@@ -26,7 +26,7 @@ pub(crate) fn record_link_change(session: &mut Session, component: u64, path: St
 }
 
 /// Record only successful source reads. No filesystem access is added to command completion.
-pub(crate) fn record_link_reads(session: &mut Session, before: &solidcraft_doc::Document) {
+pub(crate) fn record_changed_link_reads(session: &mut Session, before: &solidcraft_doc::Document) {
     let reads: Vec<_> = session
         .doc
         .links
@@ -40,7 +40,20 @@ pub(crate) fn record_link_reads(session: &mut Session, before: &solidcraft_doc::
         })
         .collect();
     for (component, path, digest) in reads {
+        std::sync::Arc::make_mut(&mut session.plugin_state.link_reads).insert(component);
         record_link_change(session, component, path, digest, true);
+    }
+}
+
+/// Record the selected components whose source was successfully applied, even if its bytes
+/// already match the document. Failed or unselected links never enter this list.
+pub(crate) fn record_link_reads(session: &mut Session, components: &[u64]) {
+    for component in components {
+        let Some((path, digest)) = session.doc.links.get(component).and_then(|link| Some((link.path.clone(), link.file_sha256.clone()?))) else {
+            continue;
+        };
+        std::sync::Arc::make_mut(&mut session.plugin_state.link_reads).insert(*component);
+        record_link_change(session, *component, path, digest, true);
     }
 }
 
@@ -78,9 +91,16 @@ pub fn design_notifications(session: &mut Session, design: Option<DesignToken>, 
         }
         // Only the declaration included in the approved bytes authorizes invocations.
         let Some(runtime) = package.manifest.runtime.as_ref() else { continue };
+        let granted = session.plugin_state.grants.get(&id).map(|grants| grants.folders.as_slice()).unwrap_or_default();
+        let scope = solidcraft_io::vfs::PathScope::new(approved_file_folders(granted, &runtime.permissions.files, false));
+        // Unread disk state has the same folder boundary as the package's file reads.
+        // Versions already read into the design remain visible without a file grant.
+        let links: Vec<_> = links.iter().filter(|link| link.read || scope.check(&link.path).is_ok()).collect();
         let listeners = runtime.listeners.clone();
         approved_listeners.extend(listeners.iter().map(|listener| format!("{id}.{}", listener.entry)));
-        let mut failure = None;
+        if let Some(failures) = session.plugin_state.listener_entry_failures.get_mut(&id) {
+            failures.retain(|entry, _| listeners.iter().any(|listener| listener.entry == *entry));
+        }
         let mut invoked = false;
         for listener in listeners {
             let include_links = !links.is_empty() && listener.on.iter().any(|on| on == "design.links_changed");
@@ -110,25 +130,34 @@ pub fn design_notifications(session: &mut Session, design: Option<DesignToken>, 
                 event["links"] = json!(links);
             }
             let invocation = Package { manifest, approval: package.approval.clone(), component: package.component.clone() };
-            match run(&mut scratch, invocation, &listener.entry, &event) {
-                Ok(reply) => {
-                    if let Err(error) = listener_panel_data(session, &id, &listener.entry, reply.result) {
-                        failure = Some(error.to_string());
+            let result = run(&mut scratch, invocation, &listener.entry, &event)
+                .and_then(|reply| listener_panel_data(session, &id, &listener.entry, reply.result).map_err(EngineError::from));
+            match result {
+                Ok(()) => {
+                    if let Some(failures) = session.plugin_state.listener_entry_failures.get_mut(&id) {
+                        failures.remove(&listener.entry);
                     }
                 }
-                Err(error) => failure = Some(error.to_string()),
+                Err(error) => {
+                    session
+                        .plugin_state
+                        .listener_entry_failures
+                        .entry(id.clone())
+                        .or_default()
+                        .insert(listener.entry, error.to_string().chars().take(4096).collect());
+                }
             }
         }
         if !invoked {
             continue;
         }
-        match failure {
-            Some(error) => {
-                retain_failure(session, id, error);
-            }
-            None => {
-                session.plugin_state.listener_failures.remove(&id);
-            }
+        let failures = session.plugin_state.listener_entry_failures.get(&id);
+        if let Some(failures) = failures.filter(|failures| !failures.is_empty()) {
+            let diagnostic = failures.iter().map(|(entry, error)| format!("{entry}: {error}")).collect::<Vec<_>>().join("\n");
+            retain_failure(session, id, diagnostic);
+        } else {
+            session.plugin_state.listener_entry_failures.remove(&id);
+            session.plugin_state.listener_failures.remove(&id);
         }
     }
     // A partial event keeps outputs of listeners it did not invoke. Replaced packages cannot

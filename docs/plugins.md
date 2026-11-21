@@ -119,6 +119,7 @@ from the version the design has read. `read: true` means the design already read
 Update Links (`component.update_links`) or Relink Source (`component.relink`)
 successfully read the changed source into the design. A disk-only observation does
 not advance the design token or trigger `design.changed`.
+Unread (`read: false`) entries require a source inside the plugin's approved read folders; `read: true` entries remain visible without that grant.
 
 The host observes files only when it already checks links, including the window's
 focus check, and after Update Links; it adds no filesystem watcher. A burst retains

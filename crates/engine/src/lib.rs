@@ -1374,6 +1374,7 @@ impl Session {
         self.plugin_limits = plugin_limits;
         self.plugin_state = plugin_state;
         self.plugin_state.link_changes = Default::default();
+        self.plugin_state.link_reads = Default::default();
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
         self.keep_print_faces = keep_print_faces;
@@ -2540,8 +2541,9 @@ impl Session {
             }),
             ..Snapshot::of(self, spec.label)
         };
-        let link_read_before = matches!(spec.id, "component.update_links" | "component.relink").then(|| before.doc.clone());
+        let link_read_before = (spec.id == "component.relink").then(|| before.doc.clone());
         let link_observations_before = self.plugin_state.link_changes.clone();
+        let link_reads_before = self.plugin_state.link_reads.clone();
         let ids = self.ids.clone();
         let design_before = self.design_revision.clone();
         let identity_before = self.document_id.clone();
@@ -2759,6 +2761,7 @@ impl Session {
                 // A failed command draws no ids, so a replay of what succeeded draws the same.
                 self.ids = ids;
                 self.plugin_state.link_changes = link_observations_before;
+                self.plugin_state.link_reads = link_reads_before;
                 self.design_revision = design_before;
                 self.document_id = identity_before;
                 self.redo_watch = redo_watch_before;
@@ -2814,7 +2817,7 @@ impl Session {
         }
         if result.is_ok() {
             if let Some(before) = link_read_before {
-                plugin::record_link_reads(self, &before);
+                plugin::record_changed_link_reads(self, &before);
             }
             self.plugin_state.prune_link_changes(&self.doc);
         }
@@ -2994,7 +2997,11 @@ impl Session {
             project_construction: self.project_construction,
             disabled_plugins: self.disabled_plugins.clone(),
             plugin_limits: self.plugin_limits,
-            plugin_state: self.plugin_state.clone(),
+            plugin_state: {
+                let mut state = self.plugin_state.clone();
+                state.link_reads = Default::default();
+                state
+            },
             plugin_forms_interactive: self.plugin_forms_interactive,
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
@@ -3224,12 +3231,17 @@ impl Session {
                 }
             }
         }
+        // Disk checks and no-op source reads may finish after a newer live observation.
+        // Merge only entries whose source observation is still current in the live session.
         let observations: Vec<_> = prepared
             .computed
             .plugin_state
             .link_changes
             .values()
-            .filter(|change| prepared.source.plugin_state.link_changes.get(&change.component) != Some(*change))
+            .filter(|change| {
+                let source = prepared.source.plugin_state.link_changes.get(&change.component);
+                source != Some(*change) && self.plugin_state.link_changes.get(&change.component) == source
+            })
             .cloned()
             .collect();
         let replies = prepared.steps.into_iter().map(|step| (step.id, step.reply)).collect();
@@ -3391,21 +3403,18 @@ impl Session {
             .values()
             .filter(|change| {
                 change.read
-                    && self.plugin_state.link_changes.get(&change.component) != Some(*change)
-                    && computed.doc.links.get(&change.component).is_some_and(|link| {
-                        link.path == change.path
-                            && link.file_sha256.as_ref() == Some(&change.digest)
-                            && self
-                                .doc
-                                .links
-                                .get(&change.component)
-                                .is_none_or(|before| before.file_sha256 != link.file_sha256 || before.path != link.path)
-                    })
+                    && computed.plugin_state.link_reads.contains(&change.component)
+                    && computed
+                        .doc
+                        .links
+                        .get(&change.component)
+                        .is_some_and(|link| link.path == change.path && link.file_sha256.as_ref() == Some(&change.digest))
             })
             .cloned()
             .collect();
         self.doc = computed.doc;
         for change in link_reads {
+            Arc::make_mut(&mut self.plugin_state.link_reads).insert(change.component);
             plugin::record_link_change(self, change.component, change.path, change.digest, true);
         }
         self.plugin_state.prune_link_changes(&self.doc);

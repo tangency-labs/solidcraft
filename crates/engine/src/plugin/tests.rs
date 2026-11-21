@@ -1097,6 +1097,7 @@ mod native {
         let mut m = manifest();
         m["capabilities"] = json!(["commands@0.2", "design@0.1"]);
         m["runtime"]["commands"] = json!([]);
+        m["runtime"]["permissions"]["files"] = json!([{"name":"project","read":true,"write":false}]);
         m["runtime"]["entries"] = json!([{"name":"make","effect":"read","input_schema":{"type":"object"}}]);
         m["runtime"]["listeners"] = json!([{"entry":"make","on":["design.links_changed"]}]);
         std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
@@ -1105,7 +1106,7 @@ mod native {
         part.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
         part.execute("file.save", &json!({"path":source})).unwrap();
         let mut s = Session::default();
-        f.install(&mut s, json!({}));
+        f.install(&mut s, json!({"folders":[{"name":"project","path":f.0,"read":true,"write":false}]}));
         let inserted = s.execute("component.insert_design", &json!({"path":source,"name":"Bracket"})).unwrap();
         let component = inserted["component"].as_u64().unwrap();
         let token = s.design_token();
@@ -1163,7 +1164,7 @@ mod native {
 
         m["runtime"]["listeners"][0]["on"] = json!(["design.changed"]);
         std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
-        f.install(&mut s, json!({}));
+        f.install(&mut s, json!({"folders":[{"name":"project","path":f.0,"read":true,"write":false}]}));
         s.plugin_state.listener_data = Default::default();
         design_notifications(&mut s, Some(updated_token.clone()), false, &links);
         assert!(s.plugin_state.listener_data.is_empty(), "old listeners skip disk-only observations");
@@ -1171,6 +1172,220 @@ mod native {
         assert_eq!(s.plugin_state.listener_data["sample.make"], json!({"design":updated_token}));
         s.execute("edit.undo", &json!({})).unwrap();
         assert!(s.plugin_state.link_changes.is_empty(), "undoing relink cannot replay an observation of the replaced path");
+    }
+
+    #[test]
+    fn unread_link_notifications_require_approved_read_folders_but_read_versions_do_not() {
+        let f = Fixture::new("i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store");
+        let inside = f.0.join("allowed");
+        let outside = f.0.join("allowed-other");
+        std::fs::create_dir_all(&inside).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let sources = [inside.join("part.sc"), outside.join("part.sc")];
+        let mut m = manifest();
+        m["capabilities"] = json!(["commands@0.2", "design@0.1"]);
+        m["runtime"]["commands"] = json!([]);
+        m["runtime"]["entries"] = json!([{"name":"make","effect":"read","input_schema":{"type":"object"}}]);
+        m["runtime"]["listeners"] = json!([{"entry":"make","on":["design.links_changed"]}]);
+        m["runtime"]["permissions"]["files"] = json!([{"name":"project","read":true,"write":false}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        f.install(&mut s, json!({"folders":[{"name":"project","path":inside,"read":true,"write":false}]}));
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+        part.execute("file.save", &json!({"path":sources[0]})).unwrap();
+        std::fs::copy(&sources[0], &sources[1]).unwrap();
+        let components: Vec<_> = sources
+            .iter()
+            .zip(["Allowed", "Private"])
+            .map(|(path, name)| s.execute("component.insert_design", &json!({"path":path,"name":name})).unwrap()["component"].as_u64().unwrap())
+            .collect();
+        part.execute("document.metadata.set", &json!({"key":"description","value":"Changed source bytes"})).unwrap();
+        part.execute("file.save", &json!({})).unwrap();
+        std::fs::copy(&sources[0], &sources[1]).unwrap();
+        let checked = s.execute("component.links", &json!({})).unwrap();
+        assert!(checked["links"].as_array().unwrap().iter().all(|link| link["changed"] == true));
+        let token = s.design_token();
+        let links: Vec<_> = s.plugin_state.link_changes.values().cloned().collect();
+        design_notifications(&mut s, Some(token.clone()), false, &links);
+        assert_eq!(
+            s.plugin_state.listener_data["sample.make"],
+            json!({"design":token,"links":[{"component":components[0],"name":"Allowed","path":sources[0],"read":false}]})
+        );
+        assert!(s.plugin_state.listener_failures.is_empty(), "{:?}", s.plugin_state.listener_failures);
+        s.plugin_state.listener_data = Default::default();
+        let hidden: Vec<_> = links.iter().filter(|link| link.component == components[1]).cloned().collect();
+        design_notifications(&mut s, Some(token.clone()), false, &hidden);
+        assert!(s.plugin_state.listener_data.is_empty(), "a links-only listener is not invoked when every unread source is outside its folders");
+        #[cfg(unix)]
+        {
+            let alias = inside.join("outside.sc");
+            std::os::unix::fs::symlink(&sources[1], &alias).unwrap();
+            let mut escaped = hidden[0].clone();
+            escaped.path = alias.to_string_lossy().into_owned();
+            design_notifications(&mut s, Some(token), false, &[escaped]);
+            assert!(s.plugin_state.listener_data.is_empty(), "a symlink inside the approved folder cannot reveal an outside source");
+        }
+
+        s.execute("component.update_links", &json!({})).unwrap();
+        let token = s.design_token();
+        let links: Vec<_> = s.plugin_state.link_changes.values().cloned().collect();
+        design_notifications(&mut s, Some(token.clone()), true, &links);
+        assert_eq!(
+            s.plugin_state.listener_data["sample.make"],
+            json!({"design":token,"links":[
+                {"component":components[0],"name":"Allowed","path":sources[0],"read":true},
+                {"component":components[1],"name":"Private","path":sources[1],"read":true}
+            ]})
+        );
+    }
+
+    #[test]
+    fn prepared_link_checks_preserve_newer_live_observations() {
+        let f = Fixture::new("");
+        let source = f.0.join("part.sc");
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+        part.execute("file.save", &json!({"path":source})).unwrap();
+        let original = std::fs::read(&source).unwrap();
+        let mut s = Session::default();
+        let component = s.execute("component.insert_design", &json!({"path":source})).unwrap()["component"].as_u64().unwrap();
+        part.execute("document.metadata.set", &json!({"key":"description","value":"Changed source bytes"})).unwrap();
+        part.execute("file.save", &json!({})).unwrap();
+        let newer = std::fs::read(&source).unwrap();
+        let prepared = s.scratch().compute_commands(&[("component.links".into(), json!({}))], None).unwrap();
+        s.execute("component.links", &json!({})).unwrap();
+        assert!(!s.plugin_state.link_changes[&component].read);
+        std::fs::write(&source, &original).unwrap();
+        s.execute("component.links", &json!({})).unwrap();
+        assert!(s.plugin_state.link_changes[&component].read);
+        let live = s.plugin_state.link_changes.clone();
+        let token = s.design_token();
+        s.accept_commands(prepared).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&live, &s.plugin_state.link_changes), "a stale check cannot overwrite the live observation");
+        assert_eq!(s.design_token(), token);
+
+        let inherited = s.scratch().compute_commands(&[("component.links".into(), json!({}))], None).unwrap();
+        std::fs::write(&source, &newer).unwrap();
+        s.execute("component.links", &json!({})).unwrap();
+        let live = s.plugin_state.link_changes.clone();
+        s.accept_commands(inherited).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&live, &s.plugin_state.link_changes), "inherited read flags are not new source reads");
+
+        std::fs::write(&source, &original).unwrap();
+        s.execute("component.links", &json!({})).unwrap();
+        std::fs::write(&source, &newer).unwrap();
+        let prepared = s.scratch().compute_commands(&[("component.links".into(), json!({}))], None).unwrap();
+        s.accept_commands(prepared).unwrap();
+        assert!(!s.plugin_state.link_changes[&component].read, "without an intervening observation acceptance still publishes the check");
+
+        std::fs::write(&source, &original).unwrap();
+        let held = s.scratch().compute_commands(&[("component.links".into(), json!({}))], None).unwrap();
+        part.execute("document.metadata.set", &json!({"key":"description","value":"A third, newer observation of the source"})).unwrap();
+        part.execute("file.save", &json!({})).unwrap();
+        s.execute("component.links", &json!({})).unwrap();
+        let live = s.plugin_state.link_changes.clone();
+        s.accept_commands(held).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&live, &s.plugin_state.link_changes), "a check's read:true also obeys the source observation guard");
+    }
+
+    #[test]
+    fn unchanged_link_reads_supersede_stale_observations_only_for_successful_selected_links() {
+        let f = Fixture::new("");
+        let sources = [f.0.join("good.sc"), f.0.join("failed.sc"), f.0.join("unselected.sc")];
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+        part.execute("file.save", &json!({"path":sources[0]})).unwrap();
+        let original = std::fs::read(&sources[0]).unwrap();
+        let mut s = Session::default();
+        let components: Vec<_> = sources
+            .iter()
+            .map(|path| {
+                std::fs::write(path, &original).unwrap();
+                s.execute("component.insert_design", &json!({"path":path})).unwrap()["component"].as_u64().unwrap()
+            })
+            .collect();
+        let digest = s.doc.links[&components[0]].file_sha256.clone();
+        part.execute("document.metadata.set", &json!({"key":"description","value":"Changed source bytes"})).unwrap();
+        part.execute("file.save", &json!({})).unwrap();
+        let newer = std::fs::read(&sources[0]).unwrap();
+        for source in &sources {
+            std::fs::write(source, &newer).unwrap();
+        }
+        s.execute("component.links", &json!({})).unwrap();
+        assert!(components.iter().all(|component| !s.plugin_state.link_changes[component].read));
+        std::fs::write(&sources[0], &original).unwrap();
+        std::fs::write(&sources[1], b"invalid design").unwrap();
+        let params = json!({"components":[components[0],components[1]]});
+        let reply = s.execute("component.update_links", &params).unwrap();
+        assert_eq!(reply["failed"][0]["component"], components[1]);
+        assert_eq!(s.doc.links[&components[0]].file_sha256, digest);
+        assert!(s.plugin_state.link_changes[&components[0]].read, "reading the held version clears the older disk observation");
+        assert!(!s.plugin_state.link_changes[&components[1]].read, "failed links are not marked read");
+        assert!(!s.plugin_state.link_changes[&components[2]].read, "unselected links are not marked read");
+
+        // The same no-op source read must survive the worker's acceptance path too.
+        std::fs::write(&sources[0], &newer).unwrap();
+        s.execute("component.links", &json!({})).unwrap();
+        std::fs::write(&sources[0], &original).unwrap();
+        let prepared = s.scratch().compute_commands(&[("component.update_links".into(), params.clone())], None).unwrap();
+        assert!(!s.plugin_state.link_changes[&components[0]].read);
+        s.accept_commands(prepared).unwrap();
+        assert_eq!(s.doc.links[&components[0]].file_sha256, digest);
+        assert!(s.plugin_state.link_changes[&components[0]].read);
+        assert!(!s.plugin_state.link_changes[&components[1]].read);
+        assert!(!s.plugin_state.link_changes[&components[2]].read);
+
+        // Plugin transactions accept evaluated sessions directly, sometimes in two layers.
+        std::fs::write(&sources[0], &newer).unwrap();
+        s.execute("component.links", &json!({})).unwrap();
+        std::fs::write(&sources[0], &original).unwrap();
+        let mut transaction = s.scratch();
+        transaction.execute("component.update_links", &params).unwrap();
+        let mut plugin_call = s.scratch();
+        plugin_call.accept_computed(transaction);
+        s.accept_computed(plugin_call);
+        assert!(s.plugin_state.link_changes[&components[0]].read, "no-op reads survive nested transaction acceptance");
+        assert!(!s.plugin_state.link_changes[&components[1]].read);
+        assert!(!s.plugin_state.link_changes[&components[2]].read);
+    }
+
+    #[test]
+    fn listener_success_clears_only_that_entrys_failure() {
+        let f = Fixture::new(
+            "local.get 0 i32.load8_u i32.const 102 i32.eq if unreachable end
+             i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store",
+        );
+        let mut m = manifest();
+        m["capabilities"] = json!(["commands@0.2", "design@0.1"]);
+        m["runtime"]["commands"] = json!([]);
+        m["runtime"]["entries"] = json!([
+            {"name":"fail","effect":"read","input_schema":{"type":"object"}},
+            {"name":"refresh","effect":"read","input_schema":{"type":"object"}}
+        ]);
+        m["runtime"]["listeners"] = json!([
+            {"entry":"fail","on":["design.changed"]}, {"entry":"refresh","on":["design.links_changed"]}
+        ]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        f.install(&mut s, json!({}));
+        let token = s.design_token();
+        design_changed(&mut s, Some(token.clone()));
+        let failure = s.plugin_state.listener_entry_failures["sample"]["fail"].clone();
+        let diagnostic = s.plugin_state.listener_failures["sample"].clone();
+        let links = [LinkChange { component: 1, name: Some("Bracket".into()), path: "part.sc".into(), read: true, digest: "new".into() }];
+        design_notifications(&mut s, Some(token.clone()), false, &links);
+        assert!(s.plugin_state.listener_data.contains_key("sample.refresh"), "the other listener succeeded");
+        assert_eq!(s.plugin_state.listener_entry_failures["sample"]["fail"], failure);
+        assert_eq!(s.plugin_state.listener_failures["sample"], diagnostic, "links-only success retains the design listener's diagnostic");
+        design_notifications(&mut s, Some(token.clone()), true, &links);
+        assert_eq!(s.plugin_state.listener_entry_failures["sample"]["fail"], failure, "later success in the same delivery cannot clear it");
+
+        std::fs::write(f.0.join("sample/plugin.wasm"), component("i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store")).unwrap();
+        f.install(&mut s, json!({}));
+        design_changed(&mut s, Some(token));
+        assert!(!s.plugin_state.listener_entry_failures.contains_key("sample"), "that entry's own success clears its failure");
+        assert!(!s.plugin_state.listener_failures.contains_key("sample"));
     }
 
     #[test]

@@ -1427,8 +1427,9 @@ fn linked_file_notifications_retry_and_deliver_without_a_design_edit() {
         dir.join("plugin.json"),
         json!({
             "id":"sample","name":"Worker sample","version":"1","capabilities":["commands@0.1","design@0.1"],
-            "runtime":{"module":"plugin.wasm","entries":[{"name":"refresh","effect":"read"}],"commands":[],
-                "listeners":[{"entry":"refresh","on":["design.links_changed"]}]}
+            "runtime":{"module":"plugin.wasm","entries":[{"name":"design_refresh","effect":"read"},{"name":"refresh","effect":"read"}],"commands":[],
+                "listeners":[{"entry":"design_refresh","on":["design.changed"]},{"entry":"refresh","on":["design.links_changed"]}],
+                "permissions":{"files":[{"name":"work","read":true,"write":false}]}}
         })
         .to_string(),
     )
@@ -1436,7 +1437,11 @@ fn linked_file_notifications_retry_and_deliver_without_a_design_edit() {
     let inspected = h.app.session.execute("plugin.inspect", &json!({"path":dir})).unwrap();
     h.app.preferences.plugin_grants.insert(
         "sample".into(),
-        solidcraft_engine::plugin::Grants { package_hash: Some(inspected["approval"].as_str().unwrap().into()), ..Default::default() },
+        solidcraft_engine::plugin::Grants {
+            package_hash: Some(inspected["approval"].as_str().unwrap().into()),
+            folders: vec![solidcraft_engine::plugin::FileGrant { name: "work".into(), folder: root.clone(), read: true, write: false }],
+            ..Default::default()
+        },
     );
     let source = root.join("part.sc");
     let mut part = solidcraft_engine::Session::default();
@@ -1449,7 +1454,7 @@ fn linked_file_notifications_retry_and_deliver_without_a_design_edit() {
     h.app.now = 1.11;
     crate::plugin_events::tick(&mut h.app, &h.ctx);
     crate::plugin_events::drain(&mut h.app).unwrap();
-    assert!(h.app.session.plugin_state.listener_data.is_empty(), "links-only listeners skip design-only invalidation");
+    assert!(!h.app.session.plugin_state.listener_data.contains_key("sample.refresh"), "links-only listeners skip design-only invalidation");
     let token = h.app.session.design_token();
     part.execute("document.metadata.set", &json!({"key":"description","value":"New source bytes"})).unwrap();
     part.execute("file.save", &json!({})).unwrap();
@@ -1479,6 +1484,32 @@ fn linked_file_notifications_retry_and_deliver_without_a_design_edit() {
     crate::plugin_events::tick(&mut h.app, &h.ctx);
     crate::plugin_events::drain(&mut h.app).unwrap();
     assert_eq!(h.app.session.plugin_state.listener_data["sample.refresh"], cached, "uninvoked listeners retain their output");
+    part.execute("document.metadata.set", &json!({"key":"description","value":"Another source change"})).unwrap();
+    part.execute("file.save", &json!({})).unwrap();
+    h.app.session.execute("component.links", &json!({})).unwrap();
+    h.app.now = 5.0;
+    crate::plugin_events::observe(&mut h.app);
+    h.app.now = 5.11;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    h.app.session.execute("document.metadata.set", &json!({"key":"description","value":"Edit while the links listener runs"})).unwrap();
+    let latest = h.app.session.design_token();
+    h.app.now = 5.12;
+    crate::plugin_events::observe(&mut h.app);
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert_eq!(h.app.session.plugin_state.listener_data["sample.refresh"], cached, "superseded output is not published");
+    h.app.now = 5.23;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert_eq!(
+        h.app.session.plugin_state.listener_data["sample.refresh"],
+        json!({"design":latest,"links":[{"component":component,"name":"Bracket","path":source,"read":false}]}),
+        "a links-only listener retries at the latest design token"
+    );
+    assert_eq!(
+        h.app.session.plugin_state.listener_data["sample.design_refresh"],
+        json!({"design":latest}),
+        "merging the links retry preserves the pending design invalidation"
+    );
     let _ = std::fs::remove_dir_all(root);
 }
 

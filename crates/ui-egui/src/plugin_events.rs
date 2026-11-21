@@ -124,6 +124,16 @@ fn completed(app: &mut SolveApp, job: Job, mut state: AppState) {
     if job.uid != app.session.uid {
         return;
     }
+    let token = Some(app.session.design_token());
+    if job.notification.token != token {
+        // A modelling edit also supersedes a links-only result. Carry its links to the
+        // latest token without replacing the edit's pending design invalidation.
+        observe(app);
+        let mut notification = job.notification;
+        notification.token = token;
+        app.plugin_events.retry(notification, app.now);
+        return;
+    }
     // A disk check can supersede the worker without changing the modelling token. Preserve
     // any whole-design invalidation too, so rejecting this output cannot lose its delivery.
     if job.link_snapshot != app.session.plugin_state.link_changes {
@@ -133,9 +143,14 @@ fn completed(app: &mut SolveApp, job: Job, mut state: AppState) {
     let ids: std::collections::BTreeSet<_> =
         app.session.plugin_state.listener_failures.keys().chain(state.listener_failures.keys()).cloned().collect();
     for id in ids {
-        // Revoking a grant while a listener runs keeps it revoked. A successful later
-        // listener clears its previous failure, without adopting unrelated scratch state.
+        // Revoking a grant while a listener runs keeps it revoked. Each successful entry
+        // clears its own previous failure, without adopting unrelated scratch state.
         if app.preferences.plugin_grants.get(&id) == state.grants.get(&id) && !app.preferences.disabled_plugins.contains(&id) {
+            if let Some(failures) = state.listener_entry_failures.remove(&id) {
+                app.session.plugin_state.listener_entry_failures.insert(id.clone(), failures);
+            } else {
+                app.session.plugin_state.listener_entry_failures.remove(&id);
+            }
             if let Some(error) = state.listener_failures.remove(&id) {
                 app.session.plugin_state.listener_failures.insert(id, error);
             } else {
