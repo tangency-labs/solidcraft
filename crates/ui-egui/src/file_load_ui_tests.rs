@@ -1589,6 +1589,8 @@ fn settle_waits_for_the_stand_up_estimate_after_the_bodies_are_meshed() {
     let text = std::fs::read_to_string(&path).unwrap();
     std::fs::write(&path, text.replace("'SolidCraft','SolidCraft'", "'SolidCraft','Example CAD'")).unwrap();
     let mut h = crate::scenario::Harness::new();
+    // This test is about the estimate, not the import-options window it would ask first.
+    h.app.preferences.ask_import_options = false;
     // Still running for more frames than `settle` ran once the meshing was done.
     crate::stand_up::hold_estimate(30);
     h.app.open_path_async(&path);

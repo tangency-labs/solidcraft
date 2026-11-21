@@ -768,7 +768,7 @@ mod tests {
             "Copper (traces, vias, zones, pads)",
             "Overlay on the board",
             "Include silkscreen",
-            "Board colour",
+            "Board color",
             "Board thickness",
             "Board",
             "Solid",
@@ -797,7 +797,7 @@ mod tests {
         h.frames(3);
         h.step(&json!({"click": {"handle": "import_options:copper"}})).unwrap();
         h.frames(2);
-        h.step(&json!({"click": {"handle": "dialog:Copper (traces, vias, zones, pads):Modelled"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Copper (traces, vias, zones, pads):Modeled"}})).unwrap();
         h.frames(2);
         h.step(&json!({"click": {"handle": "import_options:silkscreen"}})).unwrap();
         h.frames(2);

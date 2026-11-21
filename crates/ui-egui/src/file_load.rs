@@ -1027,8 +1027,6 @@ fn start(app: &mut SolveApp) {
     }
 }
 
-/// Start the next queued STEP file as a [`Staged`] import (see [`step_staged`]).
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 /// Answer the queued requests whose design's tab was closed: each has nowhere to land, and it
 /// would wait for a tab number that never matches again and hold the queue.
 fn answer_orphaned(app: &mut SolveApp) {
@@ -1045,6 +1043,8 @@ fn answer_orphaned(app: &mut SolveApp) {
     }
 }
 
+/// Start the next queued STEP file as a [`Staged`] import (see [`step_staged`]).
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn start_staged(app: &mut SolveApp) {
     if app.file_load.running.is_some() || app.file_picker_busy() {
         return;
