@@ -686,9 +686,9 @@ pub fn cycle(app: &mut SolveApp, forward: bool) {
 }
 
 /// Make the app show `view` of the shown design: the one place a view change reaches the app, so
-/// a new kind plugs in here. Model leaves a sketch and the render workspace; Sketch edits the
-/// sketch its `subject` names; Render enters the render workspace. Sheet and Animation have no
-/// workspace yet and change nothing: enter theirs here when they exist.
+/// a new kind plugs in here. Model leaves a sketch and the render workspace; Render enters the
+/// render workspace. Sheet and Animation have no workspace yet and change nothing: enter theirs
+/// here when they exist.
 pub fn apply_view(app: &mut SolveApp, view: &DesignView) {
     match view.kind {
         ViewKind::Model => {
@@ -697,14 +697,6 @@ pub fn apply_view(app: &mut SolveApp, view: &DesignView) {
             }
             if crate::render_workspace::active(app) {
                 enter_workspace(app, false);
-            }
-        }
-        ViewKind::Sketch => {
-            if let Some(sketch) = view.subject.as_deref().and_then(|subject| subject.parse().ok()) {
-                if crate::render_workspace::active(app) {
-                    enter_workspace(app, false);
-                }
-                app.edit_sketch(sketch);
             }
         }
         ViewKind::Render => enter_workspace(app, true),
@@ -719,21 +711,10 @@ fn enter_workspace(app: &mut SolveApp, render: bool) {
     }
 }
 
-/// Make the views reflect what the app shows: the render workspace, or the sketch being edited,
-/// is the active view (opened when the design has none for it), and with neither the Model view
-/// is, as the app left them by itself. Called each frame and after a design switch, so a view
-/// entered from anywhere in the app (a ribbon button, a command, Finish Sketch) shows in the strip.
-/// A view of a sketch the design no longer has (cancelled, undone or deleted) closes (#18264).
-/// While the strip shows no views (views as tabs and the switcher both off), no view is opened
-/// here: the design enters the sketch or workspace in the view shown, as before design views.
+/// Reflect the render workspace in the active view. Sketch editing stays in the current Model
+/// view and never creates a sub-tab. With the strip and switcher hidden, no view is opened here.
 pub(crate) fn sync_views(app: &mut SolveApp) {
-    let session = &app.session;
-    app.docs.views.drop_views(|view| view.kind != ViewKind::Sketch || can_restore(session, view.kind, view.subject.as_deref()));
-    let shown = if crate::render_workspace::active(app) {
-        Some((ViewKind::Render, None))
-    } else {
-        app.session.active_sketch.map(|sketch| (ViewKind::Sketch, Some(sketch.to_string())))
-    };
+    let shown = if crate::render_workspace::active(app) { Some((ViewKind::Render, None)) } else { None };
     let prefs = DesignTabPrefs::from(&app.preferences);
     let views = &mut app.docs.views;
     let before = views.active().id;
@@ -743,7 +724,7 @@ pub(crate) fn sync_views(app: &mut SolveApp) {
                 views.open(kind, subject, prefs.reuse_views);
             }
         }
-        None if matches!(views.active().kind, ViewKind::Render | ViewKind::Sketch) => {
+        None if views.active().kind == ViewKind::Render => {
             let model = views.views().iter().find(|view| view.kind == ViewKind::Model).map(|view| view.id);
             if !model.is_some_and(|model| views.activate(model)) {
                 views.open(ViewKind::Model, None, true);
@@ -965,7 +946,6 @@ pub(crate) fn view_window_ids(app: &SolveApp) -> Vec<(u64, solidcraft_views::Win
 
 pub(crate) fn view_workspace(kind: ViewKind) -> &'static str {
     match kind {
-        ViewKind::Sketch => "SKETCH",
         ViewKind::Render => "RENDER",
         _ => "MODEL",
     }
@@ -1142,12 +1122,10 @@ pub fn view_open(app: &mut SolveApp, kind: ViewKind, subject: Option<String>, re
 }
 
 /// Whether a remembered view of `kind` showing `subject` can be shown in `session`'s design again:
-/// a sketch only while the design still has it, and Sheet and Animation not until they have
-/// workspaces ([`apply_view`]).
-fn can_restore(session: &Session, kind: ViewKind, subject: Option<&str>) -> bool {
+/// Model and Render can; Sheet and Animation wait until they have workspaces ([`apply_view`]).
+fn can_restore(_session: &Session, kind: ViewKind, _subject: Option<&str>) -> bool {
     match kind {
         ViewKind::Model | ViewKind::Render => true,
-        ViewKind::Sketch => subject.and_then(|id| id.parse().ok()).is_some_and(|id| session.doc.feature_index(id).is_some()),
         ViewKind::Sheet | ViewKind::Animation => false,
     }
 }
@@ -2651,17 +2629,16 @@ const SWITCHER_MENU: [crate::app_bar::TabMenuRow<'static>; 4] = [
 pub(crate) fn kind_word(kind: ViewKind) -> &'static str {
     match kind {
         ViewKind::Model => "Model",
-        ViewKind::Sketch => "Sketch",
         ViewKind::Sheet => "Sheet",
         ViewKind::Render => "Render",
         ViewKind::Animation => "Animation",
     }
 }
 
-/// A view's hover text: "Sketch 2 · Design workspace · Alt+2" (the key for the first nine views).
+/// A view's hover text: "Model 2 · Design workspace · Alt+2" (the key for the first nine views).
 fn view_tip(view: &DesignView, place: usize) -> String {
     let workspace = solidcraft_ui_text::tr(match view.kind {
-        ViewKind::Model | ViewKind::Sketch => "tab_strip.workspace_design",
+        ViewKind::Model => "tab_strip.workspace_design",
         ViewKind::Sheet => "tab_strip.workspace_drawing",
         ViewKind::Render => "tab_strip.workspace_render",
         ViewKind::Animation => "tab_strip.workspace_animation",
@@ -5129,21 +5106,21 @@ mod tests {
         assert_eq!(h.app.docs.views.active().id, h.app.docs.views.views()[0].id);
         h.call("ui.key", json!({"key": "W", "cmd": true, "shift": true}));
         assert_eq!(h.app.docs.count(), 1, "Ctrl+Shift+W closes the design");
-        // A sketch entered from the app opens its view, and Finish Sketch leaves it for Model.
+        // Sketch commands edit the current Model without creating a view.
         let before = h.app.docs.views.len();
         h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch1"})).unwrap();
         h.frames(2);
-        let sketch = h.app.session.active_sketch.unwrap();
+        assert!(h.app.session.active_sketch.is_some());
         let active = h.app.docs.views.active().clone();
-        assert_eq!((active.kind, active.subject), (solidcraft_views::ViewKind::Sketch, Some(sketch.to_string())));
-        assert_eq!(h.app.docs.views.len(), before + 1);
+        assert_eq!(active.kind, solidcraft_views::ViewKind::Model);
+        assert_eq!(h.app.docs.views.len(), before);
         h.app.run("sketch.line", json!({"points": [[0, 0], [20, 10]]})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
         h.frames(2);
         assert_eq!(h.app.docs.views.active().kind, solidcraft_views::ViewKind::Model);
-        assert_eq!(h.app.docs.views.len(), before + 1, "the sketch's view stays");
-        assert!(view_activate(&mut h.app, active.id));
-        assert_eq!(h.app.session.active_sketch, Some(sketch), "showing it edits the sketch again");
+        assert_eq!(h.app.docs.views.len(), before, "finishing also leaves the view set alone");
+        view_activate(&mut h.app, active.id);
+        assert!(h.app.session.active_sketch.is_none(), "activating a Model never reopens a sketch");
     }
 
     /// Two Model views of one design are two angles: each keeps the camera it was left with, and a
@@ -5390,7 +5367,6 @@ mod tests {
     fn design_tab_preferences_decide_which_views_open() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        h.app.preferences.design_sub_tab_sketches = false;
         h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch1"})).unwrap();
         h.frames(2);
         assert!(h.app.session.active_sketch.is_some(), "the sketch is entered");
@@ -5411,7 +5387,7 @@ mod tests {
     /// The owner's ask: by default a design tab shows no view switcher while the design has its one
     /// view, and entering a sketch or Render stays in that view, so the tab looks as it did before
     /// design views. The switcher shows once the user opens a second view, with "Show the design
-    /// view switcher" on (even for one view, and a sketch then opens its own view again), and views
+    /// view switcher" on (even for one view), and views
     /// as tabs keeps its sub-tabs and the tab's + for a new view.
     #[test]
     fn a_design_tab_shows_no_view_switcher_until_it_has_a_second_view() {
@@ -5435,15 +5411,17 @@ mod tests {
         h.app.run("sketch.line", json!({"points": [[0, 0], [20, 10]]})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
         assert!(!switcher(&mut h), "nor after Finish Sketch");
-        // The preference brings the switcher back for one view, and sketches open views again.
+        // The preference brings the switcher back for one view; sketching stays in it.
         h.app.preferences.show_design_view_switcher = true;
         assert!(switcher(&mut h), "the preference shows it for one view");
         h.app.run("sketch.create", json!({"plane": "XZ", "name": "Sketch2"})).unwrap();
         h.frames(2);
-        assert_eq!(h.app.docs.views.len(), 2, "a sketch opens its own view with the switcher on");
+        assert_eq!(h.app.docs.views.len(), 1, "the switcher does not turn sketch mode into a view");
         h.app.run("sketch.finish", json!({})).unwrap();
         h.frames(2);
         h.app.preferences.show_design_view_switcher = false;
+        assert!(!switcher(&mut h), "one Model still needs no switcher");
+        view_open(&mut h.app, ViewKind::Model, None, false);
         assert!(switcher(&mut h), "a second view shows it with the preference off");
         // Views as tabs: sub-tabs, no switcher, whatever the preference (on a bar with room for them;
         // a narrow one falls back to the switcher).
@@ -5468,35 +5446,33 @@ mod tests {
         assert!(switcher(&mut h), "and the switcher shows");
     }
 
-    /// #18264: cancelling a new sketch closes its view instead of leaving a tab that says the
-    /// sketch no longer exists; so does undoing a finished sketch away, and Reopen does not bring
-    /// either back. A finished sketch that stays keeps its view.
+    /// Sketch lifecycle commands change features, never the Model views or their reopen history.
     #[test]
-    fn a_view_closes_when_its_sketch_is_cancelled_or_undone_away() {
+    fn sketch_lifecycle_keeps_the_current_model_view() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        // Test change (#18264): editing a sketch opens a view of its own only while the strip shows
-        // views (the owner asked that it not by default), and this test is about closing such a
-        // view, so it runs with views as tabs on. With both off no sketch view opens at all, which
-        // `a_design_tab_shows_no_view_switcher_until_it_has_a_second_view` checks.
         h.app.preferences.design_views_as_tabs = true;
-        let sketch_views = |h: &crate::scenario::Harness| h.app.docs.views.views().iter().filter(|view| view.kind == ViewKind::Sketch).count();
+        let model = h.app.docs.views.active().id;
         h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch1"})).unwrap();
         h.frames(2);
+        let sketch = h.app.session.active_sketch.unwrap();
+        assert_eq!(h.app.docs.views.active().id, model);
         h.app.run("sketch.line", json!({"points": [[0, 0], [20, 10]]})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
         h.frames(2);
-        assert_eq!(sketch_views(&h), 1, "the finished sketch keeps its view");
+        assert_eq!(h.app.docs.views.len(), 1);
+        h.app.run("sketch.edit", json!({"sketch": sketch})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.docs.views.active().id, model);
+        h.app.run("sketch.finish", json!({})).unwrap();
         h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch2"})).unwrap();
         h.frames(2);
-        assert_eq!(sketch_views(&h), 2);
         h.app.run("sketch.cancel", json!({})).unwrap();
         h.frames(2);
-        assert_eq!(sketch_views(&h), 1, "the cancelled sketch's view closes");
-        assert_eq!(h.app.docs.views.active().kind, ViewKind::Model);
-        assert!(!h.app.docs.views.can_reopen(), "Reopen has no dead view to bring back");
-        // Undo steps back into Sketch1 before it removes it; undo until the design has no sketch.
-        for _ in 0..8 {
+        assert_eq!(h.app.docs.views.len(), 1);
+        assert_eq!(h.app.docs.views.active().id, model);
+        assert!(!h.app.docs.views.can_reopen(), "no sketch tab enters the closed stack");
+        for _ in 0..12 {
             if h.app.session.doc.features.iter().all(|feature| feature.name != "Sketch1") {
                 break;
             }
@@ -5504,8 +5480,8 @@ mod tests {
             h.frames(2);
         }
         assert!(h.app.session.doc.features.iter().all(|feature| feature.name != "Sketch1"));
-        assert_eq!(sketch_views(&h), 0, "undoing Sketch1 away closes its view too");
         assert_eq!(h.app.docs.views.len(), 1);
+        assert_eq!(h.app.docs.views.active().id, model);
     }
 
     /// With "Reopen a design's views" on, a saved design's views come back when it opens again:
@@ -5517,8 +5493,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        // Test change: the owner asked that a sketch open no view of its own while the strip shows
-        // no views (the new default); with the switcher on it does, which is what this test needs.
         h.app.preferences.show_design_view_switcher = true;
         let path = std::env::temp_dir().join("solidcraft-remembered.scd").to_string_lossy().into_owned();
         h.app.session.path = Some(path.clone());
@@ -5526,6 +5500,7 @@ mod tests {
         h.frames(2);
         h.app.run("sketch.finish", json!({})).unwrap();
         h.frames(2);
+        view_open(&mut h.app, ViewKind::Model, None, false);
         view_open(&mut h.app, ViewKind::Sheet, Some("d1".into()), true);
         let model = h.app.docs.views.views()[0].id;
         view_activate(&mut h.app, model);
@@ -5543,16 +5518,15 @@ mod tests {
         h.app.preferences.design_reopen_views = true;
         restore_views_in(&mut h.app, &path, &dir);
         let kinds: Vec<ViewKind> = h.app.docs.views.views().iter().map(|view| view.kind).collect();
-        assert_eq!(kinds, [ViewKind::Model, ViewKind::Sketch], "the sheet has no workspace yet");
+        assert_eq!(kinds, [ViewKind::Model, ViewKind::Model], "the sheet has no workspace yet");
         assert_eq!(h.app.docs.views.active().kind, ViewKind::Model);
-        // A sketch the design no longer has is dropped, and with nothing left the views stay.
-        let mut stale = ViewSet::new();
-        stale.open(ViewKind::Sketch, Some("987654".into()), true);
-        let model = stale.views()[0].id;
-        stale.close(model);
-        crate::view_memory::remember(&dir, &path, stale.to_json()).unwrap();
+        // Legacy remembered Sketch tabs are removed without changing design features.
+        let stale = json!({"views": [{"id": 7, "kind": "sketch", "name": "Sketch 1", "subject": "987654"}], "active": 7});
+        crate::view_memory::remember(&dir, &path, stale).unwrap();
         restore_views_in(&mut h.app, &path, &dir);
-        assert_eq!(h.app.docs.views.len(), 2);
+        assert_eq!(h.app.docs.views.len(), 1);
+        assert_eq!(h.app.docs.views.active().kind, ViewKind::Model);
+        assert!(h.app.session.doc.features.iter().any(|feature| feature.name == "Sketch1"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
