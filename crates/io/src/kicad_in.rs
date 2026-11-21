@@ -811,7 +811,7 @@ fn outline_cell(point: [f64; 2]) -> (i64, i64) {
     ((point[0] / OUTLINE_JOIN_DISTANCE).floor() as i64, (point[1] / OUTLINE_JOIN_DISTANCE).floor() as i64)
 }
 
-/// Take a joined segment's ends out of the grid, so a pile of ends is not searched again and again.
+/// Take a joined segment's ends out of the grid: it holds only the segments not joined yet.
 fn forget_outline_segment(cells: &mut std::collections::HashMap<(i64, i64), Vec<usize>>, segment: ([f64; 2], [f64; 2]), index: usize) {
     for end in [segment.0, segment.1] {
         if let Some(cell) = cells.get_mut(&outline_cell(end)) {
