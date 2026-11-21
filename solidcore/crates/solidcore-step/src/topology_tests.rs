@@ -1032,6 +1032,52 @@ fn rising_quarters(w: &mut W, r: f64, from: f64, z: f64, rise: f64, pieces: usiz
     (curve, [at(0), at(2 * pieces)])
 }
 
+/// A cylinder strip between two rational-quadratic helices, 24 turns of pitch 1.25 mm
+/// and 0.5 mm apart. The context's 0.1 mm uncertainty is much coarser than the 0.001 mm
+/// pcurve construction tolerance. Counting at the source tolerance can miss the splits
+/// needed by the tighter fit; count and construct at the same tolerance instead.
+#[test]
+fn a_long_wound_rational_edge_with_coarse_accuracy_is_split_for_its_pcurve_fit() {
+    use crate::assembly::MAX_SPLINE_POINTS;
+    let mut w = W::default();
+    let (radius, rise, pieces) = (4.2, 1.25 / 4.0, 96);
+    let (low_curve, [low_start, low_end]) = rising_quarters(&mut w, radius, 0.0, 0.0, rise, pieces);
+    let (high_curve, [high_start, high_end]) = rising_quarters(&mut w, radius, 0.0, 0.5, rise, pieces);
+    let (ls, le, hs, he) = (w.vertex(low_start), w.vertex(low_end), w.vertex(high_start), w.vertex(high_end));
+    let low = w.add(format!("EDGE_CURVE('',#{ls},#{le},#{low_curve},.T.)"));
+    let high = w.add(format!("EDGE_CURVE('',#{hs},#{he},#{high_curve},.T.)"));
+    let start = w.line_edge((ls, low_start), (hs, high_start), true, 1.0);
+    let end = w.line_edge((le, low_end), (he, high_end), true, 1.0);
+    let axis = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let cylinder = w.add(format!("CYLINDRICAL_SURFACE('',#{axis},{})", real(radius)));
+    let uses = [(low, true), (end, true), (high, false), (start, false)].map(|(e, forward)| w.oe(e, forward));
+    let bound = w.bound(&uses, true, true);
+    let face = w.face(&[bound], cylinder, true);
+    let shell = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('wound strip',(#{shell}))"));
+    // one_solid asserts that import has no refusals and validates the complete record.
+    let s = one_solid(&w.file_with_uncertainty(&[model], 0.1));
+    assert!(s.sheet);
+    assert_eq!(s.brep.tolerance, 0.1);
+    assert_eq!(s.brep.faces.len(), 1);
+    assert!(s.notes.iter().any(|n| n.contains("edges of faces that wind round their axis split")), "{:?}", s.notes);
+    assert!(s.brep.edges.len() > 4, "the long helices need splitting at their construction tolerance");
+    assert!(s.brep.edges.iter().any(|e| matches!(e.curve, BCurve::RationalSpline { .. })));
+    let mut pcurves = 0;
+    for l in &s.brep.faces[0].loops {
+        let Loop::Edges { edges } = l else { panic!("edge loop") };
+        for u in edges {
+            let points = match &u.pcurve {
+                Curve2::Spline { points, .. } => points.len(),
+                Curve2::RationalSpline { homogeneous, .. } => homogeneous.len(),
+            };
+            assert!(points <= MAX_SPLINE_POINTS, "edge {}: {points} pcurve control points", u.edge);
+            pcurves += 1;
+        }
+    }
+    assert_eq!(pcurves, s.brep.edges.len(), "every split edge keeps its pcurve");
+}
+
 /// A thread's crest in a bore: one cylinder face (radius 5) from a circle at z = 0 up to a rim at
 /// z = 8, less the thread's groove, 1 high, which starts at a wall along the axis from z = 2 to 3
 /// and winds a turn and a half up (4 a turn) to run out through the rim. The face's second loop
