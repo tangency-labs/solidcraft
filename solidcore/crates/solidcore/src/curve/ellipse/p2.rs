@@ -579,6 +579,16 @@ impl PolarConversion {
             ));
         }
 
+        // take the standard form's T to the span's own weights (see above)
+        let (w0, w2) = end_weights;
+        let lambda = (w0 / w2).sqrt();
+        if !(w0 > 0.0 && w2 > 0.0 && lambda.is_normal()) {
+            return Err(SolidError::invalid_input(
+                OP_ANGLE,
+                "the span's end weights are not positive and finite",
+            ));
+        }
+
         // quick convert end parameters
         if (angle_deg - start_angle_deg).abs() < angle_tol {
             return Ok(start_nurb);
@@ -622,15 +632,6 @@ impl PolarConversion {
             }
         }
 
-        // take the standard form's T to the span's own weights (see above)
-        let (w0, w2) = end_weights;
-        let lambda = (w0 / w2).sqrt();
-        if !(w0 > 0.0 && w2 > 0.0 && lambda.is_normal()) {
-            return Err(SolidError::invalid_input(
-                OP_ANGLE,
-                "the span's end weights are not positive and finite",
-            ));
-        }
         let t = lambda * t / ((1.0 - t) + lambda * t);
 
         // scale normalized T to Nurb interval
@@ -2881,6 +2882,32 @@ mod tests {
             worst = worst.max((x - a.cos()).hypot(y - a.sin()));
         }
         assert!(worst < 1e-14, "worst distance {worst}");
+    }
+
+    /// An end weight must be positive and finite even when the angle is at an end, which
+    /// otherwise answers that end before the weights are looked at. A non-arc span is refused
+    /// for every angle in it.
+    #[test]
+    fn angle_param_conversion_refuses_end_weights_that_are_not_an_arc() {
+        let bad = [
+            (0.0, 1.0),
+            (-1.0, 1.0),
+            (f64::NAN, 1.0),
+            (f64::INFINITY, 1.0),
+            (1.0, f64::NAN),
+            (1.0, 0.0),
+        ];
+        for weights in bad {
+            for angle_deg in [0.0, 45.0, 90.0] {
+                let got = PolarConversion::angle_param_to_nurb_param(
+                    0.0, 1.0, 0.0, 90.0, angle_deg, weights,
+                );
+                assert!(
+                    got.is_err(),
+                    "weights {weights:?} at {angle_deg} gave {got:?}"
+                );
+            }
+        }
     }
 
     #[test]
