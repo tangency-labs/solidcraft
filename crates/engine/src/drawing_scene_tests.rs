@@ -3770,7 +3770,11 @@ fn notes_are_drawn_on_the_sheet_and_on_their_views() {
     assert!(notes.contains(&(json!(ids::encode(general)), None)) && notes.contains(&(json!(ids::encode(edge)), Some(json!(ids::encode(front))))));
     let export = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
     assert_eq!(export["notes"], reply["notes"]);
-    let hit = run(&mut s, "drawing.scene.hit", json!({"sheet": ids::encode(sheet), "point_mm": [60.0, 40.0]}));
+    // The general note starts at its place, (60, 40), so the middle of its text is half its width on.
+    let ends =
+        group_of(&built.scene, general).items.iter().filter_map(|i| if let Item::Text(run) = i { Some(run.origin.x + run.reach()) } else { None });
+    let middle = 60.0 + (ends.fold(0.0, f64::max) - 60.0) / 2.0;
+    let hit = run(&mut s, "drawing.scene.hit", json!({"sheet": ids::encode(sheet), "point_mm": [middle, 40.0]}));
     assert_eq!((&hit["hit"]["object"], &hit["hit"]["kind"]), (&json!(ids::encode(general)), &json!("note")), "{hit}");
 }
 
