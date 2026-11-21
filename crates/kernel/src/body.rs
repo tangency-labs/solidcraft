@@ -1796,7 +1796,7 @@ impl Body {
     /// Edges `indices` (record edge indices) as planar curves in `plane`'s coordinates:
     /// lines, circular arcs and splines with their own knots and weights. An edge must lie
     /// in a plane parallel to `plane`, except a cylinder's rim read along its axis
-    /// ([`Body::projected_on_cylinder`]). Nonparallel curves, unreadable edges and mesh
+    /// ([`Body::cylinder_edge_projection`]). Nonparallel curves, unreadable edges and mesh
     /// bodies return `None`; drawing measurements must not measure a flattened image.
     pub fn planar_edges(&self, plane: &solidcore_record::Plane, indices: &[usize]) -> Vec<Option<Vec<crate::PlanarPiece>>> {
         if self.is_mesh() {
@@ -1816,102 +1816,12 @@ impl Body {
     }
 
     /// The circle or arc of a cylinder bounded by this edge, viewed along its axis.
-    /// Uses the body's existing tolerance and the kernel's monotone-turn certificate.
+    /// The kernel certifies the complete native curve, including planar spline rims.
     pub fn cylinder_edge_projection(&self, plane: &solidcore_record::Plane, edge: usize) -> Option<Vec<crate::PlanarPiece>> {
         if self.is_mesh() {
             return None;
         }
-        let tol = self.planar_edges_tolerance();
-        if solidcore_ops::spline_projection::has_parallel_projection(&self.record, plane, edge, tol) {
-            return None;
-        }
-        let faces = crate::history::faces_of(self.record.edges.get(edge)?);
-        self.projected_on_cylinder(plane, edge, &faces, tol).map(|segs| segs.into_iter().map(crate::PlanarPiece::Seg).collect())
-    }
-
-    /// Edge `edge` projected on `plane` as the arc it covers of the circle of a cylinder it
-    /// bounds (one of `faces`) whose axis is `plane`'s normal: everything on that cylinder
-    /// projects onto its circle, so the arc is exact where the edge itself is held only
-    /// approximately (a hole's rim on a round wall is an intersection curve). The arc runs from
-    /// the projection of the edge's start vertex as far round as the edge goes; a closed edge
-    /// is one arc right round, which a sketch takes as the circle, as it took the rim fitted.
-    /// `None` when no such cylinder holds the edge within `tol`, or the edge turns back round
-    /// the axis.
-    fn projected_on_cylinder(&self, plane: &solidcore_record::Plane, edge: usize, faces: &[usize], tol: f64) -> Option<Vec<solidcore_record::Seg2>> {
-        use solidcraft_geom::brep::eval::CurveEval;
-        const SAMPLES: u16 = 32;
-        let e = self.record.edges.get(edge)?;
-        let curve = CurveEval::new(e.parameters()).ok()?;
-        let [t0, t1] = e.interval;
-        let pts: Vec<Vec3> = (0..=SAMPLES).map(|k| curve.point(t0 + (t1 - t0) * f64::from(k) / f64::from(SAMPLES))).collect::<Option<_>>()?;
-        let n = plane.normal();
-        let size = self.size().max(1.0);
-        faces.iter().find_map(|&f| {
-            let Some(crate::FaceSurface::Cylinder { origin, axis, radius }) = crate::surface_kind::surface_of(&self.record, f) else { return None };
-            let axis = Vec3::from(axis);
-            // The axis off the normal by an angle moves the edge's projection by that angle
-            // times its distance along the axis, at most the body's size.
-            if !(radius > tol) || axis.cross(n).len() * size > tol * 0.1 {
-                return None;
-            }
-            let off_axis = |p: Vec3| {
-                let d = p - origin;
-                (d - axis * d.dot(axis)).len()
-            };
-            if pts.iter().any(|p| (off_axis(*p) - radius).abs() > tol) {
-                return None;
-            }
-            let first = *pts.first()?;
-            let center = plane.to_local(origin + axis * (first - origin).dot(axis));
-            // A quick reject on the samples: their angle must keep going one way, and no more
-            // than once round.
-            let angles: Vec<f64> = pts.iter().map(|p| (plane.to_local(*p) - center).angle()).collect();
-            let mut sign = 0.0;
-            let mut sampled = 0.0;
-            for w in angles.windows(2) {
-                let [a, b] = w else { continue };
-                let d = (b - a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
-                if d.abs() * radius <= tol * 1e-3 {
-                    continue;
-                }
-                if sign * d < 0.0 {
-                    return None;
-                }
-                sign = d.signum();
-                sampled += d;
-            }
-            if sampled.abs() > std::f64::consts::TAU + tol / radius {
-                return None;
-            }
-            // The proof (solidcore): the edge turns one way round the axis all along its
-            // interval, the same way the samples went; else no arc, and the caller fits.
-            let turn = solidcore_ops::curve_knots::turn_about_axis(e.parameters(), e.interval, [origin.x, origin.y, origin.z], [n.x, n.y, n.z])
-                .ok()
-                .flatten()?;
-            if turn != sign {
-                return None;
-            }
-            // The arc runs from the start vertex to the end vertex that way round (a closed
-            // edge all the way round).
-            let at = |v: u32| self.record.vertices.get(v as usize).map(|x| (plane.to_local(Vec3::from(x.point)) - center).angle());
-            let [v0, v1] = e.vertices;
-            let start = at(v0)?;
-            let sweep = if v0 == v1 {
-                turn * std::f64::consts::TAU
-            } else {
-                let d = (at(v1)? - start).rem_euclid(std::f64::consts::TAU);
-                if d * radius <= tol {
-                    return None;
-                }
-                if turn > 0.0 { d } else { d - std::f64::consts::TAU }
-            };
-            // The vertices' sweep is only taken where the samples agree with it: an edge that
-            // winds past a full turn (a helix seen along its axis) is no arc.
-            if (sampled - sweep).abs() > std::f64::consts::FRAC_PI_2 {
-                return None;
-            }
-            Some(vec![solidcore_record::Seg2::Arc { center, radius, start, sweep }])
-        })
+        solidcore_ops::spline_projection::cylinder_edge_projection(&self.record, plane, edge, self.planar_edges_tolerance())
     }
 
     /// Faces with area and centroid.

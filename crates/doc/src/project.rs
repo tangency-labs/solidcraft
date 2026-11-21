@@ -786,19 +786,14 @@ fn exact_edges(body: &crate::ModelBody, plane: &Plane, edges: &[usize]) -> Resul
     edges
         .iter()
         .map(|e| {
-            let projected = if let Some(pieces) = body.body.cylinder_edge_projection(plane, *e) {
-                solidcore_ops::conic_projection::classify_pieces(plane, &pieces, solidcraft_sketch::MAX_SPLINE_POINTS, solidcraft_sketch::MAX_COORD)
-                    .map(Some)
-            } else {
-                solidcore_ops::spline_projection::projected_edge(
-                    body.body.record(),
-                    plane,
-                    *e,
-                    body.body.planar_edges_tolerance(),
-                    solidcraft_sketch::MAX_SPLINE_POINTS,
-                    solidcraft_sketch::MAX_COORD,
-                )
-            }
+            let projected = solidcore_ops::spline_projection::projected_edge(
+                body.body.record(),
+                plane,
+                *e,
+                body.body.planar_edges_tolerance(),
+                solidcraft_sketch::MAX_SPLINE_POINTS,
+                solidcraft_sketch::MAX_COORD,
+            )
             .map_err(|e| DocError::Invalid(e.to_string()))?;
             match projected {
                 Some(geometry) => projection_links(geometry).map(Some),
@@ -1488,12 +1483,7 @@ fn refresh_links_in(
             Ok(r) => {
                 // An edge or vertex link saved without a name takes the name of the geometry it was
                 // found on. A sketch that is edited stores it; evaluation leaves the design as it is.
-                if l.edge_name.is_none()
-                    && let Some(name) = resolved_edge_name(st, &r)
-                    && let Some(link) = sk.links.iter_mut().find(|link| link.id == l.id)
-                {
-                    link.edge_name = Some(name);
-                }
+                let new_edge_name = l.edge_name.is_none().then(|| resolved_edge_name(st, &r)).flatten();
                 if l.vertex_name.is_none()
                     && let Some(name) = resolved_vertex_name(st, &r)
                     && let Some(link) = sk.links.iter_mut().find(|link| link.id == l.id)
@@ -1513,6 +1503,13 @@ fn refresh_links_in(
                 // the link recorded them (#18711).
                 let updated =
                     if l.kind == LinkKind::Project { sk.update_link_named(&l.id, &r.geom, &r.edge_names) } else { sk.update_link(&l.id, &r.geom) };
+                // A name captured from a point on this rebuild did not identify
+                // the saved curve. Publish it only after matching the old link.
+                if let Some(name) = new_edge_name
+                    && let Some(link) = sk.links.iter_mut().find(|link| link.id == l.id)
+                {
+                    link.edge_name = Some(name);
+                }
                 match updated {
                     Ok(true) if words_follow => {}
                     // A rebuilt projection is only worth a warning when it took something of

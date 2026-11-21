@@ -10,6 +10,62 @@ fn face() -> LinkSource {
     LinkSource::Face { body: "Case".into(), at: Vec3::ZERO }
 }
 
+#[test]
+fn named_projection_kind_changes_keep_ids_and_offset_direction_only_for_the_same_whole_edge() {
+    for reverse in [false, true] {
+        for change in ["same", "other edge", "split", "trimmed", "unnamed"] {
+            let mut sk = Sketch::new();
+            let mut points = vec![Vec2::new(1., 0.), Vec2::new(1., 1.), Vec2::new(0., 1.)];
+            if reverse {
+                points.reverse();
+            }
+            let saved = [LinkGeom::Spline {
+                pts: points,
+                control: true,
+                degree: 2,
+                periodic: false,
+                nurbs: Some(crate::Nurbs { knots: vec![0., 0., 0., 1., 1., 1.], weights: vec![1., 0.7071067811865476, 1.] }),
+            }];
+            let link = sk.add_link(LinkKind::Project, LinkSource::Edge { body: "Cap".into(), at: Vec3::ZERO }, &saved).unwrap();
+            if change != "unnamed" {
+                sk.links[0].edge_name = Some("cap-edge".into());
+            }
+            let source = sk.curve_index("s1").unwrap();
+            let made = sk.offset_freeform_chain(&[(source, true)], 0.2).unwrap();
+            sk.record_freeform_chain_offset(&[(source, true)], &made, 0.2).unwrap();
+            let outputs = sk.freeform_chain_offsets[0].outputs.clone();
+            let arc = LinkGeom::Arc { c: Vec2::ZERO, a: Vec2::new(1., 0.), b: Vec2::new(0., 1.) };
+            let (fresh, names) = match change {
+                "split" => (
+                    vec![
+                        LinkGeom::Arc { c: Vec2::ZERO, a: Vec2::new(1., 0.), b: Vec2::new(0.7071067811865476, 0.7071067811865476) },
+                        LinkGeom::Arc { c: Vec2::ZERO, a: Vec2::new(0.7071067811865476, 0.7071067811865476), b: Vec2::new(0., 1.) },
+                    ],
+                    vec!["cap-edge".into(), "cap-edge".into()],
+                ),
+                "trimmed" => (
+                    vec![LinkGeom::Arc { c: Vec2::ZERO, a: Vec2::new(1., 0.), b: Vec2::new(0.7071067811865476, 0.7071067811865476) }],
+                    vec!["cap-edge".into()],
+                ),
+                "other edge" => (vec![arc], vec!["different-edge".into()]),
+                _ => (vec![arc], vec!["cap-edge".into()]),
+            };
+            sk.update_link_named(&link, &fresh, &names).unwrap();
+            assert_eq!(sk.freeform_chain_offsets.len(), 1, "a rebuild never silently breaks an offset");
+            assert_eq!(sk.freeform_chain_offsets[0].outputs, outputs);
+            if change == "same" {
+                assert!(matches!(sk.curves[sk.curve_index("s1").unwrap()].kind, CurveKind::Arc { .. }));
+                assert_eq!(sk.freeform_chain_offsets[0].sources, vec![("s1".into(), !reverse)]);
+                sk.refresh_offsets().unwrap();
+                assert_eq!(sk.freeform_chain_offsets[0].outputs, outputs);
+            } else {
+                assert!(sk.curve_index("s1").is_none(), "{change} cannot claim the saved source");
+                assert!(sk.refresh_offsets().unwrap_err().to_string().contains("source vanished"));
+            }
+        }
+    }
+}
+
 fn ring(outer_first: bool, outer: f64, inner: f64) -> Vec<LinkGeom> {
     let (first, second) = if outer_first { (outer, inner) } else { (inner, outer) };
     square(first).into_iter().chain(square(second)).collect()
