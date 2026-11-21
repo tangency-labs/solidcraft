@@ -220,6 +220,7 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
                     "construct.point.center",
                     "construct.point.edge_plane",
                     "construct.point.along_path",
+                    "construct.point.average",
                 ],
             },
         ],
