@@ -69,6 +69,24 @@ fn refusable(error: &SolidError) -> Option<(&'static str, i32, Option<EntityRef>
         .map(|code| (error.operation(), code, error.entity()))
 }
 
+/// `error` with `cause` kept at the root of its cause chain ([`SolidError::root_cause`]): as
+/// the cause of the deepest failure in the chain, which kept none (#19803). Nothing else of
+/// any error in the chain changes: not its operation, reason, status or site. A chain whose
+/// root is not a [`SolidError::Failed`] has no record to keep a cause in, so `error` is
+/// returned as it is and `cause` is dropped.
+fn rooted_in(mut error: SolidError, cause: SolidError) -> SolidError {
+    let mut slot = &mut error;
+    while let SolidError::Failed(failure) = slot {
+        if let Some(ref mut inner) = failure.cause {
+            slot = inner;
+        } else {
+            failure.cause = Some(cause);
+            break;
+        }
+    }
+    error
+}
+
 /// `FILEXEC_ERR` (`SM_ERR`): the executive's generic failure status, as the phrase says.
 fn failure(what: &'static str) -> SolidError {
     SolidError::blend_failed(OP, what)
@@ -826,7 +844,9 @@ impl FilletSession<'_> {
     /// Not upstream (WR-513, #1469): a missing-corner note written by this call's corner
     /// stage is kept in [`FilletSession::error_info`] across the later failure, unless
     /// that failure is a no-room refusal; the returned error is still the later stage's
-    /// own status.
+    /// own status. Where that note's vertex has no corner because its classification failed
+    /// ([`ErrorInfo::unsupported_corner_cause`]), the returned error keeps the
+    /// classification's error at the root of its cause chain (#19803).
     ///
     /// Not upstream (#2510): the fillet is built to the target's approximation tolerance
     /// (`SmTol::GetApproxTol3d`, its solvers' and its merge's), so a face it rolls on that
@@ -859,12 +879,18 @@ impl FilletSession<'_> {
             == FilletErrorType::CornerUnsupported as i32
             && self.executive.error != noted_before)
             .then(|| self.executive.error.clone());
-        let (result, split_and_logged) = self.filleting_split_and_logged(k, None);
+        let (mut result, split_and_logged) = self.filleting_split_and_logged(k, None);
         if result.is_err()
             && self.executive.error.code != FilletErrorType::NoRoom as i32
             && self.executive.error.no_room == noted_before.no_room
         {
             if let Some(note) = missing_corner_note {
+                // (not upstream, #19803) the error of the classification that left that
+                // vertex without a corner is where the later failure began: it is kept at
+                // the root of that failure's cause chain
+                if let Some(cause) = note.unsupported_corner_cause().cloned() {
+                    result = result.map_err(|error| rooted_in(error, cause));
+                }
                 self.executive.error = note;
             }
         }
@@ -1739,5 +1765,63 @@ mod ball_fit_tests {
         for native in native_failures("intersect::x", 1001) {
             assert_eq!(refusable(&native), None, "{native:?}");
         }
+    }
+
+    /// #19803: the error of a corner's failed classification goes to the root of the later
+    /// failure's chain, here the shape `do_fillet` returns where a solver finds the vertex's
+    /// corner missing (the fillet body not built, the executive's step, the missing
+    /// corner). Every error in the chain keeps its operation, reason and status; the
+    /// message gains the classification's error at its end.
+    #[test]
+    fn a_classification_error_goes_to_the_root_of_the_later_failure() {
+        let missing = SolidError::blend_missing("blend::fillet_executive::session", "x");
+        let step = keeping_cause(
+            SolidError::blend_failed("blend::fillet_executive::p3", "y"),
+            missing,
+        );
+        let before = keeping_cause(failure("the fillet body is not built"), step);
+        let classification = SolidError::InvalidInput {
+            operation: "topology::edgeuse::p3",
+            reason: "EvaluateBinormal: face without surface",
+        };
+        let after = rooted_in(before.clone(), classification.clone());
+        for (was, now) in std::iter::successors(Some(&before), |e| e.cause())
+            .zip(std::iter::successors(Some(&after), |e| e.cause()))
+        {
+            assert_eq!(now.operation(), was.operation());
+            assert_eq!(now.blend_failure(), was.blend_failure());
+            assert_eq!(now.sm_status(), was.sm_status());
+        }
+        assert_eq!(after.root_cause(), &classification);
+        assert_eq!(
+            after
+                .cause()
+                .and_then(SolidError::cause)
+                .and_then(SolidError::cause),
+            Some(&classification)
+        );
+        assert_eq!(
+            after.to_string(),
+            format!("{before}; caused by {classification}")
+        );
+    }
+
+    /// #19803: a chain whose root is no record that keeps a cause is returned as it is.
+    #[test]
+    fn a_classification_error_is_not_kept_under_a_root_that_keeps_none() {
+        let root = SolidError::InvalidInput {
+            operation: "topology::edgeuse::p3",
+            reason: "EvaluateBinormal: face without surface",
+        };
+        let before = keeping_cause(failure("the fillet body is not built"), root);
+        let after = rooted_in(
+            before.clone(),
+            SolidError::blend_missing("blend::blend_corner::setback", "z"),
+        );
+        assert_eq!(after, before);
+        assert_eq!(
+            rooted_in(SolidError::sm_err("op"), failure("w")),
+            SolidError::sm_err("op")
+        );
     }
 }
