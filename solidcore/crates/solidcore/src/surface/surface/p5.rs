@@ -508,8 +508,8 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// Those of the overrides and of the approximation; [`SolidError::Unported`] for a
-    /// curve-bounded surface (see the module deviations).
+    /// Those of the overrides and of the approximation. A curve-bounded surface answers
+    /// its basis surface's iso curve (not upstream, which runs the `SmSurface` body).
     #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn create_iso_parametric_curve(
         &self,
@@ -521,6 +521,18 @@ impl Surface {
         want_uv_iso_curve: bool,
     ) -> Result<IsoParametricCurve> {
         match self.kind_with_nurb(k)? {
+            // the basis surface's iso curve: the same surface over the same parameters
+            // (not upstream, which runs the SmSurface body below)
+            SurfaceKind::CurveBounded(s) => {
+                return s.basis().create_iso_parametric_curve(
+                    k,
+                    param,
+                    iso_parameter,
+                    approx_tol_3d,
+                    domain,
+                    want_uv_iso_curve,
+                );
+            }
             // (SmSurfOfExtrusion inherits the B-spline override)
             SurfaceKind::SurfOfExtrusion(_) => {
                 let opts = crate::nurbs::b_spline_surface::p2::IsoCurveOptions {
@@ -639,10 +651,7 @@ impl Surface {
                     uv_iso_curve: r.uv_iso_curve,
                 });
             }
-            SurfaceKind::OffsetSurface(_)
-            | SurfaceKind::CurveBounded(_)
-            | SurfaceKind::Step(_)
-            | SurfaceKind::SrfInVolume(_) => {}
+            SurfaceKind::OffsetSurface(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {}
         }
 
         // define the isoParameter Curve as an object

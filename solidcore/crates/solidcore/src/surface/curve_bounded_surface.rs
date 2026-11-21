@@ -41,6 +41,15 @@
 //! - **Object model.** The surface is the [`SurfaceKind::CurveBounded`] kind of
 //!   [`Surface`]; the `SmSurface` virtuals it does not override run the base-class
 //!   defaults there. Its own overrides pass the call along to the basis surface.
+//! - **Knots and iso curves** (not upstream, whose class overrides neither): `GetKnots`
+//!   ([`Surface::knots`], [`Surface::knots_with_nurb`]) and `CreateIsoParametricCurve`
+//!   ([`Surface::create_iso_parametric_curve`]) answer the basis surface's, as the
+//!   evaluators do. The surface is its basis over the same parameters (every evaluator
+//!   passes `uv` along unchanged, and the edits that could move a parameterisation,
+//!   `Reverse`, `Reparameterize`, `SwapUV`, `Transform`, `TrimWithDomain` and `SplitAt`,
+//!   are refused for this kind), so the basis's knots are the surface's. Upstream answers
+//!   `SM_ERR` there, so every continuity query, `LiftCurve` and surface cache tree on
+//!   the surface failed.
 //! - **Unported callees.** The basis surface's `EvaluateNormalAtSingularity`
 //!   (`surface.surface_p5`) is not in the [`Surface`] dispatch yet: that call returns
 //!   [`SolidError::Unported`]. The other basis-surface calls (`EvaluateSimple`,
@@ -685,8 +694,12 @@ mod tests {
     use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
     use crate::curve::curve::CurveKind;
     use crate::curve::line::Line;
+    use crate::geom::extent1d::Extent1d;
+    use crate::geom::geom_utility::p2::ContinuityType;
+    use crate::geom::vector2d::Vec2;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::b_spline_surface::BSplineSurface;
+    use crate::nurbs::b_spline_surface::SurfParamType;
     use crate::nurbs::crv_basic::Curve as NurbCurve;
     use crate::nurbs::math::{CPoint, NOW, NOZ};
 
@@ -750,10 +763,7 @@ mod tests {
             b.evaluate(uv, 1, 1, f).unwrap()
         );
         // base-class defaults for what the class does not override
-        assert_eq!(
-            s.degree(crate::nurbs::b_spline_surface::SurfParamType::U),
-            surface_p2::base_degree()
-        );
+        assert_eq!(s.degree(SurfParamType::U), surface_p2::base_degree());
         assert!(s.copy(&Kernel::default()).is_err());
         assert_eq!(
             c.evaluate_normal(k, uv, Side::Left, Side::Left).unwrap(),
@@ -1085,6 +1095,216 @@ mod tests {
                 ));
                 assert_eq!(inner.implicit_outer(), implicit_outer);
             }
+        }
+    }
+
+    // ---- knots and continuities: the basis surface's ----------------------------------
+
+    /// A B-spline with a crease and a reduced-continuity knot: degree 2 in `u` with the
+    /// double knot `0.5` (C0: the net folds there, so the surface has a real crease
+    /// along `u = 0.5`), degree 3 in `v` with the double knot `0.4` (C1).
+    fn creased() -> BSplineSurface {
+        let xs = [0.0, 0.25, 0.5, 0.75, 1.0];
+        let tent = [0.0, 0.25, 0.5, 0.25, 0.0];
+        let ys = [0.0, 0.15, 0.3, 0.5, 0.75, 1.0];
+        let wave = [0.0, 0.1, 0.0, 0.2, 0.0, 0.1];
+        let pw: Vec<Vec<CPoint>> = xs
+            .iter()
+            .zip(tent)
+            .map(|(&x, z)| {
+                ys.iter()
+                    .zip(wave)
+                    .map(|(&y, w)| CPoint::from_point(Vec3::new(x, y, z + w)))
+                    .collect()
+            })
+            .collect();
+        let u = [0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0];
+        let v = [0.0, 0.0, 0.0, 0.0, 0.4, 0.4, 1.0, 1.0, 1.0, 1.0];
+        BSplineSurface::from_data(4, 5, 2, 3, u.len() - 1, v.len() - 1, &pw, &u, &v).unwrap()
+    }
+
+    fn bounded(basis: Surface) -> Surface {
+        Surface::from(CurveBoundedSurface::new(basis, Vec::new(), Vec::new(), true).unwrap())
+    }
+
+    /// A curve-bounded surface answers `GetKnots` with its basis's knots, in both
+    /// directions, whole or limited to an interval (upstream's class does not override
+    /// `GetKnots`, so it answers the base class's `SM_ERR`).
+    #[test]
+    fn knots_are_the_basis_knots() {
+        let k = &Kernel::default();
+        let basis = Surface::from(creased());
+        let s = bounded(basis.clone());
+        let ivl = Extent1d::from_min_max(0.3, 0.6);
+        for param in [SurfParamType::U, SurfParamType::V] {
+            for ivl in [None, Some(&ivl)] {
+                assert_eq!(
+                    s.knots(param, ivl).unwrap(),
+                    basis.knots(param, ivl).unwrap()
+                );
+                assert_eq!(
+                    s.knots_with_nurb(k, param, ivl).unwrap(),
+                    basis.knots_with_nurb(k, param, ivl).unwrap()
+                );
+            }
+        }
+        // the creased net's own knots and multiplicities
+        assert_eq!(
+            s.knots(SurfParamType::U, None).unwrap(),
+            (vec![0.0, 0.5, 1.0], vec![3, 2, 3])
+        );
+        assert_eq!(
+            s.knots(SurfParamType::V, None).unwrap(),
+            (vec![0.0, 0.4, 1.0], vec![4, 2, 4])
+        );
+
+        // a plane basis
+        let plane = Surface::from(crate::surface::plane::Plane::from_normal(
+            Point3::new(1.0, 2.0, 3.0),
+            Vec3::Z,
+        ));
+        let s = bounded(plane.clone());
+        for param in [SurfParamType::U, SurfParamType::V] {
+            assert_eq!(
+                s.knots(param, None).unwrap(),
+                plane.knots(param, None).unwrap()
+            );
+        }
+
+        // a cylinder basis without its NURB: the basis makes it to answer
+        let cylinder = || {
+            Surface::from(crate::surface::cone::Cone::new_cylinder_bounded(
+                Point3::new(0.0, 0.0, 0.0),
+                Vec3::X,
+                Vec3::Y,
+                5.0,
+                0.0,
+                360.0,
+                12.0,
+                false,
+                false,
+                false,
+            ))
+        };
+        let s = bounded(cylinder());
+        let alone = cylinder();
+        for param in [SurfParamType::U, SurfParamType::V] {
+            let got = s.knots_with_nurb(k, param, None).unwrap();
+            assert!(got.0.len() >= 2, "{param:?}: {got:?}");
+            assert_eq!(got, alone.knots_with_nurb(k, param, None).unwrap());
+        }
+    }
+
+    /// The continuities across the knots, the continuous domain around a point next to
+    /// the crease and an iso curve of a curve-bounded surface are its basis's.
+    #[test]
+    fn continuities_and_continuous_domains_are_the_basis_ones() {
+        let k = &Kernel::default();
+        let basis = Surface::from(creased());
+        let s = bounded(basis.clone());
+        for param in [SurfParamType::U, SurfParamType::V] {
+            let got = s.calculate_continuities(k, param).unwrap();
+            assert_eq!(got, basis.calculate_continuities(k, param).unwrap());
+            let iso = s
+                .create_iso_parametric_curve(k, param, 0.3, 0.0, None, true)
+                .unwrap();
+            let want = basis
+                .create_iso_parametric_curve(k, param, 0.3, 0.0, None, true)
+                .unwrap();
+            assert_eq!(iso.max_gap_3d, want.max_gap_3d);
+            for t in [0.0, 0.2, 0.5, 0.9, 1.0] {
+                assert_eq!(
+                    iso.curve.evaluate_point(k, t).unwrap(),
+                    want.curve.evaluate_point(k, t).unwrap()
+                );
+            }
+        }
+        // the crease is C0 in u
+        let (_, u_conts) = s.calculate_continuities(k, SurfParamType::U).unwrap();
+        assert_eq!(u_conts.len(), 3);
+        assert!(
+            (u_conts[1] as i32) < (ContinuityType::C1 as i32),
+            "{u_conts:?}"
+        );
+
+        // at the crease and on either side of it
+        for (uv, dir) in [
+            (Point2::new(0.3, 0.5), Vec2::new(1.0, 0.0)),
+            (Point2::new(0.5, 0.5), Vec2::new(1.0, 0.0)),
+            (Point2::new(0.5, 0.5), Vec2::new(-1.0, 0.0)),
+            (Point2::new(0.7, 0.2), Vec2::new(0.0, 1.0)),
+        ] {
+            let got = s
+                .domain_with_continuity(k, ContinuityType::C1, uv, dir)
+                .unwrap();
+            assert_eq!(
+                got,
+                basis
+                    .domain_with_continuity(k, ContinuityType::C1, uv, dir)
+                    .unwrap(),
+                "{uv:?} {dir:?}"
+            );
+        }
+        // left of the crease the C1 domain stops at it
+        let left = s
+            .domain_with_continuity(
+                k,
+                ContinuityType::C1,
+                Point2::new(0.3, 0.5),
+                Vec2::new(1.0, 0.0),
+            )
+            .unwrap();
+        assert_eq!((left.min().x, left.max().x), (0.0, 0.5));
+    }
+
+    /// A UV line across the crease lifts on a curve-bounded surface as on its basis: the
+    /// same curve, split at the crease.
+    #[test]
+    fn a_curve_across_the_crease_lifts_as_on_the_basis() {
+        let k = &Kernel::default();
+        let basis = Surface::from(creased());
+        let s = bounded(basis.clone());
+        let dom = basis.natural_uv_domain_with_nurb(k).unwrap();
+        let uv = analytic_line_2d(Point3::new(0.2, 0.3, 0.0), Point3::new(0.8, 0.7, 0.0));
+        let ivl = uv.natural_interval();
+        let got = s.lift_curve(k, &dom, &uv, &ivl, 1e-6, false).unwrap();
+        let want = basis.lift_curve(k, &dom, &uv, &ivl, 1e-6, false).unwrap();
+        assert_eq!(got.max_approx_dev, want.max_approx_dev);
+        assert_eq!(got.curve.natural_interval(), want.curve.natural_interval());
+        for i in 0..=10 {
+            let t = ivl.evaluate(f64::from(i) / 10.0);
+            assert_eq!(
+                got.curve.evaluate_point(k, t).unwrap(),
+                want.curve.evaluate_point(k, t).unwrap()
+            );
+        }
+        // the lifted curve passes the crease's point
+        let mid = got.curve.evaluate_point(k, ivl.evaluate(0.5)).unwrap();
+        let on = basis.evaluate_point(k, Point2::new(0.5, 0.5)).unwrap();
+        assert!(mid.distance(on) <= 1e-6, "{mid:?} vs {on:?}");
+    }
+
+    /// `LiftCurve` without continuity checks on a curve-bounded surface during a Boolean
+    /// operation (whose surface cache defers its tree) lifts the curve.
+    #[test]
+    fn a_lift_without_continuity_checks_during_a_boolean_succeeds() {
+        let mut k = Kernel::default();
+        k.context.set_doing_boolean(true);
+        let basis = Surface::from(creased());
+        let s = bounded(basis.clone());
+        let dom = basis.natural_uv_domain_with_nurb(&k).unwrap();
+        let uv = analytic_line_2d(Point3::new(0.2, 0.3, 0.0), Point3::new(0.8, 0.7, 0.0));
+        let ivl = uv.natural_interval();
+        // (no continuity checks: one segment across the crease, so the approximation does
+        // not meet the tolerance there; it is still a curve on the surface)
+        let lifted = s.lift_curve(&k, &dom, &uv, &ivl, 1e-6, true).unwrap();
+        assert!(lifted.max_approx_dev < 1e-3, "{}", lifted.max_approx_dev);
+        let lifted_ivl = lifted.curve.natural_interval();
+        for (t, lt) in [(ivl.min(), lifted_ivl.min()), (ivl.max(), lifted_ivl.max())] {
+            let at = uv.evaluate_point(&k, t).unwrap();
+            let on = basis.evaluate_point(&k, Point2::new(at.x, at.y)).unwrap();
+            let p = lifted.curve.evaluate_point(&k, lt).unwrap();
+            assert!(p.distance(on) <= 1e-6, "{t}: {p:?} vs {on:?}");
         }
     }
 }

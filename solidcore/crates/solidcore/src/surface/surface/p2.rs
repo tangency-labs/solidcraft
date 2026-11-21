@@ -2668,7 +2668,9 @@ impl Surface {
                 let s = bp.net();
                 s.knots(param, ivl)
             }
-            SurfaceKind::CurveBounded(_) => base_knots(),
+            // (the basis surface over the same parameters: not upstream, whose
+            // SmCurveBoundedSurface does not override GetKnots)
+            SurfaceKind::CurveBounded(s) => s.basis().knots(param, ivl),
             SurfaceKind::Step(s) => s.knots(param, ivl),
             SurfaceKind::SrfInVolume(s) => s.knots(param, ivl),
             SurfaceKind::Plane(s) => s.base_for_query().knots(param, ivl),
@@ -2704,6 +2706,8 @@ impl Surface {
         }
         match self.kind() {
             SurfaceKind::Step(s) => s.knots_with_nurb(k, param, ivl),
+            // (the basis's, with its NURB made)
+            SurfaceKind::CurveBounded(s) => s.basis().knots_with_nurb(k, param, ivl),
             SurfaceKind::SurfOfExtrusion(s) if s.base().gw_nurb().is_none() => {
                 match ignored_surface_result(s.base_with_nurb(k))? {
                     Some(b) => b.knots(param, ivl),

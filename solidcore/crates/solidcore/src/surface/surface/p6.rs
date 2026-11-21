@@ -2159,7 +2159,7 @@ pub(super) fn create_iso_parametric_curve(
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SrfInVolume(_)
         | SurfaceKind::Step(_) => {
-            // the SmSurface body
+            // the SmSurface body (a curve-bounded surface's: its basis's)
             let iso = surface.create_iso_parametric_curve(k, dir, value, 0.0, domain, false)?;
             Ok((iso.curve, iso.max_gap_3d))
         }
