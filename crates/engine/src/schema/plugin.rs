@@ -31,6 +31,9 @@ pub struct RunParams {
     pub entry: String,
     #[serde(default = "empty_params")]
     pub params: Value,
+    /// Refuse an edit unless this is still the design state the caller computed against.
+    #[serde(default)]
+    pub expected_design: Option<craft_plugin::DesignToken>,
     /// Called by name (`<plugin>.<entry>`, as a tool): a missing grant or a read entry's refusal
     /// comes back naming the plugin, the grant and how to approve it, or the refused import.
     #[serde(default)]
@@ -307,6 +310,9 @@ pub struct InstallResult {
     pub entries: Vec<String>,
     /// Entry declarations, including where the host will show them.
     pub entry_points: Vec<craft_plugin::Entry>,
+    /// Read-only entries automatically called after design changes, covered by package approval.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub listeners: Vec<craft_plugin::Listener>,
     /// For an importer: the file extensions it opens, lowercase, without the dot.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub opens: Vec<String>,
