@@ -921,6 +921,17 @@ pub fn read_design_file(path: &str, notify: Option<impl FnOnce(DesignPreview)>) 
     }
 }
 
+/// A design container already in memory, with the model it keeps as [`read_design_file`] reads
+/// it, except that a container with a provenance entry gives no model: a signed design is
+/// evaluated from its timeline, never from a cache its signature does not cover. The entry and
+/// the model come from the same bytes, so the decision is about the file the model came from.
+pub fn read_design_with_model(bytes: &[u8]) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
+    let _span = solidcraft_profile::span("io", "read_design_file");
+    let mut reader = DesignContainerReader::new(Cursor::new(bytes))?;
+    let model = if reader.has_provenance() { None } else { reader.geometry_before_document() };
+    Ok((reader.read_document()?, model))
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 type FileSource = std::fs::File;
 #[cfg(target_arch = "wasm32")]

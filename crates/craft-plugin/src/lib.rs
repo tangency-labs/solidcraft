@@ -546,7 +546,7 @@ pub struct Manifest {
     pub runtime: Option<RuntimeManifest>,
 }
 
-/// A read-only entry called after a coalesced whole-document invalidation. Listeners refresh
+/// A read-only entry called after a coalesced design or linked-file invalidation. Listeners refresh
 /// their own caches or panel data; they do not edit, write files or start background work.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -624,11 +624,17 @@ impl RuntimeManifest {
         let mut listeners = BTreeSet::new();
         for listener in &self.listeners {
             let entry = self.entries.iter().find(|entry| entry.name == listener.entry);
+            let mut events = BTreeSet::new();
+            let valid_events = !listener.on.is_empty()
+                && listener.on.iter().all(|event| matches!(event.as_str(), "design.changed" | "design.links_changed") && events.insert(event));
             if !listeners.insert(&listener.entry)
-                || listener.on.as_slice() != ["design.changed"]
+                || !valid_events
                 || entry.is_none_or(|entry| entry.kind != EntryKind::Command || entry.effect != Effect::Read)
             {
-                return Err(invalid("runtime.listeners", "distinct read command entries listening to [\"design.changed\"] are required"));
+                return Err(invalid(
+                    "runtime.listeners",
+                    "distinct read command entries listening to a nonempty, unique selection of design.changed and design.links_changed are required",
+                ));
             }
         }
         if self.commands.len() > 128 || self.commands.iter().any(|id| !valid_command_name(id)) {
