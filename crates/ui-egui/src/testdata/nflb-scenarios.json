@@ -1,0 +1,2276 @@
+{
+ "spec": "0.4.0",
+ "about": "No File Left Behind: the rules as scenarios. See README.md in this folder for the format.",
+ "scenarios": [
+  {
+   "id": "nothing-unsaved",
+   "rules": [
+    "1.4"
+   ],
+   "title": "Nothing unsaved: no prompt, the action goes ahead",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": false
+    },
+    {
+     "id": "gearbox",
+     "name": "Gearbox",
+     "path": "~/Designs/Gearbox.sc",
+     "dirty": false
+    }
+   ],
+   "steps": [
+    {
+     "expect": {
+      "prompt": "none",
+      "outcome": "proceeded",
+      "open": [],
+      "lost": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "one-unsaved-single-prompt",
+   "rules": [
+    "1.2"
+   ],
+   "title": "One unsaved document keeps the single prompt",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "gearbox",
+     "name": "Gearbox",
+     "path": "~/Designs/Gearbox.sc",
+     "dirty": false
+    }
+   ],
+   "steps": [
+    {
+     "expect": {
+      "prompt": "single",
+      "count": 1,
+      "rows": [
+       {
+        "id": "bracket"
+       }
+      ],
+      "outcome": null,
+      "open": [
+       "bracket",
+       "gearbox"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "list-opens-ticked",
+   "rules": [
+    "1.1",
+    "1.4",
+    "2.1",
+    "2.2",
+    "2.4"
+   ],
+   "title": "Two or more unsaved: one list, a row each in order, all ticked, clean documents left out",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    },
+    {
+     "id": "untitled",
+     "name": "Untitled",
+     "path": null,
+     "dirty": true
+    },
+    {
+     "id": "gearbox",
+     "name": "Gearbox",
+     "path": "~/Designs/Gearbox.sc",
+     "dirty": false
+    }
+   ],
+   "steps": [
+    {
+     "expect": {
+      "prompt": "list",
+      "count": 3,
+      "request": null,
+      "outcome": null,
+      "rows": [
+       {
+        "id": "bracket",
+        "name": "Bracket",
+        "where": "~/Designs/Bracket.sc",
+        "ticked": true,
+        "state": "unsaved",
+        "note": null
+       },
+       {
+        "id": "lid",
+        "where": "~/Designs/Lid.sc",
+        "ticked": true
+       },
+       {
+        "id": "untitled",
+        "where": null,
+        "ticked": true
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "save-selected-all-files",
+   "rules": [
+    "3.1",
+    "3.1.2"
+   ],
+   "title": "Save Selected saves in row order without asking where, then everything closes",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    },
+    {
+     "id": "gearbox",
+     "name": "Gearbox",
+     "path": "~/Designs/Gearbox.sc",
+     "dirty": false
+    }
+   ],
+   "steps": [
+    {
+     "do": "saveSelected"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "save",
+       "id": "bracket",
+       "path": "~/Designs/Bracket.sc"
+      },
+      "rows": [
+       {
+        "id": "bracket",
+        "state": "saving"
+       },
+       {
+        "id": "lid",
+        "state": "unsaved"
+       }
+      ]
+     }
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "save",
+       "id": "lid"
+      },
+      "rows": [
+       {
+        "id": "bracket",
+        "state": "saved"
+       },
+       {
+        "id": "lid",
+        "state": "saving"
+       }
+      ],
+      "open": [
+       "bracket",
+       "lid",
+       "gearbox"
+      ]
+     }
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "prompt": "none",
+      "outcome": "proceeded",
+      "open": [],
+      "saved": {
+       "bracket": "~/Designs/Bracket.sc",
+       "lid": "~/Designs/Lid.sc"
+      },
+      "lost": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "picker-only-for-never-saved",
+   "rules": [
+    "3.1"
+   ],
+   "title": "Save Selected asks where only for the never-saved document",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "untitled",
+     "name": "Untitled",
+     "path": null,
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "saveSelected"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "save",
+       "id": "bracket"
+      }
+     }
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "pick",
+       "id": "untitled",
+       "why": "never-saved"
+      }
+     }
+    },
+    {
+     "do": "picked",
+     "path": "~/Designs/Clip.sc"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "save",
+       "id": "untitled",
+       "path": "~/Designs/Clip.sc"
+      }
+     }
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "outcome": "proceeded",
+      "saved": {
+       "untitled": "~/Designs/Clip.sc"
+      },
+      "lost": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "failed-save-nothing-closes",
+   "rules": [
+    "3.1.1",
+    "3.4"
+   ],
+   "title": "A save fails: nothing closes, the list stays, the row says why, the saved one shows as saved",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    },
+    {
+     "id": "gearbox",
+     "name": "Gearbox",
+     "path": "~/Designs/Gearbox.sc",
+     "dirty": false
+    }
+   ],
+   "steps": [
+    {
+     "do": "saveSelected"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "do": "saveFailed",
+     "reason": "The disk is full"
+    },
+    {
+     "expect": {
+      "prompt": "list",
+      "outcome": null,
+      "request": null,
+      "count": 1,
+      "open": [
+       "bracket",
+       "lid",
+       "gearbox"
+      ],
+      "closed": [],
+      "rows": [
+       {
+        "id": "bracket",
+        "state": "saved",
+        "ticked": false,
+        "note": null
+       },
+       {
+        "id": "lid",
+        "state": "unsaved",
+        "ticked": true,
+        "note": {
+         "kind": "failed",
+         "text": "The disk is full"
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "failure-does-not-stop-others",
+   "rules": [
+    "3.1.3",
+    "3.1.1"
+   ],
+   "title": "A failed save doesn't stop the others: the later documents are still saved, and nothing closes",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    },
+    {
+     "id": "untitled",
+     "name": "Untitled",
+     "path": null,
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "saveSelected"
+    },
+    {
+     "do": "saveFailed",
+     "reason": "The disk is full"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "save",
+       "id": "lid"
+      }
+     }
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "pick",
+       "id": "untitled"
+      }
+     }
+    },
+    {
+     "do": "picked",
+     "path": "~/Designs/Clip.sc"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "prompt": "list",
+      "outcome": null,
+      "count": 1,
+      "closed": [],
+      "rows": [
+       {
+        "id": "bracket",
+        "state": "unsaved",
+        "note": {
+         "kind": "failed"
+        }
+       },
+       {
+        "id": "lid",
+        "state": "saved"
+       },
+       {
+        "id": "untitled",
+        "state": "saved",
+        "where": "~/Designs/Clip.sc"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "cancelled-picker-stops-run",
+   "rules": [
+    "3.1.3",
+    "3.1.1"
+   ],
+   "title": "A cancelled picker stops the run: no second picker, nothing closes",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "untitled",
+     "name": "Untitled",
+     "path": null,
+     "dirty": true
+    },
+    {
+     "id": "untitled2",
+     "name": "Untitled 2",
+     "path": null,
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "saveSelected"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "pick",
+       "id": "untitled"
+      }
+     }
+    },
+    {
+     "do": "pickCancelled"
+    },
+    {
+     "expect": {
+      "prompt": "list",
+      "request": null,
+      "outcome": null,
+      "closed": [],
+      "count": 2,
+      "rows": [
+       {
+        "id": "bracket",
+        "state": "saved"
+       },
+       {
+        "id": "untitled",
+        "state": "unsaved",
+        "note": {
+         "kind": "cancelled"
+        }
+       },
+       {
+        "id": "untitled2",
+        "state": "unsaved",
+        "note": null
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "retry-after-failure",
+   "rules": [
+    "3.1.1",
+    "3.1.2"
+   ],
+   "title": "After the failure is fixed, Save Selected again saves the rest and everything closes",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "saveSelected"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "do": "saveFailed",
+     "reason": "The disk is full"
+    },
+    {
+     "do": "saveSelected"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "save",
+       "id": "lid"
+      },
+      "rows": [
+       {
+        "id": "bracket"
+       },
+       {
+        "id": "lid",
+        "note": null
+       }
+      ]
+     }
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "outcome": "proceeded",
+      "open": [],
+      "lost": [],
+      "saved": {
+       "bracket": "~/Designs/Bracket.sc",
+       "lid": "~/Designs/Lid.sc"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "unticked-close-unsaved",
+   "rules": [
+    "3.1.2",
+    "2.6"
+   ],
+   "title": "An unticked document closes without saving when the ticked ones have saved",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    },
+    {
+     "id": "untitled",
+     "name": "Untitled",
+     "path": null,
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "tick",
+     "id": "lid",
+     "on": false
+    },
+    {
+     "expect": {
+      "rows": [
+       {
+        "ticked": true
+       },
+       {
+        "id": "lid",
+        "ticked": false
+       },
+       {
+        "ticked": true
+       }
+      ]
+     }
+    },
+    {
+     "do": "saveSelected"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "do": "picked",
+     "path": "~/Designs/Clip.sc"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "outcome": "proceeded",
+      "open": [],
+      "lost": [
+       "lid"
+      ],
+      "saved": {
+       "bracket": "~/Designs/Bracket.sc",
+       "untitled": "~/Designs/Clip.sc"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "unticked-stay-open-on-failure",
+   "rules": [
+    "3.1.1"
+   ],
+   "title": "When a save fails, the unticked documents don't close either",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    },
+    {
+     "id": "untitled",
+     "name": "Untitled",
+     "path": null,
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "tick",
+     "id": "untitled",
+     "on": false
+    },
+    {
+     "do": "saveSelected"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "do": "saveFailed",
+     "reason": "The disk is full"
+    },
+    {
+     "expect": {
+      "outcome": null,
+      "closed": [],
+      "lost": [],
+      "rows": [
+       {
+        "id": "bracket"
+       },
+       {
+        "id": "lid"
+       },
+       {
+        "id": "untitled",
+        "ticked": false,
+        "state": "unsaved"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "nothing-ticked",
+   "rules": [
+    "3.1.2"
+   ],
+   "title": "Save Selected with nothing ticked closes everything unsaved, like Don't Save",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "tick",
+     "id": "bracket",
+     "on": false
+    },
+    {
+     "do": "tick",
+     "id": "lid",
+     "on": false
+    },
+    {
+     "do": "saveSelected"
+    },
+    {
+     "expect": {
+      "outcome": "proceeded",
+      "lost": [
+       "bracket",
+       "lid"
+      ],
+      "saved": {}
+     }
+    }
+   ]
+  },
+  {
+   "id": "dont-save",
+   "rules": [
+    "3.2"
+   ],
+   "title": "Don't Save closes every listed document without saving",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    },
+    {
+     "id": "untitled",
+     "name": "Untitled",
+     "path": null,
+     "dirty": true
+    },
+    {
+     "id": "gearbox",
+     "name": "Gearbox",
+     "path": "~/Designs/Gearbox.sc",
+     "dirty": false
+    }
+   ],
+   "steps": [
+    {
+     "do": "dontSave"
+    },
+    {
+     "expect": {
+      "prompt": "none",
+      "outcome": "proceeded",
+      "open": [],
+      "lost": [
+       "bracket",
+       "lid",
+       "untitled"
+      ],
+      "saved": {}
+     }
+    }
+   ]
+  },
+  {
+   "id": "cancel",
+   "rules": [
+    "3.3",
+    "5.1"
+   ],
+   "title": "Cancel closes nothing and stops the action",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    },
+    {
+     "id": "gearbox",
+     "name": "Gearbox",
+     "path": "~/Designs/Gearbox.sc",
+     "dirty": false
+    }
+   ],
+   "steps": [
+    {
+     "do": "cancel"
+    },
+    {
+     "expect": {
+      "prompt": "none",
+      "outcome": "stopped",
+      "open": [
+       "bracket",
+       "lid",
+       "gearbox"
+      ],
+      "closed": [],
+      "lost": []
+     }
+    },
+    {
+     "do": "saveSelected",
+     "ignored": true
+    },
+    {
+     "do": "dontSave",
+     "ignored": true
+    }
+   ]
+  },
+  {
+   "id": "cancel-after-row-answers",
+   "rules": [
+    "3.3",
+    "4.1",
+    "4.2"
+   ],
+   "title": "Cancel closes nothing more: rows already answered stay answered",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    },
+    {
+     "id": "untitled",
+     "name": "Untitled",
+     "path": null,
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "rowSave",
+     "id": "bracket"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "do": "rowDiscard",
+     "id": "lid"
+    },
+    {
+     "expect": {
+      "prompt": "list",
+      "count": 1,
+      "rows": [
+       {
+        "id": "untitled"
+       }
+      ],
+      "closed": [
+       "bracket",
+       "lid"
+      ]
+     }
+    },
+    {
+     "do": "cancel"
+    },
+    {
+     "expect": {
+      "outcome": "stopped",
+      "open": [
+       "untitled"
+      ],
+      "closed": [
+       "bracket",
+       "lid"
+      ],
+      "saved": {
+       "bracket": "~/Designs/Bracket.sc"
+      },
+      "lost": [
+       "lid"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "row-save",
+   "rules": [
+    "4.1",
+    "4.4"
+   ],
+   "title": "A row's Save saves that document only; it closes and its row leaves",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    },
+    {
+     "id": "untitled",
+     "name": "Untitled",
+     "path": null,
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "tick",
+     "id": "untitled",
+     "on": false
+    },
+    {
+     "do": "rowSave",
+     "id": "lid"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "save",
+       "id": "lid"
+      }
+     }
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "prompt": "list",
+      "outcome": null,
+      "count": 2,
+      "closed": [
+       "lid"
+      ],
+      "rows": [
+       {
+        "id": "bracket",
+        "ticked": true,
+        "state": "unsaved"
+       },
+       {
+        "id": "untitled",
+        "ticked": false,
+        "state": "unsaved"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "row-save-fails",
+   "rules": [
+    "4.1",
+    "3.4"
+   ],
+   "title": "A row's Save that fails leaves the row, with the reason",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "rowSave",
+     "id": "lid"
+    },
+    {
+     "do": "saveFailed",
+     "reason": "The disk is full"
+    },
+    {
+     "expect": {
+      "prompt": "list",
+      "closed": [],
+      "request": null,
+      "rows": [
+       {
+        "id": "bracket",
+        "note": null
+       },
+       {
+        "id": "lid",
+        "state": "unsaved",
+        "note": {
+         "kind": "failed",
+         "text": "The disk is full"
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "row-save-picker-cancelled",
+   "rules": [
+    "4.1"
+   ],
+   "title": "A row's Save on a never-saved document asks where; cancelling leaves the row",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "untitled",
+     "name": "Untitled",
+     "path": null,
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "rowSave",
+     "id": "untitled"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "pick",
+       "id": "untitled",
+       "why": "never-saved"
+      }
+     }
+    },
+    {
+     "do": "pickCancelled"
+    },
+    {
+     "expect": {
+      "prompt": "list",
+      "closed": [],
+      "rows": [
+       {
+        "id": "bracket"
+       },
+       {
+        "id": "untitled",
+        "state": "unsaved",
+        "note": {
+         "kind": "cancelled"
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "row-discard",
+   "rules": [
+    "4.2",
+    "4.4"
+   ],
+   "title": "A row's Discard closes that document only",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    },
+    {
+     "id": "untitled",
+     "name": "Untitled",
+     "path": null,
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "rowDiscard",
+     "id": "lid"
+    },
+    {
+     "expect": {
+      "prompt": "list",
+      "count": 2,
+      "closed": [
+       "lid"
+      ],
+      "lost": [
+       "lid"
+      ],
+      "rows": [
+       {
+        "id": "bracket",
+        "ticked": true
+       },
+       {
+        "id": "untitled",
+        "ticked": true
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "last-row-carries-on",
+   "rules": [
+    "4.3"
+   ],
+   "title": "Answering the last row carries on with the action",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    },
+    {
+     "id": "gearbox",
+     "name": "Gearbox",
+     "path": "~/Designs/Gearbox.sc",
+     "dirty": false
+    }
+   ],
+   "steps": [
+    {
+     "do": "rowSave",
+     "id": "bracket"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "prompt": "list",
+      "count": 1,
+      "outcome": null
+     }
+    },
+    {
+     "do": "rowDiscard",
+     "id": "lid"
+    },
+    {
+     "expect": {
+      "prompt": "none",
+      "outcome": "proceeded",
+      "open": [],
+      "saved": {
+       "bracket": "~/Designs/Bracket.sc"
+      },
+      "lost": [
+       "lid"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "last-unsaved-row-after-partial-save",
+   "rules": [
+    "4.3",
+    "3.1.1"
+   ],
+   "title": "After a failed Save Selected, discarding the failed row carries on and closes the saved ones too",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "saveSelected"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "do": "saveFailed",
+     "reason": "The disk is full"
+    },
+    {
+     "expect": {
+      "closed": []
+     }
+    },
+    {
+     "do": "rowDiscard",
+     "id": "lid"
+    },
+    {
+     "expect": {
+      "outcome": "proceeded",
+      "open": [],
+      "saved": {
+       "bracket": "~/Designs/Bracket.sc"
+      },
+      "lost": [
+       "lid"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "saved-row-buttons-off",
+   "rules": [
+    "3.1.1"
+   ],
+   "title": "A row that already saved has nothing left to answer",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "saveSelected"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "do": "saveFailed",
+     "reason": "The disk is full"
+    },
+    {
+     "do": "rowSave",
+     "id": "bracket",
+     "ignored": true
+    },
+    {
+     "do": "rowDiscard",
+     "id": "bracket",
+     "ignored": true
+    },
+    {
+     "do": "tick",
+     "id": "bracket",
+     "on": true,
+     "ignored": true
+    }
+   ]
+  },
+  {
+   "id": "read-only-asks-where",
+   "rules": [
+    "6.1"
+   ],
+   "title": "A read-only file asks for a new place, and the row knows why",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true,
+     "readOnly": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "expect": {
+      "rows": [
+       {
+        "id": "bracket",
+        "readOnly": true
+       },
+       {
+        "id": "lid",
+        "readOnly": false
+       }
+      ]
+     }
+    },
+    {
+     "do": "saveSelected"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "pick",
+       "id": "bracket",
+       "why": "read-only"
+      }
+     }
+    },
+    {
+     "do": "picked",
+     "path": "~/Designs/Bracket copy.sc"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "save",
+       "id": "lid"
+      },
+      "rows": [
+       {
+        "id": "bracket",
+        "state": "saved",
+        "where": "~/Designs/Bracket copy.sc",
+        "readOnly": false
+       },
+       {
+        "id": "lid"
+       }
+      ]
+     }
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "outcome": "proceeded",
+      "saved": {
+       "bracket": "~/Designs/Bracket copy.sc"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "buttons-wait-while-saving",
+   "rules": [
+    "6.2"
+   ],
+   "title": "While a save is running every button except Cancel waits",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    },
+    {
+     "id": "untitled",
+     "name": "Untitled",
+     "path": null,
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "saveSelected"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "save",
+       "id": "bracket"
+      },
+      "rows": [
+       {
+        "state": "saving"
+       },
+       {},
+       {}
+      ]
+     }
+    },
+    {
+     "do": "saveSelected",
+     "ignored": true
+    },
+    {
+     "do": "dontSave",
+     "ignored": true
+    },
+    {
+     "do": "rowSave",
+     "id": "lid",
+     "ignored": true
+    },
+    {
+     "do": "rowDiscard",
+     "id": "lid",
+     "ignored": true
+    },
+    {
+     "do": "tick",
+     "id": "lid",
+     "on": false,
+     "ignored": true
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "save",
+       "id": "bracket"
+      },
+      "rows": [
+       {},
+       {
+        "id": "lid",
+        "ticked": true
+       },
+       {}
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "cancel-during-save",
+   "rules": [
+    "6.2",
+    "3.3"
+   ],
+   "title": "Cancel during a slow save abandons it and stops the rest; what already saved stays saved; nothing closes",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    },
+    {
+     "id": "untitled",
+     "name": "Untitled",
+     "path": null,
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "saveSelected"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "save",
+       "id": "lid"
+      }
+     }
+    },
+    {
+     "do": "cancel"
+    },
+    {
+     "expect": {
+      "outcome": "stopped",
+      "request": null,
+      "abandoned": [
+       "lid"
+      ],
+      "open": [
+       "bracket",
+       "lid",
+       "untitled"
+      ],
+      "closed": [],
+      "saved": {
+       "bracket": "~/Designs/Bracket.sc"
+      },
+      "lost": []
+     }
+    },
+    {
+     "do": "saveDone",
+     "ignored": true
+    }
+   ]
+  },
+  {
+   "id": "cancel-waits-for-picker",
+   "rules": [
+    "6.2"
+   ],
+   "title": "While a save picker is open, it is the picker that gets answered, not the list",
+   "docs": [
+    {
+     "id": "untitled",
+     "name": "Untitled",
+     "path": null,
+     "dirty": true
+    },
+    {
+     "id": "untitled2",
+     "name": "Untitled 2",
+     "path": null,
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "saveSelected"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "pick",
+       "id": "untitled"
+      }
+     }
+    },
+    {
+     "do": "cancel",
+     "ignored": true
+    },
+    {
+     "do": "dontSave",
+     "ignored": true
+    },
+    {
+     "do": "pickCancelled"
+    },
+    {
+     "do": "cancel"
+    },
+    {
+     "expect": {
+      "outcome": "stopped",
+      "closed": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "changed-after-saving",
+   "rules": [
+    "6.5"
+   ],
+   "title": "A document that changes again after it saved needs saving again; its row stays",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "saveSelected"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "do": "saveFailed",
+     "reason": "The disk is full"
+    },
+    {
+     "expect": {
+      "count": 1
+     }
+    },
+    {
+     "do": "docChanged",
+     "id": "bracket"
+    },
+    {
+     "expect": {
+      "count": 2,
+      "rows": [
+       {
+        "id": "bracket",
+        "state": "unsaved",
+        "ticked": true
+       },
+       {
+        "id": "lid"
+       }
+      ]
+     }
+    },
+    {
+     "do": "saveSelected"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "save",
+       "id": "bracket"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "clean-document-changes",
+   "rules": [
+    "6.5",
+    "1.4"
+   ],
+   "title": "A document that gains changes while the list is open gets a row, ticked",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    },
+    {
+     "id": "gearbox",
+     "name": "Gearbox",
+     "path": "~/Designs/Gearbox.sc",
+     "dirty": false
+    }
+   ],
+   "steps": [
+    {
+     "expect": {
+      "count": 2
+     }
+    },
+    {
+     "do": "docChanged",
+     "id": "gearbox"
+    },
+    {
+     "expect": {
+      "prompt": "list",
+      "count": 3,
+      "rows": [
+       {
+        "id": "bracket"
+       },
+       {
+        "id": "lid"
+       },
+       {
+        "id": "gearbox",
+        "state": "unsaved",
+        "ticked": true
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "single-save",
+   "rules": [
+    "1.2",
+    "3.1.2"
+   ],
+   "title": "The single prompt: Save saves it and the action goes ahead",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "gearbox",
+     "name": "Gearbox",
+     "path": "~/Designs/Gearbox.sc",
+     "dirty": false
+    }
+   ],
+   "steps": [
+    {
+     "do": "saveSelected"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "save",
+       "id": "bracket"
+      }
+     }
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "outcome": "proceeded",
+      "open": [],
+      "lost": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "single-save-fails",
+   "rules": [
+    "1.2",
+    "3.1.1",
+    "3.4"
+   ],
+   "title": "The single prompt: a failed save closes nothing and the prompt stays, with the reason",
+   "docs": [
+    {
+     "id": "untitled",
+     "name": "Untitled",
+     "path": null,
+     "dirty": true
+    },
+    {
+     "id": "gearbox",
+     "name": "Gearbox",
+     "path": "~/Designs/Gearbox.sc",
+     "dirty": false
+    }
+   ],
+   "steps": [
+    {
+     "do": "saveSelected"
+    },
+    {
+     "do": "picked",
+     "path": "~/Designs/Clip.sc"
+    },
+    {
+     "do": "saveFailed",
+     "reason": "The disk is full"
+    },
+    {
+     "expect": {
+      "prompt": "single",
+      "outcome": null,
+      "closed": [],
+      "rows": [
+       {
+        "id": "untitled",
+        "where": null,
+        "note": {
+         "kind": "failed",
+         "text": "The disk is full"
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "single-dont-save-and-cancel",
+   "rules": [
+    "1.2",
+    "3.2"
+   ],
+   "title": "The single prompt: Don't Save closes it unsaved",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "gearbox",
+     "name": "Gearbox",
+     "path": "~/Designs/Gearbox.sc",
+     "dirty": false
+    }
+   ],
+   "steps": [
+    {
+     "do": "dontSave"
+    },
+    {
+     "expect": {
+      "outcome": "proceeded",
+      "lost": [
+       "bracket"
+      ],
+      "open": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "single-becomes-list",
+   "rules": [
+    "6.5",
+    "1.1"
+   ],
+   "title": "The single prompt becomes the list when a second document gains changes",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "gearbox",
+     "name": "Gearbox",
+     "path": "~/Designs/Gearbox.sc",
+     "dirty": false
+    }
+   ],
+   "steps": [
+    {
+     "expect": {
+      "prompt": "single"
+     }
+    },
+    {
+     "do": "docChanged",
+     "id": "gearbox"
+    },
+    {
+     "expect": {
+      "prompt": "list",
+      "count": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "changed-during-run",
+   "rules": [
+    "6.5",
+    "3.1.2"
+   ],
+   "title": "A document that saved and then changes while the others are still saving does not close unasked: the list stays",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "saveSelected"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "do": "docChanged",
+     "id": "bracket"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "save",
+       "id": "lid"
+      }
+     }
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "prompt": "list",
+      "outcome": null,
+      "closed": [],
+      "lost": [],
+      "count": 1,
+      "rows": [
+       {
+        "id": "bracket",
+        "state": "unsaved",
+        "ticked": true
+       },
+       {
+        "id": "lid",
+        "state": "saved"
+       }
+      ]
+     }
+    },
+    {
+     "do": "saveSelected"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "outcome": "proceeded",
+      "lost": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "clean-document-changes-during-run",
+   "rules": [
+    "6.5",
+    "3.1.2"
+   ],
+   "title": "A document that gains changes during a run of saves gets a row and holds the list open",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    },
+    {
+     "id": "gearbox",
+     "name": "Gearbox",
+     "path": "~/Designs/Gearbox.sc",
+     "dirty": false
+    }
+   ],
+   "steps": [
+    {
+     "do": "saveSelected"
+    },
+    {
+     "do": "docChanged",
+     "id": "gearbox"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "prompt": "list",
+      "outcome": null,
+      "closed": [],
+      "lost": [],
+      "count": 1,
+      "rows": [
+       {
+        "id": "bracket",
+        "state": "saved"
+       },
+       {
+        "id": "lid",
+        "state": "saved"
+       },
+       {
+        "id": "gearbox",
+        "state": "unsaved",
+        "ticked": true
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "changed-while-being-saved",
+   "rules": [
+    "6.5"
+   ],
+   "title": "A change that arrives while that document is being saved leaves it needing a save",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "saveSelected"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "save",
+       "id": "bracket"
+      }
+     }
+    },
+    {
+     "do": "docChanged",
+     "id": "bracket"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "prompt": "list",
+      "outcome": null,
+      "closed": [],
+      "count": 1,
+      "rows": [
+       {
+        "id": "bracket",
+        "state": "unsaved",
+        "ticked": true
+       },
+       {
+        "id": "lid",
+        "state": "saved"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "row-save-changed-while-saving",
+   "rules": [
+    "6.5",
+    "4.1"
+   ],
+   "title": "A row's Save whose document changes during the save does not close it",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "lid",
+     "name": "Lid",
+     "path": "~/Designs/Lid.sc",
+     "dirty": true
+    }
+   ],
+   "steps": [
+    {
+     "do": "rowSave",
+     "id": "bracket"
+    },
+    {
+     "do": "docChanged",
+     "id": "bracket"
+    },
+    {
+     "do": "saveDone"
+    },
+    {
+     "expect": {
+      "prompt": "list",
+      "closed": [],
+      "count": 2,
+      "rows": [
+       {
+        "id": "bracket",
+        "state": "unsaved"
+       },
+       {
+        "id": "lid"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "single-has-no-tick",
+   "rules": [
+    "1.2"
+   ],
+   "title": "The single prompt has no tick box: its document can't be unticked",
+   "docs": [
+    {
+     "id": "bracket",
+     "name": "Bracket",
+     "path": "~/Designs/Bracket.sc",
+     "dirty": true
+    },
+    {
+     "id": "gearbox",
+     "name": "Gearbox",
+     "path": "~/Designs/Gearbox.sc",
+     "dirty": false
+    }
+   ],
+   "steps": [
+    {
+     "do": "tick",
+     "id": "bracket",
+     "on": false,
+     "ignored": true
+    },
+    {
+     "do": "saveSelected"
+    },
+    {
+     "expect": {
+      "request": {
+       "type": "save",
+       "id": "bracket"
+      }
+     }
+    }
+   ]
+  }
+ ]
+}
