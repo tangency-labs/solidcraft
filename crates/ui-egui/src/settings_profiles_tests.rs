@@ -40,7 +40,6 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     // Test change: show_design_view_switcher, the setting the owner asked for, is a portable key.
     assert_eq!(
         keys.len(),
-        109,
         110,
         "include document browser visibility and sizing, the repeated-shortcut preference, the browser scroll wheel preferences and the centred command search among the current portable settings"
     );
