@@ -27,7 +27,8 @@ use crate::*;
 /// import feature, the tight boxes the kernel was asked for, the flats of sheets made from
 /// surfaces laid out (their pieces cut), the blends the kernel was asked for, the searches for
 /// the radius that fits, the meshes a cam's profile was read from, and the kernel's point
-/// classifications a pattern's copies were probed with.
+/// classifications a pattern's copies were probed with, and the bodies a hole's points were
+/// classified in.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Counts {
     pub moved: usize,
@@ -59,6 +60,7 @@ pub(crate) struct Counts {
     pub blends: usize,
     pub fit_searches: usize,
     pub classifications: usize,
+    pub hole_points: usize,
 }
 
 thread_local! {
@@ -93,6 +95,7 @@ thread_local! {
             blends: 0,
             fit_searches: 0,
             classifications: 0,
+            hole_points: 0,
         })
     };
 }
@@ -2900,6 +2903,62 @@ fn plate_with_hole_grid(hole: serde_json::Value) -> (f64, f64, Counts) {
     let work = counted(|| model.evaluate(&doc));
     assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
     (disc_volume(&model), std::f64::consts::PI * 1.5 * 1.5 * 2.0, work)
+}
+
+/// A hole as deep as its plate, after `others` boxes 300 mm and more away and, with `under`, a
+/// slab touching the plate's bottom face: the plate's and slab's volumes and the work.
+fn plate_hole_among_bodies(others: usize, under: bool) -> (f64, Option<f64>, Counts) {
+    let mut doc = Document::new("bodies");
+    let solid = |corner: [f64; 3], length: f64, height: f64| -> FeatureKind {
+        serde_json::from_value(serde_json::json!({
+            "type": "box", "corner": corner, "length": length.to_string(), "width": length.to_string(), "height": height.to_string(),
+        }))
+        .unwrap()
+    };
+    for i in 0..others {
+        doc.add_feature(solid([300.0 + 30.0 * i as f64, 0.0, 0.0], 20.0, 20.0), Some(&format!("Far{i}"))).unwrap();
+    }
+    if under {
+        doc.add_feature(solid([0.0, 0.0, -5.0], 100.0, 5.0), Some("Under")).unwrap();
+    }
+    doc.add_feature(solid([0.0, 0.0, 0.0], 100.0, 2.0), Some("Plate")).unwrap();
+    let hole: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "hole", "position": [50, 50, 2], "direction": [0, 0, -1], "diameter": "3", "depth": "2",
+    }))
+    .unwrap();
+    doc.add_feature(hole, Some("Hole")).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    let st = model.state();
+    // The plate is the body from z = 0 to 2 at the origin, the slab the one below it.
+    let volume = |top: f64| {
+        st.bodies
+            .iter()
+            .find(|b| b.body.exact_bounds().is_ok_and(|bb| bb.min.x.abs() < 1e-6 && (bb.max.z - top).abs() < 1e-6))
+            .map(|b| kernel::measure(&b.body).unwrap().volume)
+    };
+    (volume(2.0).unwrap(), volume(0.0), work)
+}
+
+/// A hole with a depth looks for material and air either side of its bottom, to know whether it
+/// comes out there (#17873), in the bodies whose boxes hold those points only (#19946). It
+/// classified both points in every body of the design: 2 x 21 classifications with 20 boxes far
+/// away, which in a design of hundreds of imported parts cost minutes for each evaluation of its
+/// holes. A body touching the plate where the hole ends is still asked.
+#[test]
+fn a_hole_classifies_its_bottom_in_the_bodies_there_only() {
+    let through = 20_000.0 - std::f64::consts::PI * 1.5 * 1.5 * 2.0;
+    for others in [0, 20] {
+        let (plate, under, work) = plate_hole_among_bodies(others, false);
+        assert!((plate - through).abs() < 1e-6 * through, "{others} boxes: {plate}");
+        assert_eq!(under, None);
+        assert_eq!(work.hole_points, 2, "{others} boxes: {work:?}");
+    }
+    let (plate, under, work) = plate_hole_among_bodies(20, true);
+    assert!((plate - through).abs() < 1e-6 * through, "{plate}");
+    assert!((under.unwrap() - 50_000.0).abs() < 1e-6 * 50_000.0, "the slab is not drilled: {under:?}");
+    assert_eq!(work.hole_points, 4, "{work:?}");
 }
 
 /// A pattern of a hole builds its tools once when every copy is drilled the same way, and for
