@@ -339,6 +339,7 @@ mod sketch_text_handles;
 mod sketch_text_move;
 pub mod sketch_tools;
 mod sketch_transform_ui;
+pub(crate) mod small_window;
 pub mod smart_extrude;
 #[cfg(test)]
 mod smart_extrude_ui_tests;
@@ -4358,6 +4359,7 @@ impl SolveApp {
             self.home.open = false;
         }
         self.ui.layout.publish(ui.ctx());
+        small_window::update(self, ui.ctx());
         self.preferences.dialog_buttons.publish(ui.ctx());
         self.preferences.toast_place.publish(ui.ctx());
         scenario::clear_handles();
@@ -4423,6 +4425,7 @@ impl SolveApp {
         viewport::refresh_layout(self, ui.ctx());
         // Before the dialog: a click on the view's OK or Cancel is for this frame's dialog.
         view_confirm::show(self, ui.ctx());
+        small_window::show_buttons(self, ui.ctx());
         dialogs::show(self, ui.ctx());
         issue_report::CadInput::block(self, ui, report_input);
         params_dialog::show(self, ui.ctx());

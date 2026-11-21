@@ -1202,7 +1202,9 @@ mod tests {
 
     #[test]
     fn configuration_component_and_face_pickers_start_fresh_and_clear_inherited() {
-        for (component, width) in [(true, 1400), (false, 900)] {
+        // 1000 wide: the view is narrower than the table's card (in a window under 960 the card
+        // lies along the view's bottom instead).
+        for (component, width) in [(true, 1400), (false, 1000)] {
             let mut h = crate::scenario::Harness::new();
             h.call("ui.resize", json!({"width":width,"height":720}));
             if component {
@@ -1291,7 +1293,9 @@ mod tests {
 
     #[test]
     fn configuration_table_actions_stay_on_one_line_at_normal_and_narrow_widths() {
-        for width in [1400, 900] {
+        // 1000 wide: the view is narrower than the table's card (in a window under 960 the card
+        // lies along the view's bottom instead).
+        for width in [1400, 1000] {
             let mut harness = crate::scenario::Harness::new();
             harness.call("ui.resize", json!({"width": width, "height": 720}));
             harness

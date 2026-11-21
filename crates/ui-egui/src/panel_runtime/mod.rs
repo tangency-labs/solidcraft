@@ -27,8 +27,8 @@ pub use native::NativeMonitor;
 pub use preferences::*;
 pub(crate) use preferences::{PanelLayoutSnapshot, panel_layout_matches, panel_layout_snapshot};
 pub(crate) use production::{
-    PanelVisibilitySnapshot, apply_placement_command, place_assistant, refresh_production, register_content_focus, report_content_composer_height,
-    report_content_extent, shared_content_composer_height, shared_content_measurement,
+    PanelVisibilitySnapshot, SizedPanel, apply_placement_command, bottom_band_height, place_assistant, refresh_production, register_content_focus,
+    report_content_composer_height, report_content_extent, shared_content_composer_height, shared_content_measurement, sized_panels,
 };
 pub use runtime::*;
 pub use specimen::*;

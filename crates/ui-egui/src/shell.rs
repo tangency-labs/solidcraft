@@ -18,6 +18,8 @@ pub(crate) struct State {
     pub content: Option<Rect>,
     /// The status bar along the window's bottom edge, while it is shown (#7243).
     pub status_bar: Option<Rect>,
+    /// What the window's size takes from the main window's parts.
+    pub small_window: crate::small_window::Fit,
 }
 
 /// Register the actual card, so fitting and pointer shielding use the same rectangle.
@@ -103,6 +105,7 @@ fn occluding_rects(app: &SolveApp, fitting: bool, input: bool, include_confirm: 
         rects.extend(crate::view_confirm::rect(app));
     }
     rects.extend(app.shell.status_bar.filter(|_| crate::status_bar::shown(app)));
+    rects.extend(app.shell.small_window.buttons);
     rects.retain(|r| r.is_finite() && r.is_positive());
     rects
 }

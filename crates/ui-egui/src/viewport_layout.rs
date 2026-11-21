@@ -102,18 +102,8 @@ fn free_rect_search(view: Rect, obstacles: &[Rect]) -> Rect {
 }
 
 impl Layout {
-    /// Place independent controls within the whole contour. No placement step
-    /// changes camera state or reduces the rendering/picking domain.
-    pub fn host(
-        viewport: Rect,
-        usable: &crate::panel_runtime::HostUsableRegion,
-        style: crate::prefs::NavigatorStyle,
-        corner: egui::Vec2,
-        navigation: Rect,
-    ) -> Self {
-        Self::host_with_axis(viewport, usable, style, corner, navigation, true)
-    }
-
+    /// Place independent controls within the whole contour, the axis view only when `show_axis`.
+    /// No placement step changes camera state or reduces the rendering/picking domain.
     pub(crate) fn host_with_axis(
         viewport: Rect,
         usable: &crate::panel_runtime::HostUsableRegion,
