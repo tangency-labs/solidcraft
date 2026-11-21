@@ -510,7 +510,7 @@ fn defect(why: &'static str) -> SolidError {
 /// `value`, or the defect `why` ([`defect`]): a link or entity of the offset B-rep, or of
 /// the routine's own data, that is not there.
 #[track_caller]
-fn made<T>(value: Option<T>, why: &'static str) -> Result<T> {
+fn present<T>(value: Option<T>, why: &'static str) -> Result<T> {
     match value {
         Some(v) => Ok(v),
         None => Err(defect(why)),
