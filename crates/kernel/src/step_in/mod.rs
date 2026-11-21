@@ -1118,7 +1118,9 @@ impl Reader {
                             self.note(IssueKind::OpenBody, Some(item), 0, format!("{label}: imported as an open body (the shell is not closed)"));
                         }
                     }
-                    if !self.once.contains(&item) {
+                    // A solid one walk maps at several placements is planned more than once although
+                    // its representation is walked once: keep it oriented for its later instances too.
+                    if !self.once.contains(&item) || self.uses.get(&item).is_some_and(|n| *n > 1) {
                         self.oriented.entry(item).or_insert_with(|| part.clone());
                     }
                     let (closed, file_faces, face_origin) = (part.closed, part.file_faces, part.face_origin.clone());
