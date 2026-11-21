@@ -436,8 +436,11 @@ mod tests {
         assert_eq!(document, reopened);
         let mut parts = crate::render_resources::ContainerParts::default();
         parts.hdr.insert(id, document.render.resources.required(&id).unwrap().bytes().to_vec());
-        let from_part = crate::render_resources::with_container_parts(parts, || Document::from_json(&saved.to_string())).unwrap();
-        assert_eq!(document, from_part);
+        // Every decode in the read gets the part: a newer file is checked a section at a time first.
+        let (from_part, again) = crate::render_resources::with_container_parts(parts, || {
+            (Document::from_json(&saved.to_string()), Document::from_json(&saved.to_string()))
+        });
+        assert_eq!((document.clone(), document.clone()), (from_part.unwrap(), again.unwrap()));
         assert_eq!(reopened.render.resources.len(), 1);
         let legacy: RenderSettings = serde_json::from_str(r#"{"setups":{"Old":{}}}"#).unwrap();
         assert!(legacy.resources.is_empty());

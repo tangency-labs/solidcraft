@@ -2553,14 +2553,20 @@ fn extent2d(u0: f64, v0: f64, u1: f64, v1: f64) -> Result<Extent2d> {
 /// A body from the flat arrays the C API imports (`BrepFromFlat`): `Validate`,
 /// `FlatToBrepData`, then `MakeTopologyFromData` with the B-rep's tolerance as it is ([`own_tolerances`]) and no UV
 /// trims or analytic conversion made; it heals unless `SOURCE` says SMLib wrote the arrays.
+#[cfg(test)]
 pub(crate) fn from_arrays(a: &Arrays) -> Result<Body> {
-    let f = In(a);
-    let s = validate(&f).ok_or(Error::Record(crate::import::Unsupported::Invalid("flat arrays")))?;
-    let b = run("BrepFromFlat", |k| Ok(brep_from_flat(k, &f, &s)))??;
-    Ok(Body::from_kernel(b))
+    from_arrays_with_shell_order(a, false).map(|(body, _)| body)
 }
 
-fn brep_from_flat(k: &mut Kernel, f: &In<'_>, s: &Shape) -> Result<Brep> {
+/// Reuse an enclosing shell order only for trusted arrays exported from a checked body.
+pub(crate) fn from_arrays_with_shell_order(a: &Arrays, shell_order_proven: bool) -> Result<(Body, bool)> {
+    let f = In(a);
+    let s = validate(&f).ok_or(Error::Record(crate::import::Unsupported::Invalid("flat arrays")))?;
+    let (b, proven) = run("BrepFromFlat", |k| Ok(brep_from_flat(k, &f, &s, shell_order_proven)))??;
+    Ok((Body::from_kernel(b), proven))
+}
+
+fn brep_from_flat(k: &mut Kernel, f: &In<'_>, s: &Shape, shell_order_proven: bool) -> Result<(Brep, bool)> {
     let mut data = flat_to_brep_data(k, f, s)?;
     // no heal for B-reps SMLib wrote
     let trusted = f.i(SOURCE).first() == Some(&1);
@@ -2579,8 +2585,10 @@ fn brep_from_flat(k: &mut Kernel, f: &In<'_>, s: &Shape) -> Result<Brep> {
         healer_enabled: true,
     };
     make_topology_from_data(k, &mut b, &mut data, &mut env, options).map_err(sc("SmBrep::MakeTopologyFromData"))?;
-    put_enclosing_shells_first(k, &mut b)?;
-    Ok(b)
+    // Trusted data keeps its region shell lists verbatim (build_regions appends them in
+    // order). Other data can go through the healer before the order is checked.
+    let proven = (trusted && shell_order_proven) || put_enclosing_shells_first(k, &mut b)?;
+    Ok((b, proven))
 }
 
 /// The most `SmShell::IsInnerShellOf` calls one conversion makes; a body that would need more
@@ -2597,10 +2605,11 @@ const MAX_CONTAINMENT_TESTS: usize = 1 << 16;
 /// `== TRUE`, and a region where no candidate is shown to enclose the others keeps its order.
 /// solidcore errors the C++ has no counterpart for (a call without a port, a dangling id) refuse
 /// the conversion, as does a body needing more than [`MAX_CONTAINMENT_TESTS`] containment tests.
-fn put_enclosing_shells_first(k: &mut Kernel, b: &mut Brep) -> Result<()> {
+fn put_enclosing_shells_first(k: &mut Kernel, b: &mut Brep) -> Result<bool> {
     use solidcore::query::face::p1::calculate_shell_bounding_box;
     let infinite = b.infinite_region();
     let mut tests = 0usize;
+    let mut proven = true;
     for r in bl::regions(b, None).map_err(sc("GetRegions"))? {
         if Some(r) == infinite {
             continue;
@@ -2627,6 +2636,7 @@ fn put_enclosing_shells_first(k: &mut Kernel, b: &mut Brep) -> Result<()> {
         }
         // stable: equal boxes keep the arrays' order
         candidates.sort_by(|a, c| c.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        let mut established = false;
         for &(_, candidate) in &candidates {
             let mut encloses = true;
             for &s in &shells {
@@ -2647,10 +2657,12 @@ fn put_enclosing_shells_first(k: &mut Kernel, b: &mut Brep) -> Result<()> {
                 let list = &mut b.region_mut(r).map_err(sc("SmRegion::SetList"))?.shells;
                 if let Some(at) = list.iter().position(|&s| s == candidate) {
                     list.rotate_left(at);
+                    established = true;
                 }
                 break;
             }
         }
+        proven &= established;
     }
-    Ok(())
+    Ok(proven)
 }

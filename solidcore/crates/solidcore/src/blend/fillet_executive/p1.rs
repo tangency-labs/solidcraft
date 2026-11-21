@@ -819,6 +819,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             self_intersection_handler: None,
             mark_corner_patches: false,
             cliff_overflow: false,
+            continued_cliffs: BTreeMap::new(),
             open_ends: Vec::new(),
             overflow_first: false,
             classify_only: false,
