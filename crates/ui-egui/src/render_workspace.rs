@@ -3796,6 +3796,8 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
             },
             hatch: Default::default(),
             moving: None,
+            motions: Default::default(),
+            ground: None,
         };
         match (feedback, app.viewport.scene_slot()) {
             (true, tile) => {
