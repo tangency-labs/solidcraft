@@ -513,10 +513,14 @@ pub(crate) mod witness {
     use super::{p2, v3};
     use crate::golden::KnownFailing;
 
-    /// The issues a refuted optimum is listed under: wrong maxima (also along a
-    /// direction), and wrong nearest points.
+    /// The issue a refuted maximise is listed under. The kernel's
+    /// `Surface::global_point_solve` sends a maximise to the older solver
+    /// (`global_point_solve_0`), so these answers come from a path no kernel caller takes
+    /// for that operation.
     pub(crate) const MAXIMUM_ISSUE: &str = "tangency-labs/solidcraft#13684";
-    pub(crate) const MINIMUM_ISSUE: &str = "tangency-labs/solidcraft#17773";
+    /// The issue a refuted minimise or directed maximise is listed under: the router sends
+    /// these operations to this solver, so the kernel's callers reach these answers.
+    pub(crate) const REACHED_ISSUE: &str = "tangency-labs/solidcraft#20483";
 
     /// Points per side of the global grid, less one.
     const GRID: u32 = 200;
@@ -572,6 +576,15 @@ pub(crate) mod witness {
         /// Whether the witness beats the reported optimum by more than the tolerance.
         pub(crate) fn refuted(&self) -> bool {
             self.witness.0 > self.reported.0 + self.tol
+        }
+
+        /// The issue the claim is listed under when it is refuted.
+        pub(crate) fn issue(&self) -> &'static str {
+            if self.op == SolverOperation::Maximize {
+                MAXIMUM_ISSUE
+            } else {
+                REACHED_ISSUE
+            }
         }
     }
 
@@ -646,13 +659,14 @@ pub(crate) mod witness {
         }
     }
 
-    /// Whether a known-failing reason lists its case under one of the two issues.
-    fn listed(why: &str) -> bool {
-        why.starts_with(MAXIMUM_ISSUE) || why.starts_with(MINIMUM_ISSUE)
+    /// Whether a known-failing reason lists its case under `issue`.
+    fn listed(why: &str, issue: &str) -> bool {
+        why.strip_prefix(issue).is_some_and(|rest| rest.starts_with(':'))
     }
 
-    /// Every refuted claim must be listed known failing under one of the two issues, and
-    /// every case listed under either must be a refuted claim (so a fix shows).
+    /// Every refuted claim must be listed known failing under its class's issue
+    /// ([`Claim::issue`]), and every case listed under either issue must be a refuted
+    /// claim (so a fix shows). Prints the claims and refutations per operation.
     pub(crate) fn check(unit: &str, claims: &[Claim], known: &KnownFailing) {
         let mut unexplained = Vec::new();
         for c in claims.iter().filter(|c| c.refuted()) {
@@ -670,13 +684,13 @@ pub(crate) mod witness {
                 c.witness.0 - c.reported.0,
                 c.tol
             );
-            if !known.get(&c.name).is_some_and(|why| listed(why)) {
-                unexplained.push(c.name.clone());
+            if !known.get(&c.name).is_some_and(|why| listed(why, c.issue())) {
+                unexplained.push(format!("{} ({})", c.name, c.issue()));
             }
         }
         let stale: Vec<&String> = known
             .iter()
-            .filter(|(_, why)| listed(why))
+            .filter(|(_, why)| listed(why, MAXIMUM_ISSUE) || listed(why, REACHED_ISSUE))
             .map(|(name, _)| name)
             .filter(|name| !claims.iter().any(|c| &c.name == *name && c.refuted()))
             .collect();
@@ -685,6 +699,18 @@ pub(crate) mod witness {
             claims.len(),
             claims.iter().filter(|c| c.refuted()).count()
         );
+        for op in [
+            SolverOperation::Minimize,
+            SolverOperation::Maximize,
+            SolverOperation::Signed3dDirectedMaximize,
+        ] {
+            let of_op = claims.iter().filter(|c| c.op == op);
+            eprintln!(
+                "{unit}: {op:?}: {} claimed, {} refuted",
+                of_op.clone().count(),
+                of_op.filter(|c| c.refuted()).count()
+            );
+        }
         assert!(
             unexplained.is_empty(),
             "optima refuted but not listed known failing: {unexplained:?}"
@@ -714,10 +740,15 @@ mod review_geometry_tests {
     /// a single one. Local solves and single steps are not challenged here: what a local
     /// solve's answer promises for each termination reason is not settled.
     ///
+    /// A successful solve with no solution claims nothing and is counted, not challenged.
+    /// Every global solve that succeeds records whether the surface's out-of-bounds
+    /// setting was restored; that must hold for each one, refuted or not (a refuted case
+    /// has no golden line to pin it).
+    ///
     /// A witness better by more than the case's `tol` (the solve's distance tolerance)
     /// refutes the solve, and the case must be listed known failing under
-    /// [`witness::MAXIMUM_ISSUE`] or [`witness::MINIMUM_ISSUE`]; a case listed under
-    /// either must still be refuted.
+    /// [`witness::MAXIMUM_ISSUE`] (maximise) or [`witness::REACHED_ISSUE`] (minimise,
+    /// directed maximise); a case listed under either must still be refuted.
     #[test]
     fn review_every_claimed_optimum_survives_its_witnesses() {
         let k = Kernel::default();
@@ -728,6 +759,7 @@ mod review_geometry_tests {
             seeds: 16,
         };
         let mut claims = Vec::new();
+        let mut empty = std::collections::BTreeMap::<String, usize>::new();
         for case in Runner.cases(&context).unwrap() {
             let name = case.name.as_str();
             let input: Inputs = case.parse().unwrap();
@@ -744,7 +776,10 @@ mod review_geometry_tests {
             }
             let values = &output.values["out"];
             let n = values[0] as usize;
+            // (the record's last value: the out-of-bounds setting was restored)
+            assert_eq!(values.get(1 + 7 * n), Some(&1.0), "{name}: {values:?}");
             if n == 0 {
+                *empty.entry(format!("{op:?}")).or_insert(0) += 1;
                 continue;
             }
             let solutions: Vec<([f64; 2], f64)> = (0..n)
@@ -763,6 +798,7 @@ mod review_geometry_tests {
                 &solutions,
             ));
         }
+        eprintln!("{}: succeeded with no solution, by operation: {empty:?}", Runner.id());
         witness::check(Runner.id(), &claims, &known);
     }
 

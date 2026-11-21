@@ -1037,8 +1037,10 @@ mod review_geometry_tests {
     /// the unit's other operations are the solver's internals (guesses, refinements, seam
     /// partners, single steps and their tests), which claim no optimum. A witness better
     /// by more than the case's distance tolerance refutes the solve, and the case must be
-    /// listed known failing under [`witness::MAXIMUM_ISSUE`] or [`witness::MINIMUM_ISSUE`];
-    /// a case listed there must still be refuted.
+    /// listed known failing under [`witness::MAXIMUM_ISSUE`] (maximise) or
+    /// [`witness::REACHED_ISSUE`] (minimise, directed maximise); a case listed under either
+    /// must still be refuted. This unit's record of a `Solve` does not hold the
+    /// out-of-bounds restoration flag the p3 runner records.
     #[test]
     fn review_every_claimed_optimum_survives_its_witnesses() {
         let k = Kernel::default();
