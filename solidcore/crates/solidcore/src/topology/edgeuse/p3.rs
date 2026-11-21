@@ -13,6 +13,9 @@
 //! | [`calc_sector_angle`]                             | `SmEdgeuse::CalcSectorAngle` (no unit owns it; ported for the fork's `IsKnifeEdge`) |
 //!
 //! Deviations:
+//! - **Proved trim raise (#18166).** A lazily built UV trim raises its edge by the trim's
+//!   proved distance ([`trim_raise_distance`]), not upstream's sampled one, unless the kernel's
+//!   [`Kernel::prove_lazy_trim_raise`] is off (a file's translation), when it is upstream's.
 //! - **Object model.** As [`super::p1`]: an edge use is a record in the [`Brep`]'s
 //!   arenas and the methods are free functions taking the B-rep and its id. Upstream
 //!   casts the `const` away to attach UV trim curves and to edit the edge, so these
@@ -1829,7 +1832,8 @@ pub(crate) fn trim_raise_distance(
     };
     let tol = b.edge(e)?.tolerance;
     let raises = tol < 2.0 * upstream;
-    if !raises {
+    // (a caller that turned the proof off takes upstream's raise: [`Kernel::prove_lazy_trim_raise`])
+    if !raises || !k.prove_lazy_trim_raise {
         return Ok(upstream);
     }
     // (the bounds are as tight as the tolerance the trim is fitted at asks: a tolerance the
@@ -3594,6 +3598,21 @@ mod tests {
         for (_, eu, trim) in &edges {
             let raise = trim_raise_distance(&k, &mut b, *eu, trim, 1.0).unwrap();
             assert!(raise > 0.0 && raise < 1.0, "lowered, got {raise:e}");
+        }
+    }
+
+    /// With [`Kernel::prove_lazy_trim_raise`] off (a file's translation), the same edges are
+    /// raised by upstream's distance, not lowered to a proved bound: no trim is proved.
+    #[test]
+    fn without_the_proof_a_sphere_s_edges_keep_upstream_s_raise() {
+        let (mut k, mut b, edges) = sphere_edges(Point3::new(0.0, 0.0, 0.0));
+        assert!(!edges.is_empty());
+        k.prove_lazy_trim_raise = false;
+        for (_, eu, trim) in &edges {
+            assert_eq!(
+                trim_raise_distance(&k, &mut b, *eu, trim, 1.0).unwrap(),
+                1.0
+            );
         }
     }
 

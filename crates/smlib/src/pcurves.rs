@@ -28,7 +28,9 @@ fn trims(face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
     if cover_gaps(&body, face, &bare, &mut arrays)? {
         body = import(&arrays)?;
     }
-    let (out, order) = body.to_native_ordered().map_err(|e| e.to_string())?;
+    // (a sheet made only to read its trims from: they raise their edges by upstream's sampled
+    // distance, not a proved one, which cost many times the file's translation)
+    let (out, order) = body.to_native_ordered_sampled_trims().map_err(|e| e.to_string())?;
     let [made] = out.faces.as_slice() else { return Err(format!("SMLib made {} faces of one", out.faces.len())) };
     let made_uses: Vec<&OrientedEdge> = made
         .loops
