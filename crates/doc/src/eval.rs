@@ -6359,6 +6359,9 @@ fn hole_on_surface_in(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String], fro
             continue;
         }
         // Already on the surface: the drill enters right here.
+        if !b.body.is_mesh() && matches!(b.body.classify_point(p), Ok(kernel::PointClass::OnBoundary)) {
+            return p;
+        }
         if let Some((t, _)) = m.raycast(p - dir * eps, dir)
             && t < eps * 4.0
         {
