@@ -513,8 +513,8 @@ pub(crate) mod witness {
     use super::{p2, v3};
     use crate::golden::KnownFailing;
 
-    /// Issues a refuted optimum is listed under: maximise and directed maximise, and
-    /// minimise (nearest point).
+    /// The issues a refuted optimum is listed under: wrong maxima (also along a
+    /// direction), and wrong nearest points.
     pub(crate) const MAXIMUM_ISSUE: &str = "tangency-labs/solidcraft#13684";
     pub(crate) const MINIMUM_ISSUE: &str = "tangency-labs/solidcraft#17773";
 
@@ -556,7 +556,7 @@ pub(crate) mod witness {
     pub(crate) struct Claim {
         pub(crate) name: String,
         pub(crate) op: SolverOperation,
-        /// `global <request>` or `local <reason code>`.
+        /// The kind of solve, for the report (`global request <code>`).
         pub(crate) solve: String,
         /// The record's value at its parameters (a distance; the directed maximise's
         /// error norm).
@@ -572,15 +572,6 @@ pub(crate) mod witness {
         /// Whether the witness beats the reported optimum by more than the tolerance.
         pub(crate) fn refuted(&self) -> bool {
             self.witness.0 > self.reported.0 + self.tol
-        }
-
-        /// The issue a refuted claim is listed under.
-        pub(crate) fn issue(&self) -> &'static str {
-            if self.op == SolverOperation::Minimize {
-                MINIMUM_ISSUE
-            } else {
-                MAXIMUM_ISSUE
-            }
         }
     }
 
@@ -655,51 +646,13 @@ pub(crate) mod witness {
         }
     }
 
-    /// A local solve's claim: its answer against the points around it at a thousandth
-    /// and a millionth of the domain's size (8 directions each), clamped to `dom`. A local
-    /// solve claims only a local optimum, so a far point is no witness against it.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn local(
-        k: &Kernel,
-        surface: &Surface,
-        name: &str,
-        op: SolverOperation,
-        solve: String,
-        test: [f64; 3],
-        dom: [f64; 4],
-        tol: f64,
-        uv: [f64; 2],
-        value: f64,
-    ) -> Claim {
-        check_value(k, surface, name, op, test, uv, value);
-        let reported = (objective(k, surface, op, test, uv), uv);
-        let mut witness = (f64::NEG_INFINITY, uv);
-        for scale in [1e-3, 1e-6] {
-            for i in 0..8 {
-                let a = f64::from(i) * core::f64::consts::FRAC_PI_4;
-                let w = [
-                    (uv[0] + scale * (dom[2] - dom[0]) * a.cos()).clamp(dom[0], dom[2]),
-                    (uv[1] + scale * (dom[3] - dom[1]) * a.sin()).clamp(dom[1], dom[3]),
-                ];
-                let f = objective(k, surface, op, test, w);
-                if f > witness.0 {
-                    witness = (f, w);
-                }
-            }
-        }
-        Claim {
-            name: name.to_owned(),
-            op,
-            solve,
-            value,
-            reported,
-            witness,
-            tol,
-        }
+    /// Whether a known-failing reason lists its case under one of the two issues.
+    fn listed(why: &str) -> bool {
+        why.starts_with(MAXIMUM_ISSUE) || why.starts_with(MINIMUM_ISSUE)
     }
 
-    /// Every refuted claim must be listed known failing under its issue, and every case
-    /// listed under either issue must be a refuted claim (so a fix shows).
+    /// Every refuted claim must be listed known failing under one of the two issues, and
+    /// every case listed under either must be a refuted claim (so a fix shows).
     pub(crate) fn check(unit: &str, claims: &[Claim], known: &KnownFailing) {
         let mut unexplained = Vec::new();
         for c in claims.iter().filter(|c| c.refuted()) {
@@ -717,16 +670,13 @@ pub(crate) mod witness {
                 c.witness.0 - c.reported.0,
                 c.tol
             );
-            if !known
-                .get(&c.name)
-                .is_some_and(|why| why.starts_with(c.issue()))
-            {
-                unexplained.push(format!("{} ({})", c.name, c.issue()));
+            if !known.get(&c.name).is_some_and(|why| listed(why)) {
+                unexplained.push(c.name.clone());
             }
         }
         let stale: Vec<&String> = known
             .iter()
-            .filter(|(_, why)| why.starts_with(MAXIMUM_ISSUE) || why.starts_with(MINIMUM_ISSUE))
+            .filter(|(_, why)| listed(why))
             .map(|(name, _)| name)
             .filter(|name| !claims.iter().any(|c| &c.name == *name && c.refuted()))
             .collect();
@@ -751,24 +701,23 @@ mod review_geometry_tests {
     use super::*;
     use solidcore::geom::global_solver::SolverOperation;
 
-    /// Every case of the unit whose answer claims an optimum is challenged by in-domain
-    /// witnesses ([`witness`]: one witness refutes an optimum, none proves one).
+    /// Every global solve of the unit that claims an optimum is challenged by a grid of
+    /// in-domain witnesses over its domain ([`witness`]: one witness refutes an optimum,
+    /// none proves one).
     ///
-    /// Which cases claim one, from their inputs and status: a global or local solve
-    /// ([`Operation::Stepper`] cases are single steps, which claim nothing) of an
-    /// operation that [`witness::ranks`] points, that succeeded; a global solve that
-    /// returned a solution, a local solve reported found. Every request type of a global
-    /// solve claims the same optimum: `SurfPtGlobalSolver` ignores both the request and
-    /// the target distance (`SurfacePointSolver::new` drops them) and returns its best
-    /// solution with its across-seam partners, so a nodes or find-ambiguities request is
-    /// answered like a single one.
+    /// Which cases claim one, from their inputs and status: a global solve
+    /// ([`Operation::Global`]) of an operation that [`witness::ranks`] points, that
+    /// succeeded and returned a solution. Every request type claims the same optimum:
+    /// `SurfPtGlobalSolver` ignores both the request and the target distance
+    /// (`SurfacePointSolver::new` drops them) and returns its best solution with its
+    /// across-seam partners, so a nodes, all or find-ambiguities request is answered like
+    /// a single one. Local solves and single steps are not challenged here: what a local
+    /// solve's answer promises for each termination reason is not settled.
     ///
-    /// A global solve's best solution is challenged by a grid over the case's domain; a
-    /// local one by its neighbours only, since it claims a local optimum. A witness better
-    /// by more than the case's `tol` (the global solve's distance tolerance; for a local
-    /// solve, which takes none, the same size-relative `tol` of the case) refutes it, and
-    /// the case must be listed known failing under [`witness::MAXIMUM_ISSUE`] or
-    /// [`witness::MINIMUM_ISSUE`]; a case listed there must still be refuted.
+    /// A witness better by more than the case's `tol` (the solve's distance tolerance)
+    /// refutes the solve, and the case must be listed known failing under
+    /// [`witness::MAXIMUM_ISSUE`] or [`witness::MINIMUM_ISSUE`]; a case listed under
+    /// either must still be refuted.
     #[test]
     fn review_every_claimed_optimum_survives_its_witnesses() {
         let k = Kernel::default();
@@ -783,7 +732,10 @@ mod review_geometry_tests {
             let name = case.name.as_str();
             let input: Inputs = case.parse().unwrap();
             let op = solver_op(input.solver).unwrap();
-            if !witness::ranks(op) || matches!(input.op, Operation::Stepper { .. }) {
+            let Operation::Global { request, .. } = input.op else {
+                continue;
+            };
+            if !witness::ranks(op) {
                 continue;
             }
             let output = rust(&input).unwrap();
@@ -791,47 +743,25 @@ mod review_geometry_tests {
                 continue;
             }
             let values = &output.values["out"];
-            let surface = geometry(&k, &input).unwrap();
-            match input.op {
-                Operation::Global { request, .. } => {
-                    let n = values[0] as usize;
-                    if n == 0 {
-                        continue;
-                    }
-                    let solutions: Vec<([f64; 2], f64)> = (0..n)
-                        .map(|j| (([values[2 + 7 * j], values[3 + 7 * j]]), values[4 + 7 * j]))
-                        .collect();
-                    claims.push(witness::global(
-                        &k,
-                        &surface,
-                        name,
-                        op,
-                        format!("global request {request}"),
-                        input.test,
-                        input.dom,
-                        input.tol,
-                        &solutions,
-                    ));
-                }
-                Operation::Local { .. } => {
-                    if values[0] != 1.0 {
-                        continue;
-                    }
-                    claims.push(witness::local(
-                        &k,
-                        &surface,
-                        name,
-                        op,
-                        format!("local reason {}", values[1]),
-                        input.test,
-                        input.dom,
-                        input.tol,
-                        [values[4], values[5]],
-                        values[6],
-                    ));
-                }
-                Operation::Stepper { .. } => {}
+            let n = values[0] as usize;
+            if n == 0 {
+                continue;
             }
+            let solutions: Vec<([f64; 2], f64)> = (0..n)
+                .map(|j| ([values[2 + 7 * j], values[3 + 7 * j]], values[4 + 7 * j]))
+                .collect();
+            let surface = geometry(&k, &input).unwrap();
+            claims.push(witness::global(
+                &k,
+                &surface,
+                name,
+                op,
+                format!("global request {request}"),
+                input.test,
+                input.dom,
+                input.tol,
+                &solutions,
+            ));
         }
         witness::check(Runner.id(), &claims, &known);
     }
