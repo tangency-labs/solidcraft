@@ -555,7 +555,7 @@ fn a_single_hole_picked_on_a_sketch_point_with_no_face_under_it_goes_to_multiple
     // centre on screen, so Single has no face place to take there. The click used to be ignored
     // without a word (#3634); now the hole switches to Multiple and takes the centre.
     let (mut h, centre) = block_and_circle_on(json!({"plane": "XY", "offset": 40}), [20.0, 15.0]);
-    assert!(centre.dist(Vec3::new(20.0, 15.0, 40.0)) < 1e-9, "{centre:?}");
+    assert!([centre.x - 20.0, centre.y - 15.0, centre.z - 40.0].iter().all(|d| d.abs() < 1e-9), "{centre:?}");
     h.step(&json!({"call": "ui.view", "params": {"view": "iso"}})).unwrap();
     h.settle();
     let click = screen(&mut h, centre);
@@ -591,6 +591,22 @@ fn a_single_hole_picked_on_a_sketch_point_with_no_face_under_it_goes_to_multiple
     let d = h.app.dialog.as_ref().unwrap();
     assert!(matches!(&d.kind, Kind::Hole { opts, .. } if !opts.multiple), "still Single: {:?}", d.kind);
     assert_eq!(face_places(&h).len(), 1, "the face place stays the only pick");
+
+    // An edited Single hole keeps its placement: with its face place cleared, the click on the
+    // centre changes nothing, as before.
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "OK closed the dialog: {:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let (single, _, at_points) = hole(&h);
+    assert!(!at_points, "the second hole is on the top face");
+    h.step(&json!({"call": "ui.editFeature", "params": {"feature": single}})).unwrap();
+    h.frames(4);
+    let d = h.app.dialog.as_mut().expect("the hole dialog");
+    d.inputs[0].items.clear();
+    d.active = 0;
+    h.step(&json!({"click": click})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(matches!(&d.kind, Kind::Hole { opts, .. } if !opts.multiple), "the edited hole stays Single: {:?}", d.kind);
+    assert!(d.inputs[0].items.is_empty(), "the centre is not taken: {:?}", d.inputs[0].items);
 }
 
 /// The first sketch's feature id and the id of its circle's centre point.

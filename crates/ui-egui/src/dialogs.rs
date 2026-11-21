@@ -3319,7 +3319,7 @@ fn set_hole_placement(d: &mut Dialog, multiple: bool) {
 /// (`sketch:id`): every selected sketch point, when the selection holds no face (a face keeps
 /// Single placement on it). Empty for any other dialog.
 fn hole_preselected_points(s: &Session, d: &Dialog, selection: &[Sel]) -> Vec<Sel> {
-    if !single_hole_takes_free_points(d) || d.editing.is_some() || selection.iter().any(|x| matches!(x, Sel::Face { .. })) {
+    if !single_hole_takes_free_points(d) || selection.iter().any(|x| matches!(x, Sel::Face { .. })) {
         return Vec::new();
     }
     selection
@@ -3327,6 +3327,8 @@ fn hole_preselected_points(s: &Session, d: &Dialog, selection: &[Sel]) -> Vec<Se
         .filter(|x| !is_wire_point(s, x))
         .filter_map(|x| match x {
             Sel::SketchPoint { id } if id.contains(':') => Some(x.clone()),
+            // A point of the open sketch is named without it (as `primitive_placement` reads it).
+            Sel::SketchPoint { id } => s.active_sketch.map(|sketch| Sel::SketchPoint { id: format!("{sketch}:{id}") }),
             Sel::ExternalSketchPoint { sketch, id } => Some(Sel::SketchPoint { id: format!("{sketch}:{id}") }),
             _ => None,
         })
@@ -3334,10 +3336,11 @@ fn hole_preselected_points(s: &Session, d: &Dialog, selection: &[Sel]) -> Vec<Se
 }
 
 /// Does a click on a sketch point with no face under the cursor start Multiple placement with
-/// that point (#3634)? Only while a Single hole has no place yet: Single places on faces, and
-/// such a point would otherwise be ignored without a word.
+/// that point (#3634)? Only while a new Single hole has no place yet: Single places on faces, and
+/// such a point would otherwise be ignored without a word. An edited hole keeps its placement.
 fn single_hole_takes_free_points(d: &Dialog) -> bool {
-    d.active == 0
+    d.editing.is_none()
+        && d.active == 0
         && matches!(&d.kind, Kind::Hole { opts, .. } if !opts.multiple)
         && !crate::hole_folder::active(d)
         && d.inputs.first().is_some_and(|i| i.items.is_empty())
