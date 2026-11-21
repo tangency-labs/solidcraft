@@ -1094,6 +1094,25 @@ impl Body {
         }
     }
 
+    /// The edge of `self` nearest `p`, or `None` for a mesh body or empty body.
+    pub fn edge_at(&self, p: Vec3) -> Option<usize> {
+        if self.is_mesh() || !p.is_finite() {
+            return None;
+        }
+        let chord = (self.size() * 1e-3).max(1e-4);
+        self.record
+            .edges
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| {
+                let pts = edge_points(e, chord).ok()?;
+                let d = pts.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::MAX, f64::min);
+                Some((d, i))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, i)| i)
+    }
+
     /// The face of `self` nearest `p` and its exact distance, or `None` for a mesh body or empty body.
     pub fn nearest_face(&self, p: Vec3) -> Option<(f64, usize)> {
         let form = self.ops_body()?;
