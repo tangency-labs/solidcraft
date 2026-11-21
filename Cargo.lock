@@ -6466,6 +6466,7 @@ dependencies = [
  "arboard",
  "egui",
  "egui-wgpu",
+ "flate2",
  "getrandom 0.2.17",
  "image",
  "log",
@@ -6539,6 +6540,7 @@ dependencies = [
 name = "solidcraft-ui-text"
 version = "0.45.0"
 dependencies = [
+ "flate2",
  "log",
  "serde_json",
  "sys-locale",
