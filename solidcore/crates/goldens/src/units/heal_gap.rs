@@ -1648,16 +1648,25 @@ mod tests {
     /// result the global solve beats (sample 26 a local minimum along the `v = 0` side
     /// 6.9e-6 farther than the nearest point when a result nearer than its guess was taken;
     /// samples 27 to 31 already on main, which took a result farther than its guess).
-    /// Samples 26, 30 and 31 are certified now that a moved local result is kept only when
-    /// the global solve finds nothing as near. Samples 27 to 29 keep main's feet, which are
-    /// not the nearest points (their enclosures are 2.4e-4 to 2.7e-4 wide); they are asserted
-    /// not certified, so a fix of #17773's remaining case shows here.
+    /// Samples 30 and 31 are certified now that a moved local result is kept only when the
+    /// global solve finds nothing as near. Samples 27 to 29 keep main's feet, which are not
+    /// the nearest points (their enclosures are 2.4e-4 to 2.7e-4 wide). The surface is a
+    /// curve-bounded surface, which answers as its basis B-spline (#20163); sample 26 was
+    /// certified only while it did not: its global solve then had no control net and took a
+    /// grid guess, which reached the nearest point (distance 8.0416e-4). It is now its
+    /// basis's drop: the control-polygon guess and the local solve stop at the local minimum
+    /// along the `v = 0` side the moved local foot also found, 6.9e-6 farther (distance
+    /// 8.1109e-4, enclosure [8.0414e-4, 8.1109e-4]), as on a plain B-spline surface of the
+    /// same geometry on main. The listed samples are asserted not certified, so a fix of
+    /// #17773 for B-spline surfaces shows here.
     #[test]
     fn wr56_gap_samples_drop_to_the_nearest_point() {
         use crate::certify::{evaluation_slack, nearest};
         const SAMPLE: usize = 16;
-        // (row, sample) not certified: main's feet, still kept (#17773)
-        const NOT_NEAREST: [(&str, usize); 3] = [("gen0398", 27), ("gen0398", 28), ("gen0398", 29)];
+        // (row, sample) not certified: main's feet, still kept, and the basis's drop of
+        // sample 26 (#17773)
+        const NOT_NEAREST: [(&str, usize); 4] =
+            [("gen0398", 26), ("gen0398", 27), ("gen0398", 28), ("gen0398", 29)];
         let mut failures = Vec::new();
         for name in ["gen0013", "gen0056", "gen0178", "gen0398"] {
             let case = crate::case::regression_case(&Runner, name);

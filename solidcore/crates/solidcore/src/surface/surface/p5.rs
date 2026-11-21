@@ -2664,6 +2664,43 @@ mod tests {
         Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0)))
     }
 
+    /// The `SmSurface` body's singular branch of `CreateIsoParametricCurve`: the iso line
+    /// through a singularity of a surface without an iso override of its own (a STEP
+    /// surface here; offset and volume surfaces take the same body, a curve-bounded
+    /// surface answers its basis's) is a point curve at the singular point, over the
+    /// other parameter's natural interval or its part inside the given domain.
+    #[test]
+    fn an_iso_line_through_a_singularity_of_a_step_surface_is_a_point_curve() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::surface::surface::StepSurface;
+        // every point of the `v = 0` side is the apex: singular along `v = 0`
+        let apex = CPoint::new(0.0, 0.0, 0.0, NOW);
+        let pw = vec![
+            vec![apex, CPoint::new(1.0, -1.0, 0.0, NOW)],
+            vec![apex, CPoint::new(1.0, 0.0, 0.2, NOW)],
+            vec![apex, CPoint::new(1.0, 1.0, 0.0, NOW)],
+        ];
+        let u = [0.0, 0.0, 0.5, 1.0, 1.0];
+        let v = [0.0, 0.0, 1.0, 1.0];
+        let basis = BSplineSurface::from_data(2, 1, 1, 1, 4, 3, &pw, &u, &v).unwrap();
+        let s = Surface::from(StepSurface::new(Surface::from(basis), true).unwrap());
+        let k = Kernel::default();
+        let domain = Extent2d::from_bounds(0.2, 0.1, 0.9, 0.7);
+        for (dom, ivl) in [(None, (0.0, 1.0)), (Some(&domain), (0.2, 0.9))] {
+            let iso = s
+                .create_iso_parametric_curve(&k, SurfParamType::V, 0.0, 1e-4, dom, false)
+                .unwrap();
+            assert_eq!(iso.max_gap_3d, 0.0);
+            let n = iso.curve.natural_interval();
+            assert_eq!((n.min(), n.max()), ivl);
+            for t in [n.min(), 0.5 * (n.min() + n.max()), n.max()] {
+                let p = iso.curve.evaluate_point(&k, t).unwrap();
+                assert!(p.distance(Point3::ZERO) < 1e-12, "{p:?}");
+            }
+        }
+    }
+
     #[test]
     fn plane_has_no_singularity() {
         let s = xy_plane();
