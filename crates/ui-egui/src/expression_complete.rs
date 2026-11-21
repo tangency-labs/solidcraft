@@ -220,6 +220,12 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
     popup.frame = ctx.cumulative_frame_nr();
     popup.count = list.len();
     popup.selected = popup.selected.min(list.len().saturating_sub(1));
+    // A complete unit must not turn into a function on Enter: `2 * m` is two metres, not
+    // `min(` (#8862). A parameter that extends the unit (`2 * mm` → `mm_wall`) still completes,
+    // and an arrow key still chooses the function.
+    if unit_token(&ctx, &popup.word) && !popup.keyed && list.first().is_some_and(|s| s.kind == "function") {
+        popup.armed = false;
+    }
     if list.is_empty() || popup.dismissed {
         // Nothing drawn: a press where the rows were is not on one.
         popup.rows.clear();
@@ -622,6 +628,25 @@ mod tests {
         assert_eq!(e.popup(), Some((1, true)));
         e.key(Key::Enter);
         assert_eq!(e.text, "2 * mm_wall");
+    }
+
+    /// A complete unit whose longer names are only functions stays what was typed: `2 * m` is
+    /// two metres, not `min(`. Down then Enter still inserts the function (#8862).
+    #[test]
+    fn a_unit_after_an_operator_does_not_become_a_function() {
+        let mut e = Editor::new("2 * m");
+        let (count, armed) = e.popup().expect("min( is offered");
+        assert!(!armed && count >= 2, "{count} suggestions, armed {armed}");
+        e.key(Key::Enter);
+        assert_eq!(e.text, "2 * m");
+        assert!(!e.accepted && e.leaked.contains(&Key::Enter));
+
+        let mut e = Editor::new("2 * m");
+        e.key(Key::ArrowDown);
+        assert_eq!(e.popup().map(|(_, armed)| armed), Some(true));
+        e.key(Key::Enter);
+        assert_eq!(e.text, "2 * min(");
+        assert!(e.accepted && e.leaked.is_empty());
     }
 
     /// A unit after a name or constant multiplies it, as after a number: `pi mm` is π mm and
