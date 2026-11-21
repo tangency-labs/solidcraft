@@ -13,7 +13,7 @@ use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb2, Ring};
 
 use super::CommandSpec;
-use super::features::{add_feature, check_expr, feature_sketch, profiles, sketch_id};
+use super::features::{add_feature, check_expr, default_extrude_profiles, feature_sketch, profiles, sketch_id};
 use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list, vec3};
 use crate::schema::features::FeatureResult;
 use crate::schema::sheet::{
@@ -50,7 +50,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&FLANGE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-        "base: sketch + profiles? (rule?, flip?) | contour: sketch + curves (open chain of lines and tangent arcs) + distance (rule?, flip?, reverse?) | \
+        "base: sketch + profiles? (omitted: nested outlines keep holes; rule?, flip?) | contour: sketch + curves (open chain of lines and tangent arcs) + distance (rule?, flip?, reverse?) | \
          edge: edges: [[x,y,z] on top/bottom edges, or {point: [x,y,z], angle?, height?, segments?} for an edge with its own angle and height, \
          or split into 1…64 segments [{from, to, angle?, height?, flip?}] that tile the stretch the sheet still has there (from, to are \
          fractions 0…1 of it, first from 0, last to 1; consecutive segments that match make one bend)] + \
@@ -465,11 +465,8 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
         FlangeType::Base => {
             let sketch = feature_sketch(s, p, cmd)?;
             let rule = rule_param(s, p, cmd)?;
-            add_feature(
-                s,
-                p,
-                FeatureKind::SheetBase { sketch: SketchId(sketch), profiles: profiles(p, cmd)?, rule, flip: bool_(p, "flip").unwrap_or(false) },
-            )
+            let profiles = if p.get("profiles").is_none() { default_extrude_profiles(s, sketch) } else { profiles(p, cmd)? };
+            add_feature(s, p, FeatureKind::SheetBase { sketch: SketchId(sketch), profiles, rule, flip: bool_(p, "flip").unwrap_or(false) })
         }
         FlangeType::Contour => {
             let sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
