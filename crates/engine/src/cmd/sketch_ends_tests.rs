@@ -84,11 +84,8 @@ fn an_extrude_refused_for_a_gap_says_where_the_gap_is() {
     run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0], [10, 12], [0, 0.0001]], "infer": false}));
     run(&mut s, "sketch.finish", json!({}));
     let e = s.execute("solid.extrude", &json!({"sketch": "Outline", "distance": 1})).unwrap_err().to_string();
-    assert!(
-        e.contains("Outline has no closed profiles: 2 ends of its curves touch no other curve, at (0, 0.0001) and (0, 0) in the sketch")
-            || e.contains("Outline has no closed profiles: 2 ends of its curves touch no other curve, at (0, 0) and (0, 0.0001) in the sketch"),
-        "{e}"
-    );
+    // (the sketch's report lists open ends in the order of their curves)
+    assert!(e.contains("Outline has no closed profiles: 2 ends of its curves touch no other curve, at (0, 0) and (0, 0.0001) in the sketch"), "{e}");
     assert!(e.contains("sketch.constraint.coincident"), "{e}");
 }
 
@@ -103,11 +100,11 @@ fn the_refusal_names_four_open_ends_and_counts_the_rest() {
     run(&mut s, "sketch.line", json!({"points": [[50, 40], [50.2, 40]], "infer": false}));
     run(&mut s, "sketch.finish", json!({}));
     let e = s.execute("solid.extrude", &json!({"sketch": "Outline", "distance": 1})).unwrap_err().to_string();
-    assert!(e.contains("6 ends of its curves touch no other curve, at ") && e.contains(" and 2 more in the sketch"), "{e}");
+    assert!(e.contains("6 ends of its curves touch no other curve, at (0, 0), (0, 1), (40, 40), (40.2, 40) and 2 more in the sketch"), "{e}");
 }
 
 /// A T (a line ending against another one's middle) has three open ends and no profile: the
-/// refusal names two of them, of different lines.
+/// refusal names all three (the end on the other line's middle touches it, so it is not open).
 #[test]
 fn a_t_is_refused_naming_its_open_ends() {
     let mut s = Session::default();
@@ -117,7 +114,7 @@ fn a_t_is_refused_naming_its_open_ends() {
     run(&mut s, "sketch.finish", json!({}));
     let e = s.execute("solid.extrude", &json!({"sketch": "T", "distance": 1})).unwrap_err().to_string();
     assert!(e.contains("T has no closed profiles: "), "{e}");
-    assert!(e.contains("(10, 8)") || e.contains("(0, 0)") || e.contains("(20, 0)"), "{e}");
+    assert!(e.contains("3 ends of its curves touch no other curve, at (0, 0), (20, 0) and (10, 8) in the sketch"), "{e}");
 }
 
 #[test]

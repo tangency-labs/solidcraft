@@ -979,9 +979,11 @@ pub(crate) fn no_closed_profiles(ss: &SolvedSketch) -> DocError {
     };
     let where_open = match (named.len(), count) {
         (0, _) => String::new(),
-        (_, 1) => format!(": an end of its curves touches no other curve, at {at} in the sketch (sketch.loose_ends lists the open ends)"),
+        (_, 1) => {
+            format!(": an end of its curves touches no other curve, at {at} in the sketch (after sketch.edit, sketch.loose_ends lists the open ends)")
+        }
         _ => format!(
-            ": {count} ends of its curves touch no other curve, at {at} in the sketch (sketch.loose_ends lists them; sketch.constraint.coincident joins two ends)"
+            ": {count} ends of its curves touch no other curve, at {at} in the sketch (after sketch.edit, sketch.loose_ends lists them and sketch.constraint.coincident joins two ends)"
         ),
     };
     DocError::Invalid(format!("{} has no closed profiles{where_open}", ss.name))
