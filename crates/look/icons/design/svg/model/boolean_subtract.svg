@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Boolean Subtract</title>
+  <defs>
+    <clipPath id="inside"><path d="M24.00 5.60L41.67 15.80L41.67 36.20L24.00 46.40L6.33 36.20L6.33 15.80Z"/></clipPath>
+    <mask id="outside"><path d="M0 0L64 0L64 64L0 64Z" fill="white"/><path d="M24.00 5.60L41.67 15.80L41.67 36.20L24.00 46.40L6.33 36.20L6.33 15.80Z" fill="black"/></mask>
+  </defs>
+  <path d="M24.00 5.60L41.67 15.80L24.00 26.00L6.33 15.80Z" fill="#b9ddf8" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M6.33 15.80L24.00 26.00L24.00 46.40L6.33 36.20Z" fill="#328bd3" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24.00 26.00L41.67 15.80L41.67 36.20L24.00 46.40Z" fill="#236ead" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <g clip-path="url(#inside)"><path d="M23.5 40.0A16.0 16.0 0 1 0 55.5 40.0A16.0 16.0 0 1 0 23.5 40.0Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/></g>
+  <g mask="url(#outside)"><path d="M23.5 40.0A16.0 16.0 0 1 0 55.5 40.0A16.0 16.0 0 1 0 23.5 40.0Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="3.2 4.2"/></g>
+</svg>

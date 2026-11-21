@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Center pole</title>
+  <path d="M32.00 38.00L32.00 60.00" fill="none" stroke="#ffffff" stroke-width="6.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32.00 38.00L32.00 60.00" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.95 18.00L38.93 33.00L38.93 49.00L12.95 34.00Z" fill="#b8c3cf"/>
+  <path d="M51.05 26.00L38.93 33.00L38.93 49.00L51.05 42.00Z" fill="#8e9faf"/>
+  <path d="M25.07 11.00L51.05 26.00L38.93 33.00L12.95 18.00Z" fill="#e2e8ef"/>
+  <path d="M25.07 11.00L51.05 26.00L51.05 42.00L38.93 49.00L12.95 34.00L12.95 18.00Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.95 18.00L38.93 33.00L51.05 26.00M38.93 33.00L38.93 49.00" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 22.00L32 38.00" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2.6 4"/>
+  <path d="M32.00 4.00L32.00 22.00" fill="none" stroke="#ffffff" stroke-width="6.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32.00 4.00L32.00 22.00" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="32" cy="22.00" r="5.2" fill="#ffffff"/>
+  <circle cx="32" cy="22.00" r="3.6" fill="#236ead"/>
+</svg>

@@ -236,7 +236,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.move", "Move/Copy", crate::checked!("solid.move", move_bodies))
         .at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch)
         .contract(&MOVE_CONTRACT).output(output_schema_for::<MoveResult>)
-        .params("bodies: [names]; translate?: [x,y,z] (length exprs or numbers, applied after rotation); axis?: [x,y,z] (default: world Z with origin, else the body's component's Z, world Z at the root); about?: {edge|face: [x,y,z], body?} (the edge or round face the turn is about, kept as a reference so the turn follows it when an earlier step moves the body; axis and origin give the turn's sense and where it is now); angle?: angle expr; origin?: [x,y,z] (length exprs or numbers in world coordinates; default: the body's component's origin, the world origin at the root); matrix?: rigid row-major 3x4 or 4x4, flat or rows (instead of translate/axis/angle/origin); tolerance?: matrix rotation tolerance (default 1e-9, at most 1e-3); copy?: bool (default false; true keeps originals and transforms copies); occurrences?: [occurrence paths, root first] (only with copy: copies each component independently and transforms the copies in world space; reply lists them in occurrences); name?, body_name?, body_names?"),
+        .params("bodies: [names]; translate?: [x,y,z] (length exprs or numbers, applied after rotation); axis?: [x,y,z] (default: world Z with origin, else the body's component's Z, world Z at the root); about?: {edge|face: [x,y,z], body?} (the edge or round face the turn is about, kept as a reference so the turn follows it when an earlier step moves the body; axis and origin give the turn's sense and where it is now); angle?: angle expr; origin?: [x,y,z] (length exprs or numbers in world coordinates; default: the body's component's origin, the world origin at the root); matrix?: rigid row-major 3x4 or 4x4, flat or rows (instead of translate/axis/angle/origin); tolerance?: matrix rotation tolerance (default 1e-9, at most 1e-3); copy?: bool (default false; true keeps originals and transforms copies); carry?: [construction names or ids] (also moved with the bodies, e.g. a Center Pole at fixed points); leave?: [construction names or ids] (built on the bodies but left where they are); occurrences?: [occurrence paths, root first] (only with copy: copies each component independently and transforms the copies in world space; reply lists them in occurrences); name?, body_name?, body_names?"),
 ];
 
 /// Where an extrude starts and which way is positive: a point inside the (first) profile or
@@ -2704,6 +2704,13 @@ fn copy_components(s: &mut Session, p: &Value, paths: Vec<Vec<u64>>) -> Result<V
 
 /// Move repeated placements in world coordinates, and any root bodies in the same step.
 fn move_placements(s: &mut Session, p: &Value, plan: crate::frames::PlacementMove) -> Result<Value> {
+    // Carried and left constructions are applied by the body Move; placements moved alone have
+    // none, so the lists would be dropped without a word.
+    if plan.bodies.is_empty()
+        && let Some(key) = ["carry", "leave"].into_iter().find(|k| p.get(*k).and_then(Value::as_array).is_some_and(|l| !l.is_empty()))
+    {
+        return Err(bad("solid.move", format!("`{key}` needs a body to move; it does not apply when only placements are moved")));
+    }
     let transform = world_move(s, p)?;
     let spec = super::find_command("occurrence.move").ok_or_else(|| EngineError::UnknownCommand("occurrence.move".into()))?;
     let mut moved = Vec::new();
@@ -2778,6 +2785,8 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
             angle: expr(p, "angle"),
             copy,
             copy_frames,
+            carry: construction_ids(s, cmd, p, "carry")?,
+            leave: construction_ids(s, cmd, p, "leave")?,
         },
     )?;
     if copy {
@@ -2785,6 +2794,34 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
         super::print_face::copies_keep_print_faces(s, &reply, &bodies);
     }
     Ok(reply)
+}
+
+/// The construction features listed under `key` (names or feature ids), by id; empty when absent.
+fn construction_ids(s: &Session, cmd: &str, p: &Value, key: &str) -> Result<Vec<solidcraft_doc::FeatureId>> {
+    let Some(list) = p.get(key) else { return Ok(Vec::new()) };
+    let Some(list) = list.as_array() else { return Err(bad(cmd, format!("`{key}` must list construction features"))) };
+    list.iter()
+        .map(|v| {
+            // A name is found as Document::resolve_feature_name finds it: an exact name before
+            // the feature id the text reads as, so an axis named "12" is not feature 12.
+            let f = match v {
+                Value::Number(n) => n.as_u64().and_then(|id| s.doc.feature(id)),
+                Value::String(name) => Some(s.doc.resolve_feature_name(name).map_err(|e| bad(cmd, format!("`{key}`: {e}")))?),
+                _ => None,
+            };
+            match f {
+                Some(f)
+                    if matches!(
+                        f.kind,
+                        FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. } | FeatureKind::ConstructionPlane { .. }
+                    ) =>
+                {
+                    Ok(solidcraft_doc::FeatureId(f.id))
+                }
+                _ => Err(bad(cmd, format!("`{key}`: {v} is not a construction feature"))),
+            }
+        })
+        .collect()
 }
 
 /// A copy keeps the look and the material of the body it came from (#6423): the copy is the same
