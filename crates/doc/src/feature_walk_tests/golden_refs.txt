@@ -258,4 +258,6 @@ mesh_import
 repair
   remap_bodies: body
 amalgam_tag
+  sketches: [1]
+  remap_refs: seat.sketch
   remap_bodies: add[0], new[0], remove[0]
