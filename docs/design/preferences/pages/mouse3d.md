@@ -37,7 +37,7 @@ A table with the columns "Axis", "Live input", "Speed" and a "Reset axes" button
 | Row | Control | Edits | Default | Hover | Figure | Notes |
 |---|---|---|---|---|---|---|
 | Button 1: Open Preferences; Button 2: View . Fit; Button 3: View . Top; Button 4: Hold Shift; Button 5: Not assigned | One dropdown per device button (240 wide) | `Prefs.space_mouse_buttons[device][button]` (`space_mouse::ButtonJob`) | per device | none | none | Sample jobs. The list length follows the device. `ButtonJob::Settings` ("Open Preferences") must open this page, not Navigation. |
-| Button 3, held: View . Bottom (one row under each button that was held or has a long job) | Dropdown (240 wide) with "As a short press" first | `Prefs.space_mouse_long_buttons[device][button]` | per device (measured long jobs through smed) | none | none | Only through a driver that reports long presses (smed). "As a short press" removes the long job: the button then does its short job when held. Not on the board. |
+| Button 3, held: View . Bottom (beside each button's dropdown, under the column headings "Press" and "Held") | Dropdown, half the control column, with "As a short press" first | `Prefs.space_mouse_long_buttons[device][button]` | per device (measured long jobs through smed) | "A held Shift, Ctrl or Alt stays held: it has no job of its own when held." on a disabled one | none | Through smed every button has one; read otherwise only a button with a saved long job. "As a short press" removes the long job: the button then does its short job when held. A button that holds Shift, Ctrl or Alt gets it disabled, unless a long job is saved (so it can be taken back). Not on the board. |
 | Rotation lock | Checkbox | the driver's rotation lock (smed's `set_lock`), not a preference | off | none | none | Only while the device is read through smed; the device's Lock key switches it too, and its LED shows it. Not on the board. |
 | Restore default buttons | Button | removes `space_mouse_buttons[device]` and `space_mouse_long_buttons[device]` | n/a | none | none | Shown once either map is saved for the device. |
 
@@ -53,6 +53,6 @@ A table with the columns "Axis", "Live input", "Speed" and a "Reset axes" button
 
 * `space_mouse_offer_never` and `space_mouse_offered` (the "offer to use the 3D mouse" memory) have no control.
 * `space_mouse_adopted` (which devices read through smed are done taking over their direct settings: they have a calibration or button jobs of their own) has no control.
-* The held rows and the Rotation lock checkbox are not on the board.
+* The Press and Held columns and the Rotation lock checkbox are not on the board.
 * The live bars and the dead zone are new drawing, not a setting.
 * The board omits the shipped per-row motion/source dropdowns. Keep them and their swap semantics; Reset axis assignment restores source assignments only.

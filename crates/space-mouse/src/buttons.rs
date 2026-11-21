@@ -39,7 +39,7 @@ pub enum Action {
 
 /// Whether a row is about a brief press or a press held past the device's long-press threshold.
 /// Only devices that tell the two apart (the SpaceMouse Enterprise, read through a driver that
-/// reports its long presses) have long rows.
+/// reports its long presses) have held pickers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Hold {
     Short,

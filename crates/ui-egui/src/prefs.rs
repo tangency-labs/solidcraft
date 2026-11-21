@@ -2844,10 +2844,13 @@ fn space_mouse_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut long_jobs = crate::space_mouse::button_long_jobs(app, &device);
     let mut numbers: std::collections::BTreeSet<u8> = jobs.keys().copied().collect();
     numbers.extend(app.space_mouse.seen.iter());
-    // A long row for each button that has a long job or was held long: only devices whose reader
-    // reports long presses have them.
+    // A reader that reports long presses (smed) gives every button a held job beside its short one;
+    // the others only where one is saved or a long press was seen.
+    let held_everywhere = device.starts_with("smed ");
     let long_numbers: std::collections::BTreeSet<u8> = long_jobs.keys().copied().chain(app.space_mouse.seen_long.iter()).collect();
     numbers.extend(long_numbers.iter().copied());
+    let held = |number: u8| held_everywhere || long_numbers.contains(&number);
+    let any_held = numbers.iter().any(|&number| held(number));
     let (mut changed, mut long_changed) = (false, false);
     let lock = app.space_mouse.lock;
     ui_kit::settings_form(ui, FORM_LABEL_WIDTH, |ui| {
@@ -2859,32 +2862,93 @@ fn space_mouse_buttons(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.space_mouse.lock_request = Some(on);
             }
         }
+        // The short and the held job of a button side by side, under "Press" and "Held". Preferences
+        // is never narrower than its 880 pt dialog (the window's minimum holds it), so both fit.
+        let t = Tokens::get();
+        let gap = t.space_8;
+        let row_width = ui.available_width();
+        let control_width = row_width - FORM_LABEL_WIDTH.min(row_width * 0.6) - t.space_14;
+        let half = ((control_width - gap) / 2.0).max(0.0);
+        let column = |ui: &mut egui::Ui, add: &mut dyn FnMut(&mut egui::Ui)| {
+            ui.allocate_ui_with_layout(egui::vec2(half, ui.available_height()), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.set_width(half);
+                add(ui);
+            });
+        };
+        if any_held {
+            let heading = |ui: &mut egui::Ui, key: &str| {
+                ui.add(egui::Label::new(egui::RichText::new(solidcraft_ui_text::tr(key)).size(t.font_small).color(t.form_dim)).truncate());
+            };
+            ui_kit::row(ui, "", |ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                column(ui, &mut |ui| heading(ui, "ui.3d_mouse_buttons_press"));
+                column(ui, &mut |ui| heading(ui, "ui.3d_mouse_buttons_held"));
+            });
+        }
         for number in numbers {
             let mut name = solidcraft_ui_text::format("ui.3d_mouse_button", &[("number", &number.to_string())]);
-            if app.space_mouse.buttons.contains(number) {
+            if app.space_mouse.buttons.contains(number) || app.space_mouse.long_buttons.contains(number) {
                 name.push_str("  ●");
             }
+            let long_name = solidcraft_ui_text::format("ui.3d_mouse_button_long", &[("number", &number.to_string())]);
             let current = jobs.get(&number).cloned();
-            if let Some(choice) = ui_kit::row(ui, &name, |ui| button_job_picker(app, ui, number, false, current.as_ref())) {
+            let current_long = long_jobs.get(&number).cloned();
+            // Shift, Ctrl and Alt are held for as long as their button is down: a held job would let
+            // go of them at the long-press threshold, so there is none to pick (one saved stays
+            // changeable, so it can be taken back).
+            let modifier = matches!(
+                current,
+                Some(crate::space_mouse::ButtonJob::Key(
+                    crate::space_mouse::ButtonKey::Shift | crate::space_mouse::ButtonKey::Ctrl | crate::space_mouse::ButtonKey::Alt
+                ))
+            );
+            let locked = modifier && current_long.is_none();
+            let long_picker = |app: &SolveApp, ui: &mut egui::Ui| {
+                ui_kit::named_control(ui, &long_name, |ui| {
+                    if locked {
+                        ui.add_enabled_ui(false, |ui| button_job_picker(app, ui, number, true, None))
+                            .response
+                            .backing_on_disabled_hover_text(solidcraft_ui_text::tr("ui.3d_mouse_buttons_held_modifier"));
+                        None
+                    } else {
+                        button_job_picker(app, ui, number, true, current_long.as_ref())
+                    }
+                })
+            };
+            let (choice, long_choice) = if any_held && held(number) {
+                ui_kit::row(ui, &name, |ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    let (mut short, mut long) = (None, None);
+                    column(ui, &mut |ui| short = button_job_picker(app, ui, number, false, current.as_ref()));
+                    column(ui, &mut |ui| long = long_picker(app, ui));
+                    (short, long)
+                })
+            } else {
+                let short = ui_kit::row(ui, &name, |ui| {
+                    if any_held {
+                        // No held job here: the press picker keeps its column's width.
+                        let mut short = None;
+                        column(ui, &mut |ui| short = button_job_picker(app, ui, number, false, current.as_ref()));
+                        short
+                    } else {
+                        button_job_picker(app, ui, number, false, current.as_ref())
+                    }
+                });
+                (short, None)
+            };
+            if let Some(choice) = choice {
                 changed = true;
                 match choice {
                     Some(job) => jobs.insert(number, job),
                     None => jobs.remove(&number),
                 };
             }
-            if long_numbers.contains(&number) {
-                let mut name = solidcraft_ui_text::format("ui.3d_mouse_button_long", &[("number", &number.to_string())]);
-                if app.space_mouse.long_buttons.contains(number) {
-                    name.push_str("  ●");
-                }
-                let current = long_jobs.get(&number).cloned();
-                if let Some(choice) = ui_kit::row(ui, &name, |ui| button_job_picker(app, ui, number, true, current.as_ref())) {
-                    long_changed = true;
-                    match choice {
-                        Some(job) => long_jobs.insert(number, job),
-                        None => long_jobs.remove(&number),
-                    };
-                }
+            if let Some(choice) = long_choice {
+                long_changed = true;
+                match choice {
+                    Some(job) => long_jobs.insert(number, job),
+                    None => long_jobs.remove(&number),
+                };
             }
         }
     });
@@ -5973,9 +6037,9 @@ mod tests {
         }
     }
 
-    /// The Buttons section of a device read through smed: a "held" row for each button with a long
-    /// job (the Enterprise's T, R and F), and the rotation lock smed keeps as a checkbox whose click
-    /// asks for the other state. A device without a lock shows no checkbox.
+    /// The Buttons section of a device read through smed: a held picker beside each button's press
+    /// picker (the Enterprise's T, R and F with a long job), and the rotation lock smed keeps as a
+    /// checkbox whose click asks for the other state. A device without a lock shows no checkbox.
     #[test]
     fn smed_buttons_show_held_rows_and_the_rotation_lock() {
         for lock in [Some(false), None] {
@@ -5991,11 +6055,8 @@ mod tests {
                 let row = format!("Button {number}, held");
                 assert!(h.widget(&row).is_some(), "{row} is drawn");
             }
-            assert!(h.widget("Button 23, held").is_none(), "no held row for a button without a long job");
-            // Until it is held long once: then its row says what a long press does.
-            h.app.space_mouse.seen_long.insert(23);
-            h.frames(3);
-            assert!(h.widget("Button 23, held").is_some(), "a held row for a button held long");
+            // Through smed every button has a held picker, one without a long job too.
+            assert!(h.widget("Button 23, held").is_some(), "a held picker for a button without a long job");
             if lock.is_none() {
                 assert!(h.widget("Rotation lock").is_none(), "no lock to show");
                 continue;
@@ -6003,12 +6064,20 @@ mod tests {
             h.step(&json!({"widget": "Rotation lock"})).expect("the checkbox");
             h.frames(2);
             assert_eq!(h.app.space_mouse.lock_request, Some(true), "the click asks smed to lock");
-            // A long job picked in its held row is saved as a long job, the short ones untouched.
+            // A long job picked in its held picker is saved as a long job, the short ones untouched.
             let device = "smed 256f:c633";
+            // The held pickers without a long job already read "As a short press" too, and opening
+            // the list scrolls the page; the list's entry is the one outside the pickers' column.
+            let column = h.widget("Bottom").expect("button 3's held job")[0];
             h.step(&json!({"widget": "Bottom"})).expect("button 3's held job");
             h.frames(3);
             // The list opens over the page, so its entry is clicked where it is drawn.
-            let [x, y] = h.widget("As a short press").expect("the no-long-job entry in the list");
+            let open = h.widgets("As a short press");
+            let [x, y] = open
+                .iter()
+                .copied()
+                .find(|&[x, _]| x != column)
+                .unwrap_or_else(|| panic!("the no-long-job entry in the list: pickers at x {column}, found {open:?}"));
             h.call("ui.click", json!({"x": x, "y": y}));
             h.frames(3);
             let long = h.app.preferences.space_mouse_long_buttons.get(device).cloned().unwrap_or_default();
@@ -6022,6 +6091,98 @@ mod tests {
             assert!(!h.app.preferences.space_mouse_buttons.contains_key(device), "short jobs reset");
             assert!(h.widget("Bottom").is_some(), "button 3 held shows its measured job again");
         }
+    }
+
+    /// The Buttons section on the 3D mouse page for `device`, in English, with `long` saved as its
+    /// long jobs when given.
+    fn space_mouse_buttons_page(device: &str, long: Option<&[(u8, crate::space_mouse::ButtonJob)]>) -> crate::scenario::Harness {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"language": "en"}));
+        h.app.space_mouse.device = Some(device.into());
+        if let Some(long) = long {
+            h.app.preferences.space_mouse_long_buttons.insert(device.into(), long.iter().cloned().collect());
+        }
+        h.call("ui.resize", json!({"width": 1600, "height": 4000}));
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
+        h.frames(10);
+        h
+    }
+
+    /// Whether the control named exactly `name` (a label: showing it) is drawn greyed, or `None` when
+    /// there is none.
+    fn space_mouse_control_disabled(h: &crate::scenario::Harness, name: &str) -> Option<bool> {
+        let tree = h.output.accesskit_update.as_ref()?;
+        let mut found =
+            tree.nodes.iter().filter(|(_, n)| n.label() == Some(name) || n.value() == Some(name)).map(|(_, n)| n.is_disabled()).peekable();
+        found.peek()?;
+        Some(found.any(|disabled| disabled))
+    }
+
+    /// A button that holds Shift, Ctrl or Alt keeps it held for as long as it is down, so its held
+    /// picker is greyed; once a long job is saved for it, the picker can be used to take it back.
+    #[test]
+    fn smed_held_picker_of_a_modifier_is_greyed_until_a_long_job_is_saved() {
+        use crate::space_mouse::ButtonJob;
+        // The Enterprise's Alt, Shift and Ctrl are buttons 24, 25 and 26; 23 is Esc.
+        let mut h = space_mouse_buttons_page("smed 256f:c633", None);
+        for number in [24, 25, 26] {
+            let name = format!("Button {number}, held");
+            assert_eq!(space_mouse_control_disabled(&h, &name), Some(true), "{name} is greyed");
+        }
+        assert_eq!(space_mouse_control_disabled(&h, "Button 23, held"), Some(false), "Esc's held picker can be used");
+        // Hovered, the greyed picker says why (the click first brings it into the page's view).
+        h.step(&json!({"widget": "Button 25, held"})).expect("Shift's held picker");
+        h.frames(3);
+        assert!(!h.app.preferences.space_mouse_long_buttons.contains_key("smed 256f:c633"), "the click picks nothing");
+        let [x, y] = h.widget("Button 25, held").expect("Shift's held picker");
+        h.call("ui.move", json!({"x": x, "y": y}));
+        h.frames(90);
+        let output = egui::FullOutput { shapes: h.shapes.clone(), ..Default::default() };
+        let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|t| t.galley.text()).collect();
+        let why = "A held Shift, Ctrl or Alt stays held: it has no job of its own when held.";
+        assert!(texts.contains(&why), "the greyed picker's tooltip: {texts:?}");
+        let h = space_mouse_buttons_page("smed 256f:c633", Some(&[(25, ButtonJob::View("top".into()))]));
+        assert_eq!(space_mouse_control_disabled(&h, "Button 25, held"), Some(false), "a saved long job on Shift can be changed");
+        assert_eq!(space_mouse_control_disabled(&h, "Button 24, held"), Some(true), "Alt without one stays greyed");
+    }
+
+    /// The Press and Held columns are there only where a button has a held picker: through smed for
+    /// every button, read otherwise only for one with a saved long job; without any, one column as
+    /// before.
+    #[test]
+    fn held_column_only_where_a_button_has_a_held_job() {
+        use crate::space_mouse::ButtonJob;
+        // By exact name: `widget` also finds a button whose name starts "Press ", the page's hint.
+        let heading = |h: &crate::scenario::Harness, name: &str| space_mouse_control_disabled(h, name).is_some();
+        let h = space_mouse_buttons_page("smed 256f:c633", None);
+        assert!(heading(&h, "Press") && heading(&h, "Held"), "smed: both column headings");
+        // The SpaceMouse Pro read directly reports no long presses.
+        let h = space_mouse_buttons_page("hid 046d:c62b", None);
+        assert!(h.widget("Button 1").is_some(), "the Pro's buttons are listed");
+        assert!(!heading(&h, "Held") && !heading(&h, "Press"), "no column headings without a held job");
+        assert!(h.widget("Button 1, held").is_none(), "no held picker without a held job");
+        let h = space_mouse_buttons_page("hid 046d:c62b", Some(&[(1, ButtonJob::View("top".into()))]));
+        assert!(heading(&h, "Press") && heading(&h, "Held"), "a saved long job brings the columns");
+        assert!(h.widget("Button 1, held").is_some(), "and its held picker");
+        assert!(h.widget("Button 2, held").is_none(), "only for the button that has one");
+    }
+
+    /// A button's row is marked while the button is down, held past the long-press threshold too,
+    /// since its held job shares the row.
+    #[test]
+    fn a_buttons_row_is_marked_while_it_is_down_or_held() {
+        use crate::space_mouse::ButtonSet;
+        let marked = |h: &crate::scenario::Harness, number: u8| space_mouse_control_disabled(h, &format!("Button {number}  ●")).is_some();
+        let mut h = space_mouse_buttons_page("smed 256f:c633", None);
+        assert!(!marked(&h, 23) && !marked(&h, 24), "no row marked while no button is down");
+        h.app.space_mouse.buttons = ButtonSet::of(23);
+        h.frames(2);
+        assert!(marked(&h, 23) && !marked(&h, 24), "the row of the button that is down");
+        h.app.space_mouse.buttons = ButtonSet::EMPTY;
+        h.app.space_mouse.long_buttons = ButtonSet::of(24);
+        h.frames(2);
+        assert!(marked(&h, 24) && !marked(&h, 23), "the row of the button held past the threshold");
     }
 
     /// The driver choice under Advanced: smed is offered where it runs and picked like the others, is
