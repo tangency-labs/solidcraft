@@ -76,7 +76,7 @@ const HELP: [&str; 7] = ["docs", "updates", "shortcuts", "messages", "report", "
 fn help_label<'a>(app: &'a SolveApp, item: &str) -> &'a str {
     match item {
         "docs" => app.tr_label("Documentation"),
-        "updates" => app.tr_by_id("update.check_for_updates"),
+        "updates" => solidcraft_ui_egui::tr!(app, "update.check_for_updates"),
         "shortcuts" => app.tr_label("Keyboard Shortcuts"),
         "messages" => app.tr_label("Messages\u{2026}"),
         "report" => app.tr_label("Report an Issue\u{2026}"),
@@ -159,39 +159,44 @@ fn submenu(id: &str, label: &str, children: Vec<Item>) -> Item {
 fn recent_items(app: &SolveApp, paths: &[String]) -> Vec<Item> {
     let mut items: Vec<Item> = paths.iter().map(|path| item(path, &FileAction::OpenRecent(path.clone()))).collect();
     items.push(Item::sep());
-    items.push(item(app.tr_by_id("ui.clear_recent"), &FileAction::ClearRecent));
+    items.push(item(solidcraft_ui_egui::tr!(app, "ui.clear_recent"), &FileAction::ClearRecent));
     items
 }
 
 fn menu_bar(app: &SolveApp, recent: &[String]) -> MenuBar {
     let more = |key: &str| format!("{}\u{2026}", app.tr_by_id(key));
-    let mut file = vec![item(app.tr_by_id("ui.new_design"), &FileAction::New)];
-    file.push(item(app.tr_by_id("ui.new_drawing"), &FileAction::NewDrawing));
-    file.extend([item(&more("ui.open"), &FileAction::Open), submenu(RECENT, app.tr_by_id("ui.open_recent"), recent_items(app, recent)), Item::sep()]);
+    let mut file = vec![item(solidcraft_ui_egui::tr!(app, "ui.new_design"), &FileAction::New)];
+    file.push(item(solidcraft_ui_egui::tr!(app, "ui.new_drawing"), &FileAction::NewDrawing));
+    file.extend([
+        item(&more("ui.open"), &FileAction::Open),
+        submenu(RECENT, solidcraft_ui_egui::tr!(app, "ui.open_recent"), recent_items(app, recent)),
+        Item::sep(),
+    ]);
     file.extend(INSERTS.iter().map(|(label, action)| item(app.tr_label(label), action)));
     file.extend([
         Item::sep(),
-        item(app.tr_by_id("ui.save"), &FileAction::Save),
+        item(solidcraft_ui_egui::tr!(app, "ui.save"), &FileAction::Save),
         item(&more("ui.save_as"), &FileAction::SaveAs),
         item(app.tr_label("Save As JSON\u{2026}"), &FileAction::SaveJson),
-        item(app.tr_by_id("cmd.file.verify"), &FileAction::VerifySignature),
+        item(solidcraft_ui_egui::tr!(app, "cmd.file.verify"), &FileAction::VerifySignature),
         Item::sep(),
     ]);
     file.extend(EXPORTS.iter().map(|(label, action)| item(app.tr_label(label), action)));
     file.extend([Item::sep(), item(app.tr_label("Design Properties"), &DESIGN_PROPERTIES)]);
-    let edit = vec![item(app.tr_by_id("ui.undo"), &FileAction::Undo), item(app.tr_by_id("ui.redo"), &FileAction::Redo)];
+    let edit =
+        vec![item(solidcraft_ui_egui::tr!(app, "ui.undo"), &FileAction::Undo), item(solidcraft_ui_egui::tr!(app, "ui.redo"), &FileAction::Redo)];
     let window = vec![item(app.tr_label("Agent Chat"), &FileAction::AgentChat)];
     let help = HELP.iter().map(|h| Item::action(HELP_ID, help_label(app, h), "").with(json!({ "item": h }))).collect();
     MenuBar {
         title: "SolidCraft".into(),
         version: env!("CARGO_PKG_VERSION").into(),
         app: vec![item(&more("ui.preferences"), &FileAction::Settings), item(&more("ui.keyboard_shortcuts"), &FileAction::Shortcuts)],
-        quit: item(&format!("{} SolidCraft", app.tr_by_id("ui.quit")), &FileAction::Quit),
+        quit: item(&format!("{} SolidCraft", solidcraft_ui_egui::tr!(app, "ui.quit")), &FileAction::Quit),
         menus: vec![
-            submenu("menu.file", app.tr_by_id("ui.file"), file),
+            submenu("menu.file", solidcraft_ui_egui::tr!(app, "ui.file"), file),
             submenu("menu.edit", app.tr_label("Edit"), edit),
             submenu(native_menu::WINDOW, "Window", window),
-            submenu("menu.help", app.tr_by_id("ui.help"), help),
+            submenu("menu.help", solidcraft_ui_egui::tr!(app, "ui.help"), help),
         ],
     }
 }

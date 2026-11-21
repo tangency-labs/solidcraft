@@ -841,7 +841,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             for (_, exts) in &plugins {
                 everything.extend(exts.iter().map(String::as_str).filter(|e| !io::formats::open_extensions(true).contains(e)));
             }
-            dialog = dialog.add_filter(solidcraft_ui_text::tr_by_id("file.open.drawing_filter"), &case_variants(&everything));
+            dialog = dialog.add_filter(solidcraft_ui_egui::tr!("file.open.drawing_filter"), &case_variants(&everything));
             for (label, exts) in io::formats::import_filters(true) {
                 dialog = dialog.add_filter(label, &case_variants(&exts));
             }
