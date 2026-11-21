@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 
+use serde_json::Value;
 use solidcraft_engine::plugin::images;
 
 pub(crate) use images::{KEY, referenced, valid_path};
@@ -118,27 +119,6 @@ pub(crate) fn load_swatches(dir: &Path, entries: &[solidcraft_engine::plugin::En
         let _ = swatches.set(BTreeMap::new());
     }
     swatches
-}
-
-/// The image paths a schema names: at its top, and on its properties' `oneOf` options.
-pub(crate) fn referenced(schema: &Value) -> Vec<String> {
-    let mut out: Vec<String> = schema.get(KEY).and_then(Value::as_str).map(str::to_owned).into_iter().collect();
-    for property in schema.get("properties").and_then(Value::as_object).into_iter().flat_map(|p| p.values()) {
-        for option in property.get("oneOf").and_then(Value::as_array).into_iter().flatten() {
-            out.extend(option.get(KEY).and_then(Value::as_str).map(str::to_owned));
-        }
-    }
-    out
-}
-
-/// Whether `rel` is a path this host reads: forward slashes, plain names (letters, digits, `.`,
-/// `_`, `-`), no `.` or `..`, ending in `.svg`, at most 128 characters.
-pub(crate) fn valid_path(rel: &str) -> bool {
-    (5..=128).contains(&rel.len())
-        && rel.ends_with(".svg")
-        && rel.split('/').all(|part| {
-            !part.is_empty() && part != "." && part != ".." && part.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
-        })
 }
 
 /// Read, check and add the image `rel` of the package at `dir`: the icon name it is drawn by.
