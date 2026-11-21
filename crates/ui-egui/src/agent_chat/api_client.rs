@@ -598,10 +598,13 @@ fn responses_reply(body: &Value) -> Result<Reply, String> {
         }
     };
     let items = body.get("output").and_then(Value::as_array).ok_or_else(invalid)?;
+    // After a cutoff, replay the reasoning before the last retained message. Trailing reasoning
+    // may belong to a tool call that was cut off.
+    let reasoning_end = if complete { items.len() } else { items.iter().rposition(|item| item["type"] == "message").unwrap_or(0) };
     let mut text = Vec::new();
     let mut calls: Vec<Call> = Vec::new();
     let mut kept = Vec::new();
-    for item in items {
+    for (index, item) in items.iter().enumerate() {
         match item.get("type").and_then(Value::as_str) {
             Some("message") => {
                 if let Some(parts) = item.get("content").and_then(Value::as_array) {
@@ -621,7 +624,7 @@ fn responses_reply(body: &Value) -> Result<Reply, String> {
                 }
                 kept.push(item.clone());
             }
-            Some("reasoning") if complete => kept.push(item.clone()),
+            Some("reasoning") if index < reasoning_end => kept.push(item.clone()),
             Some("function_call") if complete && calls.len() < 32 => {
                 let id = item.get("call_id").and_then(Value::as_str).filter(|id| !id.is_empty()).ok_or_else(invalid)?;
                 let name = item.get("name").and_then(Value::as_str).filter(|name| !name.is_empty()).ok_or_else(invalid)?;
@@ -3063,13 +3066,43 @@ mod tests {
         let reply = responses_reply(&json!({
             "status": "incomplete",
             "incomplete_details": {"reason": "max_output_tokens"},
-            "output": [{"type": "function_call", "call_id": "call_1", "name": "measure", "arguments": "{"}]
+            "output": [
+                {"type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "opaque"},
+                {"type": "function_call", "call_id": "call_1", "name": "measure", "arguments": "{"}
+            ]
         }));
         let reply = reply.unwrap();
         assert_eq!(reply.stop, "max_tokens");
         assert!(reply.calls.is_empty());
         assert_eq!(reply.assistant["responses_output"], json!([]));
         assert!(responses_reply(&json!({"status": "completed"})).is_err());
+    }
+
+    #[test]
+    fn incomplete_responses_replay_reasoning_before_retained_messages() {
+        let reasoning = |id| json!({"type": "reasoning", "id": id, "summary": [], "encrypted_content": "opaque"});
+        let message =
+            |status, text| json!({"type": "message", "role": "assistant", "status": status, "content": [{"type": "output_text", "text": text}]});
+        let first = message("completed", "Starting the measurement.");
+        let partial = message("incomplete", "The volume is");
+        let reply = responses_reply(&json!({
+            "status": "incomplete",
+            "incomplete_details": {"reason": "max_output_tokens"},
+            "output": [
+                reasoning("rs_1"),
+                first,
+                reasoning("rs_2"),
+                partial,
+                reasoning("rs_3"),
+                {"type": "function_call", "call_id": "call_1", "name": "measure", "arguments": "{"}
+            ]
+        }))
+        .unwrap();
+        assert_eq!(reply.stop, "max_tokens");
+        assert!(reply.calls.is_empty());
+        assert_eq!(reply.text.last(), Some(&(false, "The volume is".to_string())));
+        let next_input = responses_input("system", &[reply.assistant]);
+        assert_eq!(next_input[1..], [reasoning("rs_1"), first, reasoning("rs_2"), partial]);
     }
 
     #[test]
