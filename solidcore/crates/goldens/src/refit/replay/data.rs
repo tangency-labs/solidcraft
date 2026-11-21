@@ -21,7 +21,7 @@ pub(super) static DATA: &[Row] = &[
     ("topology.api_files", "write_bytes0094", 0x0521b11fdf5d68c5),
     ("topology.api_files", "write_bytes0106", 0xf845243caad93385),
     ("topology.api_files", "write_bytes0115", 0xf748257deeeb38dd),
-    ("topology.api_files", "write_bytes0153", 0x4ce566000f4dde46),
+    ("topology.api_files", "write_bytes0153", 0x2f2b463d8c884633),
     ("topology.api_files", "write_bytes0179", 0x9b838011294b67ab),
     ("topology.api_files", "write_bytes0180", 0xd7633fbc13239f57),
     (
@@ -999,12 +999,12 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0x8ea9901240cd8fee,
+        0x79640befc8538807,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0x667cbc909710ca65,
+        0x4b02077293d8103e,
     ),
     (
         "blend.fillet_executive_p3",
@@ -1014,12 +1014,12 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0xcac05f36949946db,
+        0x1295b489814557bb,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0x91725326f3cc2dc3,
+        0x61c95a6a9b40a870,
     ),
     (
         "blend.fillet_executive_p3",
