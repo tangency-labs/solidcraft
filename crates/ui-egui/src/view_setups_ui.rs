@@ -101,9 +101,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     let submit = ui.add_enabled_ui(!state.text.trim().is_empty(), |ui| {
                         ui_kit::button(ui, app.tr(if save { "ui.save" } else { "view_layout.rename" }), ui_kit::Button::Primary)
                     });
-                    if !state.text.trim().is_empty()
-                        && (submit.inner.clicked() || entered)
-                    {
+                    if !state.text.trim().is_empty() && (submit.inner.clicked() || entered) {
                         command = Some(match &state.editor {
                             Editor::Rename(name) => ("tab.layout.rename", json!({"name": name, "new_name": state.text})),
                             _ => ("tab.layout.save", json!({"name": state.text})),
