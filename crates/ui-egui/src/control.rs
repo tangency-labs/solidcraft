@@ -544,6 +544,9 @@ pub fn view_png(app: &SolveApp, w: u32, h: u32) -> Result<Vec<u8>, String> {
 }
 
 pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
+    // What a request does is an agent's action in usage statistics (`usage_stats`).
+    #[cfg(feature = "usage-stats")]
+    let _source = solidcraft_engine::usage::from(solidcraft_engine::usage::Source::Agent);
     crate::agent_chat::with_tool_request(app, req.chat_turn.as_ref(), |app| handle_request(app, ctx, req))
 }
 

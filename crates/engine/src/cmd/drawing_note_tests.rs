@@ -56,6 +56,28 @@ fn ends_at(reply: &Value, p: [f64; 3]) {
     assert!(point.iter().zip(p).all(|(a, b)| (a - b).abs() < 1e-9), "{reply}");
 }
 
+/// A note's text is centred on its place, so one placed near the paper's edge can run past it: its
+/// reply warns, naming where its text spans, and one that fits says nothing. A note on a view is held
+/// to the paper where its view puts it.
+#[test]
+fn a_note_whose_text_runs_off_the_paper_is_warned_about() {
+    let (mut s, _, view, _) = placed();
+    let off_paper =
+        |reply: &Value| reply["warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().unwrap_or("").contains("runs off the paper")));
+    let long = "ALL HOLES THROUGH. MATERIAL: AL 6061.";
+    let edge = run(&mut s, ADD, json!({"anchor": {"sheet": "Sheet 1"}, "at": [10, 40], "content": long}));
+    assert!(off_paper(&edge), "{edge}");
+    let note = edge["note"].as_str().unwrap().to_string();
+    assert!(off_paper(&run(&mut s, INSPECT, json!({"note": note}))), "inspect warns too");
+    let inside = run(&mut s, ADD, json!({"anchor": {"sheet": "Sheet 1"}, "at": [200, 40], "content": long}));
+    assert!(!off_paper(&inside), "{inside}");
+    // 200 mm left of a view at x = 200 is the paper's left edge.
+    let on_view = run(&mut s, ADD, json!({"anchor": {"view": ids::encode(view)}, "at": [-195, 0], "content": long}));
+    assert!(off_paper(&on_view), "{on_view}");
+    let centred = run(&mut s, ADD, json!({"anchor": {"view": ids::encode(view)}, "at": [0, -60], "content": long}));
+    assert!(!off_paper(&centred), "{centred}");
+}
+
 /// Every anchor: a sheet by name, a view, an edge and a corner, each one undo step; a note that points
 /// at nothing reads no model, and one on an edge has its leader end on the edge's middle.
 #[test]

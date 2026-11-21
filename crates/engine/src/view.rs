@@ -1925,6 +1925,26 @@ mod tests {
         }
     }
 
+    #[test]
+    fn preview_sketch_visibility_uses_the_state_after_the_commands() {
+        let mut s = Session::default();
+        let sketch = s.execute("sketch.create", &json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+        s.execute("sketch.line", &json!({"points":[[100,20],[120,30]],"construction":true})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        assert!(sketch_shown(&s, sketch));
+        assert_eq!(sketch_bounds(s.world_state().unwrap().sketch(sketch).unwrap()).max.x, 120.0);
+        for command in [
+            ("browser.visibility".into(), json!({"items":[sketch],"visible":false})),
+            ("solid.extrude".into(), json!({"sketch":sketch,"distance":10})),
+        ] {
+            let preview = s.preview_visible_world(std::slice::from_ref(&command)).unwrap();
+            assert!(preview.after.sketch(sketch).is_some(), "{} retains geometry for the preview diff", command.0);
+            assert!(!preview.shown_sketches.contains(&sketch), "{} leaves the sketch hidden after the run", command.0);
+            assert!(sketch_shown(&s, sketch), "the live session is unchanged");
+        }
+    }
+
     /// The viewport asks whether each sketch is used several times a frame: the features are
     /// walked once per design, not once per sketch asked about, and the answers follow every
     /// change of the design, a direct edit of it included.

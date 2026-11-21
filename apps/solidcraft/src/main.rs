@@ -466,6 +466,8 @@ impl eframe::App for App {
         };
         storage.set_string(solidcraft_ui_egui::prefs::STORAGE_KEY, prefs.clone());
         self.prefs_writer.written = Some(prefs);
+        #[cfg(feature = "usage-stats")]
+        storage.set_string(solidcraft_ui_egui::usage_stats::STORAGE_KEY, self.solve.usage_stats_for_storage());
     }
     /// The app is closing: work still running beside the window ends first, then the session.
     fn on_exit(&mut self) {
@@ -827,7 +829,6 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             // a group of their own, named after the plugin.
             let plugins = io::formats::plugin_open_filters();
             let mut everything: Vec<&str> = io::formats::open_extensions(true);
-            everything.extend(["dxf", "svg"]);
             for (_, exts) in &plugins {
                 everything.extend(exts.iter().map(String::as_str).filter(|e| !io::formats::open_extensions(true).contains(e)));
             }
@@ -920,6 +921,8 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         agent_http: Some(std::sync::Arc::new(agent_http)),
         secrets: Some(std::sync::Arc::new(Keychain("SolidCraft agent chat"))),
         tickets_http: Some(std::sync::Arc::new(tickets_http)),
+        #[cfg(feature = "usage-stats")]
+        usage_http: Some(std::sync::Arc::new(usage_http)),
         ticket_secrets: Some(std::sync::Arc::new(Keychain("SolidCraft tickets"))),
         show_in_folder: Some(Box::new(|path| {
             let folder = std::path::Path::new(path).parent().unwrap_or_else(|| std::path::Path::new("."));
@@ -1055,6 +1058,18 @@ fn tickets_http(r: solidcraft_ui_egui::agent_chat::backend::HttpRequest, done: s
     });
     // Without a worker the sender is dropped with the closure: the report sees no answer and
     // waits in the queue.
+    drop(spawned);
+}
+
+/// Posts a usage statistics report on a worker thread, to the one endpoint only
+/// (`usage_stats::ENDPOINT`); anything else is refused. The answer comes on `done`.
+#[cfg(feature = "usage-stats")]
+fn usage_http(r: solidcraft_ui_egui::agent_chat::backend::HttpRequest, done: std::sync::mpsc::Sender<solidcraft_ui_egui::tickets::Reply>) {
+    let spawned = std::thread::Builder::new().name("usage-stats-http".into()).spawn(move || {
+        let reply =
+            if r.url == solidcraft_ui_egui::usage_stats::ENDPOINT { tickets_call(&r) } else { Err("not the usage statistics endpoint".into()) };
+        let _ = done.send(reply);
+    });
     drop(spawned);
 }
 
@@ -1656,6 +1671,8 @@ fn main() -> eframe::Result {
             }
             // The administrator's policy holds in safe mode too.
             app.policy = solidcraft_ui_egui::policy::load();
+            #[cfg(feature = "usage-stats")]
+            app.load_usage_stats(cc.storage.and_then(|s| s.get_string(solidcraft_ui_egui::usage_stats::STORAGE_KEY)).as_deref());
             if let Some(path) = &theme_file
                 && let Err(e) = solidcraft_ui_egui::prefs::follow_theme_file_for_run(&mut app, path)
             {

@@ -1900,9 +1900,8 @@ fn body(
                         continue;
                     }
                     let before = input.clone();
-                    let tip = field.tip.clone();
                     ui.add_enabled_ui(field.enabled, |ui| {
-                        ui_kit::with_row_label_tooltip(ui, tip.as_deref(), |ui| {
+                        let mut row = |ui: &mut egui::Ui| {
                             if let Input::Selection(items) = input {
                                 let slot = picker.as_ref().and_then(|_| dialog.picker_fields.iter().position(|key| key == &field.key));
                                 let mut idle = None;
@@ -1911,7 +1910,12 @@ fn body(
                             } else if field_row(app, ui, &plugin.images, field, input) {
                                 browse = Some(field.key.clone());
                             }
-                        });
+                        };
+                        if let Some(tip) = field.tip.as_deref() {
+                            ui_kit::with_row_label_tooltip(ui, tip, row);
+                        } else {
+                            row(ui);
+                        }
                     });
                     field.edited |= *input != before;
                     if matches!(input, Input::Selection(_)) {
