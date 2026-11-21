@@ -475,7 +475,8 @@ mod tests {
     #[test]
     fn the_gpu_culls_the_placements_the_cpu_would() {
         use super::super::{
-            Batches, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook, InstancedMesh, Motions, PaletteIndex, Renderer, SceneSlot, SharedEdges, SharedTris,
+            Batches, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook, InstancedMesh, Motions, PaletteIndex, Renderer, SceneSlot, SharedEdges,
+            SharedTris,
         };
         use solidcore_record::Vec3;
         use std::sync::{Arc, Mutex};
