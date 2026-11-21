@@ -404,8 +404,8 @@ fn corner_of(a: Tangent, b: Tangent, c: Tangent, tangent_sine: f64) -> Option<Ve
 }
 
 /// A class a local operation's reach is bounded on: a plane, or a cone (a cylinder for
-/// `tan_angle = 0`) or a sphere, as [`Implicit`] holds them, or a bare B-spline net
-/// ([`net::Net`]).
+/// `tan_angle = 0`) or a sphere, as [`Implicit`] holds them, or a bare B-spline net or the
+/// offset of one ([`net::Net`]).
 #[derive(Debug, Clone)]
 enum Exact {
     Plane(Tangent),
@@ -416,10 +416,11 @@ enum Exact {
 /// `surface`'s class: its analytic label (a plane, cylinder, cone or sphere) with its NURBS
 /// form proved on that label's implicit equation ([`implicit::lies_on`], the owner's rule
 /// for an exact class at bound 0); a B-spline surface, extrusion or surface of revolution
-/// with no label and no definition is a bare net where [`net::Net::of`] takes it (a
-/// revolution's turn continued only within `tolerance` of its end), a plane stored as a NURBS
-/// among them. `None` for any other kind, a net [`net::Net::of`] turns away, a torus (its
-/// sections are quartics), or a form not proved on its label.
+/// with no label and no definition, or an offset surface of one, is a bare net where
+/// [`net::Net::of`] takes it (a revolution's turn continued only within `tolerance` of its
+/// end), a plane stored as a NURBS among them. `None` for any other kind, a net
+/// [`net::Net::of`] turns away, a torus (its sections are quartics), or a form not proved
+/// on its label.
 fn exact_class(k: &Kernel, surface: &Surface, tolerance: f64) -> Result<Option<Exact>> {
     let Some(support) = AnalyticSupport::of(surface) else {
         return Ok(net::Net::of(k, surface, tolerance)?.map(|n| Exact::Net(std::rc::Rc::new(n))));
@@ -1741,6 +1742,45 @@ fn plane_net_piece(
     }
 }
 
+/// The certified upper bound of the reach over a piece where a quadric and a bare net (or
+/// the offset of one, [`net::Net`]) meet in the edge's normal sections
+/// ([`local_extension_reach`]): the section through the edge point `p` across its tangent
+/// meets the quadric and the net (or its extension) at a point proved for every section of
+/// the piece, its distance from `p` bounded ([`net::section_quadric_meets`], which takes the
+/// root's motion along the edge out of the proof); its distance at the middle steers the
+/// halving. `guess` carries Newton's last root from piece to piece. A thread's flank moved
+/// beside its root and crest cylinders meets each of them so.
+///
+/// # Errors
+///
+/// A cancel.
+fn quadric_net_piece(
+    over: (Dv, Dv),
+    mid: (Dv, Dv),
+    dt: Ivl,
+    quadric: &Implicit,
+    net: &net::Net,
+    guess: &std::cell::Cell<Option<[f64; 2]>>,
+) -> Result<PieceBound> {
+    // the point and tangent (the point's rate) and their rates, over the piece and at its
+    // middle
+    let moving = |(p, t): (Dv, Dv)| net::Moving {
+        p: [p.x.v, p.y.v, p.z.v],
+        p_rate: [p.x.d, p.y.d, p.z.d],
+        t: [t.x.v, t.y.v, t.z.v],
+        t_rate: [t.x.d, t.y.d, t.z.d],
+    };
+    let found = net::section_quadric_meets(net, quadric, &moving(over), &moving(mid), dt, guess)?;
+    Ok(match found {
+        Some((upper, lower)) => PieceBound::Value {
+            upper,
+            lower,
+            crosses: false,
+        },
+        None => PieceBound::Unknown,
+    })
+}
+
 /// Two quadrics met in every normal section of an edge piece, proved by the shared
 /// three-equation certificate. The midpoint's root only guides refinement; an unproved
 /// section stays unknown and is subdivided, never classified as apart.
@@ -2121,20 +2161,54 @@ fn edge_interval_maximum(
     of: EdgeQuantity,
     surfaces: Option<&[u64]>,
 ) -> Result<Option<(f64, bool, bool)>> {
+    edge_interval_maximum_to(b, e, f, tolerance, Slack::Tolerance, bounds, of, surfaces)
+}
+
+/// How near the largest bound found must come to the largest value attained before the
+/// halving in [`interval_maximum`] stops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Slack {
+    /// Within the B-rep's tolerance.
+    Tolerance,
+    /// Within the value attained, or the tolerance where that is less: for a moved net's
+    /// meeting, whose bound is only the length its surfaces are extended by. A moved net's
+    /// move beside the edge is the reach itself (its meetings lie on it), and the margin
+    /// the executive extends by is the reach and that move together, so a bound within the
+    /// move of the reach at most doubles an extension that is already at least twice the
+    /// reach; a longer extension still holds every meeting, and the meetings are found by
+    /// the intersection, not placed by the bound. Halving on to the tolerance would only
+    /// tighten a length nothing measures, and on a helical edge, whose reach is the same
+    /// all along it, it halves every piece down to [`MAX_INTERVALS`].
+    Attained,
+}
+
+/// [`edge_interval_maximum`] halving to `slack`.
+#[allow(clippy::too_many_arguments)] // the edge, the bound, its slack and its record
+fn edge_interval_maximum_to(
+    b: &Brep,
+    e: crate::topology::EdgeId,
+    f: &dyn Fn((Dv, Dv), (Dv, Dv), Ivl) -> Result<PieceBound>,
+    tolerance: f64,
+    slack: Slack,
+    bounds: &mut EdgeBounds,
+    of: EdgeQuantity,
+    surfaces: Option<&[u64]>,
+) -> Result<Option<(f64, bool, bool)>> {
     let Some(cn) = edge_nurbs(b, e)? else {
         return Ok(None);
     };
     let interval = edge::interval(b, e)?;
     let Some(surfaces) = surfaces else {
-        return interval_maximum(&cn, interval, f, tolerance);
+        return interval_maximum(&cn, interval, f, tolerance, slack);
     };
-    let on = bound_inputs(&cn, interval, tolerance, surfaces);
+    let mut on = bound_inputs(&cn, interval, tolerance, surfaces);
+    on.push(u64::from(slack == Slack::Attained));
     if let Some(found) = bounds.0.get(&(e, of)) {
         if found.on == on {
             return Ok(found.bound);
         }
     }
-    let bound = interval_maximum(&cn, interval, f, tolerance)?;
+    let bound = interval_maximum(&cn, interval, f, tolerance, slack)?;
     bounds.0.insert((e, of), EdgeBound { on, bound });
     Ok(bound)
 }
@@ -2145,6 +2219,7 @@ fn interval_maximum(
     interval: crate::geom::extent1d::Extent1d,
     f: &dyn Fn((Dv, Dv), (Dv, Dv), Ivl) -> Result<PieceBound>,
     tolerance: f64,
+    slack: Slack,
 ) -> Result<Option<(f64, bool, bool)>> {
     let mut undecided = spans(cn, interval);
     // the bound on a piece; a bound that is not finite bounds nothing
@@ -2201,7 +2276,11 @@ fn interval_maximum(
     // the largest bound tightened: it bounds every piece left
     while let Some(top) = bounded.pop() {
         let tm = halves(top.t0, top.t1, top.depth).filter(|_| seen + 2 <= MAX_INTERVALS);
-        let Some(tm) = tm.filter(|_| top.halvable && top.upper > best + tolerance) else {
+        let within = match slack {
+            Slack::Tolerance => tolerance,
+            Slack::Attained => tolerance.max(best),
+        };
+        let Some(tm) = tm.filter(|_| top.halvable && top.upper > best + within) else {
             return Ok(Some((top.upper, apart, crosses && !apart)));
         };
         seen += 2;
@@ -2604,18 +2683,29 @@ fn kept_straight_edge_corner(
 /// vertex to the move.
 ///
 /// A plane and a bare B-spline net ([`net::Net`]: a B-spline surface, extrusion or surface
-/// of revolution with no label and no definition): the plane's trace `x0 + τ u` meets the net, or the
+/// of revolution with no label and no definition, or an offset surface of one): the plane's
+/// trace `x0 + τ u` meets the net, or the
 /// extension the executive builds past its sides, at a `(u, v, τ)` proved by Krawczyk's
 /// operator for every section of a piece of the edge's parameters ([`plane_net_piece`],
 /// [`net::line_meets`]); the meeting is `√(|x0 − p|² + τ²)` from `p`, `|τ|` its arc length
 /// along the plane's trace, and the pieces are halved as above. A moved net's move is at
 /// most the reach of an edge beside it, whose meetings lie on it. At a vertex, two planes'
-/// line meets a net ([`corner_with_net`]), and a plane meets a quadric and a net, or two
-/// nets ([`net::plane_quadric_and_net_meet`], [`net::plane_and_nets_meet`]), each at a
-/// point proved the same way.
+/// line meets a net ([`corner_with_net`]), a plane meets a quadric and a net, or two
+/// nets, and two quadrics meet a net ([`net::plane_quadric_and_net_meet`],
+/// [`net::plane_and_nets_meet`], [`net::quadrics_and_net_meet`]), each at a point proved
+/// the same way; two quadrics that are one surface or parallel (a thread's root cylinder in
+/// half-turn pieces) meet a net in no one point, and the edges' meetings stand.
+///
+/// A quadric and a net: the edge's normal section, the plane through `p` across the edge's
+/// tangent, meets both at a point proved by Krawczyk's operator for every section of a piece
+/// of the edge's parameters, on the quadric's own nappe and on the net as built
+/// ([`quadric_net_piece`], [`net::section_quadric_meets`]); its distance from `p` is
+/// bounded by the enclosures' difference, and the pieces are halved as above. A net here is
+/// also the offset of one ([`net::Net`]): a moved B-spline face's new surface is the
+/// `OffsetSurface` of its net, a thread's flank moved beside its root and crest cylinders.
 ///
 /// Anything else beside an edge or at a vertex where something moves (two curved
-/// quadrics without a certified meeting, a quadric or net beside a net, any
+/// quadrics without a certified meeting, a net beside a net, any
 /// three faces at the vertex but those above, even three that all stay, a net
 /// [`net::Net::of`] turns away, a torus, a blend or sweep, a plane not proved on its label,
 /// an edge curve with no NURBS form), a meeting with a net that is not proved, and a piece
@@ -2735,6 +2825,17 @@ pub fn local_extension_reach(
             let hull = |f: &dyn Fn(Vec3) -> f64| -> Result<f64> {
                 edge_maximum(b, e, f, tolerance)?.ok_or_else(uncertified)
             };
+            let pieces_to = |f: &dyn Fn((Dv, Dv), (Dv, Dv), Ivl) -> Result<PieceBound>,
+                             slack: Slack,
+                             bounds: &mut EdgeBounds,
+                             of: EdgeQuantity,
+                             surfaces: Option<&[u64]>|
+             -> Result<(f64, bool, bool)> {
+                let found =
+                    edge_interval_maximum_to(b, e, f, tolerance, slack, bounds, of, surfaces)?;
+                k.check_cancelled(LOCAL_OP)?;
+                found.ok_or_else(uncertified)
+            };
             let pieces = |f: &dyn Fn((Dv, Dv), (Dv, Dv), Ivl) -> Result<PieceBound>,
                           bounds: &mut EdgeBounds,
                           of: EdgeQuantity,
@@ -2851,6 +2952,27 @@ pub fn local_extension_reach(
                         EdgeQuantity::Meeting(own_face.min(other_face), own_face.max(other_face));
                     pieces(&piece, bounds, pair, None)?
                 }
+                (Exact::Quadric(q), Exact::Net(n)) | (Exact::Net(n), Exact::Quadric(q)) => {
+                    let guess = std::cell::Cell::new(None);
+                    let piece = |over: (Dv, Dv), mid: (Dv, Dv), dt: Ivl| {
+                        quadric_net_piece(over, mid, dt, q, n, &guess)
+                    };
+                    // recorded under the quadric's bits and the net's ([`net::Net::bits`]),
+                    // the same from either face: the second face takes the first's bound
+                    let pair =
+                        EdgeQuantity::Meeting(own_face.min(other_face), own_face.max(other_face));
+                    let surfaces = exact_bits(&Exact::Quadric(*q)).map(|mut b| {
+                        b.extend(n.bits());
+                        b
+                    });
+                    // a moved net's reach to within the move ([`Slack::Attained`])
+                    let slack = if net_moved {
+                        Slack::Attained
+                    } else {
+                        Slack::Tolerance
+                    };
+                    pieces_to(&piece, slack, bounds, pair, surfaces.as_deref())?
+                }
                 (Exact::Quadric(a), Exact::Quadric(c)) => {
                     let pair =
                         EdgeQuantity::Meeting(own_face.min(other_face), own_face.max(other_face));
@@ -2907,9 +3029,7 @@ pub fn local_extension_reach(
                         }
                     }
                 }
-                (Exact::Quadric(_) | Exact::Net(_), Exact::Quadric(_) | Exact::Net(_)) => {
-                    return Err(uncertified())
-                }
+                (Exact::Net(_), Exact::Net(_)) => return Err(uncertified()),
             };
             if apart && !found.apart.contains(&e) {
                 found.apart.push(e);
@@ -3116,7 +3236,8 @@ struct Corner {
 /// The reach and the move at a vertex of the face ([`local_extension_reach`]): where a face
 /// there moves, every face there must be of a class (`class_of`), and the meetings of the
 /// face's surface with every two others (three planes; two planes and a quadric or a net; a
-/// plane, a quadric and a net; a plane and two nets; a plane and two quadrics, on a kept
+/// plane, a quadric and a net; a plane and two nets; two quadrics and a net, nowhere for
+/// one or parallel quadrics; a plane and two quadrics, on a kept
 /// straight edge where present and its third's new surface a plane, nowhere for parallel
 /// quadrics, on the radical plane of two
 /// cylinders on one axis direction ([`quadric::Radical`]), otherwise by [`quadric::meet`];
@@ -3210,6 +3331,27 @@ fn corner(
                 (&[x], [], [m, n]) => {
                     let meeting = net::plane_and_nets_meet(m, n, x.point, x.raw, p)?;
                     Some(meeting.ok_or_else(refuse)?)
+                }
+                // two quadrics and a net: where the net crosses the quadrics' meeting; one
+                // quadric surface (a cylinder in pieces, each its own copy) or two parallel
+                // ones meet the net in no one point, and the edges' meetings stand, as for a
+                // plane below (parallel taken either way round: the same from every face).
+                // A moved net's move there is then the edges' too: the face's edges through
+                // the vertex beside the net bound it over their whole length, ends included
+                // (a moved net's shift is the reach of an edge beside it)
+                (&[], [a, c], [n]) => {
+                    if quadric_pair(a, c, at.tolerance).is_some()
+                        && quadric_pair(c, a, at.tolerance).is_some()
+                    {
+                        for (on, which) in on_nets.iter_mut().zip(&moved_nets) {
+                            if which.is_none_or(|w| w == *fc || w == *fd) {
+                                *on = Some(on.unwrap_or(0.0));
+                            }
+                        }
+                        None
+                    } else {
+                        Some(net::quadrics_and_net_meet(n, a, c, p)?.ok_or_else(refuse)?)
+                    }
                 }
                 // two or more quadrics: the kept straight edge's meeting, if any (its third
                 // a plane); a quadric third falls through to the surfaces' own constructions
