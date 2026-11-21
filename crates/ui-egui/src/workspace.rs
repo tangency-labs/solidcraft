@@ -1127,6 +1127,7 @@ mod tests {
             entries: manifest.runtime.unwrap().entries,
             images: Default::default(),
             declarations: manifest.declarations,
+            swatches: Default::default(),
         }
     }
 

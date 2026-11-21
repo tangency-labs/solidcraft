@@ -1045,6 +1045,43 @@ pub fn loft(sections: &[Vec<Curve>], degree: u32, cap: bool) -> Result<Body> {
     })
 }
 
+/// Whether a loft section (its plane's normal and its middle) faces back from the section
+/// before it (its normal as turned along the loft, and its middle): the kernel's
+/// [`solidcore::geom::plane_height::faces_back`]. The application winds the section the other
+/// way round when it does.
+#[must_use]
+pub fn loft_section_faces_back(
+    before_normal: [f64; 3],
+    before_middle: [f64; 3],
+    normal: [f64; 3],
+    middle: [f64; 3],
+) -> bool {
+    solidcore::geom::plane_height::faces_back(
+        v3(before_normal),
+        v3(before_middle),
+        v3(normal),
+        v3(middle),
+    )
+}
+
+/// Where the polyline `points` leaves the plane through `origin` with unit normal `normal`
+/// (within `tol`), in order: the index of the segment and the point. The kernel's
+/// [`solidcore::geom::plane_height::plane_departures`]; a loft opens a closed guide rail at
+/// the first of them on its first section.
+#[must_use]
+pub fn polyline_plane_departures(
+    points: &[[f64; 3]],
+    origin: [f64; 3],
+    normal: [f64; 3],
+    tol: f64,
+) -> Vec<(usize, [f64; 3])> {
+    let points: Vec<Vec3> = points.iter().map(|p| v3(*p)).collect();
+    solidcore::geom::plane_height::plane_departures(&points, v3(origin), v3(normal), tol)
+        .into_iter()
+        .map(|(k, p)| (k, [p.x, p.y, p.z]))
+        .collect()
+}
+
 /// The kernel's trace of a skin: each side face with the curves it is skinned from, if traced.
 type Traced = Option<Vec<(FaceId, Vec<usize>)>>;
 

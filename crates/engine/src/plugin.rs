@@ -4,7 +4,7 @@ use crate::{EngineError, Result, Session};
 pub use craft_plugin::{
     API, DesignKind, DockZone, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity,
     MAX_COMPONENT_BYTES, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, PanelLayout, PanelNode, PanelSpec as UiPanelSpec, PanelWidget,
-    RibbonGroup, RibbonTab, RuntimeManifest, UiDeclarations, UiSlot, WorkspaceSpec, check_input, conditions, valid_id,
+    RibbonGroup, RibbonTab, RuntimeManifest, UiDeclarations, UiSlot, WorkspaceSpec, check_input, conditions, swatches, valid_id,
 };
 use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};

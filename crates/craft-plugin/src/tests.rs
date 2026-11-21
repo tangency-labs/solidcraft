@@ -10,6 +10,81 @@ fn parse(value: &Value) -> Result<Manifest> {
     parse_manifest(&serde_json::to_vec(value).unwrap(), "sample")
 }
 
+/// Synthetic pixels only: package swatches keep their colours and never affect const inputs.
+#[test]
+fn swatches_validate_package_paths_sizes_types_and_images_without_refusing_the_manifest() {
+    let mut value = manifest();
+    let paths = [
+        json!("oak.png"),
+        json!("walnut.jpg"),
+        json!("../outside.png"),
+        json!("/outside.png"),
+        json!("https://example.com/a.png"),
+        json!("large.png"),
+        json!("wide.png"),
+        json!("wrong.gif"),
+        json!("bad.png"),
+        json!(7),
+    ];
+    let options: Vec<_> = paths.iter().enumerate().map(|(i, path)| json!({"const":i.to_string(),"x-solidcraft-swatch":path})).collect();
+    value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"finish":{"type":"string","oneOf":options}}}}]);
+    let parsed = parse(&value).expect("bad artwork never refuses a plugin");
+    let entries = &parsed.runtime.unwrap().entries;
+    let encoded = |width, height, format| {
+        let pixels = image::RgbImage::from_pixel(width, height, image::Rgb([137, 61, 23]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        pixels.write_to(&mut out, format).unwrap();
+        out.into_inner()
+    };
+    let png = encoded(128, 128, image::ImageFormat::Png);
+    let jpg = encoded(256, 256, image::ImageFormat::Jpeg);
+    let wide = encoded(257, 1, image::ImageFormat::Png);
+    let mut oversized_png = png.clone();
+    oversized_png.resize(65537, 0);
+    let report = swatches::check(entries, |path| {
+        Ok(match path {
+            "oak.png" => png.clone(),
+            "walnut.jpg" => jpg.clone(),
+            "large.png" => oversized_png.clone(),
+            "wide.png" => wide.clone(),
+            _ => b"bad image".to_vec(),
+        })
+    });
+    assert_eq!(report.images.len(), 2);
+    assert_eq!(report.images["oak.png"].size, [128, 128]);
+    assert_eq!(&report.images["oak.png"].rgba[..4], &[137, 61, 23, 255]);
+    assert_eq!(report.warnings.len(), 8, "{:?}", report.warnings);
+    assert!(swatches::decode("wrong.png", b"GIF89a").is_err());
+    assert!(swatches::decode("wrong.jpg", &png).is_err());
+    assert!(swatches::decode("tall.png", &encoded(1, 257, image::ImageFormat::Png)).is_err());
+    assert!(swatches::decode("walnut.jpeg", &jpg).is_ok());
+    let mut exact_limit = png.clone();
+    exact_limit.resize(65536, 0);
+    assert!(swatches::decode("oak.png", &exact_limit).is_ok(), "64 KiB inclusive");
+    exact_limit.push(0);
+    assert!(swatches::decode("oak.png", &exact_limit).is_err(), "a valid image one byte over the limit is omitted");
+    assert!(check_input(&entries[0].input_schema, &json!({"finish":"0"})).is_ok());
+}
+
+#[test]
+fn swatch_files_stay_inside_the_resolved_package() {
+    let root = std::env::temp_dir().join(format!("solidcraft-swatch-paths-{}", std::process::id()));
+    std::fs::create_dir_all(root.join("package")).unwrap();
+    std::fs::write(root.join("outside.png"), b"outside").unwrap();
+    let dir = root.join("package");
+    assert!(swatches::read_file(&dir, "../outside.png").is_err());
+    std::fs::write(dir.join("large.png"), vec![0; 65537]).unwrap();
+    assert!(swatches::read_file(&dir, "large.png").is_err());
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(root.join("outside.png"), dir.join("linked.png")).unwrap();
+        std::os::unix::fs::symlink(&root, dir.join("linked-dir")).unwrap();
+        assert!(swatches::read_file(&dir, "linked.png").is_err());
+        assert!(swatches::read_file(&dir, "linked-dir/outside.png").is_err());
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn metadata_normalization_and_legacy_entries() {
     let parsed = parse(&manifest()).unwrap();
