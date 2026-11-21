@@ -957,6 +957,83 @@ fn editing_a_move_about_a_world_axis_keeps_the_angle_expression() {
     assert_eq!((rx.as_str(), ry.as_str(), rz.as_str()), ("0 deg", "0 deg", "45 deg"));
 }
 
+/// #17560: a turn about an edge's axis (not X, Y or Z) by a parameter reopens in Rotate with the
+/// angle as typed and the stored axis and pivot, so saving it unchanged keeps the parameter and
+/// the axis exactly; switching to another type then keeps the turn once.
+#[test]
+fn editing_a_turn_about_a_slanted_axis_keeps_its_axis_and_angle_expression() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("parameters.change", json!({"name": "tent", "expression": "30 deg"})).unwrap();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    let axis = [0.1908089984809346, -0.9816271828442318, 0.0];
+    let origin = ["133.69015 mm", "-0.32 mm", "0 mm"];
+    let id =
+        h.app.run("solid.move", json!({"bodies": ["Body1"], "origin": origin, "axis": axis, "angle": "-tent"})).unwrap()["feature"].as_u64().unwrap();
+    let bounds = |h: &crate::scenario::Harness| crate::open_meshing::session_world(&h.app.session).body("Body1").unwrap().mesh().bounds();
+    let moved = bounds(&h);
+    let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    let Kind::Move { mode, angle, .. } = &d.kind else { panic!("not a move") };
+    assert_eq!((*mode, angle.as_str()), (ROTATE, "-tent"), "reopens in Rotate with the angle as typed");
+    assert!(items(&d, 1).is_empty(), "no axis pick: the stored axis is kept");
+    let commands = crate::dialogs::apply_commands(&h.app, &d).unwrap();
+    let [(_, redefine)] = commands.as_slice() else { panic!("one command: {commands:?}") };
+    let p = &redefine["params"];
+    assert_eq!((&p["angle"], &p["axis"], &p["origin"]), (&json!("-tent"), &json!(axis), &json!(origin)), "saved unchanged: {p}");
+    // Switching to Translate keeps the turn made so far, once.
+    let mut d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    switch_type(&h.app, &mut d, TRANSLATE);
+    for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    let after = bounds(&h);
+    assert!((after.min - moved.min).len() < 1e-6 && (after.max - moved.max).len() < 1e-6, "turned once: {moved:?} -> {after:?}");
+    // A translation that is zero only for now (a parameter) stays in Free Move, which keeps it.
+    h.app.run("parameters.change", json!({"name": "gap", "expression": "0 mm"})).unwrap();
+    let id = h
+        .app
+        .run("solid.move", json!({"bodies": ["Body1"], "translate": ["gap", "0 mm", "0 mm"], "origin": origin, "axis": axis, "angle": "-tent"}))
+        .unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    let Kind::Move { mode, x, .. } = &d.kind else { panic!("not a move") };
+    assert_eq!((*mode, x.as_str()), (FREE, "gap"), "a translation a parameter drives is kept");
+}
+
+/// #17560 with #17974: a turn about a picked edge reopens in Rotate with the edge kept, even when
+/// the edge runs along X, Y or Z, so saving it unchanged keeps the edge and the turn still follows
+/// it when a move is dragged before it. Free Move dropped the edge.
+#[test]
+fn editing_a_turn_about_a_picked_edge_keeps_the_edge() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+    let about = json!({"edge": [40.0, 15.0, 10.0], "body": "Body1"});
+    let turn = json!({"bodies": ["Body1"], "origin": ["40 mm", "0 mm", "10 mm"], "axis": [0.0, 1.0, 0.0], "angle": "10 deg", "about": about});
+    let id = h.app.run("solid.move", turn).unwrap()["feature"].as_u64().unwrap();
+    let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    let Kind::Move { mode, angle, .. } = &d.kind else { panic!("not a move") };
+    assert_eq!((*mode, angle.as_str()), (ROTATE, "10 deg"), "reopens in Rotate with the angle as typed");
+    assert!(items(&d, 1).is_empty(), "no axis pick: the stored axis and edge are kept");
+    let commands = crate::dialogs::apply_commands(&h.app, &d).unwrap();
+    let [(_, redefine)] = commands.as_slice() else { panic!("one command: {commands:?}") };
+    assert_eq!(redefine["params"]["about"]["type"], "edge", "the edge goes back with the turn: {redefine}");
+    for (command, params) in commands {
+        h.app.run(&command, params).unwrap();
+    }
+    h.settle();
+    let saved = serde_json::to_value(&h.app.session.doc.features.last().unwrap().kind).unwrap();
+    assert_eq!(saved["rotate_about"]["type"], "edge", "saved unchanged, the edge is kept: {saved}");
+    let turned = h.app.session.model.state().body("Body1").unwrap().mesh().bounds();
+    // A move along X dragged before the turn: the turn still follows the edge.
+    h.app.run("solid.move", json!({"bodies": ["Body1"], "translate": [20, 0, 0]})).unwrap();
+    let last = h.app.session.doc.features.last().unwrap().name.clone();
+    h.app.run("timeline.reorder", json!({"feature": last, "position": 1})).unwrap();
+    h.settle();
+    let b = h.app.session.model.state().body("Body1").unwrap().mesh().bounds();
+    assert!((b.min - (turned.min + Vec3::new(20.0, 0.0, 0.0))).len() < 1e-6, "{b:?} vs {turned:?}");
+    assert!((b.max - (turned.max + Vec3::new(20.0, 0.0, 0.0))).len() < 1e-6, "{b:?} vs {turned:?}");
+}
+
 /// A design with a component `Part` holding a 20 mm cube at the origin, seen from above, with no
 /// dialog open. Returns the harness and the part's placement.
 fn part_harness() -> (crate::scenario::Harness, u64) {
