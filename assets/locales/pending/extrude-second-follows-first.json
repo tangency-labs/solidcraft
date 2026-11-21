@@ -1,0 +1,26 @@
+{
+  "en": {
+    "prefs.extrude_second_follows_first": "Two Sides: Distance 2 follows a negative Distance",
+    "prefs.extrude_second_follows_first.help": "On: a negative Distance sends Distance 2 back across the sketch plane, as in older versions. Off: Direction fixes both sides and a sign only turns its own side over."
+  },
+  "ar": {
+    "prefs.extrude_second_follows_first": "جانبان: المسافة 2 تتبع المسافة السالبة",
+    "prefs.extrude_second_follows_first.help": "تشغيل: المسافة السالبة ترسل المسافة 2 إلى الجهة الأخرى من مستوى الرسم، كما في الإصدارات السابقة. إيقاف: الاتجاه يثبّت الجانبين، والإشارة تقلب جانبها فقط."
+  },
+  "he": {
+    "prefs.extrude_second_follows_first": "שני צדדים: מרחק 2 עוקב אחרי מרחק שלילי",
+    "prefs.extrude_second_follows_first.help": "פועל: מרחק שלילי שולח את מרחק 2 לצד השני של מישור הסקיצה, כמו בגרסאות קודמות. כבוי: הכיוון קובע את שני הצדדים, וסימן הופך רק את הצד שלו."
+  },
+  "ja": {
+    "prefs.extrude_second_follows_first": "両側: 距離 2 を負の距離に合わせる",
+    "prefs.extrude_second_follows_first.help": "オン: 負の距離は、以前のバージョンと同様に距離 2 をスケッチ平面の反対側へ送ります。オフ: 方向が両側を固定し、符号はその側だけを反転します。"
+  },
+  "vi": {
+    "prefs.extrude_second_follows_first": "Hai phía: Khoảng cách 2 theo Khoảng cách âm",
+    "prefs.extrude_second_follows_first.help": "Bật: Khoảng cách âm đưa Khoảng cách 2 sang phía bên kia mặt phẳng phác thảo, như các phiên bản trước. Tắt: Hướng cố định cả hai phía và dấu chỉ lật phía của chính nó."
+  },
+  "zh": {
+    "prefs.extrude_second_follows_first": "两侧：距离 2 随负距离翻转",
+    "prefs.extrude_second_follows_first.help": "开启：负距离会像旧版本一样把距离 2 送到草图平面的另一侧。关闭：方向固定两侧，符号只翻转其自身一侧。"
+  }
+}
