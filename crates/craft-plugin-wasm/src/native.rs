@@ -1134,9 +1134,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         return (host, Err(HostError::Cancelled));
     }
     let user_storage = manifest.capabilities.iter().any(|c| c.starts_with("user-storage@"));
-    if user_storage
-        && let Err(error) = host.begin_transaction()
-    {
+    if user_storage && let Err(error) = host.begin_transaction() {
         return (host, Err(error));
     }
     let limits = &runtime.limits;

@@ -976,8 +976,7 @@ fn storage_importers_share_key_json_and_total_storage_limits() {
     let oversized_input = "i32.const 20 memory.grow i32.const -1 i32.eq if unreachable end
         i32.const 2050 i32.const 32 i32.const 1048575 memory.fill
         i32.const 512 i32.const 5 i32.const 2048 i32.const 1048577 i32.const 128 call $set";
-    let (app, outcome) =
-        crate::run_import(App::default(), &manifest, &storage_importer_component(oversized_input), "convert", &json!({}), &request);
+    let (app, outcome) = crate::run_import(App::default(), &manifest, &storage_importer_component(oversized_input), "convert", &json!({}), &request);
     assert_eq!(outcome.unwrap_err(), HostError::LimitExceeded { limit: "user-storage JSON input bytes (1048576)".into() });
     assert!(app.user_data.is_empty());
     assert_eq!((app.begins, app.commits, app.rollbacks), (1, 0, 1));
