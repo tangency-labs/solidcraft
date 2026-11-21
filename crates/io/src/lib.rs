@@ -23,10 +23,10 @@ mod gerber_area;
 mod gerber_set;
 mod glb;
 pub use design::{
-    DesignCompression, DesignContainerReader, DesignPreview, FileKind, ImportCache, OpenPgpSignature, OpenPgpSigner, ProvenanceChain,
+    DesignCompression, DesignContainerReader, DesignFile, DesignPreview, FileKind, ImportCache, OpenPgpSignature, OpenPgpSigner, ProvenanceChain,
     ProvenanceRecord, ProvenanceReport, ProvenanceSave, ProvenanceSigner, ProvenanceStatus, ProvenanceSummary, SignatureSource, Signer,
-    THUMBNAIL_SIZE, file_kind, has_design_provenance, is_design_container, read_design_file, read_design_geometry, read_design_preview,
-    read_design_provenance, read_design_provenance_chain, read_design_provenance_chain_file, read_design_provenance_file,
+    THUMBNAIL_SIZE, file_kind, has_design_provenance, is_design_container, read_design_file, read_design_file_once, read_design_geometry,
+    read_design_preview, read_design_provenance, read_design_provenance_chain, read_design_provenance_chain_file, read_design_provenance_file,
     read_design_provenance_file_checked, read_design_provenance_summary_file, read_design_thumbnail, read_design_thumbnail_file,
     read_design_with_model, read_drawing, read_drawing_file, write_design_container, write_design_container_with_cache,
     write_design_container_with_compression, write_design_container_with_preview, write_design_container_with_provenance,
@@ -68,9 +68,11 @@ pub mod vfs;
 pub use airfoil::{Airfoil, AirfoilFormat, MAX_AIRFOIL_BYTES, MAX_AIRFOIL_POINTS, read_airfoil};
 pub use dxf::{DxfReadProfile, DxfWriteOptions, read_dxf, read_dxf_file, read_dxf_file_with_profile, write_dxf, write_dxf_entities, write_dxf_opts};
 pub use dxf_out::{
-    DxfEntity, DxfEntityWeight, DxfFile, DxfFileEntity, DxfFileLayer, DxfGeometryBounds, DxfLayer, DxfLayerId, DxfLinetype, DxfPath, DxfPathStyle,
-    DxfShape, DxfSourceBlock, DxfStandardWeight, DxfTextHorizontalAlignment, DxfTextRecordKind, DxfTextSource, DxfTextVerticalAlignment, DxfVertex,
-    admit_path, loop_lwpolyline, loop_lwpolyline_scaled, path_shapes, write_dxf_drawing_units, write_dxf_file, write_dxf_file_with_text_bounds,
+    DXF_PROFILE_FORMAT, DXF_PROFILE_VERSION, DxfEntity, DxfEntityWeight, DxfExportProfile, DxfFile, DxfFileEntity, DxfFileLayer, DxfGeometryBounds,
+    DxfLayer, DxfLayerId, DxfLinetype, DxfPath, DxfPathStyle, DxfRole, DxfRoleStyle, DxfShape, DxfSourceBlock, DxfStandardWeight,
+    DxfTextHorizontalAlignment, DxfTextRecordKind, DxfTextSource, DxfTextVerticalAlignment, DxfVertex, MAX_DXF_PROFILE_BYTES, admit_path,
+    loop_lwpolyline, loop_lwpolyline_scaled, path_shapes, write_dxf_drawing_units, write_dxf_file, write_dxf_file_as,
+    write_dxf_file_with_text_bounds,
 };
 pub use excellon::{DrillArc, DrillHit, DrillSlot, Drills, read_excellon};
 pub use gerber::{GerberLayer, GerberOutline, read_gerber_layer, read_gerber_outline};
