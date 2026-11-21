@@ -3480,7 +3480,7 @@ fn a_save_while_an_import_is_checked_keeps_no_model_and_does_not_wait() {
     let import = doc.features[0].id;
     let (checks, end) = kernel::ImportChecks::running_for_tests();
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
     assert!(model.checking_imports());
     // (were it to wait, this would never return: nothing else ends the check)
     assert!(model.saved_if_checked(&doc).is_none(), "no model while the check runs");
