@@ -305,11 +305,8 @@ fn dialog_hooks_and_commands_share_the_design_token_import_without_changing_old_
             );
             let (_, command) = crate::run(App { no_design, ..Default::default() }, &manifest, &component, "make", &json!({}));
             if declared {
-                let expected = if no_design {
-                    Value::Null
-                } else {
-                    json!({"document_id":"design-one","revision":"0123456789abcdef0123456789abcdef:7"})
-                };
+                let expected =
+                    if no_design { Value::Null } else { json!({"document_id":"design-one","revision":"0123456789abcdef0123456789abcdef:7"}) };
                 assert_eq!(serde_json::from_str::<Value>(&hook.unwrap()).unwrap(), expected);
                 assert_eq!(command.unwrap(), expected);
                 assert_eq!((host.value, host.begins, host.commits, host.rollbacks), (0, 1, 1, 0));
