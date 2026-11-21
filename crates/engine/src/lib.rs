@@ -1373,6 +1373,7 @@ impl Session {
         self.disabled_plugins = disabled_plugins;
         self.plugin_limits = plugin_limits;
         self.plugin_state = plugin_state;
+        self.plugin_state.link_changes = Default::default();
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
         self.keep_print_faces = keep_print_faces;
@@ -2539,6 +2540,8 @@ impl Session {
             }),
             ..Snapshot::of(self, spec.label)
         };
+        let link_read_before = matches!(spec.id, "component.update_links" | "component.relink").then(|| before.doc.clone());
+        let link_observations_before = self.plugin_state.link_changes.clone();
         let ids = self.ids.clone();
         let design_before = self.design_revision.clone();
         let identity_before = self.document_id.clone();
@@ -2755,6 +2758,7 @@ impl Session {
             Err(e) => {
                 // A failed command draws no ids, so a replay of what succeeded draws the same.
                 self.ids = ids;
+                self.plugin_state.link_changes = link_observations_before;
                 self.design_revision = design_before;
                 self.document_id = identity_before;
                 self.redo_watch = redo_watch_before;
@@ -2807,6 +2811,12 @@ impl Session {
             if let Some(kind) = failure {
                 usage::note_failure(spec.id, kind);
             }
+        }
+        if result.is_ok() {
+            if let Some(before) = link_read_before {
+                plugin::record_link_reads(self, &before);
+            }
+            self.plugin_state.prune_link_changes(&self.doc);
         }
         result
     }
@@ -3214,8 +3224,21 @@ impl Session {
                 }
             }
         }
+        let observations: Vec<_> = prepared
+            .computed
+            .plugin_state
+            .link_changes
+            .values()
+            .filter(|change| prepared.source.plugin_state.link_changes.get(&change.component) != Some(*change))
+            .cloned()
+            .collect();
         let replies = prepared.steps.into_iter().map(|step| (step.id, step.reply)).collect();
         self.accept_computed(prepared.computed);
+        for change in observations {
+            if self.doc.links.get(&change.component).is_some_and(|link| link.path == change.path) {
+                plugin::record_link_change(self, change.component, change.path, change.digest, change.read);
+            }
+        }
         Ok(replies)
     }
 
@@ -3360,7 +3383,32 @@ impl Session {
         computed.remap_hidden_bodies(&self.doc, &self.model.state(), rename.as_ref().map(|(old, new, _)| (old.as_str(), new.as_str())));
         self.visibility.hidden_bodies = std::mem::take(&mut computed.visibility.hidden_bodies);
         self.body_renames = computed.body_renames;
+        // Only committed source reads cross back from the worker. Inherited observations
+        // from undo/redo do not describe a file read in that computation.
+        let link_reads: Vec<_> = computed
+            .plugin_state
+            .link_changes
+            .values()
+            .filter(|change| {
+                change.read
+                    && self.plugin_state.link_changes.get(&change.component) != Some(*change)
+                    && computed.doc.links.get(&change.component).is_some_and(|link| {
+                        link.path == change.path
+                            && link.file_sha256.as_ref() == Some(&change.digest)
+                            && self
+                                .doc
+                                .links
+                                .get(&change.component)
+                                .is_none_or(|before| before.file_sha256 != link.file_sha256 || before.path != link.path)
+                    })
+            })
+            .cloned()
+            .collect();
         self.doc = computed.doc;
+        for change in link_reads {
+            plugin::record_link_change(self, change.component, change.path, change.digest, true);
+        }
+        self.plugin_state.prune_link_changes(&self.doc);
         self.design_state = computed.design_state;
         self.design_revision = computed.design_revision;
         self.ids = computed.ids;

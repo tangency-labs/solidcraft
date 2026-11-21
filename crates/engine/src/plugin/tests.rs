@@ -1092,6 +1092,88 @@ mod native {
     }
 
     #[test]
+    fn linked_file_listeners_name_observed_and_read_sources_without_changing_legacy_payloads() {
+        let f = Fixture::new("i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store");
+        let mut m = manifest();
+        m["capabilities"] = json!(["commands@0.2", "design@0.1"]);
+        m["runtime"]["commands"] = json!([]);
+        m["runtime"]["entries"] = json!([{"name":"make","effect":"read","input_schema":{"type":"object"}}]);
+        m["runtime"]["listeners"] = json!([{"entry":"make","on":["design.links_changed"]}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let source = f.0.join("part.sc");
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+        part.execute("file.save", &json!({"path":source})).unwrap();
+        let mut s = Session::default();
+        f.install(&mut s, json!({}));
+        let inserted = s.execute("component.insert_design", &json!({"path":source,"name":"Bracket"})).unwrap();
+        let component = inserted["component"].as_u64().unwrap();
+        let token = s.design_token();
+        let before = s.doc.to_json();
+        let history = s.undo.len();
+        part.execute("document.metadata.set", &json!({"key":"description","value":"New file contents"})).unwrap();
+        part.execute("file.save", &json!({})).unwrap();
+        let checked = s.scratch().compute_commands(&[("component.links".into(), json!({}))], None).unwrap();
+        assert!(s.plugin_state.link_changes.is_empty(), "checks on a copy do not publish before acceptance");
+        assert_eq!(s.accept_commands(checked).unwrap()[0].1["links"][0]["changed"], true);
+        let observations = s.plugin_state.link_changes.clone();
+        s.execute("component.links", &json!({})).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&observations, &s.plugin_state.link_changes), "identical checks do not enqueue events");
+        let links: Vec<_> = observations.values().cloned().collect();
+        design_notifications(&mut s, Some(token.clone()), false, &links);
+        let expected = json!({"design":token,"links":[{"component":component,"name":"Bracket","path":source,"read":false}]});
+        assert_eq!(s.plugin_state.listener_data["sample.make"], expected);
+        assert!(s.plugin_state.listener_failures.is_empty(), "{:?}", s.plugin_state.listener_failures);
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.undo.len(), history);
+        assert_eq!(s.design_token(), token);
+
+        // The actual worker acceptance path must retain the successful read observation.
+        let prepared = s.scratch().compute_commands(&[("component.update_links".into(), json!({}))], None).unwrap();
+        assert!(!s.plugin_state.link_changes[&component].read, "computing alone does not read into the live design");
+        s.accept_commands(prepared).unwrap();
+        assert!(s.plugin_state.link_changes[&component].read);
+        let links: Vec<_> = s.plugin_state.link_changes.values().cloned().collect();
+        let updated_token = s.design_token();
+        design_notifications(&mut s, Some(updated_token.clone()), true, &links);
+        let mut expected = expected;
+        expected["design"] = json!(updated_token);
+        expected["links"][0]["read"] = json!(true);
+        assert_eq!(s.plugin_state.listener_data["sample.make"], expected);
+        assert_eq!(s.execute("component.links", &json!({})).unwrap()["links"][0]["changed"], false);
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(s.plugin_state.link_changes.is_empty(), "undo forgets observations of bytes the design no longer holds");
+        let observations = s.plugin_state.link_changes.clone();
+        let redo = s.scratch().compute_commands(&[("edit.redo".into(), json!({}))], None).unwrap();
+        s.accept_commands(redo).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&observations, &s.plugin_state.link_changes), "redo does not read a source file");
+        let missing = f.0.join("missing.sc");
+        assert!(s.execute("component.relink", &json!({"component":component,"path":missing})).is_err());
+        assert!(std::sync::Arc::ptr_eq(&observations, &s.plugin_state.link_changes), "failed reads publish nothing");
+        let replacement = f.0.join("replacement.sc");
+        part.execute("file.save", &json!({"path":replacement})).unwrap();
+        s.execute("component.relink", &json!({"component":component,"path":replacement})).unwrap();
+        let links: Vec<_> = s.plugin_state.link_changes.values().cloned().collect();
+        let updated_token = s.design_token();
+        design_notifications(&mut s, Some(updated_token.clone()), true, &links);
+        assert_eq!(
+            s.plugin_state.listener_data["sample.make"],
+            json!({"design":updated_token,"links":[{"component":component,"name":"Bracket","path":replacement,"read":true}]})
+        );
+
+        m["runtime"]["listeners"][0]["on"] = json!(["design.changed"]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        f.install(&mut s, json!({}));
+        s.plugin_state.listener_data = Default::default();
+        design_notifications(&mut s, Some(updated_token.clone()), false, &links);
+        assert!(s.plugin_state.listener_data.is_empty(), "old listeners skip disk-only observations");
+        design_notifications(&mut s, Some(updated_token.clone()), true, &links);
+        assert_eq!(s.plugin_state.listener_data["sample.make"], json!({"design":updated_token}));
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(s.plugin_state.link_changes.is_empty(), "undoing relink cannot replay an observation of the replaced path");
+    }
+
+    #[test]
     fn design_listeners_refuse_point_cloud_work_before_it_starts() {
         let mut session = Session::default();
         session.plugin_state.listener_design = Some(Some(session.design_token()));

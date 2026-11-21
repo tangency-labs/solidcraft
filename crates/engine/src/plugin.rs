@@ -67,6 +67,8 @@ pub struct AppState {
     pub listener_failures: BTreeMap<String, String>,
     /// Last successful listener result; the future panel adapter may consume this data.
     pub listener_data: std::sync::Arc<BTreeMap<String, Value>>,
+    /// Latest linked-file observations, outside saved designs and undo snapshots.
+    pub link_changes: std::sync::Arc<BTreeMap<u64, LinkChange>>,
     /// Host-only authority marker and event payload for a listener invocation.
     pub(crate) listener_design: Option<Option<DesignToken>>,
     pub packages: BTreeMap<String, String>,
@@ -88,6 +90,18 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// History restores authored links, not observations of a different source or version.
+    pub(crate) fn prune_link_changes(&mut self, doc: &solidcraft_doc::Document) {
+        let current = |component: &u64, change: &LinkChange| {
+            doc.links
+                .get(component)
+                .is_some_and(|link| link.path == change.path && change.read == (link.file_sha256.as_ref() == Some(&change.digest)))
+        };
+        if self.link_changes.iter().any(|(component, change)| !current(component, change)) {
+            std::sync::Arc::make_mut(&mut self.link_changes).retain(|component, change| current(component, change));
+        }
+    }
+
     /// Background cache/panel updates do not revoke an in-flight command's authority.
     pub(crate) fn same_execution_context(&self, other: &Self) -> bool {
         self.packages == other.packages
@@ -462,6 +476,7 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
         {
             session.accept_computed(host.session);
         } else {
+            session.plugin_state.link_changes = host.session.plugin_state.link_changes;
             for message in host.session.log {
                 session.echo(message);
             }
@@ -484,7 +499,8 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
 
 pub mod check;
 mod events;
-pub use events::design_changed;
+pub use events::{LinkChange, design_changed, design_notifications};
+pub(crate) use events::{record_link_change, record_link_reads};
 mod form;
 pub mod grant_store;
 pub use form::form_errors;
@@ -659,6 +675,7 @@ impl PluginHost for SolidCraftHost {
         {
             self.session.accept_computed(computed);
         } else {
+            self.session.plugin_state.link_changes = computed.plugin_state.link_changes;
             for message in computed.log {
                 self.session.echo(message);
             }

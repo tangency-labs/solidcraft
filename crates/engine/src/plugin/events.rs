@@ -1,10 +1,60 @@
-//! Whole-design invalidation on the command worker. Never part of the triggering transaction.
+//! Design and linked-file invalidations on the command worker.
 use super::*;
+
+/// The latest observed state of one changed linked source. The digest is host-only: repeated
+/// checks of the same bytes do not enqueue another notification.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct LinkChange {
+    pub component: u64,
+    pub name: Option<String>,
+    /// Absolute source path, as held by the open session.
+    pub path: String,
+    /// Whether the design has read these bytes, rather than only observed them on disk.
+    pub read: bool,
+    #[serde(skip)]
+    pub(crate) digest: String,
+}
+
+pub(crate) fn record_link_change(session: &mut Session, component: u64, path: String, digest: String, read: bool) {
+    let change =
+        LinkChange { component, name: session.doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()), path, read, digest };
+    if session.plugin_state.link_changes.get(&component) != Some(&change) {
+        let changes = std::sync::Arc::make_mut(&mut session.plugin_state.link_changes);
+        changes.retain(|component, _| session.doc.links.contains_key(component));
+        changes.insert(component, change);
+    }
+}
+
+/// Record only successful source reads. No filesystem access is added to command completion.
+pub(crate) fn record_link_reads(session: &mut Session, before: &solidcraft_doc::Document) {
+    let reads: Vec<_> = session
+        .doc
+        .links
+        .iter()
+        .filter_map(|(component, link)| {
+            let previous = before.links.get(component);
+            if previous.is_some_and(|old| old.path == link.path && old.file_sha256 == link.file_sha256) {
+                return None;
+            }
+            Some((*component, link.path.clone(), link.file_sha256.clone()?))
+        })
+        .collect();
+    for (component, path, digest) in reads {
+        record_link_change(session, component, path, digest, true);
+    }
+}
 
 /// Deliver one already coalesced invalidation. The window calls this on its command worker,
 /// after the host action finishes. No guest result is ever adopted into the design.
 pub fn design_changed(session: &mut Session, design: Option<DesignToken>) {
+    design_notifications(session, design, true, &[]);
+}
+
+/// Deliver only the events each approved read listener declared. Disk observations alone do
+/// not change the design token or invoke existing whole-design listeners.
+pub fn design_notifications(session: &mut Session, design: Option<DesignToken>, changed: bool, links: &[LinkChange]) {
     session.plugin_state.refresh_stored();
+    let mut approved_listeners = BTreeSet::new();
     for (id, folder) in import::package_folders(session) {
         if session.disabled_plugins.contains(&id) {
             continue;
@@ -29,8 +79,16 @@ pub fn design_changed(session: &mut Session, design: Option<DesignToken>) {
         // Only the declaration included in the approved bytes authorizes invocations.
         let Some(runtime) = package.manifest.runtime.as_ref() else { continue };
         let listeners = runtime.listeners.clone();
+        approved_listeners.extend(listeners.iter().map(|listener| format!("{id}.{}", listener.entry)));
         let mut failure = None;
+        let mut invoked = false;
         for listener in listeners {
+            let include_links = !links.is_empty() && listener.on.iter().any(|on| on == "design.links_changed");
+            if !(include_links || changed && listener.on.iter().any(|on| on == "design.changed")) {
+                continue;
+            }
+            invoked = true;
+            std::sync::Arc::make_mut(&mut session.plugin_state.listener_data).remove(&format!("{id}.{}", listener.entry));
             let mut scratch = session.scratch();
             scratch.plugin_state.listener_data = Default::default();
             scratch.plugin_state.listener_design = Some(design.clone());
@@ -47,7 +105,10 @@ pub fn design_changed(session: &mut Session, design: Option<DesignToken>) {
                 // The host supplies the event envelope, independently of user entry inputs.
                 entry.input_schema = json!({"type":"object"});
             }
-            let event = json!({"design":design});
+            let mut event = json!({"design":design});
+            if include_links {
+                event["links"] = json!(links);
+            }
             let invocation = Package { manifest, approval: package.approval.clone(), component: package.component.clone() };
             match run(&mut scratch, invocation, &listener.entry, &event) {
                 Ok(reply) => {
@@ -58,6 +119,9 @@ pub fn design_changed(session: &mut Session, design: Option<DesignToken>) {
                 Err(error) => failure = Some(error.to_string()),
             }
         }
+        if !invoked {
+            continue;
+        }
         match failure {
             Some(error) => {
                 retain_failure(session, id, error);
@@ -67,6 +131,11 @@ pub fn design_changed(session: &mut Session, design: Option<DesignToken>) {
             }
         }
     }
+    // A partial event keeps outputs of listeners it did not invoke. Replaced packages cannot
+    // retain output under an old approval. Disabled packages keep the engine's existing cache
+    // behavior; the window filters their output before publishing it.
+    std::sync::Arc::make_mut(&mut session.plugin_state.listener_data)
+        .retain(|key, _| approved_listeners.contains(key) || key.split_once('.').is_some_and(|(id, _)| session.disabled_plugins.contains(id)));
 }
 
 fn retain_failure(session: &mut Session, id: String, error: impl std::fmt::Display) {
