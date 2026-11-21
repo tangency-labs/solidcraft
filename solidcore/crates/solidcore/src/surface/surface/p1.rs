@@ -1862,7 +1862,6 @@ impl Surface {
     /// which are empty until that cache's tree is built, so its answer off the natural
     /// domain depends on what ran before. No cache is made here.
     ///
-    ///
     /// A curve-bounded surface answers for its basis (not upstream, whose
     /// `SmCurveBoundedSurface` does not override `GetKnots` and so leaves an
     /// uninitialised domain, WR-663). That is exact: the kind holds only its basis, its
