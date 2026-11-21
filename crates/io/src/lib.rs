@@ -127,9 +127,12 @@ pub fn is_design_ext(ext: &str) -> bool {
     DESIGN_EXTS.iter().any(|x| ext.eq_ignore_ascii_case(x))
 }
 
-/// Is this a design file name (`.sc`, a legacy extension, or plain `.json`), any case?
+/// Is this a design file name (`.sc`, a legacy extension, plain `.json`, or a kind's `.scprt`,
+/// `.scsht`, `.scasm`), any case?
 pub fn is_design_path(path: &str) -> bool {
     std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| is_design_ext(e) || e.eq_ignore_ascii_case("json"))
+        // A part, a sheet metal part or an assembly (experimental, #6892): a design all the same.
+        || DesignKind::for_path(path).is_some()
 }
 
 /// Is this a design container file (`.sc` or a legacy extension, not plain JSON), any case?
@@ -2282,6 +2285,8 @@ mod tests {
         assert_eq!(Format::from_name("new.sc").unwrap(), Format::Design);
         assert_eq!(Format::from_name("NEW.SC").unwrap(), Format::Design);
         assert!(!is_design_path("/d/old.SOLVECRAFT") && is_design_path("older.solidcraft") && is_design_path("new.sc") && !is_design_path("a.step"));
+        // The kinds' files are designs too, so a link can name a part file (#6892).
+        assert!(is_design_path("bracket.scprt") && is_design_path("PANEL.SCSHT") && is_design_path("frame.scasm") && !is_design_path("a.scp"));
         assert_eq!(DESIGN_EXT, "sc");
         assert_eq!(DESIGN_EXTS, ["sc", "solidcraft"], "new extension first, then every older one");
         assert!(read_stl(&[0u8; 10]).is_err());
