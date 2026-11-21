@@ -602,7 +602,9 @@ impl JsonSchema for ReaderParam {
 /// FreeCAD, Rhino, 3MF, STL, OBJ or glTF file (a new design holding the file as a component
 /// named after it, as `file.insert_step` and `file.insert_mesh` make), or a `.ply`, `.pcd`,
 /// `.e57`, `.xyz`, `.pts` or `.asc` point cloud (a new design holding it, as `pointcloud.insert`
-/// makes). The open design is replaced.
+/// makes), or a command script, a `.json` file of `{"commands": [...]}` or a bare array of
+/// commands (a new, unsaved design built by replaying it, as `solidcraft-cli run` does). The
+/// open design is replaced.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct OpenParams {
@@ -710,6 +712,10 @@ pub struct OpenedDesign {
     /// With `verify: true`, when the file carries a signature: what verification found.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<SignatureReport>,
+    /// Only when a command script stopped at a failing step: which step and why. The design is
+    /// still open, holding what the steps before it built (#20102).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

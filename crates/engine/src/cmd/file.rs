@@ -57,7 +57,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&OPEN_CONTRACT)
         .output(output_schema_for::<OpenResult>)
-        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.pcd/.e57/.xyz/.pts/.asc point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); reader?: solidcraft|cadmpeg for a STEP, FreeCAD or Rhino file (see file.insert_step); geometry?: meshes|exact for an OpenUSD file (see file.insert_mesh); for a KiCad PCB: thickness?: board thickness in mm (default from the board); components?: bool (default true); copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); silkscreen?: bool (default true: the silk shapes and text); color?: \"#rrggbb\" or [r, g, b] (board substrate colour); representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
+        .params("path: .sc design (or a .solidcraft design from an earlier release), .json command script ({\"commands\": [...]} or a bare array: opens as a new, unsaved design built by replaying it; a failing step stops it and is named in `error`, with what the steps before it built left open), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.pcd/.e57/.xyz/.pts/.asc point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); reader?: solidcraft|cadmpeg for a STEP, FreeCAD or Rhino file (see file.insert_step); geometry?: meshes|exact for an OpenUSD file (see file.insert_mesh); for a KiCad PCB: thickness?: board thickness in mm (default from the board); components?: bool (default true); copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); silkscreen?: bool (default true: the silk shapes and text); color?: \"#rrggbb\" or [r, g, b] (board substrate colour); representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
     CommandSpec::new("file.insert_step", "Insert STEP", crate::checked!("file.insert_step", insert_step))
         .at("SOLID", "INSERT")
         .icon("import")
@@ -1538,7 +1538,15 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let verify = bool_(p, "verify").unwrap_or(false);
     // Stamped before it is read: a write while it is being read is a change too.
     let disk = solidcraft_io::design_lock::stamp(path);
-    let (doc, saved) = read_design(s, path)?;
+    let (doc, saved) = match read_design(s, path) {
+        Ok(opened) => opened,
+        // Not a design: a command script opens as a new design built by replaying it. Any other
+        // file keeps the reader's own message.
+        Err(e) => match command_script(path) {
+            Some(script) => return open_script(s, path, &script),
+            None => return Err(e),
+        },
+    };
     // A file with provenance is evaluated from its timeline, never from a cache the signature
     // does not cover.
     let saved = if solidcraft_io::has_design_provenance(path) { None } else { saved };
@@ -1648,6 +1656,7 @@ fn opened_design(
         }),
         warnings: s.doc.newer_file.as_ref().map(|file| file.warnings()),
         signature: s.provenance.as_ref().map(signature_report),
+        error: None,
         param_warnings: Vec::new(),
     }))
 }
@@ -1723,6 +1732,54 @@ struct ImportedFile {
 
 /// The name a design never given one by its user is shown under.
 const DEFAULT_NAME: &str = "Untitled";
+
+/// A command script at `path` when the file is one: `{"commands": [...]}`, or the JSON array
+/// `Session::run_script` also takes. `None` when it is neither (a design that failed to open,
+/// or another kind of JSON).
+fn command_script(path: &str) -> Option<Value> {
+    let bytes = solidcraft_io::vfs::read(path, solidcraft_io::MAX_DESIGN_BYTES).ok()?;
+    let v: Value = serde_json::from_slice(&bytes).ok()?;
+    (v.is_array() || v.get("commands").is_some()).then_some(v)
+}
+
+/// `doc.open` of a command script: a new design named after its file, built by replaying the
+/// script. A step that fails stops it, as `solidcraft-cli run` does, but what it built so far
+/// stays open and `error` names the step: a gap shows in the part, not as no design (#20102).
+/// The design has no path, so Save never overwrites the script.
+fn open_script(s: &mut Session, path: &str, script: &Value) -> Result<Value> {
+    let name = script_name(path);
+    let mut fresh = Session::new(Document::new(&name));
+    fresh.set_validation(s.validation());
+    let error = fresh.run_script(script).err().map(|e| e.to_string());
+    fresh.undo.clear();
+    s.replace_design(fresh);
+    let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
+    reply(OpenResult::Design(OpenedDesign {
+        path: path.to_string(),
+        features: s.doc.features.len(),
+        errors,
+        name,
+        read_only: None,
+        open_elsewhere: None,
+        newer_file: None,
+        warnings: None,
+        signature: None,
+        error,
+        param_warnings: Vec::new(),
+    }))
+}
+
+/// A script's design name: its file's name without `.script` (`NQ-32.script.json` → "NQ-32"),
+/// or without its extension.
+fn script_name(path: &str) -> String {
+    let stem = std::path::Path::new(path).file_stem().map(|s| s.to_string_lossy().trim().to_string()).unwrap_or_default();
+    let base = match stem.len().checked_sub(".script".len()) {
+        Some(at) if at > 0 && stem.get(at..).is_some_and(|tail| tail.eq_ignore_ascii_case(".script")) => stem.get(..at).unwrap_or(&stem),
+        _ => &stem,
+    };
+    let base = base.trim();
+    if base.is_empty() { DEFAULT_NAME.to_string() } else { base.chars().take(128).collect() }
+}
 
 /// A design still under the default name takes its file's name (`bracket.sc` →
 /// "bracket"); a name the user chose is kept. `None` when nothing changes.
@@ -4961,6 +5018,79 @@ mod tests {
             assert!(!s.is_dirty(), "showing the file's name is not a change to save");
         }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A command script (`{"commands": [...]}` or a JSON array) opens as a new design built by
+    /// replaying it, as `solidcraft-cli run` does. The design takes the file's name without
+    /// `.script` and is not saved over the script (#20102).
+    #[test]
+    fn opening_a_command_script_builds_it_as_a_new_design() {
+        let dir = name_dir("script-open");
+        for (file, script) in [
+            ("Plate.script.json", json!({"commands": [{"command": "solid.box", "params": {"length": 10, "width": 20, "height": 30}}]})),
+            ("Pin.script.json", json!([{"command": "solid.box", "params": {"length": 4, "width": 4, "height": 4}}])),
+        ] {
+            let path = dir.join(file);
+            std::fs::write(&path, script.to_string()).unwrap();
+            let mut s = Session::default();
+            s.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})).unwrap();
+            let r = s.execute("doc.open", &json!({"path": path})).unwrap();
+            let name = file.trim_end_matches(".script.json");
+            assert_eq!(r["name"], name, "{file}");
+            assert_eq!(s.doc.name, name);
+            assert_eq!(s.doc.features.len(), 1, "the script's design replaces the open one");
+            assert_eq!(s.world_state().unwrap().bodies.len(), 1);
+            assert!(s.path.is_none(), "a script is not the design's file");
+            assert!(r.get("error").is_none(), "{r}");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A step that fails leaves what the script built so far open, and says which step failed,
+    /// so a translation gap is visible in the part instead of leaving no design at all.
+    #[test]
+    fn a_script_that_stops_opens_what_it_built_and_names_the_step() {
+        let dir = name_dir("script-step");
+        let path = dir.join("Gear.script.json");
+        let script = json!({"commands": [
+            {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}},
+            {"command": "solid.no_such_command", "params": {}},
+            {"command": "solid.box", "params": {"length": 2, "width": 2, "height": 2}},
+        ]});
+        std::fs::write(&path, script.to_string()).unwrap();
+        let mut s = Session::default();
+        let r = s.execute("doc.open", &json!({"path": path})).unwrap();
+        let e = r["error"].as_str().unwrap_or_default();
+        assert!(e.contains("step 2"), "{e}");
+        assert_eq!(s.doc.features.len(), 1, "the step after the failure is not built");
+        assert_eq!(s.world_state().unwrap().bodies.len(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Other JSON that is not a design keeps the reader's own refusal and leaves the open design
+    /// alone; a script's name never splits a character.
+    #[test]
+    fn a_json_that_is_neither_a_design_nor_a_script_is_refused_and_script_names_are_safe() {
+        let dir = name_dir("script-refused");
+        let path = dir.join("Other.json");
+        std::fs::write(&path, r#"{"colour": "red"}"#).unwrap();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        let e = s.execute("doc.open", &json!({"path": path})).unwrap_err().to_string();
+        assert!(e.contains("Other.json"), "{e}");
+        assert_eq!(s.doc.features.len(), 1, "the open design stays");
+        std::fs::remove_dir_all(dir).unwrap();
+        for (path, name) in [
+            ("NQ-32.script.json", "NQ-32"),
+            ("a.SCRIPT.json", "a"),
+            (".script.json", ".script"),
+            ("é.script.json", "é"),
+            ("ééé.json", "ééé"),
+            ("日本語.script.json", "日本語"),
+            ("x.json", "x"),
+        ] {
+            assert_eq!(script_name(path), name, "{path}");
+        }
     }
 
     #[test]
