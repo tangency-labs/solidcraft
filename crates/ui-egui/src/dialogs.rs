@@ -633,6 +633,9 @@ pub struct Dialog {
     /// shown while this dialog is open, as an edited feature's sketch does, so its profiles can
     /// be picked even when an earlier feature uses the sketch and hides it.
     pub(crate) started_from_sketch: Option<u64>,
+    /// The pull or edge drag that opened this window (its token, [`crate::drag_extrude::token`]):
+    /// only that gesture moves its value or applies it on release.
+    pub(crate) gesture: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -906,6 +909,7 @@ impl Dialog {
             op_auto: Default::default(),
             anchor_hint: None,
             started_from_sketch: None,
+            gesture: None,
             auto: None,
         }
     }

@@ -8056,8 +8056,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::drag_fillet::to(app, &proj, p);
     }
     if resp.drag_stopped() || !primary_down {
-        crate::drag_extrude::end(app);
-        crate::drag_fillet::end(app);
+        // Where it was let go: the release frame's movement counts before the gesture ends.
+        let release = hover.filter(|_| resp.drag_stopped()).map(|p| (&proj, p));
+        crate::drag_extrude::end(app, release);
+        crate::drag_fillet::end(app, release);
     }
     // Box selection: a primary drag on the model when no navigation mode is on.
     if app.tool.is_none()
