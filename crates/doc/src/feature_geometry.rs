@@ -93,7 +93,7 @@ impl FeatureKind {
             }
             FeatureKind::Emboss { .. } => &["face"],
             FeatureKind::Revolve { .. } => &["to"],
-            FeatureKind::Extrude { .. } | FeatureKind::SurfaceExtrude { .. } => &["extent.to", "extent.from"],
+            FeatureKind::Extrude { .. } | FeatureKind::SurfaceExtrude { .. } => &["extent.to", "extent.from", "extent.to2"],
             FeatureKind::SurfaceExtend { .. } => &["up_to"],
             _ => &[],
         }

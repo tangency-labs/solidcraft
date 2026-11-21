@@ -338,7 +338,7 @@ fn surface_extrude(s: &mut Session, p: &Value) -> Result<Value> {
     let sketch = feature_sketch(s, p, cmd)?;
     let (profiles, curves) = sheet_inputs(p, cmd)?;
     let extent = extent_param(s, p, cmd)?;
-    if extent.through_all || extent.taper.is_some() || extent.to.is_some() || extent.from.is_some() {
+    if extent.through_all || extent.through_all2 || extent.taper.is_some() || extent.to.is_some() || extent.to2.is_some() || extent.from.is_some() {
         return Err(bad(cmd, "not supported yet: through all, to or from an object, or a taper"));
     }
     add_feature(s, p, FeatureKind::SurfaceExtrude { sketch: SketchId(sketch), profiles, curves, extent })
