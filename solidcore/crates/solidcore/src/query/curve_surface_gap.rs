@@ -1242,7 +1242,9 @@ pub(crate) fn plane_gap_bound(cn: &NurbsCurve, net: &Nurbs, [lo, hi]: [f64; 2]) 
 ///   summing to 1, and `|a b T| <= |T|` where every `q_i` (the trim's points in the net's box
 ///   fractions) is in `[0, 1]^2`, so the trim is (convex hull). `ψ` is the identity; only
 ///   the control points whose span meets `range` count.
-/// - **A trim of degree 1 along the whole `u` side of a net of degree 1 in `v`**: `W(s)` runs
+/// - **A trim of degree 1 along the whole `u` side of a net of degree 1 in `v`** (or along the
+///   `v` side of a net of degree 1 in `u`, taken on the net with `u` and `v` swapped,
+///   `swapped_uv`: an extrude's side as the stitch's orientation leaves it, #20373): `W(s)` runs
 ///   from `(u_a, v)` to `(u_b, v)` at a constant `v` (the trim's weights 1, so `u(s)` is linear
 ///   and the `v` exact), `[u_a, u_b]` within the net's `u` domain `[u_0, u_1]` in either
 ///   direction (one running from `u_1`'s end compared with the row backwards), and `range`
@@ -1318,7 +1320,71 @@ pub(crate) fn structured_trim_gap_bound(
         let bound = (Ivl::from(worst) + Ivl::from(twist)).hi;
         return (any && bound.is_finite()).then_some(bound);
     }
-    // (an iso line along the whole `u` side of a net of degree 1 in `v`)
+    // (an iso line along the `u` side of a net of degree 1 in `v`, or along the `v` side of
+    // one of degree 1 in `u`: the same line on the net with `u` and `v` swapped)
+    if net.q == 1 {
+        return iso_row_gap_bound(cn, wn, net, [lo, hi]);
+    }
+    if net.p == 1 {
+        let (net, wn) = swapped_uv(net, wn)?;
+        return iso_row_gap_bound(cn, &wn, &net, [lo, hi]);
+    }
+    None
+}
+
+/// The net `net` with `u` and `v` swapped, `S'(a, b) = S(b, a)`, and the trim `wn` with its
+/// two coordinates swapped, `W'(s) = (v(s), u(s))`, so that `S'(W'(s)) = S(W(s))` at every
+/// `s` (the data copied, nothing computed), for [`structured_trim_gap_bound`]. `None` for
+/// data whose sizes do not agree.
+fn swapped_uv(net: &Nurbs, wn: &NurbsCurve) -> Option<(Nurbs, NurbsCurve)> {
+    if net.pw.len() != 4 * net.nu * net.nv || wn.pw.len() != 4 * wn.n {
+        return None;
+    }
+    let mut pw = Vec::new();
+    for j in 0..net.nv {
+        for i in 0..net.nu {
+            let k = 4 * (i * net.nv + j);
+            pw.extend_from_slice(net.pw.get(k..k + 4)?);
+        }
+    }
+    let mut tw = Vec::new();
+    for c in wn.pw.chunks_exact(4) {
+        if let [x, y, z, w] = *c {
+            tw.extend_from_slice(&[y, x, z, w]);
+        }
+    }
+    let net = Nurbs {
+        p: net.q,
+        q: net.p,
+        nu: net.nv,
+        nv: net.nu,
+        u: net.v.clone(),
+        v: net.u.clone(),
+        pw,
+    };
+    let wn = NurbsCurve {
+        pw: tw,
+        ..wn.clone()
+    };
+    Some((net, wn))
+}
+
+/// The second case of [`structured_trim_gap_bound`]: a trim of degree 1 along the `u` side of
+/// the net `net`, of degree 1 in `v`.
+fn iso_row_gap_bound(
+    cn: &NurbsCurve,
+    wn: &NurbsCurve,
+    net: &Nurbs,
+    [lo, hi]: [f64; 2],
+) -> Option<f64> {
+    let point = |pw: &[f64], i: usize| -> Option<(V3<Ivl>, f64)> {
+        let s = pw.get(4 * i..4 * i + 4)?;
+        let [x, y, z, w] = [*s.first()?, *s.get(1)?, *s.get(2)?, *s.get(3)?];
+        Some((point_of([x, y, z, w])?, w))
+    };
+    if cn.pw.len() != 4 * cn.n || wn.pw.len() != 4 * wn.n {
+        return None;
+    }
     if !(wn.p == 1 && wn.n == 2 && net.q == 1 && net.nv == 2 && net.p == cn.p && net.nu == cn.n) {
         return None;
     }
@@ -4572,6 +4638,33 @@ mod tests {
             structured_trim_gap_bound(&off_weight, &wn, &probed, [0.0, 1.0]),
             None
         );
+    }
+
+    /// #20373: the same side with `u` and `v` swapped (as the stitch's orientation leaves an
+    /// extrude's side: degree 1 in `u`, the circle along `v`), with the trim's coordinates
+    /// swapped, is the same surface under the same trim, and its iso trim gets the same bound
+    /// bit for bit, whole and halfway; a trim that is not along the swapped side is left to
+    /// the bisection.
+    #[test]
+    fn a_circles_iso_trim_on_its_swapped_cylinder_gets_the_same_bound() {
+        let (k, s, net, row) = side_row();
+        let (u0, u1) = (net.u[0], net.u[net.u.len() - 1]);
+        let v1 = net.v[net.v.len() - 1];
+        let curve = Curve::from(row);
+        for end in [u1, 0.5 * u1] {
+            let trim = iso_trim(u0, end, v1);
+            let (cn, wn, probed) = trim_data(&k, &s, &curve, &trim, [0.0, 1.0]);
+            let g = structured_trim_gap_bound(&cn, &wn, &probed, [0.0, 1.0]).unwrap();
+            let (swapped, sw) = swapped_uv(&probed, &wn).unwrap();
+            assert_eq!((swapped.p, swapped.q), (probed.q, probed.p));
+            let h = structured_trim_gap_bound(&cn, &sw, &swapped, [0.0, 1.0]).unwrap();
+            assert_eq!(g.to_bits(), h.to_bits());
+            // (the unswapped trim on the swapped net runs across its circle, not along it)
+            assert_eq!(
+                structured_trim_gap_bound(&cn, &wn, &swapped, [0.0, 1.0]),
+                None
+            );
+        }
     }
 
     /// #20373: no pass-over. A curve moved off the cylinder's side (one control point 1e-3

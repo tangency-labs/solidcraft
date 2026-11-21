@@ -2092,7 +2092,7 @@ pub(crate) fn cover_joined_faces(
     }
     if raised {
         settle_face_bounds(k, b, e, &settle)?;
-        cover_raised_trims(k, b, e)?;
+        cover_raised_trims(k, b, e, true)?;
         cover_vertex_ends(k, b, e)?;
     }
     Ok(())
@@ -2148,7 +2148,10 @@ fn sampled_face_gap(k: &Kernel, b: &Brep, e: EdgeId, f: FaceId) -> Result<Option
 
 /// Not upstream (#18166, #20373): for an edge `e` the cover raised ([`cover_joined_faces`]),
 /// or a joined edge it did not raise ([`cover_joined_trims`]), raises it once to the largest
-/// proved bound of its UV trims ([`raised_trim_bound`]) that its tolerance does not cover. Each bound is taken at the fit the raised tolerance gives, once:
+/// proved bound of its UV trims ([`raised_trim_bound`]) that its tolerance does not cover. With
+/// `within`, a bound shown within the tolerance is taken as soon as it is shown (as every
+/// cover in the stitch takes it); without, each bound is taken in full at the fit, as
+/// [`cover_joined_edge_trims`] settles a raise. In the stitch each bound is taken once:
 /// a proved bound holds whatever the edge's tolerance, and bounding again at each raised
 /// tolerance only coarsens the fit (gen1108 edge 9 climbed 2.48e-5, 2.97e-5, ... 5.83e-5 in
 /// eight such rounds, for one trim bounded at 2.48e-5). A joined edge covers
@@ -2163,14 +2166,14 @@ fn sampled_face_gap(k: &Kernel, b: &Brep, e: EdgeId, f: FaceId) -> Result<Option
 /// # Errors
 ///
 /// [`SolidError::NotFound`] for a dangling id; those of [`trim_deviation_bound`].
-fn cover_raised_trims(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
+fn cover_raised_trims(k: &Kernel, b: &mut Brep, e: EdgeId, within: bool) -> Result<()> {
     let tol = b.edge(e)?.tolerance;
     let mut reach = tol;
     for &x in &b.edge(e)?.edgeuses {
         let Some(trim) = b.edgeuse(x)?.uv_trim_curve.as_ref() else {
             continue;
         };
-        if let Some(bound) = raised_trim_bound(k, b, x, trim, tol)? {
+        if let Some(bound) = raised_trim_bound(k, b, x, trim, tol, within)? {
             // (UNPROVED fallback: a bound past the B-rep check's limit is left as upstream
             // leaves it, with no sampled gate as [`cover_joined_faces`] has for a face; after a
             // raise past the limit no bound above the raised tolerance is taken, and a trim
@@ -2186,8 +2189,8 @@ fn cover_raised_trims(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
     Ok(())
 }
 
-/// The proved bound of the UV trim `trim` of `eu` ([`trim_deviation_bound`] at the fit `tol`),
-/// for [`cover_raised_trims`]. A UV line is bounded as its NURB, plus how far the line's
+/// The proved bound of the UV trim `trim` of `eu` ([`trim_deviation_bound`] at the fit `tol`,
+/// shown within `tol` where `within`, in full otherwise), for [`cover_raised_trims`]. A UV line is bounded as its NURB, plus how far the line's
 /// analytic evaluation can be from that NURB in UV (`line_evaluation_slack`) carried to the
 /// surface where it is a plane (`plane_uv_lipschitz`): its own rounding moves its parameters,
 /// which `trim_image_gap_bound` refuses. `None` where it is not enclosed (a UV line on
@@ -2202,9 +2205,11 @@ fn raised_trim_bound(
     eu: EdgeuseId,
     trim: &Curve,
     tol: f64,
+    within: bool,
 ) -> Result<Option<f64>> {
     use crate::query::curve_surface_gap::{line_evaluation_slack, plane_uv_lipschitz};
-    let over = [tol, f64::INFINITY];
+    let reach = if within { tol } else { 0.0 };
+    let over = [reach, f64::INFINITY];
     let CurveKind::Line(l) = trim.kind() else {
         return trim_deviation_bound(k, b, eu, trim, tol, over, None);
     };
@@ -2228,7 +2233,7 @@ fn raised_trim_bound(
     let slack = lip * d * (1.0 + 4.0 * f64::EPSILON);
     // (the NURB's bound is shown within the tolerance less the slack, so that a bound found
     // within `enough` still leaves the line within the tolerance)
-    let enough = ((tol - slack) * (1.0 - 4.0 * f64::EPSILON)).max(0.0);
+    let enough = ((reach - slack) * (1.0 - 4.0 * f64::EPSILON)).max(0.0);
     let Some(x) = trim_deviation_bound(k, b, eu, &Curve::from(nurb), tol, [enough, over[1]], None)?
     else {
         return Ok(None);
@@ -2374,7 +2379,13 @@ pub(crate) fn cover_joined_trims(k: &Kernel, b: &mut Brep, edges: &[EdgeId]) -> 
     Ok(())
 }
 
-/// [`cover_joined_trims`] of one edge.
+/// [`cover_joined_trims`] of one edge. A raise is settled as [`settle_face_bounds`] settles a
+/// face's: each trim bound is cut to a thousandth of the fit, the fit after a raise is the
+/// raised tolerance, and at it a bound can come out a rounding above the one found before
+/// (gen1108 edge 0: 3.12378e-5 at the fit 1e-5, 3.12542e-5 at the fit 3.12378e-5), so after a
+/// raise the cover is taken again, each bound in full at the raised tolerance, for at most
+/// [`SETTLE_ROUNDS`] rounds, until it raises no further. Each bound is proved, so each raise
+/// covers a proved distance.
 ///
 /// # Errors
 ///
@@ -2390,7 +2401,13 @@ fn cover_joined_edge_trims(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
     if !trimmed {
         return Ok(());
     }
-    cover_raised_trims(k, b, e)?;
+    for round in 0..SETTLE_ROUNDS {
+        let was = b.edge(e)?.tolerance;
+        cover_raised_trims(k, b, e, round == 0)?;
+        if b.edge(e)?.tolerance <= was {
+            break;
+        }
+    }
     if b.edge(e)?.tolerance > before {
         cover_vertex_ends(k, b, e)?;
     }
