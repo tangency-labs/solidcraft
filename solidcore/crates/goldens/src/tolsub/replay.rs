@@ -325,7 +325,10 @@ fn replay_trim_cover(unit_id: &str) -> usize {
         }
         let committed = golden.get(name);
         if hash(&line) != main_hash {
-            failures.push(format!("{name}: the row put back is not main's row"));
+            failures.push(format!(
+                "{name}: the row put back is not main's row (hashes to {:#018x}, recorded {main_hash:#018x})",
+                hash(&line)
+            ));
         }
         let line = run(u.as_ref(), case);
         if TRIM_COVER_WITHIN_COMPARATOR.contains(&(unit_id, name)) {

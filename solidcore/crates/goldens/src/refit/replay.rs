@@ -119,11 +119,17 @@ fn replay(unit_id: &str) -> usize {
             failures.push(format!("{name}: {refit:?}"));
         }
         if hash(&line) != old_hash {
-            failures.push(format!("{name}: refit row is not main's row"));
+            failures.push(format!(
+                "{name}: refit row is not main's row (hashes to {:#018x}, DATA {old_hash:#018x})",
+                hash(&line)
+            ));
         }
         let line = run(u.as_ref(), case);
         if golden.get(name) != Some(&line) {
-            failures.push(format!("{name}: the row is not the committed golden line"));
+            failures.push(format!(
+                "{name}: the row is not the committed golden line; the run's line:
+{line}"
+            ));
         }
     }
     assert!(failures.is_empty(), "{unit_id}:\n{}", failures.join("\n"));
