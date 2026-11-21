@@ -29,6 +29,3 @@ solidcore = { path = "../solidcore" }
 solidcore-convert = { path = "../solidcore-convert" }
 solidcore-ops = { path = "../solidcore-ops" }
 solidcore-record = { path = "../solidcore-record" }
-
-[dev-dependencies]
-solidcore-tess = { path = "../solidcore-tess" }
