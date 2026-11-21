@@ -3,9 +3,8 @@
 //! prepares the largest visible imported mesh during open. Other indexes start on first use.
 //! Imported outlines have their own index, requested only by Measure. The picker asks for the nearest triangle along the
 //! cursor's ray and for the edge segments near that ray, then runs its exact screen tests on
-//! those alone. A large mesh's index takes a while to make (a third of a second for a long
-//! modelled thread, #3745), so it is made on a worker thread, and picks scan the mesh until it
-//! is there: a scan takes a few milliseconds, the index a frame never waits for.
+//! those alone. A large mesh's index is made on a worker thread. While it builds, explicit picks
+//! can scan the mesh. Hover and origin feedback defer the scan for very large meshes.
 
 use solidcraft_engine::geom::prelude::*;
 use std::collections::HashMap;
@@ -13,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use egui::{Pos2, vec2};
 use solidcore_record::Vec3;
-use solidcraft_engine::geom::{Mesh, MeshIndex};
+use solidcraft_engine::geom::{Mesh, MeshIndex, PointCloudIndex};
 
 use crate::viewport::Proj;
 
@@ -59,7 +58,7 @@ type Indexes = HashMap<(usize, Kind), (Arc<Mesh>, Option<Arc<MeshIndex>>)>;
 const AT_ONCE: usize = 20_000;
 
 impl PickIndexes {
-    /// The index of `mesh`, or `None` while it is being made (the caller scans the mesh).
+    /// The index of `mesh`, or `None` while it is being made.
     pub(crate) fn of(&self, mesh: &Arc<Mesh>) -> Option<Arc<MeshIndex>> {
         self.get(mesh, Kind::Body)
     }
@@ -179,6 +178,56 @@ pub(crate) fn raycast(index: Option<&MeshIndex>, mesh: &Mesh, o: Vec3, d: Vec3) 
     match index.filter(|_| !scanning()) {
         Some(index) => index.raycast(mesh, o, d),
         None => mesh.raycast(o, d),
+    }
+}
+
+/// Clouds up to this many points get their [`PointCloudIndex`] immediately; larger ones build on a
+/// worker thread so hovering never blocks the window thread.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) const CLOUD_AT_ONCE: usize = 100_000;
+
+type CloudMap = HashMap<usize, (Arc<[f32]>, Option<Arc<PointCloudIndex>>)>;
+
+/// Spatial picking indexes for point clouds, keyed by their shared `Arc<[f32]>` storage pointer so
+/// moving, rotating or filtering a cloud reuses its index without rebuilding (#8933).
+#[derive(Default)]
+pub(crate) struct CloudPickIndexes(Arc<Mutex<CloudMap>>);
+
+impl CloudPickIndexes {
+    /// The picking index of `values`, or `None` while a worker is building it.
+    pub(crate) fn of(&self, values: &Arc<[f32]>) -> Option<Arc<PointCloudIndex>> {
+        let key = Arc::as_ptr(values).cast::<f32>() as usize;
+        let Ok(mut map) = self.0.lock() else { return Some(Arc::new(PointCloudIndex::new(values))) };
+        if let Some((_, index)) = map.get(&key) {
+            return index.clone();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if values.len() / 3 > CLOUD_AT_ONCE {
+            map.insert(key, (values.clone(), None));
+            let (indexes, source) = (self.0.clone(), values.clone());
+            let started = std::thread::Builder::new().name("cloud-pick-index".into()).spawn(move || {
+                let index = Arc::new(PointCloudIndex::new(&source));
+                if let Ok(mut map) = indexes.lock()
+                    && let Some(slot) = map.get_mut(&key)
+                    && slot.1.is_none()
+                {
+                    slot.1 = Some(index);
+                }
+            });
+            if started.is_ok() {
+                return None;
+            }
+        }
+        let index = Arc::new(PointCloudIndex::new(values));
+        map.insert(key, (values.clone(), Some(index.clone())));
+        Some(index)
+    }
+
+    /// Drop indexes whose point arrays are no longer in the document.
+    pub(crate) fn retain(&self, keep: impl Fn(usize) -> bool) {
+        if let Ok(mut map) = self.0.lock() {
+            map.retain(|k, _| keep(*k));
+        }
     }
 }
 

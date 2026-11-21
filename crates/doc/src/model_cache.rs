@@ -411,6 +411,19 @@ impl Model {
         pending.settle(&mut saved).then_some(saved)
     }
 
+    /// [`Self::saved`] when no import's SMLib check of its parts is still running
+    /// ([`Self::checking_imports`]); `None` while one is, without waiting for it (#20133). A
+    /// check can take many times as long as the import's read, and what it finds (a warning, a
+    /// healed part) is part of the model a design keeps: a model kept before the check ends
+    /// would open without it. A design saved meanwhile keeps no model, and is rebuilt when it
+    /// opens, as a design saved without the cache is; a save once the check has ended keeps it.
+    pub fn saved_if_checked(&self, doc: &Document) -> Option<SavedModel> {
+        if self.checking_imports() {
+            return None;
+        }
+        self.saved(doc)
+    }
+
     /// [`Self::saved`] without waiting for the imports' checks: the records hold what each import
     /// found before its check, and [`PendingChecks::settle`] adds what the check finds.
     pub fn saved_now(&self, doc: &Document) -> Option<(SavedModel, PendingChecks)> {

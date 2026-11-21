@@ -5128,6 +5128,154 @@ fn a_round_on_a_revolved_end_cap_that_closes_to_a_cusp_builds() {
     assert!((0.0360..=0.0381).contains(&added), "{added}");
 }
 
+/// A round of radius `r` in the corner `c` of a meridian section (x, rho), between the
+/// rays from `c` along the unit directions `d1` and `d2` (the side of the angle less than pi
+/// between them): its area and the rho of its centroid. The region is the kite of `c`, the
+/// two feet at `r cot(phi / 2)` along the rays and the ball's centre, less the ball's sector
+/// between the feet, of angle `pi - phi`.
+fn corner_round(c: [f64; 2], d1: [f64; 2], d2: [f64; 2], r: f64) -> (f64, f64) {
+    let phi = (d1[0] * d2[0] + d1[1] * d2[1]).acos();
+    let t = r / (phi / 2.0).tan();
+    let bisector = [d1[0] + d2[0], d1[1] + d2[1]];
+    let length = bisector[0].hypot(bisector[1]);
+    let b = [bisector[0] / length, bisector[1] / length];
+    let reach = r / (phi / 2.0).sin();
+    let centre = c[1] + b[1] * reach;
+    let foot = |d: [f64; 2]| c[1] + d[1] * t;
+    // each of the kite's two triangles c, foot, centre has area r t / 2
+    let kite = r * t;
+    let kite_rho = (2.0 * c[1] + foot(d1) + foot(d2) + 2.0 * centre) / 6.0;
+    let half = (PI - phi) / 2.0;
+    let sector = r * r * half;
+    // a sector's centroid lies 2 r sin(half) / (3 half) from its centre, towards c
+    let sector_rho = centre - b[1] * 2.0 * r * half.sin() / (3.0 * half);
+    let area = kite - sector;
+    (area, (kite * kite_rho - sector * sector_rho) / area)
+}
+
+/// #19724: a frustum about x (radius 24 at x = 0, 36 at x = 48) with a 12 degree rib on it,
+/// whose side leaves the cone at (18, 28.5) 15 degrees off the cone's straight side, the edge
+/// there rounded 1 mm: the body SolidCraft wrote after that round
+/// (`tests/data/issue_19724_cone_rib_round.bodies.json.gz`), read here with that round as its
+/// net. The rib's two sides are cones of one 12 degree arc span each, whose NURBS forms carry
+/// the rounding of the conversions that made them: their own numbers prove them, the cones
+/// read off their control rows do not (`AnalyticSupport::build`'s parametrisation test).
+///
+/// Rounding the rib's top edge makes an exact round of the `Circle` class between the two
+/// sides, its supports the sides' surfaces. On main its record labelled them cones, and
+/// reading it back refused the body ("a support's analytic surface is not its NURBS form's
+/// parametrisation"), as SolidCraft's measuring did after the issue's round. A support is
+/// now labelled only where reading derives it back from its form, and the body reads back
+/// with its round.
+///
+/// The volume before is the frustum's, the rib's (its triangle turned 12 degrees about x, its
+/// base on the cone's side) and the 15 degree round's (the corner between the cone's side and
+/// the rib's, filled to the ball, turned 12 degrees), each by Pappus; the top round takes off
+/// the rib's 75 degree corner at its top, turned 12 degrees. It ends on the rib's two end
+/// planes as the 15 degree round does: one face more, three edges (the top edge split in two,
+/// an arc on each end plane) and two vertices.
+#[test]
+fn a_round_on_a_short_rib_s_cones_reads_back_from_its_record() {
+    use solidcore::topology::face::p2 as face;
+    use solidcore_record::brep::Surface as RecordSurface;
+    rig_fixes();
+    let case = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../solidcore/tests/data/issue_19724_cone_rib_round.bodies.json.gz"
+    );
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(std::fs::File::open(case).unwrap())
+        .read_to_string(&mut text)
+        .unwrap();
+    let records: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let mut record: Record = serde_json::from_value(records["b1"].clone()).unwrap();
+    // the 15 degree round as its net (its definition's supports were written the way this
+    // test shows refused)
+    let mut nets = 0;
+    for f in &mut record.faces {
+        if matches!(f.surface, RecordSurface::Blend { .. }) {
+            f.surface = f.nurbs.take().unwrap();
+            nets += 1;
+        }
+    }
+    assert_eq!(nets, 1);
+    let counts = [
+        record.faces.len(),
+        record.edges.len(),
+        record.vertices.len(),
+    ];
+    assert_eq!(counts, [8, 15, 10]);
+    let b = Body::from_record(&record, true).unwrap().0;
+    assert_eq!(b.counts().unwrap(), counts);
+    // exact rounds on the body itself: a copy through its `.smb` bytes keeps no definitions
+    let exact_rounds = |b: &Body| {
+        let brep = b.kernel();
+        brep.face_list()
+            .iter()
+            .filter(|&&f| {
+                let s = face::surface(&brep, f).unwrap().unwrap();
+                matches!(s.procedural_blend(), Some(BlendRef::Exact { .. }))
+            })
+            .count()
+    };
+    assert_eq!(exact_rounds(&b), 0);
+
+    let theta = 12.0_f64.to_radians();
+    let frustum = PI * 48.0 / 3.0 * (24.0 * 24.0 + 24.0 * 36.0 + 36.0 * 36.0);
+    let p: [[f64; 2]; 3] = [
+        [18.0, 28.5],
+        [26.743_129, 33.353_628],
+        [27.370_857, 30.842_714],
+    ];
+    let cross =
+        (p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
+    let rib = cross.abs() / 2.0 * (p[0][1] + p[1][1] + p[2][1]) / 3.0 * theta;
+    let unit = |d: [f64; 2]| {
+        let l = d[0].hypot(d[1]);
+        [d[0] / l, d[1] / l]
+    };
+    let towards = |from: [f64; 2], to: [f64; 2]| unit([to[0] - from[0], to[1] - from[1]]);
+    let along_cone = unit([1.0, 0.25]);
+    let up_rib = towards(p[0], p[1]);
+    let turn = (along_cone[0] * up_rib[0] + along_cone[1] * up_rib[1]).acos();
+    assert!(
+        (turn.to_degrees() - 15.0).abs() < 1e-5,
+        "{}",
+        turn.to_degrees()
+    );
+    // the 15 degree round fills the corner outside both sides: between the cone's side back
+    // towards x = 0 and the rib's side
+    let (area, rho) = corner_round(p[0], [-along_cone[0], -along_cone[1]], up_rib, 1.0);
+    let want = frustum + rib + area * rho * theta;
+    // the volume's accuracy, and the rib's base 2.5e-7 inside the cone at its far end
+    let accuracy = 1e-10;
+    let tol = 2.0 * accuracy * want + 1e-5;
+    let before = b.volume(accuracy).unwrap();
+    assert!((before - want).abs() <= tol, "{before} {want}");
+
+    // the rib's top edge, the arc through its top corner
+    let top = nearest_edge(&b, [p[1][0], p[1][1], 0.0]);
+    let r = 0.5;
+    blend(&b, Blend::Round, &[top], &[r], &[], Corners::Filled)
+        .unwrap_or_else(|e| panic!("the rib's top does not round: {e:?}"));
+    assert_eq!(b.counts().unwrap(), [9, 18, 12]);
+    assert_eq!(exact_rounds(&b), 1);
+    let (area, rho) = corner_round(p[1], towards(p[1], p[0]), towards(p[1], p[2]), r);
+    let want = want - area * rho * theta;
+
+    let (written, _) = b.to_record().unwrap();
+    let back = Body::from_record(&written, true)
+        .unwrap_or_else(|e| panic!("the body does not read back: {e:?}"))
+        .0;
+    assert_eq!(back.counts().unwrap(), [9, 18, 12]);
+    assert!(back.is_manifold_solid().unwrap());
+    let report = back.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    assert_eq!(exact_rounds(&back), 1);
+    let after = back.volume(accuracy).unwrap();
+    assert!((after - want).abs() <= tol, "{after} {want}");
+}
+
 /// #17616: the issue's sheet-metal part, 3 thick with 2 mm bends: a 90 x 75 base, a three-bend
 /// flange on its back edge, and on its right edge a flange split into an 8 mm and a 50 mm
 /// segment. The record is the body SolidCraft's trace gives the round

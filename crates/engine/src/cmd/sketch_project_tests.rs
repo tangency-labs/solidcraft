@@ -848,6 +848,7 @@ fn a_reference_whose_body_is_gone_fails_its_sketch_naming_the_lost_projection() 
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
     let boxf = s.doc.features.last().unwrap().id;
+    let box_name = s.doc.features.last().unwrap().name.clone();
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     run(&mut s, "sketch.project", json!({"refs": [{"edge": [5, 0, 10]}]}));
     run(&mut s, "sketch.finish", json!({}));
@@ -856,7 +857,9 @@ fn a_reference_whose_body_is_gone_fails_its_sketch_naming_the_lost_projection() 
     let r = s.model.results.last().unwrap();
     let error = r.error.as_deref().unwrap_or_default();
     let read = solidcraft_doc::lost_projection_parts(error).map(|t| (t.feature, t.count, t.listed));
-    assert_eq!(read, Some((r.name.as_str(), 1, "projected edge of Body1 (curve l1)")), "{r:?}");
+    // The suppressed box is still in the design: the message names it as where the edge came from.
+    let listed = format!("projected edge of Body1 (curve l1; made by {box_name})");
+    assert_eq!(read, Some((r.name.as_str(), 1, listed.as_str())), "{r:?}");
     assert!(!error.contains(&name), "{error}");
 }
 
@@ -3111,6 +3114,38 @@ fn the_silhouette_of_conic_rounds_closes() {
     assert!((area - exact).abs() < exact * 2e-4, "area {area}, exact {exact}");
 }
 
+/// The silhouette of a letter-sized outline with small conic rounds, far from the origin, is one
+/// closed outline (#14987). A round projected as two fitted arcs (or a line and an arc) left
+/// their shared end 0.0003 to 0.001 mm apart, wider than profiles and Offset join ends, so the
+/// projected outline of an extruded letter made no profile and could not be offset.
+#[test]
+fn the_silhouette_of_small_conic_rounds_far_out_closes() {
+    for (rho, r, (cx, cz)) in [(0.5, 0.7, (-60., 250.)), (0.5, 0.4, (-140., 240.)), (0.45, 0.9, (90., -270.)), (0.5, 0.25, (200., 180.))] {
+        let mut s = Session::default();
+        let h = 6.0;
+        // A square of side 2h round (cx, cz), each corner a conic round of size r.
+        let corners = [
+            ([cx - h, cz + h - r], [cx - h, cz + h], [cx - h + r, cz + h]),
+            ([cx + h - r, cz + h], [cx + h, cz + h], [cx + h, cz + h - r]),
+            ([cx + h, cz - h + r], [cx + h, cz - h], [cx + h - r, cz - h]),
+            ([cx - h + r, cz - h], [cx - h, cz - h], [cx - h, cz - h + r]),
+        ];
+        run(&mut s, "sketch.create", json!({"plane": "YZ"}));
+        for (i, (start, apex, end)) in corners.iter().enumerate() {
+            run(&mut s, "sketch.conic", json!({"start": start, "apex": apex, "end": end, "rho": rho}));
+            let next = corners[(i + 1) % 4].0;
+            run(&mut s, "sketch.line", json!({"points": [end, next]}));
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 100, "body_name": "Letter"}));
+        run(&mut s, "sketch.create", json!({"plane": "YZ"}));
+        run(&mut s, "sketch.project", json!({"refs": [{"body": "Letter"}], "construction": false}));
+        let si = inspect(&mut s);
+        let profiles = si["profiles"].as_array().unwrap();
+        assert_eq!(profiles.len(), 1, "rho {rho}, round {r} at ({cx}, {cz}): {}", si["profiles"]);
+    }
+}
+
 /// A second placement's body is projected where that placement puts it (#9957): a sketch sees
 /// "Block (Part:2)" as the browser shows it, not only the first placement's "Block", on a plane
 /// and on a face alike.
@@ -3379,9 +3414,11 @@ fn a_sketch_whose_projected_face_lost_its_name_says_which_projection_and_how_to_
     let (mut s, outline, front, _) = part_with_outline();
     let name = redraw_front(&mut s, outline, &front);
     let curves = curves_named(&s, outline, &front);
+    // The extrude after Base made the face: the message names it as where to look.
+    let block = s.doc.features.iter().position(|f| f.name == "Base").and_then(|i| s.doc.features.get(i + 1)).map(|f| f.name.clone()).unwrap();
     assert_eq!(
         error_of(&s, "Outline").as_deref(),
-        Some(format!("Outline: projected face of Block ({curves}) is lost; delete the projection or project it again").as_str())
+        Some(format!("Outline: projected face of Block ({curves}; made by {block}) is lost; delete the projection or project it again").as_str())
     );
     assert!(!error_of(&s, "Outline").unwrap().contains(&name), "the persistent name is not shown");
     let lost = s.model.result(outline).and_then(|r| r.lost_projections.clone()).unwrap();

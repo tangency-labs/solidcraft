@@ -392,7 +392,8 @@ fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -
     let Ok((picked, _)) = crate::blend_smlib::picked_edges(body, &[pick]) else { return Ok(None) };
     let [e] = picked.as_slice() else { return Ok(None) };
     let e = *e;
-    let Some((ops, order)) = body.ops_body() else { return Ok(None) };
+    let Some(form) = body.ops_body() else { return Ok(None) };
+    let (ops, order) = &*form;
     let Ok(found) = solidcore_ops::carried_faces_ordered(ops, order, e, reach) else { return Ok(None) };
     if found.is_empty() {
         return Ok(None);
@@ -1210,7 +1211,8 @@ fn second_face_first(l0: f64, l1: f64) -> Option<bool> {
 fn first_face_normal(body: &Body, pick: Vec3, flip: bool) -> Option<Vec3> {
     let (picked, _) = crate::blend_smlib::picked_edges(body, &[pick]).ok()?;
     let [e] = picked.as_slice() else { return None };
-    let (ops, order) = body.ops_body()?;
+    let form = body.ops_body()?;
+    let (ops, order) = &*form;
     let leans = |dir: [f64; 3]| solidcore_ops::edge_faces_along_ordered(ops, order, *e, dir).ok();
     let [(f0, l0), (f1, l1)] = leans([0.0, 0.0, if flip { -1.0 } else { 1.0 }])?;
     if f0 == f1 {
@@ -1288,9 +1290,10 @@ pub fn tangent_chain_beyond_points(body: &Body, picks: &[Vec3], per_edge: usize)
     let (_, chain, picked) = picked_chain(body, picks)?;
     let most = usize::try_from(solidcore_ops::EDGE_POINTS_MAX).unwrap_or(1);
     let per_edge = if per_edge == 0 { 1 } else { per_edge.min(most) };
-    let Some((ops, order)) = body.ops_body() else {
+    let Some(form) = body.ops_body() else {
         return Err(KernelError::Invalid("a mesh body has no tangent chain".into()));
     };
+    let (ops, order) = &*form;
     chain
         .into_iter()
         .skip(picked)

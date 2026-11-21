@@ -129,6 +129,7 @@ mod kit_gallery_tests;
 mod kit_host_tests;
 mod length_input;
 pub mod library;
+pub mod link_folders_prompt;
 mod linked_source;
 pub mod links;
 #[cfg(test)]
@@ -247,6 +248,7 @@ pub mod pencil;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
+mod plugin_events;
 mod plugin_images;
 pub mod plugin_install;
 pub(crate) mod plugin_menu;
@@ -378,6 +380,8 @@ pub use solidcraft_ui_kit as ui_kit;
 #[cfg(test)]
 mod ui_kit_guard_tests;
 pub mod update;
+#[cfg(feature = "usage-stats")]
+pub mod usage_stats;
 mod value_step;
 pub(crate) mod view_angles;
 pub use solidcraft_ui_kit::view_compass;
@@ -386,12 +390,14 @@ pub mod view_gizmo;
 mod view_memory;
 pub mod view_pick;
 mod view_tiles;
+mod view_window_drag;
 pub mod view_windows;
 pub mod viewport;
 mod viewport_details;
 mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
+pub mod wheel_hint;
 pub use solidcraft_ui_kit::window_chrome;
 mod wireframe_silhouettes;
 pub mod workspace;
@@ -532,7 +538,9 @@ pub struct Services {
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
     /// Open a dialog asking for a program (a slicer); `None` when the host has no such dialog.
     pub pick_program: Option<Box<dyn Fn() -> FilePickerFuture>>,
-    /// Select the local document library root; unavailable in browser hosts.
+    /// Open a dialog asking for a folder. `None` on the web build and when the host has no
+    /// folder picker: a plugin field shows no Browse button and the text field still accepts
+    /// a pasted path, and the document library cannot choose a folder.
     pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
     pub show_in_folder: Option<Box<dyn Fn(&str)>>,
     /// Open a file in the program the system opens its kind with (a PDF in its viewer, to print).
@@ -585,6 +593,10 @@ pub struct Services {
     /// HTTP to the ticket server, for problem reports and My tickets (`tickets`); None: reports
     /// open a GitHub draft instead.
     pub tickets_http: Option<tickets::Http>,
+    /// HTTP for anonymous usage statistics (`usage_stats`), posting only to its one endpoint;
+    /// None: nothing is sent.
+    #[cfg(feature = "usage-stats")]
+    pub usage_http: Option<tickets::Http>,
     /// Where the ticket server's sign-in is kept: the system keyring (the browser's storage on
     /// the web). Never a plain file.
     pub ticket_secrets: Option<std::sync::Arc<dyn agent_chat::backend::Secrets>>,
@@ -742,6 +754,9 @@ pub struct SolveApp {
     /// What this computer's administrator set (`policy`). The host loads it at start; the default
     /// is an unmanaged computer.
     pub policy: policy::Policy,
+    /// Anonymous usage statistics (`usage_stats`): what is kept and the report on its way.
+    #[cfg(feature = "usage-stats")]
+    pub usage: usage_stats::UsageStats,
     /// Safari's steps for installing the web app, while their window is open (`install`).
     pub install_steps: Option<install::Steps>,
     /// Toolbar buttons the user pinned, removed or reordered.
@@ -835,6 +850,12 @@ pub struct SolveApp {
     pub disk_prompt: bool,
     /// Update Links, Open Linked Design or Reload from file waiting for a network server to be allowed.
     pub network_prompt: Option<network_prompt::NetworkPrompt>,
+    /// Designs just opened whose out-of-date links are in other folders, asking whether to load
+    /// them: one question per design, shown while its tab is.
+    pub link_folders_prompt: Vec<link_folders_prompt::LinkFoldersPrompt>,
+    /// Links held back by Not now, by design ([`solidcraft_engine::Session::uid`]) and component:
+    /// not read by themselves, nor asked about again, until their folder is allowed.
+    pub link_folders_held: Vec<(u64, u64)>,
     /// Designs left by crashed apps, offered for recovery.
     pub recoverable: Vec<solidcraft_engine::recovery::Entry>,
     /// The recovery folder holding this launch's reopen-guard marker (#5064); `None` when
@@ -939,6 +960,7 @@ pub struct SolveApp {
     /// in the plugins folder's grant store too, shared with the command line and headless MCP.
     plugin_grant_store: Option<solidcraft_engine::plugin::grant_store::Synced>,
     plugin_slots: plugin_slots::State,
+    plugin_events: plugin_events::State,
     /// The agent cursor acting out control requests.
     pub agent: agent_cursor::AgentCursor,
     /// The agent chat panel (docs/design/in-app-agent-chat.md).
@@ -961,6 +983,8 @@ pub struct SolveApp {
     pub library: library::LibraryState,
     /// The 3D mouse: which device, its reading, and the calibration window.
     pub space_mouse: space_mouse::Input,
+    /// The one-time question to make a smooth-scrolling mouse wheel zoom (`wheel_hint`).
+    pub wheel_hint: wheel_hint::State,
     pub file_load: file_load::FileLoad,
     /// An opened design's bodies still being meshed, off the UI thread.
     pub(crate) open_meshing: Option<open_meshing::Meshing>,
@@ -970,6 +994,7 @@ pub struct SolveApp {
     pub(crate) frame_watch: frame_watch::Watch,
     /// The other open designs (tabs).
     pub docs: documents::Documents,
+    view_window_drag: view_window_drag::State,
     view_windows: view_windows::Windows,
     /// Last OS title inputs; unchanged frames allocate nothing and send no title command.
     pub(crate) window_title: documents::WindowTitle,
@@ -1097,6 +1122,8 @@ impl SolveApp {
             crashes: crash_ui::CrashUi::default(),
             updater: update::Updater::default(),
             policy: policy::Policy::default(),
+            #[cfg(feature = "usage-stats")]
+            usage: usage_stats::UsageStats::new(None),
             install_steps: None,
             toolbar_custom: toolbar_custom::ToolbarCustom::default(),
             settings_profiles: settings_profiles::Profiles::default(),
@@ -1141,6 +1168,8 @@ impl SolveApp {
             lock_prompts: Vec::new(),
             disk_prompt: false,
             network_prompt: None,
+            link_folders_prompt: Vec::new(),
+            link_folders_held: Vec::new(),
             recoverable: Vec::new(),
             reopen_guard_dir: None,
             recovery_discard_all: false,
@@ -1192,6 +1221,7 @@ impl SolveApp {
             plugin_inspection_versions: Default::default(),
             plugin_grant_store: None,
             plugin_slots: Default::default(),
+            plugin_events: Default::default(),
             agent: Default::default(),
             shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
             styled: false,
@@ -1204,11 +1234,13 @@ impl SolveApp {
             home: home::HomeState::default(),
             library: library::LibraryState::default(),
             space_mouse: Default::default(),
+            wheel_hint: Default::default(),
             file_load: file_load::FileLoad::default(),
             open_meshing: None,
             open_meshing_next: false,
             frame_watch: Default::default(),
             docs: documents::Documents::default(),
+            view_window_drag: view_window_drag::State::default(),
             view_windows: view_windows::Windows::default(),
             window_title: Default::default(),
             applied_fonts_language: "en".into(),
@@ -1363,6 +1395,20 @@ impl SolveApp {
             log::warn!("Preferences export retained recovery data: {reason}");
             self.prefs_with_panel_layout(prefs::held_panel_layout(self).unwrap_or_else(|| panel_runtime::preferences_value(self)))
         })
+    }
+
+    /// Take in the usage statistics the host stored under `usage_stats::STORAGE_KEY`.
+    #[cfg(feature = "usage-stats")]
+    pub fn load_usage_stats(&mut self, stored: Option<&str>) {
+        self.usage.store = usage_stats::Store::from_stored(stored);
+        // Kept between runs from now on: the first start (nothing stored) shows the notice.
+        self.usage.hosted = true;
+    }
+
+    /// The usage statistics for the host to store under `usage_stats::STORAGE_KEY`.
+    #[cfg(feature = "usage-stats")]
+    pub fn usage_stats_for_storage(&self) -> String {
+        self.usage.store.to_stored()
     }
 
     /// Portable preferences for storage. On refusal the host retains its stored panel record.
@@ -1728,6 +1774,7 @@ impl SolveApp {
                 self.plugin_inspection_versions.insert((self.session.uid, id.to_owned()), control_job::next_plugin_inspection());
             }
             match id {
+                "ui.appBarReset" => self.toolbar_custom.reset_app_bar(),
                 "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64)),
                 // The sketch being edited has all new contents: a tool's picks named the old ones.
                 "sketch.replace" if v.get("sketch_id").and_then(Value::as_u64).is_some_and(|id| self.session.active_sketch == Some(id)) => {
@@ -1927,6 +1974,7 @@ impl SolveApp {
             r => r,
         };
         self.finish_command(id, &r);
+        plugin_events::command_completed(self, id, r.is_ok());
         if render_workspace::active(self)
             && matches!(id, "appearance.assign" | "appearance.paste")
             && let Ok(value) = &r
@@ -2196,6 +2244,15 @@ impl SolveApp {
             dialogs::confirm(self);
             return;
         }
+        // A tool or dialog started, for usage statistics (`usage_stats`), even if it is cancelled.
+        #[cfg(feature = "usage-stats")]
+        if self.session.count_usage
+            && let Some(spec) = solidcraft_engine::find_command(id)
+        {
+            solidcraft_engine::usage::note(solidcraft_engine::usage::Bucket::Tools, spec.id);
+            // Timed from here until it is applied or cancelled (`usage_stats::tick`).
+            self.usage.started_tool = Some(spec.id);
+        }
         self.tree.clear_folder_pick();
         // A command started from the folded ribbon's open panels closes them (#10112).
         self.ui.ribbon_open = false;
@@ -2211,6 +2268,12 @@ impl SolveApp {
             return;
         }
         if id == "timeline.play" {
+            if let Err(why) = self.run(id, json!({})) {
+                self.set_status(why, true);
+            }
+            return;
+        }
+        if id == "ui.appBarReset" {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
             }
@@ -2377,6 +2440,18 @@ impl SolveApp {
         }
         if render_workspace::start_interactive(self, id) {
             return;
+        }
+        match id {
+            "tab.view.pop_out" => {
+                let view = self.docs.views.active().id;
+                crate::design_view_ui::move_to_window(self, view, json!("new"));
+                return;
+            }
+            "tab.view.move_to_window" => {
+                crate::view_windows::cycle_view(self);
+                return;
+            }
+            _ => {}
         }
         // A display toggle leaves the current modelling tool and camera in place, and the ribbon
         // where it is: F6, the navigation bar and the navigator never went through `start`, so
@@ -3819,6 +3894,11 @@ impl SolveApp {
 
     /// Apply view.fit / view.home to the active canvas, retaining each canvas's framing policy.
     fn frame_view(&mut self, home: bool) {
+        self.frame_view_bounds(home, None);
+    }
+
+    /// Frame a preview's result through the same path, using its bounds before it is committed.
+    fn frame_view_bounds(&mut self, home: bool, preview_bounds: Option<solidcraft_engine::geom::Aabb3>) {
         if render_workspace::result_active(self) {
             render_workspace::fit_result(self);
             return;
@@ -3844,6 +3924,16 @@ impl SolveApp {
         let mut to = self.cam;
         if home {
             to.set_view(StandardView::Iso);
+        }
+        if let Some(bounds) = preview_bounds {
+            let shared = home && self.preferences.navigator_fit;
+            self.pending_fit = Some((to, bounds, true, shared));
+            to = if shared {
+                self.navigator_fitted_bounds(to, &bounds).unwrap_or_else(|| self.fitted_bounds(to, &bounds))
+            } else {
+                self.fitted_bounds(to, &bounds)
+            };
+        } else if home {
             // With the navigators' Fit on, Home shares their zoom, so a face clicked after it
             // keeps the zoom (#10091).
             let shared = self.preferences.navigator_fit;
@@ -4017,6 +4107,8 @@ impl SolveApp {
         recovery_ui::tick(self);
         open_elsewhere::tick(self, ctx);
         update::tick(self, ctx);
+        #[cfg(feature = "usage-stats")]
+        usage_stats::tick(self, ctx);
         if self.issue_report.draft.is_none() && self.file_picker.is_none() {
             // Files dropped on the theme Import tile are themes (#8226).
             prefs::take_theme_drops(self, ctx);
@@ -4250,6 +4342,7 @@ impl SolveApp {
         render_workspace::displayed::finish(self, ui.ctx());
         documents::sync_views(self);
         documents::sync_window_title(self, ui.ctx());
+        plugin_events::tick(self, ui.ctx());
     }
 
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {
@@ -4282,6 +4375,7 @@ impl SolveApp {
         documents::prompt(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
         network_prompt::show(self, ui.ctx());
+        link_folders_prompt::show(self, ui.ctx());
         update::show(self, ui.ctx());
         install::show(self, ui.ctx());
         // Settings › AI's Add agent dialog: Settings opens over Home too (#3483).
