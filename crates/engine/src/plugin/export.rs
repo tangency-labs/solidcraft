@@ -63,6 +63,18 @@ fn convert(session: &mut Session, exporter: &FormatSlot, path: &str, options: &V
     solidcraft_io::vfs::check(path).map_err(|e| HostError::PermissionDenied { permission: e.to_string() })?;
     let package = checked_package(session, exporter)?;
     let runtime = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
+    let declared = runtime.entries.iter().find(|entry| entry.name == exporter.entry).ok_or_else(|| error("unknown entry"))?;
+    let prepared = if declared.dialog_hook {
+        let protected = options.as_object().map(|v| v.keys().cloned().collect()).unwrap_or_default();
+        let update = update_dialog(session, &package, &exporter.entry, options, &protected, true)?;
+        if let Some(warning) = update.warning {
+            session.echo(warning);
+        }
+        craft_plugin::prepare_input(&declared.input_schema, &update.values)?
+    } else {
+        craft_plugin::prepare_input(&declared.input_schema, options)?
+    };
+    let options = &prepared;
     let mut warnings = Vec::new();
     if exporter.needs_plugin_data {
         warnings.push(format!("{} asks for this design's plugin data, which exports don't pass yet; it exported without it", package.manifest.name));
@@ -78,6 +90,8 @@ fn convert(session: &mut Session, exporter: &FormatSlot, path: &str, options: &V
             file_folders: Vec::new(),
             file_read_folders: Vec::new(),
             evaluation: None,
+            forms: Vec::new(),
+            form_source: None,
         };
         // The guest's stack is on this thread's: run it on a thread with room for the stack the
         // exporter asks for and the host's own calls, as an import does.
@@ -119,7 +133,7 @@ fn convert(session: &mut Session, exporter: &FormatSlot, path: &str, options: &V
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
-        let _ = (runtime, warnings, file);
+        let _ = (runtime, warnings, file, options);
         Err(error("exporting with a plugin needs the desktop app"))
     }
 }
