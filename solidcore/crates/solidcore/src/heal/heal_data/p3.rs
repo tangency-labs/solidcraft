@@ -48,7 +48,8 @@
 //! `Fix_SplitEdgesAtSeam` does not format the diagnostic of a pole split refused at
 //! an edge end (`SE_MSG`); another refused split returns `SM_ERR`.
 
-use crate::error::{ignored as ignore_soft, EntityRef, Result, SolidError};
+use crate::error::heal::HealFailure;
+use crate::error::{ignored as ignore_soft, EntityRef, Failure, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::context::{MarkLock, ALL_MARKS};
 use crate::heal::face_props::{HealerOpType, LoopObject};
@@ -76,6 +77,13 @@ use crate::topology::face::p1::{self as fp1, SeamProblem};
 use crate::topology::vertex;
 
 const OP: &str = "heal::heal_data::p3";
+
+/// A defect ([`HealFailure::Defect`]) with the status `SM_ERR` of the `SE(SM_ERR)` it
+/// replaces.
+#[track_caller]
+fn defect(why: &'static str) -> SolidError {
+    Failure::new(OP, HealFailure::Defect { why }).into_error()
+}
 /// Maximum number of nested `UpdateTargetLists` catch-up passes.
 pub const MAX_TARGET_UPDATE_DEPTH: u64 = 32;
 
@@ -131,10 +139,7 @@ impl<O: LoopObject> HealData<O> {
         through: HealerOpType,
     ) -> Result<()> {
         if tracker.is_tracking(Some(&k.context)) {
-            return Err(SolidError::heal_failed(
-                OP,
-                "the topology changes are still being tracked",
-            ));
+            return Err(SolidError::heal(OP, HealFailure::ChangesStillTracked));
         }
         if let Some(error) = tracker.failure() {
             return Err(error);
@@ -459,7 +464,10 @@ impl<O: LoopObject> HealData<O> {
             for id in queue.into_iter().rev() {
                 let p = self.edge_props.props(id)?;
                 let e = p.edge.ok_or_else(|| {
-                    SolidError::heal_failed(OP, "the edge properties have no edge")
+                    defect(
+                        "the edge properties the healer listed as degenerate have no edge, \
+                         though it lists only properties it built for an edge",
+                    )
                 })?;
                 if p.bad_degen_edge.is_false() {
                     continue;
@@ -913,7 +921,10 @@ impl<O: LoopObject> HealData<O> {
             // Only endpoint rejection is known to leave the edge unsplit. Other errors
             // can follow interval/curve edits, so do not continue with stale properties.
             if !split.split {
-                return Err(SolidError::heal_failed(OP, "the edge was not split"));
+                return Err(defect(
+                    "the edge split was declined without naming the end it is near, though \
+                     the split declines only near an end, which it names",
+                ));
             }
             // UpdateTargetLists deletes old properties. Reacquire the next candidate.
             self.update_target_lists(

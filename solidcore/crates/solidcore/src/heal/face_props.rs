@@ -1954,10 +1954,7 @@ impl<O: LoopObject> FaceProps<O> {
 
         // no work - called before SmHealData::Fix_TolSizes() has run on this Brep
         if exe_heal_op < HealerOpType::FixTolsizes {
-            return Err(SolidError::heal_failed(
-                OP_STAGE2,
-                "the tolerance sizes are not fixed yet",
-            ));
+            return Err(SolidError::heal(OP_STAGE2, HealFailure::HealStepNotRun));
         }
 
         // extra work - get props that need to be built before these props
@@ -2318,10 +2315,7 @@ impl<O: LoopObject> FaceProps<O> {
 
         // no work - called before SmHealData::Fix_SplitEdgesAtSeam() has run
         if exe_heal_op < HealerOpType::FixSplitedgeAtseam {
-            return Err(SolidError::heal_failed(
-                OP_STAGE3,
-                "the edges are not split at the seams yet",
-            ));
+            return Err(SolidError::heal(OP_STAGE3, HealFailure::HealStepNotRun));
         }
 
         // extra work - get props that need to be built before these props
