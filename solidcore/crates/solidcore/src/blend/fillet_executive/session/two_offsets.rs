@@ -16,10 +16,13 @@
 
 use super::{FilletBody, FilletObject, FilletSession, FilletSurfaceGenerator};
 use crate::blend::blend_refusal::{chains_among, BlendRefusal};
+use crate::blend::chamfer_sections::edge_sections;
 use crate::blend::chamfer_side::widest_wedge_bound;
 use crate::blend::fillet_executive::p2::FilletParametersAccess;
-use crate::blend::fillet_solver::p5::is_knife_edge;
-use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
+use crate::blend::fillet_solver::p5::{is_concave_edge, is_knife_edge};
+use crate::surface::procedural_blend::chamfer::{
+    feet_on_sections, setback_for_chord, ChamferDefinition, ChamferSize,
+};
 use crate::surface::surface::SurfaceKind;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
@@ -81,6 +84,141 @@ fn refused_size(id: EdgeId, size: ChamferSize, wedge: f64) -> SolidError {
         }
         _ => invalid("the chamfer size"),
     }
+}
+
+/// An edge's straight-setback offsets (#13710, phase 1): its pair in its supports' order, whether
+/// a section is curved (else the pair is the straight-section formula's at its station), its
+/// supports' faces, and the wedge at its station.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Leg {
+    pair: [f64; 2],
+    curved: bool,
+    faces: [crate::topology::FaceId; 2],
+    wedge: f64,
+}
+
+/// A pair the other way round.
+fn swapped(p: [f64; 2]) -> [f64; 2] {
+    [p[1], p[0]]
+}
+
+/// Which members of a group have their supports the other way round from the first's: each
+/// member's support 1 is on the chain's side of the first's support 1 where it shares a face
+/// with that side (or its support 2 with the other), worked out from member to member along
+/// the faces they share. `None` where a member shares none, or a face lies on both sides.
+fn chain_sides(members: &[Leg]) -> Option<Vec<bool>> {
+    let lead = members.first()?;
+    let mut one = vec![lead.faces[0]];
+    let mut two = vec![lead.faces[1]];
+    let mut flips: Vec<Option<bool>> = vec![None; members.len()];
+    *flips.first_mut()? = Some(false);
+    // bound: each round settles at least one member, else stops
+    for _ in 0..members.len() {
+        let mut settled = false;
+        for (m, flip) in members.iter().zip(flips.iter_mut()) {
+            if flip.is_some() {
+                continue;
+            }
+            let [a, b] = m.faces;
+            let side = if one.contains(&a) || two.contains(&b) {
+                false
+            } else if two.contains(&a) || one.contains(&b) {
+                true
+            } else {
+                continue;
+            };
+            *flip = Some(side);
+            let (x, y) = if side { (b, a) } else { (a, b) };
+            if !one.contains(&x) {
+                one.push(x);
+            }
+            if !two.contains(&y) {
+                two.push(y);
+            }
+            settled = true;
+        }
+        if !settled {
+            break;
+        }
+    }
+    if one.iter().any(|f| two.contains(f)) {
+        return None;
+    }
+    flips.into_iter().collect()
+}
+
+/// The straight-setback offsets of edge `id` (blend edge use `u0`, its mate `u1`) at `size`, the
+/// first size along support 2 where `on_second`: in the domain of #13710's phase 1 (two distances
+/// or a chord, a convex edge that is a translation or a rim, [`edge_sections`]), the offsets of
+/// [`feet_on_sections`] at the setbacks, with both feet and their point off a rim's axis, both
+/// offsets above the solver's approximation tolerance and the definition of today's kind holding
+/// them ([`ChamferDefinition::of_offsets`]). Where both sections are lines, the straight-section
+/// formula's at the station's wedge. `None` outside the domain and for every error: the edge
+/// keeps today's conversion.
+fn straight_setback_leg(
+    k: &Kernel,
+    b: &mut crate::Brep,
+    id: EdgeId,
+    u0: EdgeuseId,
+    u1: EdgeuseId,
+    size: ChamferSize,
+    on_second: bool,
+) -> Option<Leg> {
+    let reach = match size {
+        ChamferSize::Distances([a, b]) => a + b,
+        ChamferSize::Chord(c) => 2.0 * c,
+        ChamferSize::DistanceAngle { .. } => return None,
+    };
+    if !matches!(is_concave_edge(k, b, id), Ok(false)) {
+        return None;
+    }
+    let es = edge_sections(k, b, id, u0, u1, reach)?;
+    let setbacks = match size {
+        ChamferSize::Distances([a, b]) if on_second => [b, a],
+        ChamferSize::Distances(d) => d,
+        ChamferSize::Chord(c) => {
+            let d = setback_for_chord(es.sections, c)?;
+            [d, d]
+        }
+        ChamferSize::DistanceAngle { .. } => return None,
+    };
+    let face_of = |u: EdgeuseId| -> Option<crate::topology::FaceId> {
+        match eu1::faceuse(b, u).ok()? {
+            Some(fu) => b.faceuse(fu).ok()?.face,
+            None => None,
+        }
+    };
+    let faces = [face_of(u0)?, face_of(u1)?];
+    let leg = |pair: [f64; 2], curved: bool| Leg {
+        pair,
+        curved,
+        faces,
+        wedge: es.wedge,
+    };
+    if es.straight() {
+        let straight = match size {
+            ChamferSize::Chord(c) => ChamferSize::Chord(c),
+            _ => ChamferSize::Distances(setbacks),
+        };
+        let pair = ChamferDefinition::new(straight, es.wedge)
+            .ok()?
+            .offsets()
+            .ok()?;
+        return Some(leg(pair, false));
+    }
+    let feet = feet_on_sections(es.sections, setbacks, TANGENCY.sin())?;
+    let [f1, f2] = feet.feet;
+    if !(es.off_axis(f1) && es.off_axis(f2) && es.off_axis(feet.point)) {
+        return None;
+    }
+    // the solver's approximation tolerance ([`FilletSession::prepare_per_edge_two_offsets`]),
+    // below which a chamfer's definition surface is not made
+    let approx = 4.0 * edge::tolerance(b, id).ok()?;
+    if feet.offsets.iter().any(|&r| r <= approx) {
+        return None;
+    }
+    ChamferDefinition::of_offsets(feet.offsets, es.wedge).ok()?;
+    Some(leg(feet.offsets, true))
 }
 
 /// Whether edge use `u` bounds a face on a plane.
@@ -441,6 +579,8 @@ impl FilletSession<'_> {
         }
         let mut chamfers = Vec::new();
         let mut knives = Vec::new();
+        // each edge's straight-setback offsets (#13710, phase 1), where it is in the domain
+        let mut legs: Vec<Option<Leg>> = Vec::new();
         let mut first = Vec::new();
         let mut second = Vec::new();
         for (index, &id) in edges.iter().enumerate() {
@@ -481,6 +621,7 @@ impl FilletSession<'_> {
                 first.push(d);
                 second.push(d);
                 chamfers.push(None);
+                legs.push(None);
                 knives.push(id);
                 continue;
             }
@@ -510,6 +651,91 @@ impl FilletSession<'_> {
             first.push(r1);
             second.push(r2);
             chamfers.push(Some(chamfer));
+            let leg = if self.objects.straight_setbacks {
+                let target: &mut crate::Brep = &mut *self.objects.target;
+                straight_setback_leg(k, target, id, u0, u1, size, on_second)
+            } else {
+                None
+            };
+            legs.push(leg);
+        }
+        // a group of one size on a tangent chain is one chamfer: it takes the straight-setback
+        // pair only where every member has one, one of them is curved and they agree, all
+        // taking the lowest-index member's. Pairs are compared and copied in the chain's side
+        // order ([`chain_sides`]): a member's supports may be the other way round, and a pair
+        // is not symmetric even for equal sizes
+        let target: &crate::Brep = &*self.objects.target;
+        let mut done = vec![false; edges.len()];
+        for index in 0..edges.len() {
+            if done.get(index).copied().unwrap_or(true) || knife.get(index).copied().unwrap_or(true)
+            {
+                continue;
+            }
+            let size = value(sizes, index)?;
+            let mut group = Vec::new();
+            for other in index..edges.len() {
+                if chains.get(index) == chains.get(other)
+                    && !knife.get(other).copied().unwrap_or(false)
+                    && value(sizes, other)? == size
+                {
+                    group.push(other);
+                    if let Some(slot) = done.get_mut(other) {
+                        *slot = true;
+                    }
+                }
+            }
+            let members: Option<Vec<Leg>> = group
+                .iter()
+                .map(|&m| legs.get(m).copied().flatten())
+                .collect();
+            let Some(members) = members else {
+                continue;
+            };
+            if !members.iter().any(|m| m.curved) {
+                continue;
+            }
+            let (Some(lead), Some(flips)) =
+                (members.first().map(|m| m.pair), chain_sides(&members))
+            else {
+                continue;
+            };
+            // in the chain's side order: entry 1 on the side of the first member's support 1
+            let side = |pair: [f64; 2], flip: bool| if flip { swapped(pair) } else { pair };
+            let mut tolerance = 0.0_f64;
+            // the group's members are indices into `edges`
+            for id in group.iter().filter_map(|&m| edges.get(m).copied()) {
+                tolerance = tolerance.max(edge::tolerance(target, id)?);
+            }
+            let agree = members.iter().zip(&flips).all(|(m, &flip)| {
+                let p = side(m.pair, flip);
+                (p[0] - lead[0]).abs() <= tolerance && (p[1] - lead[1]).abs() <= tolerance
+            });
+            if !agree {
+                continue;
+            }
+            let taken: Option<Vec<([f64; 2], ChamferDefinition)>> = members
+                .iter()
+                .zip(&flips)
+                .map(|(m, &flip)| {
+                    let pair = side(lead, flip);
+                    ChamferDefinition::of_offsets(pair, m.wedge)
+                        .ok()
+                        .map(|d| (pair, d))
+                })
+                .collect();
+            let Some(taken) = taken else {
+                continue;
+            };
+            for (&m, (pair, definition)) in group.iter().zip(taken) {
+                if let (Some(f), Some(s), Some(c)) =
+                    (first.get_mut(m), second.get_mut(m), chamfers.get_mut(m))
+                {
+                    *f = pair[0];
+                    *s = pair[1];
+                    *c = Some(definition);
+                }
+            }
+            self.objects.straight_setback_edges += group.len();
         }
         let offsets: Vec<[f64; 2]> = first.iter().zip(&second).map(|(&a, &b)| [a, b]).collect();
         let solvers_before = self.objects.solvers.len();

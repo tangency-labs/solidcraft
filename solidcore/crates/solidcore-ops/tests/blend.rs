@@ -4149,17 +4149,15 @@ fn both_flat_face_loops_of_a_notched_half_torus_round() {
     assert!(rel(actual, expected) < 1e-8, "{actual} vs {expected}");
 }
 
-/// The volume a round of radius `r` (`chamfer: false`) or a chamfer of distance `r` takes off
-/// one rim of the upper half of a torus (ring radius `a`, tube radius `b`) cut by the plane
-/// through its axis' middle: the outer rim for `side` 1, the inner for -1. The blend is the
-/// revolved meridian blend of the tube's circle and the cut line, which meet square. Both are
-/// fixed by where the circle's and the line's offsets by `r` meet, the centre (x, r) with
-/// |x - a| = sqrt((b - r)^2 - r^2): the round is the circle about it, and the chamfer joins its
-/// feet, (x, 0) on the line and the point of the tube's circle along the centre's direction from
-/// the tube's centre. By Pappus, the volume is 2 pi times the first moment about the axis of the
-/// region between the blend and the corner, integrated over z (the substitution
-/// z = h (1 - cos t) / 2 takes the square roots' ends smoothly).
-fn half_torus_rim_blend_takes(a: f64, b: f64, r: f64, side: f64, chamfer: bool) -> f64 {
+/// The volume a round of radius `r` takes off one rim of the upper half of a torus (ring radius
+/// `a`, tube radius `b`) cut by the plane through its axis' middle: the outer rim for `side` 1,
+/// the inner for -1. The round is the revolved meridian blend of the tube's circle and the cut
+/// line, which meet square, fixed by where the circle's and the line's offsets by `r` meet, the
+/// centre (x, r) with |x - a| = sqrt((b - r)^2 - r^2): the circle about it. By Pappus, the
+/// volume is 2 pi times the first moment about the axis of the region between the round and
+/// the corner, integrated over z (the substitution z = h (1 - cos t) / 2 takes the square
+/// roots' ends smoothly).
+fn half_torus_rim_round_takes(a: f64, b: f64, r: f64, side: f64) -> f64 {
     let x = a + side * ((b - r).powi(2) - r * r).sqrt();
     let foot = [a + (x - a) * b / (b - r), r * b / (b - r)];
     let n = 20_000;
@@ -4169,11 +4167,7 @@ fn half_torus_rim_blend_takes(a: f64, b: f64, r: f64, side: f64, chamfer: bool) 
         let z = foot[1] * (1.0 - t.cos()) / 2.0;
         let dz = foot[1] * t.sin() / 2.0 * PI / f64::from(n);
         let tube = a + side * (b * b - z * z).sqrt();
-        let blend = if chamfer {
-            x + (foot[0] - x) * z / foot[1]
-        } else {
-            x + side * (r * r - (z - r).powi(2)).max(0.0).sqrt()
-        };
+        let blend = x + side * (r * r - (z - r).powi(2)).max(0.0).sqrt();
         moment += (tube * tube - blend * blend).abs() / 2.0 * dz;
     }
     2.0 * PI * moment
@@ -4183,7 +4177,9 @@ fn half_torus_rim_blend_takes(a: f64, b: f64, r: f64, side: f64, chamfer: bool) 
 /// Ø300 / Ø80 ring and did not finish at Ø3000 / Ø800 or on the Ø1000 / Ø1 ring, the time
 /// growing with the edges' length in tolerances; the rims are circles, so the blend is exact
 /// (#19190). Each ring is the issue's (blend size 0.05 x the tube's diameter) and takes the
-/// closed-form volume.
+/// closed-form volume. The chamfer's distances are straight setbacks (#13710): `r` along the
+/// cut face from the rim, and a chord of `r` on the tube's circle (curvature 1/b), the section
+/// [`straight_leg_section`] turned about the axis.
 #[test]
 fn both_flat_face_rims_of_a_large_half_torus_blend_to_their_closed_forms() {
     use solidcore_ops::boolean::boolean;
@@ -4228,10 +4224,28 @@ fn both_flat_face_rims_of_a_large_half_torus_blend_to_their_closed_forms() {
             let report = body.check(CheckLevel::All).unwrap();
             assert!(report.is_valid(), "{}", report.text);
             assert_eq!(body.solid_count().unwrap(), 1);
-            let chamfer = kind == Blend::Chamfer;
-            let expected = PI * PI * a * b * b
-                - half_torus_rim_blend_takes(a, b, r, 1.0, chamfer)
-                - half_torus_rim_blend_takes(a, b, r, -1.0, chamfer);
+            let takes = |side: f64| {
+                if kind == Blend::Round {
+                    return half_torus_rim_round_takes(a, b, r, side);
+                }
+                // the rim at (a + side b, 0) in the meridian (radius, z): the cut face toward
+                // the tube's centre, the tube up from it
+                let flat = LegSide {
+                    t: [-side, 0.0],
+                    w: [0.0, 1.0],
+                    k: 0.0,
+                    d: r,
+                };
+                let tube = LegSide {
+                    t: [0.0, 1.0],
+                    w: [-side, 0.0],
+                    k: 1.0 / b,
+                    d: r,
+                };
+                let (area, x) = straight_leg_section([a + side * b, 0.0], [flat, tube]);
+                2.0 * PI * area * x
+            };
+            let expected = PI * PI * a * b * b - takes(1.0) - takes(-1.0);
             let actual = volume(&body);
             assert!(
                 rel(actual, expected) < 1e-6,
@@ -5788,6 +5802,27 @@ fn capsule_section(plane: f64, round: f64, ball: bool) -> (f64, f64) {
 /// The half capsule's volume: half the cylinder and half of each of two hemispheres.
 const HALF_CAPSULE: f64 = 0.5 * PI * 25.0 * 10.0 + 2.0 * PI * 125.0 / 3.0;
 
+/// The section a chamfer of straight setbacks (#13710) takes off the half capsule's outline,
+/// `flat` along the cut face and `round` (a chord) on the curved face, and its first moment
+/// about the axis [`capsule_section`] measures from: the edge at (5, 0), the cut face toward
+/// the axis, the curved face up from it, a circle of curvature 1/5 ([`straight_leg_section`]).
+fn capsule_straight_section(flat: f64, round: f64) -> (f64, f64) {
+    let cut = LegSide {
+        t: [-1.0, 0.0],
+        w: [0.0, 1.0],
+        k: 0.0,
+        d: flat,
+    };
+    let curved = LegSide {
+        t: [0.0, 1.0],
+        w: [-1.0, 0.0],
+        k: 0.2,
+        d: round,
+    };
+    let (area, x) = straight_leg_section([5.0, 0.0], [cut, curved]);
+    (area, area * x)
+}
+
 /// An unequal chamfer of the half capsule's whole outline, the first size along the cut face,
 /// was refused ("the chamfer size", status 1007). The chain is measured at its narrowest
 /// wedge, a right angle all round, and lifted to where unequal sizes do not fold, from each
@@ -5795,11 +5830,9 @@ const HALF_CAPSULE: f64 = 0.5 * PI * 25.0 * 10.0 + 2.0 * PI * 125.0 / 3.0;
 /// arc that ends at a sphere's pole the normal `S_u x S_v` vanishes there, so the piece of the
 /// arc that holds the pole bounds no cosine however often it is halved: the bound was a half
 /// turn, and a chamfer at a wedge of pi has no definition. A sphere's normal is now enclosed
-/// by its definition, `S - c`, and every arc is bounded at a right angle. At that wedge the
-/// offsets are the setbacks swapped (`ChamferDefinition::offsets`): the cut face is offset by
-/// the second size and the curved faces by the first. The chamfer takes off the section of
-/// [`capsule_section`] along the two lines (10 each) and, by Pappus, turned through pi about
-/// each sphere's centre.
+/// by its definition, `S - c`, and every arc is bounded at a right angle. The chamfer's sizes
+/// are straight setbacks (#13710): it takes off [`capsule_straight_section`] along the two lines
+/// (10 each) and, by Pappus, turned through pi about each sphere's centre.
 #[test]
 fn an_unequal_chamfer_of_a_half_capsule_s_outline_is_measured_at_a_right_angle() {
     use solidcore::blend::chamfer_side::widest_wedge_bound;
@@ -5840,7 +5873,7 @@ fn an_unequal_chamfer_of_a_half_capsule_s_outline_is_measured_at_a_right_angle()
             b.check(CheckLevel::All).unwrap().is_valid(),
             "{flat}/{round}"
         );
-        let (area, moment) = capsule_section(round, flat, false);
+        let (area, moment) = capsule_straight_section(flat, round);
         let want = HALF_CAPSULE - 20.0 * area - 2.0 * PI * moment;
         assert!(
             rel(volume(&b), want) < 1e-9,
@@ -6060,6 +6093,415 @@ fn a_full_round_whose_rails_meet_along_part_of_one_of_them() {
     }
 }
 
+/// One support of a chamfer's section at its edge point E, in the plane square to the edge
+/// (#13710): `t` the unit tangent into the face, `w` the unit normal toward the other
+/// support, `k` the signed curvature of the section (> 0 with its centre on the `w` side, a
+/// convex support; < 0 a socket or groove), `d` the setback, a straight line from E.
+#[derive(Debug, Clone, Copy)]
+struct LegSide {
+    t: [f64; 2],
+    w: [f64; 2],
+    k: f64,
+    d: f64,
+}
+
+/// The section a chamfer of straight setbacks takes off at E (#13710's definition): its area
+/// and its centroid's first coordinate. Each foot is the point of its support's section at
+/// chord `d` from E, `F = E + d (cos b t + sin b w)` with `b = asin(d k / 2)`, the angle
+/// between a chord of a circle and its tangent. The section is the triangle (E, F1, F2), and
+/// on a curved support the segment between its arc E..F and the chord, of angle `2 |b|` and
+/// area `rho² (2|b| − sin 2|b|) / 2` with its centroid `4 rho sin³|b| / (3 (2|b| − sin 2|b|))`
+/// from the centre toward the chord: taken off with the triangle where the support is convex,
+/// left on it where it is concave.
+fn straight_leg_section(e: [f64; 2], sides: [LegSide; 2]) -> (f64, f64) {
+    let foot = |s: &LegSide| {
+        let b = (0.5 * s.d * s.k).asin();
+        [
+            e[0] + s.d * (b.cos() * s.t[0] + b.sin() * s.w[0]),
+            e[1] + s.d * (b.cos() * s.t[1] + b.sin() * s.w[1]),
+        ]
+    };
+    let [f1, f2] = [foot(&sides[0]), foot(&sides[1])];
+    let mut area = 0.5 * ((f1[0] - e[0]) * (f2[1] - e[1]) - (f1[1] - e[1]) * (f2[0] - e[0])).abs();
+    let mut moment = area * (e[0] + f1[0] + f2[0]) / 3.0;
+    for (s, f) in sides.iter().zip([f1, f2]) {
+        if s.k == 0.0 {
+            continue;
+        }
+        let rho = 1.0 / s.k.abs();
+        let theta = 2.0 * (0.5 * s.d * s.k).asin().abs();
+        let piece = 0.5 * rho * rho * (theta - theta.sin());
+        let c = [e[0] + s.w[0] / s.k, e[1] + s.w[1] / s.k];
+        let m = [0.5 * (e[0] + f[0]) - c[0], 0.5 * (e[1] + f[1]) - c[1]];
+        let reach = 4.0 * rho * (0.5 * theta).sin().powi(3) / (3.0 * (theta - theta.sin()));
+        let x = c[0] + reach * m[0] / m[0].hypot(m[1]);
+        let sign = s.k.signum();
+        area += sign * piece;
+        moment += sign * piece * x;
+    }
+    (area, moment / area)
+}
+
+/// Chamfers `edges` of `body` at `sizes`, the first along the face that leans most along
+/// `along`, and grades the result against `want`: valid, one solid, the closed-form volume to
+/// 1e-9.
+fn grade_straight_legs(
+    case: &str,
+    body: &Body,
+    edges: &[usize],
+    along: [f64; 3],
+    sizes: [f64; 2],
+    want: f64,
+) {
+    let faces: Vec<usize> = edges
+        .iter()
+        .map(|&e| {
+            let f = edge_faces_along(body, e, along).unwrap();
+            if f[0].1 > f[1].1 {
+                f[0].0
+            } else {
+                f[1].0
+            }
+        })
+        .collect();
+    chamfer_sides(
+        body,
+        edges,
+        &faces,
+        sizes[0],
+        ChamferSecond::Distance(sizes[1]),
+    )
+    .unwrap_or_else(|e| panic!("{case}: {e:?}"));
+    let report = body.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{case}: {report}");
+    assert_eq!(body.solid_count().unwrap(), 1, "{case}");
+    let got = body.volume(1e-11).unwrap();
+    assert!(
+        (got - want).abs() <= 1e-9 * want,
+        "{case}: {got} vs closed form {want}"
+    );
+}
+
+/// #13710: a chamfer's distances are setbacks, straight lines from the edge in the plane
+/// square to it, at every station, also where a support's section is a circle. Rims of
+/// surfaces sharing an axis, graded by Pappus (the section turned about the axis at its
+/// centroid). The hemisphere of radius 5 (#20162's): 2 on the flat and 1 on the ball, then
+/// equal 0.5 and equal 2. Its rim at (5, 0) in the plane (radius, z): along the flat inward,
+/// along the ball upward, curvature 1/5. A plate less a ball of radius 5 at its top centre, a
+/// socket (a concave support, curvature −1/5): 1 and 1. The upper half of a torus 10 / 2, both
+/// rims at once, equal 0.5. A sector of the ball of radius 5 within a cone of half angle 45°
+/// about +z from its centre: its rim, 2 on the cone and 1 on the ball.
+#[test]
+fn chamfers_on_rims_of_curved_sections_hold_their_straight_setbacks() {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::sweep::revolve;
+    use solidcore_ops::{make_sphere, make_torus, BooleanOp};
+
+    all_fixes();
+    let pappus = |e: [f64; 2], sides: [LegSide; 2]| {
+        let (area, x) = straight_leg_section(e, sides);
+        2.0 * PI * area * x
+    };
+    let flat = |d: f64, inward: f64| LegSide {
+        t: [inward, 0.0],
+        w: [0.0, 1.0],
+        k: 0.0,
+        d,
+    };
+    let hemisphere = || {
+        let ball = make_sphere([0.0; 3], 5.0).unwrap();
+        let below = make_box([-6.0, -6.0, -6.0], [12.0, 12.0, 6.0]).unwrap();
+        boolean(ball, below, BooleanOp::Subtract).unwrap().unwrap()
+    };
+    for [on_flat, on_ball] in [[2.0, 1.0], [0.5, 0.5], [2.0, 2.0]] {
+        let b = hemisphere();
+        let rim = edge_at(&b, [3.0, 4.0, 0.0]);
+        let ball = LegSide {
+            t: [0.0, 1.0],
+            w: [-1.0, 0.0],
+            k: 0.2,
+            d: on_ball,
+        };
+        let want = 250.0 * PI / 3.0 - pappus([5.0, 0.0], [flat(on_flat, -1.0), ball]);
+        grade_straight_legs(
+            &format!("hemisphere, {on_flat} on the flat, {on_ball} on the ball"),
+            &b,
+            &[rim],
+            [0.0, 0.0, -1.0],
+            [on_flat, on_ball],
+            want,
+        );
+    }
+
+    let plate = make_box([-10.0, -10.0, 0.0], [20.0, 20.0, 10.0]).unwrap();
+    let ball = make_sphere([0.0, 0.0, 10.0], 5.0).unwrap();
+    let b = boolean(plate, ball, BooleanOp::Subtract).unwrap().unwrap();
+    let rim = edge_at(&b, [3.0, 4.0, 10.0]);
+    let top = LegSide {
+        t: [1.0, 0.0],
+        w: [0.0, -1.0],
+        k: 0.0,
+        d: 1.0,
+    };
+    let socket = LegSide {
+        t: [0.0, -1.0],
+        w: [1.0, 0.0],
+        k: -0.2,
+        d: 1.0,
+    };
+    let want = 4000.0 - 250.0 * PI / 3.0 - pappus([5.0, 10.0], [top, socket]);
+    grade_straight_legs(
+        "socket, 1 and 1",
+        &b,
+        &[rim],
+        [0.0, 0.0, 1.0],
+        [1.0, 1.0],
+        want,
+    );
+
+    let ring = make_torus([0.0; 3], 10.0, 2.0).unwrap();
+    let below = make_box([-13.0, -13.0, -3.0], [26.0, 26.0, 3.0]).unwrap();
+    let b = boolean(ring, below, BooleanOp::Subtract).unwrap().unwrap();
+    let rims = [edge_at(&b, [7.2, 9.6, 0.0]), edge_at(&b, [4.8, 6.4, 0.0])];
+    let tube = |w: f64| LegSide {
+        t: [0.0, 1.0],
+        w: [w, 0.0],
+        k: 0.5,
+        d: 0.5,
+    };
+    let want = PI * PI * 10.0 * 4.0
+        - pappus([12.0, 0.0], [flat(0.5, -1.0), tube(-1.0)])
+        - pappus([8.0, 0.0], [flat(0.5, 1.0), tube(1.0)]);
+    grade_straight_legs(
+        "half torus 10 / 2, both rims, equal 0.5",
+        &b,
+        &rims,
+        [0.0, 0.0, -1.0],
+        [0.5, 0.5],
+        want,
+    );
+
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let sector = revolve(
+        &[
+            Curve::Line {
+                start: [0.0; 3],
+                end: [5.0 * s, 0.0, 5.0 * s],
+            },
+            Curve::Arc {
+                center: [0.0; 3],
+                axis: [0.0, -1.0, 0.0],
+                reference: [1.0, 0.0, 0.0],
+                radius: 5.0,
+                start: 0.25 * PI,
+                end: 0.5 * PI,
+            },
+            Curve::Line {
+                start: [0.0, 0.0, 5.0],
+                end: [0.0; 3],
+            },
+        ],
+        [0.0; 3],
+        [0.0, 0.0, 1.0],
+        2.0 * PI,
+        true,
+    )
+    .unwrap();
+    let rim = edge_at(&sector, [3.0 * s, 4.0 * s, 5.0 * s]);
+    let cone = LegSide {
+        t: [-s, -s],
+        w: [-s, s],
+        k: 0.0,
+        d: 2.0,
+    };
+    let cap = LegSide {
+        t: [-s, s],
+        w: [-s, -s],
+        k: 0.2,
+        d: 1.0,
+    };
+    let want = 2.0 * PI / 3.0 * 125.0 * (1.0 - s) - pappus([5.0 * s, 5.0 * s], [cone, cap]);
+    grade_straight_legs(
+        "ball sector within a 45° cone, 2 on the cone, 1 on the ball",
+        &sector,
+        &[rim],
+        [0.0, 0.0, -1.0],
+        [2.0, 1.0],
+        want,
+    );
+}
+
+/// #13710 along straight edges: a support's section square to the edge is the same circle at
+/// every station, so the setbacks hold all along. A bar of radius 5 and length 10 along z with
+/// a flat at y = c (its part y <= c): at c = 3 and c = 0, 1 on the flat and 1.5 on the round;
+/// at c = −3, equal 1. Its edge at (sqrt(25 − c²), c): along the flat toward the axis, along
+/// the round downward. A plate with a groove of radius 3 along z in its face y = 0, one of
+/// the groove's edges, equal 1 (a concave support). The lens where bars of radius 5 along z,
+/// their axes 6 apart, overlap: one of its edges, equal 1 (two convex supports).
+#[test]
+fn chamfers_along_straight_edges_of_curved_sections_hold_their_straight_setbacks() {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::BooleanOp;
+
+    all_fixes();
+    let prism = |e: [f64; 2], sides: [LegSide; 2]| 10.0 * straight_leg_section(e, sides).0;
+    for (c, sizes) in [(3.0_f64, [1.0, 1.5]), (0.0, [1.0, 1.5]), (-3.0, [1.0, 1.0])] {
+        let bar = make_cylinder([0.0; 3], 5.0, 10.0).unwrap();
+        let above = make_box([-6.0, c, -1.0], [12.0, 6.0 - c, 12.0]).unwrap();
+        let b = boolean(bar, above, BooleanOp::Subtract).unwrap().unwrap();
+        let x = (25.0 - c * c).sqrt();
+        let edge = edge_at(&b, [x, c, 5.0]);
+        let on_flat = LegSide {
+            t: [-1.0, 0.0],
+            w: [0.0, -1.0],
+            k: 0.0,
+            d: sizes[0],
+        };
+        let on_round = LegSide {
+            t: [c / 5.0, -x / 5.0],
+            w: [-x / 5.0, -c / 5.0],
+            k: 0.2,
+            d: sizes[1],
+        };
+        // the disc less its segment past y = c
+        let kept = 25.0 * PI - (25.0 * (c / 5.0).acos() - c * x);
+        let want = 10.0 * kept - prism([x, c], [on_flat, on_round]);
+        grade_straight_legs(
+            &format!("bar flat at y = {c}, {sizes:?}"),
+            &b,
+            &[edge],
+            [0.0, 1.0, 0.0],
+            sizes,
+            want,
+        );
+    }
+
+    let plate = make_box([-10.0, -10.0, 0.0], [20.0, 10.0, 10.0]).unwrap();
+    let groove = make_cylinder([0.0, 0.0, -1.0], 3.0, 12.0).unwrap();
+    let b = boolean(plate, groove, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let edge = edge_at(&b, [3.0, 0.0, 5.0]);
+    let face = LegSide {
+        t: [1.0, 0.0],
+        w: [0.0, -1.0],
+        k: 0.0,
+        d: 1.0,
+    };
+    let wall = LegSide {
+        t: [0.0, -1.0],
+        w: [1.0, 0.0],
+        k: -1.0 / 3.0,
+        d: 1.0,
+    };
+    let want = 2000.0 - 45.0 * PI - prism([3.0, 0.0], [face, wall]);
+    grade_straight_legs(
+        "groove of radius 3, equal 1",
+        &b,
+        &[edge],
+        [0.0, 1.0, 0.0],
+        [1.0, 1.0],
+        want,
+    );
+
+    let left = make_cylinder([-3.0, 0.0, 0.0], 5.0, 10.0).unwrap();
+    let right = make_cylinder([3.0, 0.0, 0.0], 5.0, 10.0).unwrap();
+    let b = boolean(left, right, BooleanOp::Intersect).unwrap().unwrap();
+    let edge = edge_at(&b, [0.0, 4.0, 5.0]);
+    // the face toward +x is the left bar's (centre (−3, 0)), the other the right bar's
+    let east = LegSide {
+        t: [0.8, -0.6],
+        w: [-0.6, -0.8],
+        k: 0.2,
+        d: 1.0,
+    };
+    let west = LegSide {
+        t: [-0.8, -0.6],
+        w: [0.6, -0.8],
+        k: 0.2,
+        d: 1.0,
+    };
+    let lens = 2.0 * (25.0 * (0.6_f64).acos() - 12.0);
+    let want = 10.0 * lens - prism([0.0, 4.0], [east, west]);
+    grade_straight_legs(
+        "lens of two bars, equal 1",
+        &b,
+        &[edge],
+        [1.0, 0.0, 0.0],
+        [1.0, 1.0],
+        want,
+    );
+}
+
+/// #13710 (the spec's row T12): a ball-end slot, its whole top rim chamfered equal 1 as one
+/// tangent chain: two straight edges of a groove and two half rims of balls, whose supports
+/// are the other way round from edge to edge. A plate 40 x 20 x 10 (z in [-10, 0]) less a slot
+/// cut down from its top face: a half cylinder of radius 3 along x from -5 to 5, its axis in the
+/// top face, closed at each end by a quarter ball of radius 3 about the axis's end (the balls'
+/// poles, along z, off the rim). Every station's section is the groove's: the top face along
+/// +y off the rim, the slot's wall down it, curvature -1/3. So the straight edges lose the
+/// section times their length, 10 each, and each half rim the section turned half way about its
+/// ball's vertical axis (Pappus).
+#[test]
+fn a_chamfer_of_a_ball_end_slot_s_whole_rim_holds_its_straight_setbacks() {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::sweep::revolve;
+    use solidcore_ops::{make_sphere, BooleanOp};
+
+    all_fixes();
+    let plate = make_box([-20.0, -10.0, -10.0], [40.0, 20.0, 10.0]).unwrap();
+    let line = |start: [f64; 3], end: [f64; 3]| Curve::Line { start, end };
+    let bar = revolve(
+        &[
+            line([-5.0, 0.0, 0.0], [5.0, 0.0, 0.0]),
+            line([5.0, 0.0, 0.0], [5.0, 0.0, 3.0]),
+            line([5.0, 0.0, 3.0], [-5.0, 0.0, 3.0]),
+            line([-5.0, 0.0, 3.0], [-5.0, 0.0, 0.0]),
+        ],
+        [0.0; 3],
+        [1.0, 0.0, 0.0],
+        2.0 * PI,
+        true,
+    )
+    .unwrap();
+    let mut cutter = bar;
+    for x in [-5.0, 5.0] {
+        let ball = make_sphere([x, 0.0, 0.0], 3.0).unwrap();
+        cutter = boolean(cutter, ball, BooleanOp::Union).unwrap().unwrap();
+    }
+    let b = boolean(plate, cutter, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let pick = nearest_edge(&b, [0.0, 3.0, 0.0]);
+    let edges = tangent_chain(&b, None, &[pick], &[], 2.0 * PI / 180.0)
+        .unwrap()
+        .members;
+    assert!(edges.len() >= 4, "{edges:?}");
+    blend(&b, Blend::Chamfer, &edges, &[1.0], &[], Corners::Filled).unwrap();
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    assert_eq!(b.solid_count().unwrap(), 1);
+    let top = LegSide {
+        t: [1.0, 0.0],
+        w: [0.0, -1.0],
+        k: 0.0,
+        d: 1.0,
+    };
+    let wall = LegSide {
+        t: [0.0, -1.0],
+        w: [1.0, 0.0],
+        k: -1.0 / 3.0,
+        d: 1.0,
+    };
+    let (area, x) = straight_leg_section([3.0, 0.0], [top, wall]);
+    let want = 8000.0 - (45.0 * PI + 18.0 * PI) - (20.0 * area + 2.0 * PI * area * x);
+    let got = b.volume(1e-11).unwrap();
+    assert!(
+        (got - want).abs() <= 1e-9 * want,
+        "{got} vs closed form {want}"
+    );
+}
+
 /// The half capsule's outline from pole to pole (the line x = 5 and its two quarter arcs) is
 /// one chain that ends at the spheres' poles, where it runs on into the arcs left sharp. A
 /// chamfer or a round of it failed ("Fillet Surface Computation Failure", status 1001): the
@@ -6067,8 +6509,9 @@ fn a_full_round_whose_rails_meet_along_part_of_one_of_them() {
 /// first-order image in the sphere's parameters, which is 0 at a pole, so the solve started on
 /// the pole, where the longitude is undetermined, and found none. The step is now taken in
 /// 3D. Each end is the section in the plane through the pole square to the edge, so the blend
-/// takes off [`capsule_section`] along the line (10) and, by Pappus, turned through pi/2 about
-/// each sphere's centre. An equal chamfer of 1 has offsets 1 at a right angle.
+/// takes off its section along the line (10) and, by Pappus, turned through pi/2 about each
+/// sphere's centre: a round of 1 [`capsule_section`]'s, an equal chamfer of 1 the straight
+/// setbacks' (#13710, [`capsule_straight_section`]).
 #[test]
 fn a_chamfer_or_round_of_a_half_capsule_s_outline_from_pole_to_pole_builds() {
     all_fixes();
@@ -6085,7 +6528,11 @@ fn a_chamfer_or_round_of_a_half_capsule_s_outline_from_pole_to_pole_builds() {
         let kind = if ball { Blend::Round } else { Blend::Chamfer };
         blend(&b, kind, &edges, &[1.0], &[], Corners::Filled).unwrap();
         assert!(b.check(CheckLevel::All).unwrap().is_valid(), "{kind:?}");
-        let (area, moment) = capsule_section(1.0, 1.0, ball);
+        let (area, moment) = if ball {
+            capsule_section(1.0, 1.0, true)
+        } else {
+            capsule_straight_section(1.0, 1.0)
+        };
         let want = HALF_CAPSULE - 10.0 * area - PI * moment;
         assert!(
             rel(volume(&b), want) < 1e-9,

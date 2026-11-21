@@ -814,7 +814,16 @@ fn prepare(
             s.prepare_per_edge_constant_distance(k, edges, sizes, &circular, 1, 1.0)
         }
         (Section::Chamfer { sizes, along }, _) => {
-            s.prepare_chamfers_along(k, edges, sizes, along).map(|_| ())
+            let state = STRAIGHT_SETBACKS.with(std::cell::Cell::get);
+            s.set_straight_setbacks(!state.off);
+            let prepared = s.prepare_chamfers_along(k, edges, sizes, along).map(|_| ());
+            let taken = s.straight_setback_edges();
+            STRAIGHT_SETBACKS.with(|c| {
+                let mut now = c.get();
+                now.taken = now.taken.saturating_add(taken);
+                c.set(now);
+            });
+            prepared
         }
     }
 }
@@ -1614,6 +1623,63 @@ pub fn blend_with(
 
 /// [`blend`] and [`blend_ordered`]: the edges and setback vertices picked natively or through
 /// `order`, blended with every pass turning and chamfers closing as `options` says.
+/// #13710 phase 1: a chamfer call's straight setbacks, on this thread. `off` while the call is
+/// rerun with today's conversion; `taken`, how many edges its passes gave straight-setback
+/// offsets.
+#[derive(Debug, Clone, Copy, Default)]
+struct StraightSetbacks {
+    off: bool,
+    taken: usize,
+}
+
+thread_local! {
+    static STRAIGHT_SETBACKS: std::cell::Cell<StraightSetbacks> =
+        const { std::cell::Cell::new(StraightSetbacks { off: false, taken: 0 }) };
+}
+
+/// How many chamfer calls `with_straight_setback_retry` has rerun with today's conversion.
+static STRAIGHT_SETBACK_RETRIES: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// How many chamfer calls, since the process started, were refused or failed with straight
+/// setbacks (#13710 phase 1) and were rerun with today's conversion of the sizes to offsets:
+/// for the kernel-case rigs' counts. Phase 2 removes the retry.
+#[must_use]
+pub fn straight_setback_retries() -> usize {
+    STRAIGHT_SETBACK_RETRIES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Runs a chamfer call, and where it is refused or fails after any of its edges took
+/// straight-setback offsets (#13710 phase 1), runs it once more with today's conversion and
+/// returns that. A longer leg can meet geometry today's missed, so a refusal is always today's,
+/// with today's fit size, and valid input never becomes one. Per call, not per chain: a call's
+/// edges and corners are solved together. `with_body` puts the body back after a refusal or a
+/// failure, so the rerun starts from the body as it came in. A cancelled call is not rerun.
+fn with_straight_setback_retry<T>(run: impl Fn() -> Result<Result<T>>) -> Result<Result<T>> {
+    let before = STRAIGHT_SETBACKS.with(std::cell::Cell::get);
+    STRAIGHT_SETBACKS.with(|c| c.set(StraightSetbacks::default()));
+    let first = run();
+    let taken = STRAIGHT_SETBACKS.with(|c| c.get().taken);
+    let failed = match &first {
+        Err(_) => !crate::cancel::is_cancelled(),
+        Ok(r) => r.is_err(),
+    };
+    let result = if failed && taken > 0 {
+        STRAIGHT_SETBACK_RETRIES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        STRAIGHT_SETBACKS.with(|c| {
+            c.set(StraightSetbacks {
+                off: true,
+                taken: 0,
+            });
+        });
+        run()
+    } else {
+        first
+    };
+    STRAIGHT_SETBACKS.with(|c| c.set(before));
+    result
+}
+
 fn blend_impl(
     body: &Body,
     order: Option<&crate::Order>,
@@ -1648,31 +1714,38 @@ fn blend_impl(
                 .unwrap_or(0.0)
         })
         .collect();
-    with_body("blend", body, |k, b| {
-        // the faces the blend makes, as the kernel's fillet sessions mark them: its log on for
-        // this blend, whatever the caller had it at, and put back after
-        let outer = k.blend_face_log.replace(BlendFaceLog::default());
-        let ran = blend_on_body(k, b, order, kind, edges, &each, setbacks, corners, options);
-        let ours = std::mem::replace(&mut k.blend_face_log, outer);
-        let made: HashSet<FaceId> = ours
-            .iter()
-            .flat_map(|log| log.sessions.iter().flatten())
-            .map(|m| m.face)
-            .collect();
-        if let (Some(log), Some(ours)) = (k.blend_face_log.as_mut(), ours) {
-            log.sessions.extend(ours.sessions);
-        }
-        Ok(ran?.map(|mut blended| {
-            blended.made = b
-                .face_list()
+    let run = || {
+        with_body("blend", body, |k, b| {
+            // the faces the blend makes, as the kernel's fillet sessions mark them: its log on for
+            // this blend, whatever the caller had it at, and put back after
+            let outer = k.blend_face_log.replace(BlendFaceLog::default());
+            let ran = blend_on_body(k, b, order, kind, edges, &each, setbacks, corners, options);
+            let ours = std::mem::replace(&mut k.blend_face_log, outer);
+            let made: HashSet<FaceId> = ours
                 .iter()
-                .enumerate()
-                .filter(|(_, f)| made.contains(f))
-                .map(|(i, _)| i)
+                .flat_map(|log| log.sessions.iter().flatten())
+                .map(|m| m.face)
                 .collect();
-            blended
-        }))
-    })?
+            if let (Some(log), Some(ours)) = (k.blend_face_log.as_mut(), ours) {
+                log.sessions.extend(ours.sessions);
+            }
+            Ok(ran?.map(|mut blended| {
+                blended.made = b
+                    .face_list()
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, f)| made.contains(f))
+                    .map(|(i, _)| i)
+                    .collect();
+                blended
+            }))
+        })
+    };
+    if kind == Blend::Chamfer {
+        with_straight_setback_retry(run)?
+    } else {
+        run()?
+    }
 }
 
 /// [`blend_impl`] on the kernel's body: every pass, its corners and refusals, the body
@@ -2803,77 +2876,80 @@ fn chamfer_sides_impl(
         ChamferSecond::Distance(d) => ChamferSize::Distances([distance, d]),
         ChamferSecond::Angle(angle) => ChamferSize::DistanceAngle { distance, angle },
     };
-    with_body("chamfer_sides", body, |k, b| {
-        let edge_order = order.map_or_else(|| b.edge_list(), |o| o.edges.as_slice());
-        let picked = match each_once(edge_order, edges) {
-            Ok(p) => p,
-            Err(e) => return Ok(Err(e)),
-        };
-        if picked.iter().any(|e| !b.edge_list().contains(e)) {
-            return Ok(Err(Error::Argument));
-        }
-        let mut faces = Vec::new();
-        match along {
-            Along::Faces(along) => {
-                let face_order = order.map_or_else(|| b.face_list(), |o| o.faces.as_slice());
-                for &f in along {
-                    match face_order.get(f) {
-                        Some(&f) if b.face_list().contains(&f) => faces.push(f),
-                        _ => return Ok(Err(Error::Argument)),
+    let run = || {
+        with_body("chamfer_sides", body, |k, b| {
+            let edge_order = order.map_or_else(|| b.edge_list(), |o| o.edges.as_slice());
+            let picked = match each_once(edge_order, edges) {
+                Ok(p) => p,
+                Err(e) => return Ok(Err(e)),
+            };
+            if picked.iter().any(|e| !b.edge_list().contains(e)) {
+                return Ok(Err(Error::Argument));
+            }
+            let mut faces = Vec::new();
+            match along {
+                Along::Faces(along) => {
+                    let face_order = order.map_or_else(|| b.face_list(), |o| o.faces.as_slice());
+                    for &f in along {
+                        match face_order.get(f) {
+                            Some(&f) if b.face_list().contains(&f) => faces.push(f),
+                            _ => return Ok(Err(Error::Argument)),
+                        }
+                    }
+                }
+                Along::Facing([x, y, z]) => {
+                    for &e in &picked {
+                        let [(f0, l0), (f1, l1)] = faces_along(k, b, e, Vec3::new(x, y, z))?;
+                        faces.push(if l1 > l0 { f1 } else { f0 });
                     }
                 }
             }
-            Along::Facing([x, y, z]) => {
-                for &e in &picked {
-                    let [(f0, l0), (f1, l1)] = faces_along(k, b, e, Vec3::new(x, y, z))?;
-                    faces.push(if l1 > l0 { f1 } else { f0 });
-                }
-            }
-        }
-        let expect = Expect::under(k, b, Proof::default(), contract)?;
-        let p = Pass {
-            edges: &picked,
-            section: Section::Chamfer {
-                sizes: std::slice::from_ref(&size),
-                along: &faces,
-            },
-            law: None,
-            setbacks: &[],
-            earlier: &[],
-            patches: false,
-            overflow: None,
-            // a swept turn is a round's: these are chamfers
-            turn: Turn::Mitre,
-            chamfer_corner: ChamferCorner::Mitre,
-            roll_over: RollOverStep::No,
-            contract,
-        };
-        if let Err(e) = pass_or_refuse(k, b, p)? {
-            // A fixed angle scales both setbacks with the first distance. Explicit
-            // two-distance input keeps its common scale, since neither distance is primary.
-            let e = match (second, e) {
-                (
-                    ChamferSecond::Angle(_),
-                    Error::TooLarge {
-                        size,
-                        kind: FitKind::Scale,
+            let expect = Expect::under(k, b, Proof::default(), contract)?;
+            let p = Pass {
+                edges: &picked,
+                section: Section::Chamfer {
+                    sizes: std::slice::from_ref(&size),
+                    along: &faces,
+                },
+                law: None,
+                setbacks: &[],
+                earlier: &[],
+                patches: false,
+                overflow: None,
+                // a swept turn is a round's: these are chamfers
+                turn: Turn::Mitre,
+                chamfer_corner: ChamferCorner::Mitre,
+                roll_over: RollOverStep::No,
+                contract,
+            };
+            if let Err(e) = pass_or_refuse(k, b, p)? {
+                // A fixed angle scales both setbacks with the first distance. Explicit
+                // two-distance input keeps its common scale, since neither distance is primary.
+                let e = match (second, e) {
+                    (
+                        ChamferSecond::Angle(_),
+                        Error::TooLarge {
+                            size,
+                            kind: FitKind::Scale,
+                            at,
+                            face,
+                            why,
+                        },
+                    ) => Error::TooLarge {
+                        size: crate::import_geometry::scale_value(distance, size),
+                        kind: FitKind::Distance,
                         at,
                         face,
                         why,
                     },
-                ) => Error::TooLarge {
-                    size: crate::import_geometry::scale_value(distance, size),
-                    kind: FitKind::Distance,
-                    at,
-                    face,
-                    why,
-                },
-                (_, e) => e,
-            };
-            return Ok(Err(e));
-        }
-        done(k, b, expect, contract)
-    })?
+                    (_, e) => e,
+                };
+                return Ok(Err(e));
+            }
+            done(k, b, expect, contract)
+        })
+    };
+    with_straight_setback_retry(run)?
 }
 
 /// A radius law's data checked: a clamped B-spline of `degree` 1 to 3 from 0 to 1, 2 to

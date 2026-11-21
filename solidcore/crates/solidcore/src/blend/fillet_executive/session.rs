@@ -383,6 +383,14 @@ struct SessionObjects<'target> {
     /// linear section on offsets equal to the distance. Their solvers keep no chamfer
     /// definition (there is no wedge), so [`FilletSession::chamfer_fit`] reads them here.
     knife_chamfers: Vec<EdgeId>,
+    /// (not upstream, #13710 phase 1) Whether `prepare_chamfers_along` takes the straight-setback
+    /// offsets where an edge is in their domain (on by default). Off only for solidcore-ops'
+    /// retry of a chamfer call that the straight setbacks made fail, which reruns it with
+    /// today's conversion: not a fix flag, as nothing else sets it.
+    straight_setbacks: bool,
+    /// (not upstream, #13710 phase 1) How many edges `prepare_chamfers_along` gave straight-setback
+    /// offsets: the retry runs only where some were.
+    straight_setback_edges: usize,
 }
 
 impl SessionObjects<'_> {
@@ -1701,6 +1709,22 @@ impl<'target> FilletSession<'target> {
         Self::with_second_base(k, target, None)
     }
 
+    /// (not upstream, #13710 phase 1) Whether the chamfer preparations take straight-setback
+    /// offsets where an edge is in their domain; on by default. Off only for solidcore-ops'
+    /// retry of a chamfer call the straight setbacks made fail: it reruns the call with today's
+    /// conversion, so the call's refusal is always today's. Not a fix flag: nothing else turns
+    /// it off, and phase 2 deletes today's conversion.
+    pub fn set_straight_setbacks(&mut self, on: bool) {
+        self.objects.straight_setbacks = on;
+    }
+
+    /// (not upstream, #13710 phase 1) How many edges the chamfer preparations gave
+    /// straight-setback offsets.
+    #[must_use]
+    pub fn straight_setback_edges(&self) -> usize {
+        self.objects.straight_setback_edges
+    }
+
     /// [`Self::new`] for a surface/surface fillet whose second base face lies in
     /// `second_base`, a B-rep other than `target` (upstream the two original surfaces
     /// may come from different B-reps; each rail merges into its base face's B-rep).
@@ -1794,6 +1818,8 @@ impl<'target> FilletSession<'target> {
                 chamfer_corner: crate::blend::blend_corner::BlendChamferCorner::Mitre,
                 band_cut_cache: None,
                 knife_chamfers: Vec::new(),
+                straight_setbacks: true,
+                straight_setback_edges: 0,
             },
             _gn_scope: gn_scope,
         })
