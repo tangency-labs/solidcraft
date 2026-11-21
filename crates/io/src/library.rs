@@ -13,6 +13,7 @@ use crate::catalog::{Definition, Entry, LibraryLook, LibraryMaterial, Provenance
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::ErrorKind;
+use std::sync::Arc;
 
 /// The end of a library folder's manifest file name.
 pub const MANIFEST_SUFFIX: &str = ".sclibrary.json";
@@ -57,6 +58,56 @@ pub enum Place {
     Library(String),
     /// A folder whose subfolders are library folders.
     Folder(String),
+}
+
+/// The most places a user's list holds, My Library apart.
+pub const MAX_PLACES: usize = 64;
+
+impl Place {
+    /// The folder a place reads; `None` for the built-in library.
+    pub fn path(&self) -> Option<&str> {
+        match self {
+            Self::BuiltIn => None,
+            Self::Library(path) | Self::Folder(path) => Some(path),
+        }
+    }
+}
+
+/// One of the user's places: where, and whether SolidCraft may change the libraries there.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlaceRow {
+    pub place: Place,
+    pub read_only: bool,
+}
+
+/// A change to the user's list of places. A place is named by its folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PlaceEdit {
+    /// Adds a place, at the end or at `at`.
+    Add {
+        row: PlaceRow,
+        at: Option<usize>,
+    },
+    Remove {
+        path: String,
+    },
+    /// Changes a place: whether it is read-only, and where it is in the list.
+    Set {
+        path: String,
+        read_only: Option<bool>,
+        at: Option<usize>,
+    },
+}
+
+/// What a folder is compared by, so one folder is one place however it is spelled: on Windows,
+/// ASCII case and the two separators don't matter; elsewhere only a trailing `/`. Text only: a
+/// network folder is never asked.
+fn place_key(path: &str) -> String {
+    if cfg!(windows) {
+        path.to_ascii_lowercase().replace('/', "\\").trim_end_matches('\\').to_string()
+    } else {
+        path.trim_end_matches('/').to_string()
+    }
 }
 
 /// A library folder's manifest.
@@ -426,14 +477,19 @@ fn refuse_duplicate_entries(entries: &mut [Listed]) {
 /// Every place's libraries, in the places' order. A library whose id an earlier one already has
 /// is never used in its place: the set marks it unavailable, naming the first. The set keeps that
 /// verdict apart from what the scan found, so the same scans can be merged again in another order.
+/// The scans are shared, so merging again after one place's rescan copies pointers, not libraries.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Set {
-    places: Vec<Scanned>,
+    places: Vec<Arc<Scanned>>,
     /// One status per library, in place order: the scan's, or the set's verdict on top of it.
     statuses: Vec<Status>,
 }
 impl Set {
     pub fn new(places: Vec<Scanned>) -> Self {
+        Self::shared(places.into_iter().map(Arc::new).collect())
+    }
+    /// [`Set::new`] over scans other sets may hold too.
+    pub fn shared(places: Vec<Arc<Scanned>>) -> Self {
         let mut first: BTreeMap<&str, &str> = BTreeMap::new();
         let mut statuses = Vec::new();
         for library in places.iter().flat_map(|p| &p.libraries) {
@@ -451,7 +507,7 @@ impl Set {
         }
         Self { places, statuses }
     }
-    pub fn places(&self) -> &[Scanned] {
+    pub fn places(&self) -> &[Arc<Scanned>] {
         &self.places
     }
     /// Every library, in order, with its status in this set.
@@ -465,6 +521,108 @@ impl Set {
     /// A usable entry by its id (`<library id>/<entry id>`).
     pub fn get(&self, id: &str) -> Option<&Entry> {
         self.entries().find_map(|(_, listed)| listed.state.as_ref().ok().filter(|e| e.id == id))
+    }
+}
+
+/// What the libraries of a session come from: the built-in library, My Library and the user's
+/// places in their order, how far each place's scan has got, and the set merged from the scans.
+/// Only real scans enter the set: a place still scanning is listed, not made up.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Libraries {
+    my_library: Option<PlaceRow>,
+    rows: Vec<PlaceRow>,
+    /// One per place, My Library first.
+    states: Vec<RowState>,
+    set: Set,
+}
+
+/// How far a place's scan has got.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RowState {
+    /// Its scan is in the set.
+    Scanned,
+    Scanning,
+    /// No scan could start, and why.
+    NotScanned(String),
+}
+
+impl Libraries {
+    /// The libraries of `my_library` and `rows`, from the scans found so far: `scans` holds each
+    /// place's latest scan and `failed` each place whose scan couldn't start. The built-in scan
+    /// is always first.
+    pub fn new(
+        built_in: Arc<Scanned>,
+        my_library: Option<PlaceRow>,
+        rows: Vec<PlaceRow>,
+        scans: &[Arc<Scanned>],
+        failed: &[(Place, String)],
+    ) -> Self {
+        let mut found = vec![built_in];
+        let mut states = Vec::new();
+        for row in my_library.iter().chain(&rows) {
+            if let Some(scan) = scans.iter().find(|s| s.place == row.place) {
+                found.push(Arc::clone(scan));
+                states.push(RowState::Scanned);
+            } else if let Some((_, why)) = failed.iter().find(|(place, _)| *place == row.place) {
+                states.push(RowState::NotScanned(why.clone()));
+            } else {
+                states.push(RowState::Scanning);
+            }
+        }
+        Self { my_library, rows, states, set: Set::shared(found) }
+    }
+    pub fn my_library(&self) -> Option<&PlaceRow> {
+        self.my_library.as_ref()
+    }
+    /// The user's places, in order, My Library apart.
+    pub fn rows(&self) -> &[PlaceRow] {
+        &self.rows
+    }
+    /// Every place but the built-in library, My Library first, with how far its scan has got.
+    pub fn places(&self) -> impl Iterator<Item = (&PlaceRow, &RowState)> {
+        self.my_library.iter().chain(&self.rows).zip(&self.states)
+    }
+    pub fn set(&self) -> &Set {
+        &self.set
+    }
+    /// The user's places after `edit`, or why not. My Library can't be added again, and the list
+    /// holds at most [`MAX_PLACES`]. The engine checks a change with this and the app applies it
+    /// with this, so the two never disagree.
+    pub fn edit(&self, edit: &PlaceEdit) -> Result<Vec<PlaceRow>, String> {
+        let mut rows = self.rows.clone();
+        let at_path = |rows: &[PlaceRow], path: &str| rows.iter().position(|r| r.place.path().is_some_and(|p| place_key(p) == place_key(path)));
+        let fits = |at: Option<usize>, len: usize| match at {
+            Some(at) if at > len => Err(format!("`at` is {at}, past the end of the {len} places")),
+            _ => Ok(at.unwrap_or(len)),
+        };
+        match edit {
+            PlaceEdit::Add { row, at } => {
+                let Some(path) = row.place.path() else { return Err("the built-in library is always listed".into()) };
+                let mine = self.my_library.as_ref().and_then(|m| m.place.path()).is_some_and(|p| place_key(p) == place_key(path));
+                if mine || at_path(&rows, path).is_some() {
+                    return Err(format!("{path} is listed already"));
+                }
+                if rows.len() >= MAX_PLACES {
+                    return Err(format!("a list holds at most {MAX_PLACES} places"));
+                }
+                let at = fits(*at, rows.len())?;
+                rows.insert(at, row.clone());
+            }
+            PlaceEdit::Remove { path } => {
+                let i = at_path(&rows, path).ok_or_else(|| format!("no place is listed at {path}"))?;
+                rows.remove(i);
+            }
+            PlaceEdit::Set { path, read_only, at } => {
+                let i = at_path(&rows, path).ok_or_else(|| format!("no place is listed at {path}"))?;
+                let mut row = rows.remove(i);
+                if let Some(read_only) = read_only {
+                    row.read_only = *read_only;
+                }
+                let at = fits(at.or(Some(i)), rows.len())?;
+                rows.insert(at, row);
+            }
+        }
+        Ok(rows)
     }
 }
 

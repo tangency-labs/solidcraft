@@ -318,6 +318,93 @@ fn the_set_keeps_both_names_and_flags_a_second_library_with_the_same_id() {
     );
 }
 
+fn row(place: Place) -> PlaceRow {
+    PlaceRow { place, read_only: false }
+}
+
+#[test]
+fn a_sessions_libraries_follow_the_places_order_and_share_the_scans_they_keep() {
+    let dir = tempfile::tempdir().unwrap();
+    shop(&dir.path().join("mine/Mine"), "user.one");
+    shop(&dir.path().join("one"), "user.one");
+    shop(&dir.path().join("two"), "user.two");
+    let mine = row(Place::Folder(path(&dir.path().join("mine"))));
+    let [one, two] = ["one", "two"].map(|d| row(Place::Library(path(&dir.path().join(d)))));
+    let built_in = Arc::new(scan(&Place::BuiltIn));
+    let scans: Vec<Arc<Scanned>> = [&mine, &one, &two].iter().map(|r| Arc::new(scan(&r.place))).collect();
+    let libraries = Libraries::new(Arc::clone(&built_in), Some(mine.clone()), vec![one.clone(), two.clone()], &scans, &[]);
+
+    // The built-in library first, then My Library, then the places in their order.
+    let ids: Vec<Option<&str>> = libraries.set().libraries().map(|(l, _)| l.id()).collect();
+    assert_eq!(ids, vec![Some(BUILT_IN_ID), Some("user.one"), Some("user.one"), Some("user.two")]);
+    let statuses: Vec<&Status> = libraries.set().libraries().map(|(_, s)| s).collect();
+    let mine_library = path(&dir.path().join("mine").join("Mine"));
+    assert_eq!(statuses[2], &Status::Unavailable(Reason::DuplicateId { other: mine_library }), "the earlier place wins a shared id");
+    assert_eq!(libraries.rows(), [one.clone(), two.clone()]);
+    assert!(libraries.places().all(|(_, state)| *state == RowState::Scanned));
+
+    // A rescan of one place: the others' scans are the same values, shared, not copied.
+    let rescanned = vec![Arc::clone(&scans[0]), Arc::clone(&scans[1]), Arc::new(scan(&two.place))];
+    let again = Libraries::new(Arc::clone(&built_in), Some(mine), vec![one.clone(), two.clone()], &rescanned, &[]);
+    let kept = |l: &Libraries, i: usize| Arc::ptr_eq(&l.set().places()[i], &libraries.set().places()[i]);
+    assert!(kept(&again, 0) && kept(&again, 1) && kept(&again, 2) && !kept(&again, 3));
+
+    // A place with no scan yet is listed as scanning; one whose scan couldn't start says why. Neither is made up.
+    let waiting = Libraries::new(built_in, None, vec![one.clone(), two.clone()], &[], &[(two.place.clone(), "no thread".into())]);
+    let states: Vec<&RowState> = waiting.places().map(|(_, s)| s).collect();
+    assert_eq!(states, vec![&RowState::Scanning, &RowState::NotScanned("no thread".into())]);
+    assert_eq!(waiting.set().places().len(), 1, "only the built-in scan is in the set");
+}
+
+#[test]
+fn the_places_list_changes_by_one_rule() {
+    let built_in = Arc::new(scan(&Place::BuiltIn));
+    let [a, b, c] = ["a", "b", "c"].map(|d| row(Place::Library(format!("/lib/{d}"))));
+    let mine = row(Place::Folder("/data/libraries".into()));
+    let libraries = |rows: Vec<PlaceRow>| Libraries::new(Arc::clone(&built_in), Some(mine.clone()), rows, &[], &[]);
+    let list = libraries(vec![a.clone(), b.clone()]);
+    let add = |row: &PlaceRow, at| PlaceEdit::Add { row: row.clone(), at };
+
+    assert_eq!(list.edit(&add(&c, None)), Ok(vec![a.clone(), b.clone(), c.clone()]));
+    assert_eq!(list.edit(&add(&c, Some(0))), Ok(vec![c.clone(), a.clone(), b.clone()]));
+    assert_eq!(list.edit(&PlaceEdit::Remove { path: "/lib/a".into() }), Ok(vec![b.clone()]));
+    let set = |path: &str, read_only, at| PlaceEdit::Set { path: path.into(), read_only, at };
+    assert_eq!(list.edit(&set("/lib/a", None, Some(1))), Ok(vec![b.clone(), a.clone()]));
+    assert_eq!(list.edit(&set("/lib/b", Some(true), None)), Ok(vec![a.clone(), PlaceRow { read_only: true, ..b.clone() }]));
+
+    // Refused, each with its reason: the list is unchanged.
+    assert_eq!(list.edit(&add(&a, None)), Err("/lib/a is listed already".into()));
+    assert_eq!(list.edit(&add(&row(Place::Folder("/lib/a/".into())), None)), Err("/lib/a/ is listed already".into()));
+    assert_eq!(list.edit(&add(&row(Place::Library("/data/libraries".into())), None)), Err("/data/libraries is listed already".into()));
+    assert_eq!(list.edit(&add(&row(Place::BuiltIn), None)), Err("the built-in library is always listed".into()));
+    assert_eq!(list.edit(&add(&c, Some(3))), Err("`at` is 3, past the end of the 2 places".into()));
+    assert_eq!(list.edit(&set("/lib/a", None, Some(2))), Err("`at` is 2, past the end of the 1 places".into()));
+    assert_eq!(list.edit(&PlaceEdit::Remove { path: "/lib/z".into() }), Err("no place is listed at /lib/z".into()));
+
+    // At most MAX_PLACES: the last one fits, one more doesn't.
+    let many: Vec<PlaceRow> = (0..MAX_PLACES - 1).map(|i| row(Place::Library(format!("/many/{i}")))).collect();
+    let full = libraries(many).edit(&add(&c, None)).unwrap();
+    assert_eq!(full.len(), MAX_PLACES);
+    assert_eq!(libraries(full).edit(&add(&row(Place::Library("/one/more".into())), None)), Err(format!("a list holds at most {MAX_PLACES} places")));
+}
+
+/// One folder is one place however it is spelled: on Windows, case and separators don't count.
+#[cfg(windows)]
+#[test]
+fn a_folder_spelled_two_ways_is_one_place_on_windows() {
+    let list = Libraries::new(Arc::new(scan(&Place::BuiltIn)), None, vec![row(Place::Library(r"C:\Lib".into()))], &[], &[]);
+    for spelling in ["c:/lib/", r"C:\LIB\"] {
+        assert!(list.edit(&PlaceEdit::Add { row: row(Place::Library(spelling.into())), at: None }).is_err(), "{spelling}");
+    }
+}
+
+#[cfg(not(windows))]
+#[test]
+fn a_folders_case_counts_elsewhere() {
+    let list = Libraries::new(Arc::new(scan(&Place::BuiltIn)), None, vec![row(Place::Library("/lib".into()))], &[], &[]);
+    assert!(list.edit(&PlaceEdit::Add { row: row(Place::Library("/Lib".into())), at: None }).is_ok());
+}
+
 /// Designs and library copies will point at these ids, so they never change once shipped: a built-in
 /// renamed later keeps its old id by hand. The 14 old material names keep today's values exactly
 /// (card 6: they stay generic entries).
