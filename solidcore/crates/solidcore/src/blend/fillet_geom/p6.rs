@@ -3986,6 +3986,103 @@ mod tests {
         assert!(matches!(err, SolidError::InvalidInput { .. }), "{err:?}");
     }
 
+    /// `CalcFilletEnd` on a body whose side edge's curve stops at the fillet vertex: a
+    /// quadratic whose first two control points coincide has a zero first derivative at
+    /// its start, so the side tangent there has no direction. The fillet end is refused
+    /// at that edge and parameter, a refusal no size decides (`SideEdgeDegenerate`), under
+    /// upstream's `SM_ERR`; at an interior parameter the same curve has a tangent and the
+    /// refusal is not raised.
+    #[test]
+    fn fillet_end_refuses_a_side_edge_whose_tangent_vanishes() {
+        let k = Kernel::default();
+
+        // the body: a side edge from (0, 0, 0) to (0, 0, 1) on a quadratic with its first
+        // control point repeated, and an edge use the fillet vertices are classified to
+        let mut target = Brep::new();
+        let o = Point3::new(0.0, 0.0, 0.0);
+        let top = Point3::new(0.0, 0.0, 1.0);
+        let ta = target.add_vertex(o).unwrap();
+        let tb = target.add_vertex(top).unwrap();
+        let te = target.add_edge(ta, tb).unwrap();
+        let stalled = BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 2,
+            control_points: &[o, o, top],
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[3, 3],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+        .unwrap();
+        target.edge_mut(te).unwrap().curve = Some(Curve::from(stalled));
+        let teu = target
+            .add_edgeuse_record(Edgeuse {
+                edge: Some(te),
+                ..Edgeuse::default()
+            })
+            .unwrap();
+        target.edge_mut(te).unwrap().edgeuses.push(teu);
+
+        // the fillet B-rep: an end edge across the flat patch, both end vertices processed
+        // and classified to the side edge's use, its primary use on a geometry with the
+        // patch as its fillet surface
+        let mut fb = FilletBrep::new();
+        let vs = vertex(&mut fb, &k, Point3::new(0.5, 0.2, 0.0));
+        let ve = vertex(&mut fb, &k, Point3::new(0.5, 0.8, 0.0));
+        let (e, [prim, _]) = edge_with_uses(&mut fb, vs, ve, FilletEdgeType::FilletEnd);
+        let mut geom = FilletGeom::new(&k, None, FilletGeomType::Blends).unwrap();
+        geom.solver = Some(FilletSolverId(0));
+        geom.set_fillet_surface(Some(flat_patch()));
+        let g = fb.add_geom(geom);
+        fb.set_edgeuse_fillet_geom(prim, Some(g)).unwrap();
+        for v in [vs, ve] {
+            let fv = fb.fillet_vertex_mut(v).unwrap();
+            fv.set_status(FilStatus::Processed);
+            fv.set_point_class(PointClassType::Edgeuse, Some(EntityRef::Edgeuse(teu)));
+            fv.set_original_t_param(0.0);
+        }
+        let corner = FilletCorner::new(
+            crate::blend::fillet_corner::p3::FilletCornerKind::NByOne,
+            Some(ta),
+            None,
+            None,
+            1e-3,
+            1e-6,
+        );
+        let solvers = [solver(false)];
+
+        let err = fb
+            .calc_fillet_end(&k, e, &target, Some(&corner), &solvers)
+            .unwrap_err();
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::SideEdgeTangentVanishes { edge: te, t: 0.0 }),
+            "{err:?}"
+        );
+        assert_eq!(err.kind(), crate::error::ErrorKind::SideEdgeDegenerate);
+        assert!(
+            err.is_refusal() && !err.is_defect() && !err.sized(),
+            "{err:?}"
+        );
+        assert_eq!(err.upstream_status(), Some(SM_ERR));
+        assert_eq!(err.entity(), Some(EntityRef::Edge(te)));
+
+        // at the middle of the same curve the tangent is (0, 0, 1): no refusal there
+        for v in [vs, ve] {
+            fb.fillet_vertex_mut(v).unwrap().set_original_t_param(0.5);
+        }
+        let other = fb.calc_fillet_end(&k, e, &target, Some(&corner), &solvers);
+        assert!(
+            !matches!(
+                other.as_ref().err().and_then(SolidError::blend_failure),
+                Some(BlendFailure::SideEdgeTangentVanishes { .. })
+            ),
+            "{other:?}"
+        );
+    }
+
     /// Body-qualified trim marks kept in one store, as the session's retained marks are.
     #[derive(Default)]
     struct RetainedMarks(
