@@ -218,8 +218,7 @@ pub fn extrude_origins(tool: &Body, plane: &Plane, regions: &[Region2]) -> Resul
 /// by the profile segment it turns.
 pub fn revolve_origins(tool: &Body, plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2) -> Result<Vec<FaceOrigin>> {
     let size = tool.size().max(1e-9);
-    let m = tool.mesh(&crate::MeshTolerance::chord(size * 2e-4))?;
-    let faces = face_tris(&m);
+    let faces = tool.faces((size * 1e-3).max(1e-3))?;
     let segs = segments(regions);
     let o = plane.to_world(axis_origin);
     let a = plane.dir_to_world(axis_dir).normalized().ok_or_else(|| crate::KernelError::Invalid("axis".into()))?;
@@ -231,27 +230,22 @@ pub fn revolve_origins(tool: &Body, plane: &Plane, regions: &[Region2], axis_ori
     };
     let mut out = Vec::with_capacity(faces.len());
     for f in &faces {
-        let samples = face_samples(f);
         // An angle cap is planar and contains the axis.
-        let planar = samples.windows(2).all(|w| w[0].1.dot(w[1].1) > 1.0 - 1e-9);
-        let n0 = samples.first().map(|x| x.1).unwrap_or(Vec3::Z);
-        if planar && n0.dot(a).abs() < 1e-6 && samples.iter().all(|(p, _)| (*p - o).dot(n0).abs() < size * 1e-6) {
+        if let Some(n0) = f.plane_normal
+            && n0.dot(a).abs() < 1e-6
+            && (f.centroid - o).dot(n0).abs() < size * 1e-6
+        {
             // The start cap lies in the profile's plane.
-            let start = samples.iter().all(|(p, _)| plane.height(*p).abs() < size * 1e-6);
+            let start = plane.height(f.centroid).abs() < size * 1e-6;
             out.push(FaceOrigin::Cap { end: !start });
             continue;
         }
-        // Turn each sample back into the profile's half-plane.
-        let pts: Vec<Vec2> = samples
-            .iter()
-            .map(|(p, _)| {
-                let w = *p - o;
-                let h = w.dot(a);
-                let r = (w - a * h).len();
-                plane.to_local(o + a * h + side * r)
-            })
-            .collect();
-        match nearest_segment(&segs, &pts) {
+        // Turn the face centroid back into the profile's half-plane.
+        let w = f.centroid - o;
+        let h = w.dot(a);
+        let r = (w - a * h).len();
+        let pt = plane.to_local(o + a * h + side * r);
+        match nearest_segment(&segs, &[pt]) {
             Some(k) => out.push(FaceOrigin::Profile { segment: k }),
             None => out.push(FaceOrigin::Cap { end: false }),
         }
