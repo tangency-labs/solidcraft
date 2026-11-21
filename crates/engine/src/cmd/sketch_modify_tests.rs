@@ -283,6 +283,68 @@ fn analytic_trim_and_break_use_freeform_cutters() {
     assert!(shape.dist(Vec2::new(4.8296, 1.2941)) > 0.5);
 }
 
+/// #15619: two crossing lines trimmed back to a corner hold it with one Coincident. The first
+/// trim pins its new end on the other line; the second joins the ends, and that pin goes.
+#[test]
+fn two_crossing_lines_trimmed_to_a_corner_keep_one_constraint_there() {
+    let mut s = new_sketch();
+    let a = ids(&run(&mut s, "sketch.line", json!({"points": [[-5, 0], [10, 0]], "connect": false}))["curves"])[0].clone();
+    let b = ids(&run(&mut s, "sketch.line", json!({"points": [[0, -5], [0, 10]], "connect": false}))["curves"])[0].clone();
+    let at_corner = |s: &Session| -> Vec<ConstraintKind> {
+        let sk = sketch(s);
+        let near = |p: usize| sk.point(p).is_some_and(|q| q.dist(Vec2::new(0.0, 0.0)) < 1e-6);
+        sk.constraints
+            .iter()
+            .filter(|k| match k.kind {
+                ConstraintKind::Coincident { p, q } => near(p) || near(q),
+                ConstraintKind::PointOnCurve { p, .. } => near(p),
+                _ => false,
+            })
+            .map(|k| k.kind.clone())
+            .collect()
+    };
+    run(&mut s, "sketch.trim", json!({"curve": a, "at": [-3, 0]}));
+    let first = at_corner(&s);
+    assert!(matches!(first.as_slice(), [ConstraintKind::PointOnCurve { .. }]), "the first trim pins the end on the other line: {first:?}");
+    run(&mut s, "sketch.trim", json!({"curve": b, "at": [0, -3]}));
+    let second = at_corner(&s);
+    assert!(matches!(second.as_slice(), [ConstraintKind::Coincident { .. }]), "one Coincident holds the corner: {second:?}");
+    // Two free lines have 8 degrees of freedom; the corner takes 2.
+    assert_eq!(run(&mut s, "sketch.inspect", json!({}))["dof"], 6);
+}
+
+/// #15619: a trim that drops a Point On Curve at a corner still moves an end tangency recorded
+/// after it onto the piece that keeps that end (the drop shifts every constraint after it).
+#[test]
+fn trim_dropping_a_corner_point_on_curve_keeps_a_later_end_tangent() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.arc.center_point", json!({"center": [5, 10], "start": [10, 10], "end": [0, 10]}));
+    let v = ids(&run(&mut s, "sketch.line", json!({"points": [[0, -5], "a1.end"], "connect": false}))["curves"])[0].clone();
+    let h = ids(&run(&mut s, "sketch.line", json!({"points": [[-5, 0], [10, 0]], "connect": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.line", json!({"points": [[-5, 5], [5, 5]], "connect": false}));
+    // The Point On Curve at the corner comes first, the Tangent after it.
+    run(&mut s, "sketch.trim", json!({"curve": h, "at": [-3, 0]}));
+    let tangent = run(&mut s, "sketch.constraint.tangent", json!({"a": v, "b": "a1"}))["constraint"].as_str().unwrap().to_string();
+    // The middle of the vertical line goes; its top piece keeps the end on the arc.
+    run(&mut s, "sketch.trim", json!({"curve": v, "at": [0, 2.5]}));
+    let sk = sketch(&s);
+    let at = |p: usize, x: f64, y: f64| sk.point(p).is_some_and(|q| q.dist(Vec2::new(x, y)) < 1e-6);
+    let top = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Line { a, b } if at(a, 0.0, 10.0) || at(b, 0.0, 10.0))).unwrap();
+    let arc = sk.curve_index("a1").unwrap();
+    assert!(
+        sk.constraints
+            .iter()
+            .any(|k| k.id == tangent && matches!(k.kind, ConstraintKind::Tangent { a, b } if (a, b) == (top, arc) || (a, b) == (arc, top))),
+        "the tangent follows the top piece: {:?}",
+        sk.constraints
+    );
+    assert!(
+        !sk.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::PointOnCurve { p, .. } if at(p, 0.0, 0.0))),
+        "the corner's Point On Curve goes: {:?}",
+        sk.constraints
+    );
+}
+
 /// An ellipse's own axes do not cut it (they end on it, where a Center Rectangle's diagonals end
 /// at its corners): a lone ellipse trims away whole, its axes staying as when it is deleted, and
 /// a trim of its outline stops where a line crosses, not at an axis end.
