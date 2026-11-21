@@ -119,7 +119,7 @@ pub use aabb2::Aabb2;
 pub use arcfit::{Loop2ArcFit, MAX_FIT_PIECES, Region2ArcFit, Seg2ArcFit};
 pub use ball::Ball;
 pub use blend::hermite_bezier;
-pub use bvh::{Bvh, MeshIndex};
+pub use bvh::{Bvh, MeshIndex, PointCloudIndex};
 pub use chain::{Chain, Closed, Ends, Open, Path, Planar, Ring};
 pub use grid::Grid;
 pub use mesh::{Aabb3, BoxedTriangle, InsideIndex, MassProperties, Mesh, MeshGeom, MeshMeasure, TANGENT_CHAIN, find_close_pair};

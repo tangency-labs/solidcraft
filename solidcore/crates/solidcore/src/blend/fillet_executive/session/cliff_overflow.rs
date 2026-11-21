@@ -58,6 +58,8 @@ impl FilletExecutive<FilletObject> {
         self.error.comment = refusal.comment.into();
         self.error.no_room = refusal.reason;
         self.error.no_room_without_site = true;
+        // (not upstream) a refusal noted here is not an earlier classification's
+        self.error.corner_cause = None;
     }
 }
 

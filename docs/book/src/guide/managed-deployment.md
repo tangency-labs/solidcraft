@@ -20,7 +20,7 @@ can run it.
 | Policy | Registry value | Type | Values |
 |---|---|---|---|
 | Check for updates | `CheckForUpdates` | `REG_DWORD` | `1`: checks at start and once a day, and people cannot turn them off. `0`: no checks at all, as with `SOLIDCRAFT_UPDATE_CHECK=0` ([Updates and privacy](updates.md)). |
-| Anonymous usage statistics | `UsageStatistics` | `REG_DWORD` | `0`: SolidCraft sends no usage statistics, keeps none to send later and shows no notice about them, and people cannot turn them on. `1`: each person chooses. SolidCraft 0.46 or later. |
+| Anonymous usage statistics | `UsageStatistics` | `REG_DWORD` | `0`: SolidCraft sends no usage statistics, keeps none to send later and shows no notice about them, and people cannot turn them on. `1`: each person chooses. SolidCraft 0.46 or later; what is sent is in [Privacy](https://github.com/tangency-labs/solidcraft/blob/main/docs/privacy.md). |
 | Organization name | `OrganizationName` | `REG_SZ` | The name shown as **Managed by** and the name, up to 64 characters on one line. It changes no setting. |
 | Units of new designs | `DefaultUnits` | `REG_SZ` | `mm`, `cm`, `m`, `in` or `ft` (Preferences, Design). Designs that already exist keep their units. SolidCraft 0.46 or later. |
 | Interface language | `Language` | `REG_SZ` | `system` to follow the operating system, or the code of a language SolidCraft has, such as `en`, `de`, `fr`, `pt-BR` or `zh-TW` (Preferences, General, Language lists them). SolidCraft 0.46 or later. |
