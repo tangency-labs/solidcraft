@@ -84,6 +84,28 @@ fn line_dimensions_wrap_both_directions_and_enter_uses_length_and_angle() {
 }
 
 #[test]
+fn slash_and_star_extend_the_live_value_instead_of_replacing_it() {
+    // The pointer at (20, 10) shows a 20 by 10 rectangle; "/2" halves the width and "*3"
+    // triples the height, from the values the boxes showed.
+    let mut h = drawing("sketch.rectangle.two_point");
+    let live: Vec<String> = h.app.tool.as_ref().unwrap().dims.iter().map(|d| d.value.clone()).collect();
+    h.step(&json!({"text": "/"})).unwrap();
+    assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, format!("{}/", live[0]));
+    h.step(&json!({"text": "2"})).unwrap();
+    tab(&mut h, false);
+    assert_focus(&h, 1);
+    h.step(&json!({"text": "*"})).unwrap();
+    h.step(&json!({"text": "3"})).unwrap();
+    let dims = &h.app.tool.as_ref().unwrap().dims;
+    assert_eq!(dims.iter().map(|d| d.value.clone()).collect::<Vec<_>>(), [format!("{}/2", live[0]), format!("{}*3", live[1])]);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    let state = h.app.session.world_state().unwrap();
+    let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    assert_eq!(sketch.profiles.len(), 1);
+    assert!((sketch.profiles[0].area - 300.0).abs() < 1e-6, "{}", sketch.profiles[0].area);
+}
+
+#[test]
 fn single_dimension_keeps_focus_for_tab_and_shift_tab() {
     let mut h = drawing("sketch.circle.center");
     type_value(&mut h, "8");

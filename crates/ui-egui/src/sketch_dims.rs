@@ -922,11 +922,14 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
         if construction && b.label == "Length" && text.is_empty() {
             text = INFINITE.to_owned();
         }
-        // While a box follows the cursor its whole text is selected, so typing replaces it.
+        // While a box follows the cursor its whole text is selected, so typing replaces it. A `/`
+        // or `*` goes after the value it shows instead ("2.5" becomes "2.5/"), so a half or a
+        // quarter of the live size is one more key.
         if (has_focus || (focus && i == 0)) && !b.locked {
             let mut s = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
             let n = text.chars().count();
-            s.cursor.set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
+            let start = if has_focus && !b.value.is_empty() && operator_typed(ui) { n } else { 0 };
+            s.cursor.set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(start), egui::text::CCursor::new(n))));
             s.store(ui.ctx(), id);
         }
         let pos = coord_pos[i].unwrap_or_else(|| {
@@ -985,6 +988,12 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     // A box waiting before the first click only places on Enter once it has the keyboard.
     let nothing = ui.ctx().memory(|m| m.focused().is_none()) && !(construction && t.pts.is_empty());
     (enter && (any_focused || nothing)).then_some(e)
+}
+
+/// Whether this frame's typing starts with `/` or `*`: an operator that only makes sense after
+/// a value, so it extends the live value of a box rather than replacing it.
+fn operator_typed(ui: &egui::Ui) -> bool {
+    ui.input(|input| input.raw.events.iter().any(|event| matches!(event, egui::Event::Text(text) if text.starts_with(['/', '*']))))
 }
 
 /// Place measured rectangle fields nearest their edge anchors, keeping the pointer and
