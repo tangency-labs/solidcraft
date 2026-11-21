@@ -539,13 +539,18 @@ pub struct Preview {
     /// are as the solver placed them, after motion links and limits, as `joint.inspect` and
     /// `joint.drive` give them. Empty when the commands posed no joint.
     pub joints: Vec<crate::schema::joints::ReachedJoint>,
+    /// The document after the commands: for what a front end works out of a previewed feature
+    /// (Frame Member's centrelines).
+    pub doc: Arc<Document>,
+    /// The evaluation of `doc`, which gives each feature's state before it (`Model::state_before`).
+    pub model: Model,
 }
 
 impl Preview {
     fn new(before: Arc<ModelState>, after: Arc<ModelState>, source: &Session, result: &Session, replies: Vec<Value>) -> Self {
         let shown_sketches = after.sketches.iter().filter(|sketch| view::sketch_shown(result, sketch.feature)).map(|sketch| sketch.feature).collect();
         let joints = cmd::joints::posed_joints(source, result, &replies);
-        Self { before, after, shown_sketches, replies, joints }
+        Self { before, after, shown_sketches, replies, joints, doc: result.doc.clone(), model: result.model.clone() }
     }
 
     fn visible_world(before: &Session, after: &Session, replies: Vec<Value>) -> Result<Self> {

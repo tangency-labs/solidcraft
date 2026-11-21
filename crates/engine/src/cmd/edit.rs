@@ -1545,12 +1545,32 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let before = serde_json::to_value(&f).map_err(|e| EngineError::Other(e.to_string()))?;
     let set = expand_dotted(set, Some(&before), cmd, 0)?;
     let set = hole_position_expressions(set, &f.kind);
-    let set = &numbers_as_expressions(command_profiles(&set, cmd)?, &before);
+    let mut set = numbers_as_expressions(command_profiles(&set, cmd)?, &before);
+    // A Frame Member's corner entry may give a Flip, input only: saved as an order below, as `frame.member` saves it.
+    let mut flips = Vec::new();
+    if matches!(f.kind, FeatureKind::FrameMember { .. }) {
+        for c in set.get_mut("corners").and_then(Value::as_array_mut).into_iter().flatten() {
+            flips.push(match c.as_object_mut().and_then(|c| c.remove("flip")) {
+                None | Some(Value::Null) => None,
+                Some(flip) => Some(flip.as_bool().ok_or_else(|| bad(cmd, "`corners`: `flip` must be true or false"))?),
+            });
+        }
+    }
+    let set = &set;
     let mut v = before.clone();
     merge(&mut v, set, 0);
     resolve_feature_names(&mut v, &s.doc, cmd)?;
     let mut nf: Feature = serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("invalid feature: {e}")))?;
     nf.id = f.id;
+    // An older script's `coped_butt` is Butt with the frame's Coped ticked, as `frame.member` reads it. A corner's
+    // member of this frame itself is saved without the name; another frame's is refused.
+    if let FeatureKind::FrameMember { corner, corners, coped, .. } = &mut nf.kind {
+        solidcraft_doc::frame::read_coped(corner, corners, coped);
+        own_corner_members(corners, &f.name).map_err(|e| bad(cmd, e))?;
+        if flips.iter().any(Option::is_some) {
+            super::frame::flips_as_order(&s.doc, &s.model.state_before(id), &mut nf, &flips);
+        }
+    }
     // A one-sided extrude made symmetric takes the convention a new one would: its old marker
     // never read a symmetric distance.
     if let (FeatureKind::Extrude { extent: old, .. }, FeatureKind::Extrude { extent: new, .. })
@@ -1565,6 +1585,21 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "the feature type cannot change"));
     }
     keeps_member(&f.kind, &nf.kind, cmd)?;
+
+    // A removed pair's id is never given again: `next_pair` can't go down, and every pair's id is
+    // a `pair<N>` below it, given once.
+    if let (FeatureKind::FrameMember { next_pair: was, .. }, FeatureKind::FrameMember { next_pair, pairs, .. }) = (&f.kind, &nf.kind) {
+        if next_pair < was {
+            return Err(bad(cmd, format!("`next_pair` can't go below {was}: a removed pair's id is never given again")));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(p) = pairs.iter().find(|p| !solidcraft_doc::frame::parse_pair_id(&p.id).is_some_and(|n| n < *next_pair && seen.insert(n))) {
+            return Err(bad(cmd, format!("pair id `{}` must be a pair<N> given once, below `next_pair` ({next_pair})", p.id)));
+        }
+        if let Some(p) = pairs.iter().find(|p| removed_pair_id(&f.kind, &p.id)) {
+            return Err(bad(cmd, removed_pair_message(&p.id)));
+        }
+    }
     // serde drops fields the definition doesn't have without a word: refuse them, or a typo
     // would report success and change nothing.
     let after = serde_json::to_value(&nf).map_err(|e| EngineError::Other(e.to_string()))?;
@@ -2361,6 +2396,29 @@ fn keep_from_level_on_the_same_face(s: &Session, before: &Feature, after: &mut F
     }
 }
 
+/// Is `id` a pair id Frame Member `old` gave and has since taken out (below its `next_pair`, and
+/// none of its pairs' now)? Stored references to that tube must not find another one.
+fn removed_pair_id(old: &FeatureKind, id: &str) -> bool {
+    let FeatureKind::FrameMember { next_pair, pairs, .. } = old else { return false };
+    solidcraft_doc::frame::parse_pair_id(id).is_some_and(|n| n < *next_pair) && !pairs.iter().any(|p| p.id == id)
+}
+
+fn removed_pair_message(id: &str) -> String {
+    format!("pair id `{id}` was removed: a removed pair's id is never given again (leave `id` out for a new pair)")
+}
+
+/// `corners`' members named by the frame's own name (`own`) saved without it; one of another frame refused.
+fn own_corner_members(corners: &mut [solidcraft_doc::frame::CornerOverride], own: &str) -> std::result::Result<(), &'static str> {
+    for m in corners.iter_mut().flat_map(|c| &mut c.members) {
+        match &m.feature {
+            Some(n) if *n == own => m.feature = None,
+            Some(_) => return Err("`corners`: not supported yet: a corner with a member of another frame"),
+            None => {}
+        }
+    }
+    Ok(())
+}
+
 fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.redefine";
     let id = feature_id(s, p.get("feature"), cmd)?;
@@ -2452,13 +2510,42 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.insert("thread_class".into(), json!(class));
     }
-    // Members keep their names through an edit, unless it gives them another name.
-    if let FeatureKind::FrameMember { names, body_name, .. } = &old.kind
+    // Members keep their names through an edit, unless it gives them another name. A copy names
+    // its members by position: they are pinned to their members first, so a member taken out
+    // doesn't hand its name to the next. Pair ids are never reused, so `next_pair` never goes
+    // below the feature's own, nor to an id it has, whatever the edit says, and a removed pair's
+    // id is never named again.
+    if let FeatureKind::FrameMember { names, body_name, next_pair, pairs, .. } = &old.kind
         && cid == "frame.member"
         && let Some(parameters) = params.as_object_mut()
-        && parameters.get("body_name").and_then(Value::as_str) == body_name.as_deref()
     {
-        parameters.entry("names").or_insert_with(|| json!(names));
+        // A corner's member named by this frame's own name is its own: `frame.member` takes it without the name.
+        for m in
+            parameters.get_mut("corners").and_then(Value::as_array_mut).into_iter().flatten().filter_map(|c| c.get_mut("members")?.as_array_mut())
+        {
+            for m in m.iter_mut().filter_map(Value::as_object_mut) {
+                if m.get("feature").and_then(Value::as_str) == Some(old.name.as_str()) {
+                    m.remove("feature");
+                }
+            }
+        }
+        let mut named = parameters.get("pairs").and_then(Value::as_array).into_iter().flatten().filter_map(|p| p.get("id")?.as_str());
+        if let Some(id) = named.find(|id| removed_pair_id(&old.kind, id)) {
+            return Err(bad(cmd, removed_pair_message(id)));
+        }
+        let past_ids = pairs.iter().filter_map(|p| solidcraft_doc::frame::parse_pair_id(&p.id)).max().map_or(0, |n| n.saturating_add(1));
+        let given = match parameters.get("next_pair") {
+            None | Some(Value::Null) => Some(0),
+            // Anything else is `frame.member`'s to refuse.
+            Some(v) => v.as_u64().and_then(|n| u32::try_from(n).ok()),
+        };
+        if let Some(given) = given {
+            parameters.insert("next_pair".into(), json!(given.max(*next_pair).max(past_ids)));
+        }
+        if parameters.get("body_name").and_then(Value::as_str) == body_name.as_deref() {
+            let names = (!old.body_names.is_empty()).then(|| super::browser::member_pins(s, id)).flatten().unwrap_or_else(|| names.clone());
+            parameters.entry("names").or_insert_with(|| json!(names));
+        }
     }
     // A fold keeps the side that stays, decided when it was made, through an edit that names
     // neither a side nor a fixed point: the side is never decided again.
@@ -2704,6 +2791,10 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if old.kind.constructor_profile_sketch() != new.kind.constructor_profile_sketch() {
             slot.profile_frame = new.profile_frame;
+        }
+        // A frame member names its members by their lines and pairs from now on (pinned above).
+        if matches!(new.kind, FeatureKind::FrameMember { .. }) {
+            slot.body_names.clear();
         }
         slot.kind = new.kind;
         slot.edge_refs = new.edge_refs;
