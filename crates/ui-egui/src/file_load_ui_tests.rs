@@ -1542,7 +1542,7 @@ fn an_opened_files_import_warnings_are_said_on_the_web_as_on_the_desktop() {
 /// status line says so (#6892).
 #[test]
 fn a_renamed_kind_file_opens_with_a_note_on_its_kind() {
-    solidcraft_engine::set_experimental_file_kinds(true);
+    solidcraft_engine::file_kinds_on_for_tests();
     let dir = scratch("renamed_kind");
     let mut part = Session::default();
     part.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();

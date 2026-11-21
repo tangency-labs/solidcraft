@@ -2,8 +2,9 @@
 //! (#13305).
 //!
 //! The handler reads its parameters from the raw JSON, so the key here reads as the handler reads
-//! it. `file.new` refuses nothing: a `name` that is not text is read as left out, so the
-//! handler has no message of its own for the check to keep.
+//! it. A `name` that is not text is read as left out. `kind` (experimental, #6892) is the one
+//! key the handler refuses: a value it doesn't know, or a kind other than single while Parts and
+//! assemblies is off.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,22 @@ pub struct NewDesignParams {
     /// the user's own, so Save As offers it as the file name.
     #[serde(default)]
     pub name: Option<String>,
+    /// Experimental (#6892): the kind of design, fixed once it is saved: `single` (the default,
+    /// today's design), `part`, `sheet_metal` or `assembly`. A kind other than single needs the
+    /// Parts and assemblies environment (Preferences › General › Environment, or
+    /// `SOLIDCRAFT_FILE_KINDS`); its first save takes that kind's extension.
+    #[serde(default)]
+    pub kind: Option<NewKind>,
+}
+
+/// The kinds `file.new` makes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NewKind {
+    Single,
+    Part,
+    SheetMetal,
+    Assembly,
 }
 
 /// What `file.new` returns.
@@ -24,6 +41,10 @@ pub struct NewDesignParams {
 pub struct NewDesignResult {
     /// The new design's name: the `name` given, else "Untitled".
     pub name: String,
+    /// Experimental (#6892): its kind, when it isn't a single design: `part`, `sheet metal part`
+    /// or `assembly`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

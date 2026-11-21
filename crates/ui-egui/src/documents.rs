@@ -1963,19 +1963,30 @@ pub fn saved(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
 /// takes Units of new designs (#1205): a launch starts on that empty design, so returning
 /// here used to leave it in millimetres.
 pub fn new_design(app: &mut SolveApp) {
+    // Under Parts and assemblies every new file has a kind: New makes a part (#6892).
+    let kind = crate::prefs::parts_and_assemblies(&app.preferences).then_some("part");
+    new_design_of(app, kind);
+}
+
+/// A new, empty design of `kind` (`part`, `sheet_metal`, `assembly`; none: a single design) in its
+/// own tab, as [`new_design`] makes one. Its first save takes that kind's extension (#6892).
+pub fn new_design_of(app: &mut SolveApp, kind: Option<&str>) {
     if app.file_picker_busy() {
         return;
     }
     app.home.open = false;
-    if active_is_blank(app) {
-        crate::prefs::apply_new_design(app);
+    if !active_is_blank(app)
+        && let Err(e) = open_tab(app, Session::default())
+    {
+        app.set_status(e, true);
         return;
     }
-    if let Err(e) = open_tab(app, Session::default()) {
+    if let Some(kind) = kind
+        && let Err(e) = app.run("file.new", serde_json::json!({"kind": kind}))
+    {
         app.set_status(e, true);
-    } else {
-        crate::prefs::apply_new_design(app);
     }
+    crate::prefs::apply_new_design(app);
 }
 
 /// Create a new tab directly; the File view chooses units before using [`new_design`].

@@ -1,34 +1,74 @@
 {
   "en": {
-    "prefs.experimental_file_kinds": "Separate files for parts, sheet metal and assemblies (experimental)",
-    "prefs.experimental_file_kinds_help": "A new design saved as .scprt is a part, .scsht a sheet metal part, .scasm an assembly, .sc a single design. The kind is kept in the file, so renaming it changes nothing, and saving a design as another kind is refused."
+    "prefs.environment": "Environment",
+    "prefs.environment_single": "Single design",
+    "prefs.environment_parts": "Parts and assemblies (experimental)",
+    "prefs.environment_note": "For new files. Single design keeps parts, sheet metal and assemblies together in one .sc file, as before. Parts and assemblies makes each new file a part (.scprt), a sheet metal part (.scsht) or an assembly (.scasm), which keeps its kind.",
+    "ui.new_part": "New part",
+    "ui.new_sheet_metal_part": "New sheet metal part",
+    "ui.new_assembly": "New assembly"
   },
   "ar": {
-    "prefs.experimental_file_kinds": "ملفات منفصلة للأجزاء والصفائح المعدنية والتجميعات (تجريبي)",
-    "prefs.experimental_file_kinds_help": "التصميم الجديد المحفوظ بامتداد .scprt جزء، و.scsht جزء صفائح معدنية، و.scasm تجميع، و.sc تصميم واحد. يُحفظ النوع داخل الملف، فلا تغيّره إعادة التسمية، ويُرفض حفظ التصميم كنوع آخر."
+    "prefs.environment": "البيئة",
+    "prefs.environment_single": "تصميم واحد",
+    "prefs.environment_parts": "أجزاء وتجميعات (تجريبي)",
+    "prefs.environment_note": "للملفات الجديدة. التصميم الواحد يجمع الأجزاء والصفائح المعدنية والتجميعات في ملف .sc واحد كما كان. الأجزاء والتجميعات تجعل كل ملف جديد جزءًا (.scprt) أو جزء صفائح معدنية (.scsht) أو تجميعًا (.scasm) ويحتفظ بنوعه.",
+    "ui.new_part": "جزء جديد",
+    "ui.new_sheet_metal_part": "جزء صفائح معدنية جديد",
+    "ui.new_assembly": "تجميع جديد"
   },
   "de": {
-    "prefs.experimental_file_kinds": "Getrennte Dateien für Teile, Blechteile und Baugruppen (experimentell)",
-    "prefs.experimental_file_kinds_help": "Eine neue Konstruktion, gespeichert als .scprt, ist ein Teil, als .scsht ein Blechteil, als .scasm eine Baugruppe, als .sc eine Einzelkonstruktion. Die Art steht in der Datei, ein Umbenennen ändert also nichts, und das Speichern als andere Art wird abgelehnt."
+    "prefs.environment": "Umgebung",
+    "prefs.environment_single": "Einzelkonstruktion",
+    "prefs.environment_parts": "Teile und Baugruppen (experimentell)",
+    "prefs.environment_note": "Für neue Dateien. Einzelkonstruktion hält Teile, Blechteile und Baugruppen wie bisher in einer .sc-Datei zusammen. Teile und Baugruppen macht jede neue Datei zu einem Teil (.scprt), einem Blechteil (.scsht) oder einer Baugruppe (.scasm), die ihre Art behält.",
+    "ui.new_part": "Neues Teil",
+    "ui.new_sheet_metal_part": "Neues Blechteil",
+    "ui.new_assembly": "Neue Baugruppe"
   },
   "he": {
-    "prefs.experimental_file_kinds": "קבצים נפרדים לחלקים, לפח ולמכלולים (ניסיוני)",
-    "prefs.experimental_file_kinds_help": "תכן חדש שנשמר כ‑.scprt הוא חלק, כ‑.scsht חלק פח, כ‑.scasm מכלול, וכ‑.sc תכן יחיד. הסוג נשמר בתוך הקובץ, כך ששינוי שם אינו משנה דבר, ושמירת תכן כסוג אחר נדחית."
+    "prefs.environment": "סביבה",
+    "prefs.environment_single": "תכן יחיד",
+    "prefs.environment_parts": "חלקים ומכלולים (ניסיוני)",
+    "prefs.environment_note": "לקבצים חדשים. תכן יחיד שומר חלקים, פח ומכלולים יחד בקובץ ‎.sc אחד, כמו קודם. חלקים ומכלולים הופך כל קובץ חדש לחלק (‎.scprt), לחלק פח (‎.scsht) או למכלול (‎.scasm), שסוגו נשמר.",
+    "ui.new_part": "חלק חדש",
+    "ui.new_sheet_metal_part": "חלק פח חדש",
+    "ui.new_assembly": "מכלול חדש"
   },
   "ja": {
-    "prefs.experimental_file_kinds": "部品・板金・アセンブリを別ファイルにする（試験的）",
-    "prefs.experimental_file_kinds_help": "新しいデザインを .scprt で保存すると部品、.scsht で板金部品、.scasm でアセンブリ、.sc で単一デザインになります。種類はファイル内に保存されるため、名前を変えても変わらず、別の種類として保存することはできません。"
+    "prefs.environment": "環境",
+    "prefs.environment_single": "単一デザイン",
+    "prefs.environment_parts": "部品とアセンブリ（試験的）",
+    "prefs.environment_note": "新しいファイルに適用されます。単一デザインは、これまでどおり部品・板金・アセンブリを 1 つの .sc ファイルにまとめます。部品とアセンブリでは、新しいファイルはそれぞれ部品 (.scprt)、板金部品 (.scsht)、アセンブリ (.scasm) となり、その種類を保ちます。",
+    "ui.new_part": "新しい部品",
+    "ui.new_sheet_metal_part": "新しい板金部品",
+    "ui.new_assembly": "新しいアセンブリ"
   },
   "ko": {
-    "prefs.experimental_file_kinds": "부품, 판금, 어셈블리를 별도 파일로 (실험적)",
-    "prefs.experimental_file_kinds_help": "새 디자인을 .scprt로 저장하면 부품, .scsht는 판금 부품, .scasm는 어셈블리, .sc는 단일 디자인입니다. 종류는 파일 안에 저장되므로 이름을 바꿔도 바뀌지 않으며, 다른 종류로 저장하는 것은 거부됩니다."
+    "prefs.environment": "환경",
+    "prefs.environment_single": "단일 디자인",
+    "prefs.environment_parts": "부품과 어셈블리 (실험적)",
+    "prefs.environment_note": "새 파일에 적용됩니다. 단일 디자인은 지금처럼 부품, 판금, 어셈블리를 하나의 .sc 파일에 함께 둡니다. 부품과 어셈블리는 새 파일마다 부품(.scprt), 판금 부품(.scsht) 또는 어셈블리(.scasm)로 만들며 그 종류를 유지합니다.",
+    "ui.new_part": "새 부품",
+    "ui.new_sheet_metal_part": "새 판금 부품",
+    "ui.new_assembly": "새 어셈블리"
   },
   "vi": {
-    "prefs.experimental_file_kinds": "Tệp riêng cho chi tiết, kim loại tấm và cụm lắp (thử nghiệm)",
-    "prefs.experimental_file_kinds_help": "Thiết kế mới lưu dạng .scprt là chi tiết, .scsht là chi tiết kim loại tấm, .scasm là cụm lắp, .sc là thiết kế đơn. Loại được lưu trong tệp nên đổi tên không thay đổi gì, và việc lưu thiết kế thành loại khác sẽ bị từ chối."
+    "prefs.environment": "Môi trường",
+    "prefs.environment_single": "Thiết kế đơn",
+    "prefs.environment_parts": "Chi tiết và cụm lắp (thử nghiệm)",
+    "prefs.environment_note": "Áp dụng cho tệp mới. Thiết kế đơn giữ chi tiết, kim loại tấm và cụm lắp chung trong một tệp .sc như trước. Chi tiết và cụm lắp làm mỗi tệp mới thành một chi tiết (.scprt), một chi tiết kim loại tấm (.scsht) hoặc một cụm lắp (.scasm) và giữ nguyên loại đó.",
+    "ui.new_part": "Chi tiết mới",
+    "ui.new_sheet_metal_part": "Chi tiết kim loại tấm mới",
+    "ui.new_assembly": "Cụm lắp mới"
   },
   "zh": {
-    "prefs.experimental_file_kinds": "零件、钣金和装配体使用独立文件（实验性）",
-    "prefs.experimental_file_kinds_help": "新设计保存为 .scprt 是零件，.scsht 是钣金零件，.scasm 是装配体，.sc 是单一设计。类型保存在文件中，因此重命名不会改变它，且不能将设计另存为其他类型。"
+    "prefs.environment": "环境",
+    "prefs.environment_single": "单一设计",
+    "prefs.environment_parts": "零件和装配体（实验性）",
+    "prefs.environment_note": "适用于新文件。单一设计像以前一样把零件、钣金和装配体放在一个 .sc 文件中。零件和装配体让每个新文件成为零件 (.scprt)、钣金零件 (.scsht) 或装配体 (.scasm)，并保持其类型。",
+    "ui.new_part": "新建零件",
+    "ui.new_sheet_metal_part": "新建钣金零件",
+    "ui.new_assembly": "新建装配体"
   }
 }

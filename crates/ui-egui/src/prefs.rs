@@ -1010,12 +1010,23 @@ pub fn apply_tolerance_heal(p: &Prefs) {
     solidcraft_engine::kernel::set_heals_tolerance_defects(p.heal_tolerance_defects);
 }
 
-/// The experimental switches from now on, as Preferences › General › Saving says: saved designs
-/// deflate their model cache harder (#19988), and extensions pick and check a design's kind
-/// (#6892).
+/// The environment of today's designs: one design holds everything ([`Prefs::environment`]).
+pub const ENVIRONMENT_SINGLE: &str = "single";
+/// The environment of separate files for parts, sheet metal parts and assemblies (#6892).
+pub const ENVIRONMENT_PARTS_AND_ASSEMBLIES: &str = "parts_and_assemblies";
+
+/// Whether new files are made as parts, sheet metal parts and assemblies (#6892): the
+/// environment says so; any other value is a single design.
+pub fn parts_and_assemblies(p: &Prefs) -> bool {
+    p.environment == ENVIRONMENT_PARTS_AND_ASSEMBLIES
+}
+
+/// The experimental switches from now on, as Preferences › General says: saved designs deflate
+/// their model cache harder (#19988), and under Parts and assemblies extensions pick and check a
+/// design's kind and the part library folders are searched (#6892).
 pub fn apply_experiments(p: &Prefs) {
     solidcraft_engine::io::set_smaller_default_saves(p.experimental_smaller_saves);
-    solidcraft_engine::set_experimental_file_kinds(p.experimental_file_kinds);
+    solidcraft_engine::set_experimental_file_kinds(parts_and_assemblies(p));
     solidcraft_engine::set_part_library_folders(p.experimental_part_library_folders.clone());
 }
 
@@ -1509,11 +1520,12 @@ preference_settings! {
     /// half its size for a few tens of ms on a large design ([`apply_experiments`]). Off by
     /// default: saves are as before. No format change; every release opens such a file.
     experimental_smaller_saves: bool = false, PAGE_GENERAL => check_id("prefs.experimental_smaller_saves");
-    /// Experimental (#6892): a design's kind (single design `.sc`, part `.scprt`, sheet metal part
-    /// `.scsht`, assembly `.scasm`) is picked by its first file's extension and checked by every save
-    /// and open ([`apply_experiments`]). Off by default: extensions mean nothing, as before; the
-    /// kind a file holds is kept either way.
-    experimental_file_kinds: bool = false, PAGE_GENERAL => check_id("prefs.experimental_file_kinds");
+    /// The environment new files are made in (#6892, experimental): `single` (the default: one
+    /// design holds parts, sheet metal and assemblies, as always) or `parts_and_assemblies` (New
+    /// makes a part `.scprt`, a sheet metal part `.scsht` or an assembly `.scasm`, and extensions
+    /// pick and check a design's kind, [`apply_experiments`]). Anything else reads as `single`.
+    /// Files already made keep their kind either way.
+    environment: String = ENVIRONMENT_SINGLE.into(), PAGE_GENERAL;
     /// Experimental (#6892): folders searched, in order, for a linked part that isn't where its
     /// link says (each folder, then its subfolders), with the file kinds on. No control yet: set
     /// through `ui.prefs`, until the library places page of #19614 can hold them.

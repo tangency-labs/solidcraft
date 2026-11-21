@@ -84,7 +84,7 @@ pub use features::{auto_operation, clearance_diameter, clearance_sizes, extrude_
 pub(crate) use features::{rail_fit_form, sweep_orientation};
 pub(crate) use features_more::{MAX_SKETCH_ID, SidePoint, SketchFrameId, axes_mask, side_point, sketch_frame_id};
 pub(crate) use file::import::realign_imports;
-pub use file::kind::{experimental_file_kinds, set_experimental_file_kinds};
+pub use file::kind::{experimental_file_kinds, file_kinds_on_for_tests, set_experimental_file_kinds};
 pub(crate) use file::mesh_crease_angle;
 pub use file::open_steps::OpenSteps;
 pub use file::runs_plugin_importer;

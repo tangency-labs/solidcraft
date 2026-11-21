@@ -82,7 +82,7 @@ pub use cmd::{
 };
 pub use edit_start::{EditStart, RefreshedSketchModel, SketchDomain, SketchFinishEvent};
 // Experimental file kinds (#6892).
-pub use cmd::{experimental_file_kinds, set_experimental_file_kinds, set_part_library_folders};
+pub use cmd::{experimental_file_kinds, file_kinds_on_for_tests, set_experimental_file_kinds, set_part_library_folders};
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
 pub use solidcraft_geom as geom;

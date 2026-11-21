@@ -226,10 +226,13 @@ fn clear_import_cache(_: &mut Session, _: &Value) -> Result<Value> {
 
 fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
     let name = str_(p, "name").unwrap_or("Untitled");
+    // The kind is checked before anything changes (experimental, #6892).
+    let design_kind = kind::for_new(p.get("kind"))?;
     s.replace_design(Session::new(Document::new(name)));
+    s.design_kind = design_kind;
     // A name given here is the user's own, so Save As keeps it (#4907); "Untitled" is none.
     s.user_named = !name.trim().is_empty() && name.trim() != DEFAULT_NAME;
-    let reply = NewDesignResult { name: name.to_string(), param_warnings: Vec::new() };
+    let reply = NewDesignResult { name: name.to_string(), kind: kind::reported(design_kind), param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| bad("file.new", e.to_string()))
 }
 
@@ -3344,6 +3347,38 @@ mod tests {
         let plain = single.execute("file.save", &json!({"path": at("plain.sc")})).unwrap();
         assert!(plain.get("kind").is_none(), "{plain}");
         assert_eq!(solidcraft_io::read_design_kind_file(&at("plain.sc")), DesignKind::Single);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// New files of a kind (#6892): `file.new {kind}` makes a design of that kind, whose first save
+    /// must use its extension; a single design is the default; a kind needs Parts and assemblies.
+    #[test]
+    fn file_new_makes_a_design_of_a_kind_that_saves_only_as_that_kind() {
+        use solidcraft_io::DesignKind;
+        crate::set_experimental_file_kinds(true);
+        let dir = std::env::temp_dir().join(format!("solidcraft-new-kind-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let at = |name: &str| dir.join(name).to_string_lossy().to_string();
+        let mut s = Session::default();
+        let made = s.execute("file.new", &json!({"name": "Frame", "kind": "assembly"})).unwrap();
+        assert_eq!(made["kind"], "assembly", "{made}");
+        assert_eq!(s.design_kind, DesignKind::Assembly);
+        let refused = s.execute("file.save", &json!({"path": at("frame.sc")})).unwrap_err().to_string();
+        assert!(refused.contains("this design is an assembly"), "{refused}");
+        assert_eq!(s.execute("file.save", &json!({"path": at("frame.scasm")})).unwrap()["kind"], "assembly");
+        assert_eq!(solidcraft_io::read_design_kind_file(&at("frame.scasm")), DesignKind::Assembly);
+        // The default, and `single`, make a single design, with no kind in the reply.
+        for p in [json!({}), json!({"kind": "single"}), json!({"kind": null})] {
+            let made = s.execute("file.new", &p).unwrap();
+            assert!(made.get("kind").is_none() && s.design_kind == DesignKind::Single, "{p}: {made}");
+        }
+        assert_eq!(s.execute("file.new", &json!({"kind": "sheet_metal"})).unwrap()["kind"], "sheet metal part");
+        // An unknown kind is refused and changes nothing; so is a kind with the environment off.
+        assert!(s.execute("file.new", &json!({"kind": "weldment"})).is_err());
+        assert_eq!(s.design_kind, DesignKind::SheetMetal);
+        let off = kind::for_new_with(Some(&json!("part")), false).unwrap_err().to_string();
+        assert!(off.contains("Parts and assemblies is off"), "{off}");
+        assert_eq!(kind::for_new_with(Some(&json!("single")), false).unwrap(), DesignKind::Single);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

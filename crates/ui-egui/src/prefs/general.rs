@@ -45,6 +45,32 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
         });
+        // What New makes (#6892): one design for everything, or a file of its own for each part,
+        // sheet metal part and assembly. Files already made keep their kind.
+        ui_kit::settings_section(ui, "environment", app.tr("prefs.environment"), |ui| {
+            ui_kit::settings_form(ui, labels, |ui| {
+                ui_kit::row(ui, app.tr("prefs.environment"), |ui| {
+                    let shown = crate::prefs::parts_and_assemblies(&app.preferences);
+                    let selected = app.tr(if shown { "prefs.environment_parts" } else { "prefs.environment_single" }).to_string();
+                    let choice = ui_kit::dropdown_menu(ui, "pref_environment", &selected, |ui| {
+                        for (value, key) in [
+                            (crate::prefs::ENVIRONMENT_SINGLE, "prefs.environment_single"),
+                            (crate::prefs::ENVIRONMENT_PARTS_AND_ASSEMBLIES, "prefs.environment_parts"),
+                        ] {
+                            let picked = (value == crate::prefs::ENVIRONMENT_PARTS_AND_ASSEMBLIES) == shown;
+                            let response = ui_kit::list_picker(ui, key, solidcraft_ui_text::tr(key), picked);
+                            crate::scenario::publish_rect(&format!("prefs:environment_{value}"), response.rect);
+                            if response.clicked() {
+                                app.preferences.environment = value.into();
+                                ui.close();
+                            }
+                        }
+                    });
+                    crate::scenario::publish_rect("prefs:environment", choice.rect);
+                });
+                ui_kit::text(ui, app.tr("prefs.environment_note"), ui_kit::Text::Note("environment"));
+            });
+        });
         ui_kit::settings_section(ui, "startup", app.tr("ui.on_startup"), |ui| {
             ui_kit::settings_form(ui, labels, |ui| {
                 ui_kit::row(ui, app.tr("ui.on_startup"), |ui| {
@@ -83,7 +109,6 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             setting::save_prompt_one_at_a_time(app, ui).on_hover_text(app.tr("prefs.save_prompt_one_at_a_time_help"));
             setting::experimental_smaller_saves(app, ui).on_hover_text(app.tr("prefs.experimental_smaller_saves_help"));
-            setting::experimental_file_kinds(app, ui).on_hover_text(app.tr("prefs.experimental_file_kinds_help"));
             ui_kit::settings_form(ui, labels, |ui| {
                 let shown = ui_kit::settings_row_help(ui, app.tr("ui.autosave_every"), solidcraft_ui_text::tr_label("0 turns it off"), |ui| {
                     let number = ui_kit::settings_number(ui, &mut app.autosave_minutes, 0.0..=120.0, 0.5);

@@ -28,7 +28,18 @@ pub fn set_experimental_file_kinds(on: bool) {
 /// Whether the experimental file kinds are on: [`set_experimental_file_kinds`] turned them on, or
 /// `SOLIDCRAFT_FILE_KINDS` is set (for command-line runs, which read no preferences).
 pub fn experimental_file_kinds() -> bool {
-    EXPERIMENTAL.load(Ordering::Relaxed) || solidcraft_geom::env::flag("FILE_KINDS")
+    EXPERIMENTAL.load(Ordering::Relaxed) || ON_FOR_TESTS.load(Ordering::Relaxed) || solidcraft_geom::env::flag("FILE_KINDS")
+}
+
+/// On for the rest of the process, whatever [`set_experimental_file_kinds`] is told after.
+static ON_FOR_TESTS: AtomicBool = AtomicBool::new(false);
+
+/// For tests that need the experiment on while others in the same process apply preferences
+/// that turn it off: on for the rest of the process. A single design saves and opens the same
+/// either way, so the other tests are unaffected. Under nextest each test is its own process.
+#[doc(hidden)]
+pub fn file_kinds_on_for_tests() {
+    ON_FOR_TESTS.store(true, Ordering::Relaxed);
 }
 
 /// The kind a save of `s` to `path` in `format` writes: the session's own, or with the experiment
@@ -91,6 +102,32 @@ pub(super) fn opened_with(path: &str, on: bool) -> (DesignKind, Option<String>) 
         )
     });
     (kind, note)
+}
+
+/// The kind `file.new {kind}` asks for: none or `single` is a single design; another kind needs
+/// the experiment on (the Parts and assemblies environment).
+pub(super) fn for_new(kind: Option<&serde_json::Value>) -> Result<DesignKind> {
+    for_new_with(kind, experimental_file_kinds())
+}
+
+/// [`for_new`] with the experiment `on` or off.
+pub(super) fn for_new_with(kind: Option<&serde_json::Value>, on: bool) -> Result<DesignKind> {
+    let asked = match kind.filter(|k| !k.is_null()) {
+        None => return Ok(DesignKind::Single),
+        Some(k) => k.as_str().unwrap_or_default(),
+    };
+    let kind = match asked {
+        "single" => DesignKind::Single,
+        other => DesignKind::from_content(other)
+            .ok_or_else(|| bad("file.new", format!("`kind` must be single, part, sheet_metal or assembly, not {other:?}")))?,
+    };
+    if kind != DesignKind::Single && !on {
+        return Err(bad(
+            "file.new",
+            "Parts and assemblies is off: turn it on in Preferences › General › Environment to make a new part, sheet metal part or assembly",
+        ));
+    }
+    Ok(kind)
 }
 
 /// A kind's name for a reply: none for a single design, so replies stay as they were.

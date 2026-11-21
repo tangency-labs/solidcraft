@@ -18,8 +18,9 @@ A drawing file's `container.json` adds `"content":"drawing"`. Experimentally (#6
 so its file is what it always was. The kind never changes with the file's name. Releases
 since 0.45.0-rc.1 open such a file as a design from a newer SolidCraft and keep its
 `container.json` when saving it. The checks that go with the kinds (a new design takes its first file's
-kind, a save as another kind is refused) are off unless Preferences › General › Saving turns
-them on, or `SOLIDCRAFT_FILE_KINDS=1` for command-line runs.
+kind, a save as another kind is refused) are off unless Preferences › General › Environment is
+Parts and assemblies (experimental), which also makes New offer a part, a sheet metal part or an
+assembly; or `SOLIDCRAFT_FILE_KINDS=1` for command-line runs.
 
 Within `document.json`:
 
