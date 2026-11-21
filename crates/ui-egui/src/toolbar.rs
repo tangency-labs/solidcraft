@@ -6095,6 +6095,50 @@ mod command_start_tab_tests {
         let _ = std::fs::remove_dir_all(folder);
     }
 
+    /// A linked component inside a component that is not linked: a body of it picked in the view
+    /// breaks its link (the placement a drag or Ground takes for that body is the outer one,
+    /// which has no link), and so does its own placement's row. The outer component selected
+    /// breaks nothing: it is not linked.
+    #[test]
+    fn ribbon_break_link_finds_a_linked_component_inside_one_that_is_not_linked() {
+        let nested = |name: &str| {
+            let folder = std::env::temp_dir().join(format!("solidcraft-break-link-{name}-{}", std::process::id()));
+            std::fs::create_dir_all(&folder).unwrap();
+            let source = folder.join("part.solidcraft");
+            let mut part = solidcraft_engine::Session::default();
+            part.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+            part.execute("file.save", &json!({"path": source})).unwrap();
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            let holder = h.app.run("component.create", json!({"name": "Holder"})).unwrap();
+            let inserted = h.app.run("component.insert_design", json!({"path": source})).unwrap();
+            h.app.run("component.activate", json!({"component": 0})).unwrap();
+            h.app.status = None;
+            let ids = (holder["occurrence"].as_u64().unwrap(), inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
+            (h, ids, folder)
+        };
+        let (mut h, (holder, component, occurrence), folder) = nested("nested-body");
+        assert_eq!(
+            h.app.session.occurrence_placement(&[holder, occurrence]).ok().map(|p| p.component),
+            Some(component),
+            "the linked part is inside Holder"
+        );
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [holder]}]})).unwrap();
+        h.app.start("component.break_link");
+        assert!(h.app.session.doc.links.contains_key(&component), "Holder is not linked: nothing is broken");
+        let body = h.app.session.model.state().bodies.first().map(|b| b.name.clone()).unwrap();
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": body}]})).unwrap();
+        h.app.start("component.break_link");
+        assert!(!h.app.session.doc.links.contains_key(&component), "the picked body's linked component: {:?}", h.app.status);
+        let _ = std::fs::remove_dir_all(folder);
+
+        let (mut h, (holder, component, occurrence), folder) = nested("nested-row");
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [holder, occurrence]}]})).unwrap();
+        h.app.start("component.break_link");
+        assert!(!h.app.session.doc.links.contains_key(&component), "its own placement's row: {:?}", h.app.status);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
     /// With no linked component among what is selected, Break Link says what to pick and changes
     /// nothing: nothing selected, or a component that is not linked.
     #[test]

@@ -2152,25 +2152,35 @@ impl SolveApp {
         }
     }
 
-    /// Break the link of each linked component among the selected placements, the placements
-    /// owning the bodies or faces picked in the view, and the components picked in the Browser:
-    /// its bodies stay, and it no longer follows its file. The status line says which links
-    /// were broken, as nothing else on the screen changes. With no linked component among them
-    /// it says what to pick.
+    /// The innermost linked component on a placement's path: the placement's own component, or
+    /// the nearest one above it that is linked to a file.
+    fn linked_component_on(&self, path: &[u64]) -> Option<u64> {
+        (1..=path.len()).rev().find_map(|n| {
+            let placement = self.session.occurrence_placement(path.get(..n)?).ok()?;
+            self.session.doc.links.contains_key(&placement.component).then_some(placement.component)
+        })
+    }
+
+    /// Break the link of each linked component among what is selected: a selected placement, or
+    /// a body, face, edge or vertex picked in the view, stands for the innermost linked
+    /// component on its path (a linked component inside one that is not linked is found, where
+    /// Ground's outermost placement would be the one around it), and a component picked in the
+    /// Browser for itself. Its bodies stay, and it no longer follows its file. The status line
+    /// says which links were broken, as nothing else on the screen changes. With no linked
+    /// component among them it says what to pick.
     fn break_links_of_selected_components(&mut self) {
+        let frames = self.session.doc.body_frames(&self.session.model.state());
         let mut components: Vec<u64> = Vec::new();
         for sel in &self.session.selection {
             use solidcraft_engine::Sel;
             let path = match sel {
                 Sel::Occurrence { path } => Some(path.clone()),
                 Sel::Body { name: body } | Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => {
-                    occurrence_drag::placement_of(self, body)
+                    frames.iter().find(|frame| frame.0 == *body).map(|frame| frame.2.clone())
                 }
                 _ => None,
             };
-            if let Some(placement) = path.and_then(|path| self.session.occurrence_placement(&path).ok()) {
-                components.push(placement.component);
-            }
+            components.extend(path.and_then(|path| self.linked_component_on(&path)));
         }
         components.extend(self.tree.picked_components.iter().copied());
         let mut seen = std::collections::BTreeSet::new();
