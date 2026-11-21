@@ -1,0 +1,42 @@
+{
+  "en": {
+    "ui.ai_computer_access": "Let the agent use this computer",
+    "ui.ai_computer_access_note": "The agent keeps its own tools and starts in your home folder, and SolidCraft's file commands reach any folder. Its own tools ask in the panel as the agent's mode has it; with Do everything nothing asks. Takes effect with the next conversation.",
+    "ui.ai_computer_access_warning": "With Do everything, the agent can read, change and delete whatever your user account can, without asking."
+  },
+  "ar": {
+    "ui.ai_computer_access": "السماح للوكيل باستخدام هذا الحاسوب",
+    "ui.ai_computer_access_note": "يحتفظ الوكيل بأدواته الخاصة ويبدأ في مجلد المنزل، وتصل أوامر الملفات في SolidCraft إلى أي مجلد. تطلب أدواته الخاصة الإذن في اللوحة بحسب وضع الوكيل؛ مع «تنفيذ كل شيء» لا يُسأل عن شيء. يسري ذلك من المحادثة التالية.",
+    "ui.ai_computer_access_warning": "مع «تنفيذ كل شيء» يمكن للوكيل قراءة كل ما يستطيع حساب المستخدم الوصول إليه وتغييره وحذفه دون سؤال."
+  },
+  "de": {
+    "ui.ai_computer_access": "Agent darf diesen Computer benutzen",
+    "ui.ai_computer_access_note": "Der Agent behält seine eigenen Werkzeuge und startet in Ihrem Benutzerordner, und die Dateibefehle von SolidCraft erreichen jeden Ordner. Seine eigenen Werkzeuge fragen im Panel nach, wie es der Modus des Agenten vorgibt; mit „Alles ausführen“ fragt nichts. Gilt ab der nächsten Unterhaltung.",
+    "ui.ai_computer_access_warning": "Mit „Alles ausführen“ kann der Agent ohne Nachfrage alles lesen, ändern und löschen, was Ihr Benutzerkonto darf."
+  },
+  "he": {
+    "ui.ai_computer_access": "לאפשר לסוכן להשתמש במחשב הזה",
+    "ui.ai_computer_access_note": "הסוכן שומר על הכלים שלו ומתחיל בתיקיית הבית שלך, ופקודות הקבצים של SolidCraft מגיעות לכל תיקייה. הכלים שלו מבקשים אישור בחלונית לפי המצב של הסוכן; עם „לעשות הכול” שום דבר לא שואל. ייכנס לתוקף מהשיחה הבאה.",
+    "ui.ai_computer_access_warning": "עם „לעשות הכול” הסוכן יכול לקרוא, לשנות ולמחוק כל מה שחשבון המשתמש שלך יכול, בלי לשאול."
+  },
+  "ja": {
+    "ui.ai_computer_access": "エージェントにこのコンピューターの使用を許可",
+    "ui.ai_computer_access_note": "エージェントは自身のツールを使えるままホームフォルダーで起動し、SolidCraft のファイルコマンドはどのフォルダーにも届きます。エージェント自身のツールは、そのモードに従ってパネルで確認を求めます。「すべて実行」では何も確認しません。次の会話から有効になります。",
+    "ui.ai_computer_access_warning": "「すべて実行」では、エージェントはユーザーアカウントで扱えるものを確認なしで読み取り・変更・削除できます。"
+  },
+  "ko": {
+    "ui.ai_computer_access": "에이전트가 이 컴퓨터를 사용하도록 허용",
+    "ui.ai_computer_access_note": "에이전트는 자체 도구를 그대로 유지한 채 홈 폴더에서 시작하며, SolidCraft의 파일 명령은 모든 폴더에 접근합니다. 에이전트 자체 도구는 에이전트의 모드에 따라 패널에서 확인을 요청하며, 모두 실행 모드에서는 아무것도 묻지 않습니다. 다음 대화부터 적용됩니다.",
+    "ui.ai_computer_access_warning": "모두 실행 모드에서는 에이전트가 사용자 계정이 할 수 있는 모든 것을 확인 없이 읽고, 변경하고, 삭제할 수 있습니다."
+  },
+  "vi": {
+    "ui.ai_computer_access": "Cho phép tác tử dùng máy tính này",
+    "ui.ai_computer_access_note": "Tác tử giữ lại các công cụ của riêng nó và khởi động trong thư mục nhà của bạn, còn các lệnh tệp của SolidCraft truy cập được mọi thư mục. Các công cụ riêng của nó hỏi trong bảng điều khiển theo chế độ của tác tử; với Làm mọi việc thì không hỏi gì. Có hiệu lực từ cuộc trò chuyện tiếp theo.",
+    "ui.ai_computer_access_warning": "Với Làm mọi việc, tác tử có thể đọc, thay đổi và xóa mọi thứ mà tài khoản người dùng của bạn được phép, mà không cần hỏi."
+  },
+  "zh": {
+    "ui.ai_computer_access": "允许智能体使用这台电脑",
+    "ui.ai_computer_access_note": "智能体保留自己的工具，并在你的主目录中启动；SolidCraft 的文件命令可访问任何文件夹。它自己的工具按智能体的模式在面板中询问；“执行所有操作”下不再询问。从下一次对话开始生效。",
+    "ui.ai_computer_access_warning": "在“执行所有操作”下，智能体可以不经询问读取、更改和删除你的用户账户能访问的一切。"
+  }
+}
