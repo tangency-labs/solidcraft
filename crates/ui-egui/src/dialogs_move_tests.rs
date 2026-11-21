@@ -2525,4 +2525,23 @@ mod keep_axes {
         let p = crate::dialogs_move::params(&h.app, &d).unwrap();
         assert_eq!(p["carry"], json!([pole]), "{p}");
     }
+
+    /// Unticking the option on an edited Move drops the poles it carried but keeps the
+    /// constructions it was saved leaving behind, so an axis on the body still stays.
+    #[test]
+    fn unticking_the_option_keeps_what_the_move_leaves_behind() {
+        let (mut h, pole) = box_with_pole();
+        h.app.run("construct.axis.edge", json!({"edge": {"edge": [10, 0, 10]}, "name": "Rim"})).unwrap();
+        h.settle();
+        let rim = h.app.session.doc.features.last().unwrap().id;
+        h.app.run("solid.move", json!({"bodies": ["Body1"], "translate": [30, 0, 0], "carry": [pole], "leave": [rim]})).unwrap();
+        h.settle();
+        let mv = h.app.session.doc.features.last().unwrap().id;
+        let mut d = crate::dialogs::for_feature(&h.app, mv, None).unwrap();
+        assert!(crate::dialogs_move::keeps_axes(&h.app, &d));
+        d.extra.insert("keep_axes".into(), json!(false));
+        let p = crate::dialogs_move::params(&h.app, &d).unwrap();
+        assert!(p.get("carry").is_none(), "{p}");
+        assert_eq!(p["leave"], json!([rim]), "{p}");
+    }
 }

@@ -1262,6 +1262,31 @@ fn carry_finds_a_name_before_the_id_it_reads_as() {
     assert!(on_line(o, d, Vec3::new(5.0, 5.0, 0.0)), "feature {first} stayed: {o:?} {d:?}");
 }
 
+/// A carried pole's suppression reaches the Move that carries it (#20140 review): suppressed and
+/// unsuppressed again, the pole stands where the Move put it, as a cold rebuild puts it, not where
+/// it was drawn. Deleting the pole leaves the Move working, with nothing to carry.
+#[test]
+fn a_carried_pole_unsuppressed_or_deleted_keeps_the_move_right() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+    run(&mut s, "construct.axis.two_points", json!({"a": {"point": [10, 10, 0]}, "b": {"point": [10, 10, 10]}, "name": "Pole"}));
+    run(&mut s, "solid.move", json!({"bodies": ["Block"], "translate": [30, 0, 0], "carry": ["Pole"], "name": "Shift"}));
+    run(&mut s, "timeline.suppress", json!({"feature": "Pole", "suppressed": true}));
+    run(&mut s, "timeline.suppress", json!({"feature": "Pole", "suppressed": false}));
+    let (o, d) = axis(&s, "Pole");
+    assert!(on_line(o, d, Vec3::new(40.0, 10.0, 0.0)), "the pole went with the block again: {o:?} {d:?}");
+    let reopened = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+    let mut cold = Session::new(reopened);
+    cold.refresh();
+    let (co, cd) = axis(&cold, "Pole");
+    assert!(parallel(d, cd) && on_line(o, d, co), "cached {o:?} {d:?}, cold {co:?} {cd:?}");
+    run(&mut s, "timeline.delete", json!({"feature": "Pole"}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let block = run(&mut s, "inspect.measure", json!({"bodies": ["Block"]}))["bodies"][0]["bbox"]["min"].clone();
+    assert_eq!(block, json!([30.0, 0.0, 0.0]), "the block still moves");
+}
+
 /// A copied Move carries the copied pole, not the original (#20139 review): Paste New of a
 /// component remaps `carry` to the pole copied with it.
 #[test]

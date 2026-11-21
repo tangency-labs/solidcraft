@@ -821,15 +821,18 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
         let bodies = names(&p);
         // An edited Move keeps the lists it was saved with while its bodies and the option are
         // unchanged, so confirming it as it is replays the same constructions.
-        let saved = d
-            .extra
-            .get("saved_axes")
-            .filter(|s| s.get("keep").and_then(Value::as_bool) == Some(keep) && s.get("bodies").is_some_and(|b| *b == json!(bodies)));
-        if let Some(saved) = saved {
-            for key in ["carry", "leave"] {
-                if let Some(list) = saved.get(key).filter(|l| l.as_array().is_some_and(|a| !a.is_empty())) {
-                    p[key] = list.clone();
-                }
+        // An edited Move keeps the lists it was saved with while its bodies are unchanged: the
+        // constructions it leaves behind whatever the option says, and those it carries while
+        // the option stays as it was, so confirming it as it is replays the same constructions.
+        let saved = d.extra.get("saved_axes").filter(|s| s.get("bodies").is_some_and(|b| *b == json!(bodies)));
+        let list = |key: &str| saved.and_then(|s| s.get(key)).filter(|l| l.as_array().is_some_and(|a| !a.is_empty())).cloned();
+        if let Some(leave) = list("leave") {
+            p["leave"] = leave;
+        }
+        let same_option = saved.is_some_and(|s| s.get("keep").and_then(Value::as_bool) == Some(keep));
+        if same_option {
+            if let Some(carry) = list("carry") {
+                p["carry"] = carry;
             }
         } else if keep {
             let through = axes_through(app, d.editing.map(|(id, _)| id), &bodies);
