@@ -79,6 +79,14 @@ impl Aabb3 {
     pub fn intersection(&self, o: &Aabb3) -> Aabb3 {
         Aabb3 { min: self.min.max(o.min), max: self.max.min(o.max) }
     }
+    /// Whether the endless line through `o` along `d` meets the box, its sides included (never an
+    /// empty box, never a zero direction or a coordinate that is not finite). Each side counts a
+    /// millionth of the box's size beyond it, so a line read back from a body's own face still
+    /// meets its box ([`solidcore_ops::measure::line_meets_box`]).
+    pub fn meets_line(&self, o: Vec3, d: Vec3) -> bool {
+        let k = |v: Vec3| [v.x, v.y, v.z];
+        !self.is_empty() && solidcore_ops::measure::line_meets_box(k(self.min), k(self.max), k(o), k(d), 1e-6).unwrap_or(false)
+    }
     /// Whether the two boxes share a point (never when either is empty).
     pub fn meets(&self, o: &Aabb3) -> bool {
         self.min.x <= o.max.x
