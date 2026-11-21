@@ -37,19 +37,30 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     crate::apply_vector(&sketch_transform, ss.plane.y),
                 )
                 .ok_or_else(|| DocError::Invalid("invalid cylinder sketch frame".into()))?;
-                let mut at = crate::apply_point(&crate::mat_mul(&inverse, &author_frame), face.at.0);
+                let at = crate::apply_point(&crate::mat_mul(&inverse, &author_frame), face.at.0);
                 let name = f
                     .face_names
                     .first()
                     .filter(|name| !name.is_empty())
-                    .ok_or_else(|| DocError::Invalid("selected cylinder face has no persistent identity".into()))?;
-                {
+                    .ok_or_else(|| DocError::Invalid("selected emboss face has no persistent identity".into()))?;
+                let hit = {
                     let mut scoped = ModelState::default();
                     scoped.bodies.push(mb.clone());
-                    let hit = crate::name_lookup::locate_face(&scoped, name, at).ok_or_else(|| DocError::reselect(name.as_str()))?;
-                    at = kernel::cylinder_emboss_anchor(&mb.body, hit.face, hit.point)?;
-                }
-                let result = kernel::emboss_cylinder_at(&mb.body, at, &plane, &regions, if *deboss { -d } else { d })?;
+                    crate::name_lookup::locate_face(&scoped, name, at).ok_or_else(|| DocError::reselect(name.as_str()))?
+                };
+                let signed = if *deboss { -d } else { d };
+                // A sketch tangent to a complete cylinder wall, outside or a bore, takes the wrap
+                // (whose refusals stand); a partial wall, a sketch off the wall and every other
+                // face are projected.
+                let result = match kernel::cylinder_emboss_anchor(&mb.body, hit.face, hit.point) {
+                    Ok(at) if kernel::infer_cylinder_emboss(&mb.body, &plane, &regions, signed)?.is_some() => {
+                        kernel::emboss_cylinder_at(&mb.body, at, &plane, &regions, signed)?
+                    }
+                    _ => {
+                        let at = kernel::emboss_anchor(&mb.body, hit.face, hit.point)?;
+                        kernel::emboss_project_face(&mb.body, hit.face, at, &plane, &regions, signed)?
+                    }
+                };
                 if let Some(slot) = st.bodies.get_mut(i) {
                     *slot = ModelBody::new(mb.name, result, mb.feature);
                 }

@@ -677,20 +677,7 @@ fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: V
     if b.body.is_mesh() || !near.is_finite() {
         return None;
     }
-    // The faces that border a face named only by its index and not verified (a sphere's): such a
-    // neighbour tells no piece apart, so a piece only it bounds is named without a qualifier.
-    let mut beside_index = vec![false; faces.faces.len()];
-    let by_index = |g: usize| !faces.verified(g) && faces.faces.get(g).is_some_and(|n| crate::history_names::named_by_index(strip_piece(n)));
-    for fs in &m.edge_faces {
-        let [a, b] = fs.as_slice() else { continue };
-        for (p, q) in [(*a as usize, *b as usize), (*b as usize, *a as usize)] {
-            if by_index(q)
-                && let Some(slot) = beside_index.get_mut(p)
-            {
-                *slot = true;
-            }
-        }
-    }
+    let beside_index = beside_index_named(b, faces);
     // How face `f` answers to face name `x`: `Some(true)` by a qualifier that is not its own.
     let side = |f: usize, x: &str| -> Option<bool> {
         let level = crate::history_names::matches(faces, f, x)?;
@@ -748,6 +735,47 @@ fn qualified(x: &str) -> bool {
 fn told_apart_by_index_only(x: &str) -> bool {
     crate::piece_names::piece_parts(x)
         .is_some_and(|(_, around)| !around.is_empty() && around.iter().all(|a| crate::history_names::named_by_index(strip_piece(a))))
+}
+
+/// For each face of body `b` (named by `faces`), whether it borders a face named only by its index
+/// and not verified (a sphere's, or a sweep's past a bend): such a neighbour tells no piece apart
+/// (#18481), so a piece it bounds may be named without the qualifier a design saved before held.
+/// Read from the B-rep's edges and the faces each edge's uses lie on.
+fn beside_index_named(b: &ModelBody, faces: &Names) -> Vec<bool> {
+    let mut beside = vec![false; faces.faces.len()];
+    let by_index = |g: usize| !faces.verified(g) && faces.faces.get(g).is_some_and(|n| crate::history_names::named_by_index(strip_piece(n)));
+    for edge in &b.body.record().edges {
+        for p in &edge.uses {
+            if edge.uses.iter().any(|q| q.face != p.face && by_index(q.face as usize))
+                && let Some(slot) = beside.get_mut(p.face as usize)
+            {
+                *slot = true;
+            }
+        }
+    }
+    beside
+}
+
+/// The one face among `faces` (each answering to the stored name `name` as a piece, on body `b`)
+/// that is the piece the name told apart, when that piece lost its qualifier: a design saved before
+/// faces named by their index stopped telling pieces apart (#18481) named the piece after neighbours
+/// that still bound it, and the piece is now named by its bare stem because the faces that told it
+/// apart from its siblings are named by their index. Such a sibling still answers to the name too
+/// (it is a piece of the same stem bounded by the same faces). The piece is the face named by the
+/// name's bare stem that borders an unverified face named by its index and that the reference's
+/// point `p` lies on (exactly, within the pick reach); none or several, and the name finds nothing
+/// (#20027).
+fn unqualified_piece(b: &ModelBody, names: &Names, faces: &[usize], name: &str, p: Vec3) -> Option<(usize, Vec3)> {
+    let (stem, around) = crate::piece_names::piece_parts(name)?;
+    if around.is_empty() || !p.is_finite() {
+        return None;
+    }
+    let beside = beside_index_named(b, names);
+    let mut on = faces.iter().filter_map(|&f| {
+        let bare = names.faces.get(f).is_some_and(|own| own == stem);
+        (bare && beside.get(f).copied().unwrap_or(false)).then(|| on_face(b, f, p)).flatten()
+    });
+    on.next().filter(|_| on.next().is_none())
 }
 
 /// The point of face `face` of a mesh nearest `p`, and how far it is.
@@ -1178,6 +1206,18 @@ fn locate_in<'a>(bodies: impl Iterator<Item = (usize, &'a ModelBody)>, name: &st
     // one the reference's point lies on. Pieces of one face are never told apart by a point.
     let mut bodies: Vec<usize> = faces.iter().map(|(bi, _, _)| *bi).collect();
     bodies.dedup();
+    if level == Match::Piece
+        && let [only] = bodies.as_slice()
+        && let Some((_, b, _)) = faces.first()
+    {
+        // Pieces of one face on one body: the piece a design saved before #18481 told apart by
+        // neighbours whose qualifier it lost since (#20027).
+        let names = naming::names(b);
+        let pieces: Vec<usize> = faces.iter().map(|(_, _, f)| *f).collect();
+        return unqualified_piece(b, &names, &pieces, name, p)
+            .map(|(face, point)| FaceHit { body: *only, face, point, verified: names.verified(face), on_point: true })
+            .ok_or(Miss::Several);
+    }
     if level != Match::Exact || bodies.len() < faces.len() {
         return Err(Miss::Several);
     }

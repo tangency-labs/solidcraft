@@ -4746,13 +4746,17 @@ impl Document {
         kinds
     }
 
+    /// The design as the text of a `.json` file. The same design always gives the same text, and a
+    /// short list of numbers such as a point stays on one line (the layout is in `json_layout.rs`).
     pub fn to_json(&self) -> String {
-        if self.newer_file.is_some() {
+        let compact = if self.newer_file.is_some() {
             let mut value = serde_json::to_value(self).unwrap_or_default();
             crate::newer_file::restore(self, &mut value);
-            return serde_json::to_string_pretty(&value).unwrap_or_default();
-        }
-        serde_json::to_string_pretty(self).unwrap_or_default()
+            serde_json::to_string(&value).unwrap_or_default()
+        } else {
+            serde_json::to_string(self).unwrap_or_default()
+        };
+        crate::json_layout::pretty(&compact)
     }
 
     pub fn feature(&self, id: u64) -> Option<&Feature> {

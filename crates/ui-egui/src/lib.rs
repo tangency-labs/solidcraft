@@ -378,6 +378,8 @@ pub use solidcraft_ui_kit as ui_kit;
 #[cfg(test)]
 mod ui_kit_guard_tests;
 pub mod update;
+#[cfg(feature = "usage-stats")]
+pub mod usage_stats;
 mod value_step;
 pub(crate) mod view_angles;
 pub use solidcraft_ui_kit::view_compass;
@@ -533,7 +535,9 @@ pub struct Services {
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
     /// Open a dialog asking for a program (a slicer); `None` when the host has no such dialog.
     pub pick_program: Option<Box<dyn Fn() -> FilePickerFuture>>,
-    /// Select the local document library root; unavailable in browser hosts.
+    /// Open a dialog asking for a folder. `None` on the web build and when the host has no
+    /// folder picker: a plugin field shows no Browse button and the text field still accepts
+    /// a pasted path, and the document library cannot choose a folder.
     pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
     pub show_in_folder: Option<Box<dyn Fn(&str)>>,
     /// Open a file in the program the system opens its kind with (a PDF in its viewer, to print).
@@ -586,6 +590,10 @@ pub struct Services {
     /// HTTP to the ticket server, for problem reports and My tickets (`tickets`); None: reports
     /// open a GitHub draft instead.
     pub tickets_http: Option<tickets::Http>,
+    /// HTTP for anonymous usage statistics (`usage_stats`), posting only to its one endpoint;
+    /// None: nothing is sent.
+    #[cfg(feature = "usage-stats")]
+    pub usage_http: Option<tickets::Http>,
     /// Where the ticket server's sign-in is kept: the system keyring (the browser's storage on
     /// the web). Never a plain file.
     pub ticket_secrets: Option<std::sync::Arc<dyn agent_chat::backend::Secrets>>,
@@ -743,6 +751,9 @@ pub struct SolveApp {
     /// What this computer's administrator set (`policy`). The host loads it at start; the default
     /// is an unmanaged computer.
     pub policy: policy::Policy,
+    /// Anonymous usage statistics (`usage_stats`): what is kept and the report on its way.
+    #[cfg(feature = "usage-stats")]
+    pub usage: usage_stats::UsageStats,
     /// Safari's steps for installing the web app, while their window is open (`install`).
     pub install_steps: Option<install::Steps>,
     /// Toolbar buttons the user pinned, removed or reordered.
@@ -1099,6 +1110,8 @@ impl SolveApp {
             crashes: crash_ui::CrashUi::default(),
             updater: update::Updater::default(),
             policy: policy::Policy::default(),
+            #[cfg(feature = "usage-stats")]
+            usage: usage_stats::UsageStats::new(None),
             install_steps: None,
             toolbar_custom: toolbar_custom::ToolbarCustom::default(),
             settings_profiles: settings_profiles::Profiles::default(),
@@ -1366,6 +1379,18 @@ impl SolveApp {
             log::warn!("Preferences export retained recovery data: {reason}");
             self.prefs_with_panel_layout(prefs::held_panel_layout(self).unwrap_or_else(|| panel_runtime::preferences_value(self)))
         })
+    }
+
+    /// Take in the usage statistics the host stored under `usage_stats::STORAGE_KEY`.
+    #[cfg(feature = "usage-stats")]
+    pub fn load_usage_stats(&mut self, stored: Option<&str>) {
+        self.usage.store = usage_stats::Store::from_stored(stored);
+    }
+
+    /// The usage statistics for the host to store under `usage_stats::STORAGE_KEY`.
+    #[cfg(feature = "usage-stats")]
+    pub fn usage_stats_for_storage(&self) -> String {
+        self.usage.store.to_stored()
     }
 
     /// Portable preferences for storage. On refusal the host retains its stored panel record.
@@ -1731,6 +1756,7 @@ impl SolveApp {
                 self.plugin_inspection_versions.insert((self.session.uid, id.to_owned()), control_job::next_plugin_inspection());
             }
             match id {
+                "ui.appBarReset" => self.toolbar_custom.reset_app_bar(),
                 "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64)),
                 // The sketch being edited has all new contents: a tool's picks named the old ones.
                 "sketch.replace" if v.get("sketch_id").and_then(Value::as_u64).is_some_and(|id| self.session.active_sketch == Some(id)) => {
@@ -2199,6 +2225,13 @@ impl SolveApp {
             dialogs::confirm(self);
             return;
         }
+        // A tool or dialog started, for usage statistics (`usage_stats`), even if it is cancelled.
+        #[cfg(feature = "usage-stats")]
+        if self.session.count_usage
+            && let Some(spec) = solidcraft_engine::find_command(id)
+        {
+            solidcraft_engine::usage::note(solidcraft_engine::usage::Bucket::Tools, spec.id);
+        }
         self.tree.clear_folder_pick();
         // A command started from the folded ribbon's open panels closes them (#10112).
         self.ui.ribbon_open = false;
@@ -2214,6 +2247,12 @@ impl SolveApp {
             return;
         }
         if id == "timeline.play" {
+            if let Err(why) = self.run(id, json!({})) {
+                self.set_status(why, true);
+            }
+            return;
+        }
+        if id == "ui.appBarReset" {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
             }
@@ -3834,6 +3873,11 @@ impl SolveApp {
 
     /// Apply view.fit / view.home to the active canvas, retaining each canvas's framing policy.
     fn frame_view(&mut self, home: bool) {
+        self.frame_view_bounds(home, None);
+    }
+
+    /// Frame a preview's result through the same path, using its bounds before it is committed.
+    fn frame_view_bounds(&mut self, home: bool, preview_bounds: Option<solidcraft_engine::geom::Aabb3>) {
         if render_workspace::result_active(self) {
             render_workspace::fit_result(self);
             return;
@@ -3859,6 +3903,16 @@ impl SolveApp {
         let mut to = self.cam;
         if home {
             to.set_view(StandardView::Iso);
+        }
+        if let Some(bounds) = preview_bounds {
+            let shared = home && self.preferences.navigator_fit;
+            self.pending_fit = Some((to, bounds, true, shared));
+            to = if shared {
+                self.navigator_fitted_bounds(to, &bounds).unwrap_or_else(|| self.fitted_bounds(to, &bounds))
+            } else {
+                self.fitted_bounds(to, &bounds)
+            };
+        } else if home {
             // With the navigators' Fit on, Home shares their zoom, so a face clicked after it
             // keeps the zoom (#10091).
             let shared = self.preferences.navigator_fit;
@@ -4032,6 +4086,8 @@ impl SolveApp {
         recovery_ui::tick(self);
         open_elsewhere::tick(self, ctx);
         update::tick(self, ctx);
+        #[cfg(feature = "usage-stats")]
+        usage_stats::tick(self, ctx);
         if self.issue_report.draft.is_none() && self.file_picker.is_none() {
             // Files dropped on the theme Import tile are themes (#8226).
             prefs::take_theme_drops(self, ctx);

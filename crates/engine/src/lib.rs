@@ -57,6 +57,8 @@ pub mod status_items;
 pub mod timing;
 pub mod title_block_text;
 pub mod upright_image;
+#[cfg(feature = "usage-stats")]
+pub mod usage;
 pub mod view;
 
 use solidcraft_geom::prelude::*;
@@ -520,6 +522,9 @@ pub struct Preview {
     pub before: Arc<ModelState>,
     /// The model after the commands.
     pub after: Arc<ModelState>,
+    /// Sketches shown after the commands, using the same visibility rule as Home/Fit.
+    /// The models retain hidden sketches for geometry comparisons and editing previews.
+    pub shown_sketches: std::collections::BTreeSet<u64>,
     /// What each command replied (as `execute` returns it).
     pub replies: Vec<Value>,
     /// The joints the commands posed, with their effective values now: the ones they drove and
@@ -530,6 +535,12 @@ pub struct Preview {
 }
 
 impl Preview {
+    fn new(before: Arc<ModelState>, after: Arc<ModelState>, source: &Session, result: &Session, replies: Vec<Value>) -> Self {
+        let shown_sketches = after.sketches.iter().filter(|sketch| view::sketch_shown(result, sketch.feature)).map(|sketch| sketch.feature).collect();
+        let joints = cmd::joints::posed_joints(source, result, &replies);
+        Self { before, after, shown_sketches, replies, joints }
+    }
+
     fn visible_world(before: &Session, after: &Session, replies: Vec<Value>) -> Result<Self> {
         let visible = |session: &Session| -> Result<Arc<ModelState>> {
             let world = session.world_state()?;
@@ -537,7 +548,7 @@ impl Preview {
             shown.bodies.retain(|body| session.body_visible(&body.name));
             Ok(Arc::new(shown))
         };
-        Ok(Self { before: visible(before)?, after: visible(after)?, joints: cmd::joints::posed_joints(before, after, &replies), replies })
+        Ok(Self::new(visible(before)?, visible(after)?, before, after, replies))
     }
 }
 
@@ -764,6 +775,11 @@ pub struct Session {
     /// `config.update_from_design` compares the design with to name the changes the table has no
     /// column for. The session's only, never saved.
     pub(crate) config_baseline: Option<(String, Arc<Document>)>,
+    /// The model each of the last two configuration rows left built, by row id
+    /// (`config.activate`): going back to one offers its results to the evaluation
+    /// ([`solidcraft_doc::Model::prime`]), which takes each whose feature has the same inputs,
+    /// instead of computing what the cache has dropped meanwhile. The session's only, never saved.
+    pub(crate) row_models: Vec<(u64, Model)>,
     /// Stops the work computing off the window thread for this design, shared with its copies.
     stop: solidcraft_kernel::Stop,
     /// A copy of a design ([`Session::scratch`]), sharing its token.
@@ -871,6 +887,10 @@ pub struct Session {
     /// Record this session's top-level commands in the crash journal (the app's own design;
     /// never previews or other scratch sessions). See [`crash`].
     pub crash_journal: bool,
+    /// Count the commands the person runs in this session for the app's usage statistics
+    /// ([`usage`]): the app's own design only, like [`Session::crash_journal`].
+    #[cfg(feature = "usage-stats")]
+    pub count_usage: bool,
     /// The last value each drawing dimension read this session, by drawing and dimension: what a
     /// dimension that can't be measured now last measured. Only the file's copy of the document
     /// keeps it ([`as_saved`]): a read is no change to undo or to ask about saving.
@@ -1222,6 +1242,7 @@ impl Session {
             pending_moves: Default::default(),
             exploded: Default::default(),
             config_baseline: None,
+            row_models: Vec::new(),
             world_cache: Default::default(),
             joints_settled: None,
             occurrence_visibility_cache: Default::default(),
@@ -1267,6 +1288,8 @@ impl Session {
             motion_traces: Default::default(),
             command_check: None,
             crash_journal: false,
+            #[cfg(feature = "usage-stats")]
+            count_usage: false,
         }
     }
 
@@ -1300,6 +1323,8 @@ impl Session {
         // The design on screen stays journaled for crash reports at once, not from the app's
         // next frame, so commands sent right after `doc.open` or `file.new` are kept.
         let crash_journal = self.crash_journal;
+        #[cfg(feature = "usage-stats")]
+        let count_usage = self.count_usage;
         let replacements = self.replacements.wrapping_add(1);
         let command_check = self.command_check.take();
         let previous_doc = self.doc.clone();
@@ -1307,6 +1332,10 @@ impl Session {
         let redo_watch = self.redo_watch.take();
         *self = fresh;
         self.crash_journal = crash_journal;
+        #[cfg(feature = "usage-stats")]
+        {
+            self.count_usage = count_usage;
+        }
         self.command_check = command_check;
         self.auto_project = auto_project;
         self.project_construction = project_construction;
@@ -1926,6 +1955,18 @@ impl Session {
         false
     }
 
+    /// The bodies that left this session's model let go of their kernel forms
+    /// ([`solidcraft_doc::Model::release_left`], #19629): after a refresh, when an edit computed
+    /// on a copy is adopted, and at the end of every command, which is when a copy a command
+    /// only read through (a trial of parameter values) is done with. A front end that runs a
+    /// command on a copy of this session calls it when the copy's answer is back. A copy lets
+    /// go of nothing: its session still holds the bodies it started from.
+    pub fn release_left(&mut self) {
+        if !self.is_copy {
+            self.model.release_left();
+        }
+    }
+
     /// Refresh normally, retaining the last joint solve for commands that report its outcome.
     fn refresh_with_joint_report(&mut self) -> Option<solidcraft_doc::joints::Solution> {
         let mut solved = None;
@@ -1974,6 +2015,7 @@ impl Session {
         {
             self.active_sketch = None;
         }
+        self.release_left();
         solved
     }
 
@@ -2593,6 +2635,12 @@ impl Session {
                         false
                     };
                     if saves {
+                        // An operation for usage statistics: the action that made this undo step
+                        // (`usage`). A drag's frames make none until it ends; replays make none.
+                        #[cfg(feature = "usage-stats")]
+                        if self.count_usage && live.is_none() {
+                            usage::note(usage::Bucket::Operations, spec.id);
+                        }
                         // A new step ends what could be redone in its part; the other parts' redo
                         // steps still hold, as undo puts back only the part a step changed.
                         let part = before.part;
@@ -2672,6 +2720,7 @@ impl Session {
         // lost link marked, so it can be repaired from inside it (#12085).
         if outermost {
             self.model.hold_failed_sketch(&self.doc, self.active_sketch);
+            self.release_left();
         }
         if let Some((before, changed, failed, seed)) = crash_outcome {
             // Refresh and body-name pinning can copy the shared document. Remember the final
@@ -2776,6 +2825,7 @@ impl Session {
         self.doc = c.doc;
         // A row put on the design after the checkpoint is gone with it.
         self.config_baseline = None;
+        self.row_models.clear();
         self.active_sketch = c.active_sketch;
         self.active_sheet_sketch = c.active_sheet_sketch;
         self.open_drawing = c.open_drawing;
@@ -2858,6 +2908,7 @@ impl Session {
             pending_moves: self.pending_moves.clone(),
             exploded: self.exploded.clone(),
             config_baseline: self.config_baseline.clone(),
+            row_models: self.row_models.clone(),
             world_cache: std::sync::Mutex::new(self.world_cache.lock().ok().and_then(|cache| cache.clone())),
             joints_settled: self.joints_settled.clone(),
             // Read again by the copy: handing it these references measured more peak memory on a
@@ -2907,6 +2958,8 @@ impl Session {
             motion_traces: self.motion_traces.clone(),
             command_check: self.command_check.clone(),
             crash_journal: false,
+            #[cfg(feature = "usage-stats")]
+            count_usage: false,
         }
     }
 
@@ -3170,6 +3223,7 @@ impl Session {
         self.doc = computed.doc;
         self.ids = computed.ids;
         self.model = computed.model;
+        self.release_left();
         self.world_cache = computed.world_cache;
         let replaces = |part| {
             Some(part) == implicit_part
@@ -3202,6 +3256,7 @@ impl Session {
         self.pending_moves = computed.pending_moves;
         self.exploded = computed.exploded;
         self.config_baseline = computed.config_baseline;
+        self.row_models = computed.row_models;
         // Joints the computation hid (an import's rigid group) stay hidden.
         for j in computed.visibility.hidden_joints {
             if !self.visibility.hidden_joints.contains(&j) {
@@ -3218,17 +3273,15 @@ impl Session {
     /// A `timeline.redefine` is shown even while the timeline is rolled back to the feature
     /// being edited.
     pub fn preview(&self, commands: &[(String, Value)]) -> Result<Preview> {
-        self.scratch().preview_in_place(commands, None).map(|(after, replies)| {
-            let joints = cmd::joints::posed_joints(self, &after, &replies);
-            Preview { before: self.model.state(), after: after.model.state(), replies, joints }
-        })
+        self.scratch()
+            .preview_in_place(commands, None)
+            .map(|(after, replies)| Preview::new(self.model.state(), after.model.state(), self, &after, replies))
     }
 
     /// The same evaluated preview in occurrence coordinates, including uncaptured moves.
     pub fn preview_world(&self, commands: &[(String, Value)]) -> Result<Preview> {
         let (after, replies) = self.scratch().preview_in_place(commands, None)?;
-        let joints = cmd::joints::posed_joints(self, &after, &replies);
-        Ok(Preview { before: self.world_state()?, after: after.world_state()?, replies, joints })
+        Ok(Preview::new(self.world_state()?, after.world_state()?, self, &after, replies))
     }
 
     /// World preview with each session's visibility applied, including new body placements.

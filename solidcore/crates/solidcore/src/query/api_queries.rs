@@ -19,6 +19,7 @@
 //! | [`vertex_get_point`] | `SmApiVertexGetPoint` |
 //! | [`edge_plane_crossings`] | not upstream: where an edge, over its own interval, meets a plane |
 //! | [`edge_crossing_on_face`] | not upstream: where a curve meets an edge, solved on one of the edge's faces |
+//! | [`vertex_on_edge`] | not upstream: whether a vertex lies on an edge within the two's tolerances |
 //! | [`closest_to_members`], [`edge_curve_copy`] | not upstream: `ShapeCurveSolve`/`ShapePointSolve` minimum of a curve or point against faces and edges |
 //! | [`closest_between_faces`] | not upstream: selected-shape minimum on trimmed faces and their boundaries |
 //! | [`point_distance`], [`vertex_distance`], [`edge_face_gap_samples`], [`edgeuse_face_frame`] | not upstream: certified distances (the last on `SmCrvSrfGapFunction`'s samples) |
@@ -1374,6 +1375,23 @@ pub fn edge_closest_point(
         },
         parameter: result.parameter,
     })
+}
+
+/// Whether vertex `v` lies on edge `e`: its point within the vertex's and the edge's
+/// tolerances together of the edge's curve, over the edge's interval (the exact distance of
+/// [`edge_closest_point`]). A point that does not drop onto the edge is not on it.
+///
+/// # Errors
+///
+/// Those of the vertex's and the edge's point and tolerance, and the evaluation errors of
+/// [`edge_closest_point`].
+pub fn vertex_on_edge(k: &Kernel, brep: &Brep, v: VertexId, e: EdgeId) -> Result<bool> {
+    let point = crate::topology::vertex::point(brep, v)?;
+    let Some(near) = crate::query::edge::closest_point(k, brep, e, point)? else {
+        return Ok(false);
+    };
+    let reach = crate::topology::vertex::tolerance(brep, v)? + edge::tolerance(brep, e)?;
+    Ok(near.distance <= reach)
 }
 
 /// One end of a [`PlaneCrossing`]: where it is on the edge.

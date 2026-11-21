@@ -44,6 +44,7 @@ mod fair;
 mod fill;
 #[cfg(test)]
 mod fillet_setback_tests;
+mod form_cell;
 mod freeform;
 pub mod fuzz;
 mod heal;
@@ -174,8 +175,8 @@ pub use blend::{
 pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
 pub use body::{
-    Body, COLOUR_NAME_MAX, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, MESH_MIN_ANGLE, MeshSpec,
-    MeshTolerance, OUTLINE_TRIM_SAMPLES, Paint, PlanStats, PointClass, RayPick, Refusal, SurfaceKind, colour_name, lazy_moves_made, placed_mesh,
+    Body, COLOUR_NAME_MAX, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, KernelForms, MESH_MIN_ANGLE,
+    MeshSpec, MeshTolerance, OUTLINE_TRIM_SAMPLES, Paint, PlanStats, PointClass, RayPick, Refusal, SurfaceKind, colour_name, placed_mesh,
 };
 pub use boundary::{Boundary, boundary_patch};
 pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDGE_PICKS, boundary_join, boundary_surface};
@@ -194,7 +195,9 @@ pub use curvature_comb::{CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH, comb_edge_ne
 pub use delete_face::delete_faces;
 pub use distance::{BodyDistance, DistanceShape, Members, body_distance, edges_closest, faces_closest, point_closest};
 pub use draft_corners::{CornerFill, CornerOption, CornerRefusal, CornerReport, DraftCorner, draft_corners};
-pub use emboss::{cylinder_emboss_anchor, emboss_cylinder, emboss_cylinder_at, has_cylinder_emboss_wall, infer_cylinder_emboss};
+pub use emboss::{
+    cylinder_emboss_anchor, emboss_anchor, emboss_cylinder, emboss_cylinder_at, emboss_project_face, has_cylinder_emboss_wall, infer_cylinder_emboss,
+};
 pub use failure::ErrorCode;
 pub use fair::{
     FairCurve, FairNet, FairOptions, FairReport, MAX_FAIR_ITERATIONS, MAX_FAIR_POINTS, fair_bspline_curve, fair_bspline_surface, fair_curve,

@@ -307,7 +307,6 @@ fn a_placed_body_is_moved_only_when_its_geometry_is_read() {
     let twice = transform_matrix(&placed, shift).unwrap();
     assert!(twice.record.pending() && placed.record.pending());
     // Read: exactly the eager move's record.
-    let made = crate::lazy_moves_made();
     let eager = |m: &[[f64; 4]; 4]| {
         solidcraft_geom::brep::placement::moved(source.record(), &solidcraft_geom::brep::placement::Rigid::of_matrix(m).unwrap()).unwrap()
     };
@@ -317,7 +316,7 @@ fn a_placed_body_is_moved_only_when_its_geometry_is_read() {
     for v in &twice.record().vertices {
         assert!(source.record().vertices.iter().any(|s| Vec3::from(v.point).dist(moved(both, s.point)) < 1e-9), "moved by both motions");
     }
-    assert!(crate::lazy_moves_made() >= made + 2, "each moved once it was read");
+    assert!(placed.lazy_move_made() && twice.lazy_move_made(), "each moved once it was read");
     let volume = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume;
     assert!((volume(&twice) - volume(&source)).abs() < 1e-3 * volume(&source));
     // Orthonormal only to the looser bound (an imported assembly's rotations are, written to

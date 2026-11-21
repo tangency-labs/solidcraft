@@ -466,6 +466,8 @@ impl eframe::App for App {
         };
         storage.set_string(solidcraft_ui_egui::prefs::STORAGE_KEY, prefs.clone());
         self.prefs_writer.written = Some(prefs);
+        #[cfg(feature = "usage-stats")]
+        storage.set_string(solidcraft_ui_egui::usage_stats::STORAGE_KEY, self.solve.usage_stats_for_storage());
     }
     /// The app is closing: work still running beside the window ends first, then the session.
     fn on_exit(&mut self) {
@@ -680,7 +682,20 @@ struct DialogFolderState {
 impl DialogFolder {
     /// A file was chosen in a dialog: the next one opens in its folder.
     fn chosen(&self, file: &std::path::Path) {
-        if let (Some(folder), Ok(mut state)) = (file.parent().filter(|f| !f.as_os_str().is_empty()), self.0.lock()) {
+        if let Some(folder) = file.parent().filter(|f| !f.as_os_str().is_empty()) {
+            self.remember(folder);
+        }
+    }
+
+    /// A folder was chosen: the next dialog opens in that folder, not in its parent.
+    fn chosen_folder(&self, folder: &std::path::Path) {
+        if !folder.as_os_str().is_empty() {
+            self.remember(folder);
+        }
+    }
+
+    fn remember(&self, folder: &std::path::Path) {
+        if let Ok(mut state) = self.0.lock() {
             state.folder = Some(folder.to_path_buf());
         }
     }
@@ -702,6 +717,15 @@ impl DialogFolder {
     fn answer(&self, picked: Option<rfd::FileHandle>) -> Option<String> {
         let picked = picked?;
         self.chosen(picked.path());
+        Some(picked.path().to_string_lossy().into_owned())
+    }
+
+    /// A folder picker's answer as a path. The picked folder itself is remembered, so the next
+    /// dialog opens there. [`answer`] remembers a file's parent, which would open one level above
+    /// a folder the user just chose.
+    fn answer_folder(&self, picked: Option<rfd::FileHandle>) -> Option<String> {
+        let picked = picked?;
+        self.chosen_folder(picked.path());
         Some(picked.path().to_string_lossy().into_owned())
     }
 
@@ -788,7 +812,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
     let program_parent = parent.clone();
     let file_parent = parent.clone();
     let folder_parent = parent.clone();
-    let (open_folder, file_folder, save_folder) = (folder.clone(), folder.clone(), folder.clone());
+    let (open_folder, file_folder, save_folder, browse_folder) = (folder.clone(), folder.clone(), folder.clone(), folder.clone());
     Services {
         pick_open: Some(Box::new(move |first: &[&str]| {
             // The chooser that opens may not be the desktop's own (#10159).
@@ -805,7 +829,6 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             // a group of their own, named after the plugin.
             let plugins = io::formats::plugin_open_filters();
             let mut everything: Vec<&str> = io::formats::open_extensions(true);
-            everything.extend(["dxf", "svg"]);
             for (_, exts) in &plugins {
                 everything.extend(exts.iter().map(String::as_str).filter(|e| !io::formats::open_extensions(true).contains(e)));
             }
@@ -838,15 +861,16 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             let folder = file_folder.clone();
             Box::pin(async move { folder.answer(future.await) })
         })),
-        pick_folder: Some(Box::new(move || {
-            let future = folder_parent.clone().set_title("Choose a folder").pick_folder();
-            Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
-        })),
         pick_program: Some(Box::new(move || {
             let dialog = program_parent.clone().set_title("Choose your slicer");
             let dialog = if cfg!(target_os = "windows") { dialog.add_filter("Programs", &["exe"]) } else { dialog };
             let future = dialog.pick_file();
             Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
+        })),
+        pick_folder: Some(Box::new(move || {
+            let future = browse_folder.start(folder_parent.clone()).set_title("Choose a folder").pick_folder();
+            let folder = browse_folder.clone();
+            Box::pin(async move { folder.answer_folder(future.await) })
         })),
         pick_save: Some(Box::new(move |name: &str, exts: &[&str]| {
             let dialog = save_folder.start(parent.clone()).set_file_name(name);
@@ -897,6 +921,8 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         agent_http: Some(std::sync::Arc::new(agent_http)),
         secrets: Some(std::sync::Arc::new(Keychain("SolidCraft agent chat"))),
         tickets_http: Some(std::sync::Arc::new(tickets_http)),
+        #[cfg(feature = "usage-stats")]
+        usage_http: Some(std::sync::Arc::new(usage_http)),
         ticket_secrets: Some(std::sync::Arc::new(Keychain("SolidCraft tickets"))),
         show_in_folder: Some(Box::new(|path| {
             let folder = std::path::Path::new(path).parent().unwrap_or_else(|| std::path::Path::new("."));
@@ -1032,6 +1058,18 @@ fn tickets_http(r: solidcraft_ui_egui::agent_chat::backend::HttpRequest, done: s
     });
     // Without a worker the sender is dropped with the closure: the report sees no answer and
     // waits in the queue.
+    drop(spawned);
+}
+
+/// Posts a usage statistics report on a worker thread, to the one endpoint only
+/// (`usage_stats::ENDPOINT`); anything else is refused. The answer comes on `done`.
+#[cfg(feature = "usage-stats")]
+fn usage_http(r: solidcraft_ui_egui::agent_chat::backend::HttpRequest, done: std::sync::mpsc::Sender<solidcraft_ui_egui::tickets::Reply>) {
+    let spawned = std::thread::Builder::new().name("usage-stats-http".into()).spawn(move || {
+        let reply =
+            if r.url == solidcraft_ui_egui::usage_stats::ENDPOINT { tickets_call(&r) } else { Err("not the usage statistics endpoint".into()) };
+        let _ = done.send(reply);
+    });
     drop(spawned);
 }
 
@@ -1633,6 +1671,8 @@ fn main() -> eframe::Result {
             }
             // The administrator's policy holds in safe mode too.
             app.policy = solidcraft_ui_egui::policy::load();
+            #[cfg(feature = "usage-stats")]
+            app.load_usage_stats(cc.storage.and_then(|s| s.get_string(solidcraft_ui_egui::usage_stats::STORAGE_KEY)).as_deref());
             if let Some(path) = &theme_file
                 && let Err(e) = solidcraft_ui_egui::prefs::follow_theme_file_for_run(&mut app, path)
             {
@@ -2311,9 +2351,18 @@ mod tickets_http_tests {
         let port = listener.local_addr().unwrap().port();
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
+            // The whole request, body too: a connection closed with part of the request unread is
+            // reset, and the client then gets an error instead of the reply (os error 22 on macOS)
+            // whenever the body arrives after the headers were read.
             let mut request = Vec::new();
             let mut buf = [0u8; 4096];
-            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+            let whole = |request: &[u8]| {
+                let Some(head) = request.windows(4).position(|w| w == b"\r\n\r\n") else { return false };
+                let headers = String::from_utf8_lossy(&request[..head]).to_ascii_lowercase();
+                let length = headers.lines().find_map(|l| l.strip_prefix("content-length:")).and_then(|v| v.trim().parse::<usize>().ok());
+                request.len() >= head + 4 + length.unwrap_or(0)
+            };
+            while !whole(&request) {
                 let n = stream.read(&mut buf).unwrap();
                 assert!(n > 0, "the request ended early");
                 request.extend_from_slice(&buf[..n]);
@@ -2492,6 +2541,19 @@ mod dialog_folder_tests {
         // A bare file name has no folder to remember.
         folder.chosen(Path::new("bracket.step"));
         assert_eq!(folder.folder(), Some(PathBuf::from("/work/prints")));
+    }
+
+    /// A folder picker remembers the folder itself. Remembering its parent would open the next
+    /// dialog one level above the folder the user chose.
+    #[test]
+    fn a_folder_picker_remembers_the_picked_folder_itself() {
+        let folder = DialogFolder::default();
+        folder.chosen(Path::new("/work/project/assets"));
+        assert_eq!(folder.folder(), Some(PathBuf::from("/work/project")), "a file's parent");
+        folder.chosen_folder(Path::new("/work/project/assets"));
+        assert_eq!(folder.folder(), Some(PathBuf::from("/work/project/assets")));
+        folder.chosen_folder(Path::new(""));
+        assert_eq!(folder.folder(), Some(PathBuf::from("/work/project/assets")), "an empty path leaves the last folder");
     }
 
     /// Save As starts beside the open design (#7756), and a folder chosen since wins until another

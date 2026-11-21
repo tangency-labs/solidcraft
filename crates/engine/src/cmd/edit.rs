@@ -36,6 +36,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ASSISTANT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::AssistantResult>)
         .params("Show or hide Assistant in the app. Headless calls are refused without changing the design"),
+    CommandSpec::new("ui.appBarReset", "Reset App Bar", crate::checked!("ui.appBarReset", app_bar_reset))
+        .any_part()
+        .icon("restore")
+        .noundo()
+        .doc_only()
+        .contract(&APP_BAR_RESET_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::AppBarResetResult>)
+        .params("Reset the saved application bar layout in the connected app; returns {reset: true}. Headless sessions validate the request only; no dialog or design change"),
     CommandSpec::new("ui.palette", "Search Commands", crate::checked!("ui.palette", palette))
         .icon("zoom")
         .key("S")
@@ -316,6 +324,12 @@ fn assistant(_s: &mut Session, _p: &Value) -> Result<Value> {
     Err(EngineError::Other("ui.assistant shows or hides Assistant in the app; no assistant panel exists in a headless session".into()))
 }
 
+const APP_BAR_RESET_CONTRACT: crate::schema::TypedContract<crate::schema::edit::AppBarResetParams> = crate::schema::TypedContract::new();
+
+fn app_bar_reset(_s: &mut Session, _p: &Value) -> Result<Value> {
+    reply("ui.appBarReset", crate::schema::edit::AppBarResetResult { reset: true })
+}
+
 const PALETTE_CONTRACT: crate::schema::TypedContract<crate::schema::edit::PaletteParams> = crate::schema::TypedContract::new();
 
 /// Command search (#12190) is the app's: it opens in `SolveApp::start`, and its key can be moved
@@ -455,6 +469,8 @@ fn restore_checkpoint(s: &mut Session, p: &Value) -> Result<Value> {
 fn compute_all(s: &mut Session, _p: &Value) -> Result<Value> {
     let validation = s.validation();
     s.model = solidcraft_doc::Model::new();
+    // and nothing taken from the rows built before (`config.activate`)
+    s.row_models.clear();
     s.set_validation(validation);
     s.refresh();
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
@@ -2330,13 +2346,16 @@ fn input_keys(kind: &FeatureKind, edge_names: &[String]) -> Vec<(String, solidcr
 /// An old design's From Object keeps starting at the face's level (`from_level`) through an edit
 /// that keeps its From face: the same pick, or a pick of a face on the same plane, found as the
 /// build finds it in the model before the feature. A From picked on another plane is a new
-/// choice, so it starts on that face, as a new extrude does. `after`'s face names and picked
-/// placements must already be its own.
+/// choice, so it starts on that face, as a new extrude does. So does an edit that takes To Object
+/// off: a design saved with From and To since format 58 is marked only because To used to keep
+/// its From at the face's level (#18825), and without To a new extrude starts on the face.
+/// `after`'s face names and picked placements must already be its own.
 fn keep_from_level_on_the_same_face(s: &Session, before: &Feature, after: &mut Feature) {
     let FeatureKind::Extrude { extent: was, .. } = &before.kind else {
         return;
     };
-    let keep = was.from_level && solidcraft_doc::same_extrude_from_face(&s.doc, &s.model.state_before(before.id), before, after);
+    let to_removed = was.to.is_some() && matches!(&after.kind, FeatureKind::Extrude { extent, .. } if extent.to.is_none());
+    let keep = was.from_level && !to_removed && solidcraft_doc::same_extrude_from_face(&s.doc, &s.model.state_before(before.id), before, after);
     if let FeatureKind::Extrude { extent, .. } = &mut after.kind {
         extent.from_level = keep;
     }

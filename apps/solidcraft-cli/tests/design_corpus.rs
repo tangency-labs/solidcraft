@@ -45,10 +45,13 @@ fn old_designs_open_upgrade_and_evaluate() {
             problems.push(format!("{name}: no bodies"));
         }
         // Saved again, it reads back the same: as plain JSON when it holds no binary data (which only
-        // a container keeps), and as a container.
+        // a container keeps), and as a container. Saved as JSON, opened and saved again, it is the
+        // same bytes, so a design kept in Git changes only where the design changed (#626).
         if s.doc.binary_data().is_empty() {
-            let again = solidcraft_engine::doc::Document::from_json(&s.doc.to_json()).unwrap();
+            let saved = solidcraft_engine::io::write_design(&s.doc).unwrap();
+            let again = solidcraft_engine::io::read_design(&saved).unwrap();
             assert_eq!(again, *s.doc, "{name}: round trip");
+            assert!(solidcraft_engine::io::write_design(&again).unwrap() == saved, "{name}: saved again, the JSON is the same bytes");
         }
         let package = solidcraft_engine::io::write_design_container(&s.doc).unwrap();
         let packaged = solidcraft_engine::io::read_design(&package).unwrap();
