@@ -3071,6 +3071,104 @@ fn a_tilted_whole_body_projection_is_the_exact_outline() {
     }
 }
 
+/// Synthetic saved trace for #20298: a diameter-20, height-30 cylinder projected onto the
+/// tilted plane from the report. Its outline is two half ellipses joined by two straight
+/// sides. Older builds stored a dense line trace, whose IDs the extrude saved as its profile.
+fn saved_traced_cylinder_projection() -> (Value, u64, f64) {
+    use solidcraft_sketch::{LinkGeom, LinkKind, LinkSource, Sketch};
+
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 30, "body_name": "Cylinder"}));
+    let sketch = run(
+        &mut s,
+        "sketch.create",
+        json!({"name": "Outline", "plane": {"origin": [0, 0, 40], "x_dir": [1, 0, 0], "y_dir": [0, 0.866, 0.5]}, "project_edges": false}),
+    )["sketch"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"body": "Cylinder"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"profiles": [0], "distance": 2, "name": "Pad", "body_name": "ProjectionPad"}));
+    let plane = s.model.state().sketch(sketch).unwrap().plane;
+    assert!(s.doc.sketch(sketch).unwrap().links.iter().all(|link| link.profile_boundary.is_empty()), "new projections keep ordinary picks");
+
+    let mut points = Vec::new();
+    for (z, start) in [(30., 0.), (0., std::f64::consts::PI)] {
+        for i in 0..=64 {
+            let angle = start + std::f64::consts::PI * f64::from(i) / 64.;
+            points.push(plane.to_local(solidcore_record::Vec3::new(10. * angle.cos(), 10. * angle.sin(), z)));
+        }
+    }
+    let geometry: Vec<_> = points.iter().enumerate().map(|(i, point)| LinkGeom::Line(*point, points[(i + 1) % points.len()])).collect();
+    let mut traced = Sketch::new();
+    let link = traced.add_link(LinkKind::Project, LinkSource::Body { body: "Cylinder".into() }, &geometry).unwrap();
+    let old_ids: Vec<_> = traced.link_curves(&link).iter().map(|i| traced.curves[*i].id.clone()).collect();
+    assert_eq!(old_ids.len(), 130);
+    assert!(old_ids.iter().all(|id| id.starts_with('l')));
+    assert_eq!(solidcraft_sketch::find_profiles(&traced).len(), 1);
+
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    for feature in saved["features"].as_array_mut().unwrap() {
+        if feature["id"] == sketch {
+            feature["sketch"] = serde_json::to_value(&traced).unwrap();
+        } else if feature["name"] == "Pad" {
+            feature["profiles"] = json!({"type": "curves", "loops": [old_ids]});
+        }
+    }
+    // A released format, so this remains a pre-migration file after the pending step is folded.
+    saved["format"] = json!("solidcraft/63");
+    saved.as_object_mut().unwrap().remove("format_pending");
+    // Ellipse area plus the rectangle swept by its centre along the projected cylinder axis,
+    // extruded by 2 mm. These normalized plane components also account for the rounded 0.866.
+    let expected = 2. * (std::f64::consts::PI * 100. * plane.y.y + 20. * 30. * plane.y.z);
+    (saved, sketch, expected)
+}
+
+#[test]
+fn a_saved_traced_whole_body_profile_rebuilds_with_the_exact_projection() {
+    let (saved, sketch, expected) = saved_traced_cylinder_projection();
+    let mut s = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+    for pass in 0..2 {
+        for feature in &s.doc.features {
+            let result = s.model.result(feature.id).unwrap();
+            assert!(result.error.is_none(), "{}: {:?}", feature.name, result.error);
+        }
+        let state = s.model.state();
+        let ss = state.sketch(sketch).unwrap();
+        assert!(!ss.sketch.links[0].profile_boundary.is_empty());
+        assert!(ss.sketch.curves.iter().any(|curve| matches!(curve.kind, solidcraft_sketch::CurveKind::Conic { .. })));
+        let pad = state.body("ProjectionPad").unwrap();
+        let actual = solidcraft_kernel::measure(&pad.body).unwrap().volume;
+        assert!((actual - expected).abs() < 1e-6 * expected, "{actual} vs {expected}");
+        if pass == 0 {
+            // Finishing an edit stores the regenerated curves, so the next open cannot
+            // recover the old IDs from the sketch's geometry again: it needs the saved alias.
+            run(&mut s, "sketch.edit", json!({"sketch": "Outline"}));
+            run(&mut s, "sketch.finish", json!({}));
+            assert!(s.doc.sketch(sketch).unwrap().curves.iter().any(|curve| matches!(curve.kind, solidcraft_sketch::CurveKind::Conic { .. })));
+        }
+        // Opening the migrated save cold must keep the alias as well as the exact geometry.
+        s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    }
+}
+
+#[test]
+fn a_saved_projection_profile_that_is_split_is_not_guessed() {
+    let (saved, sketch, _) = saved_traced_cylinder_projection();
+    let mut doc = solidcraft_doc::Document::from_json(&saved.to_string()).unwrap();
+    // Both halves use curves of the same source. Neither covers its complete boundary, so
+    // neither can stand for the old outline (nor may lenient curve matching choose their union).
+    let sk = doc.sketch_mut(sketch).unwrap();
+    assert!(!sk.links[0].profile_boundary.is_empty());
+    sk.add_line(solidcore_record::Vec2::new(-20., -12.5), solidcore_record::Vec2::new(20., -12.5), None, None, None).unwrap();
+    let s = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
+    assert_eq!(s.model.state().sketch(sketch).unwrap().profiles.len(), 2);
+    let pad = s.doc.find_feature("Pad").unwrap();
+    let error = s.model.result(pad.id).unwrap().error.as_deref().unwrap();
+    assert!(error.contains("no profile of Outline is bounded by exactly the curves"), "{error}");
+    assert!(s.model.state().body("ProjectionPad").is_none());
+}
+
 /// The silhouette of a square with a conic round at each corner (rho 0.19, 0.4, 0.5 and 0.7) is
 /// one closed outline of the square's true area. Fitted arcs along a conic were snapped onto lines
 /// that ended further along the outline, which left gaps of up to 3.6 mm: no profile.
