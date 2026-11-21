@@ -1334,15 +1334,32 @@ fn wood_finish_frame(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> O
     Some([origin.to_f32(), axis.to_f32()])
 }
 
-/// Whether `look` carries a built-in wood recipe: its colour, opacity and optical parameters equal
-/// the library oak or a starter wood preset. A look's name is inert, so a custom colour that borrows
-/// a wood name gets no figure, and a renamed wood recipe keeps it.
-fn is_wood_look(look: &solidcraft_engine::doc::appearance::Look) -> bool {
+/// The kind of wood `look` is drawn as (`Material::wood_kind`), if it carries a built-in wood
+/// recipe: its colour, opacity and optical parameters equal a starter wood preset (kinds 1 to 8,
+/// in the starter pack's order) or a library wood (kind 0, a general hardwood). A look's name is
+/// inert, so a custom colour that borrows a wood name gets no figure, and a renamed wood recipe
+/// keeps it.
+fn wood_kind(look: &solidcraft_engine::doc::appearance::Look) -> Option<u8> {
     use solidcraft_engine::doc::{appearance, appearance_pack};
-    type Recipe = ([u8; 3], f64, Option<solidcraft_engine::doc::pbr_appearance::PbrParameters>);
+    type Recipe = ([u8; 3], f64, Option<solidcraft_engine::doc::pbr_appearance::PbrParameters>, u8);
+    /// The starter woods that have a character of their own, in the order of their kinds from 1.
+    const KINDS: &[&str] = &[
+        "starter.wood.oak-honey",
+        "starter.wood.oak-smoked",
+        "starter.wood.walnut-dark",
+        "starter.wood.maple-light",
+        "starter.wood.cherry-warm",
+        "starter.wood.ash-pale",
+        "starter.wood.birch-cream",
+        "starter.wood.teak-golden",
+    ];
     static WOOD: std::sync::OnceLock<Vec<Recipe>> = std::sync::OnceLock::new();
     WOOD.get_or_init(|| {
-        appearance::library("Wood - Oak")
+        let starter = appearance_pack::STARTER_PACK.iter().filter(|preset| preset.category == appearance_pack::Category::Wood).filter_map(|preset| {
+            let kind = KINDS.iter().position(|id| *id == preset.id).map_or(0, |at| at as u8 + 1);
+            preset.opaque_look().ok().map(|wood| (wood.color, wood.opacity, wood.pbr, kind))
+        });
+        let library = appearance::library("Wood - Oak")
             .into_iter()
             .chain(
                 appearance::OPAQUE_FINISHES
@@ -1350,17 +1367,12 @@ fn is_wood_look(look: &solidcraft_engine::doc::appearance::Look) -> bool {
                     .filter(|(name, ..)| name.starts_with("Wood - "))
                     .filter_map(|(name, ..)| appearance::library(name)),
             )
-            .chain(
-                appearance_pack::STARTER_PACK
-                    .iter()
-                    .filter(|preset| preset.category == appearance_pack::Category::Wood)
-                    .filter_map(|preset| preset.opaque_look().ok()),
-            )
-            .map(|wood| (wood.color, wood.opacity, wood.pbr))
-            .collect()
+            .map(|wood| (wood.color, wood.opacity, wood.pbr, 0));
+        starter.chain(library).collect()
     })
     .iter()
-    .any(|(color, opacity, pbr)| *color == look.color && *opacity == look.opacity && *pbr == look.pbr)
+    .find(|(color, opacity, pbr, _)| *color == look.color && *opacity == look.opacity && *pbr == look.pbr)
+    .map(|recipe| recipe.3)
 }
 
 /// How a body whose faces all share one class may be drawn from its plan: opaque on any GPU
@@ -2207,10 +2219,10 @@ fn body_scene(
         let wood_frame = wood_finish_frame(app, b);
         let body_look = s.doc.model_body_look(b);
         if let Some(frame) = wood_frame
-            && body_look.as_ref().is_some_and(is_wood_look)
+            && let Some(kind) = body_look.as_ref().and_then(wood_kind)
         {
-            arena.set_wood(slots.body, frame);
-            arena.set_wood(slots.instance, frame);
+            arena.set_wood(slots.body, frame, kind);
+            arena.set_wood(slots.instance, frame, kind);
         }
         let faces = b.body.face_count();
         let mut face_colors = Vec::with_capacity(faces);
@@ -2239,9 +2251,9 @@ fn body_scene(
             let material = finish(color, pbr);
             arena.set_material(slot, material);
             if let Some(frame) = wood_frame
-                && look.or(body_look.as_ref()).is_some_and(is_wood_look)
+                && let Some(kind) = look.or(body_look.as_ref()).and_then(wood_kind)
             {
-                arena.set_wood(slot, frame);
+                arena.set_wood(slot, frame, kind);
             }
             face_colors.push(slot);
             face_classes.push(class);
@@ -2376,6 +2388,7 @@ fn finish(color: Color32, pbr: Option<solidcraft_engine::doc::pbr_appearance::Pb
         pbr: true,
         two_sided: false,
         wood: None,
+        wood_kind: 0,
     })
 }
 
