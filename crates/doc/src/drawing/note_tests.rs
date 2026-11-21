@@ -36,6 +36,7 @@ fn noted() -> (Drawing, [u64; 3]) {
         settings: ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() },
         reference_shown_percent: 0.0,
         label: None,
+        rotation: 0.0,
     })]);
     let edge = ModelEdge { body: "Bolt".into(), origin_feature: 4, name: "F1:side|F2:head".into(), path: vec![3] };
     let anchors = [Anchor::Sheet(sheet), Anchor::View(view), Anchor::Edge { view, edge }];

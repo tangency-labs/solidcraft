@@ -104,12 +104,22 @@ pub struct OnPaper {
     pub layout: Layout,
 }
 
-/// `dimension`, read as `resolved`, on the view through `frame` (centred on the view), its lines in
-/// `group` and its text in the drawing's `lettering`: its group, or `None` when what it measures has no place to draw on the
-/// view: it wasn't found again, or it is a single point there.
-pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame, group: LineGroup, lettering: &PaperFonts) -> Option<OnPaper> {
+/// `dimension`, read as `resolved`, on the view through `frame` (centred on the view, drawn turned by
+/// `rotation` degrees, [`solidcraft_doc::drawing::view::ResolvedView::drawn`]), its lines in `group` and
+/// its text in the drawing's `lettering`: its group, or `None` when what it measures has no place to
+/// draw on the view: it wasn't found again, or it is a single point there. It is laid out on the view's
+/// own axes, as its offset and its text's place are saved, then turned with the view about its centre.
+pub fn paper_group(
+    dimension: &Dimension,
+    resolved: &Resolved,
+    frame: &ViewFrame,
+    rotation: f64,
+    group: LineGroup,
+    lettering: &PaperFonts,
+) -> Option<OnPaper> {
     let line_mm = LineKind::Thin.width_mm(group);
-    let on: Vec<Vec2> = resolved.points.iter().map(|p| frame.to_paper(*p)).collect();
+    let turn = Turn::of(rotation);
+    let on: Vec<Vec2> = resolved.points.iter().map(|p| turn.back(frame.to_paper(*p))).collect();
     let mut lines: Vec<Vec<Vec2>> = Vec::new();
     let mut arrows = Vec::new();
     let (mut texts, mut fonts, mut why, mut pending) = (Vec::new(), Vec::new(), None, false);
@@ -117,23 +127,26 @@ pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame
     let set = |text: Option<&str>| Text::set(text, TEXT_MM, lettering);
     for piece in pieces(dimension, resolved, &on, &set)? {
         let layout = dim_layout_sized(&piece.frame, piece.at, &SIZES, piece.text.half, [None, None]);
+        let (text_at, text_dir) = (turn.on(layout.text), turn.reading(layout.text_dir));
         if !piece.text.runs.is_empty() {
-            laid.text_boxes.push(text_box(layout.text, layout.text_dir, piece.text.half));
+            laid.text_boxes.push(text_box(text_at, text_dir, piece.text.half));
         }
-        texts.extend(placed(piece.text.runs, piece.text.half, TEXT_MM, layout.text, layout.text_dir));
+        texts.extend(placed(piece.text.runs, piece.text.half, TEXT_MM, text_at, text_dir));
         fonts.extend(piece.text.fonts);
         why = why.or(piece.text.why);
         pending |= piece.text.pending;
         // A chain's neighbours share an extension line.
         for (i, line) in layout.lines.into_iter().enumerate() {
+            let line: Vec<Vec2> = line.into_iter().map(|p| turn.on(p)).collect();
             if !lines.iter().any(|other| same_line(other, &line)) {
                 let role = if i < layout.extensions { LineRole::Extension } else { LineRole::Dimension };
                 laid.lines.push((role, line.clone()));
                 lines.push(line);
             }
         }
-        laid.arrows.extend(&layout.arrows);
-        arrows.extend(layout.arrows);
+        let turned = layout.arrows.iter().map(|(tip, dir)| (turn.on(*tip), turn.on(*dir)));
+        laid.arrows.extend(turned.clone());
+        arrows.extend(turned);
     }
     for (tip, dir) in &arrows {
         lines.iter_mut().for_each(|line| stop_at_base(line, *tip, *dir));
@@ -228,17 +241,25 @@ pub(crate) enum NotDragged {
 }
 
 /// The offset and text place that lay `dimension` out where `drag` puts it ([`pieces`] turned round),
-/// read as `resolved` on the view through `frame`, its text in the drawing's `lettering`: its text's
-/// centre at a [`Drag::Text`] point, its line through a [`Drag::Line`] one. A line drag keeps the
-/// text's place, but a radial one's text turns with its leader; an angle's offset keeps its sign.
+/// read as `resolved` on the view through `frame` (drawn turned by `rotation` degrees, as for
+/// [`paper_group`]), its text in the drawing's `lettering`: its text's centre at a [`Drag::Text`]
+/// point, its line through a [`Drag::Line`] one. A line drag keeps the text's place, but a radial
+/// one's text turns with its leader; an angle's offset keeps its sign. Worked out on the view's own
+/// axes, as its offset and text place are saved.
 pub(crate) fn dragged(
     dimension: &Dimension,
     resolved: &Resolved,
     frame: &ViewFrame,
+    rotation: f64,
     lettering: &PaperFonts,
     drag: Drag,
 ) -> Result<(f64, TextPlace), NotDragged> {
-    let on: Vec<Vec2> = resolved.points.iter().map(|p| frame.to_paper(*p)).collect();
+    let turn = Turn::of(rotation);
+    let on: Vec<Vec2> = resolved.points.iter().map(|p| turn.back(frame.to_paper(*p))).collect();
+    let drag = match drag {
+        Drag::Text(p) => Drag::Text(turn.back(p)),
+        Drag::Line(p) => Drag::Line(turn.back(p)),
+    };
     let (offset, place) = (dimension.offset_mm, dimension.text);
     // The text's half size, which a linear one's lift above its line depends on.
     let half = || {
@@ -319,18 +340,59 @@ fn across_dragged(
     Err(NotDragged::BetweenEnds)
 }
 
-/// The unit direction a linear dimension's line runs in, on paper. Turned to run right, or up when
-/// it is upright, so a positive offset is above it or to its left whichever way round its points are.
+/// The unit direction a linear dimension's line runs in, on its view's own axes (as [`paper_group`]
+/// lays it out, before the view's turn). Turned to run right, or up when it is upright, so a positive
+/// offset is above it or to its left whichever way round its points are.
 pub(crate) fn line_direction(direction: LinearDirection, seen: Vec2) -> Option<Vec2> {
     let dir = match direction {
         LinearDirection::Horizontal => Vec2::X,
         LinearDirection::Vertical => Vec2::new(0.0, 1.0),
         LinearDirection::Aligned => seen.normalized()?,
-        // A view's paper map only scales and shifts, so its plane's directions are paper's.
+        // On the view's own axes its plane's directions are paper's: the map only scales and shifts.
         LinearDirection::Along(along) => along.normalized()?,
     };
-    let forward = if dir.x.abs() > 1e-9 { dir.x > 0.0 } else { dir.y > 0.0 };
-    Some(if forward { dir } else { -dir })
+    Some(forward(dir))
+}
+
+/// `dir`, or it reversed, so it runs right, or up when it is upright: the way a text reads.
+fn forward(dir: Vec2) -> Vec2 {
+    let ahead = if dir.x.abs() > 1e-9 { dir.x > 0.0 } else { dir.y > 0.0 };
+    if ahead { dir } else { -dir }
+}
+
+/// A view's turn on paper about its centre, as its picture is turned
+/// ([`solidcraft_doc::drawing::view::turn_sin_cos`]).
+#[derive(Clone, Copy)]
+struct Turn {
+    sin: f64,
+    cos: f64,
+}
+
+impl Turn {
+    fn of(degrees: f64) -> Turn {
+        let (sin, cos) = solidcraft_doc::drawing::view::turn_sin_cos(degrees);
+        Turn { sin, cos }
+    }
+
+    /// A point or direction on the view's own axes, on paper.
+    fn on(self, p: Vec2) -> Vec2 {
+        if self.sin == 0.0 && self.cos == 1.0 {
+            return p;
+        }
+        Vec2::new(self.cos * p.x - self.sin * p.y, self.sin * p.x + self.cos * p.y)
+    }
+
+    /// A point on paper, on the view's own axes.
+    fn back(self, p: Vec2) -> Vec2 {
+        Turn { sin: -self.sin, ..self }.on(p)
+    }
+
+    /// A text's direction on paper: turned with the view, and reversed where the turn would leave it
+    /// reading backwards or upside down, so it still reads as it did. Its box keeps its centre.
+    fn reading(self, dir: Vec2) -> Vec2 {
+        let turned = self.on(dir);
+        if forward(dir) == dir && forward(turned) != turned { -turned } else { turned }
+    }
 }
 
 /// A line from `a` to `b` along `dir`, `across` from their middle. Its text is at its `place`, or
