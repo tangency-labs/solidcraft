@@ -66,6 +66,69 @@ fn centred(h: &Harness) -> bool {
     [point(h, "mid.start"), point(h, "mid.end")].iter().all(|p| (p.x - 5.0).abs() < 1e-6)
 }
 
+// The number is painted ten pixels right and ten pixels above its picked entity.
+fn marked_position(number: usize) -> [f64; 2] {
+    let rect = crate::scenario::rect_of(&format!("viewport:constraint_pick:{number}")).expect("numbered pick marker");
+    [rect.center().x as f64 - 10.0, rect.center().y as f64 + 10.0]
+}
+
+fn distance_to_segment(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
+    let v = [b[0] - a[0], b[1] - a[1]];
+    let length_squared = v[0] * v[0] + v[1] * v[1];
+    let t = (((p[0] - a[0]) * v[0] + (p[1] - a[1]) * v[1]) / length_squared).clamp(0.0, 1.0);
+    (p[0] - a[0] - t * v[0]).hypot(p[1] - a[1] - t * v[1])
+}
+
+/// Pending picks stay highlighted and numbered until the constraint runs (#18474).
+#[test]
+fn pending_symmetry_lines_show_their_pick_order_until_applied() {
+    let mut h = between_two_lines();
+    h.app.start("sketch.constraint.symmetry");
+    h.frames(2);
+    assert!(crate::scenario::rect_of("viewport:constraint_pick:1").is_none());
+    for (n, xy) in [[0.0, 10.0], [10.0, 10.0]].into_iter().enumerate() {
+        let at = h.call("ui.at", json!({"sketch":xy}))["result"].clone();
+        h.step(&json!({"click":at})).unwrap();
+        h.frames(2);
+        for picked in 1..=n + 1 {
+            assert!(crate::scenario::rect_of(&format!("viewport:constraint_pick:{picked}")).is_some(), "pick {picked} stays marked");
+        }
+        assert!(crate::scenario::rect_of(&format!("viewport:constraint_pick:{}", n + 2)).is_none(), "only completed picks are marked");
+    }
+    let left = [h.at(&json!({"sketch":[0.0, 0.0]})).unwrap(), h.at(&json!({"sketch":[0.0, 20.0]})).unwrap()];
+    let right = [h.at(&json!({"sketch":[10.0, 20.0]})).unwrap(), h.at(&json!({"sketch":[10.0, 0.0]})).unwrap()];
+    assert!(distance_to_segment(marked_position(1), left[0], left[1]) < 12.0, "first marker belongs to the left line");
+    assert!(distance_to_segment(marked_position(2), right[0], right[1]) < 12.0, "second marker belongs to the right line");
+    // The third pick completes Symmetry and clears the pending overlay.
+    let at = h.call("ui.at", json!({"sketch":[3.0,10.0]}))["result"].clone();
+    h.step(&json!({"click":at})).unwrap();
+    h.frames(2);
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.picks.is_empty()));
+    assert!(crate::scenario::rect_of("viewport:constraint_pick:1").is_none());
+    assert!(crate::scenario::rect_of("viewport:constraint_pick:2").is_none());
+    assert!(centred(&h));
+}
+
+/// Point picks use the same numbering as curves, including the original pick order.
+#[test]
+fn pending_symmetry_points_are_marked_before_picking_an_axis() {
+    let mut h = two_points_picked();
+    h.frames(2);
+    assert!(crate::scenario::rect_of("viewport:constraint_pick:1").is_some());
+    assert!(crate::scenario::rect_of("viewport:constraint_pick:2").is_some());
+    assert!(crate::scenario::rect_of("viewport:constraint_pick:3").is_none());
+    for (number, xy) in [(1, [10.0, 5.0]), (2, [-12.0, -3.0])] {
+        let expected = h.at(&json!({"sketch":xy})).unwrap();
+        let actual = marked_position(number);
+        assert!((actual[0] - expected[0]).hypot(actual[1] - expected[1]) < 12.0, "marker {number} belongs to point {xy:?}");
+    }
+    let at = h.call("ui.at", json!({"sketch":[0,6]}))["result"].clone();
+    h.step(&json!({"click":at})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::rect_of("viewport:constraint_pick:1").is_none());
+    assert!(crate::scenario::rect_of("viewport:constraint_pick:2").is_none());
+}
+
 #[test]
 fn the_construction_line_is_the_symmetry_line_whatever_the_pick_order() {
     for order in [["mid", "left", "right"], ["left", "mid", "right"], ["left", "right", "mid"]] {
