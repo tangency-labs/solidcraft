@@ -710,6 +710,16 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                     br.max.x -= 14.0;
                 }
             }
+            let (br_radius, ar_radius) = if b.split.is_some() {
+                let r = t.radius_sm;
+                if labels {
+                    (egui::CornerRadius { nw: r, ne: r, sw: 0, se: 0 }, egui::CornerRadius { nw: 0, ne: 0, sw: r, se: r })
+                } else {
+                    (egui::CornerRadius { nw: r, ne: 0, sw: r, se: 0 }, egui::CornerRadius { nw: 0, ne: r, sw: 0, se: r })
+                }
+            } else {
+                (egui::CornerRadius::same(t.radius_sm), egui::CornerRadius::same(t.radius_sm))
+            };
             let resp = ui.interact(br, ui.scope_id().with(("cmd", b.id)), Sense::click_and_drag());
             for prefix in h.button {
                 solidcraft_ui_registry::publish_handle(&handle(prefix, b.id), br.center());
@@ -724,16 +734,11 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
             let background = painter.add(egui::Shape::Noop);
             let split_id = b.split.map(|s| ui.scope_id().with(("family", s.key)));
             let split_open = split_id.is_some_and(|id| egui::Popup::is_id_open(ui.ctx(), id.with("popup")));
-            let neutral = if !b.exit && (resp.is_pointer_button_down_on() || b.pressed || split_open) {
-                egui::Shape::Rect(egui::epaint::RectShape::new(
-                    whole,
-                    t.radius_sm,
-                    accent.soft,
-                    Stroke::new(1.0, accent.color),
-                    egui::StrokeKind::Inside,
-                ))
+            let br_active = !b.exit && (resp.is_pointer_button_down_on() || b.pressed);
+            let neutral = if br_active {
+                egui::Shape::Rect(egui::epaint::RectShape::new(br, br_radius, accent.soft, Stroke::new(1.0, accent.color), egui::StrokeKind::Inside))
             } else if resp.hovered() && b.enabled {
-                egui::Shape::rect_filled(whole, t.radius_sm, t.hover)
+                egui::Shape::rect_filled(br, br_radius, t.hover)
             } else {
                 egui::Shape::Noop
             };
@@ -767,18 +772,35 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                 });
             } else if let (Some(s), Some(split_id)) = (b.split, split_id) {
                 let ar = if labels {
-                    Rect::from_min_max(pos2(whole.left(), whole.top() + 30.0), pos2(whole.right(), whole.top() + 48.0))
+                    Rect::from_min_max(pos2(whole.left(), br.bottom() + 1.0), pos2(whole.right(), whole.top() + 54.0))
                 } else {
-                    Rect::from_min_max(pos2(br.right(), whole.top()), whole.right_bottom())
+                    Rect::from_min_max(pos2(br.right() + 1.0, whole.top()), whole.right_bottom())
                 };
                 let arrow = ui.interact(ar, split_id, Sense::click());
                 solidcraft_ui_registry::publish_handle(&handle(h.split, s.key), ar.center());
-                if arrow.hovered() {
-                    painter.rect_filled(ar, t.radius_sm, t.hover);
+                let ar_active = arrow.is_pointer_button_down_on() || split_open;
+                if ar_active {
+                    painter.rect(ar, ar_radius, accent.soft, Stroke::new(1.0, accent.color), egui::StrokeKind::Inside);
+                } else if arrow.hovered() {
+                    painter.rect_filled(ar, ar_radius, t.hover);
                 }
-                // The title sits on the same line as the other buttons' labels.
+                if (drawn_button.response.hovered() && b.enabled) || arrow.hovered() {
+                    if !br_active && !ar_active {
+                        painter.rect_stroke(br.union(ar), t.radius_sm, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                        let divider = if labels {
+                            [pos2(whole.left() + 1.0, br.bottom() + 0.5), pos2(whole.right() - 1.0, br.bottom() + 0.5)]
+                        } else {
+                            [pos2(br.right() + 0.5, whole.top() + 1.0), pos2(br.right() + 0.5, whole.bottom() - 1.0)]
+                        };
+                        painter.line_segment(divider, Stroke::new(1.0, t.border));
+                    } else if br_active && !ar_active {
+                        painter.rect_stroke(ar, ar_radius, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                    } else if ar_active && !br_active {
+                        painter.rect_stroke(br, br_radius, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+                    }
+                }
                 if labels {
-                    let title_y = whole.top() + 39.0;
+                    let title_y = ar.center().y;
                     let galley = button_galley(&painter, s.title, ar.width() - 16.0, t.text);
                     painter.galley(pos2(ar.center().x - 4.0, title_y - galley.size().y / 2.0), galley, t.text);
                     dropdown_arrow(&painter, pos2(ar.right() - 6.0, title_y + 0.5), t.text_dim);
