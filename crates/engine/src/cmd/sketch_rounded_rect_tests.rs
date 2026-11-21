@@ -120,8 +120,13 @@ fn a_rounded_rectangle_completes_from_an_existing_vertex() {
     let end = sk.resolve_point(&format!("{line}.end")).expect("the line's end");
     assert!(at_vertex(end), "the line's end stays at the vertex");
     assert!(
-        sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if at_vertex(p) && at_vertex(q))),
-        "the vertex stays tied to the corner"
+        !sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if at_vertex(p) && at_vertex(q))),
+        "the corner merges into the existing vertex instead of adding a Coincident constraint"
+    );
+    assert_eq!(
+        sk.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::PointOnCurve { p, .. } if p == end)).count(),
+        2,
+        "the existing vertex is the rounded corner's virtual corner on both adjacent sides"
     );
     // The shape is whole: a 20 × 20 rectangle with 2 mm corners.
     let si = run(&mut s, "sketch.inspect", json!({}));
