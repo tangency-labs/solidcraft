@@ -1,0 +1,16 @@
+{
+  "id": "rain",
+  "name": "Rain",
+  "version": "1.0.0",
+  "description": "Rain running down a window in front of a misted view of the theme's background.",
+  "capabilities": ["shaders@0.1"],
+  "shaders": [
+    {
+      "id": "rain",
+      "name": "Rain",
+      "kind": "background",
+      "source": "rain.wgsl",
+      "animated": true
+    }
+  ]
+}

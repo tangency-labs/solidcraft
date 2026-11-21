@@ -1,0 +1,15 @@
+{
+  "id": "galaxy",
+  "name": "Galaxy",
+  "version": "1.0.0",
+  "description": "A night sky of stars and a glowing galactic band behind the model, turning with the view.",
+  "capabilities": ["shaders@0.1"],
+  "shaders": [
+    {
+      "id": "galaxy",
+      "name": "Galaxy",
+      "kind": "background",
+      "source": "galaxy.wgsl"
+    }
+  ]
+}
