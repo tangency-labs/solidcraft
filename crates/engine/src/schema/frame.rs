@@ -1039,11 +1039,15 @@ pub struct FrameMemberKeys {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SketchRef")]
     pub sketch: Option<SketchRef>,
-    /// The lines to lay members along, by curve id, one member each. Default: every straight
+    /// The lines or arcs to lay members along, by curve id. One member each, unless continuous. Default: every straight
     /// line drawn in the sketch that isn't construction, projected or otherwise linked, or of no
     /// length.
     #[serde(default)]
     pub lines: Option<LineIds>,
+    /// One member along explicit, ordered tangent lines and circular arcs. Default: false.
+    /// Requires corner None without overrides, fitting, coping, Flip, gap or point pairs.
+    #[serde(default)]
+    pub continuous: Option<bool>,
     /// Members between two points, one each, after the lines' members; each point is found
     /// again whenever the design changes, so the member follows it. Give it, `sketch` or both.
     #[serde(default)]
