@@ -1450,9 +1450,12 @@ pub enum FeatureKind {
         angle: Expr,
     },
     /// Structural members (#4003): one body per straight line of a frame sketch (2D sketch lines
-    /// and 3D sketch lines), its cross-section the profile, square to the line from end to end.
+    /// and 3D sketch lines), then one per pair of points (#15705), its cross-section the profile,
+    /// square to the line from end to end.
     FrameMember {
-        path_sketch: SketchId,
+        /// The frame sketch; none: a Frame Member of pairs only.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path_sketch: Option<SketchId>,
         /// The lines, by curve id; none: every straight line drawn in the sketch (not
         /// construction, not projected or otherwise linked, not of no length).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1466,6 +1469,28 @@ pub enum FeatureKind {
         /// when the profile's size changes.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         locate: Option<[f64; 2]>,
+        /// How two members ending at one point are cut (default none: ends square to their lines).
+        #[serde(default, skip_serializing_if = "crate::frame::CornerType::is_none")]
+        corner: crate::frame::CornerType,
+        /// With a butt: the other member runs through.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        /// Free ends are fitted to the tubes of earlier Frame Members.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        fit_ends: bool,
+        /// Coped (#17854): under every type but None, each butt joint's butting tube is cut to the other tube's real
+        /// shape (its outline, radii kept, hole filled); mitres stay mitres.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        coped: bool,
+        /// Corners, crossings and overlaps finished their own way, each named by its members in order (the first runs
+        /// through, or stays whole).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        corners: Vec<crate::frame::CornerOverride>,
+        /// The weld gap (#17854) left at every welded end: each mitre, butting end and fitted end stands this far off
+        /// the member it meets; through members are never shortened. None: 0.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Gap")]
+        gap: Option<Expr>,
         /// How far the profile turns about the line (see `frame::member_axes`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(angle = "Rotation")]
@@ -1481,6 +1506,14 @@ pub enum FeatureKind {
         /// come and go (`frame::member_names`).
         #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
         names: std::collections::BTreeMap<String, String>,
+        /// Members between two points, after the lines' members, each found again on every
+        /// evaluation.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pairs: Vec<crate::frame::MemberPair>,
+        /// The number the next new pair's id takes (`pair<N>`; 0: 1), so a removed pair's id is
+        /// never given again.
+        #[serde(default, skip_serializing_if = "is_zero_u32")]
+        next_pair: u32,
     },
     /// Raise or sink profiles on a planar face, or wrap them on a selected cylindrical wall.
     Emboss {
@@ -2927,6 +2960,10 @@ fn is_zero_i8(v: &i8) -> bool {
     *v == 0
 }
 
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
+
 /// A parameter that is left out when it is 0 (an optional shape knob).
 fn is_zero(v: &f64) -> bool {
     *v == 0.0
@@ -3147,6 +3184,17 @@ impl FeatureKind {
                 | FeatureKind::SheetSurfaceConvert { .. }
                 | FeatureKind::SheetRecognize { .. }
         )
+    }
+
+    /// Profile sketch id for a constructor feature that captures `Feature::profile_frame`.
+    pub fn constructor_profile_sketch(&self) -> Option<u64> {
+        match self {
+            FeatureKind::Extrude { sketch, .. }
+            | FeatureKind::Revolve { sketch, .. }
+            | FeatureKind::SurfaceExtrude { sketch, .. }
+            | FeatureKind::SurfaceRevolve { sketch, .. } => Some(sketch.0),
+            _ => None,
+        }
     }
 
     /// Short type name (timeline tooltip, `inspect`).
@@ -3574,6 +3622,13 @@ pub struct Feature {
     /// default), or every piece stays one body.
     #[serde(default, skip_serializing_if = "Touching::is_separate")]
     pub touching: Touching,
+    /// For a constructor feature (`Extrude`, `Revolve`, `SurfaceExtrude`, `SurfaceRevolve`) built
+    /// from a profile sketch owned by another component: the rigid transform of this feature's
+    /// component relative to the lowest common ancestor of both components at feature creation
+    /// time. Later moves or joints on this component then carry the built body rigidly with it,
+    /// while moves of the sketch's own component still propagate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_frame: Option<crate::Mat>,
     #[serde(flatten)]
     pub kind: FeatureKind,
 }
@@ -4695,6 +4750,12 @@ impl Document {
         if d.features.len() > MAX_FEATURES || d.params.len() > MAX_PARAMS {
             return Err(DocError::Invalid("document too large".into()));
         }
+        // A test build's Coped corner type is Butt with Coped (#17854).
+        for f in &mut d.features {
+            if let FeatureKind::FrameMember { corner, corners, coped, .. } = &mut f.kind {
+                crate::frame_corners::read_coped(corner, corners, coped);
+            }
+        }
         // A design from elsewhere may nest groups too deep, loop, or name things that are gone.
         if let Some((groups, order)) = d.browser_pruned() {
             (d.browser_groups, d.browser_order) = (groups, order);
@@ -4723,13 +4784,17 @@ impl Document {
         kinds
     }
 
+    /// The design as the text of a `.json` file. The same design always gives the same text, and a
+    /// short list of numbers such as a point stays on one line (the layout is in `json_layout.rs`).
     pub fn to_json(&self) -> String {
-        if self.newer_file.is_some() {
+        let compact = if self.newer_file.is_some() {
             let mut value = serde_json::to_value(self).unwrap_or_default();
             crate::newer_file::restore(self, &mut value);
-            return serde_json::to_string_pretty(&value).unwrap_or_default();
-        }
-        serde_json::to_string_pretty(self).unwrap_or_default()
+            serde_json::to_string(&value).unwrap_or_default()
+        } else {
+            serde_json::to_string(self).unwrap_or_default()
+        };
+        crate::json_layout::pretty(&compact)
     }
 
     pub fn feature(&self, id: u64) -> Option<&Feature> {
@@ -4886,6 +4951,7 @@ impl Document {
             link_faces: Vec::new(),
             link_threads: Vec::new(),
             touching: Touching::Separate,
+            profile_frame: None,
             kind,
         };
         self.place_feature(f);

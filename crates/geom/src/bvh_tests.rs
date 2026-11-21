@@ -128,3 +128,46 @@ fn hostile_boxes_never_panic() {
     assert!(MeshIndex::new(&m).raycast(&m, Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, -1.0)).is_none());
     MeshIndex::new(&m).segments_near(Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0), f64::NAN, 0.0, |_, _| panic!("no segments"));
 }
+
+#[test]
+fn point_cloud_index_reports_every_point_within_cone_and_handles_hostile_inputs() {
+    let mut rng = Lcg(42);
+    let mut vals = Vec::with_capacity(600 * 3);
+    for _ in 0..600 {
+        vals.push(rng.range(-25.0, 25.0) as f32);
+        vals.push(rng.range(-25.0, 25.0) as f32);
+        vals.push(rng.range(-25.0, 25.0) as f32);
+    }
+    let index = PointCloudIndex::new(&vals);
+    assert_eq!(index.point_count(), 600);
+    for k in 0..200 {
+        let o = rng.vec(40.0) + Vec3::new(0.0, 0.0, 60.0);
+        let target = rng.vec(20.0);
+        let Some(d) = (target - o).normalized() else { continue };
+        let (a, b) = if k % 2 == 0 { (1.5, 0.0) } else { (0.1, 0.03) };
+        let mut cap = 120.0;
+        let mut visited = std::collections::HashSet::new();
+        index.visit_near_ray(o, d, a, b, &mut cap, |i, _| {
+            assert!(visited.insert(i), "point {i} visited twice");
+        });
+        for i in 0..600usize {
+            let p = Vec3::new(f64::from(vals[3 * i]), f64::from(vals[3 * i + 1]), f64::from(vals[3 * i + 2]));
+            let t = (p - o).dot(d);
+            if !(0.0..=120.0).contains(&t) {
+                continue;
+            }
+            let dist = ((p - o) - d * t).len();
+            if dist <= a + b * t {
+                assert!(visited.contains(&(i as u32)), "ray {k}: point {i} within cone was missed");
+            }
+        }
+    }
+    // Empty and non-finite inputs never panic.
+    let empty = PointCloudIndex::new(&[]);
+    let mut cap = 10.0;
+    empty.visit_near_ray(Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0), 1.0, 0.0, &mut cap, |_, _| panic!("no points"));
+    let dirty = PointCloudIndex::new(&[f32::NAN, 0.0, 0.0, 1.0, 2.0, 3.0]);
+    let mut seen = Vec::new();
+    dirty.visit_near_ray(Vec3::new(1.0, 2.0, 0.0), Vec3::new(0.0, 0.0, 1.0), 0.5, 0.0, &mut cap, |i, _| seen.push(i));
+    assert_eq!(seen, vec![1]);
+}

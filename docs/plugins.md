@@ -25,6 +25,84 @@ are lists. Entries may declare named menu or ribbon slots; each app decides
 which slots exist and draws forms from the input schemas. Plugins ship no UI
 code. SolidCraft retains approval, cancellation and plugin preferences.
 
+## Design revisions and notifications
+
+Declare `design@0.1` alongside `commands@0.2` to import the optional
+`craft:plugin/design-state@0.2.0` interface. Its read-only `get-token()` returns
+JSON `{ "document_id": "…", "revision": "0123456789abcdef0123456789abcdef:42" }`,
+or `null` without an open design.
+Existing plugins need no new imports or capabilities.
+
+The host keeps the identity and revision in the open document's session, outside
+the authored document, saved files and undo snapshots. Every committed edit,
+undo and redo gets a fresh token, including a redo that restores earlier content.
+Tokens never identify different history states. Saving does not change the token.
+Opening or importing a design creates a fresh identity and token, including when
+reopening the same file; switching between open tabs retains each tab's identity.
+Different open documents have different identities. Display-only changes do not
+invalidate calculations. These observations add no metadata to saved designs and
+do not alter the authored bytes restored by cancellation or undo.
+
+Both fields are bounded opaque strings. Compare the complete token for equality
+and pass it back unchanged. A token is valid only for its open document session;
+discard cached tokens after closing or reopening a design. Revisions do not order
+edits across sessions.
+Use this token for edit preconditions; `document.revision` reports the separate
+observation revision, which also follows visibility and uncaptured positions.
+
+An editing call may pass `expected_design` beside `entry` and `params` to
+`plugin.run`, or beside `approval` and `params` to `<plugin>.<entry>`:
+
+```json
+{
+  "path": "/plugins/example",
+  "approval": "PACKAGE_HASH",
+  "entry": "apply",
+  "expected_design": {
+    "document_id": "DESIGN_ID",
+    "revision": "0123456789abcdef0123456789abcdef:42"
+  },
+  "params": {}
+}
+```
+
+The host checks the token inside the edit transaction before invoking the guest.
+A mismatch refuses the entire edit with typed `stale_revision` data containing
+both `expected` and `actual` tokens. No history step is added. Omitting the token
+preserves unconditional calls.
+MCP clients can supply this precondition through `execute` with the wrapped
+command arguments. Direct plugin tools keep the plugin's declared input schema.
+
+A command plugin can declare invalidation listeners under the same capability:
+
+```json
+"listeners": [{"entry": "refresh", "on": ["design.changed"]}]
+```
+
+Place this in `runtime`; `refresh` must name a declared command entry with
+`"effect": "read"`. Approval covers the exact declaration and component. Disabled,
+unapproved or replaced packages receive no background calls.
+
+The window sends whole-document invalidations after finished host edits,
+undo/redo, and active-document switches, opens and closes. A burst is coalesced
+into the latest state, at most about ten deliveries a second. The entry receives
+`{"design":{"document_id":"…","revision":"0123456789abcdef0123456789abcdef:42"}}`,
+or `{"design":null}` without an active design. Closing the window's last tab
+creates a blank design, so that notification names the new active design.
+Events carry no file contents and are not an edit log.
+
+Handlers run on the command worker, away from the window thread, with their own
+budget: at most 1,000,000 fuel, 16 MiB memory, 512 KiB stack and 100 ms execution time, further
+limited by their requested budgets. They may refresh caches or panel data.
+Editing, file writes and starting jobs are refused with existing typed permission
+errors. A failure is shown in Preferences › Plugins and never fails the action
+that triggered the notification. Each invocation uses a fresh guest instance.
+Handler results use the existing 1 MiB JSON reply limit; retained panel data is
+limited to 16 MiB in total. Exceeding either limit reports a typed limit error.
+
+Panel support from #19516 is not present here. The host keeps the handler's
+bounded JSON result through a plain function for a future panel adapter.
+
 ## Installing
 
 **Install plugin…** in **Preferences > Plugins** (desktop only) picks a plugin `.zip`.
@@ -267,6 +345,22 @@ rejected when loading the plugin. `solidcraft-cli plugin check` reports these er
 running Wasm. An invalid schema leaves the dialog's Run button off with the existing CLI/agent
 note. Conditions are bounded in depth and size.
 
+Hidden-key removal also follows the applicable `oneOf` and `anyOf` object branches, including
+nested objects and arrays. A composition containing conditional object rules must have one
+branch, or object branches distinguished pairwise by a required, unconditional scalar property
+with disjoint `const` or `enum` values. The parent or every branch must declare `"type":"object"`
+for these discriminators. This makes the applicable branch unambiguous before hidden keys are
+removed. Conditional object rules inside ambiguous compositions or `allOf` are rejected
+at load time with an `invalid_manifest` error naming the composition's schema location. Scalar
+choice options using `x-solidcraft-when` remain supported. The 1,024-property condition limit
+applies only to object scopes declaring conditional rules; plain object scopes skip that limit.
+
+All applicable scopes share the same visible controller values. When any scope hides a
+controller, conditions in every scope see it as missing. Required checks and choice filters
+use that same view. Loading checks visibility dependency cycles across each combination of
+enclosing scopes and selected branches, including nested objects and array items. Mutually
+exclusive branches are checked separately.
+
 Put `x-solidcraft-when` on a `oneOf` option to offer it only when its condition is true. If the
 current choice becomes unavailable, the dialog selects a matching conditional default, or the
 first available option in schema order. With no available option, the choice is empty; a required
@@ -277,7 +371,8 @@ Conditional defaults use the first matching rule in `x-solidcraft-defaults`. The
 it on opening and when a controlling value changes, until the user edits that field. Custom
 values survive later controller changes, except that unavailable choices must still reset.
 Programs provide their own values; conditional defaults do not overwrite program inputs.
-Schemas with these annotations opt into validation and hidden-key removal before direct calls.
+Command inputs and importer options with these annotations opt into validation and hidden-key
+removal before direct calls.
 Direct calls to schemas without conditional annotations keep their existing pass-through behaviour.
 For example:
 
@@ -301,6 +396,56 @@ For example:
 These numeric defaults are plugin arguments: the plugin decides how to interpret the selected
 units. Every conditional default must satisfy the property's base schema. Defaults and option
 filters also participate in cycle detection.
+
+### Computed fields with an optional dialog hook
+
+Use declarative rules above for visibility, availability and defaults expressible as sibling
+conditions. For computed defaults or lookups, add `"dialog@0.1"` to `capabilities` and
+`"dialog_hook": true` to the individual entry. Export the additive `dialog-provider` interface:
+
+```wit
+update-fields: func(entry: string, values: string) -> result<string, plugin-error>;
+```
+
+Both strings containing values are JSON objects. Existing command worlds keep their exports;
+plugins without this capability need no new export and continue to link and run. The interface
+is available alongside both supported `craft:plugin` WIT versions (0.1 and 0.2); use the
+`command-dialog-plugin` world when building a command plugin with the hook.
+
+A reply maps existing property names to patches, for example:
+
+```json
+{
+  "clearance": {"default": 6.5, "hint": "Computed from the selected size"},
+  "size": {"choices": ["metric"], "enabled": true},
+  "details": {"visible": false}
+}
+```
+
+Only `visible`, `enabled`, `choices`, `default`, `value` and `hint` are accepted. Choices must be
+an ordered subset of that property's own `oneOf` constants, satisfying declarative option
+conditions. The hook cannot add properties, change types, enable or reveal a declaratively
+unavailable field, or bypass the input schema. A malformed reply is ignored **whole** with a
+warning. Defaults and values must satisfy the field schema and the narrowed choices. Hints are
+at most 1024 bytes of printable text; input and reply are at most 1 MiB each.
+
+Declarative conditions run first, then the validated patch, then the same input check used by
+programmatic calls. The hook never edits: it runs as a read entry, with no edit command or file
+write grants, in a fresh sandbox. Its independent budgets are at most 10,000,000 fuel, 16 MiB
+memory and 250 ms, further capped by the entry's approved runtime limits and host ceilings.
+Compilation and execution happen on the command worker, outside the window thread.
+
+The dialog debounces changes for 120 ms. It remains interactive while waiting and drops replies
+from older generations. Run uses the current fields: valid inputs remain runnable while the hook
+is pending, and an invalid or missing value keeps Run off. A user's edited field is
+never overwritten by the hook's `value` or `default`. A timeout, trap or error leaves the
+declarative fields in place with a quiet note.
+
+Scripts, `plugin.run` and namespaced MCP plugin tools call the same hook once before executing
+the entry. Tool schemas accept omitted keys for hook defaults; the original required fields are
+checked after the hook. Defaults fill omitted keys; supplied values are preserved. A value outside narrowed
+choices fails with `invalid_input` naming `params.<field>`. An exhausted time/fuel budget returns
+a typed `exhausted` error, and the entry does not run. Programmatic calls never open a dialog.
 
 ### Selection fields
 
@@ -388,6 +533,33 @@ relative path to an `.svg` file inside the package:
   and the command works as before.
 - Images are not part of the `approval` hash: changing one changes only what is drawn.
 
+An option may also name a material swatch with `x-solidcraft-swatch`. This is a separate
+annotation for PNG or JPEG artwork whose own colours are preserved, including transparency;
+the icon palette rules do not apply. For example:
+
+```json
+{"const": "oak", "title": "Natural oak", "x-solidcraft-swatch": "swatches/oak.png"}
+```
+
+Ship the image inside the plugin package. Paths follow the icon rules: plain relative paths,
+no `.` or `..`, no absolute paths or links, and nothing fetched from the network. Use `.png`,
+`.jpg` or `.jpeg`, at most 64 KiB and at most 256 × 256 decoded pixels. **128 × 128 pixels is
+recommended.** A package may name at most 256 distinct swatches. The host draws fixed-size
+tiles and loads and decodes each distinct image once
+when it loads the package, then caches its texture. A missing, corrupt, wrongly typed or oversized
+swatch is omitted with a warning in `plugin check` and the install review; the plugin still works.
+
+A partially illustrated choice shows tiles beside the option titles in its dropdown. When every
+available option has a usable swatch, the dialog offers a grid with a search box; search matches a
+case-insensitive substring of the title. Choosing either presentation still sends the option's
+`const` value. MCP and scripts use exactly the same input values as before.
+
+### View commands
+
+After Run commits the result, the app applies the run's last view command. `view.fit`
+frames the result, keeping the view direction; `view.home` frames it from the home direction.
+A run with no view command leaves the camera unchanged.
+
 ### Preview
 
 A command entry that edits the design is previewed the way native tools are: while its dialog's
@@ -403,6 +575,11 @@ The dialog has a **Preview** box, on when it opens; with it off, nothing runs un
 - It runs again only when the parameters or the design change, under the plugin's own fuel,
   memory and deadline limits, off the window's thread. A run left behind by newer inputs is
   dropped.
+- When the first successful preview is drawn, the app applies that run's last view command once
+  if it is `view.fit` or `view.home`. Fit includes previewed sketch geometry when there are no
+  bodies; even an empty result consumes this first-preview action. Later field changes leave the
+  camera alone, so you can move it freely. A run with no view command leaves the camera unchanged.
+  Reopening the dialog starts fresh: its first preview applies its view command again.
 - The most recently opened dialog on the design is previewed (the one picking in the viewport,
   when one is). While a native tool is open, its own preview is the one shown. Read entries and
   importers are not previewed.

@@ -434,6 +434,8 @@ fn key_of(e: EntityRef) -> ObjectRef {
 
 /// Tolerances of every face, edge and vertex.
 fn put_tols(b: &Brep, out: &mut Vec<f64>) {
+    #[cfg(test)]
+    crate::certify::written(b);
     out.extend(b.faces().iter().map(|(_, f)| f.tolerance));
     out.extend(b.edges().iter().map(|(_, e)| e.tolerance));
     out.extend(b.vertices().iter().map(|(_, v)| v.tolerance));

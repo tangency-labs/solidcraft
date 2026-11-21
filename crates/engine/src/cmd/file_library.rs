@@ -213,6 +213,27 @@ mod tests {
     }
 
     #[test]
+    fn library_copy_keeps_authored_bytes_and_model_cache_with_a_fresh_session_identity() {
+        let f = Fixture::new();
+        let source = f.0.join("Source.sc");
+        let destination = f.0.join("Copy.sc");
+        let mut original = session();
+        original.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        let source_bytes = original.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
+        std::fs::write(&source, &source_bytes).unwrap();
+        session().execute("file.copy", &json!({"path": source, "destination": destination})).unwrap();
+        assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
+        let copied_bytes = std::fs::read(&destination).unwrap();
+        assert_eq!(copied_bytes, source_bytes);
+        let mut reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(copied_bytes)).unwrap();
+        let saved = reader.geometry().unwrap();
+        let copied = reader.read_document().unwrap();
+        let reopened = Session::opened(copied, Some(&saved));
+        assert_ne!(reopened.design_token().document_id, original.design_token().document_id);
+        assert_eq!(reopened.model.last_recomputed, 0, "the saved model remains adoptable");
+    }
+
+    #[test]
     fn library_guards_open_and_linked_files_and_rebases_assemblies() {
         let f = Fixture::new();
         let original = f.design("Part.solidcraft");
