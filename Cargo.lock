@@ -6002,7 +6002,6 @@ dependencies = [
  "solidcore-convert",
  "solidcore-ops",
  "solidcore-record",
- "solidcore-tess",
 ]
 
 [[package]]
