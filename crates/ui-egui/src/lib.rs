@@ -378,6 +378,8 @@ pub use solidcraft_ui_kit as ui_kit;
 #[cfg(test)]
 mod ui_kit_guard_tests;
 pub mod update;
+#[cfg(feature = "usage-stats")]
+pub mod usage_stats;
 mod value_step;
 pub(crate) mod view_angles;
 pub use solidcraft_ui_kit::view_compass;
@@ -588,6 +590,10 @@ pub struct Services {
     /// HTTP to the ticket server, for problem reports and My tickets (`tickets`); None: reports
     /// open a GitHub draft instead.
     pub tickets_http: Option<tickets::Http>,
+    /// HTTP for anonymous usage statistics (`usage_stats`), posting only to its one endpoint;
+    /// None: nothing is sent.
+    #[cfg(feature = "usage-stats")]
+    pub usage_http: Option<tickets::Http>,
     /// Where the ticket server's sign-in is kept: the system keyring (the browser's storage on
     /// the web). Never a plain file.
     pub ticket_secrets: Option<std::sync::Arc<dyn agent_chat::backend::Secrets>>,
@@ -745,6 +751,9 @@ pub struct SolveApp {
     /// What this computer's administrator set (`policy`). The host loads it at start; the default
     /// is an unmanaged computer.
     pub policy: policy::Policy,
+    /// Anonymous usage statistics (`usage_stats`): what is kept and the report on its way.
+    #[cfg(feature = "usage-stats")]
+    pub usage: usage_stats::UsageStats,
     /// Safari's steps for installing the web app, while their window is open (`install`).
     pub install_steps: Option<install::Steps>,
     /// Toolbar buttons the user pinned, removed or reordered.
@@ -1101,6 +1110,8 @@ impl SolveApp {
             crashes: crash_ui::CrashUi::default(),
             updater: update::Updater::default(),
             policy: policy::Policy::default(),
+            #[cfg(feature = "usage-stats")]
+            usage: usage_stats::UsageStats::new(None),
             install_steps: None,
             toolbar_custom: toolbar_custom::ToolbarCustom::default(),
             settings_profiles: settings_profiles::Profiles::default(),
@@ -1368,6 +1379,18 @@ impl SolveApp {
             log::warn!("Preferences export retained recovery data: {reason}");
             self.prefs_with_panel_layout(prefs::held_panel_layout(self).unwrap_or_else(|| panel_runtime::preferences_value(self)))
         })
+    }
+
+    /// Take in the usage statistics the host stored under `usage_stats::STORAGE_KEY`.
+    #[cfg(feature = "usage-stats")]
+    pub fn load_usage_stats(&mut self, stored: Option<&str>) {
+        self.usage.store = usage_stats::Store::from_stored(stored);
+    }
+
+    /// The usage statistics for the host to store under `usage_stats::STORAGE_KEY`.
+    #[cfg(feature = "usage-stats")]
+    pub fn usage_stats_for_storage(&self) -> String {
+        self.usage.store.to_stored()
     }
 
     /// Portable preferences for storage. On refusal the host retains its stored panel record.
@@ -2201,6 +2224,13 @@ impl SolveApp {
         if id == "ui.dialog_ok" {
             dialogs::confirm(self);
             return;
+        }
+        // A tool or dialog started, for usage statistics (`usage_stats`), even if it is cancelled.
+        #[cfg(feature = "usage-stats")]
+        if self.session.count_usage
+            && let Some(spec) = solidcraft_engine::find_command(id)
+        {
+            solidcraft_engine::usage::note(solidcraft_engine::usage::Bucket::Tools, spec.id);
         }
         self.tree.clear_folder_pick();
         // A command started from the folded ribbon's open panels closes them (#10112).
@@ -4056,6 +4086,8 @@ impl SolveApp {
         recovery_ui::tick(self);
         open_elsewhere::tick(self, ctx);
         update::tick(self, ctx);
+        #[cfg(feature = "usage-stats")]
+        usage_stats::tick(self, ctx);
         if self.issue_report.draft.is_none() && self.file_picker.is_none() {
             // Files dropped on the theme Import tile are themes (#8226).
             prefs::take_theme_drops(self, ctx);
