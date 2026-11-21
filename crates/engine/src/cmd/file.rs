@@ -2718,7 +2718,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let bodies = string_list(cmd, p, "bodies")?;
     let lay = lay_on_print_faces(p, cmd, format)?;
     if face_solids {
-        return export_face_solids(s, path, &bodies, quality, lay);
+        return export_face_solids(s, path, &bodies, quality, lay, allow_missing(p, cmd)?);
     }
     if lay {
         return export_laid(s, path, format, &bodies, &parts, quality, allow_missing(p, cmd)?);
@@ -2743,7 +2743,7 @@ fn export_stl(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let lay = lay_on_print_faces(p, cmd, format)?;
     if stl_solids(p, cmd, format)? {
-        return export_face_solids(s, path, &bodies, quality, lay);
+        return export_face_solids(s, path, &bodies, quality, lay, allow_missing(p, cmd)?);
     }
     if lay {
         return export_laid(s, path, format, &bodies, &[], quality, allow_missing(p, cmd)?);
@@ -2769,11 +2769,18 @@ fn stl_solids(p: &Value, cmd: &str, format: Format) -> Result<bool> {
 /// The ASCII STL export with `solids: face` (docs/formats/stl-face-solids.md): one named solid for
 /// each B-rep face, from the same mesh as the plain STL export. With `lay` each body with a print
 /// face is laid on it, as [`write_laid`] does.
-fn export_face_solids(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality, lay: bool) -> Result<Value> {
+fn export_face_solids(
+    s: &Session,
+    path: &str,
+    bodies: &[String],
+    quality: solidcraft_io::MeshQuality,
+    lay: bool,
+    allow_missing: bool,
+) -> Result<Value> {
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let mut state = s.doc.painted(&*s.world_state()?);
     let laid = if lay { print_face::lay_on_print_faces(s, &mut state, bodies, &[]) } else { print_face::Laid::default() };
-    let (bytes, notes) = solidcraft_io::export_stl_face_solids(&state, bodies, quality)?;
+    let (bytes, notes) = solidcraft_io::export_stl_face_solids(&state, bodies, quality, allow_missing)?;
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let mut warnings = laid.warnings;
     warnings.extend(notes);

@@ -1026,9 +1026,9 @@ fn stl_solid_name(raw: &str) -> String {
 /// A name already used in the file gets `_2`, `_3`, … after it, so names are unique and stable for
 /// a given design. A face without triangles has no block. Returns the bytes and what meshing the
 /// bodies reported.
-pub fn export_stl_face_solids(state: &ModelState, bodies: &[String], quality: MeshQuality) -> Result<(Vec<u8>, Vec<String>)> {
+pub fn export_stl_face_solids(state: &ModelState, bodies: &[String], quality: MeshQuality, allow_missing: bool) -> Result<(Vec<u8>, Vec<String>)> {
     let sel = selected(state, bodies)?;
-    let (items, notes) = per_placed_body(&sel, |b, body| {
+    let (items, notes) = per_placed_body(&sel, allow_missing, |b, body| {
         let (m, mut n) = body_mesh(b, body, quality)?;
         let count = u32::try_from(m.triangles.len()).map_err(|_| IoError::Invalid("mesh too large".into()))?;
         let (positions, triangles, origin) = threemf::weld_tagged(&m.positions, &m.triangles, &(0..count).collect::<Vec<_>>(), weld_eps(&b.body));
