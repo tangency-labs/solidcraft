@@ -682,6 +682,11 @@ pub struct SharedEdges {
 /// body's edges in its block are simplified (`edge_detail::TOLERANCE_PX` in the UI).
 pub const EDGE_PX: f32 = 0.25;
 
+/// How far (pixels) a placement's edges may stray while the view moves ([`Frame::edge_px`]):
+/// orbiting a large assembly at [`EDGE_PX`] drew three times the segments, for a difference no
+/// moving picture shows; the fine edges come back once the view holds still.
+pub const EDGE_PX_MOVING: f32 = 1.0;
+
 impl SharedEdges {
     /// The edges of `mesh` (`shown`: which of its `edges` are drawn), each polyline's segments
     /// with the B-rep edge they are on, and `levels` coarser copies: `(tolerance, simplified
@@ -1427,6 +1432,9 @@ pub struct Frame {
     /// Occlusion samples per shaded pixel: [`AO_SAMPLES`] for a still picture,
     /// [`AO_SAMPLES_MOVING`] while the view moves (#7165).
     pub ao_samples: u32,
+    /// How far (pixels) an instanced part's edges may stray where drawn: [`EDGE_PX`] for a still
+    /// picture, [`EDGE_PX_MOVING`] while the view moves.
+    pub edge_px: f32,
     /// Supersampling (#1288): draw the frame this many times the viewport's pixels in each
     /// direction and filter it down (1: off). Under 1 the frame is drawn smaller and filtered up
     /// (the product preview past its pixel budget, #1464).
@@ -2697,7 +2705,7 @@ impl Batches {
     /// Each placement's level of detail is chosen here too: the coarsest whose error stays under
     /// [`LOD_PX`] where it is drawn ([`placement_scale`], [`level_for`]), in a view of `size`
     /// pixels.
-    fn cull(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vp: &[[f32; 4]; 4], size: [f32; 2]) {
+    fn cull(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vp: &[[f32; 4]; 4], size: [f32; 2], edge_px: f32) {
         self.cull_blocks(vp);
         let mut changed = false;
         let f = |b: &[u8], i: usize| b.get(i..i + 4).and_then(|x| x.try_into().ok()).map_or(0.0, f32::from_le_bytes);
@@ -2719,7 +2727,7 @@ impl Batches {
                 }
                 let axes = if finer { placed.axes(size) } else { None };
                 if let (Some(list), Some(e)) = (edges_shown.as_mut(), edge_levels.as_ref()) {
-                    list.push((i as u32, edges::level_for(e, PlacedBox::stretch_of(axes))));
+                    list.push((i as u32, edges::level_for(e, PlacedBox::stretch_of(axes), edge_px)));
                 }
                 let level = if errors.len() > 1 { level_for(&errors, PlacedBox::scale_of(axes)) } else { 0 };
                 shown.push((i as u32, u8::try_from(level).unwrap_or(0)));
@@ -4581,6 +4589,7 @@ pub fn frame_key(cb: &Frame) -> u64 {
     cb.ao_radius.to_bits().hash(&mut h);
     cb.ao_samples.hash(&mut h);
     cb.ssaa.to_bits().hash(&mut h);
+    cb.edge_px.to_bits().hash(&mut h);
     // A drag's layer: the scene it holds and where it is drawn.
     match &cb.moving {
         Some(m) => {
@@ -4820,7 +4829,7 @@ impl Renderer {
         if !see_through {
             res.pic.model.sort_glass(queue, cb.back);
         }
-        res.pic.model.cull(device, queue, &cb.view_proj, cb.size_px);
+        res.pic.model.cull(device, queue, &cb.view_proj, cb.size_px, cb.edge_px);
         let ground_visible = res.pic.model.ground_input.is_some_and(|ground| ground.visible_from(cb.back));
 
         let ground_key = (cb.key, cb.pv_key, cb.pv_hide, cb.ao_radius.to_bits(), ground_visible);
@@ -6408,6 +6417,7 @@ mod tests {
             eye: [0.0; 4],
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
+            edge_px: crate::view::EDGE_PX,
             sky: [0.0; 4],
             ssaa: 1.0,
         }
@@ -7004,6 +7014,7 @@ mod glass_tests {
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
+            edge_px: crate::view::EDGE_PX,
             sky: [0.0; 4],
             ssaa: 1.0,
             hover_tint: [0.0; 3],
@@ -7209,6 +7220,7 @@ mod glass_tests {
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
+            edge_px: crate::view::EDGE_PX,
             sky: [0.0; 4],
             ssaa,
         }

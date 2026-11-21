@@ -361,6 +361,7 @@ pub(crate) fn view_frame(
         eye: [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }],
         ao_radius: 0.0,
         ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+        edge_px: solidcraft_viewport_gpu::view::EDGE_PX,
         sky: [0.0; 4],
         ssaa: 1.0,
         hover_tint: [f32::from(t.hover_face_lift) / 255.0; 3],
