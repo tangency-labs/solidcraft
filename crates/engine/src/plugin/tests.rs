@@ -281,6 +281,44 @@ fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees
     assert!(!root.join("outside.sc").exists());
     std::fs::remove_dir_all(&root).unwrap();
 }
+#[test]
+fn nested_plugin_edits_save_their_current_token_without_retagging_at_acceptance() {
+    let folder = crate::tests::Folder::new("nested-plugin-save-token");
+    let path = folder.path("edited.sc");
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::from(["file".to_string()]),
+        file_folders: vec![folder.0.clone()],
+        file_read_folders: Vec::new(),
+        evaluation: None,
+    };
+    let before = host.session.design_token();
+    let mut accepted = Session::default();
+    let identity = accepted.document_id.clone();
+    // The real plugin entry owns this outer frame and one undo transaction.
+    let (_frame, outermost) = crate::frames::Nested::enter("plugin.run");
+    assert!(outermost);
+    host.begin_transaction().unwrap();
+    host.run_command("parameters.add", &json!({"name": "width", "expression": "10 mm"})).unwrap();
+    let added = host.transaction.as_ref().unwrap().design_token();
+    assert_ne!(added, before);
+    host.run_command("parameters.change", &json!({"name": "width", "expression": "20 mm"})).unwrap();
+    let edited = host.transaction.as_ref().unwrap().design_token();
+    assert_ne!(edited, added, "each nested mutation receives a distinct token");
+    host.run_command("file.save_as", &json!({"path": path})).unwrap();
+    let saved = solidcraft_io::read_design(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(saved.to_json(), host.transaction.as_ref().unwrap().doc.to_json());
+    assert_eq!(host.transaction.as_ref().unwrap().design_token(), edited);
+    host.commit_transaction().unwrap();
+    assert_eq!(host.session.design_token(), edited);
+    accepted.accept_computed(host.session);
+    assert_eq!(accepted.design_token().revision, edited.revision);
+    assert_eq!(accepted.design_token().document_id, identity);
+}
+
 /// A plugin reaches a command only by its exact registered id: another
 /// case, whitespace around it or a look-alike letter is not a granted command, so it can't slip
 /// past a command group, nor a manifest list a command under another spelling.
@@ -576,6 +614,18 @@ mod native {
         }
     }
     #[test]
+    fn nested_plugin_failure_restores_the_callers_session_token_and_authored_bytes() {
+        let f = Fixture::new("call $box unreachable");
+        let mut s = Session::default();
+        let token = s.design_token();
+        let before = s.doc.to_json();
+        assert!(f.run(&mut s).is_err());
+        assert_eq!(s.design_token(), token);
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty() && s.redo.is_empty());
+    }
+
+    #[test]
     fn traps_fuel_memory_and_denied_calls_leave_design_and_history_untouched() {
         for (code, diagnostic) in [
             ("call $box unreachable", "trap=UnreachableCodeReached"),
@@ -740,6 +790,196 @@ mod native {
         assert_eq!(s.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"], 24.);
         s.execute("edit.undo", &json!({})).unwrap();
         assert!(s.doc.features.is_empty());
+    }
+
+    #[test]
+    fn stale_plugin_worker_is_refused_after_edit_and_undo_restore_the_authored_snapshot() {
+        let f = Fixture::new("call $box");
+        let mut s = Session::default();
+        let expected = s.design_token();
+        let original = s.doc.clone();
+        let bytes = s.doc.to_json();
+        let approval = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap()["approval"].clone();
+        let args = json!({"path":f.path(),"approval":approval,"entry":"make","expected_design":expected});
+        let prepared = s.scratch().compute_commands(&[("plugin.run".into(), args)], None).unwrap();
+        s.execute("parameters.add", &json!({"name":"width","expression":"10 mm"})).unwrap();
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&s.doc, &original));
+        assert_eq!(s.doc.to_json(), bytes);
+        let actual = s.design_token();
+        assert_ne!(actual, expected);
+        assert!(!prepared.is_current(&s));
+        let error = s.accept_commands(prepared).unwrap_err();
+        assert_eq!(error.host_error(), Some(&HostError::StaleRevision { expected, actual }));
+        assert_eq!(s.doc.to_json(), bytes);
+    }
+
+    #[test]
+    fn stale_plugin_worker_result_is_refused_at_commit() {
+        let f = Fixture::new("call $box");
+        let mut s = Session::default();
+        let expected = s.design_token();
+        let approval = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap()["approval"].clone();
+        let args = json!({"path":f.path(),"approval":approval,"entry":"make","expected_design":expected});
+        let prepared = s.scratch().compute_commands(&[("plugin.run".into(), args)], None).unwrap();
+        s.execute("solid.box", &json!({"length":1,"width":1,"height":1})).unwrap();
+        let actual = s.design_token();
+        let before = s.doc.to_json();
+        let history = s.undo.len();
+        let error = s.accept_commands(prepared).unwrap_err();
+        assert!(
+            matches!(error.host_error(), Some(HostError::StaleRevision { expected: was, actual: now }) if was == &expected && now == &actual),
+            "{error}"
+        );
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.undo.len(), history);
+    }
+
+    #[test]
+    fn listener_panel_cache_is_shared_and_bounded() {
+        let mut s = Session::default();
+        let oversized = Value::String("x".repeat(MAX_JSON_BYTES));
+        assert!(matches!(events::listener_panel_data(&mut s, "sample", "oversized", oversized), Err(HostError::LimitExceeded { .. })));
+        assert!(s.plugin_state.listener_data.is_empty());
+        for index in 0..16 {
+            let data = Value::String("x".repeat(MAX_JSON_BYTES - 128));
+            events::listener_panel_data(&mut s, "sample", &format!("refresh{index}"), data).unwrap();
+        }
+        let scratch = s.scratch();
+        assert!(std::sync::Arc::ptr_eq(&s.plugin_state.listener_data, &scratch.plugin_state.listener_data), "scratch copies share cache payloads");
+        let error = events::listener_panel_data(&mut s, "sample", "extra", Value::String("x".repeat(4096))).unwrap_err();
+        assert!(matches!(error, HostError::LimitExceeded { .. }), "{error}");
+        assert_eq!(s.plugin_state.listener_data.len(), 16);
+        assert!(
+            std::sync::Arc::ptr_eq(&s.plugin_state.listener_data, &scratch.plugin_state.listener_data),
+            "refusal does not copy or change the cache"
+        );
+    }
+
+    #[test]
+    fn listener_cache_updates_do_not_invalidate_computed_plugin_edits() {
+        let f = Fixture::new("call $box");
+        let mut s = Session::default();
+        let approval = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap()["approval"].clone();
+        let args = json!({"path":f.path(),"approval":approval,"entry":"make","expected_design":s.design_token()});
+        let prepared = s.scratch().compute_commands(&[("plugin.run".into(), args)], None).unwrap();
+        std::sync::Arc::make_mut(&mut s.plugin_state.listener_data).insert("sample.refresh".into(), json!({"status":"updated"}));
+        s.plugin_state.listener_failures.insert("another".into(), "refused edit".into());
+        s.accept_commands(prepared).unwrap();
+        assert_eq!(s.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"], 24.);
+        assert_eq!(s.plugin_state.listener_data["sample.refresh"], json!({"status":"updated"}));
+    }
+
+    #[test]
+    fn stale_plugin_edits_name_both_tokens_and_leave_history_unchanged() {
+        let f = Fixture::new("call $box");
+        let mut s = Session::default();
+        let expected = s.design_token();
+        s.execute("solid.box", &json!({"length":1,"width":1,"height":1})).unwrap();
+        let actual = s.design_token();
+        let before = s.doc.to_json();
+        let history = (s.undo.len(), s.redo.len());
+        let approval = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap()["approval"].clone();
+        let args = json!({"path":f.path(),"approval":approval,"entry":"make","expected_design":expected});
+        let error = s.execute("plugin.run", &args).unwrap_err();
+        assert!(
+            matches!(error.host_error(), Some(HostError::StaleRevision { expected: was, actual: now }) if was == &expected && now == &actual),
+            "{error}"
+        );
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!((s.undo.len(), s.redo.len()), history);
+        let mut current = args;
+        current["expected_design"] = json!(actual);
+        s.execute("plugin.run", &current).unwrap();
+        assert_ne!(s.design_token(), actual);
+    }
+
+    #[test]
+    fn approved_design_listeners_receive_tokens_and_closed_design_without_editing() {
+        let f = Fixture::new("i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store");
+        let mut m = manifest();
+        m["capabilities"] = json!(["commands@0.2", "design@0.1"]);
+        m["runtime"]["commands"] = json!([]);
+        m["runtime"]["entries"] = json!([{"name":"make","effect":"read","input_schema":{"type":"object"}}]);
+        m["runtime"]["listeners"] = json!([{"entry":"make","on":["design.changed"]}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        // Merely inspecting a package must never authorize a background invocation.
+        s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
+        let token = s.design_token();
+        design_changed(&mut s, Some(token.clone()));
+        assert!(s.plugin_state.listener_data.is_empty());
+        f.install(&mut s, json!({}));
+        design_changed(&mut s, Some(token.clone()));
+        assert!(s.plugin_state.listener_failures.is_empty(), "{:?}", s.plugin_state.listener_failures);
+        assert_eq!(s.plugin_state.listener_data["sample.make"], json!({"design":token}));
+        assert_eq!(s.design_token(), token);
+        design_changed(&mut s, None);
+        assert_eq!(s.plugin_state.listener_data["sample.make"], json!({"design":null}));
+        s.disabled_plugins.insert("sample".into());
+        design_changed(&mut s, Some(token));
+        assert_eq!(s.plugin_state.listener_data["sample.make"], json!({"design":null}));
+    }
+
+    #[test]
+    fn design_listeners_refuse_point_cloud_work_before_it_starts() {
+        let mut session = Session::default();
+        session.plugin_state.listener_design = Some(Some(session.design_token()));
+        let mut host = SolidCraftHost {
+            session,
+            transaction: None,
+            sketch_exits: Vec::new(),
+            view: None,
+            groups: BTreeSet::new(),
+            file_folders: Vec::new(),
+            file_read_folders: Vec::new(),
+            evaluation: None,
+        };
+        assert_eq!(catalog_command("pointcloud.deviation").unwrap().effect, Effect::Read);
+        host.begin_transaction().unwrap();
+        let params = json!({"cloud":"scan","body":"part"});
+        let error = host.run_command("pointcloud.deviation", &params).unwrap_err();
+        assert!(matches!(error, HostError::PermissionDenied { permission }
+            if permission.contains("pointcloud.deviation") && permission.contains("read entry")));
+        // An explicit user invocation retains the existing read-only command contract.
+        host.session.plugin_state.listener_design = None;
+        assert!(matches!(host.run_command("pointcloud.deviation", &params), Err(HostError::CommandFailed { .. })));
+        host.rollback_transaction().unwrap();
+    }
+
+    #[test]
+    fn design_listeners_are_read_only_and_never_fail_the_triggering_action() {
+        let f = Fixture::new("call $box");
+        let mut m = manifest();
+        m["capabilities"] = json!(["commands@0.2", "design@0.1"]);
+        m["runtime"]["entries"] = json!([{"name":"make","effect":"read","input_schema":{"type":"object"}}]);
+        m["runtime"]["listeners"] = json!([{"entry":"make","on":["design.changed"]}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        f.install(&mut s, json!({}));
+        s.execute("solid.box", &json!({"length":1,"width":1,"height":1})).unwrap();
+        let token = s.design_token();
+        let history = s.undo.len();
+        design_changed(&mut s, Some(token.clone()));
+        assert_eq!(s.design_token(), token);
+        assert_eq!(s.undo.len(), history);
+        assert!(s.plugin_state.listener_failures["sample"].contains("read entry"));
+        assert_eq!(s.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"], 1.);
+        // A guest can return a long typed diagnostic. Keep its actionable start without
+        // retaining or laying out the guest's whole string on the window thread.
+        let long_error = Fixture::new(
+            "i32.const 0 i32.const 1 i32.store i32.const 4 i32.const 5 i32.store
+             i32.const 8 i32.const 8192 i32.store i32.const 12 i32.const 5000 i32.store
+             i32.const 8192 i32.const 120 i32.const 5000 memory.fill",
+        );
+        std::fs::write(long_error.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        long_error.install(&mut s, json!({}));
+        design_changed(&mut s, Some(token.clone()));
+        let failure = &s.plugin_state.listener_failures["sample"];
+        assert_eq!(failure.chars().count(), 4096);
+        assert!(failure.contains(&"x".repeat(32)), "the guest diagnostic was retained");
+        assert_eq!(s.design_token(), token);
+        assert_eq!(s.undo.len(), history);
     }
 
     #[test]
@@ -1514,6 +1754,23 @@ mod importers {
         assert!(s.execute("doc.open", &json!({"path": stl})).map_or(true, |r| r.get("loss_report").is_none()));
         assert_eq!(s.execute("file.import", &json!({"path": stl})).unwrap()["format"], "smp.convert");
         assert_eq!(s.execute("doc.open", &json!({"path": stl, "format": "smp.convert"})).unwrap()["bodies"], 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn imported_documents_do_not_share_the_converter_templates_identity() {
+        let (mut s, root) = installed("distinct-identities", &[("smp", &["smp"], false)]);
+        let bytes = design();
+        let original_identity = s.document_id.clone();
+        let first = put(&root, "first.smp", &bytes);
+        let second = put(&root, "second.smp", &bytes);
+        s.execute("file.import", &json!({"path":first})).unwrap();
+        let first = s.design_token();
+        s.execute("file.import", &json!({"path":second})).unwrap();
+        let second = s.design_token();
+        assert_ne!(first.document_id, original_identity);
+        assert_ne!(second.document_id, original_identity);
+        assert_ne!(first.document_id, second.document_id);
         std::fs::remove_dir_all(root).unwrap();
     }
 

@@ -1277,6 +1277,9 @@ fn hostile_params_never_panic() {
         "anchor",
         "density",
         "names",
+        "pairs",
+        "next_pair",
+        "members",
         "references",
         "head",
         "head_gap",
@@ -3600,6 +3603,8 @@ fn forgetting_a_checkpoint_keeps_the_later_ones() {
 fn a_checkpoint_survives_file_new() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 1.0, "width": 1.0, "height": 1.0}));
+    let original_token = s.design_token();
+    let original_bytes = s.doc.to_json();
     let id = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
     run(&mut s, "file.new", json!({"name": "Replacement"}));
     // The volume as SMLib integrates it, to rounding (a unit box measures 1 + 2e-16).
@@ -3607,6 +3612,10 @@ fn a_checkpoint_survives_file_new() {
     run(&mut s, "solid.box", json!({"length": 2.0, "width": 2.0, "height": 2.0}));
     assert!((volume(&mut s) - 8.0).abs() < 1e-12);
     run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": id}));
+    assert_eq!(s.design_token().document_id, original_token.document_id);
+    assert_ne!(s.design_token().revision, original_token.revision);
+    assert_eq!(s.doc.to_json(), original_bytes);
+    assert_eq!(run(&mut s, "document.revision", json!({}))["document_id"], original_token.document_id);
     assert!((volume(&mut s) - 1.0).abs() < 1e-12);
     // The undo history is the restored design's own: one step back is the empty design.
     run(&mut s, "edit.undo", json!({}));
@@ -6167,6 +6176,207 @@ fn computed_import_preserves_file_and_earlier_undo_history() {
     assert!(!s.is_dirty());
     run(&mut s, "edit.undo", json!({}));
     assert!(s.model.state().bodies.is_empty());
+}
+
+/// Plugin tracking lives in the session, never in authored bytes or undo snapshots.
+#[test]
+fn design_tokens_stay_outside_authored_documents_and_history() {
+    let mut s = Session::default();
+    let before = s.doc.to_json();
+    let token = s.design_token();
+    let value: Value = serde_json::from_str(&before).unwrap();
+    assert!(value.get("document_id").is_none() && value.get("revision").is_none());
+    run(&mut s, "parameters.add", json!({"name": "width", "expression": "10 mm"}));
+    let edited = s.design_token();
+    let edited_bytes = s.doc.to_json();
+    assert_ne!(edited, token);
+    run(&mut s, "edit.undo", json!({}));
+    let undone = s.design_token();
+    assert_eq!(s.doc.to_json(), before);
+    assert_ne!(undone, token);
+    assert_ne!(undone, edited);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.to_json(), edited_bytes);
+    assert_ne!(s.design_token(), undone);
+    assert_ne!(s.design_token(), edited);
+    assert_eq!(s.design_token().document_id, token.document_id);
+    let reopened = Session::opened_at((*s.doc).clone(), None, None);
+    assert_eq!(reopened.doc.to_json(), edited_bytes);
+    assert_ne!(reopened.design_token().document_id, s.design_token().document_id);
+}
+
+/// Plugin result tokens follow committed history for one open session and never
+/// give a branched edit the token of a discarded state. Reopening starts a new identity.
+#[test]
+fn design_tokens_follow_edits_history_save_and_reopen() {
+    let folder = Folder::new("design-revision-token");
+    let path = folder.path("part.sc");
+    let mut s = Session::default();
+    let initial = s.design_token();
+    assert_ne!(initial.document_id, Session::default().design_token().document_id);
+    run(&mut s, "parameters.add", json!({"name": "width", "expression": "10 mm"}));
+    let edited = s.design_token();
+    assert_eq!(initial.document_id, edited.document_id);
+    assert_ne!(initial, edited);
+    run(&mut s, "file.save_as", json!({"path": path}));
+    assert_eq!(s.design_token(), edited, "saving is not an edit");
+    run(&mut s, "edit.undo", json!({}));
+    let undone = s.design_token();
+    assert_ne!(undone, edited);
+    run(&mut s, "edit.redo", json!({}));
+    assert_ne!(s.design_token(), undone);
+    assert_ne!(s.design_token(), edited);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "parameters.add", json!({"name": "width", "expression": "20 mm"}));
+    assert_ne!(s.design_token(), edited, "a branched edit never reuses the discarded token");
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path": path}));
+    assert_ne!(reopened.design_token().document_id, edited.document_id, "reopening starts a new open-design identity");
+    run(&mut reopened, "parameters.change", json!({"name": "width", "expression": "30 mm"}));
+    assert_ne!(reopened.design_token(), edited);
+    assert_ne!(reopened.design_token(), s.design_token(), "independent open copies do not reuse an edit token");
+}
+
+/// Per-part undo can combine a drawing snapshot with a model edited later. Such
+/// a composite must not inherit either previous whole-document state's token.
+#[test]
+fn design_tokens_distinguish_composite_drawing_history() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
+    run(&mut s, "drawing.create", json!({}));
+    let drawing_created = s.design_token();
+    run(&mut s, "drawing.set", json!({"name": "Detail"}));
+    let drawing_edited = s.design_token();
+    run(&mut s, "parameters.add", json!({"name": "width", "expression": "10 mm"}));
+    let model_edited = s.design_token();
+    run(&mut s, "edit.undo", json!({}));
+    let composite = s.design_token();
+    assert_ne!(composite, drawing_created);
+    assert_ne!(composite, drawing_edited);
+    assert_ne!(composite, model_edited);
+    assert!(s.doc.params.iter().any(|p| p.name == "width"), "drawing undo keeps the model edit");
+    run(&mut s, "edit.redo", json!({}));
+    assert_ne!(s.design_token(), composite);
+}
+
+/// Drawing history creates fresh whole-design tokens even when undo restores
+/// exactly the saved authored content. Those tokens are not unsaved changes.
+#[test]
+fn design_tokens_drawing_undo_restores_saved_content_without_dirtying() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
+    run(&mut s, "drawing.create", json!({}));
+    s.mark_saved();
+    let saved = s.design_token();
+    assert!(!s.is_dirty());
+    run(&mut s, "drawing.set", json!({"name": "Detail"}));
+    let edited = s.design_token();
+    assert_ne!(edited, saved);
+    assert!(s.is_dirty());
+    run(&mut s, "edit.undo", json!({}));
+    let undone = s.design_token();
+    assert_ne!(undone, saved, "drawing undo retains a fresh whole-design token");
+    assert_ne!(undone, edited);
+    assert_eq!(s.doc.drawings, s.saved.drawings);
+    assert!(!s.is_dirty(), "undo restored the saved content despite its new token");
+    run(&mut s, "edit.redo", json!({}));
+    let redone = s.design_token();
+    assert_ne!(redone, saved);
+    assert_ne!(redone, edited);
+    assert_ne!(redone, undone);
+    assert!(s.is_dirty(), "redo restored the drawing edit");
+}
+
+#[test]
+fn design_tokens_computed_save_preserves_the_saved_token() {
+    let folder = Folder::new("computed-save-token");
+    let mut s = Session::default();
+    let token = s.design_token();
+    let commands = vec![("file.save_as".to_string(), json!({"path": folder.path("part.sc")}))];
+    let computed = s.scratch().compute_commands(&commands, None).unwrap();
+    s.accept_commands(computed).unwrap();
+    assert_eq!(s.design_token(), token);
+    let mut saved = s.scratch();
+    run(&mut saved, "file.save_as", json!({"path": folder.path("renamed.sc")}));
+    s.adopt_save(&saved);
+    let unchanged = s.scratch();
+    s.accept_computed(unchanged);
+    assert_eq!(s.design_token(), token, "adopting a save preserves the association too");
+}
+
+#[test]
+fn design_tokens_open_pinning_preserves_token_on_noop_acceptance() {
+    let mut original = Session::default();
+    run(&mut original, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
+    let mut doc = (*original.doc).clone();
+    for feature in &mut doc.features {
+        feature.body_names.clear();
+    }
+    doc.reserved_body_names.clear();
+    let mut opened = Session::opened_at(doc, None, None);
+    let token = opened.design_token();
+    let unchanged = opened.scratch();
+    opened.accept_computed(unchanged);
+    assert_eq!(opened.design_token(), token);
+}
+
+#[test]
+fn design_tokens_direct_computed_mutations_after_commands_get_a_fresh_token() {
+    let mut s = Session::default();
+    let mut computed = s.scratch();
+    run(&mut computed, "parameters.add", json!({"name": "width", "expression": "10 mm"}));
+    let executed = computed.design_token();
+    computed.doc_mut().name = "Direct candidate edit".into();
+    s.accept_computed(computed);
+    assert_ne!(s.design_token(), executed);
+}
+
+#[test]
+fn design_tokens_accepting_historical_candidates_never_reuses_their_tokens() {
+    let mut s = Session::default();
+    let older = s.scratch();
+    let historical = older.design_token();
+    let bytes = s.doc.to_json();
+    run(&mut s, "parameters.add", json!({"name": "width", "expression": "10 mm"}));
+    let edited = s.design_token();
+    let edited_bytes = s.doc.to_json();
+    let older_edited = s.scratch();
+    run(&mut s, "edit.undo", json!({}));
+    let current = s.design_token();
+    s.accept_computed(older);
+    assert_eq!(s.design_token(), current, "an identical historical candidate keeps the live token");
+    assert_eq!(s.doc.to_json(), bytes);
+    s.accept_computed(older_edited);
+    assert_eq!(s.doc.to_json(), edited_bytes);
+    assert_ne!(s.design_token(), historical);
+    assert_ne!(s.design_token(), edited);
+    assert_ne!(s.design_token(), current);
+}
+
+#[test]
+fn design_tokens_sketch_cancel_restores_authored_bytes_with_a_fresh_token() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
+    let bytes = s.doc.to_json();
+    let original = s.design_token();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [5, 5]}));
+    let edited = s.design_token();
+    run(&mut s, "sketch.cancel", json!({}));
+    assert_eq!(s.doc.to_json(), bytes);
+    assert_ne!(s.design_token(), original);
+    assert_ne!(s.design_token(), edited);
+}
+
+/// Selection, view refresh and a refused edit do not invalidate a computed design result.
+#[test]
+fn design_tokens_ignore_view_changes_and_refused_commands() {
+    let mut s = Session::default();
+    let token = s.design_token();
+    s.invalidate_view(s.revision);
+    run(&mut s, "select.clear", json!({}));
+    assert!(s.execute("parameters.add", &json!({"name": "width", "expression": "invalid +"})).is_err());
+    assert_eq!(s.design_token(), token);
 }
 
 /// The unsaved-changes answer is worked out once per pair of documents and revision, and stays
