@@ -1,0 +1,1023 @@
+//! Groove welds (`weld::groove`): the section of every standard groove and of grooves that
+//! match no standard against closed-form areas, the contour of each face (a weld from one side
+//! has a flat root, a weld from both sides a second face of its own), the penetration depth and
+//! its notices, and the refusals; the body along a straight joint, and the proof that the
+//! part's groove faces run straight along it.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
+
+use std::f64::consts::{FRAC_PI_2, PI};
+
+use solidcore::error::Reason;
+use solidcore::error::Result;
+use solidcore::eval::Frame;
+use solidcore::mass::integrator::properties::brep_volume_default;
+use solidcore::math::{Point2, Vec2};
+use solidcore::prism::extrude::extrude_region;
+use solidcore::prism::profile::Seg2;
+use solidcore::prism::profile::{Loop2, Region2};
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+use solidcore::weld::groove::{
+    body, fill, wall_straying, Contour, FillOptions, GrooveNote, GrooveSection, GrooveWeld,
+    WeldFailure, WeldSide,
+};
+use solidcore::SolidError;
+use solidcore::{Brep, Kernel, Vec3};
+
+/// Gap between the plates in every example.
+const G: f64 = 1.0;
+
+fn p(x: f64, y: f64) -> Point2 {
+    Point2::new(x, y)
+}
+
+fn line(a: Point2, b: Point2) -> Seg2 {
+    Seg2::Line { a, b }
+}
+
+fn tan(deg: f64) -> f64 {
+    deg.to_radians().tan()
+}
+
+fn mirror(wall: &[Seg2]) -> Vec<Seg2> {
+    wall.iter()
+        .map(|s| match *s {
+            Seg2::Line { a, b } => line(p(-a.x, a.y), p(-b.x, b.y)),
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => Seg2::Arc {
+                center: p(-center.x, center.y),
+                radius,
+                start: PI - start,
+                sweep: -sweep,
+            },
+            other => other,
+        })
+        .collect()
+}
+
+/// One test case: the groove's section and the options it is filled with, flat faces and the
+/// whole groove unless a case says otherwise.
+#[derive(Debug, Clone)]
+struct Case {
+    left: Vec<Seg2>,
+    right: Vec<Seg2>,
+    plate_normal: Option<Vec2>,
+    face: Contour,
+    second_face: Option<Contour>,
+    depth: Option<f64>,
+}
+
+impl Default for Case {
+    fn default() -> Self {
+        Self {
+            left: Vec::new(),
+            right: Vec::new(),
+            plate_normal: None,
+            face: Contour::Flat,
+            second_face: None,
+            depth: None,
+        }
+    }
+}
+
+fn weld(left: Vec<Seg2>, right: Vec<Seg2>) -> Case {
+    Case {
+        left,
+        right,
+        ..Case::default()
+    }
+}
+
+/// The two kernel steps: the groove's section (here built by hand), then the fill.
+fn run(c: &Case) -> Result<GrooveWeld> {
+    let section = GrooveSection {
+        left: c.left.clone(),
+        right: c.right.clone(),
+        plate_normal: c.plate_normal,
+    };
+    let options = FillOptions {
+        face: c.face,
+        second_face: c.second_face,
+        depth: c.depth,
+    };
+    fill(&section, &options)
+}
+
+fn section(w: &Case) -> GrooveWeld {
+    run(w).unwrap()
+}
+
+fn area(w: &Case) -> f64 {
+    let s = section(w);
+    assert!(s.region.holes.is_empty());
+    s.region.signed_area().unwrap().value
+}
+
+fn close(got: f64, want: f64) {
+    assert!(
+        (got - want).abs() <= 1e-9 * want.abs().max(1.0),
+        "area {got} != {want}"
+    );
+}
+
+/// The circular segment between a chord of half-length `a` and its arc of sagitta `h`.
+fn segment(a: f64, h: f64) -> f64 {
+    let r = (a * a + h * h) / (2.0 * h);
+    let theta = 2.0 * a.atan2(r - h);
+    r * r / 2.0 * (theta - theta.sin())
+}
+
+/// A single-V (or Y with root face `c`) groove in plates `t` thick, included angle `angle`.
+fn v_walls(t: f64, angle: f64, c: f64) -> (Vec<Seg2>, Vec<Seg2>) {
+    let top = G / 2.0 + (t - c) * tan(angle / 2.0);
+    let mut left = vec![line(p(-top, 0.0), p(-G / 2.0, -(t - c)))];
+    if c > 0.0 {
+        left.push(line(p(-G / 2.0, -(t - c)), p(-G / 2.0, -t)));
+    }
+    let right = mirror(&left);
+    (left, right)
+}
+
+/// A single-bevel (or HY with root face `c`) groove: the left edge square, the right bevelled.
+fn bevel_walls(t: f64, angle: f64, c: f64) -> (Vec<Seg2>, Vec<Seg2>) {
+    let left = vec![line(p(-G / 2.0, 0.0), p(-G / 2.0, -t))];
+    let mut right = vec![line(
+        p(G / 2.0 + (t - c) * tan(angle), 0.0),
+        p(G / 2.0, -(t - c)),
+    )];
+    if c > 0.0 {
+        right.push(line(p(G / 2.0, -(t - c)), p(G / 2.0, -t)));
+    }
+    (left, right)
+}
+
+const U_T: f64 = 10.0;
+const U_C: f64 = 1.5;
+const U_R: f64 = 3.0;
+const U_FLANK: f64 = 8.0;
+
+/// The right half of a U groove: a flank of `U_FLANK` degrees, a quarter round of `U_R` at the
+/// bottom, a root face of `U_C`.
+fn u_right() -> Vec<Seg2> {
+    let yb = -(U_T - U_C);
+    let cy = yb + U_R;
+    let cx = G / 2.0;
+    let top = cx + U_R + (-cy) * tan(U_FLANK);
+    vec![
+        line(p(top, 0.0), p(cx + U_R, cy)),
+        Seg2::Arc {
+            center: p(cx, cy),
+            radius: U_R,
+            start: 0.0,
+            sweep: -FRAC_PI_2,
+        },
+        line(p(cx, yb), p(cx, -U_T)),
+    ]
+}
+
+/// One half of the U groove past the gap: the flank's trapezoid and the quarter round.
+fn u_half_area() -> f64 {
+    let cy = -(U_T - U_C) + U_R;
+    U_R * -cy + tan(U_FLANK) * cy * cy / 2.0 + PI * U_R * U_R / 4.0
+}
+
+/// A double-V groove in plates `t` thick with a root face `c` in the middle, 60 degrees a side.
+fn x_walls(t: f64, c: f64) -> (Vec<Seg2>, Vec<Seg2>) {
+    let d = (t - c) / 2.0;
+    let top = G / 2.0 + d * tan(30.0);
+    let left = vec![
+        line(p(-top, 0.0), p(-G / 2.0, -d)),
+        line(p(-G / 2.0, -d), p(-G / 2.0, -d - c)),
+        line(p(-G / 2.0, -d - c), p(-top, -t)),
+    ];
+    let right = mirror(&left);
+    (left, right)
+}
+
+#[test]
+fn every_standard_groove_is_filled_to_its_closed_form_area() {
+    let t = 6.0;
+    let (l, r) = v_walls(t, 60.0, 0.0);
+    let v = weld(l, r);
+    close(area(&v), G * t + t * t * tan(30.0));
+    let s = section(&v);
+    assert!(s.through);
+    assert!((s.groove_depth - t).abs() < 1e-12);
+    assert!(s.notes.is_empty());
+
+    let (l, r) = bevel_walls(t, 45.0, 0.0);
+    close(area(&weld(l, r)), G * t + t * t / 2.0);
+
+    let c = 2.0;
+    let (l, r) = v_walls(t, 60.0, c);
+    close(area(&weld(l, r)), G * t + (t - c) * (t - c) * tan(30.0));
+
+    let (l, r) = bevel_walls(t, 45.0, c);
+    close(area(&weld(l, r)), G * t + (t - c) * (t - c) / 2.0);
+
+    let right = u_right();
+    close(
+        area(&weld(mirror(&right), right.clone())),
+        G * U_T + 2.0 * u_half_area(),
+    );
+    let square = vec![line(p(-G / 2.0, 0.0), p(-G / 2.0, -U_T))];
+    close(area(&weld(square, right)), G * U_T + u_half_area());
+
+    let (t2, c2) = (12.0, 2.0);
+    let d = (t2 - c2) / 2.0;
+    let (l, r) = x_walls(t2, c2);
+    close(area(&weld(l, r)), G * t2 + 2.0 * d * d * tan(30.0));
+
+    let k_right = vec![
+        line(p(G / 2.0 + d, 0.0), p(G / 2.0, -d)),
+        line(p(G / 2.0, -d), p(G / 2.0, -d - c2)),
+        line(p(G / 2.0, -d - c2), p(G / 2.0 + d, -t2)),
+    ];
+    let k_left = vec![line(p(-G / 2.0, 0.0), p(-G / 2.0, -t2))];
+    close(area(&weld(k_left, k_right)), G * t2 + d * d);
+}
+
+#[test]
+fn a_groove_that_matches_no_standard_is_filled_as_modelled() {
+    // unequal bevels (25 and 35 degrees), the right plate 1 mm thinner, flush underneath
+    let left = vec![line(
+        p(-(G / 2.0 + 8.0 * tan(25.0)), 0.0),
+        p(-G / 2.0, -8.0),
+    )];
+    let right = vec![line(p(G / 2.0 + 7.0 * tan(35.0), -1.0), p(G / 2.0, -8.0))];
+    let corners = [
+        left[0].start(),
+        right[0].start(),
+        right[0].end(),
+        left[0].end(),
+    ];
+    // the quadrilateral's area by the shoelace formula, the corners clockwise
+    let shoelace = -0.5
+        * (0..4)
+            .map(|i| {
+                let (a, b) = (corners[i], corners[(i + 1) % 4]);
+                a.x * b.y - a.y * b.x
+            })
+            .sum::<f64>();
+    close(area(&weld(left, right)), shoelace);
+
+    // a square groove 6 wide whose left plate has its top corner rounded (radius 1)
+    let left = vec![
+        Seg2::Arc {
+            center: p(-4.0, -1.0),
+            radius: 1.0,
+            start: FRAC_PI_2,
+            sweep: -FRAC_PI_2,
+        },
+        line(p(-3.0, -1.0), p(-3.0, -6.0)),
+    ];
+    let right = vec![line(p(3.0, 0.0), p(3.0, -6.0))];
+    close(area(&weld(left, right)), 36.0 + 1.0 - PI / 4.0);
+}
+
+#[test]
+fn convex_faces_add_their_segments_and_a_one_sided_root_stays_flat() {
+    let t = 6.0;
+    let (l, r) = v_walls(t, 60.0, 0.0);
+    let groove = G * t + t * t * tan(30.0);
+    let half = G / 2.0 + t * tan(30.0);
+    let w = Case {
+        face: Contour::Convex { height: 1.5 },
+        ..weld(l.clone(), r.clone())
+    };
+    close(area(&w), groove + segment(half, 1.5));
+    // welded from one side, the root closes the 1 mm gap flat: nothing below the plate
+    let s = section(&w);
+    let lowest = s
+        .region
+        .outer
+        .segs
+        .iter()
+        .flat_map(|seg| (0..=16).map(move |i| seg.point_at(f64::from(i) / 16.0).y))
+        .fold(f64::MAX, f64::min);
+    assert!((lowest + t).abs() < 1e-12, "root at {lowest}");
+    assert!(s.notes.is_empty());
+
+    // welded from both sides: each face follows its own contour, flat by default
+    let (t2, c2) = (12.0, 2.0);
+    let d = (t2 - c2) / 2.0;
+    let (l, r) = x_walls(t2, c2);
+    let half = G / 2.0 + d * tan(30.0);
+    let x_groove = G * t2 + 2.0 * d * d * tan(30.0);
+    let w = Case {
+        face: Contour::Convex { height: 1.0 },
+        second_face: Some(Contour::Convex { height: 1.2 }),
+        ..weld(l.clone(), r.clone())
+    };
+    close(area(&w), x_groove + segment(half, 1.0) + segment(half, 1.2));
+    let w = Case {
+        face: Contour::Convex { height: 1.0 },
+        second_face: Some(Contour::Flat),
+        ..weld(l.clone(), r.clone())
+    };
+    close(area(&w), x_groove + segment(half, 1.0));
+    let w = Case {
+        second_face: Some(Contour::Convex { height: 1.2 }),
+        ..weld(l, r)
+    };
+    close(area(&w), x_groove + segment(half, 1.2));
+}
+
+/// The blended face's area above the chord: the convex arc between the toes and a concave
+/// blend `o` long past each (handover §4.4).
+fn blended_cap(a: f64, h: f64, o: f64) -> f64 {
+    let x = a + o;
+    let sum = (x * x + h * h) / (2.0 * h);
+    let big = a * sum / x;
+    let small = sum - big;
+    let main = 2.0 * a * (h - big) + a * (big * big - a * a).sqrt() + big * big * (a / big).asin();
+    let blend = small * o
+        - o / 2.0 * (small * small - o * o).sqrt()
+        - small * small / 2.0 * (o / small).asin();
+    main + 2.0 * blend
+}
+
+#[test]
+fn blended_toes_run_out_tangentially_past_the_groove() {
+    let t = 6.0;
+    let (l, r) = v_walls(t, 60.0, 0.0);
+    let groove = G * t + t * t * tan(30.0);
+    let a = G / 2.0 + t * tan(30.0);
+    let h = 1.5;
+    // an overlap equal to the crest height (ops' default)
+    let w = Case {
+        face: Contour::ConvexBlended {
+            height: h,
+            overlap: h,
+        },
+        ..weld(l.clone(), r.clone())
+    };
+    close(area(&w), groove + blended_cap(a, h, h));
+    let s = section(&w);
+    // the face reaches the crest height and no higher, and runs out h past each toe
+    let (mut lo_x, mut hi_x, mut top) = (f64::MAX, f64::MIN, f64::MIN);
+    for seg in &s.region.outer.segs {
+        for i in 0..=64 {
+            let q = seg.point_at(f64::from(i) / 64.0);
+            lo_x = lo_x.min(q.x);
+            hi_x = hi_x.max(q.x);
+            top = top.max(q.y);
+        }
+    }
+    assert!((top - h).abs() < 1e-6, "crest {top}");
+    assert!((hi_x - (a + h)).abs() < 1e-9 && (lo_x + a + h).abs() < 1e-9);
+    // where the arcs meet they share their tangent (the blend is smooth)
+    let arcs: Vec<&Seg2> = s
+        .region
+        .outer
+        .segs
+        .iter()
+        .filter(|seg| matches!(seg, Seg2::Arc { .. }))
+        .collect();
+    assert_eq!(arcs.len(), 3);
+    for pair in arcs.windows(2) {
+        let (d1, d2) = (tangent_at(pair[0], 1.0), tangent_at(pair[1], 0.0));
+        assert!(pair[0].end().distance(pair[1].start()) < 1e-12);
+        assert!(
+            (d1.x * d2.y - d1.y * d2.x).abs() < 1e-9,
+            "a kink where arcs meet"
+        );
+    }
+
+    // a chosen overlap
+    let w = Case {
+        face: Contour::ConvexBlended {
+            height: h,
+            overlap: 0.5,
+        },
+        ..weld(l.clone(), r.clone())
+    };
+    close(area(&w), groove + blended_cap(a, h, 0.5));
+
+    // no overlap is the plain convex face
+    let w = Case {
+        face: Contour::ConvexBlended {
+            height: h,
+            overlap: 0.0,
+        },
+        ..weld(l, r)
+    };
+    close(area(&w), groove + segment(a, h));
+}
+
+/// The unit direction an arc runs in at the fraction `t` of its sweep.
+fn tangent_at(seg: &Seg2, t: f64) -> Point2 {
+    let Seg2::Arc { start, sweep, .. } = *seg else {
+        panic!("not an arc");
+    };
+    let ang = start + sweep * t;
+    let s = sweep.signum();
+    p(-ang.sin() * s, ang.cos() * s)
+}
+
+#[test]
+fn a_concave_face_is_built_and_says_how_deep_it_dips() {
+    let t = 6.0;
+    let (l, r) = v_walls(t, 60.0, 0.0);
+    let groove = G * t + t * t * tan(30.0);
+    let a = G / 2.0 + t * tan(30.0);
+    let w = Case {
+        face: Contour::Concave { depth: 1.0 },
+        ..weld(l, r)
+    };
+    close(area(&w), groove - segment(a, 1.0));
+    assert_eq!(
+        section(&w).notes,
+        vec![GrooveNote::BelowToes {
+            side: WeldSide::Face,
+            depth: 1.0,
+            below: [1.0, 1.0],
+            ratio: 1.0 / 6.0,
+        }]
+    );
+    // a weld from both sides with its second face concave says so for that side
+    let (t2, c2) = (12.0, 2.0);
+    let d = (t2 - c2) / 2.0;
+    let (xl, xr) = x_walls(t2, c2);
+    let w = Case {
+        second_face: Some(Contour::Concave { depth: 0.5 }),
+        ..weld(xl, xr)
+    };
+    close(
+        area(&w),
+        G * t2 + 2.0 * d * d * tan(30.0) - segment(G / 2.0 + d * tan(30.0), 0.5),
+    );
+    assert_eq!(
+        section(&w).notes,
+        vec![GrooveNote::BelowToes {
+            side: WeldSide::Second,
+            depth: 0.5,
+            below: [0.5, 0.5],
+            ratio: 0.5 / 12.0,
+        }]
+    );
+}
+
+#[test]
+fn a_concave_face_across_the_walls_is_refused_with_the_deepest_that_builds() {
+    let t = 6.0;
+    let (l, r) = v_walls(t, 60.0, 0.0);
+    let a = G / 2.0 + t * tan(30.0);
+    let w = Case {
+        face: Contour::Concave { depth: 3.0 },
+        ..weld(l, r)
+    };
+    let err = run(&w).unwrap_err();
+    let SolidError::Failed(failure) = &err else {
+        panic!("not a typed refusal: {err:?}");
+    };
+    assert_eq!(
+        failure.reason,
+        Reason::Weld(WeldFailure::ConcaveFaceCrossesWall {
+            side: WeldSide::Face,
+            depth: 3.0,
+        })
+    );
+    // the arc leaves the 60 degree V where its end tangent is steeper than the wall: at
+    // 2 atan(d / a) = 60 degrees
+    let fit = err
+        .fit()
+        .expect("the refusal says the depth that builds")
+        .size;
+    assert!((fit - a * tan(30.0)).abs() < 1e-3, "fit {fit}");
+    let builds = Case {
+        face: Contour::Concave { depth: fit },
+        ..w
+    };
+    assert!(run(&builds).is_ok());
+}
+
+#[test]
+fn a_penetration_depth_fills_the_groove_only_that_deep() {
+    let t = 6.0;
+    let (l, r) = v_walls(t, 60.0, 0.0);
+    let s = 4.0;
+    // a second face does not apply: the weld ends inside the groove
+    let w = Case {
+        depth: Some(s),
+        second_face: Some(Contour::Convex { height: 0.8 }),
+        ..weld(l.clone(), r.clone())
+    };
+    close(area(&w), G * s + tan(30.0) * (t * t - (t - s) * (t - s)));
+    assert!(section(&w).notes.is_empty());
+
+    // as deep as the plate: full penetration, nothing to say
+    let w = Case {
+        depth: Some(t),
+        ..weld(l.clone(), r.clone())
+    };
+    close(area(&w), G * t + t * t * tan(30.0));
+    assert!(section(&w).notes.is_empty());
+
+    // past the plate: full penetration, and the user is told
+    let w = Case {
+        depth: Some(8.0),
+        ..weld(l, r)
+    };
+    close(area(&w), G * t + t * t * tan(30.0));
+    assert_eq!(
+        section(&w).notes,
+        vec![GrooveNote::DeeperThanPlate {
+            asked: 8.0,
+            plate: 6.0
+        }]
+    );
+
+    // a U groove cut on its round
+    let right = u_right();
+    let w = Case {
+        depth: Some(8.0),
+        ..weld(mirror(&right), right)
+    };
+    let cy = -(U_T - U_C) + U_R;
+    // below the round's centre (at -cy) the cut keeps the strip of the round above y = -8
+    let dy = 8.0 + cy;
+    let round = U_R * U_R / 2.0 * (dy / U_R).asin() + dy / 2.0 * (U_R * U_R - dy * dy).sqrt();
+    let half = U_R * -cy + tan(U_FLANK) * cy * cy / 2.0 + round;
+    close(area(&w), G * 8.0 + 2.0 * half);
+}
+
+#[test]
+fn a_depth_past_a_closed_groove_fills_the_groove_and_says_so() {
+    // a partial-penetration preparation: a 60 degree V 6 deep, the plates touching below it
+    let top = 6.0 * tan(30.0);
+    let left = vec![line(p(-top, 0.0), p(0.0, -6.0))];
+    let right = mirror(&left);
+    let w = Case {
+        depth: Some(8.0),
+        second_face: Some(Contour::Convex { height: 1.0 }),
+        ..weld(left, right)
+    };
+    let s = section(&w);
+    assert!(!s.through);
+    close(area(&w), 36.0 * tan(30.0));
+    assert_eq!(
+        s.notes,
+        vec![GrooveNote::DeeperThanGroove {
+            asked: 8.0,
+            groove: 6.0
+        }]
+    );
+}
+
+#[test]
+fn bad_walls_contours_and_depths_are_refused_as_invalid_input() {
+    let (l, r) = v_walls(6.0, 60.0, 0.0);
+    let ok = weld(l.clone(), r.clone());
+    let cubic = Seg2::Cubic {
+        p0: p(-4.0, 0.0),
+        p1: p(-3.0, -2.0),
+        p2: p(-1.0, -4.0),
+        p3: p(-0.5, -6.0),
+    };
+    let bad = [
+        weld(Vec::new(), r.clone()),
+        weld(vec![cubic], r.clone()),
+        // a wall whose two pieces do not join
+        weld(
+            vec![
+                line(p(-4.0, 0.0), p(-2.0, -3.0)),
+                line(p(-1.9, -3.0), p(-0.5, -6.0)),
+            ],
+            r.clone(),
+        ),
+        weld(vec![line(p(f64::NAN, 0.0), p(-0.5, -6.0))], r.clone()),
+        // left and right swapped
+        weld(r.clone(), l.clone()),
+        // walls that cross each other
+        weld(
+            vec![line(p(-4.0, 0.0), p(2.0, -6.0))],
+            vec![line(p(4.0, 0.0), p(-2.0, -6.0))],
+        ),
+        Case {
+            face: Contour::Convex { height: 0.0 },
+            ..ok.clone()
+        },
+        Case {
+            face: Contour::Concave { depth: -1.0 },
+            ..ok.clone()
+        },
+        // a convex face more than half a circle (half the toe distance is 3.96)
+        Case {
+            face: Contour::Convex { height: 4.5 },
+            ..ok.clone()
+        },
+        Case {
+            second_face: Some(Contour::ConvexBlended {
+                height: 1.0,
+                overlap: f64::NAN,
+            }),
+            ..ok.clone()
+        },
+        Case {
+            depth: Some(0.0),
+            ..ok.clone()
+        },
+    ];
+    for (i, w) in bad.iter().enumerate() {
+        let err = run(w).unwrap_err();
+        assert!(
+            matches!(err, SolidError::InvalidInput { .. }),
+            "case {i}: {err:?}"
+        );
+    }
+    assert!(run(&ok).is_ok());
+}
+
+/// The area of a polygon, its corners in either order.
+fn polygon(corners: &[Point2]) -> f64 {
+    let n = corners.len();
+    0.5 * (0..n)
+        .map(|i| {
+            let (a, b) = (corners[i], corners[(i + 1) % n]);
+            a.x * b.y - a.y * b.x
+        })
+        .sum::<f64>()
+        .abs()
+}
+
+/// The lowest point of a weld's section.
+fn lowest(w: &GrooveWeld) -> f64 {
+    w.region
+        .outer
+        .segs
+        .iter()
+        .flat_map(|seg| (0..=16).map(move |i| seg.point_at(f64::from(i) / 16.0).y))
+        .fold(f64::MAX, f64::min)
+}
+
+/// The x of a straight wall `y` on a straight wall from `a` to `b`.
+fn x_at(a: Point2, b: Point2, y: f64) -> f64 {
+    a.x + (b.x - a.x) * (y - a.y) / (b.y - a.y)
+}
+
+#[test]
+fn the_depth_is_measured_from_the_lower_plate_where_the_plates_are_parallel() {
+    let up = Some(Vec2::new(0.0, 1.0));
+    // a 60 degree V between plates 10 and 8 thick, their undersides flush (at -10)
+    let (l0, lb) = (p(-(G / 2.0 + 10.0 * tan(30.0)), 0.0), p(-G / 2.0, -10.0));
+    let (r0, rb) = (p(G / 2.0 + 8.0 * tan(30.0), -2.0), p(G / 2.0, -10.0));
+    let unequal = Case {
+        plate_normal: up,
+        ..weld(vec![line(l0, lb)], vec![line(r0, rb)])
+    };
+    // s = 6 from the thinner (lower) plate's face: the weld's bottom level at -8, 6 into the
+    // thinner plate and 8 into the thicker
+    let w = Case {
+        depth: Some(6.0),
+        ..unequal.clone()
+    };
+    let got = section(&w);
+    assert!(
+        (lowest(&got) + 8.0).abs() < 1e-12,
+        "bottom at {}",
+        lowest(&got)
+    );
+    assert!((got.filled_depth - 6.0).abs() < 1e-12);
+    assert!((got.groove_depth - 8.0).abs() < 1e-12);
+    assert!(got.notes.is_empty());
+    close(
+        area(&w),
+        polygon(&[
+            l0,
+            p(x_at(l0, lb, -8.0), -8.0),
+            p(x_at(r0, rb, -8.0), -8.0),
+            r0,
+        ]),
+    );
+    // past the thinner plate: full penetration, and the user is told
+    let w = Case {
+        depth: Some(9.0),
+        ..unequal.clone()
+    };
+    let got = section(&w);
+    close(area(&w), polygon(&[l0, lb, rb, r0]));
+    assert!((got.filled_depth - 8.0).abs() < 1e-12);
+    assert_eq!(
+        got.notes,
+        vec![GrooveNote::DeeperThanPlate {
+            asked: 9.0,
+            plate: 8.0
+        }]
+    );
+    // without the plates' normal the depth is measured from the chord: not level
+    let chord = section(&Case {
+        depth: Some(6.0),
+        plate_normal: None,
+        ..unequal
+    });
+    assert!((lowest(&chord) + 8.0).abs() > 0.1);
+
+    // two 8 mm plates, the right one 2 lower: s from the right plate's face
+    let (l0, lb) = (p(-(G / 2.0 + 8.0 * tan(30.0)), 0.0), p(-G / 2.0, -8.0));
+    let (r0, rb) = (p(G / 2.0 + 8.0 * tan(30.0), -2.0), p(G / 2.0, -10.0));
+    let offset = Case {
+        plate_normal: up,
+        ..weld(vec![line(l0, lb)], vec![line(r0, rb)])
+    };
+    let w = Case {
+        depth: Some(5.0),
+        ..offset.clone()
+    };
+    assert!((lowest(&section(&w)) + 7.0).abs() < 1e-12);
+    close(
+        area(&w),
+        polygon(&[
+            l0,
+            p(x_at(l0, lb, -7.0), -7.0),
+            p(x_at(r0, rb, -7.0), -7.0),
+            r0,
+        ]),
+    );
+    // the groove opens under the upper plate 6 below the lower plate's face: deeper is full
+    // penetration, the whole groove filled to its deepest point
+    let w = Case {
+        depth: Some(7.0),
+        ..offset
+    };
+    let got = section(&w);
+    close(area(&w), polygon(&[l0, lb, rb, r0]));
+    assert!((got.filled_depth - 8.0).abs() < 1e-12);
+    assert_eq!(
+        got.notes,
+        vec![GrooveNote::DeeperThanPlate {
+            asked: 7.0,
+            plate: 6.0
+        }]
+    );
+}
+
+#[test]
+fn a_concave_face_between_offset_plates_says_how_deep_it_dips_below_each() {
+    let (l0, lb) = (p(-(G / 2.0 + 8.0 * tan(30.0)), 0.0), p(-G / 2.0, -8.0));
+    let (r0, rb) = (p(G / 2.0 + 8.0 * tan(30.0), -2.0), p(G / 2.0, -10.0));
+    let w = Case {
+        plate_normal: Some(Vec2::new(0.0, 1.0)),
+        face: Contour::Concave { depth: 1.0 },
+        ..weld(vec![line(l0, lb)], vec![line(r0, rb)])
+    };
+    let got = section(&w);
+    let [GrooveNote::BelowToes {
+        side, depth, below, ..
+    }] = got.notes[..]
+    else {
+        panic!("{:?}", got.notes);
+    };
+    assert_eq!((side, depth), (WeldSide::Face, 1.0));
+    // the face's lowest point below each plate's face: the plates' step apart, and below the
+    // lower plate's face too (the arc leaves the lower toe rising more steeply than the chord
+    // falls)
+    assert!((below[0] - below[1] - 2.0).abs() < 1e-9, "{below:?}");
+    assert!(below[1] > 0.0, "{below:?}");
+    // the lowest point of the face's arc, sampled, agrees
+    let face_low = got
+        .region
+        .outer
+        .segs
+        .iter()
+        .filter(|seg| matches!(seg, Seg2::Arc { .. }))
+        .flat_map(|seg| (0..=4096).map(move |i| seg.point_at(f64::from(i) / 4096.0).y))
+        .fold(f64::MAX, f64::min);
+    assert!((face_low + below[0]).abs() < 1e-6, "{face_low} {below:?}");
+}
+
+#[test]
+fn a_plates_normal_that_is_not_finite_or_points_into_the_plates_is_refused() {
+    let (l, r) = v_walls(6.0, 60.0, 0.0);
+    for n in [
+        Vec2::new(0.0, -1.0),
+        Vec2::new(0.0, 0.0),
+        Vec2::new(f64::NAN, 1.0),
+    ] {
+        let err = run(&Case {
+            plate_normal: Some(n),
+            ..weld(l.clone(), r.clone())
+        })
+        .unwrap_err();
+        assert!(
+            matches!(err, SolidError::InvalidInput { .. }),
+            "{n:?}: {err:?}"
+        );
+    }
+    // a normal of any length works, and on plates in one plane changes nothing
+    let one_plane = run(&Case {
+        plate_normal: Some(Vec2::new(0.0, 3.0)),
+        depth: Some(4.0),
+        ..weld(l.clone(), r.clone())
+    })
+    .unwrap();
+    let chord = run(&Case {
+        depth: Some(4.0),
+        ..weld(l, r)
+    })
+    .unwrap();
+    assert_eq!(one_plane, chord);
+}
+
+#[test]
+fn a_concave_face_past_half_a_circle_is_refused_with_the_half_circle() {
+    // a square groove 6 wide: its walls stand square to the face, so the deepest concave face
+    // that builds is the half circle, 3 deep
+    let w = Case {
+        face: Contour::Concave { depth: 4.0 },
+        ..weld(
+            vec![line(p(-3.0, 0.0), p(-3.0, -6.0))],
+            vec![line(p(3.0, 0.0), p(3.0, -6.0))],
+        )
+    };
+    let err = run(&w).unwrap_err();
+    let SolidError::Failed(failure) = &err else {
+        panic!("not a typed refusal: {err:?}");
+    };
+    assert_eq!(
+        failure.reason,
+        Reason::Weld(WeldFailure::ConcaveFaceCrossesWall {
+            side: WeldSide::Face,
+            depth: 4.0,
+        })
+    );
+    let fit = err.fit().unwrap().size;
+    assert!((fit - 3.0).abs() < 1e-3, "fit {fit}");
+}
+
+/// The section's frame on a joint along z: the section's x along x, its y (out of the face)
+/// along y.
+fn joint_frame() -> Frame {
+    Frame {
+        origin: [0.0, 0.0, 0.0],
+        x_axis: [1.0, 0.0, 0.0],
+        y_axis: [0.0, 1.0, 0.0],
+    }
+}
+
+fn valid(k: &mut Kernel, b: &mut Brep) {
+    b.use_arena_naming().unwrap();
+    let lines = check_brep(k, b, CheckLevel::Level2).unwrap().lines();
+    assert!(lines.is_empty(), "{lines:?}");
+}
+
+#[test]
+fn a_straight_groove_weld_is_its_section_swept_along_the_joint() {
+    let mut k = Kernel::default();
+    let (l, r) = v_walls(6.0, 60.0, 0.0);
+    let length = 120.0;
+    for face in [
+        Contour::Flat,
+        Contour::Convex { height: 1.5 },
+        Contour::ConvexBlended {
+            height: 1.5,
+            overlap: 1.5,
+        },
+        Contour::Concave { depth: 1.0 },
+    ] {
+        let w = section(&Case {
+            face,
+            ..weld(l.clone(), r.clone())
+        });
+        let area = w.region.signed_area().unwrap().value;
+        let mut b = body(&mut k, &w, &joint_frame(), length).unwrap();
+        valid(&mut k, &mut b);
+        let volume = brep_volume_default(&k, &mut b, 1e-9).unwrap();
+        assert!(
+            (volume - area * length).abs() <= 1e-7 * area * length,
+            "{face:?}: volume {volume} != {}",
+            area * length
+        );
+    }
+    let w = section(&weld(l, r));
+    for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let err = body(&mut k, &w, &joint_frame(), bad).unwrap_err();
+        assert!(
+            matches!(err, SolidError::InvalidInput { .. }),
+            "{bad}: {err:?}"
+        );
+    }
+}
+
+/// A plate with the left wall of a groove: its outline in the section (counter-clockwise)
+/// swept `length` along z.
+fn plate(k: &mut Kernel, outline: Vec<Seg2>, length: f64) -> Brep {
+    let region = Region2 {
+        outer: Loop2 { segs: outline },
+        holes: Vec::new(),
+    };
+    extrude_region(k, &joint_frame(), &region, 0.0, length).unwrap()
+}
+
+fn closed(points: &[Point2]) -> Vec<Seg2> {
+    (0..points.len())
+        .map(|i| line(points[i], points[(i + 1) % points.len()]))
+        .collect()
+}
+
+#[test]
+fn the_parts_groove_faces_are_proved_straight_along_the_joint() {
+    let mut k = Kernel::default();
+    let length = 120.0;
+    // the left plate of a 60 degree V, 6 thick: its bevel, its underside, its far end, its top
+    let top = G / 2.0 + 6.0 * tan(30.0);
+    let left = plate(
+        &mut k,
+        closed(&[
+            p(-top, 0.0),
+            p(-40.0, 0.0),
+            p(-40.0, -6.0),
+            p(-G / 2.0, -6.0),
+        ]),
+        length,
+    );
+    let before = format!("{left:?}");
+    let faces = left.face_list();
+    assert_eq!(faces.len(), 6);
+    let along = Vec3::new(0.0, 0.0, 1.0);
+    let straying: Vec<Option<f64>> = faces
+        .iter()
+        .map(|&f| wall_straying(&left, &[f], along, length))
+        .collect();
+    // the four side faces run along the joint; the two ends stand square to it
+    let straight = straying
+        .iter()
+        .filter(|e| e.is_some_and(|e| e < 1e-9))
+        .count();
+    let ends = straying
+        .iter()
+        .filter(|e| e.is_some_and(|e| e >= length))
+        .count();
+    assert_eq!((straight, ends), (4, 2), "{straying:?}");
+    // a joint 1 degree off: the faces that run along x stray across it by about
+    // length * sin(1 degree) and more
+    let skew = Vec3::new(0.0, 1.0_f64.to_radians().sin(), 1.0_f64.to_radians().cos());
+    let side: Vec<_> = faces
+        .iter()
+        .copied()
+        .zip(&straying)
+        .filter(|(_, e)| e.is_some_and(|e| e < 1e-9))
+        .map(|(f, _)| f)
+        .collect();
+    assert!(wall_straying(&left, &side, skew, length).unwrap() > 1.0);
+    // nothing proved from bad input
+    assert!(wall_straying(&left, &side, Vec3::new(0.0, 0.0, 0.0), length).is_none());
+    assert!(wall_straying(&left, &side, along, f64::NAN).is_none());
+    assert!(wall_straying(&left, &[], along, length).is_none());
+    // the part is only read
+    assert_eq!(format!("{left:?}"), before);
+
+    // a right plate whose groove face is a free-form curve swept along the joint (an
+    // extrusion): proved straight along it too
+    let right = plate(
+        &mut k,
+        vec![
+            Seg2::Cubic {
+                p0: p(G / 2.0, -6.0),
+                p1: p(G / 2.0 + 1.0, -4.0),
+                p2: p(G / 2.0 + 2.0, -1.0),
+                p3: p(top, 0.0),
+            },
+            line(p(top, 0.0), p(40.0, 0.0)),
+            line(p(40.0, 0.0), p(40.0, -6.0)),
+            line(p(40.0, -6.0), p(G / 2.0, -6.0)),
+        ],
+        length,
+    );
+    let curved: Vec<_> = right
+        .face_list()
+        .iter()
+        .copied()
+        .filter(|&f| {
+            !matches!(
+                right.face(f).unwrap().surface.as_ref().unwrap().kind(),
+                solidcore::surface::surface::SurfaceKind::Plane(_)
+            )
+        })
+        .collect();
+    assert_eq!(curved.len(), 1, "one face is not a plane");
+    assert!(
+        matches!(
+            right
+                .face(curved[0])
+                .unwrap()
+                .surface
+                .as_ref()
+                .unwrap()
+                .kind(),
+            solidcore::surface::surface::SurfaceKind::SurfOfExtrusion(_)
+        ),
+        "the swept curve is an extrusion"
+    );
+    let e = wall_straying(&right, &curved, along, length).expect("an extrusion is proved");
+    assert!(e < 1e-9, "{e}");
+    assert!(wall_straying(&right, &curved, skew, length).unwrap() > 1.0);
+}
