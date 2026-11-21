@@ -363,6 +363,16 @@ fn symmetric_extrude_with_symmetric_offset_leaves_clearance_gap_and_follows_para
     assert!((neg.min.z - (-8.0)).abs() < 1e-7 && (neg.max.z - (-3.0)).abs() < 1e-7);
     assert!((pos.min.z - 3.0).abs() < 1e-7 && (pos.max.z - 8.0).abs() < 1e-7);
 
+    // Sketch attached to a wing cap keeps its attachment across parameter edits.
+    let on_cap = s.execute("sketch.create", &json!({"plane": {"face": [5, 5, 8]}, "name": "OnPosCap", "project_edges": false})).unwrap()["sketch"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "parameters.change", json!({"name": name, "expression": "20 mm"}));
+    assert!((s.model.state().sketch(on_cap).unwrap().plane.origin.z - 13.0).abs() < 1e-7);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+
     // Serialization roundtrip preserves symmetric_offset and geometry.
     let reloaded = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
     assert!(reloaded.model.results.iter().all(|r| r.error.is_none()));
@@ -419,4 +429,19 @@ fn symmetric_offset_with_second_distance_is_rejected() {
         .unwrap_err()
         .to_string();
     assert!(err.contains("symmetric offset with a second distance"), "unexpected error: {err}");
+
+    let err_from = s
+        .execute(
+            "solid.extrude",
+            &json!({
+                "sketch": "Square",
+                "distance": "10 mm",
+                "direction": "symmetric",
+                "from": [0, 0, 3],
+                "symmetric_offset": true,
+            }),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(err_from.contains("symmetric offset with From Object"), "unexpected error: {err_from}");
 }

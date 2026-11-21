@@ -8653,14 +8653,17 @@ fn feature_tools_with_constructor(
             if is_symmetric_offset && extent.distance2.is_some() {
                 return Err(DocError::Invalid("not supported yet: symmetric offset with a second distance".into()));
             }
+            if is_symmetric_offset && extent.from.is_some() {
+                return Err(DocError::Invalid("not supported yet: symmetric offset with From Object".into()));
+            }
+            let symmetric_intervals = is_symmetric_offset.then(|| kernel::symmetric_offset_intervals(off, hi));
             // Through all, the tool is the same straight prism, run past the bodies: its interval is
             // where its caps are, so a cut through a sheet made from surfaces goes into the panel's
             // outline with the sketch's own curves (a text's letters as drawn), not read back from
             // the body's.
             let untrimmed = extent.to.is_none() && extent.from.is_none();
             let mut tools = Vec::new();
-            if is_symmetric_offset {
-                let [(pos_lo, pos_hi), (neg_lo, neg_hi)] = kernel::symmetric_offset_intervals(off, hi);
+            if let Some([(pos_lo, pos_hi), (neg_lo, neg_hi)]) = symmetric_intervals {
                 extrude_within_reach([neg_lo, pos_hi])?;
                 for r in &regions {
                     tools.extend(centered_extrude(
@@ -8788,8 +8791,7 @@ fn feature_tools_with_constructor(
                         // curved To face) is not the feature's start or end face.
                         let nominal = |plane: &solidcore_record::Plane| {
                             let height = (plane.origin - ss.plane.origin).dot(n);
-                            if is_symmetric_offset {
-                                let [(pos_lo, pos_hi), (neg_lo, neg_hi)] = kernel::symmetric_offset_intervals(off, hi);
+                            if let Some([(pos_lo, pos_hi), (neg_lo, neg_hi)]) = symmetric_intervals {
                                 let tolerance = 1e-9 * (1.0 + height.abs() + pos_hi.abs() + neg_lo.abs());
                                 [pos_lo, pos_hi, neg_lo, neg_hi].into_iter().any(|h| (height - h).abs() <= tolerance)
                             } else {
