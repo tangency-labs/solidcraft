@@ -182,7 +182,8 @@ A library folder holds one `*.sclibrary.json` manifest (format `solidcraft-libra
 `id`, `name`, `provenance`) and one file per entry in `materials/` and `appearances/`. A place is
 where library folders are read from: the built-in library, My Library (the `my_library_folder`
 preference) and the user's places (`library_places`). A place is one library folder (`library`)
-or a folder whose subfolders are library folders (`folder`). Libraries are used in that order; a
+or a folder whose subfolders are library folders (`folder`), named by its whole path on this
+computer or a network share (never a relative path or a device). Libraries are used in that order; a
 library whose id an earlier one has is listed as unavailable, naming the first.
 
 The app scans each place on a thread of its own: at start, when the list changes and on

@@ -63,6 +63,19 @@ pub enum Place {
 /// The most places a user's list holds, My Library apart.
 pub const MAX_PLACES: usize = 64;
 
+/// Why `path` can't be a place's folder, from its text alone: a place is a whole folder path, on
+/// this computer or a network share, never empty, relative (read from wherever SolidCraft started)
+/// or a device. The commands, the preferences and every scan keep this one rule.
+pub fn place_refusal(path: &str) -> Option<&'static str> {
+    use crate::vfs::Remote;
+    match crate::vfs::remote(path) {
+        Some(Remote::Device) => Some("a library place is a folder, not a device"),
+        Some(Remote::Network(_)) => None,
+        None if std::path::Path::new(path).is_absolute() => None,
+        None => Some("a library place needs an absolute path"),
+    }
+}
+
 impl Place {
     /// The folder a place reads; `None` for the built-in library.
     pub fn path(&self) -> Option<&str> {
@@ -304,6 +317,9 @@ pub fn scan(place: &Place) -> Scanned {
 pub(crate) fn scan_with(place: &Place, limits: &Limits) -> Scanned {
     let found = |libraries| Scanned { place: place.clone(), status: Status::Available, libraries };
     let failed = |reason| Scanned { place: place.clone(), status: Status::Unavailable(reason), libraries: Vec::new() };
+    if let Some(why) = place.path().and_then(place_refusal) {
+        return failed(Reason::Unreadable(why.into()));
+    }
     match place {
         Place::BuiltIn => found(vec![built_in()]),
         Place::Library(dir) => match list(dir, limits) {

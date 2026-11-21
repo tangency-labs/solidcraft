@@ -11,7 +11,7 @@ use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session, params::bad};
 use serde_json::{Value, json};
 use solidcraft_io::catalog::{Catalog, Definition};
-use solidcraft_io::library::{Library, Place, PlaceEdit, PlaceRow, RowState, Scanned, Status};
+use solidcraft_io::library::{self, Library, Place, PlaceEdit, PlaceRow, RowState, Scanned, Status};
 use solidcraft_io::vfs::{self, Remote};
 
 const INSPECT_CONTRACT: TypedContract<LibraryInspectParams> = TypedContract::new();
@@ -205,16 +205,10 @@ fn parse<T: serde::de::DeserializeOwned>(cmd: &str, p: &Value) -> Result<T> {
     serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))
 }
 
-/// The folder of a new place: a library path ([`path`]) that is absolute, on this computer or a
-/// network share, never a device.
+/// The folder of a new place: a library path ([`path`]) that is a place's folder by io's rule.
 fn place_path(cmd: &str, value: &str) -> Result<()> {
     path(cmd, value)?;
-    match vfs::remote(value) {
-        Some(Remote::Device) => Err(bad(cmd, "a library place is a folder, not a device")),
-        Some(Remote::Network(_)) => Ok(()),
-        None if std::path::Path::new(value).is_absolute() => Ok(()),
-        None => Err(bad(cmd, "a library place needs an absolute path")),
-    }
+    library::place_refusal(value).map_or(Ok(()), |why| Err(bad(cmd, why)))
 }
 
 /// Checks `edit` against the session's places with the rule the app applies it by.

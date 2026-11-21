@@ -125,5 +125,11 @@ fn places_set_as_preferences_stay_inside_the_callers_scope() {
         assert!(refused.is_err(), "{refused:?}");
     });
     assert!(crate::prefs::set(&mut h.app, &json!({"library_places": [{"place": {"kind": "built_in"}, "read_only": true}]})).is_err());
+    // A relative or empty folder would be read from wherever SolidCraft started.
+    for folder in ["relative/lib", ""] {
+        let row = json!({"place": {"kind": "folder", "path": folder}, "read_only": false});
+        assert!(crate::prefs::set(&mut h.app, &json!({"library_places": [row]})).is_err(), "{folder:?}");
+    }
+    assert!(crate::prefs::set(&mut h.app, &json!({"my_library_folder": "relative/lib"})).is_err());
     assert_eq!(h.app.preferences.library_places.len(), 1);
 }

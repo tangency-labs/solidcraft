@@ -590,3 +590,151 @@ fn a_library_place_on_a_network_location_is_refused() {
     }
     assert_eq!(crate::vfs::file_calls(), calls);
 }
+
+/// Seeded fuzz (the readers' mutations, #469): hostile place lists and hostile library files. Nothing
+/// panics, every cap holds, and every bad input is reported with its reason: a place that can't be
+/// read is listed with why, and every entry file that is there is listed, used or refused.
+#[test]
+fn hostile_place_lists_and_library_files_are_refused_with_a_reason() {
+    // Place lists: seeded edits over awkward folder names, from lists of 0, 1, 64 and 65 places.
+    let long = format!("/lib/{}", "n".repeat(5_000));
+    let names = ["/lib/a", "/lib/a/", "/LIB/A", r"C:\Lib", "c:/lib/", "", " ", "/lib/a/../a", "/lib/ünï cödé", "/lib/\u{202e}txt", long.as_str()];
+    let built_in = Arc::new(scan(&Place::BuiltIn));
+    let mut seed = 0x0012_9820_5eed_u64;
+    let mut next = move |n: usize| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed % n as u64) as usize
+    };
+    let keys = |rows: &[PlaceRow]| {
+        let mut keys: Vec<String> = rows.iter().filter_map(|r| r.place.path().map(place_key)).collect();
+        keys.sort_unstable();
+        keys
+    };
+    for start in [0, 1, MAX_PLACES, MAX_PLACES + 1] {
+        let mut rows: Vec<PlaceRow> = (0..start).map(|i| row(Place::Library(format!("/many/{i}")))).collect();
+        for step in 0..2_000 {
+            let path = format!("{}{}", names[next(names.len())], ["", "/x", "/0", "/1"][next(4)]);
+            let place = if next(2) == 0 { Place::Library(path.clone()) } else { Place::Folder(path.clone()) };
+            let at = (next(2) == 0).then(|| next(MAX_PLACES + 3));
+            let edit = match next(3) {
+                0 => PlaceEdit::Add { row: PlaceRow { place, read_only: next(2) == 0 }, at },
+                1 => PlaceEdit::Remove { path: path.clone() },
+                _ => PlaceEdit::Set { path: path.clone(), read_only: Some(next(2) == 0), at },
+            };
+            let case = format!("start {start}, step {step}: {edit:?}");
+            match Libraries::new(Arc::clone(&built_in), None, rows.clone(), &[], &[]).edit(&edit) {
+                Err(why) => assert!(!why.is_empty(), "{case}: refused with no reason"),
+                Ok(after) => {
+                    assert!(after.len() <= rows.len() || after.len() <= MAX_PLACES, "{case}: {} places", after.len());
+                    let mut unique = keys(&after);
+                    unique.dedup();
+                    assert_eq!(unique.len(), after.len(), "{case}: a folder listed twice");
+                    let listed = keys(&after).contains(&place_key(&path));
+                    assert_eq!(listed, !matches!(edit, PlaceEdit::Remove { .. }), "{case}");
+                    rows = after;
+                }
+            }
+        }
+    }
+
+    // Places that can't be read: each is listed with its reason, never an empty success.
+    let dir = tempfile::tempdir().unwrap();
+    put(&dir.path().join("a file"), b"not a folder");
+    for folder in [
+        path(&dir.path().join("missing")),
+        path(&dir.path().join("a file")),
+        path(&dir.path().join("n".repeat(300))),
+        String::new(),
+        "relative/lib".into(),
+    ] {
+        for place in [Place::Library(folder.clone()), Place::Folder(folder.clone())] {
+            let found = scan(&place);
+            assert!(!unavailable(found.status()).to_string().is_empty(), "{place:?}");
+            assert!(found.libraries().is_empty(), "{place:?}");
+        }
+    }
+    // Never read from wherever SolidCraft started: an empty or relative folder is refused by its text.
+    for folder in ["", "relative/lib"] {
+        let why = Reason::Unreadable("a library place needs an absolute path".into());
+        assert_eq!(unavailable(scan(&Place::Library(folder.into())).status()), why, "{folder:?}");
+    }
+    let odd = dir.path().join("ünï cödé lib");
+    shop(&odd, ID);
+    assert_eq!(library_at(&odd).entries().iter().filter(|l| l.entry().is_ok()).count(), 3, "an odd folder name reads");
+
+    // A folder place at its cap: 64 subfolders are read, 65 are refused as over it, not cut short.
+    let many = dir.path().join("many");
+    for i in 0..LIMITS.libraries_per_folder {
+        std::fs::create_dir_all(many.join(format!("{i:02}"))).unwrap();
+    }
+    shop(&many.join("00"), "user.zero");
+    assert_eq!(scan(&Place::Folder(path(&many))).libraries().len(), 1);
+    std::fs::create_dir_all(many.join("64")).unwrap();
+    let limit = LIMITS.libraries_per_folder as u64;
+    assert_eq!(unavailable(scan(&Place::Folder(path(&many))).status()), Reason::OverLimit { cap: Cap::LibrariesPerFolder, limit });
+
+    // Lies the mutations rarely make: each entry is refused with its reason, the rest still read.
+    let lib = dir.path().join("lies");
+    shop(&lib, ID);
+    let m = lib.join("materials");
+    let mut huge = serde_json::to_value(material(ID, "huge", "Huge", 1.0)).unwrap();
+    huge["definition"]["value"]["density_g_cm3"] = json!(f64::MAX);
+    huge["definition"]["value"]["physical_card"] = json!(0);
+    let huge = serde_json::to_string(&huge).unwrap();
+    let overflow = huge.replace("1.7976931348623157e+308", "1e400");
+    let deep = huge.replace("\"physical_card\":0", &format!("\"physical_card\":{}{}", "[".repeat(100_000), "]".repeat(100_000)));
+    assert!(overflow != huge && deep != huge, "{huge}");
+    put(&m.join("empty.json"), b"");
+    put(&m.join("deep.json"), deep);
+    put(&m.join("huge.json"), &huge);
+    put(&m.join("overflow.json"), overflow);
+    put(&m.join("big.json"), vec![b' '; LIMITS.entry_bytes as usize + 1]);
+    let library = library_at(&lib);
+    for label in ["empty.json", "deep.json", "huge.json", "overflow.json", "big.json"] {
+        assert!(!refused(&library, label).to_string().is_empty(), "{label}");
+    }
+    assert_eq!(refused(&library, "big.json"), &Reason::OverLimit { cap: Cap::EntryBytes, limit: LIMITS.entry_bytes });
+    assert_eq!(library.entries().iter().filter(|l| l.entry().is_ok()).count(), 3);
+    // The same library id in two places: the set flags the later one.
+    let twin = dir.path().join("twin");
+    shop(&twin, ID);
+    let set = Set::new(vec![scan(&Place::Library(path(&lib))), scan(&Place::Library(path(&twin)))]);
+    assert!(matches!(set.libraries().nth(1), Some((_, Status::Unavailable(Reason::DuplicateId { .. })))));
+
+    // Mutated manifests and entry files: each case reads or is refused with its reason, and every
+    // entry file that is there is listed.
+    let fuzz = dir.path().join("fuzz");
+    shop(&fuzz, ID);
+    let on_disk = || {
+        let mut labels: Vec<String> = ["materials", "appearances"]
+            .iter()
+            .flat_map(|kind| std::fs::read_dir(fuzz.join(kind)).unwrap())
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        labels.sort_unstable();
+        labels
+    };
+    for (file, seed) in [("Shop.sclibrary.json", 0x5c1), ("materials/PLA.json", 0x5c2), ("appearances/Blue.json", 0x5c3)] {
+        let file = fuzz.join(file);
+        let good = std::fs::read(&file).unwrap();
+        solidcraft_testkit::survives(&path(&file), &solidcraft_testkit::mutations(&good, true, seed), 2 * LIMITS.entries_per_kind, |bytes| {
+            put(&file, bytes);
+            let found = scan(&Place::Library(path(&fuzz)));
+            let Some(library) = found.libraries().first() else {
+                assert!(!unavailable(found.status()).to_string().is_empty());
+                return None;
+            };
+            if let Status::Unavailable(why) = library.status() {
+                assert!(!why.to_string().is_empty());
+                return None;
+            }
+            let mut labels: Vec<String> = library.entries().iter().map(|l| l.label().to_string()).collect();
+            labels.sort_unstable();
+            assert_eq!(labels, on_disk(), "every entry file is listed, used or refused");
+            Some(labels.len())
+        });
+        put(&file, &good);
+    }
+}

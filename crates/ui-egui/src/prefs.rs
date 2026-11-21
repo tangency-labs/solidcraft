@@ -4036,6 +4036,9 @@ fn prepare_preferences(
     let my_library = (new.my_library_folder != app.preferences.my_library_folder && !new.my_library_folder.trim().is_empty())
         .then_some(new.my_library_folder.as_str());
     for folder in new_folders.chain(my_library) {
+        if let Some(why) = solidcraft_engine::io::library::place_refusal(folder) {
+            return Err(format!("library place {folder}: {why}"));
+        }
         solidcraft_engine::io::vfs::check(folder).map_err(|e| format!("library place {folder}: {e}"))?;
     }
     if new.disabled_plugins.len() > crate::plugins::MAX_DISABLED || new.disabled_plugins.iter().any(|id| !crate::plugins::valid_id(id)) {
@@ -6981,7 +6984,10 @@ mod tests {
     #[test]
     fn library_places_survive_a_save_page_resets_and_a_row_that_does_not_read() {
         use serde_json::json;
-        let row = |i: usize| json!({"place": {"kind": "folder", "path": format!("/libraries/{i}")}, "read_only": i.is_multiple_of(2)});
+        // Whole paths on every platform: a place needs one, and "/x" is not one on Windows.
+        let root = std::env::temp_dir();
+        let place = |name: &str| root.join(name).to_string_lossy().into_owned();
+        let row = |i: usize| json!({"place": {"kind": "folder", "path": place(&format!("libraries-{i}"))}, "read_only": i.is_multiple_of(2)});
         let p = super::lenient(&json!({"length_decimals": 4, "library_places": [row(0), {"place": {"kind": "shelf", "path": "/x"}}, null, row(1)]}));
         assert_eq!(p.length_decimals, 4);
         assert_eq!(serde_json::to_value(&p.library_places).unwrap(), json!([row(0), row(1)]), "the row from a newer version is dropped alone");
@@ -6989,7 +6995,7 @@ mod tests {
         assert_eq!(super::lenient(&json!({"library_places": many})).library_places.len(), solidcraft_engine::io::library::MAX_PLACES);
 
         let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-        super::set(&mut app, &json!({"library_places": [row(0)], "my_library_folder": "/my/libraries"})).unwrap();
+        super::set(&mut app, &json!({"library_places": [row(0)], "my_library_folder": place("my-libraries")})).unwrap();
         for page in 0..super::PAGES.len() {
             super::reset_preferences(&mut app.preferences, page);
         }
@@ -6997,7 +7003,7 @@ mod tests {
         let mut other = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
         other.load_prefs(&saved);
         assert_eq!(serde_json::to_value(&other.preferences.library_places).unwrap(), json!([row(0)]));
-        assert_eq!(other.preferences.my_library_folder, "/my/libraries");
+        assert_eq!(other.preferences.my_library_folder, place("my-libraries"));
     }
 
     /// My Library is the `libraries` folder in SolidCraft's data folder, or none without one.
