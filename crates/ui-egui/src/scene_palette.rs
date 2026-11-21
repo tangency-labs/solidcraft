@@ -280,9 +280,10 @@ impl PaletteArena {
         }
     }
 
-    /// Give a slot a display-only wood frame (origin and fibre axis) on top of its finish, if
-    /// any. Set after [`PaletteArena::set_material`], which clears it.
-    pub fn set_wood(&mut self, slot: PaletteIndex, frame: [[f32; 3]; 2]) {
+    /// Give a slot a display-only wood frame (origin and fibre axis) and the kind of wood to draw
+    /// (`Material::wood_kind`) on top of its finish, if any. Set after
+    /// [`PaletteArena::set_material`], which clears it.
+    pub fn set_wood(&mut self, slot: PaletteIndex, frame: [[f32; 3]; 2], kind: u8) {
         let at = slot.0 as usize;
         if at >= self.entries.len() {
             return;
@@ -292,6 +293,7 @@ impl PaletteArena {
         }
         if let Some(entry) = self.materials.get_mut(at) {
             entry.wood = Some(frame);
+            entry.wood_kind = kind;
         }
     }
 

@@ -114,6 +114,9 @@ pub struct Material {
     pub two_sided: bool,
     /// Display-only wood origin and unit fibre axis, in the scene's millimetre frame.
     pub wood: Option<[[f32; 3]; 2]>,
+    /// Which wood the figure is drawn as, where `wood` is set: 1 to 8 are the starter woods in
+    /// the starter pack's order, 0 a general hardwood (`wood_character` in the shader).
+    pub wood_kind: u8,
 }
 
 impl Material {
@@ -128,17 +131,19 @@ impl Material {
             pbr: true,
             two_sided: false,
             wood: None,
+            wood_kind: 0,
         }
     }
 
     /// Its four texels in the material texture: base and flag, the optical parameters and the
-    /// two-sided flag, then the wood frame's origin and its fibre axis (with a flag).
+    /// two-sided flag, then the wood frame's origin (with the wood kind) and its fibre axis (with
+    /// a flag).
     fn texels(&self) -> [[f32; 4]; 4] {
         let [origin, axis] = self.wood.unwrap_or([[0.0; 3]; 2]);
         [
             [self.base[0], self.base[1], self.base[2], if self.pbr { 1.0 } else { 0.0 }],
             [self.metallic, self.roughness, self.ior, if self.two_sided { 1.0 } else { 0.0 }],
-            [origin[0], origin[1], origin[2], 0.0],
+            [origin[0], origin[1], origin[2], if self.wood.is_some() { f32::from(self.wood_kind) } else { 0.0 }],
             [axis[0], axis[1], axis[2], if self.wood.is_some() { 1.0 } else { 0.0 }],
         ]
     }
@@ -7142,7 +7147,8 @@ mod glass_tests {
             let mut b = BlockBuilder::default();
             // In z = 0, its normal away from the eye at +Z.
             b.triangle([[-20.0, -20.0, 0.0], [20.0, -20.0, 0.0], [0.0, 20.0, 0.0]], [[0.0, 0.0, -1.0]; 3], PaletteIndex(0), TriClass::Pbr);
-            let material = Material { base: [0.6, 0.6, 0.6], metallic: 0.0, roughness: 0.6, ior: 1.5, pbr: true, two_sided, wood: None };
+            let material =
+                Material { base: [0.6, 0.6, 0.6], metallic: 0.0, roughness: 0.6, ior: 1.5, pbr: true, two_sided, wood: None, wood_kind: 0 };
             GpuScene {
                 palette: Arc::new(Palette::with_stable(vec![[150, 150, 150, 255]]).with_materials(vec![material])),
                 blocks: vec![SceneBlock { key: 3, bytes: b.freeze() }],
@@ -7190,8 +7196,16 @@ mod glass_tests {
         let mut b = BlockBuilder::default();
         b.triangle([[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], [[0.0, 0.0, 1.0]; 3], PaletteIndex(0), TriClass::Pbr);
         let bytes = b.freeze();
-        let material =
-            |roughness: f32| Material { base: [0.5, 0.3, 0.2], metallic: 1.0, roughness, ior: 1.5, pbr: true, two_sided: false, wood: None };
+        let material = |roughness: f32| Material {
+            base: [0.5, 0.3, 0.2],
+            metallic: 1.0,
+            roughness,
+            ior: 1.5,
+            pbr: true,
+            two_sided: false,
+            wood: None,
+            wood_kind: 0,
+        };
         let scene = |m: Material| GpuScene {
             palette: Arc::new(Palette::with_stable(vec![[180, 120, 70, 255]]).with_materials(vec![m])),
             blocks: vec![SceneBlock { key: 3, bytes: bytes.clone() }],

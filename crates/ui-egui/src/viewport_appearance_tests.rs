@@ -1126,6 +1126,20 @@ fn wood_finish_images_follow_grain_in_light_and_dark_themes() {
     solidcraft_theme::set_dark(original_dark);
 }
 
+/// Each starter wood is drawn in its own character, and a library wood as a general hardwood.
+#[test]
+fn wood_finish_gives_each_starter_wood_its_own_kind() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("solid.box", json!({"length":100,"width":30,"height":10,"body_name":"Board"})).unwrap();
+    app.run("wood.grain", json!({"body":"Board","direction":[1,0,0]})).unwrap();
+    for (name, kind) in [("starter.wood.oak-honey", 1), ("starter.wood.walnut-dark", 3), ("starter.wood.teak-golden", 8), ("Wood - Oak", 0)] {
+        app.run("appearance.assign", json!({"bodies":["Board"],"appearance":name})).unwrap();
+        let scene = build_scene(&app);
+        let kinds: Vec<u8> = scene.palette.materials().iter().filter(|m| m.wood.is_some()).map(|m| m.wood_kind).collect();
+        assert!(!kinds.is_empty() && kinds.iter().all(|k| *k == kind), "{name}: {kinds:?}");
+    }
+}
+
 /// The figure's fine detail (ring lines, pores, fibres) fades to its average once it is smaller
 /// than a pixel: a board seen from far away is calm, not a shimmer of aliased lines.
 #[cfg(not(target_arch = "wasm32"))]
