@@ -83,6 +83,7 @@ pub struct Plugin {
     /// The images its entries name, read from the package (`plugin_images`): each relative path
     /// with the icon name it is drawn by.
     pub images: std::collections::BTreeMap<String, String>,
+    pub(crate) swatches: crate::plugin_images::Swatches,
 }
 
 /// A folder under the plugins directory that is not a plugin.
@@ -149,6 +150,7 @@ fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
         groups: Default::default(),
         entries: Vec::new(),
         images: Default::default(),
+        swatches: Default::default(),
     })
 }
 
@@ -169,6 +171,7 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
         plugin.groups = runtime.permissions.command_groups;
     }
     plugin.images = crate::plugin_images::load(dir, &plugin.id, &plugin.entries);
+    plugin.swatches = crate::plugin_images::load_swatches(dir, &plugin.entries);
     Ok((plugin, executable))
 }
 
@@ -1563,6 +1566,7 @@ mod tests {
             groups: Default::default(),
             entries: Vec::new(),
             images: Default::default(),
+            swatches: Default::default(),
             id: "ftc-frc-parts".into(),
             name: "FTC and FRC parts".into(),
             version: "0.1.0".into(),

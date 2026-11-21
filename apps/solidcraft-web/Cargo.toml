@@ -48,5 +48,5 @@ web-sys = { version = "0.3", features = [
     "IdbFactory", "IdbDatabase", "IdbObjectStore", "IdbOpenDbRequest", "IdbRequest", "IdbTransaction", "IdbTransactionMode",
     "Headers", "ReadableStream", "RequestCredentials", "ReadableStreamDefaultReader",
     "BeforeUnloadEvent", "Event", "EventTarget", "KeyboardEvent", "Response", "FormData", "RequestInit", "MediaQueryList", "Gamepad", "Performance",
-    "PointerEvent", "Node", "VisibilityState", "Touch", "TouchEvent", "TouchList",
+    "PointerEvent", "Node", "VisibilityState", "WheelEvent", "MouseEvent", "AddEventListenerOptions", "Touch", "TouchEvent", "TouchList",
 ] }

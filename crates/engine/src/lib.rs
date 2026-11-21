@@ -2507,6 +2507,11 @@ impl Session {
         // Picks in the world go into their component's frame (once: commands run by commands
         // already have them there).
         let (_nested, outermost) = frames::Nested::enter(spec.id);
+        // The person's or an agent's action, for usage statistics: timed, and counted below.
+        #[cfg(feature = "usage-stats")]
+        let usage_clock = (outermost && live.is_none() && self.count_usage).then(web_time::Instant::now);
+        #[cfg(feature = "usage-stats")]
+        let mut usage_operation = false;
         if outermost {
             frames::reset_inner_undoable();
         }
@@ -2648,8 +2653,9 @@ impl Session {
                         // An operation for usage statistics: the action that made this undo step
                         // (`usage`). A drag's frames make none until it ends; replays make none.
                         #[cfg(feature = "usage-stats")]
-                        if self.count_usage && live.is_none() {
+                        if usage_clock.is_some() {
                             usage::note(usage::Bucket::Operations, spec.id);
+                            usage_operation = true;
                         }
                         // A new step ends what could be redone in its part; the other parts' redo
                         // steps still hold, as undo puts back only the part a step changed.
@@ -2737,6 +2743,17 @@ impl Session {
             // document, so the next command does not mistake that work for an outside edit
             // and discard the replay. Failed commands have restored their document by now.
             crash::command_done(self.crash_journal, changed, &before, &self.doc, (spec.id, given, seed), failed.map_or(Ok(()), Err));
+        }
+        // An operation's or a failure's time, and the failure's kind (never its message).
+        #[cfg(feature = "usage-stats")]
+        if let Some(clock) = usage_clock {
+            let failure = result.as_ref().err().and_then(usage::error_kind);
+            if usage_operation || failure.is_some() {
+                usage::note_compute(spec.id, clock.elapsed().as_secs_f64() * 1000.0);
+            }
+            if let Some(kind) = failure {
+                usage::note_failure(spec.id, kind);
+            }
         }
         result
     }
@@ -3109,6 +3126,18 @@ impl Session {
         prepared.computed.visibility.hidden_joints.retain(|joint| !prepared.source.visibility.hidden_joints.contains(joint));
         for step in &prepared.steps {
             crash::accepted_command(self, &step.before, &step.after, &step.id, &step.params, step.changed);
+            // Computed off the window thread on a scratch copy, which counts nothing: each command
+            // that changed the design is the person's operation here, with the time it took.
+            #[cfg(feature = "usage-stats")]
+            if self.count_usage
+                && step.changed
+                && let Some(spec) = find_command(&step.id)
+            {
+                usage::note(usage::Bucket::Operations, spec.id);
+                if let Some(ms) = step.reply.get("ms").and_then(Value::as_f64) {
+                    usage::note_compute(spec.id, ms);
+                }
+            }
         }
         let replies = prepared.steps.into_iter().map(|step| (step.id, step.reply)).collect();
         self.accept_computed(prepared.computed);
