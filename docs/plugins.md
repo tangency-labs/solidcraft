@@ -405,6 +405,27 @@ relative path to an `.svg` file inside the package:
   and the command works as before.
 - Images are not part of the `approval` hash: changing one changes only what is drawn.
 
+An option may also name a material swatch with `x-solidcraft-swatch`. This is a separate
+annotation for PNG or JPEG artwork whose own colours are preserved, including transparency;
+the icon palette rules do not apply. For example:
+
+```json
+{"const": "oak", "title": "Natural oak", "x-solidcraft-swatch": "swatches/oak.png"}
+```
+
+Ship the image inside the plugin package. Paths follow the icon rules: plain relative paths,
+no `.` or `..`, no absolute paths or links, and nothing fetched from the network. Use `.png`,
+`.jpg` or `.jpeg`, at most 64 KiB and at most 256 × 256 decoded pixels. **128 × 128 pixels is
+recommended.** A package may name at most 256 distinct swatches. The host draws fixed-size
+tiles and loads and decodes each distinct image once
+when it loads the package, then caches its texture. A missing, corrupt, wrongly typed or oversized
+swatch is omitted with a warning in `plugin check` and the install review; the plugin still works.
+
+A partially illustrated choice shows tiles beside the option titles in its dropdown. When every
+available option has a usable swatch, the dialog offers a grid with a search box; search matches a
+case-insensitive substring of the title. Choosing either presentation still sends the option's
+`const` value. MCP and scripts use exactly the same input values as before.
+
 ### View commands
 
 After Run commits the result, the app applies the run's last view command. `view.fit`

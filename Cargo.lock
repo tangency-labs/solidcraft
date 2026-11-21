@@ -1373,6 +1373,7 @@ dependencies = [
 name = "craft-plugin"
 version = "0.45.0"
 dependencies = [
+ "image",
  "schemars",
  "serde",
  "serde_json",
