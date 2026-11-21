@@ -36,7 +36,7 @@ file pickers or permission dialogs. The commands expose input and output schemas
 
 | Command | Input | Output |
 |---|---|---|
-| `plugin.install` | `{path, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?}}` | `{id, name, version, description, capabilities, permissions, limits?, host_limits, commands, entries, entry_points, replaces?, installed, folder}` |
+| `plugin.install` | `{path, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?}}` | `{id, name, version, description, capabilities, permissions, limits?, host_limits, commands, entries, entry_points, themes?, replaces?, installed, folder}` |
 | `plugin.list` | `{}` | `{plugins: [{manifest, commands, disabled}]}` |
 | `plugin.remove` | `{id}` | `{id, removed: true}` |
 | `plugin.grants` | `{}` | `{grants: [{id, status, package_hash, command_groups, folders, memory_mib?, input_folder?}]}` |

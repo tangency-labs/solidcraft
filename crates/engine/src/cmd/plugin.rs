@@ -156,6 +156,7 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         entry_points: runtime.map(|r| r.entries.clone()).unwrap_or_default(),
         listeners: runtime.map(|r| r.listeners.clone()).unwrap_or_default(),
         opens: runtime.map(|r| r.entries.iter().flat_map(|e| e.extensions.iter().cloned()).collect()).unwrap_or_default(),
+        themes: manifest.themes.clone(),
         replaces,
         installed,
         folder: folder.to_string_lossy().into_owned(),

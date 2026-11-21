@@ -254,6 +254,9 @@ mod plugin_images;
 pub mod plugin_install;
 pub(crate) mod plugin_menu;
 mod plugin_slots;
+pub(crate) mod plugin_themes;
+#[cfg(test)]
+mod plugin_themes_tests;
 pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod policy;
@@ -870,6 +873,8 @@ pub struct SolveApp {
     pub mesh_units: Option<mesh_units::Ask>,
     /// The Plugins menu and the open plugin entry dialog (`plugin_menu`).
     pub(crate) plugin_menu: plugin_menu::State,
+    /// The colour themes plugins offer (`themes@0.1`), read again when the plugins change.
+    pub(crate) plugin_themes: plugin_themes::State,
     /// The bodies of a just-opened Y-up file, offered to be stood up (`stand_up`).
     pub stand_up: Option<Vec<String>>,
     /// The placement of the component that file came in as: the offer turns it.
@@ -1177,6 +1182,7 @@ impl SolveApp {
             quick_measure: Default::default(),
             mesh_units: None,
             plugin_menu: Default::default(),
+            plugin_themes: Default::default(),
             stand_up: None,
             stand_up_occurrence: None,
             stand_up_digest: None,
@@ -1762,6 +1768,7 @@ impl SolveApp {
         // A grant taken back here that the shared store still holds is not taken back: say so.
         let r = match r {
             Ok(v) if matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove" | "plugin.revoke") => {
+                self.plugin_themes.signature = None;
                 let saved = plugins::persist_grants(self);
                 plugin_slots::invalidate(self);
                 saved.map(|()| v)
