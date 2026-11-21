@@ -1399,7 +1399,7 @@ pub enum ViewState {
 pub struct ViewTab<'a> {
     pub compass: Option<bool>,
     pub name: &'a str,
-    /// What its icon draws: `model`, `sketch`, `sheet`, `render` or `animation` ([`paint_view_glyph`]).
+    /// What its icon draws: `model`, `sheet`, `render` or `animation` ([`paint_view_glyph`]).
     pub icon: &'a str,
     /// The icon's stroke colour.
     pub accent: egui::Color32,
@@ -1414,7 +1414,7 @@ pub struct ViewTab<'a> {
     pub window_number: Option<u32>,
     /// A view listed here that belongs to another window.
     pub to_window: Option<u32>,
-    /// Its hover text ("Sketch 2 · Design workspace · Ctrl+2").
+    /// Its hover text ("Model 2 · Design workspace · Ctrl+2").
     pub tip: &'a str,
 }
 
@@ -2115,7 +2115,6 @@ fn glyph_lines(icon: &str) -> &'static [&'static [(f32, f32)]] {
             &[(4.0, 7.0), (12.0, 11.0), (20.0, 7.0)],
             &[(12.0, 11.0), (12.0, 21.0)],
         ],
-        "sketch" => &[&[(4.0, 20.0), (5.0, 16.0), (16.0, 5.0), (19.0, 8.0), (8.0, 19.0), (4.0, 20.0)], &[(14.0, 7.0), (17.0, 10.0)]],
         "sheet" => &[
             &[(6.0, 3.0), (15.0, 3.0), (19.0, 7.0), (19.0, 21.0), (6.0, 21.0), (6.0, 3.0)],
             &[(15.0, 3.0), (15.0, 7.0), (19.0, 7.0)],
@@ -2136,7 +2135,7 @@ fn glyph_lines(icon: &str) -> &'static [&'static [(f32, f32)]] {
     }
 }
 
-/// Draws a view's icon (`model`, `sketch`, `sheet`, `render` or `animation`, or the menu glyphs
+/// Draws a view's icon (`model`, `sheet`, `render` or `animation`, or the menu glyphs
 /// `rename`, `window`, `close`, `duplicate`, `tiles` and `reopen`; another name draws nothing) as strokes of `ink` in `r`.
 pub fn paint_view_glyph(p: &Painter, r: Rect, icon: &str, ink: egui::Color32) {
     if matches!(icon, "window_here" | "window_other") {
