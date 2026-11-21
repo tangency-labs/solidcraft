@@ -69,9 +69,14 @@ fn plate() -> (Session, Value) {
 /// in every other cell, with nothing typed over any (a new sheet's template types its tolerances
 /// note over one); and a front view at 1:1. The sheet and the view.
 fn drawn(s: &mut Session) -> (u64, u64) {
+    drawn_with(s, ["name", "part_number"])
+}
+
+/// [`drawn`], the block's first two text cells reading the component's fields `keys`.
+fn drawn_with(s: &mut Session, keys: [&str; 2]) -> (u64, u64) {
     let sheet = id(&run(s, "drawing.create", json!({}))["sheets"][0]["id"]);
     let mut block = default_block();
-    let mut fields = [(Source::Component, "name"), (Source::Component, "part_number")].into_iter();
+    let mut fields = keys.map(|key| (Source::Component, key)).into_iter();
     for cell in &mut block.cells {
         if let CellKind::Text(text) = &mut cell.kind {
             text.content = Content(vec![match fields.next() {
@@ -138,6 +143,34 @@ fn a_lost_dimension_and_an_empty_part_number_are_listed_and_nothing_else() {
     let plate = s.doc.features[0].id;
     assert_eq!(coverage(&reply), [(plate, "covered".to_string(), vec![named("dimension", &width)])], "{reply}");
     assert_eq!(reply["coverage_counts"], json!([{"state": "covered", "count": 1}]), "{reply}");
+}
+
+/// A title block's sheet metal fields on a part that isn't sheet metal are listed as empty, each by
+/// its key; on a sheet metal part they read the sheet and nothing is listed.
+#[test]
+fn sheet_metal_fields_are_empty_on_a_part_that_isnt_sheet_metal() {
+    let (mut s, _) = plate();
+    let (sheet, _) = drawn_with(&mut s, ["thickness", "sheet_rule"]);
+    let reply = checked(&mut s, json!({}));
+    let on = json!(ids::encode(sheet));
+    let mut empty: Vec<String> = reply["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["kind"] == "empty_field" && f["sheet"] == on)
+        .map(|f| f["field"].as_str().unwrap().to_string())
+        .collect();
+    empty.sort();
+    assert_eq!(empty, ["component.sheet_rule", "component.thickness"], "{reply}");
+    // A 100 x 60 base flange of the default rule: both read, so neither is listed.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    drawn_with(&mut s, ["thickness", "sheet_rule"]);
+    let reply = checked(&mut s, json!({}));
+    assert!(of_kind(&reply, "empty_field").is_empty(), "{reply}");
 }
 
 /// Typed text over a value hides it; typed into an empty field, it fills it and is no finding. A

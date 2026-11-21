@@ -163,7 +163,11 @@ moves into `solidcore-record` as it is (`docs/layers.md`). The record keeps no a
 rebuilding derives a labelled support's analytic surface from its form (its corners for a plane,
 the circles of its rational quadratic rows for a surface of revolution: exact, as rational NURBS
 represent these surfaces exactly), refusing a form whose implicit equation does not vanish on it,
-coefficient by coefficient on each Bézier patch, naming the face. Rebuilding is exact, and the
+coefficient by coefficient on each Bézier patch, naming the face. So a support is written with its
+label only where that reading derives its surface back from the form written: a form whose
+control rows give the numbers only to more than the evaluation's rounding (a cone's short arc
+span) goes unlabelled, as its form, and is read as a free support. A corner's net and a draft's
+surfaces keep their label, which their records require. Rebuilding is exact, and the
 net is certified again (§2.4) before the round is an operand; a net not proved within ε is
 refused, naming its face. Evaluating S is a pure function of the definition: the station memo
 keys a definition by its own identity, never by a kernel's count, so kernels on other threads

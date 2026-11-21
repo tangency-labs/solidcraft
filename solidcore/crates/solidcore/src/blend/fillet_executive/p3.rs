@@ -344,6 +344,13 @@ pub struct ErrorInfo<O> {
     /// unsupported before). A note that names a site clears it. Read only under that code
     /// (`FilletSession::error_site`).
     pub no_room_without_site: bool,
+    /// Not upstream: the error of the classification that failed at the vertex noted with
+    /// [`FilletErrorType::CornerUnsupported`], which is why no corner was made there (read
+    /// it with [`ErrorInfo::unsupported_corner_cause`], which ignores it under any other
+    /// code). Every note clears it, so a later note under the same code (a corner's own
+    /// refusal, a setback not built) never reads as caused by an earlier classification;
+    /// only the executive's note of the unsupported corner sets it, after its note.
+    pub corner_cause: Option<SolidError>,
 }
 
 impl<O> Default for ErrorInfo<O> {
@@ -367,6 +374,7 @@ impl<O> Default for ErrorInfo<O> {
             entity_name: "\n".into(),
             no_room: None,
             no_room_without_site: false,
+            corner_cause: None,
         }
     }
 }
@@ -386,6 +394,7 @@ impl<O: Copy> ErrorInfo<O> {
         // (not upstream: the refusal goes with the code it explains)
         self.no_room = source.no_room;
         self.no_room_without_site = source.no_room_without_site;
+        self.corner_cause.clone_from(&source.corner_cause);
     }
 }
 
@@ -396,6 +405,18 @@ impl<O> ErrorInfo<O> {
     pub fn no_room_reason(&self) -> Option<NoRoomReason> {
         if self.code == FilletErrorType::NoRoom as i32 {
             self.no_room
+        } else {
+            None
+        }
+    }
+
+    /// The error that left the noted vertex without a corner, where its classification
+    /// failed (not upstream); `None` under any code but
+    /// [`FilletErrorType::CornerUnsupported`].
+    #[must_use]
+    pub fn unsupported_corner_cause(&self) -> Option<&SolidError> {
+        if self.code == FilletErrorType::CornerUnsupported as i32 {
+            self.corner_cause.as_ref()
         } else {
             None
         }
@@ -3291,11 +3312,13 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut round_into_material = false;
         let mut rolls_over = false;
         let mut wraps = false;
+        let mut touches_rim = false;
         let mut overflowing = Vec::new();
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
             index += 1;
             let judged = access.geometry_rails_fit_judged(k, solver, self)?;
+            touches_rim |= judged.touches_rim;
             let continued = !judged.continued_cliffs.is_empty();
             if continued {
                 self.continued_cliffs
@@ -3361,6 +3384,20 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // A supported concave crash does not authorize an unrelated convex overflow.
         if concave_crash && takes_overflow {
             concave = true;
+        }
+        if touches_rim {
+            // At the open fit bound a closed rail touches the rim without leaving
+            // its face (#20282). Judge every solver before refusing: another selected
+            // edge may need a smaller radius, even when its rail crosses the rim.
+            let mut index = 0;
+            while let Some(solver) = self.solvers.get(index).copied() {
+                index += 1;
+                self.note_fit_on_its_faces(k, access, solver)?;
+            }
+            return self.record_no_room(
+                NoRoomReason::RailLeavesFace,
+                "Fillet Error: a closed rail touches the boundary of the face it rolls on (the blend is as large as the faces allow)",
+            );
         }
         // whether the other blends add material (concave), when one overflows
         let mut index = 0;
