@@ -520,7 +520,7 @@ mod native {
         assert_eq!(error.host_error(), Some(&HostError::OverCeiling { limit: "fuel".into(), requested: 200_000_000_000, allowed: 100_000_000_000 }));
         assert_eq!(s.doc.to_json(), before);
         assert!(s.undo.is_empty());
-        s.plugin_limits = HostLimits { max_fuel: 200_000_000_000, max_memory_mib: 256 };
+        s.plugin_limits = HostLimits { max_fuel: 200_000_000_000, max_memory_mib: 256, ..HostLimits::default() };
         let approved = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
         assert_eq!(approved["within_host_limits"], true);
         assert_eq!(approved["approval"], inspection["approval"], "approval pins the exact request; a ceiling change never changes its budget");
@@ -1435,6 +1435,34 @@ mod native {
         assert!(refused.contains("needs the storage capability"), "{refused}");
     }
     #[test]
+    fn a_long_job_stops_at_the_users_job_ceiling_and_cancelling_it_changes_nothing() {
+        let f = Fixture::new("call $box (loop br 0)");
+        let mut m = manifest();
+        m["runtime"]["entries"] = json!([{"name":"make","job":true}]);
+        m["runtime"]["limits"]["fuel"] = json!(u64::MAX / 2);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        s.plugin_limits.max_fuel = u64::MAX;
+        s.plugin_limits.max_job_seconds = 1;
+        let before = s.doc.to_json();
+        let failure = f.run(&mut s).unwrap_err();
+        assert_eq!(failure.host_error(), Some(&HostError::Exhausted { limit: "deadline_ms".into(), allowed: 1000 }));
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before.clone(), 0));
+        // Cancelled from the operations panel (its watch), it stops and nothing of it lands.
+        s.plugin_limits.max_job_seconds = 600;
+        let progress = std::sync::Arc::new(solidcraft_doc::progress::Progress::default());
+        let stop = progress.clone();
+        let canceller = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            stop.cancel();
+        });
+        let failure = solidcraft_doc::progress::watch(progress, || f.run(&mut s)).unwrap_err().to_string();
+        canceller.join().unwrap();
+        assert!(failure.contains("cancelled"), "{failure}");
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before, 0));
+    }
+
+    #[test]
     fn named_calls_preserve_input_pass_through() {
         let f = Fixture::new("i32.const 0 i32.const 0 i32.store i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store");
         let mut m = manifest();
@@ -1625,7 +1653,7 @@ fn host_resource_policy_is_exact_user_state_and_never_design_data() {
     let mut m = manifest();
     m["runtime"]["limits"] = json!({"fuel":u64::MAX,"memory_mib":4096,"deadline_ms":30000});
     assert!(parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").is_ok());
-    let policy = HostLimits { max_fuel: u64::MAX, max_memory_mib: 4096 };
+    let policy = HostLimits { max_fuel: u64::MAX, max_memory_mib: 4096, ..HostLimits::default() };
     assert_eq!(serde_json::from_str::<HostLimits>(&serde_json::to_string(&policy).unwrap()).unwrap(), policy);
     let mut s = Session { plugin_limits: policy, ..Default::default() };
     assert_eq!(s.scratch().plugin_limits, policy);

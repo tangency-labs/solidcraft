@@ -3,7 +3,8 @@
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::{
     API, DesignToken, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES,
-    MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, conditions, swatches, valid_id,
+    MAX_JOB_SECONDS, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, conditions, swatches,
+    valid_id,
 };
 use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};
@@ -345,7 +346,8 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
         .into());
     }
     let rt = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
-    host_limits_for(session, &package.manifest.id, &package.approval).check(&rt.limits)?;
+    let host_limits = host_limits_for(session, &package.manifest.id, &package.approval);
+    host_limits.check(&rt.limits)?;
     let declared = rt.entries.iter().find(|e| e.name == entry).ok_or_else(|| error("unknown entry"))?;
     let prepared =
         conditions::has_conditions(&declared.input_schema).then(|| craft_plugin::prepare_input(&declared.input_schema, params)).transpose()?;
@@ -380,8 +382,16 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
         let approved = host.granted_folders();
         let file_read_folders = approved_file_folders(&approved, &rt.permissions.files, false);
         let file_folders = approved_file_folders(&approved, &rt.permissions.files, true);
-        let (host, result) =
-            craft_plugin_wasm::run(SolidCraftHost { file_folders, file_read_folders, ..host }, &package.manifest, &package.component, entry, params);
+        // A long job runs for the user's job ceiling (Preferences › Plugins).
+        let options = craft_plugin_wasm::RuntimeOptions { job_deadline_ms: host_limits.max_job_seconds.saturating_mul(1000), ..Default::default() };
+        let (host, result) = craft_plugin_wasm::run_with_options(
+            SolidCraftHost { file_folders, file_read_folders, ..host },
+            &package.manifest,
+            &package.component,
+            entry,
+            params,
+            options,
+        );
         let value = result?;
         if !std::sync::Arc::ptr_eq(&session.doc, &host.session.doc)
             || session.active_sketch != host.session.active_sketch

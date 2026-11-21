@@ -436,6 +436,24 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
 }
 
 #[test]
+fn a_command_may_be_a_long_job_and_the_job_ceiling_is_bounded() {
+    let mut long = manifest();
+    long["runtime"]["entries"] = json!([{"name":"make","job":true}, "other"]);
+    let entries = parse(&long).unwrap().runtime.unwrap().entries;
+    assert_eq!((entries[0].job, entries[1].job), (true, false));
+    let mut importing = importer();
+    importing["runtime"]["entries"][0]["job"] = json!(true);
+    assert!(matches!(parse(&importing), Err(HostError::InvalidManifest { field, .. }) if field.ends_with(".job")));
+    let limits = HostLimits::default();
+    assert_eq!(limits.max_job_seconds, 600);
+    assert!(HostLimits { max_job_seconds: 0, ..limits }.validate().is_err());
+    assert!(HostLimits { max_job_seconds: MAX_JOB_SECONDS + 1, ..limits }.validate().is_err());
+    // Preferences saved before the ceiling existed read with the default.
+    let old: HostLimits = serde_json::from_value(json!({"max_fuel": 5, "max_memory_mib": 64})).unwrap();
+    assert_eq!(old.max_job_seconds, DEFAULT_JOB_SECONDS);
+}
+
+#[test]
 fn a_plugin_that_keeps_design_data_names_storage_and_its_data_format() {
     let mut keeps = manifest();
     keeps["capabilities"] = json!(["commands@0.1", "storage@0.1"]);
