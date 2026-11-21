@@ -1042,6 +1042,37 @@ pub fn extent(
     reach: f64,
 ) -> Result<Option<[[f64; 2]; 2]>, EvalError> {
     let mut refused = None;
+    // On a cylinder or cone the box depends on which loop is placed first: a hole across the
+    // seam, placed before the loop that goes round the axis, pulls the box a turn to the wrong
+    // side (a tie between two placements of a turn each). The loops are taken widest first, so
+    // the order a file lists a face's bounds in does not change the box.
+    if loops.len() > 1 && matches!(label, Surface::Cylinder { .. } | Surface::Cone { .. }) {
+        let widths: Vec<f64> = loops
+            .iter()
+            .map(|l| {
+                let mut ignored = None;
+                extent_in(label, std::slice::from_ref(l), reach, &mut ignored)
+                    .map_or(0.0, |[u, _]| u[1] - u[0])
+            })
+            .collect();
+        let mut order: Vec<usize> = (0..loops.len()).collect();
+        order.sort_by(|a, b| {
+            let (wa, wb) = (
+                widths.get(*a).copied().unwrap_or(0.0),
+                widths.get(*b).copied().unwrap_or(0.0),
+            );
+            wb.total_cmp(&wa)
+        });
+        let ordered: Vec<Vec<(&Curve, [f64; 2], bool)>> = order
+            .iter()
+            .filter_map(|i| loops.get(*i).cloned())
+            .collect();
+        let out = extent_in(label, &ordered, reach, &mut refused);
+        return match refused {
+            Some(e) => Err(e),
+            None => Ok(out),
+        };
+    }
     let out = extent_in(label, loops, reach, &mut refused);
     match refused {
         Some(e) => Err(e),
