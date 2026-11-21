@@ -2,6 +2,9 @@
 //! face and edge origin checked against the geometry of the operands (in tests only: the history
 //! itself is recorded, never sampled), and the exact origins asserted where the outcome is known.
 
+#[path = "../../../solidcore/crates/solidcore/tests/support/annular_samples.rs"]
+mod annular_samples;
+
 use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 
@@ -337,18 +340,14 @@ fn offset_an_annular_end_near_either_circular_rim() {
     let end = b.face_at_point(centre).unwrap().unwrap();
     let expected = crate::offset_faces(&b, &[centre], 4.0).unwrap();
     // The bore and outer wall keep their radii; only the length grows, from 200 to 204 mm.
-    let want = std::f64::consts::PI * (3.5_f64.powi(2) - 1.75_f64.powi(2)) * 204.0;
+    let want = annular_samples::annular_volume(204.0);
     assert!((volume(&expected) - want).abs() < want * 1e-7);
-    for angle in [0.3_f64, 1.0, 2.0] {
-        let (sin, cos) = angle.sin_cos();
-        for radius in [3.45, 1.8] {
-            let p = Vec3::new(radius * cos, radius * sin, 200.0);
-            let holders: Vec<usize> = (0..b.face_count()).filter(|&f| b.point_lies_on_face(f, p, b.record().tolerance).unwrap().is_some()).collect();
-            assert_eq!(holders, [end], "only the annular face holds {p:?}");
-            assert_eq!(b.face_at_point(p).unwrap(), Some(end), "{p:?}");
-            let moved = crate::offset_faces(&b, &[p], 4.0).unwrap();
-            assert_eq!(moved.record(), expected.record(), "{p:?}");
-        }
+    for p in annular_samples::rim_points(200.0).into_iter().map(Vec3::from) {
+        let holders: Vec<usize> = (0..b.face_count()).filter(|&f| b.point_lies_on_face(f, p, b.record().tolerance).unwrap().is_some()).collect();
+        assert_eq!(holders, [end], "only the annular face holds {p:?}");
+        assert_eq!(b.face_at_point(p).unwrap(), Some(end), "{p:?}");
+        let moved = crate::offset_faces(&b, &[p], 4.0).unwrap();
+        assert_eq!(moved.record(), expected.record(), "{p:?}");
     }
     let tolerance = b.record().tolerance;
     let within = centre + Vec3::Z * (tolerance * 0.5);
