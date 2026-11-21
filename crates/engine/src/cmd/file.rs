@@ -1538,12 +1538,14 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let verify = bool_(p, "verify").unwrap_or(false);
     // Stamped before it is read: a write while it is being read is a change too.
     let disk = solidcraft_io::design_lock::stamp(path);
-    let (doc, saved) = read_design(s, path)?;
-    // A file with provenance is evaluated from its timeline, never from a cache the signature
-    // does not cover.
-    let saved = if solidcraft_io::has_design_provenance(path) { None } else { saved };
-    let opened = Session::opened_at_validating(doc, saved.as_ref(), Some(path), s.validation());
-    opened_design(s, opened, path, read_only, disk, verify, None)
+    // One reading of the file gives the document, the model (none for a signed file: it is
+    // evaluated from its timeline, never from a cache the signature does not cover), the
+    // provenance records and the signature check.
+    let file = read_design(s, path, verify)?;
+    let mut doc = file.doc;
+    super::component_link::resolve_design_links(&mut doc, Some(path));
+    let opened = Session::opened_validating(doc, file.model.as_ref(), s.validation()).located_with(Some(path), file.chain.clone());
+    opened_design(s, opened, path, read_only, disk, verify.then_some(file.report), file.chain)
 }
 
 /// Whether running `command` with `params` runs an installed importer plugin's code:
@@ -1589,12 +1591,12 @@ fn unreadable_design(path: &str, reason: &str) -> EngineError {
 }
 
 /// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own.
-fn read_design(s: &mut Session, path: &str) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
-    let (mut doc, saved) = solidcraft_io::read_design_file(path, s.open_preview.take()).map_err(|e| unreadable_design(path, &e.to_string()))?;
-    if let Some(stem) = default_name_for(&doc.name, path) {
-        doc.name = stem;
+fn read_design(s: &mut Session, path: &str, verify: bool) -> Result<solidcraft_io::DesignFile> {
+    let mut file = solidcraft_io::read_design_file_once(path, s.open_preview.take(), verify).map_err(|e| unreadable_design(path, &e.to_string()))?;
+    if let Some(stem) = default_name_for(&file.doc.name, path) {
+        file.doc.name = stem;
     }
-    Ok((doc, saved))
+    Ok(file)
 }
 
 /// `doc.open` of a design: `opened`, the design read from `path` and evaluated, takes `s`'s
@@ -1605,18 +1607,16 @@ fn opened_design(
     path: &str,
     read_only: bool,
     disk: Option<solidcraft_io::design_lock::FileStamp>,
-    verify: bool,
     checked: Option<Option<solidcraft_io::ProvenanceReport>>,
+    chain: Option<solidcraft_io::ProvenanceChain>,
 ) -> Result<Value> {
     s.replace_design(opened);
     s.disk = disk;
     s.read_only = read_only;
-    s.provenance_chain = solidcraft_io::read_design_provenance_chain_file(path);
-    // A staged open checks on its worker before it lands; the report is then just taken here.
-    s.provenance = match checked {
-        Some(report) => report,
-        None => verify.then(|| solidcraft_io::read_design_provenance_file(path)).flatten(),
-    };
+    // Both from the reading the design came from (`read_design`): the signature check, when it
+    // was asked for, is the check of these bytes.
+    s.provenance_chain = chain;
+    s.provenance = checked.flatten();
     // A design saved with print faces (by an older version, or with them kept) opens without
     // them when they are not kept (#11512). The rest of it opens as saved, and dropping them is
     // neither an unsaved change nor a step to undo.
@@ -2179,11 +2179,17 @@ impl Session {
 
     /// This session, just opened, as the design in the file at `path`.
     pub(crate) fn located(self, path: Option<&str>) -> Self {
-        let mut session = self;
-        session.path = path.map(str::to_owned);
         // A saved design keeps its provenance for the next save to append to, whichever path
         // opened it (the UI, the CLI, recovery, a linked design).
-        session.provenance_chain = path.and_then(solidcraft_io::read_design_provenance_chain_file);
+        let chain = path.and_then(solidcraft_io::read_design_provenance_chain_file);
+        self.located_with(path, chain)
+    }
+
+    /// [`Self::located`] with the provenance records `chain` already read with the design.
+    pub(crate) fn located_with(self, path: Option<&str>, chain: Option<solidcraft_io::ProvenanceChain>) -> Self {
+        let mut session = self;
+        session.path = path.map(str::to_owned);
+        session.provenance_chain = chain;
         // A design saved before body names were pinned (#6403) is pinned now, as its first
         // command would pin it: that command pinned them as part of itself, so undoing it went
         // back to the unpinned design, whose fingerprints no evaluated result matched, and the
