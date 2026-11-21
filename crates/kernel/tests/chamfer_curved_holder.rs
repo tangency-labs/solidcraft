@@ -21,12 +21,16 @@ fn holder() -> Body {
 }
 
 /// Integrate the removed horizontal strips analytically across the capsule's width, then
-/// use Simpson integration in height. The rolling section's centre is 2 below the top and
-/// 62 from the cutter's axis; its wall contact is 60/62 of that vector from the axis.
+/// use Simpson integration in height. The chamfer's distance is a setback, a straight line from
+/// the lip in the plane square to it (#13710): `distance` along the top, from the lip at y = 10
+/// to y = 10 - distance, and a chord of `distance` down the cutter's wall, a circle of radius 60
+/// about (y 70, z 60). That chord turns `phi = 2 asin(distance / 120)` about the axis, so its
+/// foot is at y = 70 - 60 cos phi, 60 sin phi below the top.
 fn expected_removed(distance: f64) -> f64 {
-    let center_y = 70.0 - ((60.0 + distance).powi(2) - distance.powi(2)).sqrt();
-    let contact_y = 70.0 + (center_y - 70.0) * 60.0 / (60.0 + distance);
-    let depth = distance * 60.0 / (60.0 + distance);
+    let phi = 2.0 * (distance / 120.0).asin();
+    let center_y = 10.0 - distance;
+    let contact_y = 70.0 - 60.0 * phi.cos();
+    let depth = 60.0 * phi.sin();
     let area = |y: f64| {
         let u = (y - 10.0).clamp(-10.0, 0.0);
         u * (100.0 - u * u).sqrt() + 100.0 * (u / 10.0).asin() + 20.0 * (y - 10.0).max(0.0)
@@ -62,11 +66,12 @@ fn chamfer_the_top_lip_at_a_tangent_wall_junction() {
     assert_eq!(made.crossed_face_loops().unwrap(), 0);
     let history = made.history().expect("the chamfer retains exact face provenance");
     assert!(history.faces.iter().any(|f| f.origins.iter().any(|o| matches!(o, solidcraft_kernel::history::FaceOrigin::Edge { operand: 0, .. }))));
-    // Fine enough that the meshes' chord error is below the tolerance: the removed volume
-    // measured on meshes is 37.404 at chord 0.002, 37.672 at 0.0005, 37.761 at 0.0001 and 37.759
-    // at 0.00003, converged on the expected 37.762 (the chamfer as the chord between the contacts
-    // of a 2 mm ball). The planner's meshes of the two bodies differ, so their chord errors no
-    // longer cancel as truck's did.
+    // The removed volume measured exactly, against the straight-setback closed form.
+    let exact = body.volume_at(0.0).unwrap() - made.volume_at(0.0).unwrap();
+    assert!((exact - expected_removed(2.0)).abs() < 1e-6, "removed exactly {exact}, expected {}", expected_removed(2.0));
+    // Fine enough that the meshes' chord error is below the tolerance: at chord 0.0001 the meshes
+    // measure 39.617 against the expected 39.641. The planner's meshes of the two bodies differ,
+    // so their chord errors don't cancel as truck's did.
     let mesh = |body: &Body| body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.0001)).unwrap();
     let before = mesh(&body).measure().volume;
     let after = mesh(&made);
