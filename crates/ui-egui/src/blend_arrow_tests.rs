@@ -130,3 +130,159 @@ fn two_distances_chamfer_has_an_arrow_along_each_face() {
         h.app.dialog = None;
     }
 }
+
+/// Open the real blend form and move its window just to the right of a drawn arrow.
+/// This is where clearing the window can move the value field back across that arrow.
+fn blend_beside_its_arrow(command: &str, two_distances: bool, flip: bool, secondary: bool) -> (Harness, Vec3) {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width":1600,"height":1200}));
+    h.call("ui.prefs", json!({"language":"en","look_at_anim":false}));
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.call("ui.view", json!({"view":"iso"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.frames(4);
+    let selected = edge(&h, Vec3::new(20.0, 0.0, 20.0));
+    h.app.session.selection = vec![selected];
+    h.step(&json!({"start":command})).unwrap();
+    h.frames(4);
+    if two_distances {
+        h.step(&json!({"click":{"handle":"dialog:Chamfer Type"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Chamfer Type:Two Distances"}})).unwrap();
+        h.frames(4);
+        if flip {
+            let target = crate::scenario::handle_at("dialog:Flip").expect("the actual Flip checkbox control");
+            let window = h.app.viewport.dialog_rect.expect("the actual Chamfer window");
+            assert!(window.contains(target), "the Flip checkbox must be inside its command window: {window:?}, {target:?}");
+            h.step(&json!({"click":{"handle":"dialog:Flip"}})).unwrap();
+            h.frames(4);
+        }
+        let actual = h.app.dialog.as_ref().and_then(|d| match &d.kind {
+            Kind::Fillet { ctype, flip, .. } => Some((*ctype, *flip)),
+            _ => None,
+        });
+        assert_eq!(actual, Some((1, flip)), "actual Chamfer Type/Flip controls, secondary={secondary}, requested Flip={flip}");
+    }
+    // Render the fields again after an orbit and a pan, rather than testing fixed placement.
+    h.app.cam = h.app.cam.looking_from(Vec3::new(1.0, -1.0, 0.8));
+    h.app.cam.target += Vec3::new(3.0, -2.0, 0.0);
+    h.frames(4);
+    let handle = if secondary { "arrow2" } else { "arrow" };
+    let tip = crate::scenario::handle_at(handle).expect("the actual drawn blend arrow");
+    let window = h.app.viewport.dialog_rect.expect("the actual command window");
+    let title = crate::scenario::handle_at("dialog:title").expect("the actual window title");
+    let delta = egui::vec2(tip.x + 30.0 - window.left(), tip.y - 80.0 - window.top());
+    h.call("ui.drag", json!({"x0":title.x,"y0":title.y,"x1":title.x+delta.x,"y1":title.y+delta.y,"steps":8}));
+    // Pointer input drains one event a frame; wait for the entire title drag and layout.
+    h.frames(24);
+    let tip = crate::scenario::handle_at(handle).expect("the arrow after moving the window");
+    let window = h.app.viewport.dialog_rect.unwrap();
+    assert!(
+        (window.left() - tip.x - 30.0).abs() < 3.0 && window.y_range().contains(tip.y),
+        "fixture must put the window beside the arrow: {window:?}, {tip:?}"
+    );
+    assert!(!window.contains(tip), "the command window itself must leave the arrow exposed");
+    let dialog = h.app.dialog.as_ref().unwrap();
+    let (base, primary) = anchor(&h.app, dialog).unwrap();
+    let direction = if secondary {
+        crate::canvas::chamfer_face_dirs(&h.app, dialog, base).expect("both actual chamfer face directions").1
+    } else {
+        primary.expect("the actual primary arrow direction")
+    };
+    (h, base + direction * 6.0)
+}
+
+fn blend_distance(h: &Harness, secondary: bool) -> f64 {
+    let Some(Kind::Fillet { radius, distance2, .. }) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("the blend form") };
+    h.app.session.doc.eval(if secondary { distance2 } else { radius }, solidcraft_engine::doc::expr::Kind::Length).unwrap()
+}
+
+fn check_blend_value_field_and_drag(command: &str, two_distances: bool, flip: bool, secondary: bool) {
+    let (mut h, to) = blend_beside_its_arrow(command, two_distances, flip, secondary);
+    let design = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    // This is the real drawn egui Area, not a guessed native control handle.
+    let field = h.ctx.memory(|memory| memory.area_rect(egui::Id::unique("sc_canvas_area"))).expect("the actual value field area");
+    let handles = if two_distances { vec!["arrow", "arrow2"] } else { vec!["arrow"] };
+    let grabs: Vec<_> = handles
+        .iter()
+        .map(|name| {
+            let tip = crate::scenario::handle_at(name).expect("the actual arrow handle");
+            // drag_arrow_to accepts a press in this 20x20-point region around its published tip.
+            (*name, egui::Rect::from_center_size(tip, egui::vec2(20.0, 20.0)))
+        })
+        .collect();
+    let before = blend_distance(&h, secondary);
+    let other_before = blend_distance(&h, !secondary);
+    // Attempt the real drag even when the field covers it, retaining its observed outcome.
+    let handle = if secondary { "arrow2" } else { "arrow" };
+    h.step(&json!({"drag":[{"handle":handle},{"world":[to.x,to.y,to.z]}],"ctrl":true})).unwrap();
+    h.frames(4);
+    let after = blend_distance(&h, secondary);
+    for (name, grab) in &grabs {
+        assert!(
+            !field.intersects(*grab),
+            "{command}, two={two_distances}, flip={flip}, dragged={handle}: field {field:?} covers {name} grab {grab:?}; actual distance {before} -> {after}"
+        );
+    }
+    assert!(
+        after > before && (after - 6.0).abs() < 0.3,
+        "{command}, two={two_distances}, flip={flip}, {handle}: real drag should set6mm, {before} -> {after}"
+    );
+    if two_distances {
+        assert!((blend_distance(&h, !secondary) - other_before).abs() < 1e-9, "dragging one chamfer arrow must keep the other distance");
+    }
+    assert_eq!(h.app.session.doc.to_json(), design, "editing a preview must not commit the feature");
+    assert_eq!(h.app.session.undo.len(), undo);
+}
+
+#[test]
+fn floating_fillet_and_chamfer_fields_leave_their_arrow_draggable_beside_the_window() {
+    for command in ["solid.fillet", "solid.chamfer"] {
+        check_blend_value_field_and_drag(command, false, false, false);
+    }
+}
+
+#[test]
+fn two_distance_chamfer_field_leaves_both_arrows_draggable_beside_the_window() {
+    for flip in [false, true] {
+        for secondary in [false, true] {
+            check_blend_value_field_and_drag("solid.chamfer", true, flip, secondary);
+        }
+    }
+}
+
+/// A value field stays under the pointer while the opt-in wheel stepping changes its
+/// distance, even when a diagonal arrow grows into the field's old rectangle.
+#[test]
+fn a_hovered_blend_value_field_keeps_wheel_steps_from_reaching_the_camera() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width":1600,"height":1200}));
+    h.call("ui.prefs", json!({"language":"en","look_at_anim":false,"step_values":true}));
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.call("ui.view", json!({"view":"iso"}));
+    h.call("ui.camera", json!({"target":[20,0,20],"distance":40}));
+    h.app.session.selection = vec![edge(&h, Vec3::new(20.0, 0.0, 20.0))];
+    h.step(&json!({"start":"solid.fillet"})).unwrap();
+    h.frames(4);
+    let area = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_canvas_area"))).expect("the floating field");
+    let field = h.ctx.read_response(egui::Id::unique("sc_canvas_value")).expect("the Radius field").rect;
+    h.step(&json!({"click":[field.center().x,field.center().y]})).unwrap();
+    let before = value(&h);
+    let camera = h.app.cam;
+    let mut stepped_tips = Vec::new();
+    for _ in 0..4 {
+        h.call("ui.scroll", json!({"x":field.center().x,"y":field.center().y,"delta":40.0}));
+        h.frames(2);
+        stepped_tips.push(crate::scenario::handle_at("arrow").expect("the actual arrow after this wheel notch"));
+    }
+    assert!((value(&h) - before - 4.0).abs() < 1e-9, "all four notches must step the Radius field");
+    assert_eq!(h.app.cam, camera, "no wheel notch may escape to camera zoom");
+    assert!(
+        stepped_tips.iter().any(|tip| area.intersects(egui::Rect::from_center_size(*tip, egui::vec2(20.0, 20.0)))),
+        "the diagonal arrow must cross the held field's original area during wheel stepping: {area:?}, {stepped_tips:?}"
+    );
+    let kept = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_canvas_area"))).unwrap();
+    assert!(kept.contains(field.center()), "the field stays under its wheel-stepping pointer");
+}
