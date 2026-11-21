@@ -1012,10 +1012,10 @@ pub fn apply_tolerance_heal(p: &Prefs) {
 
 /// The environment of today's designs: one design holds everything ([`Prefs::environment`]).
 pub const ENVIRONMENT_SINGLE: &str = "single";
-/// The environment of separate files for parts, sheet metal parts and assemblies (#6892).
+/// The environment of separate files for parts and assemblies (#6892).
 pub const ENVIRONMENT_PARTS_AND_ASSEMBLIES: &str = "parts_and_assemblies";
 
-/// Whether new files are made as parts, sheet metal parts and assemblies (#6892): the
+/// Whether new files are made as parts and assemblies (#6892): the
 /// environment says so; any other value is a single design.
 pub fn parts_and_assemblies(p: &Prefs) -> bool {
     p.environment == ENVIRONMENT_PARTS_AND_ASSEMBLIES
@@ -1522,7 +1522,7 @@ preference_settings! {
     experimental_smaller_saves: bool = false, PAGE_GENERAL => check_id("prefs.experimental_smaller_saves");
     /// The environment new files are made in (#6892, experimental): `single` (the default: one
     /// design holds parts, sheet metal and assemblies, as always) or `parts_and_assemblies` (New
-    /// makes a part `.scprt`, a sheet metal part `.scsht` or an assembly `.scasm`, and extensions
+    /// makes a part `.scprt`, which may hold sheet metal, or an assembly `.scasm`, and extensions
     /// pick and check a design's kind, [`apply_experiments`]). Anything else reads as `single`.
     /// Files already made keep their kind either way.
     environment: String = ENVIRONMENT_SINGLE.into(), PAGE_GENERAL;

@@ -715,11 +715,7 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     let shown = design_shown(app);
     // Under Parts and assemblies, New makes a file of a kind (#6892): a part keeps Ctrl+N.
     let mut rows = if crate::prefs::parts_and_assemblies(&app.preferences) {
-        vec![
-            row("new_part", app.tr("ui.new_part"), "Ctrl+N", "new", true),
-            row("new_sheet_metal_part", app.tr("ui.new_sheet_metal_part"), "", "new", true),
-            row("new_assembly", app.tr("ui.new_assembly"), "", "new", true),
-        ]
+        vec![row("new_part", app.tr("ui.new_part"), "Ctrl+N", "new", true), row("new_assembly", app.tr("ui.new_assembly"), "", "new", true)]
     } else {
         vec![row("new", app.tr("ui.new_design"), "Ctrl+N", "new", true)]
     };
@@ -825,7 +821,6 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "clear_recent" => FileAction::ClearRecent.run(app),
         // Parts and assemblies' New rows (#6892): a part is what New makes there.
         "new_part" => FileAction::New.run(app),
-        "new_sheet_metal_part" => crate::documents::new_design_of(app, Some("sheet_metal")),
         "new_assembly" => crate::documents::new_design_of(app, Some("assembly")),
         "file.insert_step" => FileAction::Command("file.insert_step").run(app),
         "file.insert_mesh" => FileAction::Command("file.insert_mesh").run(app),
@@ -911,7 +906,7 @@ pub fn save(app: &mut SolveApp) {
 }
 
 pub(crate) fn save_as(app: &mut SolveApp) {
-    // A part, sheet metal part or assembly is offered its own extension (#6892).
+    // A part or an assembly is offered its own extension (#6892).
     let extension = app.session.design_kind.extension();
     save_as_with_extension(app, extension);
 }
@@ -5194,8 +5189,8 @@ mod dropdown_toggle_tests {
 mod app_bar_tests {
     use super::*;
 
-    /// Under Parts and assemblies the File menu's New makes a file of a kind: New part (Ctrl+N),
-    /// New sheet metal part and New assembly; New elsewhere makes a part. Under Single design it
+    /// Under Parts and assemblies the File menu's New makes a file of a kind: New part (Ctrl+N) and
+    /// New assembly; New elsewhere makes a part. Under Single design it
     /// is New design, as before (#6892).
     #[test]
     fn the_environment_decides_what_new_makes() {
@@ -5216,8 +5211,9 @@ mod app_bar_tests {
         crate::prefs::apply_experiments(&h.app.preferences);
         // Other tests in this process apply preferences that turn the engine's switch off.
         solidcraft_engine::file_kinds_on_for_tests();
-        assert_eq!(ids(&h.app), ["new_part", "new_sheet_metal_part", "new_assembly"]);
-        for (id, kind) in [("new_assembly", DesignKind::Assembly), ("new_sheet_metal_part", DesignKind::SheetMetal), ("new_part", DesignKind::Part)] {
+        // One part kind: a part may hold sheet metal (step 16).
+        assert_eq!(ids(&h.app), ["new_part", "new_assembly"]);
+        for (id, kind) in [("new_assembly", DesignKind::Assembly), ("new_part", DesignKind::Part)] {
             run_file_row(&mut h.app, id);
             assert_eq!(h.app.session.design_kind, kind, "{id}");
         }

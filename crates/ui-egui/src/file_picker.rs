@@ -37,7 +37,7 @@ impl SolveApp {
 
     pub(crate) fn pick_open(&mut self, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
         // Under Parts and assemblies the kinds' files come first, so part files show (#6892).
-        let kinds: &[&str] = if crate::prefs::parts_and_assemblies(&self.preferences) { &["scprt", "scsht", "scasm", "sc"] } else { &[] };
+        let kinds: &[&str] = if crate::prefs::parts_and_assemblies(&self.preferences) { &["scprt", "scasm", "sc"] } else { &[] };
         self.pick_open_for(kinds, complete);
     }
 

@@ -1667,6 +1667,7 @@ fn opened_design(
         warnings: s.doc.newer_file.as_ref().map(|file| file.warnings()),
         signature: s.provenance.as_ref().map(signature_report),
         kind: kind::reported(kind),
+        sheet_metal: kind::sheet_metal_mark(s),
         kind_note,
         missing_links: kind::missing_links(s),
         param_warnings: Vec::new(),
@@ -2033,6 +2034,7 @@ fn write_bytes(
         param_warnings: Vec::new(),
         signature,
         kind: (format == "container").then(|| kind::reported(s.design_kind)).flatten(),
+        sheet_metal: kind::sheet_metal_mark(s),
     };
     if bytes_len > solidcraft_io::limits::max_design_bytes() {
         notes.push(format!(
@@ -3373,36 +3375,29 @@ mod tests {
             let made = s.execute("file.new", &p).unwrap();
             assert!(made.get("kind").is_none() && s.design_kind == DesignKind::Single, "{p}: {made}");
         }
-        assert_eq!(s.execute("file.new", &json!({"kind": "sheet_metal"})).unwrap()["kind"], "sheet metal part");
-        // An unknown kind is refused and changes nothing; so is a kind with the environment off.
+        assert_eq!(s.execute("file.new", &json!({"kind": "part"})).unwrap()["kind"], "part");
+        // Sheet metal is a part, not a kind (step 16); an unknown kind is refused and changes
+        // nothing; so is a kind with the environment off.
+        let sheet = s.execute("file.new", &json!({"kind": "sheet_metal"})).unwrap_err().to_string();
+        assert!(sheet.contains("a sheet metal part is a part"), "{sheet}");
         assert!(s.execute("file.new", &json!({"kind": "weldment"})).is_err());
-        assert_eq!(s.design_kind, DesignKind::SheetMetal);
+        assert_eq!(s.design_kind, DesignKind::Part);
         let off = kind::for_new_with(Some(&json!("part")), false).unwrap_err().to_string();
         assert!(off.contains("Parts and assemblies is off"), "{off}");
         assert_eq!(kind::for_new_with(Some(&json!("single")), false).unwrap(), DesignKind::Single);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// What each kind holds (#6892, step 13): a part refuses the sheet metal modelling commands, an
-    /// assembly refuses a body made from nothing and sheet metal, with what to do instead, and
-    /// the design is unchanged; a single design and a sheet metal part refuse nothing; the
-    /// ribbon's check gives the same reason. With the experiment off nothing is refused.
+    /// What each kind holds (#6892, steps 13 and 16): a part holds sheet metal too (Convert works in
+    /// place); an assembly refuses a body made from nothing and sheet metal, with what to do
+    /// instead, and the design is unchanged; the ribbon's check gives the same reason; a single
+    /// design is never restricted. With the experiment off nothing is refused.
     #[test]
     fn a_command_that_does_not_fit_the_kind_is_refused_with_what_to_do_instead() {
         use solidcraft_io::DesignKind;
         crate::set_experimental_file_kinds(true);
-        let mut part = Session::default();
-        part.execute("file.new", &json!({"kind": "part"})).unwrap();
-        part.execute("solid.box", &json!({"length": 40, "width": 30, "height": 2})).unwrap();
-        let before = part.doc.to_json();
-        let refused = part.execute("sheet.convert", &json!({})).unwrap_err().to_string();
-        assert!(refused.contains("a part holds part features: create a new sheet metal part, or use features to convert"), "{refused}");
-        assert_eq!(part.doc.to_json(), before, "a refused command changes nothing");
-        let spec = super::super::find_command("sheet.flange").unwrap();
-        assert!(spec.allowed(&part).unwrap_err().contains("create a new sheet metal part"), "the ribbon says the same");
-        // Reading sheet metal is allowed anywhere.
-        for id in ["sheet.export_dxf", "sheet.measure_body", "sheet.rules", "sheet.flat_pattern"] {
-            assert_eq!(kind::refusal_with(DesignKind::Part, id, true), None, "{id}");
+        for id in ["sheet.convert", "sheet.flange", "sheet.recognize", "sheet.export_dxf", "sheet.flat_pattern"] {
+            assert_eq!(kind::refusal_with(DesignKind::Part, id, true), None, "a part holds sheet metal: {id}");
         }
         let mut assembly = Session::default();
         assembly.execute("file.new", &json!({"kind": "assembly"})).unwrap();
@@ -3412,13 +3407,10 @@ mod tests {
         for id in ["solid.cylinder", "sheet.flange"] {
             assert!(kind::refusal_with(DesignKind::Assembly, id, true).is_some(), "{id}");
         }
+        let spec = super::super::find_command("solid.box").unwrap();
+        assert!(spec.allowed(&assembly).unwrap_err().contains("create a new part, then insert it"), "the ribbon says the same");
         // Still open (step 13): assembly features, more bodies in a part, solids in sheet metal.
-        for (kind, id) in [
-            (DesignKind::Assembly, "solid.extrude"),
-            (DesignKind::Assembly, "solid.hole"),
-            (DesignKind::Part, "solid.box"),
-            (DesignKind::SheetMetal, "solid.box"),
-        ] {
+        for (kind, id) in [(DesignKind::Assembly, "solid.extrude"), (DesignKind::Assembly, "solid.hole"), (DesignKind::Part, "solid.box")] {
             assert_eq!(kind::refusal_with(kind, id, true), None, "{kind:?} {id}");
         }
         // A single design is never restricted, and nothing is with the experiment off.
@@ -3426,6 +3418,49 @@ mod tests {
             assert_eq!(kind::refusal_with(DesignKind::Single, id, true), None, "{id}");
             assert_eq!(kind::refusal_with(DesignKind::Assembly, id, false), None, "{id}");
         }
+    }
+
+    /// One part kind and a sheet metal mark (#6892, step 16): a part that holds a sheet metal body
+    /// says `sheet_metal: true` in its save and open replies, a plain part doesn't; `sheet.parts`
+    /// lists the sheet bodies of the design and of an assembly's linked parts, with thickness and
+    /// flat. (A file saved as a sheet metal part by an earlier build reads as a part: the io
+    /// container tests.)
+    #[test]
+    fn a_part_that_holds_sheet_metal_is_marked_and_listed_for_nesting() {
+        crate::set_experimental_file_kinds(true);
+        let dir = std::env::temp_dir().join(format!("solidcraft-sheet-mark-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let at = |name: &str| dir.join(name).to_string_lossy().to_string();
+        let mut panel = Session::default();
+        panel.execute("file.new", &json!({"kind": "part", "name": "Panel"})).unwrap();
+        panel.execute("solid.box", &json!({"length": 40, "width": 30, "height": 2, "body_name": "Panel"})).unwrap();
+        panel.execute("sheet.recognize", &json!({"body": "Panel", "new_rule": "Plate 2 mm"})).unwrap();
+        let saved = panel.execute("file.save", &json!({"path": at("panel.scprt")})).unwrap();
+        assert!(saved["kind"] == "part" && saved["sheet_metal"] == true, "{saved}");
+        let listed = panel.execute("sheet.parts", &json!({})).unwrap();
+        let body = &listed["parts"][0]["bodies"][0];
+        assert!(listed["sheet_metal"] == true && body["body"] == "Panel", "{listed}");
+        assert!((body["thickness_mm"].as_f64().unwrap() - 2.0).abs() < 1e-9 && body["flat_pattern"] == true, "{listed}");
+        let mut reopened = Session::default();
+        let opened = reopened.execute("doc.open", &json!({"path": at("panel.scprt")})).unwrap();
+        assert!(opened["kind"] == "part" && opened["sheet_metal"] == true, "{opened}");
+        // A plain part has no mark.
+        let mut bracket = Session::default();
+        bracket.execute("file.new", &json!({"kind": "part"})).unwrap();
+        bracket.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let plain = bracket.execute("file.save", &json!({"path": at("bracket.scprt")})).unwrap();
+        assert!(plain.get("sheet_metal").is_none(), "{plain}");
+        // An assembly lists its linked sheet metal part and leaves the solid one out.
+        let mut frame = Session::default();
+        frame.execute("file.new", &json!({"kind": "assembly"})).unwrap();
+        frame.execute("file.save", &json!({"path": at("frame.scasm")})).unwrap();
+        frame.execute("component.insert_design", &json!({"path": at("panel.scprt")})).unwrap();
+        frame.execute("component.insert_design", &json!({"path": at("bracket.scprt"), "translate": [60, 0, 0]})).unwrap();
+        let nest = frame.execute("sheet.parts", &json!({})).unwrap();
+        let parts = nest["parts"].as_array().unwrap();
+        assert!(parts.len() == 1 && parts[0]["component"].is_u64(), "{nest}");
+        assert_eq!(parts[0]["bodies"][0]["body"], "Panel", "{nest}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Three-digit hex colours expand one digit per channel, as CSS does: `#fff` is white.

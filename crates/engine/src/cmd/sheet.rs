@@ -20,7 +20,7 @@ use crate::schema::sheet::{
     BendTableFormat, BendTableParams, BendTableResult, ConvertParams, DxfFile, ExportDxfParams, ExportDxfResult, FlangeParams, FlatCircle,
     FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HemParams, LibraryRule, LibrarySource, ListedRule, ManageRulesParams,
     ManageRulesResult, MeasureBodyParams, PathFlangeParams, PerforateParams, RecognizeParams, RuleFeatureError, RuleLibraryParams, RuleLibraryResult,
-    RuleReply, RulesParams, RulesResult, SheetBodyMeasure, UnfoldParams,
+    RuleReply, RulesParams, RulesResult, SheetBodyMeasure, SheetPart, SheetPartBody, SheetPartsParams, SheetPartsResult, UnfoldParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -33,6 +33,7 @@ const UNFOLD_CONTRACT: TypedContract<UnfoldParams> = TypedContract::new();
 const CONVERT_CONTRACT: TypedContract<ConvertParams> = TypedContract::new();
 const RECOGNIZE_CONTRACT: TypedContract<RecognizeParams> = TypedContract::new();
 const MEASURE_BODY_CONTRACT: TypedContract<MeasureBodyParams> = TypedContract::new();
+const PARTS_CONTRACT: TypedContract<SheetPartsParams> = TypedContract::new();
 
 const RULES_CONTRACT: TypedContract<RulesParams> = TypedContract::new();
 const MANAGE_RULES_CONTRACT: TypedContract<ManageRulesParams> = TypedContract::new();
@@ -154,6 +155,13 @@ pub static COMMANDS: &[CommandSpec] = &[
             "body; face? (as sheet.recognize) → thickness_mm (the body's own), bend_radii_mm (the inside radius of each bend \
              modelled with its radius) and surface (a point on a face of the side that is the sheet's surface); a body of no one \
              even thickness is refused, naming its thicknesses",
+        ),
+    CommandSpec::new("sheet.parts", "List Sheet Metal Parts", crate::checked!("sheet.parts", sheet_parts))
+        .contract(&PARTS_CONTRACT)
+        .output(output_schema_for::<SheetPartsResult>)
+        .noundo()
+        .params(
+            "(none) → sheet_metal, parts: [{name, file?, component?, bodies: [{body, thickness_mm, material, rule, flat_pattern}],              error?}]: the design's own sheet metal bodies, and in an assembly each linked part file that holds some, for nesting              (#6892). Reads only",
         ),
     CommandSpec::new("sheet.manage_rules", "Sheet Metal Rules", crate::checked!("sheet.manage_rules", rules))
         .contract(&MANAGE_RULES_CONTRACT).output(output_schema_for::<ManageRulesResult>).at("SHEET METAL", "MODIFY").icon("sheet_rules").params(
@@ -976,6 +984,55 @@ fn measure_body(s: &mut Session, p: &Value) -> Result<Value> {
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// `sheet.parts`: the design's own sheet metal bodies, then each linked part file that holds some,
+/// each file opened once in a session of its own, as Update Links reads it (#6892).
+fn sheet_parts(s: &mut Session, _p: &Value) -> Result<Value> {
+    let mut parts = Vec::new();
+    let own = sheet_bodies(s);
+    if !own.is_empty() {
+        parts.push(SheetPart { name: s.doc.name.clone(), file: s.path.clone(), component: None, bodies: own, error: None });
+    }
+    let mut read: Vec<String> = Vec::new();
+    let links: Vec<(u64, String)> = s.doc.links.iter().map(|(c, l)| (*c, l.path.clone())).collect();
+    for (component, path) in links {
+        let file = super::design_link::resolve(s.path.as_deref(), &path).display().to_string();
+        if read.contains(&file) {
+            continue;
+        }
+        read.push(file.clone());
+        let name = s.doc.components.iter().find(|c| c.id == component).map_or_else(|| file.clone(), |c| c.name.clone());
+        let mut part = Session::default();
+        part.set_validation(s.validation());
+        match part.execute("doc.open", &serde_json::json!({"path": file})) {
+            Ok(_) => {
+                let bodies = sheet_bodies(&part);
+                if !bodies.is_empty() {
+                    parts.push(SheetPart { name, file: Some(file), component: Some(component), bodies, error: None });
+                }
+            }
+            Err(e) => parts.push(SheetPart { name, file: Some(file), component: Some(component), bodies: Vec::new(), error: Some(e.to_string()) }),
+        }
+    }
+    let reply = SheetPartsResult { sheet_metal: parts.iter().any(|p| !p.bodies.is_empty()), parts, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| bad("sheet.parts", e.to_string()))
+}
+
+/// The sheet metal bodies of `s`'s model (`surface_sheets`, the list Flat Pattern uses).
+fn sheet_bodies(s: &Session) -> Vec<SheetPartBody> {
+    s.model
+        .state()
+        .surface_sheets
+        .iter()
+        .map(|sk| SheetPartBody {
+            body: sk.body.clone(),
+            thickness_mm: sk.thickness,
+            material: s.doc.body_material(&sk.body),
+            rule: sk.rule.clone(),
+            flat_pattern: sk.flat_matches_body().is_ok(),
+        })
+        .collect()
 }
 
 pub(crate) fn sheet_rule_name(v: &Value) -> std::result::Result<&str, &'static str> {

@@ -13,14 +13,15 @@ Existing serialized document fields are retained automatically, without a second
 of the document schema or a deep clone of embedded payloads.
 
 A drawing file's `container.json` adds `"content":"drawing"`. Experimentally (#6892,
-`io::DesignKind`), a design's kind is kept there the same way: `"content":"part"` (`.scprt`),
-`"sheet_metal"` (`.scsht`) or `"assembly"` (`.scasm`). A single design (`.sc`) writes no `content`,
+`io::DesignKind`), a design's kind is kept there the same way: `"content":"part"` (`.scprt`) or
+`"assembly"` (`.scasm`). A part may hold sheet metal: that is a mark its model gives it (its sheet
+metal bodies), reported as `sheet_metal: true` and never saved. The experiment's earlier
+`"sheet_metal"` header (`.scsht`) reads as a part. A single design (`.sc`) writes no `content`,
 so its file is what it always was. The kind never changes with the file's name. Releases
 since 0.45.0-rc.1 open such a file as a design from a newer SolidCraft and keep its
 `container.json` when saving it. The checks that go with the kinds (a new design takes its first file's
 kind, a save as another kind is refused) are off unless Preferences › General › Environment is
-Parts and assemblies (experimental), which also makes New offer a part, a sheet metal part or an
-assembly; or `SOLIDCRAFT_FILE_KINDS=1` for command-line runs.
+Parts and assemblies (experimental), which also makes New offer a part or an assembly; or `SOLIDCRAFT_FILE_KINDS=1` for command-line runs.
 
 Within `document.json`:
 

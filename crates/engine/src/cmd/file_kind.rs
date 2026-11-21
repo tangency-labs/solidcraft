@@ -1,6 +1,7 @@
-//! The kind of design a file holds (experimental, #6892): single design `.sc`, part `.scprt`, sheet
-//! metal part `.scsht`, assembly `.scasm` ([`solidcraft_io::DesignKind`]). The kind is fixed in the
-//! file's header; renaming the file never changes it.
+//! The kind of design a file holds (experimental, #6892): single design `.sc`, part `.scprt` or
+//! assembly `.scasm` ([`solidcraft_io::DesignKind`]). The kind is fixed in the file's header;
+//! renaming the file never changes it. A part that holds sheet metal is marked so
+//! ([`sheet_metal_mark`]): a mark the model gives it, not a kind.
 //!
 //! The session keeps the kind it opened ([`Session::design_kind`]) and every save writes it back,
 //! whether the experiment is on or not, so nothing a file says is lost. Only with the experiment
@@ -92,6 +93,13 @@ pub(super) fn opened(path: &str) -> (DesignKind, Option<String>) {
 /// [`opened`] with the experiment `on` or off.
 pub(super) fn opened_with(path: &str, on: bool) -> (DesignKind, Option<String>) {
     let kind = solidcraft_io::read_design_kind_file(path);
+    // A sheet metal part of the experiment's earlier builds is a part now (step 16).
+    if on && solidcraft_io::is_legacy_sheet_metal_file(path) {
+        return (
+            kind,
+            Some(format!("{path} was saved as a sheet metal part by an earlier experimental build: it opens as a part, which may hold sheet metal")),
+        );
+    }
     let note = on.then(|| DesignKind::for_path(path)).flatten().filter(|named| *named != kind).map(|named| {
         format!(
             "{path} is named as {} (.{}) but holds {}: it opened as {}, since the kind saved in the file wins over its name",
@@ -118,16 +126,21 @@ pub(super) fn for_new_with(kind: Option<&serde_json::Value>, on: bool) -> Result
     };
     let kind = match asked {
         "single" => DesignKind::Single,
-        other => DesignKind::from_content(other)
-            .ok_or_else(|| bad("file.new", format!("`kind` must be single, part, sheet_metal or assembly, not {other:?}")))?,
+        // Sheet metal is a part that holds a sheet metal body, not a kind (step 16).
+        "sheet_metal" => return Err(bad("file.new", "a sheet metal part is a part: make a `part`, then add a base flange or convert it")),
+        other => DesignKind::from_content(other).ok_or_else(|| bad("file.new", format!("`kind` must be single, part or assembly, not {other:?}")))?,
     };
     if kind != DesignKind::Single && !on {
-        return Err(bad(
-            "file.new",
-            "Parts and assemblies is off: turn it on in Preferences › General › Environment to make a new part, sheet metal part or assembly",
-        ));
+        return Err(bad("file.new", "Parts and assemblies is off: turn it on in Preferences › General › Environment to make a new part or assembly"));
     }
     Ok(kind)
+}
+
+/// The sheet metal mark of a part (#6892, step 16): `Some(true)` when its model holds a sheet metal
+/// body (`ModelState::surface_sheets`, the list Flat Pattern and Export DXF use). Derived each time,
+/// never saved; none for anything else, so replies stay as they were.
+pub(super) fn sheet_metal_mark(s: &Session) -> Option<bool> {
+    (s.design_kind == DesignKind::Part && !s.model.state().surface_sheets.is_empty()).then_some(true)
 }
 
 /// A kind's name for a reply: none for a single design, so replies stay as they were.
@@ -142,8 +155,8 @@ fn a(kind: DesignKind) -> String {
     format!("{article} {name}")
 }
 
-/// The sheet metal commands that model: a part or an assembly doesn't hold their features. The
-/// ones that only read (export, measure, flat pattern, the rules) are allowed everywhere.
+/// The sheet metal commands that model: an assembly doesn't hold their features (a part does, step
+/// 16). The ones that only read (export, measure, flat pattern, the rules) are allowed everywhere.
 const SHEET_METAL_MODELLING: [&str; 9] = [
     "sheet.flange",
     "sheet.convert",
@@ -185,9 +198,6 @@ pub(crate) fn refusal_with(kind: DesignKind, id: &str, on: bool) -> Option<Strin
         return None;
     }
     match kind {
-        DesignKind::Part if SHEET_METAL_MODELLING.contains(&id) => {
-            Some("a part holds part features: create a new sheet metal part, or use features to convert".into())
-        }
         DesignKind::Assembly if NEW_BODY_FROM_NOTHING.contains(&id) || SHEET_METAL_MODELLING.contains(&id) => {
             Some("an assembly holds parts from their own files and their joints: create a new part, then insert it".into())
         }

@@ -46,7 +46,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
         // What New makes (#6892): one design for everything, or a file of its own for each part,
-        // sheet metal part and assembly. Files already made keep their kind.
+        // assembly (a part may hold sheet metal). Files already made keep their kind.
         ui_kit::settings_section(ui, "environment", app.tr("prefs.environment"), |ui| {
             ui_kit::settings_form(ui, labels, |ui| {
                 ui_kit::row(ui, app.tr("prefs.environment"), |ui| {

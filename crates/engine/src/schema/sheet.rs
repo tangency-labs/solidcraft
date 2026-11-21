@@ -657,6 +657,58 @@ pub struct RecognizeParams {
     pub common: FeatureCommon,
 }
 
+/// List the sheet metal parts of the open design for nesting (#6892): its own sheet metal bodies,
+/// and in an assembly each linked part file that holds some (each file opened once, as Update
+/// Links reads it). Reads only; takes no parameters.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SheetPartsParams {}
+
+/// What `sheet.parts` returns.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct SheetPartsResult {
+    /// Whether any part listed holds sheet metal.
+    pub sheet_metal: bool,
+    /// The design itself when it holds sheet metal, then each linked part file that does (or
+    /// couldn't be read).
+    pub parts: Vec<SheetPart>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// One part that holds sheet metal.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct SheetPart {
+    /// The design's name, or the linked component's.
+    pub name: String,
+    /// Its file, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    /// The linked component that places it, for a linked part.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component: Option<u64>,
+    /// Its sheet metal bodies.
+    pub bodies: Vec<SheetPartBody>,
+    /// Why a linked part file couldn't be read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// One sheet metal body, as nesting needs it.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct SheetPartBody {
+    pub body: String,
+    /// The sheet's thickness.
+    pub thickness_mm: f64,
+    /// Its material's name.
+    pub material: String,
+    /// The sheet metal rule it is made with.
+    pub rule: String,
+    /// Whether its flat matches the body, so Flat Pattern and Export DXF can make it.
+    pub flat_pattern: bool,
+}
+
 /// Measure a body as sheet metal (#6748), as Recognize reads it. Reads only.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]

@@ -19,7 +19,7 @@ pub struct NewDesignParams {
     #[serde(default)]
     pub name: Option<String>,
     /// Experimental (#6892): the kind of design, fixed once it is saved: `single` (the default,
-    /// today's design), `part`, `sheet_metal` or `assembly`. A kind other than single needs the
+    /// today's design), `part` or `assembly` (a part may hold sheet metal). A kind other than single needs the
     /// Parts and assemblies environment (Preferences › General › Environment, or
     /// `SOLIDCRAFT_FILE_KINDS`); its first save takes that kind's extension.
     #[serde(default)]
@@ -32,7 +32,6 @@ pub struct NewDesignParams {
 pub enum NewKind {
     Single,
     Part,
-    SheetMetal,
     Assembly,
 }
 
@@ -41,7 +40,7 @@ pub enum NewKind {
 pub struct NewDesignResult {
     /// The new design's name: the `name` given, else "Untitled".
     pub name: String,
-    /// Experimental (#6892): its kind, when it isn't a single design: `part`, `sheet metal part`
+    /// Experimental (#6892): its kind, when it isn't a single design: `part`
     /// or `assembly`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,

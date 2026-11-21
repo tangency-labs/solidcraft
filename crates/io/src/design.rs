@@ -29,7 +29,7 @@ use serde_json::{Map, Value, json};
 use solidcraft_doc::{Document, FeatureKind, MeshData};
 use solidcraft_format::container::{Limits, Reader, Writer, digest};
 
-pub use kind::{DesignKind, design_kind, read_design_kind_file};
+pub use kind::{DesignKind, LEGACY_SHEET_METAL, design_kind, is_legacy_sheet_metal_file, read_design_kind_file};
 
 use crate::{IoError, Result, design_metadata::replace};
 
@@ -1219,6 +1219,7 @@ fn is_known_container(container: &Value) -> bool {
         || *container == json!({"format": LEGACY_VERSION})
         || container.get("content").is_some_and(|c| c == "drawing")
         || DesignKind::ALL.into_iter().any(|kind| *container == kind.header())
+        || *container == json!({"format": VERSION, "content": kind::LEGACY_SHEET_METAL.0})
 }
 
 /// A container format of ours, this build's or a later one's: `solidcraft-container/N`.
@@ -1968,6 +1969,21 @@ mod tests {
         for path in ["a.solidcraft", "a.json", "a.step", "a", "a.scd", "a.scp", "a.scdwg"] {
             assert_eq!(DesignKind::for_path(path), None, "{path}");
         }
+        // The sheet metal part of the experiment's earlier builds is a part now: its header and its
+        // extension read as a part's, this build knows the header, and saving writes "part".
+        assert_eq!(DesignKind::for_path("panel.SCSHT"), Some(DesignKind::Part));
+        let mut legacy = parts(&single);
+        legacy.insert("container.json".into(), serde_json::to_vec(&json!({"format": VERSION, "content": "sheet_metal"})).unwrap());
+        let legacy = package(&legacy);
+        assert_eq!(design_kind(&legacy), DesignKind::Part);
+        let read = crate::read_design(&legacy).unwrap();
+        assert!(read.newer_file.is_none(), "this build knows the earlier header");
+        let path = std::env::temp_dir().join(format!("solidcraft-kind-legacy-{}.scsht", std::process::id()));
+        std::fs::write(&path, &legacy).unwrap();
+        assert!(is_legacy_sheet_metal_file(&path.to_string_lossy()));
+        std::fs::remove_file(&path).unwrap();
+        let resaved = write_design_container_as(&read, DesignKind::Part, DesignCompression::Fast, None, None, None, None).unwrap();
+        assert_eq!(parts(&resaved)["container.json"], serde_json::to_vec(&json!({"format": VERSION, "content": "part"})).unwrap());
         assert_eq!(design_kind(b"{}"), DesignKind::Single, "plain JSON has no header");
         assert_eq!(read_design_kind_file("no/such/file.scprt"), DesignKind::Single);
         // A header naming something this build doesn't know is a single design here, and the

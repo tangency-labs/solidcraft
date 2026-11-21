@@ -33,7 +33,7 @@ pub use design::{
     write_design_container_with_provenance, write_design_container_with_thumbnail, write_drawing_container,
 };
 // Experimental file kinds (#6892).
-pub use design::{DesignKind, design_kind, read_design_kind_file, write_design_container_as};
+pub use design::{DesignKind, LEGACY_SHEET_METAL, design_kind, is_legacy_sheet_metal_file, read_design_kind_file, write_design_container_as};
 pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, MAX_GLB_BYTES, export_glb};
 mod legacy_dir;
 pub mod library_files;
@@ -127,8 +127,8 @@ pub fn is_design_ext(ext: &str) -> bool {
     DESIGN_EXTS.iter().any(|x| ext.eq_ignore_ascii_case(x))
 }
 
-/// Is this a design file name (`.sc`, a legacy extension, plain `.json`, or a kind's `.scprt`,
-/// `.scsht`, `.scasm`), any case?
+/// Is this a design file name (`.sc`, a legacy extension, plain `.json`, a kind's `.scprt` or
+/// `.scasm`, or the earlier experimental `.scsht`), any case?
 pub fn is_design_path(path: &str) -> bool {
     std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| is_design_ext(e) || e.eq_ignore_ascii_case("json"))
         // A part, a sheet metal part or an assembly (experimental, #6892): a design all the same.

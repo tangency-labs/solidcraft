@@ -189,6 +189,7 @@ fn replies_match_the_output_schema() {
         param_warnings: Vec::new(),
         signature: None,
         kind: None,
+        sheet_metal: None,
         kind_note: None,
         missing_links: Vec::new(),
     };
@@ -212,6 +213,7 @@ fn replies_match_the_output_schema() {
         param_warnings: Vec::new(),
         signature: None,
         kind: None,
+        sheet_metal: None,
         kind_note: None,
         missing_links: Vec::new(),
     };

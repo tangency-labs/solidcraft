@@ -170,9 +170,13 @@ pub struct SaveResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<SignedSave>,
     /// Experimental (#6892): the kind of design the file's header names, when it isn't a single
-    /// design: `part`, `sheet metal part` or `assembly`.
+    /// design: `part` or `assembly`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+    /// Experimental (#6892): `true` for a part that holds a sheet metal body (a mark its model
+    /// gives it, never saved); absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sheet_metal: Option<bool>,
 }
 
 #[cfg(test)]
