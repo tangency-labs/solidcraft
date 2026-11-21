@@ -1,0 +1,42 @@
+{
+  "en": {
+    "usage.dismiss": "Dismiss",
+    "usage.settings": "Settings",
+    "prefs.privacy.delete_requested": "Deletion requested. New installation ID: {id}"
+  },
+  "de": {
+    "usage.dismiss": "Schließen",
+    "usage.settings": "Einstellungen",
+    "prefs.privacy.delete_requested": "Löschung angefordert. Neue Installations-ID: {id}"
+  },
+  "ja": {
+    "usage.dismiss": "閉じる",
+    "usage.settings": "設定",
+    "prefs.privacy.delete_requested": "削除を依頼しました。新しいインストールID：{id}"
+  },
+  "zh": {
+    "usage.dismiss": "关闭",
+    "usage.settings": "设置",
+    "prefs.privacy.delete_requested": "已请求删除。新的安装 ID：{id}"
+  },
+  "ko": {
+    "usage.dismiss": "닫기",
+    "usage.settings": "설정",
+    "prefs.privacy.delete_requested": "삭제를 요청했습니다. 새 설치 ID: {id}"
+  },
+  "vi": {
+    "usage.dismiss": "Đóng",
+    "usage.settings": "Cài đặt",
+    "prefs.privacy.delete_requested": "Đã yêu cầu xóa. ID cài đặt mới: {id}"
+  },
+  "ar": {
+    "usage.dismiss": "إغلاق",
+    "usage.settings": "الإعدادات",
+    "prefs.privacy.delete_requested": "طُلب الحذف. معرّف التثبيت الجديد: {id}"
+  },
+  "he": {
+    "usage.dismiss": "סגירה",
+    "usage.settings": "הגדרות",
+    "prefs.privacy.delete_requested": "המחיקה התבקשה. מזהה התקנה חדש: {id}"
+  }
+}

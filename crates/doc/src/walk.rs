@@ -46,6 +46,7 @@ impl Walk for crate::newer_file::RawFeature {}
 impl Walk for ProfileSel {}
 impl Walk for std::collections::BTreeMap<String, String> {}
 impl Walk for crate::frame::Anchor {}
+impl Walk for crate::frame::CornerType {}
 impl Walk for solidcraft_sketch::Sketch {}
 impl Walk for solidcraft_sketch::PatternAlignment {}
 impl Walk for solidcraft_kernel::StepNode {}
@@ -434,7 +435,11 @@ impl PlaneRef {
                     g.walk_feature_refs(f, depth + 1);
                 }
             }
-            Self::Midplane { a, b } | Self::TwoEdges { a, b } | Self::AxisPoint { axis: a, point: b } | Self::Perpendicular { plane: a, line: b } => {
+            Self::Midplane { a, b, .. }
+            | Self::TwoEdges { a, b }
+            | Self::AxisPoint { axis: a, point: b }
+            | Self::Perpendicular { plane: a, line: b }
+            | Self::SquareToLine { line: a, point: b } => {
                 a.walk_feature_refs(f, depth + 1);
                 b.walk_feature_refs(f, depth + 1);
             }
@@ -474,7 +479,11 @@ impl PlaneRef {
                     g.walk_feature_refs_mut(f, depth + 1);
                 }
             }
-            Self::Midplane { a, b } | Self::TwoEdges { a, b } | Self::AxisPoint { axis: a, point: b } | Self::Perpendicular { plane: a, line: b } => {
+            Self::Midplane { a, b, .. }
+            | Self::TwoEdges { a, b }
+            | Self::AxisPoint { axis: a, point: b }
+            | Self::Perpendicular { plane: a, line: b }
+            | Self::SquareToLine { line: a, point: b } => {
                 a.walk_feature_refs_mut(f, depth + 1);
                 b.walk_feature_refs_mut(f, depth + 1);
             }
@@ -606,6 +615,27 @@ impl Walk for GeoRef {
     }
     fn walk_geometry_mut<'a>(&'a mut self, f: &mut dyn FnMut(GeoItemMut<'a>)) {
         f(Geo::Construct(self))
+    }
+}
+
+/// A frame member's pair of points (#15705): its ends walk as a construction point's
+/// references do, the construction points they name included, so a rename follows.
+impl Walk for crate::frame::MemberPair {
+    fn walk_refs<'a>(&'a self, f: &mut dyn FnMut(RefItem<'a>)) {
+        self.a.walk_feature_refs(f, 0);
+        self.b.walk_feature_refs(f, 0);
+    }
+    fn walk_refs_mut<'a>(&'a mut self, f: &mut dyn FnMut(RefItemMut<'a>)) {
+        self.a.walk_feature_refs_mut(f, 0);
+        self.b.walk_feature_refs_mut(f, 0);
+    }
+    fn walk_geometry<'a>(&'a self, f: &mut dyn FnMut(GeoItem<'a>)) {
+        f(Geo::Construct(&self.a));
+        f(Geo::Construct(&self.b));
+    }
+    fn walk_geometry_mut<'a>(&'a mut self, f: &mut dyn FnMut(GeoItemMut<'a>)) {
+        f(Geo::Construct(&mut self.a));
+        f(Geo::Construct(&mut self.b));
     }
 }
 

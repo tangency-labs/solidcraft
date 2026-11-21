@@ -132,7 +132,7 @@ pub(crate) fn view_pictures(
         return Ok(Vec::new());
     }
     let Ok((chosen, extents)) = crate::drawing_view::measured(shown, view) else { return Ok(Vec::new()) };
-    let frame = ortho(&crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, centre, CMD)?);
+    let frame = ortho(&crate::drawing_view::view_frame(view, &extents.model, centre, CMD)?);
     let pictures = view_parts(&chosen, Styles::from(view));
     let count = pictures.len();
     let picture = |(i, parts): (usize, Vec<Part>)| (source(id, i, count), ViewPicture { view: id, frame, bodies: drawn_bodies(&chosen, parts) });

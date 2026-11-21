@@ -348,7 +348,32 @@ impl crate::walk::Walk for ProfileSpec {
     }
 }
 
-pub use crate::eval::frame_member::{member_line_ids, member_names};
+pub use crate::eval::frame_member::{
+    LaterPieces, corner_at_point, corner_point, default_order, default_orders, is_crossing, is_member_line, is_member_wire, member_line_ids,
+    member_names, member_of_body, member_parts, member_segments, member_turns, members_cross, members_of_bodies, overlap_parent,
+};
+pub use crate::frame_corners::{CornerOverride, CornerType, MAX_GAP, MemberRef, checked_gap, read_coped};
+
+/// A frame member between two points (#15705): its id, which names the member as a line's id
+/// does (`names`, End Caps), and its two ends, found again on every evaluation so the member
+/// follows them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemberPair {
+    pub id: String,
+    pub a: crate::construct::GeoRef,
+    pub b: crate::construct::GeoRef,
+}
+
+/// The id of a feature's `n`-th pair: `pair<n>`.
+pub fn pair_id(n: u32) -> String {
+    format!("pair{n}")
+}
+
+/// The number of a pair id written as [`pair_id`] writes it (`pair3` → 3, never 0).
+pub fn parse_pair_id(id: &str) -> Option<u32> {
+    id.strip_prefix("pair")?.parse::<u32>().ok().filter(|n| *n > 0 && pair_id(*n) == id)
+}
 
 /// Where a frame member's cross-section comes from.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
@@ -883,6 +908,18 @@ pub fn member_axes(d: Vec3, angle: f64) -> Option<(Vec3, Vec3)> {
         None => (Vec3::X, d.cross(Vec3::X)),
     };
     let (c, s) = (angle.cos(), angle.sin());
+    Some((x * c + y * s, y * c - x * s))
+}
+
+/// [`member_axes`] for a member running along `dir` with its `up` given (#4003 Auto's lined-up sections): the
+/// profile's y is `up` made square to `dir` and x = y × dir; `turn` (radians) then turns the profile as
+/// [`member_axes`] does. `None` when either has no length or `up` runs along `dir` (within [`VERTICAL_TOLERANCE`]).
+pub fn group_axes(dir: Vec3, up: Vec3, turn: f64) -> Option<(Vec3, Vec3)> {
+    let (d, up) = (dir.normalized()?, up.normalized()?);
+    let y = up - d * up.dot(d);
+    let y = y.normalized().filter(|_| y.len() > VERTICAL_TOLERANCE)?;
+    let x = y.cross(d);
+    let (c, s) = (turn.cos(), turn.sin());
     Some((x * c + y * s, y * c - x * s))
 }
 

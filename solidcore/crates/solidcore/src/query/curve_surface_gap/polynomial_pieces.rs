@@ -34,7 +34,7 @@
 //! the cell holding `W(t)`, so the largest of the cells' bounds (each cell's polynomial
 //! taken over the whole piece) bounds it. Past the net's end (a box a ulp out on a seam or
 //! boundary) the end cell's polynomial is continued, plus the slack `NetSurface::partials`
-//! adds there, as [`super::piece`] does. A piece whose values reach into more than
+//! adds there, as [`super::piece_bound`] does. A piece whose values reach into more than
 //! [`MAX_CELLS`] cells, run too far past the net, or whose `D` is not proved positive is
 //! bisected.
 //!
@@ -561,7 +561,7 @@ fn polynomial_piece(
 /// enclosed is the curve evaluated. (`NurbsCurve::of` rebuilds them from the Euclidean
 /// points, which rounds: a stored `x w = 3` with `w = 10` comes back as `3.0000000000000004`.)
 /// `None` when the degree, knots and points do not agree or a weight is not positive.
-fn stored_nurbs(c: &BSplineCurve) -> Option<NurbsCurve> {
+pub(super) fn stored_nurbs(c: &BSplineCurve) -> Option<NurbsCurve> {
     use crate::nurbs::math::{NOW, NOZ};
     let (knots, mult) = c.knots(None).ok()?;
     let p = c.degree().ok()?;

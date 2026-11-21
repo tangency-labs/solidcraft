@@ -2186,7 +2186,7 @@ fn list_commands_narrows_by_prefix_panel_fields_and_page() {
 #[test]
 fn legacy_design_files_open_by_contents() {
     let mut s = server();
-    let saved = String::from_utf8(solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::default())).unwrap();
+    let saved = String::from_utf8(solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::default()).unwrap()).unwrap();
     assert!(saved.contains("\"solidcraft/"), "{saved}");
     let legacy = saved.replace("\"solidcraft/", "\"solvecraft/");
     let path = std::env::temp_dir().join(format!("solidcraft-mcp-legacy-{}.solvecraft", std::process::id()));
@@ -2216,6 +2216,28 @@ fn legacy_design_files_open_by_contents() {
     tool(&mut s, "save", json!({"path": new.to_string_lossy()}));
     tool(&mut s, "open", json!({"path": new.to_string_lossy()}));
     assert!(old.is_file() && new.is_file(), "save as leaves the old file");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #20374: `save` takes `overwrite`, as file.save does: a design file another program changed is
+/// refused without it and replaced with it.
+#[test]
+fn save_overwrite_replaces_a_design_file_changed_on_disk() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-overwrite-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("part.sc");
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+    tool(&mut s, "save", json!({"path": path.to_string_lossy()}));
+    // Another program changes the file after the save.
+    let mut bytes = std::fs::read(&path).unwrap();
+    bytes.extend_from_slice(b"changed elsewhere");
+    std::fs::write(&path, &bytes).unwrap();
+    let refused = raw_tool(&mut s, "save", json!({}));
+    assert_eq!(refused["result"]["isError"], json!(true), "{refused}");
+    tool(&mut s, "save", json!({"overwrite": true}));
+    assert_eq!(solidcraft_engine::io::read_design(&std::fs::read(&path).unwrap()).unwrap().features.len(), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -3374,6 +3396,17 @@ fn mechanisms_skill_example_moves_as_documented() {
     let hinge = value(&list, "Hinge");
     assert!((hinge - stop).abs() < 0.01, "stopped at {hinge}, the rod's limit is at {stop}");
     assert!(value(&list, "Stroke") <= 10.0 + 1e-6 && (value(&list, "Stroke") - stroke(hinge)).abs() < 1e-6, "{list}");
+}
+
+/// Every tool the server offers has a name for the person watching an agent use it (the UI shows
+/// that name, never the tool's id).
+#[test]
+fn every_tool_has_a_name_for_the_person_watching() {
+    use solidcraft_engine::agent_tools::{MESSAGE_TOOLS, tool_command};
+    for tool in tool_definitions() {
+        let name = tool["name"].as_str().unwrap();
+        assert!(tool_command(name).is_some() || MESSAGE_TOOLS.contains(&name), "tool `{name}` needs a name in solidcraft_engine::agent_tools");
+    }
 }
 
 /// Every tool and command the agent skills call exists, so a rename or removal can't leave the

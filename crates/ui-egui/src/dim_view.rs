@@ -752,35 +752,18 @@ fn change_sheet_text(app: &mut SolveApp, target: SheetText, typed: &str) -> Resu
     let typed = typed.trim();
     match target {
         SheetText::Dimension(id) => {
-            let inspect = |app: &mut SolveApp| app.run("drawing.dimension.inspect", json!({"dimension": encode(id)}));
-            let edit = |app: &mut SolveApp, text: serde_json::Value| {
-                app.run("drawing.dimension.edit", json!({"dimension": encode(id), "set": {"override_text": text}}))
-                    .map_err(|err| shown_error("drawing.dimension.edit", &err))
-            };
-            let read = inspect(app)?;
-            if read["text"].as_str() == Some(typed) {
-                // As it reads now: nothing to change, and a measured number stays measured.
+            // The box holds the dimension's text as a template, `{value}` its measured number.
+            let read = app.run("drawing.dimension.inspect", json!({"dimension": encode(id)}))?;
+            let now = read["record"]["override_text"].as_str();
+            let plain = solidcraft_engine::doc::drawing::dimension::VALUE_TOKEN;
+            // Nothing typed, `{value}` alone, or the measured number typed back: the number, measured.
+            let measured = typed.is_empty() || typed == plain || read["measured_text"].as_str() == Some(typed);
+            let wanted = (!measured).then_some(typed);
+            if wanted == now {
                 return Ok(read);
             }
-            if read["record"]["override_text"].is_null() {
-                return if typed.is_empty() { Ok(read) } else { edit(app, json!(typed)) };
-            }
-            // It shows a text instead of its number. The number shows again first: typed back, or
-            // with nothing typed, that is the whole change, and the dimension follows the model
-            // again. Any other text then takes its place, the two as one undo step.
-            let depth = app.session.undo.len();
-            let measured = edit(app, serde_json::Value::Null)?;
-            if typed.is_empty() || inspect(app)?["text"].as_str() == Some(typed) {
-                return Ok(measured);
-            }
-            let changed = edit(app, json!(typed));
-            if changed.is_ok() {
-                app.session.undo.truncate(depth + 1);
-            } else {
-                // A text that can't be set leaves the one it had.
-                let _ = app.run("edit.undo", json!({}));
-            }
-            changed
+            app.run("drawing.dimension.edit", json!({"dimension": encode(id), "set": {"override_text": wanted}}))
+                .map_err(|err| shown_error("drawing.dimension.edit", &err))
         }
         SheetText::TitleCell { sheet, cell } => {
             // As the sheet shows the cell now, and the value a typed text hides.
@@ -1030,7 +1013,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     // value would leave it (#11584); placing one only measures, so nothing moves.
     let typed = preview_world(app);
     let draft = editor_draft.or_else(|| placing.then(|| placement_preview(app)).flatten());
-    let st = typed.clone().unwrap_or_else(|| crate::open_meshing::session_world(&app.session));
+    let st = typed.clone().unwrap_or_else(|| crate::open_meshing::shown_world(app));
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else {
         DRAWN.with(|d| d.borrow_mut().clear());
         // Only a finished sketch's dimension edited from the model view stays open, at its text.

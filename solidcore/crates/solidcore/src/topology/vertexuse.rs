@@ -50,6 +50,13 @@
 //!   [`SolidError::Unported`] still propagates. The edge curve and surface
 //!   evaluations of `ComputeUVSector`, whose failure leaves uninitialised locals
 //!   upstream, propagate their error instead.
+//! - **Not upstream: an edge vertex use's UV point on its trims' side of a seam.**
+//!   `ComputeUVPoint`'s guess is its trims' end; on a closed surface the drop of a vertex
+//!   off the surface can cross the seam where it stops on the domain's bound, and land a
+//!   whole period from the guess (the same surface point). The answer is moved by those
+//!   periods back to the guess's side (the seam wrap of `face::p1`, WR-491), so a face
+//!   that ends on its seam keeps its vertices, and the trims moved onto them
+//!   (`sm_FixUVTrimCurves`), in its domain.
 //! - **`IsKindOf(SmFilletVertex_TYPE)`** in `HasVertexFaceGap` is always false for a
 //!   vertex use (`SmFilletVertex` derives from `SmVertex`) and is dropped.
 //! - **Notify.** The vertex use part (clearing the cached gaps) is applied to the
@@ -1397,8 +1404,28 @@ fn uv_point_in<B: SectorBrep>(
                 s = first;
             }
         }
+        // Not upstream: the solution on the side of a seam the guess is on. A vertex off a
+        // closed surface whose drop stops on the domain's bound with a gap crosses the seam
+        // there and lands a whole period from the guess, the trims' own end: the same
+        // surface point, outside a face that ends on its seam (WR-491's seam wrap).
+        let gap = Vec3::new(s.uv.x - uv_guess.x, s.uv.y - uv_guess.y, 0.0);
+        let mut periods = [None, None];
+        for (slot, (along, length, direction)) in periods.iter_mut().zip([
+            (gap.x, nat_domain.x_length(), SurfParamType::U),
+            (gap.y, nat_domain.y_length(), SurfParamType::V),
+        ]) {
+            if length.is_finite()
+                && along.abs() > length / 2.0
+                && or_give_up!(b.surface(f))?
+                    .is_closed(k, &nat_domain, direction, None, false)?
+                    .0
+            {
+                *slot = Some(length);
+            }
+        }
+        let wrap = crate::topology::face::p1::seam_wrap_of_gap(gap, periods);
         // a projection distance larger than the tolerance is only reported (SE)
-        s.uv
+        Point2::new(s.uv.x + wrap.x, s.uv.y + wrap.y)
     } else if is_loop_vertexuse(b, vu)? {
         // project point down to face's surface
         let face_tol = face_tolerance(b, f)?;

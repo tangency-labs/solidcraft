@@ -96,11 +96,16 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         _ => return None,
     };
     Some(match &d.kind {
-        Kind::Extrude { start, all, taper, .. } => {
+        Kind::Extrude { start, all, taper, direction, .. } => {
             let n = normal?;
             let plane = solidcore_record::Plane::from_normal(at, n)?;
-            let from =
-                from_slope_height(app, d, &plane, at, *all, taper).or_else(|| reference_height(app, d, "From Object", &plane, at)).unwrap_or(0.0);
+            let two_sided = crate::dialogs::two_sided(*direction);
+            // The window sends a taper only with one side (positive or negative), as the build
+            // gets it.
+            let taper = if *direction < 2 { taper.as_str() } else { "" };
+            let from = from_slope_height(app, d, &plane, at, *all, taper, two_sided)
+                .or_else(|| reference_height(app, d, "From Object", &plane, at))
+                .unwrap_or(0.0);
             let offset = if start.trim().is_empty() { 0.0 } else { crate::length_input::eval(&app.session.doc, start, ValueKind::Length).ok()? };
             (at + n * (from + offset), Some(n))
         }
@@ -218,24 +223,37 @@ pub(crate) fn profile_plane(app: &SolveApp, sketch: u64) -> Option<solidcore_rec
 }
 
 /// Where an extrude From a flat face at a slant starts above `centre`, on the face, when the
-/// build starts it there ([`solidcraft_engine::doc::from_slope_height`]): not with To Object,
-/// Through All (`all`) or a nonzero `taper`, nor for an edited extrude kept on its old start
-/// at the face's level (`from_level`). `None` otherwise, so the arrow starts at
-/// [`reference_height`] as before.
-fn from_slope_height(app: &SolveApp, d: &Dialog, plane: &solidcore_record::Plane, centre: Vec3, all: bool, taper: &str) -> Option<f64> {
-    let to = d.inputs.iter().any(|input| input.label == "To Object" && !input.items.is_empty());
+/// build starts it there ([`solidcraft_engine::doc::from_slope_height`], which decides by the
+/// same rule as the build: To Object on a flat end, Through All (`all`), a nonzero `taper`, Two
+/// Sides (`two_sided`)), and not for an edited extrude kept on its old start at the face's level
+/// (`from_level`). `None` otherwise, so the arrow starts at [`reference_height`] as before.
+fn from_slope_height(
+    app: &SolveApp,
+    d: &Dialog,
+    plane: &solidcore_record::Plane,
+    centre: Vec3,
+    all: bool,
+    taper: &str,
+    two_sided: bool,
+) -> Option<f64> {
+    let to_point = crate::dialogs::object_point(&d.inputs, "To Object").and_then(|point| {
+        let p = point.as_array()?;
+        Some(Vec3::new(p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?))
+    });
     let tapered = !taper.trim().is_empty() && crate::length_input::eval(&app.session.doc, taper, ValueKind::Angle).is_ok_and(|a| a != 0.0);
-    let kept_level = d
-        .editing
-        .and_then(|(id, _)| app.session.doc.feature(id))
-        .is_some_and(|f| matches!(&f.kind, solidcraft_engine::doc::FeatureKind::Extrude { extent, .. } if extent.from_level));
-    if to || all || tapered || kept_level {
+    // An edit that takes To Object off clears `from_level`, as `timeline.edit` does.
+    let has_to = d.inputs.iter().any(|input| input.label == "To Object" && !input.items.is_empty());
+    let kept_level = d.editing.and_then(|(id, _)| app.session.doc.feature(id)).is_some_and(
+        |f| matches!(&f.kind, solidcraft_engine::doc::FeatureKind::Extrude { extent, .. } if extent.from_level && (has_to || extent.to.is_none())),
+    );
+    if kept_level {
         return None;
     }
     let point = crate::dialogs::object_point(&d.inputs, "From Object")?;
     let p = point.as_array()?;
     let p = Vec3::new(p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?);
-    solidcraft_engine::doc::from_slope_height(&crate::open_meshing::session_world(&app.session), plane, centre, p)
+    let ends = solidcraft_engine::doc::ExtrudeEnds { to: None, through_all: all, tapered, two_sided };
+    solidcraft_engine::doc::from_slope_height(&crate::open_meshing::session_world(&app.session), plane, centre, p, to_point, ends)
 }
 
 fn reference_height(app: &SolveApp, d: &Dialog, label: &str, plane: &solidcore_record::Plane, centre: Vec3) -> Option<f64> {
@@ -453,6 +471,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         app.dialog = Some(d);
         return;
     }
+    // Rotate Member: the dial round the member's line sets its Angle.
+    if matches!(d.kind, Kind::RotateMember(_)) {
+        draw_move_rotation(app, ui, painter, proj, &mut d);
+        app.dialog = Some(d);
+        return;
+    }
     // A cylinder's values are typed in its window; its distances from its reference edges
     // (#6380) are shown and typed on the canvas, as a hole's, then its placement handles drawn.
     if matches!(d.kind, Kind::Primitive { cmd: "solid.cylinder", .. }) {
@@ -488,19 +512,28 @@ impl MoveRotation {
     }
 }
 
+/// Move's turn about its picked axis, or Rotate Member's about the member's line.
 fn move_rotation(app: &SolveApp, d: &Dialog, proj: &Proj) -> Option<MoveRotation> {
-    let Kind::Move { angle, .. } = &d.kind else { return None };
-    let (centre, axis) = crate::dialogs_move::rotation_axis(app, d)?;
+    let (angle, (centre, axis)) = match &d.kind {
+        Kind::Move { angle, .. } => (angle, crate::dialogs_move::rotation_axis(app, d)?),
+        Kind::RotateMember(c) => (&c.angle, crate::dialogs_rotate_member::dial(app, &d.inputs)?),
+        _ => return None,
+    };
     let angle = crate::length_input::eval(&app.session.doc, angle, ValueKind::Angle).ok().filter(|a| a.is_finite()).unwrap_or(0.0);
     Some(MoveRotation { centre, axis, radius: crate::gizmo::ring_radius(proj, centre)?, angle })
 }
 
-/// Reuse the angular handle's snapping and edge-on projection for Move's selected axis.
+/// Reuse the angular handle's snapping and edge-on projection for Move's selected axis and Rotate
+/// Member's line.
 fn draw_move_rotation(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) -> Option<(Pos2, bool)> {
     let r = move_rotation(app, d, proj)?;
     let points: Vec<_> = (0..=64).filter_map(|i| proj.to_screen(r.point(i as f64 / 64.0 * std::f64::consts::TAU))).collect();
     painter.add(egui::Shape::line(points, Stroke::new(1.8, Tokens::get().manipulator)));
-    let Kind::Move { angle, .. } = &mut d.kind else { return None };
+    let (angle, name) = match &mut d.kind {
+        Kind::Move { angle, .. } => (angle, "move_rotate"),
+        Kind::RotateMember(c) => (&mut c.angle, "rotate_member"),
+        _ => return None,
+    };
     let before = angle.clone();
     let e1 = r.axis.any_perp();
     // Keep full turns in the expression while the shared handle works near zero.
@@ -520,7 +553,7 @@ fn draw_move_rotation(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter
         1.0,
         offset,
         (offset - span, offset + span),
-        "move_rotate",
+        name,
         angle,
     )?;
     Some((end, *angle != before))

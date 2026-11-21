@@ -1,0 +1,1 @@
+indexes faces by mesh triangles for naming

@@ -4444,7 +4444,6 @@
   "sketch_panel.plane_offset": "{plane}, siirtymä {distance}",
   "sketch_panel.plane_origin": "Taso {plane}",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "Kiinnitetty ohutlevykappaleen tasopintaan; seuraa kyseistä paneelia, kun levy muuttuu.",
   "sketch_panel.text_hint": "Muokkaa tekstiä ja sen sijoittelua ja paina OK.",
   "sketch_panel.use_plane": "Käytä tasoa {plane}",
   "sketch_text.align_center": "Keskitetty",
