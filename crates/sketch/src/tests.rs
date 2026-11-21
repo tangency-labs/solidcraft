@@ -499,6 +499,32 @@ fn midpoint_symmetry_point_on_curve_arc() {
     assert!((sk.points[s1].pos.y - sk.points[s2].pos.y).abs() < 1e-7);
 }
 
+/// Four closed strips laid out as a # shut off a 6 x 6 square inside none of them: the one gap
+/// (#19963). Four open lines laid out as a # close off the same square, which was drawn by them,
+/// so it is no gap; neither is a region inside a strip or where two strips cross.
+#[test]
+fn enclosed_gaps_are_regions_crossing_closed_loops_shut_off() {
+    let mut sk = Sketch::new();
+    for (x0, y0, x1, y1) in [(-6.0, 3.0, 6.0, 4.0), (-6.0, -4.0, 6.0, -3.0), (-4.0, -6.0, -3.0, 6.0), (3.0, -6.0, 4.0, 6.0)] {
+        rect(&mut sk, [v(x0, y0), v(x1, y0), v(x1, y1), v(x0, y1)]);
+    }
+    let ps = find_profiles(&sk);
+    let gaps = enclosed_gaps(&sk, &ps);
+    assert_eq!(gaps.len(), ps.len());
+    let found: Vec<f64> = ps.iter().zip(&gaps).filter(|(_, g)| **g).map(|(p, _)| p.area).collect();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!((found[0] - 36.0).abs() < 1e-9, "{found:?}");
+    assert!(ps.iter().zip(&gaps).filter(|(_, g)| !**g).all(|(p, _)| !p.region.contains(v(0.0, 0.0))));
+
+    let mut open = Sketch::new();
+    for (a, b) in [(v(-6.0, 3.0), v(6.0, 3.0)), (v(-6.0, -3.0), v(6.0, -3.0)), (v(-3.0, -6.0), v(-3.0, 6.0)), (v(3.0, -6.0), v(3.0, 6.0))] {
+        open.add_line(a, b, None, None, None).unwrap();
+    }
+    let ps = find_profiles(&open);
+    assert_eq!(ps.len(), 1, "{ps:?}");
+    assert_eq!(enclosed_gaps(&open, &ps), [false]);
+}
+
 #[test]
 fn profiles_rectangle_with_hole_and_split() {
     let mut sk = Sketch::new();
