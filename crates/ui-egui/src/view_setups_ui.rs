@@ -24,7 +24,7 @@ fn id(ctx: &egui::Context) -> egui::Id {
 
 pub(crate) fn handle(app: &mut SolveApp, ctx: &egui::Context, row: &str) -> bool {
     let editor = match row {
-        "layout.save" => Editor::Save,
+        "layout.save_view" => Editor::Save,
         "layout.manage" => Editor::Manage,
         _ => {
             let Some(name) = row.strip_prefix("layout.saved.") else { return false };
@@ -87,12 +87,10 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
             Editor::Save | Editor::Rename(_) => {
                 let save = matches!(&state.editor, Editor::Save);
                 ui.heading(app.tr(if save { "view_layout.save_title" } else { "view_layout.rename_title" }));
-                let field = ui.add(
-                    egui::TextEdit::singleline(&mut state.text)
-                        .hint_text(app.tr("view_layout.name"))
-                        .char_limit(64)
-                        .desired_width(ui.available_width()),
-                );
+                let (entered, field) = ui_kit::text_field_reserving(ui, &mut state.text, app.tr("view_layout.name"), 0.0);
+                if let Some((cut, _)) = state.text.char_indices().nth(64) {
+                    state.text.truncate(cut);
+                }
                 field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, app.tr("view_layout.name")));
                 if state.first {
                     field.request_focus();
@@ -104,7 +102,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         ui_kit::button(ui, app.tr(if save { "ui.save" } else { "view_layout.rename" }), ui_kit::Button::Primary)
                     });
                     if !state.text.trim().is_empty()
-                        && (submit.inner.clicked() || field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)))
+                        && (submit.inner.clicked() || entered)
                     {
                         command = Some(match &state.editor {
                             Editor::Rename(name) => ("tab.layout.rename", json!({"name": name, "new_name": state.text})),

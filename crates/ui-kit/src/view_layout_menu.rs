@@ -370,8 +370,8 @@ pub(crate) fn show(ui: &mut Ui, strip: &TabStrip, data: &LayoutMenu, opened: u64
     Menu::separator(ui);
     let glyph = |p: &egui::Painter, rect, opacity| paint_view_glyph(p, rect, "tiles", Tokens::get().text_dim.gamma_multiply(opacity));
     let icon = crate::Icon::Paint(&glyph);
-    if action(ui, "layout.save", &data.text.save, icon, "", None).clicked() {
-        picked = Some("layout.save".into());
+    if action(ui, "layout.save_view", &data.text.save, icon, "", None).clicked() {
+        picked = Some("layout.save_view".into());
     }
     let saved_row = (!data.saved.is_empty()).then(|| flyout_row(ui, "layout.saved", &data.text.saved, icon, "", Flyout::Saved, &mut open));
     let mut submenu = None;
