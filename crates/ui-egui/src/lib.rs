@@ -1392,6 +1392,8 @@ impl SolveApp {
     #[cfg(feature = "usage-stats")]
     pub fn load_usage_stats(&mut self, stored: Option<&str>) {
         self.usage.store = usage_stats::Store::from_stored(stored);
+        // Kept between runs from now on: the first start (nothing stored) shows the notice.
+        self.usage.hosted = true;
     }
 
     /// The usage statistics for the host to store under `usage_stats::STORAGE_KEY`.
