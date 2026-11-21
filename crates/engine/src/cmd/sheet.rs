@@ -202,6 +202,7 @@ pub static COMMANDS: &[CommandSpec] = &[
               when the body's rule has angle_display: included), note_height?: mm (default 3), \
              bend_lines?: bool (default true; false leaves BEND_UP and BEND_DOWN out, for a cutter that would cut them), \
              layers?: roles|single (default roles, the layers below; single: every entity on layer 0), \
+             profile?: a DXF profile file's path, or the profile as an object (which layer, colour and linetype each role is written with, and the roles left out; docs/formats/dxf-profiles.md; default: the layers below; not with layers: single), \
              per_body?: bool (a file for every sheet body, `<path>-<body>.dxf`, or their DXF texts without a path → files: [{body, path | dxf, bends}]; not with `body`) \
              → DXF (AutoCAD 2000, mm): layers OUTLINE (the outer contour), CUT (what is cut out inside it), TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES, \
              POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM (one per side and depth) and PERFORATION; inner contours come before the outline",
@@ -535,7 +536,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
             }
             let flip = bool_(p, "flip").unwrap_or(false);
             let mut before = surface_panel_counts(s);
-            let mut made = add_feature(
+            let mut reply = add_feature(
                 s,
                 p,
                 FeatureKind::SheetFlange {
@@ -551,11 +552,14 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                     height_from: height_from.clone(),
                 },
             )?;
+            // The first bend owns the supplied name. Keep its identity and report the completed chain's result.
+            let named_feature =
+                str_(p, "name").filter(|name| !name.trim().is_empty() && !then.is_empty()).map(|_| (reply["feature"].clone(), reply["name"].clone()));
             // Each further bend stands on the far edge of the flange before it.
             for (angle, height, own_flip) in then {
                 let edges = far_edge_picks(s, &before, cmd)?;
                 before = surface_panel_counts(s);
-                made = add_feature(
+                reply = add_feature(
                     s,
                     &json!({}),
                     FeatureKind::SheetFlange {
@@ -572,7 +576,11 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                     },
                 )?;
             }
-            Ok(made)
+            if let Some((feature, name)) = named_feature {
+                reply["feature"] = feature;
+                reply["name"] = name;
+            }
+            Ok(reply)
         }
     }
 }
@@ -1425,8 +1433,9 @@ fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::A
 /// TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES (when asked
 /// for), one layer per pocket depth, PERFORATION and ROLL. Inner contours are written before the
 /// outline, so a program that follows the file's order cuts inside-out. Free-form curves as
-/// `o.curves` says.
-fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -> Result<String> {
+/// `o.curves` says. A DXF profile writes it its own way: its layer, colour and linetype for each
+/// role, and the roles it turns off left out.
+fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions, profile: Option<&solidcraft_io::DxfExportProfile>) -> Result<String> {
     let sk = &sk.shown();
     let rule = s.doc.sheet_rule(Some(&sk.rule));
     let display = sheet::AngleDisplay::parse(&rule.angle_display).unwrap_or_default();
@@ -1442,7 +1451,7 @@ fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -
         display,
         thickness: sk.thickness,
     };
-    drawing.dxf(o)
+    drawing.dxf(o, profile)
 }
 
 /// What a flat pattern's DXF draws: the flat material, the pockets machined in it, which of its
@@ -1463,7 +1472,7 @@ struct FlatDrawing {
 }
 
 impl FlatDrawing {
-    fn dxf(&self, o: &DxfOptions) -> Result<String> {
+    fn dxf(&self, o: &DxfOptions, profile: Option<&solidcraft_io::DxfExportProfile>) -> Result<String> {
         use solidcraft_io::{DxfFile, DxfPathStyle, DxfShape};
         let (regions, pockets, letters) = (&self.regions, &self.pockets, &self.letters);
         let pocket_layer = |p: &solidcraft_doc::sheet::SheetPocket| {
@@ -1578,7 +1587,12 @@ impl FlatDrawing {
                 file.push(layer, DxfShape::Line(*a, *b), None)?;
             }
         }
-        Ok(solidcraft_io::write_dxf_file(&file)?)
+        // The drawing is made on the standard layers either way; a profile restyles it as it is
+        // written.
+        Ok(match profile {
+            None => solidcraft_io::write_dxf_file(&file)?,
+            Some(profile) => solidcraft_io::write_dxf_file_as(&file, profile)?,
+        })
     }
 }
 
@@ -1647,6 +1661,27 @@ fn dxf_options(p: &Value, cmd: &str) -> Result<DxfOptions> {
     Ok(DxfOptions { curves, text, bend_notes, no_bend_lines, one_layer })
 }
 
+/// A `sheet.export_dxf` call's `profile`: a profile file's path, or the profile itself as an
+/// object (`docs/formats/dxf-profiles.md`). A profile that cannot be read or used as it stands is
+/// refused, and so is one together with `layers: single`, which has no layers to style.
+fn dxf_profile(p: &Value, cmd: &str, options: &DxfOptions) -> Result<Option<solidcraft_io::DxfExportProfile>> {
+    use solidcraft_io::DxfExportProfile;
+    let profile = match p.get("profile").filter(|v| !v.is_null()) {
+        None => return Ok(None),
+        Some(Value::String(path)) if !path.trim().is_empty() => {
+            let bytes =
+                solidcraft_io::vfs::read(path, solidcraft_io::MAX_DXF_PROFILE_BYTES).map_err(|e| bad(cmd, format!("`profile` {path}: {e}")))?;
+            DxfExportProfile::read(&bytes).map_err(|e| bad(cmd, format!("`profile` {path}: {e}")))?
+        }
+        Some(given @ Value::Object(_)) => DxfExportProfile::from_json(given).map_err(|e| bad(cmd, format!("`profile`: {e}")))?,
+        Some(_) => return Err(bad(cmd, "`profile` must be a DXF profile file's path or a profile object")),
+    };
+    if options.one_layer {
+        return Err(bad(cmd, "`layers: single` writes everything on layer 0 and a `profile` gives each role its layer: use one of them"));
+    }
+    Ok(Some(profile))
+}
+
 /// The files of an export of every sheet body: `path` with `-<body>` before its extension
 /// (`.dxf` when it has none). Characters a file name cannot hold become `_`, and a name another
 /// body's file already has (in any case) gets `_2`, `_3`…
@@ -1676,6 +1711,7 @@ fn body_paths(path: &str, bodies: &[String]) -> Vec<String> {
 fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sheet.export_dxf";
     let options = dxf_options(p, cmd)?;
+    let profile = dxf_profile(p, cmd, &options)?;
     let per_body = match p.get("per_body").filter(|v| !v.is_null()) {
         None => false,
         Some(Value::Bool(b)) => *b,
@@ -1694,7 +1730,7 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
         let mut made: Vec<(String, String, usize)> = Vec::new();
         for sk in &st.surface_sheets {
             sk.flat_matches_body()?;
-            made.push((sk.body.clone(), surface_dxf(s, sk, &options)?, sk.bends.len()));
+            made.push((sk.body.clone(), surface_dxf(s, sk, &options, profile.as_ref())?, sk.bends.len()));
         }
         let paths = path.map(|path| body_paths(path, &made.iter().map(|(body, ..)| body.clone()).collect::<Vec<_>>()));
         let mut files = Vec::new();
@@ -1710,7 +1746,7 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let sk = surfaces_of(s, p, cmd)?;
     sk.flat_matches_body()?;
-    let text = surface_dxf(s, &sk, &options)?;
+    let text = surface_dxf(s, &sk, &options, profile.as_ref())?;
     let bends = sk.bends.len();
     let reply = if let Some(path) = path {
         solidcraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;

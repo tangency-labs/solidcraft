@@ -393,7 +393,6 @@ pub(crate) fn validate_pointers_excluding(
     }
     let mut r = Reports {
         array: reports,
-        level,
         failed: false,
     };
     let mut cache = Lists::new(b);
@@ -973,8 +972,8 @@ fn wide_vertex_limit(b: &Brep) -> f64 {
 /// millimetre off its edges in a 10 mm box 50 times. A tolerance covers a rounding or intersection
 /// gap, never a misplaced vertex, so past this many times the limit Test #82 refuses it whatever
 /// its ball clears. The boolean's tolerance update grows a vertex no further than this either
-/// (`validate_and_update`).
-pub(super) const GROWTH_PAST_RATIO: f64 = 2.0;
+/// (`validate_and_update`), nor does the healer's `Fix_TolSizes` (`heal::heal_data`).
+pub(crate) const GROWTH_PAST_RATIO: f64 = 2.0;
 
 fn check_vertices(b: &Brep, r: &mut Reports<'_>) -> Result<()> {
     for &v in b.vertex_list() {
@@ -1342,7 +1341,6 @@ fn curve_clears(
 pub fn vertex_ball_reaches(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bool> {
     let mut r = Reports {
         array: None,
-        level: 0,
         failed: false,
     };
     check_vertex_clearance(k, b, &mut r, &[v])?;
@@ -2304,7 +2302,6 @@ mod issue_891_tests {
         let vertex = body.vertex_list()[0];
         let mut reports = Reports {
             array: None,
-            level: 0,
             failed: false,
         };
         // a body tolerance whose limit is 1000 / 1500, so both radii are between 1 x and 2 x it
@@ -2350,7 +2347,6 @@ mod issue_891_tests {
             assert!(local.edges.contains(&edges[1]), "gap {gap}");
             let mut reports = Reports {
                 array: None,
-                level: 0,
                 failed: false,
             };
             check_vertex_exclusion(&k, &mut body, &mut reports).unwrap();
@@ -2372,7 +2368,6 @@ mod issue_891_tests {
         assert_eq!(after.edges.len(), 3, "only the three incident box edges");
         let mut reports = Reports {
             array: None,
-            level: 0,
             failed: false,
         };
         check_vertex_exclusion(&k, &mut body, &mut reports).unwrap();
@@ -2452,7 +2447,6 @@ mod issue_891_tests {
         let mut array = AssertArray::new();
         let mut reports = Reports {
             array: Some(&mut array),
-            level: 0,
             failed: false,
         };
         check_vertex_exclusion(&k, &mut body, &mut reports).unwrap();
@@ -2498,7 +2492,6 @@ mod issue_891_tests {
         let vertex = edge::start_vertex(&body, wire).unwrap().unwrap();
         let mut reports = Reports {
             array: None,
-            level: 0,
             failed: false,
         };
         check_vertex_exclusion(&k, &mut body, &mut reports).unwrap();
