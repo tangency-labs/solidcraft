@@ -200,8 +200,7 @@ fn dialog_hooks_query_capabilities_at_both_api_versions_without_gaining_edit_acc
             let source = if version == "0.1.0" { source.replace(r#" (case "unsupported" string)"#, "") } else { source };
             let bytes = with_capability_query(&source, &["commands@0.1", "dialog@0.1", "host@0.1"]);
             crate::check_component(&manifest, &bytes).unwrap();
-            let (host, result) =
-                crate::dialog_fields(App::default(), &manifest, &bytes, "make", &json!({}), craft_plugin::HostLimits::default());
+            let (host, result) = crate::dialog_fields(App::default(), &manifest, &bytes, "make", &json!({}), craft_plugin::HostLimits::default());
             if code.is_empty() {
                 assert_eq!(result.unwrap(), "{}");
                 assert_eq!((host.value, host.commits, host.rollbacks), (0, 1, 0));
