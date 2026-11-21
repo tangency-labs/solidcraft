@@ -132,27 +132,16 @@ fn difference(ma: &Value, mb: &Value) -> Difference {
     }
 }
 
-/// The volume a closed mesh encloses (divergence theorem, about its box's centre).
-fn enclosed_volume(m: &solidcraft_geom::Mesh) -> f64 {
-    let o = m.bounds().center();
-    m.triangles.iter().filter_map(|t| m.tri(t)).map(|[a, b, c]| (a - o).dot((b - o).cross(c - o)) / 6.0).sum()
-}
-
 /// What makes the comparison less certain: a body whose surface does not enclose what it
-/// measures (open, or faces that failed).
-fn warnings(bodies: [(&str, &Value, &solidcraft_geom::Mesh); 2], chord: f64) -> Vec<String> {
-    let mut out = Vec::new();
-    for (name, measure, mesh) in bodies {
-        let (Some(v), area) = (measure["volume_mm3"].as_f64(), measure["area_mm2"].as_f64().unwrap_or(0.0)) else { continue };
-        let enclosed = enclosed_volume(mesh);
-        // A mesh within `chord` of the surface encloses the volume to within chord × area.
-        if !((enclosed - v).abs() <= chord * area.abs() + 1e-6 * v.abs()) {
-            out.push(format!(
-                "`{name}`: its surface encloses {enclosed:.3} mm³ but the body measures {v:.3} mm³: it is open or has faces that failed, so its measures and the regions near the gap are unreliable"
-            ));
-        }
-    }
-    out
+/// measures (an open shell), told from its exact topology.
+fn warnings(bodies: [(&str, &solidcraft_kernel::Body); 2]) -> Vec<String> {
+    bodies
+        .into_iter()
+        .filter(|(_, body)| !super::inspect::encloses_volume(body))
+        .map(|(name, _)| {
+            format!("`{name}`: its surface does not enclose a volume: it is open, so its measures and the regions near the gap are unreliable")
+        })
+        .collect()
 }
 
 /// A region's volume, centre and box, measured exactly.
@@ -360,7 +349,7 @@ fn compare_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     let ((ca, va), (cb, vb)) = (total(Side::OnlyInA), total(Side::OnlyInB));
     let worst = c.a_to_b.max.max(c.b_to_a.max);
     let identical = c.regions.is_empty() && c.unlisted == 0;
-    let mut warnings = warnings([(na.as_str(), &measure_a, &mesh_a), (nb.as_str(), &measure_b, &mesh_b)], chord);
+    let mut warnings = warnings([(na.as_str(), &ba.body), (nb.as_str(), &bb.body)]);
     warnings.extend(exact_notes);
     let mut verdict = if identical {
         format!("identical within {tolerance} mm (largest deviation {worst:.4} mm)")
