@@ -608,6 +608,17 @@ pub enum HistorySketches {
     UnderFeature,
 }
 
+/// How unsuppressing an upstream feature in the 2D Timeline affects downstream dependents.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Timeline2dUnsuppressMode {
+    /// Restore each downstream feature's original suppression state (features separately suppressed remain suppressed).
+    #[default]
+    RestoreState,
+    /// Unsuppress all downstream features that depend on the upstream feature.
+    UnsuppressAll,
+}
+
 /// How a section hatches the faces it cuts (Preferences: "Section hatch").
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1607,6 +1618,21 @@ preference_settings! {
     /// `Group #N` folder (#8885). Off, the default, shows each feature, starts folders open and
     /// makes no folder, as the bar always has.
     history_bar_groups: bool = false, PAGE_LAYOUT;
+    /// Two-dimensional (2D) Timeline with multi-track component layout,
+    /// two-tier header, movable corridor brackets, and feature grouping.
+    timeline_2d: bool = false, PAGE_LAYOUT;
+    /// Whether unoccupied cells in the 2D timeline grid display subtle alignment dots (·).
+    timeline_2d_cell_dots: bool = true, PAGE_LAYOUT;
+    /// Opacity of alignment dots in unoccupied 2D timeline cells (0.05 to 1.0).
+    timeline_2d_dot_opacity: f32 = 0.35, PAGE_LAYOUT, accept(0.05..=1.0);
+    /// Allow activating components directly by clicking component tracks or radio indicators in the 2D timeline.
+    timeline_2d_component_activation: bool = true, PAGE_LAYOUT;
+    /// Highlight color for prerequisite features in the 2D timeline Directed Acyclic Graph (DAG).
+    timeline_2d_prereq_color: [u8; 3] = [245, 158, 11], PAGE_LAYOUT;
+    /// Highlight color for downstream dependent features in the 2D timeline Directed Acyclic Graph (DAG).
+    timeline_2d_dependent_color: [u8; 3] = [56, 189, 248], PAGE_LAYOUT;
+    /// How unsuppressing an upstream feature affects downstream dependents in the 2D timeline DAG.
+    timeline_2d_unsuppress_mode: Timeline2dUnsuppressMode = Default::default(), PAGE_LAYOUT;
     /// Vertical History starts with the active component's Bodies folder and the Origin (#6490).
     timeline_origin_bodies: bool = false, PAGE_LAYOUT;
     /// Render shell preference, independent of the document and Design history.
@@ -4514,6 +4540,9 @@ pub fn migrate(mut p: Prefs) -> Prefs {
     if !accepted::wheel_zoom_speed(&p) {
         p.wheel_zoom_speed = Prefs::default().wheel_zoom_speed;
     }
+    if !accepted::timeline_2d_dot_opacity(&p) {
+        p.timeline_2d_dot_opacity = Prefs::default().timeline_2d_dot_opacity;
+    }
     if !accepted::home_fit_size(&p) {
         p.home_fit_size = Prefs::default().home_fit_size;
     }
@@ -4745,6 +4774,9 @@ fn prepare_preferences(
     if !accepted::wheel_zoom_speed(&new) {
         return Err("`wheel_zoom_speed` must be 0.25…4".into());
     }
+    if !accepted::timeline_2d_dot_opacity(&new) {
+        return Err("`timeline_2d_dot_opacity` must be 0.05…1".into());
+    }
     // Before `migrate`, which puts a template this version doesn't have back to the default.
     for (key, chosen, assembly) in
         [("part_drawing_template", &new.part_drawing_template, false), ("assembly_drawing_template", &new.assembly_drawing_template, true)]
@@ -4861,6 +4893,9 @@ fn prepare_preferences(
     }
     if !accepted::perspective_fov(&new) {
         return Err("`perspective_fov` must be 15°…90° in radians (0.2618…1.5708)".into());
+    }
+    if !accepted::timeline_2d_dot_opacity(&new) {
+        return Err("`timeline_2d_dot_opacity` must be 0.05…1".into());
     }
     if crate::drawing_sheet_page::SheetBackdrop::parse(&new.drawing_sheet_backdrop).is_none() {
         return Err("`drawing_sheet_backdrop` must be datum_cloud, grid or none".into());
@@ -7350,6 +7385,7 @@ mod tests {
             ("history_folder_kind_icon", json!(true), PAGE_LAYOUT),
             ("history_group_joints", json!(true), PAGE_LAYOUT),
             ("history_bar_groups", json!(true), PAGE_LAYOUT),
+            ("timeline_2d", json!(true), PAGE_LAYOUT),
             ("color_vision", json!("protan"), PAGE_APPEARANCE),
             ("viewport_theme", json!("light"), PAGE_APPEARANCE),
             ("viewport_background", json!([255, 255, 255]), PAGE_APPEARANCE),
