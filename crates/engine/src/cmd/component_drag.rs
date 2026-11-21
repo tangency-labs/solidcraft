@@ -39,6 +39,13 @@ impl Session {
         }
         if let Some(group) = self.held_by_rigid_group(dragged) {
             let group = doc.components.iter().find(|c| c.id == group).map(|c| c.name.clone()).unwrap_or_default();
+            // Inside a linked subassembly there is nothing to unlock: the linked design places it.
+            if doc.link_keeping_occurrence(dragged).is_some() {
+                return Err(refused(format!(
+                    "{} is inside the linked subassembly {group}, which places it: drag {group}, or drive the joints of a flexible occurrence of it",
+                    placement.name
+                )));
+            }
             return Err(refused(format!("{} is held in {group} by a rigid group: drag {group}, or Unlock Contents first", placement.name)));
         }
         // Is `o` the placement `top` or inside its component (in every placement of it)?

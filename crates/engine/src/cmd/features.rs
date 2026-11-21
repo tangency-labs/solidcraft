@@ -2882,6 +2882,9 @@ fn finish_pattern(
             .filter(|id| *id != 0)
             .ok_or_else(|| bad(cmd, format!("no component `{c}`")))?;
         let src = s.doc.occurrence_of(id).cloned().ok_or_else(|| bad(cmd, format!("component `{c}` has no occurrence")))?;
+        if let Some(why) = super::component_link::kept_occurrence_refusal(s, src.id) {
+            return Err(bad(cmd, why));
+        }
         for m in &mats {
             made.push(s.doc_mut().add_occurrence(id, src.parent, solidcraft_doc::mat_mul(m, &src.transform))?);
         }
@@ -2889,6 +2892,10 @@ fn finish_pattern(
     // A placement picked by its path is placed again beside itself, in the component holding it,
     // moved as the pattern moves it in the world: so a part placed several times, or inside a
     // subassembly, is patterned from the placement picked, not from its first one.
+    // A placement a linked subassembly keeps is that design's to place, picked by its path too.
+    if let Some(why) = paths.iter().filter_map(|path| path.last()).find_map(|last| super::component_link::kept_occurrence_refusal(s, *last)) {
+        return Err(bad(cmd, why));
+    }
     shown_as_placed(s, paths.iter().map(|path| (format!("{path:?}"), path.as_slice())), cmd)?;
     for path in &paths {
         let lost = || bad(cmd, format!("no placement {path:?}"));
@@ -3235,6 +3242,14 @@ fn shown_as_placed<'a>(s: &Session, picked: impl IntoIterator<Item = (String, &'
         }
         if path.iter().any(|id| s.pending_moves.contains_key(id)) {
             return Err(bad(cmd, format!("`{what}` is shown in an exploded view: show it assembled (explode.show with no view) first")));
+        }
+        if s.doc.path_is_posed(path) {
+            return Err(bad(
+                cmd,
+                format!(
+                    "`{what}` is inside a flexible occurrence of a linked subassembly that does not stand as its design has it: make the occurrence rigid (component.link_mode) first"
+                ),
+            ));
         }
     }
     Ok(())

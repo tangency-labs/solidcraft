@@ -140,6 +140,9 @@ fn world_pick(
         .ok_or_else(|| bad(cmd, format!("give `{pk}`, `{fk}` or `{pk}_plane` ([x, y, z], \"origin\", or a plane)")))
 }
 
+/// `occurrence.align`, as the module comment describes it: one rigid move in the world, from
+/// `from` to `to`, for every placement chosen. A placement that is grounded (without
+/// `move_grounded`), kept by a link or held in a rigid group refuses the whole call.
 pub(super) fn align(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "occurrence.align";
     let paths = resolve_paths(s, p, cmd)?;
@@ -157,6 +160,9 @@ pub(super) fn align(s: &mut Session, p: &Value) -> Result<Value> {
                 cmd,
                 format!("{} is grounded: unground it first (occurrence.ground; a design's first part is grounded when it is made)", o.name),
             ));
+        }
+        if let Some(why) = crate::cmd::component_link::kept_occurrence_refusal(s, id) {
+            return Err(bad(cmd, why));
         }
         if let Some(mut group) = s.held_by_rigid_group(id) {
             for _ in 0..64 {

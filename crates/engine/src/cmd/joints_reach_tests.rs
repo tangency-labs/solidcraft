@@ -159,7 +159,7 @@ fn a_reach_held_at_a_limit_settles_quickly() {
     let at = Vec3::new(-36.672, -2.706, 14.855);
     for k in [1.0, 2.0] {
         let to = Vec3::new(at.x, at.y + 2.0 * k, at.z + 1.5 * k);
-        let ask = solidcraft_doc::joints::Reach { occurrence: plate, point: at, to, axis: None, joints: None };
+        let ask = solidcraft_doc::joints::Reach { occurrence: plate, point: at, to, axis: None, joints: None, path: Vec::new() };
         let st = s.model.state();
         let first = solidcraft_doc::joints::reach(&s.doc, &st, &ask).unwrap_or_default();
         // A tenth of the 200 000 placements one solve may spend; the crawl spent all of them.

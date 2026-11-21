@@ -7,7 +7,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<AssemblyMassParams>(), &[]);
+    assert_keys(input_schema_for::<AssemblyMassParams>(), &["every_placement"]);
 }
 
 #[test]
