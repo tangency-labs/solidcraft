@@ -165,6 +165,7 @@ pub mod sketch_dimension;
 pub mod sketch_dimensioned;
 pub mod sketch_divide;
 pub mod sketch_ends;
+pub mod sketch_merge_lines;
 pub mod sketch_equation;
 pub mod sketch_import;
 pub mod sketch_inspect;

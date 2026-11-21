@@ -190,7 +190,7 @@ sketch = [
   "blend", "circle", "circle2", "circle3", "circle_tt",
   "circle_ttt", "conic", "constrainer", "dimension", "ellipse", "equation_curve",
   "extend", "finish", "fit_section", "include",
-  "intersect", "intersection_curve", "iso_curve", "line", "line_mid",
+  "intersect", "intersection_curve", "iso_curve", "line", "line_mid", "merge_lines",
   "offset", "offset_two_sides", "offset_symmetric", "point", "polygon", "polygon_circumscribed", "polygon_edge",
   "project", "project_surface", "rect", "rect3", "rect_center", "rect_edge_center",
   "rect_rounded", "sketch", "sketch_chamfer", "sketch_chamfer_angle", "sketch_chamfer_two_distances",

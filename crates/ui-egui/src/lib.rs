@@ -2875,6 +2875,10 @@ impl SolveApp {
             sketch_palette::toggle_construction(self);
             return;
         }
+        if id == "sketch.merge_lines" {
+            sketch_modify_ui::merge_selected_lines(self);
+            return;
+        }
         dim_view::cancel();
         self.tool = None;
         self.home.open = false;

@@ -26,6 +26,17 @@ Welds and the cut list follow.
 {"command": "frame.member", "params": {"sketch": "Frame", "lines": ["l5", "l6"], "profile_sketch": "45x45 section", "anchor": "bottom_left", "angle": "90 deg"}}
 ```
 
+A run drawn as several lines end to end makes one member per line. To make it one member at its
+full length, select the lines in the sketch and use **Merge Lines** (SKETCH › MODIFY or the
+right-click menu, `sketch.merge_lines`, #20317). The first selected line keeps its id and runs the
+whole length. Its direction relations stay and the pieces' lengths go. A line ending between the
+pieces stays on the merged line. A Frame Member already built on the sketch names the merged line
+in place of the ones that went, and drops their names and corner overrides.
+
+```json
+{"command": "sketch.merge_lines", "params": {"curves": ["l1", "l2", "l3"]}}
+```
+
 Members are ordinary bodies: mirror, pattern, move, drill and combine them with the usual
 commands. Where members meet they overlap unless you choose a corner type (see Corners) or use Trim/Extend.
 
