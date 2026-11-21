@@ -75,6 +75,13 @@ SolidCraft changes to egui and eframe:
   hit test the next pass would start with, run between passes against the last pass's widgets
   (`begin_pass` and it share `prev_pass_hits`); `WidgetHits` is exported for it. Test:
   `widget_hits_at_matches_the_next_pass`.
+- `crates/eframe/src/native/file_storage.rs`, `crates/eframe/src/lib.rs`: `save_to_disk` writes
+  the settings (`app.ron`) to a temporary file beside them, syncs it and renames it over them, so
+  the file always holds one whole save. Two windows saving at once each truncated and wrote the
+  same file, and a shorter save left the tail of a longer one behind it (#4164). A rename the
+  system refuses is tried again for up to 150 ms (Windows refuses while another process has the
+  file open). `lib.rs` re-exports `save_to_disk`, hidden, for SolidCraft's tests
+  (`settings_saved_at_once_from_two_windows_stay_whole` in `apps/solidcraft/src/startup.rs`).
 
 The SolidCraft 3D view uses both to skip frames for pointer motion that changes nothing it
 draws (`viewport::follow_pointer_without_frame` in `crates/ui-egui`).
