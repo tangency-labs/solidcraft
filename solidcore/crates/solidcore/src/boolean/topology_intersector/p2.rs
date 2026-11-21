@@ -1999,7 +1999,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     }
 
     /// Not upstream (#16937): whether two distinct edges `a` and `b` of one operand stand
-    /// at one place: `b` is open, runs between `a`'s two vertices, and lies along `a`
+    /// at one place where the operand pinches to no thickness: neither is lamina (a pinch is
+    /// the body meeting itself, so each edge bounds material on both sides, and a lamina
+    /// edge, a sheet's free border, bounds it on one side only, #17716), `b` is open, runs
+    /// between `a`'s two vertices, and lies along `a`
     /// within the sum of the two edges' tolerances, found as an edge a face already has
     /// along a curve (`SmTools::FindCoincidentEdge` over the edges of each of
     /// `a`'s faces, with `b`'s curve over its interval at `b`'s tolerance), and only where
@@ -2021,6 +2024,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             return Ok(false);
         };
         if start == end {
+            return Ok(false);
+        }
+        // (#17716) coincident sheet borders, or a solid's edge along a sheet's border, are
+        // no pinch: their relation is the Boolean's to make or refuse
+        if brep.edge_is_lamina(a)? || brep.edge_is_lamina(b)? {
             return Ok(false);
         }
         let curve = brep
