@@ -93,7 +93,8 @@ same colour and linetype. Layer names ignore case, as DXF does.
 
 The `pockets` role's `layer` replaces the word `POCKET` at the start of each pocket layer's
 name; the side and depth stay (`MILL_TOP_Z0.000000_TO_1.000000_MM` for `"layer": "MILL"`),
-because the DXF records a pocket's depth nowhere else.
+because the DXF records a pocket's depth nowhere else. A pocket layer whose whole name would be
+over DXF's 255 characters is refused; the depth is never cut short.
 
 ## With the export's other options
 
@@ -106,6 +107,8 @@ because the DXF records a pocket's depth nowhere else.
 - `layers: single` puts every entity on layer 0 and cannot be combined with a profile.
 - `curves`, `note_height` and `per_body` work as without a profile. The entities and their order
   are the same; only their layers change.
+- A flat pattern the export refuses without a profile is refused with one too, even when what
+  is wrong is in a role the profile turns off.
 
 ## What is refused
 

@@ -3373,6 +3373,40 @@ mod tests {
         let file = flat_with_every_role();
         let clash = profile(serde_json::json!({"pockets": {"layer": "M"}, "cut": {"layer": "M_TOP_Z0.000000_TO_1.000000_MM"}})).unwrap();
         assert!(write_dxf_file_as(&file, &clash).unwrap_err().to_string().contains("share a layer"));
+        // What a role that is off holds still counts against the producer's plan: a note one byte
+        // over the 2,048 a bend may have is refused with the notes off, as it is without a profile.
+        let mut heavy = DxfFile::for_flat_pattern_export(0, 1, 0).unwrap();
+        let notes = heavy.declare_layer("BEND_NOTES", 8, DxfLinetype::Continuous, None).unwrap();
+        heavy.push(notes, DxfShape::Text { at: Vec2::ZERO, height: 3.0, angle_deg: 0.0, text: "N".repeat(2049) }, None).unwrap();
+        let no_notes = profile(serde_json::json!({"bend_notes": {"on": false}})).unwrap();
+        let refusals = [write_dxf_file(&heavy), write_dxf_file_as(&heavy, &neutral), write_dxf_file_as(&heavy, &no_notes)];
+        for refusal in refusals {
+            assert!(refusal.unwrap_err().to_string().contains("note text exceeds"));
+        }
+    }
+
+    #[test]
+    fn a_dxf_profile_refuses_a_pocket_layer_name_too_long_for_dxf() {
+        // The producer admits a pocket layer with a long depth: 12 + 60 + 8 characters here.
+        let suffix = format!("_TOP_Z{}_TO_1_MM", "1".repeat(60));
+        let mut file = DxfFile::for_flat_pattern_export(1, 0, 0).unwrap();
+        let pocket = file.declare_layer(&format!("POCKET{suffix}"), 3, DxfLinetype::Continuous, None).unwrap();
+        file.push(pocket, DxfShape::Line(Vec2::ZERO, Vec2::new(10.0, 0.0)), None).unwrap();
+        let named = |length: usize| profile(serde_json::json!({"pockets": {"layer": "M".repeat(length)}})).unwrap();
+        // 181 + 74 is DXF's 255 characters: written whole, the side and depth after the name.
+        let longest = format!("{}{suffix}", "M".repeat(181));
+        let dxf = write_dxf_file_as(&file, &named(181)).unwrap();
+        assert_eq!(layer_rows(&dxf).iter().map(|row| row.0.as_str()).collect::<Vec<_>>(), ["0", longest.as_str()]);
+        // One more is refused, by role and length; the depth is never cut short to fit.
+        let error = write_dxf_file_as(&file, &named(182)).unwrap_err().to_string();
+        assert!(
+            error.starts_with("DXF profile: role `pockets`: layer ") && error.contains("is 256 characters; a DXF layer name holds at most 255"),
+            "{error}"
+        );
+        assert!(write_dxf_file_as(&file, &named(200)).unwrap_err().to_string().contains("is 274 characters"));
+        // With the pockets off the layer is not in the file, so its name is not checked.
+        let off = profile(serde_json::json!({"pockets": {"on": false, "layer": "M".repeat(200)}})).unwrap();
+        assert_eq!(layer_rows(&write_dxf_file_as(&file, &off).unwrap()).len(), 1);
     }
 
     #[test]

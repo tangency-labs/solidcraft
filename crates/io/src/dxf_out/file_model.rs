@@ -29,7 +29,7 @@ mod geometry;
 pub use geometry::DxfGeometryBounds;
 
 const STANDARD_WEIGHTS: [u16; 24] = [0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120, 140, 158, 200, 211];
-const MAX_NAME_CHARS: usize = 255;
+pub(super) const MAX_NAME_CHARS: usize = 255;
 // A resource bound on the RAW input, independent of the format-name length
 // after trimming. It does not change the normalized format-name bound.
 const MAX_RAW_NAME_BYTES: usize = 4096;

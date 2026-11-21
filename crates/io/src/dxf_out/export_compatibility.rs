@@ -236,7 +236,9 @@ pub(super) fn write(file: &DxfFile<DxfShape>, budget: Budget, profile: Option<&D
         Some(profile) => {
             let mut written = Vec::new();
             written.try_reserve_exact(file.layers().len()).map_err(|_| invalid("layer-view allocation failed"))?;
-            written.extend(file.layers().iter().map(|l| profile.written(l.name(), l.color(), l.linetype())));
+            for layer in file.layers() {
+                written.push(profile.written(layer.name(), layer.color(), layer.linetype())?);
+            }
             Some(written)
         }
     };
@@ -251,12 +253,12 @@ pub(super) fn write(file: &DxfFile<DxfShape>, budget: Budget, profile: Option<&D
             return Err(invalid("producer entities do not have weight overrides"));
         }
         budget.shape(layer.name(), entity.geometry())?;
-        if let Some(written) = written
-            && written.get(file.layer_index(entity.layer())?).is_none_or(Option::is_none)
-        {
-            // Its role is off: checked as the producer's, but not written or measured.
-            continue;
-        }
+        // An entity whose role is off is still the producer's: its shape, its work and its text
+        // count against the plan, so a profile never admits a file the plain writer refuses.
+        let off = match written {
+            None => false,
+            Some(written) => written.get(file.layer_index(entity.layer())?).is_none_or(Option::is_none),
+        };
         let count = shape_work(entity.geometry())?;
         values = add(values, count)?;
         if values > budget.values {
@@ -267,6 +269,10 @@ pub(super) fn write(file: &DxfFile<DxfShape>, budget: Budget, profile: Option<&D
             if text_bytes > budget.text_bytes {
                 return Err(invalid("stored note text exceeds the immutable producer plan"));
             }
+        }
+        if off {
+            // Not written, so not measured: the drawing's extents are those of what is in the file.
+            continue;
         }
         samples.clear();
         samples.try_reserve(count).map_err(|_| invalid("extent allocation failed"))?;

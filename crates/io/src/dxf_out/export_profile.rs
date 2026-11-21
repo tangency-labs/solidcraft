@@ -12,6 +12,7 @@ use std::borrow::Cow;
 use serde_json::{Map, Value, json};
 
 use super::DxfLinetype;
+use super::file_model::MAX_NAME_CHARS;
 use crate::{IoError, Result};
 
 /// The `format` of a profile file.
@@ -20,8 +21,8 @@ pub const DXF_PROFILE_FORMAT: &str = "solidcraft-dxf-profile";
 pub const DXF_PROFILE_VERSION: u64 = 1;
 /// A profile file is at most this long.
 pub const MAX_DXF_PROFILE_BYTES: usize = 1 << 20;
-/// A layer name of a profile is at most this long, which leaves room for a pocket layer's side
-/// and depth within DXF's 255 characters.
+/// A layer name of a profile is at most this long, which leaves room for an ordinary pocket
+/// layer's side and depth within DXF's 255 characters; `written` checks each finished name.
 const MAX_LAYER: usize = 200;
 const MAX_NAME: usize = 128;
 const MAX_NOTE: usize = 2000;
@@ -108,6 +109,9 @@ impl DxfRole {
 }
 
 const POCKET: &str = "POCKET";
+
+/// A layer as a profile writes it: its name, colour and linetype.
+pub(super) type WrittenLayer<'a> = (Cow<'a, str>, i16, DxfLinetype);
 
 /// How one role is written.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -314,14 +318,28 @@ impl DxfExportProfile {
 
     /// What a standard layer of a flat pattern is written as: its name, colour and linetype, or
     /// nothing when its role is off. A layer with no role keeps what it has.
-    pub(super) fn written<'a>(&'a self, name: &'a str, color: i16, linetype: DxfLinetype) -> Option<(Cow<'a, str>, i16, DxfLinetype)> {
-        let Some((style, rest)) = DxfRole::of_layer(name).and_then(|(role, rest)| Some((self.role(role)?, rest))) else {
-            return Some((Cow::Borrowed(name), color, linetype));
+    ///
+    /// A pocket layer keeps its side and depth after the profile's name, so the finished name can
+    /// be longer than a DXF layer name may be. It is refused then, never cut short: the depth is
+    /// recorded nowhere else. No other role's name gets anything added.
+    pub(super) fn written<'a>(&'a self, name: &'a str, color: i16, linetype: DxfLinetype) -> Result<Option<WrittenLayer<'a>>> {
+        let Some((role, style, rest)) = DxfRole::of_layer(name).and_then(|(role, rest)| Some((role, self.role(role)?, rest))) else {
+            return Ok(Some((Cow::Borrowed(name), color, linetype)));
         };
         if !style.on {
-            return None;
+            return Ok(None);
         }
-        let name = if rest.is_empty() { Cow::Borrowed(style.layer.as_str()) } else { Cow::Owned(format!("{}{rest}", style.layer)) };
-        Some((name, style.color, style.linetype))
+        if rest.is_empty() {
+            return Ok(Some((Cow::Borrowed(style.layer.as_str()), style.color, style.linetype)));
+        }
+        let length = style.layer.chars().count().saturating_add(rest.chars().count());
+        if length > MAX_NAME_CHARS {
+            return Err(refused(format!(
+                "role `{}`: layer {:?} with its side and depth ({rest}) is {length} characters; a DXF layer name holds at most {MAX_NAME_CHARS}, so give the role a shorter layer name",
+                role.key(),
+                style.layer
+            )));
+        }
+        Ok(Some((Cow::Owned(format!("{}{rest}", style.layer)), style.color, style.linetype)))
     }
 }
