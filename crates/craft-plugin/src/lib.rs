@@ -772,12 +772,15 @@ pub fn parse_manifest_for_version(text: &[u8], folder: &str, app: &str, host_ver
     let value: Value = serde_json::from_slice(text).map_err(|error| invalid("manifest", error.to_string()))?;
     if let Some(minimum) = value.get("min_host_version") {
         let minimum = minimum.as_str().ok_or_else(|| invalid("min_host_version", "must be a semantic version string, e.g. \"1.2.3\""))?;
-        let required = semver::Version::parse(minimum)
-            .map_err(|_| invalid("min_host_version", "must be a complete semantic version, e.g. \"1.2.3\""))?;
+        let required =
+            semver::Version::parse(minimum).map_err(|_| invalid("min_host_version", "must be a complete semantic version, e.g. \"1.2.3\""))?;
         let current = semver::Version::parse(host_version)
             .map_err(|_| invalid("min_host_version", format!("{app} has an invalid host version `{host_version}`")))?;
         if current.cmp_precedence(&required).is_lt() {
-            return Err(invalid("min_host_version", format!("needs {app} {minimum} or newer; this version of {app} is {host_version}; update {app}")));
+            return Err(invalid(
+                "min_host_version",
+                format!("needs {app} {minimum} or newer; this version of {app} is {host_version}; update {app}"),
+            ));
         }
     }
     // A plugin from before capabilities names its API in `runtime.api`: say so plainly.
