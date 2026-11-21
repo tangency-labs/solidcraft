@@ -796,6 +796,101 @@ mod native {
         }
     }
 
+    fn dialog_fixture(code: &str) -> Fixture {
+        let f = Fixture::new("");
+        let mut m = manifest();
+        m["capabilities"] = json!(["commands@0.1", "dialog@0.1"]);
+        m["runtime"]["entries"] = json!([{"name":"make","effect":"read","dialog_hook":true,"input_schema":{
+        "type":"object","required":["width"],"properties":{
+            "width":{"type":"number","minimum":1},
+            "size":{"type":"string","oneOf":[{"const":"small"},{"const":"large"}]}
+        }}}]);
+        m["runtime"]["limits"] = json!({"fuel":10000000,"memory_mib":1,"deadline_ms":250});
+        let reply = r#"{"width":{"default":24},"size":{"choices":["large"]}}"#;
+        let bytes = include_str!("../../../craft-plugin-wasm/src/dialog_fixture.wat")
+            .replace("__PACKAGE__", "craft:plugin")
+            .replace("__VERSION__", "0.2.0")
+            .replace("__HOOK_CODE__", code)
+            .replace("__REPLY_LEN__", &reply.len().to_string())
+            .replace("__REPLY__", &reply.replace('"', "\\22"));
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        std::fs::write(f.0.join("sample/plugin.wasm"), wat::parse_str(bytes).unwrap()).unwrap();
+        f
+    }
+
+    #[test]
+    fn plugin_run_dialog_hook_fills_omissions_preserves_callers_and_rejects_narrowed_choices() {
+        let f = dialog_fixture("");
+        let mut s = Session::default();
+        let approval = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap()["approval"].clone();
+        let args = |params: Value| json!({"path":f.path(),"approval":approval,"entry":"make","params":params});
+        let tools = s.execute("plugin.tools", &json!({"name":"sample.make"})).unwrap();
+        let schema = &tools["tools"][0]["input_schema"];
+        check_input(schema, &json!({})).unwrap();
+        assert!(schema.get("required").is_none(), "MCP accepts omitted keys for hook defaults");
+        assert_eq!(s.execute("sample.make", &json!({"approval":approval,"params":{}})).unwrap()["result"]["width"], 24);
+        assert_eq!(s.execute("plugin.run", &args(json!({}))).unwrap()["result"]["width"], 24);
+        assert_eq!(s.execute("plugin.run", &args(json!({"width":12}))).unwrap()["result"]["width"], 12);
+        let error = s.execute("plugin.run", &args(json!({"size":"small"}))).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::InvalidInput { field, .. }) if field == "params.size"), "{error}");
+        assert!(s.undo.is_empty());
+    }
+
+    #[test]
+    fn plugin_run_dialog_hook_timeout_is_typed_and_never_runs_the_entry() {
+        let f = dialog_fixture("(loop $forever br $forever)");
+        let path = f.0.join("sample/plugin.json");
+        let mut manifest: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        manifest["runtime"]["limits"]["deadline_ms"] = json!(1);
+        std::fs::write(path, manifest.to_string()).unwrap();
+        let mut s = Session::default();
+        let error = f.run(&mut s).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::Exhausted { limit, .. }) if limit == "deadline_ms"), "{error}");
+        assert!(s.undo.is_empty());
+    }
+
+    #[test]
+    fn dialog_hook_reads_only_its_own_user_settings_without_changing_the_callers_authority() {
+        let f = Fixture::new("");
+        let mut m = manifest();
+        m["capabilities"] = json!(["commands@0.2", "dialog@0.1", "user-storage@0.1"]);
+        m["runtime"]["entries"] = json!([{"name":"make","dialog_hook":true,"input_schema":{"type":"object"}}]);
+        let read = "i32.const 512 i32.const 5 i32.const 128 call $get
+            i32.const 128 i32.load if unreachable end
+            i32.const 132 i32.load i32.const 1 i32.ne if unreachable end
+            i32.const 140 i32.load i32.const 2 i32.ne if unreachable end
+            i32.const 136 i32.load i32.load16_u i32.const 12852 i32.ne if unreachable end";
+        let source = include_str!("../../../craft-plugin-wasm/src/user_storage_fixture.wat").replace("__CODE__", read);
+        let (prefix, _) = source.rsplit_once(')').unwrap();
+        let source = format!(
+            r#"{prefix}
+  (func $update (param "entry" string) (param "values" $json) (result (result $json (error $error)))
+    (canon lift (core func $execute-core) (memory $memory) (realloc $realloc)))
+  (instance $dialog (export "json" (type $json)) (export "plugin-error" (type $error)) (export "update-fields" (func $update)))
+  (export "craft:plugin/dialog-provider@0.2.0" (instance $dialog)))"#
+        );
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        std::fs::write(f.0.join("sample/plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+        let mut s = Session::default();
+        let settings = f.0.join("settings");
+        s.plugin_state.user_settings_dir = Some(settings.clone());
+        s.plugin_state.user_storage_caller = Some("other".into());
+        let saved = BTreeMap::from([("hinge".into(), json!(42))]);
+        let other = BTreeMap::from([("hinge".into(), json!(17))]);
+        user_storage::save(&settings, "sample", &saved).unwrap();
+        user_storage::save(&settings, "other", &other).unwrap();
+        let before = s.design_token();
+        let package = read_package(&f.path()).unwrap();
+        let update = update_dialog(&s, &package, "make", &json!({}), &BTreeSet::new(), false).unwrap();
+        assert!(update.warning.is_none(), "{:?}", update.warning);
+        assert_eq!(update.values, json!({}));
+        assert_eq!(s.plugin_state.user_storage_caller.as_deref(), Some("other"));
+        assert_eq!(s.design_token(), before);
+        assert!(s.undo.is_empty());
+        assert_eq!(user_storage::load(&settings, "sample").unwrap(), saved);
+        assert_eq!(user_storage::load(&settings, "other").unwrap(), other);
+    }
+
     #[test]
     fn plugin_run_omits_hidden_keys_and_refuses_unavailable_choices() {
         // Return the JSON argument received by the actual Wasm entry, using its canonical result area.
@@ -1988,6 +2083,30 @@ mod importers {
         }});
         std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
         (s, root)
+    }
+
+    #[test]
+    fn importer_options_without_conditions_validate_before_entering_wasm() {
+        let (mut s, root) = installed("plain-options", &[("smp", &["smp"], false)]);
+        let mut manifest = importer_manifest("smp", &["smp"], false);
+        manifest["runtime"]["entries"][0]["input_schema"] = json!({"type":"object","required":["width"],"properties":{
+            "width":{"type":"number","minimum":1,"maximum":10}
+        }});
+        std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
+        let file = put(&root, "bracket.smp", &design());
+        let mut importer = importer_for(&s, &file, None).unwrap().unwrap();
+        let before = s.doc.to_json();
+        for options in [json!({"width":0}), json!({}), json!({"width":"2"}), json!({"width":11})] {
+            let error = import_file(&mut s, &importer, &file, &options).unwrap_err();
+            assert!(matches!(error.host_error(), Some(HostError::InvalidInput { field, .. }) if field == "params.width"), "{error}");
+            assert_eq!(s.doc.to_json(), before);
+        }
+        assert!(import_file(&mut s, &importer, &file, &json!({"width":2})).is_ok());
+        // A cached catalog schema must not weaken the schema of the package being executed.
+        importer.input_schema = json!({});
+        let error = import_file(&mut s, &importer, &file, &json!({"width":0})).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::InvalidInput { field, .. }) if field == "params.width"), "{error}");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

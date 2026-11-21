@@ -17,8 +17,8 @@
 //!
 //! Run goes through the same `plugin.run` request the control channel sends, with the package's
 //! content hash read when the dialog opened: the computation runs on its worker and comes back as
-//! one undo step. Nothing here runs plugin code in any other way, and programmatic calls never
-//! open this dialog.
+//! one undo step. Optional field hooks use the same engine validation on a read-only command
+//! worker. Programmatic calls never open this dialog.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -95,6 +95,8 @@ pub(crate) struct Field {
     available: Vec<usize>,
     pub(crate) edited: bool,
     controls: Option<Map<String, Value>>,
+    hook: Option<solidcraft_engine::plugin::dialog::FieldPatch>,
+    hook_baseline: Option<Input>,
 }
 
 /// What a field holds, with its schema limits.
@@ -343,6 +345,8 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             available: Vec::new(),
             edited: false,
             controls: None,
+            hook: None,
+            hook_baseline: None,
         },
         input,
     ))
@@ -416,6 +420,8 @@ fn selection_field(key: &str, p: &Map<String, Value>, required: bool) -> Option<
             available: Vec::new(),
             edited: false,
             controls: None,
+            hook: None,
+            hook_baseline: None,
         },
         Input::Selection(Vec::new()),
     ))
@@ -520,7 +526,15 @@ fn default_input(field: &Field, value: &Value) -> Option<Input> {
         Kind::Boolean => value.as_bool().map(Input::Boolean),
         Kind::Text { .. } => value.as_str().map(|s| Input::Text(s.to_owned())),
         Kind::Choice { values, .. } => value.as_str().and_then(|v| values.iter().position(|s| s == v)).map(|i| Input::Choice(Some(i))),
-        _ => None,
+        Kind::Selection { accept, names, .. } => value
+            .as_array()?
+            .iter()
+            .map(|value| {
+                let pick = if *names { Sel::Body { name: value.as_str()?.to_owned() } } else { serde_json::from_value::<Sel>(value.clone()).ok()? };
+                crate::dialogs::fits(*accept, &pick).then_some(pick)
+            })
+            .collect::<Option<Vec<_>>>()
+            .map(Input::Selection),
     }
 }
 
@@ -539,6 +553,7 @@ fn refresh_conditions(fields: &mut [(Field, Input)]) -> bool {
         field.enabled = field.conditions.enabled(&values);
         if !field.edited
             && changed
+            && field.hook.as_ref().is_none_or(|patch| !patch.contains_key("value") && !patch.contains_key("default"))
             && let Some(default) = field.conditions.default_value(&values).and_then(|v| default_input(field, v))
         {
             *input = default;
@@ -553,8 +568,18 @@ fn refresh_conditions(fields: &mut [(Field, Input)]) -> bool {
                 *chosen = default.filter(|i| field.available.contains(i)).or_else(|| field.available.first().copied());
             }
         }
+        let declared_visible = field.visible;
+        if let Some(patch) = &field.hook {
+            field.visible &= patch.get("visible") != Some(&Value::Bool(false));
+            field.enabled &= patch.get("enabled") != Some(&Value::Bool(false));
+            if let Some(choices) = patch.get("choices").and_then(Value::as_array)
+                && let Kind::Choice { values, .. } = &field.kind
+            {
+                field.available.retain(|i| values.get(*i).is_some_and(|v| choices.iter().any(|c| c.as_str() == Some(v))));
+            }
+        }
         field.controls = Some(controls);
-        if field.visible {
+        if declared_visible {
             if let Some(value) = scalar_value(field, input) {
                 values.insert(field.key.clone(), value);
             } else {
@@ -572,7 +597,9 @@ fn refresh_conditions(fields: &mut [(Field, Input)]) -> bool {
 pub(crate) fn params(fields: &[(Field, Input)]) -> Result<Value, Problem> {
     let mut out = Map::new();
     for (field, input) in fields {
-        if !field.visible {
+        let hidden_by_hook = field.hook.as_ref().is_some_and(|p| p.get("visible") == Some(&Value::Bool(false)))
+            && field.controls.as_ref().is_some_and(|c| field.conditions.visible(c));
+        if !field.visible && !hidden_by_hook {
             continue;
         }
         let missing = || Problem::Missing(field.label.clone());
@@ -896,6 +923,7 @@ pub(crate) struct EntryDialog {
     /// The fields, or `None` when the schema needs the agent or the CLI.
     pub(crate) fields: Option<Vec<(Field, Input)>>,
     pub(crate) running: Option<Running>,
+    hook: Option<HookState>,
     pub(crate) error: Option<String>,
     /// A read entry's result, as indented JSON.
     pub(crate) result: Option<String>,
@@ -910,6 +938,171 @@ pub(crate) struct EntryDialog {
     pub(crate) preview: bool,
     /// Its first result has been shown: later previews leave the user's camera alone.
     preview_drawn: bool,
+}
+
+/// One bounded worker per dialog; generations invalidate replies before any field is touched.
+type HookReply = Result<solidcraft_engine::plugin::dialog::Update, String>;
+type PendingHook = (u64, std::sync::mpsc::Receiver<HookReply>);
+
+struct HookState {
+    schema: Value,
+    generation: u64,
+    observed: Vec<Input>,
+    document: Arc<solidcraft_engine::doc::Document>,
+    changed_at: f64,
+    submitted: Option<u64>,
+    pending: Option<PendingHook>,
+    note: bool,
+}
+
+fn hook_values(fields: &[(Field, Input)]) -> Value {
+    let mut values = Map::new();
+    for (field, input) in fields {
+        if let Some(value) = scalar_value(field, input) {
+            values.insert(field.key.clone(), value);
+        } else if matches!(input, Input::Selection(_)) {
+            let mut field = field.clone();
+            field.required = false;
+            if let Ok(value) = params(&[(field, input.clone())])
+                && let Some(object) = value.as_object()
+            {
+                values.extend(object.clone());
+            }
+        }
+    }
+    Value::Object(values)
+}
+
+fn apply_hook_reply(dialog: &mut EntryDialog, generation: u64, update: solidcraft_engine::plugin::dialog::Update) -> bool {
+    let Some(hook) = &mut dialog.hook else { return false };
+    if generation != hook.generation {
+        return false;
+    }
+    let Some(fields) = &mut dialog.fields else { return false };
+    hook.note = update.warning.is_some();
+    hook.submitted = Some(generation);
+    for (field, input) in fields.iter_mut() {
+        if !field.edited
+            && let Some(baseline) = field.hook_baseline.take()
+        {
+            *input = baseline;
+        }
+        field.hook = update.fields.get(&field.key).cloned();
+        field.tip = field
+            .hook
+            .as_ref()
+            .and_then(|f| f.get("hint"))
+            .and_then(Value::as_str)
+            .or_else(|| hook.schema.get("properties")?.get(&field.key)?.get("description")?.as_str())
+            .map(str::to_owned);
+        if !field.edited
+            && field.hook.as_ref().is_some_and(|f| f.contains_key("value") || f.contains_key("default"))
+            && let Some(value) = update.values.get(&field.key).and_then(|v| default_input(field, v))
+        {
+            field.hook_baseline = Some(input.clone());
+            *input = value;
+        }
+    }
+    refresh_conditions(fields);
+    hook.observed = fields.iter().map(|(_, i)| i.clone()).collect();
+    true
+}
+
+/// Polling never waits. The command worker owns package I/O, Wasm compilation and execution.
+fn poll_hooks(app: &mut SolveApp, ctx: &egui::Context) {
+    let now = crate::now_ms();
+    for dialog in &mut app.plugin_menu.dialogs {
+        let Some(hook) = &mut dialog.hook else { continue };
+        let Some(fields) = &mut dialog.fields else { continue };
+        let values: Vec<Input> = fields.iter().map(|(_, i)| i.clone()).collect();
+        let document_changed = dialog.session == app.session.uid && !Arc::ptr_eq(&hook.document, &app.session.doc);
+        if values != hook.observed || document_changed {
+            hook.document = app.session.doc.clone();
+            hook.generation = hook.generation.wrapping_add(1);
+            hook.changed_at = now;
+            hook.observed = values;
+            hook.note = false;
+            for (field, input) in fields.iter_mut() {
+                field.hook = None;
+                field.controls = None;
+                if let Some(baseline) = field.hook_baseline.take()
+                    && !field.edited
+                    && !(document_changed && matches!(&baseline, Input::Selection(_)))
+                {
+                    *input = baseline;
+                }
+                field.tip = hook
+                    .schema
+                    .get("properties")
+                    .and_then(|p| p.get(&field.key))
+                    .and_then(|p| p.get("description"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+            }
+            refresh_conditions(fields);
+            hook.observed = fields.iter().map(|(_, i)| i.clone()).collect();
+        }
+        let completed = hook.pending.as_ref().and_then(|(generation, reply)| match reply.try_recv() {
+            Ok(reply) => Some((*generation, reply)),
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some((*generation, Err(String::new()))),
+        });
+        if let Some((generation, reply)) = completed {
+            hook.pending = None;
+            match reply {
+                Ok(update) => {
+                    if apply_hook_reply(dialog, generation, update) {
+                        dialog.picked_on = dialog.hook.as_ref().map(|hook| hook.document.clone());
+                        if let Some(picker) = app
+                            .dialog
+                            .as_mut()
+                            .filter(|picker| matches!(picker.kind, crate::dialogs::Kind::PluginPick { dialog:id } if id == dialog.id))
+                        {
+                            picker.inputs = dialog.selection_inputs();
+                        }
+                    }
+                }
+                Err(_) => {
+                    if let Some(hook) = &mut dialog.hook
+                        && generation == hook.generation
+                    {
+                        hook.note = true;
+                    }
+                }
+            }
+        }
+        let Some(hook) = &mut dialog.hook else { continue };
+        if hook.pending.is_some() || hook.submitted == Some(hook.generation) {
+            continue;
+        }
+        ctx.request_repaint_after(std::time::Duration::from_millis(25));
+        if now - hook.changed_at < 120.0 || dialog.session != app.session.uid {
+            continue;
+        }
+        let Some(fields) = &dialog.fields else { continue };
+        let protected = fields.iter().filter(|(f, _)| f.edited).map(|(f, _)| f.key.clone()).collect();
+        let values = hook_values(fields);
+        let session = app.session.scratch();
+        let plugin = dialog.plugin.clone();
+        let entry = dialog.entry.clone();
+        let generation = hook.generation;
+        hook.submitted = Some(generation);
+        hook.pending = crate::control_job::spawn(None, Default::default(), move || {
+            let result = (|| {
+                let package =
+                    solidcraft_engine::plugin::with_installed(&session, &plugin.path, || solidcraft_engine::plugin::read_package(&plugin.path))?;
+                if package.approval != plugin.approval {
+                    return Err(solidcraft_engine::EngineError::Other("plugin approval changed".into()));
+                }
+                solidcraft_engine::plugin::update_dialog(&session, &package, &entry, &values, &protected, false)
+            })();
+            result.map_err(|e| e.to_string())
+        })
+        .map(|reply| (generation, reply));
+        if hook.pending.is_none() {
+            hook.note = true;
+        }
+    }
 }
 
 /// A run waiting for its reply.
@@ -944,6 +1137,16 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         picks.extend(app.session.selection.iter().filter(|s| crate::dialogs::fits(*accept, s)).take(max.unwrap_or(usize::MAX)).cloned());
         prefilled = !picks.is_empty();
     }
+    let hook = entry.dialog_hook.then(|| HookState {
+        schema: entry.input_schema.clone(),
+        generation: 0,
+        observed: fields.iter().flatten().map(|(_, i)| i.clone()).collect(),
+        document: app.session.doc.clone(),
+        changed_at: crate::now_ms() - 120.0,
+        submitted: None,
+        pending: None,
+        note: false,
+    });
     app.plugin_menu.dialogs.push(EntryDialog {
         id,
         label: command_title(&plugin, entry),
@@ -954,6 +1157,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
         plugin,
         session: app.session.uid,
         running: None,
+        hook,
         error: None,
         result: None,
         opens,
@@ -1006,9 +1210,14 @@ fn selection_input(field: &Field, picks: &[Sel]) -> SelInput {
 /// design `doc`.
 fn take_picks(dialog: &mut EntryDialog, picker: &crate::dialogs::Dialog, doc: &Arc<solidcraft_engine::doc::Document>) {
     let mut changed = false;
-    for (input, picks) in picker.inputs.iter().zip(dialog.selection_picks_mut()) {
+    let selections = dialog.fields.iter_mut().flatten().filter_map(|(field, input)| match input {
+        Input::Selection(picks) => Some((field, picks)),
+        _ => None,
+    });
+    for (input, (field, picks)) in picker.inputs.iter().zip(selections) {
         if *picks != input.items {
             picks.clone_from(&input.items);
+            field.edited = true;
             changed = true;
         }
     }
@@ -1333,6 +1542,7 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
 pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     poll(app);
     sync_picks(app);
+    poll_hooks(app, ctx);
     for mut dialog in std::mem::take(&mut app.plugin_menu.dialogs) {
         let id = dialog.id;
         let (stays, run_it, claim) = show_dialog(app, ctx, &mut dialog);
@@ -1376,7 +1586,7 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     }
     let ready = dialog.ready(app);
     let running = dialog.running.is_some();
-    if running {
+    if running || dialog.hook.as_ref().is_some_and(|h| h.pending.is_some()) {
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
     // Just the command's own title ("Gears"): no plugin or menu name after it.
@@ -1513,6 +1723,13 @@ fn body(
             ui_kit::status_line(ui, &solidcraft_ui_text::format("ui.plugin_dialog_preview_failed", &[("error", error)]), ui_kit::StatusTone::Dim);
         }
     }
+    if let Some(hook) = &dialog.hook {
+        if hook.note {
+            ui_kit::status_line(ui, app.tr("ui.plugin_hook_unavailable"), ui_kit::StatusTone::Dim);
+        } else if hook.pending.is_some() {
+            ui_kit::status_line(ui, app.tr("ui.plugin_hook_waiting"), ui_kit::StatusTone::Dim);
+        }
+    }
     if dialog.picks_cleared {
         ui_kit::status_line(ui, app.tr("ui.plugin_dialog_picks_cleared"), ui_kit::StatusTone::Warning);
     }
@@ -1602,7 +1819,7 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
         (Kind::Choice { titles, .. }, Input::Choice(chosen)) => {
             // Until something is chosen the dropdown leads with "Choose…", which is not a value.
             let choose = app.tr("ui.plugin_dialog_choose").to_owned();
-            let lead = chosen.is_none();
+            let lead = chosen.is_none_or(|index| !field.available.contains(&index));
             let shown: Vec<&str> = lead
                 .then_some(choose.as_str())
                 .into_iter()
@@ -1633,6 +1850,7 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
             if tiles.iter().any(Option::is_some) {
                 let titles: Vec<String> = field.available.iter().filter_map(|i| titles.get(*i).cloned()).collect();
                 let mut selected = chosen.and_then(|i| field.available.iter().position(|v| *v == i));
+                let before_selected = selected;
                 let response = ui_kit::row(ui, &label, |ui| {
                     ui_kit::swatch_picker(
                         ui,
@@ -1641,9 +1859,12 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
                         ui_kit::SwatchPicker { titles: &titles, textures: &tiles, choose: &choose, search_hint: app.tr("ui.plugin_swatch_search") },
                     )
                 });
-                *chosen = selected.and_then(|i| field.available.get(i).copied());
+                if selected != before_selected {
+                    *chosen = selected.and_then(|i| field.available.get(i).copied());
+                }
                 response
             } else {
+                let before_index = index;
                 let response = match pictures {
                     Some(pictures) => {
                         // "Choose…" has the generic plugin icon.
@@ -1653,7 +1874,9 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
                     }
                     None => ui_kit::row(ui, &label, |ui| ui_kit::dropdown(ui, &id, &mut index, &shown)),
                 };
-                *chosen = (if lead { index.checked_sub(1) } else { Some(index) }).and_then(|i| field.available.get(i).copied());
+                if index != before_index {
+                    *chosen = (if lead { index.checked_sub(1) } else { Some(index) }).and_then(|i| field.available.get(i).copied());
+                }
                 response
             }
         }

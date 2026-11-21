@@ -623,6 +623,11 @@ impl<'t> Assembly<'t> {
     /// uses each on its side), making a body of `kind`.
     pub fn finish(mut self, item: u64, name: String, shells: Vec<Vec<(u32, bool)>>, kind: Kind) -> R<Solid> {
         let mut notes = Vec::new();
+        let mut shells = shells;
+        let hairpins = self.drop_hairpin_faces(&mut shells)?;
+        if hairpins > 0 {
+            notes.push(format!("{hairpins} walls no wider than {} mm left out (an outline running out and back along itself)", self.tol));
+        }
         let twins = self.merge_twin_edges()?;
         if twins > 0 {
             notes.push(format!("{twins} edges the file writes twice (two edges on the same vertices and one curve, each used by one face) made one"));
@@ -1076,6 +1081,135 @@ impl<'t> Assembly<'t> {
         solidcore_ops::record_check::validate(&brep).map_err(|e| format!("the record is invalid: {e}"))?;
         solidcore_ops::record_check::agreement(&brep).map_err(|e| format!("the record's geometry disagrees: {e}"))?;
         Ok(Solid { item, name, product: None, brep, face_origin, sheet, notes, turned: turned_faces })
+    }
+
+    /// Leaves out each face that is no wider than the tolerance: one loop whose two open edges
+    /// are the same curve record over the same interval between the same two vertices (its two
+    /// sides one line), its other edges closed edges whose curves stay within the tolerance of
+    /// their vertex. Such a face is a wall an outline makes where it runs out and back along
+    /// itself (a hairpin some exporters write, tangency-labs/solidcore#3292's [T-24]); kept, its
+    /// two sides are coincident edges of one face (`SmFace` tests #33 and #34) and the body
+    /// fails the check before any operation. Left out, its closed edges (points at the
+    /// tolerance) drop out of the faces beside it (a face they alone bound, the wall's cap, goes
+    /// too), and its two sides, each now used by one face, are one edge
+    /// ([`Self::merge_twin_edges`]). Faces are renumbered in `shells`. Returns how many walls were
+    /// left out.
+    ///
+    /// [T-24]: https://tickets.solidcraft.io/t/24
+    fn drop_hairpin_faces(&mut self, shells: &mut [Vec<(u32, bool)>]) -> R<usize> {
+        let mut gone: Vec<usize> = Vec::new();
+        let mut points: HashSet<u32> = HashSet::new();
+        for (fi, face) in self.faces.iter().enumerate() {
+            let [Bound::Edges(es)] = face.loops.as_slice() else { continue };
+            let (mut open, mut closed): (Vec<u32>, Vec<u32>) = (Vec::new(), Vec::new());
+            for &(e, _) in es {
+                let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                let [a, b] = edge.vertices;
+                if a == b { closed.push(e) } else { open.push(e) }
+            }
+            let [x, y] = open.as_slice() else { continue };
+            let (ex, ey) = (self.edges.get(*x as usize).ok_or("edge reference")?, self.edges.get(*y as usize).ok_or("edge reference")?);
+            let same_ends = {
+                let ([a, b], [c, d]) = (ex.vertices, ey.vertices);
+                (a == c && b == d) || (a == d && b == c)
+            };
+            if x == y || !same_ends || ex.curve != ey.curve || ex.interval != ey.interval {
+                continue;
+            }
+            let mut narrow = true;
+            for &e in &closed {
+                let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                let at = v3(self.point(edge.vertices[0])?);
+                let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+                let [lo, hi] = edge.interval;
+                for k in 0..=32 {
+                    let p = c.point(lo + (hi - lo) * f64::from(k) / 32.0).ok_or("edge point")?;
+                    if !(p.dist(at) <= self.tol) {
+                        narrow = false;
+                    }
+                }
+            }
+            if narrow {
+                gone.push(fi);
+                points.extend(closed);
+            }
+        }
+        if gone.is_empty() {
+            return Ok(0);
+        }
+        let walls = gone.len();
+        // A face bounded by those closed edges alone (the wall's cap, inside the outline's
+        // excursion) is no wider than the tolerance either: it goes too.
+        for (fi, face) in self.faces.iter().enumerate() {
+            let edge_loops: Vec<&Vec<(u32, bool)>> = face
+                .loops
+                .iter()
+                .filter_map(|l| match l {
+                    Bound::Edges(es) => Some(es),
+                    Bound::Vertex(_) => None,
+                })
+                .collect();
+            if !gone.contains(&fi) && !edge_loops.is_empty() && edge_loops.iter().all(|es| es.iter().all(|(e, _)| points.contains(e))) {
+                gone.push(fi);
+            }
+        }
+        // The closed edges out of every other loop. A hole of nothing else (the outline's
+        // excursion seen from the face it runs into) goes with them; an outer loop of nothing
+        // else keeps its face whole.
+        for (fi, face) in self.faces.iter_mut().enumerate() {
+            if gone.contains(&fi) {
+                continue;
+            }
+            let outer = face.outer.unwrap_or(0);
+            let mut kept = Vec::new();
+            let mut new_outer = None;
+            for (k, mut l) in std::mem::take(&mut face.loops).into_iter().enumerate() {
+                if let Bound::Edges(es) = &mut l {
+                    if es.iter().all(|(e, _)| points.contains(e)) {
+                        if k != outer {
+                            continue;
+                        }
+                    } else {
+                        es.retain(|(e, _)| !points.contains(e));
+                    }
+                }
+                if k == outer && face.outer.is_some() {
+                    new_outer = Some(kept.len());
+                }
+                kept.push(l);
+            }
+            face.loops = kept;
+            if face.outer.is_some() {
+                face.outer = new_outer;
+            }
+        }
+        // The faces out, the rest renumbered in the shells.
+        let mut new_index: Vec<Option<u32>> = Vec::new();
+        let mut next = 0u32;
+        for fi in 0..self.faces.len() {
+            if gone.contains(&fi) {
+                new_index.push(None);
+            } else {
+                new_index.push(Some(next));
+                next += 1;
+            }
+        }
+        let mut k = 0usize;
+        self.faces.retain(|_| {
+            let keep = !gone.contains(&k);
+            k += 1;
+            keep
+        });
+        for shell in shells.iter_mut() {
+            shell.retain_mut(|(f, _)| match new_index.get(*f as usize).copied().flatten() {
+                Some(n) => {
+                    *f = n;
+                    true
+                }
+                None => false,
+            });
+        }
+        Ok(walls)
     }
 
     /// Edges the file writes twice: two EDGE_CURVEs on the same two vertices and the same curve

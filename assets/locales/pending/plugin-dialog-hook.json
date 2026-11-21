@@ -1,0 +1,46 @@
+{
+  "ar": {
+    "ui.plugin_hook_unavailable": "تحديث حقول الإضافة غير متاح. تُستخدم الحقول المعلنة.",
+    "ui.plugin_hook_waiting": "جارٍ تحديث حقول الإضافة…"
+  },
+  "de": {
+    "ui.plugin_hook_unavailable": "Plugin-Felder können nicht aktualisiert werden. Die deklarierten Felder werden verwendet.",
+    "ui.plugin_hook_waiting": "Plugin-Felder werden aktualisiert…"
+  },
+  "en": {
+    "ui.plugin_hook_unavailable": "Plugin field update unavailable. Using the declared fields.",
+    "ui.plugin_hook_waiting": "Updating plugin fields…"
+  },
+  "eu": {
+    "ui.plugin_hook_unavailable": "Ezin dira pluginaren eremuak eguneratu. Adierazitako eremuak erabiltzen dira.",
+    "ui.plugin_hook_waiting": "Pluginaren eremuak eguneratzen…"
+  },
+  "he": {
+    "ui.plugin_hook_unavailable": "עדכון שדות התוסף אינו זמין. נעשה שימוש בשדות המוצהרים.",
+    "ui.plugin_hook_waiting": "מעדכן את שדות התוסף…"
+  },
+  "ja": {
+    "ui.plugin_hook_unavailable": "プラグインの項目を更新できません。宣言された項目を使用します。",
+    "ui.plugin_hook_waiting": "プラグインの項目を更新中…"
+  },
+  "ko": {
+    "ui.plugin_hook_unavailable": "플러그인 필드를 업데이트할 수 없습니다. 선언된 필드를 사용합니다.",
+    "ui.plugin_hook_waiting": "플러그인 필드 업데이트 중…"
+  },
+  "pt-BR": {
+    "ui.plugin_hook_unavailable": "Não foi possível atualizar os campos do plugin. Usando os campos declarados.",
+    "ui.plugin_hook_waiting": "Atualizando os campos do plugin…"
+  },
+  "tr": {
+    "ui.plugin_hook_unavailable": "Eklenti alanları güncellenemiyor. Tanımlanan alanlar kullanılıyor.",
+    "ui.plugin_hook_waiting": "Eklenti alanları güncelleniyor…"
+  },
+  "vi": {
+    "ui.plugin_hook_unavailable": "Không thể cập nhật các trường của phần bổ trợ. Đang dùng các trường đã khai báo.",
+    "ui.plugin_hook_waiting": "Đang cập nhật các trường của phần bổ trợ…"
+  },
+  "zh": {
+    "ui.plugin_hook_unavailable": "无法更新插件字段。使用已声明的字段。",
+    "ui.plugin_hook_waiting": "正在更新插件字段…"
+  }
+}
