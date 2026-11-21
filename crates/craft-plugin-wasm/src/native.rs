@@ -87,7 +87,7 @@ fn start_prefix_read<T: Send + 'static>(
     read: impl FnOnce() -> Result<T> + Send + 'static,
 ) -> Result<mpsc::Receiver<Result<T>>> {
     reads
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| (n < MAX_PREFIX_READS).then_some(n + 1))
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |n| (n < MAX_PREFIX_READS).then_some(n + 1))
         .map_err(|_| limit("outstanding dialog prefix reads"))?;
     let permit = PrefixPermit(reads);
     let (send, reply) = mpsc::channel();
