@@ -1452,7 +1452,7 @@ mod tests {
         use crate::lineage::Operand;
         let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(4., 2., 1.)).unwrap();
         let source = ModelBody::new("Box".into(), body.clone(), 1);
-        let before = Arc::new(ModelState { bodies: vec![source.clone()], ..ModelState::default() });
+        let before = Arc::new(ModelState::default().with_bodies(vec![source.clone()]));
         let feature: Feature = serde_json::from_value(serde_json::json!({
             "id": 2, "name": "Move", "type": "move", "bodies": ["Box"], "translate": ["0 mm", "0 mm", "0 mm"]
         }))
