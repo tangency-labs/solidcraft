@@ -38,7 +38,7 @@ mod resources;
 mod shots;
 mod staging;
 mod studio_presets;
-mod surface_bindings;
+pub(super) mod surface_bindings;
 mod surface_resources;
 mod textures;
 mod transmission;
