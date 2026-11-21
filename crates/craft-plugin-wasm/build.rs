@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let namespace = namespace.replace('-', "_");
     let name = name.replace('-', "_");
     let output = format!(
-        "use bindings::{namespace}::{name}::{{clock, commands, control, design_state, files, forms, log, types::{{self, PluginError}}}};\n\
+        "use bindings::{namespace}::{name}::{{clock, commands, control, design_state, files, forms, log, user_storage, types::{{self, PluginError}}}};\n\
          macro_rules! call_entry {{ ($guest:expr, $store:expr, $entry:expr, $params:expr) => {{ $guest.{namespace}_{name}_entry().call_execute($store, $entry, $params) }}; }}\n"
     );
     fs::write(PathBuf::from(env::var("OUT_DIR")?).join("aliases.rs"), output)?;
@@ -35,6 +35,25 @@ fn main() -> Result<(), Box<dyn Error>> {
          macro_rules! call_import {{ ($guest:expr, $store:expr, $entry:expr, $file:expr, $options:expr) => {{ $guest.{namespace}_{name}_importer().call_import_file($store, $entry, $file, $options) }}; }}\n"
     );
     fs::write(PathBuf::from(env::var("OUT_DIR")?).join("importer.rs"), importer)?;
+    let importer_storage = format!(
+        "mod importer_storage_bindings {{\n\
+             wasmtime::component::bindgen!({{\n\
+                 path: \"../craft-plugin/wit\",\n\
+                 world: \"importer-plugin-with-storage\",\n\
+                 with: {{\n\
+                     \"{package_name}/types\": super::bindings::{namespace}::{name}::types,\n\
+                     \"{package_name}/log\": super::bindings::{namespace}::{name}::log,\n\
+                     \"{package_name}/control\": super::bindings::{namespace}::{name}::control,\n\
+                     \"{package_name}/clock\": super::bindings::{namespace}::{name}::clock,\n\
+                     \"{package_name}/source\": super::importer_bindings::{namespace}::{name}::source,\n\
+                     \"{package_name}/design\": super::importer_bindings::{namespace}::{name}::design,\n\
+                     \"{package_name}/evaluate\": super::importer_bindings::{namespace}::{name}::evaluate,\n\
+                     \"{package_name}/user-storage\": super::bindings::{namespace}::{name}::user_storage,\n\
+                 }},\n\
+             }});\n\
+         }}\n"
+    );
+    fs::write(PathBuf::from(env::var("OUT_DIR")?).join("importer_storage.rs"), importer_storage)?;
     let dialog = format!(
         "mod importer_dialog_bindings {{\n\
              wasmtime::component::bindgen!({{\n\

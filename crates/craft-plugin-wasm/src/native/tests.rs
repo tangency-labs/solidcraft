@@ -6,6 +6,9 @@ use std::collections::BTreeSet;
 
 #[derive(Default)]
 struct App {
+    user_data: BTreeMap<String, Value>,
+    saved_user_data: Option<BTreeMap<String, Value>>,
+    cancel_after_set: bool,
     value: usize,
     saved: Option<usize>,
     begins: usize,
@@ -31,6 +34,23 @@ impl PluginHost for App {
         self.forms.push((entry.into(), params.clone()));
         Ok(())
     }
+    fn user_storage_get(&mut self, key: &str) -> Result<Option<Value>> {
+        Ok(self.user_data.get(key).cloned())
+    }
+    fn user_storage_set(&mut self, key: &str, value: &Value) -> Result<()> {
+        let mut data = self.user_data.clone();
+        data.insert(key.into(), value.clone());
+        craft_plugin::check_user_storage(&data)?;
+        self.user_data = data;
+        self.cancelled |= self.cancel_after_set;
+        Ok(())
+    }
+    fn user_storage_remove(&mut self, key: &str) -> Result<bool> {
+        Ok(self.user_data.remove(key).is_some())
+    }
+    fn user_storage_list(&mut self) -> Result<Vec<String>> {
+        Ok(self.user_data.keys().cloned().collect())
+    }
     fn design_token(&self) -> Result<Option<craft_plugin::DesignToken>> {
         Ok((!self.no_design)
             .then(|| craft_plugin::DesignToken { document_id: "design-one".into(), revision: "0123456789abcdef0123456789abcdef:7".into() }))
@@ -50,6 +70,7 @@ impl PluginHost for App {
     }
     fn begin_transaction(&mut self) -> Result<()> {
         self.saved = Some(self.value);
+        self.saved_user_data = Some(self.user_data.clone());
         self.begins += 1;
         Ok(())
     }
@@ -61,11 +82,13 @@ impl PluginHost for App {
             return Err(trap("commit refused"));
         }
         self.saved = None;
+        self.saved_user_data = None;
         self.commits += 1;
         Ok(())
     }
     fn rollback_transaction(&mut self) -> Result<()> {
         self.value = self.saved.take().unwrap();
+        self.user_data = self.saved_user_data.take().unwrap();
         self.rollbacks += 1;
         self.forms.clear();
         Ok(())
@@ -331,6 +354,65 @@ fn hook_manifest() -> Manifest {
     m.capabilities.push("dialog@0.1".into());
     m.runtime.as_mut().unwrap().entries[0].dialog_hook = true;
     m
+}
+
+fn storage_hook_component(importer: bool, code: &str) -> Vec<u8> {
+    let template = if importer { include_str!("../importer_storage_fixture.wat") } else { include_str!("../user_storage_fixture.wat") };
+    let hook = format!(
+        r#"    (data (i32.const 4096) "{{}}")
+    (func (export "update-fields") (param i32 i32 i32 i32) (result i32)
+      {code}
+      i32.const 0 i32.const 0 i32.store
+      i32.const 4 i32.const 4096 i32.store
+      i32.const 8 i32.const 2 i32.store
+      i32.const 0)
+    (func (export "execute")"#
+    );
+    let source = template.replace("__CODE__", "").replace("    (func (export \"execute\")", &hook);
+    let (prefix, _) = source.rsplit_once(')').unwrap();
+    wat::parse_str(format!(
+        r#"{prefix}
+  (alias core export $main "update-fields" (core func $update-core))
+  (func $update (param "entry" string) (param "values" $json) (result (result $json (error $error)))
+    (canon lift (core func $update-core) (memory $memory) (realloc $realloc)))
+  (instance $dialog (export "json" (type $json)) (export "plugin-error" (type $error)) (export "update-fields" (func $update)))
+  (export "craft:plugin/dialog-provider@0.2.0" (instance $dialog)))"#
+    ))
+    .unwrap()
+}
+
+#[test]
+fn command_and_importer_dialog_hooks_read_user_settings_but_cannot_set_or_remove_them() {
+    let read = "i32.const 512 i32.const 5 i32.const 128 call $get
+        i32.const 128 i32.load if unreachable end
+        i32.const 132 i32.load i32.const 1 i32.ne if unreachable end
+        i32.const 140 i32.load i32.const 2 i32.ne if unreachable end
+        i32.const 136 i32.load i32.load16_u i32.const 12852 i32.ne if unreachable end";
+    for importer in [false, true] {
+        let mut manifest = if importer { storage_importer_manifest() } else { user_storage_manifest() };
+        manifest.capabilities.push("dialog@0.1".into());
+        manifest.runtime.as_mut().unwrap().entries[0].dialog_hook = true;
+        let entry = if importer { "convert" } else { "make" };
+        for (code, writing) in [
+            (read, None),
+            (USER_SET, Some("user-storage.set")),
+            ("i32.const 512 i32.const 5 i32.const 128 call $remove", Some("user-storage.remove")),
+        ] {
+            let bytes = storage_hook_component(importer, code);
+            crate::check_component(&manifest, &bytes).unwrap();
+            let saved = BTreeMap::from([("hinge".into(), json!(42))]);
+            let app = App { user_data: saved.clone(), ..Default::default() };
+            let (app, result) = crate::dialog_fields(app, &manifest, &bytes, entry, &json!({}), craft_plugin::HostLimits::default());
+            if let Some(import) = writing {
+                assert_eq!(result.unwrap_err(), craft_plugin::read_entry_refusal(import));
+                assert_eq!((app.begins, app.commits, app.rollbacks), (1, 0, 1));
+            } else {
+                assert_eq!(result.unwrap(), "{}");
+                assert_eq!((app.begins, app.commits, app.rollbacks), (1, 1, 0));
+            }
+            assert_eq!(app.user_data, saved);
+        }
+    }
 }
 
 #[test]
@@ -754,6 +836,7 @@ fn state<H: PluginHost>(app: H) -> State<H> {
         groups: BTreeSet::new(),
         granted_capabilities: Vec::new(),
         effect: Effect::Edit,
+        user_storage: false,
         design_tokens: false,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
@@ -1294,6 +1377,14 @@ fn importer_component_for(version: &str) -> Vec<u8> {
     let source = if version == "0.1.0" { source.replace(r#" (case "unsupported" string)"#, "") } else { source };
     wat::parse_str(source).unwrap()
 }
+fn storage_importer_manifest() -> Manifest {
+    let mut manifest = importer_manifest(false);
+    manifest.capabilities.push("user-storage@0.1".into());
+    manifest
+}
+fn storage_importer_component(code: &str) -> Vec<u8> {
+    wat::parse_str(include_str!("../importer_storage_fixture.wat").replace("__CODE__", code)).unwrap()
+}
 fn import(manifest: &Manifest, path: PathBuf, input_folder: bool) -> Result<crate::Imported> {
     import_with(&importer_component(), manifest, path, input_folder)
 }
@@ -1356,6 +1447,135 @@ fn an_importer_streams_its_file_into_a_design_and_returns_its_loss_report() {
     assert!(matches!(run(&mut app, &importer_manifest(false), &importer_component(), "convert", &json!({})), Err(HostError::InvalidInput { .. })));
     std::fs::remove_dir_all(root).unwrap();
 }
+#[test]
+fn storage_importers_read_previous_successful_imports_and_leave_commit_to_acceptance() {
+    let root = import_folder(&[("bracket.smp", b"design bytes")]);
+    let request = crate::ImportRequest { path: root.join("bracket.smp"), input_folder: false };
+    let manifest = storage_importer_manifest();
+    let component = storage_importer_component(USER_SET);
+    crate::check_component(&manifest, &component).unwrap();
+    let (mut app, imported) = crate::run_import(App::default(), &manifest, &component, "convert", &json!({}), &request);
+    assert_eq!(imported.unwrap().design, b"design bytes");
+    assert_eq!((app.begins, app.commits, app.rollbacks), (1, 0, 0));
+    assert!(app.saved_user_data.as_ref().unwrap().is_empty(), "preferences are pending until acceptance");
+    app.commit_transaction().unwrap();
+    let read = "i32.const 512 i32.const 5 i32.const 128 call $get
+        i32.const 128 i32.load if unreachable end
+        i32.const 132 i32.load i32.const 1 i32.ne if unreachable end
+        i32.const 140 i32.load i32.const 2 i32.ne if unreachable end
+        i32.const 136 i32.load i32.load16_u i32.const 12852 i32.ne if unreachable end
+        i32.const 128 call $list
+        i32.const 128 i32.load if unreachable end
+        i32.const 136 i32.load i32.const 1 i32.ne if unreachable end
+        i32.const 132 i32.load i32.load offset=4 i32.const 5 i32.ne if unreachable end";
+    let (mut app, imported) = crate::run_import(app, &manifest, &storage_importer_component(read), "convert", &json!({}), &request);
+    imported.unwrap();
+    app.commit_transaction().unwrap();
+    let remove = "i32.const 512 i32.const 5 i32.const 128 call $remove
+        i32.const 128 i32.load if unreachable end
+        i32.const 132 i32.load i32.eqz if unreachable end";
+    let (mut app, imported) = crate::run_import(app, &manifest, &storage_importer_component(remove), "convert", &json!({}), &request);
+    imported.unwrap();
+    assert!(app.user_data.is_empty());
+    // A declined design restores the preferences even though guest execution succeeded.
+    app.rollback_transaction().unwrap();
+    assert_eq!(app.user_data["hinge"], json!(42));
+    assert_eq!((app.begins, app.commits, app.rollbacks), (3, 2, 1));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn storage_importers_rollback_traps_guest_errors_invalid_reports_empty_designs_and_cancellation() {
+    let root = import_folder(&[("bracket.smp", b"design bytes"), ("empty.smp", b"")]);
+    let manifest = storage_importer_manifest();
+    for (file, tail, cancel) in [
+        ("bracket.smp", "unreachable", false),
+        ("bracket.smp", "i32.const 0 i32.const 1 i32.store i32.const 4 i32.const 6 i32.store i32.const 0 return", false),
+        ("bracket.smp", "i32.const 1024 i32.const 120 i32.store8", false),
+        ("empty.smp", "", false),
+        ("bracket.smp", "", true),
+    ] {
+        let request = crate::ImportRequest { path: root.join(file), input_folder: false };
+        let app = App { user_data: BTreeMap::from([("previous".into(), json!(true))]), cancel_after_set: cancel, ..Default::default() };
+        let component = storage_importer_component(&format!("{USER_SET} {tail}"));
+        let (app, outcome) = crate::run_import(app, &manifest, &component, "convert", &json!({}), &request);
+        assert!(outcome.is_err(), "{file}, {tail}, cancel={cancel}");
+        assert_eq!(app.user_data, BTreeMap::from([("previous".into(), json!(true))]));
+        assert_eq!((app.begins, app.commits, app.rollbacks), (1, 0, 1));
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn storage_importers_require_capability_for_every_storage_call() {
+    let root = import_folder(&[("bracket.smp", b"design bytes")]);
+    let request = crate::ImportRequest { path: root.join("bracket.smp"), input_folder: false };
+    for code in [
+        USER_SET,
+        "i32.const 512 i32.const 5 i32.const 128 call $get",
+        "i32.const 512 i32.const 5 i32.const 128 call $remove",
+        "i32.const 128 call $list",
+    ] {
+        let (app, outcome) =
+            crate::run_import(App::default(), &importer_manifest(false), &storage_importer_component(code), "convert", &json!({}), &request);
+        assert_eq!(outcome.unwrap_err(), HostError::PermissionDenied { permission: "user-storage@0.1 is not requested".into() });
+        assert!(app.user_data.is_empty());
+        assert_eq!((app.begins, app.commits, app.rollbacks), (0, 0, 0));
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn storage_importers_share_key_json_and_total_storage_limits() {
+    let root = import_folder(&[("bracket.smp", b"design bytes")]);
+    let request = crate::ImportRequest { path: root.join("bracket.smp"), input_folder: false };
+    let manifest = storage_importer_manifest();
+    for (code, field) in [
+        ("i32.const 512 i32.const 0 i32.const 128 call $get", "user-storage.key"),
+        ("i32.const 512 i32.const 129 i32.const 128 call $get", "user-storage.key"),
+        ("i32.const 512 i32.const 5 i32.const 512 i32.const 5 i32.const 128 call $set", "user-storage.value"),
+    ] {
+        let (app, outcome) = crate::run_import(App::default(), &manifest, &storage_importer_component(code), "convert", &json!({}), &request);
+        assert!(matches!(outcome, Err(HostError::InvalidInput { field: actual, .. }) if actual == field));
+        assert!(app.user_data.is_empty());
+        assert_eq!((app.begins, app.commits, app.rollbacks), (1, 0, 1));
+    }
+    let oversized_input = "i32.const 20 memory.grow i32.const -1 i32.eq if unreachable end
+        i32.const 2050 i32.const 32 i32.const 1048575 memory.fill
+        i32.const 512 i32.const 5 i32.const 2048 i32.const 1048577 i32.const 128 call $set";
+    let (app, outcome) = crate::run_import(App::default(), &manifest, &storage_importer_component(oversized_input), "convert", &json!({}), &request);
+    assert_eq!(outcome.unwrap_err(), HostError::LimitExceeded { limit: "user-storage JSON input bytes (1048576)".into() });
+    assert!(app.user_data.is_empty());
+    assert_eq!((app.begins, app.commits, app.rollbacks), (1, 0, 1));
+    for (data, limit) in [
+        ((0..craft_plugin::MAX_USER_STORAGE_KEYS).map(|i| (format!("k{i}"), json!(null))).collect(), "user-storage keys (128)"),
+        (BTreeMap::from([("large".into(), json!("x".repeat(craft_plugin::MAX_USER_STORAGE_BYTES - 14)))]), "user-storage total bytes (65536)"),
+    ] {
+        let app = App { user_data: data, ..Default::default() };
+        let original = app.user_data.clone();
+        let (app, outcome) = crate::run_import(app, &manifest, &storage_importer_component(USER_SET), "convert", &json!({}), &request);
+        assert_eq!(outcome.unwrap_err(), HostError::LimitExceeded { limit: limit.into() });
+        assert_eq!(app.user_data, original);
+        assert_eq!((app.begins, app.commits, app.rollbacks), (1, 0, 1));
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn existing_importer_worlds_load_and_run_without_host_transactions() {
+    let root = import_folder(&[("bracket.smp", b"design bytes")]);
+    let request = crate::ImportRequest { path: root.join("bracket.smp"), input_folder: false };
+    let manifest = importer_manifest(false);
+    for version in craft_plugin::WIT_VERSIONS {
+        let component = importer_component_for(version);
+        crate::check_component(&manifest, &component).unwrap();
+        let (app, outcome) = crate::run_import(App::default(), &manifest, &component, "convert", &json!({}), &request);
+        assert_eq!(outcome.unwrap().design, b"design bytes");
+        assert_eq!((app.begins, app.commits, app.rollbacks), (0, 0, 0));
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn reading_beside_the_file_needs_the_input_folder_permission_both_asked_and_granted() {
     let root = import_folder(&[("assembly.smp", b"S"), ("part.bin", b"part bytes"), (".hidden.smp", b"x")]);
@@ -1638,5 +1858,139 @@ fn an_importer_can_read_an_approved_external_library_without_widening_source() {
     let app = App { input_grants: vec![FileGrant { name: "project".into(), folder: library, read: true, write: false }], ..Default::default() };
     let (_, imported) = crate::run_import(app, &manifest, &component, "convert", &json!({}), &request);
     assert_eq!(imported.unwrap().design, b"{}");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+const USER_SET: &str = "i32.const 512 i32.const 5 i32.const 2048 i32.const 2 i32.const 128 call $set";
+
+fn user_storage_component(code: &str) -> Vec<u8> {
+    wat::parse_str(include_str!("../user_storage_fixture.wat").replace("__CODE__", code)).unwrap()
+}
+
+fn user_storage_manifest() -> Manifest {
+    let mut m = manifest();
+    m.capabilities.push("user-storage@0.1".into());
+    m
+}
+
+#[test]
+fn user_storage_wit_set_get_across_runs_list_and_remove() {
+    let mut app = App::default();
+    let mut m = user_storage_manifest();
+    m.capabilities = vec!["commands@0.2".into(), "user-storage@0.1.0".into()];
+    let padded = "i32.const 2050 i32.const 32 i32.const 70000 memory.fill
+        i32.const 512 i32.const 5 i32.const 2048 i32.const 70002 i32.const 128 call $set";
+    run(&mut app, &m, &user_storage_component(padded), "make", &json!({})).unwrap();
+    assert_eq!(app.user_data["hinge"], json!(42));
+    let read = "i32.const 512 i32.const 5 i32.const 128 call $get
+        i32.const 128 i32.load if unreachable end
+        i32.const 132 i32.load i32.const 1 i32.ne if unreachable end
+        i32.const 140 i32.load i32.const 2 i32.ne if unreachable end
+        i32.const 136 i32.load i32.load16_u i32.const 12852 i32.ne if unreachable end
+        i32.const 128 call $list
+        i32.const 128 i32.load if unreachable end
+        i32.const 136 i32.load i32.const 1 i32.ne if unreachable end
+        i32.const 132 i32.load i32.load offset=4 i32.const 5 i32.ne if unreachable end";
+    let mut read_manifest = m.clone();
+    read_manifest.runtime.as_mut().unwrap().entries[0].effect = Effect::Read;
+    run(&mut app, &read_manifest, &user_storage_component(read), "make", &json!({})).unwrap();
+    let remove = "i32.const 512 i32.const 5 i32.const 128 call $remove
+        i32.const 128 i32.load if unreachable end
+        i32.const 132 i32.load i32.eqz if unreachable end";
+    run(&mut app, &m, &user_storage_component(remove), "make", &json!({})).unwrap();
+    assert!(app.user_data.is_empty());
+}
+
+#[test]
+fn user_storage_wit_refuses_missing_capability_read_writes_invalid_json_and_limits() {
+    let mut app = App::default();
+    assert!(matches!(run(&mut app, &manifest(), &user_storage_component(USER_SET), "make", &json!({})), Err(HostError::PermissionDenied { .. })));
+    let mut m = user_storage_manifest();
+    m.runtime.as_mut().unwrap().entries[0].effect = Effect::Read;
+    for (code, import) in [(USER_SET, "user-storage.set"), ("i32.const 512 i32.const 5 i32.const 128 call $remove", "user-storage.remove")] {
+        assert_eq!(run(&mut app, &m, &user_storage_component(code), "make", &json!({})).unwrap_err(), craft_plugin::read_entry_refusal(import));
+    }
+    assert!(app.user_data.is_empty());
+    m.runtime.as_mut().unwrap().entries[0].effect = Effect::Edit;
+    let invalid = "i32.const 512 i32.const 5 i32.const 512 i32.const 5 i32.const 128 call $set";
+    assert!(matches!(run(&mut app, &m, &user_storage_component(invalid), "make", &json!({})), Err(HostError::InvalidInput { .. })));
+    // The fixture sees limit-exceeded (variant 2), even if it swallows the error.
+    for i in 0..craft_plugin::MAX_USER_STORAGE_KEYS {
+        app.user_data.insert(format!("k{i}"), json!(null));
+    }
+    let code = format!(
+        "{USER_SET} i32.const 128 i32.load i32.const 1 i32.ne if unreachable end i32.const 132 i32.load i32.const 2 i32.ne if unreachable end"
+    );
+    assert_eq!(
+        run(&mut app, &m, &user_storage_component(&code), "make", &json!({})).unwrap_err(),
+        HostError::LimitExceeded { limit: "user-storage keys (128)".into() }
+    );
+    app.user_data.clear();
+    app.user_data.insert("large".into(), json!("x".repeat(craft_plugin::MAX_USER_STORAGE_BYTES - 14)));
+    assert_eq!(
+        run(&mut app, &m, &user_storage_component(USER_SET), "make", &json!({})).unwrap_err(),
+        HostError::LimitExceeded { limit: "user-storage total bytes (65536)".into() }
+    );
+    m.runtime.as_mut().unwrap().limits.memory_mib = 2;
+    m.runtime.as_mut().unwrap().limits.fuel = 10_000_000;
+    let oversized_input = "i32.const 20 memory.grow i32.const -1 i32.eq if unreachable end
+        i32.const 2050 i32.const 32 i32.const 1048575 memory.fill
+        i32.const 512 i32.const 5 i32.const 2048 i32.const 1048577 i32.const 128 call $set";
+    assert_eq!(
+        run(&mut app, &m, &user_storage_component(oversized_input), "make", &json!({})).unwrap_err(),
+        HostError::LimitExceeded { limit: "user-storage JSON input bytes (1048576)".into() }
+    );
+}
+
+/// The storage importer also exports a read-only, file-aware field hook.
+fn storage_importer_dialog_component(code: &str) -> Vec<u8> {
+    let hook = format!(
+        r#"    (data (i32.const 4096) "{{\22fields\22:{{}}}}")
+    (func (export "dialog") (param i32 i32 i32 i32) (result i32)
+      {code}
+      i32.const 0 i32.const 0 i32.store
+      i32.const 4 i32.const 4096 i32.store
+      i32.const 8 i32.const 13 i32.store
+      i32.const 0)
+    (func (export "execute")"#
+    );
+    let source = include_str!("../importer_storage_fixture.wat")
+        .replace("__CODE__", "")
+        .replace("    (func (export \"execute\")", &hook);
+    let (prefix, _) = source.rsplit_once(')').unwrap();
+    wat::parse_str(format!(
+        r#"{prefix}
+  (alias core export $main "dialog" (core func $dialog-core))
+  (func $update (param "entry" string) (param "values" $json) (result (result $json (error $error)))
+    (canon lift (core func $dialog-core) (memory $memory) (realloc $realloc)))
+  (instance $dialog (export "json" (type $json)) (export "plugin-error" (type $error)) (export "update-fields" (func $update)))
+  (export "craft:plugin/dialog-provider@0.2.0" (instance $dialog)))"#
+    ))
+    .unwrap()
+}
+
+#[test]
+fn file_aware_hooks_read_optional_user_settings_without_publishing_or_writing() {
+    let root = import_folder(&[("part.smp", b"header")]);
+    let request = ImportRequest { path: root.join("part.smp"), input_folder: false };
+    let mut manifest = dialog_manifest();
+    manifest.optional_capabilities = vec!["user-storage@0.1".into()];
+    let read = "i32.const 512 i32.const 5 i32.const 128 call $get
+        i32.const 128 i32.load if unreachable end
+        i32.const 132 i32.load i32.eqz if unreachable end";
+    let component = storage_importer_dialog_component(read);
+    crate::check_component(&manifest, &component).unwrap();
+    let original = BTreeMap::from([("hinge".into(), json!(42))]);
+    let app = App { user_data: original.clone(), ..Default::default() };
+    let (app, result) = crate::update_fields(app, &manifest, &component, "convert", &json!({"values":{}}), &request);
+    assert_eq!(result.unwrap(), json!({"fields":{}}));
+    assert_eq!((app.begins, app.commits, app.rollbacks), (1, 0, 1));
+    assert_eq!(app.user_data, original);
+    let (app, result) = crate::update_fields(app, &manifest, &storage_importer_dialog_component(USER_SET), "convert", &json!({}), &request);
+    assert_eq!(result.unwrap_err(), craft_plugin::read_entry_refusal("user-storage.set"));
+    assert_eq!(app.user_data, original);
+    manifest.optional_capabilities = vec!["user-storage@0.2".into()];
+    let (_, result) = crate::update_fields(app, &manifest, &component, "convert", &json!({}), &request);
+    assert!(matches!(result, Err(HostError::PermissionDenied { .. })));
     std::fs::remove_dir_all(root).unwrap();
 }

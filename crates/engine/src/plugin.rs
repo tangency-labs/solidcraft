@@ -92,6 +92,10 @@ pub struct AppState {
     /// The plugin whose run is under way, when it keeps data in designs (`storage@0.1`): the only
     /// one that may change plugin data, and only its own. Set by the host for that run alone.
     pub storage_caller: Option<storage::StorageCaller>,
+    /// Settings location supplied by the app or tests; otherwise the user's native settings folder.
+    pub user_settings_dir: Option<PathBuf>,
+    /// The authenticated command plugin for this run, only when it requests user-storage.
+    pub user_storage_caller: Option<String>,
     /// Set when `grants` is kept in the plugins folder's grant store between sessions (the command
     /// line and headless MCP with `--keep-plugin-approvals`): what this session last read from or wrote to it. `None`: the
     /// grants live only in this session, or the app keeps them itself (the desktop app).
@@ -115,6 +119,10 @@ impl AppState {
         }
     }
 
+    pub fn user_settings_dir(&self) -> Option<PathBuf> {
+        self.user_settings_dir.clone().or_else(user_storage::settings_dir)
+    }
+
     /// Background cache/panel updates do not revoke an in-flight command's authority.
     pub(crate) fn same_execution_context(&self, other: &Self) -> bool {
         self.packages == other.packages
@@ -124,6 +132,8 @@ impl AppState {
             && self.command_groups == other.command_groups
             && self.plugins_dir == other.plugins_dir
             && self.storage_caller == other.storage_caller
+            && self.user_settings_dir == other.user_settings_dir
+            && self.user_storage_caller == other.user_storage_caller
             && self.stored == other.stored
     }
     /// The installed plugins' folder, if this platform has one.
@@ -403,8 +413,11 @@ fn update_dialog_with_schema(
     }
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     let result = {
+        let mut scratch = session.scratch();
+        scratch.plugin_state.user_storage_caller =
+            package.manifest.granted_capabilities().iter().any(|c| c.starts_with("user-storage@")).then(|| package.manifest.id.clone());
         let host = SolidCraftHost {
-            session: session.scratch(),
+            session: scratch,
             input_folders: Vec::new(),
             transaction: None,
             sketch_exits: Vec::new(),
@@ -415,6 +428,7 @@ fn update_dialog_with_schema(
             evaluation: None,
             forms: Vec::new(),
             form_source: None,
+            user_data: None,
         };
         let (_, result) = craft_plugin_wasm::dialog_fields(
             host,
@@ -485,6 +499,8 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
         let groups: BTreeSet<String> = rt.permissions.command_groups.intersection(&grants.command_groups).cloned().collect();
         let mut scratch = session.scratch();
         scratch.plugin_state.file_grants = grants.folders;
+        scratch.plugin_state.user_storage_caller =
+            package.manifest.granted_capabilities().iter().any(|c| c.starts_with("user-storage@")).then(|| package.manifest.id.clone());
         scratch.plugin_state.storage_caller = rt
             .data_format
             .filter(|_| package.manifest.granted_capabilities().iter().any(|c| c.starts_with("storage@")))
@@ -506,6 +522,7 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
             evaluation: None,
             forms: Vec::new(),
             form_source: Some((package.manifest.id.clone(), rt.entries.clone())),
+            user_data: None,
         };
         let approved = host.granted_folders();
         let file_read_folders = approved_file_folders(&approved, &rt.permissions.files, false);
@@ -555,6 +572,7 @@ pub mod messages;
 #[cfg(not(target_arch = "wasm32"))]
 mod package;
 pub mod storage;
+pub mod user_storage;
 #[cfg(not(target_arch = "wasm32"))]
 pub use package::{remove, store_grants, validate_grants};
 
@@ -586,9 +604,34 @@ pub struct SolidCraftHost {
     evaluation: Option<Box<Session>>,
     forms: Vec<crate::schema::plugin::FormRequest>,
     form_source: Option<(String, Vec<Entry>)>,
+    /// User settings staged for this call; never copied into a document or undo snapshot.
+    user_data: Option<user_storage::Pending>,
 }
 
 impl SolidCraftHost {
+    fn user_storage_identity(&self) -> craft_plugin::Result<(PathBuf, String)> {
+        let id =
+            self.session.plugin_state.user_storage_caller.clone().filter(|id| valid_id(id)).ok_or_else(|| HostError::PermissionDenied {
+                permission: "user-storage: only the plugin's own entries may access its data".into(),
+            })?;
+        let settings = self
+            .session
+            .plugin_state
+            .user_settings_dir()
+            .ok_or_else(|| HostError::PermissionDenied { permission: "user-storage: no user settings folder is available".into() })?;
+        Ok((settings, id))
+    }
+    fn user_data(&mut self) -> craft_plugin::Result<&mut user_storage::Pending> {
+        if self.transaction.is_none() {
+            return Err(HostError::PermissionDenied { permission: "user-storage: no active plugin run".into() });
+        }
+        let (settings, id) = self.user_storage_identity()?;
+        if self.user_data.is_none() {
+            self.user_data = Some(user_storage::Pending::load(&settings, &id)?);
+        }
+        self.user_data.as_mut().ok_or_else(|| HostError::InvalidInput { field: "user-storage".into(), reason: "no active data".into() })
+    }
+
     /// Keep the last view command. `view.fit` and `view.home` frame in the window.
     /// `view.navigate` does not store a camera; its reply is what the navigator applies.
     /// Any other command that changes `session.camera` keeps that camera.
@@ -612,6 +655,22 @@ impl PluginHost for SolidCraftHost {
     fn open_form(&mut self, entry: &str, params: &Value) -> craft_plugin::Result<()> {
         self.request_form(entry, params)
     }
+    fn user_storage_get(&mut self, key: &str) -> craft_plugin::Result<Option<Value>> {
+        craft_plugin::check_user_storage_key(key)?;
+        Ok(self.user_data()?.get(key))
+    }
+    fn user_storage_set(&mut self, key: &str, value: &Value) -> craft_plugin::Result<()> {
+        craft_plugin::check_user_storage_key(key)?;
+        self.user_data()?.set(key, value)
+    }
+    fn user_storage_remove(&mut self, key: &str) -> craft_plugin::Result<bool> {
+        craft_plugin::check_user_storage_key(key)?;
+        Ok(self.user_data()?.remove(key))
+    }
+    fn user_storage_list(&mut self) -> craft_plugin::Result<Vec<String>> {
+        Ok(self.user_data()?.list())
+    }
+
     fn design_token(&self) -> craft_plugin::Result<Option<DesignToken>> {
         match &self.session.plugin_state.listener_design {
             Some(design) => Ok(design.clone()),
@@ -708,10 +767,19 @@ impl PluginHost for SolidCraftHost {
         if self.transaction.is_some() {
             return Err(HostError::InvalidInput { field: "transaction".into(), reason: "already active".into() });
         }
+        self.user_data = None;
         self.transaction = Some(self.session.scratch());
         Ok(())
     }
     fn commit_transaction(&mut self) -> craft_plugin::Result<()> {
+        if self.transaction.is_none() {
+            return Err(HostError::InvalidInput { field: "transaction".into(), reason: "not active".into() });
+        }
+        if let Some(data) = &self.user_data {
+            let (settings, id) = self.user_storage_identity()?;
+            data.publish(&settings, &id)?;
+        }
+        self.user_data = None;
         let mut computed =
             self.transaction.take().ok_or_else(|| HostError::InvalidInput { field: "transaction".into(), reason: "not active".into() })?;
         computed.undo.clear();
@@ -733,6 +801,7 @@ impl PluginHost for SolidCraftHost {
     }
     fn rollback_transaction(&mut self) -> craft_plugin::Result<()> {
         self.transaction = None;
+        self.user_data = None;
         self.sketch_exits.clear();
         self.forms.clear();
         self.view = None;

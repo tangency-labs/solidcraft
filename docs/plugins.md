@@ -249,7 +249,7 @@ The command surface exposes management without opening dialogs:
 | `plugin.check` | `{path}`: a package folder or `.zip` | `{ok, id, name, version, kind, approval, entries, problems: [{severity, field, problem, fix}]}`; installs nothing |
 | `plugin.install` | `{path, approval?, archive?, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?, input_folder?}}` | Package description and installation status, including declared `entry_points` |
 | `plugin.list` | `{}` | `{plugins: [{manifest, commands, disabled}]}` |
-| `plugin.remove` | `{id}` | `{id, removed: true}` |
+| `plugin.remove` | `{id, remove_user_data?: bool}` (default: false) | `{id, removed: true}` |
 | `plugin.grants` | `{}` | `{grants: [{id, status, package_hash, command_groups, folders, memory_mib?, input_folder?}]}` |
 | `plugin.revoke` | `{id}` | `{id, revoked}` |
 | `plugin.tools` | `{name?}` | `{tools: [{name, kind, plugin, entry, plugin_name, plugin_version, description, effect, extensions, input_schema, approval?}]}`: every installed, enabled plugin's entries as tools for agents (below); `approval` only for the one tool `name` asks for |
@@ -887,7 +887,8 @@ reports progress and cancellation, reads named files and a clock, and exports th
 the host refuses an unknown or incompatible required capability when it reads the manifest, with
 a plain message such as "needs commands 0.3; update SolidCraft or the plugin". `formats@0.2`
 adds importers, `evaluate@0.2` lets an importer check its result, `dialog@0.1` supplies bounded
-field patches and file-aware form updates, and `storage@0.1` keeps data in a design (below). `ui` and
+field patches and file-aware form updates, `storage@0.1` keeps data in a design, and `user-storage@0.1`
+keeps per-user settings for command plugins and importers (below). `ui` and
 `viewport` arrive later as their own
 versioned interfaces. While a version is 0.x, a minor version may break the one before it.
 
@@ -1045,13 +1046,16 @@ plugin and importer.
 - `plugin.check` (`solidcraft-cli plugin check <folder|plugin.zip>`) checks a package without
   running it, through the code Install and a call use: the installer's reader and limits, the
   manifest, the permissions (`net` is refused), the limits against the app's ceilings, and the
-  component against its world (`command-plugin` or `importer-plugin`) and this app's WIT version,
+  component against its world (`command-plugin`, `importer-plugin` or
+  `importer-plugin-with-storage`) and this app's WIT version,
   with no WASI or network import. Each problem has a severity, the field, what is wrong and how to
   fix it. In a folder, `tests/` and hidden files are left out. It runs no plugin code, installs
   nothing and never opens a dialog.
 - `solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] [--require-cases]` checks
   the package, installs it into a scratch plugins folder with the app's installer, and runs its
   test cases, `tests/*.json`, through `plugin.run` and `file.import` with the app's limits. A
+  case uses its own temporary user-settings folder, removed after the run. Cases never read or
+  write the native settings folder or the folder named by `SOLIDCRAFT_SETTINGS_DIR`. A
   folder's cases are in its `tests/` folder; a `.zip`'s are the `tests/` folder it holds, so a
   `.zip` made without one has none. A case names the entry, its parameters or file, the grants
   (default: everything the manifest asks for, stored in the scratch folder's grant store as an
@@ -1092,6 +1096,10 @@ Only an importer may say `open`.
   `importer.import-file(entry, file, options)` and imports `source` (the file, read in chunks of at
   most 1 MiB), `design` (where it writes a SolidCraft design file), `log`, `control` and `clock`.
   It has no `commands` import: an importer makes a design, it does not edit the open one.
+  To keep per-user preferences, add `"user-storage@0.1"` beside `"formats@0.2"` in the manifest
+  and build against the additive `importer-plugin-with-storage` world in `craft:plugin@0.2.0`.
+  It adds the same `user-storage` interface command plugins use; the existing `importer-plugin`
+  world is unchanged, so existing importers keep loading and running.
 - **The result.** The design opens as a new design that is not saved anywhere yet, named after
   the file unless the design names itself. The call returns a loss report,
   `{"summary": "...", "items": [{"severity": "info|degraded|dropped", "title": "...", "subject": "...", "message": "...", "code": "..."}], "details": {...}}`.
@@ -1108,6 +1116,12 @@ Only an importer may say `open`.
   **Save report…** saves it as a `.txt` file, or as a `.json` file in the shape of the reply.
   After OK, Plugins › Last import report… shows the last import's report again.
   Nothing changes unless the whole import succeeds.
+- **Per-user preferences.** An importer with `user-storage@0.1` can read its settings during an
+  import and stage `set` or `remove` calls, for example to remember the options used for a format.
+  Settings are saved only after the imported design is valid and the host accepts the successful
+  import. A failed or cancelled import, including an invalid output design, saves no settings.
+  The [per-user settings rules](#per-user-settings-user-storage01) below apply unchanged, including
+  key and byte limits and the scope checks for deleting settings when the plugin is uninstalled.
 - **Assemblies.** `source.read`, `source.size` and `source.resolve` with path `""` reach the file
   being imported. Any other path is relative to that file's folder (an assembly's parts) and needs
   the `input_folder` permission. The install review shows it and Install approves it, stored with
@@ -1157,6 +1171,77 @@ and MCP give the English.
 `allowed`). The engine's own numbers for a stopped run (fuel used and left) go to the debug log.
 
 ## Plugin data in a design
+
+A plugin chooses the lifetime of each setting. Keep values that determine a particular part
+with the design using `storage@0.1`. Keep personal defaults, such as a shop's preferred hinge
+or sheet price, with the user using `user-storage@0.1`. A plugin can request both capabilities.
+
+### Per-user settings (`user-storage@0.1`)
+
+Add `"user-storage@0.1"` beside `"commands@0.2"` or `"formats@0.2"` in the manifest's
+capabilities. No `runtime.data_format` is needed unless the plugin also uses design storage.
+The `craft:plugin/user-storage@0.2.0` host interface is available in `command-plugin` and the
+additive `importer-plugin-with-storage` world. Both offer:
+
+| Call | Result |
+| --- | --- |
+| `get(key)` | The JSON string, or `none` for an absent key |
+| `set(key, value)` | Saves a JSON value supplied as a string |
+| `remove(key)` | Whether the key existed |
+| `list()` | The stored keys, sorted by name |
+
+All four return `result<…, plugin-error>`. JSON `null` is a value, distinct from an absent key.
+Only the calling plugin's entries can access its settings: no call accepts another plugin id
+or a file path. The manifest capability is required for every call; importing the interface
+alone grants no access. Deleting settings when uninstalling obeys the caller's file scope as
+described below. Existing command plugins and importers continue linking without the new import.
+
+Each plugin can keep at most **128 keys** and **65,536 bytes (64 KiB)** for the entire compact
+JSON object, including keys, values, quotes, braces and separators. Keys contain 1–128 UTF-8
+bytes without control characters. Invalid keys or JSON return `invalid-input`. Exceeding a
+budget returns typed `limit-exceeded` naming `user-storage keys (128)` or
+`user-storage total bytes (65536)`. Each `set` argument accepts at most 1 MiB of JSON text
+before parsing (`limit-exceeded: user-storage JSON input bytes (1048576)`); whitespace does not
+consume the compact map's budget. A refused write leaves the previous data intact.
+
+`set` and `remove` are refused from `read` entries and dialog hooks, like design-storage writes.
+A file-aware hook may read its own settings with `get` and `list`; its read transaction is discarded
+when the hook finishes, and it still has only the bounded file prefix and no folder grants. Changes are
+staged while the entry runs and published when the host commits it. Guest failures discard
+staged settings. Importers may read throughout the import; their writes are published only after
+the host validates and accepts the successful import. Failed or cancelled imports publish no
+settings. The host remembers the loaded file's SHA-256 hash (including whether it was
+absent) and checks it again under a per-plugin file lock before replacing the map. If the file
+changed, or another run holds the lock, commit refuses with the structured host error
+`{"kind":"user_storage_conflict", "plugin":"gears"}`. No settings or design changes from that
+transaction are published. Retry the whole plugin call to load the latest settings and apply its
+changes again; even changes to different keys require a retry. A read without staged changes
+can still succeed after another run commits. The lock is released on close or process exit;
+the separate `<plugin-id>.lock` file stays beside the JSON file so simultaneous processes use
+the same lock. As with existing granted file writes, a later file-publication error may report
+failure after settings have committed. A user-settings write **does not edit the design or add
+an undo step**. Undoing a modelling operation does not undo the user's settings. A settings-only entry declares `edit`, since it
+writes, but its successful run leaves the design unchanged.
+
+SolidCraft saves one `plugin-user-data/<plugin-id>.json` file in the user's settings folder,
+using an atomic replacement. It never embeds these settings in a design or shares them with
+another plugin. Desktop, scripts, MCP and CLI plugin calls use the same folder:
+`$XDG_DATA_HOME/solidcraft` (default `~/.local/share/solidcraft`) on Linux,
+`~/Library/Application Support/SolidCraft` on macOS, and `%APPDATA%/SolidCraft/data` on Windows.
+`SOLIDCRAFT_SETTINGS_DIR` selects an isolated settings folder for desktop and headless runs;
+`--plugins-dir` changes installed packages, not the settings folder.
+`plugin test` gives each case a temporary settings folder and removes it after the run.
+
+Removing a plugin in Preferences offers to remove its saved user settings too; the box starts
+unchecked (keep). Scripts and MCP may omit `remove_user_data`:
+`plugin.remove {"id":"gears"}` and `plugin.remove {"id":"gears", "remove_user_data":false}`
+keep settings for reinstallation; `remove_user_data:true` deletes that plugin's settings.
+Deleting settings also requires the caller's file scope to allow the settings record; otherwise
+removal refuses with typed `permission_denied` before changing the package, grants or settings.
+These programmatic calls never prompt.
+Revoking approvals or disabling the plugin keeps its settings.
+
+### Design storage (`storage@0.1`)
 
 A design container reserves `plugins/<plugin-id>/` for a plugin's own files. They are kept and
 saved back untouched when the plugin is missing, and opening a design never fails because a plugin

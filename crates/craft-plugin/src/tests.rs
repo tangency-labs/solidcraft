@@ -815,6 +815,52 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
 }
 
 #[test]
+fn user_storage_is_additive_and_needs_a_command_or_importer_runtime_but_no_design_format() {
+    let mut value = manifest();
+    for capability in ["user-storage@0.1", "user-storage@0.1.0"] {
+        value["capabilities"] = json!(["commands@0.1", capability]);
+        assert!(parse(&value).is_ok());
+    }
+    value["capabilities"] = json!(["commands@0.2", "storage@0.1", "user-storage@0.1"]);
+    value["runtime"]["data_format"] = json!(1);
+    assert!(parse(&value).is_ok());
+    value["capabilities"] = json!(["commands@0.2", "user-storage@0.2"]);
+    assert!(matches!(parse(&value), Err(HostError::UnsupportedCapability { .. })));
+    let mut value = importer();
+    for capability in ["user-storage@0.1", "user-storage@0.1.0"] {
+        value["capabilities"] = json!(["formats@0.2", capability]);
+        assert!(parse(&value).is_ok());
+    }
+    value["runtime"]["data_format"] = json!(1);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "runtime.data_format"));
+    value["capabilities"] = json!(["formats@0.2", "storage@0.1", "user-storage@0.1"]);
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+    let mut value = manifest();
+    value["capabilities"] = json!(["user-storage@0.1"]);
+    value.as_object_mut().unwrap().remove("runtime");
+    assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+}
+
+#[test]
+fn user_storage_budgets_include_json_overhead_and_keys_use_utf8_bytes() {
+    // {"k":""} is eight bytes; allow exactly 64 KiB, refuse one more byte.
+    let exact = BTreeMap::from([("k".into(), json!("x".repeat(MAX_USER_STORAGE_BYTES - 8)))]);
+    assert_eq!(serde_json::to_vec(&exact).unwrap().len(), MAX_USER_STORAGE_BYTES);
+    check_user_storage(&exact).unwrap();
+    let larger = BTreeMap::from([("k".into(), json!("x".repeat(MAX_USER_STORAGE_BYTES - 7)))]);
+    assert_eq!(check_user_storage(&larger).unwrap_err(), HostError::LimitExceeded { limit: "user-storage total bytes (65536)".into() });
+    let mut keys: BTreeMap<_, _> = (0..MAX_USER_STORAGE_KEYS).map(|i| (format!("k{i}"), json!(null))).collect();
+    check_user_storage(&keys).unwrap();
+    keys.insert("k0".into(), json!({"replacement":true}));
+    check_user_storage(&keys).unwrap();
+    keys.insert("one-more".into(), json!(null));
+    assert_eq!(check_user_storage(&keys).unwrap_err(), HostError::LimitExceeded { limit: "user-storage keys (128)".into() });
+    check_user_storage_key(&"é".repeat(64)).unwrap();
+    assert!(check_user_storage_key(&"é".repeat(65)).is_err());
+    assert!(check_user_storage_key("bad\nkey").is_err());
+}
+
+#[test]
 fn a_plugin_that_keeps_design_data_names_storage_and_its_data_format() {
     let mut keeps = manifest();
     keeps["capabilities"] = json!(["commands@0.1", "storage@0.1"]);
