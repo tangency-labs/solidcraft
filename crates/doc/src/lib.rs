@@ -46,6 +46,7 @@ pub mod frame_corners;
 pub mod frame_layout;
 mod frame_multi_trim;
 pub mod gpu_plan;
+pub mod gusset;
 mod history_names;
 pub mod hole_reference;
 pub mod ids;

@@ -38,7 +38,19 @@ const STRAIGHT_TOL: f64 = 1e-3;
 /// `<its name> · <the other's>`. An error about a piece names it by its line and the tube it starts past
 /// ([`pieces_by_line`]).
 pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
-    built(doc, vals, f, st).map_err(|e| pieces_by_line(st, f, e))
+    built(doc, vals, f, st).map_err(|e| pieces_by_line(st, f, e))?;
+    // Use the final naming/identity pass: Auto frames may split, notch or drop members.
+    // Metadata must not change whether the frame itself can build.
+    let names: Vec<String> = st.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.to_string()).collect();
+    let picked: Vec<&str> = names.iter().map(String::as_str).collect();
+    if let Ok(lines) = members_of_bodies(doc, st, f, &picked)
+        && lines.len() == names.len()
+    {
+        for (body, line) in st.bodies.iter_mut().filter(|b| b.feature == f.id).zip(lines) {
+            body.frame_member_line = line.map(Into::into);
+        }
+    }
+    Ok(())
 }
 
 /// `e` with each later piece of a cut line (`L>X`, [`LaterPieces`]) told as "the piece of `L` past `X`" (ruling C4):
