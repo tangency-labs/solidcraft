@@ -690,6 +690,66 @@ pub fn face_split_if_on_face(tool: &Body, target: &Body, face: usize, plane: &Pl
     Ok(Some(out))
 }
 
+/// `tool`, a prism run along `travel`, cut at the surface of face `face` of `sheet` where it
+/// crosses that surface the way it does at `near` (a point of the face): the pieces, as
+/// [`split_body`] gives them. A cylinder, extended, meets a line along the travel twice, once on
+/// each half of it either side of its axis, and only the half the face's pick lies on ends the
+/// tool there (#20389): the tool is cut by that half, its long edges carried on tangentially
+/// along the travel (back the way it came where the tool leaves the cylinder at the pick, on
+/// ahead where it goes in), a smooth sheet a line along the travel crosses once at most; the
+/// sheet reaches past the tool every way. Every other surface (and a travel along the axis, or a
+/// pick on the cylinder's edge as seen along the travel) splits at the face's surface extended,
+/// as [`split_body`] does.
+pub fn split_at_facing_side(tool: &Body, sheet: &Body, face: usize, near: Vec3, travel: Vec3) -> Result<Vec<Body>> {
+    let whole = SplitTool::Face { body: sheet, face };
+    let Some(crate::FaceSurface::Cylinder { origin, axis, radius }) = crate::face_surface(sheet, face) else {
+        return split_body(tool, &whole);
+    };
+    let axis = axis.vec();
+    // The travel across the axis, and where the pick lies across it.
+    let across = |v: Vec3| v - axis * v.dot(axis);
+    let (Some(d), Some(side)) = (across(travel).normalized(), across(near - origin).normalized()) else {
+        return split_body(tool, &whole);
+    };
+    let facing = side.dot(d);
+    if facing.abs() < 1e-9 {
+        return split_body(tool, &whole);
+    }
+    // How far the sheet must reach from the axis's origin to pass the whole tool.
+    let (lo, hi) = {
+        let b = tool.exact_bounds()?;
+        (b.min, b.max)
+    };
+    let reach = (0..8)
+        .map(|i| {
+            let pick = |bit: usize, l: f64, h: f64| if i & bit == 0 { l } else { h };
+            (Vec3::new(pick(1, lo.x, hi.x), pick(2, lo.y, hi.y), pick(4, lo.z, hi.z)) - origin).len()
+        })
+        .fold(0.0_f64, f64::max)
+        + radius
+        + 1.0;
+    // The sketch frame across the axis: x along the travel, its normal along the axis.
+    let plane = Plane { origin, x: d, y: axis.cross(d) };
+    // The half the pick is on faces +x (the tool leaves the cylinder there) or -x (it goes in);
+    // its edges run on away from that half, along -x or +x.
+    let sign = facing.signum();
+    let top = Vec2::new(0.0, radius);
+    let bottom = Vec2::new(0.0, -radius);
+    let back = Vec2::new(-sign * reach, 0.0);
+    let chain = vec![
+        Seg2::Line { a: top + back, b: top },
+        Seg2::Arc { center: Vec2::new(0.0, 0.0), radius, start: std::f64::consts::FRAC_PI_2, sweep: -sign * std::f64::consts::PI },
+        Seg2::Line { a: bottom, b: bottom + back },
+    ];
+    let trough = crate::extrude_sheet(&plane, &[chain], -reach, reach)?;
+    // Named by its round face: were the sheet not taken whole, that face's surface extended
+    // is the whole cylinder again, never a plane of the sheet.
+    let round = (0..trough.face_count())
+        .find(|&f| matches!(crate::face_surface(&trough, f), Some(crate::FaceSurface::Cylinder { .. })))
+        .ok_or_else(|| invalid("the sheet across the round has no round face"))?;
+    split_body(tool, &SplitTool::Face { body: &trough, face: round })
+}
+
 /// Whether `body` has a planar face square to `plane`'s normal at `height` along it (a prism's
 /// cap there), by the body's own tolerance never over a quarter of `span`
 /// ([`solidcore_ops::cap::is_square_plane_at_height`]).
@@ -1240,5 +1300,36 @@ mod tests {
         let pl = Plane::new(Vec3::new(50.0, 0.0, 0.0), Vec3::Y, Vec3::Z).unwrap();
         assert!(split_faces(&b, &[0], &SplitTool::Plane(pl)).is_err());
         assert!(split_faces(&b, &[99], &SplitTool::Plane(Plane::XY)).is_err());
+    }
+
+    /// #20389: a bar run along the travel up to a quarter of a cylinder (axis z through (30, 20),
+    /// radius 10, the quarter toward +x +y) is cut where it crosses the cylinder the way it does at
+    /// the pick, not where it first meets the cylinder extended. The bar covers y 22…28 and z 0…4,
+    /// where the cylinder spans x = 30 ∓ √(100 − (y − 20)²). From x = −10 along +x it leaves the
+    /// cylinder at the quarter: the piece at the start runs to the far crossing,
+    /// 4 · (6 · 40 + ∫₂⁸ √(100 − u²) du). From x = 60 along −x it goes in there: the piece at the
+    /// start runs to the near crossing, 4 · (6 · 30 − ∫₂⁸ √(100 − u²) du).
+    #[test]
+    fn a_bar_is_cut_where_it_crosses_the_cylinder_as_at_the_pick() {
+        let quarter = vec![Seg2::Arc { center: Vec2::new(30.0, 20.0), radius: 10.0, start: 0.0, sweep: std::f64::consts::FRAC_PI_2 }];
+        let sheet = crate::extrude_sheet(&Plane::XY, &[quarter], -5.0, 10.0).unwrap();
+        let h = 10.0 / 2f64.sqrt();
+        let near = Vec3::new(30.0 + h, 20.0 + h, 2.0);
+        let primitive = |u: f64| u / 2.0 * (100.0 - u * u).sqrt() + 50.0 * (u / 10.0).asin();
+        let segment = primitive(8.0) - primitive(2.0);
+        for (from, to, travel, want) in [(-10.0, 60.0, Vec3::X, 4.0 * (240.0 + segment)), (60.0, -10.0, -Vec3::X, 4.0 * (180.0 - segment))] {
+            let bar = crate::box_solid(Vec3::new(f64::min(from, to), 22.0, 0.0), Vec3::new(f64::max(from, to), 28.0, 4.0)).unwrap();
+            let parts = split_at_facing_side(&bar, &sheet, 0, near, travel).unwrap();
+            // The piece at the start: the one reaching `from`.
+            let start = parts
+                .iter()
+                .find(|p| {
+                    let b = p.exact_bounds().unwrap();
+                    (b.min.x - from).abs() < 1e-6 || (b.max.x - from).abs() < 1e-6
+                })
+                .unwrap();
+            let got = measure(start).unwrap().volume;
+            assert!(rel(got, want) < 1e-6, "from {from}: {got} vs {want}");
+        }
     }
 }
