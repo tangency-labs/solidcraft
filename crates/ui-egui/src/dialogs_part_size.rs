@@ -486,6 +486,8 @@ mod tests {
             ("set_screw", "M5", Some(10.0)),
             ("dowel_pin", "6", Some(20.0)),
             ("bearing", "608", None),
+            ("heat_set_insert_cnc_kitchen", "M3x4 VORON", None),
+            ("heat_set_insert_ruthex", "M3x5x4", None),
             ("hex_bolt_gost", "M6", Some(20.0)),
             ("socket_head_cap_screw_gost", "M6", Some(20.0)),
             ("set_screw_gost", "M6", Some(10.0)),
@@ -498,6 +500,8 @@ mod tests {
             ("hex_nut_inch", "1/2-13 UNC", None),
             ("washer_sae", "1/2", None),
             ("washer_uss", "1/2", None),
+            ("heat_set_insert_cnc_kitchen_inch", "#4-40 UNC x 5.7", None),
+            ("heat_set_insert_ruthex_inch", "#2-56 UNC x 4", None),
         ] {
             let (app, id) = part(family, size, length);
             let k = Resize::new(&app, id).unwrap();

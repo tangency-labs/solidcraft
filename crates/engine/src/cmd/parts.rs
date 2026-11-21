@@ -1,5 +1,7 @@
 //! Standard parts: ISO and GOST metric and ASME/ANSI inch fasteners, dowel pins and ball bearings,
 //! generated in code from the dimensions in the public standards tables (no vendor geometry).
+//! Heat-set inserts have no standard: each maker's published sizes are families of their own
+//! (`HEAT_SET_CNC_KITCHEN`, `HEAT_SET_RUTHEX`), and the part is a plain sleeve.
 //! Inch parts are tabled in inches and built in millimetres like the rest. Each part is inserted as
 //! its own component, built by ordinary features (so it stays parametric and editable), with a
 //! cosmetic thread where it has one; at a hole it gets a rigid joint that puts its axis on the
@@ -7,7 +9,7 @@
 //! once per hole, each placement with its own joint.
 //!
 //! Part frame: the seating plane is z = 0 (the underside of a head, the bottom of a nut or
-//! washer, the top of a set screw or pin); the shank runs down −z. A countersunk screw is the
+//! washer, the top of a set screw, pin or heat-set insert); the shank runs down −z. A countersunk screw is the
 //! exception: its head sinks into the part, so z = 0 is the top of the head, level with the face.
 //! Seated at a hole, its cone lies in the hole's 90 degree countersink: pick the rim where the
 //! countersink meets the bore.
@@ -49,9 +51,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<InsertedPart>)
         .params(
             "family (socket_head_cap_screw | button_head_cap_screw | countersunk_socket_screw | hex_bolt | hex_nut | washer | set_screw | dowel_pin | bearing | \
-         hex_bolt_gost | socket_head_cap_screw_gost | set_screw_gost | hex_nut_gost | hex_nut_thin_gost | washer_gost | washer_large_gost | \
-         dowel_pin_gost | hex_cap_screw_inch | hex_nut_inch | washer_sae | washer_uss); size (\"M6\", \"608\" for bearings, \"1/2-13 UNC\" for inch screws and nuts, \
-         \"1/2\" for inch washers); length? (mm, inch parts too; screws, bolts, set screws, pins; default a standard length near 2.5 d); \
+         heat_set_insert_cnc_kitchen | heat_set_insert_ruthex | hex_bolt_gost | socket_head_cap_screw_gost | set_screw_gost | hex_nut_gost | hex_nut_thin_gost | washer_gost | washer_large_gost | \
+         dowel_pin_gost | hex_cap_screw_inch | hex_nut_inch | washer_sae | washer_uss | heat_set_insert_cnc_kitchen_inch | heat_set_insert_ruthex_inch); size (\"M6\", \"608\" for bearings, \"1/2-13 UNC\" for inch screws and nuts, \
+         \"1/2\" for inch washers, \"M3x5.7\" or \"#4-40 UNC x 5.7\" for heat-set inserts, whose size names the length); length? (mm, inch parts too; screws, bolts, set screws, pins; default a standard length near 2.5 d); \
          at?: [x,y,z] on a hole's rim or wall (the part seats on the hole's face with a rigid joint, head on the picked face and \
          shank into the hole, whichever way the face points) or on a flat face (seated at that point, head out of the face), or a list of \
          them (one component, placed and seated once per pick) | point?: [x,y,z] with direction?: [x,y,z] (no joint: the part's seating plane, under a head or \
@@ -85,6 +87,8 @@ const FAMILIES: &[(&str, &str, &str)] = &[
     ("set_screw", "Hex socket set screw, flat point", "ISO 4026"),
     ("dowel_pin", "Parallel pin (dowel)", "ISO 8734"),
     ("bearing", "Deep groove ball bearing (envelope)", "ISO 15 (6000/6200/600 series)"),
+    ("heat_set_insert_cnc_kitchen", "Heat-set insert", HEAT_SET_CNC_KITCHEN),
+    ("heat_set_insert_ruthex", "Heat-set insert", HEAT_SET_RUTHEX),
     ("hex_bolt_gost", "Hex head bolt", "GOST 7798-70"),
     ("socket_head_cap_screw_gost", "Socket head cap screw", "GOST 11738-84"),
     ("set_screw_gost", "Hex socket set screw, flat point", "GOST 11074-93"),
@@ -97,7 +101,140 @@ const FAMILIES: &[(&str, &str, &str)] = &[
     ("hex_nut_inch", "Hex nut (inch)", "ASME B18.2.2"),
     ("washer_sae", "Plain washer, SAE (narrow)", "ANSI B18.22.1 Type A"),
     ("washer_uss", "Plain washer, USS (wide)", "ANSI B18.22.1 Type A"),
+    ("heat_set_insert_cnc_kitchen_inch", "Heat-set insert (inch)", HEAT_SET_CNC_KITCHEN),
+    ("heat_set_insert_ruthex_inch", "Heat-set insert (inch)", HEAT_SET_RUTHEX),
 ];
+
+/// The makers whose sizes the heat-set insert families follow. No standard covers these
+/// inserts and makers' sizes differ, so each maker has families of its own, and they show the
+/// maker where the others show a standard: in the Type list, in `parts.library` and in the part
+/// number (`CNC Kitchen M3x5.7`, `ruthex M3x5.7`). Each name is written here and nowhere else.
+const HEAT_SET_CNC_KITCHEN: &str = "CNC Kitchen";
+const HEAT_SET_RUTHEX: &str = "ruthex";
+
+/// One heat-set insert: (size, thread, d, pitch or threads per inch, length L, insert diameter
+/// D1, hole diameter, minimum wall W).
+type HeatSetRow = (&'static str, &'static str, f64, f64, f64, f64, f64, f64);
+
+/// CNC Kitchen's metric heat-set inserts, from its "Dimensions & Design Guidelines" sheet
+/// (https://cnckitchenus.store/cdn/shop/files/Dimensions_and_Guidlines.png): thread and length
+/// L, insert diameter D1, hole diameter D2 and minimum wall W. The size names the length, as
+/// each thread comes in one or two fixed lengths; `M3x4 VORON` is the wider M3 insert the sheet
+/// marks VORON. The sheet gives no pitch: it is the ISO coarse one. D2 is the hole to model in
+/// the printed part and W the least material to leave around that hole.
+///
+/// An older edition of the sheet
+/// (https://www.cnckitchen.com/s/CNCKitchen_Heat-Set-Insert-Dimensions-and-Design-Guidelines.pdf)
+/// has 4.4 for the VORON insert's hole and 12.5 for the 3/8-16 insert's diameter, and lacks
+/// M1.6 and the short M6 and M8.
+const HEAT_SET: &[HeatSetRow] = &[
+    ("M1.6x2.5", "M1.6", 1.6, 0.35, 2.5, 2.5, 2.2, 1.3),
+    ("M2x3", "M2", 2.0, 0.4, 3.0, 3.6, 3.2, 1.3),
+    ("M2.5x4", "M2.5", 2.5, 0.45, 4.0, 4.6, 4.0, 1.6),
+    ("M3x5.7", "M3", 3.0, 0.5, 5.7, 4.6, 4.0, 1.6),
+    ("M3x3", "M3", 3.0, 0.5, 3.0, 4.6, 4.0, 1.6),
+    ("M3x4 VORON", "M3", 3.0, 0.5, 4.0, 5.0, 4.45, 1.6),
+    ("M4x8.1", "M4", 4.0, 0.7, 8.1, 6.3, 5.7, 2.1),
+    ("M4x4", "M4", 4.0, 0.7, 4.0, 6.3, 5.7, 2.1),
+    ("M5x9.5", "M5", 5.0, 0.8, 9.5, 7.1, 6.5, 2.6),
+    ("M5x5.8", "M5", 5.0, 0.8, 5.8, 7.1, 6.5, 2.6),
+    ("M6x12.7", "M6", 6.0, 1.0, 12.7, 8.7, 8.1, 3.3),
+    ("M6x6.8", "M6", 6.0, 1.0, 6.8, 8.7, 8.1, 3.3),
+    ("M8x12.7", "M8", 8.0, 1.25, 12.7, 10.2, 9.7, 4.5),
+    ("M8x6.8", "M8", 8.0, 1.25, 6.8, 10.2, 9.7, 4.5),
+    ("M10x12.7", "M10", 10.0, 1.5, 12.7, 12.6, 12.0, 6.0),
+];
+
+/// The same sheet's inch inserts: (size, thread, major diameter, threads per inch, L, D1, D2,
+/// W), the major diameter in mm from the thread's inch size and the rest in mm as the sheet
+/// gives them. The sheet writes 5/16-18 and 3/8-16 without a series: both are UNC. G 1/8 is
+/// the ISO 228 pipe thread, listed here because the sheet lists it with the inch inserts.
+const HEAT_SET_INCH: &[HeatSetRow] = &[
+    ("#2-56 UNC x 3.2", "#2-56 UNC", 0.086 * INCH, 56.0, 3.2, 3.6, 3.2, 1.3),
+    ("#4-40 UNC x 5.7", "#4-40 UNC", 0.112 * INCH, 40.0, 5.7, 4.6, 4.0, 1.6),
+    ("#4-40 UNC x 3.6", "#4-40 UNC", 0.112 * INCH, 40.0, 3.6, 4.6, 4.0, 1.6),
+    ("#6-32 UNC x 7.1", "#6-32 UNC", 0.138 * INCH, 32.0, 7.1, 5.4, 4.8, 1.8),
+    ("#6-32 UNC x 3.8", "#6-32 UNC", 0.138 * INCH, 32.0, 3.8, 5.4, 4.8, 1.8),
+    ("#8-32 UNC x 8.2", "#8-32 UNC", 0.164 * INCH, 32.0, 8.2, 6.3, 5.7, 2.1),
+    ("#8-32 UNC x 4.7", "#8-32 UNC", 0.164 * INCH, 32.0, 4.7, 6.3, 5.7, 2.1),
+    ("#10-24 UNC x 9.5", "#10-24 UNC", 0.19 * INCH, 24.0, 9.5, 7.1, 6.5, 2.6),
+    ("#10-32 UNF x 9.5", "#10-32 UNF", 0.19 * INCH, 32.0, 9.5, 7.1, 6.5, 2.6),
+    ("1/4-20 UNC x 12.7", "1/4-20 UNC", 0.25 * INCH, 20.0, 12.7, 8.7, 8.1, 3.3),
+    ("1/4-20 UNC x 6.4", "1/4-20 UNC", 0.25 * INCH, 20.0, 6.4, 8.7, 8.1, 3.3),
+    ("5/16-18 UNC x 12.7", "5/16-18 UNC", 0.3125 * INCH, 18.0, 12.7, 10.2, 9.7, 4.5),
+    ("3/8-16 UNC x 12.7", "3/8-16 UNC", 0.375 * INCH, 16.0, 12.7, 12.6, 12.0, 6.0),
+    ("G 1/8 x 12.7", "G 1/8", 9.728, 28.0, 12.7, 12.5, 12.0, 6.0),
+];
+
+/// ruthex's metric heat-set inserts, from the RX series product data sheet of ruthex GmbH,
+/// status 15.08.2022, page 1 (a copy is at
+/// https://www.igo3d.com/mediafiles/Sonstiges/Ruthex/ruthex_Datenblatt_RX-Serie.pdf): its
+/// length L, d1 (insert diameter), d3 (hole diameter) and minimum wall w. The sizes are the
+/// sheet's designations without the `RX-` (`RX-M3x5,7`, `RX-M3x5x4`, the wider M3 insert) and
+/// without the S of the short ones, which their length tells apart. The sheet heads the table
+/// "Metrisches ISO-Gewinde" and gives no pitch: it is the ISO coarse one.
+const HEAT_SET_RUTHEX_METRIC: &[HeatSetRow] = &[
+    ("M2x4", "M2", 2.0, 0.4, 4.0, 3.6, 3.2, 1.3),
+    ("M2.5x5.7", "M2.5", 2.5, 0.45, 5.7, 4.6, 4.0, 1.6),
+    ("M3x4", "M3", 3.0, 0.5, 4.0, 4.6, 4.0, 1.6),
+    ("M3x5x4", "M3", 3.0, 0.5, 4.0, 5.0, 4.4, 1.3),
+    ("M3x5.7", "M3", 3.0, 0.5, 5.7, 4.6, 4.0, 1.6),
+    ("M4x4", "M4", 4.0, 0.7, 4.0, 6.3, 5.6, 2.1),
+    ("M4x8.1", "M4", 4.0, 0.7, 8.1, 6.3, 5.6, 2.1),
+    ("M5x5.8", "M5", 5.0, 0.8, 5.8, 7.1, 6.4, 2.6),
+    ("M5x9.5", "M5", 5.0, 0.8, 9.5, 7.1, 6.4, 2.6),
+    ("M6x12.7", "M6", 6.0, 1.0, 12.7, 8.7, 8.0, 3.3),
+    ("M8x12.7", "M8", 8.0, 1.25, 12.7, 10.1, 9.6, 4.5),
+];
+
+/// The same data sheet's page 2, "Zölliges UNC-Gewinde": (size, thread, major diameter, threads
+/// per inch, L, d1, d3, w), tabled like [`HEAT_SET_INCH`].
+const HEAT_SET_RUTHEX_INCH: &[HeatSetRow] = &[
+    ("#2-56 UNC x 4", "#2-56 UNC", 0.086 * INCH, 56.0, 4.0, 3.6, 3.2, 1.3),
+    ("#4-40 UNC x 5.7", "#4-40 UNC", 0.112 * INCH, 40.0, 5.7, 4.6, 4.0, 1.6),
+    ("#8-32 UNC x 8.1", "#8-32 UNC", 0.164 * INCH, 32.0, 8.1, 6.3, 5.6, 2.1),
+    ("#10-24 UNC x 9.5", "#10-24 UNC", 0.19 * INCH, 24.0, 9.5, 7.1, 6.4, 2.6),
+    ("1/4-20 UNC x 12.7", "1/4-20 UNC", 0.25 * INCH, 20.0, 12.7, 8.7, 8.0, 3.3),
+    ("3/8-16 UNC x 12.7", "3/8-16 UNC", 0.375 * INCH, 16.0, 12.7, 12.6, 11.9, 6.0),
+];
+
+/// How much deeper than the insert a blind hole for it is, at least (mm): room for the plastic
+/// the insert pushes ahead of it. Both makers' sheets draw the hole "L + 1 mm" deep.
+const HEAT_SET_HOLE_ALLOWANCE: f64 = 1.0;
+
+/// A heat-set insert family: its table, whether its threads are metric, and its maker.
+fn heat_set_family(family: &str) -> Option<(&'static [HeatSetRow], bool, &'static str)> {
+    Some(match family {
+        "heat_set_insert_cnc_kitchen" => (HEAT_SET, true, HEAT_SET_CNC_KITCHEN),
+        "heat_set_insert_cnc_kitchen_inch" => (HEAT_SET_INCH, false, HEAT_SET_CNC_KITCHEN),
+        "heat_set_insert_ruthex" => (HEAT_SET_RUTHEX_METRIC, true, HEAT_SET_RUTHEX),
+        "heat_set_insert_ruthex_inch" => (HEAT_SET_RUTHEX_INCH, false, HEAT_SET_RUTHEX),
+        _ => return None,
+    })
+}
+
+/// A heat-set insert's row by its size, written as the library lists it (case and the spaces
+/// around it aside), and whether it has a metric thread.
+fn heat_set(family: &str, size: &str) -> Option<(HeatSetRow, bool)> {
+    let (table, metric, _) = heat_set_family(family)?;
+    table.iter().find(|r| r.0.eq_ignore_ascii_case(size.trim())).map(|r| (*r, metric))
+}
+
+/// A heat-set insert family's rows for `parts.library`: the thread, the insert's own size, and
+/// what the printed part needs for it (the hole's diameter, the least depth of a blind hole and
+/// the least wall around the hole), in mm.
+fn heat_set_rows(family: &str) -> Vec<Value> {
+    let Some((table, metric, _)) = heat_set_family(family) else { return Vec::new() };
+    table
+        .iter()
+        .map(|&(size, thread, d, p, l, d1, d2, w)| {
+            let pitch = if metric { p } else { INCH / p };
+            // To the sheet's 0.1 mm: the sum of two decimals is not always the decimal itself.
+            let depth = ((l + HEAT_SET_HOLE_ALLOWANCE) * 10.0).round() / 10.0;
+            json!({"size": size, "thread": thread, "d": d, "pitch": pitch, "length": l, "outer": d1, "hole_diameter": d2, "blind_hole_depth": depth, "min_wall": w})
+        })
+        .collect()
+}
 
 /// ISO metric coarse: (size, d, pitch).
 const METRIC: [(&str, f64, f64); 14] = [
@@ -529,7 +666,10 @@ fn default_inch_length(d: f64) -> f64 {
 }
 
 fn is_inch(family: &str) -> bool {
-    matches!(family, "hex_cap_screw_inch" | "hex_nut_inch" | "washer_sae" | "washer_uss")
+    matches!(
+        family,
+        "hex_cap_screw_inch" | "hex_nut_inch" | "washer_sae" | "washer_uss" | "heat_set_insert_cnc_kitchen_inch" | "heat_set_insert_ruthex_inch"
+    )
 }
 
 /// A unified inch thread from the catalogue (`1/2-13 UNC`): its nominal size (`1/2`), and its
@@ -623,6 +763,10 @@ enum Shape {
     Ring { d_in: f64, d_out: f64, h: f64 },
     /// A cylinder down −z with a socket in its top (set screw), or plain (pin).
     Rod { d: f64, pitch: Option<f64>, len: f64, socket: Option<(f64, f64)> },
+    /// A sleeve down −z with a threaded bore (heat-set insert), its top level with the face it
+    /// is sunk into. The knurls are not built: `d_out` is the diameter over them. The length
+    /// belongs to the size, so the part has no length of its own to choose.
+    Sleeve { d: f64, pitch: Option<f64>, d_out: f64, len: f64 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -769,6 +913,10 @@ fn shape(family: &str, size: &str, length: Option<f64>) -> std::result::Result<S
             let (_, bore, od, w) = BEARINGS.iter().find(|r| r.0 == size.trim()).copied().ok_or_else(|| need("bearing"))?;
             Shape::Ring { d_in: bore, d_out: od, h: w }
         }
+        f if heat_set_family(f).is_some() => {
+            let ((_, _, d, pitch, len, d_out, _, _), metric) = heat_set(family, size).ok_or_else(|| need("heat-set insert"))?;
+            Shape::Sleeve { d, pitch: metric.then_some(pitch), d_out, len }
+        }
         o => return Err(format!("unknown part family `{o}` (parts.library lists them)")),
     })
 }
@@ -914,6 +1062,12 @@ fn build(s: &mut Session, sh: &Shape, body_name: Option<&str>) -> Result<()> {
                 thread(s, d, p, Vec3::new(d / 2.0, 0.0, -len / 2.0));
             }
         }
+        Shape::Sleeve { d, pitch, d_out, len } => {
+            revolve(s, &[(d / 2.0, -len), (d_out / 2.0, -len), (d_out / 2.0, 0.0), (d / 2.0, 0.0)], "new", body_name)?;
+            if let Some(p) = pitch {
+                thread(s, d, p, Vec3::new(d / 2.0, 0.0, -len / 2.0));
+            }
+        }
     }
     Ok(())
 }
@@ -932,6 +1086,7 @@ fn library(_s: &mut Session, p: &Value) -> Result<Value> {
             "set_screw" => SET_SCREW.iter().map(|r| json!({"size": r.0, "d": metric(r.0).map(|m| m.0), "pitch": metric(r.0).map(|m| m.1), "socket": r.1, "socket_depth": r.2})).collect(),
             "dowel_pin" => DOWEL.iter().map(|d| json!({"size": format!("{d}"), "d": d})).collect(),
             "bearing" => BEARINGS.iter().map(|r| json!({"size": r.0, "bore": r.1, "outer": r.2, "width": r.3})).collect(),
+            f if heat_set_family(f).is_some() => heat_set_rows(f),
             "hex_bolt_gost" => GOST_HEX.iter().filter_map(|r| r.4.map(|k| json!({"size": r.0, "d": r.1, "pitch": r.2, "across_flats": r.3, "head_height": k}))).collect(),
             "socket_head_cap_screw_gost" => GOST_SHCS.iter().map(|r| json!({"size": r.0, "d": r.1, "pitch": r.2, "head_diameter": r.3, "head_height": r.4, "socket": r.5, "socket_depth": r.6})).collect(),
             "set_screw_gost" => GOST_SET_SCREW.iter().map(|r| json!({"size": r.0, "d": r.1, "pitch": r.2, "socket": r.3, "socket_depth": r.4})).collect(),
@@ -1031,7 +1186,7 @@ fn identity(family: &str, size: &str, sh: &Shape) -> (String, String) {
         "hex_cap_screw_inch" => "ASME B18.2.1",
         "hex_nut_inch" => "ASME B18.2.2",
         "washer_sae" | "washer_uss" => "ANSI B18.22.1",
-        _ => "",
+        f => heat_set_family(f).map_or("", |f| f.2),
     };
     let series = match family {
         "washer_sae" => " N",
@@ -1078,6 +1233,7 @@ fn label(family: &str) -> &'static str {
         "hex_nut_inch" => "Hex Nut",
         "washer_sae" => "SAE Washer",
         "washer_uss" => "USS Washer",
+        f if heat_set_family(f).is_some() => "Heat-Set Insert",
         _ => "Bearing",
     }
 }
@@ -1705,7 +1861,10 @@ mod tests {
             .as_array()
             .map(|a| a.iter().filter(|f| f["system"] == "inch").filter_map(|f| f["family"].as_str()).collect())
             .unwrap_or_default();
-        assert_eq!(inch, ["hex_cap_screw_inch", "hex_nut_inch", "washer_sae", "washer_uss"]);
+        assert_eq!(
+            inch,
+            ["hex_cap_screw_inch", "hex_nut_inch", "washer_sae", "washer_uss", "heat_set_insert_cnc_kitchen_inch", "heat_set_insert_ruthex_inch"]
+        );
         let lengths: Vec<f64> = l["lengths"].as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
         assert_eq!((lengths.first().copied(), lengths.last().copied(), lengths.len()), (Some(0.5 * IN), Some(8.0 * IN), 19));
         // A 1/2-13 x 2 cap screw: 3/4 across flats, head 0.312 high, shank 2 in long, no thread mark.
@@ -1899,6 +2058,192 @@ mod tests {
             ("washer_gost", "1/2"),
             ("washer_large_gost", "M42"),
             ("dowel_pin_gost", "7"),
+        ] {
+            assert!(Session::default().execute("parts.insert", &json!({"family": family, "size": size})).is_err(), "{family} {size}");
+        }
+    }
+
+    /// Heat-set inserts follow no standard: each maker has a metric and an inch family that carry
+    /// its published sizes, say whose they are where other families say their standard, and
+    /// report what the printed part needs (hole diameter, least blind hole depth, least wall)
+    /// beside the insert's size.
+    #[test]
+    fn heat_set_inserts_follow_their_makers_sheets() {
+        let (cnc, ruthex) = (super::HEAT_SET_CNC_KITCHEN, super::HEAT_SET_RUTHEX);
+        let part_number = |s: &Session, component: &Value| {
+            let comp = component.as_u64().unwrap_or(0);
+            s.doc.components.iter().find(|c| c.id == comp).and_then(|c| c.metadata.text(solidcraft_doc::metadata::PART_NUMBER)).map(str::to_string)
+        };
+        let library = |family: &str| run(&mut Session::default(), "parts.library", json!({"family": family}));
+        let names = |l: &Value| -> Vec<String> {
+            l["sizes"].as_array().map(|a| a.iter().filter_map(|x| x["size"].as_str().map(str::to_string)).collect()).unwrap_or_default()
+        };
+        let families = [
+            ("heat_set_insert_cnc_kitchen", cnc, "metric", 15),
+            ("heat_set_insert_cnc_kitchen_inch", cnc, "inch", 14),
+            ("heat_set_insert_ruthex", ruthex, "metric", 11),
+            ("heat_set_insert_ruthex_inch", ruthex, "inch", 6),
+        ];
+        // The two makers are listed side by side in each unit system, the metric ones before
+        // the GOST families.
+        let all = run(&mut Session::default(), "parts.library", json!({}));
+        let listed: Vec<&str> = all["families"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|f| f["family"].as_str()).filter(|f| f.starts_with("heat_set")).collect())
+            .unwrap_or_default();
+        assert_eq!(
+            listed,
+            ["heat_set_insert_cnc_kitchen", "heat_set_insert_ruthex", "heat_set_insert_cnc_kitchen_inch", "heat_set_insert_ruthex_inch"]
+        );
+        for (family, maker, system, count) in families {
+            let l = library(family);
+            assert_eq!((l["standard"].as_str(), l["system"].as_str(), names(&l).len()), (Some(maker), Some(system), count), "{family}");
+            // The size names the length, so no family has a Length list.
+            assert!(l["lengths"].is_null(), "{family}");
+        }
+        let [cnc_metric, cnc_inch, ruthex_metric, ruthex_inch] = families.map(|f| library(f.0));
+        assert_eq!(
+            names(&cnc_metric),
+            [
+                "M1.6x2.5",
+                "M2x3",
+                "M2.5x4",
+                "M3x5.7",
+                "M3x3",
+                "M3x4 VORON",
+                "M4x8.1",
+                "M4x4",
+                "M5x9.5",
+                "M5x5.8",
+                "M6x12.7",
+                "M6x6.8",
+                "M8x12.7",
+                "M8x6.8",
+                "M10x12.7"
+            ]
+        );
+        assert_eq!(names(&cnc_inch)[..3], ["#2-56 UNC x 3.2", "#4-40 UNC x 5.7", "#4-40 UNC x 3.6"]);
+        assert_eq!(names(&cnc_inch)[11..], ["5/16-18 UNC x 12.7", "3/8-16 UNC x 12.7", "G 1/8 x 12.7"]);
+        assert_eq!(
+            names(&ruthex_metric),
+            ["M2x4", "M2.5x5.7", "M3x4", "M3x5x4", "M3x5.7", "M4x4", "M4x8.1", "M5x5.8", "M5x9.5", "M6x12.7", "M8x12.7"]
+        );
+        assert_eq!(
+            names(&ruthex_inch),
+            ["#2-56 UNC x 4", "#4-40 UNC x 5.7", "#8-32 UNC x 8.1", "#10-24 UNC x 9.5", "1/4-20 UNC x 12.7", "3/8-16 UNC x 12.7"]
+        );
+        // The sheets' rows. CNC Kitchen's M3 x 5.7 is 4.6 across, goes in a 4.0 hole and needs
+        // 1.6 of wall; its VORON insert is 5.0 across in a 4.45 hole.
+        let row = |l: &Value, size: &str| l["sizes"].as_array().and_then(|a| a.iter().find(|x| x["size"] == size)).cloned().unwrap_or_default();
+        let dims = |r: &Value| ["d", "pitch", "length", "outer", "hole_diameter", "blind_hole_depth", "min_wall"].map(|k| r[k].as_f64());
+        let m3 = row(&cnc_metric, "M3x5.7");
+        assert_eq!(m3["thread"], "M3");
+        assert_eq!(dims(&m3), [Some(3.0), Some(0.5), Some(5.7), Some(4.6), Some(4.0), Some(6.7), Some(1.6)]);
+        assert_eq!(dims(&row(&cnc_metric, "M3x4 VORON"))[2..], [Some(4.0), Some(5.0), Some(4.45), Some(5.0), Some(1.6)]);
+        let quarter = row(&cnc_inch, "1/4-20 UNC x 6.4");
+        assert_eq!(quarter["thread"], "1/4-20 UNC");
+        assert_eq!(dims(&quarter)[2..], [Some(6.4), Some(8.7), Some(8.1), Some(7.4), Some(3.3)]);
+        // 1/4 in across and 20 threads to the inch, in mm.
+        assert!(dims(&quarter)[..2].iter().zip([6.35, 1.27]).all(|(got, want)| got.is_some_and(|g| (g - want).abs() < 1e-9)), "{quarter}");
+        // ruthex differs where its sheet does: an M4 hole of 5.6 (CNC Kitchen 5.7), an M8 insert
+        // 10.1 across in a 9.6 hole (10.2 in 9.7), a wide M3 insert in a 4.4 hole with 1.3 of
+        // wall (4.45 and 1.6), and an M2 insert 4 long (3).
+        assert_eq!(dims(&row(&ruthex_metric, "M4x8.1")), [Some(4.0), Some(0.7), Some(8.1), Some(6.3), Some(5.6), Some(9.1), Some(2.1)]);
+        assert_eq!(dims(&row(&ruthex_metric, "M8x12.7"))[2..], [Some(12.7), Some(10.1), Some(9.6), Some(13.7), Some(4.5)]);
+        assert_eq!(dims(&row(&ruthex_metric, "M3x5x4"))[2..], [Some(4.0), Some(5.0), Some(4.4), Some(5.0), Some(1.3)]);
+        assert_eq!(dims(&row(&ruthex_metric, "M2x4"))[2..], [Some(4.0), Some(3.6), Some(3.2), Some(5.0), Some(1.3)]);
+        assert_eq!(dims(&row(&ruthex_inch, "3/8-16 UNC x 12.7"))[2..], [Some(12.7), Some(12.6), Some(11.9), Some(13.7), Some(6.0)]);
+        // Every row holds together: the screw passes the bore, the insert is wider than its
+        // hole (it melts its way in), and a blind hole is 1 mm deeper than the insert is long.
+        let mut known = 0;
+        for l in [&cnc_metric, &cnc_inch, &ruthex_metric, &ruthex_inch] {
+            for r in l["sizes"].as_array().cloned().unwrap_or_default() {
+                let [Some(d), Some(pitch), Some(len), Some(outer), Some(hole), Some(depth), Some(wall)] = dims(&r) else { panic!("{r}") };
+                assert!(d < hole && hole < outer && outer - hole <= 0.7 + 1e-9, "{r}");
+                assert!(pitch > 0.0 && wall > 0.0 && (depth - len - 1.0).abs() < 1e-9, "{r}");
+                // A thread the catalogue has is the size the catalogue says.
+                if let Some(t) = r["thread"].as_str().and_then(solidcraft_doc::parse_tapped_thread) {
+                    assert!((t.major_diameter - d).abs() < 1e-3 && (t.pitch - pitch).abs() < 1e-6, "{r} against {t:?}");
+                    known += 1;
+                }
+            }
+        }
+        assert!(known >= 43, "only {known} of the 46 threads were found in the catalogue");
+        // A CNC Kitchen M3 x 5.7 insert: a sleeve 4.6 across and 5.7 long with a 3 mm bore, its
+        // top at z = 0, with an M3 thread in the bore.
+        let mut s = Session::default();
+        let out = run(&mut s, "parts.insert", json!({"family": "heat_set_insert_cnc_kitchen", "size": "M3x5.7"}));
+        assert_eq!(out["name"], "Heat-Set Insert M3x5.7");
+        assert_eq!(part_number(&s, &out["component"]), Some(format!("{cnc} M3x5.7")));
+        assert_eq!(s.doc.parts.get(&out["component"].as_u64().unwrap_or(0)).and_then(|p| p.length), None);
+        let (lo, hi) = bbox(&s, "Heat-Set Insert M3x5.7");
+        assert!((hi.x - lo.x - 4.6).abs() < 1e-6 && (lo.z + 5.7).abs() < 1e-6 && hi.z.abs() < 1e-6, "{lo:?} {hi:?}");
+        let volume = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN);
+        let sleeve = std::f64::consts::PI / 4.0 * (4.6 * 4.6 - 3.0 * 3.0) * 5.7;
+        assert!((volume - sleeve).abs() < 1e-3 * sleeve, "volume {volume}, a sleeve's is {sleeve}");
+        assert!(s.model.state().threads.iter().any(|t| t.designation.starts_with("M3")), "{:?}", s.model.state().threads);
+        // Resized to M4 x 8.1 it is rebuilt and renumbered, still without a length of its own.
+        let r = run(&mut s, "parts.resize", json!({"component": out["component"], "size": "M4x8.1"}));
+        assert_eq!((r["name"].as_str(), r["length"].as_f64()), (Some("Heat-Set Insert M4x8.1"), None));
+        assert_eq!(part_number(&s, &r["component"]), Some(format!("{cnc} M4x8.1")));
+        let (lo, hi) = bbox(&s, "Heat-Set Insert M4x8.1");
+        assert!((hi.x - lo.x - 6.3).abs() < 1e-6 && (lo.z + 8.1).abs() < 1e-6 && hi.z.abs() < 1e-6, "{lo:?} {hi:?}");
+        // The VORON size has a word in it: it resizes by that name, to it and from it, and its
+        // name and part number carry the word.
+        let r = run(&mut s, "parts.resize", json!({"component": out["component"], "size": "M3x4 VORON"}));
+        assert_eq!((r["name"].as_str(), r["size"].as_str(), r["length"].as_f64()), (Some("Heat-Set Insert M3x4 VORON"), Some("M3x4 VORON"), None));
+        assert_eq!(part_number(&s, &r["component"]), Some(format!("{cnc} M3x4 VORON")));
+        let (lo, hi) = bbox(&s, "Heat-Set Insert M3x4 VORON");
+        assert!((hi.x - lo.x - 5.0).abs() < 1e-6 && (lo.z + 4.0).abs() < 1e-6 && hi.z.abs() < 1e-6, "{lo:?} {hi:?}");
+        let r = run(&mut s, "parts.resize", json!({"component": "Heat-Set Insert M3x4 VORON", "size": "M3x3"}));
+        assert_eq!(r["name"], "Heat-Set Insert M3x3");
+        // Inserted by that name, in any case: 5.0 across and 4.0 long, with an M3 thread.
+        let mut v = Session::default();
+        let out = run(&mut v, "parts.insert", json!({"family": "heat_set_insert_cnc_kitchen", "size": "m3x4 voron"}));
+        assert_eq!(out["name"], "Heat-Set Insert m3x4 voron");
+        let (lo, hi) = bbox(&v, "Heat-Set Insert m3x4 voron");
+        assert!((hi.x - lo.x - 5.0).abs() < 1e-6 && (lo.z + 4.0).abs() < 1e-6 && hi.z.abs() < 1e-6, "{lo:?} {hi:?}");
+        assert!(v.model.state().threads.iter().any(|t| t.designation.starts_with("M3")), "{:?}", v.model.state().threads);
+        // Seated in the hole the library sizes for it (4.0 across, 6.7 deep): its top is level
+        // with the plate's face and it goes 5.7 down the hole's axis.
+        let mut p = Session::default();
+        run(&mut p, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
+        run(&mut p, "solid.hole", json!({"position": [20, 15, 10], "diameter": 4.0, "depth": 6.7}));
+        let seated = run(&mut p, "parts.insert", json!({"family": "heat_set_insert_cnc_kitchen", "size": "M3x5.7", "at": [22, 15, 10]}));
+        assert!(seated["joint"].is_number(), "{seated}");
+        let (lo, hi) = bbox(&p, "Heat-Set Insert M3x5.7");
+        assert!((hi.z - 10.0).abs() < 1e-6 && (lo.z - 4.3).abs() < 1e-6, "{lo:?} {hi:?}");
+        assert!(((lo.x + hi.x) / 2.0 - 20.0).abs() < 1e-6 && ((lo.y + hi.y) / 2.0 - 15.0).abs() < 1e-6, "{lo:?} {hi:?}");
+        // A ruthex M8 x 12.7 insert is its sheet's 10.1 across, and numbered as ruthex's.
+        let mut x = Session::default();
+        let out = run(&mut x, "parts.insert", json!({"family": "heat_set_insert_ruthex", "size": "M8x12.7"}));
+        assert_eq!(part_number(&x, &out["component"]), Some(format!("{ruthex} M8x12.7")));
+        let (lo, hi) = bbox(&x, "Heat-Set Insert M8x12.7");
+        assert!((hi.x - lo.x - 10.1).abs() < 1e-6 && (lo.z + 12.7).abs() < 1e-6 && hi.z.abs() < 1e-6, "{lo:?} {hi:?}");
+        // An inch insert is built in millimetres and, like the other inch parts, has no
+        // cosmetic thread (#9571).
+        for (family, maker, size, across, long) in [
+            ("heat_set_insert_cnc_kitchen_inch", cnc, "#4-40 UNC x 5.7", 4.6, 5.7),
+            ("heat_set_insert_ruthex_inch", ruthex, "3/8-16 UNC x 12.7", 12.6, 12.7),
+        ] {
+            let mut i = Session::default();
+            let out = run(&mut i, "parts.insert", json!({"family": family, "size": size}));
+            assert_eq!(part_number(&i, &out["component"]), Some(format!("{maker} {size}")));
+            let (lo, hi) = bbox(&i, "Heat-Set Insert");
+            assert!((hi.x - lo.x - across).abs() < 1e-6 && (lo.z + long).abs() < 1e-6 && hi.z.abs() < 1e-6, "{family}: {lo:?} {hi:?}");
+            assert!(i.model.state().threads.is_empty(), "{family}: {:?}", i.model.state().threads);
+        }
+        // A thread alone is not a size, and each family has only its own sizes: one maker's
+        // size is refused in the other's family.
+        for (family, size) in [
+            ("heat_set_insert_cnc_kitchen", "M3"),
+            ("heat_set_insert_cnc_kitchen", "M12x10"),
+            ("heat_set_insert_cnc_kitchen", "#4-40 UNC x 5.7"),
+            ("heat_set_insert_cnc_kitchen", "M3x5x4"),
+            ("heat_set_insert_cnc_kitchen_inch", "M3x5.7"),
+            ("heat_set_insert_ruthex", "M3x4 VORON"),
+            ("heat_set_insert_ruthex", "M10x12.7"),
+            ("heat_set_insert_ruthex_inch", "G 1/8 x 12.7"),
         ] {
             assert!(Session::default().execute("parts.insert", &json!({"family": family, "size": size})).is_err(), "{family} {size}");
         }
@@ -2362,6 +2707,10 @@ mod tests {
             ("hex_nut_inch", "1/2-13 UNC", "5/8-18 UNF"),
             ("washer_sae", "1/2", "5/8"),
             ("washer_uss", "1/2", "5/8"),
+            ("heat_set_insert_cnc_kitchen", "M3x4 VORON", "M4x8.1"),
+            ("heat_set_insert_cnc_kitchen_inch", "#4-40 UNC x 5.7", "1/4-20 UNC x 12.7"),
+            ("heat_set_insert_ruthex", "M3x5x4", "M4x8.1"),
+            ("heat_set_insert_ruthex_inch", "#2-56 UNC x 4", "3/8-16 UNC x 12.7"),
         ] {
             let mut s = Session::default();
             let part = run(&mut s, "parts.insert", json!({"family": family, "size": size}));

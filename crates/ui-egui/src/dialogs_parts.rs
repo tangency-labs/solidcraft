@@ -260,7 +260,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
             form_row(ui, &label, |ui| {
                 crate::ui_kit::text(
                     ui,
-                    &v.as_f64().map(|x| crate::prefs::show_mm(app, x, 1)).unwrap_or_else(|| v.to_string()),
+                    // A length in the design's units; text (a thread's designation) as it is.
+                    &v.as_f64().map(|x| crate::prefs::show_mm(app, x, 1)).or_else(|| v.as_str().map(str::to_string)).unwrap_or_else(|| v.to_string()),
                     crate::ui_kit::Text::Cell,
                 );
             });
@@ -291,17 +292,22 @@ pub fn commands(app: &SolveApp, k: &Pt, inputs: &[SelInput]) -> Result<Vec<(Stri
 fn dimension_label(key: &str) -> Option<&'static str> {
     Some(match key {
         "across_flats" => "parts.dimension.across_flats",
+        "blind_hole_depth" => "parts.dimension.blind_hole_depth",
         "bore" => "parts.dimension.bore",
         "d" => "parts.dimension.d",
         "head_diameter" => "parts.dimension.head_diameter",
         "head_height" => "parts.dimension.head_height",
         "height" => "parts.dimension.height",
+        "hole_diameter" => "parts.dimension.hole_diameter",
         "inner" => "parts.dimension.inner",
+        "length" => "parts.dimension.length",
+        "min_wall" => "parts.dimension.min_wall",
         "outer" => "parts.dimension.outer",
         "pitch" => "parts.dimension.pitch",
         "socket" => "parts.dimension.socket",
         "socket_depth" => "parts.dimension.socket_depth",
         "thickness" => "parts.dimension.thickness",
+        "thread" => "parts.dimension.thread",
         "width" => "parts.dimension.width",
         _ => return None,
     })
