@@ -281,7 +281,6 @@ pub(crate) fn window_layout(app: &SolveApp) -> solidcraft_ui_kit::view_layout_me
         },
         saved,
         matching_saved,
-)
         design: crate::i18n::tr_name(&documents::tab_name(app, &app.session)),
         window: app.view_windows.current_window(),
         native: crate::view_windows::supports_pop_out(app) && crate::view_windows::can_create(app),
