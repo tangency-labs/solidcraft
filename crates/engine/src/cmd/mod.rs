@@ -162,6 +162,7 @@ pub(crate) use view_navigation::camera_form;
 pub use view_navigation::standard_view;
 mod component_link;
 pub use component_link::resolve_design_links;
+pub(crate) use component_link::{drive_links, follow_command, forget_kept, mark_links_reconciled, reading_links_in, take_drive_report};
 mod config;
 mod design_link;
 mod file;

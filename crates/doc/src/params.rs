@@ -708,6 +708,9 @@ pub enum ParamUser {
     Canvas { canvas: u64, name: String, input: String },
     /// An occurrence moved by an expression (`input` names the axis, e.g. `translate y`).
     Occurrence { occurrence: u64, name: String, input: String },
+    /// The expression a linked component gives its design's parameter `parameter`
+    /// (`DesignLink::parameters`).
+    Link { component: u64, name: String, parameter: String },
 }
 
 impl ParamUser {
@@ -725,6 +728,7 @@ impl ParamUser {
             ParamUser::Rule { kind, name, field } => format!("{kind} rule {name} ({field})"),
             ParamUser::Canvas { name, input, .. } => format!("canvas {name} ({input})"),
             ParamUser::Occurrence { name, input, .. } => format!("occurrence {name} ({input})"),
+            ParamUser::Link { name, parameter, .. } => format!("linked component {name} ({parameter})"),
         }
     }
 }
@@ -903,6 +907,14 @@ impl Document {
                     out.push(ParamUser::Canvas { canvas: c.id, name: c.name.clone(), input: label.into() });
                 }
             });
+        }
+        // A link taking a parameter by name is not a user: without it, the linked design's
+        // parameter goes back to its own value.
+        for (component, link) in &self.links {
+            for parameter in link.parameters.iter().filter(|(_, e)| uses(e)).map(|(parameter, _)| parameter) {
+                let cname = self.components.iter().find(|c| c.id == *component).map_or_else(|| component.to_string(), |c| c.name.clone());
+                out.push(ParamUser::Link { component: *component, name: cname, parameter: parameter.clone() });
+            }
         }
         out
     }
@@ -1099,6 +1111,23 @@ impl Document {
                     n += 1;
                 }
             });
+        }
+        // A link's expressions follow. A link that took `old` by name from a user parameter
+        // goes on giving it this one's value under its new name, as its own expression, so
+        // renaming changes no linked part.
+        let user = !text && self.param(new).is_some_and(|p| !p.model);
+        for link in self.links.values_mut() {
+            for e in link.parameters.values_mut() {
+                let r = expr::rename_reference(e, old, new);
+                if r != *e {
+                    *e = r;
+                    n += 1;
+                }
+            }
+            if user && link.parameters_by_name && link.parameter_values.contains_key(old) && !link.parameters.contains_key(old) {
+                link.parameters.insert(old.to_string(), new.to_string());
+                n += 1;
+            }
         }
         if let Some(c) = self.param_comments.remove(old) {
             self.param_comments.insert(new.to_string(), c);

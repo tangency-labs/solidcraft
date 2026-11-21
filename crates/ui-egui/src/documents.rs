@@ -87,14 +87,23 @@ struct DocWork {
     /// The toolbar tab shown, its contextual tab and the tab a sketch returns to (`None`: the
     /// design was left with both preferences off, or is new, and comes back on MODEL).
     tab: Option<(String, Option<String>, Option<String>)>,
+    /// Its Link Parameters or Insert Design dialog, or the read that opens it: kept with or
+    /// without the preference, since the design it links is often open in another tab.
+    link_parameters: Option<crate::link_parameters_dialog::Form>,
+    link_parameters_reading: Option<crate::link_parameters_dialog::Reading>,
 }
 
 /// Take the active design's dialog, tool and toolbar tab, to keep with its tab. A feature still
 /// computing after OK can't wait (its result belongs to the window thread): that dialog is
 /// cancelled, as without the preference. Without the preference the toolbar tab is still kept
 /// (`remember_toolbar_tab`), once the dialog and tool are gone, so it is a tab they leave behind.
+/// The Link Parameters and Insert Design dialogs are kept either way: they set what this design
+/// passes to another one, which is often open in the tab being shown, and act on no other
+/// design (`link_parameters_dialog`).
 fn take_work(app: &mut SolveApp, presenting: bool) -> DocWork {
     let bom = app.bom.take();
+    let link_parameters = app.link_parameters.take();
+    let link_parameters_reading = app.link_parameters_reading.take();
     if !presenting && (!app.preferences.keep_work_on_tab_switch || app.applying.is_some()) {
         crate::dialogs::cancel(app);
         // A sketch still open for a New Sketch stays, as any open sketch does.
@@ -102,7 +111,7 @@ fn take_work(app: &mut SolveApp, presenting: bool) -> DocWork {
         app.tool = None;
         crate::drawing_workspace::close_panel(app);
         let tab = app.preferences.remember_toolbar_tab.then(|| (app.ui.tab.clone(), app.ui.ribbon_context.clone(), app.ui.sketch_return_tab.clone()));
-        return DocWork { bom, tab, ..DocWork::default() };
+        return DocWork { bom, tab, link_parameters, link_parameters_reading, ..DocWork::default() };
     }
     DocWork {
         bom,
@@ -113,6 +122,8 @@ fn take_work(app: &mut SolveApp, presenting: bool) -> DocWork {
         editing_state: app.editing_state.take(),
         tool: app.tool.take(),
         tab: Some((app.ui.tab.clone(), app.ui.ribbon_context.clone(), app.ui.sketch_return_tab.clone())),
+        link_parameters,
+        link_parameters_reading,
     }
 }
 
@@ -134,6 +145,8 @@ fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
     app.inline_sketch = work.inline_sketch;
     app.editing_state = work.editing_state;
     app.tool = work.tool;
+    app.link_parameters = work.link_parameters;
+    app.link_parameters_reading = work.link_parameters_reading;
     match work.tab {
         Some((tab, context, back)) => {
             app.ui.tab = tab;
@@ -170,6 +183,8 @@ struct DocView {
     own_clipboard_stamp: u64,
     /// Its Drawing workspace: the sheet page (sheet, zoom, camera) and the panels open on it.
     drawing: crate::drawing_workspace::State,
+    /// What its last value edit could not pass to linked designs (`SolveApp::link_warnings`).
+    link_warnings: Vec<String>,
 }
 
 impl DocSlot {
@@ -482,6 +497,7 @@ fn take_view(app: &mut SolveApp) -> DocView {
         cut: std::mem::take(&mut app.cut),
         own_clipboard_stamp: app.own_clipboard_stamp,
         drawing: std::mem::take(&mut app.drawing_workspace),
+        link_warnings: std::mem::take(&mut app.link_warnings),
     }
 }
 
@@ -498,6 +514,7 @@ fn put_view(app: &mut SolveApp, v: DocView) {
     app.cut = v.cut;
     app.own_clipboard_stamp = v.own_clipboard_stamp;
     app.drawing_workspace = v.drawing;
+    app.link_warnings = v.link_warnings;
     crate::edit_clipboard::drop_stale(app);
 }
 

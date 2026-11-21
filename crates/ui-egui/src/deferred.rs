@@ -104,6 +104,7 @@ pub struct DocJobs {
     queue: Vec<(String, Value, u64)>,
     start_after_roll: Option<(String, Option<u64>)>,
     delete_check: Option<DeleteCheck>,
+    link_parameters_waiting: Option<(u64, crate::link_parameters_dialog::Form)>,
 }
 
 /// How a command asked to run off the window thread goes.
@@ -209,6 +210,7 @@ impl SolveApp {
             queue: std::mem::replace(&mut self.deferred_queue, incoming.queue),
             start_after_roll: std::mem::replace(&mut self.start_after_roll, incoming.start_after_roll),
             delete_check: std::mem::replace(&mut self.delete_check, incoming.delete_check),
+            link_parameters_waiting: std::mem::replace(&mut self.link_parameters_waiting, incoming.link_parameters_waiting),
         }
     }
 
@@ -247,6 +249,19 @@ impl SolveApp {
         self.run_heavy_as(id, params, crate::operations::serial())
     }
 
+    /// [`Self::run_heavy`], and which operation it is: while [`Self::heavy_pending`] says it is
+    /// under way, its `Ok` says only that it was taken on.
+    pub(crate) fn run_heavy_serial(&mut self, id: &str, params: Value) -> (u64, Result<Value, String>) {
+        let serial = crate::operations::serial();
+        (serial, self.run_heavy_as(id, params, serial))
+    }
+
+    /// Whether the history command `serial` ([`Self::run_heavy_serial`]) still computes or waits
+    /// its turn.
+    pub(crate) fn heavy_pending(&self, serial: u64) -> bool {
+        self.deferred.as_ref().is_some_and(|d| d.serial == serial) || self.deferred_queue.iter().any(|(_, _, s)| *s == serial)
+    }
+
     /// [`Self::run_heavy`], as the operation `serial` (the operations panel's row).
     fn run_heavy_as(&mut self, id: &str, params: Value, serial: u64) -> Result<Value, String> {
         crate::sketch_view::sync(self)?;
@@ -280,6 +295,7 @@ impl SolveApp {
                     Err(e) => crate::operations::Outcome::Failed(crate::friendly_error(id, e)),
                 };
                 crate::operations::ended(self, &format!("history:{serial}"), outcome);
+                crate::link_parameters_dialog::heavy_ended(self, serial, r.as_ref().err());
                 r
             }
         }
@@ -419,14 +435,16 @@ impl SolveApp {
                     let playback = self.timeline_playback.take();
                     let r = self.run_evaluated(&id, params, job.evaluated.take().flatten().as_ref(), job.kept.take());
                     self.timeline_playback = playback;
-                    let outcome = match r {
+                    let outcome = match &r {
                         Ok(_) => crate::operations::Outcome::Done,
-                        Err(e) => crate::operations::Outcome::Failed(crate::friendly_error(&id, &e)),
+                        Err(e) => crate::operations::Outcome::Failed(crate::friendly_error(&id, e)),
                     };
                     crate::operations::ended(self, &key, outcome);
+                    crate::link_parameters_dialog::heavy_ended(self, job.serial, r.as_ref().err());
                 } else {
                     // A later one of the same kind does it (where the marker ends is all that counts).
                     crate::operations::ended(self, &key, crate::operations::Outcome::Done);
+                    crate::link_parameters_dialog::heavy_ended(self, job.serial, None);
                 }
             }
         }

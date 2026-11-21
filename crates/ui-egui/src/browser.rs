@@ -2011,7 +2011,12 @@ fn occurrence_rows_inner(
     // A cut component has a dashed outline until Paste moves it.
     let cut = app.cut.placements.iter().any(|p| p.as_slice() == path);
     let link = app.tree.links.get(placement.component).cloned();
-    let badges: &[&str] = if placement.grounded { &["pin"] } else { &[] };
+    let badges: &[&str] = match (placement.grounded, placement.driven) {
+        (true, true) => &["pin", "link"],
+        (true, false) => &["pin"],
+        (false, true) => &["link"],
+        (false, false) => &[],
+    };
     let emphasis = app.tree.search.hits().filter(|_| matches).and_then(|h| h.span(&placement.label));
     app.tree.remember(key);
     let appearance = if crate::render_workspace::active(app) {

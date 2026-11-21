@@ -137,6 +137,7 @@ mod kit_host_tests;
 mod length_input;
 pub mod library;
 pub mod link_folders_prompt;
+pub mod link_parameters_dialog;
 mod linked_source;
 pub mod links;
 #[cfg(test)]
@@ -896,6 +897,25 @@ pub struct SolveApp {
     pub(crate) quick_measure: quick_measure::QuickMeasure,
     /// An STL or OBJ file waiting for the unit its coordinates are in (`mesh_units`).
     pub mesh_units: Option<mesh_units::Ask>,
+    /// Which values a link passes, while its dialog is open (`link_parameters_dialog`).
+    pub link_parameters: Option<link_parameters_dialog::Form>,
+    /// A linked design's parameters being read for that dialog.
+    pub link_parameters_reading: Option<link_parameters_dialog::Reading>,
+    /// The Link Parameters dialog whose OK computes beside the window, by its operation
+    /// ([`SolveApp::run_heavy_serial`]): back with the reason when the edit is refused, or as it
+    /// was when it is stopped. It goes with its design's other jobs (`deferred::DocJobs`).
+    pub link_parameters_waiting: Option<(u64, link_parameters_dialog::Form)>,
+    /// The Insert Design dialogs whose OK is inserting, each by its file operation's serial
+    /// (`file_load::Request::serial`): back with the reason when the insert fails, or as it was
+    /// when it is stopped, in the design it was opened in. File operations are the window's, not
+    /// one design's, so these are too, one for each design whose insert is under way.
+    pub link_parameters_inserting: Vec<(u64, link_parameters_dialog::Form)>,
+    /// Insert Design drafts whose insert failed or was stopped, each opened again once its design
+    /// is the one shown and no other of these dialogs is open.
+    pub link_parameters_back: Vec<link_parameters_dialog::Form>,
+    /// What the last value edit's links could not pass, and why (`parameters.change`'s
+    /// `link_warnings`), for the Parameters window.
+    pub link_warnings: Vec<String>,
     /// The Plugins menu and the open plugin entry dialog (`plugin_menu`).
     pub(crate) plugin_menu: plugin_menu::State,
     /// The bodies of a just-opened Y-up file, offered to be stood up (`stand_up`).
@@ -1207,6 +1227,12 @@ impl SolveApp {
             recovery_discard_all: false,
             quick_measure: Default::default(),
             mesh_units: None,
+            link_parameters: None,
+            link_parameters_reading: None,
+            link_parameters_waiting: None,
+            link_parameters_inserting: Vec::new(),
+            link_parameters_back: Vec::new(),
+            link_warnings: Vec::new(),
             plugin_menu: Default::default(),
             stand_up: None,
             stand_up_occurrence: None,
@@ -1786,8 +1812,26 @@ impl SolveApp {
             self.status_undo = false;
             self.status = None;
         }
+        // The design tab the command was given in: one that switches tabs (`view.next_tab`, a
+        // design opened or closed) brings in another design's session, whose revision says
+        // nothing about this one's.
+        let tab = self.docs.active_tab();
         let done = self.command_completed(id, r);
         issue_report::ticket::step_params(self, id, params);
+        // What the last edit's links could not take (a value edit, or any edit that changed what
+        // a link is passed: a feature input, a rename): any later change to the design (Undo,
+        // Update Links, another edit) makes it old news. Going to another tab is no change to
+        // either design: the one shown keeps what its own last edit said.
+        let link_warnings = |v: &Value| -> Vec<String> {
+            v["link_warnings"].as_array().map(|w| w.iter().filter_map(|w| w.as_str().map(str::to_string)).collect()).unwrap_or_default()
+        };
+        if id == "parameters.change"
+            && let Ok(v) = &done
+        {
+            self.link_warnings = link_warnings(v);
+        } else if self.session.revision != revision && self.docs.active_tab() == tab {
+            self.link_warnings = done.as_ref().map(link_warnings).unwrap_or_default();
+        }
         if self.session.revision != revision {
             timeline::stop_playback(self);
         }
@@ -2252,7 +2296,8 @@ impl SolveApp {
         self.pick_open(|app, path| {
             let Some(path) = path else { return };
             if solidcraft_engine::io::is_design_path(&path) {
-                app.insert_design_async(&path, None);
+                // A design with user parameters asks which values its link passes first.
+                link_parameters_dialog::ask_insert(app, &path, None);
             } else if solidcraft_engine::io::is_kicad_path(&path) {
                 kicad_import_dialog::open(app, &path);
             } else {
@@ -4677,6 +4722,7 @@ impl SolveApp {
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
         mesh_units::show(self, ui.ctx());
+        link_parameters_dialog::show(self, ui.ctx());
         plugin_menu::show(self, ui.ctx());
         stand_up::show(self, ui.ctx());
         prefs_notice::show(self, ui.ctx());

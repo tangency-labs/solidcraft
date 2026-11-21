@@ -157,6 +157,9 @@ fn is_text(s: &Session, name: &str, unit: Option<&str>) -> bool {
 
 fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "parameters.change";
+    // What an earlier edit's driven links did is not this edit's to report.
+    super::take_drive_report();
+    super::forget_kept();
     let solved = s.solved_sketches();
     if let Some(changes) = p.get("changes") {
         return change_many(s, changes, &solved);
@@ -164,7 +167,7 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(n) = str_(p, "delete") {
         s.doc_mut().remove_param(n.trim())?;
         s.settle_value_edit(&solved)?;
-        return reply(cmd, ParamChanged { body: ParamChangedBody::Deleted { deleted: n.trim().to_string() }, param_warnings: Vec::new() });
+        return reply(cmd, changed_reply(ParamChangedBody::Deleted { deleted: n.trim().to_string() }));
     }
     let mut name = param_name(cmd, p)?.to_string();
     let mut renamed: Option<ParamRename> = None;
@@ -250,7 +253,13 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
         name,
         expression: e,
     };
-    reply(cmd, ParamChanged { body: ParamChangedBody::One(Box::new(one)), param_warnings: Vec::new() })
+    reply(cmd, changed_reply(ParamChangedBody::One(Box::new(one))))
+}
+
+/// A `parameters.change` reply, with the linked components the edit drove.
+fn changed_reply(body: ParamChangedBody) -> ParamChanged {
+    let (linked, link_warnings) = super::take_drive_report();
+    ParamChanged { body, linked, link_warnings, param_warnings: Vec::new() }
 }
 
 /// A negative value on a sided distance dimension flips the free side to the opposite side of its
@@ -441,7 +450,7 @@ fn change_many(s: &mut Session, changes: &Value, solved: &crate::SketchValues) -
     let (vals, _) = s.doc.param_values();
     let changed = list.iter().map(|(n, _)| (n.clone(), vals.get(n).map(|v| expr::round_reported(expr::reported_value(*v))))).collect();
     let body = ParamChangedBody::Many { changed, recomputed: s.model.last_recomputed, restored: s.model.last_restored, errors: failing(s), switched };
-    reply(cmd, ParamChanged { body, param_warnings: Vec::new() })
+    reply(cmd, changed_reply(body))
 }
 
 /// The configuration rules that switch a feature's suppression and read a parameter this edit

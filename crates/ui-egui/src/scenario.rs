@@ -322,6 +322,7 @@ impl Harness {
         // worker, or a window checking what its material does: wait for it (as a person would).
         let began = std::time::Instant::now();
         while (!self.app.file_load.idle()
+            || self.app.link_parameters_reading.is_some()
             || self.app.saving.is_some()
             || crate::open_meshing::active(&self.app)
             || self.app.stand_up_later.is_some()

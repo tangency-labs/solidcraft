@@ -19,6 +19,8 @@ pub(super) struct Node {
     pub key: String,
     pub tooltip: String,
     pub grounded: bool,
+    /// Its link passes values to its design (`component.link_parameters`).
+    pub driven: bool,
     pub first: bool,
     pub children: Vec<Vec<u64>>,
     pub hover_bodies: Option<Vec<String>>,
@@ -198,6 +200,11 @@ impl Cache {
             tooltip.push_str(&doc.occurrences.get(*self.ids.get(id)?)?.name);
         }
         tooltip.push_str("\nGeometry edits apply to every instance of this component.");
+        let passed = crate::link_parameters_dialog::tooltip(&doc, component);
+        if let Some(lines) = &passed {
+            tooltip.push('\n');
+            tooltip.push_str(lines);
+        }
         let children = self.children(app, component, path, solidcraft_engine::doc::MAX_PLACEMENTS.saturating_sub(self.scheduled));
         self.scheduled += children.len();
         Some((
@@ -210,6 +217,7 @@ impl Cache {
                 key: occurrence_key(path),
                 tooltip,
                 grounded: occurrence.grounded,
+                driven: passed.is_some(),
                 first,
                 children,
                 hover_bodies: None,

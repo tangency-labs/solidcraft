@@ -1378,6 +1378,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     }
     if doc.links.contains_key(&id) {
         own.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
+        own.push(act("ui.linkParameters", "Link Parameters…", "chain").with(json!({"component": id})));
     } else if id != 0 && app.session.can_extract(id) {
         own.push(act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})));
     }
@@ -1898,6 +1899,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 crate::linked_source::start(app, component, id_of(&p, "occurrence"));
             }
         }
+        "ui.linkParameters" => {
+            if let Some(component) = id_of(&p, "component") {
+                crate::link_parameters_dialog::open_link(app, component);
+            }
+        }
         "ui.extractComponent" => {
             if let Some(component) = id_of(&p, "component") {
                 crate::linked_source::extract(app, component);
@@ -2014,10 +2020,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 return;
             };
             // The design is open here, so its file's place is already the user's choice. Its saved
-            // file is read beside the window, as a picked one is (#11593).
+            // file is read beside the window, as a picked one is (#11593), and one with user
+            // parameters asks which values its link passes first, as a picked one does.
             let note = (p.get("unsaved").and_then(Value::as_bool) == Some(true))
                 .then(|| solidcraft_ui_text::format("ui.insert_design.saved_file", &[("name", name)]));
-            app.insert_design_async(path, note);
+            crate::link_parameters_dialog::ask_insert(app, path, note);
         }
         "ui.insertBrowse" => app.pick_design_to_insert(),
         "ui.export" => {

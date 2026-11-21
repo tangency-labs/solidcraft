@@ -229,6 +229,18 @@ pub struct InsertDesignKeys {
     /// another occurrence of it. Default: false.
     #[serde(default)]
     pub reuse: Option<bool>,
+    /// User parameters of the design to set, by name: each an expression over this design's
+    /// parameters (text or a number), as `component.link_parameters` sets them. Default: none.
+    #[serde(default)]
+    pub parameters: Option<std::collections::BTreeMap<String, Value>>,
+    /// Also set every user parameter of the design that has the name of one of this design's
+    /// user parameters to that parameter; one in `parameters` wins. Default: false.
+    #[serde(default)]
+    pub by_name: Option<bool>,
+    /// User parameters of the design that keep their own value although this design has one
+    /// with the same name (`by_name` leaves them out). Default: none.
+    #[serde(default)]
+    pub keep: Option<Vec<String>>,
 }
 
 /// `component.insert_design` parameters: [`InsertDesignKeys`].
@@ -305,6 +317,10 @@ pub enum DesignInserted {
         created_bodies: Vec<String>,
         /// What the design file gave that did not come in (such as mesh bodies).
         warnings: Vec<String>,
+        /// The user parameters of the design that the link sets, by name; absent when it sets
+        /// none.
+        #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+        parameters: std::collections::BTreeMap<String, LinkedParameter>,
     },
 }
 
@@ -504,6 +520,143 @@ pub struct BreakLinkResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Set or clear user parameters of a linked component's design, each an expression over this
+/// design's parameters. The linked bodies are worked out again with those values, and again
+/// whenever one of the expressions changes value. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_required)]
+pub struct LinkParametersParams {
+    // Optional in the type and required in the schema (`component_required`).
+    /// The linked component, by id or name.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+    /// Each user parameter of the linked design to set, by name: an expression over this
+    /// design's parameters (text or a number), or `null` to give it back to the linked design.
+    /// Parameters not named keep what the link gives them. Left out: nothing changes, and the
+    /// reply lists what the link sets.
+    #[serde(default)]
+    pub set: Option<std::collections::BTreeMap<String, Value>>,
+    /// Also set every user parameter of the linked design that has the name of one of this
+    /// design's user parameters to that parameter; a parameter in `set` wins. Left out: as it was.
+    #[serde(default)]
+    pub by_name: Option<bool>,
+    /// User parameters of the linked design that keep their own value although this design has
+    /// one with the same name (`by_name` leaves them out); this list replaces the one the link
+    /// has, `[]` keeps none. A name can't be both kept and in `set`. Left out: as it was.
+    #[serde(default)]
+    pub keep: Option<Vec<String>>,
+    /// Take in the linked file as it is now with these settings, as Update Links does, in the
+    /// same step: for a file that changed since this design read it (a parameter renamed there
+    /// can't be updated with the settings the link has). Left out or false: a changed file is
+    /// refused.
+    #[serde(default)]
+    pub update: Option<bool>,
+}
+
+/// `path` when given: a design file's path, with the handler's message for anything else.
+fn path_given<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    design_path(d, "`path` must be the path of a design")
+}
+
+/// The user parameters a saved design has that a link could set, for a design about to be
+/// inserted (`path`) or the design a linked component links (`component`). Reads the file;
+/// changes nothing.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DesignParametersParams {
+    /// The design (`.sc`) by file path. Give this or `component`.
+    #[serde(default, deserialize_with = "path_given", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "path_schema")]
+    pub path: Option<String>,
+    /// A linked component, by id or name: its design, and what the link passes it now.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+}
+
+/// One user parameter of the design, as `component.design_parameters` lists it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DesignParameter {
+    /// Its name.
+    pub name: String,
+    /// Its expression in the design.
+    pub expression: String,
+    /// Its unit (`mm`, `deg`, `in`, empty for a plain number).
+    pub unit: String,
+    /// Its value in the design, in mm for a length, degrees for an angle; `null` when its
+    /// expression doesn't work out.
+    pub value: Option<f64>,
+    /// The same value in its own unit, as the Parameters window shows it.
+    pub display_value: Option<f64>,
+    /// Its comment.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub comment: String,
+    /// The value this design would give it by name (`by_name`), in mm or degrees: absent when
+    /// this design has no user parameter of that name and kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub here: Option<f64>,
+}
+
+/// What `component.design_parameters` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DesignParametersResult {
+    /// The design file read.
+    pub file: String,
+    /// Its number user parameters, in its own order.
+    pub parameters: Vec<DesignParameter>,
+    /// With `component`: whether the link takes values by name.
+    pub by_name: bool,
+    /// With `component`: the link's own expressions, by parameter name.
+    pub set: std::collections::BTreeMap<String, String>,
+    /// With `component`: the parameters it keeps at the design's own value.
+    pub keep: Vec<String>,
+    /// With `component`: the file changed since this design last read it, so the parameters
+    /// listed are the file's as it is now, and setting them takes it in
+    /// (`component.link_parameters` with `update`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub changed: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// One parameter a link sets: the expression and the value it gives the linked design.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct LinkedParameter {
+    /// The expression, over this design's parameters.
+    pub expression: String,
+    /// The value it gives, in mm for a length, degrees for an angle; `null` before the link
+    /// was worked out with it.
+    pub value: Option<f64>,
+    /// Whether the link sets it by its name (`by_name`), not by an expression of its own.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub by_name: bool,
+}
+
+/// What `component.link_parameters` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct LinkParametersResult {
+    /// The component, by id.
+    pub component: u64,
+    /// The Import feature that holds the linked bodies, by id.
+    pub feature: u64,
+    /// Every parameter the link sets now, by name.
+    pub parameters: std::collections::BTreeMap<String, LinkedParameter>,
+    /// Whether the link sets the design's parameters named as this design's (`by_name`).
+    pub by_name: bool,
+    /// The design's parameters that keep their own value although named as one of this
+    /// design's.
+    pub keep: Vec<String>,
+    /// Whether the linked bodies are not the ones the link had.
+    pub geometry_changed: bool,
+    /// What the linked design gave that did not come in.
+    pub warnings: Vec<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// `component.links` takes no parameters.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -534,6 +687,17 @@ pub enum LinkInfo {
         /// Selected source configuration row id; absent when following the saved source state.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         configuration: Option<u64>,
+        /// The user parameters of the design that the link sets (`component.link_parameters`),
+        /// by name; absent when it sets none.
+        #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+        parameters: std::collections::BTreeMap<String, LinkedParameter>,
+        /// Whether the link also sets the design's parameters named as this design's.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        parameters_by_name: bool,
+        /// The design's parameters that keep their own value although named as one of this
+        /// design's; absent when none.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        parameters_kept: Vec<String>,
         /// The file it resolves to.
         file: String,
         /// Whether the file is there; null when that can't be told.

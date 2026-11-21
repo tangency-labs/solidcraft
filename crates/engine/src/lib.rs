@@ -797,6 +797,8 @@ pub struct Session {
     /// Scratch-only owner provenance, independent of the bounded undo vector.
     /// Ordinary sessions keep None; adoption never installs a child's watch map.
     redo_watch: Option<RedoWatch>,
+    /// What this design's linked designs were last driven from (`cmd::follow_command`).
+    pub(crate) links_reconciled: Option<u64>,
     /// Sketch feature being edited (sketch mode).
     pub active_sketch: Option<u64>,
     pub sketching_view: Option<u64>,
@@ -1370,6 +1372,7 @@ impl Session {
             undo: Vec::new(),
             redo: Vec::new(),
             redo_watch: None,
+            links_reconciled: None,
             active_sketch: None,
             sketching_view: None,
             view_context: ViewContext::default(),
@@ -1793,6 +1796,14 @@ impl Session {
     pub(crate) fn set_doc(&mut self, doc: Document) {
         self.forget_document_caches();
         self.doc = Arc::new(doc);
+    }
+
+    /// Make the shared `doc` the design, as [`Session::set_doc`] does, keeping `doc` itself
+    /// unchanged: the next edit copies it (a linked design kept open goes back to the design its
+    /// file holds this way before each drive, `component_link_parameters`).
+    pub(crate) fn share_doc(&mut self, doc: Arc<Document>) {
+        self.forget_document_caches();
+        self.doc = doc;
     }
 
     /// Before the document changes: the placement index keeps the document alive with its
@@ -2637,6 +2648,9 @@ impl Session {
     /// as before. Otherwise store each sketch whose values changed as solved, so the next edit
     /// continues from it (see `Model::adopt_solved_sketches`).
     pub(crate) fn settle_value_edit(&mut self, solved_before: &SketchValues) -> Result<()> {
+        // Linked designs whose parameters this design sets take their bodies with the new values.
+        // Their STEP reads are held until the refresh below has used them.
+        let reads = crate::cmd::drive_links(self)?;
         // The solved geometry each sketch had before the edit, for the shrink/fling checks
         // after the refresh below (the same checks `settle` runs on an edit's own solve).
         let solved_geometry: std::collections::BTreeMap<u64, solidcraft_sketch::Sketch> =
@@ -2670,6 +2684,9 @@ impl Session {
             *self.doc_mut().sketch_mut(id)? = sketch;
         }
         self.refresh();
+        // The driven links take their designs' materials and looks, on the bodies as the refresh
+        // named them.
+        reads.inherit(self)?;
         for r in &self.model.results {
             // A value a 3D dimension or point of this sketch cannot take (#10608) is refused like
             // one that conflicts; an error from upstream is not the edit's to refuse.
@@ -2893,6 +2910,10 @@ impl Session {
         let params = mapped.as_ref().unwrap_or(params);
         if outermost {
             crash::command_begin(self, spec.id, given);
+            // What linked designs did is reported by the command that drove them: nothing left
+            // from an earlier one (a refused edit) is this one's.
+            crate::cmd::take_drive_report();
+            crate::cmd::forget_kept();
         }
         let scope = crash::Scope::enter();
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match live {
@@ -2941,6 +2962,24 @@ impl Session {
         let r = match r {
             Ok(value) if outermost && spec.undoable && self.replacements == replacements => {
                 self.refresh_sheet_fill_sources(&before.doc, spec.id).map(|()| value)
+            }
+            value => value,
+        };
+        // A command that changed what a linked design is passed without its links following
+        // (a feature input a link's expression reads, a renamed parameter a link by name now
+        // matches, a step after a compound command's value edit): the links follow in the same
+        // undo step, as after a value edit, and the reply says what they did as a value edit's
+        // does (`linked`, `link_warnings`). A live edit's links follow when it is committed.
+        let r = match r {
+            Ok((mut v, live_edit))
+                if outermost
+                    && spec.undoable
+                    && live_edit.is_none()
+                    && self.replacements == replacements
+                    && !Arc::ptr_eq(&self.doc, &before.doc)
+                    && !matches!(spec.id, "edit.undo" | "edit.redo" | "edit.restore_checkpoint") =>
+            {
+                self.follow_links(&mut v).map(|()| (v, live_edit))
             }
             value => value,
         };
@@ -3301,6 +3340,7 @@ impl Session {
             undo: Vec::new(),
             redo: Vec::new(),
             redo_watch: Some(redo_watch),
+            links_reconciled: self.links_reconciled,
             active_sketch: self.active_sketch,
             sketching_view: self.sketching_view,
             view_context: self.view_context.clone(),
@@ -3717,6 +3757,27 @@ impl Session {
         }
     }
 
+    /// After a command that changed the design: the linked designs follow what they are passed
+    /// now when they haven't yet (`cmd::follow_command`), and `reply` (an object) gains what they
+    /// did, `linked` and `link_warnings`, as a value edit's reply has them. `Session::execute`
+    /// does this for the outermost command; a host that runs commands inside its own file scope
+    /// (a plugin's) does it for each, inside that scope, so no linked design is read with more
+    /// authority than the command had.
+    pub(crate) fn follow_links(&mut self, reply: &mut Value) -> Result<()> {
+        let (linked, warnings) = crate::cmd::follow_command(self)?;
+        if let Some(reply) = reply.as_object_mut() {
+            for (key, items) in [("linked", linked), ("link_warnings", warnings)] {
+                if items.is_empty() {
+                    continue;
+                }
+                if let Some(list) = reply.entry(key).or_insert_with(|| Value::Array(Vec::new())).as_array_mut() {
+                    list.extend(items.into_iter().map(Value::String));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Commit commands evaluated on a scratch copy without losing this session's file,
     /// saved state, view state, checkpoints or earlier undo steps. A vanished sketch owner is
     /// refused before any part of the computed transaction is installed.
@@ -3795,6 +3856,9 @@ impl Session {
         self.plugin_state.prune_link_changes(&self.doc);
         self.design_state = computed.design_state;
         self.design_revision = computed.design_revision;
+        // What its links were last driven from goes with the design: a drive the computation
+        // made, or one it couldn't make (a read its scope refused), is not made again here.
+        self.links_reconciled = computed.links_reconciled;
         self.ids = computed.ids;
         self.model = computed.model;
         self.release_left();

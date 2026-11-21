@@ -363,6 +363,22 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::section_count(ui, "users", "User Parameters", true, Some(users.len()), |ui| {
                     table(app, ui, &mut d, &users, "user", name_floor);
                 });
+                // What the links pass to their designs, and what the last edit could not pass.
+                let passed: Vec<String> = crate::link_parameters_dialog::passed(app)
+                    .into_iter()
+                    .filter(|l| filter.is_empty() || l.to_lowercase().contains(&filter))
+                    .collect();
+                let refused = app.link_warnings.clone();
+                if !passed.is_empty() || !refused.is_empty() {
+                    ui_kit::section_count(ui, "linked", solidcraft_ui_text::tr("ui.link_parameters.passed"), true, Some(passed.len()), |ui| {
+                        for line in &passed {
+                            ui_kit::text(ui, line, ui_kit::Text::MonoNote("link_passed"));
+                        }
+                        for why in &refused {
+                            ui_kit::text(ui, why, ui_kit::Text::Error("link_refused"));
+                        }
+                    });
+                }
                 ui_kit::section(ui, "models", "Model Parameters", true, |ui| {
                     ui.scope(|ui| {
                         ui.spacing_mut().indent = solidcraft_theme::Tokens::get().space_14;
