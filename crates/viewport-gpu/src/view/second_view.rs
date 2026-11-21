@@ -125,7 +125,9 @@ impl Renderer {
             }
             queue.write_buffer(&self.moving_uniform, 0, &uniform_bytes_placing(frame, w, h, self.linear_out, reversed, mv.transform));
         }
-        self.pic.model.cull(device, queue, &frame.view_proj, [w, h]);
+        // Bodies drawn moved (a joint drag) are culled where they are drawn, as in the window; its
+        // motion table, written by the window's prepare this frame, is the one this draw reads.
+        self.pic.model.cull(device, queue, &frame.view_proj, [w, h], &frame.motions);
         queue.write_buffer(&self.uniform, 0, &uniform_bytes(frame, w, h, self.linear_out, reversed));
 
         let [sx, sy] = [scissor[0].min(size[0]), scissor[1].min(size[1])];

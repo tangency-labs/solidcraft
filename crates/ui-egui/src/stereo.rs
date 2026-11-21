@@ -107,6 +107,8 @@ pub(crate) fn test_frame() -> Frame {
         hatch: Default::default(),
         sky: [0.0; 4],
         moving: None,
+        motions: Default::default(),
+        ground: None,
     }
 }
 

@@ -78,7 +78,10 @@ impl WebWheelGestures {
     /// `WHEEL_STEP_MIN` points is a wheel notch (browsers report about 100 points per notch,
     /// scaled by page zoom and display scaling); smaller point deltas and horizontal input
     /// start a swipe. Once started, larger deltas and momentum belong to that swipe too.
-    pub fn update(&mut self, raw: &mut egui::RawInput, now: f64) -> Option<std::time::Duration> {
+    /// `Always zoom` also treats a bare vertical step of any size as a wheel step, so a
+    /// smooth-scrolling mouse wheel zooms; Shift and the navigation modifiers still pan. The other
+    /// two choices route as before (`wheel_hint` only asks whether to offer `Always zoom`).
+    pub fn update(&mut self, raw: &mut egui::RawInput, now: f64, mode: crate::prefs::BrowserScrollWheel) -> Option<std::time::Duration> {
         use egui::{Event, Modifiers, MouseWheelUnit, TouchPhase, Vec2};
         const IDLE: f64 = 0.1;
         const WHEEL_STEP_MIN: f32 = 40.0;
@@ -100,7 +103,8 @@ impl WebWheelGestures {
                 Event::MouseWheel { unit, delta, modifiers, .. } => {
                     let point = *unit == MouseWheelUnit::Point;
                     let valid_delta = delta.is_finite() && *delta != Vec2::ZERO;
-                    let step = delta.x == 0.0 && delta.y.abs() >= WHEEL_STEP_MIN;
+                    let always_zoom = mode == crate::prefs::BrowserScrollWheel::AlwaysZoom && *modifiers == Modifiers::NONE;
+                    let step = delta.x == 0.0 && (delta.y.abs() >= WHEEL_STEP_MIN || always_zoom);
                     let swipe = valid_time && point && valid_delta && !modifiers.ctrl && (self.last_scroll.is_some() || !step);
                     if swipe {
                         if self.last_scroll.is_none() {
@@ -727,9 +731,61 @@ pub(crate) struct CameraInput {
 /// selectable, so a press that would start a selection navigates as on empty space; with
 /// `caps.orbit` off, bindings that orbit do nothing and pan and zoom work as usual.
 pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::Response, caps: NavCaps) -> CameraInput {
+    consume_middle_paste(app, ui, rect, resp);
     let input = handle_input(app, ui, rect, resp, caps);
     hold_perspective_distance(app);
     input
+}
+
+/// Navigation runs before tool dialogs. Keep a middle press's clipboard side effects out of
+/// their focused editors, including on release after the pointer has crossed a field.
+fn consume_middle_paste(app: &SolveApp, ui: &egui::Ui, rect: Rect, resp: &egui::Response) {
+    let ctx = ui.ctx();
+    let id = resp.id.with("middle_paste_owned");
+    let modifiers = ui.input(|i| i.modifiers);
+    let (mut owned, previous_modifiers) = ctx.data(|data| data.get_temp::<(bool, egui::Modifiers)>(id).unwrap_or((false, modifiers)));
+    let mut suppress = owned;
+    // Hit-testing needs the context too, so do it outside the input lock. Process presses in
+    // order: a slow frame can contain a viewport click followed by a legitimate field click.
+    let mut events = ui.input_mut(|i| std::mem::take(&mut i.events));
+    let middle_transition = events.iter().any(|event| matches!(event, egui::Event::PointerButton { button: egui::PointerButton::Middle, .. }));
+    // egui-winit emits Paste without a V key event; the web integration emits both. Track
+    // modifiers in event order too, so releasing Ctrl/Cmd later in this frame loses no paste.
+    // InputState.modifiers is already the final state of this frame. Start with the previous
+    // pass's state so a later modifier change cannot alter the provenance of an earlier Paste.
+    let mut command = previous_modifiers.command_only();
+    let mut keyboard_paste = false;
+    events.retain(|event| {
+        match event {
+            egui::Event::ModifiersChanged(modifiers) => command = modifiers.command_only(),
+            egui::Event::Key { key, pressed: true, modifiers, .. }
+                if *key == egui::Key::Paste || (*key == egui::Key::V && modifiers.command) || (*key == egui::Key::Insert && modifiers.shift) =>
+            {
+                keyboard_paste = true;
+            }
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Middle, pressed: true, .. } => {
+                owned = ui.is_enabled()
+                    && rect.contains(*pos)
+                    && !crate::shell::covered(app, *pos)
+                    && ctx.widget_hits_at(*pos).drag.is_some_and(|widget| widget.id == resp.id);
+                suppress = owned;
+            }
+            egui::Event::PointerButton { button: egui::PointerButton::Middle, pressed: false, .. } => {
+                // Keep suppressing through release, when browsers can send an ordinary Paste.
+                owned = false;
+            }
+            // Browser PRIMARY paste accompanies a middle press/release. A Paste on a held
+            // frame alone is not evidence of middle-click paste and must reach the editor.
+            egui::Event::Paste(_) => return !suppress || !middle_transition || command || keyboard_paste,
+            egui::Event::MiddleClickPaste { .. } => return !suppress,
+            _ => {}
+        }
+        true
+    });
+    // Leave pointer input intact for the camera; only its clipboard side effects are consumed.
+    ui.input_mut(|i| i.events = events);
+    let held = ui.input(|i| i.focused && i.pointer.button_down(egui::PointerButton::Middle));
+    ctx.data_mut(|data| data.insert_temp(id, (owned && held, modifiers)));
 }
 
 /// The one place a perspective eye is kept off the target, whichever input moved the camera (#16628).
@@ -2030,7 +2086,7 @@ mod tests {
         gesture: &mut bool,
     ) -> (super::RawWheel, Vec<egui::Event>) {
         let mut raw = egui::RawInput { time: Some(time), events, focused: true, ..Default::default() };
-        let _ = state.update(&mut raw, time);
+        let _ = state.update(&mut raw, time, crate::prefs::BrowserScrollWheel::Automatic);
         let events = raw.events.clone();
         let mut input = egui::InputState::default();
         input.events = raw.events;
@@ -2231,6 +2287,39 @@ mod tests {
     }
 
     #[test]
+    fn web_always_zoom_makes_small_bare_steps_zoom_and_keeps_shift_panning() {
+        use egui::{Modifiers, MouseWheelUnit::Point, vec2};
+        for (mode, modifiers, zooms) in [
+            (crate::prefs::BrowserScrollWheel::AlwaysZoom, Modifiers::NONE, true),
+            (crate::prefs::BrowserScrollWheel::AlwaysZoom, Modifiers::SHIFT, false),
+            (crate::prefs::BrowserScrollWheel::Automatic, Modifiers::NONE, false),
+            (crate::prefs::BrowserScrollWheel::AlwaysPan, Modifiers::NONE, false),
+        ] {
+            let mut state = super::WebWheelGestures::default();
+            let mut gesture = false;
+            for index in 0..4 {
+                let time = f64::from(index) * 0.016;
+                let mut raw = egui::RawInput { time: Some(time), events: vec![web_wheel(Point, vec2(0.0, 3.0), modifiers)], ..Default::default() };
+                state.update(&mut raw, time, mode);
+                let mut input = egui::InputState::default();
+                input.events = raw.events;
+                let wheel = super::immediate_wheel(
+                    &input,
+                    egui::InputOptions::default(),
+                    600.0,
+                    &mut gesture,
+                    &mut false,
+                    &mut Default::default(),
+                    crate::prefs::TrackpadScroll::Pans,
+                    Some(Modifiers::COMMAND),
+                );
+                assert_eq!(wheel.zoom != 0.0, zooms, "{mode:?} {modifiers:?}");
+                assert_eq!(gesture, !zooms, "{mode:?} {modifiers:?}");
+            }
+        }
+    }
+
+    #[test]
     fn web_swipes_pan_from_the_first_delta_and_end_after_idle() {
         use egui::{Modifiers, MouseWheelUnit::Point, TouchPhase, vec2};
         let mut state = super::WebWheelGestures::default();
@@ -2243,7 +2332,9 @@ mod tests {
             let starts = events.iter().filter(|e| matches!(e, egui::Event::MouseWheel { phase: TouchPhase::Start, .. })).count();
             assert_eq!(starts, usize::from(time == 0.0));
         }
-        let delay = state.update(&mut egui::RawInput::default(), 0.10).expect("schedule the idle end even without more input");
+        let delay = state
+            .update(&mut egui::RawInput::default(), 0.10, crate::prefs::BrowserScrollWheel::Automatic)
+            .expect("schedule the idle end even without more input");
         assert!((delay.as_secs_f64() - 0.09).abs() < 1e-9);
         web_frame(&mut state, 0.18, vec![], &mut gesture);
         assert!(gesture);

@@ -100,6 +100,49 @@ impl From<solidcraft_views::Placement> for TabViewPlacement {
 pub struct TabViewLayoutParams {
     /// How to lay them out. `single` shows one view at a time again.
     pub layout: TabViewLayout,
+    /// The target window. Defaults to the last focused window.
+    #[serde(default)]
+    pub window: Option<u32>,
+}
+
+/// `tab.view.equal_sizes` and `tab.view.reset_cameras` act on the tiles in one window.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TabViewWindowParams {
+    /// The target window. Defaults to the last focused window.
+    #[serde(default)]
+    pub window: Option<u32>,
+}
+
+/// Which camera components are linked across the visible Model views.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TabViewLinkMode {
+    Off,
+    Orientation,
+    Zoom,
+    Both,
+}
+
+impl From<TabViewLinkMode> for solidcraft_views::CameraLinkMode {
+    fn from(mode: TabViewLinkMode) -> Self {
+        match mode {
+            TabViewLinkMode::Off => Self::Off,
+            TabViewLinkMode::Orientation => Self::Orientation,
+            TabViewLinkMode::Zoom => Self::Zoom,
+            TabViewLinkMode::Both => Self::Both,
+        }
+    }
+}
+
+/// `tab.view.link`: choose which camera components the visible Model views share.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TabViewLinkParams {
+    /// The target window. Defaults to the last focused window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<u32>,
+    pub mode: TabViewLinkMode,
 }
 
 /// `tab.view.beside`: show another view beside the active one.
@@ -116,6 +159,9 @@ pub struct TabViewBesideParams {
     /// An explicit cell and position. Requires `id` and replaces the top-level `edge` option.
     #[serde(default)]
     pub placement: Option<TabViewPlacement>,
+    /// The target window. Defaults to the last focused window.
+    #[serde(default)]
+    pub window: Option<u32>,
 }
 
 /// `tab.view.open`: open a view of the shown design and make it the active one.
@@ -132,6 +178,9 @@ pub struct TabViewOpenParams {
     /// Default: true when a subject is given, else false.
     #[serde(default)]
     pub reuse: Option<bool>,
+    /// The target window. Defaults to the last focused window.
+    #[serde(default)]
+    pub window: Option<u32>,
 }
 
 /// `tab.view.close`, `tab.view.duplicate`: act on one view.
@@ -153,6 +202,9 @@ pub struct TabViewActivateParams {
     /// The view's place in tab order, 0 first. Give this or `id`.
     #[serde(default)]
     pub index: Option<u64>,
+    /// The window containing the view. Defaults to the last focused window.
+    #[serde(default)]
+    pub window: Option<u32>,
 }
 
 /// `tab.view.rename`: give a view a new name.
@@ -218,6 +270,9 @@ pub struct TabViewReply {
     /// The place asked for (`tab.view.activate`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub index: Option<u64>,
+    /// The window asked for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window: Option<u32>,
     /// The name asked for, trimmed (`tab.view.rename`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,

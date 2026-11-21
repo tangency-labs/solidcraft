@@ -1,7 +1,7 @@
 //! The Move window's main value: the one the canvas box shows and the keyboard types into.
 //! It follows the move type, because each type uses a different value.
 use serde_json::json;
-use solidcraft_engine::Session;
+use solidcraft_engine::{PickMode, Session};
 
 use super::*;
 use crate::Services;
@@ -971,13 +971,12 @@ fn part_harness() -> (crate::scenario::Harness, u64) {
     (h, made["occurrence"].as_u64().unwrap())
 }
 
-/// Opens Move/Copy with the viewport in component (`components`) or body pick mode, Create Copy
-/// ticked or not, then clicks the top of the cube. The pick mode is set first: Move/Copy's Object
+/// Opens Move/Copy with the viewport in the Parts (`components`) or Bodies selection mode, Create
+/// Copy ticked or not, then clicks the top of the cube. The mode is set first: Move/Copy's Object
 /// starts from it, and then decides what a click picks.
 fn click_cube_in_move(components: bool, copy: bool) -> (crate::scenario::Harness, u64) {
     let (mut h, occurrence) = part_harness();
-    h.app.ui.pick_components = components;
-    h.app.ui.pick_bodies = !components;
+    h.app.ui.pick_mode = if components { PickMode::Parts } else { PickMode::Bodies };
     h.app.start("solid.move");
     h.settle();
     if copy {
@@ -1400,14 +1399,13 @@ fn a_component_picked_before_create_copy_is_ticked_is_copied_as_a_component() {
 
 #[test]
 fn editing_a_move_never_takes_a_component_pick() {
-    // An existing move of another body is edited, and the component is clicked in component mode.
+    // An existing move of another body is edited, and the component is clicked in the Parts mode.
     let (mut h, _) = part_harness();
     h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "body_name": "Plate"})).unwrap();
     let moved = h.app.run("solid.move", json!({"bodies": ["Plate"], "translate": [0, 0, 5]})).unwrap()["feature"].as_u64().unwrap();
     h.app.dialog = Some(crate::dialogs::for_feature(&h.app, moved, None).unwrap());
     h.settle();
-    h.app.ui.pick_components = true;
-    h.app.ui.pick_bodies = false;
+    h.app.ui.pick_mode = PickMode::Parts;
     h.step(&json!({"click": {"world": [10, 10, 20]}})).unwrap();
     let items = h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
     assert!(items.iter().any(|s| matches!(s, Sel::Body { name } if name == "Peg")), "the click picks the body: {items:?}");

@@ -137,9 +137,9 @@ Known limits of this first step:
 - The headset shows what the window's design view drew. While the window is minimized or
   covered it draws nothing new: the headset keeps the last picture and gets about ten frames a
   second, so keep the window open.
-- The controllers are drawn over the model, not into it; a hand behind the model shows through
-  it. The ray stops at the part it points at, so it never crosses the model.
-- The signs are drawn over everything. Edges and points are not picked, only parts.
+- The signs, the ring menu and the joints' badges are drawn over everything (the controllers,
+  their rays and the belt hide behind the model). Edges and points are not picked, only parts.
+- The menus, the belt and the signs are a first working layout, not a finished design.
 - A VR runtime that stops answering holds the window too (OpenXR's frame wait has no time limit).
 
 ### The OpenXR loader
@@ -194,7 +194,8 @@ offscreen frame of the scene's own kind (depth, MSAA, order-independent transpar
 writes the camera uniform, the culled placements and the glass order for the eye and submits at
 once; the window's next `prepare` writes its own again before it draws, and its cached still
 picture is not touched. A last pass puts it over the backdrop and the floor into the runtime's
-sRGB picture, and the controllers' boxes and rays over that. The pictures go to the runtime as
+sRGB picture, then the floor grid, the belt, the controllers and their rays, depth-tested
+against the model, and the signs over all of it. The pictures go to the runtime as
 one projection layer.
 
 ### Decisions tested without a headset

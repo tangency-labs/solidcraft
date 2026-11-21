@@ -76,14 +76,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&SAVE_CONTRACT)
         .output(output_schema_for::<SaveResult>)
-        .params("path? (default: current file; a name that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused); sign?: bool (the app's own Save only: sign the save with GnuPG, appending a provenance record; container only; a script or agent is refused); signing_key?: fingerprint or user id (default: GnuPG's default signing key) → signature: {method, fingerprint, user_id?} when signed"),
+        .params("path? (default: current file; a name that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true; left out, without waiting, while an imported file's check of its parts still runs); preview?: bool (saved display meshes, default: false); overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused); sign?: bool (the app's own Save only: sign the save with GnuPG, appending a provenance record; container only; a script or agent is refused); signing_key?: fingerprint or user id (default: GnuPG's default signing key) → signature: {method, fingerprint, user_id?} when signed"),
     CommandSpec::new("file.save_as", "Save As", crate::checked!("file.save_as", save_as)).any_part()
         .icon("save")
         .key("Ctrl+Shift+S")
         .noundo()
         .contract(&SAVE_AS_CONTRACT)
         .output(output_schema_for::<SaveResult>)
-        .params("path (a design file name, .sc as a rule; one that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file); sign?: bool and signing_key? (as file.save, and likewise only from the app's own Save)"),
+        .params("path (a design file name, .sc as a rule; one that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true; left out, without waiting, while an imported file's check of its parts still runs); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file); sign?: bool and signing_key? (as file.save, and likewise only from the app's own Save)"),
     CommandSpec::new("file.verify", "Verify Signature", crate::checked!("file.verify", verify)).any_part()
         .icon("shield")
         .noundo()
@@ -576,6 +576,8 @@ fn open_step(
     let key = solidcraft_io::ImportCache::key(&bytes, path, &import_key_options(&options));
     let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
     if let Some((doc, saved, mut reply)) = cache.and_then(|cache| cache.read(&key)) {
+        // The cache holds an import template. A fresh session owns its tracking
+        // identity without changing the cached authored design.
         let mut fresh = Session::opened_validating(doc, Some(&saved), validation);
         // An import is still an unsaved design, with the same dirty state as a cold import.
         fresh.saved = std::sync::Arc::new(Document::new(&stem));
@@ -1322,8 +1324,10 @@ fn read_kicad_model(path: &str) -> std::io::Result<solidcraft_io::KicadModelFile
     let Some(stem) = named.file_stem() else { return Err(missing) };
     let Some(dir) = named.parent() else { return Err(missing) };
     let format = named.extension().and_then(|e| e.to_str()).unwrap_or("");
-    for other in ["step", "stp", "wrl"] {
-        if other.eq_ignore_ascii_case(format) {
+    // KiCad 10's zipped STEP comes after VRML, so a board that already found a `….wrl` keeps it,
+    // and in both spellings, as the file system may tell `….stpZ` from `….stpz`.
+    for other in ["step", "stp", "wrl", "stpZ", "stpz"] {
+        if other == format {
             continue;
         }
         // Not `with_extension`: a model named `DIP-14_W7.62mm` has `62mm` as its extension.
@@ -1534,12 +1538,14 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let verify = bool_(p, "verify").unwrap_or(false);
     // Stamped before it is read: a write while it is being read is a change too.
     let disk = solidcraft_io::design_lock::stamp(path);
-    let (doc, saved) = read_design(s, path)?;
-    // A file with provenance is evaluated from its timeline, never from a cache the signature
-    // does not cover.
-    let saved = if solidcraft_io::has_design_provenance(path) { None } else { saved };
-    let opened = Session::opened_at_validating(doc, saved.as_ref(), Some(path), s.validation());
-    opened_design(s, opened, path, read_only, disk, verify, None)
+    // One reading of the file gives the document, the model (none for a signed file: it is
+    // evaluated from its timeline, never from a cache the signature does not cover), the
+    // provenance records and the signature check.
+    let file = read_design(s, path, verify)?;
+    let mut doc = file.doc;
+    super::component_link::resolve_design_links(&mut doc, Some(path));
+    let opened = Session::opened_validating(doc, file.model.as_ref(), s.validation()).located_with(Some(path), file.chain.clone());
+    opened_design(s, opened, path, read_only, disk, verify.then_some(file.report), file.chain)
 }
 
 /// Whether running `command` with `params` runs an installed importer plugin's code:
@@ -1585,12 +1591,12 @@ fn unreadable_design(path: &str, reason: &str) -> EngineError {
 }
 
 /// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own.
-fn read_design(s: &mut Session, path: &str) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
-    let (mut doc, saved) = solidcraft_io::read_design_file(path, s.open_preview.take()).map_err(|e| unreadable_design(path, &e.to_string()))?;
-    if let Some(stem) = default_name_for(&doc.name, path) {
-        doc.name = stem;
+fn read_design(s: &mut Session, path: &str, verify: bool) -> Result<solidcraft_io::DesignFile> {
+    let mut file = solidcraft_io::read_design_file_once(path, s.open_preview.take(), verify).map_err(|e| unreadable_design(path, &e.to_string()))?;
+    if let Some(stem) = default_name_for(&file.doc.name, path) {
+        file.doc.name = stem;
     }
-    Ok((doc, saved))
+    Ok(file)
 }
 
 /// `doc.open` of a design: `opened`, the design read from `path` and evaluated, takes `s`'s
@@ -1601,18 +1607,16 @@ fn opened_design(
     path: &str,
     read_only: bool,
     disk: Option<solidcraft_io::design_lock::FileStamp>,
-    verify: bool,
     checked: Option<Option<solidcraft_io::ProvenanceReport>>,
+    chain: Option<solidcraft_io::ProvenanceChain>,
 ) -> Result<Value> {
     s.replace_design(opened);
     s.disk = disk;
     s.read_only = read_only;
-    s.provenance_chain = solidcraft_io::read_design_provenance_chain_file(path);
-    // A staged open checks on its worker before it lands; the report is then just taken here.
-    s.provenance = match checked {
-        Some(report) => report,
-        None => verify.then(|| solidcraft_io::read_design_provenance_file(path)).flatten(),
-    };
+    // Both from the reading the design came from (`read_design`): the signature check, when it
+    // was asked for, is the check of these bytes.
+    s.provenance_chain = chain;
+    s.provenance = checked.flatten();
     // A design saved with print faces (by an older version, or with them kept) opens without
     // them when they are not kept (#11512). The rest of it opens as saved, and dropping them is
     // neither an unsaved change nor a step to undo.
@@ -1752,6 +1756,7 @@ fn saved_name(name: &str, old_path: Option<&str>, path: &str, user_named: bool) 
 /// Rename the design, and the undo and redo states that still carry the old name, so undo
 /// does not bring the default name back and leave the design looking changed.
 fn rename_design(s: &mut Session, from: &str, to: &str) {
+    let token_current = s.design_token_is_current();
     // A prepared world is keyed by the document's Arc. Changing only its name
     // must not make an opted-in save lose warm geometry and display caches.
     // Retag only a cache that already matches: cold or stale placements stay so.
@@ -1784,6 +1789,9 @@ fn rename_design(s: &mut Session, from: &str, to: &str) {
         && let Some(cache) = cache.as_mut()
     {
         cache.doc = std::sync::Arc::clone(&s.doc);
+    }
+    if token_current {
+        s.follow_design_token();
     }
 }
 
@@ -1884,8 +1892,11 @@ fn write_file(
 }
 
 /// Report a requested model cache missing from the file just written. Inspecting the
-/// container directory avoids decoding the large model a second time (#18815).
-fn missing_save_cache(s: &Session, format: &str, cache: bool, bytes: &[u8]) -> Option<String> {
+/// container directory avoids decoding the large model a second time (#18815). `checking`: an
+/// import's check of its parts was still running when the save began, so the save left the
+/// cache out without waiting for it ([`saved_geometry`], #20133); taken then, as the check may
+/// have ended since.
+fn missing_save_cache(s: &Session, format: &str, cache: bool, checking: bool, bytes: &[u8]) -> Option<String> {
     if !cache || format != "container" || s.doc.features.is_empty() {
         return None;
     }
@@ -1902,6 +1913,8 @@ fn missing_save_cache(s: &Session, format: &str, cache: bool, bytes: &[u8]) -> O
         "temporary component placements are active (for example an exploded view)".into()
     } else if s.model.state().bodies.is_empty() {
         "there are no evaluated bodies to cache".into()
+    } else if checking {
+        "an imported file's parts were still being checked (a save once the check ends keeps it)".into()
     } else {
         "the cache could not fit or be encoded within the design file budget".into()
     };
@@ -1918,6 +1931,8 @@ fn write_bytes(
     sign: bool,
     signing_key: Option<&str>,
 ) -> Result<Value> {
+    // Before the bytes are made: a check that ends meanwhile leaves this save without the cache.
+    let checking = s.model.checking_imports();
     let chain = s.provenance_chain.clone().unwrap_or_default();
     let mut signature = None;
     let mut notes: Vec<String> = Vec::new();
@@ -1967,7 +1982,7 @@ fn write_bytes(
             _ => return Err(bad("file.save", "format must be container or json")),
         }
     };
-    let cache_not_saved = missing_save_cache(s, format, cache, &bytes);
+    let cache_not_saved = missing_save_cache(s, format, cache, checking, &bytes);
     // Cancelled while the design was being prepared (a watched save): nothing is written.
     if solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()) {
         return Err(EngineError::Other(format!("{path}: save cancelled")));
@@ -2164,11 +2179,17 @@ impl Session {
 
     /// This session, just opened, as the design in the file at `path`.
     pub(crate) fn located(self, path: Option<&str>) -> Self {
-        let mut session = self;
-        session.path = path.map(str::to_owned);
         // A saved design keeps its provenance for the next save to append to, whichever path
         // opened it (the UI, the CLI, recovery, a linked design).
-        session.provenance_chain = path.and_then(solidcraft_io::read_design_provenance_chain_file);
+        let chain = path.and_then(solidcraft_io::read_design_provenance_chain_file);
+        self.located_with(path, chain)
+    }
+
+    /// [`Self::located`] with the provenance records `chain` already read with the design.
+    pub(crate) fn located_with(self, path: Option<&str>, chain: Option<solidcraft_io::ProvenanceChain>) -> Self {
+        let mut session = self;
+        session.path = path.map(str::to_owned);
+        session.provenance_chain = chain;
         // A design saved before body names were pinned (#6403) is pinned now, as its first
         // command would pin it: that command pinned them as part of itself, so undoing it went
         // back to the unpinned design, whose fingerprints no evaluated result matched, and the
@@ -2185,6 +2206,7 @@ impl Session {
         if unpinned || dropped || !std::sync::Arc::ptr_eq(&before, &session.doc) {
             session.pin_rolled_back_body_names();
         }
+        session.follow_design_token();
         session.saved = session.doc.clone();
         session
     }
@@ -2360,12 +2382,14 @@ impl Session {
 }
 
 /// The evaluated model a save keeps, so opening need not rebuild it: only the finished evaluation
-/// of `design`, the document saved (no sketch being edited, no uncaptured moves, no feature errors).
+/// of `design`, the document saved (no sketch being edited, no uncaptured moves, no feature errors),
+/// and none while an import's SMLib check of its parts still runs: the save does not wait for it
+/// ([`solidcraft_doc::Model::saved_if_checked`], #20133).
 fn saved_geometry(s: &Session, design: &Document) -> Option<solidcraft_doc::SavedModel> {
     if s.active_sketch.is_some() || !s.pending_moves.is_empty() || s.model.state().bodies.is_empty() {
         return None;
     }
-    s.model.saved(design)
+    s.model.saved_if_checked(design)
 }
 
 /// [`saved_geometry`] without waiting for the imports' checks ([`solidcraft_doc::Model::saved_now`]).
@@ -2378,7 +2402,8 @@ fn saved_geometry_now(s: &Session, design: &Document) -> Option<(solidcraft_doc:
 
 /// Cache only warm display geometry. A save never waits for an unevaluated mesh.
 fn saved_preview(s: &Session) -> Option<solidcraft_io::DesignPreview> {
-    if s.active_sketch.is_some() || !s.pending_moves.is_empty() || s.model.results.iter().any(|r| r.error.is_some()) {
+    // Nor while a joint drag shows a frame: the world placed for it is not the design's.
+    if s.active_sketch.is_some() || !s.pending_moves.is_empty() || !s.drag_moves().is_empty() || s.model.results.iter().any(|r| r.error.is_some()) {
         return None;
     }
     let world = s.cached_world_state()?;
@@ -3604,6 +3629,7 @@ mod tests {
             let (mut first, cold) = open_step(&path, &json!({}), Some(&cache), solidcraft_kernel::Validation::default()).unwrap();
             assert_eq!(cold["import_reused"], false);
             let before = first.doc.to_json();
+            let first_token = first.design_token();
             let bounds = crate::view::bounds(&first).unwrap();
             assert!(first.is_dirty());
             assert!((solidcraft_kernel::measure_mass(&first.model.state().bodies[0].body).unwrap().volume - 2000.0).abs() < 1e-6);
@@ -3612,6 +3638,7 @@ mod tests {
             assert_eq!(hit["import_reused"], true);
             assert_eq!(hit["content_sha256"], cold["content_sha256"]);
             assert_eq!(hit["warnings"], cold["warnings"]);
+            assert_ne!(reopened.design_token().document_id, first_token.document_id, "a cached import starts a distinct open session");
             assert_eq!(reopened.doc.to_json(), before, "subsequent edits never enter the cache");
             assert_eq!(reopened.model.last_recomputed, 0, "cache hit adopts the model without importing");
             assert!(reopened.is_dirty());
@@ -4197,12 +4224,15 @@ mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
         let omitted = s.design_container(solidcraft_io::DesignCompression::Fast, false, false).unwrap();
-        let notice = missing_save_cache(&s, "container", true, &omitted).unwrap();
+        let notice = missing_save_cache(&s, "container", true, false, &omitted).unwrap();
         assert!(notice.contains("design file budget"), "{notice}");
-        assert!(missing_save_cache(&s, "container", false, &omitted).is_none());
-        assert!(missing_save_cache(&s, "json", true, &omitted).is_none());
+        // Left out while an import's parts were being checked (#20133): that is the reason given.
+        let checking = missing_save_cache(&s, "container", true, true, &omitted).unwrap();
+        assert!(checking.contains("still being checked") && !checking.contains("budget"), "{checking}");
+        assert!(missing_save_cache(&s, "container", false, false, &omitted).is_none());
+        assert!(missing_save_cache(&s, "json", true, false, &omitted).is_none());
         let included = s.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
-        assert!(missing_save_cache(&s, "container", true, &included).is_none());
+        assert!(missing_save_cache(&s, "container", true, false, &included).is_none());
     }
 
     #[test]
