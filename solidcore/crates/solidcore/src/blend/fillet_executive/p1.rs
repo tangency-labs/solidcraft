@@ -537,6 +537,7 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
         self.code = code as i32;
         // (not upstream: this overload names no site)
         self.no_room_without_site = true;
+        self.corner_cause = None;
         if comment.is_some() {
             self.comment = tblock_text(comment);
         }
@@ -557,6 +558,7 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
         self.edge = edge;
         self.code = code as i32;
         self.no_room_without_site = false;
+        self.corner_cause = None;
         self.status = status as i32;
         self.comment = tblock_text(comment);
     }
@@ -608,6 +610,7 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
     ) {
         self.code = code as i32;
         self.no_room_without_site = false;
+        self.corner_cause = None;
         self.status = status as i32;
         self.edge = filleted_edge;
         self.side_face = side_face;
@@ -633,6 +636,7 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
     ) {
         self.code = code as i32;
         self.no_room_without_site = false;
+        self.corner_cause = None;
         self.status = status as i32;
         self.corner_type = corner_type;
         self.vertex = vertex;
@@ -657,6 +661,7 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
     ) {
         self.code = code as i32;
         self.no_room_without_site = false;
+        self.corner_cause = None;
         self.status = status as i32;
         self.edge_type = edge_type as i32;
         add_unique(&mut self.edges, fillet_edge);
@@ -681,6 +686,7 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
     ) {
         self.code = code as i32;
         self.no_room_without_site = false;
+        self.corner_cause = None;
         self.status = status as i32;
         self.edge_type = FilletEdgeType::Unknown as i32; // (it's not a fillet edge)
         self.edge = filleted_edge;
@@ -1351,6 +1357,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     refused = true;
                 }
                 CornerCreation::Unsupported { location, cause } => {
+                    // `note_vertex_error` notes nothing for a null vertex, so the note is
+                    // made exactly when it was before; the null-vertex test only keeps the
+                    // cause off an earlier vertex's note, which it does not explain
                     if !refused && vertex.is_some() {
                         self.error.note_vertex_error(
                             vertex,
@@ -2310,6 +2319,112 @@ mod tests {
             None,
         );
         assert_eq!(executive.error.unsupported_corner_cause(), None);
+    }
+
+    /// #19803: every note of the error record clears the classification's error, so a
+    /// later note under the same code (a corner's own refusal, a setback not built) never
+    /// reads as caused by it.
+    #[test]
+    fn a_later_note_of_any_kind_is_not_the_classifications() {
+        let classification =
+            SolidError::invalid_input("corner_creation_test", "classification failure");
+        let unsupported = FilletErrorType::CornerUnsupported;
+        let notes: [fn(&mut ErrorInfo<H>, FilletErrorType); 6] = [
+            |e, code| e.note_error(code, None),
+            |e, code| e.note_edge_error(Some(H(1)), FilStatus::Failure, code, None),
+            |e, code| {
+                e.note_merge_error(code, FilStatus::Failure, None, None, None, None, None);
+            },
+            |e, code| {
+                e.note_corner_error(
+                    code,
+                    FilletCornerType::Unknown,
+                    FilStatus::Failure,
+                    None,
+                    Some(H(2)),
+                    [None, None],
+                    [None, None],
+                    None,
+                );
+            },
+            |e, code| {
+                e.note_fillet_edge_error(
+                    code,
+                    FilStatus::Failure,
+                    FilletEdgeType::Unknown,
+                    None,
+                    None,
+                    None,
+                );
+            },
+            |e, code| {
+                e.note_intersection_error(
+                    code,
+                    FilStatus::Failure,
+                    None,
+                    &[],
+                    &[],
+                    &[],
+                    Point3::ZERO,
+                    None,
+                );
+            },
+        ];
+        for (i, note) in notes.iter().enumerate() {
+            let mut e = ErrorInfo::<H>::new(None);
+            e.note_vertex_error(
+                Some(H(3)),
+                None,
+                FilStatus::Failure,
+                unsupported,
+                Some("Corner case not implemented"),
+            );
+            e.corner_cause = Some(classification.clone());
+            assert_eq!(e.unsupported_corner_cause(), Some(&classification));
+            note(&mut e, unsupported);
+            assert_eq!(e.code, unsupported as i32, "note {i}");
+            assert_eq!(e.unsupported_corner_cause(), None, "note {i}");
+        }
+    }
+
+    /// #19803: an unsupported corner at a null vertex notes nothing, as before, and leaves
+    /// the earlier vertex's note and its cause alone.
+    #[test]
+    fn an_unsupported_corner_at_a_null_vertex_leaves_the_earlier_note() {
+        use crate::blend::fillet_executive::p3::VertexEntry;
+
+        let k = Kernel::default();
+        let mut executive = corner_creation_executive();
+        executive.filleted_vertices = vec![Some(H(3)), None];
+        for vertex in [Some(H(3)), None] {
+            executive
+                .vertex_corner_map
+                .insert(vertex, VertexEntry::SolverEdgeuses(vec![H(20)]));
+        }
+        let first = SolidError::invalid_input("corner_creation_test", "first classification");
+        let second = SolidError::invalid_input("corner_creation_test", "second classification");
+        executive
+            .create_fillet_corners_recording_vertex_errors(
+                &k,
+                |_, _, vertex, _| {
+                    Ok(CornerCreation::Unsupported {
+                        location: None,
+                        cause: Some(if vertex.is_some() {
+                            first.clone()
+                        } else {
+                            second.clone()
+                        }),
+                    })
+                },
+                None,
+            )
+            .unwrap();
+        assert_eq!(executive.error.vertex, Some(H(3)));
+        assert_eq!(
+            executive.error.code,
+            FilletErrorType::CornerUnsupported as i32
+        );
+        assert_eq!(executive.error.unsupported_corner_cause(), Some(&first));
     }
 
     #[test]

@@ -347,7 +347,9 @@ pub struct ErrorInfo<O> {
     /// Not upstream: the error of the classification that failed at the vertex noted with
     /// [`FilletErrorType::CornerUnsupported`], which is why no corner was made there (read
     /// it with [`ErrorInfo::unsupported_corner_cause`], which ignores it under any other
-    /// code).
+    /// code). Every note clears it, so a later note under the same code (a corner's own
+    /// refusal, a setback not built) never reads as caused by an earlier classification;
+    /// only the executive's note of the unsupported corner sets it, after its note.
     pub corner_cause: Option<SolidError>,
 }
 

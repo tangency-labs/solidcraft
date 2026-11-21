@@ -1574,6 +1574,8 @@ fn replay_solver_error(
     error.edge_type = note.edge_type;
     // (not upstream) the note's own site, written below, or none of it
     error.no_room_without_site = note.no_room_without_site;
+    // (not upstream) a solver's note is not explained by an earlier corner's classification
+    error.corner_cause = None;
     error.edge = map(note.edge);
     for (from, to) in [
         (&note.surfaces, &mut error.surfaces),
@@ -1612,6 +1614,7 @@ fn replay_corner_error(
     error.corner_type = note.corner_type;
     error.vertex = map(note.vertex);
     error.no_room_without_site = false; // (not upstream: it names the vertex)
+    error.corner_cause = None; // (not upstream: nor is it an earlier classification's)
     for surface in &note.surfaces {
         let surface = map(*surface);
         if !error.surfaces.contains(&surface) {
@@ -9074,6 +9077,132 @@ mod tests {
     /// edge of the unit cube: five times the faces, so the fillet surface fails (code 4,
     /// not a no-room refusal) and the edge has no corner to note.
     const STALE_CASE_RADIUS: f64 = 5.0;
+
+    /// What a fillet of the three edges at the unit cube's corner at the origin, rounded by
+    /// 0.2, reports when `spoil` is done to its session once it is prepared: the returned
+    /// error of `do_fillet`, the session's error info after it, and the corner's vertex and
+    /// point.
+    fn spoiled_cube_corner(
+        spoil: impl FnOnce(&mut FilletSession<'_>, VertexId),
+    ) -> (
+        Result<()>,
+        ErrorInfo<FilletObject>,
+        Option<FilletObject>,
+        Option<Point3>,
+    ) {
+        let mut k = Kernel::default();
+        let mut body =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                .unwrap();
+        let corner = crate::topology::brep::p1::vertices(&body, None)
+            .unwrap()
+            .into_iter()
+            .find(|v| crate::topology::vertex::point(&body, *v).unwrap() == Point3::ZERO)
+            .unwrap();
+        let edges = crate::topology::brep::p1::edges(&body, None)
+            .unwrap()
+            .into_iter()
+            .filter(|e| {
+                crate::topology::edge::vertices(&body, *e, None)
+                    .unwrap()
+                    .contains(&Some(corner))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(edges.len(), 3);
+        let at = crate::topology::vertex::point(&body, corner).ok();
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &edges, 0.2, 1, 1, 1.0)
+            .unwrap();
+        spoil(&mut session, corner);
+        let result = session.do_fillet(&mut k);
+        let vertex = FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(corner));
+        (result, session.error_info().clone(), Some(vertex), at)
+    }
+
+    /// [`spoiled_cube_corner`] with the surface of one face at the corner taken away, so
+    /// the classification of the corner fails where it tests the convexity of the corner's
+    /// edges; with `set_back`, the corner is marked set back, which is no Ball, so the
+    /// Ball's classification passes it by and the Setback's is the one that fails.
+    fn cube_corner_with_a_face_without_surface(
+        set_back: bool,
+    ) -> (
+        Result<()>,
+        ErrorInfo<FilletObject>,
+        Option<FilletObject>,
+        Option<Point3>,
+    ) {
+        spoiled_cube_corner(|session, corner| {
+            if set_back {
+                session.add_set_back_vertex(corner);
+            }
+            let target = &mut *session.objects.target;
+            let face = crate::topology::vertex::faces(target, corner).unwrap()[0];
+            target.face_mut(face).unwrap().surface = None;
+        })
+    }
+
+    /// The error the classification of [`cube_corner_with_a_face_without_surface`] fails
+    /// with.
+    fn face_without_surface() -> SolidError {
+        SolidError::InvalidInput {
+            operation: "topology::edgeuse::p3",
+            reason: "EvaluateBinormal: face without surface",
+        }
+    }
+
+    /// The note of the corner whose classification failed, as before (#19803): unsupported,
+    /// a failure, the fork's comment, at the corner's vertex and point; and the filleting's
+    /// own failure returned, its operation, status and cause unchanged.
+    fn assert_noted_as_before(
+        (result, error, vertex, at): &(
+            Result<()>,
+            ErrorInfo<FilletObject>,
+            Option<FilletObject>,
+            Option<Point3>,
+        ),
+    ) {
+        assert_eq!(error.code, FilletErrorType::CornerUnsupported as i32);
+        assert_eq!(error.status, FilStatus::Failure as i32);
+        assert_eq!(error.comment, "Corner case not implemented");
+        assert_eq!(error.vertex, *vertex);
+        assert_eq!(error.location, *at);
+        let e = result.as_ref().unwrap_err();
+        assert_eq!(e.operation(), "blend::fillet_executive::session::finish");
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e:?}");
+        // the stage's error here is not a record that can keep a cause, so the
+        // classification's error is not chained onto it: the chain is as it was
+        assert_eq!(e.cause(), Some(&face_without_surface()), "{e:?}");
+    }
+
+    #[test]
+    fn a_failed_ball_classification_is_kept_with_the_unsupported_corner() {
+        let run = cube_corner_with_a_face_without_surface(false);
+        assert_noted_as_before(&run);
+        assert_eq!(
+            run.1.unsupported_corner_cause(),
+            Some(&face_without_surface())
+        );
+    }
+
+    #[test]
+    fn a_failed_setback_classification_is_kept_with_the_unsupported_corner() {
+        let run = cube_corner_with_a_face_without_surface(true);
+        assert_noted_as_before(&run);
+        assert_eq!(
+            run.1.unsupported_corner_cause(),
+            Some(&face_without_surface())
+        );
+    }
+
+    /// Without the spoil the cube's corner is the Ball and the fillet builds: the spoil, not
+    /// the case, is what fails the classifications above.
+    #[test]
+    fn the_unspoiled_cube_corner_builds() {
+        let (result, error, _, _) = spoiled_cube_corner(|_, _| {});
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(error.unsupported_corner_cause(), None);
+    }
 
     #[test]
     fn a_no_room_refusal_after_an_unsupported_corner_names_no_stale_site() {
