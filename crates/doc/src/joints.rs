@@ -817,11 +817,15 @@ impl Joint {
     }
 }
 
-/// Expressions a joint's numbers follow (over the design's parameters): the offset (a length),
-/// the angle and each value (angles or lengths as the joint's values are). A number typed in
-/// place of one drops it.
+/// Expressions a joint's numbers follow (over the design's parameters): the lateral offsets, the
+/// axial offset (lengths), the angle and each value (angles or lengths as the joint's values are).
+/// A number typed in place of one drops it.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct JointExprs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_x: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_y: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -837,7 +841,12 @@ pub struct JointExprs {
 
 impl JointExprs {
     pub fn is_empty(&self) -> bool {
-        self.offset.is_none() && self.angle.is_none() && self.values.iter().all(Option::is_none) && self.limits.iter().all(|l| l == &[None, None])
+        self.offset_x.is_none()
+            && self.offset_y.is_none()
+            && self.offset.is_none()
+            && self.angle.is_none()
+            && self.values.iter().all(Option::is_none)
+            && self.limits.iter().all(|l| l == &[None, None])
     }
 
     /// The expressions the minimum and maximum of value `i`'s limits follow.
@@ -902,14 +911,23 @@ impl<'a> Params<'a> {
     }
 }
 
-/// A joint's offset, angle and values worked out from its expressions (those without one keep
-/// their numbers), or why one can't be: an unknown name, a wrong unit, or a number too large.
-pub fn expressed(params: &Params, j: &Joint) -> Result<(f64, f64, Vec<f64>)> {
+/// A joint's lateral offsets, axial offset, angle and values worked out from its expressions
+/// (those without one keep their numbers), or why one can't be: an unknown name, a wrong unit, or
+/// a number too large.
+pub fn expressed(params: &Params, j: &Joint) -> Result<([f64; 2], f64, f64, Vec<f64>)> {
     let eval = |e: &str, kind: crate::expr::Kind, what: &str| -> Result<f64> {
         let v = params.eval(e, kind).map_err(|err| DocError::Invalid(format!("joint {}: {what} `{e}`: {err}", j.name)))?;
         if v.is_finite() && v.abs() < MAX_EXPR_VALUE { Ok(v) } else { Err(DocError::Invalid(format!("joint {}: {what} `{e}` gives {v}", j.name))) }
     };
     let x = &j.exprs;
+    let offset_x = match &x.offset_x {
+        Some(e) => eval(e, crate::expr::Kind::Length, "offset_x")?,
+        None => j.offset_xy[0],
+    };
+    let offset_y = match &x.offset_y {
+        Some(e) => eval(e, crate::expr::Kind::Length, "offset_y")?,
+        None => j.offset_xy[1],
+    };
     let offset = match &x.offset {
         Some(e) => eval(e, crate::expr::Kind::Length, "offset")?,
         None => j.offset,
@@ -931,7 +949,7 @@ pub fn expressed(params: &Params, j: &Joint) -> Result<(f64, f64, Vec<f64>)> {
             *slot = v;
         }
     }
-    Ok((offset, angle, values))
+    Ok(([offset_x, offset_y], offset, angle, values))
 }
 
 /// A joint's limits worked out from their expressions (an end without one keeps its number), or
@@ -1177,6 +1195,8 @@ impl Assembly {
         let mut out = Vec::new();
         for j in &self.joints {
             let x = &j.exprs;
+            out.extend(x.offset_x.as_deref().map(|e| (j.id, "offset_x".to_string(), e)));
+            out.extend(x.offset_y.as_deref().map(|e| (j.id, "offset_y".to_string(), e)));
             out.extend(x.offset.as_deref().map(|e| (j.id, "offset".to_string(), e)));
             out.extend(x.angle.as_deref().map(|e| (j.id, "angle".to_string(), e)));
             for (i, e) in x.values.iter().enumerate() {
@@ -1217,6 +1237,8 @@ impl Assembly {
         let mut out = Vec::new();
         for j in &mut self.joints {
             let x = &mut j.exprs;
+            out.extend(x.offset_x.as_mut());
+            out.extend(x.offset_y.as_mut());
             out.extend(x.offset.as_mut());
             out.extend(x.angle.as_mut());
             out.extend(x.values.iter_mut().flatten());

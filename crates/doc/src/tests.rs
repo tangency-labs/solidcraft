@@ -1444,9 +1444,8 @@ fn a_design_saved_before_the_midplane_frame_change_keeps_its_old_frame() {
     assert!(built.origin.dist(Vec3::new(0., 0., 20.)) < 1e-9, "the midplane takes the world XY frame: {built:?}");
     assert!(built.x.dist(Vec3::X) < 1e-9 && built.y.dist(Vec3::Y) < 1e-9, "the midplane takes the world XY frame: {built:?}");
 
-    // The design as an older build saved it: format 63, the one before the midplane change
-    // (`format/v64/midplane-old-frame.rs`), and no list of the changes it has, so the change is
-    // applied to it as it opens. Not `FORMAT - 1`: another pending change moves `FORMAT` on.
+    // The design as an older build saved it: before v64 (`midplane-old-frame.rs`), so the
+    // v64 migration step is applied to it as it opens.
     let mut saved: serde_json::Value = serde_json::from_str(&doc.to_json()).unwrap();
     saved["format"] = serde_json::json!(crate::format::format_string(63));
     saved.as_object_mut().unwrap().remove("format_pending");
