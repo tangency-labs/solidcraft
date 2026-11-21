@@ -100,10 +100,7 @@ fn edit_form_keeps_selection_context_in_alternatives_and_ordinary_object_arrays_
     }});
     let values = json!({"records":[{"type":"body","name":"Stock"}]});
     assert!(check_input(&ordinary, &values).is_err());
-    assert!(matches!(
-        form_errors(&s, &ordinary, &values).get("records"),
-        Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })
-    ));
+    assert!(matches!(form_errors(&s, &ordinary, &values).get("records"), Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })));
 }
 
 #[test]
@@ -121,10 +118,7 @@ fn edit_form_checks_pick_existence_in_selection_array_alternatives() {
         assert!(form_errors(&s, &schema, &values).is_empty(), "{composition}");
         let deleted = json!({"enabled":true,"picks":[{"type":"body","name":"deleted"}]});
         assert!(check_input(&schema, &deleted).is_ok());
-        assert!(
-            matches!(form_errors(&s, &schema, &deleted).get("picks"), Some(crate::schema::plugin::FormFieldError::MissingPick)),
-            "{composition}"
-        );
+        assert!(matches!(form_errors(&s, &schema, &deleted).get("picks"), Some(crate::schema::plugin::FormFieldError::MissingPick)), "{composition}");
     }
     let filtered = json!({"type":"object","properties":{
         "enabled":{"type":"boolean"},
