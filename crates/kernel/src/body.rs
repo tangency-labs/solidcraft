@@ -1196,6 +1196,18 @@ impl Body {
         Ok(self)
     }
 
+    /// The lines this body's faces were split along, moved by the column-major matrix `m`.
+    pub(crate) fn transformed_split_lines(&self, m: &[[f64; 4]; 4]) -> Option<std::sync::Arc<Vec<Vec<Vec3>>>> {
+        let point = |p: &Vec3| {
+            Vec3::new(
+                m[0][0] * p.x + m[1][0] * p.y + m[2][0] * p.z + m[3][0],
+                m[0][1] * p.x + m[1][1] * p.y + m[2][1] * p.z + m[3][1],
+                m[0][2] * p.x + m[1][2] * p.y + m[2][2] * p.z + m[3][2],
+            )
+        };
+        self.splits.as_ref().map(|lines| std::sync::Arc::new(lines.iter().map(|line| line.iter().map(point).collect()).collect()))
+    }
+
     pub(crate) fn transformed_sources(&self, m: [[f64; 4]; 4]) -> Result<Option<FaceSources>> {
         let Some(sources) = &self.face_sources else { return Ok(None) };
         // Sources with no plane (an imported part's) do not move: every placement shares them.
@@ -1997,6 +2009,26 @@ impl Body {
             Err(solidcore_ops::Error::Argument) => Ok(None),
             Err(e) => Err(KernelError::Failed(format!("point on face: {e}"))),
         }
+    }
+
+    /// Exact material classes, boundary face indices and outward normals for all points.
+    /// The entire request, including optional face selection, uses one ops rollback scope
+    /// and cached kernel face boxes; no per-point or per-face body snapshots, no mesh.
+    pub fn classify_points_with_normals(
+        &self,
+        points: &[Vec3],
+        face: Option<solidcore_ops::PointNormalFace>,
+    ) -> Result<Vec<solidcore_ops::ClassifiedPoint>> {
+        let form = self.ops_body().ok_or_else(|| KernelError::Invalid("point classification needs an exact body".into()))?;
+        let (body, order) = &*form;
+        let points: Vec<[f64; 3]> = points.iter().copied().map(Into::into).collect();
+        body.classify_points_with_normals(order, &points, face).map_err(|e| match e {
+            solidcore_ops::Error::Argument => {
+                KernelError::Invalid("the point must lie on the selected face, or on an exact boundary face when face is omitted".into())
+            }
+            solidcore_ops::Error::Internal(message) => KernelError::Internal(format!("classify points with normals: {message}")),
+            e => KernelError::Failed(format!("classify points with normals: {e}")),
+        })
     }
 
     /// Where face `face_index` lies along `direction` when it is a plane square to it: its level

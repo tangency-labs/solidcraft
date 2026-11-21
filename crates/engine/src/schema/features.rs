@@ -133,6 +133,10 @@ pub struct ExtrudeParams {
     /// Start this far from the sketch plane, along its normal.
     #[serde(default)]
     pub start_offset: Option<LengthExpr>,
+    /// When symmetric extrude is offset, offset both directions symmetrically away from the sketch
+    /// plane, leaving a clearance gap between the two sides.
+    #[serde(default)]
+    pub symmetric_offset: Option<bool>,
     /// How a symmetric distance is read. Default: total_distance.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "ConventionParam")]

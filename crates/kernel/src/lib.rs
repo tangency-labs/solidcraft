@@ -183,7 +183,8 @@ pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDG
 pub use bridge::{Frame, blend_between, bridge, chain, chain_closes, frames, frames_across, sample_grid};
 pub use build::{
     PathSeg, box_solid, canonical_revolve_axis, cylinder, extrude, extrude_tapered, extrude_tapered_between, extrude_whole_sides, loft, loft_regions,
-    loft_with_rails, offset_loop, path_polyline, planar_face_record, revolve, revolve_whole, sphere, sweep, sweep_with, torus,
+    loft_with_rails, offset_loop, path_polyline, planar_face_record, revolve, revolve_whole, sphere, sweep, sweep_with, symmetric_offset_intervals,
+    symmetric_offset_probe_points, torus,
 };
 pub use continuity::{
     ContinuityReport, ContinuityTolerances, DEFAULT_SAMPLES, EdgePick, MAX_SAMPLES, MIN_SAMPLES, SeamReport, SeamStation, SeamVerdict, SeamWorst,
