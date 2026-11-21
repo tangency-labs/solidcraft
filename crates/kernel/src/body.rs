@@ -2011,14 +2011,23 @@ impl Body {
         }
     }
 
-    /// Outward unit normal at `point` on trimmed face `face_index`, within the body's
-    /// modelling tolerance. `None` off the face; no mesh or nearest-surface approximation.
-    pub fn face_normal_at_point(&self, face_index: usize, point: Vec3) -> Result<Option<Vec3>> {
-        let form = self.ops_body().ok_or_else(|| KernelError::Invalid("face normal needs an exact body".into()))?;
+    /// Exact material classes, boundary face indices and outward normals for all points.
+    /// The entire request, including optional face selection, uses one ops rollback scope
+    /// and cached kernel face boxes; no per-point or per-face body snapshots, no mesh.
+    pub fn classify_points_with_normals(
+        &self,
+        points: &[Vec3],
+        face: Option<solidcore_ops::PointNormalFace>,
+    ) -> Result<Vec<solidcore_ops::ClassifiedPoint>> {
+        let form = self.ops_body().ok_or_else(|| KernelError::Invalid("point classification needs an exact body".into()))?;
         let (body, order) = &*form;
-        body.face_normal_at_point(order, face_index, point.into()).map(|n| n.map(|n| v3(n.value))).map_err(|e| match e {
-            solidcore_ops::Error::Internal(message) => KernelError::Internal(format!("face normal at point: {message}")),
-            e => KernelError::Failed(format!("face normal at point: {e}")),
+        let points: Vec<[f64; 3]> = points.iter().copied().map(Into::into).collect();
+        body.classify_points_with_normals(order, &points, face).map_err(|e| match e {
+            solidcore_ops::Error::Argument => {
+                KernelError::Invalid("the point must lie on the selected face, or on an exact boundary face when face is omitted".into())
+            }
+            solidcore_ops::Error::Internal(message) => KernelError::Internal(format!("classify points with normals: {message}")),
+            e => KernelError::Failed(format!("classify points with normals: {e}")),
         })
     }
 

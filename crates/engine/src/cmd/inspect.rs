@@ -787,7 +787,7 @@ fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
 /// Read the existing exact classifier; face choice and normal evaluation also stay in the kernel.
 fn classify_points(s: &mut Session, p: &Value) -> Result<Value> {
     use crate::schema::FaceRef;
-    use solidcraft_kernel::PointClass;
+    use solidcore_ops::{ClassifiedPoint as KernelPoint, PointNormalFace};
 
     let cmd = "inspect.classify_points";
     let args: ClassifyPointsParams = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
@@ -800,35 +800,27 @@ fn classify_points(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "point classification requires an exact body; mesh bodies are not supported"));
     }
     let names = solidcraft_doc::naming::face_names(b);
-    let face_at = |point: Vec3, selected: Option<usize>| -> Result<(usize, Vec3)> {
-        let candidates = selected.map_or(0..b.body.face_count(), |i| i..i + 1);
-        for index in candidates {
-            if let Some(normal) = b.body.face_normal_at_point(index, point)? {
-                return Ok((index, normal));
-            }
-        }
-        Err(bad(cmd, "the point must lie on the selected face, or on an exact boundary face when face is omitted"))
-    };
     let selected = match args.face {
         Some(FaceRef::Name(name)) => {
             let index = names.iter().position(|n| *n == name).ok_or_else(|| bad(cmd, format!("no face `{name}` on `{}`", b.name)))?;
-            Some(index)
+            Some(PointNormalFace::Index(index))
         }
-        Some(FaceRef::Point(point)) => Some(face_at(point, None)?.0),
+        Some(FaceRef::Point(point)) => Some(PointNormalFace::Point(point.into())),
         None => None,
     };
     let points: Vec<Vec3> = args.points.iter().map(|p| p.0).collect();
-    let classes = b.body.classify_points(&points)?;
-    let results = points
+    let classes = b.body.classify_points_with_normals(&points, selected).map_err(|e| match e {
+        solidcraft_kernel::KernelError::Invalid(message) => bad(cmd, message),
+        e => e.into(),
+    })?;
+    let results = classes
         .into_iter()
-        .zip(classes)
-        .map(|(point, class)| match class {
-            PointClass::Inside => Ok(ClassifiedPoint::Inside),
-            PointClass::Outside => Ok(ClassifiedPoint::Outside),
-            PointClass::OnBoundary => {
-                let (index, normal) = face_at(point, selected)?;
+        .map(|class| match class {
+            KernelPoint::Inside => Ok(ClassifiedPoint::Inside),
+            KernelPoint::Outside => Ok(ClassifiedPoint::Outside),
+            KernelPoint::On { face: index, normal } => {
                 let face = names.get(index).filter(|n| !n.is_empty()).cloned().ok_or_else(|| bad(cmd, "the boundary face has no persistent name"))?;
-                Ok(ClassifiedPoint::On { face, normal: normal.into() })
+                Ok(ClassifiedPoint::On { face, normal: normal.value })
             }
         })
         .collect::<Result<Vec<_>>>()?;

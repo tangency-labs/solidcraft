@@ -23,7 +23,7 @@
 //! | [`closest_to_members`], [`edge_curve_copy`] | not upstream: `ShapeCurveSolve`/`ShapePointSolve` minimum of a curve or point against faces and edges |
 //! | [`closest_between_faces`] | not upstream: selected-shape minimum on trimmed faces and their boundaries |
 //! | [`point_distance`], [`vertex_distance`], [`edge_face_gap_samples`], [`edgeuse_face_frame`] | not upstream: certified distances (the last on `SmCrvSrfGapFunction`'s samples) |
-//! | [`face_normal_at_point`] | not upstream: the normal at a point on a trimmed face, in its chosen use's sense |
+//! | [`face_normal_at_point`], [`face_parameters_at_point`], [`face_normal_at_uv`] | not upstream: trimmed-face membership and the normal in the chosen use's sense |
 //! | [`box_max_distance_to_point`] | not upstream: [`Extent3d::max_distance_to_point`] of a box given by two corners |
 //! | `count_contained_samples`, `edge_piece_points`, `point_in_solid`, `target_curve_crossings` (private) | `sm_CountContainedSamples`, `sm_PointInSolid`, its `BrepCurveSolve` |
 //! | `solution_point` (private) | `SmSolution::GetPoint` |
@@ -1867,8 +1867,14 @@ pub fn edgeuse_face_frame(
     })
 }
 
-/// A face's normal at its surface parameters, in the explicitly chosen face use's sense.
-fn face_normal_at_uv(
+/// A face's unit normal at its surface parameters, in the chosen face use's sense.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a use of another face, a missing surface or a zero
+/// normal; [`SolidError::Unsupported`] for an unknown face-use orientation; those of
+/// surface evaluation and [`crate::query::normal::certify`].
+pub fn face_normal_at_uv(
     k: &Kernel,
     brep: &Brep,
     f: FaceId,
@@ -1918,6 +1924,28 @@ pub fn face_normal_at_point(
     tolerance: f64,
     faceuse: FaceuseId,
 ) -> Result<Option<UnitVector>> {
+    let Some(uv) = face_parameters_at_point(k, brep, f, point, tolerance)? else {
+        return Ok(None);
+    };
+    face_normal_at_uv(k, brep, f, uv, faceuse).map(Some)
+}
+
+/// Surface parameters of `point` on trimmed face `f` within `tolerance`, or `None`
+/// off the face. Shares [`face_normal_at_point`]'s membership test so a caller can
+/// establish membership before choosing a material-side face use.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a non-finite point or a tolerance that is not
+/// finite and positive; those of [`crate::query::face::p1::point_3d_classify_at`]
+/// and surface evaluation.
+pub fn face_parameters_at_point(
+    k: &Kernel,
+    brep: &mut Brep,
+    f: FaceId,
+    point: Point3,
+    tolerance: f64,
+) -> Result<Option<Point2>> {
     if point.is_undef() || !(tolerance.is_finite() && tolerance > 0.0) {
         return Err(SolidError::invalid_input(
             OP,
@@ -1949,7 +1977,7 @@ pub fn face_normal_at_point(
     if point.distance(surface.evaluate_point(k, uv)?) > tolerance {
         return Ok(None);
     }
-    face_normal_at_uv(k, brep, f, uv, faceuse).map(Some)
+    Ok(Some(uv))
 }
 
 /// [`edgeuse_face_frame`] of face `f`'s use of edge `e`, at the middle of the edge's
