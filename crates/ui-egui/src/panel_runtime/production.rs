@@ -383,6 +383,8 @@ impl PanelVisibilitySnapshot {
 struct PanelSnapshot {
     product: Product,
     available: bool,
+    /// Takes its column's whole height whatever it lists (the compact Browser holding the History, #14566).
+    fills: bool,
     presentation: PanelPresentation,
     extent: Option<ContentExtent>,
 }
@@ -437,6 +439,7 @@ impl ProductionState {
             panels: Product::all_map(|product| PanelSnapshot {
                 product,
                 available: product.available(app),
+                fills: product == Product::Browser && crate::browser::holds_compact_history(app),
                 presentation: product.presentation(app),
                 extent: None,
             }),
@@ -554,6 +557,7 @@ pub(crate) fn refresh_production(app: &crate::SolveApp) -> PanelResult<()> {
     }
     for panel in &mut snapshot.panels {
         panel.available = panel.product.available(app);
+        panel.fills = panel.product == Product::Browser && crate::browser::holds_compact_history(app);
         panel.presentation = panel.product.presentation(app);
     }
     Ok(())
@@ -1216,11 +1220,12 @@ impl PanelController for ProductionController {
     }
     fn measure(&self, _owner: &ContentOwner, _models: &dyn PanelModels, spec: &PanelSpec) -> PanelResult<Arc<dyn HostContentMetrics>> {
         let snapshot = self.state.0.try_borrow().map_err(|_| error(Rule::Lifecycle, "content measurement is borrowed"))?;
+        let panel = snapshot.panels.iter().find(|panel| panel.product == self.product);
         Ok(Arc::new(ProductionMetrics {
-            extent: snapshot.panels.iter().find(|panel| panel.product == self.product).and_then(|panel| panel.extent),
+            extent: panel.and_then(|panel| panel.extent),
             strip_width: (self.product == Product::History).then(|| crate::ui_kit::history_width(false)),
             inset: solidcraft_theme::Tokens::get().space_2 * 2.0,
-            policy: spec.side_height_policy,
+            policy: if panel.is_some_and(|panel| panel.fills) { SideHeightPolicy::Fill } else { spec.side_height_policy },
         }))
     }
     fn prepare_lifecycle(&self, event: &LifecycleEvent) -> PanelResult<()> {
