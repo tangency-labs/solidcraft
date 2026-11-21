@@ -206,6 +206,7 @@ const ANSWERING: &[&str] = &[
     "make_torus",
     "arrays",
     "to_native",
+    "to_native_prepared",
     "planar_faces",
     "extrude",
     "revolve",
@@ -346,6 +347,7 @@ fn every_entry_point_answers() {
     says("make_torus", Brep::make_torus([0.0; 3], 2.0, 1.0));
     says("arrays", a.arrays());
     says("to_native", a.to_native().map_err(|_| Error::Argument));
+    says("to_native_prepared", a.to_native_prepared().map_err(|_| Error::Argument));
     says("extrude", Brep::extrude(&lines, p(0.0, 0.0, 1.0), 1.0, 0.0, DraftCorner::Curvature, true));
     says("revolve", Brep::revolve(&lines, p(20.0, 0.0, 0.0), p(0.0, 1.0, 0.0), 1.0, true));
     let run = [Curve::Line { start: p(5.0, 5.0, 5.0), end: p(5.0, 5.0, 15.0) }];

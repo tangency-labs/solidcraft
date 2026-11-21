@@ -848,6 +848,7 @@ fn a_reference_whose_body_is_gone_fails_its_sketch_naming_the_lost_projection() 
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
     let boxf = s.doc.features.last().unwrap().id;
+    let box_name = s.doc.features.last().unwrap().name.clone();
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     run(&mut s, "sketch.project", json!({"refs": [{"edge": [5, 0, 10]}]}));
     run(&mut s, "sketch.finish", json!({}));
@@ -856,7 +857,9 @@ fn a_reference_whose_body_is_gone_fails_its_sketch_naming_the_lost_projection() 
     let r = s.model.results.last().unwrap();
     let error = r.error.as_deref().unwrap_or_default();
     let read = solidcraft_doc::lost_projection_parts(error).map(|t| (t.feature, t.count, t.listed));
-    assert_eq!(read, Some((r.name.as_str(), 1, "projected edge of Body1 (curve l1)")), "{r:?}");
+    // The suppressed box is still in the design: the message names it as where the edge came from.
+    let listed = format!("projected edge of Body1 (curve l1; made by {box_name})");
+    assert_eq!(read, Some((r.name.as_str(), 1, listed.as_str())), "{r:?}");
     assert!(!error.contains(&name), "{error}");
 }
 
@@ -3068,6 +3071,241 @@ fn a_tilted_whole_body_projection_is_the_exact_outline() {
     }
 }
 
+/// Synthetic saved trace for #20298: a diameter-20, height-30 cylinder projected onto the
+/// tilted plane from the report. Its outline is two half ellipses joined by two straight
+/// sides. Older builds stored a dense line trace, whose IDs the extrude saved as its profile.
+fn saved_traced_cylinder_projection() -> (Value, u64, f64) {
+    use solidcraft_sketch::{LinkGeom, LinkKind, LinkSource, Sketch};
+
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 30, "body_name": "Cylinder"}));
+    let sketch = run(
+        &mut s,
+        "sketch.create",
+        json!({"name": "Outline", "plane": {"origin": [0, 0, 40], "x_dir": [1, 0, 0], "y_dir": [0, 0.866, 0.5]}, "project_edges": false}),
+    )["sketch"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"body": "Cylinder"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"profiles": [0], "distance": 2, "name": "Pad", "body_name": "ProjectionPad"}));
+    assert!(s.doc.sketch(sketch).unwrap().links.iter().all(|link| link.profile_boundary.is_empty()), "new projections keep ordinary picks");
+
+    // Fixed old-style trace, generated once from the cylinder and input plane above.
+    // Its 130 segments include both straight sides; the repeated first point closes it.
+    let points = [
+        [10.000000000000, -5.000110003630],
+        [9.987954562052, -4.575174595273],
+        [9.951847266722, -4.151262893534],
+        [9.891765099648, -3.729396138834],
+        [9.807852804032, -3.310590645136],
+        [9.700312531945, -2.895855351556],
+        [9.569403357322, -2.486189391745],
+        [9.415440651830, -2.082579686880],
+        [9.238795325113, -1.685998568095],
+        [9.039892931234, -1.297401434039],
+        [8.819212643484, -0.917724449247],
+        [8.577286100003, -0.547882288830],
+        [8.314696123025, -0.188765934946],
+        [8.032075314806, 0.158759469651],
+        [7.730104533627, 0.493856705824],
+        [7.409511253550, 0.815718494979],
+        [7.071067811865, 1.123569443875],
+        [6.715589548470, 1.416667912611],
+        [6.343932841636, 1.694307801303],
+        [5.956993044924, 1.955820251141],
+        [5.555702330196, 2.200575255728],
+        [5.141027441932, 2.427983178820],
+        [4.713967368260, 2.637496174811],
+        [4.275550934303, 2.828609508543],
+        [3.826834323651, 3.000862771255],
+        [3.368898533922, 3.153840989750],
+        [2.902846772545, 3.287175626100],
+        [2.429801799033, 3.400545465488],
+        [1.950903220161, 3.493677390040],
+        [1.467304744554, 3.566347036793],
+        [0.980171403296, 3.618379338202],
+        [0.490676743274, 3.649648943897],
+        [0.000000000000, 3.660080522657],
+        [-0.490676743274, 3.649648943897],
+        [-0.980171403296, 3.618379338202],
+        [-1.467304744554, 3.566347036793],
+        [-1.950903220161, 3.493677390040],
+        [-2.429801799033, 3.400545465488],
+        [-2.902846772545, 3.287175626100],
+        [-3.368898533922, 3.153840989750],
+        [-3.826834323651, 3.000862771255],
+        [-4.275550934303, 2.828609508543],
+        [-4.713967368260, 2.637496174811],
+        [-5.141027441932, 2.427983178820],
+        [-5.555702330196, 2.200575255728],
+        [-5.956993044924, 1.955820251141],
+        [-6.343932841636, 1.694307801303],
+        [-6.715589548470, 1.416667912611],
+        [-7.071067811865, 1.123569443875],
+        [-7.409511253550, 0.815718494979],
+        [-7.730104533627, 0.493856705824],
+        [-8.032075314806, 0.158759469651],
+        [-8.314696123025, -0.188765934946],
+        [-8.577286100003, -0.547882288830],
+        [-8.819212643484, -0.917724449247],
+        [-9.039892931234, -1.297401434039],
+        [-9.238795325113, -1.685998568095],
+        [-9.415440651830, -2.082579686880],
+        [-9.569403357322, -2.486189391745],
+        [-9.700312531945, -2.895855351556],
+        [-9.807852804032, -3.310590645136],
+        [-9.891765099648, -3.729396138834],
+        [-9.951847266722, -4.151262893534],
+        [-9.987954562052, -4.575174595273],
+        [-10.000000000000, -5.000110003630],
+        [-10.000000000000, -20.000440014521],
+        [-9.987954562052, -20.425375422878],
+        [-9.951847266722, -20.849287124616],
+        [-9.891765099648, -21.271153879317],
+        [-9.807852804032, -21.689959373015],
+        [-9.700312531945, -22.104694666594],
+        [-9.569403357322, -22.514360626406],
+        [-9.415440651830, -22.917970331270],
+        [-9.238795325113, -23.314551450056],
+        [-9.039892931234, -23.703148584111],
+        [-8.819212643484, -24.082825568904],
+        [-8.577286100003, -24.452667729321],
+        [-8.314696123025, -24.811784083204],
+        [-8.032075314806, -25.159309487802],
+        [-7.730104533627, -25.494406723975],
+        [-7.409511253550, -25.816268513130],
+        [-7.071067811865, -26.124119462026],
+        [-6.715589548470, -26.417217930762],
+        [-6.343932841636, -26.694857819454],
+        [-5.956993044924, -26.956370269292],
+        [-5.555702330196, -27.201125273879],
+        [-5.141027441932, -27.428533196971],
+        [-4.713967368260, -27.638046192962],
+        [-4.275550934303, -27.829159526693],
+        [-3.826834323651, -28.001412789406],
+        [-3.368898533922, -28.154391007901],
+        [-2.902846772545, -28.287725644251],
+        [-2.429801799033, -28.401095483639],
+        [-1.950903220161, -28.494227408191],
+        [-1.467304744554, -28.566897054944],
+        [-0.980171403296, -28.618929356353],
+        [-0.490676743274, -28.650198962047],
+        [0.000000000000, -28.660630540808],
+        [0.490676743274, -28.650198962047],
+        [0.980171403296, -28.618929356353],
+        [1.467304744554, -28.566897054944],
+        [1.950903220161, -28.494227408191],
+        [2.429801799033, -28.401095483639],
+        [2.902846772545, -28.287725644251],
+        [3.368898533922, -28.154391007901],
+        [3.826834323651, -28.001412789406],
+        [4.275550934303, -27.829159526693],
+        [4.713967368260, -27.638046192962],
+        [5.141027441932, -27.428533196971],
+        [5.555702330196, -27.201125273879],
+        [5.956993044924, -26.956370269292],
+        [6.343932841636, -26.694857819454],
+        [6.715589548470, -26.417217930762],
+        [7.071067811865, -26.124119462026],
+        [7.409511253550, -25.816268513130],
+        [7.730104533627, -25.494406723975],
+        [8.032075314806, -25.159309487802],
+        [8.314696123025, -24.811784083204],
+        [8.577286100003, -24.452667729321],
+        [8.819212643484, -24.082825568904],
+        [9.039892931234, -23.703148584111],
+        [9.238795325113, -23.314551450056],
+        [9.415440651830, -22.917970331270],
+        [9.569403357322, -22.514360626406],
+        [9.700312531945, -22.104694666594],
+        [9.807852804032, -21.689959373015],
+        [9.891765099648, -21.271153879317],
+        [9.951847266722, -20.849287124616],
+        [9.987954562052, -20.425375422878],
+        [10.000000000000, -20.000440014521],
+        [10.000000000000, -5.000110003630],
+    ]
+    .map(|[x, y]| solidcore_record::Vec2::new(x, y));
+    let geometry: Vec<_> = points.windows(2).map(|pair| LinkGeom::Line(pair[0], pair[1])).collect();
+    let mut traced = Sketch::new();
+    let link = traced.add_link(LinkKind::Project, LinkSource::Body { body: "Cylinder".into() }, &geometry).unwrap();
+    let old_ids: Vec<_> = traced.link_curves(&link).iter().map(|i| traced.curves[*i].id.clone()).collect();
+    assert_eq!(old_ids.len(), 130);
+    assert!(old_ids.iter().all(|id| id.starts_with('l')));
+    assert_eq!(solidcraft_sketch::find_profiles(&traced).len(), 1);
+
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    for feature in saved["features"].as_array_mut().unwrap() {
+        if feature["id"] == sketch {
+            feature["sketch"] = serde_json::to_value(&traced).unwrap();
+        } else if feature["name"] == "Pad" {
+            feature["profiles"] = json!({"type": "curves", "loops": [old_ids]});
+        }
+    }
+    // A released format, so this remains a pre-migration file after the pending step is folded.
+    saved["format"] = json!("solidcraft/63");
+    saved.as_object_mut().unwrap().remove("format_pending");
+    // Let q = sqrt(0.866^2 + 0.5^2) normalize the specified plane's y direction.
+    // Projected area = ellipse pi*10^2*(0.866/q) + axial rectangle 20*30*(0.5/q).
+    // Extruding 2 mm gives 2*(pi*100*0.866 + 600*0.5)/q = 1144.149019157064 mm^3.
+    (saved, sketch, 1144.149019157064)
+}
+
+#[test]
+fn a_saved_traced_whole_body_profile_rebuilds_with_the_exact_projection() {
+    let (saved, sketch, expected) = saved_traced_cylinder_projection();
+    let mut s = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+    let assert_rebuilt = |s: &Session| {
+        for feature in &s.doc.features {
+            let result = s.model.result(feature.id).unwrap();
+            assert!(result.error.is_none(), "{}: {:?}", feature.name, result.error);
+        }
+        let state = s.model.state();
+        let ss = state.sketch(sketch).unwrap();
+        assert!(!ss.sketch.links[0].profile_boundary.is_empty());
+        assert!(ss.sketch.curves.iter().any(|curve| matches!(curve.kind, solidcraft_sketch::CurveKind::Conic { .. })));
+        let solidcraft_doc::FeatureKind::Extrude { profiles, .. } = &s.doc.find_feature("Pad").unwrap().kind else {
+            panic!("Pad must remain an extrude");
+        };
+        let solidcraft_doc::ProfileSel::Curves { loops } = profiles else { panic!("Pad must retain its saved curve IDs") };
+        assert_eq!(loops.len(), 1);
+        // The rebuilt sketch cannot resolve the saved IDs directly: the migrated reference
+        // must identify the exact outline, rather than extruding the unchanged old trace.
+        assert_eq!(solidcraft_sketch::profile_by_curves(&ss.profiles, &loops[0]), Err(solidcraft_sketch::CurvePick::Missing));
+        assert_eq!(solidcraft_doc::profile_selection_indices(ss, profiles).unwrap(), vec![0]);
+        let pad = state.body("ProjectionPad").unwrap();
+        let actual = solidcraft_kernel::measure(&pad.body).unwrap().volume;
+        assert!((actual - expected).abs() < 1e-6 * expected, "{actual} vs {expected}");
+    };
+    assert_rebuilt(&s);
+    // Evaluation refreshes a copy in model state. A no-op edit/finish does not write that
+    // copy into the document; check the rebuilt outline where evaluation keeps it.
+    run(&mut s, "sketch.edit", json!({"sketch": "Outline"}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert_rebuilt(&s);
+    // Opening the migrated save cold must preserve the reference and rebuild the exact outline.
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_rebuilt(&reopened);
+}
+
+#[test]
+fn a_saved_projection_profile_that_is_split_is_not_guessed() {
+    let (saved, sketch, _) = saved_traced_cylinder_projection();
+    let mut doc = solidcraft_doc::Document::from_json(&saved.to_string()).unwrap();
+    // Both halves use curves of the same source. Neither covers its complete boundary, so
+    // neither can stand for the old outline (nor may lenient curve matching choose their union).
+    let sk = doc.sketch_mut(sketch).unwrap();
+    assert!(!sk.links[0].profile_boundary.is_empty());
+    sk.add_line(solidcore_record::Vec2::new(-20., -12.5), solidcore_record::Vec2::new(20., -12.5), None, None, None).unwrap();
+    let s = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
+    assert_eq!(s.model.state().sketch(sketch).unwrap().profiles.len(), 2);
+    let pad = s.doc.find_feature("Pad").unwrap();
+    let error = s.model.result(pad.id).unwrap().error.as_deref().unwrap();
+    assert!(error.contains("no profile of Outline is bounded by exactly the curves"), "{error}");
+    assert!(s.model.state().body("ProjectionPad").is_none());
+}
+
 /// The silhouette of a square with a conic round at each corner (rho 0.19, 0.4, 0.5 and 0.7) is
 /// one closed outline of the square's true area. Fitted arcs along a conic were snapped onto lines
 /// that ended further along the outline, which left gaps of up to 3.6 mm: no profile.
@@ -3109,6 +3347,38 @@ fn the_silhouette_of_conic_rounds_closes() {
     assert_eq!(profiles.len(), 1, "{}", si["profiles"]);
     let area = profiles[0]["area_mm2"].as_f64().unwrap();
     assert!((area - exact).abs() < exact * 2e-4, "area {area}, exact {exact}");
+}
+
+/// The silhouette of a letter-sized outline with small conic rounds, far from the origin, is one
+/// closed outline (#14987). A round projected as two fitted arcs (or a line and an arc) left
+/// their shared end 0.0003 to 0.001 mm apart, wider than profiles and Offset join ends, so the
+/// projected outline of an extruded letter made no profile and could not be offset.
+#[test]
+fn the_silhouette_of_small_conic_rounds_far_out_closes() {
+    for (rho, r, (cx, cz)) in [(0.5, 0.7, (-60., 250.)), (0.5, 0.4, (-140., 240.)), (0.45, 0.9, (90., -270.)), (0.5, 0.25, (200., 180.))] {
+        let mut s = Session::default();
+        let h = 6.0;
+        // A square of side 2h round (cx, cz), each corner a conic round of size r.
+        let corners = [
+            ([cx - h, cz + h - r], [cx - h, cz + h], [cx - h + r, cz + h]),
+            ([cx + h - r, cz + h], [cx + h, cz + h], [cx + h, cz + h - r]),
+            ([cx + h, cz - h + r], [cx + h, cz - h], [cx + h - r, cz - h]),
+            ([cx - h + r, cz - h], [cx - h, cz - h], [cx - h, cz - h + r]),
+        ];
+        run(&mut s, "sketch.create", json!({"plane": "YZ"}));
+        for (i, (start, apex, end)) in corners.iter().enumerate() {
+            run(&mut s, "sketch.conic", json!({"start": start, "apex": apex, "end": end, "rho": rho}));
+            let next = corners[(i + 1) % 4].0;
+            run(&mut s, "sketch.line", json!({"points": [end, next]}));
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 100, "body_name": "Letter"}));
+        run(&mut s, "sketch.create", json!({"plane": "YZ"}));
+        run(&mut s, "sketch.project", json!({"refs": [{"body": "Letter"}], "construction": false}));
+        let si = inspect(&mut s);
+        let profiles = si["profiles"].as_array().unwrap();
+        assert_eq!(profiles.len(), 1, "rho {rho}, round {r} at ({cx}, {cz}): {}", si["profiles"]);
+    }
 }
 
 /// A second placement's body is projected where that placement puts it (#9957): a sketch sees
@@ -3379,9 +3649,11 @@ fn a_sketch_whose_projected_face_lost_its_name_says_which_projection_and_how_to_
     let (mut s, outline, front, _) = part_with_outline();
     let name = redraw_front(&mut s, outline, &front);
     let curves = curves_named(&s, outline, &front);
+    // The extrude after Base made the face: the message names it as where to look.
+    let block = s.doc.features.iter().position(|f| f.name == "Base").and_then(|i| s.doc.features.get(i + 1)).map(|f| f.name.clone()).unwrap();
     assert_eq!(
         error_of(&s, "Outline").as_deref(),
-        Some(format!("Outline: projected face of Block ({curves}) is lost; delete the projection or project it again").as_str())
+        Some(format!("Outline: projected face of Block ({curves}; made by {block}) is lost; delete the projection or project it again").as_str())
     );
     assert!(!error_of(&s, "Outline").unwrap().contains(&name), "the persistent name is not shown");
     let lost = s.model.result(outline).and_then(|r| r.lost_projections.clone()).unwrap();

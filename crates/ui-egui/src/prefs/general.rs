@@ -131,6 +131,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.preferences.network_hosts.remove(i);
                 }
             }
+            link_folders(app, ui);
             ui.horizontal(|ui| {
                 let (single, tip) = (app.tr("ui.slicer_single_instance").to_string(), app.tr("ui.slicer_single_instance_tip").to_string());
                 let width = (ui.available_width() - t.space_16 - ui.spacing().item_spacing.x).max(0.0);
@@ -270,4 +271,37 @@ fn file_size_rows(app: &mut SolveApp, ui: &mut egui::Ui, labels: f32) {
             }
         });
     });
+}
+
+/// The folders linked files load from when a design opens (`linked_file_folders`): each can be
+/// removed, or all forgotten; a design in one of them that is removed asks again.
+fn link_folders(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = Tokens::get();
+    // Wrapped, so a narrow window keeps the notes inside the page.
+    ui.horizontal_wrapped(|ui| ui_kit::settings_inline_note(ui, app.tr("prefs.link_folders_note")));
+    if app.preferences.linked_file_folders.is_empty() {
+        ui.horizontal_wrapped(|ui| ui_kit::settings_inline_note(ui, app.tr("prefs.link_folders_none")));
+        return;
+    }
+    let mut remove = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(t.space_6, t.space_6);
+        for (i, folder) in app.preferences.linked_file_folders.iter().enumerate() {
+            let chip =
+                ui_kit::SettingsChip { key: Some(folder), monospace: true, remove: Some(app.tr("prefs.link_folders_remove")), ..Default::default() };
+            let button = ui_kit::settings_chip(ui, folder, chip);
+            crate::scenario::publish_target(&format!("prefs:link_folder:{i}:remove"), button.rect);
+            if button.clicked() {
+                remove = Some(i);
+            }
+        }
+    });
+    if let Some(i) = remove.filter(|i| *i < app.preferences.linked_file_folders.len()) {
+        app.preferences.linked_file_folders.remove(i);
+    }
+    let clear = ui_kit::button(ui, app.tr("prefs.link_folders_clear"), ui_kit::Button::Normal);
+    crate::scenario::publish_target("prefs:link_folders:clear", clear.rect);
+    if clear.clicked() {
+        app.preferences.linked_file_folders.clear();
+    }
 }

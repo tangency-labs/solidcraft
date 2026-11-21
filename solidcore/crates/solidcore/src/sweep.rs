@@ -17,6 +17,7 @@ pub mod rotational_sweep_geometry;
 pub mod screw;
 pub mod section_blend;
 pub mod segments;
+pub mod skin_ends;
 pub mod skin_flat_walls;
 pub mod stations;
 pub mod topology_sweep;
