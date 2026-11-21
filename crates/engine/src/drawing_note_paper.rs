@@ -1,5 +1,6 @@
 //! A drawing's notes on paper (#4896 W19i): one group for each note, its text starting at, centred on
-//! or ending at its place by its alignment ([`Align`], #20122), the lines of a left or right note starting or ending there together,
+//! or ending at its place by its alignment ([`HAlign`], #20122), each line standing that way too (a note
+//! with no alignment, saved before them, is centred as a block with its lines starting at its left edge),
 //! at its own cap height or a dimension's, set in the drawing's lettering by the dimension's text
 //! rule ([`Text::set`]), with its own line breaks only. A note that points at the model has a leader
 //! from where each thing it points at is now to its text, ending in a dimension's arrowhead, with a
@@ -9,12 +10,12 @@
 //! without a leader ([`label_group`]).
 
 use solidcore_record::Vec2;
-use solidcraft_doc::drawing::note::{Align, Note};
+use solidcraft_doc::drawing::note::Note;
 use solidcraft_geom::Aabb2;
+use solidcraft_geom::cell::HAlign;
 use solidcraft_geom::paper::annotate::{LANDING_PER_LINE_WIDTH, Leader};
-use solidcraft_geom::paper::text::TextRun;
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
-use solidcraft_sketch::PaperFonts;
+use solidcraft_sketch::{PaperFonts, TextAlign, TextStyle};
 
 use crate::drawing_dimension_paper::{ARROW, GAP_MM, Layout, OnPaper, TEXT_MM, Text, placed};
 
@@ -23,11 +24,10 @@ use crate::drawing_dimension_paper::{ARROW, GAP_MM, Layout, OnPaper, TEXT_MM, Te
 /// each of `tips`, the ends it points at that are found: its group.
 pub fn note_group(note: &Note, text: &str, tips: &[Vec2], line_mm: f64, lettering: &PaperFonts) -> OnPaper {
     let cap_mm = note.cap_mm.unwrap_or(TEXT_MM);
-    let mut text = Text::set(Some(text), cap_mm, lettering);
+    let text = Text::set(Some(text), cap_mm, lettering, &style(note));
     // The text's box stands from its place by the alignment, level with it; its leaders, its landings
     // and its group are laid out from the box.
     let centre = box_centre(note, text.half);
-    text.runs = justified(std::mem::take(&mut text.runs), note.align, text.half.x * 2.0);
     let mut why = text.why;
     let mut items = Vec::new();
     // Whether a leader has drawn the landing on the text's left and on its right.
@@ -48,41 +48,26 @@ pub fn note_group(note: &Note, text: &str, tips: &[Vec2], line_mm: f64, letterin
     }
 }
 
+/// How `note`'s lines stand in its box: by its alignment, or from the box's left edge for a note with none.
+fn style(note: &Note) -> TextStyle {
+    let align = match note.align {
+        Some(HAlign::Centre) => TextAlign::Center,
+        Some(HAlign::Right) => TextAlign::Right,
+        Some(HAlign::Left) | None => TextAlign::Left,
+    };
+    TextStyle { align, ..TextStyle::default() }
+}
+
 /// The middle of the box a text `half` in size takes round `note`'s place by its alignment: the box
 /// starts at the place for left, is centred on it, or ends at it for right. The one rule the group, its
 /// leaders and [`text_box`] share.
 fn box_centre(note: &Note, half: Vec2) -> Vec2 {
     let reach = match note.align {
-        Align::Left => half.x,
-        Align::Centre => 0.0,
-        Align::Right => -half.x,
+        Some(HAlign::Left) => half.x,
+        Some(HAlign::Centre) | None => 0.0,
+        Some(HAlign::Right) => -half.x,
     };
     Vec2::new(note.at[0] + reach, note.at[1])
-}
-
-/// `runs` with each of their lines moved as `align` stands it in a box `width` wide: for right, each
-/// line ends at the box's right edge. Left lines start at the box's left edge, and so do a centred
-/// note's, as every note's did before alignments (the block is centred, not each line). Lines are the
-/// runs that share a baseline, which a text's own breaks make (a line set in more than one font is
-/// several runs).
-fn justified(mut runs: Vec<TextRun>, align: Align, width: f64) -> Vec<TextRun> {
-    if align != Align::Right {
-        return runs;
-    }
-    let mut lines: Vec<(f64, f64)> = Vec::new();
-    for run in &runs {
-        let end = run.reach() + run.origin.x;
-        match lines.iter_mut().find(|(y, _)| (*y - run.origin.y).abs() < 1e-9) {
-            Some((_, widest)) => *widest = widest.max(end),
-            None => lines.push((run.origin.y, end)),
-        }
-    }
-    for run in &mut runs {
-        if let Some((_, line)) = lines.iter().find(|(y, _)| (*y - run.origin.y).abs() < 1e-9) {
-            run.origin.x += (width - line).max(0.0);
-        }
-    }
-    runs
 }
 
 /// The height of a view label's capitals: the ISO 3098 height after a dimension's.
@@ -91,7 +76,7 @@ const LABEL_MM: f64 = 5.0;
 /// View `view`'s label reading `text` (#13044), set as a note's text is, its capitals [`LABEL_MM`]
 /// high, centred on the origin for the scene to place by its view: its group, and half its size.
 pub fn label_group(view: u64, text: &str, lettering: &PaperFonts) -> (OnPaper, Vec2) {
-    let text = Text::set(Some(text), LABEL_MM, lettering);
+    let text = Text::set(Some(text), LABEL_MM, lettering, &TextStyle::default());
     let items = placed(text.runs, text.half, LABEL_MM, Vec2::ZERO, Vec2::X).collect();
     let group = Group { object: view, kind: ObjectKind::ViewLabel, items };
     (OnPaper { group, fonts: text.fonts, why: text.why, pending: text.pending, layout: Layout::default() }, text.half)
@@ -100,7 +85,7 @@ pub fn label_group(view: u64, text: &str, lettering: &PaperFonts) -> (OnPaper, V
 /// The box `note`'s text, reading `text`, takes at its place by its alignment (from its sheet's corner, or from
 /// its view's centre), set in `lettering` as [`note_group`] sets it; None while it isn't set.
 pub fn text_box(note: &Note, text: &str, lettering: &PaperFonts) -> Option<Aabb2> {
-    let set = Text::set(Some(text), note.cap_mm.unwrap_or(TEXT_MM), lettering);
+    let set = Text::set(Some(text), note.cap_mm.unwrap_or(TEXT_MM), lettering, &style(note));
     if set.runs.is_empty() {
         return None;
     }

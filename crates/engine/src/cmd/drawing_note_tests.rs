@@ -592,8 +592,7 @@ fn a_note_on_an_exploded_view_ends_where_the_view_draws_its_edge() {
 }
 
 /// A new note starts at its place: left unless it says otherwise, kept in its record, and an edit sets
-/// it in one undo step, none when it is as it was. Centre, spelt either way, is saved as no `align`, as a
-/// note from before alignments, and inspect always says which.
+/// it in one undo step, none when it is as it was. Centre is spelt either way and saved as `centre`.
 #[test]
 fn a_new_note_is_left_aligned_and_an_edit_sets_it() {
     let (mut s, _, _, _) = placed();
@@ -603,7 +602,7 @@ fn a_new_note_is_left_aligned_and_an_edit_sets_it() {
     let right = run(&mut s, ADD, json!({"anchor": anchor, "at": [15, 60], "content": "x", "align": "right"}));
     assert_eq!(right["align"], json!("right"));
     let centred = run(&mut s, ADD, json!({"anchor": anchor, "at": [15, 60], "content": "x", "align": "center"}));
-    assert_eq!((&centred["align"], centred["record"].get("align")), (&json!("centre"), None), "{centred}");
+    assert_eq!((&centred["align"], &centred["record"]["align"]), (&json!("centre"), &json!("centre")), "{centred}");
     let id = plain["note"].clone();
     let steps = |s: &Session| s.drawing("test").unwrap().notes.len();
     assert_eq!(steps(&s), 3);

@@ -2,9 +2,8 @@
 use serde_json::json;
 use solidcore_record::Vec2;
 use solidcraft_engine::{
-    doc::drawing::note::Align,
     doc::ids,
-    geom::cell::{MAX_TEXT_BYTES, Part},
+    geom::cell::{HAlign, MAX_TEXT_BYTES, Part},
 };
 use solidcraft_theme::Tokens;
 
@@ -17,14 +16,14 @@ use crate::{
 /// The choices of the alignment control, in the order it lists them: where the note's text stands
 /// from its place.
 /// with the word the commands take for each.
-const ALIGNS: [(Align, &str, &str, &str); 3] = [
-    (Align::Left, "left", "ui.drawing_note.align_left", "drawing:note:align:left"),
-    (Align::Centre, "centre", "ui.drawing_note.align_centre", "drawing:note:align:centre"),
-    (Align::Right, "right", "ui.drawing_note.align_right", "drawing:note:align:right"),
+const ALIGNS: [(HAlign, &str, &str, &str); 3] = [
+    (HAlign::Left, "left", "ui.drawing_note.align_left", "drawing:note:align:left"),
+    (HAlign::Centre, "centre", "ui.drawing_note.align_centre", "drawing:note:align:centre"),
+    (HAlign::Right, "right", "ui.drawing_note.align_right", "drawing:note:align:right"),
 ];
 
 /// The word `drawing.note.add` and `.edit` take for `align`.
-fn word(align: Align) -> &'static str {
+fn word(align: HAlign) -> &'static str {
     ALIGNS.iter().find(|(one, ..)| *one == align).map_or("centre", |(_, word, ..)| word)
 }
 
@@ -32,13 +31,14 @@ fn word(align: Align) -> &'static str {
 pub(super) struct Draft {
     text: String,
     /// Which end of the text sits at its place: left for a note about to be placed, as the command
-    /// has it, and the note's own when one is edited.
-    align: Align,
+    /// has it, and the note's own when one is edited. None for an edited note saved before alignments,
+    /// which stays as it is unless the choice is touched (the control shows it as centre).
+    align: Option<HAlign>,
     /// The note being edited has linked fields: its text isn't edited here, its alignment is.
     fields: bool,
     /// The preview last drawn: for this text, with the pointer here, on this sheet, aligned so. Drawn again only
     /// when one of them changes.
-    shown: Option<(String, Vec2, u64, Align, Option<crate::drawing_sheet_page::Marks>)>,
+    shown: Option<(String, Vec2, u64, Option<HAlign>, Option<crate::drawing_sheet_page::Marks>)>,
 }
 
 /// How finely a preview's letters are flattened, on paper.
@@ -55,7 +55,7 @@ fn ready(text: &str) -> bool {
 pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Option<u64>) {
     if app.drawing_workspace.note.is_none() {
         let draft = match selected {
-            None => Some(Draft { align: Align::Left, ..Draft::default() }),
+            None => Some(Draft { align: Some(HAlign::Left), ..Draft::default() }),
             Some(id) => app.session.drawing("drawing.inspect").ok().and_then(|drawing| {
                 let note = drawing.notes.by_id(id)?;
                 let text = note.content.0.iter().map(|part| match part {
@@ -81,11 +81,14 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Option<u64
             }
             let labels = ALIGNS.map(|(_, _, key, _)| tr(key));
             let targets = ALIGNS.map(|(.., target)| target);
-            let mut index = ALIGNS.iter().position(|(align, ..)| *align == draft.align).unwrap_or(1);
+            let shown = draft.align.unwrap_or(HAlign::Centre);
+            let mut index = ALIGNS.iter().position(|(align, ..)| *align == shown).unwrap_or(1);
             ui_kit::row(ui, tr("ui.drawing_note.align"), |ui| {
                 ui_kit::segmented(ui, &mut index, &labels, ui_kit::Segments { targets: &targets, ..Default::default() })
             });
-            draft.align = ALIGNS.get(index).map_or(draft.align, |(align, ..)| *align);
+            if let Some((align, ..)) = ALIGNS.get(index).filter(|(align, ..)| *align != shown) {
+                draft.align = Some(*align);
+            }
             if selected.is_none() {
                 ui_kit::text(ui, tr("ui.drawing_note.place"), ui_kit::Text::Note("drawing_note_place"));
             }
@@ -104,8 +107,10 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Option<u64
         && let Some(id) = selected
         && let Some(draft) = app.drawing_workspace.note.as_ref()
     {
-        let align = word(draft.align);
-        let set = if draft.fields { json!({"align": align}) } else { json!({"content": draft.text, "align": align}) };
+        let mut set = if draft.fields { json!({}) } else { json!({"content": draft.text}) };
+        if let Some(align) = draft.align {
+            set["align"] = json!(word(align));
+        }
         let params = json!({"note": ids::encode(id), "set": set});
         match app.run("drawing.note.edit", params) {
             Ok(_) => {
@@ -121,7 +126,7 @@ pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: crate::d
         return;
     }
     let Some(mut draft) = app.drawing_workspace.note.take() else { return };
-    let params = json!({"anchor":{"sheet":ids::encode(sheet)}, "at":[point.x, point.y], "content":draft.text, "align": word(draft.align)});
+    let params = json!({"anchor":{"sheet":ids::encode(sheet)}, "at":[point.x, point.y], "content":draft.text, "align": draft.align.map(word)});
     // The note as the sheet will draw it once placed: its own group, in the drawing's lettering, at
     // its paper size, in the accent colour as every preview on the sheet is.
     let fresh =

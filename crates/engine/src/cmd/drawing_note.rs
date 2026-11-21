@@ -9,9 +9,9 @@ use std::sync::Arc;
 use serde_json::Value;
 use solidcraft_doc::bom::Tree;
 use solidcraft_doc::drawing::fields::{FieldState, Values, no_field};
-use solidcraft_doc::drawing::note::{Align, Anchor, Branch, End, Note, leaders_refused};
+use solidcraft_doc::drawing::note::{Anchor, Branch, End, Note, leaders_refused};
 use solidcraft_doc::ids;
-use solidcraft_geom::cell::{Content, Part};
+use solidcraft_geom::cell::{Content, HAlign, Part};
 
 use super::CommandSpec;
 use super::drawing_dimension::status_words;
@@ -40,7 +40,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "anchor: {sheet: id or name}, {view: id}, {edge: {view, edge}} or {corner: {view, corner}} (an edge or a corner as drawing.dimension.add \
              takes it; its leader ends there); at: [x, y] on paper in mm, from the sheet's lower-left corner or the view's centre; content: text, \
-             or [{text} or {field: {source: component|drawing|sheet|revision, key, format?}}]; cap_mm?: 0.5..100, its text height; align?: left (default: the text starts at `at`), centre (the block is centred on `at`) or right (the text ends at `at`), each line of several starting at `at` for left and ending there for right; branches?: [{edge} or \
+             or [{text} or {field: {source: component|drawing|sheet|revision, key, format?}}]; cap_mm?: 0.5..100, its text height; align?: left (default: the text starts at `at`), centre (the text is centred on `at`) or right (the text ends at `at`), each line of several standing the same way; branches?: [{edge} or \
              {corner}], more leaders of a note on a view, 16 leaders in all, its anchor's included → what drawing.note.inspect answers \
              for it. Saved by name, never the point picked; an edge or a corner on a part its view doesn't \
              draw is refused. One undo step; no model is evaluated.",
@@ -64,7 +64,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<NoteResult>)
         .params(
-            "note: its id → {note, align: left, centre or right, record: as saved, status: ok, ambiguous, suppressed or lost, why?, point?: where its leader ends, in the \
+            "note: its id → {note, align?: left, centre or right (none for a note saved before alignments, whose block is centred on at), record: as saved, status: ok, ambiguous, suppressed or lost, why?, point?: where its leader ends, in the \
              design's frame, exact, candidates?: [{edge: {body, index}}], branches?: [{status, why?, point?, exact, candidates?}] \
              (a lost one loses only its own leader), text: what it says now, its fields read for its sheet, \
              fields?: [{source, key, state: shown, empty, lost (its sheet documents a component the design no longer has) or unknown \
@@ -100,7 +100,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         },
     };
     let branches = request.branches.iter().map(|pick| branch(s, pick, ADD)).collect::<Result<Vec<_>>>()?;
-    let align = request.align.map_or(Align::Left, Align::from);
+    let align = Some(request.align.unwrap_or(HAlign::Left));
     let mut note = Note { id: 0, anchor, at: request.at, content: request.content.0, cap_mm: request.cap_mm, align, branches };
     if let Some(view) = note.anchor.view() {
         check_drawn(&record, view, note.paths(), ADD)?;
@@ -134,8 +134,8 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
             note.cap_mm = cap;
             changed.push("cap_mm".to_string());
         }
-        if let Some(align) = request.set.align.map(Align::from).filter(|align| *align != note.align) {
-            note.align = align;
+        if let Some(align) = request.set.align.filter(|align| note.align != Some(*align)) {
+            note.align = Some(align);
             changed.push("align".to_string());
         }
         if let Some(branches) = branches.filter(|branches| *branches != note.branches) {
@@ -213,7 +213,7 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     warnings.extend(off_paper(d, note, &text, at));
     let reply = NoteResult {
         note: ids::encode(id),
-        align: note.align.into(),
+        align: note.align,
         record: serde_json::to_value(note).map_err(|e| EngineError::Other(e.to_string()))?,
         status: status.to_string(),
         why,
@@ -244,9 +244,9 @@ fn off_paper(d: &solidcraft_doc::drawing::Drawing, note: &Note, text: &str, at: 
     let (min, max) = (text_box.min + offset, text_box.max + offset);
     let on = min.x >= -EPS && min.y >= -EPS && max.x <= size.x + EPS && max.y <= size.y + EPS;
     let stands = match note.align {
-        Align::Left => "starting at",
-        Align::Centre => "centred on",
-        Align::Right => "ending at",
+        Some(HAlign::Left) => "starting at",
+        Some(HAlign::Centre) | None => "centred on",
+        Some(HAlign::Right) => "ending at",
     };
     (!on).then(|| {
         format!(
