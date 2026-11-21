@@ -296,7 +296,7 @@ fn target_plane(
     let fst = crate::state_in_face_anchor_frame(doc, st, anchor, f.component)?;
     let (pl, note) = doc.resolve_attached_plane_noted(vals, plane, f.component, st, &fst)?;
     if let Some(note) = note {
-        super::append_warning(warning, note);
+        crate::eval::append_warning(warning, note);
     }
     Ok(pl)
 }
