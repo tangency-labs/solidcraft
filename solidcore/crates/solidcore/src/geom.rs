@@ -33,6 +33,7 @@ pub mod point_set;
 pub mod polar_box;
 pub mod polynomial;
 pub mod pseudo_box;
+pub mod scan_frame;
 pub mod solution_array;
 pub mod step_matrix;
 pub mod tol;
