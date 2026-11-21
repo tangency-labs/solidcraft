@@ -353,6 +353,13 @@ impl Vr {
         &self.status
     }
 
+    /// Why VR didn't start, in the user's language, for the start's own notice; `None` while it
+    /// runs, waits, has ended or wasn't asked for. That notice takes the status line after the
+    /// first frames, where `frame` already said it once (a recovery start hid it, #18712).
+    pub fn start_failure(&self) -> Option<String> {
+        matches!(self.status, Status::Failed(_)).then(|| self.status_text())
+    }
+
     /// The status in the user's language.
     fn status_text(&self) -> String {
         use solidcraft_ui_text::{format, tr};
@@ -2739,6 +2746,10 @@ mod tests {
         let vr = Vr::failed(Reason::NoRuntime);
         assert_eq!(vr.status(), &Status::Failed(Reason::NoRuntime));
         assert!(vr.session.is_none() && vr.transform.is_none());
+        // The start's notice carries the reason too, so a notice at start can't hide it.
+        // (Its words come from the pending catalog, which tests don't load: the key stands in.)
+        let note = vr.start_failure().expect("a failed start has a note for the start's notice");
+        assert!(!note.is_empty());
     }
 
     /// A run without VR opens no session and says whether OpenXR is there, each finding in words
@@ -2749,6 +2760,7 @@ mod tests {
         let vr = Vr::off(Found::NoRuntime);
         assert_eq!(vr.status(), &Status::Off(Found::NoRuntime));
         assert!(!vr.has_session());
+        assert_eq!(vr.start_failure(), None, "VR not asked for adds nothing to the start's notice");
         let words = [Found::Ready, Found::NoLoader, Found::NoRuntime].map(off_words);
         assert_eq!(words[0], ("vr.status_off_found", None));
         assert_eq!(words[1], ("vr.status_not_found", Some("vr.reason_no_loader")), "the loader is the one the failed start names too");

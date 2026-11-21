@@ -1895,8 +1895,15 @@ fn main() -> eframe::Result {
                     }
                     // Tell the user about crashes since the last start (after the recovery offer is set up).
                     solidcraft_ui_egui::crash_ui::announce(app, &crashed);
-                    if !notes.is_empty() {
-                        app.set_status(notes.join(" "), true);
+                    // VR that didn't start says why here too: this notice takes the status line,
+                    // and the reason VR gave there on the first frame would be gone (#18712).
+                    #[cfg(any(target_os = "windows", target_os = "linux"))]
+                    let vr_note = a.vr.as_ref().and_then(vr::Vr::start_failure);
+                    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+                    let vr_note: Option<String> = None;
+                    let said: Vec<&str> = notes.iter().map(String::as_str).chain(vr_note.as_deref()).collect();
+                    if !said.is_empty() {
+                        app.set_status(said.join(" "), true);
                     }
                     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
                     {
