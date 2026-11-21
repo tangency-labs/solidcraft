@@ -2419,13 +2419,14 @@ mod keep_axes {
         (h, pole)
     }
 
-    /// Where the pole stands: its line's point at z = 0.
+    /// Where the upright pole stands: its line's x and y (its point is at z = 0, where it was
+    /// drawn, and a move along X keeps it upright).
     fn pole_foot(h: &Harness) -> (f64, f64) {
         let st = h.app.session.model.state();
-        let c = st.construct.last().expect("a pole");
+        let c = st.construct.iter().find(|c| c.name == "Center Pole").expect("a pole");
         let solidcraft_engine::doc::construct::ConstructGeom::Axis { origin, dir } = c.geom else { panic!("not an axis") };
-        let t = -origin.z / dir.z;
-        (origin.x + t * dir.x, origin.y + t * dir.y)
+        assert!(dir.x.abs() < 1e-9 && dir.y.abs() < 1e-9, "the pole stays upright: {dir:?}");
+        (origin.x, origin.y)
     }
 
     /// Move Body1 30 mm along X with the Move window, Keep Axes With Body set to `keep`.
@@ -2491,5 +2492,37 @@ mod keep_axes {
         let d = h.app.dialog.take().unwrap();
         let p = crate::dialogs_move::params(&h.app, &d).unwrap();
         assert!(p.get("carry").is_none(), "{p}");
+    }
+
+    /// An axis that also reads a body (from a point on the box to a fixed point) is not a Center
+    /// Pole: it stays when the box moves, ticked or not, though its line meets the box.
+    #[test]
+    fn an_axis_held_by_the_body_and_a_fixed_point_stays() {
+        let (mut h, pole) = box_with_pole();
+        h.app.run("construct.axis.two_points", json!({"a": {"vertex": [20, 20, 10]}, "b": {"point": [30, 30, 20]}, "name": "Tether"})).unwrap();
+        h.settle();
+        let tether = h.app.session.doc.features.last().unwrap().id;
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": "Body1"}]})).unwrap();
+        h.app.start("solid.move");
+        let d = h.app.dialog.as_mut().unwrap();
+        d.extra.insert("keep_axes".into(), json!(true));
+        let d = h.app.dialog.take().unwrap();
+        let p = crate::dialogs_move::params(&h.app, &d).unwrap();
+        assert_eq!(p["carry"], json!([pole]), "only the Center Pole, not the tether {tether}: {p}");
+    }
+
+    /// Ticking the option on an edited Move finds the poles where the bodies were before it: a
+    /// Move that left the pole behind, edited with the option ticked, takes it along.
+    #[test]
+    fn ticking_the_option_on_an_edited_move_finds_the_pole_it_left() {
+        let (mut h, pole) = box_with_pole();
+        move_body1(&mut h, Some(false));
+        assert_eq!(pole_foot(&h), (10.0, 10.0));
+        let mv = h.app.session.doc.features.last().unwrap().id;
+        let mut d = crate::dialogs::for_feature(&h.app, mv, None).unwrap();
+        assert!(!crate::dialogs_move::keeps_axes(&h.app, &d));
+        d.extra.insert("keep_axes".into(), json!(true));
+        let p = crate::dialogs_move::params(&h.app, &d).unwrap();
+        assert_eq!(p["carry"], json!([pole]), "{p}");
     }
 }

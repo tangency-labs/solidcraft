@@ -832,7 +832,7 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
                 }
             }
         } else if keep {
-            let through = axes_through(app, &bodies);
+            let through = axes_through(app, d.editing.map(|(id, _)| id), &bodies);
             if !through.is_empty() {
                 p["carry"] = json!(through);
             }
@@ -854,18 +854,35 @@ pub(crate) fn keeps_axes(_app: &SolveApp, d: &Dialog) -> bool {
 
 /// The construction axes held only by fixed points (a Center Pole) whose line runs through one
 /// of `bodies`, by feature id: Keep Axes With Body takes them along. Axes built on the bodies go
-/// with them anyway (#10127). Tested where the placed model puts them, as the bodies are.
-pub(crate) fn axes_through(app: &SolveApp, bodies: &[String]) -> Vec<u64> {
-    let world = crate::open_meshing::session_world(&app.session);
+/// with them anyway (#10127), and one that also reads a body, a plane or a sketch stays. Tested
+/// where the placed model puts the bodies before this Move: for an edited Move, the model
+/// before it, so a pole the bodies are moved away from is still found.
+pub(crate) fn axes_through(app: &SolveApp, editing: Option<u64>, bodies: &[String]) -> Vec<u64> {
+    let world = match editing {
+        Some(id) => {
+            std::sync::Arc::new(solidcraft_engine::doc::world_state(&app.session.doc, &app.session.model.state_before(id)).unwrap_or_default())
+        }
+        None => crate::open_meshing::session_world(&app.session),
+    };
     let boxes: Vec<_> = bodies.iter().filter_map(|n| world.body(n).map(|b| b.mesh().bounds())).collect();
     let mut through = Vec::new();
     for c in &world.construct {
         let solidcraft_engine::doc::construct::ConstructGeom::Axis { origin, dir } = c.geom else { continue };
-        if c.bodies.is_empty() && !through.contains(&c.feature) && boxes.iter().any(|b| b.meets_line(origin, dir)) {
+        if fixed_points_axis(app, c.feature) && !through.contains(&c.feature) && boxes.iter().any(|b| b.meets_line(origin, dir)) {
             through.push(c.feature);
         }
     }
     through
+}
+
+/// Whether the construction axis `feature` is drawn through two fixed points (or the origin), so
+/// nothing a Move does takes it along unless it is carried.
+fn fixed_points_axis(app: &SolveApp, feature: u64) -> bool {
+    use solidcraft_engine::doc::construct::{AxisDef, GeoRef};
+    let fixed = |g: &GeoRef| matches!(g, GeoRef::Point { .. } | GeoRef::Origin);
+    app.session.doc.feature(feature).is_some_and(
+        |f| matches!(&f.kind, solidcraft_engine::doc::FeatureKind::ConstructionAxis { def: AxisDef::TwoPoints { a, b } } if fixed(a) && fixed(b)),
+    )
 }
 
 /// The current type's move, or what it still needs picked.
