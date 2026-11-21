@@ -5221,25 +5221,24 @@ fn to_pick_body(s: &Session, d: &Dialog, pick: &Sel) -> Option<String> {
     }
 }
 
-/// The target `solid.extrude` takes for a Join that names none: the body of the face extruded,
-/// or of the face the profiles' sketch is on. None for the automatic scope, which joins every
-/// body the tool meets.
-fn default_join_target(s: &Session, d: &Dialog) -> Option<String> {
-    match d.inputs.first()?.items.first()? {
+/// The body Extrude's profiles come from: the body of the face extruded, or of the face the
+/// profiles' sketch is on, while it is shown. None for a sketch on no body.
+fn profile_body(s: &Session, d: &Dialog) -> Option<String> {
+    let body = match d.inputs.first()?.items.first()? {
         Sel::Face { body, .. } => Some(body.clone()),
         Sel::Profile { sketch, .. } | Sel::SketchCurve { sketch: Some(sketch), .. } => solidcraft_engine::sketch_join_target(s, *sketch),
         _ => None,
-    }
+    }?;
+    solidcraft_engine::joinable_body(s, &body).then_some(body)
 }
 
-/// The bodies OK stores as the targets of Extrude's Join, Cut or Intersect when Target Bodies is left empty,
-/// and among them the To body: what `solid.extrude` and the window choose then.
-/// - Some bodies hidden: the shown ones, so a hidden body is left alone (#3961). Visibility is
-///   read here, never at a rebuild: cleared, the box takes hidden bodies too.
-/// - A Join from a body's face, or from a sketch on one: that body, and the body a Join To Object
-///   runs to (#6424).
-/// - Otherwise none: the automatic scope, every body the extrusion meets (the box says Automatic).
-/// - Nothing picked to extrude yet: none, Automatic, until a face or profile says which body.
+/// The bodies Extrude's Target Bodies fill in with ([`sync_targets`]), and among them the To body.
+/// - Nothing picked to extrude yet: none (All), until a face or profile says which body.
+/// - A face or a sketch on a shown body's face: that body, for Join, Cut and Intersect alike;
+///   a Join To Object adds the body it runs to (#6424).
+/// - Otherwise, some bodies hidden: the shown ones, so a hidden body is left alone (#3961).
+///   Visibility is read here, never at a rebuild: cleared, the box takes hidden bodies too.
+/// - Otherwise none: All, every body the extrusion meets.
 fn default_targets(s: &Session, d: &Dialog, operation: usize) -> (Vec<String>, Option<String>) {
     if d.inputs.first().is_none_or(|i| i.items.is_empty()) {
         return (Vec::new(), None);
@@ -5249,17 +5248,17 @@ fn default_targets(s: &Session, d: &Dialog, operation: usize) -> (Vec<String>, O
     if edited.is_some_and(|f| !f.participants.is_empty()) || d.extra.get("participants").and_then(Value::as_array).is_some_and(|p| !p.is_empty()) {
         return (Vec::new(), None);
     }
+    if let Some(body) = profile_body(s, d) {
+        let to =
+            (operation == crate::op_auto::JOIN).then(|| join_to_pick(d).and_then(|pick| to_pick_body(s, d, pick))).flatten().filter(|to| *to != body);
+        return (std::iter::once(body).chain(to.clone()).collect(), to);
+    }
     if edited.is_none()
         && let Some(shown) = solidcraft_engine::shown_scope(s)
     {
         return (shown, None);
     }
-    if operation != crate::op_auto::JOIN {
-        return (Vec::new(), None);
-    }
-    let Some(default) = default_join_target(s, d) else { return (Vec::new(), None) };
-    let to = join_to_pick(d).and_then(|pick| to_pick_body(s, d, pick)).filter(|body| *body != default);
-    (std::iter::once(default).chain(to.clone()).collect(), to)
+    (Vec::new(), None)
 }
 
 /// Extrude's Target Bodies show the bodies OK stores, as soon as they are known: while the box

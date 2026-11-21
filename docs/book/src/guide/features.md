@@ -93,15 +93,16 @@ existing picks. With the setting off, picks only add profiles.
 or an edge and click one of the points that light up, its ends or its middle (a hole's centre
 too), the way Move's points are picked. So an extrude can end where two sketch lines meet.
 
-Extrude's **Target Bodies** shows the bodies a Join, Cut or Intersect will use as soon as you pick a face
-or profile, and OK stores exactly those. A Join starts with the body its profile is sketched on
-(or whose face it extrudes). When some bodies are hidden, a Join, Cut or Intersect starts with the shown
-bodies instead, so a hidden body is left alone; visibility is read only then, never when the model
-rebuilds. Until you pick or remove a body there, the box follows your other choices; after that
-it keeps yours. Left empty, the box says **All**: a Join joins every body the extrusion touches or
-intersects, a Cut cuts every body it intersects, and an Intersect intersects every body, removing
-any the extrusion misses, each time the model rebuilds, even hidden bodies. Clearing the box (its **×**) chooses that. Editing a feature shows the bodies it stored,
-or All when it stored none.
+Extrude's **Target Bodies** shows the bodies a Join, Cut or Intersect will use as soon as you pick
+a face or profile, and OK stores exactly those. It starts with the body the profile is sketched on
+(or whose face it extrudes), for all three. A profile on no body starts with the shown bodies when
+some are hidden, so a hidden body is left alone; visibility is read only then, never when the
+model rebuilds. Until you pick or remove a body there, the box follows your other choices; after
+that it keeps yours. Left empty, the box says **All**: a Join joins every body the extrusion
+touches or intersects, a Cut cuts every body it intersects, and an Intersect intersects every
+body, removing any the extrusion misses, each time the model rebuilds, even hidden bodies.
+Clearing the box (its **×**) chooses that. Editing a feature shows the bodies it stored, or All
+when it stored none.
 
 A Join **To Object** joins the body it runs to only when that body is one of its **Target
 Bodies**. Picking the To Object puts that body in the box, so you can see it. Take it out of the
