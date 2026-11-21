@@ -45,11 +45,14 @@ pub const MAX_LEADERS: usize = 16;
 /// The text heights a note may set, in millimetres of paper.
 pub const CAP_MM: RangeInclusive<f64> = 0.5..=100.0;
 
-/// Which end of a note's text sits at its place, and how its lines stand to one another: each line
-/// starts at it (left), is centred on it, or ends at it (right).
+/// Which end of a note's text sits at its place: its start (left), its middle (centre) or its end
+/// (right). The lines of a note with several stand to one another as the alignment says for left and
+/// right (all start at the place, or all end at it); for centre the block is centred and its lines
+/// start at the block's left edge, as every note's did before alignments existed.
 ///
-/// A note saved without one is centred, as every note was before it existed; the commands make a new
-/// note left. A centred note isn't saved with it, so such a drawing reads as before.
+/// A note saved without one is centred, as every note was before it existed, and draws exactly as it
+/// did; the commands make a new note left. A centred note isn't saved with it, so such a drawing reads
+/// as before.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Align {
@@ -64,17 +67,6 @@ pub enum Align {
 }
 
 impl Align {
-    /// How far along its line, from its start, a line `room` mm wide at most stands when its own text
-    /// is `width` mm: none for left, half what is spare for centre, all of it for right.
-    pub fn indent(self, room: f64, width: f64) -> f64 {
-        let spare = (room - width).max(0.0);
-        match self {
-            Align::Left => 0.0,
-            Align::Centre => spare * 0.5,
-            Align::Right => spare,
-        }
-    }
-
     /// Whether it is the centre a note saved before alignments had, which a drawing doesn't save.
     pub fn is_centre(&self) -> bool {
         *self == Align::Centre
