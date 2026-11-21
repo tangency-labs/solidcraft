@@ -365,7 +365,8 @@ mod web {
         let options = Object::new();
         let _ = Reflect::set(&options, &"multiple".into(), &JsValue::FALSE);
         let extensions = Array::new();
-        for e in picker_extensions() {
+        // Shared design archives (#4019) open from the picker too; `.zip` is not an import format.
+        for e in picker_extensions().into_iter().chain([".zip".to_string()]) {
             extensions.push(&e.into());
         }
         let accept = Object::new();
