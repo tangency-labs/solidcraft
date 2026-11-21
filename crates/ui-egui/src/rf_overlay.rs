@@ -7,7 +7,8 @@
 //!   emitter moved: on a coarser grid while it moves, then on the full grid on release. The
 //!   engine keeps the sliced walls, so only the paths are traced again.
 //! - **The card** at the bottom right picks the device, the band, the emitter's height, the slice
-//!   height and which bodies make walls, adds an emitter, and clears the heatmap. Its colour key
+//!   height and which bodies make walls, loads a device file (its devices join the list), adds an
+//!   emitter, and clears the heatmap. Its colour key
 //!   shows, for each level, the share of the floor at that level or better.
 
 use std::cell::Cell;
@@ -15,7 +16,7 @@ use std::cell::Cell;
 use egui::{Color32, Pos2, Stroke};
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
-use solidcraft_engine::cmd::rf_coverage::{DEVICES, RfOverlay};
+use solidcraft_engine::cmd::rf_coverage::RfOverlay;
 use solidcraft_ui_text::tr;
 
 use crate::SolveApp;
@@ -210,9 +211,10 @@ pub fn details(app: &SolveApp) -> Option<Details> {
     let device = first.and_then(|e| e.get("device")).and_then(Value::as_str);
     let height = o.emitters.first().map_or(1000.0, |e| e.height);
     let band = BANDS.iter().position(|b| *b == o.band.name()).unwrap_or(1);
-    let mut devices: Vec<String> = DEVICES.iter().map(|d| d.name.to_string()).collect();
+    // The devices file's devices first, then the built-in ones, then a typed EIRP.
+    let mut devices: Vec<String> = o.devices.iter().map(|(_, name)| name.clone()).collect();
     devices.push(tr("ui.rf_coverage_custom").to_string());
-    let device = device.and_then(|id| DEVICES.iter().position(|d| d.id == id)).unwrap_or(DEVICES.len());
+    let device = device.and_then(|id| o.devices.iter().position(|(d, _)| d.eq_ignore_ascii_case(id))).unwrap_or(o.devices.len());
     let comps = components(app);
     let mut walls = vec![tr("ui.rf_coverage_all_bodies").to_string()];
     walls.extend(comps.iter().cloned());
@@ -245,7 +247,11 @@ pub fn details(app: &SolveApp) -> Option<Details> {
             pattern_colour: None,
         })
         .collect();
-    d.actions = vec![("add".into(), tr("ui.rf_coverage_add").to_string()), ("clear".into(), tr("ui.rf_coverage_clear").to_string())];
+    d.actions = vec![
+        ("add".into(), tr("ui.rf_coverage_add").to_string()),
+        ("file".into(), tr("ui.rf_coverage_device_file").to_string()),
+        ("clear".into(), tr("ui.rf_coverage_clear").to_string()),
+    ];
     Some(d)
 }
 
@@ -261,13 +267,13 @@ fn changed(app: &SolveApp, id: &str, value: &DetailValue) -> Option<Value> {
     let choice = |v: &DetailValue| if let DetailValue::Choice { selected, .. } = v { Some(*selected) } else { None };
     match id {
         "device" => {
-            let pick = DEVICES.get(choice(value)?);
+            let pick = o.devices.get(choice(value)?).map(|(id, _)| id.clone());
             for e in p.get_mut("emitters")?.as_array_mut()? {
                 let e = e.as_object_mut()?;
-                match pick {
-                    Some(d) => {
+                match &pick {
+                    Some(id) => {
                         e.remove("eirp_dbm");
-                        e.insert("device".into(), json!(d.id));
+                        e.insert("device".into(), json!(id));
                     }
                     None => {
                         e.remove("device");
@@ -303,6 +309,10 @@ fn changed(app: &SolveApp, id: &str, value: &DetailValue) -> Option<Value> {
 
 /// Act on the card.
 pub fn dispatch(app: &mut SolveApp, event: DetailEvent) {
+    if matches!(&event, DetailEvent::Action(id) if id == "file") {
+        pick_devices_file(app);
+        return;
+    }
     let params = match event {
         DetailEvent::Change(id, value) => changed(app, &id, &value),
         DetailEvent::Action(id) if id == "clear" => Some(json!({"clear": true})),
@@ -325,6 +335,27 @@ pub fn dispatch(app: &mut SolveApp, event: DetailEvent) {
     {
         app.set_status(e, true);
     }
+}
+
+/// The heatmap's parameters with `devices_file` set to `path`.
+fn with_devices_file(o: &RfOverlay, path: &str) -> Option<Value> {
+    let mut p = o.params.clone();
+    let p_obj = p.as_object_mut()?;
+    p_obj.remove("png");
+    p_obj.insert("devices_file".into(), json!(path));
+    Some(p)
+}
+
+/// Ask for a JSON device list (a `devices_file`, such as one built from FCC and ISED records) and
+/// work the heatmap out again with it: its devices join the card's device list.
+fn pick_devices_file(app: &mut SolveApp) {
+    app.pick_open_for(&["json"], |app, path| {
+        let Some(path) = path else { return };
+        let Some(p) = overlay(app).and_then(|o| with_devices_file(o, &path)) else { return };
+        if let Err(e) = app.run(CMD, p) {
+            app.set_status(e, true);
+        }
+    });
 }
 
 /// The card over the bottom right of the view while the heatmap is on.

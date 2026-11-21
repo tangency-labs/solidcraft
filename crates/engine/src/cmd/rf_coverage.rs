@@ -46,10 +46,11 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Wi-Fi Coverage", 
     .output(output_schema_for::<RfCoverageReply>)
     .params(
         "Predict Wi-Fi signal strength (RSSI) over a floor plan from the walls the bodies make at a height, and show it as a heatmap. \
-         emitters: [{name?, at: [x, y] | [x, y, z] (mm, world), height?: mm (default client_height), device?: built-in id (call with no \
-         emitters to list them) | eirp_dbm?: dBm | {\"2.4\", \"5\", \"6\": dBm}}]; band?: \"2.4\" | \"5\" | \"6\" | \"all\" (default all); \
+         emitters: [{name?, at: [x, y] | [x, y, z] (mm, world), height?: mm (default client_height), device?: id from the built-in library or \
+         devices_file (call with no emitters to list them) | eirp_dbm?: dBm | {\"2.4\", \"5\", \"6\": dBm}}]; band?: \"2.4\" | \"5\" | \"6\" | \"all\" (default all); \
          slice_height?: mm where the bodies are cut (default 1000); client_height?: mm (default 1000); grid_step?: mm 10–2000 (default 75); \
-         exponent?: path-loss exponent 1.5–6 (default 2.2); region?: {polygon: [[x, y]…]} | {body: name} (default: the floor the walls \
+         exponent?: path-loss exponent 1.5–6 (default 2.2); devices_file?: path to a JSON list of {id, name?, eirp_dbm: \
+         {\"2.4\", \"5\", \"6\": dBm}} (its ids replace built-in ones of the same id); region?: {polygon: [[x, y]…]} | {body: name} (default: the floor the walls \
          enclose); points?: [{name, at: [x, y]}] (RSSI at rooms); bodies?: [names] | components?: [names] (only these make walls); \
          rf_materials?: bool (with bodies or components, bodies whose material has an RF loss count too); exclude?: [body or component names] (furniture); include_hidden?: bool (default false: hidden bodies count only when their \
          material has an RF loss); cap_eirp?: bool (default true: 30 dBm at 2.4/5 GHz, 27 at 6 GHz); png?: path; grid?: bool (return \
@@ -95,9 +96,69 @@ pub const DEVICES: &[Device] = &[
     Device { id: "ux7", name: "UniFi Express 7", eirp_dbm: [Some(27.0), Some(33.0), Some(30.0)] },
 ];
 
-/// The device `id` names.
-pub fn device(id: &str) -> Option<&'static Device> {
-    DEVICES.iter().find(|d| d.id.eq_ignore_ascii_case(id.trim()))
+/// A device an emitter can name: a built-in one or one from a `devices_file`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LibraryDevice {
+    pub id: String,
+    pub name: String,
+    /// EIRP per band before the cap (dBm); `None` where it has no radio.
+    pub eirp_dbm: [Option<f64>; 3],
+    /// Whether it came from the `devices_file`.
+    pub from_file: bool,
+}
+
+/// The largest `devices_file` read (bytes) and the most devices it may list.
+const MAX_DEVICES_FILE: usize = 4 << 20;
+const MAX_FILE_DEVICES: usize = 2000;
+
+/// One entry of a `devices_file`: an id, a name and EIRP per band; other keys (sources, notes)
+/// are ignored.
+#[derive(serde::Deserialize)]
+struct FileDevice {
+    id: String,
+    #[serde(default)]
+    name: Option<String>,
+    eirp_dbm: BTreeMap<String, f64>,
+}
+
+/// The devices emitters can name: those of the `devices_file` at `path`, then the built-in ones
+/// whose ids the file doesn't use.
+pub fn library(path: Option<&str>) -> Result<Vec<LibraryDevice>> {
+    let mut out = Vec::new();
+    if let Some(path) = path {
+        let bytes = solidcraft_io::vfs::read(path, MAX_DEVICES_FILE).map_err(|e| bad(CMD, format!("`devices_file` {path}: {e}")))?;
+        let list: Vec<FileDevice> = serde_json::from_slice(&bytes)
+            .map_err(|e| bad(CMD, format!("`devices_file` must be a JSON list of {{id, name?, eirp_dbm: {{\"2.4\", \"5\", \"6\": dBm}}}}: {e}")))?;
+        if list.len() > MAX_FILE_DEVICES {
+            return Err(bad(CMD, format!("`devices_file` lists at most {MAX_FILE_DEVICES} devices")));
+        }
+        for d in list {
+            let id = d.id.trim().to_string();
+            if id.is_empty() || id.chars().count() > 64 || out.iter().any(|o: &LibraryDevice| o.id.eq_ignore_ascii_case(&id)) {
+                return Err(bad(CMD, format!("`devices_file`: device ids must be 1–64 characters and different, not `{id}`")));
+            }
+            let mut eirp = [None; 3];
+            for (band, v) in &d.eirp_dbm {
+                let band = Band::ALL.into_iter().find(|b| b.name() == band.as_str());
+                match band {
+                    Some(b) if v.is_finite() && (-30.0..=60.0).contains(v) => {
+                        if let Some(slot) = eirp.get_mut(b.index()) {
+                            *slot = Some(*v);
+                        }
+                    }
+                    _ => return Err(bad(CMD, format!("`devices_file`: `{id}` needs eirp_dbm keys \"2.4\", \"5\", \"6\" with -30 to 60 dBm"))),
+                }
+            }
+            let name = d.name.filter(|n| !n.trim().is_empty() && n.chars().count() <= MAX_NAME).unwrap_or_else(|| id.clone());
+            out.push(LibraryDevice { id, name, eirp_dbm: eirp, from_file: true });
+        }
+    }
+    for d in DEVICES {
+        if !out.iter().any(|o| o.id.eq_ignore_ascii_case(d.id)) {
+            out.push(LibraryDevice { id: d.id.into(), name: d.name.into(), eirp_dbm: d.eirp_dbm, from_file: false });
+        }
+    }
+    Ok(out)
 }
 
 /// The walls one slice made, kept for the next call while the model and the slice settings stay
@@ -132,6 +193,8 @@ pub struct RfOverlay {
     pub version: u64,
     /// The legend: (lowest dBm of the step, colour).
     pub legend: Vec<(f64, [u8; 3])>,
+    /// The devices emitters can name (the `devices_file`'s, then the built-in ones): (id, name).
+    pub devices: Vec<(String, String)>,
     /// For each step of the legend, the share of the floor (0–100) at its level or better; for
     /// the last, open step, the share below the one before it.
     pub floor_share: Vec<f64>,
@@ -150,10 +213,11 @@ fn rf_coverage(s: &mut Session, p: &Value) -> Result<Value> {
         s.refresh_display();
         return reply(empty(false, started));
     }
+    let devices = library(params.devices_file.as_deref())?;
     let Some(emitter_params) = params.emitters.as_ref().filter(|e| !e.is_empty()) else {
         // Without emitters: the device library, so a caller can pick one.
         let mut out = empty(s.rf_coverage.is_some(), started);
-        out.devices = DEVICES.iter().map(device_reply).collect();
+        out.devices = devices.iter().map(device_reply).collect();
         return reply(out);
     };
     if emitter_params.len() > MAX_EMITTERS {
@@ -169,7 +233,7 @@ fn rf_coverage(s: &mut Session, p: &Value) -> Result<Value> {
     let exponent = length("exponent", params.exponent, 2.2, 1.5, 6.0)?;
     let gap = length("close_gaps", params.close_gaps, 1000.0, 0.0, 5000.0)?;
     let cap = params.cap_eirp.unwrap_or(true);
-    let emitters = emitter_params.iter().enumerate().map(|(i, e)| emitter(i, e, client, cap)).collect::<Result<Vec<_>>>()?;
+    let emitters = emitter_params.iter().enumerate().map(|(i, e)| emitter(i, e, client, cap, &devices)).collect::<Result<Vec<_>>>()?;
     let bands: Vec<Band> = match params.band.unwrap_or(BandName::All) {
         BandName::G2_4 => vec![Band::G2_4],
         BandName::G5 => vec![Band::G5],
@@ -307,6 +371,7 @@ fn rf_coverage(s: &mut Session, p: &Value) -> Result<Value> {
             version,
             legend: crate::rf_coverage::SCALE.to_vec(),
             floor_share: floor_share(&shown_values, &cells),
+            devices: devices.iter().map(|d| (d.id.clone(), d.name.clone())).collect(),
         }));
         s.refresh_display();
     }
@@ -395,8 +460,13 @@ fn band_map(values: &[Option<f64>; 3]) -> BTreeMap<String, f64> {
     Band::ALL.iter().filter_map(|b| Some((b.name().to_string(), (*values.get(b.index())?)?))).collect()
 }
 
-fn device_reply(d: &Device) -> DeviceReply {
-    DeviceReply { id: d.id.into(), name: d.name.into(), eirp_dbm: band_map(&d.eirp_dbm) }
+fn device_reply(d: &LibraryDevice) -> DeviceReply {
+    DeviceReply {
+        id: d.id.clone(),
+        name: d.name.clone(),
+        eirp_dbm: band_map(&d.eirp_dbm),
+        source: if d.from_file { "file" } else { "built-in" }.into(),
+    }
 }
 
 fn emitter_reply(e: &Emitter, device: Option<&str>) -> EmitterReply {
@@ -404,7 +474,7 @@ fn emitter_reply(e: &Emitter, device: Option<&str>) -> EmitterReply {
 }
 
 /// The emitter `p` describes, the `i`th.
-fn emitter(i: usize, p: &crate::schema::rf_coverage::EmitterParam, client: f64, cap: bool) -> Result<Emitter> {
+fn emitter(i: usize, p: &crate::schema::rf_coverage::EmitterParam, client: f64, cap: bool, devices: &[LibraryDevice]) -> Result<Emitter> {
     let finite = |v: f64| v.is_finite() && v.abs() <= MAX_COORD;
     let (at, z) = match p.at.as_slice() {
         [x, y] => ([*x, *y], None),
@@ -418,8 +488,9 @@ fn emitter(i: usize, p: &crate::schema::rf_coverage::EmitterParam, client: f64, 
     let mut eirp = match (&p.device, &p.eirp_dbm) {
         (Some(_), Some(_)) => return Err(bad(CMD, "give an emitter `device` or `eirp_dbm`, not both")),
         (Some(id), None) => {
-            let ids: Vec<&str> = DEVICES.iter().map(|d| d.id).collect();
-            device(id).ok_or_else(|| bad(CMD, format!("no device `{id}`: one of {}", ids.join(", "))))?.eirp_dbm
+            let found = devices.iter().find(|d| d.id.eq_ignore_ascii_case(id.trim()));
+            let ids: Vec<&str> = devices.iter().map(|d| d.id.as_str()).take(40).collect();
+            found.ok_or_else(|| bad(CMD, format!("no device `{id}`: one of {}", ids.join(", "))))?.eirp_dbm
         }
         (None, Some(EirpParam::Every(v))) => [Some(*v); 3],
         (None, Some(EirpParam::PerBand(m))) => {

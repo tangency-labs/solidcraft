@@ -14,7 +14,8 @@
     "ui.rf_coverage_nothing": "Nothing is shown to work out Wi-Fi coverage for",
     "ui.rf_coverage_slice": "Slice height",
     "ui.rf_coverage_walls": "Walls from",
-    "ui.rf_coverage_short": "Wi-Fi"
+    "ui.rf_coverage_short": "Wi-Fi",
+    "ui.rf_coverage_device_file": "Device file…"
   },
   "ar": {
     "cmd.inspect.rf_coverage": "تغطية Wi-Fi",
@@ -31,7 +32,8 @@
     "ui.rf_coverage_nothing": "لا يوجد شيء ظاهر لحساب تغطية Wi-Fi له",
     "ui.rf_coverage_slice": "ارتفاع المقطع",
     "ui.rf_coverage_walls": "الجدران من",
-    "ui.rf_coverage_short": "Wi-Fi"
+    "ui.rf_coverage_short": "Wi-Fi",
+    "ui.rf_coverage_device_file": "ملف الأجهزة…"
   },
   "he": {
     "cmd.inspect.rf_coverage": "כיסוי Wi-Fi",
@@ -48,7 +50,8 @@
     "ui.rf_coverage_nothing": "אין דבר מוצג לחישוב כיסוי Wi-Fi",
     "ui.rf_coverage_slice": "גובה החתך",
     "ui.rf_coverage_walls": "קירות מתוך",
-    "ui.rf_coverage_short": "Wi-Fi"
+    "ui.rf_coverage_short": "Wi-Fi",
+    "ui.rf_coverage_device_file": "קובץ מכשירים…"
   },
   "ja": {
     "cmd.inspect.rf_coverage": "Wi-Fi カバレッジ",
@@ -65,7 +68,8 @@
     "ui.rf_coverage_nothing": "Wi-Fi カバレッジを計算する対象が表示されていません",
     "ui.rf_coverage_slice": "切断高さ",
     "ui.rf_coverage_walls": "壁の対象",
-    "ui.rf_coverage_short": "Wi-Fi"
+    "ui.rf_coverage_short": "Wi-Fi",
+    "ui.rf_coverage_device_file": "デバイスファイル…"
   },
   "vi": {
     "cmd.inspect.rf_coverage": "Vùng phủ Wi-Fi",
@@ -82,7 +86,8 @@
     "ui.rf_coverage_nothing": "Không có gì đang hiển thị để tính vùng phủ Wi-Fi",
     "ui.rf_coverage_slice": "Độ cao lát cắt",
     "ui.rf_coverage_walls": "Tường lấy từ",
-    "ui.rf_coverage_short": "Wi-Fi"
+    "ui.rf_coverage_short": "Wi-Fi",
+    "ui.rf_coverage_device_file": "Tệp thiết bị…"
   },
   "zh": {
     "cmd.inspect.rf_coverage": "Wi-Fi 覆盖",
@@ -99,7 +104,8 @@
     "ui.rf_coverage_nothing": "没有显示任何可计算 Wi-Fi 覆盖的对象",
     "ui.rf_coverage_slice": "切片高度",
     "ui.rf_coverage_walls": "墙体来源",
-    "ui.rf_coverage_short": "Wi-Fi"
+    "ui.rf_coverage_short": "Wi-Fi",
+    "ui.rf_coverage_device_file": "设备文件…"
   },
   "de": {
     "cmd.inspect.rf_coverage": "WLAN-Abdeckung",
@@ -116,7 +122,8 @@
     "ui.rf_coverage_nothing": "Nichts sichtbar, für das die WLAN-Abdeckung berechnet werden kann",
     "ui.rf_coverage_slice": "Schnitthöhe",
     "ui.rf_coverage_walls": "Wände aus",
-    "ui.rf_coverage_short": "WLAN"
+    "ui.rf_coverage_short": "WLAN",
+    "ui.rf_coverage_device_file": "Gerätedatei…"
   },
   "ko": {
     "cmd.inspect.rf_coverage": "Wi-Fi 커버리지",
@@ -133,6 +140,7 @@
     "ui.rf_coverage_nothing": "Wi-Fi 커버리지를 계산할 표시된 대상이 없습니다",
     "ui.rf_coverage_slice": "절단 높이",
     "ui.rf_coverage_walls": "벽 대상",
-    "ui.rf_coverage_short": "Wi-Fi"
+    "ui.rf_coverage_short": "Wi-Fi",
+    "ui.rf_coverage_device_file": "장치 파일…"
   }
 }

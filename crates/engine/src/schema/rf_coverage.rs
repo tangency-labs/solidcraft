@@ -41,8 +41,8 @@ pub struct EmitterParam {
     /// Its height in mm, world z (default: `client_height`, or the z of `at`).
     #[serde(default)]
     pub height: Option<f64>,
-    /// A device from the built-in library (`devices` in the reply lists them): its EIRP per band,
-    /// capped at indoor limits. Not with `eirp_dbm`.
+    /// A device from the built-in library or the `devices_file` (a call with no emitters lists
+    /// them): its EIRP per band, capped at indoor limits. Not with `eirp_dbm`.
     #[serde(default)]
     pub device: Option<String>,
     /// Its EIRP in dBm: one number for every band, or {"2.4": dBm, "5": dBm, "6": dBm} (a band left
@@ -99,6 +99,11 @@ pub struct RfCoverageParams {
     /// The path-loss exponent: 1.5 to 6 (default 2.2; 2 is free space).
     #[serde(default)]
     pub exponent: Option<f64>,
+    /// A JSON file of devices `device` can name, besides the built-in ones: a list of
+    /// {id, name?, eirp_dbm: {"2.4": dBm, "5": dBm, "6": dBm}} (other keys are ignored). Its ids
+    /// replace built-in ones of the same id.
+    #[serde(default)]
+    pub devices_file: Option<String>,
     /// The floor the statistics count (default: the floor the walls enclose; when they enclose
     /// nothing, every cell not in a wall).
     #[serde(default)]
@@ -218,6 +223,8 @@ pub struct DeviceReply {
     pub name: String,
     /// EIRP per band before the cap (dBm).
     pub eirp_dbm: BTreeMap<String, f64>,
+    /// "built-in" or "file" (the `devices_file`).
+    pub source: String,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]

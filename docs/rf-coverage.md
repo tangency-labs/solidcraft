@@ -103,9 +103,14 @@ The reply is kept small for agents:
 `grid: true` adds every cell's value. `png: "path.png"` writes the heatmap seen from above, with
 north up, each wall's outline in its material's colour, and the emitters marked.
 
-A call with no emitters returns the device library (`devices`). The library lists a few Wi-Fi 7
-routers and access points. Their EIRP is the transmit power plus the antenna gain from the makers'
-public spec sheets. An emitter can give `eirp_dbm` instead: one number, or one for each band.
+A call with no emitters returns the device library (`devices`). The built-in library lists a
+few Wi-Fi 7 routers and access points. Their EIRP is the transmit power plus the antenna gain from
+the makers' public spec sheets. `devices_file` adds your own devices: a JSON list of
+`{"id", "name"?, "eirp_dbm": {"2.4": dBm, "5": dBm, "6": dBm}}`, other keys ignored. A file
+device with a built-in device's id replaces it, and each listed device says whether it came from
+the file or is built in. A library built from FCC and ISED certification records, with EIRP =
+conducted power + antenna gain from each device's RF exposure report, fits this shape. An emitter
+can also give `eirp_dbm` itself: one number, or one for each band.
 
 ## In the 3D view
 
@@ -117,6 +122,7 @@ public spec sheets. An emitter can give `eirp_dbm` instead: one number, or one f
   you release it, the map is worked out on the full grid. The cut walls are kept between calls, so
   only the paths are traced again.
 - The card at the bottom right sets the device, the band, the router's height and the slice height.
+  **Device file…** loads a `devices_file`; its devices head the device list.
   It also chooses which component makes the walls (bodies with an RF material always count), adds a
   router, and clears the map. Its colour key shows, for each level, the share of the floor at that
   level or better, so the −60 and −67 dBm rows are the coverage figures.

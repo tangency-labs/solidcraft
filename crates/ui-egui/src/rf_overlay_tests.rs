@@ -61,7 +61,7 @@ fn the_card_changes_the_band_device_and_height_and_adds_and_clears() {
     assert!(shares.windows(2).take(shares.len() - 2).all(|w| w[0] <= w[1]), "{shares:?}");
     dispatch(&mut app, DetailEvent::Change("band".into(), DetailValue::Choice { selected: 2, options: Vec::new() }));
     assert_eq!(app.session.rf_coverage.as_ref().unwrap().band.name(), "6");
-    let custom = DEVICES.len();
+    let custom = app.session.rf_coverage.as_ref().unwrap().devices.len();
     dispatch(&mut app, DetailEvent::Change("device".into(), DetailValue::Choice { selected: custom, options: Vec::new() }));
     assert_eq!(app.session.rf_coverage.as_ref().unwrap().emitters[0].eirp(solidcraft_engine::doc::rf::Band::G6), Some(20.0));
     let units = app.session.doc.units.clone();
@@ -85,4 +85,27 @@ fn moving_an_emitter_keeps_the_full_settings_for_the_release() {
     let mut with_z = (*o).clone();
     with_z.params["emitters"][0] = json!({"at": [1, 2, 2400]});
     assert_eq!(moved(&with_z, 0, [5.0, 6.0]).unwrap()["emitters"][0], json!({"at": [5.0, 6.0], "height": 2400.0}));
+}
+
+#[test]
+fn the_card_loads_a_devices_file_into_its_device_list() {
+    let mut app = room();
+    toggle(&mut app);
+    let dir = std::env::temp_dir().join(format!("rf-card-devices-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("devices.json");
+    std::fs::write(&file, json!([{"id": "lab-ap", "name": "Lab AP", "eirp_dbm": {"2.4": 20, "5": 23}}]).to_string()).unwrap();
+    let path = file.to_string_lossy().to_string();
+    // As the file picker's answer does: rerun with the file.
+    let p = with_devices_file(app.session.rf_coverage.as_ref().unwrap(), &path).unwrap();
+    app.run(CMD, p).unwrap();
+    let d = details(&app).unwrap();
+    let DetailValue::Choice { options, .. } = &d.settings[0].value else { panic!("device is a choice") };
+    assert_eq!(options.first().map(String::as_str), Some("Lab AP"));
+    assert!(d.actions.iter().any(|(id, _)| id == "file"));
+    dispatch(&mut app, DetailEvent::Change("device".into(), DetailValue::Choice { selected: 0, options: Vec::new() }));
+    let o = app.session.rf_coverage.clone().unwrap();
+    assert_eq!(o.params["emitters"][0]["device"], "lab-ap");
+    assert_eq!(o.emitters[0].eirp(solidcraft_engine::doc::rf::Band::G5), Some(23.0));
+    let _ = std::fs::remove_dir_all(&dir);
 }

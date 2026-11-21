@@ -174,3 +174,52 @@ fn hostile_params_are_refused_and_change_nothing() {
     }
     assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
 }
+
+#[test]
+fn a_devices_file_adds_devices_and_replaces_built_in_ones() {
+    let mut s = two_rooms();
+    let dir = std::env::temp_dir().join(format!("rf-devices-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("devices.json");
+    // As the FCC/ISED library writes it: extra keys (sources) are ignored.
+    std::fs::write(
+        &file,
+        json!([
+            {"id": "u7-pro", "name": "U7 Pro (FCC)", "eirp_dbm": {"2.4": 29.24, "5": 31.33, "6": 29.51}, "sources": [{"url": "x"}]},
+            {"id": "lab-ap", "eirp_dbm": {"5": 18.0}}
+        ])
+        .to_string(),
+    )
+    .unwrap();
+    let path = file.to_string_lossy().to_string();
+    let list = run(&mut s, "inspect.rf_coverage", json!({"devices_file": path}));
+    let devices = list["devices"].as_array().unwrap();
+    assert_eq!(devices[0], json!({"id": "u7-pro", "name": "U7 Pro (FCC)", "eirp_dbm": {"2.4": 29.24, "5": 31.33, "6": 29.51}, "source": "file"}));
+    assert_eq!(devices[1]["name"], "lab-ap");
+    // The built-in u7-pro is replaced, the other built-ins stay.
+    assert_eq!(devices.iter().filter(|d| d["id"] == "u7-pro").count(), 1);
+    assert!(devices.iter().any(|d| d["id"] == "udr7" && d["source"] == "built-in"));
+    // An emitter names a file device; the cap still applies (31.33 at 5 GHz is capped to 30).
+    let out = run(
+        &mut s,
+        "inspect.rf_coverage",
+        json!({"devices_file": path, "band": "all", "emitters": [{"at": [2000, 1500], "device": "u7-pro"}, {"at": [6000, 1500], "device": "LAB-AP"}]}),
+    );
+    assert_eq!(out["emitters"][0]["eirp_dbm"], json!({"2.4": 29.24, "5": 30.0, "6": 27.0}));
+    assert_eq!(out["emitters"][1]["eirp_dbm"], json!({"5": 18.0}));
+    assert_eq!(s.rf_coverage.as_ref().unwrap().devices.first().map(|d| d.0.as_str()), Some("u7-pro"));
+    // Bad files are refused: missing, not a list, a band that isn't one, power out of range, repeated ids.
+    for (name, text) in [
+        ("list.json", json!({"id": "x"}).to_string()),
+        ("band.json", json!([{"id": "x", "eirp_dbm": {"60": 20}}]).to_string()),
+        ("power.json", json!([{"id": "x", "eirp_dbm": {"5": 99}}]).to_string()),
+        ("twice.json", json!([{"id": "x", "eirp_dbm": {}}, {"id": "X", "eirp_dbm": {}}]).to_string()),
+        ("empty.json", json!([{"id": " ", "eirp_dbm": {}}]).to_string()),
+    ] {
+        let bad = dir.join(name);
+        std::fs::write(&bad, text).unwrap();
+        assert!(s.execute("inspect.rf_coverage", &json!({"devices_file": bad.to_string_lossy()})).is_err(), "{name}");
+    }
+    assert!(s.execute("inspect.rf_coverage", &json!({"devices_file": dir.join("missing.json").to_string_lossy()})).is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}
