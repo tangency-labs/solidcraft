@@ -287,7 +287,8 @@ fn link_folders(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(t.space_6, t.space_6);
         for (i, folder) in app.preferences.linked_file_folders.iter().enumerate() {
-            let chip = ui_kit::SettingsChip { key: Some(folder), monospace: true, remove: Some(app.tr("prefs.link_folders_remove")), ..Default::default() };
+            let chip =
+                ui_kit::SettingsChip { key: Some(folder), monospace: true, remove: Some(app.tr("prefs.link_folders_remove")), ..Default::default() };
             let button = ui_kit::settings_chip(ui, folder, chip);
             crate::scenario::publish_target(&format!("prefs:link_folder:{i}:remove"), button.rect);
             if button.clicked() {
