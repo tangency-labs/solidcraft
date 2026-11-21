@@ -894,8 +894,12 @@ pub fn collapse_near(s: &EvalSurface, uv: [f64; 2], reach: f64) -> Result<Collap
 /// `f`. Every point of an iso-line through `uv` along `f` is then within `o_e` times that of the
 /// line through the nearest point (moving across `e`), and the piece of an iso-line along `e`
 /// past the range within the same of its end; `δ` is twice the sum over the directions, rounded
-/// up. A strip with a weight other than the net's first, or not positive, is refused
-/// ([`EvalError::OffRange`]): a rational continuation is not bounded here.
+/// up. A direction whose weights change along it is refused ([`EvalError::OffRange`]), as is any
+/// weight not positive, and a net off its range in both directions unless all its weights are the
+/// first's: a rational continuation is not bounded there. A direction `e` whose weights depend
+/// only on the other direction's index (a cylinder's arc, straight along its axis), with the
+/// other direction on its range, is a polynomial in `e` whose coefficients are convex mixes
+/// across, so its partial is within the largest of the points' (each over its own weight).
 fn onto_range(s: &EvalSurface, uv: [f64; 2]) -> Result<Option<([f64; 2], f64)>, EvalError> {
     let EvalSurface::Nurbs(n) = s else {
         return Ok(None);
@@ -956,8 +960,8 @@ fn onto_range(s: &EvalSurface, uv: [f64; 2]) -> Result<Option<([f64; 2], f64)>, 
             uv[0], uv[1]
         ))
     };
-    // Control point `i` along e, `j` across, as a Euclidean point of the one weight w0.
-    let point = |e: usize, i: usize, j: usize| -> Result<Vec3, EvalError> {
+    // Control point `i` along e, `j` across: its Euclidean point and its weight.
+    let point = |e: usize, i: usize, j: usize| -> Result<(Vec3, f64), EvalError> {
         let (iu, iv) = if e == 0 { (i, j) } else { (j, i) };
         let c = ctrl
             .get(
@@ -967,11 +971,10 @@ fn onto_range(s: &EvalSurface, uv: [f64; 2]) -> Result<Option<([f64; 2], f64)>, 
             )
             .copied()
             .ok_or_else(bad)?;
-        let polynomial = c[3] == w0 && w0 > 0.0 && c.iter().all(|x| x.is_finite());
-        if !polynomial {
+        if !(c[3] > 0.0 && c.iter().all(|x| x.is_finite())) {
             return Err(rational());
         }
-        Ok(Vec3::new(c[0], c[1], c[2]) * (1.0 / w0))
+        Ok((Vec3::new(c[0], c[1], c[2]) * (1.0 / c[3]), c[3]))
     };
     let grow = |o: f64, h: f64, power: usize| -> f64 {
         (0..power).fold(1.0, |acc, _| acc * (1.0 + 2.0 * o / h))
@@ -997,7 +1000,14 @@ fn onto_range(s: &EvalSurface, uv: [f64; 2]) -> Result<Option<([f64; 2], f64)>, 
                 return Err(bad());
             }
             for b in 0..m_f {
-                let (x, y) = (point(e, a, b)?, point(e, a + 1, b)?);
+                let ((x, wx), (y, wy)) = (point(e, a, b)?, point(e, a + 1, b)?);
+                // Along e the weight must not change (the surface is then a polynomial in e
+                // whose coefficients are convex mixes across, so its partial is bounded by the
+                // points' own), and across the range's other direction f it must be the net's
+                // one weight when f is off its range too, where the mix is not convex.
+                if wx != wy || (o_f != 0.0 && wx != w0) {
+                    return Err(rational());
+                }
                 // The difference's length with its rounding on the points' own sizes (each
                 // point's division, the difference, the length).
                 let len = (y - x).len() + gamma(8) * (x.len() + y.len());

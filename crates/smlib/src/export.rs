@@ -712,6 +712,16 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
             return Err(invalid(format!("{}: the edge's interval is no longer than SMLib's knot resolution (1e-12)", trim_on())));
         }
         let (Some(s0), Some(s1)) = (end(a, t0), end(z, t1)) else {
+            // SMLib gives the trim of an edge that runs further off its face than it tolerates
+            // on the unit interval, whatever the edge's own parameter is (it reports it as
+            // having no length): the same position along the edge, so the knots are carried
+            // onto its interval, the ends exactly.
+            if a == 0.0 && z == 1.0 {
+                for x in &mut k {
+                    *x = t0 * (1.0 - *x) + t1 * *x;
+                }
+                return Ok((k, points));
+            }
             // Which ends: more than a rounding apart and not one point of the edge.
             let off: Vec<String> = [("start", a, t0), ("end", z, t1)]
                 .into_iter()
