@@ -311,9 +311,9 @@ pub fn import_dialog(
                 .spawn_scoped(scope, || {
                     craft_plugin_wasm::update_fields(host, &package.manifest, &package.component, &entry.name, &context, &request).1
                 })
-                .map_err(|e| error(e.to_string()))?
+                .map_err(|e| HostError::Trap { reason: format!("could not start the dialog hook: {e}") })?
                 .join()
-                .map_err(|_| error("dialog hook stopped unexpectedly"))?
+                .map_err(|_| HostError::Trap { reason: "dialog hook stopped unexpectedly".into() })?
         })?;
         Ok(ImportDialog { file, schema: dialog::apply_update(&schema, &update)?, hook })
     }

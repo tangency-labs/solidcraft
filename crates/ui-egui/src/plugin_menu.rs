@@ -222,7 +222,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         ("integer", false) => &["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"],
         ("boolean", false) => &[],
         // A list of values, or of `{"const": value, "title": shown}` options; not both.
-        ("string", true) if p.contains_key("enum") != p.contains_key("oneOf") => &["enum", "oneOf"],
+        ("string", true) if p.contains_key("enum") != p.contains_key("oneOf") => &["enum", "oneOf", "minLength", "maxLength", "format"],
         ("string", false) => &["minLength", "maxLength", "format"],
         _ => return None,
     };
@@ -304,6 +304,17 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         "boolean" => (Kind::Boolean, Input::Boolean(default.and_then(Value::as_bool).unwrap_or(false))),
         "string" if choice => {
             let (values, titles, pictures) = choices(p)?;
+            // A finite choice still obeys the string's original bounds. Directory fields keep
+            // their text/picker path and grant checks rather than becoming dropdowns.
+            if text("format").as_deref() == Some("directory")
+                || values.iter().any(|value| {
+                    let length = value.chars().count() as u64;
+                    p.get("minLength").and_then(Value::as_u64).is_some_and(|min| length < min)
+                        || p.get("maxLength").and_then(Value::as_u64).is_some_and(|max| length > max)
+                })
+            {
+                return None;
+            }
             images = pictures;
             let chosen = default.and_then(Value::as_str).and_then(|d| values.iter().position(|o| o == d));
             (Kind::Choice { values, titles }, Input::Choice(chosen))
@@ -1103,9 +1114,14 @@ fn start_file_job(app: &mut SolveApp, id: u64) {
 
 fn retain_edits(fields: &mut [(Field, Input)], previous: &[(Field, Input)]) {
     for (field, input) in fields {
-        if let Some((old, value)) = previous.iter().find(|(old, _)| old.key == field.key && old.edited)
-            && let Some(value) = scalar_value(old, value).and_then(|v| default_input(field, &v))
-        {
+        let Some((old, value)) = previous.iter().find(|(old, _)| old.key == field.key && old.edited) else { continue };
+        let retained = match (&old.kind, &field.kind, value) {
+            (Kind::Text { .. }, Kind::Text { .. }, Input::Text(_))
+            | (Kind::Number { .. }, Kind::Number { .. }, Input::Typed(_))
+            | (Kind::Integer { .. }, Kind::Integer { .. }, Input::Typed(_)) => Some(value.clone()),
+            _ => scalar_value(old, value).and_then(|v| default_input(field, &v)),
+        };
+        if let Some(value) = retained {
             *input = value;
             field.edited = true;
         }
@@ -1145,7 +1161,8 @@ fn poll_file(dialog: &mut EntryDialog) {
     dialog.fields = Some(fields);
     dialog.file = Some(result.file);
     dialog.has_hook = result.hook;
-    dialog.hook_values = Some(dialog_values(dialog));
+    // Keep the submitted snapshot: defaults or visibility changes in this result may require
+    // another update before its choices describe the values currently displayed.
 }
 
 /// A selection field's label as the `'static` text a [`SelInput`] carries. Each distinct label is

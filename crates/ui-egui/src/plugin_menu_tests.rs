@@ -1792,7 +1792,8 @@ fn importer_menu_picks_first_and_cancel_opens_no_form_with_a_legacy_preference()
     let mut h = crate::scenario::Harness::new();
     h.app.plugin_menu.listed = vec![listed("sample", vec![importing_entry()])];
     h.app.plugin_menu.loaded = true;
-    assert!(h.app.preferences.plugin_import_file_first);
+    assert!(!h.app.preferences.plugin_import_file_first, "existing workflows stay the default");
+    h.app.preferences.plugin_import_file_first = true;
     h.app.services.pick_open = Some(Box::new(|extensions| {
         assert_eq!(extensions, &["smp"]);
         Box::pin(std::future::ready(None))
@@ -1847,6 +1848,7 @@ fn importer_file_generations_discard_late_updates_and_close_disconnects_the_work
     assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap(), json!({"part":"initial"}));
     let (tx, rx) = std::sync::mpsc::channel();
     dialog.file_job = Some(FileJob { generation: 2, reply: rx });
+    dialog.hook_values = Some(json!({"part":"new.smp"}));
     assert!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).is_err());
     tx.send(Ok(result(2, "new.smp"))).unwrap();
     poll_file(h.app.plugin_menu.dialogs.last_mut().unwrap());
@@ -1874,6 +1876,9 @@ fn interactive_open_and_drop_reuse_the_file_and_do_not_start_importing_before_th
     std::fs::write(&path, b"header").unwrap();
     let mut h = crate::scenario::Harness::new();
     h.app.session.plugin_state.plugins_dir = Some(root.join("plugins"));
+    assert!(!offer_import(&mut h.app, &path), "direct Open/drop remain the default");
+    assert!(h.app.plugin_menu.dialogs.is_empty());
+    h.app.preferences.plugin_import_file_first = true;
     for generation in 1..=2 {
         if generation == 1 {
             h.app.open_path_async(&path);
@@ -1927,4 +1932,151 @@ fn importer_file_facts_drive_visibility_enabled_choices_and_defaults_without_run
     file.format = "different.convert".into();
     let fields = form(&solidcraft_engine::plugin::conditions::bind_file_conditions(&schema, Some(&file)).unwrap()).unwrap();
     assert!(params(&fields).unwrap().get("flatten").is_none());
+}
+
+/// Deliver a completed hook deterministically, preserving the snapshot set when it was submitted.
+fn finish_import_fields(dialog: &mut EntryDialog, schema: Value) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    dialog.file_job = Some(FileJob { generation: dialog.file_generation, reply: rx });
+    tx.send(Ok(solidcraft_engine::plugin::ImportDialog {
+        file: solidcraft_engine::plugin::dialog::FileFacts {
+            name: "part.smp".into(),
+            extension: "smp".into(),
+            size: 24,
+            format: "sample.convert".into(),
+            generation: dialog.file_generation,
+        },
+        schema,
+        hook: true,
+    }))
+    .unwrap();
+    poll_file(dialog);
+}
+
+#[test]
+fn hook_refresh_preserves_cleared_text_and_incomplete_numeric_edits() {
+    let schema = json!({"type":"object","properties":{
+        "text":{"type":"string","default":"initial"},
+        "number":{"type":"number","default":1.5},
+        "integer":{"type":"integer","default":2},
+        "empty_number":{"type":"number","default":3.5}
+    }});
+    let mut h = crate::scenario::Harness::new();
+    let mut entry = importing_entry();
+    entry.input_schema = schema.clone();
+    h.app.plugin_menu.listed = vec![listed("sample", vec![entry])];
+    h.app.plugin_menu.loaded = true;
+    open_entry(&mut h.app, 0, 0);
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.source = Some("part.smp".into());
+    let edits = [
+        ("text", Input::Text(String::new())),
+        ("number", Input::Typed("-".into())),
+        ("integer", Input::Typed("2e+".into())),
+        ("empty_number", Input::Typed(String::new())),
+    ];
+    for (key, value) in &edits {
+        set_input(dialog.fields.as_mut().unwrap(), key, value.clone());
+    }
+    let submitted = dialog_values(dialog);
+    assert_eq!(submitted, json!({}), "cleared and incomplete input has no scalar value");
+    dialog.hook_values = Some(submitted.clone());
+    finish_import_fields(dialog, schema);
+    for (key, value) in edits {
+        let (field, actual) = dialog.fields.as_ref().unwrap().iter().find(|(f, _)| f.key == key).unwrap();
+        assert_eq!(*actual, value, "{key} must keep the raw edit");
+        assert!(field.edited);
+    }
+    assert_eq!(dialog_values(dialog), submitted, "hook refresh must not restore omitted defaults");
+}
+
+#[test]
+fn bounded_text_choice_updates_remain_drawable_and_keep_original_constraints() {
+    let schema = json!({"type":"object","properties":{
+        "part":{"type":"string","minLength":4,"maxLength":32,"format":"text","default":"plate"}
+    }});
+    for update in [
+        json!({"fields":{"part":{"enum":["plate","cover"],"default":"plate"}}}),
+        json!({"fields":{"part":{"oneOf":[{"const":"plate","title":"Plate"},{"const":"cover","title":"Cover"}],"default":"plate"}}}),
+    ] {
+        let updated = solidcraft_engine::plugin::dialog::apply_update(&schema, &update).unwrap();
+        assert_eq!(updated["properties"]["part"]["minLength"], 4);
+        assert_eq!(updated["properties"]["part"]["maxLength"], 32);
+        let mut h = crate::scenario::Harness::new();
+        let mut entry = importing_entry();
+        entry.input_schema = schema.clone();
+        h.app.plugin_menu.listed = vec![listed("sample", vec![entry])];
+        h.app.plugin_menu.loaded = true;
+        open_entry(&mut h.app, 0, 0);
+        let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+        dialog.source = Some("part.smp".into());
+        dialog.hook_values = Some(dialog_values(dialog));
+        finish_import_fields(dialog, updated);
+        assert!(!dialog.file_failed, "valid bounded choices must not disable the form");
+        assert!(matches!(dialog.fields.as_ref().unwrap()[0].0.kind, Kind::Choice { .. }));
+        assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap(), json!({"part":"plate"}));
+    }
+    for value in [json!("bad"), json!("x".repeat(33))] {
+        let update = json!({"fields":{"part":{"enum":[value]}}});
+        assert!(solidcraft_engine::plugin::dialog::apply_update(&schema, &update).is_err());
+    }
+    assert!(
+        form(&json!({"type":"object","properties":{
+            "part":{"type":"string","maxLength":3,"enum":["plate"]}
+        }}))
+        .is_none(),
+        "static choices must obey the same length constraints"
+    );
+}
+
+#[test]
+fn hook_defaults_trigger_another_update_until_submitted_values_match_the_form() {
+    let schema = json!({"type":"object","properties":{
+        "mode":{"type":"boolean","default":false,"x-solidcraft-defaults":[
+            {"when":{"file":"extension","eq":"smp"},"value":true}
+        ]},
+        "part":{"type":"string","default":"same"}
+    }});
+    let mut h = crate::scenario::Harness::new();
+    let mut entry = importing_entry();
+    entry.input_schema = schema.clone();
+    h.app.plugin_menu.listed = vec![listed("sample", vec![entry])];
+    h.app.plugin_menu.loaded = true;
+    open_entry(&mut h.app, 0, 0);
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.source = Some("part.smp".into());
+    dialog.hook_values = Some(dialog_values(dialog));
+    let submitted = dialog.hook_values.clone();
+    assert_eq!(submitted, Some(json!({"mode":false,"part":"same"})));
+    let file = solidcraft_engine::plugin::dialog::FileFacts {
+        name: "part.smp".into(),
+        extension: "smp".into(),
+        size: 24,
+        format: "sample.convert".into(),
+        generation: dialog.file_generation,
+    };
+    let bound = solidcraft_engine::plugin::conditions::bind_file_conditions(&schema, Some(&file)).unwrap();
+    let first = solidcraft_engine::plugin::dialog::apply_update(
+        &bound,
+        &json!({"fields":{"part":{"enum":["same","old"],"default":"same"}}}),
+    )
+    .unwrap();
+    finish_import_fields(dialog, first);
+    assert_eq!(dialog.hook_values, submitted, "displayed defaults were never submitted to this hook");
+    assert_eq!(dialog_values(dialog), json!({"mode":true,"part":"same"}));
+    assert!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).is_err(), "Open waits for choices computed for mode=true");
+    poll(&mut h.app);
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    assert!(dialog.file_job.is_some(), "poll queues the missing update");
+    assert_eq!(dialog.hook_values, Some(json!({"mode":true,"part":"same"})));
+    let second = solidcraft_engine::plugin::dialog::apply_update(
+        &bound,
+        &json!({"fields":{"part":{"enum":["same","new"],"default":"same"}}}),
+    )
+    .unwrap();
+    finish_import_fields(dialog, second);
+    assert_eq!(dialog.hook_values.as_ref(), Some(&dialog_values(dialog)));
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap(), json!({"mode":true,"part":"same"}));
+    poll(&mut h.app);
+    assert!(h.app.plugin_menu.dialog().unwrap().file_job.is_none(), "unchanged values must not queue another update");
 }

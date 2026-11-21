@@ -176,13 +176,14 @@ Clicking a File, Help or ribbon item opens the same input-schema dialog as the P
 The host finds the entry by its namespaced `<plugin-id>.<entry>` command. The dialog uses the same
 enabled state and grant checks from every placement. Missing command-group grants leave Run off
 with an explanation. Opening a command dialog executes no plugin code; Run submits the
-existing `plugin.run` transaction. An importer entry first chooses a file, then shows its options.
-Open file opens it as a new design with `file.import`. File › Open and drag-and-drop already have
-a path and go straight to the same form. Cancel at either step opens nothing. An importer may
-opt into the bounded dialog hook below; choosing a file then runs that hook, never the importer.
-In **Preferences › Plugins**, turn off **Choose the file before import options**
-(`plugin_import_file_first`, on by default) to restore the options-first menu dialog and direct
-File › Open/drop behaviour. This is an app-wide workflow preference; it changes no saved designs.
+existing `plugin.run` transaction. By default, importer menu entries show options before choosing
+a file, and File › Open and drag-and-drop import their paths directly.
+In **Preferences › Plugins**, turn on **Choose the file before import options**
+(`plugin_import_file_first`, off by default) to choose the file before showing its options.
+With this enabled, File › Open and drag-and-drop already have a path and go straight to the same
+form. Open file opens it as a new design with `file.import`; Cancel at either step opens nothing.
+An importer may opt into the bounded dialog hook below; choosing a file then runs that hook,
+never the importer. This is an app-wide workflow preference; it changes no saved designs.
 
 ### File-aware importer forms
 
@@ -235,7 +236,11 @@ and `description`. Values must satisfy the original field constraints, and defau
 the updated choices. A hook cannot add fields, change types, constraints or directory semantics,
 or replace declarative conditions. Conditional choice lists cannot be replaced. Folder values
 still need the existing install grants: a hook default and a picked folder grant no new access.
-Untouched fields take new defaults; edited values survive when the new choices still offer them.
+Untouched fields take new defaults; compatible text and numeric edits, including cleared or
+incomplete input, survive updates. Edited choices survive when the new choices still offer them.
+String choices retain their length constraints, and every offered value must satisfy them.
+If applying an update changes the visible values, the host calls the hook again with those
+values before enabling Open. Unchanged visible values do not trigger another call.
 
 Each update runs in a fresh sandbox on a worker, with at most 5,000,000 fuel, 500 ms shared by
 prefix acquisition and guest execution, and 256 host calls (or the manifest's smaller budgets).
