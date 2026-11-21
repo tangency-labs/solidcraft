@@ -62,14 +62,15 @@ middle (`2 * t`) grows while the clock runs, so the pen moves outwards as it goe
 ## Angles are in radians
 
 `sin`, `cos` and `tan` count angles in **radians**, not degrees: a full turn is `2 * pi`
-(about 6.28), half a turn is `pi`. This holds for every plain number inside a rule, not only
-for `t`: `cos(0.5)` is radians. To use degrees inside a rule, spell the unit out, as in
+(about 6.28), half a turn is `pi`. This holds for every plain number inside a trig call, not
+only for `t`: `cos(0.5)` is radians. To use degrees inside a rule, spell the unit out, as in
 `cos(0.5 deg)`. You can also write an angle with its unit for **Start** and **End**, such as
 `360 deg`.
 
 The rest of the expression language is the opposite: a plain number in a trig call reads
-degrees, so the same `cos(0.5)` in a sketch point or a parameter is `cos(0.5 deg)`. Spell the
-unit out when a formula moves between the two places.
+degrees, in a sketch point and in a parameter whose unit is not radians. A parameter declared
+in radians reads it as radians: `cos(0.5)` there is `cos(0.5 rad)`. Spell the unit out when a
+formula moves between places.
 
 A number without a unit is in your design's unit (millimetres unless you changed it).
 
