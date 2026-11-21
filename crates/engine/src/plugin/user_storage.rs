@@ -52,14 +52,15 @@ fn path(settings: &Path, id: &str) -> Result<PathBuf> {
 
 /// Load only the host-selected plugin's map. Never read unbounded data or follow a record link.
 pub fn load(settings: &Path, id: &str) -> Result<Data> {
-    load_snapshot(settings, id).map(|(data, _)| data)
+    load_snapshot(settings, id).map(|(data, _, _)| data)
 }
 
-fn load_snapshot(settings: &Path, id: &str) -> Result<(Data, Option<[u8; 32]>)> {
+/// The parsed map, the hash of the exact bytes read, and those bytes (none when absent).
+fn load_snapshot(settings: &Path, id: &str) -> Result<(Data, Option<[u8; 32]>, Option<Vec<u8>>)> {
     let path = path(settings, id)?;
     let meta = match std::fs::symlink_metadata(&path) {
         Ok(meta) => meta,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((Data::new(), None)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((Data::new(), None, None)),
         Err(e) => return Err(invalid(e)),
     };
     if !meta.is_file() || meta.file_type().is_symlink() {
@@ -76,7 +77,8 @@ fn load_snapshot(settings: &Path, id: &str) -> Result<(Data, Option<[u8; 32]>)> 
     }
     let data: Data = serde_json::from_slice(&bytes).map_err(invalid)?;
     check_user_storage(&data)?;
-    Ok((data, Some(Sha256::digest(&bytes).into())))
+    let hash = Sha256::digest(&bytes).into();
+    Ok((data, Some(hash), Some(bytes)))
 }
 
 fn conflict(id: &str) -> HostError {
@@ -142,8 +144,12 @@ pub struct Pending {
 }
 impl Pending {
     pub fn load(settings: &Path, id: &str) -> Result<Self> {
-        let (data, loaded_hash) = load_snapshot(settings, id)?;
+        let (data, loaded_hash, _) = load_snapshot(settings, id)?;
         Ok(Self { data, loaded_hash, dirty: false })
+    }
+    /// Whether this record holds a change that publication would write.
+    pub(crate) fn is_dirty(&self) -> bool {
+        self.dirty
     }
     pub fn get(&self, key: &str) -> Option<Value> {
         self.data.get(key).cloned()
@@ -208,21 +214,22 @@ fn batch_save(position: usize, settings: &Path, id: &str, data: &Data) -> Result
 /// (or removed, if it did not exist), still under the locks, and the failure is returned.
 pub(crate) fn publish_all(pending: &BTreeMap<String, (PathBuf, Pending)>) -> Result<()> {
     let mut locks = Vec::new();
-    let mut previous: Vec<(&String, &Path, Option<Data>)> = Vec::new();
+    let mut previous: Vec<(&String, &Path, Option<Vec<u8>>)> = Vec::new();
     for (id, (settings, data)) in pending.iter().filter(|(_, (_, data))| data.dirty) {
         locks.push(lock_record(settings, id)?);
-        let (old, hash) = load_snapshot(settings, id)?;
+        let (_, hash, original) = load_snapshot(settings, id)?;
         if hash != data.loaded_hash {
             return Err(conflict(id));
         }
-        previous.push((id, settings, hash.map(|_| old)));
+        previous.push((id, settings, original));
     }
     for (position, (id, (settings, data))) in pending.iter().filter(|(_, (_, data))| data.dirty).enumerate() {
         if let Err(error) = batch_save(position, settings, id, &data.data) {
             // Best effort, newest first: the original failure is the one reported.
             for (id, settings, old) in previous.iter().take(position + 1).rev() {
                 let _ = match old {
-                    Some(old) => save_locked(settings, id, old),
+                    // The original bytes, not a re-serialised map, so the record hashes as before.
+                    Some(old) => path(settings, id).and_then(|p| solidcraft_io::safe_write::write_atomic_no_follow(&p, old).map_err(invalid)),
                     None => path(settings, id).and_then(|p| match std::fs::remove_file(p) {
                         Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(invalid(e)),
                         _ => Ok(()),

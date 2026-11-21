@@ -4328,3 +4328,43 @@ fn settings_staged_by_a_nested_import_survive_the_outer_commit() {
     assert_eq!(user_storage::load(&root, "gears").unwrap(), BTreeMap::from([("inner".into(), json!(2))]));
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn a_clean_nested_settings_read_does_not_replace_the_outer_write() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-settings-nested-read-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let mut host = user_storage_host(&root, "gears");
+    host.session.plugin_state.defer_user_settings = true;
+    host.begin_transaction().unwrap();
+    host.user_storage_set("outer", &json!(1)).unwrap();
+    // The nested entry only read the record: its staged copy is clean.
+    let clean = user_storage::Pending::load(&root, "gears").unwrap();
+    host.transaction.as_mut().unwrap().plugin_state.pending_user_settings.insert("gears".into(), (root.clone(), clean));
+    host.commit_transaction().unwrap();
+    host.session.plugin_state.publish_user_settings().unwrap();
+    assert_eq!(user_storage::load(&root, "gears").unwrap(), BTreeMap::from([("outer".into(), json!(1))]));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_failed_batch_save_restores_a_formatted_record_so_the_batch_can_retry() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-settings-formatted-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    user_storage::save(&root, "first", &BTreeMap::from([("keep".into(), json!(1))])).unwrap();
+    let record = root.join("plugin-user-data").join("first.json");
+    let formatted = b"{\n  \"keep\": 1\n}\n".to_vec();
+    std::fs::write(&record, &formatted).unwrap();
+    let mut state = AppState::default();
+    for id in ["first", "last"] {
+        let mut data = user_storage::Pending::load(&root, id).unwrap();
+        data.set("candidate", &json!(true)).unwrap();
+        state.pending_user_settings.insert(id.into(), (root.clone(), data));
+    }
+    user_storage::fail_batch_save_at(Some(1));
+    assert!(state.publish_user_settings().is_err());
+    user_storage::fail_batch_save_at(None);
+    assert_eq!(std::fs::read(&record).unwrap(), formatted, "the original bytes are put back");
+    state.publish_user_settings().unwrap();
+    assert_eq!(user_storage::load(&root, "first").unwrap()["candidate"], json!(true));
+    std::fs::remove_dir_all(root).unwrap();
+}

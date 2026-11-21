@@ -1004,7 +1004,9 @@ fn run_mode<H: PluginHost + 'static>(
     let result = (|| match outcome {
         Ok(value) => match state.host.commit_transaction() {
             Ok(()) => match state.publish_writes() {
-                Ok(()) => state.host.publish_committed().map(|()| value),
+                Ok(()) => state.host.publish_committed().map(|()| value).map_err(|error| HostError::PermissionDenied {
+                    permission: format!("user-storage: the approved files were published but the settings were not saved: {error}"),
+                }),
                 Err(error) => {
                     // Files may have changed, but the settings stay as they were.
                     let _ = state.host.rollback_transaction();

@@ -849,7 +849,9 @@ impl PluginHost for SolidCraftHost {
         let inner = std::mem::take(&mut computed.plugin_state.pending_user_settings);
         let mut merged = self.session.plugin_state.pending_user_settings.clone();
         for (id, entry) in inner {
-            if base.get(&id) != Some(&entry) {
+            // A clean inner record (a nested read) never replaces the outer's unpublished write.
+            let outer_write = merged.get(&id).is_some_and(|(_, outer)| outer.is_dirty());
+            if base.get(&id) != Some(&entry) && (entry.1.is_dirty() || !outer_write) {
                 merged.insert(id, entry);
             }
         }
