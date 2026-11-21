@@ -27,8 +27,7 @@ fn scoped_render_projection_uses_pending_view_options_before_paint() {
         });
         assert!(!app.ui.perspective, "Render navigation leaves the ground unchanged");
     }
-    let mut authored = Camera::default();
-    authored.fov = 0.42;
+    let authored = Camera { fov: 0.42, ..Camera::default() };
     app.docs.views.set_spec(render, solidcraft_viewport::ViewSpec::new(authored));
     crate::documents::with_view_look(&mut app, render, |app| {
         app.ui.perspective = true;
