@@ -1,7 +1,8 @@
 //! Quick measurement (#7000): what the selection measures, in the view's bottom right corner above
 //! History, so a simple size needs no Measure tool. One item gives the Measure tool's rows (an
 //! edge's length, Ø and R for a round one, a face's area and perimeter, a point's position); two
-//! give their distance and angle; several edges or several faces their count and total length or
+//! give their distance and angle, and two parallel items offset sideways (faces, edges, sketch
+//! lines) the distance square to them too; several edges or several faces their count and total length or
 //! area.
 //! Computed off the window thread from a copy of the session ([`Session::measure_items`]) whenever
 //! the selection or the design changes; nothing shows while it computes, or for a selection with
@@ -196,6 +197,14 @@ pub(crate) fn centre_distance_label(r: &Value) -> &'static str {
     }
 }
 
+/// The distance between two parallel items square to them (faces, edges, sketch lines), where it
+/// is not the closest distance already shown: the items are offset sideways and do not face each
+/// other.
+pub(crate) fn parallel_distance(r: &Value) -> Option<f64> {
+    let d = r["parallel_distance_mm"].as_f64()?;
+    r["distance_mm"].as_f64().is_none_or(|closest| (closest - d).abs() > 1e-6 * (1.0 + d)).then_some(d)
+}
+
 /// The readout's rows for a measurement.
 fn lines(app: &SolveApp, r: &Value) -> Vec<(String, String)> {
     let split = |line: String| match line.split_once("  ") {
@@ -220,6 +229,9 @@ fn lines(app: &SolveApp, r: &Value) -> Vec<(String, String)> {
     }
     if let Some(d) = r["distance_mm"].as_f64() {
         rows.push((solidcraft_ui_text::tr_label("Distance").to_string(), crate::prefs::show_mm(app, d, 1)));
+    }
+    if let Some(d) = parallel_distance(r) {
+        rows.push((solidcraft_ui_text::tr("measure.parallel_distance").to_string(), crate::prefs::show_mm(app, d, 1)));
     }
     if let Some(a) = r["angle_deg"].as_f64() {
         rows.push((solidcraft_ui_text::tr_label("Angle").to_string(), format!("{a:.2}°")));
