@@ -14,8 +14,9 @@
 //! - Windows portable `.zip` / standalone `.exe`: the running `solidcraft.exe` is renamed to
 //!   `solidcraft.exe.old` (Windows allows renaming a running executable), the new one takes its
 //!   name, and SolidCraft offers a restart; the `.old` file is deleted at the next start.
-//! - macOS: the `.dmg` is verified and opened; the user drags the app to Applications. The
-//!   bundle is never replaced in place from the background.
+//! - macOS: the `.dmg` is verified and held until the user chooses Quit and update. The
+//!   disk image opens after SolidCraft exits, then the user drags the app to Applications.
+//!   The bundle is never replaced in place from the background (#18844).
 //! - Flatpak, Snap, `.deb`, `.rpm`, `.tar.gz`: never replaced; the window shows the command.
 
 use std::io::{Read, Write};
@@ -78,8 +79,8 @@ pub enum Outcome {
     Restart(PathBuf),
     /// Start this installer (program, arguments) after SolidCraft exits.
     Installer(PathBuf, Vec<String>),
-    /// The disk image was opened for the user.
-    Opened(PathBuf),
+    /// A verified disk image, waiting until the user quits to open in Finder (#18844).
+    DmgReady(PathBuf),
 }
 
 /// `SHA256SUMS.txt` lines (`<hex>  <name>` or `<hex> *<name>`): the lowercase hex for `name`.
@@ -123,6 +124,22 @@ pub fn relaunch_after(installer: &Path, args: &[String], exe: &Path) -> (PathBuf
     (
         PathBuf::from("powershell"),
         vec!["-NoProfile".into(), "-NonInteractive".into(), "-WindowStyle".into(), "Hidden".into(), "-Command".into(), script],
+    )
+}
+
+/// Start Finder only after the running process has fully exited. The native host spawns
+/// this detached helper during App::drop, while its own process may still hold the old app
+/// bundle open. Passing the path as an argument avoids interpreting it as shell source.
+pub fn open_dmg_after_exit(dmg: &Path, parent_pid: u32) -> (PathBuf, Vec<String>) {
+    (
+        PathBuf::from("/bin/sh"),
+        vec![
+            "-c".into(),
+            "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; exec /usr/bin/open \"$2\"".into(),
+            "solidcraft-dmg-update".into(),
+            parent_pid.to_string(),
+            dmg.to_string_lossy().to_string(),
+        ],
     )
 }
 
@@ -326,7 +343,7 @@ pub fn apply(method: &Method, package: &Path) -> Result<Outcome, String> {
             Ok(Outcome::Restart(exe.clone()))
         }
         Method::Msi => Ok(Outcome::Installer(PathBuf::from("msiexec"), vec!["/i".into(), package.to_string_lossy().to_string(), "/passive".into()])),
-        Method::Dmg => Ok(Outcome::Opened(package.to_path_buf())),
+        Method::Dmg => Ok(Outcome::DmgReady(package.to_path_buf())),
     }
 }
 
