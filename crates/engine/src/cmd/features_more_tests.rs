@@ -848,6 +848,36 @@ fn emboss_text_wraps_round_a_whole_tube_outside_and_in_its_bore() {
     }
 }
 
+/// Text wraps onto the outside of a half tube, a wall that is not a whole cylinder (#12029):
+/// emboss and deboss change the volume as on a whole tube.
+#[test]
+fn emboss_text_wraps_onto_a_half_tube() {
+    let mut flat = Session::default();
+    run(&mut flat, "solid.box", json!({"length": 60, "width": 60, "height": 20, "body_name": "Flat"}));
+    let flat_before = volume(&mut flat);
+    run(&mut flat, "sketch.create", json!({"plane": {"origin": [20, 20, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Text"}));
+    run(&mut flat, "sketch.text", json!({"text": "Emboss", "at": [-10, 10], "height": 6}));
+    run(&mut flat, "sketch.finish", json!({}));
+    run(&mut flat, "solid.emboss", json!({"sketch": "Text", "depth": 1}));
+    let area = volume(&mut flat) - flat_before;
+    for (mode, rr) in [("emboss", 21.0_f64), ("deboss", 19.)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 30, "body_name": "Tube"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 16, "height": 30, "operation": "cut", "targets": ["Tube"]}));
+        run(&mut s, "solid.box", json!({"length": 50, "width": 25, "height": 40, "corner": [-25, -25, -5], "operation": "cut", "targets": ["Tube"]}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 20, 0], "x_dir": [-1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Text"}));
+        run(&mut s, "sketch.text", json!({"text": "Emboss", "at": [-10, 10], "height": 6}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = volume(&mut s);
+        run(&mut s, "solid.emboss", json!({"sketch": "Text", "face": [0.0, 20.0, 13.0], "depth": 1, "mode": mode}));
+        assert_eq!(s.model.state().body("Tube").unwrap().body.shell_count(), 1);
+        // Signed: an emboss adds material and a deboss takes it away.
+        let change = volume(&mut s) - before;
+        let want = area * (rr * rr - 400.) / 40.;
+        assert!((change - want).abs() < 1e-4 * want.abs(), "{mode}: {change} vs {want}");
+    }
+}
+
 #[test]
 fn concave_cylinder_emboss_and_deboss_with_sketch_profile_and_text() {
     let mut s = Session::default();
