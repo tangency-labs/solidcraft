@@ -158,6 +158,57 @@ fn a_sections_sketch_facing_does_not_change_a_railed_loft() {
     assert!(up.bbox.min.dist(down.bbox.min) < 1e-6 && up.bbox.max.dist(down.bbox.max) < 1e-6, "{:?} vs {:?}", down.bbox, up.bbox);
 }
 
+/// A quarter turn about the Z axis (#17580): a quadrilateral beside the axis and the same one
+/// turned a quarter turn round it, its sketch facing back against the turn. The second section
+/// used to be wound the other way round from the first, so the stations twisted through
+/// themselves (two rails "came together", one left the loft without volume); and a rail of
+/// curves that close into a ring was followed the long way round from one section to the next.
+/// Two rails, round the axis through the quadrilateral's two nearest corners, the outer one three
+/// arcs listed out of order, now stretch the stations into the solid of revolution: π/2 · the
+/// quadrilateral's first moment about the axis (Pappus), to the skin's accuracy through its
+/// stations. The closed outline of the face its bottom edge sweeps (the arcs and the two edges)
+/// is followed from where it leaves the first section, along the inner arc.
+#[test]
+fn a_loft_through_a_quarter_turn_follows_rails_of_several_curves() {
+    let mut s = Session::default();
+    // The same quadrilateral either side, its x the distance from the Z axis.
+    let start = [[2, 0], [5, 0], [25, 8], [25, 10]];
+    let end = [[-2, 0], [-5, 0], [-25, 8], [-25, 10]];
+    for (name, x_dir, points) in [("Start", [-1, 0, 0], start), ("End", [0, -1, 0], end)] {
+        run(&mut s, "sketch.create", json!({"name": name, "plane": {"origin": [0, 0, 0], "x_dir": x_dir, "y_dir": [0, 0, 1]}}));
+        run(&mut s, "sketch.line", json!({"points": points, "infer": false, "closed": true}));
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    run(&mut s, "sketch.create", json!({"name": "Rail", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    // Arcs round the origin: radius 5 from 90° to 180° in three pieces of 30° (cos 30° · 5 =
+    // 4.330127018922193), and radius 2 whole.
+    let h = 4.330127018922193;
+    for (id, start, end) in
+        [("o1", [0.0, 5.0], [-2.5, h]), ("o2", [-2.5, h], [-h, 2.5]), ("o3", [-h, 2.5], [-5.0, 0.0]), ("i", [0.0, 2.0], [-2.0, 0.0])]
+    {
+        run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": start, "end": end, "id": id}));
+    }
+    run(&mut s, "sketch.line", json!({"points": [[-5, 0], [-2, 0]], "infer": false, "ids": ["s"]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 2], [0, 5]], "infer": false, "ids": ["e"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let rail = |curves: &[&str]| json!({"sketch": "Rail", "curves": curves});
+    let mut loft = |body: &str, rails: Value, fit: &str| {
+        let p = json!({"sections": [{"sketch": "Start"}, {"sketch": "End"}], "rails": rails, "rail_fit": fit, "operation": "new", "body_name": body});
+        s.execute("solid.loft", &p).unwrap_or_else(|e| panic!("{body}: {e}"));
+    };
+    loft("Turned", json!([rail(&["o2", "o1", "o3"]), rail(&["i"])]), "stretch");
+    loft("Inner", json!([rail(&["i"])]), "scale");
+    loft("Outline", json!([rail(&["o1", "o2", "o3", "s", "i", "e"])]), "scale");
+    // Pappus: the quadrilateral's area is 35 and its centroid 316/21 from the axis, so its
+    // first moment is 1580/3 and a quarter turn sweeps π/2 · 1580/3 = 790π/3.
+    let revolved = 790.0 * PI / 3.0;
+    let turned = measure(&s, "Turned");
+    assert!((turned.volume - revolved).abs() < 2e-3 * revolved, "volume {} vs {revolved}", turned.volume);
+    assert!((turned.bbox.max.y - 25.0).abs() < 1e-6 && (turned.bbox.min.x + 25.0).abs() < 1e-6, "{:?}", turned.bbox);
+    let (inner, outline) = (measure(&s, "Inner").volume, measure(&s, "Outline").volume);
+    assert!(inner > 0.0 && (outline - inner).abs() < 1e-9 * inner, "the outline's loft {outline} vs the inner arc's {inner}");
+}
+
 /// Hostile rails are refused with an error and leave the design as it was.
 #[test]
 fn hostile_rails_are_refused() {

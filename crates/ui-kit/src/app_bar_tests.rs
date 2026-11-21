@@ -295,6 +295,9 @@ const VIEWS: [ViewTab<'static>; 3] = [
         underline: egui::Color32::BLUE,
         state: ViewState::Normal,
         active: true,
+        on_screen: false,
+        window_name: None,
+        window_number: None,
         to_window: None,
         tip: "Model",
     },
@@ -305,6 +308,9 @@ const VIEWS: [ViewTab<'static>; 3] = [
         underline: egui::Color32::GREEN,
         state: ViewState::SourceChanged,
         active: false,
+        on_screen: false,
+        window_name: None,
+        window_number: None,
         to_window: None,
         tip: "Sketch 2",
     },
@@ -315,6 +321,9 @@ const VIEWS: [ViewTab<'static>; 3] = [
         underline: egui::Color32::RED,
         state: ViewState::Deleted,
         active: false,
+        on_screen: false,
+        window_name: None,
+        window_number: None,
         to_window: None,
         tip: "Sheet 1",
     },
@@ -333,6 +342,7 @@ struct TabsRig {
     single_view: bool,
     name: &'static str,
     detached: bool,
+    clear: bool,
     pop_out: bool,
     /// The + has a menu.
     plus: bool,
@@ -362,6 +372,7 @@ impl TabsRig {
             single_view: false,
             name: "One",
             detached: false,
+            clear: false,
             pop_out: false,
             plus,
             rename: rename.map(|(k, _)| k),
@@ -386,6 +397,8 @@ impl TabsRig {
         let mut views = VIEWS;
         if self.detached {
             views[1].to_window = Some(1);
+            views[1].window_name = Some("Window 2");
+            views[1].window_number = Some(2);
         }
         let views = if self.single_view || self.pop_out {
             &views[..1]
@@ -413,6 +426,7 @@ impl TabsRig {
             handles: TAB_HANDLES,
             views_as_tabs: self.views == Some(true),
             switcher_always: false,
+            clear_view_tabs: self.clear,
             view_text: ViewText {
                 close_view: "Close view",
                 close_design: "Close design",
@@ -422,6 +436,7 @@ impl TabsRig {
             },
             view_menu: &VIEW_MENU,
             view_right_row: "vright",
+            view_rename_row: "vrename",
             view_rename: self.rename.map(|k| (k, TabRename { text: &mut text, focused: &mut focused, max: 8 })),
             plus_menu: if self.plus { &PLUS_MENU } else { &[] },
             layout_menu: &[],
@@ -1780,3 +1795,54 @@ const OLD_BAR_ROWS: &[&[i32]] = &[
     &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1572844, 1000, 1604844, 33000, 2, 1588844, 17000, 4, 147500, 7000, 148500, 27000, 0, 4, 296781, 7000, 297781, 27000, 0, 4, 473781, 7000, 474781, 27000, 0, 0, 0, 4, 1606844, 4000, 1722000, 30000, 2, 1664422, 17000, 4, 1308000, 5000, 1378000, 29000, 2, 1343000, 17000, 4, 1378000, 9000, 1394000, 25000, 2, 1386000, 17000, 4, 1404000, 5000, 1475000, 29000, 2, 1439500, 17000, 4, 1475000, 9000, 1491000, 25000, 2, 1483000, 17000, 4, 1538844, 1000, 1570844, 33000, 2, 1554844, 17000, 0, 2, 1759797, 17000, 2, 314281, 34000, 4, 484281, 4000, 1496844, 30000, 1, 1, 2, 484281, 1306531, 0, 4, 1504844, 1000, 1536844, 33000, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 188
     &[4, 255750, 1000, 287750, 33000, 2, 271750, 17000, 4, 298750, 4000, 335031, 30000, 2, 316891, 17000, 4, 336031, 1000, 368031, 33000, 2, 352031, 17000, 4, 370031, 1000, 402031, 33000, 2, 386031, 17000, 4, 404031, 1000, 436031, 33000, 2, 420031, 17000, 4, 1656000, 1000, 1688000, 33000, 2, 1672000, 17000, 4, 295250, 7000, 296250, 27000, 0, 4, 444531, 7000, 445531, 27000, 0, 4, 621531, 7000, 622531, 27000, 0, 0, 0, 4, 1690000, 1000, 1722000, 33000, 2, 1706000, 17000, 4, 1391000, 5000, 1461000, 29000, 2, 1426000, 17000, 4, 1461000, 9000, 1477000, 25000, 2, 1469000, 17000, 4, 1487000, 5000, 1558000, 29000, 2, 1522500, 17000, 4, 1558000, 9000, 1574000, 25000, 2, 1566000, 17000, 4, 1622000, 1000, 1654000, 33000, 2, 1638000, 17000, 0, 2, 1759797, 17000, 2, 462031, 34000, 4, 632031, 1000, 1580000, 33000, 1, 1, 2, 632031, 1389688, 0, 4, 1588000, 1000, 1620000, 33000, 0, 4, 298750, 4000, 335031, 30000], // 1920 / 254
 ];
+
+#[test]
+fn clear_view_tabs_distinguish_the_four_placements() {
+    let ground = VIEWS[0];
+    let hidden = VIEWS[1];
+    let card = ViewTab { on_screen: true, ..hidden };
+    let elsewhere = ViewTab { to_window: Some(2), window_name: Some("Inspection"), window_number: Some(3), ..hidden };
+    assert_eq!(view_look(&ground), ViewLook::Ground);
+    assert_eq!(view_look(&card), ViewLook::Card);
+    assert_eq!(view_look(&hidden), ViewLook::Hidden);
+    assert_eq!(view_look(&elsewhere), ViewLook::Elsewhere);
+    assert_eq!(window_badge(&elsewhere, CollapseStage::Full), "Inspection");
+    assert_eq!(window_badge(&elsewhere, CollapseStage::LayoutGlyph), "Inspection");
+    assert_eq!(window_badge(&elsewhere, CollapseStage::WindowNumber), "3");
+}
+
+#[test]
+fn clear_view_tabs_collapse_in_order_with_and_without_another_window() {
+    for count in 2..=12 {
+        for elsewhere in [false, true] {
+            let focused = 120.0;
+            let icon_tabs = (count - 1) as f32 * 30.0;
+            let idle_names = (count - 1 - usize::from(elsewhere)) as f32 * 30.0;
+            let window_names = if elsewhere { 24.0 } else { 0.0 };
+            let icons = focused + icon_tabs + 24.0;
+            let window_number = icons + idle_names;
+            let glyph = window_number + window_names;
+            let full = glyph + 40.0;
+            let widths = [full, glyph, window_number, icons, focused + 28.0];
+            assert_eq!(collapse_stage(widths, full), CollapseStage::Full);
+            assert_eq!(collapse_stage(widths, full - 0.25), CollapseStage::LayoutGlyph);
+            assert_eq!(collapse_stage(widths, glyph - 0.25), if elsewhere { CollapseStage::WindowNumber } else { CollapseStage::Icons });
+            assert_eq!(collapse_stage(widths, icons - 0.25), CollapseStage::Overflow);
+        }
+    }
+}
+
+#[test]
+fn elsewhere_view_has_only_a_return_button_on_hover() {
+    let mut rig = TabsRig::with(Some(true));
+    rig.detached = true;
+    rig.clear = true;
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:vclose:0").is_some());
+    assert!(solidcraft_ui_registry::rect_of("t:vclose:1").is_none());
+    assert!(solidcraft_ui_registry::rect_of("t:view:1:return").is_none());
+    let elsewhere = rig.at("t:view:1");
+    rig.frame(vec![egui::Event::PointerMoved(elsewhere)]);
+    assert!(solidcraft_ui_registry::rect_of("t:vclose:1").is_none());
+    assert_eq!(rig.press(rig.at("t:view:1:return"), egui::PointerButton::Primary), vec![TabAction::ReturnView(1)]);
+}
