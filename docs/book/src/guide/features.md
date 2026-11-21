@@ -326,6 +326,18 @@ plane ids, `folder: false` and `folder: true` hide and show the Analysis folder,
 removes them all. `offset` moves the cut against the plane's normal,
 so a positive offset cuts more away; `at` is a world coordinate on a named plane's axis.
 
+## Wi-Fi coverage
+
+**Wi-Fi Coverage** (INSPECT tab, next to Section Analysis) predicts the strength of a Wi-Fi signal
+across a floor plan from the walls in the design, and shows it as a heatmap on a horizontal slice.
+It cuts the bodies at the slice height (1 m by default). Each wall the straight path from the
+router crosses costs its material's loss: set it on a material with `rf` (`material.create`,
+`material.edit`). A wall without one counts as drywall when it is thinner than 140 mm, and as
+concrete otherwise. Drag the router's marker to try other spots. The card at the bottom right sets
+the device, band and heights, and shows how much of the floor gets −60 dBm or better. It changes
+nothing in the design. Scripts use `inspect.rf_coverage`; see `docs/rf-coverage.md` for the model
+and every option.
+
 ## Comparing two bodies
 
 **Compare Bodies** (`inspect.compare`) lays two versions of one part over each other, such as a

@@ -116,6 +116,10 @@ pub struct RfCoverageParams {
     /// Only the bodies of these components, their subcomponents included, make walls (names).
     #[serde(default)]
     pub components: Option<Vec<String>>,
+    /// With `bodies` or `components`: bodies whose material has an RF loss make walls too, wherever
+    /// they are (default false).
+    #[serde(default)]
+    pub rf_materials: Option<bool>,
     /// Bodies or components (names) left out of the analysis: furniture, plants.
     #[serde(default)]
     pub exclude: Option<Vec<String>>,

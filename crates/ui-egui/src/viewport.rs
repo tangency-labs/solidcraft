@@ -4874,7 +4874,8 @@ pub fn section_planes(app: &SolveApp) -> Vec<SectionPlane> {
             Err(_) => Vec::new(),
         };
     }
-    match slice_plane(app) {
+    // Wi-Fi coverage cuts the view just above its heatmap, when no section does.
+    match slice_plane(app).or_else(|| crate::rf_overlay::clip(app)) {
         Some((origin, normal)) => vec![SectionPlane { id: 0, origin, normal }],
         None => app.session.section.clone(),
     }
@@ -7430,7 +7431,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             turned_depth: Some(paint_vp.turned_depth_f32()),
             back: proj.cam.back().to_f32(),
             size_px,
-            images: crate::ref_images::gpu_images(app),
+            images: {
+                let mut images = crate::ref_images::gpu_images(app);
+                images.extend(crate::rf_overlay::gpu_image(app));
+                images
+            },
             clouds: crate::point_clouds::gpu_clouds(app, ui.ctx()),
             analysis: analysis_uniform(app),
             analysis_colors: crate::gpu::analysis_colors(&t.analysis),
@@ -7483,6 +7488,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let card = app.viewport.card;
     let notice = app.viewport.window.unwrap_or(rect);
     let overlay_rect = crate::shell::bottom_readout_rect(app, notice);
+    crate::rf_overlay::card(app, ui, overlay_rect);
     if !card {
         crate::viewport_details::legacy_legends(app, ui, overlay_rect);
         placement_note(app, &painter, overlay_rect);
@@ -8047,6 +8053,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && rect.contains(a)
             && !crate::shell::covered(app, a)
             && !axes.contains(a)
+            && !crate::rf_overlay::start_drag(app, &proj, a)
             && !crate::joint_handles::start_drag(app, &proj, a)
             && !crate::occurrence_drag::start(app, &proj, a)
             && !crate::joint_drag::start(app, &proj, a)
@@ -8058,6 +8065,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             if crate::joint_handles::active(app) {
                 // Captured handle motion is handled below, including the release frame.
+            } else if crate::rf_overlay::dragging() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                crate::rf_overlay::drag_to(app, &proj, p);
             } else if crate::joint_drag::active(app) {
                 crate::joint_drag::to(app, &proj, p);
             } else if crate::occurrence_drag::active(app) {
@@ -8076,6 +8086,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if crate::joint_drag::active(app) && (resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down())) {
         crate::joint_drag::end(app);
+    }
+    if crate::rf_overlay::dragging() && (resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down())) {
+        crate::rf_overlay::end_drag(app);
     }
     // A drag whose release never came (focus lost, a tool or dialog took over) ends where it is.
     if crate::occurrence_drag::active(app) && (resp.drag_stopped() || !ui.input(|i| i.pointer.primary_down())) {
@@ -8134,6 +8147,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     crate::preview::paint_sketches(app, &painter, &proj);
     crate::ref_images::show(app, ui, &painter, &proj);
+    crate::rf_overlay::show(app, &painter, &proj);
     crate::browser_canvas::paint_marks(app, &painter, &proj);
     crate::point_clouds::show(app, &painter, &proj);
     crate::dialogs_assembly::origins(app, &painter, &proj);

@@ -51,7 +51,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Wi-Fi Coverage", 
          slice_height?: mm where the bodies are cut (default 1000); client_height?: mm (default 1000); grid_step?: mm 10–2000 (default 75); \
          exponent?: path-loss exponent 1.5–6 (default 2.2); region?: {polygon: [[x, y]…]} | {body: name} (default: the floor the walls \
          enclose); points?: [{name, at: [x, y]}] (RSSI at rooms); bodies?: [names] | components?: [names] (only these make walls); \
-         exclude?: [body or component names] (furniture); include_hidden?: bool (default false: hidden bodies count only when their \
+         rf_materials?: bool (with bodies or components, bodies whose material has an RF loss count too); exclude?: [body or component names] (furniture); include_hidden?: bool (default false: hidden bodies count only when their \
          material has an RF loss); cap_eirp?: bool (default true: 30 dBm at 2.4/5 GHz, 27 at 6 GHz); png?: path; grid?: bool (return \
          the values); show?: bool (default true); clear?: true. A wall's loss comes from its material's rf (material.create), a built-in \
          material's default, or its thickness (under 140 mm drywall, else concrete). RSSI = EIRP − FSPL(1 m) − 10·n·log10(d) − losses \
@@ -199,6 +199,7 @@ fn rf_coverage(s: &mut Session, p: &Value) -> Result<Value> {
         components: names(&params.components, "components")?,
         exclude: names(&params.exclude, "exclude")?,
         include_hidden: params.include_hidden.unwrap_or(false),
+        rf_materials: params.rf_materials.unwrap_or(false),
     };
 
     if s.model.is_stale() {
@@ -437,6 +438,7 @@ struct Scope {
     components: Vec<String>,
     exclude: Vec<String>,
     include_hidden: bool,
+    rf_materials: bool,
 }
 
 /// The names of `component` and every component above it.
@@ -476,7 +478,8 @@ fn takes(s: &Session, scope: &Scope, body: &ModelBody) -> bool {
     if !scope.bodies.is_empty() || !scope.components.is_empty() {
         let by_body = scope.bodies.iter().any(|n| names.contains(&n.as_str()));
         let by_component = scope.components.iter().any(|n| components.contains(&n.as_str()));
-        if !by_body && !by_component {
+        let by_material = scope.rf_materials && material_loss(s, body).is_some();
+        if !by_body && !by_component && !by_material {
             return false;
         }
     }

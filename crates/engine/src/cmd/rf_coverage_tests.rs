@@ -125,6 +125,9 @@ fn scope_hidden_bodies_regions_devices_and_png() {
     assert_eq!(out["walls"]["materials"], json!({"Low-E": 1}));
     let behind = out["points"][0]["rssi_dbm"]["5"].as_f64().unwrap();
     assert!((behind - (free(1.3) - 15.0)).abs() < 0.06, "{behind}");
+    // Scoped to a body, bodies with an RF material can still count.
+    let out = run(&mut s, "inspect.rf_coverage", json!({"emitters": ap(), "bodies": ["Partition"], "rf_materials": true}));
+    assert_eq!(out["walls"]["materials"], json!({"Concrete": 4, "Low-E": 1, "guessed by thickness": 1}));
     // A polygon region; a device from the library, capped at 30 dBm on 5 GHz and 27 on 6.
     let png = std::env::temp_dir().join(format!("rf-coverage-{}.png", std::process::id()));
     let out = run(
