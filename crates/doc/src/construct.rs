@@ -1052,7 +1052,7 @@ pub(crate) fn resolve_point(ctx: &Ctx, d: &PointDef) -> Result<Vec3> {
             }
             let mut sum = Vec3::new(0.0, 0.0, 0.0);
             for p in points {
-                sum = sum + point(ctx, p)?;
+                sum += point(ctx, p)?;
             }
             Ok(sum * (1.0 / points.len() as f64))
         }
