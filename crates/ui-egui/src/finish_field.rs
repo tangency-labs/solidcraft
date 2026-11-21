@@ -24,17 +24,22 @@ pub fn common() -> impl Iterator<Item = &'static str> {
     COMMON.iter().map(|id| tr(id))
 }
 
+/// The common finishes as they are written into a design (what a pick stores), in the list's order.
+pub fn common_values() -> Vec<String> {
+    common().map(str::to_string).collect()
+}
+
 /// The finish's text field with its pick list at the right. Returns whether the text changed.
 /// `id` keeps the list's state apart from other finish fields.
 pub fn editor(ui: &mut egui::Ui, id: &str, value: &mut String) -> bool {
     let was = value.clone();
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui_kit::compact_dropdown_menu(ui, ("sc_finish_common", id), tr("ui.finish.pick"), |ui| {
-            for (i, finish) in common().enumerate() {
-                let option = ui_kit::list_picker(ui, &format!("finish_common_{i}"), finish, value == finish);
+            for (i, (finish, stored)) in common().zip(common_values()).enumerate() {
+                let option = ui_kit::list_picker(ui, &format!("finish_common_{i}"), finish, *value == stored);
                 crate::scenario::publish_handle(&format!("dialog:Finish:{finish}"), option.rect.center());
                 if option.clicked() {
-                    *value = finish.to_string();
+                    *value = stored;
                     ui.close();
                 }
             }
@@ -64,5 +69,28 @@ mod tests {
             assert!(seen.insert(*finish), "{finish} twice");
         }
         assert!(all.contains(&"Powder coat, RAL 9005, matt"), "a black powder coat is on the list");
+    }
+
+    /// A pick stores the finish in reading order, as a catalog holds it, not as the window draws it
+    /// (right-to-left lines are drawn in display order, as egui has no bidirectional layout): a
+    /// design opened in another language, or printed, must read right. Hebrew and Arabic have the
+    /// finishes in their own script.
+    #[test]
+    fn a_picked_finish_is_stored_in_reading_order_in_a_right_to_left_language() {
+        crate::i18n::install();
+        for language in ["he", "ar"] {
+            let _language = solidcraft_ui_text::scope(language);
+            let catalog = solidcraft_ui_text::locale().catalog();
+            let english = solidcraft_ui_text::Locale::for_language("en").catalog();
+            let stored = common_values();
+            assert_eq!(stored.len(), COMMON.len());
+            let mut shown_differs = false;
+            for (id, value) in COMMON.iter().zip(&stored) {
+                let reading = catalog.messages().get(*id).or_else(|| english.messages().get(*id)).unwrap();
+                assert_eq!(value, reading, "{language} {id}");
+                shown_differs |= tr(id) != reading;
+            }
+            assert!(shown_differs, "{language}: some finish is drawn in display order, or this test proves nothing");
+        }
     }
 }
