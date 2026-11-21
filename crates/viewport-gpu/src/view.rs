@@ -100,20 +100,39 @@ pub struct Material {
     /// Lit on both sides: where the eye sees the face's back, it is lit as its front (an open
     /// sheet's back would otherwise be black). Off for solids, which never show their back.
     pub two_sided: bool,
+    /// The axis a turned face was cut about, as a lathe leaves it: a point on it and its
+    /// direction, in the scene's frame. Brushed metal's grooves run around it (rings on a round
+    /// face, circles on a flat face across it). `None`: the shader picks a world axis.
+    pub turn: Option<[[f32; 3]; 2]>,
 }
+
+/// Texel rows a palette row of materials takes in the material texture ([`Material::texels`]).
+const MATERIAL_TEXEL_ROWS: u32 = 4;
 
 impl Material {
     /// The surface `s` as the shader takes it.
     pub fn of(s: &solidcraft_viewport::surface::OpaqueSurface) -> Material {
         let base = s.base_color().to_f32();
-        Material { base, metallic: s.metallic() as f32, roughness: s.roughness() as f32, ior: s.dielectric_ior() as f32, pbr: true, two_sided: false }
+        Material {
+            base,
+            metallic: s.metallic() as f32,
+            roughness: s.roughness() as f32,
+            ior: s.dielectric_ior() as f32,
+            pbr: true,
+            two_sided: false,
+            turn: None,
+        }
     }
 
-    /// Its two texels in the material texture: base and flag, then the optical parameters.
-    fn texels(&self) -> [[f32; 4]; 2] {
+    /// Its texels in the material texture: base and flag, the optical parameters, then the turn
+    /// axis's point (w 1 when there is one) and direction.
+    fn texels(&self) -> [[f32; 4]; MATERIAL_TEXEL_ROWS as usize] {
+        let [at, along] = self.turn.unwrap_or_default();
         [
             [self.base[0], self.base[1], self.base[2], if self.pbr { 1.0 } else { 0.0 }],
             [self.metallic, self.roughness, self.ior, if self.two_sided { 1.0 } else { 0.0 }],
+            [at[0], at[1], at[2], if self.turn.is_some() { 1.0 } else { 0.0 }],
+            [along[0], along[1], along[2], 0.0],
         ]
     }
 }
@@ -2073,7 +2092,7 @@ struct PaletteGpu {
     palette: Arc<Palette>,
     /// Held for the bind group, which views it.
     _texture: wgpu::Texture,
-    /// The PBR materials ([`Material`]): two texel rows for each palette row that has any.
+    /// The PBR materials ([`Material`]): `MATERIAL_TEXEL_ROWS` texel rows for each palette row that has any.
     materials: wgpu::Texture,
     material_rows: u32,
     bind: wgpu::BindGroup,
@@ -2083,11 +2102,11 @@ struct PaletteGpu {
 /// Bytes of one palette texel.
 const PALETTE_TEXEL: u32 = 8;
 
-/// The material texture for `rows` palette rows of materials (two texel rows each).
+/// The material texture for `rows` palette rows of materials (`MATERIAL_TEXEL_ROWS` texel rows each).
 fn material_texture(device: &wgpu::Device, rows: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some("sc_materials"),
-        size: wgpu::Extent3d { width: PALETTE_WIDTH, height: 2 * rows.max(1), depth_or_array_layers: 1 },
+        size: wgpu::Extent3d { width: PALETTE_WIDTH, height: MATERIAL_TEXEL_ROWS * rows.max(1), depth_or_array_layers: 1 },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -2097,15 +2116,15 @@ fn material_texture(device: &wgpu::Device, rows: u32) -> wgpu::Texture {
     })
 }
 
-/// Palette rows `first..last` of `materials` as the material texture's texels: for each, a row
-/// of base colours and flags, then a row of optical parameters.
+/// Palette rows `first..last` of `materials` as the material texture's texels: for each palette
+/// row, one texel row per entry of [`Material::texels`].
 fn material_bytes(materials: &[Material], first: u32, last: u32) -> Vec<u8> {
     let width = PALETTE_WIDTH as usize;
-    let mut out = Vec::with_capacity((last - first) as usize * 2 * width * 16);
+    let mut out = Vec::with_capacity((last - first) as usize * MATERIAL_TEXEL_ROWS as usize * width * 16);
     for row in first..last {
-        for half in 0..2 {
+        for half in 0..MATERIAL_TEXEL_ROWS as usize {
             for col in 0..width {
-                let texels = materials.get(row as usize * width + col).map_or([[0.0; 4]; 2], Material::texels);
+                let texels = materials.get(row as usize * width + col).map_or(Default::default(), Material::texels);
                 for v in texels[half] {
                     out.extend_from_slice(&v.to_le_bytes());
                 }
@@ -2125,10 +2144,19 @@ fn write_materials(queue: &wgpu::Queue, texture: &wgpu::Texture, materials: &[Ma
     let bytes = material_bytes(materials, first, last);
     *written += bytes.len() as u64;
     queue.write_texture(
-        wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d { x: 0, y: 2 * first, z: 0 }, aspect: wgpu::TextureAspect::All },
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d { x: 0, y: MATERIAL_TEXEL_ROWS * first, z: 0 },
+            aspect: wgpu::TextureAspect::All,
+        },
         &bytes,
-        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(PALETTE_WIDTH * 16), rows_per_image: Some(2 * (last - first)) },
-        wgpu::Extent3d { width: PALETTE_WIDTH, height: 2 * (last - first), depth_or_array_layers: 1 },
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(PALETTE_WIDTH * 16),
+            rows_per_image: Some(MATERIAL_TEXEL_ROWS * (last - first)),
+        },
+        wgpu::Extent3d { width: PALETTE_WIDTH, height: MATERIAL_TEXEL_ROWS * (last - first), depth_or_array_layers: 1 },
     );
 }
 
@@ -6836,7 +6864,7 @@ mod glass_tests {
             let mut b = BlockBuilder::default();
             // In z = 0, its normal away from the eye at +Z.
             b.triangle([[-20.0, -20.0, 0.0], [20.0, -20.0, 0.0], [0.0, 20.0, 0.0]], [[0.0, 0.0, -1.0]; 3], PaletteIndex(0), TriClass::Pbr);
-            let material = Material { base: [0.6, 0.6, 0.6], metallic: 0.0, roughness: 0.6, ior: 1.5, pbr: true, two_sided };
+            let material = Material { base: [0.6, 0.6, 0.6], metallic: 0.0, roughness: 0.6, ior: 1.5, pbr: true, two_sided, turn: None };
             GpuScene {
                 palette: Arc::new(Palette::with_stable(vec![[150, 150, 150, 255]]).with_materials(vec![material])),
                 blocks: vec![SceneBlock { key: 3, bytes: b.freeze() }],
@@ -6884,7 +6912,8 @@ mod glass_tests {
         let mut b = BlockBuilder::default();
         b.triangle([[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], [[0.0, 0.0, 1.0]; 3], PaletteIndex(0), TriClass::Pbr);
         let bytes = b.freeze();
-        let material = |roughness: f32| Material { base: [0.5, 0.3, 0.2], metallic: 1.0, roughness, ior: 1.5, pbr: true, two_sided: false };
+        let material =
+            |roughness: f32| Material { base: [0.5, 0.3, 0.2], metallic: 1.0, roughness, ior: 1.5, pbr: true, two_sided: false, turn: None };
         let scene = |m: Material| GpuScene {
             palette: Arc::new(Palette::with_stable(vec![[180, 120, 70, 255]]).with_materials(vec![m])),
             blocks: vec![SceneBlock { key: 3, bytes: bytes.clone() }],
@@ -6900,7 +6929,7 @@ mod glass_tests {
         assert!(first.geometry > 0 && first.palette > 0, "the first scene uploads its block and tables: {first:?}");
         let edited = take(&mut r, 2, scene(material(0.6)));
         assert_eq!(edited.geometry, 0, "a material edit uploads no geometry: {edited:?}");
-        assert_eq!(edited.palette, u64::from(2 * PALETTE_WIDTH * 16), "one row of materials (two texel rows): {edited:?}");
+        assert_eq!(edited.palette, u64::from(MATERIAL_TEXEL_ROWS * PALETTE_WIDTH * 16), "one row of materials (its texel rows): {edited:?}");
     }
 
     /// Without order-independent transparency, the sorted glass stream is kept while the blocks'
