@@ -548,13 +548,15 @@ fn certify_file(file: &str) -> Option<usize> {
 
 /// `Fillet/sphere_plane.smb` (the `own_reader_sphere_plane_*` goldens) and
 /// `Fillet/sphere_diff_3cylinders.smb` (the `own_reader_sphere_diff_3cylinders_*` goldens
-/// and the `stubs4` rounds on it): every sphere trim the change made finer is certified
+/// and the `stubs4` rounds on it), and `Solids/revolution_mold.smb` (whose four rebuilt sphere
+/// trims the change refines): every sphere trim the change made finer is certified
 /// within its edge's tolerance of the edge, piece by piece.
 #[test]
 fn the_moved_golden_families_sphere_trims_are_certified_on_their_edges() {
     for file in [
         "Fillet/sphere_plane.smb",
         "Fillet/sphere_diff_3cylinders.smb",
+        "Solids/revolution_mold.smb",
     ] {
         if let Some(n) = certify_file(file) {
             assert!(
