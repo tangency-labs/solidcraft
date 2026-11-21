@@ -690,7 +690,9 @@ fn sample_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
                 for column in 0..columns {
                     let index = row * columns + column;
                     let Some(sample) = samples.get(index) else { continue };
-                    let texture = crate::home::document_thumbnail(app, ui.ctx(), &format!("sample:{index}"));
+                    // The List shows names only, so it never asks for a picture.
+                    let texture =
+                        if view == ViewMode::List { None } else { crate::home::document_thumbnail(app, ui.ctx(), &format!("sample:{index}")) };
                     let response = thumbnail_card(ui, view, width, height, app.tr_label(sample.name), None, texture, "box", CardStatus::default());
                     crate::scenario::publish_handle(&format!("library:sample:{index}"), response.rect.center());
                     if response.on_hover_text(app.tr_label(sample.about)).clicked() {
