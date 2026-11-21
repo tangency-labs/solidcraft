@@ -2488,10 +2488,10 @@ fn saved_shelled_cap_projection(through: f64, spline: bool) -> (Session, u64, so
     run(&mut s, "solid.extrude", json!({"sketch":"Sketch1","distance":30}));
     run(&mut s, "solid.shell", json!({"faces":["F2:top"],"thickness":2}));
     let id = run(&mut s, "sketch.create", json!({"plane":{"face":[0,30,-1]}}))["sketch"].as_u64().unwrap();
-    assert_eq!(
-        s.model.state().sketch(id).unwrap().plane,
-        Plane { origin: Vec3::new(0., 30., 0.), x: Vec3::new(-1., 0., 0.), y: Vec3::new(0., 0., 1.) }
-    );
+    let plane = s.model.state().sketch(id).unwrap().plane;
+    let want = Plane { origin: Vec3::new(0., 30., 0.), x: Vec3::new(-1., 0., 0.), y: Vec3::new(0., 0., 1.) };
+    // The rim face's plane, to rounding: the fixed coordinates below are written in it.
+    assert!(plane.origin.dist(want.origin) < 1e-9 && plane.x.dist(want.x) < 1e-9 && plane.y.dist(want.y) < 1e-9, "{plane:?}");
     let mut boundary = vec![
         LinkGeom::Arc { c: center, a: Vec2::new(-20., -18.), b: Vec2::new(20., -18.) },
         LinkGeom::Line(Vec2::new(20., -18.), Vec2::new(12., 0.)),
