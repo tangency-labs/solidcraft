@@ -186,15 +186,6 @@ fn font_dialog_filters_picks_with_keyboard_and_click_and_renders() {
 
 #[test]
 fn described_field_labels_and_values_show_the_same_tooltip() {
-    field_tooltips(true);
-}
-
-#[test]
-fn fields_without_descriptions_have_no_label_or_value_tooltip() {
-    field_tooltips(false);
-}
-
-fn field_tooltips(described: bool) {
     for mut property in [
         json!({"type":"number","default":2}),
         json!({"type":"number"}),
@@ -208,9 +199,7 @@ fn field_tooltips(described: bool) {
         json!({"type":"array","x-solidcraft-selection":{"version":1,"accept":["edge"]}}),
     ] {
         property["title"] = json!("Saw kerf");
-        if described {
-            property["description"] = json!("Width removed by the saw blade");
-        }
+        property["description"] = json!("Width removed by the saw blade");
         let mut h = crate::scenario::Harness::new();
         let mut command = entry("cut", "edit", json!([]));
         command.input_schema = json!({"type":"object","required":["kerf"],"properties":{"kerf":property}});
@@ -239,20 +228,72 @@ fn field_tooltips(described: bool) {
                 h.frame_with(vec![egui::Event::PointerMoved(at)]);
                 h.frames(4);
                 let context = format!("{property}: label={label}, idle={idle}");
-                if described {
-                    let mut found = false;
-                    for shape in &h.shapes {
-                        crate::test_support::each_shape(&shape.shape, &mut |shape| {
-                            if let egui::Shape::Text(text) = shape {
-                                found |= text.galley.text() == "Width removed by the saw blade";
-                            }
-                        });
-                    }
-                    assert!(found, "description is painted on hover: {context}");
-                } else {
-                    assert!(egui::Tooltip::seconds_since_last_tooltip(&h.ctx) > 0.0, "no tooltip on hover: {context}");
+                let mut found = false;
+                for shape in &h.shapes {
+                    crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                        if let egui::Shape::Text(text) = shape {
+                            found |= text.galley.text() == "Width removed by the saw blade";
+                        }
+                    });
                 }
+                assert!(found, "description is painted on hover: {context}");
             }
+        }
+    }
+}
+
+#[test]
+fn fields_without_descriptions_keep_picking_help_and_clipped_label_tooltips() {
+    let title = "A long plugin field label that must be clipped in the label column";
+    let label = format!("{title} *");
+    let mut h = crate::scenario::Harness::new();
+    let mut command = entry("cut", "edit", json!([]));
+    command.input_schema = json!({"type":"object","required":["kerf"],"properties":{
+        "kerf":{"type":"array","title":title,"x-solidcraft-selection":{"version":1,"accept":["edge"]}}
+    }});
+    h.app.plugin_menu.listed = vec![listed("saw", vec![command])];
+    h.app.plugin_menu.loaded = true;
+    h.app.home.open = false;
+    open_entry(&mut h.app, 0, 0);
+    h.app.plugin_menu.dialogs.last_mut().unwrap().preview = false;
+    h.ctx.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+    h.frames(4);
+    for idle in [false, true] {
+        if idle {
+            h.app.dialog = None;
+            h.frames(3);
+        }
+        for hover_label in [false, true] {
+            h.frame_with(vec![egui::Event::PointerGone]);
+            h.frames(3);
+            if hover_label {
+                let mut clipped = false;
+                for shape in &h.shapes {
+                    crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                        if let egui::Shape::Text(text) = shape {
+                            clipped |= text.galley.text() == label && text.galley.elided;
+                        }
+                    });
+                }
+                assert!(clipped, "the label must actually be clipped: idle={idle}");
+            }
+            let at = if hover_label {
+                crate::scenario::rect_of(&format!("dialog:label:{label}")).expect("field label").center()
+            } else {
+                crate::scenario::handle_at("plugin_dialog:field:kerf").expect("selection value")
+            };
+            h.frame_with(vec![egui::Event::PointerMoved(at)]);
+            h.frames(4);
+            let expected = if hover_label { label.as_str() } else { "click edges or faces (click to pick into this input)" };
+            let mut found = false;
+            for shape in &h.shapes {
+                crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                    if let egui::Shape::Text(text) = shape {
+                        found |= text.galley.text() == expected && !text.galley.elided;
+                    }
+                });
+            }
+            assert!(found, "default tooltip is painted: label={hover_label}, idle={idle}, expected={expected}");
         }
     }
 }
@@ -285,6 +326,116 @@ fn choice_options_show_their_titles_and_send_their_values() {
         assert_eq!(form(&json!({"type":"object","properties":{"p":{"type":"string","oneOf":options}}})), None, "{options}");
     }
     assert_eq!(form(&json!({"type":"object","properties":{"p":{"type":"string","enum":["a"],"oneOf":[{"const":"a"}]}}})), None, "not both");
+}
+
+#[test]
+fn swatch_annotations_preserve_partial_choices_and_const_values() {
+    let schema = json!({"type":"object","properties":{"finish":{"type":"string","oneOf":[
+        {"const":"oak","title":"Oak","x-solidcraft-swatch":"oak.png"},
+        {"const":"walnut","title":"Walnut","x-solidcraft-swatch":7},
+        {"const":"plain","title":"Plain"}
+    ]}}});
+    let mut fields = form(&schema).expect("bad artwork does not disable the dialog");
+    assert_eq!(fields[0].0.swatches, [Some("oak.png".into()), None, None]);
+    fields[0].1 = Input::Choice(Some(1));
+    assert_eq!(params(&fields), Ok(json!({"finish":"walnut"})));
+}
+
+/// Two full dialog captures, with synthetic artwork generated here, plus pointer selection.
+#[test]
+fn swatch_dialog_dropdown_and_filtered_grid_render_and_send_const_values() {
+    let mut h = crate::scenario::Harness::new();
+    let dir = h.dir.join("swatches");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (path, base) in [("oak.png", [137, 61, 23]), ("walnut.jpg", [81, 41, 27])] {
+        let pixels = image::RgbImage::from_fn(128, 128, |x, y| {
+            let stripe = ((x / 8 + y / 16) % 2) as u8 * 16;
+            image::Rgb(base.map(|c| c + stripe))
+        });
+        pixels.save(dir.join(path)).unwrap();
+    }
+    let schema = |complete| {
+        json!({"type":"object","required":["finish"],"properties":{
+            "show_unavailable":{"type":"boolean","default":false},
+            "finish":{"type":"string","title":"Finish","oneOf":[
+            {"const":"unavailable","title":"Unavailable finish","x-solidcraft-swatch":"walnut.jpg",
+             "x-solidcraft-when":{"field":"show_unavailable","eq":true}},
+            {"const":"oak","title":"Natural oak","x-solidcraft-swatch":"oak.png"},
+            {"const":"walnut","title":"Walnut","x-solidcraft-swatch":"walnut.jpg"},
+            if complete { json!({"const":"white","title":"White oak","x-solidcraft-swatch":"oak.png"}) } else { json!({"const":"plain","title":"Plain"}) }
+        ]}}})
+    };
+    let ctx = crate::fonts::test_context();
+    let mut textures = std::collections::HashMap::new();
+    let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
+    let output_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/plugin-swatches");
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut tick = 0;
+    let mut frame = |app: &mut SolveApp, events: Vec<egui::Event>, capture: Option<&str>| {
+        tick += 1;
+        solidcraft_ui_registry::clear_handles();
+        let mut output =
+            ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), time: Some(tick as f64 / 60.0), events, ..Default::default() }, |ui| {
+                ui_kit::scope(ui, |_ui| show(app, &ctx));
+            });
+        ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+        output.textures_delta.clear();
+        if let Some(name) = capture {
+            let image = ui_kit::test_raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures);
+            assert_eq!(image.dimensions(), (1280, 720));
+            image.save(output_dir.join(name)).unwrap();
+        }
+    };
+    let pointer = |pos, pressed| {
+        vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
+        ]
+    };
+    for complete in [false, true] {
+        let mut command = entry("finish", "read", json!([]));
+        command.input_schema = schema(complete);
+        let mut plugin = listed(if complete { "grid" } else { "dropdown" }, vec![command]);
+        plugin.swatches = Arc::new(std::sync::OnceLock::from(crate::plugin_images::read_swatches(&dir, &plugin.entries)));
+        h.app.plugin_menu.listed = vec![plugin];
+        h.app.plugin_menu.loaded = true;
+        h.app.plugin_menu.dialogs.clear();
+        open_entry(&mut h.app, 0, 0);
+        for _ in 0..6 {
+            frame(&mut h.app, vec![], None);
+        }
+        let trigger = crate::scenario::handle_at("plugin_dialog:field:finish").unwrap();
+        frame(&mut h.app, pointer(trigger, true), None);
+        frame(&mut h.app, pointer(trigger, false), None);
+        for _ in 0..3 {
+            frame(&mut h.app, vec![], None);
+        }
+        if complete {
+            let search = crate::scenario::handle_at("swatch:plugin_field_finish:search").unwrap();
+            frame(&mut h.app, pointer(search, true), None);
+            frame(&mut h.app, pointer(search, false), None);
+            frame(&mut h.app, vec![egui::Event::Text("OaK".into())], None);
+            frame(&mut h.app, vec![], Some("grid-filtered.png"));
+            assert!(crate::scenario::handle_at("swatch:plugin_field_finish:option:1").is_none(), "Walnut is filtered out");
+            assert!(crate::scenario::handle_at("swatch:plugin_field_finish:option:0").is_some());
+        } else {
+            frame(&mut h.app, vec![], Some("dropdown.png"));
+            assert!(crate::scenario::handle_at("swatch:plugin_field_finish:search").is_none());
+            assert!(crate::scenario::rect_of("swatch:plugin_field_finish:tile:0").is_some());
+            assert!(crate::scenario::rect_of("swatch:plugin_field_finish:tile:1").is_some());
+            assert!(crate::scenario::rect_of("swatch:plugin_field_finish:tile:2").is_none());
+        }
+        let select = crate::scenario::handle_at("swatch:plugin_field_finish:option:2").unwrap();
+        frame(&mut h.app, pointer(select, true), None);
+        frame(&mut h.app, pointer(select, false), None);
+        let fields = h.app.plugin_menu.dialog().unwrap().fields.as_ref().unwrap();
+        let (finish, selected) = fields.iter().find(|(field, _)| field.key == "finish").unwrap();
+        assert_eq!(finish.available, [1, 2, 3], "conditional choices retain their schema indices");
+        assert_eq!(*selected, Input::Choice(Some(3)), "picker index maps back past the unavailable option");
+        assert_eq!(params(fields), Ok(json!({"finish": if complete { "white" } else { "plain" }, "show_unavailable":false})));
+        frame(&mut h.app, vec![], None);
+        assert!(crate::scenario::handle_at("swatch:plugin_field_finish:option:0").is_none(), "selection closes the picker");
+    }
 }
 
 #[test]
@@ -347,6 +498,32 @@ fn conditional_dialog_fields_hide_disable_reset_and_follow_defaults_until_edited
     set_input(&mut fields, "storage", Input::Choice(Some(0)));
     assert_eq!(params(&fields).unwrap()["length"], 42.0, "custom value survives");
     assert_eq!(params(&fields).unwrap()["size"], "small", "an unavailable custom choice resets");
+}
+
+#[test]
+fn conditional_swatches_keep_defaults_visibility_and_enabled_state() {
+    let mut schema = cabinet_schema();
+    let size = &mut schema["properties"]["size"];
+    for (option, path) in size["oneOf"].as_array_mut().unwrap().iter_mut().zip(["small.png", "medium.jpg", "large.png"]) {
+        option["x-solidcraft-swatch"] = json!(path);
+    }
+    size["x-solidcraft-visible-when"] = json!({"field":"has_back","eq":true});
+    size["x-solidcraft-enabled-when"] = json!({"field":"storage","eq":"shelves"});
+    let mut fields = form(&schema).expect("conditions and swatches are supported together");
+    let size = |fields: &[(Field, Input)]| fields.iter().find(|(f, _)| f.key == "size").unwrap().clone();
+    assert_eq!(size(&fields).0.swatches, [Some("small.png".into()), Some("medium.jpg".into()), Some("large.png".into())]);
+    set_input(&mut fields, "storage", Input::Choice(Some(1)));
+    assert_eq!(size(&fields).0.available, [1, 2]);
+    assert!(!size(&fields).0.enabled);
+    assert_eq!(params(&fields).unwrap()["size"], "large", "a disabled swatch field still sends its conditional default");
+    set_input(&mut fields, "has_back", Input::Boolean(false));
+    assert!(!size(&fields).0.visible);
+    assert!(params(&fields).unwrap().get("size").is_none(), "hidden swatch fields are omitted");
+    set_input(&mut fields, "has_back", Input::Boolean(true));
+    set_input(&mut fields, "size", Input::Choice(Some(1)));
+    set_input(&mut fields, "storage", Input::Choice(Some(0)));
+    assert!(size(&fields).0.enabled);
+    assert_eq!(params(&fields).unwrap()["size"], "small", "an unavailable swatch choice resets to the matching default");
 }
 
 #[test]
@@ -706,6 +883,7 @@ fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -> Listed {
         groups: BTreeSet::new(),
         entries,
         images: Default::default(),
+        swatches: Default::default(),
     }
 }
 
@@ -1418,8 +1596,8 @@ mod native {
         zero["name"] = json!("zero");
         let manifest = json!({"id":"frames","name":"Frames","version":"0.1.0","capabilities":["commands@0.1"],"runtime":{
             "module":"plugin.wasm",
-            "entries":[entry("home", "Home"), entry("edit", "Edit"), entry("fail", "Fail"), entry("place", "Place"), entry("move", "Move"), entry("both", "Both"), fit, sketch, zero],
-            "commands":["solid.box", "view.fit", "view.home", "component.create", "occurrence.move", "sketch.create", "sketch.rectangle.two_point", "sketch.finish"]}});
+            "entries":[entry("home", "Home"), entry("edit", "Edit"), entry("fail", "Fail"), entry("place", "Place"), entry("move", "Move"), entry("both", "Both"), fit, sketch, zero, entry("consumed", "Consumed")],
+            "commands":["solid.box", "view.fit", "view.home", "component.create", "occurrence.move", "sketch.create", "sketch.rectangle.two_point", "sketch.finish", "sketch.line", "solid.extrude"]}});
         std::fs::write(dir.join("plugin.json"), manifest.to_string()).unwrap();
         root
     }
@@ -1702,6 +1880,91 @@ mod native {
         assert!(h.app.preview.active, "the solid preview is ready: {:?}", h.app.preview.error);
         assert_eq!(h.app.preview.bounds.max.z.round(), 10.0, "the field change produces a solid");
         assert!(same_camera(&moved, &h.app.cam), "a later solid leaves the user's camera alone");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn an_unchanged_visible_sketch_is_included_in_the_first_plugin_preview_fit() {
+        let root = view_package("preview-unchanged-sketch-fit");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[100,20],"p1":[120,30]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let sketch = h.app.session.world_state().unwrap().sketches[0].feature;
+        assert!(solidcraft_engine::view::sketch_shown(&h.app.session, sketch));
+        h.app.plugin_menu.loaded = true;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        let fit = h.app.plugin_menu.listed[0].entries.iter().position(|e| e.name == "fit").unwrap();
+        h.app.cam.set_view(solidcraft_viewport::StandardView::Top);
+        h.app.cam.distance = 800.0;
+        let parked = h.app.cam;
+        let (doc, undo) = (h.app.session.doc.clone(), h.app.session.undo.len());
+        open_entry(&mut h.app, 0, fit);
+        previewed(&mut h);
+        assert!(h.app.preview.active, "the preview is ready: {:?}", h.app.preview.error);
+        assert!(h.app.preview.sketches.is_empty(), "the existing sketch is unchanged by the run");
+        // The new box spans (0,0,0)..(20,10,3); the shown rectangle extends to (120,30,0).
+        let bounds = solidcraft_engine::geom::Aabb3 { min: solidcore_record::Vec3::ZERO, max: solidcore_record::Vec3::new(120.0, 30.0, 3.0) };
+        assert_eq!(h.app.preview.bounds, bounds, "framing includes the unchanged shown sketch");
+        let expected = h.app.fitted_bounds(parked, &bounds);
+        assert!(same_camera(&expected, &h.app.cam), "the first preview fits all shown geometry");
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
+        assert_eq!(h.app.session.undo.len(), undo);
+
+        h.app.cam = parked;
+        run(&mut h.app).unwrap();
+        settle(&mut h);
+        h.frames(2);
+        assert!(solidcraft_engine::view::sketch_shown(&h.app.session, sketch));
+        assert_eq!(solidcraft_engine::view::bounds(&h.app.session).unwrap(), bounds);
+        // The bounds above are the preview's; the dialog has closed, so Fit has the whole viewport.
+        let committed = h.app.fitted_bounds(parked, &bounds);
+        assert!(same_camera(&committed, &h.app.cam), "preview and committed Fit frame the same geometry");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_sketch_a_plugin_consumes_does_not_widen_its_first_preview_fit() {
+        let root = view_package("preview-consumed-sketch-fit");
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.plugin_menu.loaded = true;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        let entry = h.app.plugin_menu.listed[0].entries.iter().position(|e| e.name == "consumed").unwrap();
+        h.app.cam.set_view(solidcraft_viewport::StandardView::Top);
+        h.app.cam.distance = 800.0;
+        let parked = h.app.cam;
+        open_entry(&mut h.app, 0, entry);
+        previewed(&mut h);
+        assert!(h.app.preview.active, "the preview is ready: {:?}", h.app.preview.error);
+        assert_eq!(h.app.preview.sketches.len(), 1, "the run changed the distant sketch's geometry");
+        assert_eq!(
+            solidcraft_engine::view::sketch_bounds(&h.app.preview.sketches[0].sketch).max.x,
+            120.0,
+            "the sketch itself extends past the solid"
+        );
+        // The rectangle extrudes to (0,0,0)..(10,10,10). Its sketch also has a construction
+        // line ending at (120,30), which must not enlarge Fit once the sketch is consumed.
+        let bounds =
+            solidcraft_engine::geom::Aabb3 { min: solidcore_record::Vec3::new(0.0, 0.0, 0.0), max: solidcore_record::Vec3::new(10.0, 10.0, 10.0) };
+        assert_eq!(h.app.preview.bounds, bounds, "only the shown box contributes to framing");
+        let expected = h.app.fitted_bounds(parked, &bounds);
+        assert!(same_camera(&expected, &h.app.cam), "the first preview fits only shown geometry");
+        assert!(h.app.plugin_menu.dialogs[0].preview_drawn);
+        assert!(h.app.session.doc.features.is_empty(), "the run is still only previewed");
+
+        h.app.cam = parked;
+        run(&mut h.app).unwrap();
+        settle(&mut h);
+        h.frames(2);
+        let sketch = h.app.session.world_state().unwrap().sketches[0].feature;
+        assert!(solidcraft_engine::view::sketch_consumed(&h.app.session, sketch), "the extrusion consumes the sketch");
+        assert!(!solidcraft_engine::view::sketch_shown(&h.app.session, sketch), "the consumed sketch is hidden");
+        assert_eq!(solidcraft_engine::view::bounds(&h.app.session).unwrap(), bounds);
+        // The bounds above are the preview's; the dialog has closed, so Fit has the whole viewport.
+        let committed = h.app.fitted_bounds(parked, &bounds);
+        assert!(same_camera(&committed, &h.app.cam), "preview and committed Fit frame the same geometry");
         let _ = std::fs::remove_dir_all(root);
     }
 

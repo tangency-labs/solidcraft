@@ -1787,6 +1787,36 @@ mod install_zip {
     }
 
     #[test]
+    fn invalid_swatches_warn_in_check_and_install_review_but_install_succeeds() {
+        let (mut s, root) = session("swatches");
+        let mut m: Value = serde_json::from_slice(&manifest_bytes("gears", json!(["commands@0.1"]))).unwrap();
+        m["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"finish":{"type":"string","oneOf":[
+            {"const":"oak","x-solidcraft-swatch":"bad.png"}, {"const":"plain","x-solidcraft-swatch":"../outside.png"}
+        ]}}}}]);
+        let (package, version) = API.split_once('@').unwrap();
+        let component = wat::parse_str(include_str!("fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version)).unwrap();
+        let zip = zip(&[("plugin.json", &serde_json::to_vec(&m).unwrap()), ("plugin.wasm", &component), ("bad.png", b"not an image")]);
+        let path = put(&root, "swatches.zip", &zip);
+        let dry = s.execute("plugin.install", &json!({"path":path,"dry_run":true})).unwrap();
+        assert_eq!(dry["param_warnings"].as_array().unwrap().len(), 2);
+        let checked = s.execute("plugin.check", &json!({"path":path})).unwrap();
+        assert_eq!(checked["ok"], true, "{checked}");
+        let warnings: Vec<_> = checked["problems"].as_array().unwrap().iter().filter(|p| p["field"] == "x-solidcraft-swatch").collect();
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings.iter().all(|p| p["severity"] == "warning"));
+        let installed = s.execute("plugin.install", &json!({"path":path})).unwrap();
+        assert_eq!(installed["installed"], true);
+        let folder = root.join("plugins/gears");
+        let checked_folder = s.execute("plugin.check", &json!({"path":folder})).unwrap();
+        assert_eq!(checked_folder["ok"], true, "{checked_folder}");
+        // Builds without plugin execution also report an unrelated component warning.
+        let folder_warnings: Vec<_> = checked_folder["problems"].as_array().unwrap().iter().filter(|p| p["field"] == "x-solidcraft-swatch").collect();
+        assert_eq!(folder_warnings.len(), 2);
+        assert!(folder_warnings.iter().all(|p| p["severity"] == "warning"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn a_valid_zip_installs_and_its_entries_resolve() {
         let (mut s, root) = session("valid");
         let path = put(&root, "gears.zip", &gears("0.1.0"));

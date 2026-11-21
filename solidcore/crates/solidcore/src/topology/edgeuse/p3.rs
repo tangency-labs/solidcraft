@@ -93,6 +93,9 @@
 //!   dominated, the fit is below the tolerance the edge had before the raise. Cost: each
 //!   call walks the edge's faces and, above that baseline with no gap cached, computes
 //!   the uses' edge/face gaps without caching them.
+//! - **Periodic projection.** The point-drop interpolation lifts consecutive UV samples
+//!   across closed-surface seams before fitting. Interpolating their wrapped coordinates
+//!   instead invents a whole-period excursion between nearby points on the surface.
 //! - **Passed-on statuses (WR-663).** The statuses the fork passes on
 //!   (tangency-labs/smlib 666242b: `CreateUVTrimCurve`'s box, seam transforms, 2D
 //!   conversions, trims, end evaluations and drops, `NormalizedEvaluate`;
@@ -1497,6 +1500,19 @@ fn brute_force(
     let mut params: Vec<f64> = Vec::new();
     let uv_tol = EFF_ZERO_SQRT * (face_domain.size().length() + 1.0);
     let edge_tol = b.edge(e)?.tolerance;
+    // Closure uses the kernel's rounding scale, not the fitting tolerance: a narrow
+    // open patch does not acquire a period just because the edge has a large gap.
+    let natural = surface.natural_uv_domain_with_nurb(k)?;
+    let u_period = surface
+        .is_closed(k, &natural, SurfParamType::U, None, false)?
+        .0
+        .then_some(natural.u_interval().length())
+        .filter(|p| p.is_finite() && *p > 0.0);
+    let v_period = surface
+        .is_closed(k, &natural, SurfParamType::V, None, false)?
+        .0
+        .then_some(natural.v_interval().length())
+        .filter(|p| p.is_finite() && *p > 0.0);
 
     // for 101 points
     for ii in 0..=100_u32 {
@@ -1520,7 +1536,13 @@ fn brute_force(
         // when a closest point was found
         if let Some(sol) = solutions.as_slice().first() {
             // get the surface UV Point from the solution array
-            let pnt = Point3::new(sol.start.param(0)?, sol.start.param(1)?, 0.0);
+            let mut pnt = Point3::new(sol.start.param(0)?, sol.start.param(1)?, 0.0);
+            // Interpolate a continuous lift of the surface parameters. A jump between
+            // equivalent seam sides is a change of chart, not motion across the patch.
+            if let Some(previous) = points.last() {
+                pnt.x = crate::eval::uv::unwrap(pnt.x, previous.x, u_period);
+                pnt.y = crate::eval::uv::unwrap(pnt.y, previous.y, v_period);
+            }
 
             // save the first sample Point and subsequent ones that are far enough apart
             if points.last().is_none_or(|l| pnt.distance(*l) > uv_tol) {
@@ -3627,6 +3649,59 @@ mod tests {
         if let Ok(r) = r {
             assert!(r.status.is_ok());
             assert_eq!(r.dist_to_surf, -1.0);
+        }
+    }
+
+    /// The projected arc crosses the cylinder's 360-degree cut. Interpolating
+    /// wrapped angles invents a curve across the opposite side of the cylinder.
+    #[test]
+    fn point_drop_interpolation_follows_an_arc_across_a_periodic_seam() {
+        use crate::nurbs::b_spline_curve::p1::NurbCircleParam;
+        use crate::primitive::api_primitives::{create_cylinder, create_cylinder_surface};
+
+        let mut k = Kernel::default();
+        let mut b = create_cylinder(&mut k, Vec3::ZERO, 5.0, 3.0).unwrap();
+        let (eu, e) = b
+            .edgeuses()
+            .iter()
+            .find_map(|(eu, u)| u.edge.map(|e| (eu, e)))
+            .unwrap();
+        let surface = Surface::from(create_cylinder_surface(&k, Vec3::ZERO, 5.0, 3.0).unwrap());
+        let curve = Curve::from(
+            BSplineCurve::create_circle_segment(
+                3,
+                &Axis2Placement::default(),
+                5.0,
+                -10.0,
+                10.0,
+                NurbCircleParam::Quadratic,
+            )
+            .unwrap(),
+        );
+        let interval = curve.natural_interval();
+        let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        let mut fail = DropCurveFail::default();
+        let made = brute_force(
+            &k, &mut b, eu, e, &surface, &domain, &curve, &interval, false, true, &mut fail,
+        )
+        .unwrap();
+        let tolerance = b.edge(e).unwrap().tolerance;
+        for i in 0..=400 {
+            let t = interval.evaluate(f64::from(i) / 400.0);
+            let uv = made.curve.evaluate_point(&k, t).unwrap();
+            // Evaluate the periodic extension in the surface's own parameters.
+            // The native evaluator clamps outside its active knot interval.
+            let u = domain.u_interval();
+            let wrapped_u = u.min() + (uv.x - u.min()).rem_euclid(u.length());
+            let lifted = surface
+                .evaluate_point(&k, Point2::new(wrapped_u, uv.y))
+                .unwrap();
+            let expected = curve.evaluate_point(&k, t).unwrap();
+            assert!(
+                lifted.distance(expected) <= tolerance,
+                "at {t}: gap {}, tolerance {tolerance}",
+                lifted.distance(expected)
+            );
         }
     }
 
