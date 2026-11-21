@@ -180,7 +180,13 @@ const KICAD_IMPORT: &[OptionSpec] = &[
     OptionSpec {
         param: "thickness",
         label: "Board thickness",
-        kind: OptionKind::Number { default: 1.6, min: 0.01, max: 1000.0, unit: "mm", from_file: Some(crate::kicad_file_thickness) },
+        kind: OptionKind::Number {
+            default: 1.6,
+            min: crate::kicad_in::BOARD_THICKNESS_MIN_MM,
+            max: crate::kicad_in::BOARD_THICKNESS_MAX_MM,
+            unit: "mm",
+            from_file: Some(crate::kicad_file_thickness),
+        },
     },
     OptionSpec { param: "representation", label: "Board", kind: OptionKind::Choice { choices: &[("brep", "Solid"), ("mesh", "Mesh")], default: 0 } },
 ];
@@ -683,6 +689,15 @@ mod tests {
         assert_eq!(read(&board.to_string_lossy()), Some(2.2));
         assert_eq!(read(&dir.join("b.kicad_pro").to_string_lossy()), Some(2.2), "a project reads its board");
         assert_eq!(read(&dir.join("missing.kicad_pcb").to_string_lossy()), None);
+        // A board outside the row's range is not a board thickness, so the file names none: the
+        // row starts at its default, 1.6 mm, which is the thickness the import uses for it too.
+        let thin = dir.join("thin.kicad_pcb");
+        std::fs::write(&thin, "(kicad_pcb (version 20240108) (general (thickness 0.005)))").unwrap();
+        assert_eq!(read(&thin.to_string_lossy()), None, "a board thinner than the row offers");
+        assert_eq!(crate::kicad_in::kicad_board_thickness(&std::fs::read(&thin).unwrap()), None);
+        let thick = dir.join("thick.kicad_pcb");
+        std::fs::write(&thick, "(kicad_pcb (version 20240108) (general (thickness 2000)))").unwrap();
+        assert_eq!(read(&thick.to_string_lossy()), None, "a board thicker than a board");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
