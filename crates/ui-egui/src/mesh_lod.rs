@@ -9,7 +9,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
-use solidcraft_engine::geom::Mesh;
+use solidcraft_engine::doc::ModelBody;
+use solidcraft_engine::geom::{Mesh, simplify};
+use solidcraft_engine::kernel::Body;
 
 use crate::gpu::SharedTris;
 
@@ -42,11 +44,12 @@ struct State {
 struct Job {
     key: usize,
     source: Arc<Mesh>,
+    indexed: Option<Body>,
     cost: usize,
 }
 
-/// Welding visits all positions, even if many share a point, and collapse scratch also depends
-/// on the triangle count. Charge both, with large jobs occupying the whole budget.
+/// Budget for the display geometry's positions and triangles, so large jobs have exclusive
+/// access to the scratch budget even when their source is indexed.
 fn work_cost(positions: usize, triangles: usize) -> usize {
     triangles.saturating_add(positions.div_ceil(3)).clamp(1, WORK_BUDGET)
 }
@@ -91,13 +94,13 @@ impl MeshLods {
     /// mesh gets them, whatever its size: a level is drawn only where its measured error is under
     /// [`crate::gpu::LOD_PX`] on screen, so a mesh that simplifies badly (a box) is drawn coarser
     /// only where it is a few pixels across, and one that cannot simplify gets none.
-    pub(crate) fn levels(&self, mesh: &Arc<Mesh>) -> Option<Levels> {
+    pub(crate) fn levels(&self, mesh: &Arc<Mesh>, body: Option<&ModelBody>) -> Option<Levels> {
         let key = Arc::as_ptr(mesh) as usize;
         let mut state = self.0.lock().ok()?;
         if let Some((_, levels)) = state.by_mesh.get(&key).filter(|(held, _)| Arc::ptr_eq(held, mesh)) {
             return levels.clone();
         }
-        queue(&mut state, &self.0, key, mesh);
+        queue(&mut state, &self.0, key, mesh, body);
         None
     }
 
@@ -133,10 +136,15 @@ impl MeshLods {
 
 /// Queues `mesh` (at `key`) for a worker. Called with the state locked, so a retiring worker
 /// ([`work`]) either sees this request or has already released its reservation.
-fn queue(state: &mut State, shared: &Arc<Mutex<State>>, key: usize, mesh: &Arc<Mesh>) {
+fn queue(state: &mut State, shared: &Arc<Mutex<State>>, key: usize, mesh: &Arc<Mesh>, body: Option<&ModelBody>) {
     state.by_mesh.insert(key, (mesh.clone(), None));
     let cost = work_cost(mesh.positions.len(), mesh.triangles.len());
-    state.queue.push_back(Job { key, source: mesh.clone(), cost });
+    let indexed = body
+        .filter(|_| mesh.triangles.len() >= crate::viewport::INSTANCE_ALONE)
+        .and_then(ModelBody::flat_mesh_body_in_place)
+        .filter(|body| body.triangle_mesh().is_some_and(|(_, triangles)| triangles.len() == mesh.triangles.len()))
+        .cloned();
+    state.queue.push_back(Job { key, source: mesh.clone(), indexed, cost });
     start_worker(state, shared);
 }
 
@@ -153,7 +161,7 @@ fn start_worker(state: &mut State, shared: &Arc<Mutex<State>>) {
 /// on an exclusive job, or when this worker retires, so other meshes benefit as soon as possible.
 fn work(shared: &Arc<Mutex<State>>, mut job: Job) {
     loop {
-        let levels = Arc::new(make(&job.source));
+        let levels = Arc::new(make(&job.source, job.indexed.as_ref()));
         let Ok(mut state) = shared.lock() else { return };
         state.release(job.cost);
         if let Some(slot) = state.by_mesh.get_mut(&job.key) {
@@ -175,13 +183,14 @@ fn work(shared: &Arc<Mutex<State>>, mut job: Job) {
 /// simplifies (each level at least a fifth smaller than the one before, [`simplify::levels`]).
 ///
 /// [`simplify::levels`]: solidcraft_engine::geom::simplify::levels
-fn make(mesh: &Mesh) -> Vec<(Arc<SharedTris>, f32)> {
+fn make(mesh: &Mesh, indexed: Option<&Body>) -> Vec<(Arc<SharedTris>, f32)> {
     let n = mesh.triangles.len();
     let targets: Vec<usize> = [4, 16, 64].into_iter().map(|d| n / d).filter(|t| *t >= 1).collect();
-    solidcraft_engine::geom::simplify::levels(&mesh.positions, &mesh.triangles, &targets)
-        .iter()
-        .map(|l| (Arc::new(SharedTris::from_level(l)), l.error as f32))
-        .collect()
+    let levels = match indexed.and_then(Body::triangle_mesh) {
+        Some((positions, triangles)) => simplify::levels_from_indexed_facets(positions, triangles, &targets),
+        None => simplify::levels(&mesh.positions, &mesh.triangles, &targets),
+    };
+    levels.iter().map(|l| (Arc::new(SharedTris::from_level(l)), l.error as f32)).collect()
 }
 
 #[cfg(test)]

@@ -1134,9 +1134,13 @@ impl crate::SolveApp {
         Ok(())
     }
     pub fn universal_panel_host_enabled(&self) -> bool {
-        self.panel_content_frame.is_some() || self.panel_runtime.as_ref().is_some_and(|integration| integration.host.is_some())
+        !self.view_windows.is_child()
+            && (self.panel_content_frame.is_some() || self.panel_runtime.as_ref().is_some_and(|integration| integration.host.is_some()))
     }
     pub fn universal_panel_frame(&self) -> Option<&HostFrame> {
+        if self.view_windows.is_child() {
+            return None;
+        }
         self.panel_runtime
             .as_ref()
             .and_then(|integration| integration.host.as_ref())
