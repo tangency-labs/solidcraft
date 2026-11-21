@@ -67,7 +67,8 @@ fn item(action: RingAction, set: &VrSettings, state: State) -> Option<Item> {
         RingAction::ShowAll => (Act::ShowAll, words("vr.menu_show_all"), true),
         RingAction::Explode => (Act::Explode, words(if state.exploded { "vr.menu_assemble" } else { "vr.menu_explode" }), true),
         RingAction::Section => (Act::Section, words(if state.section { "vr.menu_section_off" } else { "vr.menu_section" }), true),
-        RingAction::PutBack => (Act::PutBack, words("vr.menu_put_back"), true),
+        // The house alone: no words beneath it.
+        RingAction::PutBack => (Act::PutBack, String::new(), true),
         RingAction::Undo => (Act::Undo, words("vr.menu_undo"), state.can_undo),
         RingAction::Redo => (Act::Redo, words("vr.menu_redo"), state.can_redo),
         RingAction::Passthrough => (Act::Passthrough, words(if state.passthrough { "vr.passthrough_off" } else { "vr.belt_passthrough" }), true),

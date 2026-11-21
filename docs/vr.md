@@ -42,17 +42,17 @@ group's name and icon. The defaults:
 
 | Slot | What it does |
 |---|---|
-| Show/Hide | Hides what is pointed at, or the selection when nothing is (the whole selection when the part pointed at is in it); when all of that is hidden, shows it again. |
+| Show/Hide | Hides the selection, or the part pointed at when nothing is selected; when all of that is hidden, shows it again. With Preferences › XR › Ring menu › "Hide and isolate act on" set to Pointed part first, it hides what is pointed at instead (the whole selection when that part is in it), and the selection when nothing is. Isolate acts on the same. |
 | Isolate | Shows only that, the rest hidden. |
-| Show all | Shows everything again. |
+| Show all | Shows every part again: bodies and placements. Sketches, joints, construction geometry and the origin stay as they are. |
 | Section / Section off | A section plane at the tip of that controller: what lies on your side of it is cut away. Select with that hand leaves it in the model. Only the headset is cut. |
-| View ▸ | Put back (the model in front of you, at its first size), Explode / Put together (its first exploded view, or every part moved away from the middle; nothing saved), Real room. While parts are moved and their positions not captured, Explode says so and changes nothing: capture or undo the moves first. |
+| View ▸ | Put back (the house: the model in front of you, at its first size), Explode / Put together (its first exploded view, or every part moved away from the middle; nothing saved), Passthrough. While parts are moved and their positions not captured, Explode says so and changes nothing: capture or undo the moves first. |
 | Edit ▸ | Undo, Redo. |
 
 Also available for a slot: Hide (only), and every action above.
 
 **The belt.** Below and in front of you, curved toward you, and left where it is put: Browser,
-Designs (each open design, and New), File (Save, Close), Room (the real room around the model, Put
+Designs (each open design, and New), File (Save, Close), Room (Passthrough, the real room around the model; Put
 back) and Edit (Undo, Redo). Point at a group (or touch it with the controller) and Select: its
 items grow out above it; Select on one does it. Save and Close ask nothing in the headset: a
 design that has no file yet, or whose moved parts are not captured, is saved on the desktop
@@ -66,12 +66,14 @@ where they are nearer.
 **The Browser.** Select on Browser opens the window's own Browser beside the belt (Select again
 closes it): every row the desktop Browser has, with its folds, eyes and selecting. The ray is its
 pointer and Select its click; with the ray on it, the stick scrolls it. Pointing at a row lights
-its part.
+its part. It only views the design: a row is never renamed or dragged there, and a double click
+is a plain click (no editor, dialog or edit in place opens); the component's radio still
+activates it.
 
 **Joints** are drawn as the window draws them (their badges, where their eyes and the Joints
 folder show them), over the model.
 
-**The real room** (passthrough): where the VR software offers it (an alpha-blended view), the
+**Passthrough** (the real room): where the VR software offers it (an alpha-blended view), the
 model stands in the real room instead of the drawn one, with no backdrop or floor grid.
 
 **Settings** (Preferences › XR › VR, applied at once, also with the headset on): which inputs
@@ -101,8 +103,11 @@ neither lights nor selects anything.
 A sign at the controller says what an item or the stick did. Hiding, isolating and showing are
 the desktop's Show/Hide, one undo step each.
 
-A part is what the Browser selects on a click in an assembly: the outermost placement the body
-is in, or the body itself where it belongs to the design's own component. Hidden and ghosted
+A part is one level inside the component active (the Browser's radio): the placement directly
+inside it on the way to the body, or the body itself where it is that component's own. With the
+design itself active that is the top-level placement; activate a subassembly to point at the
+parts it holds, and one inside it to go deeper. A body outside the component active is picked as
+with the design active. Hidden and ghosted
 bodies are passed through; with a section on, what it cuts away is too, and the cut face stops
 the ray.
 

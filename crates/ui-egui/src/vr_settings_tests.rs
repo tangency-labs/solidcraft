@@ -517,3 +517,14 @@ fn ring_slots_take_as_many_a_row_as_fit() {
     }
     assert_eq!(row_end(&widths, 5, 5, 330.0, 8.0), 5, "nothing left: an empty row ends at once");
 }
+
+/// The ring's part actions act on the selection first out of the box; the other way is kept when
+/// saved, and a value this version does not know takes the default alone.
+#[test]
+fn the_part_actions_act_on_the_selection_first_unless_set_otherwise() {
+    assert_eq!(VrSettings::default().acts_on, ActsOn::Selection);
+    let read = VrSettings::from_saved(json!({"layout": LAYOUT, "acts_on": "pointed"})).unwrap();
+    assert_eq!(read.acts_on, ActsOn::Pointed);
+    let read = VrSettings::from_saved(json!({"layout": LAYOUT, "acts_on": "elsewhere", "grid": 0.5})).unwrap();
+    assert_eq!((read.acts_on, read.grid), (ActsOn::Selection, 0.5), "only the unknown value falls back");
+}

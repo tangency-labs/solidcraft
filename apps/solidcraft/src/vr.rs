@@ -649,7 +649,7 @@ impl Vr {
                 if let Some(open) = self.menu.take()
                     && let Some(act) = open.chosen()
                 {
-                    let said = act_on(app, act, open.target.as_deref(), i, &mut self.section, &mut self.put_back);
+                    let said = act_on(app, act, open.target.as_deref(), set.acts_on, i, &mut self.section, &mut self.put_back);
                     self.pointer.say(i, said);
                     buzz(session, hand, Pulse::TICK);
                 }
@@ -670,8 +670,8 @@ impl Vr {
             };
             if open && self.menu.is_none() && !holds && self.window_hover[i].is_none() && !self.window_pressed[i] {
                 let target = self.pointer.pointed[i].as_ref().map(|p| p.part.clone());
-                // The part actions act on what is pointed at, else on the selection.
-                let parts = vr_pick::acted_on(app, target.as_deref());
+                // What the part actions act on, as the settings say (`ActsOn`).
+                let parts = vr_pick::acted_on(app, target.as_deref(), set.acts_on);
                 let state = menu::State {
                     parts: !parts.is_empty(),
                     hidden: vr_pick::all_hidden(app, &parts),
@@ -708,7 +708,7 @@ impl Vr {
             // Put back, the section, undo and redo, where the settings give them a button.
             for (button, act) in [(PUT_BACK, Act::PutBack), (SECTION, Act::Section), (UNDO, Act::Undo), (REDO, Act::Redo)] {
                 if b[button].pressed {
-                    let said = act_on(app, act, None, i, &mut self.section, &mut self.put_back);
+                    let said = act_on(app, act, None, set.acts_on, i, &mut self.section, &mut self.put_back);
                     self.pointer.say(i, said);
                     buzz(session, hand, Pulse::TICK);
                 }
@@ -816,7 +816,7 @@ impl Vr {
                     _ => None,
                 };
                 if let Some(act) = act.filter(|_| !self.buttons[i][GRAB].down) {
-                    let said = act_on(app, act, None, i, &mut self.section, &mut self.put_back);
+                    let said = act_on(app, act, None, set.acts_on, i, &mut self.section, &mut self.put_back);
                     self.pointer.say(i, said);
                     buzz(session, hand, Pulse::TICK);
                 }
@@ -1173,9 +1173,18 @@ fn unit3(v: [f64; 3]) -> Option<[f64; 3]> {
 }
 
 /// Do `act`, chosen with hand `i` (from the menu or the stick), `target` the part its ray pointed
-/// at when the menu opened. Hiding and isolating act on the selection when `target` is in it. What
-/// was done, in the user's language, for the sign at the controller (nothing for nothing done).
-fn act_on(app: &mut SolveApp, act: Act, target: Option<&Part>, i: usize, section: &mut Section, put_back: &mut bool) -> String {
+/// at when the menu opened. Hiding and isolating act on the selection or on `target`, as `acts`
+/// says ([`vr_pick::acted_on`]). What was done, in the user's language, for the sign at the
+/// controller (nothing for nothing done).
+fn act_on(
+    app: &mut SolveApp,
+    act: Act,
+    target: Option<&Part>,
+    acts: settings::ActsOn,
+    i: usize,
+    section: &mut Section,
+    put_back: &mut bool,
+) -> String {
     use solidcraft_ui_text::tr;
     let done = |result: Result<(), String>, words: &str| match result {
         Ok(()) => tr(words).to_string(),
@@ -1183,8 +1192,7 @@ fn act_on(app: &mut SolveApp, act: Act, target: Option<&Part>, i: usize, section
     };
     match act {
         Act::Hide | Act::Isolate | Act::ToggleHide => {
-            // What is pointed at (with the selection, when it is in it), else the selection.
-            let parts = vr_pick::acted_on(app, target);
+            let parts = vr_pick::acted_on(app, target, acts);
             if parts.is_empty() {
                 return tr("vr.nothing_selected").to_string();
             }
@@ -2186,7 +2194,10 @@ impl Gpu {
             let l = egui::Rgba::from(c);
             [l.r(), l.g(), l.b()]
         };
-        let style = Style { body: linear(t.app_bar), body_held: linear(t.form_primary), ray: linear(t.form_primary), ray_pressed: linear(t.accent) };
+        // Most themes give the accent and the primary form colour the same value, so the pressed
+        // ray is the ray's own colour brought most of the way to white, not a second token.
+        let ray = linear(t.form_primary);
+        let style = Style { body: linear(t.app_bar), body_held: linear(t.form_primary), ray, ray_pressed: ray.map(|c| c + (1.0 - c) * 0.7) };
         let mut vertices = marks::marks(scene.hands, scene.held, scene.reach, scene.ray_length, &style);
         if let Some(plane) = &scene.outline {
             vertices.extend(section::outline(plane, style.ray));

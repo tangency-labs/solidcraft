@@ -24,7 +24,8 @@ pub enum Look {
     /// A board with words on one line.
     Sign,
     /// A menu item, drawn as a slot of SolidCraft's radial menu: the dialog's body and border, its
-    /// icon in colour, its words small beneath (or alone where there is none); `lit` (marked, open
+    /// icon in colour, its words small beneath (the icon alone where it has none, the words alone
+    /// where there is no icon); `lit` (marked, open
     /// or current) in the tab's accent; one that cannot be taken (or a ring passed) at `fade`
     /// percent opacity (100: not faded).
     Bubble { icon: Option<&'static str>, lit: bool, fade: u8 },
@@ -196,6 +197,18 @@ impl Painter {
                     let ink = if lit { accent.ink } else { t.form_ink };
                     let inside = board.shrink(f32::from(t.radius_xl) * scale * 0.6);
                     match icon {
+                        // Without words the icon alone fills the middle.
+                        Some(name) if text.trim().is_empty() => {
+                            let side = inside.height().min(inside.width() * 0.6).max(0.0);
+                            let at = egui::Rect::from_center_size(inside.center(), egui::vec2(side, side));
+                            solidcraft_ui_egui::ui_kit::icons::paint_accented(
+                                &painter,
+                                at,
+                                name,
+                                solidcraft_theme::TabAccent::current_icon_accent(app),
+                                1.0,
+                            );
+                        }
                         Some(name) => {
                             let label = painter.layout_job(wrapped(&short(text, BUBBLE_CHARS), t.font_small * scale, ink, inside.width(), 1));
                             let gap = t.space_2 * scale;

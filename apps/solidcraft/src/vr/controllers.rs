@@ -46,11 +46,20 @@ struct GpuMesh {
 /// would go past it is drawn without them (in its colours alone).
 pub const MAX_PICTURE_BYTES: u64 = 256 * 1024 * 1024;
 
-/// A model on the GPU: its meshes, and the bytes its pictures take there.
+/// A model on the GPU, for one hand: its meshes (each bound to its asset's pictures).
 struct Uploaded {
     meshes: Vec<GpuMesh>,
-    picture_bytes: u64,
 }
+
+/// An asset's pictures on the GPU, shared by every hand holding a controller of it, and the bytes
+/// they take there (none: drawn without them).
+struct Pictures {
+    views: Vec<wgpu::TextureView>,
+    bytes: u64,
+}
+
+/// The smallest side [`fit_pictures`] shrinks pictures to (pixels).
+const MIN_PICTURE_SIDE: u32 = 64;
 
 /// The bytes a model's pictures (`images`) take on the GPU (four a pixel), however big they say
 /// they are.
@@ -69,22 +78,51 @@ fn keep_live<T>(uploaded: &mut HashMap<Key, T>, live: &[[u8; 16]]) {
     uploaded.retain(|key, _| live.contains(&key.0));
 }
 
+/// Shrink the pictures of `models` until they fit in [`MAX_PICTURE_BYTES`] together, halving the
+/// side they are kept at each time, down to [`MIN_PICTURE_SIDE`]: every controller keeps its
+/// pictures, smaller, rather than one going without (a controller can have a dozen large ones).
+/// The side they were kept at.
+pub fn fit_pictures(models: &mut [Model]) -> u32 {
+    let total = |models: &[Model]| models.iter().map(|m| picture_bytes(&m.images)).fold(0, u64::saturating_add);
+    let mut side = model::KEPT_IMAGE_SIDE;
+    while !pictures_fit(0, total(models)) && side > MIN_PICTURE_SIDE {
+        side /= 2;
+        for image in models.iter_mut().flat_map(|m| m.images.iter_mut()) {
+            if image.size[0].max(image.size[1]) > side {
+                *image = image.shrunk(side);
+            }
+        }
+    }
+    side
+}
+
 /// The controllers' models by their asset's id.
 pub type Models = HashMap<[u8; 16], Arc<Model>>;
 
 /// Each of `assets` read into a model (its meshes, and its pictures decoded); one that cannot be
 /// read is left out, and the log says why.
 pub fn read(assets: Vec<solidcraft_xr::ModelAsset>) -> Models {
-    assets
-        .into_iter()
-        .filter_map(|a| match model::parse(&a.glb, &a.nodes) {
-            Ok(model) => Some((a.cache, Arc::new(model))),
-            Err(e) => {
-                log::info!("VR: a controller model was not read: {e}");
-                None
+    let listed = assets.len();
+    let mut ids = Vec::new();
+    let mut read = Vec::new();
+    for a in assets {
+        // An asset listed twice (both hands hold the same kind) is read once.
+        if ids.contains(&a.cache) {
+            continue;
+        }
+        match model::parse(&a.glb, &a.nodes) {
+            Ok(model) => {
+                ids.push(a.cache);
+                read.push(model);
             }
-        })
-        .collect()
+            Err(e) => log::info!("VR: a controller model was not read: {e}"),
+        }
+    }
+    let side = fit_pictures(&mut read);
+    let pictures: Vec<usize> = read.iter().map(|m| m.images.len()).collect();
+    let bytes = read.iter().map(|m| picture_bytes(&m.images)).fold(0, u64::saturating_add);
+    log::info!("VR: {} of {listed} controller models read; pictures {pictures:?}, at most {side} pixels a side, {bytes} bytes", read.len());
+    ids.into_iter().zip(read).map(|(id, model)| (id, Arc::new(model))).collect()
 }
 
 /// Reads the controllers' models beside the frame: parsing a model and decoding its pictures
@@ -145,6 +183,8 @@ pub struct Controllers {
     /// A white picture for meshes without one.
     white: wgpu::TextureView,
     uploaded: HashMap<Key, Uploaded>,
+    /// Each asset's pictures, shared by the hands.
+    pictures: HashMap<[u8; 16], Pictures>,
     /// The meshes to draw this frame, after [`Controllers::prepare`]: which model, which mesh.
     shown: Vec<(Key, usize)>,
 }
@@ -220,7 +260,7 @@ impl Controllers {
             cache: None,
         });
         let white = picture(device, queue, [1, 1], &[255; 4]);
-        Controllers { pipeline, layout, white, uploaded: HashMap::new(), shown: Vec::new() }
+        Controllers { pipeline, layout, white, uploaded: HashMap::new(), pictures: HashMap::new(), shown: Vec::new() }
     }
 
     /// Get `draws` ready: each model uploaded the first time it is seen (with `view_uniform` and
@@ -228,17 +268,25 @@ impl Controllers {
     /// are let go; the others stay uploaded while they are not drawn (tracking lost a moment).
     pub fn prepare(&mut self, rs: &egui_wgpu::RenderState, draws: &[Draw], live: &[[u8; 16]], view_uniform: &wgpu::Buffer, sampler: &wgpu::Sampler) {
         keep_live(&mut self.uploaded, live);
+        self.pictures.retain(|id, _| live.contains(id));
         self.shown.clear();
         for draw in draws {
-            if !self.uploaded.contains_key(&draw.key) {
-                let used = self.uploaded.values().map(|u| u.picture_bytes).fold(0, u64::saturating_add);
-                let with_pictures = pictures_fit(used, picture_bytes(&draw.model.images));
-                if !with_pictures {
+            if !self.pictures.contains_key(&draw.key.0) {
+                let used = self.pictures.values().map(|p| p.bytes).fold(0, u64::saturating_add);
+                let bytes = picture_bytes(&draw.model.images);
+                let pictures = if pictures_fit(used, bytes) {
+                    let views = draw.model.images.iter().map(|image| picture(&rs.device, &rs.queue, image.size, &image.rgba)).collect();
+                    Pictures { views, bytes }
+                } else {
                     log::info!("VR: a controller model is drawn without its pictures: they would take more than {MAX_PICTURE_BYTES} bytes");
-                }
-                let meshes = self.upload(rs, &draw.model, with_pictures, view_uniform, sampler);
-                let picture_bytes = if with_pictures { picture_bytes(&draw.model.images) } else { 0 };
-                self.uploaded.insert(draw.key, Uploaded { meshes, picture_bytes });
+                    Pictures { views: Vec::new(), bytes: 0 }
+                };
+                self.pictures.insert(draw.key.0, pictures);
+            }
+            if !self.uploaded.contains_key(&draw.key) {
+                let views = self.pictures.get(&draw.key.0).map_or(&[][..], |p| &p.views[..]);
+                let meshes = self.upload(rs, &draw.model, views, view_uniform, sampler);
+                self.uploaded.insert(draw.key, Uploaded { meshes });
             }
             let Some(uploaded) = self.uploaded.get(&draw.key) else { continue };
             for (i, mesh) in uploaded.meshes.iter().enumerate() {
@@ -249,20 +297,18 @@ impl Controllers {
         }
     }
 
-    /// The meshes of `model` on the GPU, and its pictures `with_pictures` (else each mesh in its
-    /// colour alone).
+    /// The meshes of `model` on the GPU, bound to its asset's `pictures` on the GPU (none: each
+    /// mesh in its colour alone).
     fn upload(
         &self,
         rs: &egui_wgpu::RenderState,
         model: &Model,
-        with_pictures: bool,
+        pictures: &[wgpu::TextureView],
         view_uniform: &wgpu::Buffer,
         sampler: &wgpu::Sampler,
     ) -> Vec<GpuMesh> {
         use wgpu::util::DeviceExt as _;
         let device = &rs.device;
-        let pictures: Vec<wgpu::TextureView> =
-            if with_pictures { model.images.iter().map(|image| picture(device, &rs.queue, image.size, &image.rgba)).collect() } else { Vec::new() };
         model
             .meshes
             .iter()
@@ -423,6 +469,28 @@ mod tests {
         assert!(pictures_fit(MAX_PICTURE_BYTES, 0), "no pictures always fit");
         assert_eq!(picture_bytes(&with(&[[u32::MAX, u32::MAX]; 16])), u64::MAX, "saturated, not wrapped");
         assert!(!pictures_fit(0, u64::MAX) && !pictures_fit(u64::MAX, 1));
+    }
+
+    /// Pictures too large together are shrunk until they fit, every model keeping its own, in
+    /// their shape; ones that fit are kept as they are. Two Steam Frame controllers have 9 and 12
+    /// pictures of 2048 a side: kept at 1024.
+    #[test]
+    fn the_controllers_pictures_are_shrunk_to_fit_together() {
+        let blank = |side: u32| model::Image { size: [side, side], rgba: vec![0; (side * side * 4) as usize] };
+        let with = |count: usize, side: u32| {
+            let mut model = Model::default();
+            model.images = (0..count).map(|_| blank(side)).collect();
+            model
+        };
+        let mut frame = [with(9, 2048), with(12, 2048)];
+        assert_eq!(fit_pictures(&mut frame), 1024);
+        assert!(frame.iter().all(|m| m.images.iter().all(|i| i.size == [1024, 1024] && i.rgba.len() == 1024 * 1024 * 4)));
+        assert!(pictures_fit(0, frame.iter().map(|m| picture_bytes(&m.images)).sum()));
+        let mut small = [with(2, 256)];
+        assert_eq!(fit_pictures(&mut small), model::KEPT_IMAGE_SIDE, "fits: nothing shrunk");
+        assert_eq!(small[0].images[0].size, [256, 256]);
+        let mut none: [Model; 0] = [];
+        assert_eq!(fit_pictures(&mut none), model::KEPT_IMAGE_SIDE);
     }
 
     /// The controllers draw over the backdrop with the depth buffer every pipeline after it

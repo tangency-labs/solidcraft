@@ -104,7 +104,8 @@ pub fn items(group: Group, state: &State) -> Vec<Item> {
                 current: state.passthrough && state.passthrough_offered,
                 ..item(Act::Passthrough, "vr.belt_passthrough", Some("eye"), state.passthrough_offered)
             },
-            item(Act::PutBack, "vr.menu_put_back", Some("home"), true),
+            // The house alone: no words beneath it.
+            Item { words: String::new(), ..item(Act::PutBack, "vr.menu_put_back", Some("home"), true) },
         ],
         Group::Edit => {
             vec![item(Act::Undo, "vr.menu_undo", Some("undo"), state.can_undo), item(Act::Redo, "vr.menu_redo", Some("redo"), state.can_redo)]

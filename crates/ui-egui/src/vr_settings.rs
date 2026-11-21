@@ -233,6 +233,19 @@ pub enum StickAction {
     UndoRedo,
 }
 
+/// What the ring menu's part actions (Show/Hide, Hide, Isolate) act on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActsOn {
+    /// The selection while there is one, whatever the ray points at; the part pointed at when
+    /// nothing is selected.
+    #[default]
+    Selection,
+    /// The part pointed at (with the whole selection when it is in it); the selection when the
+    /// ray points at no part.
+    Pointed,
+}
+
 /// Which stick does what while one hand holds the model.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -313,6 +326,8 @@ pub struct VrSettings {
     pub ring: Vec<RingAction>,
     /// The ring menu's groups ([`GROUPS`]).
     pub ring_groups: Vec<RingGroup>,
+    /// What the ring menu's part actions act on.
+    pub acts_on: ActsOn,
     /// The belt: groups of what manages the designs and the room, at the hips.
     pub belt: bool,
     /// How far below the eyes the belt is (metres).
@@ -461,6 +476,7 @@ impl Default for VrSettings {
                 RingAction::Group(0),
                 RingAction::Group(1),
             ],
+            acts_on: ActsOn::Selection,
             ring_groups: vec![
                 RingGroup {
                     name: "vr.group_view".into(),
@@ -655,7 +671,6 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::text(ui, &tr("prefs.vr.note"), ui_kit::Text::Hint("vr_settings_note"));
     ui_kit::settings_section(ui, "vr_buttons", &tr("prefs.vr.sec_buttons"), |ui| buttons(app, ui));
     ui_kit::settings_section(ui, "vr_ring", &tr("prefs.vr.sec_ring"), |ui| ring_settings(app, ui));
-    let passthrough_missing = app_passthrough_missing(&app.services.vr_passthrough);
     let s = &mut app.preferences.vr;
     // Numbers in fields: they are seldom changed, and only while VR is worked out.
     let number = |ui: &mut egui::Ui, words: &str, value: &mut f32, range: std::ops::RangeInclusive<f32>, step: f64| {
@@ -708,9 +723,6 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     ui_kit::settings_section(ui, "vr_look", &tr("prefs.vr.sec_look"), |ui| {
         ui_kit::checkbox(ui, &tr("prefs.vr.passthrough"), &mut s.passthrough);
-        if passthrough_missing {
-            ui_kit::text(ui, &tr("prefs.vr.passthrough_missing"), ui_kit::Text::Hint("vr_passthrough_missing"));
-        }
         ui_kit::checkbox(ui, &tr("prefs.vr.joints"), &mut s.joints);
         number(ui, "prefs.vr.grid", &mut s.grid, SHARE, 0.05);
         number(ui, "prefs.vr.grid_reach", &mut s.grid_reach, GRID_REACH, 1.0);
@@ -827,6 +839,13 @@ fn ring_settings(app: &mut SolveApp, ui: &mut egui::Ui) {
     let tr = |k: &str| solidcraft_ui_text::tr(k).to_string();
     ui_kit::text(ui, &tr("prefs.vr.ring"), ui_kit::Text::Hint("vr_ring"));
     let s = &mut app.preferences.vr;
+    segments(
+        ui,
+        &tr("prefs.vr.acts_on"),
+        &[tr("prefs.vr.acts_on_selection"), tr("prefs.vr.acts_on_pointed")],
+        &mut s.acts_on,
+        &[ActsOn::Selection, ActsOn::Pointed],
+    );
     while s.ring_groups.len() < GROUPS {
         s.ring_groups.push(RingGroup::default());
     }
@@ -931,11 +950,6 @@ fn segments<T: Copy + PartialEq>(ui: &mut egui::Ui, label: &str, names: &[String
             *value = values.get(at).copied().unwrap_or(*value);
         }
     });
-}
-
-/// Whether the running VR session said it cannot show the real room (`Some(false)`).
-fn app_passthrough_missing(offered: &Option<bool>) -> bool {
-    *offered == Some(false)
 }
 
 /// A dropdown row choosing `value` among `values`, named by `names`.

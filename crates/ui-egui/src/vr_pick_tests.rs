@@ -3,6 +3,7 @@
 
 use crate::scenario::Harness;
 use crate::vr_pick::{self, Part};
+use crate::vr_settings::ActsOn;
 use serde_json::json;
 use solidcraft_engine::Sel;
 
@@ -65,18 +66,18 @@ fn a_body_that_is_not_there_is_no_placement() {
 #[test]
 fn without_a_pointed_part_an_action_acts_on_the_selection() {
     let (mut h, part, inner) = body_and_placement();
-    assert!(vr_pick::acted_on(&h.app, None).is_empty(), "nothing selected, nothing pointed at");
+    assert!(vr_pick::acted_on(&h.app, None, ActsOn::Pointed).is_empty(), "nothing selected, nothing pointed at");
     let top = vr_pick::part_of(&h.app, "Top");
     let placed = vr_pick::part_of(&h.app, &inner);
     vr_pick::toggle(&mut h.app, Some(&top));
     vr_pick::toggle(&mut h.app, Some(&placed));
     assert!(vr_pick::is_selected(&h.app, &top) && vr_pick::is_selected(&h.app, &placed));
-    let on = vr_pick::acted_on(&h.app, None);
+    let on = vr_pick::acted_on(&h.app, None, ActsOn::Pointed);
     assert_eq!(on.iter().map(|p| p.sel.clone()).collect::<Vec<_>>(), vec![top.sel.clone(), Sel::Occurrence { path: vec![part] }]);
     assert_eq!(on[1].bodies, vec![inner.clone()]);
     vr_pick::toggle(&mut h.app, Some(&top));
     assert!(!vr_pick::is_selected(&h.app, &top), "the trigger again takes it out");
-    assert_eq!(names(&vr_pick::acted_on(&h.app, None)), names(std::slice::from_ref(&placed)));
+    assert_eq!(names(&vr_pick::acted_on(&h.app, None, ActsOn::Pointed)), names(std::slice::from_ref(&placed)));
     vr_pick::toggle(&mut h.app, None);
     assert!(h.app.session.selection.is_empty(), "the trigger on nothing clears the selection");
 }
@@ -89,10 +90,10 @@ fn a_pointed_part_is_acted_on_alone_or_with_the_selection_it_is_in() {
     let top = vr_pick::part_of(&h.app, "Top");
     let placed = vr_pick::part_of(&h.app, &inner);
     vr_pick::toggle(&mut h.app, Some(&top));
-    assert_eq!(vr_pick::acted_on(&h.app, Some(&placed)), vec![placed.clone()], "not selected: alone");
+    assert_eq!(vr_pick::acted_on(&h.app, Some(&placed), ActsOn::Pointed), vec![placed.clone()], "not selected: alone");
     vr_pick::toggle(&mut h.app, Some(&placed));
-    assert_eq!(names(&vr_pick::acted_on(&h.app, Some(&placed))), names(&[top.clone(), placed.clone()]), "selected: the whole selection");
-    assert_eq!(names(&vr_pick::acted_on(&h.app, Some(&top))), names(&[top, placed]));
+    assert_eq!(names(&vr_pick::acted_on(&h.app, Some(&placed), ActsOn::Pointed)), names(&[top.clone(), placed.clone()]), "selected: the whole selection");
+    assert_eq!(names(&vr_pick::acted_on(&h.app, Some(&top), ActsOn::Pointed)), names(&[top, placed]));
 }
 
 /// Selected items that are not parts (a face, a feature, a placement that no longer exists)
@@ -104,11 +105,11 @@ fn selected_items_that_are_not_parts_are_left_out() {
     let top = vr_pick::part_of(&h.app, "Top");
     let face = Sel::Face { body: "Top".into(), index: 0, point: solidcore_record::Vec3::new(5.0, 5.0, 10.0) };
     h.app.session.selection = vec![face, Sel::Feature { id: 1 }, Sel::Occurrence { path: vec![9999] }];
-    assert!(vr_pick::acted_on(&h.app, None).is_empty());
+    assert!(vr_pick::acted_on(&h.app, None, ActsOn::Pointed).is_empty());
     assert!(vr_pick::selected_parts(&h.app).is_empty());
-    assert_eq!(vr_pick::acted_on(&h.app, Some(&top)), vec![top.clone()]);
+    assert_eq!(vr_pick::acted_on(&h.app, Some(&top), ActsOn::Pointed), vec![top.clone()]);
     h.app.session.selection.push(top.sel.clone());
-    assert_eq!(vr_pick::acted_on(&h.app, Some(&top)), vec![top], "only the part of the selection");
+    assert_eq!(vr_pick::acted_on(&h.app, Some(&top), ActsOn::Pointed), vec![top], "only the part of the selection");
 }
 
 /// Nothing is not all hidden; a list is all hidden only when every part in it is, a body by its
@@ -429,4 +430,129 @@ fn bodies_of_lists_each_body_once_in_order() {
     };
     assert_eq!(vr_pick::bodies_of(&[part(&["B", "A"]), part(&["A", "C", "B"])]), ["B", "A", "C"]);
     assert!(vr_pick::bodies_of(std::iter::empty::<&Part>()).is_empty());
+}
+
+/// A design `Top`, holding the placement `Bay` with its own body `Cell` and, inside it, the
+/// placement `Contact` with the body `Pin`; the root active. The harness, `Bay`'s and
+/// `Contact`'s components and placements, and `Cell`'s and `Pin`'s world names.
+fn nested() -> (Harness, [u64; 2], [u64; 2], [String; 2]) {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Top"})).unwrap();
+    let bay = h.app.run("component.create", json!({"name":"Bay"})).unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[20,0,0],"body_name":"Cell"})).unwrap();
+    let contact = h.app.run("component.create", json!({"name":"Contact"})).unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[40,0,0],"body_name":"Pin"})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.settle();
+    let id = |v: &serde_json::Value, k: &str| v[k].as_u64().unwrap();
+    let (components, occurrences) = ([id(&bay, "component"), id(&contact, "component")], [id(&bay, "occurrence"), id(&contact, "occurrence")]);
+    let pin = h.app.session.occurrence_bodies(&occurrences, true).unwrap();
+    let cell: Vec<String> = h.app.session.occurrence_bodies(&occurrences[..1], true).unwrap().into_iter().filter(|b| !pin.contains(b)).collect();
+    assert_eq!((cell.len(), pin.len()), (1, 1), "{cell:?} {pin:?}");
+    (h, components, occurrences, [cell[0].clone(), pin[0].clone()])
+}
+
+/// The level a body is picked at: one inside the active placement, the body itself when it is
+/// the active component's own, and as with the root active when the body is not inside the
+/// active placement or that is not known.
+#[test]
+fn a_pick_is_one_level_inside_the_active_placement() {
+    use vr_pick::picked_at;
+    assert_eq!(picked_at(&[], Some(&[])), None, "a root body is itself");
+    assert_eq!(picked_at(&[1, 2, 3], Some(&[])), Some(vec![1]), "the root active: the top-level placement");
+    assert_eq!(picked_at(&[1, 2, 3], Some(&[1])), Some(vec![1, 2]));
+    assert_eq!(picked_at(&[1, 2, 3], Some(&[1, 2])), Some(vec![1, 2, 3]));
+    assert_eq!(picked_at(&[1, 2, 3], Some(&[1, 2, 3])), None, "the active component's own body is itself");
+    assert_eq!(picked_at(&[1, 2, 3], Some(&[4])), Some(vec![1]), "outside the active placement: as with the root");
+    assert_eq!(picked_at(&[1, 2, 3], Some(&[1, 2, 3, 4])), Some(vec![1]), "a placement inside the body's is not around it");
+    assert_eq!(picked_at(&[1, 2, 3], None), Some(vec![1]));
+    assert_eq!(picked_at(&[], Some(&[4])), None);
+}
+
+/// Activating a subassembly picks the parts it holds: its own bodies, and the placements directly
+/// inside it; activating one of those goes a level deeper again. The root active picks the
+/// top-level placement, and a body outside the active component is picked as with the root.
+#[test]
+fn activating_a_subassembly_picks_what_it_holds() {
+    let (mut h, [bay_c, contact_c], [bay, contact], [cell, pin]) = nested();
+    let sel = |h: &Harness, body: &str| vr_pick::part_of(&h.app, body).sel;
+    assert_eq!(sel(&h, &cell), Sel::Occurrence { path: vec![bay] });
+    assert_eq!(sel(&h, &pin), Sel::Occurrence { path: vec![bay] }, "the root active: the top-level placement");
+    assert_eq!(sel(&h, "Top"), Sel::Body { name: "Top".into() });
+
+    h.app.run("component.activate", json!({"component": bay_c, "occurrence": bay, "path": [bay]})).unwrap();
+    h.settle();
+    assert_eq!(sel(&h, &cell), Sel::Body { name: cell.clone() }, "the active component's own body");
+    let deeper = vr_pick::part_of(&h.app, &pin);
+    assert_eq!(deeper.sel, Sel::Occurrence { path: vec![bay, contact] });
+    let row = h.app.session.occurrence_children(&[bay]).unwrap().into_iter().find(|c| c.path == [bay, contact]).unwrap();
+    assert_eq!((deeper.name, deeper.bodies), (row.name, vec![pin.clone()]), "named as its Browser row");
+    assert_eq!(sel(&h, "Top"), Sel::Body { name: "Top".into() }, "outside the active component: as with the root");
+
+    h.app.run("component.activate", json!({"component": contact_c, "occurrence": contact, "path": [bay, contact]})).unwrap();
+    h.settle();
+    assert_eq!(sel(&h, &pin), Sel::Body { name: pin.clone() });
+    assert_eq!(sel(&h, &cell), Sel::Occurrence { path: vec![bay] }, "a body around the active component is outside it");
+
+    // Activated by the component alone: its placement on the way to the body.
+    h.app.run("component.activate", json!({"component": bay_c})).unwrap();
+    h.settle();
+    if h.app.session.active_occurrence_path.is_none() {
+        assert_eq!(sel(&h, &cell), Sel::Body { name: cell.clone() });
+        assert_eq!(sel(&h, &pin), Sel::Occurrence { path: vec![bay, contact] });
+    }
+}
+
+/// A selected placement is named as its own Browser row, whatever level the pick is at.
+#[test]
+fn a_selected_placement_keeps_its_own_name() {
+    let (mut h, _, [bay, contact], _) = nested();
+    h.app.session.selection = vec![Sel::Occurrence { path: vec![bay, contact] }];
+    let row = h.app.session.occurrence_children(&[bay]).unwrap().into_iter().find(|c| c.path == [bay, contact]).unwrap();
+    assert_eq!(names(&vr_pick::selected_parts(&h.app)), vec![row.name]);
+}
+
+/// Show all shows every hidden body and placement again, in one undo step, and leaves a hidden
+/// sketch and a hidden joint hidden.
+#[test]
+fn show_all_shows_the_parts_and_leaves_sketches_and_joints_alone() {
+    let (mut h, joint) = jointed();
+    h.app.run("sketch.create", json!({"plane": "XY", "offset": 50, "name": "Note"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.settle();
+    let sketch = h.app.session.model.state().sketches.last().unwrap().feature;
+    h.app.run("browser.visibility", json!({"joints": [joint], "visible": false})).unwrap();
+    h.app.run("browser.visibility", json!({"items": ["Note"], "visible": false})).unwrap();
+    let a = h.app.session.doc.find_component("A").unwrap();
+    let path = vec![h.app.session.doc.occurrence_of(a).unwrap().id];
+    let body = h.app.session.occurrence_bodies(&path, true).unwrap()[0].clone();
+    let placed = vr_pick::part_of(&h.app, &body);
+    vr_pick::hide(&mut h.app, &[placed]).unwrap();
+    assert!(h.app.session.occurrence_hidden(&path));
+    assert!(h.app.session.visibility.hidden_sketches.contains(&sketch) && h.app.session.visibility.hidden_joints.contains(&joint));
+    let undo = h.app.session.undo.len();
+    vr_pick::show_all(&mut h.app).unwrap();
+    assert!(!h.app.session.occurrence_hidden(&path) && h.app.session.visibility.hidden_bodies.is_empty(), "the parts show");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    assert!(h.app.session.visibility.hidden_sketches.contains(&sketch), "the sketch stays hidden");
+    assert!(h.app.session.visibility.hidden_joints.contains(&joint), "the joint stays hidden");
+}
+
+/// Acting on the selection first: with parts selected, an action acts on them whatever the ray
+/// points at, a part in the selection or out of it; with none selected (or only faces and
+/// features), on the part pointed at, and on nothing when nothing is pointed at either.
+#[test]
+fn acting_on_the_selection_first_ignores_what_is_pointed_at() {
+    let (mut h, _, inner) = body_and_placement();
+    let top = vr_pick::part_of(&h.app, "Top");
+    let placed = vr_pick::part_of(&h.app, &inner);
+    let on = |h: &Harness, pointed: Option<&Part>| names(&vr_pick::acted_on(&h.app, pointed, ActsOn::Selection));
+    assert!(on(&h, None).is_empty(), "nothing selected, nothing pointed at");
+    assert_eq!(on(&h, Some(&placed)), names(std::slice::from_ref(&placed)), "nothing selected: the part pointed at");
+    vr_pick::toggle(&mut h.app, Some(&top));
+    assert_eq!(on(&h, Some(&placed)), names(std::slice::from_ref(&top)), "the selection, not the part pointed at");
+    assert_eq!(on(&h, Some(&top)), names(std::slice::from_ref(&top)));
+    assert_eq!(on(&h, None), names(std::slice::from_ref(&top)));
+    h.app.session.selection = vec![Sel::Feature { id: 1 }];
+    assert_eq!(on(&h, Some(&placed)), names(&[placed]), "a selection of no parts: the part pointed at");
 }

@@ -15,3 +15,9 @@ const OWNER: ContentOwner = ContentOwner(0x5652);
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, lit: &mut Vec<String>) {
     crate::semantic_content::show_detached(app, ui, OWNER, lit);
 }
+
+/// The headset's Browser closed: what Select held in it (a drag over the eyes, a row drag) ends,
+/// and the window's frame treats it as not drawn from now on.
+pub fn close(app: &mut SolveApp) {
+    crate::semantic_content::close_detached(app, OWNER);
+}

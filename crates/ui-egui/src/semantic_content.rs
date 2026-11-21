@@ -70,6 +70,11 @@ pub(crate) struct OwnerState {
     output: Output,
     actions: Option<crate::browser::Actions>,
     presented: bool,
+    /// The context of its own this presentation is drawn in, between the window's frames (the
+    /// VR headset's Browser, [`show_detached`]); `None` for one the window draws. The window's
+    /// frame never draws it, so it does not end its gestures as gone; whatever ends them does so
+    /// through this context, which holds them.
+    detached: Option<egui::Context>,
 }
 
 impl OwnerState {
@@ -307,9 +312,13 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut Ui, owner: ContentOwner, request
 /// The Browser drawn into `ui` of a context of its own (the VR headset's window on the belt),
 /// between the window's frames, as `owner`: its rows, folds, eyes and selecting work as in the
 /// window. What its pointer lights goes into `lit` (as `vr_pick::light` keeps it); its context
-/// menu and drops, which belong to the window, are not opened.
+/// menu and drops, which belong to the window, are not opened, and it only views the design: no
+/// row is renamed, dragged or edited from it (a double click is a plain click).
 pub(crate) fn show_detached(app: &mut SolveApp, ui: &mut Ui, owner: ContentOwner, lit: &mut Vec<String>) {
     let request = ContentRequest::Browser { shrink_height: false };
+    app.tree.content.owners.entry(owner).or_default().detached = Some(ui.ctx().clone());
+    // Only viewing: its rows select, fold, show, hide and activate; nothing renames or edits.
+    ui.ctx().data_mut(|data| data.insert_temp(crate::browser::view_only_id(), true));
     let active = app.tree.content.active.take();
     // The window's context stays the one its drags and captures are ended through.
     let context = app.tree.content.context.clone();
@@ -326,6 +335,20 @@ pub(crate) fn show_detached(app: &mut SolveApp, ui: &mut Ui, owner: ContentOwner
     app.tree.content.active = active;
     if context.is_some() {
         app.tree.content.context = context;
+    }
+}
+
+/// The presentation `owner` drawn in a context of its own ([`show_detached`]) is closed: what it
+/// held (an eye drag, a row drag) ends through its context, and the window's frame treats it as
+/// any presentation not drawn from now on.
+pub(crate) fn close_detached(app: &mut SolveApp, owner: ContentOwner) {
+    if app.tree.content.owners.get(&owner).is_none_or(|state| state.detached.is_none()) {
+        return;
+    }
+    let ctx = app.tree.content.context.clone().unwrap_or_default();
+    end_panel_gestures(app, &ctx, owner, app.session.uid);
+    if let Some(state) = app.tree.content.owners.get_mut(&owner) {
+        state.detached = None;
     }
 }
 
@@ -385,10 +408,13 @@ pub(crate) fn content_source(source: crate::ui_kit::browser::Source) -> ContentS
 
 /// End what the panel holds for presentation `owner` (an eye drag, a row drag): it is gone, or
 /// its document is. An eye drag it held becomes one undo step.
+/// A presentation drawn in a context of its own ([`OwnerState::detached`]) has them ended through
+/// that one, whatever `ctx` is.
 fn end_panel_gestures(app: &mut SolveApp, ctx: &egui::Context, owner: ContentOwner, session: u64) {
     let source = crate::ui_kit::browser::Source { scope: session, presentation: owner.0 };
     let Some(state) = app.tree.content.owners.get_mut(&owner) else { return };
-    let ended = crate::ui_kit::browser::end_gestures(ctx, &mut state.browser, source);
+    let ctx = state.detached.clone().unwrap_or_else(|| ctx.clone());
+    let ended = crate::ui_kit::browser::end_gestures(&ctx, &mut state.browser, source);
     if ended.contains(&crate::ui_kit::browser::Event::EyeGesture(crate::ui_kit::browser::Gesture::End)) {
         crate::browser::merge_eye_drag(app, true);
     }
@@ -463,7 +489,9 @@ pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
         crate::browser::end_eye_drag(app, ctx);
         capture = None;
     }
-    let gone: Vec<ContentOwner> = app.tree.content.owners.iter().filter(|(_, state)| !state.presented).map(|(owner, _)| *owner).collect();
+    // A presentation in a context of its own is drawn between the window's frames, never in one.
+    let gone: Vec<ContentOwner> =
+        app.tree.content.owners.iter().filter(|(_, state)| !state.presented && state.detached.is_none()).map(|(owner, _)| *owner).collect();
     for owner in gone {
         end_panel_gestures(app, ctx, owner, app.session.uid);
     }

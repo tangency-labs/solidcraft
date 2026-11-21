@@ -232,11 +232,12 @@ impl Panel {
         self.picture.as_ref().map(|(view, _)| view)
     }
 
-    /// The window closed: Select held on it lets go, the pointer leaves it and what it lit goes
-    /// out.
+    /// The window closed: Select held on it lets go, the pointer leaves it, what it lit goes
+    /// out and what the Browser in it held (a drag over its eyes) ends.
     pub fn close(&mut self, app: &mut SolveApp) {
         self.events.extend(self.pointer.gone());
         solidcraft_ui_egui::vr_pick::light(app, &mut self.lit, Vec::new());
+        solidcraft_ui_egui::vr_browser::close(app);
     }
 }
 

@@ -7,6 +7,7 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
+use crate::vr_settings::ActsOn;
 
 /// What a ray stops at.
 #[derive(Clone, Debug, PartialEq)]
@@ -19,8 +20,8 @@ pub struct RayHit {
     pub point: [f64; 3],
 }
 
-/// A part as VR names, lights and selects it: an occurrence as the Browser shows it, or a body of
-/// the root component.
+/// A part as VR names, lights and selects it: an occurrence as the Browser shows it, or a body
+/// (of the root component, or of the component active).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Part {
     /// What selecting it selects.
@@ -65,24 +66,61 @@ pub fn view_section(app: &SolveApp) -> Vec<Cut> {
     crate::viewport::section_planes(app).iter().map(|p| ([p.origin.x, p.origin.y, p.origin.z], [p.normal.x, p.normal.y, p.normal.z])).collect()
 }
 
-/// The part `body` belongs to: its outermost placement, as the Browser selects it, or the body
-/// itself in the root component.
+/// The part `body` is picked as, one level inside the component active (the Browser's radio): a
+/// body of that component is itself, one further in is the placement directly inside it on the
+/// way to the body, as the Browser selects it. Activating a subassembly so picks the parts it
+/// holds. A body outside the component active is picked as with the root active: its top-level
+/// placement, or itself in the root component.
 pub fn part_of(app: &SolveApp, body: &str) -> Part {
-    let sel = crate::viewport::component_selection(app, body);
-    match &sel {
-        Sel::Occurrence { path } => {
-            let parent = &path[..path.len().saturating_sub(1)];
-            let name = app
-                .session
-                .occurrence_children(parent)
-                .ok()
-                .and_then(|children| children.into_iter().find(|c| &c.path == path))
-                .map_or_else(|| body.to_string(), |c| c.name);
-            let bodies = app.session.occurrence_bodies(path, true).unwrap_or_else(|_| vec![body.to_string()]);
-            Part { sel, name, bodies }
-        }
-        _ => Part { sel, name: body.to_string(), bodies: vec![body.to_string()] },
+    let own = match crate::viewport::component_selection(app, body) {
+        Sel::Occurrence { path } => path,
+        _ => Vec::new(),
+    };
+    let active = active_path(app, &own);
+    match picked_at(&own, active.as_deref()) {
+        Some(path) => placement(app, &path).unwrap_or_else(|| Part {
+            sel: Sel::Occurrence { path },
+            name: body.to_string(),
+            bodies: vec![body.to_string()],
+        }),
+        None => Part { sel: Sel::Body { name: body.to_string() }, name: body.to_string(), bodies: vec![body.to_string()] },
     }
+}
+
+/// The placement path of the component active, `[]` for the root; `own` is the path of the
+/// placement a body belongs to. Activated through one of its placements, that one; activated by
+/// the component alone, its placement on the way to the body (`None` when the body is not in it).
+fn active_path(app: &SolveApp, own: &[u64]) -> Option<Vec<u64>> {
+    let session = &app.session;
+    if session.active_component == 0 {
+        return Some(Vec::new());
+    }
+    if let Some(path) = &session.active_occurrence_path {
+        return Some(path.clone());
+    }
+    let placements = session.placed_document().placements();
+    (1..=own.len())
+        .map(|n| &own[..n])
+        .find(|prefix| placements.iter().any(|(component, path, _)| *component == session.active_component && path.as_slice() == *prefix))
+        .map(<[u64]>::to_vec)
+}
+
+/// The placement a body in the placement `own` is picked as, with the component active at
+/// `active` (`None`: not known): the one directly inside the active one on the way to `own`, or
+/// `None` for the body itself, which is the active component's own. With `own` not inside the
+/// active one, as with the root active.
+pub fn picked_at(own: &[u64], active: Option<&[u64]>) -> Option<Vec<u64>> {
+    let base = active.filter(|a| own.starts_with(a)).unwrap_or(&[]);
+    (own.len() > base.len()).then(|| own[..=base.len()].to_vec())
+}
+
+/// The placement at `path` as a part: named as its Browser row, with its bodies; `None` when no
+/// row or no body is there.
+fn placement(app: &SolveApp, path: &[u64]) -> Option<Part> {
+    let parent = &path[..path.len().saturating_sub(1)];
+    let row = app.session.occurrence_children(parent).ok()?.into_iter().find(|c| c.path == path)?;
+    let bodies = app.session.occurrence_bodies(path, true).ok().filter(|b| !b.is_empty())?;
+    Some(Part { sel: Sel::Occurrence { path: path.to_vec() }, name: row.name, bodies })
 }
 
 /// Whether `part` is selected now.
@@ -107,9 +145,8 @@ pub fn targets(app: &SolveApp, pointed: &Part) -> Vec<Part> {
     for sel in &app.session.selection {
         let part = match sel {
             Sel::Occurrence { path } => {
-                let bodies = app.session.occurrence_bodies(path, true).unwrap_or_default();
-                let Some(first) = bodies.first() else { continue };
-                Part { name: part_of(app, first).name, sel: sel.clone(), bodies }
+                let Some(part) = placement(app, path) else { continue };
+                part
             }
             Sel::Body { name } => Part { sel: sel.clone(), name: name.clone(), bodies: vec![name.clone()] },
             _ => continue,
@@ -124,11 +161,7 @@ pub fn selected_parts(app: &SolveApp) -> Vec<Part> {
     let mut parts = Vec::new();
     for sel in &app.session.selection {
         match sel {
-            Sel::Occurrence { path } => {
-                let bodies = app.session.occurrence_bodies(path, true).unwrap_or_default();
-                let Some(first) = bodies.first() else { continue };
-                parts.push(Part { name: part_of(app, first).name, sel: sel.clone(), bodies });
-            }
+            Sel::Occurrence { path } => parts.extend(placement(app, path)),
             Sel::Body { name } => parts.push(Part { sel: sel.clone(), name: name.clone(), bodies: vec![name.clone()] }),
             _ => {}
         }
@@ -136,12 +169,17 @@ pub fn selected_parts(app: &SolveApp) -> Vec<Part> {
     parts
 }
 
-/// What an action on the parts acts on: the part pointed at (with the selection, when it is in
-/// it), else the selection. Empty: nothing to act on.
-pub fn acted_on(app: &SolveApp, pointed: Option<&Part>) -> Vec<Part> {
-    match pointed {
-        Some(part) => targets(app, part),
-        None => selected_parts(app),
+/// What an action on the parts acts on, as `acts` says: with [`ActsOn::Selection`] the parts
+/// selected while there are any, else the part `pointed` at; with [`ActsOn::Pointed`] the part
+/// pointed at (with the selection, when it is in it), else the selection. Empty: nothing to act
+/// on.
+pub fn acted_on(app: &SolveApp, pointed: Option<&Part>, acts: ActsOn) -> Vec<Part> {
+    let selected = selected_parts(app);
+    match (pointed, acts) {
+        (Some(part), ActsOn::Selection) if selected.is_empty() => vec![part.clone()],
+        (_, ActsOn::Selection) => selected,
+        (Some(part), ActsOn::Pointed) => targets(app, part),
+        (None, ActsOn::Pointed) => selected,
     }
 }
 
@@ -206,9 +244,11 @@ pub fn isolate(app: &mut SolveApp, parts: &[Part]) -> Result<(), String> {
     app.run("browser.visibility", serde_json::json!({ "items": items, "visible": true, "isolate": true })).map(|_| ())
 }
 
-/// Show everything again (folders and placements too), in one step that undo takes back.
+/// Show every part again (bodies and placements, and the folders and groups holding them), in
+/// one step that undo takes back. Sketches, joints, construction geometry and the origin stay as
+/// they are: in the headset they are seldom wanted, and the Browser shows them one by one.
 pub fn show_all(app: &mut SolveApp) -> Result<(), String> {
-    app.run("browser.visibility", serde_json::json!({ "folder": "all", "visible": true })).map(|_| ())
+    app.run("browser.visibility", serde_json::json!({ "folder": "bodies", "visible": true })).map(|_| ())
 }
 
 /// Explode the assembly apart, or put it back together when it is shown apart: the design's first

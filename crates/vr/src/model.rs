@@ -19,6 +19,11 @@ const MAX_IMAGES: usize = 16;
 /// The largest picture side taken (pixels).
 const MAX_IMAGE_SIDE: u32 = 4096;
 
+/// The largest picture side kept (pixels): a controller never takes enough of the view for more,
+/// so a larger picture is shrunk to it as it is read (its shape kept), a quarter of the memory
+/// on the GPU for one of [`MAX_IMAGE_SIDE`].
+pub const KEPT_IMAGE_SIDE: u32 = 2048;
+
 /// The most a picture's decoding may hold at once (bytes): the largest picture at 16 bits a
 /// channel.
 const MAX_IMAGE_BYTES: u64 = MAX_IMAGE_SIDE as u64 * MAX_IMAGE_SIDE as u64 * 8;
@@ -69,8 +74,22 @@ pub struct Image {
     pub rgba: Vec<u8>,
 }
 
-/// A controller's model.
-#[derive(Clone, Debug, PartialEq)]
+impl Image {
+    /// This picture with its longer side at most `side` pixels ([`kept_size`]); as it is when it
+    /// fits already, or when its pixels are not as many as its size says.
+    pub fn shrunk(&self, side: u32) -> Image {
+        let size = kept_size(self.size, side);
+        if size == self.size {
+            return self.clone();
+        }
+        let Some(picture) = image::RgbaImage::from_raw(self.size[0], self.size[1], self.rgba.clone()) else { return self.clone() };
+        let small = image::imageops::resize(&picture, size[0], size[1], image::imageops::FilterType::Triangle);
+        Image { size, rgba: small.into_raw() }
+    }
+}
+
+/// A controller's model (by default an empty one: nothing to draw).
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Model {
     pub nodes: Vec<Node>,
     pub meshes: Vec<Mesh>,
@@ -302,8 +321,27 @@ fn read_image(source: &gltf::Image, blob: Option<&[u8]>) -> Option<Image> {
     if picture.width() > MAX_IMAGE_SIDE || picture.height() > MAX_IMAGE_SIDE || picture.width() == 0 || picture.height() == 0 {
         return None;
     }
+    let [width, height] = kept_size([picture.width(), picture.height()], KEPT_IMAGE_SIDE);
+    let picture = if [width, height] == [picture.width(), picture.height()] {
+        picture
+    } else {
+        picture.resize_exact(width, height, image::imageops::FilterType::Triangle)
+    };
     let rgba = picture.to_rgba8();
     Some(Image { size: [rgba.width(), rgba.height()], rgba: rgba.into_raw() })
+}
+
+/// The size a picture of `size` pixels is kept at with at most `side` pixels a side (one at
+/// least): as it is when it fits, else shrunk so its longer side is that, its shape kept and no
+/// side below one pixel. Pictures are read at most [`KEPT_IMAGE_SIDE`] a side.
+pub fn kept_size(size: [u32; 2], side: u32) -> [u32; 2] {
+    let side = side.max(1);
+    let longest = size[0].max(size[1]);
+    if longest <= side {
+        return size;
+    }
+    let scale = f64::from(side) / f64::from(longest);
+    size.map(|s| ((f64::from(s) * scale).round() as u32).clamp(1, side))
 }
 
 /// Whether the glTF reader can read all of `accessor` from the asset's own buffer `blob`: at
@@ -804,6 +842,36 @@ mod tests {
         assert!(error.contains("meshes"), "{error}");
     }
 
+    /// A picture is kept as it is up to [`KEPT_IMAGE_SIDE`] a side, and larger ones shrunk to it
+    /// in their own shape, never to nothing.
+    #[test]
+    fn large_pictures_are_kept_smaller_in_their_shape() {
+        let kept = |size| kept_size(size, KEPT_IMAGE_SIDE);
+        assert_eq!(kept([KEPT_IMAGE_SIDE, 10]), [KEPT_IMAGE_SIDE, 10]);
+        assert_eq!(kept([16, 16]), [16, 16]);
+        assert_eq!(kept([4096, 4096]), [2048, 2048]);
+        assert_eq!(kept([4096, 1024]), [2048, 512]);
+        assert_eq!(kept([1024, 4096]), [512, 2048]);
+        assert_eq!(kept([3000, 7]), [2048, 5]);
+        assert_eq!(kept([4096, 1]), [2048, 1], "no side below one pixel");
+        assert_eq!(kept([u32::MAX, 1]), [2048, 1]);
+        assert_eq!(kept_size([2048, 2048], 1024), [1024, 1024]);
+        assert_eq!(kept_size([5, 3], 0), [1, 1], "a side of nothing is one pixel");
+    }
+
+    /// A picture shrunk keeps its colours and its shape; one that fits, or whose pixels do not
+    /// match its size, is kept as it is.
+    #[test]
+    fn a_picture_shrunk_keeps_its_colours() {
+        let orange = Image { size: [8, 4], rgba: [255, 128, 0, 255].repeat(32) };
+        let small = orange.shrunk(2);
+        assert_eq!(small.size, [2, 1]);
+        assert_eq!(small.rgba, [255, 128, 0, 255].repeat(2));
+        assert_eq!(orange.shrunk(8), orange, "fits already");
+        let short = Image { size: [8, 4], rgba: vec![0; 3] };
+        assert_eq!(short.shrunk(2), short, "its pixels are not what its size says");
+    }
+
     /// A picture wider than [`MAX_IMAGE_SIDE`], one that only claims to be huge, or one that is
     /// no picture is left out and its mesh drawn plain; the model itself is still read.
     #[test]
@@ -813,7 +881,8 @@ mod tests {
         let wide = model_with(&png(MAX_IMAGE_SIDE + 1, 1));
         assert_eq!((wide.meshes[0].image, wide.images.len()), (None, 0));
         let widest = model_with(&png(MAX_IMAGE_SIDE, 1));
-        assert_eq!(widest.images[0].size, [MAX_IMAGE_SIDE, 1]);
+        assert_eq!(widest.images[0].size, [KEPT_IMAGE_SIDE, 1], "taken, and shrunk");
+        assert_eq!(&widest.images[0].rgba[..4], [255, 128, 0, 255], "in its own colours");
         let broken = model_with(b"\x89PNG\r\n\x1a\n not really");
         assert_eq!((broken.meshes[0].image, broken.images.len()), (None, 0));
         // A real PNG whose header claims 100 000 × 100 000 pixels.

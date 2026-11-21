@@ -72,6 +72,22 @@ pub struct Runtime {
     local_floor: bool,
 }
 
+/// The extensions asked for: `required`, and each extra the runtime lists in `available`. The
+/// floor (`XR_EXT_local_floor`; the play area stands in otherwise), tracked hands as controllers
+/// (a pinch selects, a closed hand grabs), and the models of the controllers actually held, which
+/// take both `XR_EXT_render_model` and `XR_EXT_interaction_render_model`. Their ids are
+/// `XR_EXT_uuid`'s type, asked for where the runtime lists it but never required for them: a
+/// runtime that wants it and does not list it refuses the extras, and VR starts without them.
+fn optional_extensions(available: &xr::ExtensionSet, required: &xr::ExtensionSet) -> xr::ExtensionSet {
+    let mut enabled = required.clone();
+    enabled.ext_local_floor = available.ext_local_floor;
+    enabled.ext_hand_interaction = available.ext_hand_interaction;
+    enabled.ext_render_model = available.ext_render_model && available.ext_interaction_render_model;
+    enabled.ext_interaction_render_model = enabled.ext_render_model;
+    enabled.ext_uuid = enabled.ext_render_model && available.ext_uuid;
+    enabled
+}
+
 impl Runtime {
     /// Find the VR software and its headset. Each way this can fail is its own [`Error`], so the
     /// app can say what to start or plug in.
@@ -83,16 +99,13 @@ impl Runtime {
         }
         let mut required = xr::ExtensionSet::default();
         required.khr_vulkan_enable2 = true;
-        let mut enabled = required.clone();
-        // Where the floor is: asked for where the runtime has it; the play area stands in otherwise.
-        enabled.ext_local_floor = available.ext_local_floor;
-        // Tracked hands as controllers (a pinch selects, a closed hand grabs), and the models of
-        // the controllers actually held (which need `XR_EXT_uuid` for their ids): asked for where
-        // the runtime has them all.
-        enabled.ext_hand_interaction = available.ext_hand_interaction;
-        enabled.ext_render_model = available.ext_render_model && available.ext_interaction_render_model && available.ext_uuid;
-        enabled.ext_interaction_render_model = enabled.ext_render_model;
-        enabled.ext_uuid = enabled.ext_render_model;
+        let mut enabled = optional_extensions(&available, &required);
+        log::info!(
+            "VR: controller models offered: XR_EXT_render_model {}, XR_EXT_interaction_render_model {}, XR_EXT_uuid {}",
+            available.ext_render_model,
+            available.ext_interaction_render_model,
+            available.ext_uuid
+        );
         let app = xr::ApplicationInfo {
             application_name: "SolidCraft",
             application_version: 1,
@@ -294,7 +307,7 @@ pub struct ModelPose {
 }
 
 /// How often asking for the controller models is tried in all after the runtime says they
-/// changed: the first ask and the tries after it failed.
+/// changed: the first ask and the tries after it failed or found none.
 const MODEL_TRIES: u32 = 5;
 
 /// The frames let pass before the first try again after a failed ask; each later one waits
@@ -548,8 +561,8 @@ impl Session {
     /// The models of the controllers held, when they changed since the last call (the user
     /// picked up other controllers, or the runtime found them): every model now, each with its
     /// asset. `None` when nothing changed, and always where the runtime does not hand out models
-    /// (`XR_EXT_render_model`); the app then draws its own marks. Asking that failed is tried
-    /// again a little later, a few times ([`ModelAsk`]); meanwhile there are no models.
+    /// (`XR_EXT_render_model`); the app then draws its own marks. Asking that failed or found none
+    /// is tried again a little later, a few times ([`ModelAsk`]); meanwhile there are no models.
     pub fn new_controller_models(&mut self) -> Option<Vec<ModelAsset>> {
         if !self.models_ask.due() || self.controls.is_none() || self.instance.exts().ext_render_model.is_none() {
             return None;
@@ -561,7 +574,15 @@ impl Session {
             return None;
         };
         match interop::controller_models(&self.instance, &self.session, [left, right]) {
-            Ok(models) => self.models = models,
+            Ok(models) => {
+                // None yet: the runtime may not have bound the controllers this soon after the
+                // controls were attached, and need not say so when it has; asked again a little
+                // later, as after a failure.
+                if models.is_empty() {
+                    self.models_ask.failed();
+                }
+                self.models = models;
+            }
             Err(e) => {
                 log::info!("VR: no controller models: {e}");
                 self.models_ask.failed();
@@ -713,6 +734,27 @@ impl Drop for Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The controller models are asked for where the runtime lists both of their extensions,
+    /// with `XR_EXT_uuid` only where it is listed too; with either of the two missing, none of
+    /// them is, and the required ones always are.
+    #[test]
+    fn controller_models_do_not_wait_for_the_uuid_extension() {
+        let mut required = xr::ExtensionSet::default();
+        required.khr_vulkan_enable2 = true;
+        let mut available = required.clone();
+        available.ext_render_model = true;
+        available.ext_interaction_render_model = true;
+        let enabled = optional_extensions(&available, &required);
+        assert!(enabled.khr_vulkan_enable2 && enabled.ext_render_model && enabled.ext_interaction_render_model);
+        assert!(!enabled.ext_uuid, "not listed, not asked for");
+        available.ext_uuid = true;
+        assert!(optional_extensions(&available, &required).ext_uuid);
+        available.ext_interaction_render_model = false;
+        let enabled = optional_extensions(&available, &required);
+        assert!(!enabled.ext_render_model && !enabled.ext_interaction_render_model && !enabled.ext_uuid);
+        assert!(enabled.khr_vulkan_enable2);
+    }
 
     /// The frames on which `ask` asks within `frames` frames, each ask failing when `fails`.
     fn asks(ask: &mut ModelAsk, frames: u32, fails: bool) -> Vec<u32> {

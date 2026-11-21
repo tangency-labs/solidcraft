@@ -840,6 +840,19 @@ fn dialog_open(ui: &egui::Ui) -> bool {
     ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tree_dialog_open"))).unwrap_or(false)
 }
 
+/// Where the context marks that its Browser only views the design (the VR headset's,
+/// [`crate::semantic_content::show_detached`]): its rows select, fold, show and hide and activate,
+/// but nothing edits there: no name editor, a double click is a plain click (no editor, dialog
+/// or edit in place opens), and no row is dragged or dropped.
+pub(crate) fn view_only_id() -> egui::Id {
+    egui::Id::unique("sc_tree_view_only")
+}
+
+/// Whether `ui`'s context's Browser only views the design ([`view_only_id`]).
+fn view_only(ui: &egui::Ui) -> bool {
+    ui.ctx().data(|d| d.get_temp::<bool>(view_only_id())).unwrap_or(false)
+}
+
 fn eye_left(ui: &egui::Ui) -> bool {
     ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tree_eye_left"))).unwrap_or(false)
 }
@@ -927,9 +940,13 @@ impl Hit {
 
 /// Draw a Browser row through the panel and read its events. A renamable row asks to be renamed
 /// (the host's editor, `context_menu`), unless a dialog is open: then a second click picks again.
+/// In a Browser that only views the design ([`view_only`], the VR headset's) a row is never
+/// renamed, dragged or dropped on, and a double click is a plain click.
 pub(crate) fn node_row(rows: &mut Rows<'_>, spec: Spec<'_>, row: Row<'_>) -> Hit {
     let Spec { key, item, drag, drops, accept } = spec;
-    let rename = if row.rename && !dialog_open(rows.ui()) { panel::Rename::Host } else { panel::Rename::Never };
+    let viewing = view_only(rows.ui());
+    let (drag, drops) = if viewing { (None, panel::Drops::default()) } else { (drag, drops) };
+    let rename = if row.rename && !dialog_open(rows.ui()) && !viewing { panel::Rename::Host } else { panel::Rename::Never };
     let out = rows.row(panel::Node {
         id: node_id(key),
         key,
@@ -966,7 +983,7 @@ pub(crate) fn node_row(rows: &mut Rows<'_>, spec: Spec<'_>, row: Row<'_>) -> Hit
             // The second click of a double-click is a plain click too.
             panel::Event::Open(_) => {
                 hit.clicked = true;
-                hit.double = true;
+                hit.double = !viewing;
                 hit.how = item.then_some(How::Only);
             }
             // The slower second click, held back until the double-click delay passed.
