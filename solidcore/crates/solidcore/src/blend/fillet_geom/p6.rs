@@ -327,8 +327,9 @@ fn continued_line_segment(
 }
 
 /// `SmCurve::DropPoint(ivl, pnt, NULL, dTol, NULL, bSuccess, dParam, dDist)` with the
-/// default `SM_SO_MINIMIZE`: the parameter when the call succeeds and finds a point,
-/// `None` otherwise ([`SolidError::Unported`] propagates).
+/// default `SM_SO_MINIMIZE`: the parameter when the call succeeds and finds a point, `None`
+/// when it succeeds and finds none. The drop's errors propagate: each caller records one as
+/// the cause of its failure ([`defect_after`]).
 fn drop_param(
     k: &Kernel,
     curve: &Curve,
@@ -336,11 +337,8 @@ fn drop_param(
     pnt: Point3,
     tol: f64,
 ) -> Result<Option<f64>> {
-    match curve.drop_point(k, ivl, pnt, None, tol, None, SolverOperation::Minimize) {
-        Ok(d) if d.success => Ok(Some(d.parameter)),
-        Err(e) if e.is_unported_or_cancelled() => Err(e),
-        _ => Ok(None),
-    }
+    let d = curve.drop_point(k, ivl, pnt, None, tol, None, SolverOperation::Minimize)?;
+    Ok(d.success.then_some(d.parameter))
 }
 
 /// `SM_CAST_PTR(SmBSplineSurface, pCopy)` after a `Copy`: the copy when it
@@ -1272,18 +1270,26 @@ impl FilletBrep {
 
         // drop startVertex to thisFilletEdge->OrigCurveCopy
         let start_pnt = self.vertex_point(start_fv)?;
-        let Some(param1) = drop_param(k, &new_3d_curve, &trim_ivl, start_pnt, tol)? else {
-            self.fillet_edge_mut(e)?
-                .set_status(FilStatus::EndPntDropFailure);
-            return Err(defect(OP_ON_EDGE, EDGE_END_NO_DROP));
+        let param1 = match drop_param(k, &new_3d_curve, &trim_ivl, start_pnt, tol) {
+            Ok(Some(t)) => t,
+            Err(err) if err.is_unported_or_cancelled() => return Err(err),
+            failed => {
+                self.fillet_edge_mut(e)?
+                    .set_status(FilStatus::EndPntDropFailure);
+                return Err(defect_after(OP_ON_EDGE, EDGE_END_NO_DROP, failed.err()));
+            }
         };
 
         // drop endVertex to thisFilletEdge->OrigCurveCopy
         let end_pnt = self.vertex_point(end_fv)?;
-        let Some(param2) = drop_param(k, &new_3d_curve, &trim_ivl, end_pnt, tol)? else {
-            self.fillet_edge_mut(e)?
-                .set_status(FilStatus::EndPntDropFailure);
-            return Err(defect(OP_ON_EDGE, EDGE_END_NO_DROP));
+        let param2 = match drop_param(k, &new_3d_curve, &trim_ivl, end_pnt, tol) {
+            Ok(Some(t)) => t,
+            Err(err) if err.is_unported_or_cancelled() => return Err(err),
+            failed => {
+                self.fillet_edge_mut(e)?
+                    .set_status(FilStatus::EndPntDropFailure);
+                return Err(defect_after(OP_ON_EDGE, EDGE_END_NO_DROP, failed.err()));
+            }
         };
 
         // set 3DCurve->interval = ordered[startDropparameter, endDropParameter]
@@ -1691,19 +1697,25 @@ impl FilletBrep {
         let pnt1 = self.vertex_point(v1)?;
 
         // Drop Vertex0 Point to RailCurve
-        let Some(param1) = drop_param(k, &new_rail_curve, &trim_ivl, pnt0, approx_tol * 10.0)?
-        else {
-            self.fillet_edge_mut(e)?
-                .set_status(FilStatus::EndPntDropFailure);
-            return Err(defect(OP_SETBACK, SET_BACK_END_NO_DROP));
+        let param1 = match drop_param(k, &new_rail_curve, &trim_ivl, pnt0, approx_tol * 10.0) {
+            Ok(Some(t)) => t,
+            Err(err) if err.is_unported_or_cancelled() => return Err(err),
+            failed => {
+                self.fillet_edge_mut(e)?
+                    .set_status(FilStatus::EndPntDropFailure);
+                return Err(defect_after(OP_SETBACK, SET_BACK_END_NO_DROP, failed.err()));
+            }
         };
 
         // Drop Vertex1 Point to RailCurve
-        let Some(param2) = drop_param(k, &new_rail_curve, &trim_ivl, pnt1, approx_tol * 10.0)?
-        else {
-            self.fillet_edge_mut(e)?
-                .set_status(FilStatus::EndPntDropFailure);
-            return Err(defect(OP_SETBACK, SET_BACK_END_NO_DROP));
+        let param2 = match drop_param(k, &new_rail_curve, &trim_ivl, pnt1, approx_tol * 10.0) {
+            Ok(Some(t)) => t,
+            Err(err) if err.is_unported_or_cancelled() => return Err(err),
+            failed => {
+                self.fillet_edge_mut(e)?
+                    .set_status(FilStatus::EndPntDropFailure);
+                return Err(defect_after(OP_SETBACK, SET_BACK_END_NO_DROP, failed.err()));
+            }
         };
 
         // set Rail NewCurve and UVTrimCurve and NewOrigUVCurve TrimIvls to found
@@ -3201,6 +3213,19 @@ fn stage_failed(op: &'static str) -> SolidError {
 #[track_caller]
 fn defect(op: &'static str, why: &'static str) -> SolidError {
     SolidError::blend(op, BlendFailure::Defect { why })
+}
+
+/// A defect ([`BlendFailure::Defect`]) with the status `SM_ERR` of the `SER` it replaces,
+/// keeping `cause`, the error of the step that failed, where there is one (rule 6): its
+/// class decides whether the failure reads as a defect or a refusal.
+#[track_caller]
+fn defect_after(op: &'static str, why: &'static str, cause: Option<SolidError>) -> SolidError {
+    let failure = Failure::new(op, BlendFailure::Defect { why });
+    match cause {
+        Some(cause) => failure.caused_by(cause),
+        None => failure,
+    }
+    .into_error()
 }
 
 /// A defect ([`BlendFailure::Defect`]) of an object the kernel built and that is not
