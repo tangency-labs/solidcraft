@@ -506,6 +506,11 @@ it does not inherit another occurrence's position or rotation. For example, inse
 After the part file changes, **Update Links** (`component.update_links`) reads it again.
 A part it cannot find or read keeps its bodies and holds up no other: Messages names it with the
 file it looked for, and the command's reply lists it in `failed`.
+With the experimental separate files for parts, sheet metal and assemblies on, a part that is not
+where its link says is also looked for in the library folders (`ui.prefs
+{"experimental_part_library_folders": [...]}`, or `SOLIDCRAFT_PART_LIBRARY` for command-line runs):
+each folder, then its subfolders. The part is read from the first one that has it, Messages says
+where it was found, and the link keeps naming its own file.
 An assembly that opens, or whose tab comes back to the front, does that by itself for the parts whose files
 changed since it last read them, whether the part was saved in another tab, another window or by
 a checkout. The parts it reads come in as one step, so one **Undo** takes them all back. A part

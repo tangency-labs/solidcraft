@@ -1510,3 +1510,40 @@ fn a_job_folder_moved_whole_keeps_its_links_and_loses_a_library_left_behind() {
     assert!(links(&moved.join("top.sc")).iter().all(|(_, found)| *found));
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// Library folders (#6892): a linked part file that isn't where its link says is looked for in
+/// the library folders, with the file kinds on. Update Links reads it from there and says so; the
+/// link keeps naming its own file. Without the folder it isn't found. Part files of
+/// a kind (`.scprt`) are linked like any design.
+#[test]
+fn a_part_moved_into_a_library_folder_is_found_there_and_said_so() {
+    crate::set_experimental_file_kinds(true);
+    let root = folder("part-library");
+    let (job, library) = (root.join("job"), root.join("library"));
+    std::fs::create_dir_all(job.join("parts")).unwrap();
+    std::fs::create_dir_all(library.join("fasteners")).unwrap();
+    let bolt = job.join("parts").join("bolt.scprt");
+    part(&bolt, 10);
+    let mut s = Session::default();
+    run(&mut s, "file.save", json!({"path": job.join("top.scasm")}));
+    run(&mut s, "component.insert_design", json!({"path": bolt}));
+    run(&mut s, "file.save", json!({}));
+    // The part moves into the library, one folder down, and changes there.
+    std::fs::rename(&bolt, library.join("fasteners").join("bolt.scprt")).unwrap();
+    part(&library.join("fasteners").join("bolt.scprt"), 25);
+    // Without a library folder it isn't found (the only link, so the update is refused).
+    let refused = s.execute("component.update_links", &json!({})).unwrap_err().to_string();
+    assert!(refused.contains("bolt") && refused.contains("not found"), "{refused}");
+    crate::set_part_library_folders(vec![library.to_string_lossy().into_owned()]);
+    let updated = run(&mut s, "component.update_links", json!({}));
+    crate::set_part_library_folders(Vec::new());
+    assert_eq!(updated["updated"], json!(["bolt"]), "{updated}");
+    let note = updated["warnings"].as_array().unwrap().iter().filter_map(Value::as_str).find(|w| w.contains("found in the library folder"));
+    assert!(note.is_some_and(|n| n.starts_with("bolt: not at") && n.contains("fasteners")), "{updated}");
+    assert!((volume(&mut s) - 5000.0).abs() < 1e-6, "the library's part came in: {}", volume(&mut s));
+    run(&mut s, "file.save", json!({}));
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path": job.join("top.scasm")}));
+    assert_eq!(run(&mut reopened, "component.links", json!({}))["links"][0]["path"], "parts/bolt.scprt", "the link still names its own file");
+    let _ = std::fs::remove_dir_all(root);
+}

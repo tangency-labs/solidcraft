@@ -971,7 +971,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         };
         // A window running this off its thread names the design being read again (#5329).
         solidcraft_doc::progress::item(Some((&cname, index, count)));
-        let (old, file, bytes) = match read_linked(s, comp, &link) {
+        let (old, file, bytes) = match read_linked(s, comp, &link, &mut warnings) {
             Ok(read) => read,
             Err(e) if go_on => {
                 failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone(), path: link.path.clone() });
@@ -1087,12 +1087,19 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// `comp`'s linked design as it was last read (its bodies) and as its file is now, read before
 /// anything in the design changes.
-fn read_linked(s: &Session, comp: u64, link: &DesignLink) -> std::result::Result<(ImportSource, PathBuf, Vec<u8>), String> {
+fn read_linked(s: &Session, comp: u64, link: &DesignLink, notes: &mut Vec<String>) -> std::result::Result<(ImportSource, PathBuf, Vec<u8>), String> {
     let Some(FeatureKind::Import { step: old, records, .. }) = s.doc.feature(link.feature).filter(|f| f.component == comp).map(|f| &f.kind) else {
         return Err(format!("its linked bodies (feature {}) are gone; break the link or insert the design again", link.feature));
     };
     link_refused(s.path.as_deref(), &link.path).map_err(|e| e.to_string())?;
-    let file = resolve(s.path.as_deref(), &link.path);
+    let mut file = resolve(s.path.as_deref(), &link.path);
+    // Not where the link says: a library folder may have it (experimental, #6892). The link keeps
+    // naming its own file; the note says where this read came from.
+    if let Some((found, folder)) = super::design_link::found_in_library(&file) {
+        let name = s.doc.components.iter().find(|c| c.id == comp).map_or("the part", |c| c.name.as_str());
+        notes.push(format!("{name}: not at {}; found in the library folder {} as {}", file.display(), folder.display(), found.display()));
+        file = found;
+    }
     let bytes = read_link(&file, s.path.as_deref()).map_err(|e| e.to_string())?;
     Ok(((old.clone(), records.clone()), file, bytes))
 }

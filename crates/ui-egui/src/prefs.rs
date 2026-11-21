@@ -1016,6 +1016,7 @@ pub fn apply_tolerance_heal(p: &Prefs) {
 pub fn apply_experiments(p: &Prefs) {
     solidcraft_engine::io::set_smaller_default_saves(p.experimental_smaller_saves);
     solidcraft_engine::set_experimental_file_kinds(p.experimental_file_kinds);
+    solidcraft_engine::set_part_library_folders(p.experimental_part_library_folders.clone());
 }
 
 /// Perspective view's default field of view (about 34°), in radians.
@@ -1513,6 +1514,10 @@ preference_settings! {
     /// and open ([`apply_experiments`]). Off by default: extensions mean nothing, as before; the
     /// kind a file holds is kept either way.
     experimental_file_kinds: bool = false, PAGE_GENERAL => check_id("prefs.experimental_file_kinds");
+    /// Experimental (#6892): folders searched, in order, for a linked part that isn't where its
+    /// link says (each folder, then its subfolders), with the file kinds on. No control yet: set
+    /// through `ui.prefs`, until the library places page of #19614 can hold them.
+    experimental_part_library_folders: Vec<String> = Vec::new(), PAGE_GENERAL;
     /// Those designs' files, in tab order, as the last quit left them.
     open_designs: Vec<String> = Vec::new(), PAGE_GENERAL;
     /// Web app (#10220): keep each open design's unsaved changes current in the browser's
