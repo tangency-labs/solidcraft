@@ -635,7 +635,7 @@ fn thread_grooves(
         None => 0.0,
     };
     // How far the section moves to leave the material, a little past it.
-    let out = if t.internal { -(r1 - radius + 0.05 * p) } else { radius - r0 + 0.05 * p };
+    let out = if t.internal { -(r1 - radius + 0.06 * p) } else { radius - r0 + 0.05 * p };
     if t.internal && r0 + out < 0.1 * p {
         return Err(DocError::Invalid("the hole is too small for this thread's runout".into()));
     }
