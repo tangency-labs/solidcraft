@@ -205,12 +205,12 @@ External MCP clients connected to the desktop app can also use:
 - `documents {}` lists tabs. `action: "switch"` selects `index`; `"close"` closes it
   (the active tab if omitted); `"new"` opens an empty design.
 - `quit_app {}` exits cleanly, avoiding crash recovery on the next launch.
-- `preferences {}` reads preferences. Named keys, such as `theme`, set them and return the updated values.
+- `preferences {}` reads the display and unit preferences: `default_units`, `theme`, `language`, `up_axis`, `ui_scale`, `zoom_to_cursor`, `smooth_wheel_zoom` and `show_frame_rate`. Named keys set them and return the updated values.
 - `agent_cursor {}` reads cursor settings; `show`, `speed` (1–5 or `"instant"`), and `follow_camera` change them.
 
 Closing or quitting with unsaved changes is refused and names the designs unless `force: true`
 explicitly discards them, including their recovery copies. These calls never open dialogs.
-`preferences` refuses the interactive `open`, `button` and `stand_up` actions before changing any settings.
+`preferences` refuses every other key before changing any settings, so an AI client cannot change plugin access, graphics, file limits, signing or file paths, or use the interactive `open`, `button` and `stand_up` actions.
 Headless servers return an error
 saying they need the desktop app. Confined clients cannot start persistent `theme_follow` reads; use inline `theme_import` instead. These tools cannot be used as `batch` steps or wrapped in
 `execute`. The in-app Assistant does not offer them: its permission gate excludes app management.

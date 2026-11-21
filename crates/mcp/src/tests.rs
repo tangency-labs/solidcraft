@@ -4863,7 +4863,7 @@ impl crate::backend::Backend for AppTools {
         match method {
             "ui.documents" => Ok(json!({"documents": [{"name": "A", "active": true, "unsaved": false}], "active_index": 0})),
             "app.quit" => Ok(json!({"quitting": true})),
-            "ui.prefs" => Ok(json!({"default_units": "mm", "theme": "dark"})),
+            "ui.prefs" => Ok(json!({"default_units": "mm", "theme": "dark", "plugin_grants": {"gears": ["/data"]}, "graphics_backend": "gl"})),
             "ui.agent_cursor" => Ok(json!({"show": true, "speed": 2.0, "follow_camera": false})),
             other => Err(format!("unknown method `{other}`")),
         }
@@ -4936,8 +4936,8 @@ fn quit_app_bridges_to_app_quit() {
     assert_eq!(b.calls[0].1, json!({"force": true, "ask": false}));
 }
 
-/// #3704: `preferences` reads with no arguments and passes the named ones straight to ui.prefs;
-/// a preference the app does not know is the app's refusal, not a schema error.
+/// #3704: `preferences` reads with no arguments and passes allowed settings straight to ui.prefs;
+/// a key outside the allowlist is refused before the app is asked.
 #[test]
 fn preferences_reads_and_sets() {
     let (b, r, is_err) = app_tool("preferences", json!({}));
@@ -4950,10 +4950,32 @@ fn preferences_reads_and_sets() {
     assert_eq!(b.calls[0].1, json!({"theme": "dark", "default_units": "cm"}));
     assert!(r["content"][0]["text"].as_str().unwrap().contains("dark"));
 
-    // A made-up key passes the schema (additionalProperties) and is refused by the app.
-    let mut s = server();
-    let r = raw_tool(&mut s, "preferences", json!({"no_such_preference": 1}));
-    assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    // A made-up key passes the schema (additionalProperties) and is refused before any call.
+    let (b, r, is_err) = app_tool("preferences", json!({"no_such_preference": 1}));
+    assert!(is_err, "{r}");
+    assert!(b.calls.is_empty());
+}
+
+/// #3704 review: an AI client may not widen plugin access or change graphics, file limits, signing or file
+/// paths; those keys are refused before ui.prefs is asked, even next to an allowed one, and never read back.
+#[test]
+fn preferences_refuses_keys_outside_the_allowlist_and_reads_back_only_allowed_ones() {
+    for (key, value) in [
+        ("plugin_grants", json!({"gears": ["/"]})),
+        ("graphics_backend", json!("vulkan")),
+        ("disabled_plugins", json!([])),
+        ("theme_follow", json!("/tmp/theme.json")),
+    ] {
+        let (b, reply, is_error) = app_tool("preferences", json!({key: value, "theme": "dark"}));
+        assert!(is_error, "{key}: {reply}");
+        let text = reply["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains(key) && text.contains("default_units"), "{text}");
+        assert!(b.calls.is_empty(), "{key}: a refused request must not reach ui.prefs");
+    }
+    let (_b, reply, is_error) = app_tool("preferences", json!({}));
+    assert!(!is_error, "{reply}");
+    let text = reply["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("default_units") && !text.contains("plugin_grants") && !text.contains("graphics_backend"), "{text}");
 }
 
 /// Preference reads and writes must not drive dialogs or act on the current design.

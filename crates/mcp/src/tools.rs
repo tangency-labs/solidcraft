@@ -400,11 +400,11 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
         tool(
             "preferences",
             "Read or set preferences",
-            "The desktop app's preferences. With no arguments, reads them all back. With arguments, sets the named ones and returns all of them. \
-             Any preference the app's ui.prefs accepts may be set (docs/control-protocol.md), such as default_units, theme, language, up_axis, \
-             msaa, ui_scale, zoom_to_cursor, smooth_wheel_zoom, show_frame_rate. Kept between runs. Needs the desktop app: headless returns \
-             an error. UI-only actions open, button and stand_up are refused: this tool never opens dialogs or changes the current design. \
-             External MCP clients only; not available in the in-app Assistant.",
+            "The desktop app's display and unit preferences: default_units, theme, language, up_axis, ui_scale, zoom_to_cursor, \
+             smooth_wheel_zoom and show_frame_rate. With no arguments, reads them back. With arguments, sets the named ones and returns \
+             them. Kept between runs. Any other key is refused, so this tool cannot change plugin access, graphics, file limits, signing or \
+             file paths, open dialogs or change the current design. Needs the desktop app: headless returns an error. External MCP clients \
+             only; not available in the in-app Assistant.",
             json!({
                 "type": "object",
                 "properties": {},
@@ -646,6 +646,12 @@ fn text_result(v: &Value, is_error: bool, opts: Options) -> Value {
 
 /// Run a tool, as the server does by default. Failures are tool results with `isError: true`
 /// (the model sees the message); nothing here panics on hostile arguments.
+/// The preferences an external AI client may read and set through the `preferences` tool (#3704): display and unit
+/// settings only. Everything else `ui.prefs` knows (plugin grants, graphics, file limits, the signing key, file paths)
+/// stays with the person.
+const AGENT_PREFERENCES: &[&str] =
+    &["default_units", "theme", "language", "up_axis", "ui_scale", "zoom_to_cursor", "smooth_wheel_zoom", "show_frame_rate"];
+
 pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> Value {
     call_tool_with(b, name, args, Options::default())
 }
@@ -1115,12 +1121,18 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
             if !b.has_ui() {
                 return Err("preferences: needs the desktop app (headless has no preferences window)".into());
             }
-            if let Some(key) = ["open", "button", "stand_up"].into_iter().find(|key| a.contains_key(*key)) {
+            if let Some(key) = a.keys().find(|key| !AGENT_PREFERENCES.contains(&key.as_str())) {
                 return Err(format!(
-                    "preferences: `{key}` is an interactive UI action, not a preference; this tool never opens dialogs or acts on designs"
+                    "preferences: `{key}` cannot be read or set from an AI client; the preferences this tool can set are {}",
+                    AGENT_PREFERENCES.join(", ")
                 ));
             }
-            b.call("ui.prefs", Value::Object(a.clone()))
+            let mut reply = b.call("ui.prefs", Value::Object(a.clone()))?;
+            // Read back only the same settings: the full reply also names plugin grants, file paths and the signing key.
+            if let Some(all) = reply.as_object_mut() {
+                all.retain(|key, _| AGENT_PREFERENCES.contains(&key.as_str()));
+            }
+            Ok(reply)
         }
         "agent_cursor" => {
             if !b.has_ui() {
