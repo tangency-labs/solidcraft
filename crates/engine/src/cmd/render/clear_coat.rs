@@ -5,6 +5,7 @@ use solidcore_record::Vec3;
 use solidcraft_render::ProductScene;
 use solidcraft_viewport::{
     clear_coat::ClearCoat,
+    flakes::FlakeLayer,
     surface::{OpaqueSurface, srgb8_to_linear},
 };
 
@@ -31,19 +32,26 @@ pub(super) fn apply(scene: &mut ProductScene, overrides: &[Override], command: &
             return Err(bad(command, "clear coats require bounded names and distinct captured body ordinals"));
         }
         let coat = ClearCoat::new(input.weight, input.roughness, input.ior).map_err(|e| bad(command, e.to_string()))?;
-        apply_one(scene, input.body_index, &input.body_name, coat, command)?;
+        apply_one(scene, input.body_index, &input.body_name, coat, None, command)?;
     }
     Ok(())
 }
 
-pub(super) fn apply_one(scene: &mut ProductScene, body_index: usize, body_name: &str, coat: ClearCoat, command: &str) -> Result<()> {
+pub(super) fn apply_one(
+    scene: &mut ProductScene,
+    body_index: usize,
+    body_name: &str,
+    coat: ClearCoat,
+    flakes: Option<FlakeLayer>,
+    command: &str,
+) -> Result<()> {
     let body = scene
         .meshes
         .get_mut(body_index)
         .filter(|m| m.name == body_name)
         .ok_or_else(|| bad(command, "clear-coat body ordinal and exact name must both match render.scene"))?;
-    // A zero-weight override is a true no-op, including legacy appearances.
-    if coat.weight() == 0.0 {
+    // A zero-weight override without flakes is a true no-op, including legacy appearances.
+    if coat.weight() == 0.0 && flakes.is_none() {
         return Ok(());
     }
     if body.transmission.is_some() || body.faces.iter().any(|f| f.transmission.is_some()) {
@@ -53,7 +61,8 @@ pub(super) fn apply_one(scene: &mut ProductScene, body_index: usize, body_name: 
         let [r, g, b] = color.map(srgb8_to_linear);
         let base =
             existing.map(Ok).unwrap_or_else(|| OpaqueSurface::new(Vec3::new(r, g, b), 0.0, 0.5, 1.5)).map_err(|e| bad(command, e.to_string()))?;
-        Ok(base.with_clear_coat(coat))
+        let coated = base.with_clear_coat(coat);
+        Ok(flakes.map_or(coated, |flakes| coated.with_flakes(flakes)))
     };
     body.surface = Some(surface(body.color, body.surface)?);
     for face in &mut body.faces {
@@ -162,6 +171,45 @@ mod stable_tests {
             assert!(s.doc.render.setups["Coat"].coats.is_empty());
             s.execute("edit.undo", &json!({})).unwrap();
             assert_eq!(s.doc, saved);
+        }
+    }
+
+    #[test]
+    fn saved_coat_flakes_bind_reach_every_face_and_apply_even_under_a_zero_weight_coat() {
+        for method in ["cpu_raytrace", "gpu_path"] {
+            let mut s = Session::default();
+            s.execute("solid.box", &json!({"length":10,"width":10,"height":3,"body_name":"Housing"})).unwrap();
+            s.execute("render.settings.set", &json!({"name":"Paint","set":{"width":8,"height":8,"job":{"method":method}}})).unwrap();
+            let flakes = json!({"coverage":0.5,"size_mm":0.1,"spread":0.6,"depth":0.2,"color":[230,230,230],"metallic":1,"roughness":0.2});
+            let coat = json!({"weight":0,"roughness":0.12,"ior":1.5,"flakes":flakes});
+            s.execute("render.coat.bind", &json!({"name":"Paint","body_index":0,"body_name":"Housing","coat":coat,"expected_revision":s.revision}))
+                .unwrap();
+            let saved = s.doc.render.setups["Paint"].coats.iter().next().unwrap().coat;
+            assert_eq!(saved.flakes.map(|f| (f.coverage, f.size_mm, f.color)), Some((0.5, 0.1, [230, 230, 230])));
+            let mut scene = crate::product_scene::extract(&s).unwrap();
+            let cpu = solidcraft_render::job::RaytraceOptions::default();
+            super::super::coat_bindings::apply(
+                &s,
+                &mut scene,
+                &s.doc.render.setups["Paint"].coats,
+                (method == "cpu_raytrace").then_some(&cpu),
+                "check",
+            )
+            .unwrap();
+            let surface = scene.meshes[0].surface.unwrap();
+            assert_eq!(surface.clear_coat(), None, "a zero-weight coat adds no coat lobe");
+            let layer = surface.flakes().unwrap();
+            assert!((layer.coverage() - 0.5).abs() < 1e-4 && (layer.spread() - 0.6).abs() < 1e-4);
+            for face in &scene.meshes[0].faces {
+                assert_eq!(face.surface.unwrap().flakes(), Some(layer));
+            }
+            for (key, value) in [("coverage", json!(1.5)), ("size_mm", json!(0)), ("unknown", json!(1))] {
+                let mut bad = flakes.clone();
+                bad[key] = value;
+                let coat = json!({"weight":1,"roughness":0.12,"ior":1.5,"flakes":bad});
+                let input = json!({"name":"Paint","body_index":0,"body_name":"Housing","coat":coat,"expected_revision":s.revision,"replace":true});
+                assert!(s.execute("render.coat.bind", &input).is_err(), "{key}");
+            }
         }
     }
     #[test]

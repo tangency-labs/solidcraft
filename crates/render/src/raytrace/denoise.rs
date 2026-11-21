@@ -587,6 +587,7 @@ impl Guides {
             shared.surface = changed.surface;
             shared.shading_normal = changed.shading_normal;
         }
+        let shared = shared.on_flake().map_err(error)?;
         let reflection = options
             .reflections
             .as_ref()
@@ -595,7 +596,9 @@ impl Guides {
         let mirror = reflection == Some(ReflectionMode::Mirror);
         let near_perfect = shared.surface.metallic() >= 0.99 && shared.surface.roughness() <= 0.05;
         let smooth_metal = shared.surface.metallic() > 0.5 && shared.surface.roughness() < 0.25;
-        let active_coat = shared.surface.clear_coat().is_some_and(|coat| coat.weight() > 0.0);
+        // A flake turns the base lobes away from the shading normal, like a coat layers them:
+        // neither is a single mirror.
+        let active_coat = shared.surface.clear_coat().is_some_and(|coat| coat.weight() > 0.0) || shared.surface.has_flakes();
         let sharp_coat = shared.surface.clear_coat().is_some_and(|coat| coat.weight() > 0.0 && coat.roughness() < 0.05);
         let geometric = shared.oriented_geometric_normal();
         let (relative, depth, surface_footprint) = guide_geometry(request, shared.position);

@@ -115,6 +115,11 @@ fn apply(
             .map_err(|_| invalid("invalid CPU aged clear coat"))?;
         result = result.with_clear_coat(clear);
     }
+    // The aged layer covers the flakes as it covers the coat.
+    if let Some(flakes) = surface.flakes() {
+        let flakes = flakes.with_coverage(flakes.coverage() * (1.0 - weight)).map_err(|_| invalid("invalid CPU aged flakes"))?;
+        result = result.with_flakes(flakes);
+    }
     Ok(result)
 }
 

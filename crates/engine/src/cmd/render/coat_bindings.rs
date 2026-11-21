@@ -53,11 +53,13 @@ pub(super) fn apply(s: &Session, scene: &mut ProductScene, bindings: &CoatBindin
         }) {
             return Err(bad(command, "CPU clear-coat targets cannot share Glass, selected reflection or anisotropy overrides"));
         }
-        resolved.push((index, name.as_str(), binding.coat.to_runtime().map_err(|e| bad(command, e.to_string()))?));
+        let coat = binding.coat.to_runtime().map_err(|e| bad(command, e.to_string()))?;
+        let flakes = binding.coat.flake_layer().map_err(|e| bad(command, e.to_string()))?;
+        resolved.push((index, name.as_str(), coat, flakes));
     }
     drop(visible);
-    for (index, name, coat) in resolved {
-        super::clear_coat::apply_one(scene, index, name, coat, command)?;
+    for (index, name, coat, flakes) in resolved {
+        super::clear_coat::apply_one(scene, index, name, coat, flakes, command)?;
     }
     Ok(())
 }
