@@ -909,8 +909,18 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> b
             extra.insert("start_angle".into(), json!(angle));
         }
     }
+    let mut taper = extra.get("taper").and_then(Value::as_str).unwrap_or_default().to_string();
+    let before = taper.clone();
+    let enter_taper = hint_row(ui, "Taper angle", &mut taper, "0 deg");
+    if taper != before {
+        if taper.trim().is_empty() {
+            extra.remove("taper");
+        } else {
+            extra.insert("taper".into(), json!(taper));
+        }
+    }
     extra_options(ui, "coil_options", extra, &[("Clockwise", "clockwise")]);
-    enter
+    enter || enter_taper
 }
 
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {

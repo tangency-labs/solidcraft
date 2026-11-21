@@ -8992,12 +8992,31 @@ fn feature_tools_with_constructor(
             Ok(vec![crate::lineage::ProfileRoles::swept(Some(ss), Some(r)).tool(body, None)])
         }
         FeatureKind::Coil {
-            base, axis, diameter, pitch, turns, section_size, section, position, start_angle, clockwise, sketch, profiles, ..
+            base,
+            axis,
+            diameter,
+            pitch,
+            turns,
+            section_size,
+            section,
+            position,
+            start_angle,
+            taper,
+            clockwise,
+            sketch,
+            profiles,
+            ..
         } => {
             let base = &point(vals, base)?;
             let k = axis.normalized().ok_or_else(|| DocError::Invalid("coil axis".into()))?;
             let p = val(vals, pitch, Kind::Length)?;
             let n = val(vals, turns, Kind::Unitless)?;
+            // The cone angle: the kernel turns it into the coil's radial growth and refuses one
+            // that leaves its range or takes the coil through its axis (#4735).
+            let taper = match taper {
+                Some(e) => val(vals, e, Kind::Angle)?,
+                None => 0.0,
+            };
             if sketch.is_some()
                 && (diameter.is_some()
                     || section_size.is_some()
@@ -9024,7 +9043,7 @@ fn feature_tools_with_constructor(
                 let axis = if *clockwise { k * -1.0 } else { k };
                 // A left-handed coil turns about −axis and climbs along +axis: mirror the pitch.
                 let pitch = if *clockwise { -p } else { p };
-                return Ok(unnamed(vec![kernel::sweep_helix(&ss.plane, region, *base, axis, pitch, n)?]));
+                return Ok(unnamed(vec![kernel::sweep_helix_tapered(&ss.plane, region, *base, axis, pitch, n, taper)?]));
             }
             let diameter = diameter.as_ref().ok_or_else(|| DocError::Invalid("a coil needs a `sketch` or a `diameter`".into()))?;
             let section_size = section_size.as_ref().ok_or_else(|| DocError::Invalid("a coil needs a `sketch` or a `section_size`".into()))?;
@@ -9057,7 +9076,7 @@ fn feature_tools_with_constructor(
             let axis = if *clockwise { k * -1.0 } else { k };
             // A left-handed coil turns about −axis and climbs along +axis: mirror the pitch.
             let pitch = if *clockwise { -p } else { p };
-            let coil = Traced::unnamed(kernel::sweep_helix(&plane, &region, *base, axis, pitch, n)?);
+            let coil = Traced::unnamed(kernel::sweep_helix_tapered(&plane, &region, *base, axis, pitch, n, taper)?);
             Ok(vec![coil.with_recipe(tool_recipe(doc, f, vals))])
         }
         FeatureKind::Loft { sections, rails, rail_fit, .. } => {
