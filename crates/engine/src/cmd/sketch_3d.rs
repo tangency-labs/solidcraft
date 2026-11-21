@@ -465,7 +465,7 @@ fn lift_point(s: &mut Session, p: &Value, cmd: &str, point: &str) -> Result<Valu
 /// `sketch.constraint.coincident` on 3D refs: two drawn 3D points, or a 3D point and a drawn 3D
 /// line (the point on the line). `None` when neither operand is 3D, for the planar command.
 pub(super) fn coincident_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Option<Value>> {
-    if s.open_drawing.is_some() {
+    if s.sheet_sketching() {
         return Ok(None);
     }
     let a = p.get("a").and_then(Value::as_str).map(str::to_string);
@@ -502,7 +502,7 @@ fn is_3d(sk: &solidcraft_sketch::Sketch, r: &str) -> bool {
 /// `sketch.constraint.fix` on 3D refs: each 3D point (or every fit point of a drawn 3D curve)
 /// held where it is, or released. `None` when no ref is 3D, for the planar command.
 pub(super) fn fix_3d(s: &mut Session, p: &Value, cmd: &str, refs: &[String], want: Option<bool>) -> Result<Option<Value>> {
-    if s.open_drawing.is_some() {
+    if s.sheet_sketching() {
         return Ok(None);
     }
     let id = sketch_store::target(s, p, cmd)?;
@@ -643,7 +643,7 @@ pub(super) fn join_in(sk: &mut solidcraft_sketch::Sketch, doc: &solidcraft_doc::
 /// parallel: or a line and an origin plane, `xy`, `yz` or `xz`). `None` when neither operand is
 /// 3D, for the planar command.
 pub(super) fn relation_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Option<Constrained>> {
-    if s.open_drawing.is_some() {
+    if s.sheet_sketching() {
         return Ok(None);
     }
     let a = p.get("a").and_then(Value::as_str).map(str::to_string);
@@ -716,7 +716,7 @@ fn on_plane(s: &mut Session, p: &Value) -> Result<Value> {
 /// (or along X, Y or Z only), the angle between two drawn 3D lines, or a drawn 3D arc's radius.
 /// `None` when no entity is 3D, for the planar command.
 pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Option<DimensionResult>> {
-    if s.open_drawing.is_some() {
+    if s.sheet_sketching() {
         return Ok(None);
     }
     let ents: Vec<String> =
@@ -925,7 +925,7 @@ pub(super) fn dimension_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Opti
 /// again, with a parameter of the value it measures; one the other 3D constraints already
 /// determine stays driven. `None` when `cid` is not a 3D constraint, for the planar command.
 pub(super) fn toggle_driven_3d(s: &mut Session, p: &Value, cmd: &str, cid: &str, want: Option<bool>) -> Result<Option<Value>> {
-    if s.open_drawing.is_some() {
+    if s.sheet_sketching() {
         return Ok(None);
     }
     let id = sketch_store::target(s, p, cmd)?;
@@ -980,6 +980,93 @@ const SIDE: f64 = 1e-9;
 
 fn round6(v: f64) -> f64 {
     (v * 1e6).round() / 1e6
+}
+
+/// Turn the curves `curves` of the target 3D sketch into drawn 3D curves through the same places,
+/// moved by `offset` (world). The points `points` move by `offset` too, each on its own: a lone
+/// point becomes a drawn 3D point, and the lines and fit-point splines through one that isn't on
+/// a moved curve become drawn 3D curves with just that point moved. Returns the new drawn curves.
+pub(super) fn lift(s: &mut Session, p: &Value, cmd: &str, curves: &[String], points: &[String], offset: Vec3) -> Result<(Vec<String>, Value)> {
+    let id = sketch_store::target(s, p, cmd)?;
+    let st = s.world_state()?;
+    let plane = st.sketch(id).map(|ss| ss.plane).ok_or_else(|| bad(cmd, "the sketch has no plane"))?;
+    let inverse = inverse_owner_frame(s, p, cmd)?;
+    let comp = move |q: Vec2| solidcraft_doc::apply_point(&inverse, plane.to_world(q));
+    let shift = solidcraft_doc::apply_vector(&inverse, offset);
+    edit(s, p, cmd, false, |sk, doc| {
+        needs_3d(sk, cmd)?;
+        let mut which = Vec::new();
+        for c in curves {
+            which.push(sk.curve_index(c).ok_or_else(|| bad(cmd, format!("no curve `{c}`")))?);
+        }
+        which.sort_unstable();
+        which.dedup();
+        // Points moved on their own: lone ones, and ones on curves that stay where they are
+        // (those curves are lifted in place, then just the point moves).
+        let mut alone: Vec<(usize, Vec3)> = Vec::new();
+        let mut on_curves: Vec<usize> = Vec::new();
+        let mut in_place: Vec<usize> = Vec::new();
+        for r in points {
+            let pi = sk.resolve_point(r).filter(|i| *i != 0).ok_or_else(|| bad(cmd, format!("no point `{r}`")))?;
+            let through: Vec<usize> = sk.curves.iter().enumerate().filter(|(_, c)| c.kind.uses(pi)).map(|(i, _)| i).collect();
+            if through.is_empty() {
+                if !alone.iter().any(|(q, _)| *q == pi) {
+                    alone.push((pi, sk.points.get(pi).map(|q| comp(q.pos)).ok_or_else(|| bad(cmd, "the point is missing"))?));
+                }
+            } else if !through.iter().all(|c| which.contains(c)) {
+                on_curves.push(pi);
+                in_place.extend(through.into_iter().filter(|c| !which.contains(c)));
+            }
+        }
+        in_place.sort_unstable();
+        in_place.dedup();
+        let moved = which.len();
+        let mut all = which.clone();
+        all.extend(in_place.iter().copied());
+        // Each curve as a drawn 3D curve: its point ids, and its fit points in component space.
+        let mut lifted: Vec<(Vec<usize>, Vec<Vec3>)> = Vec::new();
+        for &ci in &all {
+            let ids = liftable(&sk.curves[ci], cmd)?;
+            let fit = ids
+                .iter()
+                .map(|i| sk.points.get(*i).map(|q| comp(q.pos)).ok_or_else(|| bad(cmd, "a curve's point is missing")))
+                .collect::<Result<Vec<Vec3>>>()?;
+            lifted.push((ids, fit));
+        }
+        sk.remove_curves(&all);
+        let gone: Vec<usize> = alone.iter().map(|(q, _)| *q).collect();
+        sk.remove_points(&gone);
+        let mut made = Vec::new();
+        // Where each point moved on its own sits on the drawn curves (curve id, fit index).
+        let mut placed: Vec<(usize, String, usize)> = Vec::new();
+        for (n, (ids, fit)) in lifted.iter().enumerate() {
+            let fit: Vec<Vec3> = if n < moved { fit.iter().map(|q| *q + shift).collect() } else { fit.clone() };
+            let w = sk.add_drawn_wire_in(&fit, WireSpace::Component)?;
+            for (k, q) in ids.iter().enumerate() {
+                if n >= moved && on_curves.contains(q) {
+                    placed.push((*q, w.clone(), k));
+                }
+            }
+            made.push(w);
+        }
+        for (_, q) in &alone {
+            made.push(sk.add_drawn_wire_in(&[*q + shift], WireSpace::Component)?);
+        }
+        // Each point on curves lifted in place moves by the offset, once (the first curve it is
+        // on; the drawn curves through it stay joined there).
+        let mut done: Vec<usize> = Vec::new();
+        for (pi, w, k) in &placed {
+            if done.contains(pi) {
+                continue;
+            }
+            done.push(*pi);
+            if let Some(now) = sk.wire_index(w).and_then(|i| sk.wires.get(i)).and_then(|x| x.fit.get(*k)).copied() {
+                sk.move_drawn_point(w, *k, now + shift)?;
+            }
+        }
+        join_in(sk, doc, id, &made)?;
+        Ok(made)
+    })
 }
 
 #[cfg(test)]

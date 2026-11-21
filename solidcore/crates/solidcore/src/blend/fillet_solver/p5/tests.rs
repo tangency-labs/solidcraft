@@ -1097,14 +1097,12 @@ fn rollover_topology_split_preserves_actual_solver_id_and_partial_edits() {
     let end_use = f.fb.brep().edge(rail).unwrap().edgeuses[1];
     let count = f.fb.geoms().len();
     let err = Missing.topology_split(&mut f.context(), id).unwrap_err();
-    // a typed blend failure that keeps the bare `Upstream`'s status (#13790)
+    // a stage failure (#15034) that keeps the bare `Upstream`'s status (#13790)
     assert_eq!(
         (err.operation(), err.blend_failure(), err.upstream_status()),
         (
             "blend::fillet_geom::p5::FilletBrep::make_rail_edgeuse",
-            Some(&crate::error::blend::BlendFailure::Missing(
-                "the other base edge use"
-            )),
+            Some(&crate::error::blend::BlendFailure::StageFailed),
             Some(crate::error::SM_ERR_NULL_POINTER)
         ),
         "{err:?}"
@@ -1129,9 +1127,7 @@ fn rollover_recalc_uses_the_real_solver_and_reports_missing_edge_curve() {
         (err.operation(), err.blend_failure(), err.upstream_status()),
         (
             "blend::fillet_geom::p3::FilletBrep::re_calc_fillet_geom",
-            Some(&crate::error::blend::BlendFailure::Missing(
-                "the solver edge's curve"
-            )),
+            Some(&crate::error::blend::BlendFailure::StageFailed),
             Some(crate::error::SM_ERR_NULL_POINTER)
         ),
         "{err:?}"

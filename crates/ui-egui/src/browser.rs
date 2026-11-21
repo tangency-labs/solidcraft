@@ -821,7 +821,7 @@ fn row_rect(ui: &egui::Ui) -> Rect {
 }
 
 /// One row's look.
-pub(crate) use crate::ui_kit::{Mark, Row};
+pub(crate) use crate::ui_kit::{Mark, Row, Status};
 
 fn compact_tree(ui: &egui::Ui) -> bool {
     ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_compact_tree"))).unwrap_or(false)
@@ -1073,6 +1073,22 @@ fn click_select(app: &mut SolveApp, how: Option<&How>, sel: Option<Sel>) {
 fn sel_of_key(k: &str) -> Option<Sel> {
     if let Some((_, id)) = k.rsplit_once("/s:") {
         return id.parse().ok().map(|id| Sel::Feature { id });
+    }
+    if let Some(name) = k.strip_prefix("origin:") {
+        return match name {
+            "O" => Some(Sel::Vertex { body: String::new(), point: solidcore_record::Vec3::ZERO }),
+            "X" | "Y" | "Z" => Some(Sel::Axis { name: name.to_string() }),
+            "XY" | "XZ" | "YZ" => Some(Sel::Plane { name: name.to_string() }),
+            _ => None,
+        };
+    }
+    if let Some((_, item)) = solidcraft_engine::origins::item(k) {
+        return match item {
+            "O" => Some(Sel::ConstructionPoint { name: k.to_string() }),
+            "X" | "Y" | "Z" => Some(Sel::Axis { name: k.to_string() }),
+            "XY" | "XZ" | "YZ" => Some(Sel::Plane { name: k.to_string() }),
+            _ => None,
+        };
     }
     if let Some(p) = k.strip_prefix("o:") {
         let path: Option<Vec<u64>> = p.split('/').map(|id| id.parse().ok()).collect();
@@ -1783,6 +1799,8 @@ fn component_rows_inner(
         count: &appearance.count,
         // The design holds everything the tree lists.
         mark: if id == 0 && acts.lit.any() { Mark::Branch } else { Mark::None },
+        status: cache.defects.get(&id).map(|_| Status::Warning),
+        status_tip: cache.defects.get(&id),
         ..Default::default()
     };
     // Bodies and sketches dropped on a component move into it; a placement dropped on it moves
@@ -1958,6 +1976,8 @@ fn occurrence_rows_inner(
         badges,
         emphasis,
         mark: acts.lit.placement(&app.session.doc, path, placement.component),
+        status: cache.defects.get(&placement.component).map(|_| Status::Warning),
+        status_tip: cache.defects.get(&placement.component),
         ..Default::default()
     };
     // The top of a sibling's row puts the dragged placement before it; the rest of the row, and
@@ -2163,9 +2183,10 @@ fn doc_settings(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize) {
 
 /// The origin point, axes and planes, as `(key, icon, thing lit for it)`.
 fn origin_things() -> [(&'static str, &'static str, Option<Thing>); 7] {
-    let (axis, plane) = (|k: &str| Some(Thing::Axis(k.into())), |k: &str| Some(Thing::Plane(k.into())));
+    let (point, axis, plane) =
+        (|k: &str| Some(Thing::Point(k.into())), |k: &str| Some(Thing::Axis(k.into())), |k: &str| Some(Thing::Plane(k.into())));
     [
-        ("O", "point", None),
+        ("O", "point", point("O")),
         ("X", "axis", axis("X")),
         ("Y", "axis", axis("Y")),
         ("Z", "axis", axis("Z")),
@@ -2267,10 +2288,10 @@ fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &
             _ => Some(Sel::Vertex { body: String::new(), point: solidcore_record::Vec3::ZERO }),
         };
         let (selected, mark) = lit_row(lit(&thing));
-        let item_key = format!("{key}:{name}");
+        let item_key = if component { name.clone() } else { format!("origin:{name}") };
         let r = node_row(
             rows,
-            Spec { key: &item_key, ..Default::default() },
+            Spec { key: &item_key, item: true, ..Default::default() },
             // Faded when hidden itself or with the whole Origin. A renamed plane's label is already
             // in the interface's language (`name`).
             Row {
@@ -2278,7 +2299,7 @@ fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &
                 eye: Some(visible),
                 icon,
                 label,
-                handle: component.then_some(name.as_str()),
+                handle: Some(name.as_str()),
                 name: label != k,
                 selected,
                 dim: !visible || faded,
@@ -2294,6 +2315,7 @@ fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &
             let target = match icon {
                 "plane" => Some(Target::OriginPlane { name: name.clone() }),
                 "axis" => Some(Target::OriginAxis { name: name.clone() }),
+                "point" => Some(Target::OriginPoint { name: name.clone() }),
                 _ => None,
             };
             if let Some(target) = target {
@@ -2309,10 +2331,14 @@ fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &
         if r.hovered && app.preferences.browser_hover_shows_origin {
             acts.hover_origin = Some(name);
         }
-        if r.clicked
-            && let Some(x) = sel
-        {
-            pick_from_browser(app, x);
+        if r.clicked {
+            if app.dialog.is_some() {
+                if let Some(x) = sel {
+                    pick_from_browser(app, x);
+                }
+            } else {
+                click_select(app, r.how.as_ref(), sel);
+            }
         }
     }
 }
@@ -2595,10 +2621,14 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
     // A locked canvas (#12310) is not moved, calibrated or deleted until it is unlocked.
     let locked = canvas.is_some_and(|c| c.locked);
     let why = locked.then(|| solidcraft_ui_text::tr("browser.canvas_locked").to_string());
+    // An anchored canvas is placed by its sketch's points: change the sketch instead.
+    let follows = canvas.is_some_and(|c| c.anchor.is_some()).then(|| solidcraft_ui_text::tr("browser.canvas_anchored").to_string());
+    let placed = why.clone().or(follows);
     vec![
         Item::action("ui.editCanvas", "Edit Canvas", "canvas").with(json!({ "canvas": id })).off_because(why.clone()),
-        Item::action("ui.calibrateCanvas", "Calibrate", "measure").with(json!({ "canvas": id })).off_because(why.clone()),
-        Item::action("ui.straightenCanvas", "Straighten", "canvas").with(json!({ "canvas": id })).off_because(why.clone()),
+        Item::action("ui.calibrateCanvas", "Calibrate", "measure").with(json!({ "canvas": id })).off_because(placed.clone()),
+        Item::action("ui.straightenCanvas", "Straighten", "canvas").with(json!({ "canvas": id })).off_because(placed.clone()),
+        Item::action("canvas.frame_sketch", "Frame Sketch", "canvas").with(json!({ "canvas": id })).off_because(placed),
         Item::action("canvas.to_sketch", "Canvas to Sketch", "canvas").with(json!({ "canvas": id })),
         Item::sep(),
         Item::action("ui.delete", "Delete", "delete").with(json!({ "canvases": [id] })).off_because(why),
@@ -2730,8 +2760,7 @@ fn pick_from_browser(app: &mut SolveApp, x: Sel) {
         Sel::Plane { name } => crate::viewport::Hit::Plane { name: name.clone(), point: solidcore_record::Vec3::ZERO },
         Sel::Axis { name } => crate::viewport::Hit::Axis { name: name.clone() },
         Sel::ConstructionPoint { name } => crate::viewport::Hit::ConstructionPoint { name: name.clone() },
-        // The origin point goes only into a dialog input that takes it.
-        Sel::Vertex { body, point } if body.is_empty() && app.dialog.is_some() => crate::viewport::Hit::Vertex { body: String::new(), point: *point },
+        Sel::Vertex { body, point } if body.is_empty() => crate::viewport::Hit::Vertex { body: String::new(), point: *point },
         _ => return,
     };
     if let Some(mut d) = app.dialog.take() {
@@ -2767,6 +2796,8 @@ struct Entry {
     target: Option<Target>,
     /// Bodies lit when the row is hovered.
     bodies: Vec<String>,
+    /// A body whose import found flaws in its part: the row's warning mark says what they are.
+    defect: Option<crate::ui_kit::StatusTip>,
 }
 
 impl Entry {
@@ -2801,6 +2832,7 @@ impl Entry {
             sel: Some(Sel::Body { name: world.clone() }),
             target: Some(Target::Body { name: world.clone() }),
             bodies: vec![world],
+            defect: crate::browser_defects::body_tip(&app.session.model, b),
         }
     }
 
@@ -2832,6 +2864,7 @@ impl Entry {
             sel: Some(Sel::Feature { id: f.id }),
             target: Some(Target::Sketch { id: f.id }),
             bodies: Vec::new(),
+            defect: None,
         }
     }
 
@@ -2858,6 +2891,7 @@ impl Entry {
             sel: Some(sel),
             target: Some(Target::Plane { id: f.id }),
             bodies: Vec::new(),
+            defect: None,
         }
     }
 
@@ -3447,6 +3481,8 @@ fn entry_row(
             badges,
             mark,
             emphasis,
+            status: e.defect.as_ref().map(|_| Status::Warning),
+            status_tip: e.defect.as_ref(),
             ..Default::default()
         },
     );

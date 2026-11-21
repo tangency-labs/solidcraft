@@ -26,7 +26,7 @@ pub enum Kind {
     Step,
     /// Design files (`.sc`, older `.solidcraft`, JSON).
     Design,
-    /// Point cloud files (`.ply`, `.xyz`, `.pts`).
+    /// Point cloud files (`.ply`, `.pcd`, `.e57`, `.xyz`, `.pts`, `.asc`).
     PointCloud,
 }
 
@@ -189,7 +189,25 @@ pub fn max_step_bytes() -> usize {
 
 /// The largest design file read (and written) now.
 pub fn max_design_bytes() -> usize {
+    #[cfg(test)]
+    if let Some(cap) = test_cap::get() {
+        return cap;
+    }
     usize::try_from(effective().design).unwrap_or(usize::MAX)
+}
+
+/// A design file limit below the smallest the app allows, for this test's thread only, so a test
+/// can pass the limit with a small design.
+#[cfg(test)]
+pub(crate) mod test_cap {
+    use std::cell::Cell;
+    thread_local!(static CAP: Cell<Option<usize>> = const { Cell::new(None) });
+    pub fn get() -> Option<usize> {
+        CAP.with(Cell::get)
+    }
+    pub fn set(cap: Option<usize>) {
+        CAP.with(|c| c.set(cap));
+    }
 }
 
 const BROWSER_NOTE: &str = "the web app can't open larger files: a browser tab can't hold them";

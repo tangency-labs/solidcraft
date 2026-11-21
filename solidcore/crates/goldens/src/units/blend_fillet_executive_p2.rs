@@ -1624,6 +1624,7 @@ fn executive(target: Option<Handle>) -> FilletExecutive<Handle> {
         fit_kind: solidcore::blend::fillet_executive::FitKind::Radius,
         fit_setback: -1.0,
         rollover_adjusting: false,
+        rolled_beside_band: false,
     };
     executive.intersector.ignore_tangency = true;
     executive

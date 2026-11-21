@@ -88,6 +88,186 @@ fn other_lists_and_nested_objects_are_not_guessed() {
     assert_eq!(form(&json!({"type":"object","required":["missing"],"properties":{}})), None);
 }
 
+fn cabinet_schema() -> Value {
+    json!({"type":"object","required":["storage","shelf_count","drawer_count"],"properties":{
+        "storage":{"type":"string","title":"Inside","default":"shelves","oneOf":[{"const":"shelves","title":"Shelves"},{"const":"drawers","title":"Drawers"}]},
+        "shelf_count":{"type":"integer","title":"Shelves","default":3,"minimum":1,"x-solidcraft-visible-when":{"field":"storage","eq":"shelves"}},
+        "drawer_count":{"type":"integer","title":"Drawers","default":4,"minimum":1,"x-solidcraft-visible-when":{"field":"storage","eq":"drawers"}},
+        "has_back":{"type":"boolean","title":"Back panel","default":true},
+        "back_thickness":{"type":"number","title":"Back thickness","default":6.0,"x-solidcraft-enabled-when":{"field":"has_back","eq":true}},
+        "size":{"type":"string","title":"Size","default":"small","oneOf":[
+            {"const":"small","x-solidcraft-when":{"field":"storage","eq":"shelves"}},
+            {"const":"medium","x-solidcraft-when":{"field":"storage","eq":"drawers"}},
+            {"const":"large","x-solidcraft-when":{"field":"storage","eq":"drawers"}}],
+            "x-solidcraft-defaults":[{"when":{"field":"storage","eq":"drawers"},"value":"large"}]},
+        "length":{"type":"number","title":"Length","default":20.0,"x-solidcraft-defaults":[
+            {"when":{"field":"storage","eq":"drawers"},"value":30.0},
+            {"when":{"field":"storage","eq":"shelves"},"value":20.0}]}
+    }})
+}
+
+fn set_input(fields: &mut [(Field, Input)], key: &str, input: Input) {
+    let (field, value) = fields.iter_mut().find(|(f, _)| f.key == key).unwrap();
+    *value = input;
+    field.edited = true;
+    refresh_conditions(fields);
+}
+
+#[test]
+fn conditional_dialog_fields_hide_disable_reset_and_follow_defaults_until_edited() {
+    let mut fields = form(&cabinet_schema()).expect("conditional form");
+    assert_eq!(params(&fields).unwrap().get("drawer_count"), None);
+    set_input(&mut fields, "storage", Input::Choice(Some(1)));
+    let sent = params(&fields).unwrap();
+    assert_eq!(sent.get("shelf_count"), None);
+    assert_eq!(sent["drawer_count"], 4);
+    assert_eq!(sent["size"], "large", "matching default before first valid choice");
+    assert_eq!(sent["length"], 30.0);
+    set_input(&mut fields, "has_back", Input::Boolean(false));
+    assert!(!fields.iter().find(|(f, _)| f.key == "back_thickness").unwrap().0.enabled);
+    assert_eq!(params(&fields).unwrap()["back_thickness"], 6.0, "disabled values are sent");
+    set_input(&mut fields, "length", Input::Number(42.0));
+    set_input(&mut fields, "storage", Input::Choice(Some(0)));
+    assert_eq!(params(&fields).unwrap()["length"], 42.0, "custom value survives");
+    assert_eq!(params(&fields).unwrap()["size"], "small", "an unavailable custom choice resets");
+}
+
+#[test]
+fn conditional_choices_reset_in_schema_order_and_recover_after_no_available_options() {
+    let schema = json!({"type":"object","required":["size"],"properties":{
+        "mode":{"type":"string","enum":["a","b","none"],"default":"a"},
+        "size":{"type":"string","default":"one","oneOf":[
+            {"const":"one","x-solidcraft-when":{"field":"mode","eq":"a"}},
+            {"const":"two","x-solidcraft-when":{"field":"mode","eq":"b"}},
+            {"const":"three","x-solidcraft-when":{"field":"mode","eq":"b"}}]}
+    }});
+    let mut fields = form(&schema).unwrap();
+    set_input(&mut fields, "mode", Input::Choice(Some(1)));
+    assert_eq!(params(&fields).unwrap()["size"], "two");
+    set_input(&mut fields, "mode", Input::Choice(Some(2)));
+    assert_eq!(params(&fields), Err(Problem::Missing("size".into())));
+    set_input(&mut fields, "mode", Input::Choice(Some(1)));
+    assert_eq!(params(&fields).unwrap()["size"], "two");
+}
+
+#[test]
+fn conditional_defaults_cascade_and_hidden_empty_fields_do_not_gate_run() {
+    let schema = json!({"type":"object","required":["empty"],"properties":{
+        "z_mode":{"type":"boolean","default":false},
+        "b_value":{"type":"integer","default":1,"x-solidcraft-defaults":[{"when":{"field":"z_mode","eq":true},"value":2}]},
+        "a_value":{"type":"integer","default":10,"x-solidcraft-defaults":[{"when":{"field":"b_value","eq":2},"value":20}]},
+        "empty":{"type":"number","x-solidcraft-visible-when":{"field":"z_mode","eq":false}}
+    }});
+    let mut fields = form(&schema).unwrap();
+    assert_eq!(params(&fields), Err(Problem::Missing("empty".into())));
+    set_input(&mut fields, "z_mode", Input::Boolean(true));
+    assert_eq!(params(&fields), Ok(json!({"z_mode":true,"b_value":2,"a_value":20})));
+}
+
+#[test]
+fn invalid_conditional_dialog_schemas_leave_run_off() {
+    for condition in [json!({"field":"missing","eq":true}), json!({"field":"a","eq":1})] {
+        assert!(form(&json!({"type":"object","properties":{"a":{"type":"number","x-solidcraft-visible-when":condition}}})).is_none());
+    }
+}
+
+#[test]
+fn conditional_dialog_dropdown_renders_before_and_after_switching() {
+    fn paint(
+        h: &mut crate::scenario::Harness,
+        textures: &mut std::collections::HashMap<egui::TextureId, egui::ColorImage>,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        let mut output = h.ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0))),
+                time: Some(h.ctx.cumulative_frame_nr() as f64 / 15.0),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                h.app.logic(ui.ctx());
+                h.app.ui(ui);
+            },
+        );
+        ui_kit::test_textures_update(textures, &output.textures_delta);
+        output.textures_delta.clear();
+        output
+    }
+    fn click(h: &mut crate::scenario::Harness, textures: &mut std::collections::HashMap<egui::TextureId, egui::ColorImage>, key: &str) {
+        let at = crate::scenario::handle_at(key).unwrap_or_else(|| panic!("missing {key}"));
+        for pressed in [true, false] {
+            paint(
+                h,
+                textures,
+                vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
+                ],
+            );
+        }
+        paint(h, textures, vec![]);
+    }
+    let mut h = crate::scenario::Harness::new();
+    let mut command = entry("cabinet", "edit", json!([{"kind":"menu","name":"Cabinet"}]));
+    command.input_schema = cabinet_schema();
+    h.app.plugin_menu.listed = vec![listed("cabinet", vec![command])];
+    h.app.plugin_menu.loaded = true;
+    h.app.home.open = false;
+    open_entry(&mut h.app, 0, 0);
+    h.app.plugin_menu.dialogs.last_mut().unwrap().preview = false;
+    h.ctx = crate::fonts::test_context();
+    solidcraft_theme::apply(&h.ctx);
+    let mut textures = std::collections::HashMap::new();
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/plugin-conditional-fields");
+    std::fs::create_dir_all(&dir).unwrap();
+    for stage in ["before", "after"] {
+        for _ in 0..4 {
+            paint(&mut h, &mut textures, vec![]);
+        }
+        let output = paint(&mut h, &mut textures, vec![]);
+        let sent = h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap();
+        let expected = if stage == "before" { "shelf_count" } else { "drawer_count" };
+        let hidden = if stage == "before" { "drawer_count" } else { "shelf_count" };
+        assert!(sent.get(expected).is_some() && sent.get(hidden).is_none());
+        assert!(crate::scenario::handle_at(&format!("plugin_dialog:field:{expected}")).is_some());
+        assert!(
+            crate::test_support::text_shapes(&output).any(|text| text.galley.text() == if stage == "before" { "Shelves *" } else { "Drawers *" })
+        );
+        let image = ui_kit::test_raster(&h.ctx, output.shapes, output.pixels_per_point, h.ctx.viewport_rect(), &textures);
+        assert_eq!(image.dimensions(), (1280, 720));
+        image.save(dir.join(format!("{stage}.png"))).unwrap();
+        if stage == "before" {
+            click(&mut h, &mut textures, "plugin_dialog:field:storage");
+            click(&mut h, &mut textures, "dialog:Inside *:Drawers");
+        }
+    }
+    click(&mut h, &mut textures, "plugin_dialog:field:has_back");
+    let fields = h.app.plugin_menu.dialog().unwrap().fields.as_ref().unwrap();
+    assert!(!fields.iter().find(|(f, _)| f.key == "back_thickness").unwrap().0.enabled);
+    let before = fields.iter().find(|(f, _)| f.key == "back_thickness").unwrap().1.clone();
+    click(&mut h, &mut textures, "plugin_dialog:field:back_thickness");
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().fields.as_ref().unwrap().iter().find(|(f, _)| f.key == "back_thickness").unwrap().1, before);
+    for _ in 0..3 {
+        let mut output = h.ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))),
+                focused: true,
+                ..Default::default()
+            },
+            |ui| {
+                h.app.logic(ui.ctx());
+                h.app.ui(ui);
+            },
+        );
+        output.textures_delta.clear();
+    }
+    for key in ["plugin_dialog:field:storage", "plugin_dialog:field:length", "plugin_dialog:run", "plugin_dialog:cancel"] {
+        assert!(h.ctx.viewport_rect().contains(crate::scenario::handle_at(key).unwrap()), "{key} must fit a smaller window");
+    }
+}
+
 /// A schema with two selection fields: the edges to work on, and one body.
 fn pick_schema() -> Value {
     json!({"type":"object","required":["edges","body"],"properties":{
@@ -97,6 +277,29 @@ fn pick_schema() -> Value {
             "x-solidcraft-selection":{"version":1,"accept":["body"]}},
         "depth":{"type":"number","default":2}
     }})
+}
+
+#[test]
+fn conditional_selection_fields_stop_picking_when_hidden_or_disabled() {
+    let mut schema = pick_schema();
+    schema["properties"]["pick"] = json!({"type":"boolean","default":true});
+    schema["properties"]["edges"]["x-solidcraft-visible-when"] = json!({"field":"pick","eq":true});
+    schema["properties"]["body"]["x-solidcraft-enabled-when"] = json!({"field":"pick","eq":true});
+    let mut command = entry("pick", "edit", json!([{"kind":"menu","name":"Picks"}]));
+    command.input_schema = schema;
+    let mut h = crate::scenario::Harness::new();
+    h.app.plugin_menu.listed = vec![listed("picks", vec![command])];
+    h.app.plugin_menu.loaded = true;
+    open_entry(&mut h.app, 0, 0);
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.preview = false;
+    let id = dialog.id;
+    assert_eq!(picking(&h.app), Some(id));
+    set_input(h.app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap(), "pick", Input::Boolean(false));
+    h.frames(2);
+    assert_eq!(picking(&h.app), None);
+    assert!(!start_picking(&mut h.app, id, 0), "hidden field cannot pick");
+    assert!(!start_picking(&mut h.app, id, 1), "disabled field cannot pick");
 }
 
 #[test]
@@ -265,6 +468,23 @@ fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -> Listed {
         entries,
         images: Default::default(),
     }
+}
+
+#[test]
+fn a_numeric_plugin_editor_interrupts_external_joint_drive() {
+    use crate::control::tests::{assert_local_editor_interrupts_joint_drive, joint_drive_design};
+
+    let (mut h, arm, _) = joint_drive_design();
+    let mut make = entry("make", "edit", json!([]));
+    make.input_schema = json!({"type":"object","properties":{"length":{"type":"number","default":20}}});
+    h.app.plugin_menu.listed = vec![listed("boxes", vec![make])];
+    h.app.plugin_menu.loaded = true;
+    assert_local_editor_interrupts_joint_drive(&mut h, arm, |app| {
+        open_entry(app, 0, 0);
+        assert!(app.dialog.is_none(), "the editor has no viewport pick field");
+        assert_eq!(app.plugin_menu.dialog().unwrap().ready(app), Ok(json!({"length":20.0})));
+        assert!(preview_commands(app).is_some());
+    });
 }
 
 #[test]
@@ -846,8 +1066,9 @@ mod native {
         let _ = std::fs::remove_dir_all(root);
     }
 
-    /// A package with `home` (a box, then view.home), `edit` (a box and no view command), `fail`
-    /// and `place` (a component with a box in it, moved 100 mm along X).
+    /// A package with `home` (a box, then view.home), `edit` (a box and no view command),
+    /// `fail`, `place` (a new component moved 100 mm along X), `move` (only the move), and
+    /// `both` (move the existing component, then make another box).
     fn view_package(tag: &str) -> std::path::PathBuf {
         let root = std::env::temp_dir().join(format!("solidcraft-plugin-view-{}-{tag}", std::process::id()));
         let dir = root.join("frames");
@@ -858,7 +1079,7 @@ mod native {
         let entry = |entry_name: &str, label: &str| json!({"name": entry_name, "effect": "edit", "input_schema": {"type": "object"}, "slots": [{"kind": "menu", "name": label}]});
         let manifest = json!({"id":"frames","name":"Frames","version":"0.1.0","capabilities":["commands@0.1"],"runtime":{
             "module":"plugin.wasm",
-            "entries":[entry("home", "Home"), entry("edit", "Edit"), entry("fail", "Fail"), entry("place", "Place")],
+            "entries":[entry("home", "Home"), entry("edit", "Edit"), entry("fail", "Fail"), entry("place", "Place"), entry("move", "Move"), entry("both", "Both")],
             "commands":["solid.box", "view.home", "component.create", "occurrence.move"]}});
         std::fs::write(dir.join("plugin.json"), manifest.to_string()).unwrap();
         root
@@ -898,6 +1119,127 @@ mod native {
         let placed = world.bodies.iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |acc, body| acc.union(&body.mesh().bounds()));
         assert_eq!((placed.min.x.round(), placed.max.x.round()), (100.0, 110.0));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Moving an existing component adds no material, even before the design has a placement.
+    #[test]
+    fn a_component_a_run_only_moves_keeps_its_body_colour_in_the_preview() {
+        let root = view_package("move-colour");
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "operation": "new_body"})).unwrap();
+        h.app.preferences.preview_tint_new_faces = true;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        h.app.plugin_menu.loaded = true;
+        assert!(!solidcraft_engine::frames::placed(&h.app.session), "the component starts at its definition");
+        let (doc, undo) = (h.app.session.doc.clone(), h.app.session.undo.len());
+        let entry = h.app.plugin_menu.listed[0].entries.iter().position(|entry| entry.name == "move").unwrap();
+        open_entry(&mut h.app, 0, entry);
+        previewed(&mut h);
+        assert!(h.app.preview.active, "the moved box is drawn: {:?}", h.app.preview.error);
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc), "the preview leaves the design untouched");
+        assert_eq!(h.app.session.undo.len(), undo, "the preview adds no undo step");
+
+        let (_, id, cmds) = preview_commands(&h.app).expect("the dialog is previewed");
+        let mut scratch = h.app.session.scratch();
+        dry_run(&mut scratch, &id);
+        let colors = crate::preview::Colors { tint_new: true, ..crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get()) };
+        assert_ne!(colors.body, colors.added);
+        assert_ne!(colors.body, colors.new_body);
+        let built = crate::preview::compute(&scratch, &cmds, colors).unwrap();
+        let (vertices, rest) = built.scene.tris.as_chunks::<{ crate::gpu::TRI_SIZE }>();
+        assert!(rest.is_empty() && !vertices.is_empty(), "the box has preview triangles");
+        let xs = vertices.iter().map(|v| f32::from_le_bytes([v[0], v[1], v[2], v[3]]));
+        let (lo, hi) = xs.fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
+        assert_eq!((lo.round(), hi.round()), (100.0, 110.0), "the preview moves the existing box 100 mm along X");
+        assert!(!built.scene.ghost.is_empty(), "the old placement remains visible as a ghost");
+        let count = |colour| {
+            vertices
+                .iter()
+                .filter(|v| {
+                    let index = u32::from_le_bytes([v[24], v[25], v[26], v[27]]);
+                    built.scene.palette.get(crate::gpu::PaletteIndex(index)) == Some(colour)
+                })
+                .count()
+        };
+        if let Some(path) = std::env::var_os("SOLIDCRAFT_PLUGIN_PREVIEW_SHOT") {
+            const SIZE: u32 = 512;
+            h.app.cam.target = solidcore_record::Vec3::new(105.0, 5.0, 5.0);
+            h.app.cam.distance = 35.0;
+            let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(SIZE as f32, SIZE as f32));
+            let proj = crate::viewport::projection(&h.app, rect);
+            let e = proj.cam.eye().to_f32();
+            let eye = [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }];
+            let pixels = crate::gpu::render_offscreen_preview(
+                crate::gpu::GpuScene::default(),
+                built.scene.clone(),
+                None,
+                proj.vp.to_f32(),
+                proj.cam.back().to_f32(),
+                eye,
+                SIZE,
+            )
+            .expect("a GPU adapter is required for the requested preview capture");
+            image::RgbaImage::from_raw(SIZE, SIZE, pixels).unwrap().save(path).unwrap();
+        }
+        let counts = (count(colors.body), count(colors.added), count(colors.new_body));
+        let _ = std::fs::remove_dir_all(root);
+        assert_eq!(counts, (vertices.len(), 0, 0), "moving an existing body adds no new surface or body");
+    }
+
+    /// Each body keeps its own preview role when a plugin moves a part and makes material.
+    #[test]
+    fn a_run_tints_only_new_bodies_even_when_an_existing_component_was_already_placed() {
+        for (start, entry_name) in [(0, "both"), (20, "move"), (20, "both")] {
+            let root = view_package(&format!("mixed-colour-{start}-{entry_name}"));
+            let mut h = crate::scenario::Harness::new();
+            h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap();
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "operation": "new_body"})).unwrap();
+            if start != 0 {
+                h.app.run("occurrence.move", json!({"occurrence": "Part:1", "translate": [start, 0, 0]})).unwrap();
+            }
+            assert_eq!(solidcraft_engine::frames::placed(&h.app.session), start != 0);
+            h.app.plugin_menu.listed = list(&h.app, Some(&root));
+            h.app.plugin_menu.loaded = true;
+            let (doc, undo) = (h.app.session.doc.clone(), h.app.session.undo.len());
+            let entry = h.app.plugin_menu.listed[0].entries.iter().position(|entry| entry.name == entry_name).unwrap();
+            open_entry(&mut h.app, 0, entry);
+            let (_, id, cmds) = preview_commands(&h.app).expect("the dialog is previewed");
+            let mut scratch = h.app.session.scratch();
+            dry_run(&mut scratch, &id);
+            let colors = crate::preview::Colors { tint_new: true, ..crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get()) };
+            assert_ne!(colors.body, colors.added);
+            assert_ne!(colors.body, colors.new_body);
+            let built = crate::preview::compute(&scratch, &cmds, colors).unwrap();
+            assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc), "the preview leaves the design untouched");
+            assert_eq!(h.app.session.undo.len(), undo, "the preview adds no undo step");
+            assert!(built.scene.xray.is_empty(), "moving and making bodies removes no material");
+            let (vertices, rest) = built.scene.tris.as_chunks::<{ crate::gpu::TRI_SIZE }>();
+            assert!(rest.is_empty() && !vertices.is_empty());
+            let mut moved = Vec::new();
+            let mut made = Vec::new();
+            for vertex in vertices {
+                let index = u32::from_le_bytes([vertex[24], vertex[25], vertex[26], vertex[27]]);
+                let colour = built.scene.palette.get(crate::gpu::PaletteIndex(index));
+                let x = f32::from_le_bytes([vertex[0], vertex[1], vertex[2], vertex[3]]);
+                if colour == Some(colors.body) {
+                    moved.push(x);
+                } else {
+                    assert_eq!(colour, Some(colors.new_body), "{entry_name} from {start}: no existing surface is new");
+                    made.push(x);
+                }
+            }
+            let span = |xs: &[f32]| xs.iter().copied().fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
+            // The original box spans 0..10; its old placement and the plugin's 100 mm move add.
+            assert_eq!(span(&moved), ((start + 100) as f32, (start + 110) as f32), "{entry_name}: the existing box stays body-coloured");
+            if entry_name == "both" {
+                // solid.box takes world coordinates, even inside the now-moved component.
+                assert_eq!(span(&made), (20.0, 30.0), "only the second box is new material");
+            } else {
+                assert!(made.is_empty(), "a move alone makes no new body");
+            }
+            let _ = std::fs::remove_dir_all(root);
+        }
     }
 
     fn same_camera(a: &solidcraft_viewport::Camera, b: &solidcraft_viewport::Camera) -> bool {

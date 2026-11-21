@@ -13,6 +13,7 @@
 
 pub(crate) mod tube;
 
+use solidcore::blend::fillet_section::interval::round_up;
 use solidcore::blend::fillet_section::station::as_b_spline;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::kernel::Kernel;
@@ -153,18 +154,35 @@ pub(crate) fn nearest(
     p: Point3,
     foot: Point2,
 ) -> Enclosure {
+    nearest_with_rounding(k, surface, uv_box, p, foot).0
+}
+
+/// [`nearest`], with the rounding its upper end adds to the computed distance from `p` to
+/// the foot's surface point: the evaluation's slack at the foot and `γ_8` of the distance's
+/// coordinates, the two terms counted below (infinite where the evaluation is not bounded).
+///
+/// # Panics
+///
+/// As [`nearest`].
+pub(crate) fn nearest_with_rounding(
+    k: &Kernel,
+    surface: &Surface,
+    uv_box: Option<&Extent2d>,
+    p: Point3,
+    foot: Point2,
+) -> (Enclosure, f64) {
     let surface = measured(surface);
     let q = surface.evaluate_point(k, foot).expect("the foot");
     // the evaluation's rounding, and the distance's own (a difference per coordinate, three
     // squares, two sums and a root, on coordinates at most the larger point's size)
     // (past a rational net's knots the evaluation is not bounded: no upper end)
-    let hi = p.distance(q)
-        + evaluation_slack_at(k, surface, foot).unwrap_or(f64::INFINITY)
-        + gamma(8) * p.max_dimension().max(q.max_dimension()) * 3.0_f64.sqrt();
+    let slack = evaluation_slack_at(k, surface, foot).unwrap_or(f64::INFINITY);
+    let distance = gamma(8) * p.max_dimension().max(q.max_dimension()) * 3.0_f64.sqrt();
+    let hi = p.distance(q) + slack + distance;
     // ask for the foot's distance: the subdivision stops once the nearest piece is that far
     let lo = surface_distance_lower_bound(k, surface, uv_box, p, p.distance(q))
         .expect("the lower bound");
-    Enclosure { lo, hi }
+    (Enclosure { lo, hi }, round_up(slack + distance))
 }
 
 /// The enclosure of a sampled maximum gap from a curve to `surface`: the largest of the true

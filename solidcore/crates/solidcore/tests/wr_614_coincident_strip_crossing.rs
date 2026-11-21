@@ -181,10 +181,8 @@ fn wr_614_all_booleans_at_1e5_and_5e6() {
 
 #[test]
 fn wr_614_all_upstream_fixes_union_1e5_is_valid_solid() {
-    let mut fixes = UpstreamFixes::all();
-    fixes.geometric_g2_continuity = false;
     let mut k = Kernel {
-        fixes,
+        fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
 

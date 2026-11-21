@@ -20,7 +20,7 @@ const MAX_ENTITIES: usize = MAX_POINTS + MAX_CURVES + MAX_CONSTRAINTS;
 const MAX_VALIDATION_WORK: usize = 2_000_000;
 const MAX_STORED_TEXT_BYTES: usize = 4096;
 const MAX_LOCAL_ID_BYTES: usize = 512;
-const AUXILIARY: [&str; 6] = ["links", "patterns", "offsets", "freeform_offsets", "wires", "equations"];
+const AUXILIARY: [&str; 7] = ["links", "patterns", "offsets", "freeform_offsets", "freeform_chain_offsets", "wires", "equations"];
 
 /// Authored sheet geometry. Points and lengths are paper XY millimetres, regardless
 /// of the drawing's display units. The origin is the sheet's lower-left corner,
@@ -181,9 +181,15 @@ pub(super) fn check_drawing(drawing: &Drawing) -> Result<()> {
 fn check_payload(record: &SheetSketch) -> Result<()> {
     check_name(&record.name, "sheet sketch")?;
     let sk = &record.sketch;
-    require(sk.links.is_empty() && sk.patterns.is_empty() && sk.offsets.is_empty() && sk.freeform_offsets.is_empty() && sk.wires.is_empty(), || {
-        "not supported yet: sheet sketch links, patterns, offsets or 3D wires".into()
-    })?;
+    require(
+        sk.links.is_empty()
+            && sk.patterns.is_empty()
+            && sk.offsets.is_empty()
+            && sk.freeform_offsets.is_empty()
+            && sk.freeform_chain_offsets.is_empty()
+            && sk.wires.is_empty(),
+        || "not supported yet: sheet sketch links, patterns, offsets or 3D wires".into(),
+    )?;
     require(sk.equations.is_empty(), || "not supported yet: sheet sketch equations".into())?;
     require(!sk.view.three_d && !sk.view.slice, || "model-only sketch view is not a sheet sketch".into())?;
     let origin = sk.points.first().ok_or_else(|| invalid("missing sketch origin"))?;

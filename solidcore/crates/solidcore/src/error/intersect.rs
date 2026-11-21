@@ -16,12 +16,16 @@
 //! | [`IntersectFailure::StepTangentTooShort`] | `SM_ERR`             |
 //! | [`IntersectFailure::PointsWhereAPlaneCrosses`] | `SM_ERR`        |
 //! | [`IntersectFailure::StageFailed`]   | the site's (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`) |
+//! | [`IntersectFailure::Defect`]        | the site's (`SM_ERR`, or another through `with_status`) |
 //!
 //! **The record** (#15034). A check that refuses builds a typed cause; a stage that fails
 //! with no reason the kernel names is an [`IntersectFailure::StageFailed`], a defect
 //! ([`ErrorKind::StageFailed`]), keeping the error of the call it made as its cause where it
 //! has one. The phrase causes ([`IntersectFailure::Failed`] to
-//! [`IntersectFailure::Inconsistent`]) are sites not yet converted.
+//! [`IntersectFailure::Inconsistent`]) are sites not yet converted, and so is an
+//! [`IntersectFailure::StageFailed`] not yet reviewed: a reviewed one is an
+//! [`IntersectFailure::Defect`] with its reason (the conversion guide:
+//! `docs/failure-codes-and-reproduction.md` §6).
 //!
 //! Deviations: not upstream. The failure's `operation` path says which routine. The handles these routines work on are the
 //! classification's or intersector's own, not ids of the caller's B-rep, so no failure
@@ -69,8 +73,17 @@ pub enum IntersectFailure {
     /// A stage of an intersection routine failed with no reason the kernel names: a defect
     /// ([`ErrorKind::StageFailed`]). The failure holds the operation, the status the C++
     /// reports (for the goldens only), where it was built, and the error of the call it made
-    /// where it has one.
+    /// where it has one. The form not yet reviewed: new code builds
+    /// [`IntersectFailure::Defect`], a named cause or a refusal instead.
     StageFailed,
+    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
+    /// `why` names the step that failed and why that is the kernel's fault, not the
+    /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
+    /// says otherwise.
+    Defect {
+        /// The step that failed, and why that is the kernel's fault.
+        why: &'static str,
+    },
 }
 
 impl IntersectFailure {
@@ -80,7 +93,8 @@ impl IntersectFailure {
             Self::Failed(_)
             | Self::StepTangentTooShort
             | Self::PointsWhereAPlaneCrosses { .. }
-            | Self::StageFailed => SM_ERR,
+            | Self::StageFailed
+            | Self::Defect { .. } => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
@@ -88,14 +102,15 @@ impl IntersectFailure {
     }
 
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::StageFailed`] for
-    /// [`IntersectFailure::StageFailed`], a defect; [`ErrorKind::Missing`] for
+    /// [`IntersectFailure::StageFailed`] and [`IntersectFailure::Defect`], a defect;
+    /// [`ErrorKind::Missing`] for
     /// [`IntersectFailure::Missing`], [`ErrorKind::OutsideDomain`] for
     /// [`IntersectFailure::OutsideDomain`], [`ErrorKind::NotWithinTolerance`] for
     /// [`IntersectFailure::PointsWhereAPlaneCrosses`], [`ErrorKind::Failed`] otherwise.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
-            Self::StageFailed => ErrorKind::StageFailed,
+            Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
             Self::PointsWhereAPlaneCrosses { .. } => ErrorKind::NotWithinTolerance,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
@@ -121,6 +136,7 @@ impl core::fmt::Display for IntersectFailure {
                  their default tolerance {surface_tolerance:e}"
             ),
             Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
+            Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
         }
     }
 }
@@ -286,10 +302,92 @@ pub(super) mod tests {
         assert!(!e.is_defect() && e.is_status_answer());
     }
 
+    /// A reviewed defect is of class 127 with the stage failure's status, and says why.
+    #[test]
+    fn a_reviewed_defect_is_class_127_with_its_reason() {
+        let why = "the trace lost the branch it was started on, which its own step control keeps";
+        let defect = IntersectFailure::Defect { why };
+        for status in [SM_ERR, SM_ERR_NULL_POINTER] {
+            let e = Failure::new("intersect::op", defect)
+                .with_status(status)
+                .into_error();
+            super::super::tests::assert_defect(
+                &e,
+                &SolidError::intersect_stage_failed("intersect::op", status),
+                "intersect::op",
+                status,
+                &format!("intersect::op: stage_failed: {why}"),
+            );
+            assert_eq!(e.intersect_failure(), Some(&defect));
+        }
+        super::super::tests::assert_defect(
+            &SolidError::intersect("intersect::op", defect),
+            &SolidError::intersect_stage_failed("intersect::op", SM_ERR),
+            "intersect::op",
+            SM_ERR,
+            &format!("intersect::op: stage_failed: {why}"),
+        );
+    }
+
     /// The intersection routines describe their failures: their library code builds no
     /// bare `Upstream` status.
     #[test]
     fn the_intersect_routines_build_no_bare_statuses() {
         super::super::bare_scan::assert_waiting("intersect", 40, &[]);
+    }
+
+    /// The sites that build a intersection phrase cause only fall:
+    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
+    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
+    /// files' counts here, and a file at 0 loses its line (the conversion guide:
+    /// `docs/failure-codes-and-reproduction.md` §6).
+    #[test]
+    fn the_intersect_phrase_cause_sites_only_shrink() {
+        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
+        const PHRASES: Scan = Scan {
+            builders: &[
+                Builder::Variant("IntersectFailure", "Failed"),
+                Builder::Variant("IntersectFailure", "Missing"),
+                Builder::Variant("IntersectFailure", "OutsideDomain"),
+                Builder::Variant("IntersectFailure", "Inconsistent"),
+                Builder::Method("intersect_failed", Some(1)),
+                Builder::Method("intersect_missing", Some(1)),
+            ],
+            wrappers: Wrappers::Phrase,
+        };
+        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
+        const PINNED: &[(&str, usize)] = &[
+            ("solidcore/src/intersect/adv_surface_intersector.rs", 10),
+            ("solidcore/src/intersect/api_intersectors.rs", 5),
+            ("solidcore/src/intersect/curve_class/p1.rs", 9),
+            ("solidcore/src/intersect/curve_class/p2.rs", 7),
+            ("solidcore/src/intersect/curve_class/p3.rs", 19),
+            ("solidcore/src/intersect/curve_class/p4.rs", 26),
+            ("solidcore/src/intersect/curve_class/p5.rs", 8),
+            ("solidcore/src/intersect/curve_class/p6.rs", 21),
+            ("solidcore/src/intersect/curve_class/p7.rs", 17),
+            ("solidcore/src/intersect/curve_class/p8.rs", 17),
+            ("solidcore/src/intersect/curve_class/p9.rs", 17),
+            ("solidcore/src/intersect/point_class.rs", 12),
+            ("solidcore/src/intersect/ray_tracer.rs", 11),
+            ("solidcore/src/intersect/surface_drop_curve.rs", 8),
+            ("solidcore/src/intersect/surface_drop_lib/boundary_moves.rs", 3),
+            ("solidcore/src/intersect/surface_drop_lib/p1.rs", 4),
+            ("solidcore/src/intersect/surface_drop_lib/p2.rs", 7),
+            ("solidcore/src/intersect/surface_drop_lib/p3.rs", 10),
+            ("solidcore/src/intersect/surface_intersector/p2.rs", 9),
+            ("solidcore/src/intersect/surface_intersector/p3.rs", 5),
+            ("solidcore/src/intersect/surface_intersector/p4.rs", 17),
+            ("solidcore/src/intersect/surface_silhouette.rs", 7),
+            ("solidcore/src/intersect/surface_tracer.rs", 6),
+            ("solidcore/src/intersect/topology_solver/p1.rs", 12),
+            ("solidcore/src/intersect/topology_solver/p2.rs", 24),
+            ("solidcore/src/intersect/views.rs", 2),
+        ];
+        assert_pinned(
+            "intersection phrase-cause sites",
+            &crate_sites(&PHRASES),
+            PINNED,
+        );
     }
 }

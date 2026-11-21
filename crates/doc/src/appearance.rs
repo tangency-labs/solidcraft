@@ -498,6 +498,13 @@ pub fn face_index_at(b: &crate::ModelBody, p: Vec3) -> Option<usize> {
     (d <= pick_tolerance(b)).then_some(f)
 }
 
+/// The faces of `b` that hold `p` within `tolerance`, in ascending order: one when `p` lies on a
+/// face, several when it lies on an edge or a vertex they share, none when it floats. Each face is
+/// decided exactly on its surface and trim, not on the display mesh.
+pub fn faces_within(b: &crate::ModelBody, p: Vec3, tolerance: f64) -> Vec<usize> {
+    (0..b.body.face_count()).filter(|&face| b.body.point_lies_on_face(face, p, tolerance).ok().flatten().is_some()).collect()
+}
+
 /// The face of `b` nearest `p` and how far it is, however far.
 pub fn nearest_face(b: &crate::ModelBody, p: Vec3) -> Option<(f64, usize)> {
     let m = b.mesh();

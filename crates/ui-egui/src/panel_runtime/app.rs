@@ -590,6 +590,7 @@ impl AppPanelRuntime {
                                 return Err(error(Rule::Capability, "desktop viewport became unavailable"));
                             }
                             desktop.observe(ui.ctx(), &host, active);
+                            let _blur = content.app.blur.begin(ui.ctx());
                             solidcraft_ui_registry::isolated(|| {
                                 super::native_ui::paint(&mut self.runtime, &mut services, &mut content, &host, &section, ui, enabled)
                             })

@@ -196,11 +196,6 @@ pub struct ModelFace {
     /// For a cylindrical face: its axis and radius.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cylinder: Option<FaceCylinder>,
-    /// For a flat-model sheet's face: `sheet:<body>:<panel>:<side>`, the side `top`, `bottom`,
-    /// `rim.<edge>`, `bend.inner` or `bend.outer`. It is taken wherever a face name is. A sheet
-    /// made from surfaces has none: its faces' names are the model's, after what made each.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sheet_face: Option<String>,
 }
 
 /// A cylindrical face's axis and radius.
@@ -504,9 +499,31 @@ pub struct DocumentInspectResult {
     pub redo: usize,
     /// The parts of the origin that are hidden, by name.
     pub hidden_origin: Vec<String>,
+    /// What imports found wrong with the geometry of the parts they brought in, as the Browser
+    /// marks it; left out when nothing is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub defects: Vec<GeometryDefect>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// What an import found wrong with a part's geometry: on the body made of the part, or, for a
+/// part that was not imported, on the component that would have held it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GeometryDefect {
+    /// The body made of the part; absent for a part that was not imported.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    /// The component (id) that holds a part that was not imported, or the nearest one above it
+    /// that the import made.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub component: Option<u64>,
+    /// What kind of problem: `imported_as_surfaces`, `face_left_out`, `open_body`,
+    /// `faces_not_shown`, `needs_repair`, `repaired`, `not_imported` or `refused`.
+    pub kind: String,
+    /// The import's note, in its own words.
+    pub detail: String,
 }
 
 /// A parameter of the design.
@@ -526,6 +543,26 @@ pub struct DocumentParam {
     pub error: Option<String>,
 }
 
+/// A failed kernel call's stable code: equal for two failures of one kind at one place in the
+/// kernel, whatever the design, its numbers or its names, so failures are grouped by it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ErrorCodeReply {
+    /// The kernel call that failed, such as `blend`.
+    pub call: String,
+    /// The kernel's number for the kind of failure, never reused; 0 for one the kernel's
+    /// operations library decided itself.
+    pub kind: u16,
+    /// The kernel routine that failed (a module path), or for kind 0 the library's name of the
+    /// error.
+    pub operation: String,
+}
+
+impl From<&solidcraft_kernel::ErrorCode> for ErrorCodeReply {
+    fn from(c: &solidcraft_kernel::ErrorCode) -> Self {
+        ErrorCodeReply { call: c.call.clone(), kind: c.kind, operation: c.operation.clone() }
+    }
+}
+
 /// A feature of the timeline.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct TimelineEntry {
@@ -539,6 +576,9 @@ pub struct TimelineEntry {
     pub rolled_back: bool,
     /// Why it failed; `null` when it did not.
     pub error: Option<String>,
+    /// The stable code of the kernel call it failed with; present only when it failed with one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<ErrorCodeReply>,
     pub warning: Option<String>,
     /// How long it took to evaluate (ms); `null` when it has no result.
     pub ms: Option<f64>,
@@ -563,6 +603,9 @@ pub struct TimelineSummary {
     /// Why it failed; present only when it did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The stable code of the kernel call it failed with; present only when it failed with one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<ErrorCodeReply>,
     /// Present only when it has one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub warning: Option<String>,

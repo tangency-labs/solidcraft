@@ -64,6 +64,9 @@ fn look_ats_own_key_faces_the_open_sketch_with_nothing_selected() {
     crate::keymap::press(&mut h.app, "N", false);
     assert!((h.app.cam.back() - Vec3::new(0.0, 0.0, 1.0)).len() < 1e-6, "facing the sketch: {:?}", h.app.cam.back());
     assert!(near(h.app.cam.target, Vec3::new(340.0, 490.0, 8.0)), "{:?}", h.app.cam.target);
+    // Holding the key does not turn the view to the other side and back.
+    crate::keymap::press(&mut h.app, "N", true);
+    assert!((h.app.cam.back() - Vec3::new(0.0, 0.0, 1.0)).len() < 1e-6, "a repeat changes nothing: {:?}", h.app.cam.back());
 }
 
 #[test]

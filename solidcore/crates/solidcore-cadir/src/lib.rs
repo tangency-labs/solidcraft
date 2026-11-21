@@ -24,7 +24,7 @@
 
 mod geometry;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use cadmpeg_ir::document::CadIr;
 use cadmpeg_ir::topology::{
@@ -36,8 +36,12 @@ use solidcore_step::assembly::{
     Assembly, Bound, Kind, hyperbola_curve, parabola_curve, periodic_edge,
 };
 use solidcore_step::topology::{
-    MAX_BOUNDS, MAX_FACES, MAX_FILE_FACES, MAX_FIT_TOLERANCE, MAX_LOOP, MIN_TOLERANCE,
+    MAX_BOUNDS, MAX_FACES, MAX_FILE_FACES, MAX_FIT_TOLERANCE, MAX_LOOP, MIN_TOLERANCE, named_face,
 };
+
+/// Most reads of a refused region without the faces its refusals name, as the STEP reader
+/// makes of a refused solid.
+const MAX_LEFT_OUT_ROUNDS: usize = 8;
 
 use geometry::R;
 
@@ -124,14 +128,29 @@ pub fn read_bodies(ir: &CadIr, trims: Option<&dyn Trims>) -> Bodies {
         };
         for (k, region) in body.regions.iter().enumerate() {
             let name = body.name.clone().unwrap_or_default();
-            match model.region(
-                region.as_str(),
-                kind,
-                name,
-                tolerance(ir),
-                trims,
-                &mut budget,
-            ) {
+            let none = HashSet::new();
+            let read = model
+                .region(
+                    region.as_str(),
+                    kind,
+                    name.clone(),
+                    model.region_tolerance(region.as_str(), tolerance(ir)),
+                    trims,
+                    &none,
+                    &mut budget,
+                )
+                .or_else(|message| {
+                    model.without_named_faces(
+                        region.as_str(),
+                        kind,
+                        name,
+                        model.region_tolerance(region.as_str(), tolerance(ir)),
+                        trims,
+                        message,
+                        &mut budget,
+                    )
+                });
+            match read {
                 Ok(solid) => {
                     out.read.push(Read {
                         body: id.clone(),
@@ -241,8 +260,120 @@ impl<'a> Model<'a> {
         matches!((at(a), at(b)), (Some(p), Some(q)) if (p - q).length() <= tol)
     }
 
+    /// A region refused with `refusal`, read again without the face the refusal names, as an
+    /// open surface of the faces that remain (the faces that do read, sharing the edges they do):
+    /// what the STEP reader makes of a solid it cannot close. A refusal of that naming another face
+    /// of the region leaves it out too, up to [`MAX_LEFT_OUT_ROUNDS`] reads; a face is only ever
+    /// left out where a refusal names it. The record's notes say why it is open and each face left
+    /// out. The refusal stands where it names no face of the region, or no read succeeds.
+    #[allow(clippy::too_many_arguments)]
+    fn without_named_faces(
+        &self,
+        id: &str,
+        kind: Kind,
+        name: String,
+        tol: f64,
+        trims: Option<&dyn Trims>,
+        refusal: String,
+        budget: &mut usize,
+    ) -> R<Solid> {
+        let of_region = self.face_indices(id);
+        let open = Kind::Open {
+            voids: matches!(kind, Kind::Solid)
+                && self.regions.get(id).is_some_and(|r| r.shells.len() > 1),
+            outer: true,
+        };
+        let open = if matches!(kind, Kind::Model) {
+            Kind::Model
+        } else {
+            open
+        };
+        let mut skip = HashSet::new();
+        let mut left_out = Vec::new();
+        let mut why = refusal.clone();
+        // Each read is charged to the file's face budget, as the first one was: a region read
+        // again costs what it reads again, so refused regions cannot read past the budget.
+        for _ in 0..MAX_LEFT_OUT_ROUNDS {
+            let Some(face) = self
+                .named(&why)
+                .filter(|f| of_region.contains(f) && !skip.contains(f))
+            else {
+                break;
+            };
+            skip.insert(face);
+            left_out.push(why.clone());
+            if skip.len() >= of_region.len() {
+                break;
+            }
+            match self.region(id, open, name.clone(), tol, trims, &skip, budget) {
+                Ok(mut solid) => {
+                    solid.notes.insert(
+                        0,
+                        format!("not closed, so its faces came in as an open surface: {refusal}"),
+                    );
+                    solid
+                        .notes
+                        .extend(left_out.iter().map(|m| format!("left out: {m}")));
+                    return Ok(solid);
+                }
+                Err(m) => why = m,
+            }
+        }
+        Err(refusal)
+    }
+
+    /// The face a refusal names: by its model index (`face #12`, as the assembly stage names a
+    /// face) or by its id in the model (`face step:data:face#81405-…`, as this reader names one).
+    fn named(&self, message: &str) -> Option<u64> {
+        if let Some(f) = named_face(message) {
+            return Some(f);
+        }
+        message.match_indices("face ").find_map(|(at, m)| {
+            let rest = message.get(at + m.len()..)?;
+            // A model id has colons in it: the id is the word, less the colon after it.
+            let id = rest.split_whitespace().next()?.trim_end_matches(':');
+            self.faces.get(id).map(|(i, _)| *i as u64)
+        })
+    }
+
+    /// The tolerance region `id` is built at: the largest its faces carry (a STEP file states
+    /// each part's uncertainty, which CADIR gives every face of the part, overriding the
+    /// document's), else `document`, within the range the STEP reader takes a file's. An edge's
+    /// or vertex's own tolerance (one off its curve) is that entity's alone, never the region's:
+    /// one loose edge does not loosen every face.
+    fn region_tolerance(&self, id: &str, document: f64) -> f64 {
+        let Some(region) = self.regions.get(id) else {
+            return document;
+        };
+        let most = region
+            .shells
+            .iter()
+            .filter_map(|s| self.shells.get(s.as_str()))
+            .flat_map(|shell| shell.faces())
+            .filter_map(|f| self.faces.get(f.as_str()))
+            .filter_map(|(_, face)| face.tolerance.map(|t| t.get()))
+            .filter(|t| t.is_finite())
+            .fold(None, |m: Option<f64>, t| Some(m.map_or(t, |m| m.max(t))));
+        most.map_or(document, |t| t.clamp(MIN_TOLERANCE, MAX_FIT_TOLERANCE))
+    }
+
+    /// The model indices of region `id`'s faces (what a refusal names a face by).
+    fn face_indices(&self, id: &str) -> HashSet<u64> {
+        let Some(region) = self.regions.get(id) else {
+            return HashSet::new();
+        };
+        region
+            .shells
+            .iter()
+            .filter_map(|s| self.shells.get(s.as_str()))
+            .flat_map(|shell| shell.faces())
+            .filter_map(|f| self.faces.get(f.as_str()).map(|(i, _)| *i as u64))
+            .collect()
+    }
+
     /// Region `id` read into a record of `kind` (a solid's first shell its outer one, the rest
-    /// its voids).
+    /// its voids), without the faces in `skip` (model indices).
+    #[allow(clippy::too_many_arguments)]
     fn region(
         &self,
         id: &str,
@@ -250,6 +381,7 @@ impl<'a> Model<'a> {
         name: String,
         tol: f64,
         trims: Option<&dyn Trims>,
+        skip: &HashSet<u64>,
         budget: &mut usize,
     ) -> R<Solid> {
         let region = self
@@ -271,7 +403,8 @@ impl<'a> Model<'a> {
         b.join_collapsed(&region.shells);
         let mut shells = Vec::new();
         let mut left_out = 0usize;
-        for s in &region.shells {
+        let mut outer_left_out = false;
+        for (k, s) in region.shells.iter().enumerate() {
             if shells.len() >= solidcore_record::brep::MAX_SHELLS {
                 return Err(format!(
                     "more than {} shells",
@@ -286,6 +419,13 @@ impl<'a> Model<'a> {
             left_out += shell.wire_edges().len() + shell.free_vertices().len();
             let mut faces = Vec::new();
             for f in shell.faces() {
+                if self
+                    .faces
+                    .get(f.as_str())
+                    .is_some_and(|(i, _)| skip.contains(&(*i as u64)))
+                {
+                    continue;
+                }
                 if faces.len() >= MAX_FACES {
                     return Err(format!("more than {MAX_FACES} faces"));
                 }
@@ -294,8 +434,21 @@ impl<'a> Model<'a> {
                     .ok_or_else(|| format!("more than {MAX_FILE_FACES} faces in one model"))?;
                 faces.push(b.face(f.as_str())?);
             }
-            shells.push(faces);
+            // A shell all of whose faces a refusal left out is no shell of the open surface. Where
+            // that is the outer shell, the shells left are all cavities, and stay voids.
+            if faces.is_empty() && !skip.is_empty() {
+                outer_left_out |= k == 0;
+            } else {
+                shells.push(faces);
+            }
         }
+        let kind = match kind {
+            Kind::Open { voids, .. } if outer_left_out => Kind::Open {
+                voids,
+                outer: false,
+            },
+            k => k,
+        };
         let mut solid = b.asm.finish(0, name, shells, kind)?;
         if left_out > 0 {
             solid.notes.push(format!(

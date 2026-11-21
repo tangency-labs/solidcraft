@@ -224,7 +224,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("interference")
         .noundo()
         .params(
-        "bodies?: [names] (default: all, in world placement; a name that is no body is refused); budget_s?: seconds (default 240, at most 86400: pairs not finished by then are listed in unchecked as \"not checked: the time budget … ran out\" and the call returns); exclude_pairs?: [[a, b]] (pairs left out, such as a pin in its hole: each side a body's world name or an occurrence id|name, matching every body under it; pairs_excluded counts them) → interferences: pairs that overlap with the overlap volume, area, bounding box and centre, and a_part, b_part: {component, path: [occurrence names], path_ids} where each body sits (also on unchecked pairs); unchecked: [{a, b, reason}], the pairs that could not be checked, with the reason, and each mesh body (STL, 3MF or OBJ import: not intersected) as {a: name, b: null, reason: \"mesh body: not checked\"}, so count: 0 is not read as no overlap (checked counts the solid bodies). Bodies are pruned by bounding box first, then by their display meshes (pairs whose meshes stay apart by more than their chord tolerances, neither inside the other, are clear without a boolean), so any number of bodies is fine; the pairs left are intersected exactly, in parallel on desktop, the slowest first; at most 20000 pairs whose boxes overlap are intersected per call (truncated: true and skipped_pairs: n say when more were left out). Also: pairs_candidate (boxes overlap), pairs_cleared (by the meshes), pairs_intersected, pairs_not_checked, pairs_excluded, budget_exceeded, threads (worker threads; 0: on the calling thread), boolean_ms and tessellate_ms (kernel time summed over the pairs), slowest: [{a, b, ms, boolean_ms, tessellate_ms}] and ms",
+        "bodies?: [names] (default: all, in world placement; a name that is no body is refused); budget_s?: seconds (default 240, at most 86400: pairs not finished by then are listed in unchecked as \"not checked: the time budget … ran out\" and the call returns); exclude_pairs?: [[a, b]] (pairs left out, such as a pin in its hole: each side a body's world name or an occurrence id|name, matching every body under it; pairs_excluded counts them); envelopes?: bool (default false: component envelopes, solid.bounding_solid with `component`, are left out unless named; true: each is checked instead of the bodies inside it, and a body named inside one means it; an envelope and a body inside it are never paired, counted in pairs_excluded) → interferences: pairs that overlap with the overlap volume, area, bounding box and centre, and a_part, b_part: {component, path: [occurrence names], path_ids} where each body sits (also on unchecked pairs); unchecked: [{a, b, reason}], the pairs that could not be checked, with the reason, and each mesh body (STL, 3MF or OBJ import: not intersected) as {a: name, b: null, reason: \"mesh body: not checked\"}, so count: 0 is not read as no overlap (checked counts the solid bodies). Bodies are pruned by bounding box first, then by their display meshes (pairs whose meshes stay apart by more than their chord tolerances, neither inside the other, are clear without a boolean), so any number of bodies is fine; the pairs left are intersected exactly, in parallel on desktop, the slowest first; at most 20000 pairs whose boxes overlap are intersected per call (truncated: true and skipped_pairs: n say when more were left out). Also: pairs_candidate (boxes overlap), pairs_cleared (by the meshes), pairs_intersected, pairs_not_checked, pairs_excluded, budget_exceeded, threads (worker threads; 0: on the calling thread), boolean_ms and tessellate_ms (kernel time summed over the pairs), slowest: [{a, b, ms, boolean_ms, tessellate_ms}] and ms",
     ),
 ];
 
@@ -414,6 +414,25 @@ fn effective_value_list(s: &Session, id: u64) -> Option<Vec<NamedValue>> {
     let j = s.doc.assembly.joints.iter().find(|j| j.id == id)?;
     let vals = joints::joint_values(&s.doc.assembly);
     Some(named_value_list(j, vals.get(&id).map(Vec::as_slice).unwrap_or(&j.values)))
+}
+
+/// The joints a preview posed: the ones its commands drove, and the ones whose values the
+/// commands changed (a motion link's follower, a joint a closed loop moved). Their values are
+/// as the solver placed them, after motion links and limits, as `joint.inspect` and
+/// `joint.drive` give them.
+pub(crate) fn posed_joints(before: &Session, after: &Session, replies: &[Value]) -> Vec<ReachedJoint> {
+    let was = joints::joint_values(&before.doc.assembly);
+    let now = joints::joint_values(&after.doc.assembly);
+    let mut ids: std::collections::BTreeSet<u64> = replies.iter().filter_map(|r| r.get("joint").and_then(Value::as_u64)).collect();
+    ids.extend(after.doc.assembly.joints.iter().filter(|j| was.get(&j.id) != now.get(&j.id)).map(|j| j.id));
+    after
+        .doc
+        .assembly
+        .joints
+        .iter()
+        .filter(|j| ids.contains(&j.id))
+        .map(|j| ReachedJoint { joint: j.id, name: j.name.clone(), values: named_value_list(j, now.get(&j.id).unwrap_or(&j.values)) })
+        .collect()
 }
 
 fn occurrence_name(s: &Session, id: u64) -> String {

@@ -382,7 +382,9 @@ fn seam_curves(k: &Kernel, uv_curve: &Curve, delta: Vec3) -> Result<Vec<Curve>> 
 /// edge/edge gap, `max(def, max face tolerance, gain * g - def)`
 /// ([`brep_calc_edge_zone_tol_3d`]), capped by the edge tolerance. A tolerance raised
 /// to cover a gap so never loosens the fit, and the fit is never above upstream's (the
-/// edge tolerance).
+/// edge tolerance). An edge tolerance a read raised to cover a kept UV trim's distance
+/// (not upstream, [`crate::topology::TrimCoverRaises`]) is taken as the tolerance before
+/// that raise while the edge holds the raised value.
 ///
 /// # Errors
 ///
@@ -390,7 +392,14 @@ fn seam_curves(k: &Kernel, uv_curve: &Curve, delta: Vec3) -> Result<Vec<Curve>> 
 /// preparation errors of [`crate::topology::edgeuse::p1::calc_max_edge_face_gap`].
 pub(crate) fn fit_tolerance(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<f64> {
     use crate::topology::edgeuse::p1 as eu1;
-    let edge_tol = b.edge(e)?.tolerance;
+    let mut edge_tol = b.edge(e)?.tolerance;
+    // (a tolerance a read raised to cover a kept trim's distance, held still, fits as the
+    // tolerance before the raise: [`crate::topology::TrimCoverRaises`])
+    if let Some(&(before, after)) = b.trim_cover_raises().edges.get(&e) {
+        if after.to_bits() == edge_tol.to_bits() {
+            edge_tol = before;
+        }
+    }
     // (the largest face tolerance of the edge, as `Fix_TolSizes` takes it)
     let mut max_face_tol = zone_tol3d(k, 0.0);
     for f in crate::topology::edge::faces(b, e, None)? {

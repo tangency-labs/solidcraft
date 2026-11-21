@@ -55,6 +55,7 @@ pub mod geom;
 #[allow(missing_docs)]
 pub mod hatch;
 pub mod heal;
+pub mod hlr;
 pub mod intersect;
 pub mod living_hinge;
 pub mod mass;

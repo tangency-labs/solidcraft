@@ -272,7 +272,7 @@ pub fn on_hover(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
     } else if let Some(point) = app.tool.as_ref().and_then(|tool| crate::sketch_tools::periodic_start_snap(app, tool, proj, pos)) {
         Some((point, Some("Close smooth loop".into())))
     } else {
-        sketch_point_at(app, proj, pos)
+        crate::sketch_tools::tool_point_at(app, proj, pos, app.tool.as_ref().map(|t| t.cmd))
     };
     let follow = app.preferences.center_arc_follows_cursor;
     if let Some(t) = app.tool.as_mut() {

@@ -636,7 +636,7 @@ fn insert_footer(app: &mut SolveApp, ui: &mut egui::Ui) {
             for (clicked, command, extensions) in [
                 (step, "file.insert_step", &["step", "stp"][..]),
                 (iges, "file.insert_step", &["igs", "iges"][..]),
-                (mesh, "file.insert_mesh", &["3mf", "stl", "obj", "glb", "gltf"][..]),
+                (mesh, "file.insert_mesh", &["3mf", "stl", "obj", "glb", "gltf", "usd", "usda", "usdc", "usdz"][..]),
             ] {
                 if clicked && solidcraft_engine::find_command(command).is_some_and(|spec| spec.info(&app.session).enabled) {
                     app.home.open = false;
@@ -1523,7 +1523,10 @@ mod tests {
             assert!(h.app.library.root.is_none());
         }
         assert_eq!(asked.get(), 3);
-        assert_eq!(*filters.borrow(), vec![vec!["step", "stp"], vec!["igs", "iges"], vec!["3mf", "stl", "obj", "glb", "gltf"]]);
+        assert_eq!(
+            *filters.borrow(),
+            vec![vec!["step", "stp"], vec!["igs", "iges"], vec!["3mf", "stl", "obj", "glb", "gltf", "usd", "usda", "usdc", "usdz"]]
+        );
     }
 
     #[test]
@@ -1726,7 +1729,7 @@ mod tests {
     fn copy_and_move_commands_refresh_the_listing_without_touching_the_open_design() {
         let mut h = Harness::new();
         let source = h.dir.join("Original.solidcraft");
-        std::fs::write(&source, solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::new("Original"))).unwrap();
+        std::fs::write(&source, solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::new("Original")).unwrap()).unwrap();
         h.app.library.set_root(h.dir.clone());
         wait(&mut h.app);
         let doc = h.app.session.doc.to_json();
@@ -1750,7 +1753,7 @@ mod tests {
         let mut h = Harness::new();
         let source = h.dir.join("Original.solidcraft");
         let destination = h.dir.join("Partial.solidcraft");
-        std::fs::write(&source, solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::new("Original"))).unwrap();
+        std::fs::write(&source, solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::new("Original")).unwrap()).unwrap();
         h.app.library.set_root(h.dir.clone());
         wait(&mut h.app);
         let original_permissions = std::fs::metadata(&h.dir).unwrap().permissions();

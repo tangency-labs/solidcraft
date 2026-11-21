@@ -51,11 +51,6 @@ pub fn fixes() -> Vec<&'static str> {
     crate::core::fixes().flags().filter(|&(_, on)| on).map(|(name, _)| name).collect()
 }
 
-/// The names of solidcore's upstream fixes this crate holds back: every other one is on.
-pub fn held_back() -> Vec<&'static str> {
-    crate::core::HELD_BACK.to_vec()
-}
-
 pub(crate) fn on() -> bool {
     ON.load(Ordering::Relaxed)
 }

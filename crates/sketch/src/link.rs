@@ -248,6 +248,14 @@ pub struct Link {
     /// geometry refresh. None: the vertex is the one nearest the source's point.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vertex_name: Option<String>,
+    /// The persistent name of the model edge each of the link's curves was projected from, in
+    /// the order of its curves ([`Sketch::link_curves`]), empty for a curve no edge names
+    /// exactly. A face read again after a parameter moved it is matched to its curves by these
+    /// names, whatever order the face's edges come back in (#18711). Empty for a link saved
+    /// before, or one whose curves do not stand one for one for named edges: such a link is
+    /// matched by its geometry, as before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub curve_edges: Vec<String>,
     /// Automatically projected borders owned by a durable sketch face attachment.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto_face: bool,
@@ -370,6 +378,15 @@ fn layout(geom: &[LinkGeom], kind: LinkKind) -> Result<Layout> {
         pts.push(p);
         pts.len() - 1
     }
+    fn spline_point(pts: &mut Vec<Vec2>, p: Vec2) -> usize {
+        // A nearby endpoint is a different control and changes the curve. Native edge
+        // topology has already supplied shared vertices before the geometry reaches us.
+        if let Some(i) = pts.iter().position(|q| *q == p) {
+            return i;
+        }
+        pts.push(p);
+        pts.len() - 1
+    }
     // A face seen edge-on projects its edges onto one another; one line stands for them.
     let same_line = |cs: &[LCurve], a: usize, b: usize| cs.iter().any(|k| matches!(*k, LCurve::Line(x, y) if (x, y) == (a, b) || (x, y) == (b, a)));
     for g in geom.iter().filter(|g| g.finite()) {
@@ -412,11 +429,11 @@ fn layout(geom: &[LinkGeom], kind: LinkKind) -> Result<Layout> {
             }
             LinkGeom::Spline { pts, control, degree, periodic, nurbs } => {
                 let (Some(first), Some(last)) = (pts.first(), pts.last()) else { continue };
-                let s0 = pt(&mut l.pts, *first);
+                let s0 = spline_point(&mut l.pts, *first);
                 let first_in = l.pts.len();
                 let inner = pts.get(1..pts.len() - 1).unwrap_or_default();
                 l.pts.extend(inner.iter().copied());
-                let s1 = pt(&mut l.pts, *last);
+                let s1 = spline_point(&mut l.pts, *last);
                 l.curves.push(LCurve::Spline(s0, s1, first_in, inner.len(), control, degree, periodic, nurbs));
             }
         }
@@ -481,16 +498,6 @@ fn same_shape(a: &LCurve, b: &LCurve) -> bool {
     )
 }
 
-/// Whether two splines' own knots and weights ([`crate::Nurbs`]) are the same within `close`.
-fn same_nurbs(a: Option<&crate::Nurbs>, b: Option<&crate::Nurbs>, close: impl Fn(f64, f64) -> bool) -> bool {
-    let all = |x: &[f64], y: &[f64]| x.len() == y.len() && x.iter().zip(y).all(|(p, q)| close(*p, *q));
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => all(&a.knots, &b.knots) && all(&a.weights, &b.weights),
-        _ => false,
-    }
-}
-
 /// Whether two readings of a linked point are the same point: within [`same_geometry`]'s tolerance.
 fn near_point(p: Vec2, q: Vec2) -> bool {
     p.dist(q) <= SAME_TOL * (1.0 + p.len().max(q.len()))
@@ -503,22 +510,27 @@ const SAME_TOL: f64 = 1e-6;
 /// the direction a loop was walked? Lines match with either end first; circles by centre and
 /// radius; arcs by centre and their (start, end) pair; conics by all their points and rho.
 fn same_geometry(a: &[(LCurve, Vec<Vec2>)], b: &[(LCurve, Vec<Vec2>)]) -> bool {
+    let near = near_point;
     let close = |x: f64, y: f64| (x - y).abs() <= SAME_TOL * (1.0 + x.abs().max(y.abs()));
     let matches = |(ca, pa): &(LCurve, Vec<Vec2>), (cb, pb): &(LCurve, Vec<Vec2>)| -> bool {
         if pa.len() != pb.len() {
             return false;
         }
-        let all = || pa.iter().zip(pb).all(|(p, q)| near_point(*p, *q));
+        let all = || pa.iter().zip(pb).all(|(p, q)| near(*p, *q));
         match (ca, cb) {
             (LCurve::Line(..), LCurve::Line(..)) => {
-                all() || matches!((pa.as_slice(), pb.as_slice()), ([a0, a1], [b0, b1]) if near_point(*a0, *b1) && near_point(*a1, *b0))
+                all() || matches!((pa.as_slice(), pb.as_slice()), ([a0, a1], [b0, b1]) if near(*a0, *b1) && near(*a1, *b0))
             }
             (LCurve::Circle(_, ra), LCurve::Circle(_, rb)) => all() && close(*ra, *rb),
             (LCurve::Arc(..), LCurve::Arc(..)) => all(),
             (LCurve::Conic(.., ra), LCurve::Conic(.., rb)) => all() && close(*ra, *rb),
             (LCurve::Ellipse(.., ra), LCurve::Ellipse(.., rb)) => all() && close(*ra, *rb),
-            (LCurve::Spline(.., ca, da, pa, ka), LCurve::Spline(.., cb, db, pb, kb)) => {
-                ca == cb && da == db && pa == pb && same_nurbs(ka.as_ref(), kb.as_ref(), close) && all()
+            (LCurve::Spline(.., ca, da, periodic_a, ka), LCurve::Spline(.., cb, db, periodic_b, kb)) => {
+                ca == cb
+                    && da == db
+                    && periodic_a == periodic_b
+                    && ka == kb
+                    && pa.iter().zip(pb).all(|(p, q)| p.dist(*q) <= f64::EPSILON * 64. * (1.0 + p.len().max(q.len())))
             }
             _ => false,
         }
@@ -831,6 +843,7 @@ impl Sketch {
             face_name: None,
             edge_name: None,
             vertex_name: None,
+            curve_edges: Vec::new(),
             auto_face: false,
             lost: false,
             name_dropped: false,
@@ -969,12 +982,75 @@ impl Sketch {
     /// sketch's own curves and constraints on it move to the new entities that match the old
     /// ones (`rebuild_link`). Returns `true` when it was rebuilt.
     pub fn update_link(&mut self, id: &str, geom: &[LinkGeom]) -> Result<bool> {
+        self.update_link_read(id, geom, false).map(|(rebuilt, _)| rebuilt)
+    }
+
+    /// Record which model edge each curve of link `id` stands for: `names[i]` is the persistent
+    /// name of the edge `geom[i]` was projected from, `geom` the geometry the link was just made
+    /// or refreshed from. Only a link whose curves are `geom` one for one keeps them; any other
+    /// keeps none (see [`Link::curve_edges`]).
+    pub fn set_link_curve_edges(&mut self, id: &str, geom: &[LinkGeom], names: &[String]) {
+        let one_for_one = self.link(id).is_some_and(|l| layout(geom, l.kind).is_ok_and(|lay| lay.curves.len() == geom.len() && lay.lone.is_empty()))
+            && names.len() == geom.len()
+            && self.link_curves(id).len() == geom.len();
+        if let Some(link) = self.links.iter_mut().find(|l| l.id == id) {
+            link.curve_edges = if one_for_one { names.to_vec() } else { Vec::new() };
+        }
+    }
+
+    /// [`Sketch::update_link`] with `names`, the persistent name of the edge each piece of `geom`
+    /// was projected from. When the link's curves were recorded with their edges' names
+    /// ([`Link::curve_edges`]) and `geom` has the same names, each one exact and none twice, the
+    /// fresh pieces are taken in the order of the link's curves: the same curve is the same edge,
+    /// wherever the face moved and whatever order its edges came back in, and its points keep
+    /// their ids as long as each stays on the same loop of the face (an outer rim is never taken
+    /// for a hole) (#18711). Otherwise as [`Sketch::update_link`]. Either way the link records
+    /// the names of the edges its curves stand for now, where it knows them.
+    pub fn update_link_named(&mut self, id: &str, geom: &[LinkGeom], names: &[String]) -> Result<bool> {
+        let unique = |v: &[String]| {
+            let mut seen = std::collections::BTreeSet::new();
+            !v.is_empty() && v.iter().all(|n| !n.is_empty() && seen.insert(n.as_str()))
+        };
+        let stored = self.link(id).map(|l| l.curve_edges.clone()).unwrap_or_default();
+        let by_name: Option<Vec<usize>> = (names.len() == geom.len()
+            && stored.len() == geom.len()
+            && self.link_curves(id).len() == stored.len()
+            && unique(&stored)
+            && unique(names))
+        .then(|| stored.iter().map(|n| names.iter().position(|m| m == n)).collect::<Option<Vec<usize>>>())
+        .flatten();
+        let (geom, names): (Vec<LinkGeom>, Vec<String>) = match &by_name {
+            Some(order) => order.iter().filter_map(|j| Some((geom.get(*j)?.clone(), names.get(*j)?.clone()))).unzip(),
+            None => (geom.to_vec(), names.to_vec()),
+        };
+        let (rebuilt, read) = self.update_link_read(id, &geom, by_name.is_some())?;
+        let edges: Vec<String> = match read {
+            Some(read) if names.len() == geom.len() => read.iter().filter_map(|j| names.get(*j).cloned()).collect(),
+            _ => Vec::new(),
+        };
+        let keep = edges.len() == self.link_curves(id).len();
+        if let Some(link) = self.links.iter_mut().find(|l| l.id == id) {
+            link.curve_edges = if keep { edges } else { Vec::new() };
+        }
+        Ok(rebuilt)
+    }
+
+    /// [`Sketch::update_link`], and for each curve of the link after it (in [`Sketch::link_curves`]
+    /// order), the piece of `geom` it stands for, where that is known (the link's curves are
+    /// `geom` one for one). `in_name_order`: `geom` was put in the order of the link's curves by
+    /// their edges' names ([`Sketch::update_link_named`]).
+    fn update_link_read(&mut self, id: &str, geom: &[LinkGeom], in_name_order: bool) -> Result<(bool, Option<Vec<usize>>)> {
         let Some(kind) = self.link(id).map(|l| l.kind) else {
             return Err(SketchError::Unknown(id.into()));
         };
         let halves = self.saved_halves(id, geom);
+        let pieces = geom.len();
         let geom = halves.as_deref().unwrap_or(geom);
         let lay = layout(geom, kind)?;
+        // Each curve of the layout is the piece of `geom` of the same index.
+        let one_for_one = halves.is_none() && lay.curves.len() == pieces && lay.lone.is_empty();
+        let read = |map: Vec<usize>| one_for_one.then_some(map);
+        let in_order = || read((0..lay.curves.len()).collect());
         // A projected face boundary is a closed loop: crossings and touching points make its
         // identity ambiguous, and the link keeps the geometry it had. A face taken with
         // `Intersect` is a section: an open chain, which no closed boundary describes.
@@ -1144,12 +1220,32 @@ impl Sketch {
                         }
                     }
                 }
-                return Ok(false);
+                return Ok((false, if same { in_order() } else { None }));
             }
         }
         // A resized face can enumerate the same boundary in another order. Match the
         // shared-point graph in normalized sketch space before discarding its identity.
-        let mut same_order_agrees = false;
+        // Large links skip the quadratic loop matcher. The sharing graph must still agree,
+        // and the kernel must witness a unique nearby point for every ordered point. This
+        // establishes identity only: the changed coordinates are applied below.
+        let mut same_order_agrees = if same && (points.len() > 512 || curves.len() > 512) && self.link(id).is_some_and(closed_boundary) {
+            let parameters_agree = cur.as_ref().is_some_and(|cur| {
+                cur.iter().zip(&new).all(|(a, b)| match (a, b) {
+                    (LCurve::Circle(_, a), LCurve::Circle(_, b))
+                    | (LCurve::Conic(.., a), LCurve::Conic(.., b))
+                    | (LCurve::Ellipse(.., a), LCurve::Ellipse(.., b)) => a == b,
+                    _ => true,
+                })
+            });
+            let old: Option<Vec<Vec2>> = points.iter().map(|i| self.point(*i)).collect();
+            let fresh: Option<Vec<Vec2>> = order.iter().map(|i| lay.pts.get(*i).copied()).collect();
+            parameters_agree
+                && old
+                    .zip(fresh)
+                    .is_some_and(|(old, fresh)| solidcore_ops::point_identity::ordered_nearby_points(&old, &fresh, 1e-6, 4_000_000).unwrap_or(false))
+        } else {
+            false
+        };
         if let Some(cur) = &cur
             && points.len() == lay.pts.len()
             && cur.len() == lay.curves.len()
@@ -1271,6 +1367,7 @@ impl Sketch {
                         p.pos = *q;
                     }
                 }
+                let kept = curve_map.clone();
                 for (ci, li) in curves.iter().zip(curve_map) {
                     if let (Some(Curve { kind: CurveKind::Circle { r, .. }, .. }), Some(LCurve::Circle(_, value))) =
                         (self.curves.get_mut(*ci), lay.curves.get(li))
@@ -1287,13 +1384,18 @@ impl Sketch {
                     {
                         *r = *value;
                     }
-                    if let (Some(Curve { kind: CurveKind::Spline { nurbs, .. }, .. }), Some(LCurve::Spline(.., value))) =
-                        (self.curves.get_mut(*ci), lay.curves.get(li))
+                    if let (
+                        Some(Curve { kind: CurveKind::Spline { control, degree, periodic, nurbs, .. }, .. }),
+                        Some(LCurve::Spline(_, _, _, _, ct, d, closed, value)),
+                    ) = (self.curves.get_mut(*ci), lay.curves.get(li))
                     {
+                        *control = *ct;
+                        *degree = *d;
+                        *periodic = *closed;
                         nurbs.clone_from(value);
                     }
                 }
-                return Ok(false);
+                return Ok((false, read(kept)));
             }
             // A face resized by more than the match above allows (#9001: an angle's wall made
             // thicker moves the inner corner by more than a tenth of the face) is still the same
@@ -1303,9 +1405,19 @@ impl Sketch {
             // it was. The two end corners of a thin arm have the same lines; the lines leave them
             // in opposite senses, which tells them apart when the box the points are compared in
             // shrinks with the face (#12086).
-            same_order_agrees = same
+            // Put in the order of the link's curves by the names of their edges, the same reading
+            // is the same edges: each point is where the same edges meet wherever they went, so it
+            // need only be on the same loops (#18711).
+            let named_order_agrees = in_name_order
+                && same
                 && loop_roles.as_ref().is_some_and(|roles| {
-                    (0..points.len()).all(|k| {
+                    (0..points.len())
+                        .all(|k| order.get(k).is_some_and(|fresh| roles.old.get(k).is_some_and(|old| roles.fresh.get(*fresh) == Some(old))))
+                });
+            same_order_agrees = named_order_agrees
+                || same
+                    && loop_roles.as_ref().is_some_and(|roles| {
+                        (0..points.len()).all(|k| {
                         let (Some(&fresh_i), Some(p)) = (order.get(k), a.get(k)) else { return false };
                         let mut candidates: Vec<(usize, f64)> = b
                             .iter()
@@ -1321,7 +1433,7 @@ impl Sketch {
                         candidates.sort_by(|x, y| x.1.total_cmp(&y.1));
                         matches!(candidates.first(), Some((i, d)) if *i == fresh_i && candidates.get(1).is_none_or(|(_, second)| *d < *second * 0.75))
                     })
-                });
+                    });
         }
         // Equal topology alone does not identify a face boundary: an outer rim and a
         // hole can have identical point graphs. Never move saved curve ids between them
@@ -1351,7 +1463,7 @@ impl Sketch {
                     nurbs.clone_from(k);
                 }
             }
-            return Ok(false);
+            return Ok((false, in_order()));
         }
         // A face seen edge-on was once saved as two lines on the same two points, one each way;
         // it is one line now. Keep the first line (an offset or a constraint may name it) and
@@ -1371,11 +1483,11 @@ impl Sketch {
                 p.pos = b;
             }
             self.remove_curves(&[second]);
-            return Ok(true);
+            return Ok((true, None));
         }
         // Rebuild: new entities, and what the sketch held on the old ones moves to them.
         self.rebuild_link(id, &lay, &points, &curves, cur.as_deref())?;
-        Ok(true)
+        Ok((true, in_order()))
     }
 
     /// Where this sketch's points were in `stored`, the same sketch before its links were
@@ -1487,6 +1599,7 @@ impl Sketch {
                     || o.outputs.iter().any(curve)
                     || o.topology.as_ref().is_some_and(|t| t.roles.iter().any(|r| curve(&r.output) || point(&r.start) || point(&r.end)))
             }) || self.freeform_offsets.iter().any(|o| curve(&o.source) || curve(&o.output))
+                || self.freeform_chain_offsets.iter().any(|o| o.sources.iter().any(|(id, _)| curve(id)) || o.outputs.iter().any(curve))
             {
                 return false;
             }

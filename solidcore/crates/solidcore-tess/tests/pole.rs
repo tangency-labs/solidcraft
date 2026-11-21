@@ -202,16 +202,16 @@ fn a_pole_of_order_four_is_meshed_with_its_triangles_mean_normal_and_named() {
 }
 
 /// The cone whose apex is of third order (both first derivatives vanish there) is planned like
-/// the other faces, 592 triangles a quarter, and meshed whole: its apex takes the limit rule.
+/// the other faces, 560 triangles a quarter, and meshed whole: its apex takes the limit rule.
 #[test]
-fn the_cone_apex_of_third_order_is_meshed_on_its_592_triangles() {
+fn the_cone_apex_of_third_order_is_meshed_on_its_560_triangles() {
     let (p, stats) = planned(Kind::Cone);
     assert!(stats.unmeshed.is_empty(), "{:?}", stats.unmeshed);
     let (m, refused) = p.evaluate();
     assert!(refused.is_empty(), "{refused:?}");
     for f in &p.faces {
-        assert_eq!(f.triangles.len(), 592, "face {}", f.face);
-        assert_eq!(face_triangles(&m, f.face).len(), 592, "face {}", f.face);
+        assert_eq!(f.triangles.len(), 560, "face {}", f.face);
+        assert_eq!(face_triangles(&m, f.face).len(), 560, "face {}", f.face);
     }
 }
 
