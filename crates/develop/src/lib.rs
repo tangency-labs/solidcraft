@@ -91,6 +91,7 @@ fn joint_words(why: JointRefusal) -> &'static str {
         JointRefusal::RipAgainstOutline => "a rip's edge runs against its panel's outline",
         JointRefusal::TornEnd => "a torn end of the zone strays further from the curve it follows than its tolerance",
         JointRefusal::OutlineEnd => "an edge beside the bend's end turns back before it reaches the bend line, so the bend's end can't follow it",
+        JointRefusal::OutlineFit => "the bend's end can't follow the curve of an edge beside it through the bend closely enough",
         JointRefusal::NoFrame => "an anchor has no frame on its panel",
     }
 }

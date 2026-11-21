@@ -836,6 +836,19 @@ fn outline_ends(sheet: &Sheet, b: &BendEdge, bend: &Bend, end: f64, tol: f64) ->
                     }
                     out.push(next);
                 }
+                // The side may be split where the loop starts: its last piece runs on into its first.
+                if out.len() > 2
+                    && let (Some(Some((a, b))), Some(Some((c, d)))) = (out.last().copied(), out.first().copied())
+                {
+                    let (u, v) = ((b.0 - a.0, b.1 - a.1), (d.0 - c.0, d.1 - c.1));
+                    let len = (u.0.hypot(u.1)).max(v.0.hypot(v.1));
+                    if (b.0 - c.0).hypot(b.1 - c.1) <= tol && u.0 * v.0 + u.1 * v.1 > 0.0 && (u.0 * v.1 - u.1 * v.0).abs() <= tol * len {
+                        out.pop();
+                        if let Some(first) = out.first_mut() {
+                            *first = Some((a, d));
+                        }
+                    }
+                }
                 out
             })
             .collect();

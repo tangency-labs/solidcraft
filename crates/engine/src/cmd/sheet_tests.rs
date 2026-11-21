@@ -10681,3 +10681,32 @@ fn a_bends_free_end_follows_the_slanted_sides_square_through_the_sheet() {
     assert!((x - 18.242641).abs() < 1e-6, "{x}");
     assert_eq!((at(x + 0.12, y, z), at(x - 0.12, y, z)), (Inside, Outside));
 }
+
+/// A 120° flange set inside and picked on the top face turns away from the material, so its sharp
+/// lies T tan 60° = 3.464 inside the edge, more than the thickness: the edge is cut back to it
+/// before the flange is laid on. The flange's side still carries the plate's on, 0.75 along the
+/// edge for every mm out, so in the flat it runs parallel to the plate's side: x falls 0.75 for
+/// every mm y rises, the plate's x = 20 − 0.75 y.
+#[test]
+fn a_flange_whose_sharp_is_cut_back_into_the_plate_still_carries_its_slanted_side() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "T", "thickness": "2 mm", "active": true, "bend_radius": "2 mm", "k_factor": 0.44}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.line", json!({"points": [[20, 0], [100, 0], [100, 60], [-25, 60]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"type": "base", "sketch": "Base"}));
+    run(&mut s, "sheet.flange", json!({"type": "edge", "height": 26, "angle": 120, "position": "inside", "edges": [[60, 0, 2]]}));
+    // The flange's side in the flat: from the flange's corner left of the middle at the bottom up
+    // to its neighbour on the outline.
+    let f = flat(&mut s);
+    let pts = outline_points(&f);
+    let n = pts.len();
+    let Some((k, low)) = pts.iter().copied().enumerate().filter(|(_, p)| p.0 < 60.0).min_by(|a, b| a.1.1.total_cmp(&b.1.1)) else {
+        panic!("no flange corner: {pts:?}")
+    };
+    let up =
+        [pts.get((k + n - 1) % n), pts.get((k + 1) % n)].into_iter().flatten().copied().filter(|p| p.0 < 60.0).max_by(|a, b| a.1.total_cmp(&b.1));
+    let Some(up) = up else { panic!("the flange's side has no top: {pts:?}") };
+    let slope = (up.0 - low.0) / (up.1 - low.1);
+    assert!((slope + 0.75).abs() < 1e-9, "the flange's side runs {slope} along for each mm across, not -0.75: {low:?} {up:?}");
+}

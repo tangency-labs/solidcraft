@@ -296,12 +296,7 @@ impl Folded<'_> {
         // helix (a cut across a zone's curved end near a joint of its spans) passes for one too,
         // whose wall would be a cone the rulings at its ends don't lie on: there only a line
         // straight across the bend folds to an arc (round the bend's axis).
-        let across = |bent: &Bent| {
-            run.iter().all(|s| match *s {
-                Seg2::Line { a, b } => (bent.wrapped(a).0 - bent.wrapped(b).0).abs() <= 1e-9,
-                _ => false,
-            })
-        };
+        let across = |bent: &Bent| run.iter().all(|s| matches!(*s, Seg2::Line { a, b } if bent.straight_across(a, b)));
         if let (Some(surface), Some(deep)) = (simple(&sampled(0.0)?), simple(&sampled(self.t)?)) {
             let arc = matches!(surface, EdgeSpec::Arc { .. }) || matches!(deep, EdgeSpec::Arc { .. });
             let held = match piece {
