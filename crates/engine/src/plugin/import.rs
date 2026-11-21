@@ -147,11 +147,17 @@ fn convert(
     }
     // Use the checked package, not a schema cached when discovery or a dialog ran.
     let declared = runtime.entries.iter().find(|e| e.name == importer.entry).ok_or_else(|| error("unknown importer entry"))?;
-    let fields = craft_plugin::directory_read_fields(&declared.input_schema)?;
-    let prepared = (conditions::has_conditions(&declared.input_schema) || !fields.is_empty())
-        .then(|| craft_plugin::prepare_input(&declared.input_schema, options))
-        .transpose()?;
-    let options = prepared.as_ref().unwrap_or(options);
+    let prepared = if declared.dialog_hook {
+        let protected = options.as_object().map(|v| v.keys().cloned().collect()).unwrap_or_default();
+        let update = update_dialog(session, &package, &importer.entry, options, &protected, true)?;
+        if let Some(warning) = update.warning {
+            session.echo(warning);
+        }
+        craft_plugin::prepare_input(&declared.input_schema, &update.values)?
+    } else {
+        craft_plugin::prepare_input(&declared.input_schema, options)?
+    };
+    let options = &prepared;
     let input_folders = folders::for_entry(session, &package, &importer.entry, options, consent)?;
     // The caller's file scope covers the file, and with input_folder, the folder it is in. The
     // folder is read only when the manifest asks for it and the user approved it at install, for
