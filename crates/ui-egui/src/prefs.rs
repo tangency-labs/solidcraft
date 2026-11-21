@@ -31,6 +31,7 @@ mod mouse3d;
 mod navbar;
 mod navigation;
 mod panel_layout;
+mod privacy;
 mod security;
 mod sketch;
 mod theme_picker;
@@ -386,6 +387,7 @@ pub const PAGES: &[&str] = &[
     "Shortcuts",
     "Assistant",
     "Plugins",
+    "Privacy",
 ];
 pub const PAGE_GENERAL: usize = 0;
 pub const PAGE_APPEARANCE: usize = 1;
@@ -400,6 +402,7 @@ pub const PAGE_MOUSE3D: usize = 9;
 pub const PAGE_SHORTCUTS: usize = 10;
 pub const PAGE_ASSISTANT: usize = 11;
 pub const PAGE_PLUGINS: usize = 12;
+pub const PAGE_PRIVACY: usize = 13;
 /// What Preferences accepts for `parameter_list_rows`: `parameters.complete` answers at most 200.
 pub const PARAMETER_LIST_ROWS: std::ops::RangeInclusive<u16> = 5..=200;
 const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
@@ -451,7 +454,8 @@ const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
     prefs_window::Page::Host(prefs_window::HostPage {
         icon: ui_kit::Icon::Kit("shield"),
         label: "prefs.security",
-        group: Some("prefs.structure.work"),
+        // Already in Work, after Design: a group here drew a second "Work" heading.
+        group: None,
         handle: "prefs:page:Security",
         scroll: true,
         draw: page_draw::<PAGE_SECURITY>,
@@ -519,6 +523,15 @@ const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
         scroll: true,
         draw: page_draw::<PAGE_PLUGINS>,
         defaults: page_defaults::<PAGE_PLUGINS>,
+    }),
+    prefs_window::Page::Host(prefs_window::HostPage {
+        icon: ui_kit::Icon::Kit("eye"),
+        label: "prefs.privacy",
+        group: None,
+        handle: "prefs:page:Privacy",
+        scroll: true,
+        draw: page_draw::<PAGE_PRIVACY>,
+        defaults: page_defaults::<PAGE_PRIVACY>,
     }),
 ];
 
@@ -3437,6 +3450,7 @@ fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
         }
         PAGE_DESIGN => design::show(app, ui),
         PAGE_SECURITY => security::show(app, ui),
+        PAGE_PRIVACY => privacy::show(app, ui),
         PAGE_NAVIGATION => navigation::show(app, ui, t),
         PAGE_GRAPHICS => graphics::show(app, ui),
         PAGE_SKETCH => sketch::show(app, ui),
@@ -7449,16 +7463,14 @@ mod tests {
                 "3D mouse",
                 "Shortcuts",
                 "Assistant",
-                "Plugins"
+                "Plugins",
+                "Privacy"
             ]
         );
         assert_eq!(WINDOW_PAGES.len(), PAGES.len());
         let groups: Vec<_> =
             WINDOW_PAGES.iter().map(host_page).enumerate().filter_map(|(i, p)| p.group.map(|g| (i, solidcraft_ui_text::tr(g)))).collect();
-        assert_eq!(
-            groups,
-            [(PAGE_APPEARANCE, "Look"), (PAGE_DESIGN, "Work"), (PAGE_SECURITY, "Work"), (PAGE_NAVIGATION, "Input"), (PAGE_ASSISTANT, "Extend")]
-        );
+        assert_eq!(groups, [(PAGE_APPEARANCE, "Look"), (PAGE_DESIGN, "Work"), (PAGE_NAVIGATION, "Input"), (PAGE_ASSISTANT, "Extend")]);
         let mut fields = std::collections::BTreeSet::new();
         for (field, page) in FIELD_PAGES {
             assert!(fields.insert(field), "duplicate home for {field}");
