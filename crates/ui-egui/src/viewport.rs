@@ -7519,7 +7519,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let layer = ui.layer_id();
     let backdrop_from = ui.ctx().graphics_mut(|g| g.entry(layer).next_idx().0);
     let painter = ui.painter_at(paint);
-    solidcraft_viewport_egui::paint_background(&painter, paint, t.viewport_top, t.viewport_bottom);
+    solidcraft_viewport_egui::paint_background(&painter, paint, t.viewport_top, t.viewport_middle, t.viewport_bottom);
     crate::gpu::paint_background_picture(app, &painter, paint);
 
     // ---- model ----
@@ -10118,6 +10118,7 @@ pub(crate) fn scene_palette(dark: bool, mode: solidcraft_theme::ColorVision) -> 
     let rgb = |c: Color32| Rgb(c.r(), c.g(), c.b());
     solidcraft_engine::view::Palette {
         background: (rgb(t.viewport_top), rgb(t.viewport_bottom)),
+        background_middle: t.viewport_middle.map(rgb),
         grid: rgb(t.grid),
         grid_major: rgb(t.grid_major),
         edge: rgb(t.body_edge),

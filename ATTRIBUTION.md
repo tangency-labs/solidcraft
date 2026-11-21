@@ -629,6 +629,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | crates/look/icons/design/svg/model/finish_edit.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | `assets/locales/pending/sketch-tracking-guides.json` | SolidCraft contributors | Original alignment-guide preference labels and help text | MIT OR Apache-2.0 |
 | assets/locales/pending/point-clouds.json | SolidCraft contributors | Original point-cloud UI strings and translations | MIT OR Apache-2.0 |
+| `assets/locales/pending/viewport-background-gradient.json` | SolidCraft contributors | Original viewport background gradient preference messages and translations | MIT OR Apache-2.0 |
 | crates/look/icons/design/svg/model/feature_group.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/model/mesh_body.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | crates/look/icons/design/svg/model/timeline_play.svg | SolidCraft contributors | Original history playback icon; canonical grey_cube base and original action cue | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
