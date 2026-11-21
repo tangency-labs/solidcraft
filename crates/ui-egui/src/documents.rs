@@ -759,7 +759,7 @@ pub(crate) fn sync_views(app: &mut SolveApp) {
 
 /// Change the shown design's views with `change`; when that changes the active view, the app
 /// shows the new one ([`apply_view`]).
-fn change_views<T>(app: &mut SolveApp, change: impl FnOnce(&mut ViewSet) -> T) -> T {
+pub(crate) fn change_views<T>(app: &mut SolveApp, change: impl FnOnce(&mut ViewSet) -> T) -> T {
     let before = app.docs.views.active().id;
     keep_look(app);
     let result = change(&mut app.docs.views);
@@ -1111,7 +1111,9 @@ pub(crate) fn with_view_look<T>(app: &mut SolveApp, id: u64, draw: impl FnOnce(&
     let mut look = app.docs.navigation.remove(&id).unwrap_or_else(|| ViewLook::from_ui(&app.ui));
     look.swap(app);
     show_look(app, &view);
+    let previous_compass = app.viewport.compass_view.replace(id);
     let out = draw(app);
+    app.viewport.compass_view = previous_compass;
     app.docs.views.set_spec(id, solidcraft_viewport::ViewSpec::new(app.cam));
     app.docs.inspect.insert(id, app.session.inspect());
     look.swap(app);
@@ -1133,7 +1135,7 @@ pub(crate) fn focus_view(app: &mut SolveApp, id: u64) -> bool {
 pub fn view_open(app: &mut SolveApp, kind: ViewKind, subject: Option<String>, reuse: bool) -> u64 {
     let prefs = DesignTabPrefs::from(&app.preferences);
     if !prefs.opens_sub_tab(kind) {
-        apply_view(app, &DesignView { id: 0, kind, name: String::new(), subject, spec: None });
+        apply_view(app, &DesignView { id: 0, kind, name: String::new(), subject, spec: None, compass: true });
         return app.docs.views.active().id;
     }
     change_views(app, |views| views.open(kind, subject, reuse && prefs.reuse_views))
@@ -1551,12 +1553,36 @@ pub(crate) fn view_picture_window_owners(app: &SolveApp) -> std::collections::Ha
 pub(crate) fn view_command(app: &mut SolveApp, command: &str, v: Value) -> Result<Value, String> {
     if matches!(
         command,
-        "tab.view.layout" | "tab.view.beside" | "tab.view.open" | "tab.view.equal_sizes" | "tab.view.link" | "tab.view.reset_cameras"
+        "tab.view.layout"
+            | "tab.view.beside"
+            | "tab.view.open"
+            | "tab.view.equal_sizes"
+            | "tab.view.link"
+            | "tab.view.reset_cameras"
+            | "tab.view.close_others"
+            | "tab.view.close_right"
     ) {
-        let requested = v.get("window").and_then(Value::as_u64).and_then(|id| u32::try_from(id).ok());
+        let requested = v.get("window").and_then(Value::as_u64).and_then(|id| u32::try_from(id).ok()).or_else(|| {
+            if matches!(command, "tab.view.close_others" | "tab.view.close_right") {
+                v.get("id")
+                    .and_then(Value::as_u64)
+                    .and_then(|id| app.docs.views.window_of(id).map(|window| if window == 0 { app.view_windows.current_window() } else { window }))
+            } else {
+                None
+            }
+        });
         return crate::view_windows::with_strip(app, requested, |app| view_command_local(app, command, v));
     }
     view_command_local(app, command, v)
+}
+
+pub(crate) fn set_compass(app: &mut SolveApp, request: Value) -> Result<Value, String> {
+    let options: solidcraft_engine::schema::tab_views::ViewCompassParams =
+        serde_json::from_value(request.clone()).map_err(|error| error.to_string())?;
+    if !app.docs.views.set_compass(options.view, options.on) {
+        return Err("no_such_3d_view".into());
+    }
+    Ok(request)
 }
 
 fn view_command_local(app: &mut SolveApp, command: &str, mut v: Value) -> Result<Value, String> {
@@ -1577,6 +1603,18 @@ fn view_command_local(app: &mut SolveApp, command: &str, mut v: Value) -> Result
             if !view_close(app, asked) {
                 return Err("the last view of a design stays open".into());
             }
+            Some(asked)
+        }
+        "tab.view.close_others" | "tab.view.close_right" => {
+            if app.docs.views.get(asked).is_none() {
+                return Err(format!("there is no view {asked} in this window"));
+            }
+            if command == "tab.view.close_others" {
+                view_close_others(app, asked);
+            } else {
+                view_close_right_of(app, asked);
+            }
+            v["window"] = json!(app.view_windows.current_window());
             Some(asked)
         }
         "tab.view.reopen" => Some(view_reopen(app).ok_or("there is no closed view to reopen")?),
@@ -2643,6 +2681,7 @@ fn view_tab<'a>(
 ) -> crate::app_bar::ViewTab<'a> {
     let colour = crate::workspace::view_icon_colour(kind_word(view.kind), true);
     crate::app_bar::ViewTab {
+        compass: view.kind.can_tile().then_some(view.compass),
         name: &view.name,
         icon: view.kind.key(),
         accent: colour,
@@ -2948,6 +2987,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             }
         }
     }
+    crate::view_setups_ui::show(app, ui.ctx());
     crate::view_window_drag::keyboard(app, ui.ctx());
     match (shut, pick) {
         _ if !idle => {}
@@ -3335,6 +3375,64 @@ mod tests {
         reattach_window_views(&mut app, tab, child);
         assert!(app.docs.views.get(other).is_some());
         assert_eq!(app.docs.views.active().id, model);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn named_layout_reuses_live_views_and_keeps_extra_views_in_main() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.preferences.clear_view_tabs = true;
+        let first = app.docs.views.active().id;
+        let second = view_duplicate(&mut app, first).unwrap();
+        let third = view_duplicate(&mut app, second).unwrap();
+        assert!(view_rename(&mut app, third, "Original angle"));
+        app.run("tab.view.move_to_window", json!({"view":third})).unwrap();
+        app.run("tab.view.layout", json!({"window":0,"layout":"side_by_side"})).unwrap();
+        assert_eq!(app.run("tab.layout.save", json!({"name":"Side monitors"})).unwrap()["name"], "Side monitors");
+        assert_eq!(app.run("tab.layout.list", json!({})).unwrap()["layouts"], json!(["Side monitors"]));
+        assert_eq!(crate::view_setups::matching_name(&app).as_deref(), Some("Side monitors"));
+        let stored = serde_json::to_value(&app.preferences).unwrap();
+        assert!(!stored["view_window_setups"].to_string().contains("Original angle"));
+        let prefs = crate::prefs::lenient(&stored);
+
+        let mut target = SolveApp::new(Session::default(), Default::default());
+        target.preferences = prefs;
+        let uid = target.session.uid;
+        let main = target.docs.views.active().id;
+        let a = view_duplicate(&mut target, main).unwrap();
+        let b = view_duplicate(&mut target, a).unwrap();
+        let extra = view_duplicate(&mut target, b).unwrap();
+        assert!(view_rename(&mut target, b, "Keep this name"));
+        target.run("tab.layout.apply", json!({"name":"Side monitors"})).unwrap();
+        assert_eq!(target.session.uid, uid);
+        assert_eq!(target.docs.views.views().iter().map(|view| view.id).collect::<Vec<_>>(), [main, a, extra]);
+        assert_eq!(target.docs.views.tiles().unwrap().views(), [main, a]);
+        let child = target.docs.views.windows().first().unwrap();
+        assert_eq!(child.views.ids().collect::<Vec<_>>(), [b]);
+        assert_eq!(child.views.active().name, "Keep this name");
+        let id = child.id;
+        target.run("tab.layout.apply", json!({"name":"Side monitors"})).unwrap();
+        assert_eq!(target.docs.views.windows().first().unwrap().id, id);
+        assert!(target.docs.views.check());
+        assert_eq!(target.run("tab.layout.rename", json!({"name":"Side monitors","new_name":"Review"})).unwrap()["new_name"], "Review");
+        assert_eq!(target.run("tab.layout.list", json!({})).unwrap()["layouts"], json!(["Review"]));
+        assert_eq!(target.run("tab.layout.remove", json!({"name":"Review"})).unwrap()["name"], "Review");
+        assert_eq!(target.run("tab.layout.list", json!({})).unwrap()["layouts"], json!([]));
+    }
+
+    #[test]
+    fn malformed_saved_layout_is_hidden_and_cannot_change_the_design() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.preferences.view_window_setups.insert(
+            "Broken".to_owned(),
+            json!({"windows":[{
+                "views":1, "level":"full", "placement":null, "tiles":{"view":3}
+            }]}),
+        );
+        let before = app.docs.views.clone();
+        assert_eq!(app.run("tab.layout.list", json!({})).unwrap()["layouts"], json!([]));
+        assert_eq!(app.run("tab.layout.apply", json!({"name":"Broken"})).unwrap_err(), "no_such_layout");
+        assert_eq!(app.docs.views, before);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -4876,6 +4974,25 @@ mod tests {
         let mut one = app();
         cycle(&mut one, true);
         assert_eq!((one.docs.active, one.docs.count()), (0, 1), "a single design: nothing to go to");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn close_view_groups_stay_in_the_requested_window_and_keep_the_anchor() {
+        let mut app = app();
+        let root = app.docs.views.active().id;
+        let second = app.run("tab.view.open", json!({"kind": "model"})).unwrap()["id"].as_u64().unwrap();
+        let third = app.run("tab.view.open", json!({"kind": "model"})).unwrap()["id"].as_u64().unwrap();
+        let remote = app.run("tab.view.open", json!({"kind": "model"})).unwrap()["id"].as_u64().unwrap();
+        let window = app.run("tab.view.move_to_window", json!({"view": remote, "window": "new"})).unwrap()["window"].as_u64().unwrap();
+
+        assert!(app.run("tab.view.close_right", json!({"id": second, "window": 0})).is_ok());
+        assert_eq!(app.docs.views.views().iter().map(|view| view.id).collect::<Vec<_>>(), [root, second]);
+        assert!(app.docs.views.get(third).is_none());
+        assert!(app.run("tab.view.close_others", json!({"id": second, "window": window})).is_err());
+        assert!(app.run("tab.view.close_others", json!({"id": second})).is_ok());
+        assert_eq!(app.docs.views.views().iter().map(|view| view.id).collect::<Vec<_>>(), [second]);
+        assert_eq!(app.docs.views.window_of(remote), u32::try_from(window).ok());
     }
 
     /// A design's views: `tab.view.*` open, show, rename, move, close and reopen them (never the
