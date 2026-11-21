@@ -10,6 +10,8 @@ and selected when the active body is a sheet), and builds parts from a sheet of 
   would make has no closed-form flat, so the flange is refused, naming the curve.
 - [**Hem**](../reference/commands.md#command-sheet.hem) returns a sheet edge back toward the sheet; no new sketch is required.
 - **Fold** (`sheet.fold`) bends the sheet along a sketch line.
+- **Jog** (`sheet.jog`) steps a flat panel across a line: it bends, runs straight for a short wall
+  and bends back, in one feature.
 - **Unfold / Refold** (`sheet.unfold`, `sheet.refold`) for working on the flat part.
 - **Convert** (`sheet.convert`) turns surfaces into sheet metal: the faces of a solid or of a
   surface body. Every face becomes a panel, however thin the body (a thin plate's six faces are
@@ -36,6 +38,22 @@ and selected when the active body is a sheet), and builds parts from a sheet of 
   from one of its sides (see **Recognize Sheet Metal** below).
 - **Create Flat Pattern** (`sheet.flat_pattern`) shows the flat part with its bend lines and a
   bend table, and exports it as DXF or a bend-table CSV through the save picker.
+
+A **jog** makes two bends of opposite turn along one line, so the far side ends up parallel to
+where it was, `offset` away. `measure` says what the offset is between: `outside` (outer face to
+outer face, the default), `inside` (inner face to inner face) or `faces` (a face to the same
+face). `angle` (default 90 deg) turns both bends, `position` puts the line at the `start`,
+`middle` or `end` of the whole jog, from the line toward the side that moves, and `flip` steps
+the other way. Which side stays is decided once, as the jog is made, the way a fold decides it
+(`stays`: `left` or `right` of the line as drawn, or `fixed`, a point on the sheet on that
+side, else the side with more of the sheet joined to it), and kept: only the side is stored, not
+the point. A `fixed` point off the sheet is refused. The two bends are cut out of the sheet like a fold, so the flat pattern keeps its
+size and the bend table lists one bend up and one down. An offset too small for the two bends is
+refused with the smallest that fits.
+
+```json
+{"command": "sheet.jog", "params": {"points": [[50, 0, 2], [50, 60, 2]], "fixed": [100, 30, 2], "offset": "20 mm", "measure": "outside"}}
+```
 
 Bends follow the rule's K-factor, so flat lengths match what a press brake will make. Tests
 check flat lengths against hand-computed bend allowances.

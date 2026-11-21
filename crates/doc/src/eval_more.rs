@@ -1031,6 +1031,9 @@ impl Document {
     /// either side ([`crate::SurfaceSheet::fold_side`]). None for a feature that is no fold on a
     /// sheet made from surfaces.
     pub fn fold_side_at(&self, st: &ModelState, kind: &FeatureKind) -> Result<Option<crate::FoldSide>> {
+        if let FeatureKind::SheetJog { .. } = kind {
+            return self.jog_side_at(st, kind);
+        }
         let FeatureKind::SheetFold { sketch, curve, a, b, angle, radius, position, flip, fixed, body, .. } = kind else { return Ok(None) };
         let Some((i, a, b)) = surface_fold_sheet(st, body, sketch, curve, a, b) else { return Ok(None) };
         let Some(sk) = st.surface_sheets.get(i).filter(|sk| !sk.unfolded) else { return Ok(None) };
@@ -1043,15 +1046,45 @@ impl Document {
         sk.fold_side(a, b, ang, rr, position, *flip, fixed.map(Vec3::from)).map(Some)
     }
 
-    /// Whether a fold's `fixed` point touches no material of the sheet made from surfaces the
-    /// fold is on, as `st` has it before the fold (see `SurfaceSheet::touches`): such a
-    /// point picks no side, and the `sheet.fold` command refuses it (#263). False for a fold with
-    /// no fixed point, or one on no folded sheet (which fails as it is evaluated).
+    /// Whether a fold's or a jog's `fixed` point touches no material of the sheet made from
+    /// surfaces the feature is on, as `st` has it before the feature (see `SurfaceSheet::touches`):
+    /// such a point picks no side, and the `sheet.fold` and `sheet.jog` commands refuse it (#263).
+    /// False for a feature with no fixed point, or one on no folded sheet (which fails as it is
+    /// evaluated).
     pub fn fold_fixed_off_sheet(&self, st: &ModelState, kind: &FeatureKind) -> bool {
-        let FeatureKind::SheetFold { sketch, curve, a, b, fixed: Some(p), body, .. } = kind else { return false };
+        let (FeatureKind::SheetFold { sketch, curve, a, b, fixed: Some(p), body, .. }
+        | FeatureKind::SheetJog { sketch, curve, a, b, fixed: Some(p), body, .. }) = kind
+        else {
+            return false;
+        };
         let Some((i, _, _)) = surface_fold_sheet(st, body, sketch, curve, a, b) else { return false };
         let Some(sk) = st.surface_sheets.get(i).filter(|sk| !sk.unfolded) else { return false };
         !sk.touches(p.0, (sk.thickness * 1e-3).max(1e-6))
+    }
+
+    /// The side a jog keeps put, decided as the jog is made, as [`Self::fold_side_at`] decides a
+    /// fold's ([`crate::SurfaceSheet::jog_side`]). None for a feature that is no jog on a sheet
+    /// made from surfaces.
+    fn jog_side_at(&self, st: &ModelState, kind: &FeatureKind) -> Result<Option<crate::FoldSide>> {
+        let FeatureKind::SheetJog { sketch, curve, a, b, offset, measure, angle, radius, position, flip, fixed, body, .. } = kind else {
+            return Ok(None);
+        };
+        let Some((i, a, b)) = surface_fold_sheet(st, body, sketch, curve, a, b) else { return Ok(None) };
+        let Some(sk) = st.surface_sheets.get(i).filter(|sk| !sk.unfolded) else { return Ok(None) };
+        let vals = self.evaluation_values();
+        let rr = match radius {
+            Some(e) => val(&vals, e, Kind::Length)?,
+            None => self.rule_values_at(&vals, &self.sheet_rule(Some(&sk.rule)), Some(sk.thickness))?.bend_radius,
+        };
+        let step = crate::sheet_surface_jog::JogStep {
+            offset: val(&vals, offset, Kind::Length)?,
+            measure,
+            angle: val(&vals, angle, Kind::Angle)?,
+            radius: rr,
+            position,
+            flip: *flip,
+        };
+        sk.jog_side(a, b, step, fixed.map(Vec3::from)).map(Some)
     }
 
     /// This design with each fold that keeps no side that stays (a design saved before folds
@@ -1061,10 +1094,10 @@ impl Document {
     pub fn with_fold_sides(&self, model: &Model) -> Option<Document> {
         let mut out: Option<Document> = None;
         for f in &self.features {
-            let FeatureKind::SheetFold { stays: None, .. } = &f.kind else { continue };
+            let (FeatureKind::SheetFold { stays: None, .. } | FeatureKind::SheetJog { stays: None, .. }) = &f.kind else { continue };
             let Ok(Some(side)) = self.fold_side_at(&model.state_before(f.id), &f.kind) else { continue };
             let doc = out.get_or_insert_with(|| self.clone());
-            if let Some(FeatureKind::SheetFold { stays, .. }) = doc.feature_mut(f.id).map(|x| &mut x.kind) {
+            if let Some(FeatureKind::SheetFold { stays, .. } | FeatureKind::SheetJog { stays, .. }) = doc.feature_mut(f.id).map(|x| &mut x.kind) {
                 *stays = Some(side);
             }
         }
@@ -1459,6 +1492,48 @@ pub(super) fn sheet_eval(
                 None if !st.surface_sheets.is_empty() => DocError::Invalid("the fold line must lie on a flat face of the sheet".into()),
                 _ => no_sheet(body),
             })
+        }
+        FeatureKind::SheetJog { sketch, curve, a, b, offset, measure, angle, radius, position, flip, fixed, stays, body } => {
+            // The sketch line, where it is now.
+            let (a, b) = match (sketch, curve) {
+                (Some(sk), Some(c)) => {
+                    let ss = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk}")))?;
+                    let ci = ss.sketch.curve_index(c).ok_or_else(|| DocError::Unknown(format!("curve `{c}`")))?;
+                    match ss.sketch.segs(ci).as_slice() {
+                        [Seg2::Line { a, b }] => (ss.plane.to_world(*a), ss.plane.to_world(*b)),
+                        _ => return Err(DocError::Invalid("the jog line must be a sketch line".into())),
+                    }
+                }
+                _ => (a.0, b.0),
+            };
+            let (i, a, b) = surface_fold_sheet(st, body, &None, &None, &crate::Position(a), &crate::Position(b))
+                .ok_or_else(|| DocError::Invalid("the jog line must lie on a flat face of a sheet metal body".into()))?;
+            let sk = st.surface_sheets.get(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
+            if sk.unfolded {
+                return Err(DocError::Invalid("refold the sheet before jogging it".into()));
+            }
+            let off = val(vals, offset, Kind::Length)?;
+            let ang = val(vals, angle, Kind::Angle)?;
+            // The rule's radius at the sheet's own thickness, as Fold takes it.
+            let rr = match radius {
+                Some(e) => val(vals, e, Kind::Length)?,
+                None => doc.rule_values_at(vals, &doc.sheet_rule(Some(&sk.rule)), Some(sk.thickness))?.bend_radius,
+            };
+            let step = crate::sheet_surface_jog::JogStep { offset: off, measure, angle: ang, radius: rr, position, flip: *flip };
+            // The side that stays is the jog's own, decided when it was made.
+            let stays = match stays {
+                Some(side) => *side,
+                None => sk.jog_side(a, b, step, fixed.map(Vec3::from))?,
+            };
+            if let Some(sk) = st.surface_sheets.get_mut(i) {
+                // Each of the two folds keys its new panels as a fold does, on the panel it
+                // folds and along its own line.
+                let mut made = |sk: &mut crate::SurfaceSheet, before: &crate::SurfaceSheet, line: [Vec3; 2]| {
+                    tag_panels(sk, Some(before), before.sheet.panels.len(), f.id, PanelsBy::Fold(line));
+                };
+                sk.add_jog(a, b, step, stays, &mut made)?;
+            }
+            rebuild_surface_sheet(st, i)
         }
         FeatureKind::SheetUnfold { body, refold } => {
             let i = surface_sheet_for(st, body, |s| s.unfolded == *refold).ok_or_else(|| match body {

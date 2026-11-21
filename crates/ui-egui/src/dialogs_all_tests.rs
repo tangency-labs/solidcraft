@@ -483,7 +483,7 @@ fn representative(h: &Harness, command: &str) -> Dialog {
             vec![Sel::Plane { name: if index == 1 { "XZ" } else { "XY" }.into() }]
         } else if input.accept & crate::selection::SKETCH_LINES != 0 {
             vec![Sel::ExternalSketchCurve { sketch: crate::open_meshing::session_world(s).sketches.last().unwrap().feature, id: path.clone() }]
-        } else if input.accept & CURVES != 0 || command == "sheet.fold" && index == 0 {
+        } else if input.accept & CURVES != 0 || matches!(command, "sheet.fold" | "sheet.jog") && index == 0 {
             vec![Sel::SketchCurve { id: path.clone(), sketch: None }]
         } else if input.accept & AXES != 0 {
             // The Revolve fixture's profile is in XY; its preview needs an axis in that plane.
@@ -566,7 +566,7 @@ fn check_form(command: &str, labels: &[&str]) {
     }
     let checks: &[&str] = match command {
         "solid.shell" => &["Tangent Chain"],
-        "solid.rib" | "solid.web" | "solid.align" | "sheet.flange" | "sheet.hem" | "sheet.fold" | "joint.create" => &["Flip"],
+        "solid.rib" | "solid.web" | "solid.align" | "sheet.flange" | "sheet.hem" | "sheet.fold" | "sheet.jog" | "joint.create" => &["Flip"],
         "inspect.section" => &["Flip", "Hatch"],
         "solid.move" => &["Create Copy"],
         "solid.combine" => &["Keep Tools", "New Component"],
@@ -631,6 +631,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         | "Bend Line Position" | "From Snap" | "To Snap" | "Joint" | "Joint 1" | "Joint 2" | "Gear 1" | "Gear 2" | "Pinion" | "Rack" | "Screw"
         | "Nut" | "Cam" | "Follower" | "Anchor" => Role::ComboBox,
         "Inset By" => Role::ComboBox,
+        "Measure" if command == "sheet.jog" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
         "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Start" | "End" if command == "solid.thread" => Role::ComboBox,
         "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
@@ -947,6 +948,7 @@ form_case!(flange, "sheet.flange", ["Type", "Rule"]);
 form_case!(path_flange, "sheet.path_flange", ["Bend Radius"]);
 form_case!(hem, "sheet.hem", ["Type", "Length", "ui.sheet_gap"]);
 form_case!(fold, "sheet.fold", ["Bend Line Position", "Angle", "Bend Radius"]);
+form_case!(jog, "sheet.jog", ["Offset", "Measure", "Bend Line Position", "Angle", "Bend Radius"]);
 form_case!(unfold, "sheet.unfold", []);
 form_case!(refold, "sheet.refold", []);
 form_case!(sheet_convert, "sheet.convert", ["Rule"]);

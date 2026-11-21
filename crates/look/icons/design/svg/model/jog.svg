@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Jog</title>
+  <path d="M10 42L24 42A5 5 0 0 0 29 37L29 27A5 5 0 0 1 34 22L54 22" fill="none" stroke="#34465b" stroke-width="11.4" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M10 42L24 42" fill="none" stroke="#b8c3cf" stroke-width="6.3" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24 42A5 5 0 0 0 29 37L29 27A5 5 0 0 1 34 22L54 22" fill="none" stroke="#328bd3" stroke-width="6.3" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M38 42L54 42" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="3 4"/>
+</svg>
