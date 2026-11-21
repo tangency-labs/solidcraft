@@ -44,6 +44,21 @@ fn clicked_browser_folders_toggle_visibility_with_v() {
     }
 }
 
+/// #14554: V on the Origin row of the Browser shows or hides the whole Origin, as it does for a folder.
+#[test]
+fn v_on_the_clicked_origin_row_hides_the_origin() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"operation":"new_body","body_name":"One"})).unwrap();
+    h.settle();
+    assert!(h.app.origin_shown());
+    h.step(&json!({"click":{"handle":"row:Origin"}})).unwrap();
+    h.step(&json!({"key":"V"})).unwrap();
+    assert!(!h.app.origin_shown(), "V hides the Origin picked in the Browser");
+    h.step(&json!({"key":"V"})).unwrap();
+    assert!(h.app.origin_shown(), "V shows it again");
+}
+
 /// #10526: New Group from the root's context menu in a design with no bodies yet makes a group
 /// the Browser shows, and a body made later can be dropped into it.
 #[test]
