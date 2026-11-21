@@ -326,8 +326,9 @@ something new in a design (a field, a feature type, a new kind of name), or make
 mean something else, it needs a format change. **Add one file, and edit nothing shared:**
 
 1. Create `crates/doc/src/format/pending/<what-it-is>.rs` (lowercase, dashes). Start it with a
-   `//!` note: what is saved, what older designs get without it, and that the last release asks
-   for an update instead of meeting it.
+   `//!` note: what is saved, what older designs get without it, and what the last release does
+   with a design that has it (it warns about the newer format number, opens what it can read and
+   keeps the rest).
 2. If older designs must be rewritten as they open, put `pub fn step(v: &mut Value) ->
    crate::Result<()>` in the same file. Pending steps run in file-name order, after the older
    formats' steps.

@@ -39,8 +39,9 @@ does not supply optical properties or mechanical axes for a body.
 
 New files declare the `physical-material-cards` pending format change. Older
 designs without a card need no data migration and retain unspecified engineering
-properties. The last released reader refuses the newer format; a pending build
-without this descriptor refuses the unknown change. No historical format number
+properties. The last released reader warns about the newer format number, opens
+what it can read and keeps the rest; a pending build without this descriptor refuses
+the unknown change. No historical format number
 or previous migration is repurposed.
 
 Engineering constants such as elastic moduli can exceed the geometry coordinate
