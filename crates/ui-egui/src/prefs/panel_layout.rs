@@ -779,6 +779,13 @@ fn danger_button(ui: &mut Ui, label: &str) -> Response {
     ui_kit::button(ui, egui::RichText::new(label).size(Tokens::get().font_label), ui_kit::Button::DangerOutlined)
 }
 
+/// Applies the saved layout `name` to the current workspace and says so in the status bar, as its
+/// tile here does. The View menu lists the saved layouts through this (#17131).
+pub(crate) fn apply(app: &mut SolveApp, name: &str) {
+    let view = crate::panel_runtime::layout_preferences_view(app).ok();
+    run(app, "layout.apply", json!({"name":name}), view.as_ref().map(|view| (name, view)));
+}
+
 fn run(app: &mut SolveApp, command: &str, params: serde_json::Value, applied: Option<(&str, &LayoutPreferencesView)>) -> bool {
     match app.run(command, params) {
         Ok(_) => {

@@ -64,11 +64,17 @@ fn menu(id: &str) -> Menu {
 struct Rig {
     ctx: egui::Context,
     bar: Bar<'static>,
+    menus: fn(&str) -> Menu,
+    time: std::cell::Cell<f64>,
 }
 
 impl Rig {
     fn new() -> Rig {
-        let rig = Rig { ctx: crate::test_support::context(), bar: bar() };
+        Rig::with(menu)
+    }
+
+    fn with(menus: fn(&str) -> Menu) -> Rig {
+        let rig = Rig { ctx: crate::test_support::context(), bar: bar(), menus, time: Default::default() };
         rig.frame(Vec::new());
         rig
     }
@@ -78,8 +84,14 @@ impl Rig {
         let mut action = None;
         crate::test_support::raw_frame(
             &self.ctx,
-            RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 400.0))), events, focused: true, ..Default::default() },
-            |ui| action = show(ui, &self.bar, menu),
+            RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 400.0))),
+                events,
+                focused: true,
+                time: Some(self.time.replace(self.time.get() + 0.1)),
+                ..Default::default()
+            },
+            |ui| action = show(ui, &self.bar, self.menus),
         );
         action
     }
@@ -150,4 +162,39 @@ fn the_context_menus_return_customise_hide_reset_and_remove_with_the_slot_index(
     let folded = solidcraft_ui_registry::rect_of("nav:slot:view").expect("More is open").center();
     rig.click_with(folded, PointerButton::Secondary);
     assert_eq!(rig.click_target("nav:context:remove"), Some(NavAction::Context(ContextItem::Remove(3))), "a folded slot too");
+}
+
+/// A submenu longer than the window (64 saved layouts) scrolls inside it: its first row and,
+/// after scrolling, its last row are on screen and can be picked.
+#[test]
+fn a_submenu_taller_than_the_window_scrolls_to_its_last_row() {
+    fn long(id: &str) -> Menu {
+        let mut menu = menu(id);
+        if let Some(MenuEntry::Row(preset)) = menu.entries.last_mut() {
+            preset.submenu = (0..64).map(|i| MenuRow::new(format!("l{i}"), format!("Layout {i}"), "", format!("test:l{i}"))).collect();
+        }
+        menu
+    }
+    let rig = Rig::with(long);
+    let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 400.0));
+    let on_screen = |name: &str| solidcraft_ui_registry::rect_of(name).is_some_and(|r| screen.contains_rect(r));
+    rig.click_target("nav:more");
+    rig.click_target("nav:slot:view");
+    rig.click_target("test:preset");
+    assert!(on_screen("test:l0"), "the first layout is on screen");
+    assert!(!on_screen("test:l63"), "the last is below the window until scrolled");
+    let over = solidcraft_ui_registry::rect_of("test:l0").expect("the first layout is drawn").center();
+    for _ in 0..20 {
+        let wheel = Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -400.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        };
+        rig.frame(vec![Event::PointerMoved(over), wheel]);
+    }
+    rig.frame(Vec::new());
+    assert!(on_screen("test:l63"), "scrolling brings the last layout into the window");
+    assert_eq!(rig.click_target("test:l63"), Some(NavAction::Item { menu: "view".into(), item: "l63".into() }));
 }
