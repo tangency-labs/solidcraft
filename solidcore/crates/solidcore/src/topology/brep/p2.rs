@@ -3487,23 +3487,21 @@ pub fn mate_lamina_edge_to_surface(
                     true,
                 )?
             } else {
-                // the face's surface reaches its face's cache (smsurf_GetSurfaceCache),
-                // made on the B-rep: an exact evaluation copy of the surface meanwhile
+                // the face's surface (an exact evaluation copy, as the B-rep is borrowed
+                // meanwhile); the lift reads its continuities and makes no cache
                 let surface = b
                     .face(face)?
                     .surface
                     .as_ref()
                     .ok_or(null_deref("face without surface"))?
                     .clone_for_evaluation()?;
-                surface.lift_curve_with_context(
+                surface.lift_curve(
                     k,
                     &face_domain,
                     &side_curve,
                     &side_curve.natural_interval(),
                     tol,
                     true,
-                    &mut crate::query::brep::BrepFaceServices::new(b),
-                    Some(CacheObject::Surface(face)),
                 )?
             };
             let new_3d = lifted.curve;

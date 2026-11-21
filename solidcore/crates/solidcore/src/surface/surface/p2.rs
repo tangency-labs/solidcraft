@@ -204,14 +204,13 @@
 //!   ([`Surface::keep_standalone_trim_cache`]). The stored cache's own surface copy
 //!   gets a slot of its own (no self-reference); a cache taken out shares the slot
 //!   again until it is stored. Other surface caches are built afresh instead of being
-//!   kept on the surface (`m_pCacheObj`), but whether that cache's tree has been built
-//!   is observable: `GetDomainWithContinuity`, `LiftCurve`, `GetSurfaceContinuity` and
-//!   the drop-curve boundary search read the continuity arrays without `GetTree`.
-//!   [`Surface::cache_tree_state`] keeps that bit of history ([`CacheTreeState`]) in a
-//!   slot shared by the surface and its evaluation copies (which stand for upstream's
-//!   pointers to the one object); `Clone` starts an empty slot, as the copy
-//!   constructor leaves `m_pCacheObj` null. The cache builds of `surface.surface_p1`
-//!   and `surface.surface_cache_p3` keep it in step.
+//!   kept on the surface (`m_pCacheObj`). Whether upstream's cache had its tree built
+//!   is not modelled: the continuity arrays upstream reads from a cache without
+//!   `GetTree` are a function of the surface alone ([`Surface::continuities`]), so
+//!   every cache answers them the same, built or not. The slot is shared by the
+//!   surface and its evaluation copies (which stand for upstream's pointers to the one
+//!   object); `Clone` starts an empty slot, as the copy constructor leaves
+//!   `m_pCacheObj` null.
 //! - **Lazy NURB degree and knots.** Upstream `GetDegree` / `GetKnots` make a missing
 //!   NURB (`GetOrCreateGwNurbPointer`); [`Surface::degree`] and [`Surface::knots`] read
 //!   the stored base, so a lazy extrusion, cone, sphere or torus answers `0` / the
@@ -306,6 +305,7 @@ use crate::surface::surf_of_revolution::p3::intersect_revolved_into;
 use crate::surface::surf_of_revolution::{Revolved, SurfOfRevolution};
 use crate::surface::surface::p1::{StepSurface, SurfaceIntersectContext, SurfaceSolveContext};
 use crate::surface::surface::p3::SingularitiesMemo;
+use crate::surface::surface::p6::ContinuityMemo;
 use crate::surface::surface::p8::BoundaryMemo;
 use crate::surface::surface::p8::FaceSolveCache;
 use crate::surface::surface_cache::p1::SurfaceCache;
@@ -455,30 +455,16 @@ pub struct Surface {
     /// Not upstream: the memo of the singular sides `GetSingularities` finds
     /// (`SingularitiesMemo`); a copy starts an empty one, an edit replaces it.
     singularities_memo: SingularitiesMemo,
+    /// Not upstream: the memo of the continuity arrays ([`Surface::continuities`],
+    /// `ContinuityMemo`); an exact copy shares it, a [`Clone`] starts an empty one, an
+    /// edit replaces it.
+    continuity_memo: ContinuityMemo,
     /// Not upstream (#2485, #2488): a round of an exact class or a blend corner's face,
     /// this surface its net, keeps its definition here ([`Surface::procedural_blend`]). A
     /// copy, a piece, an extension and an edit of the parametrization carry it (the
     /// definition is a set the net is on, or within its bound of); a motion moves it; an
     /// evaluation copy, which only evaluates, has none.
     definition: Option<Box<KeptDefinition>>,
-}
-
-/// What a surface's cache slot (`SmAObject::m_pCacheObj`) holds, as far as a reader of
-/// the cache's continuity arrays (`GetUContinuitiesArray`, `GetVContinuitiesArray`)
-/// can tell without calling `GetTree`: the arrays are filled only by
-/// `SmSurfaceCache::BuildTreeBase`, which runs when a cache is made outside a Boolean
-/// operation or on the first `GetTree`, and the cache then lives on with the surface.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CacheTreeState {
-    /// No cache: the next `smsurf_GetSurfaceCache` makes one, building its tree
-    /// unless the context is doing a Boolean operation.
-    #[default]
-    NoCache,
-    /// A cache whose tree has not been built (made during a Boolean operation): its
-    /// continuity arrays stay empty until a `GetTree` builds the tree.
-    Unbuilt,
-    /// A cache whose tree has been built: its continuity arrays are filled.
-    Built,
 }
 
 /// The trimmed surface cache a surface's cache slot holds: the `SM_OC_TRIMSRF` entry of
@@ -501,7 +487,6 @@ pub enum TrimCacheSlot {
 /// What a [`CacheSlot`] holds.
 #[derive(Debug, Default)]
 struct SlotState {
-    tree: CacheTreeState,
     trim: TrimCacheSlot,
     /// The face was modified while the trimmed cache was in use.
     face_modified_while_out: bool,
@@ -516,9 +501,8 @@ struct SlotState {
 /// passes evaluation copies ([`Surface::clone_for_evaluation`]) where upstream passes
 /// that pointer. The slot records what a later reader of the cache can observe, shared
 /// between a surface and its evaluation copies so that what is done through any of
-/// them is seen by all: whether the cache's tree was built ([`CacheTreeState`]) and,
-/// once one has been made, the surface's trimmed surface cache itself
-/// ([`TrimCacheSlot`]). `Clone` (the copy constructor, which leaves `m_pCacheObj` null)
+/// them is seen by all: once one has been made, the surface's trimmed surface cache
+/// itself ([`TrimCacheSlot`]). `Clone` (the copy constructor, which leaves `m_pCacheObj` null)
 /// starts an empty slot. Single-threaded use only orders the accesses, so the result
 /// is deterministic.
 #[derive(Debug, Default)]
@@ -541,14 +525,6 @@ impl CacheSlot {
         // leaves the state consistent, so it stays usable
         let mut guard = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         f(&mut guard)
-    }
-
-    fn get(&self) -> CacheTreeState {
-        self.with(|s| s.tree)
-    }
-
-    fn set(&self, state: CacheTreeState) {
-        self.with(|s| s.tree = state);
     }
 }
 
@@ -647,6 +623,7 @@ impl Clone for Surface {
             made_kind: MadeKindSlot::default(),
             boundary_memo: BoundaryMemo::new(),
             singularities_memo: SingularitiesMemo::new(),
+            continuity_memo: ContinuityMemo::new(),
             definition: self.definition.clone(),
         };
         s.update_owned_bases();
@@ -976,6 +953,7 @@ impl Surface {
             made_kind: self.made_kind.shared(),
             boundary_memo: BoundaryMemo::new(),
             singularities_memo: SingularitiesMemo::new(),
+            continuity_memo: self.continuity_memo.share(),
             definition: None,
         })
     }
@@ -1082,6 +1060,7 @@ impl Surface {
             made_kind: self.made_kind.shared(),
             boundary_memo: BoundaryMemo::new(),
             singularities_memo: SingularitiesMemo::new(),
+            continuity_memo: self.continuity_memo.share(),
             definition: self.definition.clone(),
         }
     }
@@ -1248,6 +1227,7 @@ impl Surface {
             made_kind: MadeKindSlot::default(),
             boundary_memo: BoundaryMemo::new(),
             singularities_memo: SingularitiesMemo::new(),
+            continuity_memo: ContinuityMemo::new(),
             definition: None,
         }
     }
@@ -1359,20 +1339,6 @@ impl Surface {
         piece
     }
 
-    /// The state of this surface's cache slot (see [`CacheTreeState`]), shared with its
-    /// evaluation copies.
-    #[must_use]
-    pub fn cache_tree_state(&self) -> CacheTreeState {
-        self.cache_slot.get()
-    }
-
-    /// Records the state of this surface's cache slot, for this surface and every
-    /// evaluation copy of it: the cache builds keep it in step, and a caller that
-    /// rebuilds a surface which already had a cache upstream (an import) restores it.
-    pub fn set_cache_tree_state(&self, state: CacheTreeState) {
-        self.cache_slot.set(state);
-    }
-
     /// Takes this surface's trimmed surface cache out of its cache slot (shared with its
     /// evaluation copies) for use, leaving [`TrimCacheSlot::CheckedOut`] until
     /// [`Surface::store_trim_cache`] returns it: [`TrimCacheSlot::Stored`] with the cache,
@@ -1397,23 +1363,17 @@ impl Surface {
     /// Stores `cache` as the trimmed surface cache of the surface it caches (whose cache
     /// slot its own surface copy shares: upstream's
     /// `SmCacheMgr::AddToObjectCache(SM_OC_TRIMSRF, ..)`, or the return of a cache taken
-    /// with [`Surface::take_trim_cache`]), and records its tree state. A face
+    /// with [`Surface::take_trim_cache`]). A face
     /// modification noted while the cache was out ([`Surface::mark_trim_cache_face_modified`])
     /// is applied to it. The cache's own surface copy then gets a slot of its own, so
     /// that the slot does not own itself.
     pub fn store_trim_cache(mut cache: TrimSrfCache<EntityRef>) {
         let slot = cache.base().surface().cache_slot.share();
         cache.base_mut().surface_mut().cache_slot = CacheSlot::default();
-        let tree = if cache.base().tree().is_some() {
-            CacheTreeState::Built
-        } else {
-            CacheTreeState::Unbuilt
-        };
         slot.with(|s| {
             if core::mem::take(&mut s.face_modified_while_out) {
                 cache.base_mut().face_was_modified = true;
             }
-            s.tree = tree;
             s.trim = TrimCacheSlot::Stored(Box::new(cache));
         });
     }
@@ -1467,8 +1427,7 @@ impl Surface {
 
     /// Deletes this surface's trimmed surface cache (`SmCacheMgr::DeleteObjectsCache(
     /// SM_OC_TRIMSRF, ..)`), or ends a checkout without returning a cache (a build that
-    /// failed). The tree state is left as it is (the surface cache of `SM_OC_SURFACE`
-    /// keeps its own).
+    /// failed).
     pub fn delete_trim_cache(&self) {
         self.cache_slot.with(|s| {
             s.trim = TrimCacheSlot::Empty;
@@ -1540,8 +1499,8 @@ impl Surface {
     }
 
     /// Gives this surface (a copy of `src` standing for it in a B-rep copied into new
-    /// arenas, its owner already renamed) what `src`'s cache slot holds: its tree state
-    /// and its kept trimmed surface cache, the cache's topology handles renamed by
+    /// arenas, its owner already renamed) what `src`'s cache slot holds: its kept
+    /// trimmed surface cache, the cache's topology handles renamed by
     /// `map` and its face binding keyed to this surface's owner. `src` keeps its own.
     /// Upstream has one surface object, so nothing is copied there; this keeps a copy's
     /// later cache lookups seeing the cache the original's earlier ones made
@@ -1576,7 +1535,6 @@ impl Surface {
                 Self::store_trim_cache(copied?);
             }
         }
-        self.set_cache_tree_state(src.cache_tree_state());
         Ok(())
     }
 
@@ -1614,6 +1572,12 @@ impl Surface {
         &self.singularities_memo
     }
 
+    /// The memo of the continuity arrays [`Surface::continuities`] computes (see
+    /// `ContinuityMemo`).
+    pub(crate) const fn continuity_memo(&self) -> &ContinuityMemo {
+        &self.continuity_memo
+    }
+
     /// The concrete kind: once a `const` query made a cone's, sphere's, torus's or
     /// surface of revolution's missing NURB ([`Surface::kind_with_nurb`]), the made kind
     /// kept on this surface (`MadeKindSlot`), as upstream keeps the made NURB on the
@@ -1621,6 +1585,19 @@ impl Surface {
     #[must_use]
     pub fn kind(&self) -> &SurfaceKind {
         self.made_kind.get().unwrap_or(&self.kind)
+    }
+
+    /// The surface whose geometry this one is: through every curve-bounded layer, its
+    /// basis surface (a curve-bounded surface is its basis over the same parameters:
+    /// [`crate::surface::curve_bounded_surface`]); any other surface itself.
+    #[must_use]
+    pub(crate) fn geometry(&self) -> &Self {
+        let mut s = self;
+        // (bounded: construction caps the nesting at MAX_GEOMETRY_NESTING)
+        while let SurfaceKind::CurveBounded(c) = s.kind() {
+            s = c.basis();
+        }
+        s
     }
 
     /// Moves a kind made by [`Surface::kind_with_nurb`] into this surface before an
@@ -1646,6 +1623,7 @@ impl Surface {
         // an edit makes another surface value: start an empty boundary memo
         self.boundary_memo = BoundaryMemo::new();
         self.singularities_memo = SingularitiesMemo::new();
+        self.continuity_memo = ContinuityMemo::new();
         &mut self.kind
     }
 
@@ -3294,6 +3272,7 @@ impl Surface {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
         self.singularities_memo = SingularitiesMemo::new();
+        self.continuity_memo = ContinuityMemo::new();
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.adjust_step_uv_domain(new_step_uv_domain),
             SurfaceKind::ProceduralBlend(pb) => {
@@ -3356,6 +3335,7 @@ impl Surface {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
         self.singularities_memo = SingularitiesMemo::new();
+        self.continuity_memo = ContinuityMemo::new();
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.reverse(param),
             SurfaceKind::ProceduralBlend(s) => s.reverse(param),
@@ -3450,6 +3430,7 @@ impl Surface {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
         self.singularities_memo = SingularitiesMemo::new();
+        self.continuity_memo = ContinuityMemo::new();
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.reparameterize(new_domain),
             SurfaceKind::ProceduralBlend(s) => s.reparameterize(new_domain),
@@ -3516,6 +3497,7 @@ impl Surface {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
         self.singularities_memo = SingularitiesMemo::new();
+        self.continuity_memo = ContinuityMemo::new();
         let type_code = self.type_code();
         let Self {
             kind,
@@ -3657,6 +3639,7 @@ impl Surface {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
         self.singularities_memo = SingularitiesMemo::new();
+        self.continuity_memo = ContinuityMemo::new();
         // (#2485, #2488) a definition moves with its net; one that cannot move so (a scale
         // that is not uniform) refuses before the net moves. A sweep's (#2572) that cannot
         // follow the motion is left behind: the net moves as it did without it.
@@ -3754,6 +3737,7 @@ impl Surface {
         self.take_made_kind_for_edit();
         self.boundary_memo = BoundaryMemo::new();
         self.singularities_memo = SingularitiesMemo::new();
+        self.continuity_memo = ContinuityMemo::new();
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.trim_with_domain_with(trim_domain, options),
             SurfaceKind::ProceduralBlend(pb) => {
@@ -7862,7 +7846,7 @@ mod tests {
                 surface.owner_zone_tol_3d,
             );
             let definition_kept = surface.definition.is_some();
-            let cache_tree = surface.cache_tree_state();
+            let has_trim_cache = surface.has_trim_cache();
             let result = surface.reverse(&k, param);
             let SurfaceKind::SurfOfRevolution(after) = surface.kind() else {
                 panic!("reversal changed the surface kind");
@@ -7877,7 +7861,7 @@ mod tests {
                     owner
                 );
                 assert_eq!(surface.definition.is_some(), definition_kept);
-                assert_eq!(surface.cache_tree_state(), cache_tree);
+                assert_eq!(surface.has_trim_cache(), has_trim_cache);
                 for (uv, point) in &points {
                     assert_eq!(
                         surface.evaluate_point(&k, *uv).unwrap(),
