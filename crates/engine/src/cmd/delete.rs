@@ -126,10 +126,19 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
         Ok(())
     })?;
     let listed = |objects: &[u64]| objects.iter().map(|id| ids::encode(*id)).collect::<Vec<_>>();
-    let (views, dimensions, balloons) = (listed(&gone.views), listed(&gone.dimensions), listed(&gone.balloons));
-    Ok(
-        json!({ "deleted": also, "deleted_joints": [], "would_fail": [], "skipped": [], "views": views, "dimensions": dimensions, "balloons": balloons, "notes": listed(&gone.notes) }),
-    )
+    let reply = SelectionDeleteResult {
+        deleted: also,
+        deleted_joints: Vec::new(),
+        bodies: Vec::new(),
+        would_fail: Vec::new(),
+        skipped: Vec::new(),
+        views: Some(listed(&gone.views)),
+        dimensions: Some(listed(&gone.dimensions)),
+        balloons: Some(listed(&gone.balloons)),
+        notes: Some(listed(&gone.notes)),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 /// The delete `p` asks for is of the open drawing's objects (its undo step is the drawing's): it
@@ -338,7 +347,18 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     // Features after a rolled-back marker count too (#3471).
     let would_fail: Vec<String> =
         super::edit::newly_broken_in_history(&before_doc, &before, &s.doc, &s.model).into_iter().map(|(name, _)| name).collect();
-    let reply = SelectionDeleteResult { deleted, deleted_joints: joints, bodies, would_fail, skipped, param_warnings: Vec::new() };
+    let reply = SelectionDeleteResult {
+        deleted,
+        deleted_joints: joints,
+        bodies,
+        would_fail,
+        skipped,
+        views: None,
+        dimensions: None,
+        balloons: None,
+        notes: None,
+        param_warnings: Vec::new(),
+    };
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
