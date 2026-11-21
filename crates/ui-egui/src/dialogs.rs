@@ -31,6 +31,7 @@ mod auto;
 mod dense;
 #[cfg(test)]
 pub(crate) use dense::primitive_label;
+pub(crate) use dense::quantity_row;
 
 const SELECT_ONLY: &[Scope] = &[Scope::Selection, Scope::FeaturePreview];
 const SELECT_MANIP: &[Scope] = &[Scope::Selection, Scope::Manipulator, Scope::FeaturePreview];
@@ -54,6 +55,7 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "solid.remove", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     // Pattern parameters are dialog-only - no viewport modifier chords.
     ToolModifiers { tool: "solid.pattern.path", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
+    ToolModifiers { tool: "solid.pattern.face", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.pattern.rectangular", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.pattern.circular", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.pipe", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
@@ -330,6 +332,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 count: String,
                 spacing: String,
             },
+            /// Pattern bodies over a face; its attractors sit behind Advanced.
+            FacePattern(Box<crate::dialogs_face_pattern::Form>),
             /// Physical material (and with it the appearance) of bodies.
             Material {
                 index: usize,
@@ -1049,6 +1053,7 @@ impl Dialog {
                 Kind::PathPattern { count: "4".into(), spacing: length_default(s, "20") },
                 vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
             ),
+            "solid.pattern.face" => Dialog::new(crate::dialogs_face_pattern::kind(), crate::dialogs_face_pattern::inputs()),
             "mesh.convert" => Dialog::new(
                 Kind::MeshConvert { tolerance: crate::length_input::model(&s.doc, 0.05) },
                 vec![SelInput::new("Mesh body", BODIES, false)],
@@ -1239,6 +1244,7 @@ impl Dialog {
         recall(app, &mut d);
         // Patterns of features picked in the timeline: the objects are features.
         if is_pattern(&d.kind)
+            && !matches!(d.kind, Kind::FacePattern(_))
             && s.selection.iter().any(|x| matches!(x, Sel::Feature { .. }))
             && let Some(inp) = d.inputs.first_mut()
         {
@@ -1533,6 +1539,7 @@ impl Dialog {
                 | Kind::Align { .. }
                 | Kind::Remove
                 | Kind::PathPattern { .. }
+                | Kind::FacePattern(_)
                 | Kind::Pipe { .. }
                 | Kind::Stock { .. }
                 | Kind::Scale { .. }
@@ -3020,6 +3027,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::ChatContext => "PICK CONTEXT",
         Kind::PluginPick { .. } => "PLUGIN",
         Kind::PathPattern { .. } => "PATTERN ON PATH",
+        Kind::FacePattern(_) => "PATTERN ON FACE",
         Kind::Split => "SPLIT BODY",
         Kind::Thread { .. } => "THREAD",
         Kind::Section { .. } => "SECTION ANALYSIS",
@@ -3184,7 +3192,7 @@ const SKETCH_NOT_OBJECT: &str =
     "Pick bodies or features: a sketch is neither. Repeat its curves with the sketch's own Pattern or Mirror, or extrude it first.";
 
 fn is_pattern(k: &Kind) -> bool {
-    matches!(k, Kind::PatternRect { .. } | Kind::PatternCirc { .. } | Kind::PathPattern { .. } | Kind::Mirror)
+    matches!(k, Kind::PatternRect { .. } | Kind::PatternCirc { .. } | Kind::PathPattern { .. } | Kind::FacePattern(_) | Kind::Mirror)
 }
 
 /// The Object Type row of a pattern: bodies (picked in the view), features (picked in the
@@ -3283,11 +3291,12 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
         Kind::PatternRect { .. } => Some(0),
         Kind::PatternCirc { .. } => Some(1),
         Kind::PathPattern { .. } => Some(2),
+        Kind::FacePattern(_) => Some(3),
         _ => None,
     };
     if let Some(cur) = current {
         let mut ty = cur;
-        choice_row(ui, "Type", "pat_type", &mut ty, &["Rectangular", "Circular", "Path"]);
+        choice_row(ui, "Type", "pat_type", &mut ty, &["Rectangular", "Circular", "Path", "Face"]);
         if ty != cur {
             // Same objects, the new pattern's other inputs.
             let objects = d.inputs.first().map(|i| i.items.clone()).unwrap_or_default();
@@ -3309,12 +3318,14 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
                     Kind::PatternCirc { count: "6".into(), angle: "360 deg".into() },
                     vec![SelInput::new("Objects", BODIES, true), SelInput::new("Axis", AXIS_PICKS, false)],
                 ),
-                _ => (
+                2 => (
                     Kind::PathPattern { count: "4".into(), spacing: length_default(session, "20") },
                     vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
                 ),
+                _ => (crate::dialogs_face_pattern::kind(), crate::dialogs_face_pattern::inputs()),
             };
-            let accept = d.inputs.first().map(|i| i.accept).unwrap_or(BODIES);
+            // A face pattern copies bodies only.
+            let accept = if matches!(kind, Kind::FacePattern(_)) { BODIES } else { d.inputs.first().map(|i| i.accept).unwrap_or(BODIES) };
             if let Some(i) = inputs.first_mut() {
                 i.items = objects;
                 i.accept = accept;
@@ -3325,7 +3336,10 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
             d.extra.clear();
             d.advance();
         }
-        object_type_row(d, ui, session);
+        // A face pattern copies bodies only: no Object Type.
+        if !matches!(d.kind, Kind::FacePattern(_)) {
+            object_type_row(d, ui, session);
+        }
         return;
     }
     if crate::hole_folder::active(d) {
@@ -4938,6 +4952,7 @@ fn rememberable(kind: &Kind) -> bool {
             | Kind::BoundaryFill { .. }
             | Kind::Align { .. }
             | Kind::PathPattern { .. }
+            | Kind::FacePattern(_)
             | Kind::Section { .. }
             | Kind::Move { .. }
             | Kind::Hole { .. }
@@ -5744,7 +5759,7 @@ pub(crate) fn facing(app: &SolveApp, n: Vec3, again: bool) -> Vec3 {
     if again && app.cam.back().dot(n) > 0.999 { -n } else { n }
 }
 
-fn sels(d: &Dialog, i: usize) -> &[Sel] {
+pub(crate) fn sels(d: &Dialog, i: usize) -> &[Sel] {
     selection::items(&d.inputs, i)
 }
 
@@ -6793,6 +6808,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "bodies")?;
             ("solid.remove", json!({"bodies": sels(d, 0).body_names()}))
         }
+        Kind::FacePattern(_) => ("solid.pattern.face", crate::dialogs_face_pattern::params(app, d)?),
         Kind::PathPattern { count, spacing } => {
             need(0, "objects")?;
             need(1, "the path")?;
@@ -8759,6 +8775,49 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     if *extent {
                         d.extra.insert("distance".into(), json!(spacing));
                     }
+                    d
+                }
+                PatternKind::Face { face, .. } => {
+                    let mut d = start("solid.pattern.face")?;
+                    let form = crate::dialogs_face_pattern::form_of(pattern).unwrap_or_default();
+                    if form.attract {
+                        crate::dialogs_face_pattern::set_attractor_inputs(&mut d, true);
+                    }
+                    // The face, and each attractor set, as picks where they are now. A set with a
+                    // reference that can't be shown stays empty, and its saved references go back
+                    // unchanged.
+                    if let (Some(pick), Some(inp)) = (model_axis_sel(s, face), d.inputs.get_mut(1)) {
+                        inp.items = vec![pick];
+                    }
+                    if let PatternKind::Face { more_faces, .. } = pattern
+                        && let Some(picks) = more_faces.iter().map(|g| model_axis_sel(s, g)).collect::<Option<Vec<Sel>>>()
+                        && let Some(inp) = d.inputs.get_mut(1)
+                        && !inp.items.is_empty()
+                    {
+                        inp.items.extend(picks);
+                    }
+                    if let PatternKind::Face { attract, avoid, .. } = pattern {
+                        let set = |geometry: &[solidcraft_engine::doc::construct::GeoRef], bodies: &[solidcraft_engine::doc::BodyName]| {
+                            let mut picks: Vec<Sel> = geometry.iter().map(|g| point_sel(s, g).or_else(|| saved_pick(s, g))).collect::<Option<_>>()?;
+                            picks.extend(bodies.iter().map(|b| Sel::Body { name: b.0.clone() }));
+                            Some(picks)
+                        };
+                        let mut sets = Vec::new();
+                        if let Some(a) = avoid.as_deref() {
+                            sets.push((crate::dialogs_face_pattern::AVOID, &a.geometry, &a.bodies));
+                        }
+                        if let Some(a) = attract.as_deref() {
+                            sets.push((crate::dialogs_face_pattern::ATTRACTORS, &a.geometry, &a.bodies));
+                            sets.push((crate::dialogs_face_pattern::FAR_ATTRACTORS, &a.far_geometry, &a.far_bodies));
+                        }
+                        for (label, geometry, bodies) in sets {
+                            if let (Some(picks), Some(inp)) = (set(geometry, bodies), d.inputs.iter_mut().find(|i| i.label == label)) {
+                                inp.items = picks;
+                            }
+                        }
+                    }
+                    d.kind = Kind::FacePattern(Box::new(form));
+                    d.active = 0;
                     d
                 }
             };

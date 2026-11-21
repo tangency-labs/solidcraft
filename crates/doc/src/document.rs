@@ -3090,6 +3090,219 @@ pub enum PatternKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         orient: bool,
     },
+    /// Copies standing on a face of the model: one at the centre of each cell of a grid laid
+    /// across the face's surface parameters (`count1` by `count2`), each copy turned so its
+    /// up (+Z) follows the face's normal there and its X the grid's first direction, with its
+    /// `anchor` on the face. The face is found again on each evaluation, so the copies follow it.
+    /// Bodies only.
+    Face {
+        face: GeoRef,
+        /// More faces of the same body the copies stand on with `face`: together one region, so
+        /// the edges two of them share are not edges of it (no margin to them, copies across
+        /// them), and a count is shared over them by area.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        more_faces: Vec<GeoRef>,
+        /// A layout spaced by distance on the surface, in place of the grid and `random`, so it
+        /// stays even where the face's parameters crowd (a sphere's poles).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layout: Option<FaceLayout>,
+        /// The layout's outer copies sit flush with the face's edges (with `overhang`, their
+        /// centres on them) and the edge margin moves them in: the grid runs from edge to edge,
+        /// as do the spaced rows. Absent (designs made before it): each grid copy at the centre of
+        /// its cell, and the margin only leaves out the copies nearer the edges than it.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        fit_edges: bool,
+        #[walk(unitless = "Quantity")]
+        count1: Expr,
+        #[walk(unitless = "Quantity 2")]
+        count2: Expr,
+        /// Every other column moves half a cell along.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        staggered: bool,
+        /// Instances at random places instead of on the grid (`count1` and `count2` are then
+        /// unused).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        random: Option<RandomPlacement>,
+        /// The grid's turn on the face.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Grid angle")]
+        angle: Option<Expr>,
+        /// The edge margin: no copy nearer than this to the face's edges, round its holes too,
+        /// measured from the copy itself to the edges' exact curves.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Edge margin")]
+        margin: Option<Expr>,
+        /// Copies may hang over the face's edges and holes: only each copy's centre has to be on
+        /// the face, and the edge margin is measured from that centre. Off, every copy lies
+        /// wholly on the face, clear of its edges even at an edge margin of 0.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        overhang: bool,
+        /// Geometry no copy may come near.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        avoid: Option<Box<Avoid>>,
+        /// The copies stand on the other side of the face.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        /// The point of the copied bodies that goes onto the face (default: the centre of the
+        /// bottom of their bounding box, so they stand on the face wherever they were modelled).
+        #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_point_expr")]
+        #[walk(placement)]
+        anchor: Option<PointExpr>,
+        /// Advanced: each copy's size, height and rotation follow its distance to attractor points.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attract: Option<Box<Attract>>,
+    },
+}
+
+/// What a face pattern keeps its copies away from: points, faces and whole bodies, found again on
+/// each evaluation. A copy is left out when it comes within `margin` of one, measured from the
+/// copy itself on the exact geometry; with no margin, when it touches or overlaps one, or one
+/// holds the other.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct Avoid {
+    /// Fixed points, vertices, sketch points, construction points and faces.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub geometry: Vec<GeoRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bodies: Vec<BodyName>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Avoid margin")]
+    pub margin: Option<Expr>,
+}
+
+/// How a pattern's copies change with their distance to attractors: points, edges, faces or
+/// whole bodies. Each value goes from its `near` setting at the near distance (or nearer) to its
+/// `far` setting at the far distance (or farther); without those distances, the nearest and the
+/// farthest copies set them. With far attractors too, a copy's place between the two sets sets
+/// its value instead: the near setting on the near attractors, the far one on the far
+/// attractors, blended by the share of its distance to the near set in the sum of both. The near
+/// and far distances are then hold zones: a copy within `near` of the near set takes the near
+/// values, one within `far` of the far set the far values (both default 0), and the blend runs
+/// between the zones' edges.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct Attract {
+    /// Geometry the distances are measured to: fixed points, vertices, sketch points,
+    /// construction points, edges and faces, found again on each evaluation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub geometry: Vec<GeoRef>,
+    /// Whole bodies the distances are measured to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bodies: Vec<BodyName>,
+    /// The far attractors, when the values blend between two sets.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub far_geometry: Vec<GeoRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub far_bodies: Vec<BodyName>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Near distance")]
+    pub near: Option<Expr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Far distance")]
+    pub far: Option<Expr>,
+    /// Scale of a copy at the near distance, and at the far one (default 1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(unitless = "Scale near")]
+    pub scale_near: Option<Expr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(unitless = "Scale far")]
+    pub scale_far: Option<Expr>,
+    /// How far a copy moves out along the face's normal (negative: into it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Offset from face near")]
+    pub offset_near: Option<Expr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Offset from face far")]
+    pub offset_far: Option<Expr>,
+    /// How far a copy rotates about the face's normal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(angle = "Rotate near")]
+    pub rotate_near: Option<Expr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(angle = "Rotate far")]
+    pub rotate_far: Option<Expr>,
+    /// No copy farther than this from every attractor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Cutoff")]
+    pub cutoff: Option<Expr>,
+    /// How the values change between the near and far distances.
+    #[serde(default, skip_serializing_if = "is_default_falloff")]
+    pub falloff: Falloff,
+}
+
+/// A face pattern's random placement: how many instances, the seed that fixes where they go,
+/// and how they spread.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct RandomPlacement {
+    #[walk(unitless = "Quantity")]
+    pub count: Expr,
+    #[serde(default)]
+    pub seed: u32,
+    #[serde(default)]
+    pub noise: Noise,
+}
+
+/// A face pattern's layout spaced by distance on the surface ([`PatternKind::Face`]'s `layout`):
+/// even where the face's parameters crowd, as round a sphere's poles. Its `staggered` and `angle`
+/// apply as noted.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FaceLayout {
+    /// Rows `row_spacing` apart along the surface (default `spacing`), each with as many copies as
+    /// fit its length at `spacing` apart: round a sphere, its circles of latitude. `staggered`
+    /// moves every other row half a spacing along.
+    Spacing {
+        #[walk(length = "Spacing")]
+        spacing: Expr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Row spacing")]
+        row_spacing: Option<Expr>,
+    },
+    /// `count` copies on a Fibonacci spiral, even over the faces' area.
+    Spiral {
+        #[walk(unitless = "Quantity")]
+        count: Expr,
+    },
+    /// `count` copies relaxed until evenly spread over the faces together.
+    Fill {
+        #[walk(unitless = "Quantity")]
+        count: Expr,
+    },
+    /// The vertices of a geodesic sphere of `frequency` (1 to 9: `10 f² + 2` on a whole sphere) on
+    /// faces of one sphere; `angle` turns it about the sphere's pole.
+    Geodesic {
+        #[walk(unitless = "Frequency")]
+        frequency: Expr,
+    },
+}
+
+/// How a random placement spreads its instances: the colour of the noise that places them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Noise {
+    /// Independent places, equally likely over the face's area.
+    #[default]
+    White,
+    /// Random but evenly spread: no clumps, no gaps.
+    Blue,
+    /// Loose clusters.
+    Pink,
+    /// Large clusters and bare patches.
+    Brown,
+}
+
+/// How an attractor's effect changes between its near and far distances.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Falloff {
+    /// In step with the distance.
+    #[default]
+    Linear,
+    /// Easing in and out at both ends (smoothstep).
+    Smooth,
+}
+
+fn is_default_falloff(f: &Falloff) -> bool {
+    *f == Falloff::Linear
 }
 
 fn default_pattern_alignment(alignment: &solidcraft_sketch::PatternAlignment) -> bool {
@@ -3215,6 +3428,7 @@ impl FeatureKind {
             FeatureKind::Combine { .. } => "CombineFeature",
             FeatureKind::Pattern { pattern: PatternKind::Rectangular { .. }, .. } => "RectangularPatternFeature",
             FeatureKind::Pattern { pattern: PatternKind::Path { .. }, .. } => "PathPatternFeature",
+            FeatureKind::Pattern { pattern: PatternKind::Face { .. }, .. } => "FacePatternFeature",
             FeatureKind::Pattern { .. } => "CircularPatternFeature",
             FeatureKind::Mirror { .. } => "MirrorFeature",
             FeatureKind::ConstructionPlane { .. } => "ConstructionPlane",
@@ -3479,6 +3693,7 @@ impl FeatureKind {
             FeatureKind::Combine { .. } => "Combine",
             FeatureKind::Pattern { pattern: PatternKind::Rectangular { .. }, .. } => "RectangularPattern",
             FeatureKind::Pattern { pattern: PatternKind::Path { .. }, .. } => "PathPattern",
+            FeatureKind::Pattern { pattern: PatternKind::Face { .. }, .. } => "FacePattern",
             FeatureKind::Pattern { .. } => "CircularPattern",
             FeatureKind::Mirror { .. } => "Mirror",
             FeatureKind::ConstructionPlane { .. } => "Plane",

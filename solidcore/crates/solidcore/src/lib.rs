@@ -36,7 +36,7 @@
 //! Foundation: [`math`], [`error`], [`kernel`], [`limits`], [`topology`], [`geom`]. Algorithm layers (filled
 //! in as units are ported, see `plan/modules.toml`): [`nurbs`], [`curve`],
 //! [`surface`], [`intersect`], [`boolean`], [`blend`], [`offset`], [`heal`], [`mass`],
-//! [`query`], [`sweep`], [`primitive`].
+//! [`query`], [`sweep`], [`primitive`]; [`face_pattern`], where copies stand on a face.
 #![forbid(unsafe_code)]
 
 pub mod error;
@@ -51,6 +51,7 @@ pub mod cell_grid;
 pub mod curve;
 pub mod develop;
 pub mod eval;
+pub mod face_pattern;
 pub mod geom;
 #[allow(missing_docs)]
 pub mod hatch;

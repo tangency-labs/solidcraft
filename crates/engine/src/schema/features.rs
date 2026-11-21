@@ -1080,6 +1080,209 @@ pub enum PatternResult {
     },
 }
 
+/// Copy bodies onto a face of the model: one copy at the centre of each cell of a grid laid
+/// across the face, standing on it. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PatternFaceParams {
+    /// The bodies to copy, by name. Each copy's +Z stands along the face's normal and its X runs
+    /// with the grid, its `anchor` on the face.
+    pub bodies: NameList,
+    /// The face to copy onto: a point on it ({"face": [x, y, z]}, kept by the face's persistent
+    /// name, so the copies follow the face as the model changes) or a reference as saved.
+    /// Required unless `faces` lists the faces.
+    #[serde(default)]
+    pub face: Option<GeoRefParam>,
+    /// More faces of the same body to copy onto (with `face`, or alone): together one region, so
+    /// the edges two of them share are no edges of it, and a count is shared over them by area.
+    /// At most 256.
+    #[serde(default)]
+    pub faces: Option<Vec<GeoRefParam>>,
+    /// A layout spaced by distance on the surface, in place of the grid (`count1`, `count2`) and
+    /// `random`: even where the face's parameters crowd, as round a sphere's poles.
+    #[serde(default)]
+    pub layout: Option<FaceLayoutParams>,
+    /// Cells across the face (round a cylinder, its first direction). Required without `random`.
+    #[serde(default)]
+    pub count1: Option<NumberExpr>,
+    /// Cells along the face (its second direction). Required without `random`.
+    #[serde(default)]
+    pub count2: Option<NumberExpr>,
+    /// Instances at random places instead of on a grid.
+    #[serde(default)]
+    pub random: Option<RandomParams>,
+    /// Every other column moves half a cell along.
+    #[serde(default)]
+    pub staggered: Option<bool>,
+    /// The grid's turn on the face. Default: 0.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
+    /// The layout's outer copies sit flush with the face's edges (with `overhang`, their centres
+    /// on them), the edge margin moving them in: the grid and the spaced rows run from edge to
+    /// edge. Default: false (each grid copy at the centre of its cell). The dialog sets it.
+    #[serde(default)]
+    pub fit_edges: Option<bool>,
+    /// The edge margin: no copy nearer than this to the face's edges, round its holes too,
+    /// measured from the copy itself. Default: 0.
+    #[serde(default)]
+    pub margin: Option<LengthExpr>,
+    /// Copies may hang over the face's edges and holes: only each copy's centre has to be on the
+    /// face, and the edge margin is measured from it. Default: false (every copy lies wholly on
+    /// the face).
+    #[serde(default)]
+    pub overhang: Option<bool>,
+    /// Geometry no copy may come near.
+    #[serde(default)]
+    pub avoid: Option<AvoidParams>,
+    /// The copies stand on the other side of the face.
+    #[serde(default)]
+    pub flip: Option<bool>,
+    /// The point of the copied bodies that goes onto the face. Default: the centre of the bottom
+    /// of their bounding box.
+    #[serde(default)]
+    pub anchor: Option<PointExpr3>,
+    /// Put the copies into a group in the browser's Bodies folder, named after the feature.
+    /// Default: true.
+    #[serde(default)]
+    pub group: Option<bool>,
+    /// Advanced: change each copy with its distance to attractors.
+    #[serde(default)]
+    pub attract: Option<AttractParams>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// What a face pattern keeps its copies away from. A copy is left out when it comes within
+/// `margin` of one, measured from the copy itself; with no margin, when it touches or overlaps one.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AvoidParams {
+    /// Fixed points ({"point": [x, y, z]}), vertices, sketch points, construction points and faces
+    /// ({"face": [x, y, z]}), followed as they move. Not edges: give the faces along one.
+    #[serde(default)]
+    pub geometry: Option<Vec<GeoRefParam>>,
+    /// Whole bodies, by name.
+    #[serde(default)]
+    pub bodies: Option<NameList>,
+    /// How near a copy may come. Default: 0.
+    #[serde(default)]
+    pub margin: Option<LengthExpr>,
+}
+
+/// How a face pattern's copies change with their distance to the nearest attractor: each value
+/// goes from its `_near` setting at the `near` distance (or nearer) to its `_far` setting at the
+/// `far` distance (or farther). With far attractors, a copy's place between the two sets sets it
+/// instead: the `_near` setting on the near attractors, the `_far` one on the far attractors.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AttractParams {
+    /// Attractor geometry: fixed points ({"point": [x, y, z]}), vertices, sketch points,
+    /// construction points, edges ({"edge": [x, y, z]}) and faces ({"face": [x, y, z]}), followed as
+    /// they move. Distances to edges and faces are exact.
+    #[serde(default)]
+    pub geometry: Option<Vec<GeoRefParam>>,
+    /// Whole bodies as attractors, by name.
+    #[serde(default)]
+    pub bodies: Option<NameList>,
+    /// Far attractors: with them, the values blend between the two sets.
+    #[serde(default)]
+    pub far_geometry: Option<Vec<GeoRefParam>>,
+    /// Far attractor bodies, by name.
+    #[serde(default)]
+    pub far_bodies: Option<NameList>,
+    /// The distance that counts as near. Default: the nearest copy's. With far attractors, a hold
+    /// zone: copies within this of the near attractors take the near values in full (default 0).
+    #[serde(default)]
+    pub near: Option<LengthExpr>,
+    /// The distance that counts as far. Default: the farthest copy's. With far attractors, a hold
+    /// zone: copies within this of the far attractors take the far values in full (default 0).
+    #[serde(default)]
+    pub far: Option<LengthExpr>,
+    /// A copy's scale at the near distance. Default: 1.
+    #[serde(default)]
+    pub scale_near: Option<NumberExpr>,
+    /// A copy's scale at the far distance. Default: 1.
+    #[serde(default)]
+    pub scale_far: Option<NumberExpr>,
+    /// How far a copy moves out along the face's normal at the near distance (negative: into
+    /// the face). Default: 0.
+    #[serde(default)]
+    pub offset_near: Option<LengthExpr>,
+    /// The same at the far distance. Default: 0.
+    #[serde(default)]
+    pub offset_far: Option<LengthExpr>,
+    /// How far a copy rotates about the face's normal at the near distance. Default: 0.
+    #[serde(default)]
+    pub rotate_near: Option<AngleExpr>,
+    /// The same at the far distance. Default: 0.
+    #[serde(default)]
+    pub rotate_far: Option<AngleExpr>,
+    /// No copy farther than this from every attractor point.
+    #[serde(default)]
+    pub cutoff: Option<LengthExpr>,
+    /// How the values change between the distances: linear (default) or smooth (easing in and
+    /// out at both ends).
+    #[serde(default)]
+    pub falloff: Option<FalloffParam>,
+}
+
+/// A face pattern's layout spaced by distance on the surface.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum FaceLayoutParams {
+    /// Rows `row_spacing` apart along the surface (default `spacing`), each with as many copies as
+    /// fit its length at `spacing` apart: round a sphere, its circles of latitude. `staggered`
+    /// moves every other row half a spacing along.
+    Spacing {
+        spacing: LengthExpr,
+        #[serde(default)]
+        row_spacing: Option<LengthExpr>,
+    },
+    /// `count` copies on a Fibonacci spiral, even over the faces' area.
+    Spiral { count: NumberExpr },
+    /// `count` copies relaxed until evenly spread over the faces together, round holes and across
+    /// the edges between them.
+    Fill { count: NumberExpr },
+    /// The vertices of a geodesic sphere of `frequency` (1 to 9: 10 f² + 2 copies on a whole
+    /// sphere) on faces of one sphere; `angle` turns it about the sphere's pole.
+    Geodesic { frequency: NumberExpr },
+}
+
+/// A face pattern's random placement.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct RandomParams {
+    /// How many instances.
+    pub count: NumberExpr,
+    /// Fixes where they go: the same seed gives the same places. Default: 0.
+    #[serde(default)]
+    pub seed: Option<u32>,
+    /// How they spread: white (independent), blue (evenly spread, no clumps), pink (loose
+    /// clusters) or brown (large clusters). Default: white.
+    #[serde(default)]
+    pub noise: Option<NoiseParam>,
+}
+
+/// How a random placement spreads its instances.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NoiseParam {
+    White,
+    Blue,
+    Pink,
+    Brown,
+}
+
+/// How an attractor's effect changes between its near and far distances.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FalloffParam {
+    /// In step with the distance.
+    Linear,
+    /// Easing in and out at both ends.
+    Smooth,
+}
+
 /// A rigid matrix, in row-major order, with translation in its last column.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(untagged)]

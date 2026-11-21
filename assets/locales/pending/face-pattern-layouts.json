@@ -1,0 +1,82 @@
+{
+  "en": {
+    "ui.face_pattern.even_fill": "Even fill",
+    "ui.face_pattern.frequency": "Frequency",
+    "ui.face_pattern.geodesic": "Geodesic",
+    "ui.face_pattern.row_spacing": "Row spacing",
+    "ui.face_pattern.same_as_spacing": "same as spacing",
+    "ui.face_pattern.spiral": "Spiral",
+    "ui.face_pattern.staggered_rows": "Staggered rows",
+    "ui.face_pattern.turn": "Turn"
+  },
+  "de": {
+    "ui.face_pattern.even_fill": "Gleichmäßig füllen",
+    "ui.face_pattern.frequency": "Frequenz",
+    "ui.face_pattern.geodesic": "Geodätisch",
+    "ui.face_pattern.row_spacing": "Reihenabstand",
+    "ui.face_pattern.same_as_spacing": "wie Abstand",
+    "ui.face_pattern.spiral": "Spirale",
+    "ui.face_pattern.staggered_rows": "Versetzte Reihen",
+    "ui.face_pattern.turn": "Drehung"
+  },
+  "ar": {
+    "ui.face_pattern.even_fill": "تعبئة متساوية",
+    "ui.face_pattern.frequency": "التردد",
+    "ui.face_pattern.geodesic": "جيوديسي",
+    "ui.face_pattern.row_spacing": "تباعد الصفوف",
+    "ui.face_pattern.same_as_spacing": "مثل التباعد",
+    "ui.face_pattern.spiral": "حلزوني",
+    "ui.face_pattern.staggered_rows": "صفوف متخالفة",
+    "ui.face_pattern.turn": "الدوران"
+  },
+  "he": {
+    "ui.face_pattern.even_fill": "מילוי אחיד",
+    "ui.face_pattern.frequency": "תדירות",
+    "ui.face_pattern.geodesic": "גאודזי",
+    "ui.face_pattern.row_spacing": "מרווח שורות",
+    "ui.face_pattern.same_as_spacing": "כמו המרווח",
+    "ui.face_pattern.spiral": "ספירלה",
+    "ui.face_pattern.staggered_rows": "שורות מדורגות",
+    "ui.face_pattern.turn": "סיבוב"
+  },
+  "ja": {
+    "ui.face_pattern.even_fill": "均等配置",
+    "ui.face_pattern.frequency": "分割数",
+    "ui.face_pattern.geodesic": "ジオデシック",
+    "ui.face_pattern.row_spacing": "行間隔",
+    "ui.face_pattern.same_as_spacing": "間隔と同じ",
+    "ui.face_pattern.spiral": "スパイラル",
+    "ui.face_pattern.staggered_rows": "千鳥の行",
+    "ui.face_pattern.turn": "回転"
+  },
+  "vi": {
+    "ui.face_pattern.even_fill": "Phủ đều",
+    "ui.face_pattern.frequency": "Tần số",
+    "ui.face_pattern.geodesic": "Trắc địa",
+    "ui.face_pattern.row_spacing": "Khoảng cách hàng",
+    "ui.face_pattern.same_as_spacing": "bằng khoảng cách",
+    "ui.face_pattern.spiral": "Xoắn ốc",
+    "ui.face_pattern.staggered_rows": "Hàng so le",
+    "ui.face_pattern.turn": "Xoay"
+  },
+  "zh": {
+    "ui.face_pattern.even_fill": "均匀填充",
+    "ui.face_pattern.frequency": "细分频率",
+    "ui.face_pattern.geodesic": "测地",
+    "ui.face_pattern.row_spacing": "行间距",
+    "ui.face_pattern.same_as_spacing": "与间距相同",
+    "ui.face_pattern.spiral": "螺旋",
+    "ui.face_pattern.staggered_rows": "交错行",
+    "ui.face_pattern.turn": "旋转"
+  },
+  "ko": {
+    "ui.face_pattern.even_fill": "균등 채우기",
+    "ui.face_pattern.frequency": "분할 수",
+    "ui.face_pattern.geodesic": "지오데식",
+    "ui.face_pattern.row_spacing": "행 간격",
+    "ui.face_pattern.same_as_spacing": "간격과 같음",
+    "ui.face_pattern.spiral": "나선형",
+    "ui.face_pattern.staggered_rows": "엇갈린 행",
+    "ui.face_pattern.turn": "회전"
+  }
+}

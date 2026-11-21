@@ -37,6 +37,7 @@ mod delete_face;
 mod distance;
 mod draft_corners;
 mod emboss;
+mod face_pattern;
 #[cfg(test)]
 mod face_source_tests;
 pub mod failure;
@@ -193,10 +194,15 @@ pub use continuity_order::{Construction, Continuity};
 pub use corner_g2::{CURVATURE_SHARE, DEFAULT_SETBACK_FACTOR};
 pub use curvature_comb::{CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH, comb_edge_near, edge_comb, edge_distance, iso_comb};
 pub use delete_face::delete_faces;
-pub use distance::{BodyDistance, DistanceShape, Members, body_distance, edges_closest, faces_closest, point_closest};
+pub use distance::{BodyDistance, DistanceShape, Members, body_distance, boundary_gap, edges_closest, faces_closest, point_closest};
 pub use draft_corners::{CornerFill, CornerOption, CornerRefusal, CornerReport, DraftCorner, draft_corners};
 pub use emboss::{
     cylinder_emboss_anchor, emboss_anchor, emboss_cylinder, emboss_cylinder_at, emboss_project_face, has_cylinder_emboss_wall, infer_cylinder_emboss,
+};
+pub use face_pattern::{
+    FaceEdgeFrame, FaceLayout, FaceStation, Falloff, MAX_EDGE_POINTS, MAX_FACES, MAX_GEODESIC_FREQUENCY, MAX_STATION_COUNT, Noise, PointDistance,
+    attraction, face_edge_frames_across, face_edge_points, face_edge_points_across, face_layout_stations, face_placement, face_random_stations,
+    face_stations, ramp,
 };
 pub use failure::ErrorCode;
 pub use fair::{
@@ -255,8 +261,9 @@ pub use surface_ruled::{Ruled, RuledCorners, RuledMode, ruled_far_handles, ruled
 pub use surface_trim::{TrimKeep, mutual_trim, trim, trim_keep};
 pub use surface_untrim::{UntrimHoles, untrim};
 pub use surfaces::{
-    copy_faces, extend, extrude_sheet, loft_sheet, loft_sheet_with_rails, patch_edges, patch_region, remove_faces, reverse_faces, revolve_sheet,
-    stitch, sweep_sheet, sweep_sheet_point_path_with, sweep_sheet_points, sweep_sheet_points_with, sweep_sheet_with, thicken, unstitch,
+    copy_faces, extend, extrude_sheet, faces_of, loft_sheet, loft_sheet_with_rails, patch_edges, patch_region, remove_faces, reverse_faces,
+    revolve_sheet, stitch, sweep_sheet, sweep_sheet_point_path_with, sweep_sheet_points, sweep_sheet_points_with, sweep_sheet_with, thicken,
+    unstitch,
 };
 pub use sweep_path::{RailFit, SweepControl, SweepOrientation, sweep_path, sweep_path_with};
 pub use tolerance_heal::{

@@ -229,6 +229,7 @@ params	false
 paste	false
 path_flange	false
 pattern_circ	false
+pattern_face	false
 pattern_path	false
 pattern_rect	false
 perforate	false
