@@ -35,6 +35,8 @@
 //!   B-rep's own surfaces for its intersections and restores it; the port intersects
 //!   evaluation copies of the surfaces with the flag on, leaving the B-rep's surfaces
 //!   alone.
+//! - **Chamfers (not upstream, DM-0.3).** [`delete_fillet_face`] also removes a chamfer:
+//!   four-sided ([`chamfer_sides`]), or a ring whose closed rails are not tangent.
 //! - **Ring fillets (not upstream).** [`delete_fillet_face`] hands a ring fillet to
 //!   [`ring::RingFilletRemoval`] (WR-605, the SolidCraft fork's tangency-labs/smlib
 //!   52bfef0; formerly `Kernel::fixes.fillet_removal_takes_ring_fillets`); upstream
@@ -458,9 +460,8 @@ impl FilletRemoval {
         };
         let (e0, e1, e2, e3) = (*e0, *e1, *e2, *e3);
 
-        let tangency_tol_deg = 2.0; // [for fillet1018.smb, Face[5]; was 0.5]
         let tangent =
-            |b: &mut Brep, e: EdgeId| edge::is_tangent_edge(k, b, e, tangency_tol_deg, false);
+            |b: &mut Brep, e: EdgeId| edge::is_tangent_edge(k, b, e, TANGENCY_TOL_DEG, false);
 
         if tangent(b, e0)? {
             if tangent(b, e1)? {
@@ -489,7 +490,15 @@ impl FilletRemoval {
             self.tan_edges = [Some(e1), Some(e3)];
             self.end_edges = [Some(e0), Some(e2)];
         } else {
-            return Err(refused(R::NoTangentEdge));
+            if tangent(b, e2)? || tangent(b, e3)? {
+                return Err(refused(R::OppositeEdgeNotTangent));
+            }
+            let (sides, ends) = match chamfer_sides(k, b, self.face_to_delete, [e0, e1, e2, e3])? {
+                Sides::FirstThird => ([e0, e2], [e1, e3]),
+                Sides::SecondFourth => ([e1, e3], [e0, e2]),
+            };
+            self.tan_edges = sides.map(Some);
+            self.end_edges = ends.map(Some);
         }
 
         // Get the four corner vertices.
@@ -1980,9 +1989,19 @@ pub fn delete_fillet_face(
     // the B-rep, so a face that is no ring reaches the four-sided removal (or its
     // refusal) exactly as it was.
     let mut scratch = b.clone_standing_for_self()?;
-    if ring::RingFilletRemoval::is_ring(k, &mut scratch, Some(fillet_face), 2.0)? {
+    if ring::RingFilletRemoval::is_ring(k, &mut scratch, Some(fillet_face), TANGENCY_TOL_DEG)? {
         let mut removal = ring::RingFilletRemoval::new(fillet_face, tol_3d);
         let r = removal.remove_face(k, b);
+        // (not upstream: the port's cached topology fields, true again for the caller)
+        b.refresh_cached_topology();
+        return r;
+    }
+    // Not upstream (DM-0.3): a ring chamfer too, decided and planned on the copy, so the
+    // B-rep is edited only by a planned removal and any other face is left as it was.
+    if let Some(planned) =
+        ring::RingFilletRemoval::planned_chamfer(k, &mut scratch, fillet_face, tol_3d)?
+    {
+        let r = planned.remove(k, b);
         // (not upstream: the port's cached topology fields, true again for the caller)
         b.refresh_cached_topology();
         return r;
@@ -1992,6 +2011,121 @@ pub fn delete_fillet_face(
     // (not upstream: the port's cached topology fields, true again for the caller)
     b.refresh_cached_topology();
     r
+}
+
+/// Tangency, in degrees; [for fillet1018.smb, Face[5]; was 0.5]. The offset's
+/// `TANGENCY_TOL_DEG` is the same; the offset calls the removals, not the reverse.
+const TANGENCY_TOL_DEG: f64 = 2.0;
+
+/// A chamfer edge and the face across it, read for [`pair_meets`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Across {
+    plane_normal: Option<Vec3>,
+    tangent: Vec3,
+    len: f64,
+    straight: bool,
+}
+
+/// Whether two opposite edges of a chamfer face are its sides (the chamfer runs along them).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Meet {
+    Yes,
+    No,
+    Unknown,
+}
+
+/// Whether opposite chamfer edges `a` and `b` lie along where their neighbouring planes meet.
+fn pair_meets(a: &Across, b: &Across, tol: f64) -> Meet {
+    let (Some(na), Some(nb)) = (a.plane_normal, b.plane_normal) else {
+        return Meet::Unknown;
+    };
+    if !(a.straight && b.straight) {
+        return Meet::Unknown;
+    }
+    let (sin, _) = TANGENCY_TOL_DEG.to_radians().sin_cos();
+    let parallel = na.cross(nb).length() <= sin;
+    let along_a = a.len * a.tangent.dot(nb).abs() <= tol;
+    let along_b = b.len * b.tangent.dot(na).abs() <= tol;
+    if !parallel && along_a && along_b {
+        Meet::Yes
+    } else {
+        Meet::No
+    }
+}
+
+/// Which opposite pair of a chamfer's edges are its sides.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Sides {
+    FirstThird,
+    SecondFourth,
+}
+
+/// Decides the sides from each pair's [`Meet`]; neither or both, or an unknown pair, is refused.
+fn decide_sides(m: [Meet; 2]) -> std::result::Result<Sides, R> {
+    match m {
+        [Meet::Yes, Meet::No] => Ok(Sides::FirstThird),
+        [Meet::No, Meet::Yes] => Ok(Sides::SecondFourth),
+        [Meet::Yes, Meet::Yes] => Err(R::ChamferSidesAmbiguous),
+        [Meet::No, Meet::No] => Err(R::NoTangentEdge),
+        _ => Err(R::ChamferNeighboursNotCoaxial),
+    }
+}
+
+/// Whether edge `e` is a line, or a B-spline within `tol` of its chord (`N_CrvIsLine`).
+fn is_straight(b: &Brep, e: EdgeId, tol: f64) -> Result<bool> {
+    let Some(c) = edge::curve(b, e)? else {
+        return Ok(false);
+    };
+    Ok(match c.kind() {
+        CurveKind::Line(_) => true,
+        CurveKind::BSpline(bs) => bs.nurb_ref()?.is_line(tol),
+        _ => false,
+    })
+}
+
+/// Reads the chamfer `face`'s four edges into [`Across`] and decides its sides.
+fn chamfer_sides(k: &Kernel, b: &mut Brep, face: FaceId, edges: [EdgeId; 4]) -> Result<Sides> {
+    let mut across = Vec::with_capacity(4);
+    let mut tols = Vec::with_capacity(4);
+    for e in edges {
+        let mut found = None;
+        for eu in edge::edgeuses(b, e, None, None)? {
+            if let Some(f) = eu1::face(b, eu)?.filter(|&f| f != face) {
+                let t = b.edge(e)?.interval.evaluate(0.5);
+                let at =
+                    crate::topology::edgeuse::p2::binormal_ignoring_status(k, b, eu, t, false)?;
+                found = Some((f, at.tangent.unitize_or_z()));
+                break;
+            }
+        }
+        let (f, tangent) = ner(found)?;
+        let tol = edge::tolerance(b, e)?;
+        let planar = ner(crate::topology::face::p2::surface(b, f)?)?.is_planar(k, tol)?;
+        let plane_normal = planar.is_planar.then(|| planar.normal.unitize_or_z());
+        let verts = edge::vertices(b, e, None)?;
+        let (len, straight) = match verts.as_slice() {
+            [Some(v0), Some(v1)] => {
+                let (p0, p1) = (vertex::point(b, *v0)?, vertex::point(b, *v1)?);
+                (p0.distance(p1), is_straight(b, e, tol)?)
+            }
+            _ => (0.0, false),
+        };
+        tols.push(tol);
+        across.push(Across {
+            plane_normal,
+            tangent,
+            len,
+            straight,
+        });
+    }
+    let ([a0, a1, a2, a3], [t0, t1, t2, t3]) = (across.as_slice(), tols.as_slice()) else {
+        return Err(stage_failed());
+    };
+    let meets = [
+        pair_meets(a0, a2, t0.max(*t2)),
+        pair_meets(a1, a3, t1.max(*t3)),
+    ];
+    decide_sides(meets).map_err(refused)
 }
 
 #[cfg(test)]
@@ -2135,5 +2269,109 @@ mod tests {
         assert_eq!(failed.cause(), Some(&call));
         assert_eq!(failed.root_cause(), &call);
         assert_eq!(curved_side_edge(false, None).cause(), None);
+    }
+
+    fn plane_edge(normal: Vec3, tangent: Vec3, len: f64) -> Across {
+        Across {
+            plane_normal: Some(normal),
+            tangent,
+            len,
+            straight: true,
+        }
+    }
+
+    /// A box's vertical edge chamfer: long edges along `x = 10`, `y = 0`; short along z.
+    fn box_chamfer() -> [Across; 4] {
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let x = Vec3::new(1.0, 0.0, 0.0);
+        let long = 8.0;
+        [
+            plane_edge(x, z, long),
+            plane_edge(Vec3::new(0.0, 0.0, -1.0), x, 1.4),
+            plane_edge(Vec3::new(0.0, -1.0, 0.0), z, long),
+            plane_edge(Vec3::new(0.0, 0.0, 1.0), x, 1.4),
+        ]
+    }
+
+    #[test]
+    fn a_box_edge_chamfer_has_its_first_and_third_edges_as_sides() {
+        let [e0, e1, e2, e3] = box_chamfer();
+        let tol = 1e-6;
+        assert_eq!(pair_meets(&e0, &e2, tol), Meet::Yes);
+        assert_eq!(pair_meets(&e1, &e3, tol), Meet::No);
+        assert_eq!(decide_sides([Meet::Yes, Meet::No]), Ok(Sides::FirstThird));
+    }
+
+    #[test]
+    fn the_same_chamfer_with_its_loop_starting_one_edge_on_has_the_other_pair() {
+        let [e0, e1, e2, e3] = box_chamfer();
+        let tol = 1e-6;
+        let rotated = [e1, e2, e3, e0];
+        let m = [
+            pair_meets(&rotated[0], &rotated[2], tol),
+            pair_meets(&rotated[1], &rotated[3], tol),
+        ];
+        assert_eq!(m, [Meet::No, Meet::Yes]);
+        assert_eq!(decide_sides(m), Ok(Sides::SecondFourth));
+    }
+
+    #[test]
+    fn a_frustum_top_is_ambiguous() {
+        // each opposite pair of a square frustum's top edges runs along the other's neighbour
+        let a = 0.6_f64.sqrt();
+        let b = 0.8_f64.sqrt();
+        let y = Vec3::new(0.0, 1.0, 0.0);
+        let x = Vec3::new(1.0, 0.0, 0.0);
+        let top = [
+            plane_edge(Vec3::new(a, 0.0, b), y, 2.0),
+            plane_edge(Vec3::new(0.0, a, b), x, 2.0),
+            plane_edge(Vec3::new(-a, 0.0, b), y, 2.0),
+            plane_edge(Vec3::new(0.0, -a, b), x, 2.0),
+        ];
+        let tol = 1e-6;
+        let m = [
+            pair_meets(&top[0], &top[2], tol),
+            pair_meets(&top[1], &top[3], tol),
+        ];
+        assert_eq!(m, [Meet::Yes, Meet::Yes]);
+        assert_eq!(decide_sides(m), Err(R::ChamferSidesAmbiguous));
+    }
+
+    #[test]
+    fn a_box_face_has_no_side_pair() {
+        // a box face's four neighbours are the faces beside it: opposite ones are parallel
+        let x = Vec3::new(1.0, 0.0, 0.0);
+        let y = Vec3::new(0.0, 1.0, 0.0);
+        let face = [
+            plane_edge(x, y, 10.0),
+            plane_edge(y, x, 10.0),
+            plane_edge(-x, y, 10.0),
+            plane_edge(-y, x, 10.0),
+        ];
+        let tol = 1e-6;
+        let m = [
+            pair_meets(&face[0], &face[2], tol),
+            pair_meets(&face[1], &face[3], tol),
+        ];
+        assert_eq!(m, [Meet::No, Meet::No]);
+        assert_eq!(decide_sides(m), Err(R::NoTangentEdge));
+    }
+
+    #[test]
+    fn a_curved_neighbour_is_refused_not_guessed() {
+        let [e0, e1, e2, e3] = box_chamfer();
+        let curved = Across {
+            plane_normal: None,
+            ..e2
+        };
+        let tol = 1e-6;
+        let m = [pair_meets(&e0, &curved, tol), pair_meets(&e1, &e3, tol)];
+        assert_eq!(m, [Meet::Unknown, Meet::No]);
+        assert_eq!(decide_sides(m), Err(R::ChamferNeighboursNotCoaxial));
+        let not_straight = Across {
+            straight: false,
+            ..e0
+        };
+        assert_eq!(pair_meets(&not_straight, &e2, tol), Meet::Unknown);
     }
 }
