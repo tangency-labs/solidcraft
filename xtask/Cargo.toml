@@ -8,6 +8,8 @@ publish = false
 [dependencies]
 flate2 = "1.1"
 proc-macro2 = { workspace = true, features = ["span-locations"] }
+# Markdown as rustdoc reads it, to find doc tests without building (src/doc_tests.rs).
+pulldown-cmark = { version = "0.13", default-features = false }
 quick-xml = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

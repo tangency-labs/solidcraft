@@ -283,7 +283,7 @@ fn include_target(args: TokenStream, base: &Path, crate_dir: &Path) -> Option<In
     }
 }
 
-fn string_literal(lit: &proc_macro2::Literal) -> Option<String> {
+pub(crate) fn string_literal(lit: &proc_macro2::Literal) -> Option<String> {
     syn::parse2::<syn::LitStr>(TokenStream::from(TokenTree::Literal(lit.clone()))).ok().map(|s| s.value())
 }
 
