@@ -36,6 +36,7 @@ pub type Result<T> = std::result::Result<T, HostError>;
 pub mod conditions;
 pub mod dialog;
 mod input;
+pub mod swatches;
 pub use input::{check_input, prepare_input, strict_input_schema};
 
 /// The host imports that change something outside the design. A `read` entry is refused every

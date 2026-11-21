@@ -1383,6 +1383,34 @@ fn combine_across_a_turned_occurrence_meets_the_tool_where_it_is_shown() {
     assert!((volume(&s, "Base") - want).abs() < 1e-6 * want, "{} vs {want}", volume(&s, "Base"));
 }
 
+/// #20040: a combine with tools from several placements of one component cuts at each of them,
+/// not at the component's first placement. Drill holds a 10 x 10 x 5 bit; its copies at x, y 20
+/// and 60 each take 500 from the top of a 100 x 100 x 10 board, the first placement (at the
+/// corner) none. Renaming the component keeps both holes; moving one copy off the board takes its
+/// hole with it.
+#[test]
+fn combine_with_tools_of_several_placements_cuts_at_each() {
+    let volume = |s: &Session| s.model.state().body("Board").map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).unwrap_or(0.0);
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 100, "height": 10, "body_name": "Board"}));
+    created(&mut s, "Drill");
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [-50, -50, 5], "body_name": "Bit"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.copy", json!({"component": "Drill", "translate": [70, 70, 0]}));
+    run(&mut s, "occurrence.copy", json!({"component": "Drill", "translate": [110, 110, 0]}));
+    let r = run(&mut s, "solid.combine", json!({"target": "Board", "tools": ["Bit (Drill:2)", "Bit (Drill:3)"], "operation": "cut"}));
+    near(&json!(volume(&s)), 100_000.0 - 2.0 * 500.0);
+    // A placement's tool is not taken away: that would take the bit from every placement.
+    let warning = s.model.result(r["feature"].as_u64().unwrap()).unwrap().warning.clone().unwrap_or_default();
+    assert!(warning.contains("`Bit (Drill:2)` is kept: it is a placement of `Bit`"), "{warning}");
+    // Renaming the component renames its placements (`Tool:2`); the combine follows them.
+    run(&mut s, "component.rename", json!({"component": "Drill", "name": "Tool"}));
+    near(&json!(volume(&s)), 100_000.0 - 2.0 * 500.0);
+    run(&mut s, "occurrence.move", json!({"occurrence": "Tool:3", "space": "world", "translate": [100, 0, 0]}));
+    run(&mut s, "component.capture_position", json!({}));
+    near(&json!(volume(&s)), 100_000.0 - 500.0);
+}
+
 /// #3383: a feature joining into a body of another, placed component draws its tool where the
 /// tool is shown, as Combine does. Part is moved 100 mm along x, so its 10 mm cubes sit at x 100..110
 /// and 120..130; a box and an extrude drawn from the root over each add 4 x 4 x 5 to it in one
