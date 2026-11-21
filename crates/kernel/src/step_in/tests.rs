@@ -5617,25 +5617,50 @@ fn a_cap_whose_rim_is_one_closed_edge_measures_its_whole_volume() {
 /// its own hole and its face turned over: the volume was right and the area short by both rings.
 #[test]
 fn a_thin_ring_with_a_far_side_vertex_keeps_both_rings_in_its_area() {
-    let (ro, ri, h) = (15.5_f64, 15.4_f64, 10.0_f64);
+    thin_ring(15.5, 15.4, false);
+}
+
+/// The same tube 3.1 m across with rings 0.05 mm wide, its inner circles written as two arcs
+/// each: a polygon of a fixed number of chords per edge misses a one-edge circle by four times
+/// what it misses a two-arc circle by, more than the ring's whole area here, so loops must be
+/// compared on areas with the sampling error taken out, not on finer polygons.
+#[test]
+fn a_wide_thin_ring_whose_inner_circles_are_two_arcs_keeps_both_rings_in_its_area() {
+    thin_ring(1550.0, 1549.95, true);
+}
+
+/// A thin tube of height 10 between radii `ro` and `ri`, imported and measured whole. Each outer
+/// circle is one closed edge; each inner circle is one closed edge (the top one's vertex on the far
+/// side), or two arcs when `split_inner`.
+fn thin_ring(ro: f64, ri: f64, split_inner: bool) {
+    let h = 10.0_f64;
     let mut w = Entities::default();
-    // One closed circle edge at height `z` of radius `r`, its one vertex at `x` on the x axis.
-    let circle = |w: &mut Entities, z: f64, r: f64, x: f64| {
+    // A circle at height `z` of radius `r` as its edges in order: one closed edge with its vertex at
+    // `x` on the x axis, or two arcs from `x` to `-x` and back.
+    let circle = |w: &mut Entities, z: f64, r: f64, x: f64, split: bool| -> Vec<usize> {
         let a = w.axis([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
         let c = w.add(format!("CIRCLE('',#{a},{r:?})"));
         let v = w.vertex([x, 0.0, z]);
-        w.add(format!("EDGE_CURVE('',#{v},#{v},#{c},.T.)"))
+        if split {
+            let u = w.vertex([-x, 0.0, z]);
+            vec![w.add(format!("EDGE_CURVE('',#{v},#{u},#{c},.T.)")), w.add(format!("EDGE_CURVE('',#{u},#{v},#{c},.T.)"))]
+        } else {
+            vec![w.add(format!("EDGE_CURVE('',#{v},#{v},#{c},.T.)"))]
+        }
     };
-    let bottom_outer = circle(&mut w, 0.0, ro, ro);
-    let top_outer = circle(&mut w, h, ro, ro);
-    let bottom_inner = circle(&mut w, 0.0, ri, ri);
-    let top_inner = circle(&mut w, h, ri, -ri);
-    // A face of several bounds, each one edge: `(edge, orientation, outer)`.
-    let face = |w: &mut Entities, bounds: &[(usize, bool, bool)], surface: usize, same_sense: bool| {
+    let bottom_outer = circle(&mut w, 0.0, ro, ro, false);
+    let top_outer = circle(&mut w, h, ro, ro, false);
+    let bottom_inner = circle(&mut w, 0.0, ri, ri, split_inner);
+    let top_inner = circle(&mut w, h, ri, -ri, split_inner);
+    // A face of several bounds: `(edges in order, orientation, outer)`; a bound used against its
+    // edges' direction runs them backwards.
+    let face = |w: &mut Entities, bounds: &[(&Vec<usize>, bool, bool)], surface: usize, same_sense: bool| {
         let mut ids = Vec::new();
-        for &(e, o, outer) in bounds {
-            let oe = w.add(format!("ORIENTED_EDGE('',*,*,#{e},.{}.)", if o { "T" } else { "F" }));
-            let l = w.add(format!("EDGE_LOOP('',(#{oe}))"));
+        for &(edges, o, outer) in bounds {
+            let ordered: Vec<usize> = if o { edges.clone() } else { edges.iter().rev().copied().collect() };
+            let oes: Vec<String> =
+                ordered.iter().map(|e| format!("#{}", w.add(format!("ORIENTED_EDGE('',*,*,#{e},.{}.)", if o { "T" } else { "F" })))).collect();
+            let l = w.add(format!("EDGE_LOOP('',({}))", oes.join(",")));
             let kind = if outer { "FACE_OUTER_BOUND" } else { "FACE_BOUND" };
             ids.push(format!("#{}", w.add(format!("{kind}('',#{l},.T.)"))));
         }
@@ -5657,10 +5682,10 @@ fn a_thin_ring_with_a_far_side_vertex_keeps_both_rings_in_its_area() {
         let a = w.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
         w.add(format!("CYLINDRICAL_SURFACE('',#{a},{ri:?})"))
     };
-    let top = face(&mut w, &[(top_outer, true, true), (top_inner, false, false)], plane_top, true);
-    let bottom = face(&mut w, &[(bottom_outer, false, true), (bottom_inner, true, false)], plane_bottom, false);
-    let outside = face(&mut w, &[(bottom_outer, true, false), (top_outer, false, false)], cyl_outer, true);
-    let inside = face(&mut w, &[(bottom_inner, false, false), (top_inner, true, false)], cyl_inner, false);
+    let top = face(&mut w, &[(&top_outer, true, true), (&top_inner, false, false)], plane_top, true);
+    let bottom = face(&mut w, &[(&bottom_outer, false, true), (&bottom_inner, true, false)], plane_bottom, false);
+    let outside = face(&mut w, &[(&bottom_outer, true, false), (&top_outer, false, false)], cyl_outer, true);
+    let inside = face(&mut w, &[(&bottom_inner, false, false), (&top_inner, true, false)], cyl_inner, false);
     let text = w.solid(&[top, bottom, outside, inside]);
     let pi = std::f64::consts::PI;
     let imp = step_import(&text).unwrap();

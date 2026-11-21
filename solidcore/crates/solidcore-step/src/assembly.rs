@@ -1569,10 +1569,11 @@ impl<'t> Assembly<'t> {
         let shapes: Vec<Option<f64>> = edge_loops.iter().zip(&pcs).map(|(l, pc)| loop_area(l, pc, periods)).collect();
         let face = self.faces.get_mut(fi).ok_or("face reference")?;
         let marked = face.outer.and_then(|o| positions.iter().position(|p| *p == o));
-        // Which loop is largest is decided on finer polygons than the loops' sides are: nested
-        // loops of nearly one size (a thin ring) must not swap places by sampling.
+        // Which loop is largest is decided on areas whose sampling error is taken out: nested
+        // loops of nearly one size (a thin ring) must not swap places by how finely, or in how
+        // many edges, each is sampled.
         let sizes: Vec<Option<f64>> = if edge_loops.len() > 1 {
-            edge_loops.iter().zip(&pcs).zip(&shapes).map(|((l, pc), coarse)| coarse.and(loop_area_sampled(l, pc, periods, 256))).collect()
+            edge_loops.iter().zip(&pcs).zip(&shapes).map(|((l, pc), coarse)| coarse.and(loop_area_extrapolated(l, pc, periods))).collect()
         } else {
             shapes.clone()
         };
@@ -1918,6 +1919,18 @@ fn natural_periods(s: &BSurface) -> [bool; 2] {
 /// does not close there (it winds around a periodic direction) or is degenerate.
 fn loop_area(l: &[(u32, bool)], pcs: &[Curve2], periodic: [bool; 2]) -> Option<f64> {
     loop_area_sampled(l, pcs, periodic, 16)
+}
+
+/// [`loop_area`] with the polygon's sampling error taken out. A polygon of `n` chords per edge
+/// misses each smooth edge's area by an amount that falls as `1 / n^2`, with a constant that
+/// depends on the edge (its turning, how its parameter runs), so loops of the same size split into
+/// different numbers of edges are missed by different amounts. Two polygons, `n` and `2 n` chords
+/// per edge, cancel that leading term for every edge at once (Richardson): what is left falls as
+/// `1 / n^4`, whatever the edge count.
+fn loop_area_extrapolated(l: &[(u32, bool)], pcs: &[Curve2], periodic: [bool; 2]) -> Option<f64> {
+    let coarse = loop_area_sampled(l, pcs, periodic, 128)?;
+    let fine = loop_area_sampled(l, pcs, periodic, 256)?;
+    Some((4.0 * fine - coarse) / 3.0)
 }
 
 /// [`loop_area`] with `steps` chords on each edge. A rational arc sampled evenly in its parameter
