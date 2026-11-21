@@ -56,6 +56,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::ReplaceFace => Some("solid.replace_face"),
         Kind::BoundaryFill { .. } => Some("solid.boundary_fill"),
         Kind::Align { .. } => Some("solid.align"),
+        Kind::ScanAlign(_) => Some("scan.align"),
         Kind::Remove => Some("solid.remove"),
         Kind::PathPattern { .. } => Some("solid.pattern.path"),
         Kind::Combine { .. } => Some("solid.combine"),
@@ -971,6 +972,10 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> b
 }
 
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
+    if matches!(d.kind, Kind::ScanAlign(_)) {
+        crate::dialogs_scan_align::fields(ui, app, d);
+        return false;
+    }
     let mut enter = false;
     let through_point = offset_through_point(d).is_some();
     // Move/Copy of a component without Create Copy moves its placement (`dialogs_move::placements`).

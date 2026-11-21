@@ -193,6 +193,7 @@ pub(crate) use plugin::shared_corners as plugin_shared_corners;
 mod plugin_storage;
 mod point_cloud;
 mod point_cloud_deviation;
+pub(crate) mod scan_align;
 mod script;
 mod section;
 mod selection;
@@ -610,6 +611,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(canvas_sketch::COMMANDS.iter());
     v.extend(point_cloud::COMMANDS.iter());
     v.extend(point_cloud_deviation::COMMANDS.iter());
+    v.extend(scan_align::COMMANDS.iter());
     v.extend(sketch_3d::COMMANDS.iter());
     v.extend(surface_analysis::COMMANDS.iter());
     v.extend(surface_boundary::COMMANDS.iter());

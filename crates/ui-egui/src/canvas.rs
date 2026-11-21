@@ -466,6 +466,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         app.dialog = Some(d);
         return;
     }
+    if matches!(d.kind, Kind::ScanAlign(_)) {
+        crate::dialogs_scan_align::overlay(app, painter, proj, &d);
+        app.dialog = Some(d);
+        return;
+    }
     if crate::dialogs_sheet::overlay(app, painter, proj.rect, &d) {
         app.dialog = Some(d);
         return;

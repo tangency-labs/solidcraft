@@ -143,6 +143,7 @@ pub mod render_ui;
 pub mod rotate_member;
 pub mod save;
 pub mod save_mesh;
+pub mod scan_align;
 pub mod section;
 pub mod select;
 pub mod selection;

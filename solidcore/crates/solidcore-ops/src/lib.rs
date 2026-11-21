@@ -82,6 +82,7 @@ pub mod prism;
 pub mod provenance;
 pub mod query;
 pub mod record_check;
+pub mod scan_align;
 pub mod session;
 pub mod spline_projection;
 pub mod split;

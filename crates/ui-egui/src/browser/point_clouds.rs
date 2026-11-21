@@ -254,6 +254,7 @@ pub fn items(app: &SolveApp, id: u64) -> Vec<Item> {
     let visible = app.session.doc.point_clouds.iter().find(|c| c.id == id).is_some_and(|c| c.visible);
     vec![
         Item::action("ui.editPointCloud", "Edit Point Cloud", "edit").with(json!({ "cloud": id })),
+        Item::action("scan.align", "Align Scan", "align"),
         Item::sep(),
         Item::action("pointcloud.delete", "Delete", "delete").with(json!({ "cloud": id })),
         Item::sep(),

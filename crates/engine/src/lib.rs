@@ -90,6 +90,7 @@ pub use cmd::extrude_reach;
 pub use cmd::find_command;
 pub use cmd::normalize_command_id;
 pub use cmd::resolve_design_links;
+pub use cmd::scan_align::preview_align as preview_scan_align;
 pub use cmd::settings::MAX_PROFILE_NAME;
 pub use cmd::settings::profile_name;
 pub use cmd::shown_scope;

@@ -199,7 +199,7 @@ fn set_colors(c: &mut PointCloud, by: Option<(ColorBy, Option<String>)>, color: 
 }
 
 /// The cloud's placement as `matrix` takes it: 12 numbers, row by row.
-fn matrix_rows(m: &Mat) -> Vec<f64> {
+pub(super) fn matrix_rows(m: &Mat) -> Vec<f64> {
     (0..3).flat_map(|row| (0..4).map(move |col| m[col][row])).collect()
 }
 
@@ -294,7 +294,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(out)
 }
 
-fn find(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
+pub(super) fn find(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
     let key = match p.get("cloud") {
         Some(Value::Number(n)) => n.to_string(),
         Some(Value::String(x)) => x.clone(),

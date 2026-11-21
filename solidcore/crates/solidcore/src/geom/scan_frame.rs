@@ -106,10 +106,16 @@ fn invalid(op: &'static str, msg: &'static str) -> SolidError {
 /// collinear sample sets.
 pub fn fit_plane(points: &[Point3], tol: f64) -> Result<PlaneFit> {
     if !(tol.is_finite() && tol > 0.0) {
-        return Err(invalid(OP_FIT_PLANE, "tolerance must be finite and positive"));
+        return Err(invalid(
+            OP_FIT_PLANE,
+            "tolerance must be finite and positive",
+        ));
     }
     if points.len() < 3 {
-        return Err(invalid(OP_FIT_PLANE, "plane fit requires at least 3 points"));
+        return Err(invalid(
+            OP_FIT_PLANE,
+            "plane fit requires at least 3 points",
+        ));
     }
     if points.iter().any(|&p| !is_finite_vec(p)) {
         return Err(invalid(OP_FIT_PLANE, "plane fit points must be finite"));
@@ -160,7 +166,10 @@ pub fn fit_plane(points: &[Point3], tol: f64) -> Result<PlaneFit> {
 /// Validates and normalizes an existing explicit plane `(origin, normal)`.
 pub fn plane_from_origin_normal(origin: Point3, normal: Vec3) -> Result<PlaneFit> {
     if !is_finite_vec(origin) || !is_finite_vec(normal) {
-        return Err(invalid(OP_EXPLICIT_PLANE, "plane origin and normal must be finite"));
+        return Err(invalid(
+            OP_EXPLICIT_PLANE,
+            "plane origin and normal must be finite",
+        ));
     }
     let n = normal
         .unitize()
@@ -180,17 +189,26 @@ pub fn plane_from_origin_normal(origin: Point3, normal: Vec3) -> Result<PlaneFit
 /// Rejects zero/non-finite directions and directions normal (or near-normal) to the plane.
 pub fn project_direction_onto_plane(direction: Vec3, plane_normal: Vec3, tol: f64) -> Result<Vec3> {
     if !(tol.is_finite() && tol > 0.0) {
-        return Err(invalid(OP_PROJECT_DIR, "tolerance must be finite and positive"));
+        return Err(invalid(
+            OP_PROJECT_DIR,
+            "tolerance must be finite and positive",
+        ));
     }
     if !is_finite_vec(direction) || !is_finite_vec(plane_normal) {
-        return Err(invalid(OP_PROJECT_DIR, "direction and plane normal must be finite"));
+        return Err(invalid(
+            OP_PROJECT_DIR,
+            "direction and plane normal must be finite",
+        ));
     }
     let n = plane_normal
         .unitize()
         .map_err(|_| invalid(OP_PROJECT_DIR, "plane normal must be non-zero"))?;
     let raw_len = direction.length();
     if !(raw_len.is_finite() && raw_len > tol) {
-        return Err(invalid(OP_PROJECT_DIR, "direction vector is zero or shorter than tolerance"));
+        return Err(invalid(
+            OP_PROJECT_DIR,
+            "direction vector is zero or shorter than tolerance",
+        ));
     }
     let proj = direction - n * direction.dot(n);
     let proj_len = proj.length();
@@ -222,7 +240,10 @@ pub fn project_points_direction_onto_plane(
 /// and the unsigned off-plane distance.
 pub fn project_origin_onto_plane(raw_origin: Point3, plane: &PlaneFit) -> Result<ProjectedOrigin> {
     if !is_finite_vec(raw_origin) || !is_finite_vec(plane.origin) || !is_finite_vec(plane.normal) {
-        return Err(invalid(OP_PROJECT_ORIGIN, "origin and plane must be finite"));
+        return Err(invalid(
+            OP_PROJECT_ORIGIN,
+            "origin and plane must be finite",
+        ));
     }
     let n = plane
         .normal
@@ -329,36 +350,37 @@ pub fn rigid_alignment(source: Frame3D, target: Frame3D) -> Result<RigidAlignmen
     // R = R_target * R_source^T
     // Columns of R_source are [sx, sy, sz]; columns of R_target are [tx, ty, tz].
     // For any world vector v: R v = tx (sx·v) + ty (sy·v) + tz (sz·v).
-    let sx = [source.x_axis.x, source.x_axis.y, source.x_axis.z];
-    let sy = [source.y_axis.x, source.y_axis.y, source.y_axis.z];
-    let sz = [source.z_axis.x, source.z_axis.y, source.z_axis.z];
-    let tx = [target.x_axis.x, target.x_axis.y, target.x_axis.z];
-    let ty = [target.y_axis.x, target.y_axis.y, target.y_axis.z];
-    let tz = [target.z_axis.x, target.z_axis.y, target.z_axis.z];
-
-    let mut r = [[0.0_f64; 3]; 3]; // r[row][col]
-    for row in 0..3 {
-        for col in 0..3 {
-            r[row][col] = tx[row] * sx[col] + ty[row] * sy[col] + tz[row] * sz[col];
-        }
-    }
+    let (sx, sy, sz) = (source.x_axis, source.y_axis, source.z_axis);
+    let (tx, ty, tz) = (target.x_axis, target.y_axis, target.z_axis);
+    let r00 = tx.x * sx.x + ty.x * sy.x + tz.x * sz.x;
+    let r01 = tx.x * sx.y + ty.x * sy.y + tz.x * sz.y;
+    let r02 = tx.x * sx.z + ty.x * sy.z + tz.x * sz.z;
+    let r10 = tx.y * sx.x + ty.y * sy.x + tz.y * sz.x;
+    let r11 = tx.y * sx.y + ty.y * sy.y + tz.y * sz.y;
+    let r12 = tx.y * sx.z + ty.y * sy.z + tz.y * sz.z;
+    let r20 = tx.z * sx.x + ty.z * sy.x + tz.z * sz.x;
+    let r21 = tx.z * sx.y + ty.z * sy.y + tz.z * sz.y;
+    let r22 = tx.z * sx.z + ty.z * sy.z + tz.z * sz.z;
 
     let r_so = Vec3::new(
-        r[0][0] * source.origin.x + r[0][1] * source.origin.y + r[0][2] * source.origin.z,
-        r[1][0] * source.origin.x + r[1][1] * source.origin.y + r[1][2] * source.origin.z,
-        r[2][0] * source.origin.x + r[2][1] * source.origin.y + r[2][2] * source.origin.z,
+        r00 * source.origin.x + r01 * source.origin.y + r02 * source.origin.z,
+        r10 * source.origin.x + r11 * source.origin.y + r12 * source.origin.z,
+        r20 * source.origin.x + r21 * source.origin.y + r22 * source.origin.z,
     );
     let t = target.origin - r_so;
 
-    let det = r[0][0] * (r[1][1] * r[2][2] - r[1][2] * r[2][1])
-        - r[0][1] * (r[1][0] * r[2][2] - r[1][2] * r[2][0])
-        + r[0][2] * (r[1][0] * r[2][1] - r[1][1] * r[2][0]);
+    let det = r00 * (r11 * r22 - r12 * r21) - r01 * (r10 * r22 - r12 * r20)
+        + r02 * (r10 * r21 - r11 * r20);
 
+    let cols = [
+        Vec3::new(r00, r10, r20),
+        Vec3::new(r01, r11, r21),
+        Vec3::new(r02, r12, r22),
+    ];
     let mut max_ortho_err = 0.0_f64;
-    for i in 0..3 {
-        for j in 0..3 {
-            let dot = r[0][i] * r[0][j] + r[1][i] * r[1][j] + r[2][i] * r[2][j];
-            let err = (dot - if i == j { 1.0 } else { 0.0 }).abs();
+    for (i, ci) in cols.iter().enumerate() {
+        for (j, cj) in cols.iter().enumerate() {
+            let err = (ci.dot(*cj) - if i == j { 1.0 } else { 0.0 }).abs();
             if err > max_ortho_err {
                 max_ortho_err = err;
             }
@@ -373,15 +395,15 @@ pub fn rigid_alignment(source: Frame3D, target: Frame3D) -> Result<RigidAlignmen
     }
 
     let row_major = [
-        [r[0][0], r[0][1], r[0][2], t.x],
-        [r[1][0], r[1][1], r[1][2], t.y],
-        [r[2][0], r[2][1], r[2][2], t.z],
+        [r00, r01, r02, t.x],
+        [r10, r11, r12, t.y],
+        [r20, r21, r22, t.z],
         [0.0, 0.0, 0.0, 1.0],
     ];
     let column_major = [
-        [r[0][0], r[1][0], r[2][0], 0.0],
-        [r[0][1], r[1][1], r[2][1], 0.0],
-        [r[0][2], r[1][2], r[2][2], 0.0],
+        [r00, r10, r20, 0.0],
+        [r01, r11, r21, 0.0],
+        [r02, r12, r22, 0.0],
         [t.x, t.y, t.z, 1.0],
     ];
 
@@ -398,20 +420,22 @@ pub fn rigid_alignment(source: Frame3D, target: Frame3D) -> Result<RigidAlignmen
 /// Applies a column-major 4×4 rigid transform (`m[col][row]`) to a 3D point.
 #[must_use]
 pub fn apply_column_major_point(m: &[[f64; 4]; 4], p: Point3) -> Point3 {
+    let [[c00, c01, c02, _], [c10, c11, c12, _], [c20, c21, c22, _], [c30, c31, c32, _]] = *m;
     Point3::new(
-        m[0][0] * p.x + m[1][0] * p.y + m[2][0] * p.z + m[3][0],
-        m[0][1] * p.x + m[1][1] * p.y + m[2][1] * p.z + m[3][1],
-        m[0][2] * p.x + m[1][2] * p.y + m[2][2] * p.z + m[3][2],
+        c00 * p.x + c10 * p.y + c20 * p.z + c30,
+        c01 * p.x + c11 * p.y + c21 * p.z + c31,
+        c02 * p.x + c12 * p.y + c22 * p.z + c32,
     )
 }
 
 /// Applies the 3×3 rotational part of a column-major 4×4 matrix to a direction vector.
 #[must_use]
 pub fn apply_column_major_vec(m: &[[f64; 4]; 4], v: Vec3) -> Vec3 {
+    let [[c00, c01, c02, _], [c10, c11, c12, _], [c20, c21, c22, _], _] = *m;
     Vec3::new(
-        m[0][0] * v.x + m[1][0] * v.y + m[2][0] * v.z,
-        m[0][1] * v.x + m[1][1] * v.y + m[2][1] * v.z,
-        m[0][2] * v.x + m[1][2] * v.y + m[2][2] * v.z,
+        c00 * v.x + c10 * v.y + c20 * v.z,
+        c01 * v.x + c11 * v.y + c21 * v.z,
+        c02 * v.x + c12 * v.y + c22 * v.z,
     )
 }
 
@@ -421,16 +445,17 @@ pub fn apply_column_major_vec(m: &[[f64; 4]; 4], v: Vec3) -> Vec3 {
 /// calling `pointcloud.edit`: `final_matrix = compose_column_major(&world_delta, &existing)`.
 #[must_use]
 pub fn compose_column_major(a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]) -> [[f64; 4]; 4] {
-    let mut out = [[0.0_f64; 4]; 4];
-    for col in 0..4 {
-        for row in 0..4 {
-            out[col][row] = a[0][row] * b[col][0]
-                + a[1][row] * b[col][1]
-                + a[2][row] * b[col][2]
-                + a[3][row] * b[col][3];
-        }
-    }
-    out
+    let [a0, a1, a2, a3] = *a;
+    let mul_col = |[b0, b1, b2, b3]: [f64; 4]| {
+        [
+            a0[0] * b0 + a1[0] * b1 + a2[0] * b2 + a3[0] * b3,
+            a0[1] * b0 + a1[1] * b1 + a2[1] * b2 + a3[1] * b3,
+            a0[2] * b0 + a1[2] * b1 + a2[2] * b2 + a3[2] * b3,
+            a0[3] * b0 + a1[3] * b1 + a2[3] * b2 + a3[3] * b3,
+        ]
+    };
+    let [b0, b1, b2, b3] = *b;
+    [mul_col(b0), mul_col(b1), mul_col(b2), mul_col(b3)]
 }
 
 #[cfg(test)]
@@ -448,7 +473,12 @@ mod tests {
         let x = project_direction_onto_plane(Vec3::new(0.0, 1.0, -0.5), z, 1e-6).unwrap();
         let y = z.cross(x).unitize().unwrap();
         let o = pt(125.5, -42.25, 88.0);
-        let true_frame = Frame3D { origin: o, x_axis: x, y_axis: y, z_axis: z };
+        let true_frame = Frame3D {
+            origin: o,
+            x_axis: x,
+            y_axis: y,
+            z_axis: z,
+        };
 
         // Four coplanar samples on a smaller functional face (not necessarily centered at o).
         let samples = [
@@ -468,9 +498,11 @@ mod tests {
 
         // Pick flip_normal if PCA normal happened to point opposite to +z.
         let flip_n = plane.normal.dot(z) < 0.0;
-        let dir = project_points_direction_onto_plane(dir_from, dir_to, plane.normal, 1e-6).unwrap();
+        let dir =
+            project_points_direction_onto_plane(dir_from, dir_to, plane.normal, 1e-6).unwrap();
         let (src, proj_origin) =
-            Frame3D::from_plane_direction_origin(&plane, dir, raw_origin, flip_n, false, 1e-6).unwrap();
+            Frame3D::from_plane_direction_origin(&plane, dir, raw_origin, flip_n, false, 1e-6)
+                .unwrap();
         assert!((proj_origin.off_plane_distance - 4.25).abs() < 1e-12);
         assert!(proj_origin.projected_origin.distance(o) < 1e-12);
 
@@ -491,13 +523,19 @@ mod tests {
             .map(|&p| apply_column_major_point(&align.column_major, p))
             .collect();
         for &p in &moved {
-            assert!(p.z.abs() < 1e-11, "aligned sample should lie on Z=0, got {p:?}");
+            assert!(
+                p.z.abs() < 1e-11,
+                "aligned sample should lie on Z=0, got {p:?}"
+            );
         }
         for i in 0..samples.len() {
             for j in (i + 1)..samples.len() {
                 let d0 = samples[i].distance(samples[j]);
                 let d1 = moved[i].distance(moved[j]);
-                assert!((d0 - d1).abs() < 1e-11, "pairwise distance changed: {d0} vs {d1}");
+                assert!(
+                    (d0 - d1).abs() < 1e-11,
+                    "pairwise distance changed: {d0} vs {d1}"
+                );
             }
         }
     }
@@ -529,7 +567,10 @@ mod tests {
         let expected_rms = (expected_sum_sq / (samples.len() as f64)).sqrt();
         assert!((fit.max_abs_residual - expected_max).abs() < 1e-12);
         assert!((fit.rms_residual - expected_rms).abs() < 1e-12);
-        assert!(fit.max_abs_residual > 0.4, "negative outlier must be counted in max_abs_residual");
+        assert!(
+            fit.max_abs_residual > 0.4,
+            "negative outlier must be counted in max_abs_residual"
+        );
     }
 
     #[test]
@@ -561,13 +602,32 @@ mod tests {
         // Coincident points
         assert!(fit_plane(&[pt(1.0, 1.0, 1.0); 4], 1e-6).is_err());
         // Collinear points
-        assert!(fit_plane(&[pt(0.0, 0.0, 0.0), pt(5.0, 0.0, 0.0), pt(10.0, 0.0, 0.0)], 1e-6).is_err());
+        assert!(fit_plane(
+            &[pt(0.0, 0.0, 0.0), pt(5.0, 0.0, 0.0), pt(10.0, 0.0, 0.0)],
+            1e-6
+        )
+        .is_err());
         // NaN coordinate
-        assert!(fit_plane(&[pt(0.0, 0.0, 0.0), pt(1.0, 0.0, 0.0), pt(0.0, f64::NAN, 0.0)], 1e-6).is_err());
+        assert!(fit_plane(
+            &[pt(0.0, 0.0, 0.0), pt(1.0, 0.0, 0.0), pt(0.0, f64::NAN, 0.0)],
+            1e-6
+        )
+        .is_err());
         // Coincident direction points
-        assert!(project_points_direction_onto_plane(pt(1.0, 2.0, 3.0), pt(1.0, 2.0, 3.0), Vec3::new(0.0, 0.0, 1.0), 1e-6).is_err());
+        assert!(project_points_direction_onto_plane(
+            pt(1.0, 2.0, 3.0),
+            pt(1.0, 2.0, 3.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            1e-6
+        )
+        .is_err());
         // Direction normal to plane
-        assert!(project_direction_onto_plane(Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, 1.0), 1e-6).is_err());
+        assert!(project_direction_onto_plane(
+            Vec3::new(0.0, 0.0, 5.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            1e-6
+        )
+        .is_err());
     }
 
     #[test]
@@ -597,6 +657,9 @@ mod tests {
 
         // Applying `composed` directly to `local_o` must land at world origin (0, 0, 0).
         let final_o = apply_column_major_point(&composed, local_o);
-        assert!(final_o.distance(Point3::new(0.0, 0.0, 0.0)) < 1e-12, "got {final_o:?}");
+        assert!(
+            final_o.distance(Point3::new(0.0, 0.0, 0.0)) < 1e-12,
+            "got {final_o:?}"
+        );
     }
 }
