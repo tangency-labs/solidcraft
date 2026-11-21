@@ -635,6 +635,8 @@ pub struct Dialog {
     /// shown while this dialog is open, as an edited feature's sketch does, so its profiles can
     /// be picked even when an earlier feature uses the sketch and hides it.
     pub(crate) started_from_sketch: Option<u64>,
+    /// New Sketch was pressed: the dialog waits while the sketch is drawn ([`crate::command_sketch`]).
+    pub(crate) new_sketch: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -910,6 +912,7 @@ impl Dialog {
             anchor_hint: None,
             started_from_sketch: None,
             auto: None,
+            new_sketch: false,
         }
     }
 
@@ -1789,6 +1792,12 @@ impl Dialog {
         }
         if let Some(target) = self.extrude_target(s, h) {
             return Some(target);
+        }
+        // A plane while the profiles are still empty: a new sketch on it.
+        if let Hit::Plane { name, .. } = h
+            && crate::command_sketch::plane_starts_sketch(self)
+        {
+            return Some(Sel::Plane { name: name.clone() });
         }
         let inp = self.active_input()?;
         if self.takes_components() {
@@ -4419,6 +4428,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     app.viewport.corner_ok = false;
     sync_feature_edit(app);
     app.op_check.poll();
+    crate::command_sketch::tick(app);
     if app.tree.redefine.is_none() {
         app.viewport.dialog_rect = None;
     }
@@ -4709,6 +4719,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ok = false;
         cancel = false;
     }
+    // New Sketch: the dialog waits while its sketch is drawn.
+    if std::mem::take(&mut d.new_sketch) {
+        crate::command_sketch::begin(app, d, None);
+        return;
+    }
     // Keyboard: Enter applies (from a value field, or with nothing focused), Esc cancels.
     let (enter_free, esc) = ctx.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
     let nothing_focused = ctx.memory(|m| m.focused().is_none());
@@ -4875,6 +4890,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     if !keep || cancel {
         app.session.feature_edit_sketch = None;
+        crate::command_sketch::closed(app, applied);
         crate::dialogs_motion::closed(app, &mut d, applied);
         if let Kind::Text(k) = &mut d.kind {
             crate::sketch_text::closed(app, k, applied);
@@ -5186,6 +5202,7 @@ pub fn cancel(app: &mut SolveApp) {
     if app.applying.take().is_some() {
         crate::operations::ended(app, "apply", crate::operations::Outcome::Cancelled);
     }
+    crate::command_sketch::closed(app, false);
     if let Some(mut d) = app.dialog.take() {
         crate::dialogs_motion::closed(app, &mut d, false);
         if let Kind::Text(k) = &mut d.kind {
