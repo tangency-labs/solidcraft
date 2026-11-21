@@ -371,16 +371,21 @@ fn design_images(part: &Session, shown: &str) -> LinkedImages {
             Some(k) => {
                 // The frame unmirrored: a mirrored image's bottom-left corner is its bottom-right.
                 let (bl, br, tl) = if c.flip { (k[1], k[0], k[2]) } else { (k[0], k[1], k[3]) };
-                let Some(plane) = Plane::new(bl, br - bl, tl - bl) else {
+                let [w, h] = c.pixels;
+                let aspect = if w == 0 { 1.0 } else { f64::from(h) / f64::from(w) };
+                let at = |p: solidcore_record::Vec3| [p.x, p.y, p.z];
+                let (Some(plane), Some((width, stretched))) =
+                    (Plane::new(bl, br - bl, tl - bl), solidcore_ops::affine::picture_fit(at(bl), at(br), at(tl), aspect))
+                else {
                     warnings.push(format!("{shown}: image `{}` has no area where its sketch puts it: left out", c.name));
                     continue;
                 };
                 image.plane = solidcraft_doc::PlaneRef::Custom { plane };
-                image.width = (br - bl).len();
+                image.width = width;
                 image.angle = 0.0;
                 let height = image.height();
                 image.center = Vec2::new(image.width / 2.0, height / 2.0);
-                if (tl - (bl + plane.y * height)).len() > 1e-6 * (1.0 + image.width.max(height)) {
+                if stretched {
                     warnings.push(format!("{shown}: image `{}` is stretched by its sketch there; it comes in with its image's own shape", c.name));
                 }
             }
