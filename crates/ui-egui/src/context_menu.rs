@@ -664,10 +664,18 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let sketch = feature.and_then(|f| crate::timeline::TimelineKind::of(&f.kind).profile_sketch());
     let suppressed = feature.is_some_and(|f| f.suppressed);
     let targets = crate::timeline::menu_targets(app, id);
-    vec![
+    let is_construction = feature.is_some_and(|f| f.kind.is_construction());
+    let visible = feature.is_some_and(|f| !app.session.visibility.hidden_origin.contains(&f.name));
+    let mut items = vec![
         act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists),
         act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some()),
         act("ui.rename", "Rename", "rename").key("F2").with(json!({"feature":id})).on(exists),
+    ];
+    if is_construction {
+        let name = feature.map_or("", |f| f.name.as_str());
+        items.push(act("ui.originPart", "Show/Hide", "eye").key("V").with(json!({ "keys": [name], "show": !visible })));
+    }
+    items.extend([
         act("timeline.suppress", if suppressed { "Unsuppress" } else { "Suppress" }, "suppress")
             .with(json!({"feature":id, "suppressed": !suppressed}))
             .on(exists),
@@ -682,7 +690,8 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
             .on(exists),
         Item::sep(),
         act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({"feature":id})).on(exists),
-    ]
+    ]);
+    items
 }
 
 /// The canvas menus put Repeat on
@@ -2438,6 +2447,7 @@ pub fn toggle_visibility(app: &mut SolveApp) {
         .filter_map(|s| match s {
             Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } => Some(name.clone()),
             Sel::Vertex { body, .. } if body.is_empty() => Some("O".to_string()),
+            Sel::Feature { id } => app.session.doc.feature(*id).filter(|f| f.kind.is_construction()).map(|f| f.name.clone()),
             _ => None,
         })
         .collect();
