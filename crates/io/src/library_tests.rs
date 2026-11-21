@@ -574,3 +574,19 @@ fn links_inside_a_place_are_not_followed() {
     assert!(library.entries().iter().all(|l| l.label() != "linked.json"));
     assert!(library.entries().iter().all(|l| l.kind() == Kind::Material), "the linked appearances folder is not read");
 }
+
+/// A library place follows the network rules a design's links follow.
+#[test]
+fn a_library_place_on_a_network_location_is_refused() {
+    let calls = crate::vfs::file_calls();
+    for place in [Place::Library(r"\\evil.example\lib".into()), Place::Folder(r"\\evil.example\libs".into())] {
+        let found = scan(&place);
+        let reason = match found.status() {
+            Status::Unavailable(reason) => reason.to_string(),
+            Status::Available => String::new(),
+        };
+        assert!(reason.contains(r"network location \\evil.example"), "{place:?}: {reason}");
+        assert!(found.libraries().is_empty(), "{place:?}");
+    }
+    assert_eq!(crate::vfs::file_calls(), calls);
+}

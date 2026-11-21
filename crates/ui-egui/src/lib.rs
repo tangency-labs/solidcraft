@@ -135,6 +135,9 @@ mod kit_gallery_tests;
 mod kit_host_tests;
 mod length_input;
 pub mod library;
+mod library_places;
+#[cfg(test)]
+mod library_places_tests;
 pub mod link_folders_prompt;
 mod linked_source;
 pub mod links;
@@ -785,6 +788,8 @@ pub struct SolveApp {
     pub toolbar_custom: toolbar_custom::ToolbarCustom,
     /// Named settings profiles (#6237).
     pub settings_profiles: settings_profiles::Profiles,
+    /// The library places every session reads, and their scans (#12982).
+    library_places: library_places::Places,
     /// Preferences kept between runs, and their window.
     pub preferences: prefs::Prefs,
     pub prefs_window: prefs::PrefsWindow,
@@ -1152,6 +1157,7 @@ impl SolveApp {
             install_steps: None,
             toolbar_custom: toolbar_custom::ToolbarCustom::default(),
             settings_profiles: settings_profiles::Profiles::default(),
+            library_places: library_places::Places::default(),
             preferences: prefs::Prefs::default(),
             prefs_window: prefs::PrefsWindow::default(),
             slicer_menu: dialogs_save_mesh::SlicerMenu::default(),
@@ -2066,6 +2072,8 @@ impl SolveApp {
         // Settings profiles live in the app: the engine only checked the parameters.
         let r = match r {
             Ok(v) if id.starts_with("settings.profile.") => settings_profiles::command(self, id, &v),
+            // So do the library places.
+            Ok(v) if id.starts_with("library.places.") => library_places::command(self, id, &v),
             // The view navigator is the app's too.
             Ok(v) if id == "view.navigator" => view_gizmo::command(self, &v),
             r => r,
@@ -4271,6 +4279,7 @@ impl SolveApp {
             self.esc_handled = false;
         }
         prefs::apply(self, ctx);
+        library_places::sync(self, ctx);
         control_switch::tick(self, ctx.input(|i| i.time), Some(ctx));
         self.apply_look(ctx);
         self.publish_tab_accent(ctx);

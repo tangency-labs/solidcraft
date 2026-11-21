@@ -310,7 +310,7 @@ pub(crate) fn scan_with(place: &Place, limits: &Limits) -> Scanned {
             Err(reason) => failed(reason),
             Ok(listing) => found(vec![read_library(dir, listing, limits)]),
         },
-        Place::Folder(dir) => match crate::vfs::dirs_in(dir, limits.libraries_per_folder) {
+        Place::Folder(dir) => match checked::dirs_in(dir, limits.libraries_per_folder) {
             Err(e) => failed(listing_reason(&e, Cap::LibrariesPerFolder, limits.libraries_per_folder)),
             Ok(dirs) => found(
                 dirs.iter()
@@ -327,6 +327,30 @@ pub(crate) fn scan_with(place: &Place, limits: &Limits) -> Scanned {
     }
 }
 
+/// The reads a scan makes. A library place follows the network rules a design's links follow:
+/// each path is checked before anything on the disk or the network is asked.
+mod checked {
+    use crate::vfs::{self, check_design_path};
+    use std::io::Result;
+
+    pub(super) fn dirs_in(dir: &str, max: usize) -> Result<Vec<String>> {
+        check_design_path(dir, None)?;
+        vfs::dirs_in(dir, max)
+    }
+    pub(super) fn files_in(dir: &str, max: usize) -> Result<Vec<String>> {
+        check_design_path(dir, None)?;
+        vfs::files_in(dir, max)
+    }
+    pub(super) fn len(path: &str) -> Result<u64> {
+        check_design_path(path, None)?;
+        vfs::len(path)
+    }
+    pub(super) fn read(path: &str, max: usize) -> Result<Vec<u8>> {
+        check_design_path(path, None)?;
+        vfs::read(path, max)
+    }
+}
+
 /// What is directly in a library folder: its manifest files and its subfolders, each listed once.
 struct Listing {
     manifests: Vec<String>,
@@ -336,8 +360,8 @@ struct Listing {
 fn list(dir: &str, limits: &Limits) -> Result<Listing, Reason> {
     // Folders first: in the browser only the folder listing can tell a missing folder from an empty one.
     let (cap, limit) = (Cap::FilesBesideManifest, limits.files_beside_manifest);
-    let folders = crate::vfs::dirs_in(dir, limit).map_err(|e| listing_reason(&e, cap, limit))?;
-    let files = crate::vfs::files_in(dir, limit).map_err(|e| listing_reason(&e, cap, limit))?;
+    let folders = checked::dirs_in(dir, limit).map_err(|e| listing_reason(&e, cap, limit))?;
+    let files = checked::files_in(dir, limit).map_err(|e| listing_reason(&e, cap, limit))?;
     Ok(Listing { manifests: files.into_iter().filter(|p| ends_with(p, MANIFEST_SUFFIX)).collect(), folders })
 }
 
@@ -421,7 +445,7 @@ fn read_library(dir: &str, listing: Listing, limits: &Limits) -> Library {
     for kind in [Kind::Material, Kind::Appearance] {
         // Only a real folder: a link named `materials` is not one, so a library can't reach outside.
         let Some(sub) = listing.folders.iter().find(|f| file_label(f) == kind.folder()) else { continue };
-        let files = match crate::vfs::files_in(sub, limits.entries_per_kind) {
+        let files = match checked::files_in(sub, limits.entries_per_kind) {
             Ok(files) => files,
             Err(e) => return unavailable(listing_reason(&e, Cap::EntriesPerKind(kind), limits.entries_per_kind)),
         };
@@ -447,10 +471,10 @@ fn read_capped(path: &str, cap: Cap, limit: u64) -> Result<Vec<u8>, Reason> {
         _ => Reason::Unreadable(e.to_string()),
     };
     // The size first, as `Catalog::read` does: in the browser a read copies the stored bytes before it checks them.
-    if crate::vfs::len(path).map_err(reason)? > limit {
+    if checked::len(path).map_err(reason)? > limit {
         return Err(Reason::OverLimit { cap, limit });
     }
-    crate::vfs::read(path, usize::try_from(limit).unwrap_or(usize::MAX)).map_err(reason)
+    checked::read(path, usize::try_from(limit).unwrap_or(usize::MAX)).map_err(reason)
 }
 
 /// Two files with one entry id: neither is used, and each names the others by kind folder and file name
