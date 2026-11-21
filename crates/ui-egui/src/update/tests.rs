@@ -604,15 +604,17 @@ fn the_title_bar_offers_the_new_version_and_opens_the_update_window() {
     h.frame();
     wait_for_check(&mut h);
     h.frames(2);
-    // An accent pill reading "Update to <version>", left of the Settings/Help/Report cluster.
+    // The transient Update pill follows the saved End items, rather than preceding Assistant.
     let label = format!("Update to {version}");
     let at = h.widget(&label).unwrap_or_else(|| panic!("no `{label}` in the title bar"));
     let pill = crate::scenario::rect_of("titlebar:update").unwrap();
     assert!(pill.contains(egui::pos2(at[0] as f32, at[1] as f32)));
-    let assistant = crate::scenario::rect_of("titlebar:assistant").unwrap();
-    assert!(pill.right() < assistant.left() && assistant.left() - pill.right() < 12.0, "beside Assistant: {pill:?} {assistant:?}");
+    let version_rect = crate::scenario::rect_of("titlebar:version").unwrap();
+    assert!((pill.left() - version_rect.right() - crate::ui_kit::app_bar_layout::application::GAP).abs() < 0.5);
     assert!((pill.center().y - report.center().y).abs() < 1.0 && pill.height() <= report.height());
-    assert_eq!(crate::scenario::rect_of("titlebar:report"), Some(report), "Report a bug stays where it was");
+    let shifted_report = crate::scenario::rect_of("titlebar:report").unwrap();
+    assert_eq!(shifted_report.size(), report.size(), "adding a transient keeps the Report control's size");
+    assert!(!shifted_report.intersects(pill), "End-stack neighbours move aside for the update pill");
     assert!(!h.app.updater.open, "no window pops up by itself");
     assert!(crate::scenario::rect_of("update:window").is_none());
     // Clicking it opens the Update window (not a modal: the bar stays usable).
@@ -639,7 +641,7 @@ fn the_pill_shortens_in_a_narrow_title_bar() {
     let wide = crate::scenario::rect_of("titlebar:update").unwrap();
     let label = format!("Update to {version}");
     assert!(h.widget(&label).is_some());
-    // Narrower and narrower: the pill never grows, never reaches Report a bug, and its label gives
+    // Narrower and narrower: the pill never grows or overlaps Report a bug, and its label gives
     // way (to "Update", then the icon alone) before the document tabs run out of room.
     let mut last = wide.width();
     let mut shortened = false;
@@ -653,7 +655,8 @@ fn the_pill_shortens_in_a_narrow_title_bar() {
         if let Some(p) = pill {
             assert!(p.width() <= last + 0.5, "at {width}: {p:?} grew from {last}");
             if let Some(report) = report {
-                assert!(p.right() <= report.left(), "at {width}: {p:?} overlaps Report a bug {report:?}");
+                // Saved-list End order puts the transient after Report, so check separation in either direction.
+                assert!(!p.intersects(report), "at {width}: {p:?} overlaps Report a bug {report:?}");
             }
             last = p.width();
         }

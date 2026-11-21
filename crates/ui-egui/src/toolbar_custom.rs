@@ -9,9 +9,8 @@
 //! restores the tab. The buttons are kept with the preferences and exported or imported with the
 //! keyboard shortcuts; hidden tabs are kept in the `hidden_toolbar_tabs` preference.
 //!
-//! The quick-access bar (#10223) is kept here too: the commands a command's menu added to the
-//! application bar, after Save, Undo and Redo, in the order the user dragged them into. It is
-//! empty, and so not drawn, until a command is added.
+//! The quick-access command inventory (#10223) is kept here too. The application bar's saved
+//! item list owns their order, zones and visibility. The inventory is empty until a command is added.
 
 use std::collections::BTreeMap;
 
@@ -31,7 +30,7 @@ pub struct ToolbarCustom {
     pub panels: BTreeMap<String, Vec<String>>,
     /// `"<workspace>/<tab>"` → gallery commands moved to full-size buttons.
     pub gallery_buttons: BTreeMap<String, Vec<String>>,
-    /// The quick-access bar's commands, in order (#10223). Empty by default: no bar.
+    /// Pinned commands in enrolment order (#10223); `app_bar` owns their drawing order.
     pub quick_access: Vec<String>,
     /// One saved list for every movable application-bar control.
     pub app_bar: ui_kit::app_bar_items::Layout,
@@ -39,6 +38,8 @@ pub struct ToolbarCustom {
     pub extra: BTreeMap<String, Value>,
     /// The Customize Toolbar window is open (not kept).
     pub customizing: bool,
+    /// The application-bar editor is open (not kept).
+    pub app_bar_customizing: bool,
 }
 
 /// Most commands the quick-access bar holds.
@@ -405,28 +406,6 @@ pub fn quick_remove(app: &mut SolveApp, id: &str) {
     app.toolbar_custom.app_bar.items.retain(|p| p.id != format!("quick:{id}"));
 }
 
-/// Move a quick-access button before another one (`before`: None puts it at the end).
-pub fn quick_move(app: &mut SolveApp, id: &str, before: Option<&str>) {
-    let list = &mut app.toolbar_custom.quick_access;
-    if !list.iter().any(|q| q == id) || before == Some(id) {
-        return;
-    }
-    list.retain(|q| q != id);
-    let at = before.and_then(|b| list.iter().position(|q| q == b)).unwrap_or(list.len());
-    list.insert(at, id.to_string());
-    let key = format!("quick:{id}");
-    if let Some(at) = app.toolbar_custom.app_bar.items.iter().position(|p| p.id == key) {
-        let item = app.toolbar_custom.app_bar.items.remove(at);
-        let before_key = before.map(|id| format!("quick:{id}"));
-        let target = before_key
-            .as_ref()
-            .and_then(|id| app.toolbar_custom.app_bar.items.iter().position(|p| &p.id == id && p.zone == item.zone))
-            .or_else(|| app.toolbar_custom.app_bar.items.iter().rposition(|p| p.id.starts_with("quick:") && p.zone == item.zone).map(|i| i + 1))
-            .unwrap_or(at.min(app.toolbar_custom.app_bar.items.len()));
-        app.toolbar_custom.app_bar.items.insert(target, item);
-    }
-}
-
 /// Reset Toolbar: a tab's panels back to their defaults.
 pub fn reset(app: &mut SolveApp, tab: &str) {
     let prefix = format!("{WORKSPACE}/{tab}/");
@@ -648,6 +627,39 @@ mod migration_tests {
     use super::*;
 
     #[test]
+    fn app_bar_context_menu_rows_edit_the_saved_list() {
+        use crate::context_menu::{Target, items, run_item};
+        use ui_kit::app_bar_items::Zone;
+        let mut h = crate::scenario::Harness::new();
+        let target = Target::AppBar { id: Some("save".into()) };
+        let rows = items(&h.app, &target);
+        assert_eq!(rows.iter().filter(|r| !r.is_sep()).count(), 6);
+        for (action, zone) in [("end", Zone::End), ("start", Zone::Start)] {
+            let row = rows.iter().find(|r| r.params.as_ref().and_then(|p| p.get("action")).and_then(Value::as_str) == Some(action)).unwrap();
+            run_item(&mut h.app, row, egui::Pos2::ZERO);
+            assert_eq!(h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "save").unwrap().zone, zone);
+        }
+        let hide = rows.iter().find(|r| r.params.as_ref().and_then(|p| p.get("action")).and_then(Value::as_str) == Some("hide")).unwrap();
+        run_item(&mut h.app, hide, egui::Pos2::ZERO);
+        assert!(!h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "save").unwrap().shown);
+        for id in ["logo", "tabs", "more", "captions", "managed", "offered"] {
+            let rows = items(&h.app, &Target::AppBar { id: Some(id.into()) });
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].id, "ui.appBarCustomize");
+        }
+        let empty = items(&h.app, &Target::AppBar { id: None });
+        let file_rows = items(&h.app, &Target::AppBar { id: Some("file".into()) });
+        assert!(!file_rows[0].enabled, "File can move but Hide is disabled");
+        run_item(&mut h.app, &file_rows[0], egui::Pos2::ZERO);
+        assert!(h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "file").unwrap().shown);
+        assert_eq!(empty.len(), 2);
+        run_item(&mut h.app, empty.iter().find(|r| r.id == "ui.appBarReset").unwrap(), egui::Pos2::ZERO);
+        assert_eq!(h.app.toolbar_custom.app_bar, ui_kit::app_bar_items::Layout::default());
+        run_item(&mut h.app, &empty[0], egui::Pos2::ZERO);
+        assert!(h.app.toolbar_custom.app_bar_customizing);
+    }
+
+    #[test]
     fn app_bar_migrates_old_quick_access_and_preserves_future_toolbar_keys() {
         let mut legacy = ToolbarCustom::default();
         legacy.load(&json!({"DESIGN/future/panel":["future.command"],"future_setting":{"keep":true}}));
@@ -690,7 +702,8 @@ mod migration_tests {
         quick_add(&mut h.app, "solid.box").unwrap();
         quick_add(&mut h.app, "solid.fillet").unwrap();
         quick_add(&mut h.app, "solid.box").unwrap();
-        quick_move(&mut h.app, "solid.fillet", Some("solid.box"));
+        let defaults = ui_kit::app_bar_items::Layout::default_for(h.app.toolbar_custom.quick_access.iter().map(String::as_str));
+        h.app.toolbar_custom.app_bar.move_before("quick:solid.fillet", ui_kit::app_bar_items::Zone::Start, Some("quick:solid.box"), &defaults);
         let quick: Vec<_> = h.app.toolbar_custom.app_bar.items.iter().filter_map(|p| p.id.strip_prefix("quick:")).collect();
         assert_eq!(quick, ["solid.fillet", "solid.box"]);
         quick_remove(&mut h.app, "solid.fillet");

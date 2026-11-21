@@ -1535,6 +1535,9 @@ preference_settings! {
     design_reuse_views: bool = true, PAGE_LAYOUT;
     /// A design opens with the views it had when it was last closed.
     design_reopen_views: bool = false, PAGE_LAYOUT;
+    /// Display defaults copied into a newly detached design window.
+    #[serde(deserialize_with = "pop_out_window_defaults")]
+    pop_out_window_defaults: solidcraft_views::WindowOptions = solidcraft_views::WindowOptions::new_pop_out(), PAGE_LAYOUT;
     /// Named, app-wide arrangements of design windows.
     view_window_setups: BTreeMap<String, serde_json::Value> = BTreeMap::new();
     /// Windows only: while the window is dragged by its title bar, nothing is drawn, so the window
@@ -4629,6 +4632,15 @@ fn limit_toolbar_tabs(mut p: Prefs) -> Prefs {
 /// Whether `name` is one of the built-in templates of an assembly's drawings (`assembly`) or a part's.
 pub(crate) fn is_template_for(name: &str, assembly: bool) -> bool {
     template::BUILT_INS.contains(&name) && template::assembly(name) == Some(assembly)
+}
+
+/// Preferences create future windows; a missing ribbon value here uses the new default.
+fn pop_out_window_defaults<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<solidcraft_views::WindowOptions, D::Error> {
+    let mut value = serde_json::Value::deserialize(deserializer)?;
+    if let Some(fields) = value.as_object_mut() {
+        fields.entry("ribbon").or_insert(serde_json::Value::Bool(true));
+    }
+    serde_json::from_value(value).map_err(serde::de::Error::custom)
 }
 
 /// Saved preferences, keeping every one that still reads. A value this version doesn't
