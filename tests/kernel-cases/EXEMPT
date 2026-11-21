@@ -354,6 +354,7 @@ render.texture.remove             rendering image resources; crates/engine/src/c
 select.all                        the selection
 select.clear                      the selection
 select.filter                     the selection
+select.invert                     the selection
 select.same_look                  the selection
 select.set                        the selection
 select.sharp_edges                the selection; crates/engine/src/cmd/edit_tests.rs
