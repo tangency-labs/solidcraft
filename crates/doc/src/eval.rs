@@ -1405,6 +1405,14 @@ impl EvalCache {
         self.states.budget = if bytes == 0 { CACHE_BYTES } else { bytes };
     }
 
+    /// For tests: drops every whole-model result kept, as the budget does for the ones it has no
+    /// room for. Which result a full cache drops is decided by how long each took to compute, so a
+    /// test that needs a state gone says so here and does not leave it to a clock.
+    #[doc(hidden)]
+    pub fn forget_states(&mut self) {
+        self.states = Store::new(self.states.budget);
+    }
+
     /// The byte budget of whole-model results.
     pub fn budget(&self) -> usize {
         self.states.budget
@@ -12072,6 +12080,23 @@ fn chamfer_with(
                     }
                     _ => return Err(kernel::KernelError::Failed(why).into()),
                 }
+            }
+            // A refusal as too large that names no fit: as for an equal chamfer, it names the
+            // largest scale of its sizes that builds, or says that none tried builds (#19691).
+            Err(kernel::KernelError::TooLarge(why)) if !kernel::names_largest_fit(&why) && EVAL_VALIDATION.get() != kernel::Validation::Off => {
+                let why = match kernel::chamfer_sides_max_why(b, edges, d, s, flip) {
+                    Ok(kernel::FitSearch { found: Some((scale, _)), .. }) => match s {
+                        kernel::ChamferSide::Distance(_) => format!("{why}; {}", kernel::scale_fit_note(scale)),
+                        kernel::ChamferSide::Angle(_) => format!("{why}; {}", kernel::largest_fit_note("distance", d * scale)),
+                    },
+                    Ok(kernel::FitSearch { found: None, smallest_refused: Some((at, e)), tried, .. }) => format!(
+                        "{why}; none of the {tried} scales of its sizes tried builds (the smallest, {} times: {})",
+                        show_mm(at),
+                        kernel::without_fit_note(&e.to_string())
+                    ),
+                    _ => why,
+                };
+                return Err(kernel::KernelError::TooLarge(why).into());
             }
             other => other?,
         },

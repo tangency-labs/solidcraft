@@ -2307,6 +2307,26 @@ fn shared_edges(cache: &SharedEdgesCache, mesh: &std::sync::Arc<solidcraft_engin
     edges
 }
 
+/// `mesh`'s shown edges at one level: each simplified to `tolerance` (mm), and those whose whole
+/// extent is under it left out ([`make_shared_edges`]).
+fn level_polylines(mesh: &solidcraft_engine::geom::Mesh, shown: &impl Fn(usize) -> bool, tolerance: f64) -> Vec<Vec<[f32; 3]>> {
+    mesh.edges
+        .iter()
+        .enumerate()
+        .filter(|(i, e)| shown(*i) && e.len() > 1 && !(edge_extent(e) < tolerance))
+        .map(|(_, e)| crate::edge_detail::simplify(e, tolerance).iter().map(|p| p.to_f32()).collect())
+        .collect()
+}
+
+/// The diagonal of the box around an edge's points (mm).
+fn edge_extent(points: &[Vec3]) -> f64 {
+    let mut b = solidcraft_engine::geom::Aabb3::EMPTY;
+    for p in points {
+        b.add(*p);
+    }
+    b.diagonal()
+}
+
 /// `mesh`'s shared edges, made ([`shared_edges`]).
 fn make_shared_edges(mesh: &solidcraft_engine::geom::Mesh) -> std::sync::Arc<crate::gpu::SharedEdges> {
     let shown = |i: usize| mesh.edge_visible(i) && mesh.shaded_edge_visible(i);
@@ -2317,18 +2337,16 @@ fn make_shared_edges(mesh: &solidcraft_engine::geom::Mesh) -> std::sync::Arc<cra
     // From fine enough for a part seen large (a block simplifies its edges to a quarter pixel:
     // without a level that fine, the raw edges, which wander within the mesher's tolerance, dip
     // behind their flat faces in dashes) to coarse enough for one seen tiny.
-    for fraction in [1.0 / 16384.0, 1.0 / 8192.0, 1.0 / 4096.0, 1.0 / 2048.0, 1.0 / 512.0, 1.0 / 128.0, 1.0 / 32.0] {
+    // An edge whose whole extent is under a level's tolerance is left out of it: no point of it is
+    // farther than that from where it would be drawn, the bound every simplified edge keeps. So a
+    // part small on screen draws none of its holes' and threads' loops, only the edges that
+    // still show.
+    for fraction in [1.0 / 16384.0, 1.0 / 8192.0, 1.0 / 4096.0, 1.0 / 2048.0, 1.0 / 512.0, 1.0 / 128.0, 1.0 / 32.0, 1.0 / 8.0, 1.0 / 2.0] {
         let tolerance = size * fraction;
         if !(tolerance > 0.0 && tolerance.is_finite()) {
             break;
         }
-        let polylines: Vec<Vec<[f32; 3]>> = mesh
-            .edges
-            .iter()
-            .enumerate()
-            .filter(|(i, e)| shown(*i) && e.len() > 1)
-            .map(|(_, e)| crate::edge_detail::simplify(e, tolerance).iter().map(|p| p.to_f32()).collect())
-            .collect();
+        let polylines = level_polylines(mesh, &shown, tolerance);
         let segments = polylines.iter().map(|p: &Vec<[f32; 3]>| p.len().saturating_sub(1)).sum::<usize>();
         // A level that saves little is not worth its own draw; but the finest is kept whenever
         // it straightens anything, or a part with a few wandering edges among many curved ones
@@ -13418,6 +13436,36 @@ mod tests {
         let finest = edges.levels.iter().map(|l| l.1).filter(|t| *t > 0.0).fold(f32::INFINITY, f32::min);
         // A quarter pixel of a part filling a view 4096 pixels across.
         assert!(f64::from(finest) <= size / 4.0 / 4096.0 * 1.001, "finest level {finest} for a part {size} across");
+    }
+
+    /// An edge smaller than a level's tolerance is left out of that level (it strays from where it
+    /// would be drawn by less than the tolerance), kept in the finer ones; the part's larger edges
+    /// stay even at the coarsest level, half its size, and that level is made.
+    #[test]
+    fn edges_smaller_than_a_levels_tolerance_are_left_out_of_it() {
+        let part =
+            solidcraft_engine::doc::ModelBody::new("Part".into(), solidcraft_engine::kernel::cylinder(Vec3::ZERO, Vec3::Z, 10.0, 20.0).unwrap(), 1);
+        let mut mesh = (*part.mesh()).clone();
+        let size = (mesh.bounds().max - mesh.bounds().min).len();
+        let shown = |i: usize| mesh.edge_visible(i) && mesh.shaded_edge_visible(i);
+        let edges: Vec<usize> = (0..mesh.edges.len()).filter(|&i| shown(i) && mesh.edges[i].len() > 1).collect();
+        // One shown edge made a loop a hundredth of the part's size across.
+        let tiny = size / 100.0;
+        let centre = mesh.edges[edges[0]][0];
+        mesh.edges[edges[0]] = (0..=16)
+            .map(|k| {
+                let a = std::f64::consts::TAU * f64::from(k % 16) / 16.0;
+                centre + Vec3::new(a.cos(), a.sin(), 0.0) * (tiny / 2.0)
+            })
+            .collect();
+        let shown = |i: usize| mesh.edge_visible(i) && mesh.shaded_edge_visible(i);
+        let at = |tolerance: f64| level_polylines(&mesh, &shown, tolerance).len();
+        assert_eq!(at(tiny / 4.0), edges.len(), "finer than the loop: every edge");
+        assert_eq!(at(tiny * 1.5), edges.len() - 1, "coarser than the loop: all but it");
+        assert!(at(size / 2.0) > 0, "the part's rims stay at the coarsest level");
+        let made = make_shared_edges(&mesh);
+        let coarsest = made.levels.iter().map(|l| l.1).fold(0.0f32, f32::max);
+        assert!((f64::from(coarsest) - size / 2.0).abs() < size * 1e-6, "a level as coarse as half the part: {coarsest} for {size}");
     }
 
     /// A design with one imported mesh of about 100 000 triangles (a sphere of radius 50, each

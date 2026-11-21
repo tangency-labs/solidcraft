@@ -3689,10 +3689,11 @@ fn make_face(
 ///
 /// **An `error` that is not a [`SolidError::Failed`] is returned as it is and `cause` is
 /// dropped**: only the record of a `Failed` holds a cause. No information is lost today:
-/// the only callers ([`re_solved`] at the two corner conversions) pass the failure their
-/// local `sm_err` closure builds, `SolidError::blend_failed`, which is always a `Failed`.
+/// every caller passes a failure `SolidError::blend_failed` builds, which is always a
+/// `Failed` ([`re_solved`] at the two corner conversions, their local `sm_err` closure's;
+/// the fillet executive's stage failures and the session's "the fillet body is not built").
 /// A new caller must pass a `Failed` too.
-pub(super) fn keeping_cause(error: SolidError, cause: SolidError) -> SolidError {
+pub(in crate::blend) fn keeping_cause(error: SolidError, cause: SolidError) -> SolidError {
     match error {
         SolidError::Failed(failure) => (*failure).caused_by(cause).into_error(),
         other => other,
