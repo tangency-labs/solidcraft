@@ -271,6 +271,11 @@ impl Indirect {
         self.on_gpu = true;
     }
 
+    /// Whether a GPU cull last filled its arguments and placements, rather than the CPU.
+    pub(super) fn culls_on_gpu(&self) -> bool {
+        self.on_gpu
+    }
+
     /// The buffer the placements are drawn from.
     pub(super) fn instances(&self) -> Option<wgpu::Buffer> {
         self.instances.as_ref().map(|(b, _)| b.clone())
@@ -333,8 +338,10 @@ impl Indirect {
         (instances, args)
     }
 
-    /// Write the placements in view and each entry's arguments ([`Indirect::contents`]).
+    /// Write the placements in view and each entry's arguments ([`Indirect::contents`]): the CPU
+    /// culled this frame, so it draws from these again (`on_gpu` off).
     pub(super) fn write(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, draws: &[InstancedDraw]) {
+        self.on_gpu = false;
         let (instances, args) = self.contents(draws);
         if let Some(buffer) = &self.args {
             queue.write_buffer(buffer, 0, &args);

@@ -375,13 +375,22 @@ impl Edges {
         self.on_gpu = true;
     }
 
+    /// Whether a GPU cull last filled its arguments and placements, rather than the CPU.
+    pub(super) fn culls_on_gpu(&self) -> bool {
+        self.on_gpu
+    }
+
     /// The placements each entry drew (a GPU cull's, read back): the segments drawn.
     pub(super) fn counted(&mut self, counts: &[u32]) {
         self.segments = self.entries.iter().zip(counts).map(|(e, c)| u64::from(e.count) * u64::from(*c)).sum();
     }
 
-    /// Write the placements in view and each entry's arguments ([`Edges::contents`]).
+    /// Write the placements in view and each entry's arguments ([`Edges::contents`]): the CPU
+    /// culled this frame, so the arguments and placements start their buffers again.
     pub(super) fn write(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, parts: &[Part<'_>]) {
+        self.args_at = 0;
+        self.instances_at = 0;
+        self.on_gpu = false;
         let (instances, args) = self.contents(parts);
         if let Some(buffer) = &self.args {
             queue.write_buffer(buffer, 0, &args);

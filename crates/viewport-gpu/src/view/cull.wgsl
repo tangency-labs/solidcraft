@@ -25,7 +25,7 @@ struct View {
 }
 
 @group(0) @binding(0) var<uniform> view: View;
-// Placements (16 words: the 15 of a placement, then its part), then parts (16 words: low corner
+// Placements (17 words: the 16 of a placement, then its part), then parts (16 words: low corner
 // and a word that is 1 for a box that is not finite, high corner and a pad, then the triangles'
 // first level, level count and whether they are culled here, a pad, then the edges' first
 // level, level count and whether the part has edges here, a pad), then levels (4 words: the
@@ -33,13 +33,16 @@ struct View {
 @group(0) @binding(1) var<storage, read> scene: array<u32>;
 // The triangles' draw arguments (5 words each), then the edges' (4 words each).
 @group(0) @binding(2) var<storage, read_write> args: array<atomic<u32>>;
-// The triangles' placements in view (15 words each), then the edges'.
+// The triangles' placements in view (16 words each), then the edges'.
 @group(0) @binding(3) var<storage, read_write> out: array<u32>;
 // Per placement: its triangles' entry and slot, its edges' entry and slot (NONE: not drawn).
 @group(0) @binding(4) var<storage, read_write> picks: array<u32>;
 
 const NONE: u32 = 0xffffffffu;
-const PLACEMENT_WORDS: u32 = 15u;
+// Words of a placement as it is drawn ([`INSTANCE_SIZE`]), and of one in `scene`: the placement,
+// then its part.
+const PLACEMENT_WORDS: u32 = 16u;
+const SCENE_PLACEMENT_WORDS: u32 = 17u;
 
 fn f(i: u32) -> f32 {
     return bitcast<f32>(scene[i]);
@@ -90,11 +93,11 @@ fn pick(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) g
     }
     picks[i * 4u] = NONE;
     picks[i * 4u + 2u] = NONE;
-    let at = i * 16u;
+    let at = i * SCENE_PLACEMENT_WORDS;
     let r0 = vec4<f32>(f(at), f(at + 1u), f(at + 2u), f(at + 3u));
     let r1 = vec4<f32>(f(at + 4u), f(at + 5u), f(at + 6u), f(at + 7u));
     let r2 = vec4<f32>(f(at + 8u), f(at + 9u), f(at + 10u), f(at + 11u));
-    let part = view.parts_at + scene[at + 15u] * 16u;
+    let part = view.parts_at + scene[at + PLACEMENT_WORDS] * 16u;
     let lo = vec3<f32>(f(part), f(part + 1u), f(part + 2u));
     let hi = vec3<f32>(f(part + 4u), f(part + 5u), f(part + 6u));
     let finite = scene[part + 3u] == 0u;
@@ -237,7 +240,7 @@ fn place(@builtin(global_invocation_id) id: vec3<u32>, @builtin(num_workgroups) 
     if i >= view.n {
         return;
     }
-    let at = i * 16u;
+    let at = i * SCENE_PLACEMENT_WORDS;
     let tri = picks[i * 4u];
     if tri != NONE {
         let slot = atomicLoad(&args[tri * 5u + 4u]) + picks[i * 4u + 1u];

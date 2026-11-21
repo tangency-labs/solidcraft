@@ -11,7 +11,9 @@
 //!
 //! See-through looks are drawn back to front, so their placements are still culled and sorted
 //! on the CPU and written at the end of the triangles' half of the buffer. The draw statistics
-//! (triangles and segments drawn) come back from the GPU a frame or two later.
+//! (triangles and segments drawn) come back from the GPU a frame or two later. A frame that moves
+//! bodies is culled on the CPU too: the shader reads the placements the scene holds, not where
+//! their motions put them, and the cull is made again for the next frame that moves nothing.
 //!
 //! Only on a device that draws indirectly and binds four storage buffers to a compute shader
 //! (not WebGL2); elsewhere the CPU culls as before.
@@ -25,7 +27,7 @@ const SHADER: &str = include_str!("cull.wgsl");
 /// Words of a placement ([`INSTANCE_SIZE`] bytes).
 const PLACEMENT_WORDS: usize = INSTANCE_SIZE / 4;
 /// Words of a placement as the shader reads it: the placement, then its part.
-const SCENE_PLACEMENT_WORDS: usize = 16;
+const SCENE_PLACEMENT_WORDS: usize = PLACEMENT_WORDS + 1;
 const PART_WORDS: usize = 16;
 const LEVEL_WORDS: usize = 4;
 /// Words of one draw's arguments: indexed triangles, and edges.
@@ -534,8 +536,8 @@ mod tests {
         let size = [800.0, 600.0];
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         let motions = Motions::default();
-        gpu.cull(&device, &queue, &mut encoder, &vp, size, &motions);
-        cpu.cull(&device, &queue, &mut encoder, &vp, size, &motions);
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX);
+        cpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX);
         queue.submit([encoder.finish()]);
         assert!(cpu.gpu_cull.is_none());
         let Some(g) = gpu.gpu_cull.as_ref() else { panic!("the GPU culls the scene") };
@@ -588,5 +590,15 @@ mod tests {
             levels_drawn[level] += usize::from(count > 0);
         }
         assert!(levels_drawn.iter().all(|n| *n > 0), "every level drawn: {levels_drawn:?}");
+        // The cull reads the placements where the scene holds them, not where a motion puts one:
+        // a frame that moves a body is culled on the CPU, and the next that moves nothing on the
+        // GPU again, from the buffers the cull took back.
+        let shift = [[1.0, 0.0, 0.0, 30.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &Motions::new([(1, shift)]), crate::view::EDGE_PX);
+        assert!(gpu.gpu_cull.is_none(), "a frame with motions is culled on the CPU");
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX);
+        assert!(gpu.gpu_cull.is_some(), "a frame without motions is culled on the GPU again");
+        queue.submit([encoder.finish()]);
     }
 }

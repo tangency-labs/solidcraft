@@ -2830,7 +2830,9 @@ impl Batches {
     /// [`LOD_PX`] where it is drawn ([`placement_scale`], [`level_for`]), in a view of `size`
     /// pixels.
     /// Where the device can, the GPU culls instead ([`gpu_cull`]), in `encoder` before the
-    /// frame's passes: here only the see-through looks' placements are, to sort them.
+    /// frame's passes: here only the see-through looks' placements are, to sort them. A frame
+    /// that moves bodies is culled here too, where their motions put the placements, and the GPU
+    /// cull is made again for the next frame that moves nothing.
     fn cull(
         &mut self,
         device: &wgpu::Device,
@@ -2844,12 +2846,31 @@ impl Batches {
         self.cull_blocks(vp, motions);
         if std::mem::take(&mut self.gpu_cull_stale) {
             self.gpu_cull = None;
-            if self.cull_kernel.is_none() && !self.cull_kernel_failed && !self.instanced.is_empty() {
-                self.cull_kernel = gpu_cull::Kernel::new(device).map(Arc::new);
-                self.cull_kernel_failed = self.cull_kernel.is_none();
+            if motions.is_empty() {
+                if self.cull_kernel.is_none() && !self.cull_kernel_failed && !self.instanced.is_empty() {
+                    self.cull_kernel = gpu_cull::Kernel::new(device).map(Arc::new);
+                    self.cull_kernel_failed = self.cull_kernel.is_none();
+                }
+                if let (Some(kernel), Some(indirect)) = (self.cull_kernel.clone(), self.indirect.as_mut()) {
+                    self.gpu_cull = gpu_cull::GpuCull::new(device, kernel, &self.instanced, indirect, self.edges.as_mut());
+                }
             }
-            if let (Some(kernel), Some(indirect)) = (self.cull_kernel.clone(), self.indirect.as_mut()) {
-                self.gpu_cull = gpu_cull::GpuCull::new(device, kernel, &self.instanced, indirect, self.edges.as_mut());
+        }
+        if !motions.is_empty() {
+            // The cull reads the placements as the scene holds them, not where their motions put
+            // them: a frame that moves something is culled where it is drawn on the CPU, in
+            // [`Self::cull_placements`], and the cull is made again for the next frame that
+            // moves nothing.
+            let took_over = self.indirect.as_ref().is_some_and(|i| i.culls_on_gpu()) || self.edges.as_ref().is_some_and(|e| e.culls_on_gpu());
+            self.gpu_cull = None;
+            self.gpu_cull_stale = true;
+            if took_over {
+                // The buffers hold the cull's placements: write every draw's again, where its
+                // motion puts it.
+                for d in &mut self.instanced {
+                    d.shown = None;
+                    d.edges_shown = None;
+                }
             }
         }
         let (changed, edges_changed) = self.cull_placements(queue, vp, size, motions, edge_px);
