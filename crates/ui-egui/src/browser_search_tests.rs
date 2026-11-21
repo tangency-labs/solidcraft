@@ -1095,3 +1095,103 @@ fn a_folded_browser_keeps_its_search_in_the_header() {
     assert!(handle_at("browser:search").is_some(), "the field stays in the folded header");
     assert!(h.app.tree.search.on() && h.app.tree.search.text == "washer");
 }
+
+/// The Browser's card in the panel host this frame: its header and its body.
+fn browser_card(h: &Harness) -> (egui::Rect, Option<egui::Rect>) {
+    let frame = h.app.universal_panel_frame().unwrap();
+    let card =
+        frame.layout.sections.iter().find(|card| card.tabs.iter().any(|tab| tab.instance.0 == "browser") || card.instance.0 == "browser").unwrap();
+    (crate::panel_runtime::egui_rect(card.header), card.body.map(crate::panel_runtime::egui_rect))
+}
+
+/// Puts History in the Browser's card as a second tab, the Browser's tab active.
+fn group_history_with_browser(h: &mut Harness) {
+    use solidcraft_engine::panels::{Destination, InstanceId, LayoutAction, Mutation};
+    h.app.run("view.history_layout", json!({"dock": "left"})).unwrap();
+    h.frames(2);
+    let browser = InstanceId::new("browser").unwrap();
+    let section = h.app.panel_runtime().unwrap().layout().layout().containing(&browser).unwrap().id.clone();
+    let mutations = vec![
+        Mutation::Move { instance: InstanceId::new("history").unwrap(), destination: Destination::JoinTab { section, index: 1 } },
+        Mutation::Activate { instance: browser },
+    ];
+    h.app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations }).unwrap();
+    h.frames(3);
+}
+
+/// Closes one panel of the shared host.
+fn close_panel(h: &mut Harness, name: &str) {
+    use solidcraft_engine::panels::{InstanceId, LayoutAction, Mutation};
+    let mutations = vec![Mutation::Close { instance: InstanceId::new(name).unwrap() }];
+    h.app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations }).unwrap();
+    h.frames(3);
+}
+
+/// How many search fields the Browser draws this frame.
+fn fields() -> usize {
+    crate::scenario::handles("browser:search").into_iter().filter(|(name, _)| name == "browser:search").count()
+}
+
+/// A Browser grouped with another panel has tabs in its header: its search box is the first row of
+/// its body, drawn once, and it still opens and ends from the magnifier.
+#[test]
+fn a_grouped_browser_draws_its_search_as_the_first_row() {
+    let mut h = assembly();
+    group_history_with_browser(&mut h);
+    let (header, body) = browser_card(&h);
+    assert!(body.is_some(), "the Browser's tab is shown");
+    open(&mut h);
+    assert_eq!(fields(), 1, "one field");
+    let frame = crate::scenario::rect_of("browser:search:frame").unwrap();
+    assert!(frame.top() >= header.bottom() - 0.5, "the box {frame:?} is under the header {header:?}");
+    h.call("ui.text", json!({"text": "washer"}));
+    h.frames(2);
+    assert_eq!(count("Washer"), 1);
+    click(&mut h, "browser:magnifier");
+    assert!(handle_at("browser:search").is_none() && !h.app.tree.search.on());
+}
+
+/// The field keeps the keyboard, its text and its caret when it moves from the header into the body
+/// (the Browser joins a tab group) and back (the group goes).
+#[test]
+fn the_search_keeps_the_keyboard_when_its_box_moves() {
+    let mut h = assembly();
+    open(&mut h);
+    h.call("ui.text", json!({"text": "wa"}));
+    h.frames(2);
+    assert!(h.ctx.text_edit_focused());
+    let (header, _) = browser_card(&h);
+    assert!(header.contains(crate::scenario::rect_of("browser:search:frame").unwrap().center()), "in the header first");
+    group_history_with_browser(&mut h);
+    let (header, _) = browser_card(&h);
+    assert!(crate::scenario::rect_of("browser:search:frame").unwrap().top() >= header.bottom() - 0.5, "now in the body");
+    assert!(h.ctx.text_edit_focused(), "the field kept the keyboard");
+    h.call("ui.text", json!({"text": "s"}));
+    h.frames(2);
+    assert_eq!(h.app.tree.search.text, "was", "the caret stayed at the end");
+    close_panel(&mut h, "history");
+    let (header, _) = browser_card(&h);
+    assert!(header.contains(crate::scenario::rect_of("browser:search:frame").unwrap().center()), "back in the header");
+    assert!(h.ctx.text_edit_focused());
+    h.call("ui.text", json!({"text": "h"}));
+    h.frames(2);
+    assert_eq!(h.app.tree.search.text, "wash");
+}
+
+/// Closing the Browser while its field has the keyboard leaves no hidden field holding it; the
+/// search is the app's, so reopening the Browser shows it again.
+#[test]
+fn closing_the_browser_while_searching_lets_go_of_the_keyboard() {
+    let mut h = assembly();
+    open(&mut h);
+    h.call("ui.text", json!({"text": "wa"}));
+    h.frames(2);
+    assert!(h.ctx.text_edit_focused());
+    close_panel(&mut h, "browser");
+    assert!(handle_at("browser:search").is_none(), "the Browser is closed");
+    assert!(!h.ctx.text_edit_focused(), "no hidden field keeps the keyboard");
+    assert_eq!(h.app.tree.search.text, "wa");
+    crate::browser::reveal_shared_panel(&mut h.app, "browser");
+    h.frames(3);
+    assert!(handle_at("browser:search").is_some() && h.app.tree.search.text == "wa");
+}

@@ -14,7 +14,10 @@ use super::*;
 const WORKSPACE: &str = "panel_fixture.workspace";
 const INSPECT: &str = "panel_fixture.inspect";
 const PRESETS: &[&str] =
-    &["docks", "tabs", "collapsed", "floating", "overflow", "pinned", "columns", "stack_tabs", "content_fill", "inline", "surfaces"];
+    &["docks", "tabs", "collapsed", "floating", "overflow", "pinned", "columns", "stack_tabs", "content_fill", "inline", "surfaces", "search"];
+/// The `search` specimen (#19042): its synthetic rows, and the most its query holds.
+const SEARCH_ROWS: usize = 6;
+const SEARCH_QUERY_CHARS: usize = 128;
 type SpecimenIdentities = Rc<RefCell<BTreeMap<ControllerKey, Rc<()>>>>;
 
 fn preset(value: &str) -> PanelResult<()> {
@@ -52,6 +55,7 @@ fn enable_host_specimen_remembered(app: &mut crate::SolveApp, name: &str, rememb
         ("fixture.log", false, Ownership::Workspace),
         ("fixture.fill", false, Ownership::Workspace),
         ("fixture.pin", false, Ownership::Workspace),
+        ("fixture.search", false, Ownership::Workspace),
     ] {
         let binding = fixture_controller_binding(&probe, editor, ownership);
         let create = binding.create;
@@ -70,8 +74,11 @@ fn enable_host_specimen_remembered(app: &mut crate::SolveApp, name: &str, rememb
                         identity: Rc::new(()),
                         key: ControllerKey { instance: instance.id.clone(), owner: owner.clone() },
                         editor,
+                        search: instance.kind.0 == "fixture.search",
                         title_key: if editor {
                             "ui.panel_fixture.editor"
+                        } else if instance.kind.0 == "fixture.search" {
+                            "ui.panel_fixture.search_panel"
                         } else if instance.kind.0 == "fixture.fill" {
                             "ui.panel_fixture.fill"
                         } else if instance.kind.0 == "fixture.pin" {
@@ -147,6 +154,7 @@ fn specimen_layout(name: &str) -> PanelResult<(Layout, PanelRegistry)> {
         ("fixture.log", "ui.panel_fixture.log", false, false, false),
         ("fixture.fill", "ui.panel_fixture.fill", false, true, false),
         ("fixture.pin", "ui.panel_fixture.pin", true, false, false),
+        ("fixture.search", "ui.panel_fixture.search_panel", false, false, false),
     ] {
         let mut allowed_zones = [Zone::Left, Zone::Right, Zone::Bottom, Zone::Floating].into_iter().collect::<std::collections::BTreeSet<_>>();
         if pinned {
@@ -174,6 +182,8 @@ fn specimen_layout(name: &str) -> PanelResult<(Layout, PanelRegistry)> {
             fixed_bottom_height: None,
             header_actions: if editor {
                 vec![HeaderActionSpec { id: ControlId::new("apply")?, label_key: "ui.panel_fixture.apply".into(), icon: "list".into() }]
+            } else if kind == "fixture.search" {
+                vec![HeaderActionSpec { id: ControlId::new("magnifier")?, label_key: "ui.panel_fixture.search".into(), icon: "zoom".into() }]
             } else {
                 Vec::new()
             },
@@ -191,12 +201,17 @@ fn specimen_layout(name: &str) -> PanelResult<(Layout, PanelRegistry)> {
         2
     } else if name == "inline" {
         1
+    } else if name == "search" {
+        // One alone on the left, two in a tab group on the right.
+        3
     } else {
         4
     };
     for index in 0..count {
         let id = InstanceId::new(format!("specimen-{index}"))?;
-        let kind = if name == "inline" {
+        let kind = if name == "search" {
+            "fixture.search"
+        } else if name == "inline" {
             "fixture.log"
         } else if (name == "content_fill" && index == 1) || (name == "surfaces" && index == 3) {
             "fixture.fill"
@@ -218,7 +233,7 @@ fn specimen_layout(name: &str) -> PanelResult<(Layout, PanelRegistry)> {
             Zone::Bottom
         } else if matches!(name, "columns" | "stack_tabs") {
             Zone::Left
-        } else if name == "content_fill" {
+        } else if matches!(name, "content_fill" | "search") {
             if index == 0 { Zone::Left } else { Zone::Right }
         } else {
             match index % 3 {
@@ -236,7 +251,7 @@ fn specimen_layout(name: &str) -> PanelResult<(Layout, PanelRegistry)> {
             0
         } else if name == "tabs" {
             index % 2
-        } else if name == "stack_tabs" && index == 3 {
+        } else if (name == "stack_tabs" && index == 3) || (name == "search" && index > 0) {
             1
         } else {
             index
@@ -330,7 +345,52 @@ struct VisibleSpecimen {
     identity: Rc<()>,
     key: ControllerKey,
     editor: bool,
+    /// The `search` specimen: synthetic rows narrowed by the shared search box (#19042).
+    search: bool,
     title_key: &'static str,
+}
+impl VisibleSpecimen {
+    /// The search box in `rect`: the header in the title's place, or the body's first row.
+    fn search_box(&self, ui: &mut egui::Ui, rect: egui::Rect) -> PanelResult<()> {
+        use crate::ui_kit::{PanelSearch, PanelSearchText};
+        use solidcraft_ui_text::tr;
+        self.probe.edit(&self.key, |state| {
+            let text = PanelSearchText {
+                hint: tr("ui.panel_fixture.search_hint"),
+                tip: tr("ui.panel_fixture.search_tip"),
+                end: tr("ui.panel_fixture.search_end"),
+                clear: tr("ui.panel_fixture.search_clear"),
+            };
+            let field = PanelSearch::new(&self.key.instance.0, text, SEARCH_QUERY_CHARS).focus(std::mem::take(&mut state.search_focus)).show(
+                ui,
+                rect,
+                &mut state.query,
+            );
+            if field.finish(ui, |_| ()) {
+                state.search_open = false;
+                state.query.clear();
+            }
+        })
+    }
+
+    /// The body: the box when the header holds tabs, then the rows whose names hold the query.
+    fn search_body(&self, ui: &mut egui::Ui) -> PanelResult<()> {
+        let t = solidcraft_theme::Tokens::get();
+        if self.probe.state(&self.key)?.search_open && !super::title_drawn(ui.ctx(), &self.key.instance.0) {
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), crate::ui_kit::PanelSearch::row_height()), egui::Sense::hover());
+            self.search_box(ui, rect)?;
+        }
+        let query = self.probe.state(&self.key)?.query.to_lowercase();
+        ui.spacing_mut().item_spacing.y = t.space_4;
+        for n in 1..=SEARCH_ROWS {
+            let label = solidcraft_ui_text::format("ui.panel_fixture.search_item", &[("n", &n.to_string())]);
+            if label.to_lowercase().contains(&query) {
+                let row = ui.add_sized([ui.available_width(), t.control_height], egui::Label::new(label).truncate());
+                crate::scenario::publish_handle(&format!("{}:item:{n}", self.key.instance.0), row.rect.center());
+            }
+        }
+        Ok(())
+    }
 }
 impl PanelController for VisibleSpecimen {
     fn availability(&self, owner: &ContentOwner, models: &dyn PanelModels) -> Availability {
@@ -355,7 +415,7 @@ impl PanelController for VisibleSpecimen {
                 &[("title", solidcraft_ui_text::tr(self.title_key)), ("id", &self.key.instance.0)],
             ),
             icon: "list".into(),
-            status: snapshot.map(|state| solidcraft_ui_text::format("ui.panel_fixture.updates", &[("count", &state.updates.to_string())])),
+            status: snapshot.as_ref().map(|state| solidcraft_ui_text::format("ui.panel_fixture.updates", &[("count", &state.updates.to_string())])),
             attention: self.editor,
             actions: if self.editor {
                 [("apply", "ui.panel_fixture.apply"), ("cancel", "ui.panel_fixture.cancel"), ("finish", "ui.panel_fixture.finish")]
@@ -368,14 +428,34 @@ impl PanelController for VisibleSpecimen {
                         disabled_reason: None,
                     })
                     .collect()
+            } else if self.search && !snapshot.as_ref().is_some_and(|state| state.search_open) {
+                // Only while the box is closed: the host lists a bound action its header hides
+                // in the footer, and the open box has its own magnifier.
+                vec![RuntimeAction {
+                    pressed: None,
+                    id: ControlId("magnifier".into()),
+                    label: solidcraft_ui_text::tr("ui.panel_fixture.search").into(),
+                    enabled: true,
+                    disabled_reason: None,
+                }]
             } else {
                 Vec::new()
             },
         }
     }
+    fn header_search(&self) -> Option<HeaderSearch> {
+        let open = self.probe.state(&self.key).ok()?.search_open;
+        self.search.then(|| HeaderSearch { action: ControlId("magnifier".into()), open: open.then(|| crate::ui_kit::PanelSearch::min_width(false)) })
+    }
     fn measure(&self, _owner: &ContentOwner, _models: &dyn PanelModels, spec: &PanelSpec) -> PanelResult<Arc<dyn HostContentMetrics>> {
         let t = solidcraft_theme::Tokens::get();
-        let rows = if self.editor { 7.0 } else { 5.0 };
+        let rows = if self.editor {
+            7.0
+        } else if self.search {
+            SEARCH_ROWS as f32 + 1.0
+        } else {
+            5.0
+        };
         Ok(Arc::new(SpecimenMetrics {
             // The actual body below uses fixed-height truncated labels and a
             // three-row editor. No hidden renderer or draft enumeration needed.
@@ -391,6 +471,16 @@ impl PanelController for VisibleSpecimen {
     }
     fn render(&mut self, slot: ContentSlot, ui: &mut egui::Ui, context: &PanelContext, services: &mut ContentServices<'_>) -> PanelResult<()> {
         self.inner.render(slot, ui, context, services)?;
+        if self.search {
+            return match slot {
+                ContentSlot::Title if self.probe.state(&self.key)?.search_open => {
+                    let rect = ui.max_rect();
+                    self.search_box(ui, rect)
+                }
+                ContentSlot::Body => self.search_body(ui),
+                _ => Ok(()),
+            };
+        }
         match slot {
             ContentSlot::Header => {
                 ui.label(solidcraft_ui_text::tr("ui.panel_fixture.caption"));
@@ -457,12 +547,19 @@ impl PanelController for VisibleSpecimen {
             ContentSlot::Inline => {
                 self.render_inline(ui, context, services)?;
             }
-            // The specimen never asks for header content.
+            // Only the search specimen asks for header content.
             ContentSlot::Title => {}
         }
         Ok(())
     }
     fn action(&mut self, owner: &ContentOwner, action: &ControlId, services: &mut ContentServices<'_>) -> PanelResult<()> {
+        if self.search && action.0 == "magnifier" {
+            // The header's magnifier opens the box with the keyboard; the box's own ends it.
+            return self.probe.edit(&self.key, |state| {
+                state.search_open = true;
+                state.search_focus = true;
+            });
+        }
         self.inner.action(owner, action, services)
     }
     fn render_inline(&mut self, ui: &mut egui::Ui, context: &PanelContext, services: &mut ContentServices<'_>) -> PanelResult<()> {
@@ -525,7 +622,8 @@ impl PanelModels for SpecimenModels {
                 "reopens": state.reopens, "applies": state.applies, "finishes": state.finishes, "pulses":state.pulses,
                 "reparents": state.reparents, "destroys": state.destroys, "draft": state.draft,
                 "transaction_live": state.transaction_live, "reject_cancel": state.reject_cancel,
-                "state": state.last_state.map(|s| json!({"open":s.requested_open,"presented":s.presented,"activated":s.activated,"destroyed":s.destroyed})),
+                "state": state.last_state.map(|s| json!({"open":s.requested_open,"presented":s.presented,"activated":s.activated,"destroyed":s.destroyed,
+                    "query":state.query,"query_limit":SEARCH_QUERY_CHARS})),
                 "last_clip": state.last_clip.map(|r| [r.min.x,r.min.y,r.max.x,r.max.y]),
             }));
         }

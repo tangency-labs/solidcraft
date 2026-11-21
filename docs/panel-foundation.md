@@ -74,6 +74,17 @@ one runtime transaction. Synthetic Apply/Finish/Pulse actions never run Session
 commands. Real History playback and Assistant New Chat bindings belong to their
 content migrations.
 
+A panel with a search box says so through `PanelController::header_search`
+(#19042): the header action that opens it and, while it is open, the box's
+narrowest width (`ui_kit::PanelSearch::min_width`). Each tick the docked host
+applies it on a change only: the box takes the title's place
+(`ContentSlot::Title`) and the action is hidden. An action the kind does not
+declare, or a width that is not finite, positive and within `MAX_LOGICAL`, is
+refused and changes nothing. A tab group keeps its tabs in the header, so the
+panel draws the box as its body's first row when `title_drawn` says its Title was
+not drawn this pass. Native panel windows have no Title slot yet; they show the box
+in the body.
+
 ## Application preferences
 
 The preference adapter connects the shared envelope and catalogue to
@@ -378,8 +389,10 @@ animation completes immediately; layout, semantics and focus never wait for it.
 `ui.panel_fixture` is authenticated, off by default, and refuses to replace another
 runtime. Presets: `docks`, `tabs`, `collapsed`, `floating`, `overflow` (24 instances),
 `pinned`, `columns` (three independent Left columns), `stack_tabs`, `content_fill`
-(short Content versus Fill), `inline` (one editable total row), and `surfaces`
-(declared surface preferences with the existing synthetic bodies). The old `rails`
+(short Content versus Fill), `inline` (one editable total row), `surfaces`
+(declared surface preferences with the existing synthetic bodies), and `search`
+(synthetic rows narrowed by the shared search box: one panel alone with the box in
+its header, two in a tab group with it in the body). The old `rails`
 preset is replaced by `collapsed`; it is not an alias to the retired experience.
 The optional `remember:true` enable parameter attaches the application preference
 catalogue for isolated restart review. A restart must explicitly enable the same

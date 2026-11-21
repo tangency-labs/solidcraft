@@ -1,0 +1,74 @@
+{
+  "en": {
+    "ui.panel_fixture.search": "Search the rows",
+    "ui.panel_fixture.search_clear": "Clear the search (Esc)",
+    "ui.panel_fixture.search_end": "End the search",
+    "ui.panel_fixture.search_hint": "Find rows",
+    "ui.panel_fixture.search_item": "Item {n}",
+    "ui.panel_fixture.search_panel": "Search specimen",
+    "ui.panel_fixture.search_tip": "Keeps the synthetic rows whose names contain the text."
+  },
+  "ar": {
+    "ui.panel_fixture.search": "البحث في الصفوف",
+    "ui.panel_fixture.search_clear": "مسح البحث (Esc)",
+    "ui.panel_fixture.search_end": "إنهاء البحث",
+    "ui.panel_fixture.search_hint": "البحث عن صفوف",
+    "ui.panel_fixture.search_item": "عنصر {n}",
+    "ui.panel_fixture.search_panel": "نموذج بحث تجريبي",
+    "ui.panel_fixture.search_tip": "يُبقي الصفوف التجريبية التي تحتوي أسماؤها على النص."
+  },
+  "de": {
+    "ui.panel_fixture.search": "Zeilen durchsuchen",
+    "ui.panel_fixture.search_clear": "Suche löschen (Esc)",
+    "ui.panel_fixture.search_end": "Suche beenden",
+    "ui.panel_fixture.search_hint": "Zeilen finden",
+    "ui.panel_fixture.search_item": "Eintrag {n}",
+    "ui.panel_fixture.search_panel": "Muster mit Suche",
+    "ui.panel_fixture.search_tip": "Behält die synthetischen Zeilen, deren Name den Text enthält."
+  },
+  "he": {
+    "ui.panel_fixture.search": "חיפוש בשורות",
+    "ui.panel_fixture.search_clear": "ניקוי החיפוש (Esc)",
+    "ui.panel_fixture.search_end": "סיום החיפוש",
+    "ui.panel_fixture.search_hint": "חיפוש שורות",
+    "ui.panel_fixture.search_item": "פריט {n}",
+    "ui.panel_fixture.search_panel": "דוגמת חיפוש",
+    "ui.panel_fixture.search_tip": "משאיר את השורות הסינתטיות ששמן מכיל את הטקסט."
+  },
+  "ja": {
+    "ui.panel_fixture.search": "行を検索",
+    "ui.panel_fixture.search_clear": "検索をクリア (Esc)",
+    "ui.panel_fixture.search_end": "検索を終了",
+    "ui.panel_fixture.search_hint": "行を探す",
+    "ui.panel_fixture.search_item": "項目 {n}",
+    "ui.panel_fixture.search_panel": "検索標本",
+    "ui.panel_fixture.search_tip": "名前にこのテキストを含む合成行だけを残します。"
+  },
+  "ko": {
+    "ui.panel_fixture.search": "행 검색",
+    "ui.panel_fixture.search_clear": "검색 지우기 (Esc)",
+    "ui.panel_fixture.search_end": "검색 끝내기",
+    "ui.panel_fixture.search_hint": "행 찾기",
+    "ui.panel_fixture.search_item": "항목 {n}",
+    "ui.panel_fixture.search_panel": "검색 견본",
+    "ui.panel_fixture.search_tip": "이름에 이 텍스트가 들어 있는 합성 행만 남깁니다."
+  },
+  "vi": {
+    "ui.panel_fixture.search": "Tìm trong các hàng",
+    "ui.panel_fixture.search_clear": "Xóa tìm kiếm (Esc)",
+    "ui.panel_fixture.search_end": "Kết thúc tìm kiếm",
+    "ui.panel_fixture.search_hint": "Tìm hàng",
+    "ui.panel_fixture.search_item": "Mục {n}",
+    "ui.panel_fixture.search_panel": "Mẫu tìm kiếm",
+    "ui.panel_fixture.search_tip": "Giữ lại các hàng tổng hợp có tên chứa văn bản này."
+  },
+  "zh": {
+    "ui.panel_fixture.search": "搜索行",
+    "ui.panel_fixture.search_clear": "清除搜索 (Esc)",
+    "ui.panel_fixture.search_end": "结束搜索",
+    "ui.panel_fixture.search_hint": "查找行",
+    "ui.panel_fixture.search_item": "项目 {n}",
+    "ui.panel_fixture.search_panel": "搜索示例",
+    "ui.panel_fixture.search_tip": "只保留名称包含此文本的合成行。"
+  }
+}

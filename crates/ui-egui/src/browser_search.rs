@@ -274,31 +274,12 @@ pub(crate) fn body_count(session: &Session) -> String {
     solidcraft_ui_text::format(if count == 1 { "ui.browser_bodies_one" } else { "ui.browser_bodies_other" }, &[("count", &count.to_string())])
 }
 
-/// The narrowest the header's box gets (`field_row`): the magnifier, a field, the filter and the ×,
-/// with the inset and spacing; 136 at the default tokens, so it fits the
-/// default 250-wide Browser beside its actions. Narrower headers move their actions to a row below
-/// (the panel host's rule for a long title).
-pub(crate) fn header_min_width() -> f32 {
-    let t = Tokens::get();
-    t.space_24 * 5.0 + t.space_4 * 4.0
-}
-
-/// The field is in the panel's header this frame (`ContentSlot::Title`): the body has no field row.
-pub(crate) fn in_header(ctx: &egui::Context) -> bool {
-    let pass = ctx.cumulative_pass_nr();
-    ctx.data(|d| d.get_temp::<u64>(header_pass_id())) == Some(pass)
-}
-
-fn header_pass_id() -> egui::Id {
-    egui::Id::unique("browser_search_in_header")
-}
-
-/// The search field in the Browser panel's header, in the title's place (`ContentSlot::Title`).
+/// The search box in the Browser panel's header, in the title's place (`ContentSlot::Title`).
 pub(crate) fn header_field(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let pass = ui.ctx().cumulative_pass_nr();
-    ui.ctx().data_mut(|d| d.insert_temp(header_pass_id(), pass));
-    let rect = ui.max_rect();
-    field_row(app, ui, rect);
+    if bar_shown(app) {
+        let rect = ui.max_rect();
+        field_row(app, ui, rect);
+    }
 }
 
 /// The field's row is there once asked for, and while a search is on, which only the field can
@@ -308,81 +289,57 @@ pub(crate) fn bar_shown(app: &SolveApp) -> bool {
     !crate::render_workspace::active(app) && (search.shown || search.on())
 }
 
-/// The search box in `rect`, in @Nathan-Dane's design: the magnifier, the field, the filter of kinds
-/// and the ×, all inside one frame inset from the panel's edge. `rect` is the Browser panel's header,
-/// or its first row when the host can't give the header (a Browser grouped with other panels). The
-/// magnifier, the × or Esc ends the search and takes the box away.
+/// The search box in `rect` (the kit's `PanelSearch`, in @Nathan-Dane's design): the magnifier, the
+/// field, the filter of kinds and the ×. `rect` is the Browser panel's header, or its first row when
+/// the header holds tabs (a Browser grouped with other panels). The magnifier, the × or Esc ends the
+/// search and takes the box away.
 pub(crate) fn field_row(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect) {
-    let t = Tokens::get();
+    use crate::ui_kit::{PanelSearch, PanelSearchFilter, PanelSearchText};
+    use solidcraft_ui_text::tr;
     refresh(app);
-    crate::scenario::publish_rect("browser:search:bar", rect);
-    let frame = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + t.space_6, rect.center().y - t.form_close_size / 2.0),
-        egui::pos2(rect.right().max(rect.left() + t.space_6), rect.center().y + t.form_close_size / 2.0),
+    let text = PanelSearchText {
+        hint: tr("ui.browser_search_hint"),
+        tip: tr("ui.browser_search_tip"),
+        end: tr("ui.browser_search_end"),
+        clear: tr("ui.browser_search_clear"),
+    };
+    let ticked = app.tree.search.kinds.len();
+    let filter = PanelSearchFilter { icon: "find_kinds", label: tr("ui.browser_search_kinds"), handle: "kinds", picked: ticked };
+    let field = PanelSearch::new("browser", text, MAX_PATTERN_CHARS).focus(std::mem::take(&mut app.tree.search.focus)).filter(filter).show(
+        ui,
+        rect,
+        &mut app.tree.search.text,
     );
-    // One id wherever it is drawn: a field that moves into the header keeps the keyboard.
-    let id = egui::Id::unique("browser_search_field");
-    let end = solidcraft_ui_text::tr("ui.browser_search_end");
-    let search = crate::ui_kit::SearchBox::frame(ui, frame, id, t.radius_sm, Some(end), "browser");
-    let button = t.space_24;
-    let trailing = 2.0 * button + t.space_2;
-    let hint = solidcraft_ui_text::tr("ui.browser_search_hint");
-    let field = search.editor(ui, &mut app.tree.search.text, hint, MAX_PATTERN_CHARS, trailing);
-    crate::scenario::publish_handle("browser:search", field.rect.center());
-    crate::scenario::publish_rect("browser:search", field.rect);
-    if std::mem::take(&mut app.tree.search.focus) {
-        field.request_focus();
-    }
-    // Esc in the field ends the search and closes it (egui gives up the focus on Esc).
-    let escaped = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape));
-    field.backing_on_hover_text(solidcraft_ui_text::tr("ui.browser_search_tip"));
-    let magnifier = search.magnifier.as_ref().is_some_and(egui::Response::clicked);
-    if let Some(m) = &search.magnifier {
-        crate::scenario::publish_handle("browser:magnifier", m.rect.center());
-    }
-    let at =
-        |n: f32| egui::Rect::from_center_size(egui::pos2(frame.right() - t.space_2 - button * (n - 0.5), frame.center().y), vec2(button, button));
-    kind_filter(app, ui, at(2.0));
-    let clear = crate::ui_kit::icon_button_at(ui, at(1.0), "close", solidcraft_ui_text::tr("ui.browser_search_clear"));
-    crate::scenario::publish_handle("browser:search:clear", clear.rect.center());
-    if clear.clicked() || escaped || magnifier {
+    if field.finish(ui, |ui| kind_list(app, ui, ticked)) {
         app.tree.search.clear();
     }
 }
 
-/// The box's filter in `rect`: a list of the design's kinds to tick, each with how many match whether
-/// ticked or not, and All kinds to clear them; a badge on the button counts the kinds ticked.
-fn kind_filter(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect) {
-    let ticked = app.tree.search.kinds.len();
-    let filter = crate::ui_kit::filter_button_at(ui, rect, "find_kinds", solidcraft_ui_text::tr("ui.browser_search_kinds"), ticked, |ui| {
-        // Only while the list is open: the field is there on every frame.
-        let all = crate::ui_kit::text_button(ui, solidcraft_ui_text::tr("ui.browser_search_all_kinds"), ticked > 0);
-        crate::scenario::publish_handle("browser:search:kind:all", all.rect.center());
-        if all.clicked() {
-            app.tree.search.kinds.clear();
-        }
-        for kind in kinds_present(app) {
-            // How many match, once there is a search to count.
-            let label = match app.tree.search.hits() {
-                Some(hits) => format!("{} ({})", kind_label(kind), hits.search.count(kind)),
-                None => kind_label(kind).to_string(),
-            };
-            let mut on = app.tree.search.kinds.contains(&kind);
-            let r = crate::ui_kit::checkbox(ui, &label, &mut on);
-            crate::scenario::publish_handle(&format!("browser:search:kind:{}", kind.id()), r.rect.center());
-            if r.changed() {
-                if on {
-                    app.tree.search.kinds.insert(kind);
-                } else {
-                    app.tree.search.kinds.remove(&kind);
-                }
+/// The filter's list: the design's kinds to tick, each with how many match whether ticked or not,
+/// and All kinds to clear them (the filter's badge counts the `ticked` kinds).
+fn kind_list(app: &mut SolveApp, ui: &mut egui::Ui, ticked: usize) {
+    // Only while the list is open: the field is there on every frame.
+    let all = crate::ui_kit::text_button(ui, solidcraft_ui_text::tr("ui.browser_search_all_kinds"), ticked > 0);
+    crate::scenario::publish_handle("browser:search:kind:all", all.rect.center());
+    if all.clicked() {
+        app.tree.search.kinds.clear();
+    }
+    for kind in kinds_present(app) {
+        // How many match, once there is a search to count.
+        let label = match app.tree.search.hits() {
+            Some(hits) => format!("{} ({})", kind_label(kind), hits.search.count(kind)),
+            None => kind_label(kind).to_string(),
+        };
+        let mut on = app.tree.search.kinds.contains(&kind);
+        let r = crate::ui_kit::checkbox(ui, &label, &mut on);
+        crate::scenario::publish_handle(&format!("browser:search:kind:{}", kind.id()), r.rect.center());
+        if r.changed() {
+            if on {
+                app.tree.search.kinds.insert(kind);
+            } else {
+                app.tree.search.kinds.remove(&kind);
             }
         }
-    });
-    crate::scenario::publish_handle("browser:search:kinds", filter.response.rect.center());
-    crate::scenario::publish_rect("browser:search:kinds", filter.response.rect);
-    if let Some(badge) = filter.badge {
-        crate::scenario::publish_handle("browser:search:kinds:badge", badge.center());
     }
 }
 

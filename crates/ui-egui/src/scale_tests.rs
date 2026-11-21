@@ -273,7 +273,8 @@ fn nested_bolts(each: usize) -> Harness {
 }
 
 /// The browser's search on an assembly: one keystroke's search, and a whole frame with the tree
-/// unfiltered, listing a few rows and listing many. Run with `--ignored --nocapture`.
+/// unfiltered, with the box open and empty, listing a few rows and listing many. Run with
+/// `--ignored --nocapture`.
 #[test]
 #[ignore = "manual search measurement"]
 fn browser_search_cost() {
@@ -293,12 +294,13 @@ fn browser_search_cost() {
         let mut times: Vec<f64> = (0..21).map(|_| ms(|| h.frames(1))).collect();
         times.sort_by(f64::total_cmp);
         line.push_str(&format!(" no_bar_frame_ms={:.2}", times[times.len() / 2]));
-        for (name, text) in [("no_search", ""), ("few_rows", "bolt:7"), ("many_rows", "bolt")] {
-            if text.is_empty() {
-                h.app.tree.search.clear();
-            } else {
-                h.app.tree.search.show();
-                h.app.tree.search.text = text.to_string();
+        for (name, text) in [("no_search", None), ("open_empty", Some("")), ("few_rows", Some("bolt:7")), ("many_rows", Some("bolt"))] {
+            match text {
+                None => h.app.tree.search.clear(),
+                Some(text) => {
+                    h.app.tree.search.show();
+                    h.app.tree.search.text = text.to_string();
+                }
             }
             h.frames(2);
             let mut times: Vec<f64> = (0..21).map(|_| ms(|| h.frames(1))).collect();
