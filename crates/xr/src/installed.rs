@@ -95,6 +95,7 @@ fn runtime_manifests(config_home: Option<&Path>, home: Option<&Path>, config_dir
 mod tests {
     use super::*;
 
+    /// Without the loader, what is missing is the loader, whether a runtime is registered or not.
     #[test]
     fn the_loader_is_named_before_the_runtime() {
         assert_eq!(Found::of(false, false), Found::NoLoader);
@@ -103,6 +104,7 @@ mod tests {
         assert_eq!(Found::of(true, true), Found::Ready);
     }
 
+    /// The active runtime is looked for in the XDG config home, then each XDG config folder, then `/etc`.
     #[test]
     fn runtime_manifests_follow_the_xdg_folders_in_order() {
         let files = runtime_manifests(Some(Path::new("/c")), Some(Path::new("/h")), Some("/a:/b"));
@@ -110,6 +112,7 @@ mod tests {
         assert_eq!(files, want);
     }
 
+    /// Without the XDG variables, the config home is `~/.config` and the config folder `/etc/xdg`.
     #[test]
     fn runtime_manifests_fall_back_to_the_defaults() {
         let files = runtime_manifests(None, Some(Path::new("/h")), None);
@@ -117,6 +120,7 @@ mod tests {
         assert_eq!(files, want);
     }
 
+    /// Relative and empty folders are skipped (the XDG rules), so only absolute ones are read.
     #[test]
     fn relative_and_empty_folders_are_refused() {
         let files = runtime_manifests(Some(Path::new("conf")), Some(Path::new("home")), Some("rel::x"));

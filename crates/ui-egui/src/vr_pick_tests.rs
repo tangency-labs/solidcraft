@@ -92,7 +92,11 @@ fn a_pointed_part_is_acted_on_alone_or_with_the_selection_it_is_in() {
     vr_pick::toggle(&mut h.app, Some(&top));
     assert_eq!(vr_pick::acted_on(&h.app, Some(&placed), ActsOn::Pointed), vec![placed.clone()], "not selected: alone");
     vr_pick::toggle(&mut h.app, Some(&placed));
-    assert_eq!(names(&vr_pick::acted_on(&h.app, Some(&placed), ActsOn::Pointed)), names(&[top.clone(), placed.clone()]), "selected: the whole selection");
+    assert_eq!(
+        names(&vr_pick::acted_on(&h.app, Some(&placed), ActsOn::Pointed)),
+        names(&[top.clone(), placed.clone()]),
+        "selected: the whole selection"
+    );
     assert_eq!(names(&vr_pick::acted_on(&h.app, Some(&top), ActsOn::Pointed)), names(&[top, placed]));
 }
 

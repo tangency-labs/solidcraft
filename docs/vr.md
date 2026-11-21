@@ -66,9 +66,10 @@ where they are nearer.
 **The Browser.** Select on Browser opens the window's own Browser beside the belt (Select again
 closes it): every row the desktop Browser has, with its folds, eyes and selecting. The ray is its
 pointer and Select its click; with the ray on it, the stick scrolls it. Pointing at a row lights
-its part. It only views the design: a row is never renamed or dragged there, and a double click
-is a plain click (no editor, dialog or edit in place opens); the component's radio still
-activates it.
+its part. It only views the design: a row is never renamed or dragged there, a double click is
+a plain click (no editor, dialog or edit in place opens), a sketch's Edit button does nothing, the
+history marker stays where it is, and Document Settings only shows its values; the component's
+radio still activates it.
 
 **Joints** are drawn as the window draws them (their badges, where their eyes and the Joints
 folder show them), over the model.
@@ -233,5 +234,7 @@ desktop, and VR would drive its commands once it lands.
 |---|---|---|---|---|
 | Meta Quest 3S | Oculus 1.208.0 | `XR_KHR_vulkan_enable2` | 1824 × 1872 | from the `xr-info` probe (#7275) |
 | Steam Frame (streaming) | SteamVR/OpenXR 2.18.4 | `XR_KHR_vulkan_enable2` | 2644 × 2644 | from the `xr-info` probe (#13469); the viewer tried on it |
+| Simulated headset, two WMR controllers (Linux) | Monado 25.1.0 | `XR_KHR_vulkan_enable2` | 896 × 1007 | the viewer tried on it in #18712 (Arch, Wayland, NVIDIA) |
 
-Neither offers `XR_KHR_vulkan_swapchain_format_list`; formats are enumerated and picked.
+Oculus and SteamVR do not offer `XR_KHR_vulkan_swapchain_format_list`, Monado does; formats are
+enumerated and picked either way.

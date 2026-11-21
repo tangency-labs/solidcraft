@@ -319,6 +319,9 @@ pub(crate) fn show_detached(app: &mut SolveApp, ui: &mut Ui, owner: ContentOwner
     app.tree.content.owners.entry(owner).or_default().detached = Some(ui.ctx().clone());
     // Only viewing: its rows select, fold, show, hide and activate; nothing renames or edits.
     ui.ctx().data_mut(|data| data.insert_temp(crate::browser::view_only_id(), true));
+    // The rows' look follows Preferences there too (the eye's side), as the window's frame
+    // publishes it into its own context.
+    crate::browser::publish_row_prefs(app, ui.ctx());
     let active = app.tree.content.active.take();
     // The window's context stays the one its drags and captures are ended through.
     let context = app.tree.content.context.clone();

@@ -125,8 +125,9 @@ impl Renderer {
             }
             queue.write_buffer(&self.moving_uniform, 0, &uniform_bytes_placing(frame, w, h, self.linear_out, reversed, mv.transform));
         }
-        // Bodies drawn moved (a joint drag) are culled where they are drawn, as in the window; its
-        // motion table, written by the window's prepare this frame, is the one this draw reads.
+        // Bodies drawn moved (a joint drag) are drawn and culled where the frame moves them, as in
+        // the window; the table is written only when the motions changed since the window's.
+        self.motions.set(queue, &frame.motions);
         self.pic.model.cull(device, queue, &frame.view_proj, [w, h], &frame.motions);
         queue.write_buffer(&self.uniform, 0, &uniform_bytes(frame, w, h, self.linear_out, reversed));
 

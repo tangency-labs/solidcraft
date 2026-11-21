@@ -88,6 +88,26 @@ fn optional_extensions(available: &xr::ExtensionSet, required: &xr::ExtensionSet
     enabled
 }
 
+/// What to ask for when the runtime refuses `enabled`, in order: the same without the controller
+/// models (the extensions most likely to need another the runtime does not list), then `required`
+/// alone. A step that asks for nothing less than the one before is left out.
+fn fallbacks(enabled: &xr::ExtensionSet, required: &xr::ExtensionSet) -> Vec<xr::ExtensionSet> {
+    let mut steps = Vec::new();
+    if enabled.ext_render_model || enabled.ext_interaction_render_model || enabled.ext_uuid {
+        let mut without_models = enabled.clone();
+        without_models.ext_render_model = false;
+        without_models.ext_interaction_render_model = false;
+        without_models.ext_uuid = required.ext_uuid;
+        steps.push(without_models);
+    }
+    let last = steps.last().unwrap_or(enabled);
+    let more = |a: bool, b: bool| a && !b;
+    if more(last.ext_local_floor, required.ext_local_floor) || more(last.ext_hand_interaction, required.ext_hand_interaction) {
+        steps.push(required.clone());
+    }
+    steps
+}
+
 impl Runtime {
     /// Find the VR software and its headset. Each way this can fail is its own [`Error`], so the
     /// app can say what to start or plug in.
@@ -114,13 +134,19 @@ impl Runtime {
             api_version: xr::Version::new(1, 0, 0),
         };
         // The extras are never worth not starting for: a runtime that refuses them (one needs
-        // another the runtime does not say) gets asked for the required ones alone.
-        let instance = match entry.create_instance(&app, &enabled, &[], &()) {
-            Ok(instance) => instance,
-            Err(e) => {
-                log::warn!("VR: the VR software refused the optional extensions ({e}); starting without them");
-                enabled = required;
-                entry.create_instance(&app, &enabled, &[], &()).map_err(|e| Error::NoRuntime(e.to_string()))?
+        // another the runtime does not say) gets asked without the controller models, then for
+        // the required ones alone, so the floor and tracked hands stay where only the models fail.
+        let mut steps = fallbacks(&enabled, &required).into_iter();
+        let instance = loop {
+            match entry.create_instance(&app, &enabled, &[], &()) {
+                Ok(instance) => break instance,
+                Err(e) => match steps.next() {
+                    Some(next) => {
+                        log::warn!("VR: the VR software refused the optional extensions ({e}); asking for fewer");
+                        enabled = next;
+                    }
+                    None => return Err(Error::NoRuntime(e.to_string())),
+                },
             }
         };
         let name = instance.properties().map(|p| format!("{} {}", p.runtime_name, p.runtime_version)).unwrap_or_default();
@@ -754,6 +780,35 @@ mod tests {
         let enabled = optional_extensions(&available, &required);
         assert!(!enabled.ext_render_model && !enabled.ext_interaction_render_model && !enabled.ext_uuid);
         assert!(enabled.khr_vulkan_enable2);
+    }
+
+    /// A refused start asks again without the controller models first, keeping the floor and
+    /// tracked hands, and only then for the required extensions alone; with nothing optional
+    /// asked for, there is nothing to fall back to.
+    #[test]
+    fn a_refusal_drops_the_controller_models_before_the_floor_and_hands() {
+        let mut required = xr::ExtensionSet::default();
+        required.khr_vulkan_enable2 = true;
+        let mut available = required.clone();
+        available.ext_local_floor = true;
+        available.ext_hand_interaction = true;
+        available.ext_render_model = true;
+        available.ext_interaction_render_model = true;
+        let enabled = optional_extensions(&available, &required);
+        let steps = fallbacks(&enabled, &required);
+        assert_eq!(steps.len(), 2);
+        assert!(steps[0].ext_local_floor && steps[0].ext_hand_interaction && steps[0].khr_vulkan_enable2);
+        assert!(!steps[0].ext_render_model && !steps[0].ext_interaction_render_model && !steps[0].ext_uuid);
+        assert!(!steps[1].ext_local_floor && !steps[1].ext_hand_interaction && steps[1].khr_vulkan_enable2);
+        // Only the models offered: one step, straight to the required ones.
+        let mut models_only = required.clone();
+        models_only.ext_render_model = true;
+        models_only.ext_interaction_render_model = true;
+        let steps = fallbacks(&optional_extensions(&models_only, &required), &required);
+        assert_eq!(steps.len(), 1);
+        assert!(!steps[0].ext_render_model && steps[0].khr_vulkan_enable2);
+        // Nothing optional: the first refusal is the answer.
+        assert!(fallbacks(&required, &required).is_empty());
     }
 
     /// The frames on which `ask` asks within `frames` frames, each ask failing when `fails`.

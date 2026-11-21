@@ -215,7 +215,6 @@ fn closing_the_headsets_browser_ends_its_eye_drag() {
     assert!(ctx.data(|d| d.get_temp::<bool>(crate::ui_kit::eye_drag_id())).is_none());
 }
 
-
 /// The headset's Browser driven as the app drives it: each pass at the frame's clock, with the
 /// window's frame after it, and places on it read right after its own pass.
 struct Headset {
@@ -283,7 +282,8 @@ impl Headset {
     /// As the app's pointer does, nothing is told while the ray is off the window.
     fn select(&mut self, h: &mut Harness, pressed: bool) {
         self.down = pressed;
-        let events = self.at.map(|pos| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        let events =
+            self.at.map(|pos| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
         self.pass(h, events.into_iter().collect(), 0.02);
     }
 
@@ -320,7 +320,12 @@ impl Headset {
     /// (both told with the next pass), and the Browser ends what it held.
     fn close(&mut self, h: &mut Harness, frames: usize) {
         if let (true, Some(pos)) = (self.down, self.at) {
-            self.queued.push(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+            self.queued.push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            });
         }
         if self.at.take().is_some() {
             self.queued.push(egui::Event::PointerGone);
@@ -369,10 +374,13 @@ fn answers(h: &mut Harness, hs: &mut Headset, after: &str) {
     }
     let at = hs.place(h, "row:Two");
     hs.click(h, at, 0.6);
-    assert!(h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::Body { name } if name == "Two")), "after {after}: Two's row selects it: {:?}", h.app.session.selection);
+    assert!(
+        h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::Body { name } if name == "Two")),
+        "after {after}: Two's row selects it: {:?}",
+        h.app.session.selection
+    );
     assert!(h.app.menu.rename.is_none(), "after {after}: no name editor is left open");
 }
-
 
 /// After every gesture the ray can make on the headset's Browser (clicks quick and slow, drags of
 /// rows and over the eyes, Select let go off the window, the wheel, the window closed while Select
@@ -511,7 +519,11 @@ fn a_slow_second_click_in_the_headsets_browser_opens_no_name_editor() {
     hs.click(&mut h, at, 0.8);
     hs.click(&mut h, at, 1.0);
     assert!(h.app.menu.rename.is_none(), "no name editor: {:?}", h.app.menu.rename.as_ref().map(|r| r.text.clone()));
-    assert!(h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::Body { name } if name == "Two")), "{:?}", h.app.session.selection);
+    assert!(
+        h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::Body { name } if name == "Two")),
+        "{:?}",
+        h.app.session.selection
+    );
 }
 
 /// A body and a placed part `Part` holding a body of its own, the root active and the Browser's
@@ -575,5 +587,58 @@ fn a_row_dragged_in_the_headsets_browser_moves_nothing() {
     let (from, to) = (hs.place(&mut h, "row:Top"), hs.place(&mut h, &placement));
     hs.drag(&mut h, from, to);
     h.settle();
+    assert!(h.app.session.doc == doc, "the design is unchanged");
+}
+
+/// With the history in the Browser, the headset's Browser still only views the design: the
+/// extrusion's Edit Profile Sketch button opens no sketch, the history marker dragged above the
+/// extrusion rolls nothing back, a feature row dragged above another moves nothing, and Document
+/// Settings' Units, Precision, Parameters and Design Properties rows open no menu, Preferences,
+/// tool or dialog.
+#[test]
+fn the_headsets_browser_edits_nothing_from_the_history_or_document_settings() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Profile"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,15]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let pad = h.app.run("solid.extrude", json!({"distance":10,"name":"Pad","body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
+    let block =
+        h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"name":"Block","body_name":"Block"})).unwrap()["feature"].as_u64().unwrap();
+    h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+    h.settle();
+    let doc = h.app.session.doc.clone();
+    let mut hs = Headset::new();
+
+    let button = hs.place(&mut h, "action:Pad");
+    hs.click(&mut h, button, 0.6);
+    assert_eq!(h.app.session.active_sketch, None, "Edit Profile Sketch opened the sketch");
+
+    let pad_row = hs.place(&mut h, &format!("row:browser-feature:c0:{pad}"));
+    let marker = hs.place(&mut h, "browser:rollback");
+    hs.drag(&mut h, marker, egui::pos2(pad_row.x, pad_row.y - 8.0));
+    h.settle();
+    let block_row = hs.place(&mut h, &format!("row:browser-feature:c0:{block}"));
+    hs.drag(&mut h, block_row, egui::pos2(pad_row.x, pad_row.y - 8.0));
+    h.settle();
+    assert!(h.app.session.doc == doc, "the history was rolled or reordered: marker {:?}", h.app.session.doc.marker);
+
+    let settings = hs.place(&mut h, "fold:Document Settings");
+    hs.click(&mut h, settings, 0.6);
+    let rows: Vec<String> = {
+        hs.alone(&mut h, Vec::new(), 0.02);
+        let rows = solidcraft_ui_registry::handles("row:").into_iter().map(|(name, _)| name).collect();
+        h.frame();
+        rows
+    };
+    let wanted = ["row:Units", "row:Precision", "row:Parameters", "row:Design Properties"];
+    for start in wanted {
+        let row = rows.iter().find(|r| r.starts_with(start)).unwrap_or_else(|| panic!("{start} among {rows:?}")).clone();
+        let at = hs.place(&mut h, &row);
+        hs.click(&mut h, at, 0.6);
+        assert!(h.app.viewport.context_menu.is_none(), "{row}: a menu opened");
+        assert!(!h.app.prefs_window.shell.open, "{row}: Preferences opened");
+        assert!(h.app.params.is_none() && h.app.tool.is_none() && h.app.dialog.is_none(), "{row}: a tool or dialog opened");
+        assert!(h.app.design_properties.is_none(), "{row}: Design Properties opened");
+    }
     assert!(h.app.session.doc == doc, "the design is unchanged");
 }

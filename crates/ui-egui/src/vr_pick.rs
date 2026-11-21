@@ -78,11 +78,9 @@ pub fn part_of(app: &SolveApp, body: &str) -> Part {
     };
     let active = active_path(app, &own);
     match picked_at(&own, active.as_deref()) {
-        Some(path) => placement(app, &path).unwrap_or_else(|| Part {
-            sel: Sel::Occurrence { path },
-            name: body.to_string(),
-            bodies: vec![body.to_string()],
-        }),
+        Some(path) => {
+            placement(app, &path).unwrap_or_else(|| Part { sel: Sel::Occurrence { path }, name: body.to_string(), bodies: vec![body.to_string()] })
+        }
         None => Part { sel: Sel::Body { name: body.to_string() }, name: body.to_string(), bodies: vec![body.to_string()] },
     }
 }

@@ -248,8 +248,12 @@ pub(super) fn rows(app: &mut SolveApp, rows: &mut Rows<'_>, component: u64, path
         slots.push((bottom, end));
         drops.push(DropSlot { y: bottom, position: end, feature: None });
     }
-    drag_marker(app, rows.ui(), &resp, &slots, marker);
-    drag_rows(app, rows.ui(), &plan, drag_id, dragged, &drops, resp.rect.center().y);
+    // A Browser that only views the design (the headset's) neither rolls the history nor moves
+    // features.
+    if !crate::browser::view_only(rows.ui()) {
+        drag_marker(app, rows.ui(), &resp, &slots, marker);
+        drag_rows(app, rows.ui(), &plan, drag_id, dragged, &drops, resp.rect.center().y);
+    }
 }
 
 /// The Browser's model of the design as it is now: `None` while it is missing or made for
@@ -553,6 +557,7 @@ fn feature_row(
     // In the History: a drag of the row (not of its fold arrow or eye) moves the feature (#9565).
     if let Some(drag) = drag
         && !r.on_control
+        && !crate::browser::view_only(rows.ui())
         && r.resp.as_ref().is_some_and(egui::Response::drag_started)
         && let Some(source) = crate::semantic_content::current_source(app)
     {
