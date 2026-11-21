@@ -1091,7 +1091,32 @@ fn window_menu(app: &mut SolveApp, ui: &mut Ui, id: WindowId, anchor: egui::Resp
         .collect();
     let title = window_name(app, id);
     let interface_sizes = solidcraft_views::InterfaceSize::ALL.map(u16::from);
+    let tr = solidcraft_ui_text::tr;
+    let text = kit::WindowText {
+        preview: tr("window_menu.preview").to_owned(),
+        show_here: tr("window_menu.show_here").to_owned(),
+        window: tr("window_menu.window").to_owned(),
+        keep_on_top: tr("window_options.keep_on_top").to_owned(),
+        ribbon: tr("window_ribbon.ribbon").to_owned(),
+        auto_hide: tr("window_ribbon.auto_hide").to_owned(),
+        auto_hide_unavailable: tr("window_ribbon.auto_hide_unavailable").to_owned(),
+        other_panels: tr("window_panels.other_panels").to_owned(),
+        workspace_panels: tr("window_panels.workspace_panels").to_owned(),
+        top_bar: tr("window_topbar.top_bar").to_owned(),
+        always: tr("window_options.always").to_owned(),
+        edge: tr("window_topbar.edge").to_owned(),
+        card_headers: tr("window_options.card_headers").to_owned(),
+        on_hover: tr("window_options.on_hover").to_owned(),
+        hidden: tr("window_options.hidden").to_owned(),
+        move_to_display: tr("window_menu.move_to_display").to_owned(),
+        interface_size: tr("window_size.interface_size").to_owned(),
+        rename: tr("window_menu.rename").to_owned(),
+        use_default: tr("window_menu.use_default").to_owned(),
+        return_views: tr("multi_window.return_views").to_owned(),
+        close_window: tr("multi_window.close_window").to_owned(),
+    };
     let menu = WindowMenu {
+        text: &text,
         title: &title,
         displays: &displays,
         card_headers,
@@ -1151,11 +1176,13 @@ fn show_window_rename(app: &mut SolveApp, ctx: &Context, id: WindowId) {
     let modal = Container::new(ctx, Surface::Window).modal(key).show(ctx, |ui| {
         ui.set_width(280.0);
         ui.heading(app.tr("window_menu.rename"));
-        let field = ui.add(egui::TextEdit::singleline(&mut name).char_limit(solidcraft_views::MAX_NAME).hint_text(app.tr("window_menu.name")));
+        let (keys, field) = crate::ui_kit::text_field_reserving(ui, &mut name, app.tr("window_menu.name"), 0.0);
+        if let Some((cut, _)) = name.char_indices().nth(solidcraft_views::MAX_NAME) {
+            name.truncate(cut);
+        }
         if first {
             field.request_focus();
         }
-        let keys = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
         ui.horizontal(|ui| {
             let cancel = crate::ui_kit::button(ui, app.tr("ui.cancel"), crate::ui_kit::Button::Normal).clicked();
             let apply = crate::ui_kit::button(ui, app.tr("ui.apply"), crate::ui_kit::Button::Enabled(!name.trim().is_empty())).clicked();

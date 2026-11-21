@@ -5,11 +5,12 @@ use crate::menu::{Menu, MenuItem};
 use crate::{Container, Surface};
 use egui::{Id, Key, Modifiers, Pos2, Rect, Response, Ui, pos2, vec2};
 use solidcraft_theme::Tokens;
-use solidcraft_ui_text::tr;
 
 const WIDTH: f32 = 328.0;
 const ROW_HEIGHT: f32 = 34.0;
 const MENU_HEIGHT: f32 = 520.0;
+const TITLE_ICON: egui::Vec2 = egui::Vec2::splat(16.0);
+const PREVIEW_HEIGHT: f32 = 196.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CardHeaders {
@@ -42,7 +43,34 @@ pub struct DisplayChoice<'a> {
     pub current: bool,
 }
 
+/// The menu's words, translated by the host.
+#[derive(Clone, Debug, Default)]
+pub struct WindowText {
+    pub preview: String,
+    pub show_here: String,
+    pub window: String,
+    pub keep_on_top: String,
+    pub ribbon: String,
+    pub auto_hide: String,
+    pub auto_hide_unavailable: String,
+    pub other_panels: String,
+    pub workspace_panels: String,
+    pub top_bar: String,
+    pub always: String,
+    pub edge: String,
+    pub card_headers: String,
+    pub on_hover: String,
+    pub hidden: String,
+    pub move_to_display: String,
+    pub interface_size: String,
+    pub rename: String,
+    pub use_default: String,
+    pub return_views: String,
+    pub close_window: String,
+}
+
 pub struct WindowMenu<'a> {
+    pub text: &'a WindowText,
     pub title: &'a str,
     pub displays: &'a [DisplayChoice<'a>],
     pub card_headers: CardHeaders,
@@ -173,7 +201,7 @@ pub fn show(ui: &mut Ui, anchor: Response, context_open: bool, menu: &WindowMenu
     ctx.accesskit_node_builder(anchor.id, |node| node.set_expanded(state.open));
     let mut action = None;
     if state.open {
-        let screen = ctx.content_rect().shrink(8.0);
+        let screen = ctx.content_rect().shrink(Tokens::get().space_8);
         let width = WIDTH.min(screen.width());
         let height = screen.height().min(MENU_HEIGHT);
         if width > 0.0 && height > 0.0 {
@@ -215,26 +243,26 @@ pub fn show(ui: &mut Ui, anchor: Response, context_open: bool, menu: &WindowMenu
 fn contents(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, state: &mut State) -> (Option<Action>, Option<Rect>) {
     let t = Tokens::get();
     let display = menu.displays.iter().find(|display| display.current);
-    ui.add_space(4.0);
+    ui.add_space(t.space_4);
     ui.horizontal(|ui| {
-        ui.add_space(8.0);
-        let (icon, _) = ui.allocate_exact_size(vec2(16.0, 16.0), egui::Sense::hover());
+        ui.add_space(t.space_8);
+        let (icon, _) = ui.allocate_exact_size(TITLE_ICON, egui::Sense::hover());
         crate::icons::paint_ink(ui.painter(), icon, crate::icons::window_icon(true), t.text_dim);
-        ui.add(egui::Label::new(egui::RichText::new(menu.title).font(crate::type_face::semibold(13.0)).color(t.text)).truncate());
+        ui.add(egui::Label::new(egui::RichText::new(menu.title).font(crate::type_face::semibold(t.font_button)).color(t.text)).truncate());
         if let Some(display) = display {
-            ui.add(egui::Label::new(egui::RichText::new(display.name).size(12.0).color(t.text_dim)).truncate());
+            ui.add(egui::Label::new(egui::RichText::new(display.name).size(t.font_body).color(t.text_dim)).truncate());
         }
     });
-    ui.add_space(6.0);
-    crate::window_preview::show(ui, menu, 196.0);
+    ui.add_space(t.space_6);
+    crate::window_preview::show(ui, menu, PREVIEW_HEIGHT);
     let mut focus = FocusRows::new(state.scroll_focus);
     let (mut action, flyout) = middle(ui, id, menu, state, &mut focus);
     Menu::separator(ui);
     for (key, label, icon, shortcut, choice) in [
-        ("return", "multi_window.return_views", "undo", "", Action::ReturnViews),
-        ("close", "multi_window.close_window", "close", "Ctrl+W", Action::Close),
+        ("return", &menu.text.return_views, "undo", "", Action::ReturnViews),
+        ("close", &menu.text.close_window, "close", "Ctrl+W", Action::Close),
     ] {
-        let response = row(ui, key, tr(label), icon, shortcut);
+        let response = row(ui, key, label, icon, shortcut);
         focus.row(ui, &response);
         if response.clicked() {
             action = Some(choice);
@@ -247,20 +275,22 @@ fn contents(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, state: &mut State) -> (O
 }
 
 fn middle(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, state: &mut State, focus: &mut FocusRows) -> (Option<Action>, Option<Rect>) {
-    Menu::heading(ui, tr("window_menu.show_here"));
+    let text = menu.text;
+    let t = Tokens::get();
+    Menu::heading(ui, &text.show_here);
     let mut action = ribbon_options(ui, menu, focus);
-    action = top_bar(ui, menu.top_bar, focus).or(action);
-    action = panel_options(ui, menu.panels, focus).or(action);
-    action = card_headers(ui, menu.card_headers, focus).or(action);
+    action = top_bar(ui, text, menu.top_bar, focus).or(action);
+    action = panel_options(ui, text, menu.panels, focus).or(action);
+    action = card_headers(ui, text, menu.card_headers, focus).or(action);
     Menu::separator(ui);
-    Menu::heading(ui, tr("window_menu.window"));
+    Menu::heading(ui, &text.window);
     let mut on = menu.keep_on_top;
-    let key = tr("window_options.keep_on_top");
+    let key = text.keep_on_top.as_str();
     ui.horizontal(|ui| {
-        ui.add_space(8.0);
+        ui.add_space(t.space_8);
         ui.label(key);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_space(8.0);
+            ui.add_space(t.space_8);
             let response = crate::preferences::theme_option_switch(ui, key, &mut on);
             solidcraft_ui_registry::publish_target("window_options:keep_on_top", response.rect);
             focus.row(ui, &response);
@@ -271,13 +301,13 @@ fn middle(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, state: &mut State, focus: 
     }
 
     let (size_action, size_flyout) = sizes(ui, id, menu, state, focus);
-    let (display_action, flyout) = displays(ui, id, menu.displays, state, focus);
+    let (display_action, flyout) = displays(ui, id, &text.move_to_display, menu.displays, state, focus);
     action = display_action.or(size_action).or(action);
     for (key, label, icon, shortcut, choice) in [
-        ("rename", "window_menu.rename", "rename", "F2", Action::Rename),
-        ("use_defaults", "window_menu.use_default", "star", "", Action::UseAsDefault),
+        ("rename", &text.rename, "rename", "F2", Action::Rename),
+        ("use_defaults", &text.use_default, "star", "", Action::UseAsDefault),
     ] {
-        let response = row(ui, key, tr(label), icon, shortcut);
+        let response = row(ui, key, label, icon, shortcut);
         focus.row(ui, &response);
         if response.clicked() {
             action = Some(choice);
@@ -291,7 +321,7 @@ fn ribbon_options(ui: &mut Ui, menu: &WindowMenu<'_>, focus: &mut FocusRows) -> 
     let mut ribbon = menu.ribbon;
     let mut auto_hide = menu.ribbon_auto_hide;
     let t = Tokens::get();
-    let label = tr("window_ribbon.ribbon");
+    let label = menu.text.ribbon.as_str();
     ui.horizontal(|ui| {
         ui.add_space(t.space_8);
         ui.label(label);
@@ -302,9 +332,9 @@ fn ribbon_options(ui: &mut Ui, menu: &WindowMenu<'_>, focus: &mut FocusRows) -> 
             focus.row(ui, &response);
         });
     });
-    let label = tr("window_ribbon.auto_hide");
+    let label = menu.text.auto_hide.as_str();
     let available = menu.ribbon;
-    let name = if available { label } else { tr("window_ribbon.auto_hide_unavailable") };
+    let name = if available { label } else { menu.text.auto_hide_unavailable.as_str() };
     ui.add_enabled_ui(available, |ui| {
         ui.horizontal(|ui| {
             ui.add_space(t.space_8 + 22.0);
@@ -326,11 +356,11 @@ fn ribbon_options(ui: &mut Ui, menu: &WindowMenu<'_>, focus: &mut FocusRows) -> 
     }
 }
 
-fn panel_options(ui: &mut Ui, current: bool, focus: &mut FocusRows) -> Option<Action> {
+fn panel_options(ui: &mut Ui, text: &WindowText, current: bool, focus: &mut FocusRows) -> Option<Action> {
     use crate::BackingTooltipExt as _;
     let t = Tokens::get();
-    let label = tr("window_panels.other_panels");
-    let description = tr("window_panels.workspace_panels");
+    let label = text.other_panels.as_str();
+    let description = text.workspace_panels.as_str();
     let mut panels = current;
     ui.horizontal(|ui| {
         ui.add_space(t.space_8);
@@ -345,18 +375,18 @@ fn panel_options(ui: &mut Ui, current: bool, focus: &mut FocusRows) -> Option<Ac
     (panels != current).then_some(Action::Panels(panels))
 }
 
-fn top_bar(ui: &mut Ui, mode: TopBar, focus: &mut FocusRows) -> Option<Action> {
-    let labels = [tr("window_options.always"), tr("window_topbar.edge")];
+fn top_bar(ui: &mut Ui, text: &WindowText, mode: TopBar, focus: &mut FocusRows) -> Option<Action> {
+    let labels = [text.always.as_str(), text.edge.as_str()];
     let targets = ["window_options:top_bar:always", "window_options:top_bar:edge"];
     let selected = usize::from(mode == TopBar::Edge);
-    segment_row(ui, tr("window_topbar.top_bar"), selected, &labels, &targets, 170.0, focus)
+    segment_row(ui, &text.top_bar, selected, &labels, &targets, 170.0, focus)
         .map(|index| Action::TopBar(if index == 0 { TopBar::Always } else { TopBar::Edge }))
 }
 
-fn card_headers(ui: &mut Ui, headers: CardHeaders, focus: &mut FocusRows) -> Option<Action> {
-    let labels = [tr("window_options.always"), tr("window_options.on_hover"), tr("window_options.hidden")];
+fn card_headers(ui: &mut Ui, text: &WindowText, headers: CardHeaders, focus: &mut FocusRows) -> Option<Action> {
+    let labels = [text.always.as_str(), text.on_hover.as_str(), text.hidden.as_str()];
     let targets = ["window_options:headers:always", "window_options:headers:hover", "window_options:headers:hidden"];
-    segment_row(ui, tr("window_options.card_headers"), headers.index(), &labels, &targets, 210.0, focus)
+    segment_row(ui, &text.card_headers, headers.index(), &labels, &targets, 210.0, focus)
         .and_then(|index| CardHeaders::ALL.get(index).copied())
         .map(Action::CardHeaders)
 }
@@ -372,13 +402,13 @@ fn segment_row(
 ) -> Option<usize> {
     let mut changed = false;
     ui.push_id(label, |ui| {
+        let t = Tokens::get();
         ui.horizontal(|ui| {
-            ui.add_space(8.0);
+            ui.add_space(t.space_8);
             ui.label(label);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(8.0);
+                ui.add_space(t.space_8);
                 let width = ui.available_width().min(max_width);
-                let t = Tokens::get();
                 ui.allocate_ui_with_layout(vec2(width, ROW_HEIGHT), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     // A segment has the usual native focus target. Register the selected one as the
                     // row's default target and preserve the active segment when navigating from it.
@@ -417,8 +447,8 @@ fn segment_row(
     changed.then_some(selected)
 }
 
-fn displays(ui: &mut Ui, id: Id, displays: &[DisplayChoice<'_>], state: &mut State, focus: &mut FocusRows) -> (Option<Action>, Option<Rect>) {
-    let mut row = MenuItem::new("window_options:display", tr("window_menu.move_to_display"), "display");
+fn displays(ui: &mut Ui, id: Id, label: &str, displays: &[DisplayChoice<'_>], state: &mut State, focus: &mut FocusRows) -> (Option<Action>, Option<Rect>) {
+    let mut row = MenuItem::new("window_options:display", label, "display");
     row.shortcut = displays.iter().find(|display| display.current).map_or("", |display| display.name);
     row.submenu = true;
     row.enabled = !displays.is_empty();
@@ -469,7 +499,7 @@ fn displays(ui: &mut Ui, id: Id, displays: &[DisplayChoice<'_>], state: &mut Sta
 
 fn sizes(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, state: &mut State, focus: &mut FocusRows) -> (Option<Action>, Option<Rect>) {
     let value = format!("{}%", menu.interface_size);
-    let mut row = MenuItem::new("window_options:interface_size", tr("window_size.interface_size"), "zoom");
+    let mut row = MenuItem::new("window_options:interface_size", &menu.text.interface_size, "zoom");
     row.shortcut = &value;
     row.submenu = true;
     row.highlighted = state.sizes;

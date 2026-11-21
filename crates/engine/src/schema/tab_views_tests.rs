@@ -131,7 +131,10 @@ fn window_commands_check_and_echo_requests_without_editing_the_design() {
     assert_keys(input_schema_for::<TabViewLinkParams>(), &["mode", "window"]);
     assert_keys(input_schema_for::<TabWindowCleanParams>(), &["on", "window"]);
     assert_keys(input_schema_for::<TabWindowOptionParams>(), &["window"]);
-    assert_keys(input_schema_for::<TabWindowSetOptionsParams>(), &["card_headers", "keep_on_top", "window"]);
+    assert_keys(
+        input_schema_for::<TabWindowSetOptionsParams>(),
+        &["card_headers", "interface_size", "keep_on_top", "panels", "ribbon", "ribbon_auto_hide", "top_bar", "window"],
+    );
 
     let mut session = Session { param_check: ParamCheck::Strict, ..Session::default() };
     let before = session.doc.to_json();
@@ -204,7 +207,10 @@ fn window_schemas_cover_host_replies() {
             output_schema_for::<TabWindowListReply>(),
         ),
         (json!({"returned":[2,3]}), output_schema_for::<TabWindowCloseReply>()),
-        (json!({"window": 1, "options": {"card_headers": "hidden", "keep_on_top": false}}), output_schema_for::<TabWindowOptionsReply>()),
+        (
+            json!({"window": 1, "options": {"card_headers": "hidden", "keep_on_top": false, "interface_size": 100, "panels": false, "ribbon": false, "ribbon_auto_hide": true, "top_bar": "always"}}),
+            output_schema_for::<TabWindowOptionsReply>(),
+        ),
     ] {
         let schema = schema.as_value();
         assert!(conforms(schema, schema, &value), "{value} doesn't match {schema}");

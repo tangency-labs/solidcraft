@@ -4,6 +4,11 @@ use crate::window_options_menu::{CardHeaders, TopBar, WindowMenu};
 use egui::{Color32, Mesh, Painter, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 use solidcraft_theme::Tokens;
 
+/// The miniature window, in its own units.
+const WINDOW: egui::Vec2 = egui::Vec2::new(900.0, 560.0);
+/// The card's miniature cube face, in the same units.
+const CARD_FACE: egui::Vec2 = egui::Vec2::splat(78.0);
+
 pub(crate) fn show(ui: &mut Ui, menu: &WindowMenu<'_>, max_height: f32) {
     let width = (ui.available_width() - 16.0).max(0.0);
     let height = (width * 0.65).min(max_height);
@@ -11,16 +16,15 @@ pub(crate) fn show(ui: &mut Ui, menu: &WindowMenu<'_>, max_height: f32) {
         return;
     }
     ui.horizontal(|ui| {
-        ui.add_space(8.0);
+        ui.add_space(Tokens::get().space_8);
         let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
-        let label = solidcraft_ui_text::tr("window_menu.preview");
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, label));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, &menu.text.preview));
         let t = Tokens::get();
         let painter = ui.painter_at(rect);
         desktop(&painter, rect, t.accent_soft.lerp_to_gamma(t.figure_ground, 0.32), t.surface_accent.lerp_to_gamma(t.figure_ground, 0.45));
         let inset = (rect.height() * 0.055).min(12.0);
-        let scale = ((rect.width() - 2.0 * inset) / 900.0).min((rect.height() - 2.0 * inset) / 560.0);
-        let window = Rect::from_center_size(rect.center(), vec2(900.0, 560.0) * scale);
+        let scale = ((rect.width() - 2.0 * inset) / WINDOW.x).min((rect.height() - 2.0 * inset) / WINDOW.y);
+        let window = Rect::from_center_size(rect.center(), WINDOW * scale);
         let radius = (16.0 * scale).round() as u8;
         for (spread, opacity) in [(18.0, 0.12), (10.0, 0.20), (3.0, 0.30)] {
             painter.rect_filled(window.translate(vec2(0.0, 12.0 * scale)).expand(spread * scale), radius, t.figure_shadow.gamma_multiply(opacity));
@@ -74,7 +78,7 @@ fn miniature(painter: &Painter, window: Rect, scale: f32, menu: &WindowMenu<'_>,
                 tab.center(),
                 egui::Align2::CENTER_CENTER,
                 solidcraft_ui_text::tr(label),
-                crate::type_face::semibold(12.0 * scale),
+                crate::type_face::semibold(t.font_body * scale),
                 t.app_bar_text,
             );
         }
@@ -105,7 +109,7 @@ fn miniature(painter: &Painter, window: Rect, scale: f32, menu: &WindowMenu<'_>,
         }
         CardHeaders::Hidden => {}
     }
-    let top = Rect::from_center_size(card.center() + vec2(0.0, 6.0 * scale), vec2(78.0, 78.0) * scale);
+    let top = Rect::from_center_size(card.center() + vec2(0.0, 6.0 * scale), CARD_FACE * scale);
     painter.rect(top, 0, t.figure_face_top, Stroke::new(3.0 * scale, t.figure_line), StrokeKind::Inside);
     if menu.panels {
         let top = if menu.ribbon { 146.0 } else { 62.0 };
