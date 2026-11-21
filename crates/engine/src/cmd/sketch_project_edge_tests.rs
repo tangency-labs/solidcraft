@@ -126,13 +126,13 @@ fn lost(s: &Session) -> Option<String> {
     r.error.as_deref().and_then(solidcraft_doc::lost_projection_parts).filter(|t| t.feature == "Top").map(|t| t.listed.to_string())
 }
 
-/// How sketch `Top` names its projected edge: by its body and its curve, never by the edge's
-/// persistent name `name`.
+/// How sketch `Top` names its projected edge: by its body, its curve and the feature that made
+/// the edge (the plate's side and top), never by the edge's persistent name `name`.
 #[track_caller]
 fn assert_lost_edge(s: &Session, name: &str) {
     let sk = s.doc.sketch(s.doc.find_feature("Top").unwrap().id).unwrap();
     let curve = &sk.curves[sk.link_curves(&sk.links[0].id)[0]].id;
-    assert_eq!(lost(s), Some(format!("projected edge of Body1 (curve {curve})")), "{}", trouble(s));
+    assert_eq!(lost(s), Some(format!("projected edge of Body1 (curve {curve}; made by Plate)")), "{}", trouble(s));
     assert!(!trouble(s).contains(name), "{}", trouble(s));
 }
 

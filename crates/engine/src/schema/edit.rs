@@ -19,6 +19,17 @@ pub struct AssistantParams {}
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct AssistantResult {}
 
+/// Reset the connected app's saved application bar. No design or parameters are needed.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AppBarResetParams {}
+
+/// Validated reset request; the connected app applies it to its toolbar preferences.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AppBarResetResult {
+    pub reset: bool,
+}
+
 /// Command search is UI-owned and takes no parameters.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -1165,7 +1176,7 @@ impl JsonSchema for CommandParams {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "The parameters of the feature's command, as `describe_command` shows them for it: the feature is rebuilt from them. Keys it takes that this leaves out take their defaults, except that some are kept from the feature being edited: an extrude's or revolve's `convention` and an extrude's run-to body, a feature's `participants`, a frame member's `names` (when `body_name` is unchanged), a thread's old size, a perforation's outline and an emboss's face. Any value is read here and passed on, and the command refuses what is not its parameters. `name` is ignored: the feature keeps its name.",
+            "description": "The parameters of the feature's command, as `describe_command` shows them for it: the feature is rebuilt from them. Keys it takes that this leaves out take their defaults, except that some are kept from the feature being edited: an extrude's or revolve's `convention` and an extrude's run-to body, a feature's `participants`, a frame member's `names` (when `body_name` is unchanged) and `next_pair`, a thread's old size, a perforation's outline and an emboss's face. Any value is read here and passed on, and the command refuses what is not its parameters. `name` is ignored: the feature keeps its name.",
             "type": "object"
         })
     }
@@ -1565,7 +1576,28 @@ mod tests {
     use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
     #[test]
+    fn app_bar_reset_has_an_empty_contract_and_a_typed_reply() {
+        let spec = crate::find_command("ui.appBarReset").unwrap();
+        let contract = spec.contract.unwrap();
+        assert!(contract.allowed_keys().is_empty());
+        assert!(contract.check(&json!({})).is_empty());
+        for input in [json!({"reset":false}), json!([]), json!(false), json!(5), json!("reset")] {
+            assert!(!contract.check(&input).is_empty(), "{input}");
+        }
+        let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+        let error = s.execute(spec.id, &json!({"reset":false})).unwrap_err().to_string();
+        assert!(error.contains("unknown key `reset`"), "{error}");
+        let value = s.execute(spec.id, &json!({})).unwrap();
+        assert_eq!(value, json!({"reset":true}));
+        let output = spec.output.unwrap()();
+        assert_eq!(output.as_value().pointer("/properties/reset/type"), Some(&json!("boolean")));
+        assert_eq!(output.as_value().get("required"), Some(&json!(["reset"])));
+        assert!(conforms(output.as_value(), output.as_value(), &value));
+    }
+
+    #[test]
     fn schemas_and_the_key_check_agree() {
+        assert_keys(input_schema_for::<super::AppBarResetParams>(), &[]);
         assert_keys(input_schema_for::<RepeatParams>(), &[]);
         assert_keys(input_schema_for::<AssistantParams>(), &[]);
         assert_keys(input_schema_for::<PaletteParams>(), &[]);

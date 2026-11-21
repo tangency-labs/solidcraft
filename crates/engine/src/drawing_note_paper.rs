@@ -9,6 +9,7 @@
 
 use solidcore_record::Vec2;
 use solidcraft_doc::drawing::note::Note;
+use solidcraft_geom::Aabb2;
 use solidcraft_geom::paper::annotate::{LANDING_PER_LINE_WIDTH, Leader};
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
 use solidcraft_sketch::PaperFonts;
@@ -52,6 +53,17 @@ pub fn label_group(view: u64, text: &str, lettering: &PaperFonts) -> (OnPaper, V
     let items = placed(text.runs, text.half, LABEL_MM, Vec2::ZERO, Vec2::X).collect();
     let group = Group { object: view, kind: ObjectKind::ViewLabel, items };
     (OnPaper { group, fonts: text.fonts, why: text.why, pending: text.pending, layout: Layout::default() }, text.half)
+}
+
+/// The box `note`'s text, reading `text`, takes round its place (from its sheet's corner, or from
+/// its view's centre), set in `lettering` as [`note_group`] sets it; None while it isn't set.
+pub fn text_box(note: &Note, text: &str, lettering: &PaperFonts) -> Option<Aabb2> {
+    let set = Text::set(Some(text), note.cap_mm.unwrap_or(TEXT_MM), lettering);
+    if set.runs.is_empty() {
+        return None;
+    }
+    let centre = Vec2::new(note.at[0], note.at[1]);
+    Some(Aabb2 { min: centre - set.half, max: centre + set.half })
 }
 
 /// A leader from `tip` to the text `half` in size round `centre`. From beside the text it ends with a

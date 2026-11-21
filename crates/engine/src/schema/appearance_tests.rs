@@ -1,9 +1,9 @@
 use serde_json::{Value, json};
 
 use super::{
-    AppearanceAssignParams, AppearanceAssignResult, AppearanceCopyParams, AppearanceCopyResult, AppearanceLibraryParams, AppearanceLibraryResult,
-    AppearanceListParams, AppearanceListResult, AppearancePaintParams, AppearancePaintResult, AppearancePickUpParams, AppearancePickUpResult,
-    ChainTarget,
+    AppearanceAssignParams, AppearanceAssignResult, AppearanceCopyParams, AppearanceCopyResult, AppearanceFavoriteParams, AppearanceFavoriteResult,
+    AppearanceLibraryParams, AppearanceLibraryResult, AppearanceListParams, AppearanceListResult, AppearancePaintParams, AppearancePaintResult,
+    AppearancePickUpParams, AppearancePickUpResult, ChainTarget,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -16,6 +16,7 @@ fn schemas_and_the_key_check_agree() {
         &["appearance", "bodies", "body", "color", "components", "faces", "name", "opacity", "pbr"],
     );
     assert_keys(input_schema_for::<AppearanceLibraryParams>(), &[]);
+    assert_keys(input_schema_for::<AppearanceFavoriteParams>(), &["favorite", "look"]);
     assert_keys(input_schema_for::<AppearanceListParams>(), &["body"]);
     assert_keys(input_schema_for::<AppearancePaintParams>(), &["appearance", "color", "done", "name", "opacity", "pbr"]);
     assert_keys(input_schema_for::<AppearancePickUpParams>(), &["target"]);
@@ -40,6 +41,10 @@ fn strict_keeps_todays_errors() {
         ("appearance.paint", json!({"appearance": "not in the library"})),
         // A target of the right shape that names no body is the handler's to refuse too.
         ("appearance.pick_up", json!({"target": {"body": "NoSuchBody"}})),
+        // A favourite's look is read by the same parser, so an empty or unknown one is the
+        // handler's to refuse in both modes; the contract only sees the two keys around it.
+        ("appearance.favorite", json!({"look": {}, "favorite": true})),
+        ("appearance.favorite", json!({"look": {"appearance": "not in the library"}, "favorite": true})),
     ]);
 }
 
@@ -273,4 +278,74 @@ fn copy_refusals_stay_the_chains_below_strict() {
         assert_eq!(error(json!({}), level), bad_params("appearance.chain", "give one target object"));
     }
     assert_eq!(error(json!({}), ParamCheck::Strict), bad_params("appearance.copy", "`target` is required"));
+}
+
+/// Marking a look as a favourite answers with the look the call described, in the shape
+/// `appearance.copy` reports it, and the preference back. The look keys are the five of
+/// `appearance.assign`, read by the same parser, so a colour with a label and PBR comes back as it
+/// was given.
+#[test]
+fn a_favourite_look_answers_with_its_schema() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    let matches = |schema: schemars::Schema, id: &str, reply: &Value| {
+        let schema = schema.as_value();
+        assert!(conforms(schema, schema, reply), "{id}: {reply} doesn't match {schema}");
+    };
+    let described = run("engine.describe", json!({"command": "appearance.favorite"}));
+    assert_eq!(described["id"], "appearance.favorite", "the command is described by its own id");
+    let input = input_schema_for::<AppearanceFavoriteParams>();
+    let input = input.as_value();
+    let mut required: Vec<&str> = input["required"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    required.sort_unstable();
+    assert_eq!(required, ["favorite", "look"], "a favourite names a look and the preference");
+    assert_eq!(input["$defs"]["FavoriteLook"]["additionalProperties"], false, "the look takes the assignment's look keys only");
+    let pbr = json!({"metallic": 0.2, "roughness": 0.3, "dielectric_ior": 1.6});
+    let liked = run("appearance.favorite", json!({"look": {"appearance": "Copper"}, "favorite": true}));
+    assert_eq!(liked["look"]["name"], "Copper", "{liked}");
+    assert_eq!(liked["favorite"], true, "{liked}");
+    assert!(liked.get("param_warnings").is_none(), "{liked}");
+    matches(output_schema_for::<AppearanceFavoriteResult>(), "appearance.favorite", &liked);
+    let custom = run("appearance.favorite", json!({"look": {"color": "#345678", "name": "Favourite", "pbr": pbr.clone()}, "favorite": false}));
+    assert_eq!(custom["look"], json!({"name": "Favourite", "color": "#345678", "opacity": 1.0, "pbr": pbr}), "{custom}");
+    assert_eq!(custom["favorite"], false, "{custom}");
+    assert!(custom.get("param_warnings").is_none(), "{custom}");
+    matches(output_schema_for::<AppearanceFavoriteResult>(), "appearance.favorite", &custom);
+    // A key the command doesn't take is refused below strict too, by the handler's own
+    // `deny_unknown_fields` type, exactly as before the contract: no call here answers with
+    // warnings, and the published output schema is what a call that runs really answers.
+    let refused = |level: ParamCheck| {
+        let mut s = Session { param_check: level, ..Session::default() };
+        s.execute("appearance.favorite", &json!({"look": {"appearance": "Copper"}, "favorite": true, "favourite": true})).err().map(|e| e.to_string())
+    };
+    assert_eq!(refused(ParamCheck::Warn), bad_params("appearance.favorite", "unknown field `favourite`, expected `look` or `favorite`"));
+    assert_eq!(refused(ParamCheck::Strict), bad_params("appearance.favorite", "unknown key `favourite`; did you mean `favorite`?"));
+}
+
+/// A favourite's own refusals: a missing preference is the contract's in strict and the handler's
+/// below it. The look's own keys stay the parser's in every mode, since the contract reads only the
+/// two keys around it, so a misspelt one leaves no look to read and the handler refuses it as it
+/// always did.
+#[test]
+fn favourite_refusals_name_the_command_called() {
+    let error = |p: Value, level: ParamCheck| {
+        let mut s = Session { param_check: level, ..Session::default() };
+        s.execute("appearance.favorite", &p).err().map(|e| e.to_string())
+    };
+    for level in [ParamCheck::Off, ParamCheck::Warn] {
+        assert_eq!(
+            error(json!({"look": {"appearance": "Copper"}}), level),
+            bad_params("appearance.favorite", "missing field `favorite`"),
+            "{level:?}"
+        );
+    }
+    assert_eq!(error(json!({"look": {"appearance": "Copper"}}), ParamCheck::Strict), bad_params("appearance.favorite", "`favorite` is required"));
+    for level in [ParamCheck::Off, ParamCheck::Warn, ParamCheck::Strict] {
+        assert_eq!(error(json!({"look": {}, "favorite": true}), level), bad_params("appearance.favorite", "give a look"), "{level:?}");
+        assert_eq!(
+            error(json!({"look": {"appearanc": "Copper"}, "favorite": true}), level),
+            bad_params("appearance.favorite", "give a look"),
+            "{level:?}"
+        );
+    }
 }

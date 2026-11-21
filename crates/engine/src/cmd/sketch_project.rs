@@ -268,8 +268,8 @@ fn state_for_sketch<'a>(
 /// name, component, occurrence path and frame.
 pub(super) type PlacedBodies = Vec<(String, String, u64, Vec<u64>, solidcraft_doc::Mat)>;
 
-/// Sketch links keep a further placement's body by the name the world gives it (`Block (Part:2)`,
-/// #9957), which a rename of the body or of its component changes: each link naming one of
+/// Sketch links and combine tools keep a further placement's body by the name the world gives it
+/// (`Block (Part:2)`, #9957), which a rename of the body or of its component changes: each link naming one of
 /// `before` (the placed bodies before the rename) now names what that body is called in `doc`.
 /// `renamed` is the body renamed (old name, new name), if one was.
 pub(super) fn follow_placed_renames(doc: &mut Document, st: &solidcraft_doc::ModelState, before: &PlacedBodies, renamed: Option<(&str, &str)>) {
@@ -292,10 +292,21 @@ pub(super) fn follow_placed_renames(doc: &mut Document, st: &solidcraft_doc::Mod
         return;
     }
     for f in &mut doc.features {
-        if let FeatureKind::Sketch { sketch, .. } = &mut f.kind {
-            for link in &mut sketch.links {
-                rename_link_body(&mut link.source, &renames);
+        match &mut f.kind {
+            FeatureKind::Sketch { sketch, .. } => {
+                for link in &mut sketch.links {
+                    rename_link_body(&mut link.source, &renames);
+                }
             }
+            // So do a combine's tools (#20040).
+            FeatureKind::Combine { tools, .. } => {
+                for tool in tools {
+                    if let Some(new) = renames.get(tool.0.as_str()) {
+                        tool.0.clone_from(new);
+                    }
+                }
+            }
+            _ => {}
         }
     }
 }
