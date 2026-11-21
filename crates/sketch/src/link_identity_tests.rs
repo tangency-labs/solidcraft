@@ -510,6 +510,7 @@ fn edge_on_face_saved_as_a_line_pair_keeps_the_line_an_offset_follows() {
         edge_name: None,
         vertex_name: None,
         curve_edges: Vec::new(),
+        profile_boundary: Vec::new(),
         auto_face: false,
         lost: false,
         name_dropped: false,

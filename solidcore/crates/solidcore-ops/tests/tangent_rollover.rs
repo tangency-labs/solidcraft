@@ -2117,18 +2117,36 @@ fn seam_reach() -> f64 {
 /// 6.03 on the closed surface's domain end), builds, checks valid at every level, and has the
 /// closed-form volume: the lobes' section plus the round's area, times the height. The round's
 /// rails lie at the ball's contacts.
+///
+/// Also every radius from 6.001 to 6.015 in steps of 0.001, and 6.025 to 6.04: just past the
+/// reach the rail on the ø60 wall lies 0.0005 to 0.03 past the seam, and the round's cap edges
+/// run along the body's cap edge between the seam's vertex and the rail's for that short
+/// length. That run was dropped as a tangent touch, being under a twentieth of the cap edge, and
+/// the piece then classified by a point test on the cap's boundary: by rounding outside the
+/// cap, when the trim collected the whole body and was refused as leaking ("the faces the rails
+/// enclose reach past the rails"; 12 to 22 of the radii 5.980 to 6.040, both modes, depending on
+/// rounding). Past the reach the round takes the seam's edge with the sliver: no edge runs through
+/// the seam's line, and the body has 6 faces (each lobe's wall in two, less the sliver, the round
+/// and the caps); below it, the seam's edge stays and the sliver's remainder makes 7.
 #[test]
 fn a_lone_round_between_two_cylinders_rolls_over_the_seam_of_one() {
     use solidcore::query::api_queries::edge_closest_point;
     let reach = seam_reach();
     assert!((reach - 6.0024).abs() < 1e-4, "seam reach {reach}");
+    let band = (1..=15).map(|i| 6.0 + 0.001 * f64::from(i));
+    let radii: Vec<f64> = [2.0, 5.0, 5.99, 6.0, 6.01, 6.02, 6.03, 6.1, 8.0, 10.0, 14.0]
+        .into_iter()
+        .chain(band)
+        .chain([6.025, 6.035, 6.04])
+        .collect();
+    let seam = on_second_lobe(LOBE_SEAM.to_degrees());
     for corpus in [true, false] {
         if corpus {
             fixes();
         } else {
             session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
         }
-        for r in [2.0, 5.0, 5.99, 6.0, 6.01, 6.02, 6.03, 6.1, 8.0, 10.0, 14.0] {
+        for &r in &radii {
             let b = two_lobes();
             let (px, py) = lobe_crossing();
             let e = edge_at(&b, [px, py, LOBE_HEIGHT / 2.0]);
@@ -2164,6 +2182,18 @@ fn a_lone_round_between_two_cylinders_rolls_over_the_seam_of_one() {
                     );
                 }
             }
+            // the seam's edge, kept below the reach and taken by the round past it
+            let q = solidcore::Vec3::new(seam.0, seam.1, 7.5);
+            let seam_edge = brep.edge_list().iter().any(|&e| {
+                edge_closest_point(&k, &brep, e, q)
+                    .unwrap()
+                    .closest
+                    .distance
+                    < 1e-7
+            });
+            assert_eq!(seam_edge, r < reach, "corpus {corpus} r {r}: seam edge");
+            let faces = if r < reach { 7 } else { 6 };
+            assert_eq!(brep.face_list().len(), faces, "corpus {corpus} r {r}");
         }
     }
 }

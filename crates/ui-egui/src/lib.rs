@@ -12,6 +12,7 @@ use crate::ui_kit::recent_colors;
 pub mod access;
 pub mod agent_chat;
 pub mod agent_cursor;
+pub mod agent_label;
 pub mod ai_connect;
 pub use solidcraft_ui_kit::app_bar;
 pub use solidcraft_ui_kit::blur;
@@ -129,6 +130,7 @@ mod kit_gallery_tests;
 mod kit_host_tests;
 mod length_input;
 pub mod library;
+pub mod link_folders_prompt;
 mod linked_source;
 pub mod links;
 #[cfg(test)]
@@ -247,6 +249,7 @@ pub mod pencil;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
+mod plugin_events;
 mod plugin_images;
 pub mod plugin_install;
 pub(crate) mod plugin_menu;
@@ -292,6 +295,7 @@ pub mod scenario;
 pub(crate) mod scene_palette;
 pub mod select_other;
 pub mod selection;
+pub(crate) mod selection_mode;
 pub mod semantic_content;
 pub mod settings_profiles;
 #[cfg(test)]
@@ -395,6 +399,7 @@ mod viewport_details;
 mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
+pub mod wheel_hint;
 pub use solidcraft_ui_kit::window_chrome;
 mod wireframe_silhouettes;
 pub mod workspace;
@@ -450,17 +455,15 @@ pub struct UiState {
     pub dark: bool,
     /// Selection filter: kinds a click doesn't pick (`vertices`, `edges`, `faces`, `sketch`).
     pub pick_off: Vec<String>,
-    /// A click on a face picks its whole body (Modelling; Preferences › Sketch › Click selects).
-    pub pick_bodies: bool,
-    /// A face picks its exact component occurrence (Modelling).
-    pub pick_components: bool,
     /// The Render workspace's own Body / Face / Component choice: `"body"`, `"face"` or
-    /// `"component"`. It is kept apart from Modelling's so a Body chosen in Render does not
-    /// leave Modelling picking whole bodies, nor reach the preferences file.
+    /// `"component"`. It is kept apart from Modelling's `pick_mode` so a Body chosen in Render
+    /// does not leave Modelling picking whole bodies, nor reach the preferences file.
     pub render_pick: String,
     /// The selection shape (#4376): a drag in the view draws a freehand lasso that takes what is
     /// wholly inside it, instead of the window/crossing rectangle. Off by default.
     pub lasso_select: bool,
+    /// What a click on the model picks (#4255, `select.mode`).
+    pub pick_mode: solidcraft_engine::PickMode,
     /// 0: shaded with edges, 1: shaded, 2: wireframe, 3: shaded with hidden edges.
     pub visual_style: u8,
     /// A soft shadow on the ground under the model (seen from above).
@@ -474,18 +477,6 @@ pub struct UiState {
     pub tool_cursor: bool,
     /// The colours picked last in any colour picker, newest first (#9234); kept between runs.
     pub recent_colors: Vec<[u8; 3]>,
-}
-
-impl UiState {
-    fn pick_mode(&self) -> &'static str {
-        if self.pick_components {
-            "component"
-        } else if self.pick_bodies {
-            "body"
-        } else {
-            "face"
-        }
-    }
 }
 
 impl Default for UiState {
@@ -508,10 +499,9 @@ impl Default for UiState {
             palette_open: false,
             dark: true,
             pick_off: Vec::new(),
-            pick_bodies: false,
-            pick_components: false,
             render_pick: "face".into(),
             lasso_select: false,
+            pick_mode: Default::default(),
             visual_style: 0,
             ground_shadow: true,
             up_axis: Default::default(),
@@ -847,6 +837,12 @@ pub struct SolveApp {
     pub disk_prompt: bool,
     /// Update Links, Open Linked Design or Reload from file waiting for a network server to be allowed.
     pub network_prompt: Option<network_prompt::NetworkPrompt>,
+    /// Designs just opened whose out-of-date links are in other folders, asking whether to load
+    /// them: one question per design, shown while its tab is.
+    pub link_folders_prompt: Vec<link_folders_prompt::LinkFoldersPrompt>,
+    /// Links held back by Not now, by design ([`solidcraft_engine::Session::uid`]) and component:
+    /// not read by themselves, nor asked about again, until their folder is allowed.
+    pub link_folders_held: Vec<(u64, u64)>,
     /// Designs left by crashed apps, offered for recovery.
     pub recoverable: Vec<solidcraft_engine::recovery::Entry>,
     /// The recovery folder holding this launch's reopen-guard marker (#5064); `None` when
@@ -951,6 +947,7 @@ pub struct SolveApp {
     /// in the plugins folder's grant store too, shared with the command line and headless MCP.
     plugin_grant_store: Option<solidcraft_engine::plugin::grant_store::Synced>,
     plugin_slots: plugin_slots::State,
+    plugin_events: plugin_events::State,
     /// The agent cursor acting out control requests.
     pub agent: agent_cursor::AgentCursor,
     /// The agent chat panel (docs/design/in-app-agent-chat.md).
@@ -973,6 +970,8 @@ pub struct SolveApp {
     pub library: library::LibraryState,
     /// The 3D mouse: which device, its reading, and the calibration window.
     pub space_mouse: space_mouse::Input,
+    /// The one-time question to make a smooth-scrolling mouse wheel zoom (`wheel_hint`).
+    pub wheel_hint: wheel_hint::State,
     pub file_load: file_load::FileLoad,
     /// An opened design's bodies still being meshed, off the UI thread.
     pub(crate) open_meshing: Option<open_meshing::Meshing>,
@@ -1005,17 +1004,11 @@ impl Drop for SolveApp {
 }
 
 impl SolveApp {
-    /// What a click on a face picks now: `"face"`, `"body"` or `"component"`. In the Render
-    /// workspace that is Render's own choice; elsewhere Modelling's.
+    /// What a click on a face picks now, seen as the selection filter's `"face"`, `"body"` or
+    /// `"component"`. In the Render workspace that is Render's own choice; elsewhere Modelling's
+    /// selection mode ([`selection_mode::picks`]).
     pub(crate) fn pick_mode(&self) -> &'static str {
-        if !render_workspace::active(self) {
-            return self.ui.pick_mode();
-        }
-        match self.ui.render_pick.as_str() {
-            "body" => "body",
-            "component" => "component",
-            _ => "face",
-        }
+        selection_mode::render_filter(selection_mode::picks(self))
     }
     /// A click on a face picks its whole body ([`SolveApp::pick_mode`]).
     pub(crate) fn picks_bodies(&self) -> bool {
@@ -1156,6 +1149,8 @@ impl SolveApp {
             lock_prompts: Vec::new(),
             disk_prompt: false,
             network_prompt: None,
+            link_folders_prompt: Vec::new(),
+            link_folders_held: Vec::new(),
             recoverable: Vec::new(),
             reopen_guard_dir: None,
             recovery_discard_all: false,
@@ -1207,6 +1202,7 @@ impl SolveApp {
             plugin_inspection_versions: Default::default(),
             plugin_grant_store: None,
             plugin_slots: Default::default(),
+            plugin_events: Default::default(),
             agent: Default::default(),
             shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
             styled: false,
@@ -1219,6 +1215,7 @@ impl SolveApp {
             home: home::HomeState::default(),
             library: library::LibraryState::default(),
             space_mouse: Default::default(),
+            wheel_hint: Default::default(),
             file_load: file_load::FileLoad::default(),
             open_meshing: None,
             open_meshing_next: false,
@@ -1385,6 +1382,8 @@ impl SolveApp {
     #[cfg(feature = "usage-stats")]
     pub fn load_usage_stats(&mut self, stored: Option<&str>) {
         self.usage.store = usage_stats::Store::from_stored(stored);
+        // Kept between runs from now on: the first start (nothing stored) shows the notice.
+        self.usage.hosted = true;
     }
 
     /// The usage statistics for the host to store under `usage_stats::STORAGE_KEY`.
@@ -1423,7 +1422,7 @@ impl SolveApp {
             "tool_cursor": self.ui.tool_cursor,
             "perspective": self.ui.perspective,
             "auto_ortho_faces": self.ui.auto_ortho_faces,
-            "pick_bodies": self.ui.pick_bodies,
+            "pick_mode": self.ui.pick_mode,
             "auto_project": self.session.auto_project,
             "project_construction": self.session.project_construction,
             "visual_style": self.ui.visual_style,
@@ -1491,8 +1490,8 @@ impl SolveApp {
         if let Some(a) = flag("auto_ortho_faces") {
             self.ui.auto_ortho_faces = a;
         }
-        if let Some(b) = flag("pick_bodies") {
-            self.ui.pick_bodies = b;
+        if let Some(mode) = selection_mode::from_prefs(&v) {
+            self.ui.pick_mode = mode;
         }
         if let Some(a) = flag("auto_project") {
             self.session.auto_project = a;
@@ -1903,8 +1902,7 @@ impl SolveApp {
                 if render_workspace::active(self) {
                     self.ui.render_pick = mode.unwrap_or("face").to_string();
                 } else {
-                    self.ui.pick_bodies = mode == Some("body");
-                    self.ui.pick_components = mode == Some("component");
+                    self.ui.pick_mode = selection_mode::from_render_filter(mode);
                 }
                 self.ui.pick_off.retain(|kind| kind != "faces");
             }
@@ -1923,6 +1921,11 @@ impl SolveApp {
             }
             if id == "view.origin_axes_across_view" {
                 self.preferences.origin_axes_across_view = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
+            }
+            if id == "select.mode"
+                && let Some(mode) = v.get("mode").and_then(|m| serde_json::from_value(m.clone()).ok())
+            {
+                self.ui.pick_mode = mode;
             }
             if matches!(id, "view.ambient_occlusion" | "view.graphics_preset") {
                 self.preferences.ambient_occlusion = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
@@ -1956,6 +1959,11 @@ impl SolveApp {
             r => r,
         };
         self.finish_command(id, &r);
+        plugin_events::command_completed(self, id, r.is_ok());
+        if matches!(id, "select.mode" | "select.filter") {
+            // Parts and Components pick through the placements' walk: have it before the next frame draws.
+            selection_mode::prepare(self);
+        }
         if render_workspace::active(self)
             && matches!(id, "appearance.assign" | "appearance.paste")
             && let Ok(value) = &r
@@ -1977,7 +1985,7 @@ impl SolveApp {
                 // thread-local scope. The command's own label is translated too, so the echo
                 // reads the same way the toolbar button it came from does.
                 let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);
-                let label = language.label(command_label(id));
+                let label = &crate::agent_label::name_in(language, id);
                 // Frames of a gesture (a continuous view move, a part dragged by its joints) are
                 // not echoed one by one.
                 if v.get("continuous").and_then(Value::as_bool) != Some(true) {
@@ -2231,6 +2239,8 @@ impl SolveApp {
             && let Some(spec) = solidcraft_engine::find_command(id)
         {
             solidcraft_engine::usage::note(solidcraft_engine::usage::Bucket::Tools, spec.id);
+            // Timed from here until it is applied or cancelled (`usage_stats::tick`).
+            self.usage.started_tool = Some(spec.id);
         }
         self.tree.clear_folder_pick();
         // A command started from the folded ribbon's open panels closes them (#10112).
@@ -2459,6 +2469,7 @@ impl SolveApp {
             "view.visual_style" => Some(context_menu::Target::VisualStyle),
             "view.tool" => Some(context_menu::Target::ViewTool),
             "select.filter" => Some(context_menu::Target::SelectionFilter),
+            "select.mode" => Some(context_menu::Target::SelectionMode),
             _ => None,
         };
         if let Some(target) = choice {
@@ -4321,6 +4332,7 @@ impl SolveApp {
         render_workspace::displayed::finish(self, ui.ctx());
         documents::sync_views(self);
         documents::sync_window_title(self, ui.ctx());
+        plugin_events::tick(self, ui.ctx());
     }
 
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {
@@ -4353,6 +4365,7 @@ impl SolveApp {
         documents::prompt(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
         network_prompt::show(self, ui.ctx());
+        link_folders_prompt::show(self, ui.ctx());
         update::show(self, ui.ctx());
         install::show(self, ui.ctx());
         // Settings › AI's Add agent dialog: Settings opens over Home too (#3483).
