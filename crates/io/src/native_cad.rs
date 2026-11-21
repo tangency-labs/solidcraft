@@ -1,5 +1,6 @@
 //! Other CAD formats read through [cadmpeg](https://github.com/cadmpeg/cadmpeg): FreeCAD
-//! `.FCStd` and Rhino `.3dm`, and OpenUSD both ways ([`usd`]). cadmpeg decodes the file into its neutral model (CADIR). By default
+//! `.FCStd` and Rhino `.3dm`, and OpenUSD both ways ([`usd`]); Rhino and OpenUSD are also written
+//! through it ([`cadmpeg_export`]). cadmpeg decodes the file into its neutral model (CADIR). By default
 //! cadmpeg's STEP writer restates that as STEP, which the Import feature then reads and keeps like
 //! any STEP file ([`native_cad_to_step`]); with [`crate::StepReader::Cadmpeg`] (the Preferences
 //! switch "Import with cadmpeg", off by default) the model is read straight into B-rep records
@@ -10,7 +11,8 @@
 //! `sat` codec (a ShapeManager stream decoder that reads ACIS as one dialect), are not built.
 //!
 //! This module is the cadmpeg seam: the one place cadmpeg is called, returning the STEP text, the
-//! records or the OpenUSD bytes plus warnings. A cadmpeg-based STEP reader could be added here later and chosen by a setting, to
+//! records or the exported bytes plus warnings; an export writes the design into cadmpeg's model
+//! directly (`cadir_out`) and cadmpeg's writer writes the file (`export`). A cadmpeg-based STEP reader could be added here later and chosen by a setting, to
 //! compare with our own STEP reader, without changing that reader.
 
 /// File extensions read through cadmpeg (lower case).
@@ -89,6 +91,10 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
     traced_records(ir, product, system, colours, false).0
 }
 
+/// How the CADIR reader's note on a solid it could not close starts: it read the region again as an
+/// open surface of the faces that do read (the refusal follows).
+const OPEN_SURFACE: &str = "not closed, so its faces came in as an open surface: ";
+
 /// `ir`'s bodies as an import kept as records, written by `system`: each body region assembled
 /// into a record by `solidcore_cadir`, its pcurves without a closed form made as a STEP import's
 /// are ([`solidcraft_kernel::import_trims`]). Nothing passes through STEP text. CADIR's bodies
@@ -98,7 +104,8 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
 /// `product`. With `colours`, each body takes the colours the file gives it and its faces
 /// ([`Looks::paint_of`]). What could not be read (and what was repaired on the way) is in the
 /// warnings, each naming its body; with `shown`, a body whose B-rep cannot be read comes in as the
-/// mesh the file shows it with, where it has one. Also returns where each record body came from ([`validation::Origin`]), for checking the file's own
+/// mesh the file shows it with, where it has one, and so does a solid whose B-rep reads only as an
+/// open surface of the faces that do read ([`OPEN_SURFACE`]). Also returns where each record body came from ([`validation::Origin`]), for checking the file's own
 /// figures ([`validation::check`]).
 fn traced_records(
     ir: &cadmpeg_ir::document::CadIr,
@@ -116,7 +123,30 @@ fn traced_records(
     let mut unplaced = Vec::with_capacity(read.read.len());
     let looks = colours.then(|| Looks::of(ir));
     let layers = HiddenLayers::of(ir);
+    let has_triangles =
+        |id: &str| ir.model.tessellations.iter().any(|t| t.body.as_ref().is_some_and(|b| b.as_str() == id) && !t.triangles().is_empty());
+    // With `shown`, a solid the reader could not close, read as an open surface of the faces that
+    // do read, comes in as the mesh the file shows it with instead, where it has one: that mesh is
+    // the whole part, the open surface only some of its faces. A sheet, and a body with no mesh,
+    // keep the open surface.
+    let mut opened: std::collections::BTreeMap<&str, String> = std::collections::BTreeMap::new();
+    if shown {
+        for r in &read.read {
+            let solid = by_id.get(r.body.as_str()).is_some_and(|b| !matches!(b.kind, cadmpeg_ir::topology::BodyKind::Sheet));
+            let why = r.solid.notes.iter().find_map(|n| n.strip_prefix(OPEN_SURFACE));
+            if let Some(why) = why.filter(|_| solid && has_triangles(r.body.as_str())) {
+                opened.entry(r.body.as_str()).or_insert_with(|| why.to_string());
+            }
+        }
+    }
+    for (id, why) in &opened {
+        warnings.push(format!("{}: its B-rep was not imported ({why}): it came in as the mesh the file shows it with", label(id)));
+    }
+    let opened: std::collections::HashSet<String> = opened.into_keys().map(str::to_string).collect();
     for r in read.read {
+        if opened.contains(r.body.as_str()) {
+            continue;
+        }
         let body = by_id.get(r.body.as_str());
         let (color, paint) = looks.as_ref().map_or((None, None), |l| l.paint_of(ir, &r.body, &r.solid.face_origin));
         warnings.extend(r.solid.notes.iter().map(|n| format!("{}: {n}", label(&r.body))));
@@ -140,10 +170,9 @@ fn traced_records(
     }
     // With `shown`, a B-rep that cannot be read comes in as the mesh the file shows it with (an
     // OpenUSD `BrepArray`'s fallback mesh, a tessellation of its body), rather than not at all.
-    let has_triangles =
-        |id: &str| ir.model.tessellations.iter().any(|t| t.body.as_ref().is_some_and(|b| b.as_str() == id) && !t.triangles().is_empty());
-    let fallen: std::collections::HashSet<&str> =
+    let mut fallen: std::collections::HashSet<&str> =
         if shown { read.failures.iter().map(|f| f.body.as_str()).filter(|id| has_triangles(id)).collect() } else { Default::default() };
+    fallen.extend(opened.iter().map(String::as_str));
     warnings.extend(read.failures.iter().map(|f| {
         if fallen.contains(f.body.as_str()) {
             format!("{}: its B-rep was not imported ({}): it came in as the mesh the file shows it with", label(&f.body), f.message)
@@ -377,16 +406,131 @@ pub use design::NativeDesign;
 mod usd;
 pub use usd::{USD_EXTS, is_usd_path};
 
-/// `step` (STEP text SolidCraft wrote for the bodies to export) as an OpenUSD file called `file`:
-/// `.usda` text, `.usdc` or `.usd` binary, or a `.usdz` package. Returns the file's bytes and what
-/// it could not carry. Panics inside cadmpeg become errors.
-pub fn usd_from_step(step: &[u8], file: &str) -> Result<(Vec<u8>, Vec<String>), String> {
-    solidcraft_kernel::guard("cadmpeg USD export", || usd::from_step(step, file).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(
-        |e| match e {
-            solidcraft_kernel::KernelError::Invalid(m) => m,
-            e => e.to_string(),
-        },
-    )
+mod cadir_out;
+mod cadir_physics;
+mod cadir_textures;
+mod export;
+
+/// What the design's view hides, for an export that writes it: bodies by their world name
+/// (hidden themselves, by a folder or by a placement above them) and placements by their path
+/// (hidden themselves).
+#[derive(Clone, Debug, Default)]
+pub struct Hidden {
+    pub bodies: std::collections::BTreeSet<String>,
+    pub placements: Vec<Vec<u64>>,
+}
+
+/// The choices of an export through cadmpeg beyond its bodies, file and quality.
+#[derive(Clone, Debug, Default)]
+pub struct CadmpegOptions {
+    /// What the design's view hides, written hidden.
+    pub hidden: Hidden,
+    /// OpenUSD: the joints, grounding and each component's mass written as physics.
+    pub physics: bool,
+    /// OpenUSD: the image textures a render setup gives bodies, written into a `.usdz` package.
+    pub surfaces: Vec<SurfacePlan>,
+    /// OpenUSD: the pictures shown on the model (decals), written into a `.usdz` package.
+    pub decals: Vec<DecalPlan>,
+}
+
+/// A picture shown on the model: its image on a quad.
+#[derive(Clone, Debug)]
+pub struct DecalPlan {
+    pub name: String,
+    /// The component it belongs to (0: the design itself).
+    pub component: u64,
+    /// Its corners (bottom-left, bottom-right, top-right, top-left) in its component's frame and
+    /// in the world, mm.
+    pub local: [[f64; 3]; 4],
+    pub world: [[f64; 3]; 4],
+    /// Its PNG or JPEG image, and the image's SHA-256 (hex), naming the file it is written as.
+    pub image: SurfaceMap,
+}
+
+/// One image map of a [`SurfacePlan`]: its SHA-256 (hex), naming the file it is written as, and its
+/// PNG or JPEG bytes.
+#[derive(Clone, Debug)]
+pub struct SurfaceMap {
+    pub sha256: String,
+    pub bytes: std::sync::Arc<[u8]>,
+}
+
+/// The image maps a render setup gives one placement of a body: the textures of the body's look
+/// for an OpenUSD export.
+#[derive(Clone, Debug)]
+pub struct SurfacePlan {
+    /// The render setup's name.
+    pub setup: String,
+    /// The body as the design holds it: its definition name and component.
+    pub definition: String,
+    pub component: u64,
+    /// The placement bound (empty for a body of the design itself) and the body's world name.
+    pub path: Vec<u64>,
+    pub world: String,
+    /// The projection, in the body's definition frame (mm): a point `p` is at
+    /// `((p − origin)·u / |u|², (p − origin)·v / |v|²)` in the images, repeating.
+    pub origin: [f64; 3],
+    pub u: [f64; 3],
+    pub v: [f64; 3],
+    /// The image's v runs the other way (the built-in surfaces' images are stored so).
+    pub flip_v: bool,
+    /// How strongly the normal map tilts the surface, 0 to 1.
+    pub normal_strength: f64,
+    pub base_color: Option<SurfaceMap>,
+    pub normal: Option<SurfaceMap>,
+    pub roughness: Option<SurfaceMap>,
+    pub metallic: Option<SurfaceMap>,
+}
+
+impl CadmpegOptions {
+    /// Whether an export of `bodies` (all when empty) of `doc` writes the physics
+    /// [`Self::physics`] asks for: only the whole design, with its components, each placed
+    /// rigidly. Otherwise each body is written where the world shows it, without physics.
+    pub fn physics_fits(doc: &solidcraft_doc::Document, bodies: &[String]) -> bool {
+        bodies.is_empty() && !doc.occurrences.is_empty() && doc.occurrences.iter().all(|o| solidcraft_doc::is_placement(&o.transform))
+    }
+}
+pub(crate) use export::FREECAD_REFUSED;
+
+/// The bodies of `world` (the design's model placed in the world; all of them when `bodies` is
+/// empty) as a `format` file called `file`, written by cadmpeg: OpenUSD ([`crate::Format::Usd`],
+/// the extension picking the encoding) or Rhino ([`crate::Format::Rhino`]); FreeCAD is refused,
+/// as cadmpeg cannot write a new FreeCAD file yet. With no bodies chosen, a design with components
+/// keeps them where the format holds them: `model`, the model before placing, holds each
+/// component's bodies. `options` says what else is written. Meshes are made at `quality`. Returns
+/// the file's bytes and what it could not carry (`export` says what each format leaves out).
+/// Panics inside cadmpeg become errors.
+#[allow(clippy::too_many_arguments)]
+pub fn cadmpeg_export(
+    doc: &solidcraft_doc::Document,
+    model: &solidcraft_doc::ModelState,
+    world: &solidcraft_doc::ModelState,
+    bodies: &[String],
+    options: &CadmpegOptions,
+    file: &str,
+    quality: crate::MeshQuality,
+    format: crate::Format,
+) -> Result<(Vec<u8>, Vec<String>), String> {
+    solidcraft_kernel::guard("cadmpeg export", || {
+        export::from_design(doc, model, world, bodies, options, file, quality, format).map_err(solidcraft_kernel::KernelError::Invalid)
+    })
+    .map_err(|e| match e {
+        solidcraft_kernel::KernelError::Invalid(m) => m,
+        e => e.to_string(),
+    })
+}
+
+/// [`cadmpeg_export`] as OpenUSD: `.usda` text, `.usdc` or `.usd` binary, or a `.usdz` package.
+pub fn usd_from_design(
+    doc: &solidcraft_doc::Document,
+    model: &solidcraft_doc::ModelState,
+    world: &solidcraft_doc::ModelState,
+    bodies: &[String],
+    options: &CadmpegOptions,
+    file: &str,
+    quality: crate::MeshQuality,
+) -> Result<(Vec<u8>, Vec<String>), String> {
+    cadmpeg_export(doc, model, world, bodies, options, file, quality, crate::Format::Usd)
 }
 
 /// An OpenUSD file (`file` is its name) read for an import of its exact geometry, kept as records
