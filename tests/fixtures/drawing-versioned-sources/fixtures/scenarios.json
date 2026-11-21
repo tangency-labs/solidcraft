@@ -1,0 +1,132 @@
+{
+  "purpose": "Declarative acceptance inputs and oracles, not executable CLI commands or an application record schema.",
+  "history_labels": "C0/C1 are logical snapshots. The future harness creates actual commits in a disposable repository.",
+  "states": {
+    "C0": {
+      "drawing_name": "Versioned pair initial",
+      "plate_dimensions_mm": [
+        40,
+        30,
+        5
+      ],
+      "block_dimensions_mm": [
+        10,
+        10,
+        20
+      ],
+      "plate_volume_mm3": 6000,
+      "block_volume_mm3": 2000
+    },
+    "C1": {
+      "drawing_name": "Versioned pair changed",
+      "plate_dimensions_mm": [
+        60,
+        30,
+        5
+      ],
+      "block_dimensions_mm": [
+        12,
+        10,
+        20
+      ],
+      "plate_volume_mm3": 9000,
+      "block_volume_mm3": 2400
+    }
+  },
+  "cases": [
+    {
+      "id": "A1",
+      "start": "C0",
+      "action": "List drawing sources with both models present, then with both absent.",
+      "expected_paths": [
+        "../models/plate.solidcraft",
+        "../models/block.solidcraft"
+      ],
+      "source_open_calls": 0,
+      "source_evaluator_calls": 0
+    },
+    {
+      "id": "A2",
+      "start": "Repository head C1",
+      "action": "Open historical C0 using the repository revision resolver; repeat with a dirty current plate.",
+      "expected_state": "C0",
+      "forbid": [
+        "Head/current-source substitution",
+        "Working-copy mutation"
+      ],
+      "evidence": [
+        "Requested commit",
+        "Resolved source paths and blob IDs",
+        "Source bytes",
+        "Dimensions when evaluator exists"
+      ]
+    },
+    {
+      "id": "A3-save-as",
+      "start": "C0",
+      "action": "Save drawing as copies/review/pair.drawing.json",
+      "expected_paths": [
+        "../../models/plate.solidcraft",
+        "../../models/block.solidcraft"
+      ],
+      "sources_unchanged": true
+    },
+    {
+      "id": "A3-relink",
+      "start": "C0",
+      "action": "Move models/block.solidcraft to models/block-renamed.solidcraft and explicitly Relink source_b.",
+      "expected_paths": [
+        "../models/plate.solidcraft",
+        "../models/block-renamed.solidcraft"
+      ],
+      "expected": "Sheet B still documents the block, never the plate; references remain consistent."
+    },
+    {
+      "id": "A3-missing",
+      "start": "C0 plus genuinely generated baseline views",
+      "action": "Remove models/plate.solidcraft.",
+      "affected_view_state": "lost",
+      "forbid": [
+        "Claiming current",
+        "Silently using another source"
+      ]
+    },
+    {
+      "id": "A3-changed",
+      "start": "C0 plus genuinely generated baseline views",
+      "action": "Replace only plate.solidcraft with its C1 bytes.",
+      "affected_view_state_before_update": "out of date",
+      "current_only_after": "Successful generation/update against the correct changed source and full view inputs."
+    },
+    {
+      "id": "A3-no-cache",
+      "start": "C0 plus a genuinely generated baseline view and its verified existing derived cache",
+      "action": "Remove the verified baseline derived cache, reopen the drawing through the actual reader/session, and inspect authored identities and the allowed regeneration/no-cache state.",
+      "expected": "Authored records, IDs and references survive unchanged. The real provider either regenerates a result with valid current provenance or reports its agreed no-cache/pending state; it never claims the removed cache is current. No invented serialized status.",
+      "preconditions": [
+        "Generate a real view through the actual view/session provider.",
+        "Verify that the view has produced a nonempty derived cache before removal; fail the scenario setup if no cache was generated.",
+        "Record the authored drawing/source/sheet IDs, references and authored text before cache removal."
+      ],
+      "evidence": [
+        "Baseline view generation and cache-existence evidence",
+        "Cache removal evidence",
+        "Reopened authored IDs and references",
+        "Actual provider regeneration/no-cache observation"
+      ]
+    },
+    {
+      "id": "A3-broken-id",
+      "start": "C0",
+      "action": "After real writer binding, replace sheet A source reference with an unresolvable source ID; keep files present.",
+      "expected": "Damaged drawing reported; no automatic identity repair or retarget."
+    },
+    {
+      "id": "A4",
+      "start": "C0 bound by actual Drawing writer",
+      "action": "Save/open/save in plain and container forms; then regenerate/remove derived cache.",
+      "expected": "No-edit bytes identical in each form. Cache refresh leaves authored text unchanged. Cache never enters text form."
+    }
+  ],
+  "runtime_status": "Not executed: K2 authored record fields are bound; executable scenarios await the actual dependency/container/view/session providers."
+}

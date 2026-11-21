@@ -1,0 +1,27 @@
+{
+  "format": "solidcraft/1",
+  "name": "Acceptance plate",
+  "units": "mm",
+  "params": [],
+  "features": [
+    {
+      "id": 1,
+      "name": "Stock",
+      "suppressed": false,
+      "body_names": [
+        "Plate"
+      ],
+      "type": "box",
+      "corner": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "length": "60",
+      "width": "30",
+      "height": "5",
+      "operation": "new_body"
+    }
+  ],
+  "next_id": 2
+}
