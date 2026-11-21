@@ -2159,7 +2159,7 @@ pub(super) fn create_iso_parametric_curve(
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SrfInVolume(_)
         | SurfaceKind::Step(_) => {
-            // the SmSurface body
+            // the SmSurface body (a curve-bounded surface's: its basis's)
             let iso = surface.create_iso_parametric_curve(k, dir, value, 0.0, domain, false)?;
             Ok((iso.curve, iso.max_gap_3d))
         }
@@ -2174,7 +2174,7 @@ fn is_singularity(
     uv: Point2,
     tol: f64,
 ) -> Result<(bool, SurfParamType)> {
-    match surface.kind() {
+    match surface.geometry().kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity()),
 
         SurfaceKind::Cone(_)
@@ -2183,6 +2183,7 @@ fn is_singularity(
         | SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::BallPatch(_)
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SrfInVolume(_)
         | SurfaceKind::SurfOfRevolution(_)
@@ -2198,7 +2199,7 @@ fn is_singularity(
 /// `IsOnSeam(uv)` (virtual, default arguments): the plane override (a plane has no
 /// seam), else the base body.
 fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
-    match surface.kind() {
+    match surface.geometry().kind() {
         SurfaceKind::Plane(p) => Ok(p.is_on_seam().0),
 
         SurfaceKind::Cone(_)
@@ -2207,6 +2208,7 @@ fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
         | SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::BallPatch(_)
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SrfInVolume(_)
         | SurfaceKind::SurfOfRevolution(_)

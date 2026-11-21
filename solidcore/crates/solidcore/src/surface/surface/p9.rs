@@ -57,6 +57,8 @@ const OP: &str = "surface::surface::p9::find_tessellation_splits";
 const MAX_SPLITS: usize = 1_000_000;
 
 fn bss<'a>(k: &Kernel, surface: &'a Surface) -> Result<Cow<'a, BSplineSurface>> {
+    // (a curve-bounded surface is its basis over the same parameters)
+    let surface = surface.geometry();
     match surface.kind() {
         SurfaceKind::BSpline(s) => Ok(Cow::Borrowed(s)),
         SurfaceKind::ProceduralBlend(pb) => {
@@ -80,6 +82,7 @@ fn bss<'a>(k: &Kernel, surface: &'a Surface) -> Result<Cow<'a, BSplineSurface>> 
         SurfaceKind::SurfOfRevolution(s) => Ok(Cow::Borrowed(s.base())),
         // (the B-spline evaluation makes a missing NURB: GetOrCreateGwNurbPointer)
         SurfaceKind::SurfOfExtrusion(s) => s.base_with_nurb(k),
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)
@@ -116,8 +119,11 @@ fn typed_iso_curve(
     value: f64,
     approx_tol: f64,
 ) -> Result<(BSplineCurve, Curve)> {
+    // (a curve-bounded surface is its basis over the same parameters)
+    let surface = surface.geometry();
     let typed = match surface.kind_with_nurb(k)? {
         // (no override: the `SmSurface` body, whose approximation uses the tolerance)
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)
@@ -166,6 +172,8 @@ pub(super) fn implicit_iso(
     value: f64,
     left: bool,
 ) -> Result<Curve> {
+    // (a curve-bounded surface is its basis over the same parameters)
+    let surface = surface.geometry();
     // upstream's SmIsoCurve evaluates through the surface's virtual Evaluate: for an
     // SmPlane that is the analytic evaluation, not the NURB (whose bilinear
     // interpolation over the plane's +-1234567 analytic domain differs in the last bits),
@@ -175,6 +183,7 @@ pub(super) fn implicit_iso(
     | SurfaceKind::Sphere(_)
     | SurfaceKind::Torus(_)
     | SurfaceKind::ProceduralBlend(_)
+    // (CurveBounded: not reached, `Surface::geometry` peels it)
     | SurfaceKind::CurveBounded(_)
     | SurfaceKind::Step(_)
     | SurfaceKind::OffsetSurface(_)

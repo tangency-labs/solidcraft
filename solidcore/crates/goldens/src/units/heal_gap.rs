@@ -1648,16 +1648,28 @@ mod tests {
     /// result the global solve beats (sample 26 a local minimum along the `v = 0` side
     /// 6.9e-6 farther than the nearest point when a result nearer than its guess was taken;
     /// samples 27 to 31 already on main, which took a result farther than its guess).
-    /// Samples 26, 30 and 31 are certified now that a moved local result is kept only when
-    /// the global solve finds nothing as near. Samples 27 to 29 keep main's feet, which are
-    /// not the nearest points (their enclosures are 2.4e-4 to 2.7e-4 wide); they are asserted
-    /// not certified, so a fix of #17773's remaining case shows here.
+    /// Samples 30 and 31 are certified now that a moved local result is kept only when the
+    /// global solve finds nothing as near. Samples 27 to 29 keep main's feet, which are not
+    /// the nearest points (their enclosures are 2.4e-4 to 2.7e-4 wide). The surface is a
+    /// curve-bounded surface, which answers as its basis B-spline (#20163); sample 26 was
+    /// certified only while it did not: its global solve then had no control net and took a
+    /// grid guess, which reached the nearest point (distance 8.0416e-4). It is now its
+    /// basis's drop: the control-polygon guess and the local solve stop at the local minimum
+    /// along the `v = 0` side the moved local foot also found, 6.9e-6 farther (distance
+    /// 8.1109e-4, enclosure [8.0414e-4, 8.1109e-4]), as on a plain B-spline surface of the
+    /// same geometry on main. Its golden line is withdrawn: `gen0398` is listed known
+    /// failing under #17773 (`expected/known_failing.json`), so no wrong foot is blessed.
+    /// This test still runs it: the listed samples are asserted not certified, so a fix of
+    /// #17773 for B-spline surfaces fails here, and that fix certifies them, drops them
+    /// from the list and blesses the row again.
     #[test]
     fn wr56_gap_samples_drop_to_the_nearest_point() {
         use crate::certify::{evaluation_slack, nearest};
         const SAMPLE: usize = 16;
-        // (row, sample) not certified: main's feet, still kept (#17773)
-        const NOT_NEAREST: [(&str, usize); 3] = [("gen0398", 27), ("gen0398", 28), ("gen0398", 29)];
+        // (row, sample) not certified: main's feet, still kept, and the basis's drop of
+        // sample 26 (#17773)
+        const NOT_NEAREST: [(&str, usize); 4] =
+            [("gen0398", 26), ("gen0398", 27), ("gen0398", 28), ("gen0398", 29)];
         let mut failures = Vec::new();
         for name in ["gen0013", "gen0056", "gen0178", "gen0398"] {
             let case = crate::case::regression_case(&Runner, name);
@@ -1708,6 +1720,79 @@ mod tests {
             eprintln!("{name}: widest relative width {widest:e}");
         }
         assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    /// The rows of gaps from a curve-bounded surface (sampled as its basis B-spline) whose
+    /// values this change moved and that stay blessed: every sample is proved. Each
+    /// sample's surface point is the surface's point at its parameters, to the
+    /// evaluation's rounding. A gap to a point is that point's distance to it. A gap to a
+    /// surface (`gen0002`, `gen0267`, planes) drops to a foot certified the nearest point
+    /// ([`crate::certify::nearest`]), to a millionth of the distance. A sample the gap
+    /// function left unset (it stops at the first gap over the tolerance) is all zeros
+    /// and is counted. The other moved rows are listed known failing: `gen0102` (8 drops
+    /// to a B-spline surface not certified), `gen0036` and `gen0276` (drops to a curve,
+    /// which no certificate here covers).
+    #[test]
+    fn curve_bounded_gap_rows_are_proved() {
+        use crate::certify::{evaluation_slack, nearest};
+        const SAMPLE: usize = 16;
+        // (row, samples evaluated)
+        const ROWS: [(&str, usize); 7] = [
+            ("gen0002", 147),
+            ("gen0055", 147),
+            ("gen0091", 1),
+            ("gen0267", 143),
+            ("gen0322", 1),
+            ("gen0346", 25),
+            ("srf_pt_curve_bounded_v_stride", 25),
+        ];
+        for (name, evaluated) in ROWS {
+            let case = crate::case::regression_case(&Runner, name);
+            let inputs: Inputs = case.parse().expect("inputs");
+            let Inputs::Gf { gf, .. } = &inputs else {
+                panic!("{name}: not a gap function case");
+            };
+            let k = Kernel::default();
+            let s = shapes(&k, gf).expect("shapes");
+            let Shape::Surface(this) = &s.this else {
+                panic!("{name}: not a gap from a surface");
+            };
+            let state = run_rust(&inputs).expect("rust").values["state"].clone();
+            assert_eq!(state[0], 0.0, "{name}: status");
+            let n = state[11] as usize;
+            assert_eq!(state.len(), 12 + n * SAMPLE, "{name}: layout");
+            let this_slack = evaluation_slack(&k, this);
+            let mut seen = 0;
+            for i in 0..n {
+                let r = &state[12 + i * SAMPLE..12 + (i + 1) * SAMPLE];
+                if r.iter().all(|x| *x == 0.0) {
+                    continue;
+                }
+                seen += 1;
+                let p = Vec3::new(r[1], r[2], r[3]);
+                let q = Vec3::new(r[4], r[5], r[6]);
+                let at = this.evaluate_point(&k, Point2::new(r[10], r[11])).expect("point");
+                assert!(at.distance(p) <= this_slack, "{name} sample {i}: {p:?} vs {at:?}");
+                match &s.other {
+                    Shape::Point(o) => assert_eq!(q, *o, "{name} sample {i}: the point"),
+                    Shape::Surface(other) => {
+                        let uv = Point2::new(r[12], r[13]);
+                        let slack = evaluation_slack(&k, other);
+                        let foot = other.evaluate_point(&k, uv).expect("foot");
+                        assert!(foot.distance(q) <= slack, "{name} sample {i}: foot");
+                        let d = p.distance(q);
+                        let e = nearest(&k, other, None, p, uv);
+                        assert!(e.holds(d), "{name} sample {i}: {d} outside {e:?}");
+                        assert!(
+                            e.width() <= 1e-6 * d + slack,
+                            "{name} sample {i}: {d} not certified {e:?}"
+                        );
+                    }
+                    Shape::Curve(_) => panic!("{name}: a gap to a curve is not certified here"),
+                }
+            }
+            assert_eq!(seen, evaluated, "{name}: samples evaluated");
+        }
     }
 
     #[test]

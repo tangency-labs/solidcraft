@@ -604,7 +604,9 @@ impl TessSrfCache {
             // (`GetNaturalUVDomain` and the copy constructor read the NURB through
             // `GetOrCreateGwNurbPointer`, which makes a plane's or a surface of
             // revolution's missing NURB first)
-            let bss: Option<BSplineSurface> = match self.base().surface().kind() {
+            // (a curve-bounded surface's patches are its basis's)
+            let geometry = self.base().surface().geometry();
+            let bss: Option<BSplineSurface> = match geometry.kind() {
                 SurfaceKind::BSpline(b) => Some(b.clone()),
                 SurfaceKind::ProceduralBlend(pb) => {
                     let b = pb.net();
@@ -623,7 +625,7 @@ impl TessSrfCache {
                 | SurfaceKind::Sphere(_)
                 | SurfaceKind::Torus(_)
                 | SurfaceKind::SurfOfRevolution(_) => {
-                    self.base().surface().revolution_base_with_nurb(k)?.cloned()
+                    geometry.revolution_base_with_nurb(k)?.cloned()
                 }
                 SurfaceKind::SurfOfExtrusion(s) => Some(if s.base().gw_nurb().is_some() {
                     s.base().clone()
@@ -634,6 +636,7 @@ impl TessSrfCache {
                         None => s.base().clone(),
                     }
                 }),
+                // (CurveBounded: not reached, `Surface::geometry` peels it)
                 SurfaceKind::CurveBounded(_)
                 | SurfaceKind::Step(_)
                 | SurfaceKind::SrfInVolume(_)

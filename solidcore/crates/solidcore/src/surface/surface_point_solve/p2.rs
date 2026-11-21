@@ -1242,6 +1242,9 @@ fn set_first_object<O: SolutionObject>(sol: &mut Solution<O>, surface_obj: Optio
 /// `SmBSplineSurface` (B-spline, plane, surface of revolution) without it; `None`
 /// when nothing changes (`SmTemporaryChangeValue` on `GetOutOfBoundsEnabled()`).
 pub(crate) fn with_out_of_bounds_enabled(surface: &Surface) -> Result<Option<Surface>> {
+    // (a curve-bounded surface is its basis over the same parameters)
+    let original = surface;
+    let surface = original.geometry();
     let enabled = match surface.kind() {
         SurfaceKind::BSpline(b) => b.is_out_of_bounds_enabled(),
         SurfaceKind::ProceduralBlend(pb) => {
@@ -1258,6 +1261,7 @@ pub(crate) fn with_out_of_bounds_enabled(surface: &Surface) -> Result<Option<Sur
         SurfaceKind::Torus(s) => s.base().base().is_out_of_bounds_enabled(),
         SurfaceKind::SurfOfRevolution(s) => s.base().is_out_of_bounds_enabled(),
         SurfaceKind::SurfOfExtrusion(s) => s.base().is_out_of_bounds_enabled(),
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)
@@ -1269,6 +1273,9 @@ pub(crate) fn with_out_of_bounds_enabled(surface: &Surface) -> Result<Option<Sur
         return Ok(None);
     }
     let mut copy = surface.clone_for_evaluation()?;
+    // the copy stands for the surface: a curve-bounded surface's basis takes its owner
+    // (a face, which the callers look up), not the basis's own
+    copy.restore_owner_state(original);
     match copy.kind_mut() {
         SurfaceKind::BSpline(b) => *b.out_of_bounds_enabled_mut() = true,
         SurfaceKind::ProceduralBlend(pb) => {
@@ -1285,6 +1292,7 @@ pub(crate) fn with_out_of_bounds_enabled(surface: &Surface) -> Result<Option<Sur
         SurfaceKind::Torus(s) => *s.base.base_mut().out_of_bounds_enabled_mut() = true,
         SurfaceKind::SurfOfRevolution(s) => *s.base_mut().out_of_bounds_enabled_mut() = true,
         SurfaceKind::SurfOfExtrusion(s) => *s.base_mut().out_of_bounds_enabled_mut() = true,
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)
@@ -1328,6 +1336,8 @@ pub(crate) fn with_out_of_bounds_enabled_in_place<R>(
 /// The `SmBSplineSurface` part whose `m_bOutOfBoundsEnabled` an evaluation of `surface`
 /// reads, `None` for the kinds not derived from it.
 fn out_of_bounds_base(surface: &Surface) -> Option<&BSplineSurface> {
+    // (a curve-bounded surface is its basis over the same parameters)
+    let surface = surface.geometry();
     match surface.kind() {
         SurfaceKind::BSpline(b) => Some(b),
         SurfaceKind::ProceduralBlend(pb) => {
@@ -1344,6 +1354,7 @@ fn out_of_bounds_base(surface: &Surface) -> Option<&BSplineSurface> {
         SurfaceKind::Torus(s) => Some(s.base().base()),
         SurfaceKind::SurfOfRevolution(s) => Some(s.base()),
         SurfaceKind::SurfOfExtrusion(s) => Some(s.base()),
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)

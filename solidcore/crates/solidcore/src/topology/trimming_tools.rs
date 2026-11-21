@@ -2365,6 +2365,8 @@ pub fn is_loop_uv_gap_within_tolerance(
     end_point: Point3,
     xsect_tol_3d: f64,
 ) -> Result<bool> {
+    // (a curve-bounded surface is its basis over the same parameters)
+    let surface = surface.geometry();
     // the extractions run on GetOrCreateGwNurbPointer: a plane makes its NURB (a failure
     // is their NER, which certifies nothing)
     let bss: Cow<'_, BSplineSurface> = match surface.kind_with_nurb(k)? {
@@ -2388,6 +2390,7 @@ pub fn is_loop_uv_gap_within_tolerance(
         SurfaceKind::Sphere(s) => Cow::Borrowed(s.base().base()),
         SurfaceKind::Torus(s) => Cow::Borrowed(s.base().base()),
         // (dynamic_cast<const SmBSplineSurface*> fails: FALSE)
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::SrfInVolume(_)

@@ -494,54 +494,202 @@ mod review_geometry_tests {
     use super::*;
     use solidcore::geom::global_solver::SolverOperation;
 
-    /// Maximum-distance results are evaluated independently and challenged by in-domain points.
+    /// The objective a solve optimises at `uv`, larger is better: the distance to the test
+    /// point for a maximise, its negation for a minimise, and for a 3D signed directed
+    /// maximise the position along the direction the test point carries (the solver
+    /// minimises along its negation from a fixed plane, so only differences matter).
+    fn objective(
+        k: &Kernel,
+        surface: &Surface,
+        operation: SolverOperation,
+        test: [f64; 3],
+        uv: [f64; 2],
+    ) -> f64 {
+        let at = surface.evaluate_point(k, p2(uv)).unwrap();
+        match operation {
+            SolverOperation::Maximize => at.distance(v3(test)),
+            SolverOperation::Minimize => -at.distance(v3(test)),
+            SolverOperation::Signed3dDirectedMaximize => {
+                let d = v3(test);
+                at.dot(d) / d.length()
+            }
+            other => panic!("no objective for {other:?}"),
+        }
+    }
+
+    /// The best of a 201 by 201 grid over `dom` (its corners and edges included), and
+    /// where.
+    fn grid_witness(
+        k: &Kernel,
+        surface: &Surface,
+        operation: SolverOperation,
+        test: [f64; 3],
+        dom: [f64; 4],
+    ) -> (f64, [f64; 2]) {
+        const N: u32 = 200;
+        let mut best = (f64::NEG_INFINITY, [0.0; 2]);
+        for iu in 0..=N {
+            for iv in 0..=N {
+                let uv = [
+                    dom[0] + (dom[2] - dom[0]) * f64::from(iu) / f64::from(N),
+                    dom[1] + (dom[3] - dom[1]) * f64::from(iv) / f64::from(N),
+                ];
+                let f = objective(k, surface, operation, test, uv);
+                if f > best.0 {
+                    best = (f, uv);
+                }
+            }
+        }
+        best
+    }
+
+    /// The best of the points around `uv` at a thousandth and a millionth of the domain's
+    /// size (8 directions each), clamped to `dom`.
+    fn neighbour_witness(
+        k: &Kernel,
+        surface: &Surface,
+        operation: SolverOperation,
+        test: [f64; 3],
+        dom: [f64; 4],
+        uv: [f64; 2],
+    ) -> (f64, [f64; 2]) {
+        let mut best = (f64::NEG_INFINITY, uv);
+        for scale in [1e-3, 1e-6] {
+            for i in 0..8 {
+                let a = f64::from(i) * core::f64::consts::FRAC_PI_4;
+                let w = [
+                    (uv[0] + scale * (dom[2] - dom[0]) * a.cos()).clamp(dom[0], dom[2]),
+                    (uv[1] + scale * (dom[3] - dom[1]) * a.sin()).clamp(dom[1], dom[3]),
+                ];
+                let f = objective(k, surface, operation, test, w);
+                if f > best.0 {
+                    best = (f, w);
+                }
+            }
+        }
+        best
+    }
+
+    /// Every changed or reviewed case that claims an optimum is challenged by in-domain
+    /// points: a global solve by a dense grid over the case's domain (each returned
+    /// solution's best), a found local solve by points around its answer. Each reported
+    /// value is first evaluated independently at its parameters. A witness better by more
+    /// than the case's tolerance disproves the optimum; such a case must be listed known
+    /// failing (tangency-labs/solidcraft#13684). The witness is not a proof of the true
+    /// optimum. The requests: 0 the best solution, 2 (find ambiguities) and 3 (nodes) are
+    /// answered by the same path as 0 (`SurfPtGlobalSolver` ignores them), so their best
+    /// solution is challenged too.
     #[test]
     fn review_global_maximum_outputs_have_geometric_evidence() {
         let k = Kernel::default();
         let known =
             crate::golden::known_failing(&crate::golden::default_dir(), Runner.id()).unwrap();
         let mut unexplained = Vec::new();
-        for name in ["matrix_0267", "matrix_0337"] {
+        for name in [
+            "matrix_0107",
+            "matrix_0111",
+            "matrix_0222",
+            "matrix_0267",
+            "matrix_0289",
+            "matrix_0337",
+            "matrix_0370",
+            "matrix_0490",
+            "matrix_0627",
+            "matrix_1156",
+        ] {
             let case = crate::case::regression_case(&Runner, name);
             let input: Inputs = case.parse().unwrap();
-            assert_eq!(input.solver, 4);
+            let operation = solver_op(input.solver).unwrap();
             let surface = geometry(&k, &input).unwrap();
             let output = rust(&input).unwrap();
             let values = &output.values["out"];
-            let reported = values[4];
-            let actual = surface
-                .evaluate_point(&k, p2([values[2], values[3]]))
-                .unwrap()
-                .distance(v3(input.test));
-            assert!((actual - reported).abs() < 1e-11 * actual.max(1.0));
-            let mut witness = (0.0_f64, [0.0; 2]);
-            for iu in 0..=10 {
-                for iv in 0..=10 {
-                    let uv = [
-                        input.dom[0] + (input.dom[2] - input.dom[0]) * f64::from(iu) / 10.0,
-                        input.dom[1] + (input.dom[3] - input.dom[1]) * f64::from(iv) / 10.0,
-                    ];
-                    let distance = surface
-                        .evaluate_point(&k, p2(uv))
-                        .unwrap()
-                        .distance(v3(input.test));
-                    if distance > witness.0 {
-                        witness = (distance, uv);
-                    }
+            let test = input.test;
+            let check = |uv: [f64; 2], value: f64| {
+                if operation != SolverOperation::Signed3dDirectedMaximize {
+                    let actual = objective(&k, &surface, operation, test, uv).abs();
+                    assert!(
+                        (actual - value).abs() < 1e-11 * actual.max(1.0),
+                        "{name}: {actual} {value}"
+                    );
                 }
-            }
+            };
+            let (reported, witness) = match input.op {
+                Operation::Global { .. } => {
+                    let n = values[0] as usize;
+                    assert!(n > 0, "{name}: no solution");
+                    let mut best = (f64::NEG_INFINITY, [0.0; 2]);
+                    for j in 0..n {
+                        let r = &values[1 + 7 * j..8 + 7 * j];
+                        let uv = [r[1], r[2]];
+                        check(uv, r[3]);
+                        let f = objective(&k, &surface, operation, test, uv);
+                        if f > best.0 {
+                            best = (f, uv);
+                        }
+                    }
+                    (best, grid_witness(&k, &surface, operation, test, input.dom))
+                }
+                Operation::Local { .. } => {
+                    assert_eq!(values[0], 1.0, "{name}: not found");
+                    let uv = [values[4], values[5]];
+                    check(uv, values[6]);
+                    let f = objective(&k, &surface, operation, test, uv);
+                    (
+                        (f, uv),
+                        neighbour_witness(&k, &surface, operation, test, input.dom, uv),
+                    )
+                }
+                Operation::Stepper { .. } => panic!("{name}: a step claims no optimum"),
+            };
             eprintln!(
-                "{name}: reported={reported:?}; farther witness={witness:?}; tol={:?}",
+                "{name}: {operation:?} reported {reported:?}; best witness {witness:?}; tol {}",
                 input.tol
             );
-            if witness.0 > reported + input.tol && !known.contains_key(name) {
+            if witness.0 > reported.0 + input.tol && !known.contains_key(name) {
                 unexplained.push(name);
             }
         }
         assert!(
             unexplained.is_empty(),
-            "wrong maxima still blessed: {unexplained:?}"
+            "optima disproved but still blessed: {unexplained:?}"
         );
+    }
+
+    /// A changed `Normalize` request for nodes (`matrix_1041`) claims points whose
+    /// direction to the test point is along the surface normal, not an optimum: each
+    /// reported solution's value is its distance at its parameters, and the direction is
+    /// normal to the surface there (here the one solution is the test point itself, at a
+    /// distance of 2.4e-13).
+    #[test]
+    fn review_normalize_outputs_are_normal_projections() {
+        let k = Kernel::default();
+        let name = "matrix_1041";
+        let case = crate::case::regression_case(&Runner, name);
+        let input: Inputs = case.parse().unwrap();
+        assert_eq!(solver_op(input.solver).unwrap(), SolverOperation::Normalize);
+        let surface = geometry(&k, &input).unwrap();
+        let output = rust(&input).unwrap();
+        let values = &output.values["out"];
+        let n = values[0] as usize;
+        assert!(n > 0, "{name}: no solution");
+        for j in 0..n {
+            let r = &values[1 + 7 * j..8 + 7 * j];
+            let uv = p2([r[1], r[2]]);
+            let at = surface.evaluate_point(&k, uv).unwrap();
+            let gap = v3(input.test) - at;
+            let normal = surface
+                .evaluate_normal(
+                    &k,
+                    uv,
+                    solidcore::nurbs::knots::Side::Left,
+                    solidcore::nurbs::knots::Side::Left,
+                )
+                .unwrap();
+            let sine = gap.cross(normal).length() / (gap.length() * normal.length());
+            assert!((gap.length() - r[3]).abs() < 1e-11 * gap.length().max(1.0), "{name} {j}");
+            // (a test point on the surface, within the tolerance, is its own projection)
+            assert!(gap.length() <= input.tol || sine <= 1e-6, "{name} {j}: sine {sine:e}");
+        }
     }
 
     /// WR-57: a maximize stepping into a singular point keeps the farthest iso curve

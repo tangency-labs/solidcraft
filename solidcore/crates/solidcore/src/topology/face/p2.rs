@@ -1080,6 +1080,8 @@ fn is_singularity(
     uv: Point2,
     tol: f64,
 ) -> Result<(bool, SurfParamType)> {
+    // (a curve-bounded surface is its basis over the same parameters)
+    let surface = surface.geometry();
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity()),
 
@@ -1089,6 +1091,7 @@ fn is_singularity(
         | SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::BallPatch(_)
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::SurfOfExtrusion(_)

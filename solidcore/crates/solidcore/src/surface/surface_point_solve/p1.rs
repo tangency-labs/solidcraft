@@ -264,6 +264,8 @@ impl<'s> SurfacePointSolver<'s> {
 
 /// `m_pBSplSrf`: the B-spline part with a NURB, looking through one offset as upstream.
 fn b_spline_part(surface: &Surface) -> Option<&BSplineSurface> {
+    // (a curve-bounded surface is its basis over the same parameters)
+    let surface = surface.geometry();
     let base = match surface.kind() {
         SurfaceKind::OffsetSurface(offset) => offset.base_surface(),
         _ => surface,
@@ -1287,6 +1289,8 @@ fn set_interval(d: &mut Extent2d, dir: SurfParamType, ivl: &Extent1d) {
 /// `pSurf->IsOnSeam(crUV)` (virtual, default arguments): a plane has no seam
 /// (`SmPlane::IsOnSeam` override); the other kinds run the base body.
 fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
+    // (a curve-bounded surface is its basis over the same parameters)
+    let surface = surface.geometry();
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_on_seam().0),
 
@@ -1296,6 +1300,7 @@ fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
         | SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::BallPatch(_)
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::SurfOfExtrusion(_)
@@ -2115,11 +2120,10 @@ mod tests {
         let t = g.base.test_point();
         assert!(t.z > 0.0 && t.x > 1.0 && t.y > 1.0);
 
-        // a curve-bounded surface has no B-spline part
-        let cb = Surface::from(
-            CurveBoundedSurface::new(bilinear(0.0), Vec::new(), Vec::new(), true).unwrap(),
-        );
-        let g = global(&k, &cb, SolverOperation::Minimize, Point3::ZERO);
+        // a STEP surface has no B-spline part (a curve-bounded surface has its basis's)
+        let step =
+            Surface::from(crate::surface::surface::StepSurface::new(bilinear(0.0), true).unwrap());
+        let g = global(&k, &step, SolverOperation::Minimize, Point3::ZERO);
         assert!(g.base.b_spline().is_none());
         assert!(g.find_polygon_triangle_guess((0, 0)).is_err());
         assert!(g.refine_guess_polygon_leg(0, 0).is_err());
@@ -2444,15 +2448,55 @@ mod tests {
     fn wr72_propagates_bbox_failure_in_constructors() {
         let fixed_kernel = Kernel::default();
 
-        let cb_plane = Surface::from(
-            CurveBoundedSurface::new(wr72_tilted_plane(), Vec::new(), Vec::new(), true).unwrap(),
-        );
+        // (a STEP surface without base surface: no surface cache can be made, so its
+        // bounding box fails with SM_ERR_NULL_POINTER)
+        let no_cache = Surface::from(crate::surface::surface::StepSurface::empty());
         let up_z = Point3::new(0.0, 0.0, 1.0);
         let mid_uv = Point2::new(0.5, 0.5);
 
+        // the failure is the bounding box's: the box alone fails with the same status,
+        // and the constructors without the directed maximise (no box) succeed
+        let bbox_err = no_cache
+            .calculate_bounding_box(&fixed_kernel, &unit_dom(), [true, false, false], true)
+            .unwrap_err();
+        assert_eq!(bbox_err.sm_status(), Some(SM_ERR_NULL_POINTER));
+        assert!(SurfacePointSolver::new(
+            &fixed_kernel,
+            &no_cache,
+            &unit_dom(),
+            SolverOperation::Minimize,
+            up_z,
+            1e-6,
+            None,
+            SolutionRequested::Single,
+        )
+        .is_ok());
+        assert!(SurfPtGlobalSolver::new(
+            &fixed_kernel,
+            &no_cache,
+            &unit_dom(),
+            SolverOperation::Minimize,
+            up_z,
+            1e-6,
+            None,
+            SolutionRequested::Single,
+        )
+        .is_ok());
+        assert!(SurfPtSolveStepper::new(
+            &fixed_kernel,
+            &no_cache,
+            &unit_dom(),
+            up_z,
+            mid_uv,
+            1e-12,
+            1e-6,
+            SolverOperation::Minimize,
+        )
+        .is_ok());
+
         let base_err = SurfacePointSolver::new(
             &fixed_kernel,
-            &cb_plane,
+            &no_cache,
             &unit_dom(),
             SolverOperation::Signed3dDirectedMaximize,
             up_z,
@@ -2465,7 +2509,7 @@ mod tests {
 
         let global_ctor_err = SurfPtGlobalSolver::new(
             &fixed_kernel,
-            &cb_plane,
+            &no_cache,
             &unit_dom(),
             SolverOperation::Signed3dDirectedMaximize,
             up_z,
@@ -2478,7 +2522,7 @@ mod tests {
 
         let stepper_err = SurfPtSolveStepper::new(
             &fixed_kernel,
-            &cb_plane,
+            &no_cache,
             &unit_dom(),
             up_z,
             mid_uv,
@@ -2509,13 +2553,13 @@ mod tests {
     fn wr72_propagates_bbox_failure_in_end_to_end_solves() {
         let fixed_kernel = Kernel::default();
 
-        let cb_plane = Surface::from(
-            CurveBoundedSurface::new(wr72_tilted_plane(), Vec::new(), Vec::new(), true).unwrap(),
-        );
+        // (a STEP surface without base surface: no surface cache can be made, so its
+        // bounding box fails with SM_ERR_NULL_POINTER)
+        let no_cache = Surface::from(crate::surface::surface::StepSurface::empty());
         let up_z = Point3::new(0.0, 0.0, 1.0);
         let mid_uv = Point2::new(0.5, 0.5);
 
-        let global_1_err = cb_plane
+        let global_1_err = no_cache
             .global_point_solve_1::<OperandObject>(
                 &fixed_kernel,
                 &unit_dom(),
@@ -2529,7 +2573,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(global_1_err.sm_status(), Some(SM_ERR_NULL_POINTER));
 
-        let global_err = cb_plane
+        let global_err = no_cache
             .global_point_solve::<OperandObject>(
                 &fixed_kernel,
                 None,
@@ -2543,7 +2587,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(global_err.sm_status(), Some(SM_ERR_NULL_POINTER));
 
-        let local_1_err = cb_plane
+        let local_1_err = no_cache
             .local_point_solve_1::<()>(
                 &fixed_kernel,
                 &unit_dom(),
@@ -2555,7 +2599,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(local_1_err.sm_status(), Some(SM_ERR_NULL_POINTER));
 
-        let local_err = cb_plane
+        let local_err = no_cache
             .local_point_solve::<()>(
                 &fixed_kernel,
                 &unit_dom(),

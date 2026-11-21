@@ -616,8 +616,11 @@ fn seam_gap(
     use crate::geom::certified::{distance, gamma, Bounded};
     use crate::geom::vector3d::Point3;
     use crate::nurbs::math::{CPoint, NOW};
+    // (a curve-bounded surface is its basis over the same parameters)
+    let surface = surface.geometry();
     let blend = match surface.kind_with_nurb(k)? {
         SurfaceKind::Plane(_)
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)

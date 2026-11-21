@@ -215,6 +215,17 @@ impl Surface {
         d3d_tol: f64,
         pt_test_only: bool,
     ) -> Result<Singularity> {
+        // (not upstream: the basis surface over the same parameters)
+        if let SurfaceKind::CurveBounded(c) = self.kind() {
+            return c.basis().is_singularity_with_poles(
+                k,
+                uv,
+                singularities,
+                pole_points,
+                d3d_tol,
+                pt_test_only,
+            );
+        }
         // the SmPlane overrides: a plane has no singularity
         if let SurfaceKind::Plane(p) = self.kind() {
             let (singular, direction) = if pole_points.is_some() || singularities != SS_UNKNOWN {
@@ -508,8 +519,8 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// Those of the overrides and of the approximation; [`SolidError::Unported`] for a
-    /// curve-bounded surface (see the module deviations).
+    /// Those of the overrides and of the approximation. A curve-bounded surface answers
+    /// its basis surface's iso curve (not upstream, which runs the `SmSurface` body).
     #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn create_iso_parametric_curve(
         &self,
@@ -521,6 +532,18 @@ impl Surface {
         want_uv_iso_curve: bool,
     ) -> Result<IsoParametricCurve> {
         match self.kind_with_nurb(k)? {
+            // the basis surface's iso curve: the same surface over the same parameters
+            // (not upstream, which runs the SmSurface body below)
+            SurfaceKind::CurveBounded(s) => {
+                return s.basis().create_iso_parametric_curve(
+                    k,
+                    param,
+                    iso_parameter,
+                    approx_tol_3d,
+                    domain,
+                    want_uv_iso_curve,
+                );
+            }
             // (SmSurfOfExtrusion inherits the B-spline override)
             SurfaceKind::SurfOfExtrusion(_) => {
                 let opts = crate::nurbs::b_spline_surface::p2::IsoCurveOptions {
@@ -639,10 +662,7 @@ impl Surface {
                     uv_iso_curve: r.uv_iso_curve,
                 });
             }
-            SurfaceKind::OffsetSurface(_)
-            | SurfaceKind::CurveBounded(_)
-            | SurfaceKind::Step(_)
-            | SurfaceKind::SrfInVolume(_) => {}
+            SurfaceKind::OffsetSurface(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {}
         }
 
         // define the isoParameter Curve as an object
@@ -2642,6 +2662,46 @@ mod tests {
 
     fn xy_plane() -> Surface {
         Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0)))
+    }
+
+    /// The `SmSurface` body's singular branch of `CreateIsoParametricCurve`: the iso line
+    /// through a singularity of a surface without an iso override of its own (a STEP
+    /// surface here; offset and volume surfaces take the same body, a curve-bounded
+    /// surface answers its basis's) is a point curve at the singular point, over the
+    /// other parameter's natural interval or its part inside the given domain.
+    #[test]
+    fn an_iso_line_through_a_singularity_of_a_step_surface_is_a_point_curve() {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::surface::surface::StepSurface;
+        // every point of the `v = 0` side is the apex: singular along `v = 0`
+        let apex = CPoint::new(0.0, 0.0, 0.0, NOW);
+        let pw = vec![
+            vec![apex, CPoint::new(1.0, -1.0, 0.0, NOW)],
+            vec![apex, CPoint::new(1.0, 0.0, 0.2, NOW)],
+            vec![apex, CPoint::new(1.0, 1.0, 0.0, NOW)],
+        ];
+        let u = [0.0, 0.0, 0.5, 1.0, 1.0];
+        let v = [0.0, 0.0, 1.0, 1.0];
+        let basis = BSplineSurface::from_data(2, 1, 1, 1, 4, 3, &pw, &u, &v).unwrap();
+        let s = Surface::from(StepSurface::new(Surface::from(basis), true).unwrap());
+        let k = Kernel::default();
+        // (a domain that holds the iso line: its `v` range contains `v = 0`; outside it this
+        // body answers where the B-spline override refuses, tangency-labs/solidcraft#20378,
+        // plan/findings/surface.surface_p5--generic-iso-body-ignores-the-domain-in-the-iso-direction.md)
+        let domain = Extent2d::from_bounds(0.2, 0.0, 0.9, 0.7);
+        for (dom, ivl) in [(None, (0.0, 1.0)), (Some(&domain), (0.2, 0.9))] {
+            let iso = s
+                .create_iso_parametric_curve(&k, SurfParamType::V, 0.0, 1e-4, dom, false)
+                .unwrap();
+            assert_eq!(iso.max_gap_3d, 0.0);
+            let n = iso.curve.natural_interval();
+            assert_eq!((n.min(), n.max()), ivl);
+            for t in [n.min(), 0.5 * (n.min() + n.max()), n.max()] {
+                let p = iso.curve.evaluate_point(&k, t).unwrap();
+                assert!(p.distance(Point3::ZERO) < 1e-12, "{p:?}");
+            }
+        }
     }
 
     #[test]

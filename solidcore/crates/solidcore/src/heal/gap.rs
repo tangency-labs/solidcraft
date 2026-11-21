@@ -2202,7 +2202,7 @@ impl<'a> GapFunction<'a> {
         let this_surface = self.this_surface();
         let is_bspline = this_curve.is_some_and(|c| c.is_kind_of(BSPLINE_CURVE_TYPE))
             || match this_surface {
-                Some(s) => s.is_kind_of(B_SPLINE_SURFACE_TYPE)?,
+                Some(s) => s.geometry().is_kind_of(B_SPLINE_SURFACE_TYPE)?,
                 None => false,
             };
         if self.sample_cnt_u == 0 || self.sample_cnt_v == 0 {
@@ -2366,7 +2366,7 @@ impl<'a> GapFunction<'a> {
             return Ok(None);
         };
         let (SurfaceKind::BSpline(a), SurfaceKind::BSpline(b)) =
-            (cos.surface().kind(), other.kind())
+            (cos.surface().geometry().kind(), other.geometry().kind())
         else {
             return Ok(None);
         };
@@ -2704,7 +2704,6 @@ mod tests {
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::b_spline_surface::BSplineSurface;
     use crate::nurbs::math::CPoint;
-    use crate::surface::curve_bounded_surface::CurveBoundedSurface;
 
     // A piecewise linear gap with a peak of 10 at t=15, on [10,16].
     fn wr89_curve() -> Curve {
@@ -2862,7 +2861,8 @@ mod tests {
         }
     }
 
-    /// Creates a non-B-spline `CurveBoundedSurface` with bilinear basis.
+    /// Creates a non-B-spline surface: a `StepSurface` over a bilinear basis (a
+    /// curve-bounded surface is sampled as its B-spline basis).
     /// The basis surface interpolates `(0,0,0)` -> `(1,0,0)` -> `(0,1,z_max)` -> `(1,1,z_max)`.
     /// Natural domain is `[0, 1] x [0, 1]`, and `z(u, v) = z_max * v`.
     fn wr88_non_bspline_surface(z_max: f64) -> Surface {
@@ -2875,7 +2875,7 @@ mod tests {
             )
             .unwrap(),
         );
-        Surface::from(CurveBoundedSurface::new(basis, Vec::new(), Vec::new(), true).unwrap())
+        Surface::from(crate::surface::surface::StepSurface::new(basis, true).unwrap())
     }
 
     /// Asserts that all samples in `f` match the Cartesian product of `us` and `vs` in row-major order.

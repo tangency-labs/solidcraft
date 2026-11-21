@@ -2317,18 +2317,18 @@ mod tests {
         .unwrap()
     }
 
-    /// On a curve-bounded surface, whose generic `GetKnots` fails, the classification
-    /// against the surface knot lines fails, so `GetKnots` of the curve on it returns
-    /// a failing status. `FindParameterAtArcLength` and `CurveMaxDistanceBetween` pass
-    /// that status on, as the fork's `SER` does, instead of using the unclassified
-    /// knots (WR-663).
+    /// On a surface whose `GetKnots` fails (an empty STEP surface: no base surface), the
+    /// classification against the surface knot lines fails, so `GetKnots` of the curve
+    /// on it returns a failing status. `FindParameterAtArcLength` and
+    /// `CurveMaxDistanceBetween` pass that status on, as the fork's `SER` does, instead
+    /// of using the unclassified knots (WR-663).
     #[test]
     fn a_failing_knot_status_is_passed_on_by_the_arc_length_and_max_distance() {
         use crate::geom::extent1d::Extent1d;
-        use crate::surface::curve_bounded_surface::CurveBoundedSurface;
+        use crate::surface::surface::StepSurface;
         let k = Kernel::default();
-        let bounded = CurveBoundedSurface::new(patch().into(), vec![], vec![], true).unwrap();
-        let c = Curve::from(CrvOnSurf::new(&k, uv(), bounded.into(), None, 3).unwrap());
+        let empty = Surface::from(StepSurface::empty());
+        let c = Curve::from(CrvOnSurf::new(&k, uv(), empty, None, 3).unwrap());
         let ws = c.knots_with_status(&k, None).unwrap();
         let Err(status) = ws.status else {
             panic!("the classification succeeded: {:?}", ws.knots)

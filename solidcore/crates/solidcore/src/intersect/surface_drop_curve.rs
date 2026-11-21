@@ -181,6 +181,8 @@ impl SolutionObject for NoObject {
 /// `IsSingularity(uv, eSingDir)` (virtual, default tolerances): the plane override
 /// (none); other kinds run `SmSurface::IsSingularity`.
 fn is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<(bool, SurfParamType)> {
+    // (a curve-bounded surface is its basis over the same parameters)
+    let surface = surface.geometry();
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(p.is_singularity()),
 
@@ -190,6 +192,7 @@ fn is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<(bool, Su
         | SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::BallPatch(_)
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::SurfOfExtrusion(_)
@@ -260,6 +263,8 @@ fn surface_global_point_solve(
 /// `IsOnSeam(uv, NULL, &eSeamDir, &newUVs)`: the points across the seam when `uv` is
 /// on it (a plane has none; the seam direction output is not read afterwards).
 fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Option<Vec<Point2>>> {
+    // (a curve-bounded surface is its basis over the same parameters)
+    let surface = surface.geometry();
     match surface.kind() {
         SurfaceKind::Plane(p) => Ok(if p.is_on_seam().0 {
             Some(Vec::new())
@@ -273,6 +278,7 @@ fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Option<Vec<Po
         | SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::BallPatch(_)
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::SurfOfExtrusion(_)
@@ -295,6 +301,8 @@ fn create_iso_parametric_curve(
     value: f64,
     approx_tol: f64,
 ) -> Result<Curve> {
+    // (a curve-bounded surface is its basis over the same parameters)
+    let surface = surface.geometry();
     match surface.kind_with_nurb(k)? {
         SurfaceKind::BSpline(b) => Ok(Curve::from(
             b.create_iso_parametric_curve(k, param, value, IsoCurveOptions::default())?
@@ -336,6 +344,7 @@ fn create_iso_parametric_curve(
         SurfaceKind::Torus(s) => Ok(s
             .create_iso_parametric_curve(k, param, value, None, false)?
             .curve),
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)

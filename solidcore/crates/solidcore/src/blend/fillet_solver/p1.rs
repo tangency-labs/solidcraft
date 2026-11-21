@@ -3162,6 +3162,8 @@ impl<'a> FindClippedRadiusEfo<'a> {
 /// `SM_CAST_PTR(SmBSplineSurface, ..)`: B-splines, planes and surfaces of revolution;
 /// only the `SmBSplineSurface` member changes, not a revolution's generator).
 fn evaluate_point_out_of_bounds(k: &Kernel, base: &Surface, uv: Point2) -> Result<Point3> {
+    // (a curve-bounded surface is its basis over the same parameters)
+    let base = base.geometry();
     // the flag is set on the surface itself upstream: evaluate an exact copy
     let mut s = base.clone_for_evaluation()?;
     match s.kind_mut() {
@@ -3181,6 +3183,7 @@ fn evaluate_point_out_of_bounds(k: &Kernel, base: &Surface, uv: Point2) -> Resul
         SurfaceKind::Sphere(c) => *c.base.base_mut().out_of_bounds_enabled_mut() = true,
         SurfaceKind::Torus(c) => *c.base.base_mut().out_of_bounds_enabled_mut() = true,
         // an SmOffsetSurface is not an SmBSplineSurface either
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::SrfInVolume(_)

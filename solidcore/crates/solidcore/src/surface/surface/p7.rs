@@ -885,6 +885,12 @@ impl Surface {
         opt_tol: Option<f64>,
         want_continuity: bool,
     ) -> Result<(bool, Option<ContinuityType>)> {
+        // (not upstream: the basis surface over the same parameters)
+        if let SurfaceKind::CurveBounded(c) = self.kind() {
+            return c
+                .basis()
+                .is_closed(k, uv_domain, param, opt_tol, want_continuity);
+        }
         match self.kind() {
             SurfaceKind::Plane(p) => {
                 let (closed, continuity) = p.is_closed();
@@ -924,6 +930,10 @@ impl Surface {
     /// of an offset surface's bounding box (its other failures are ignored, as
     /// upstream).
     pub fn is_planar(&self, k: &Kernel, tol_3d: f64) -> Result<Planar> {
+        // (not upstream: the basis surface over the same parameters)
+        if let SurfaceKind::CurveBounded(c) = self.kind() {
+            return c.basis().is_planar(k, tol_3d);
+        }
         // the unpadded box: the zone-tolerance padding made flat surfaces fail small
         // tolerances
         match self.kind_with_nurb(k)? {

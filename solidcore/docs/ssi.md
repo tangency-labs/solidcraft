@@ -315,13 +315,14 @@ closed loop L; from each, the march predicts along n1 × n2 and corrects onto bo
 
 ### 4.1 Dispatch: special cases first
 
-`Surface::global_surface_intersect` (`solidcore/src/surface/surface/p2.rs`) matches on the first
-surface's kind. A plane, cone (cylinders are cones of zero semi-angle), sphere or torus tries its
+`Surface::global_surface_intersect` (`solidcore/src/surface/surface/p2.rs`) first replaces a
+curve-bounded surface on either side by its basis (`Surface::geometry`: the surface is its basis
+over the same parameters), then matches on the first surface's kind. A plane, cone (cylinders are cones of zero semi-angle), sphere or torus tries its
 closed form against the other surface's kind first (§5). Each special case returns its curves and a
 flag saying whether the general intersector is still needed; when it is, `do_intersection`
 (`intersect/surface_intersector/p5.rs`) runs on an `AdvSurfaceIntersector` and resets the output
-first. Any other pair, and every B-spline, procedural blend, offset or curve-bounded surface, goes
-straight to the general intersector.
+first. Any other pair, and every B-spline, procedural blend or offset surface, goes straight to the
+general intersector; a curve-bounded surface takes its basis's path, closed forms included.
 
 `ssi` orders its own paths the same way (`ssi/src/intersect.rs`, `intersect_bodies`): closed forms for
 a plane against a sphere or a degree-2 form (`quadric`), then the field path where one side has an

@@ -25,10 +25,11 @@
 //! boundary report with a non-null list is guarded in C++: its global label lookup
 //! omits `CurveBoundedSurface` and would index past the one-entry default table.
 //! Defined basis-failure reports retain that default label and are compared.
-//! The inherited base check at levels 0..2 cannot compute the continuities (generic
-//! `GetKnots` fails), where upstream reads their unwritten outputs; as the fork, that
-//! fails surface test 4, and with a non-null list its report then reaches the label
-//! guard above. Most new draws use `LEVEL_GIVEN`, which skips it.
+//! The inherited base check at levels 0..2 reads the basis surface's continuities
+//! (Rust answers `GetKnots` from the basis, where upstream's generic `GetKnots` fails
+//! and the check reads unwritten outputs), so it reports what it reports on the basis;
+//! only the boundary reports are the curve-bounded surface's own. Most new draws use
+//! `LEVEL_GIVEN`, which skips it.
 
 // The generator indexes the nets and knot vectors it has just built (as other runners do).
 #![allow(clippy::indexing_slicing)]

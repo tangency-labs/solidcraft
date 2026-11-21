@@ -518,7 +518,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             let node_surface = self.node_surface(fields.surface)?;
             // (upstream casts unchecked; a NURB-less surface gives a null pSur; a plane
             // has its NURB, made here on a copy when the port has not made it yet)
-            sur = match node_surface.kind() {
+            sur = match node_surface.geometry().kind() {
                 SurfaceKind::Plane(p) => p.base_for_query().gw_nurb().cloned(),
                 _ => bspline_of(node_surface)
                     .ok_or_else(|| invalid(OP_TEST, "node surface is not a B-spline"))?
@@ -560,7 +560,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         // node's subdomain. (The cache surface is copied only where the copy is read:
         // the B-spline based kinds test the node's patch, and read the copy only in
         // the surface-evaluation fallbacks below.)
-        let compound_copy: Option<Surface> = match self.surface().kind() {
+        let compound_copy: Option<Surface> = match self.surface().geometry().kind() {
             SurfaceKind::Cone(_)
             | SurfaceKind::Sphere(_)
             | SurfaceKind::Torus(_)
@@ -570,6 +570,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             | SurfaceKind::Plane(_)
             | SurfaceKind::SurfOfRevolution(_)
             | SurfaceKind::SurfOfExtrusion(_) => None,
+            // (CurveBounded: not reached, `Surface::geometry` peels it)
             SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_)
@@ -1003,7 +1004,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 });
 
                 // for the node's bounding box
-                let patch = match surface.kind_with_nurb(k)? {
+                let patch = match surface.geometry().kind_with_nurb(k)? {
                     SurfaceKind::BSpline(b) => b.copy_sub_patch(&node_uv),
                     SurfaceKind::ProceduralBlend(pb) => {
                         let b = pb.net();
@@ -1019,6 +1020,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                     SurfaceKind::Torus(s) => s.base().base().copy_sub_patch(&node_uv),
                     SurfaceKind::SurfOfRevolution(s) => s.base().copy_sub_patch(&node_uv),
                     SurfaceKind::SurfOfExtrusion(s) => s.base().copy_sub_patch(&node_uv),
+                    // (CurveBounded: not reached, `Surface::geometry` peels it)
                     SurfaceKind::CurveBounded(_)
                     | SurfaceKind::Step(_)
                     | SurfaceKind::OffsetSurface(_)
