@@ -33,6 +33,36 @@ pub const MAX_MEMORY_MIB: usize = 4096;
 
 pub type Result<T> = std::result::Result<T, HostError>;
 
+/// An open document session and its committed history state, kept outside authored document data.
+/// Saving preserves a token; committed edits, undo and redo each produce a fresh revision.
+/// Opening or importing a document creates a fresh identity, including reopening the same file.
+/// Both strings are opaque and must only be compared for equality within their open session.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DesignToken {
+    #[serde(deserialize_with = "deserialize_design_token_part")]
+    #[schemars(length(min = 1, max = 128))]
+    pub document_id: String,
+    #[serde(deserialize_with = "deserialize_design_token_part")]
+    #[schemars(length(min = 1, max = 128))]
+    pub revision: String,
+}
+fn deserialize_design_token_part<'de, D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<String, D::Error> {
+    use serde::de::Error;
+
+    let value = String::deserialize(deserializer)?;
+    if value.is_empty() || value.len() > 128 || !value.bytes().all(|byte| (b' '..=b'~').contains(&byte)) {
+        return Err(D::Error::custom("a design token field must contain 1 to 128 printable ASCII characters"));
+    }
+    Ok(value)
+}
+
+impl std::fmt::Display for DesignToken {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}@{}", self.document_id, self.revision)
+    }
+}
+
 pub mod conditions;
 mod input;
 mod schema_order;
@@ -54,6 +84,9 @@ pub const READ_ENTRY_IMPORT: &str = "read entry may not use the host import ";
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema, thiserror::Error)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HostError {
+    /// An edit was computed against a different history state. Checked in its transaction.
+    #[error("stale design revision: expected {expected}, current {actual}")]
+    StaleRevision { expected: DesignToken, actual: DesignToken },
     #[error("permission denied: {permission}")]
     PermissionDenied { permission: String },
     #[error("command {command} failed: {reason}")]
@@ -112,7 +145,8 @@ fn exhausted(limit: &str, allowed: u64) -> String {
 /// The capabilities this host serves, as name and `major.minor`. Each is a set of WIT interfaces
 /// a plugin names in its manifest's `capabilities` list. While a major version is 0, a minor
 /// version may break the one before it, so 0.x matches only the same minor.
-pub const CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 2)), ("evaluate", (0, 2)), ("formats", (0, 2)), ("storage", (0, 1))];
+pub const CAPABILITIES: &[(&str, (u32, u32))] =
+    &[("commands", (0, 2)), ("design", (0, 1)), ("evaluate", (0, 2)), ("formats", (0, 2)), ("storage", (0, 1))];
 /// Older versions of [`CAPABILITIES`] the host still serves: plugins built against
 /// `craft:plugin@0.1.0` ([`WIT_0_1`]) run unchanged.
 pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1))];
@@ -217,6 +251,11 @@ pub struct FileGrant {
 /// removes staged files without replacing their targets. Publication errors after app
 /// commit can leave a subset of files applied and must be reported to the caller.
 pub trait PluginHost {
+    /// The active document's identity and committed revision (`design@0.1`), or none when closed.
+    /// Existing hosts need not implement this additive read-only capability.
+    fn design_token(&self) -> Result<Option<DesignToken>> {
+        Err(HostError::PermissionDenied { permission: "design@0.1 is not available in this host".into() })
+    }
     fn command_catalog(&self) -> Vec<CommandSchema>;
     fn run_command(&mut self, name: &str, args: &Value) -> Result<Value>;
     fn begin_transaction(&mut self) -> Result<()>;
@@ -498,12 +537,24 @@ pub struct Manifest {
     pub runtime: Option<RuntimeManifest>,
 }
 
+/// A read-only entry called after a coalesced whole-document invalidation. Listeners refresh
+/// their own caches or panel data; they do not edit, write files or start background work.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Listener {
+    pub entry: String,
+    pub on: Vec<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeManifest {
     /// A single file name within the package, never a directory or absolute path.
     pub module: String,
     pub entries: Vec<Entry>,
+    /// Opt-in notifications, under capability `design@0.1`. Missing for existing packages.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub listeners: Vec<Listener>,
     /// Exact app command ids, intersected with the app catalog by the runtime.
     pub commands: BTreeSet<String>,
     #[serde(default)]
@@ -561,6 +612,19 @@ impl RuntimeManifest {
                 })
             {
                 return Err(invalid("runtime.entries.slots", "requires at most 16 named menu or ribbon slots"));
+            }
+        }
+        if self.listeners.len() > 16 {
+            return Err(invalid("runtime.listeners", "at most 16 distinct listeners"));
+        }
+        let mut listeners = BTreeSet::new();
+        for listener in &self.listeners {
+            let entry = self.entries.iter().find(|entry| entry.name == listener.entry);
+            if !listeners.insert(&listener.entry)
+                || listener.on.as_slice() != ["design.changed"]
+                || entry.is_none_or(|entry| entry.kind != EntryKind::Command || entry.effect != Effect::Read)
+            {
+                return Err(invalid("runtime.listeners", "distinct read command entries listening to [\"design.changed\"] are required"));
             }
         }
         if self.commands.len() > 128 || self.commands.iter().any(|id| !valid_command_name(id)) {
@@ -790,6 +854,11 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
             return Err(invalid("capabilities", "a plugin with a runtime needs the commands capability: \"capabilities\": [\"commands@0.1\"]"));
         }
         runtime.validate()?;
+    }
+    if manifest.runtime.as_ref().is_some_and(|runtime| !runtime.listeners.is_empty())
+        && !manifest.capabilities.iter().any(|capability| capability.starts_with("design@"))
+    {
+        return Err(invalid("runtime.listeners", "design listeners require capability design@0.1"));
     }
     check_storage(&manifest)?;
     Ok(manifest)
