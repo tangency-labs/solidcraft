@@ -266,6 +266,20 @@ mod tests {
         assert!(!on(&h.app), "the second turns it off");
     }
 
+    /// Wide or narrow, the switch keeps a gap before the Donate pill rather than touching it.
+    #[test]
+    fn the_bar_switch_keeps_clear_of_the_link_pills() {
+        for (width, height) in [(1280, 720), (900, 600)] {
+            let mut h = boxed();
+            h.call("ui.resize", json!({"width": width, "height": height}));
+            h.app.home.open = false;
+            h.settle();
+            let switch = crate::scenario::rect_of("titlebar:creative").expect("the switch shows");
+            let donate = crate::scenario::rect_of("titlebar:kofi").expect("the Donate pill shows");
+            assert!(switch.right() + 4.0 <= donate.left(), "{width}x{height}: {switch:?} {donate:?}");
+        }
+    }
+
     #[test]
     fn double_clicking_a_body_picks_it_up_and_a_triad_drag_moves_it() {
         let mut h = boxed();

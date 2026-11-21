@@ -368,7 +368,8 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if out.reserved_offers { out.tabs_end } else { badge.or(update).map_or(out.tabs_end, |u| out.tabs_end.min(u.left() - 8.0)) };
             // The Creative switch takes the right end of the space left to the tabs, so it sits
             // left of the offers and the link pills; it hides when the tabs need that room.
-            let switch_right = if out.reserved_offers { tabs_end } else { tabs_end + 2.0 };
+            // The reserved layout ends the tabs' space at the next part's edge, so keep a pill's gap.
+            let switch_right = if out.reserved_offers { tabs_end - 6.0 } else { tabs_end + 2.0 };
             let span = Rect::from_min_max(pos2(out.tabs_start.min(switch_right), out.offer.min.y), pos2(switch_right, out.offer.max.y));
             let creative = if design_shown(app) { crate::creative_mode::bar_switch(app, ui, span) } else { None };
             let tabs_end = creative.map_or(tabs_end, |c| tabs_end.min(c.left() - 8.0));
