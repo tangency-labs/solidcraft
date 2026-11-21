@@ -59,13 +59,31 @@ pub enum SurfaceFailure {
         /// The step that failed, and why that is the kernel's fault.
         why: &'static str,
     },
+    /// The boundary curves of a plane on ellipses are not all ellipses, so they have no
+    /// common ellipse plane to take. Class `failed`, status `SM_ERR`.
+    NoCommonEllipsePlane,
+    /// A curve of a plane on ellipses has no certified bounding box, so the plane's canvas
+    /// cannot enclose it. Class `failed`, status `SM_ERR`.
+    EllipseBoundsNotCertified,
+    /// The ellipses of a plane's boundary do not all lie in the first one's stored plane,
+    /// exactly: they are refused rather than fitted within a tolerance. Class `failed`,
+    /// status `SM_ERR`.
+    EllipsesNotOnOneExactPlane,
+    /// The canvas that encloses an analytic plane's boundary curves is degenerate or not
+    /// finite. Class `failed`, status `SM_ERR`.
+    PlaneCanvasNotFinite,
 }
 
 impl SurfaceFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) | Self::Defect { .. } => SM_ERR,
+            Self::Failed(_)
+            | Self::Defect { .. }
+            | Self::NoCommonEllipsePlane
+            | Self::EllipseBoundsNotCertified
+            | Self::EllipsesNotOnOneExactPlane
+            | Self::PlaneCanvasNotFinite => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
@@ -95,6 +113,18 @@ impl core::fmt::Display for SurfaceFailure {
             | Self::OffSurface(what) => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
+            Self::NoCommonEllipsePlane => {
+                f.write_str("the boundary curves are not all ellipses with a common plane")
+            }
+            Self::EllipseBoundsNotCertified => {
+                f.write_str("a boundary curve has no certified bounding box")
+            }
+            Self::EllipsesNotOnOneExactPlane => {
+                f.write_str("the ellipse boundaries do not have one exact plane")
+            }
+            Self::PlaneCanvasNotFinite => {
+                f.write_str("the analytic plane's bounding canvas is not finite")
+            }
         }
     }
 }
@@ -286,6 +316,24 @@ mod tests {
     #[test]
     fn the_surface_routines_build_no_bare_statuses() {
         super::super::bare_scan::assert_waiting("surface", 51, &[]);
+    }
+
+    /// The named causes of a plane on ellipses have status `SM_ERR` and class `failed`.
+    #[test]
+    fn the_plane_on_ellipses_causes_have_their_status_and_class() {
+        let op = "surface::op";
+        for failure in [
+            SurfaceFailure::NoCommonEllipsePlane,
+            SurfaceFailure::EllipseBoundsNotCertified,
+            SurfaceFailure::EllipsesNotOnOneExactPlane,
+            SurfaceFailure::PlaneCanvasNotFinite,
+        ] {
+            let e = SolidError::surface(op, failure);
+            assert_eq!(e.upstream_status(), Some(SM_ERR), "{failure:?}");
+            assert_eq!(e.kind(), ErrorKind::Failed, "{failure:?}");
+            assert_eq!(e.surface_failure(), Some(&failure));
+            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+        }
     }
 
     /// A reviewed defect is of class 127 with the status of the phrase cause it replaces,
