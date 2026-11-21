@@ -470,3 +470,21 @@ fn physical_catalog_import_respects_design_cap_and_builtin_names_without_partial
     assert_eq!(s.doc, before);
     assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
 }
+
+/// The library places are the user's, like the plugin host fields: one shared value that every copy
+/// of a session reads and that opening or starting a design keeps. New sessions share the built-in one.
+#[test]
+fn a_sessions_library_places_are_shared_with_its_copies_and_kept_across_designs() {
+    use solidcraft_io::library::{Libraries, Place, PlaceRow, scan};
+    let mut s = Session::default();
+    assert!(Arc::ptr_eq(&s.libraries, &Session::default().libraries), "the built-in value is made once");
+    assert_eq!(s.libraries.set().places().len(), 1);
+    assert_eq!(s.libraries.set().places()[0].place(), &Place::BuiltIn);
+
+    let row = PlaceRow { place: Place::Library("/lib/shop".into()), read_only: true };
+    let places = Arc::new(Libraries::new(Arc::new(scan(&Place::BuiltIn)), None, vec![row], &[], &[]));
+    s.libraries = Arc::clone(&places);
+    assert!(Arc::ptr_eq(&s.scratch().libraries, &places), "a copy shares the value, not a new scan");
+    s.replace_design(Session::default());
+    assert!(Arc::ptr_eq(&s.libraries, &places), "opening or starting a design keeps the user's places");
+}
