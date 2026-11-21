@@ -1168,7 +1168,14 @@ fn a_placement_that_scales_a_part_is_checked_as_placed() {
 /// A check job for `body`, as the reader makes one (part `name`, `times` instances).
 fn check_job(body: &Body, name: &str, times: usize) -> checks::Job {
     let n = body.face_count();
-    let source = Arc::new(parallel::Part { body: body.clone(), closed: true, file_faces: n, face_origin: (0..n as u64).collect(), refused: None });
+    let source = Arc::new(parallel::Part {
+        body: body.clone(),
+        closed: true,
+        file_faces: n,
+        face_origin: (0..n as u64).collect(),
+        refused: None,
+        split_edges: 0,
+    });
     checks::Job {
         item: 101,
         part: name.into(),
@@ -1186,7 +1193,14 @@ fn check_job(body: &Body, name: &str, times: usize) -> checks::Job {
 /// first instance.
 fn part_jobs(body: &Body, placements: &[M4]) -> (Vec<checks::Job>, checks::Heals) {
     let n = body.face_count();
-    let part = Arc::new(parallel::Part { body: body.clone(), closed: true, file_faces: n, face_origin: (0..n as u64).collect(), refused: None });
+    let part = Arc::new(parallel::Part {
+        body: body.clone(),
+        closed: true,
+        file_faces: n,
+        face_origin: (0..n as u64).collect(),
+        refused: None,
+        split_edges: 0,
+    });
     let mut jobs: Vec<checks::Job> = Vec::new();
     let mut of: HashMap<Option<[u64; 16]>, usize> = HashMap::new();
     for m in placements {
@@ -3314,8 +3328,38 @@ fn a_surface_model_with_an_edge_of_three_faces_imports_as_one_open_body() {
     let body = &imp.bodies[0].body;
     assert!(!imp.bodies[0].closed);
     assert_eq!(body.face_count(), 3);
-    // The shared edge and the three edges round each sheet, the third use on a copy of its own.
-    assert!(body.edge_count() >= 10, "{}", body.edge_count());
+    // Nine outer edges and the shared one, and the third use on a copy of its own: eleven.
+    assert_eq!(body.edge_count(), 11);
+    // The axial edges: the first two uses keep the edge, the third has the copy to itself, with
+    // the same curve and the same vertices.
+    let record = body.record();
+    let mut uses = vec![0usize; record.edges.len()];
+    for face in &record.faces {
+        for l in &face.loops {
+            if let solidcore_record::brep::Loop::Edges { edges } = l {
+                for u in edges {
+                    uses[u.edge as usize] += 1;
+                }
+            }
+        }
+    }
+    let axial: Vec<usize> = (0..record.edges.len())
+        .filter(|&i| {
+            let e = &record.edges[i];
+            e.vertices.iter().all(|&v| {
+                let p = record.vertices[v as usize].point;
+                p[0].abs() < 1e-9 && p[1].abs() < 1e-9
+            })
+        })
+        .collect();
+    assert_eq!(axial.len(), 2, "{axial:?}");
+    let mut counts: Vec<usize> = axial.iter().map(|&i| uses[i]).collect();
+    counts.sort_unstable();
+    assert_eq!(counts, [1, 2]);
+    assert_eq!(record.edges[axial[0]].curve, record.edges[axial[1]].curve);
+    assert_eq!(record.edges[axial[0]].vertices, record.edges[axial[1]].vertices);
+    // One original edge was split, once.
+    assert_eq!(imp.report.split_edges, 1);
 }
 
 /// Two sheets sharing an edge, as before.
@@ -3325,6 +3369,7 @@ fn a_surface_model_with_an_edge_of_two_faces_still_imports_as_one_open_body() {
     assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
     assert!(!imp.bodies[0].closed);
     assert_eq!(imp.bodies[0].body.face_count(), 2);
+    assert_eq!(imp.report.split_edges, 0);
 }
 
 /// Parts of known shape from the step-conformance corpus (`tests/step-conformance`, generated
@@ -5173,7 +5218,7 @@ fn an_imported_part_whose_check_fails_is_healed_where_it_is_read() {
     let faces = body.face_count();
     assert_eq!(faces, 8);
     let origin: Vec<u64> = (100..100 + faces as u64).collect();
-    let part = Part { body, closed: true, file_faces: faces, face_origin: origin.clone(), refused: None };
+    let part = Part { body, closed: true, file_faces: faces, face_origin: origin.clone(), refused: None, split_edges: 0 };
     let read = heal(&part, 7);
     assert_eq!(part.body.record(), &source, "the part read stays as it was");
     let Healed::Kept(part, note, check, face_source) = read else { panic!("kept") };
@@ -5213,7 +5258,7 @@ fn an_imported_part_whose_check_fails_is_healed_where_it_is_read() {
     // a part whose check passes is left as it is, with no note
     let clean = hair_step_body(3e-3, 1e-3);
     assert_eq!(crate::validation::failing_check(&clean).unwrap(), None);
-    let part = Part { body: clean, closed: true, file_faces: 8, face_origin: origin.clone(), refused: None };
+    let part = Part { body: clean, closed: true, file_faces: 8, face_origin: origin.clone(), refused: None, split_edges: 0 };
     assert!(matches!(heal(&part, 7), Healed::NotKept));
 }
 
@@ -5325,7 +5370,7 @@ fn a_stopped_heal_changes_nothing() {
     let stop = solidcraft_smlib::stop::Stop::new();
     stop.stop();
     assert_eq!(stop.within(|| crate::heal_tolerance_defects(&hair)).err(), Some(KernelError::Heal(crate::HealFailure::Stopped)));
-    let part = Part { closed: true, file_faces: 8, face_origin: (0..8).collect(), refused: None, body: hair.clone() };
+    let part = Part { closed: true, file_faces: 8, face_origin: (0..8).collect(), refused: None, split_edges: 0, body: hair.clone() };
     assert!(matches!(stop.within(|| heal(&part, 7)), Healed::Stopped));
     assert_eq!(part.body.record(), &source);
     // In the import's checks: a stopped run heals nothing and says it was stopped.
