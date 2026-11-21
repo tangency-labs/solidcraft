@@ -319,6 +319,7 @@ pub(crate) fn describe<H: PluginHost + 'static>(
     let limits = &runtime.limits;
     // No command or filesystem authority while reading static approval declarations.
     let state = State {
+        design_tokens: false,
         host,
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
