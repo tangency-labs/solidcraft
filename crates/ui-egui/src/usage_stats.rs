@@ -156,10 +156,21 @@ pub enum Off {
     Preference,
 }
 
+/// How long the first-start notice stays when nobody points at it.
+pub const NOTICE_SECONDS: f64 = 30.0;
+
 /// The app's usage statistics: what is kept, and the report on its way.
 #[derive(Default)]
 pub struct UsageStats {
     pub store: Store,
+    /// The host keeps this app's usage statistics between runs (`SolveApp::load_usage_stats`).
+    /// Until then (tests, scenarios, an app that keeps nothing) the notice never shows and nothing
+    /// is counted.
+    pub(crate) hosted: bool,
+    /// Until when (the app's clock) the notice shows; None: not showing.
+    notice_until: Option<f64>,
+    /// Preferences › Privacy shows the next report.
+    pub show_report: bool,
     /// [`ENV_OFF`] said off when the app started.
     pub env_off: bool,
     /// The minute (since 1970) of the last input counted.
@@ -225,7 +236,7 @@ pub fn off(app: &SolveApp) -> Option<Off> {
 
 /// Usage statistics are on and the person has been told: count and send.
 pub fn active(app: &SolveApp) -> bool {
-    off(app).is_none() && app.usage.store.notice_shown
+    app.usage.hosted && off(app).is_none() && app.usage.store.notice_shown
 }
 
 /// A new random installation id (a version 4 UUID). None when the system has no randomness.
@@ -379,6 +390,11 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
 pub fn tick_at(app: &mut SolveApp, unix: i64, now: f64, input: bool) {
     let on = active(app);
     app.session.count_usage = on;
+    // The counts are the process's: only the app that keeps them takes them, so another app in
+    // the same process (a test's) never takes this one's.
+    if !app.usage.hosted {
+        return;
+    }
     let counted = solidcraft_engine::usage::take();
     if !on {
         if off(app).is_some() {
@@ -525,6 +541,95 @@ fn send(app: &mut SolveApp, today: &str, now: f64) {
 /// The server took the report (2xx) or will never take it (4xx other than 429).
 fn done(status: u16) -> bool {
     (200..300).contains(&status) || ((400..500).contains(&status) && status != 429)
+}
+
+/// What the notice's buttons do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoticeAction {
+    TurnOff,
+    Details,
+    Close,
+}
+
+/// The first-start notice is showing: shown once, the first time usage statistics are on. From the
+/// frame it first shows, counting starts ([`Store::notice_shown`]).
+pub fn notice(app: &mut SolveApp, now: f64) -> bool {
+    if !app.usage.hosted || off(app).is_some() {
+        app.usage.notice_until = None;
+        return false;
+    }
+    if !app.usage.store.notice_shown {
+        app.usage.store.notice_shown = true;
+        app.usage.notice_until = Some(now + NOTICE_SECONDS);
+    }
+    app.usage.notice_until.is_some_and(|until| now < until)
+}
+
+/// The share of the notice's time left (1 to 0).
+pub fn notice_left(app: &SolveApp, now: f64) -> f32 {
+    app.usage.notice_until.map_or(0.0, |until| ((until - now) / NOTICE_SECONDS).clamp(0.0, 1.0) as f32)
+}
+
+/// The pointer is on the notice: its time starts again.
+pub fn keep_notice(app: &mut SolveApp, now: f64) {
+    if app.usage.notice_until.is_some() {
+        app.usage.notice_until = Some(now + NOTICE_SECONDS);
+    }
+}
+
+/// A button of the notice was pressed.
+pub fn act(app: &mut SolveApp, action: NoticeAction) {
+    app.usage.notice_until = None;
+    match action {
+        NoticeAction::TurnOff => {
+            app.preferences.usage_statistics = false;
+            app.usage.store.days.clear();
+            let text = app.tr("usage.turned_off").to_string();
+            app.set_status(text, false);
+        }
+        NoticeAction::Details => crate::prefs::open_at(app, crate::prefs::PAGE_PRIVACY),
+        NoticeAction::Close => {}
+    }
+}
+
+/// The notice as one of the shared toasts in `free`; its rect when shown.
+pub fn notice_toast(app: &mut SolveApp, ui: &egui::Ui, free: egui::Rect) -> Option<egui::Rect> {
+    let now = ui.ctx().input(|i| i.time);
+    if !notice(app, now) {
+        return None;
+    }
+    use crate::ui_kit::toast::Action;
+    let (off_label, details) = (app.tr("usage.turn_off").to_string(), app.tr("usage.details").to_string());
+    let actions = [(off_label.as_str(), Action::Secondary), (details.as_str(), Action::Primary)];
+    let extras = crate::ui_kit::toast::Extras {
+        close: Some("toast:usage_stats:close"),
+        countdown: Some((notice_left(app, now), NOTICE_SECONDS)),
+        ..Default::default()
+    };
+    let text = app.tr("usage.notice").to_string();
+    let toast = crate::viewport::paint_toast_ext(ui, free, text, crate::ui_kit::toast::Lead::Dot(false), &actions, extras)?;
+    crate::scenario::publish_rect("toast:usage_stats", toast.rect);
+    for (index, button) in toast.buttons.iter().enumerate() {
+        crate::scenario::publish_rect(&format!("toast:usage_stats:button:{index}"), *button);
+    }
+    if ui.ctx().input(|i| i.pointer.hover_pos()).is_some_and(|pos| toast.rect.contains(pos)) {
+        keep_notice(app, now);
+    }
+    let action = if toast.closed {
+        Some(NoticeAction::Close)
+    } else {
+        toast.clicked.and_then(|i| [NoticeAction::TurnOff, NoticeAction::Details].get(i).copied())
+    };
+    if let Some(action) = action {
+        act(app, action);
+    }
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+    Some(toast.rect)
+}
+
+/// Whether the notice is to show (no side effects), so an idle window can skip the toasts' layout.
+pub fn notice_pending(app: &SolveApp) -> bool {
+    app.usage.hosted && off(app).is_none() && (!app.usage.store.notice_shown || app.usage.notice_until.is_some())
 }
 
 #[cfg(test)]
