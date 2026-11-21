@@ -156,12 +156,12 @@ pub(super) struct GpuCull {
     words: [u32; 8],
     /// The view the placements were last culled for.
     culled_for: Option<([[f32; 4]; 4], [f32; 2], bool)>,
-    /// Whether the last cull's counts are still to be copied back (the readback was busy).
-    counts_pending: bool,
     /// The device's workgroups per dispatch dimension.
     max_groups: u32,
     readback: wgpu::Buffer,
     state: Arc<AtomicU8>,
+    /// The last cull's statistics are not copied yet: the readback was busy.
+    copy_pending: bool,
 }
 
 impl GpuCull {
@@ -337,10 +337,10 @@ impl GpuCull {
             placeholder,
             bound_hiz: 0,
             culled_for: None,
-            counts_pending: false,
             max_groups: limits.max_compute_workgroups_per_dimension.max(1),
             readback,
             state: Arc::new(AtomicU8::new(IDLE)),
+            copy_pending: false,
         })
     }
 
@@ -395,7 +395,11 @@ impl GpuCull {
         // only for another view, or after a cull that left out hidden placements.
         let key = (*vp, size, hidden.is_some());
         if !cpu_changed && hidden.is_none() && self.culled_for == Some(key) {
-            self.copy_counts(encoder);
+            // A cull whose statistics could not be copied while the readback was busy: copy them
+            // now that it is free (a cull below would overwrite its arguments).
+            if self.copy_pending {
+                self.copy_stats(encoder);
+            }
             return;
         }
         self.culled_for = Some(key);
@@ -464,17 +468,18 @@ impl GpuCull {
             pass.set_pipeline(&self.kernel.place);
             pass.dispatch_workgroups(x, y, 1);
         }
-        self.counts_pending = true;
-        self.copy_counts(encoder);
+        self.copy_stats(encoder);
     }
 
-    /// Copy the last cull's counts back for the statistics, in `encoder`, once the readback is
-    /// free: a cull while it was busy is copied in a later frame, even if the view stays put.
-    fn copy_counts(&mut self, encoder: &mut wgpu::CommandEncoder) {
-        if self.counts_pending && self.state.load(Ordering::Acquire) == IDLE {
+    /// Copy the arguments for the statistics now, or remember to when the last readback frees the
+    /// buffer (a cull's arguments change only with the next cull).
+    fn copy_stats(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        if self.state.load(Ordering::Acquire) == IDLE {
             encoder.copy_buffer_to_buffer(&self.args, 0, &self.readback, 0, self.args_reset.len() as u64);
             self.state.store(COPIED, Ordering::Release);
-            self.counts_pending = false;
+            self.copy_pending = false;
+        } else {
+            self.copy_pending = true;
         }
     }
 
@@ -663,7 +668,9 @@ mod tests {
     /// left out, and one in front of it is drawn; without the last frame's depth both are.
     #[test]
     fn a_placement_behind_the_last_frames_depth_is_left_out_while_the_view_moves() {
-        use super::super::{Batches, GpuScene, GpuTarget, InstanceLook, InstancedMesh, Motions, PaletteIndex, Renderer, SceneSlot, SharedTris, hiz};
+        use super::super::{
+            Batches, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook, InstancedMesh, Motions, PaletteIndex, Renderer, SceneSlot, SharedTris, hiz,
+        };
         use solidcore_record::Vec3;
         use std::sync::{Arc, Mutex};
         let Ok((_, device, queue)) = crate::open_headless(crate::test_env::policy()) else { return };
@@ -728,28 +735,54 @@ mod tests {
         let mut pyramid = hiz::Hiz::new(&device, &kernel, &depth_view, [64, 48], 1);
         pyramid.build(&queue, &kernel, &mut encoder, vp, false, 1);
         queue.submit([encoder.finish()]);
-        let drawn = |batches: &mut Batches, hidden: Option<(&hiz::Hiz, bool)>| -> u32 {
+        let drawn = |batches: &mut Batches, hidden: Option<(&hiz::Hiz, bool)>| -> (u32, Vec<u8>) {
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
             batches.cull(&device, &queue, &mut encoder, &vp, size, &Motions::default(), hidden);
             queue.submit([encoder.finish()]);
             let Some(g) = batches.gpu_cull.as_ref() else { panic!("the GPU culls the scene") };
+            let out = batches.indirect.as_ref().and_then(|i| i.instances()).expect("placements");
             let staging = device.create_buffer(&wgpu::BufferDescriptor {
                 label: None,
                 size: g.args.size(),
                 usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
+            let placed = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: out.size(),
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
             encoder.copy_buffer_to_buffer(&g.args, 0, &staging, 0, g.args.size());
+            encoder.copy_buffer_to_buffer(&out, 0, &placed, 0, out.size());
             queue.submit([encoder.finish()]);
             staging.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+            placed.slice(..).map_async(wgpu::MapMode::Read, |_| {});
             device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
             let bytes = staging.slice(..).get_mapped_range().unwrap().to_vec();
+            let outs = placed.slice(..).get_mapped_range().unwrap().to_vec();
+            let word = |b: &[u8], i: usize| u32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
             let entries = batches.indirect.as_ref().unwrap().entry_list().len();
-            (0..entries).map(|n| u32::from_le_bytes(bytes[(n * 5 + 1) * 4..(n * 5 + 2) * 4].try_into().unwrap())).sum()
+            let mut total = 0u32;
+            let mut survivor = Vec::new();
+            for n in 0..entries {
+                let count = word(&bytes, n * 5 + 1);
+                total += count;
+                if count == 1 {
+                    let first = word(&bytes, n * 5 + 4) as usize;
+                    survivor = outs[first * INSTANCE_SIZE..(first + 1) * INSTANCE_SIZE].to_vec();
+                }
+            }
+            (total, survivor)
         };
-        assert_eq!(drawn(&mut batches, None), 2, "a still view draws both");
-        assert_eq!(drawn(&mut batches, Some((&pyramid, false))), 1, "moving: the one behind the plane is left out");
-        assert_eq!(drawn(&mut batches, None), 2, "still again: both");
+        assert_eq!(drawn(&mut batches, None).0, 2, "a still view draws both");
+        let (count, survivor) = drawn(&mut batches, Some((&pyramid, false)));
+        assert_eq!(count, 1, "moving: the one behind the plane is left out");
+        // The near placement's rows, [row][column]: the part at z -30, the one in front of the plane.
+        let near: Vec<u8> =
+            [[1.0f32, 0.0, 0.0, -5.0], [0.0, 1.0, 0.0, -5.0], [0.0, 0.0, 1.0, -30.0]].iter().flatten().flat_map(|v| v.to_le_bytes()).collect();
+        assert_eq!(&survivor[..near.len()], &near[..], "the near placement survives, not the rear one");
+        assert_eq!(drawn(&mut batches, None).0, 2, "still again: both");
     }
 }

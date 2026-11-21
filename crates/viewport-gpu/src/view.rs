@@ -3289,12 +3289,15 @@ pub struct Renderer {
     /// below each frame the device refused (out of video memory, #7296).
     frame_budget: u64,
     /// The depth pyramid's pipelines (made the first time a frame can use them; `None` with
-    /// `hiz_failed` where the device cannot), the pyramid of the last frame drawn, how many
-    /// pyramids have been made, and how many frames drawn.
+    /// `hiz_failed` where the device cannot build them or refused its memory), the pyramid of the
+    /// last frame drawn, how many pyramids have been made, the picture it belongs to, and how
+    /// many frames drawn.
     hiz_kernel: Option<hiz::Kernel>,
     hiz_failed: bool,
     hiz: Option<hiz::Hiz>,
     hiz_generation: u64,
+    /// The picture slot the pyramid was built for (a pyramid is one picture's depth).
+    hiz_slot: u64,
     frames: u64,
     /// The device refused memory for a frame or its see-through targets ([`DrawStats::lowered`]).
     lowered: bool,
@@ -4428,6 +4431,7 @@ impl Renderer {
                 hiz_failed: false,
                 hiz: None,
                 hiz_generation: 0,
+                hiz_slot: 0,
                 frames: 0,
                 lowered: false,
                 image: image.join(),
@@ -5130,9 +5134,16 @@ impl Renderer {
             res.pic.model.sort_glass(queue, cb.back);
         }
         // While the view moves, the placements the last frame drawn hid are left out: only with
-        // the pyramid that frame built (`frames` counts the frames drawn so far).
+        // the pyramid that frame built (`frames` counts the frames drawn so far), for the picture
+        // it was built from, and by a frame drawn into a frame of its own (one drawn straight
+        // into the window's pass leaves nothing out).
         let reversed = res.target.reversed_depth();
-        let hidden = res.hiz.as_ref().filter(|h| cb.occlusion && h.vp.is_some() && h.built_in == res.frames).map(|h| (h, reversed));
+        let offscreen = isolated || cb.ssaa != 1.0 || see_through || res.window_differs();
+        let hidden = res
+            .hiz
+            .as_ref()
+            .filter(|h| cb.occlusion && offscreen && h.vp.is_some() && h.built_in == res.frames && res.hiz_slot == res.pic_slot)
+            .map(|h| (h, reversed));
         res.pic.model.cull(device, queue, encoder, &cb.view_proj, cb.size_px, &cb.motions, cb.edge_px, hidden);
         // The frame's own ground (under bodies drawn moved) before the model scene's.
         let ground = cb.ground.or(res.pic.model.ground_input);
@@ -5216,7 +5227,9 @@ impl Renderer {
         res.pic.ss_ready = (isolated || cb.ssaa != 1.0 || see_through || res.window_differs()) && res.supersample(device, encoder, cb, see_through);
         res.frames += 1;
         res.build_depth_pyramid(device, queue, encoder, cb);
-        res.pic.ss_key = (res.pic.ss_ready && res.refused_upload.is_none()).then_some(key);
+        // A picture drawn with occlusion is not cached: an identical frame would reuse it before
+        // the cull could draw a placement the previous pyramid hid.
+        res.pic.ss_key = (res.pic.ss_ready && res.refused_upload.is_none() && !cb.occlusion).then_some(key);
     }
 
     /// Draw the frame into `pass` within `viewport` (x, y, width, height in physical pixels):
@@ -5826,21 +5839,37 @@ impl Renderer {
         }
         let Some((size, depth)) = self.pic.ss.as_ref().and_then(|ss| Some((ss.size, ss.depth_read.clone()?))) else { return };
         let samples = self.target.samples.max(1);
-        if self.hiz_kernel.as_ref().is_none_or(|k| k.samples() != samples) {
+        let made = self.hiz_kernel.as_ref().is_none_or(|k| k.samples() != samples);
+        if made {
             self.hiz_kernel = hiz::Kernel::new(device, samples);
             self.hiz_failed = self.hiz_kernel.is_none();
             self.hiz = None;
         }
         let Some(kernel) = &self.hiz_kernel else { return };
+        // The frame just drawn had no kernel when it chose its store operation (`supersample`
+        // discards depth without one), so its depth is gone: build from the next frame's stored
+        // depth instead.
+        if made {
+            return;
+        }
         // A pyramid per frame size; a new frame of the same size is a new depth texture.
         if self.hiz.as_ref().is_none_or(|h| h.frame != size || !h.reads(&depth)) {
             self.hiz_generation += 1;
-            self.hiz = Some(hiz::Hiz::new(device, kernel, &depth, size, self.hiz_generation));
+            match allocated(device, || hiz::Hiz::new(device, kernel, &depth, size, self.hiz_generation)) {
+                Ok(hiz) => self.hiz = Some(hiz),
+                Err(e) => {
+                    log::warn!("hidden placements are drawn while the view moves: the GPU refused the depth pyramid: {e}");
+                    self.hiz = None;
+                    self.hiz_failed = true;
+                    return;
+                }
+            }
         }
         let reversed = self.target.reversed_depth();
         if let Some(h) = self.hiz.as_mut() {
             h.build(queue, kernel, encoder, cb.view_proj, reversed, self.frames);
         }
+        self.hiz_slot = self.pic_slot;
     }
 
     /// Draw the frame supersampled (`cb.ssaa` times the viewport's pixels each way, within the

@@ -54,17 +54,21 @@ fn hidden(r0: vec4<f32>, r1: vec4<f32>, r2: vec4<f32>, lo: vec3<f32>, hi: vec3<f
     var pmin = vec2<f32>(1e30, 1e30);
     var pmax = vec2<f32>(-1e30, -1e30);
     var near = 1e30;
+    var outside = false;
     for (var k = 0u; k < 8u; k = k + 1u) {
         let p = vec4<f32>(corner(lo, hi, k), 1.0);
         let c = view.prev_vp * vec4<f32>(dot(r0, p), dot(r1, p), dot(r2, p), 1.0);
         if (!(c.w > 1e-6)) { return false; }
         let ndc = c.xyz / c.w;
         let px = vec2<f32>((ndc.x * 0.5 + 0.5) * frame.x, (0.5 - ndc.y * 0.5) * frame.y);
+        if (px.x < 0.0 || px.x >= frame.x || px.y < 0.0 || px.y >= frame.y) { outside = true; }
         pmin = min(pmin, px);
         pmax = max(pmax, px);
         near = min(near, select(ndc.z, 1.0 - ndc.z, (view.hiz.w & 2u) != 0u));
     }
-    if (pmax.x < 0.0 || pmax.y < 0.0 || pmin.x >= frame.x || pmin.y >= frame.y) { return false; }
+    // A box crossing the frame's edge may have a part the current view shows: the depth kept
+    // inside the strip says nothing about the rest of it.
+    if (outside) { return false; }
     let a = max(pmin, vec2<f32>(0.0, 0.0)) * 0.5;
     let b = min(pmax, frame - vec2<f32>(1.0, 1.0)) * 0.5;
     let span = max(b.x - a.x, b.y - a.y);

@@ -167,9 +167,16 @@ impl Kernel {
     }
 }
 
+/// Level 0's size for a frame of `frame` pixels: half the frame each way, at least 1, rounded up
+/// to a power of two so every later level halves it exactly. An odd frame's last row and column
+/// are then kept (the first-level shaders clamp their reads to the frame's edge).
+fn level0_size(frame: [u32; 2]) -> [u32; 2] {
+    frame.map(|side| side.div_ceil(2).max(1).next_power_of_two())
+}
+
 /// The pyramid of one frame size and the view it was last built for.
 pub(super) struct Hiz {
-    /// The frame's size (pixels); level 0 is half of it.
+    /// The frame's size (pixels); level 0 is half of it, rounded up to a power of two.
     pub(super) frame: [u32; 2],
     pub(super) levels: u32,
     level0: [u32; 2],
@@ -191,7 +198,7 @@ pub(super) struct Hiz {
 impl Hiz {
     /// A pyramid for a frame of `frame` pixels whose depth is `depth` (its depth aspect).
     pub(super) fn new(device: &wgpu::Device, kernel: &Kernel, depth: &wgpu::TextureView, frame: [u32; 2], generation: u64) -> Hiz {
-        let level0 = [frame[0].div_ceil(2).max(1), frame[1].div_ceil(2).max(1)];
+        let level0 = level0_size(frame);
         let levels = 32 - level0[0].max(level0[1]).leading_zeros();
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("sc_hiz"),
@@ -279,5 +286,18 @@ mod tests {
             let module = naga::front::wgsl::parse_str(src).unwrap_or_else(|e| panic!("{}", e.emit_to_string(src)));
             naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap();
         }
+    }
+
+    /// An odd frame keeps its last row and column: level 0 is rounded up to a power of two, so
+    /// every later level halves it exactly instead of dropping the last texel.
+    #[test]
+    fn an_odd_frames_last_row_and_column_reach_every_level() {
+        let [w, h] = super::level0_size([10, 7]);
+        assert_eq!([w, h], [8, 4]);
+        let levels = 32 - w.max(h).leading_zeros();
+        let widths: Vec<u32> = (0..levels).map(|k| (w >> k).max(1)).collect();
+        assert_eq!(widths, [8, 4, 2, 1], "each level halves the one before");
+        assert!(w * 2 >= 10 && h * 2 >= 7, "level 0 covers the frame");
+        assert_eq!(super::level0_size([64, 48]), [32, 24], "even frames unchanged");
     }
 }
