@@ -26,7 +26,7 @@ use solidcraft_doc::Expr;
 use solidcraft_doc::frame::sizes::Family;
 use solidcraft_doc::frame::{self, Anchor, CornerOverride, CornerType, MAX_MEMBERS, MemberRef, Profile, ProfileSpec};
 
-use super::check::{keyed, located, whole};
+use super::check::{keyed, located, parse_issue, whole};
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
 use super::types::{AngleExpr, GeoRefParam, LengthExpr, Point2, ProfilesParam, SketchRef, StringList, not_blank_pattern, present};
