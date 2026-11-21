@@ -21,7 +21,7 @@
 
 use solidcore::query::api_queries as q;
 use solidcore::{Brep, Kernel, Point3};
-use solidcore_record::Brep as Record;
+use solidcore_record::brep::Brep as Record;
 
 use crate::body::Body;
 use crate::measure::box_max_distance_to_point;
