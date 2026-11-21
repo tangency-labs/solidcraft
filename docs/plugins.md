@@ -290,8 +290,10 @@ An importer can additionally request `"dialog@0.1"` alongside `"formats@0.2"` an
 the additive `importer-dialog-plugin` world in `crates/craft-plugin/wit/plugin.wit`. This includes
 the existing importer world and adds the export `dialog-provider.update-fields(entry, context)`.
 The existing 0.1 and 0.2 importer worlds and their interfaces are unchanged; existing components
-need no rebuild and do not acquire a hook. Declaring the capability requires its export when
-checking/installing the component. Currently this capability is for importer runtimes only.
+need no rebuild and do not acquire a hook. The host checks the optional export when checking or
+installing the component; an explicit `dialog_hook` declaration requires it. This file-aware reply
+format is for importer entries without `dialog_hook`; entries with `"dialog_hook": true` use the
+general field patches described below.
 
 `context` is JSON:
 
@@ -338,7 +340,8 @@ even when the same path is picked again. Old header choices are cleared immediat
 one worker runs per dialog; a result for an earlier generation is discarded before the next
 update starts. Closing the form disconnects its results. Editing inputs reruns an opted-in hook,
 with fields and Open disabled while it is pending. File conditions themselves never run Wasm.
-Scripts, CLI and MCP continue to pass `path` and `options` directly and never call the dialog hook.
+Scripts, CLI and MCP continue to pass `path` and `options` directly and never call this file-aware
+schema hook. An explicit `dialog_hook` entry still runs its general field hook before importing.
 
 ## Integration APIs
 
@@ -479,6 +482,59 @@ For example:
 These numeric defaults are plugin arguments: the plugin decides how to interpret the selected
 units. Every conditional default must satisfy the property's base schema. Defaults and option
 filters also participate in cycle detection.
+
+### Computed fields with an optional dialog hook
+
+Use declarative rules above for visibility, availability and defaults expressible as sibling
+conditions. For computed defaults or lookups, add `"dialog@0.1"` to `capabilities` and
+`"dialog_hook": true` to the individual entry. Export the additive `dialog-provider` interface:
+
+```wit
+update-fields: func(entry: string, values: string) -> result<string, plugin-error>;
+```
+
+Both strings containing values are JSON objects. Existing command worlds keep their exports;
+plugins without this capability need no new export and continue to link and run. The interface
+is available alongside both supported `craft:plugin` WIT versions (0.1 and 0.2); use the
+`command-dialog-plugin` world when building a command plugin with the hook.
+Importer entries can use the same general patches. When the file-first form has a selected file,
+the host binds its file conditions before validating patches. Changing the file invalidates older
+patch replies, and the file reader and field hook share one worker slot per dialog.
+
+A reply maps existing property names to patches, for example:
+
+```json
+{
+  "clearance": {"default": 6.5, "hint": "Computed from the selected size"},
+  "size": {"choices": ["metric"], "enabled": true},
+  "details": {"visible": false}
+}
+```
+
+Only `visible`, `enabled`, `choices`, `default`, `value` and `hint` are accepted. Choices must be
+an ordered subset of that property's own `oneOf` constants, satisfying declarative option
+conditions. The hook cannot add properties, change types, enable or reveal a declaratively
+unavailable field, or bypass the input schema. A malformed reply is ignored **whole** with a
+warning. Defaults and values must satisfy the field schema and the narrowed choices. Hints are
+at most 1024 bytes of printable text; input and reply are at most 1 MiB each.
+
+Declarative conditions run first, then the validated patch, then the same input check used by
+programmatic calls. The hook never edits: it runs as a read entry, with no edit command or file
+write grants, in a fresh sandbox. Its independent budgets are at most 10,000,000 fuel, 16 MiB
+memory and 250 ms, further capped by the entry's approved runtime limits and host ceilings.
+Compilation and execution happen on the command worker, outside the window thread.
+
+The dialog debounces changes for 120 ms. It remains interactive while waiting and drops replies
+from older generations. Run uses the current fields: valid inputs remain runnable while the hook
+is pending, and an invalid or missing value keeps Run off. A user's edited field is
+never overwritten by the hook's `value` or `default`. A timeout, trap or error leaves the
+declarative fields in place with a quiet note.
+
+Scripts, `plugin.run` and namespaced MCP plugin tools call the same hook once before executing
+the entry. Tool schemas accept omitted keys for hook defaults; the original required fields are
+checked after the hook. Defaults fill omitted keys; supplied values are preserved. A value outside narrowed
+choices fails with `invalid_input` naming `params.<field>`. An exhausted time/fuel budget returns
+a typed `exhausted` error, and the entry does not run. Programmatic calls never open a dialog.
 
 ### Selection fields
 

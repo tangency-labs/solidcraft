@@ -8,7 +8,7 @@ package craft:plugin@0.2.0;
 // - `storage@0.1`: with `commands`, the app's `storage.*` commands, so a plugin keeps its own data
 //   in the open design (no interface of its own).
 // - `design@0.1`: with `commands`, design-state, for document identity/revision and read listeners.
-// - `dialog@0.1`: with `formats@0.2`, dialog-provider (additive world `importer-dialog-plugin`).
+// - `dialog@0.1`: dialog-provider, for command field patches or file-aware importer updates.
 // Later capabilities (ui, viewport) arrive as their own interfaces. While the version is
 // 0.x, a minor version may break the one before it. 0.2 added `plugin-error.unsupported`. A host
 // still runs plugins built against 0.1 (`../wit-0.1/plugin.wit`): it reads the version from the
@@ -129,13 +129,27 @@ world importer-plugin {
     export importer;
 }
 
-// Additive dialog@0.1 capability. Existing worlds and interface signatures are frozen.
+// Optional, additive capability dialog@0.1. Existing worlds retain their exports.
 interface dialog-provider {
     use types.{json, plugin-error};
-    // context = {values: {...}, file: {name, extension, size, format, generation}}.
-    // Reply = {fields: {declared-field: {title?, description?, default?, enum?/oneOf?}}}.
-    update-fields: func(entry: string, context: json) -> result<json, plugin-error>;
+    // Values and reply are JSON objects. The host validates the entire reply before applying it.
+    // A dialog_hook entry receives values and returns per-field visible/enabled/choices/default/value/hint patches.
+    // A file-aware importer receives {values, file} and returns {fields: {declared-field: {title?, description?, default?, enum?/oneOf?}}}.
+    update-fields: func(entry: string, values: json) -> result<json, plugin-error>;
 }
+world dialog-plugin {
+    import commands;
+    import log;
+    import control;
+    import files;
+    import clock;
+    export dialog-provider;
+}
+world command-dialog-plugin {
+    include command-plugin;
+    export dialog-provider;
+}
+
 world importer-dialog-plugin {
     include importer-plugin;
     export dialog-provider;

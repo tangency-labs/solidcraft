@@ -448,6 +448,8 @@ pub struct Entry {
     pub extensions: Vec<String>,
     pub effect: Effect,
     pub input_schema: Value,
+    /// Opt in to the read-only dialog-provider export (dialog@0.1).
+    pub dialog_hook: bool,
     pub slots: Vec<UiSlot>,
 }
 
@@ -480,6 +482,8 @@ struct DeclaredEntry {
     #[serde(default = "empty_input_schema")]
     input_schema: Value,
     #[serde(default)]
+    dialog_hook: bool,
+    #[serde(default)]
     slots: Vec<UiSlot>,
 }
 impl From<EntryDeclaration> for Entry {
@@ -491,6 +495,7 @@ impl From<EntryDeclaration> for Entry {
                 extensions: Vec::new(),
                 effect: Effect::Edit,
                 input_schema: empty_input_schema(),
+                dialog_hook: false,
                 slots: Vec::new(),
             },
             EntryDeclaration::Declared(value) => Self {
@@ -503,6 +508,7 @@ impl From<EntryDeclaration> for Entry {
                     (EntryKind::Command, None) => Effect::Edit,
                 },
                 input_schema: value.input_schema,
+                dialog_hook: value.dialog_hook,
                 slots: value.slots,
             },
         }
@@ -792,14 +798,21 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         return Err(HostError::LimitExceeded { limit: "manifest size exceeds 64 KiB".into() });
     }
     // A plugin from before capabilities names its API in `runtime.api`: say so plainly.
-    if let Ok(value) = serde_json::from_slice::<Value>(text)
-        && let Some(api) = value.get("runtime").and_then(|runtime| runtime.get("api"))
-    {
-        let api = api.as_str().map(|api| api.chars().take(64).collect::<String>()).unwrap_or_else(|| "an older plugin API".into());
-        return Err(HostError::UnsupportedCapability {
-            capability: api.clone(),
-            reason: format!("was built for {api}; this version of {app} runs {API} plugins (capabilities [\"commands@0.2\"]); update the plugin"),
-        });
+    if let Ok(value) = serde_json::from_slice::<Value>(text) {
+        if let Some(api) = value.get("runtime").and_then(|runtime| runtime.get("api")) {
+            let api = api.as_str().map(|api| api.chars().take(64).collect::<String>()).unwrap_or_else(|| "an older plugin API".into());
+            return Err(HostError::UnsupportedCapability {
+                capability: api.clone(),
+                reason: format!("was built for {api}; this version of {app} runs {API} plugins (capabilities [\"commands@0.2\"]); update the plugin"),
+            });
+        }
+        // A newer capability may introduce new manifest keys. Report that capability first,
+        // before strict deserialization would misdiagnose it as an unknown field.
+        if let Some(capabilities) = value.get("capabilities")
+            && let Ok(requested) = serde_json::from_value::<Vec<String>>(capabilities.clone())
+        {
+            check_capabilities(&requested, app)?;
+        }
     }
     let mut manifest: Manifest = serde_json::from_slice(text).map_err(|error| invalid("manifest", error.to_string()))?;
     manifest.name = manifest.name.trim().to_string();
@@ -827,10 +840,10 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         return Err(invalid("description", "requires at most 240 printable characters"));
     }
     check_capabilities(&manifest.capabilities, app)?;
-    if manifest.capabilities.iter().any(|c| c.starts_with("dialog@")) && !manifest.runtime.as_ref().is_some_and(RuntimeManifest::is_importer) {
-        return Err(invalid("capabilities", "dialog@0.1 currently needs an importer runtime"));
-    }
     if let Some(runtime) = &manifest.runtime {
+        if runtime.entries.iter().any(|entry| entry.dialog_hook) && !manifest.capabilities.iter().any(|c| c.starts_with("dialog@")) {
+            return Err(invalid("capabilities", "a dialog hook needs the dialog capability: dialog@0.1"));
+        }
         if runtime.is_importer() {
             if !manifest.capabilities.iter().any(|capability| capability.starts_with("formats@")) {
                 return Err(invalid("capabilities", "an importer needs the formats capability: \"capabilities\": [\"formats@0.1\"]"));

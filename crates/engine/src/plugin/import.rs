@@ -138,10 +138,20 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
     if !options.is_object() {
         return Err(HostError::InvalidInput { field: "options".into(), reason: "the importer's options are an object".into() }.into());
     }
-    let facts = conditions::uses_file_facts(&importer.input_schema).then(|| file_facts(path, &importer.id, 0)).transpose()?;
-    let schema = conditions::bind_file_conditions(&importer.input_schema, facts.as_ref())?;
-    let prepared = conditions::has_conditions(&schema).then(|| craft_plugin::prepare_input(&schema, options)).transpose()?;
-    let options = prepared.as_ref().unwrap_or(options);
+    let declared = runtime.entries.iter().find(|entry| entry.name == importer.entry).ok_or_else(|| error("unknown entry"))?;
+    let facts = conditions::uses_file_facts(&declared.input_schema).then(|| file_facts(path, &importer.id, 0)).transpose()?;
+    let schema = conditions::bind_file_conditions(&declared.input_schema, facts.as_ref())?;
+    let prepared = if declared.dialog_hook {
+        let protected = options.as_object().map(|v| v.keys().cloned().collect()).unwrap_or_default();
+        let update = update_dialog_with_schema(session, &package, &importer.entry, options, &protected, true, &schema)?;
+        if let Some(warning) = update.warning {
+            session.echo(warning);
+        }
+        craft_plugin::prepare_input(&schema, &update.values)?
+    } else {
+        craft_plugin::prepare_input(&schema, options)?
+    };
+    let options = &prepared;
     // The caller's file scope covers the file, and with input_folder, the folder it is in. The
     // folder is read only when the manifest asks for it and the user approved it at install, for
     // this exact package (the grant above).
@@ -282,7 +292,7 @@ pub fn import_dialog(
     let entry = runtime.entries.iter().find(|e| e.name == entry).ok_or_else(|| error("unknown importer entry"))?;
     let file = file_facts(path, &format!("{}.{}", package.manifest.id, entry.name), generation)?;
     let schema = conditions::bind_file_conditions(&entry.input_schema, Some(&file))?;
-    let hook = package.manifest.capabilities.iter().any(|c| c.starts_with("dialog@"));
+    let hook = !entry.dialog_hook && package.manifest.capabilities.iter().any(|c| c.starts_with("dialog@"));
     if !hook {
         return Ok(ImportDialog { file, schema, hook });
     }
