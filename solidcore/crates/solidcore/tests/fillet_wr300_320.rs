@@ -14,6 +14,7 @@ use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_geom::p1::FilletErrorType;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::tol::contact_tol_3d;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
@@ -299,6 +300,73 @@ fn hole_rim_just_below_the_contact_builds_a_valid_solid() {
         (got - expected).abs() < 0.01,
         "volume {got}, expected {expected}"
     );
+}
+
+/// The open rail y = r meets the hole's rim at (5, 2.5, 10) when r = 2.5.
+/// The top face's outer boundary and hole become one loop through that vertex,
+/// rather than two touching loops. Contacts within modelling tolerance do too.
+#[test]
+fn outer_edge_round_tangent_to_the_hole_joins_the_top_face_loops() {
+    for tolerances in [0.0, -0.5, 0.5] {
+        let mut k = kernel(|f| *f = UpstreamFixes::all());
+        let (mut b, _) = cube_with_round_hole(&mut k);
+        let outer = edge_between(&k, &b, [0.0, 0.0, 10.0], [10.0, 0.0, 10.0]);
+        let r = 2.5 + tolerances * contact_tol_3d(&k);
+        fillet_edges(&mut k, &mut b, &[outer], r, 1, 1, 1.0).unwrap();
+        assert!(is_manifold_solid(&b).unwrap(), "r{r}");
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "r{r}: {lines:?}");
+
+        let mut top_faces = 0;
+        for face in b.faces().ids() {
+            let vertices =
+                solidcore::topology::face::p4::vertices(&b, face, None, false, None).unwrap();
+            if !vertices.is_empty()
+                && vertices
+                    .iter()
+                    .all(|&v| (b.vertex(v).unwrap().point.z - 10.0).abs() < 1e-6)
+            {
+                top_faces += 1;
+                let loops = solidcore::topology::face::p2::loops(&b, face, false, None).unwrap();
+                assert_eq!(loops.len(), 1, "r{r}: {face:?}");
+            }
+        }
+        assert_eq!(top_faces, 1, "r{r}");
+
+        // Cube minus the cylindrical hole minus the extruded round's spandrel:
+        // its r-square less its quarter disk, swept along the 10 mm edge.
+        // At exact contact these regions do not overlap. Above it by delta,
+        // any overlap is in a strip at most 5 mm wide and 10 mm deep, so its
+        // volume is at most 50 delta (< 0.0003 mm^3 for these perturbations).
+        // The round's area is below 85 mm^2; its 4e-5 mm construction tolerance
+        // contributes under 0.0034 mm^3, plus the integrator's 1e-6.
+        let pi = std::f64::consts::PI;
+        let expected = 1000.0 - pi * 2.5 * 2.5 * 10.0 - 10.0 * r * r * (1.0 - pi / 4.0);
+        let got = volume(&k, &mut b);
+        assert!(
+            (got - expected).abs() < 0.01,
+            "r{r}: volume {got}, expected {expected}"
+        );
+    }
+}
+
+/// Either side of contact stays buildable: r = 2.499 misses the hole and
+/// r = 2.501 crosses its rim, taking the existing cliff trimming path.
+#[test]
+fn outer_edge_round_either_side_of_the_hole_contact_stays_valid() {
+    for r in [2.499, 2.501] {
+        let mut k = kernel(|f| *f = UpstreamFixes::all());
+        let (mut b, _) = cube_with_round_hole(&mut k);
+        let outer = edge_between(&k, &b, [0.0, 0.0, 10.0], [10.0, 0.0, 10.0]);
+        fillet_edges(&mut k, &mut b, &[outer], r, 1, 1, 1.0).unwrap();
+        assert!(is_manifold_solid(&b).unwrap(), "r{r}");
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "r{r}: {lines:?}");
+    }
 }
 
 // ---- WR-303: the end of a round that crosses more than one face at a three-edge vertex ----
