@@ -621,6 +621,35 @@ fn setback_box_corner(radii: [f64; 3], round_order: usize, ease: f64, order: usi
     if order == 1 {
         println!("  least Gaussian curvature over the fill {least:.3e}");
     }
+    // a G2 fill's seam with its round is parabolic: the round is its section swept
+    // along a line (degree 1 along, so its Gaussian curvature is 0; an eased round's
+    // law `10 s^3 - 15 s^4 + 6 s^5` is flat to second order at `to`, so its jets at
+    // the end row are the swept section's), and the fill's rows 0..=2, taken from the
+    // round's geometry (#14041), carry those jets to the seam whatever the interior
+    // solve chooses: the fill's K on the seam u = 0 is 0. Exact rational arithmetic
+    // on the returned net finds K exactly 0 at 129 stations — more than the
+    // curvature numerator's degree, so the identity holds on the whole seam — and the
+    // sampled residual is f64 evaluation rounding alone. #13775's certificate will
+    // prove this as an identity of the definition; this keeps it on the returned net.
+    // The G^n round (order 3, cubic Hermite along) is not derived here.
+    if order == 2 && round_order <= 2 {
+        let mut worst = 0.0f64;
+        for m in 0..3 {
+            for j in 0..=16 {
+                let uv = at(0.0, f64::from(j) / 16.0);
+                let kg = gaussian_curvature(&k, &patches[m], uv).unwrap_or_else(|| {
+                    panic!("strip {m} at {uv:?}: no curvature on its round seam")
+                });
+                worst = worst.max(kg.abs());
+                assert!(
+                    kg.abs() <= 1e-11 / (size * size),
+                    "strip {m} at {uv:?}: Gaussian curvature {kg:e} on its round seam, \
+                     the parabolic identity broken"
+                );
+            }
+        }
+        println!("  worst |K| on the round seams {worst:.3e}");
+    }
 }
 
 /// `setback_distances_box_corner`: the setbacks by the owner's rule, `max(1.5 r, least +
