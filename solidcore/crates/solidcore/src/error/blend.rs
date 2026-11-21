@@ -18,8 +18,11 @@
 //! | [`BlendFailure::RemovalRefused`]       | the reason's ([`removal_class`]), 130 or 131  |
 //! | [`BlendFailure::StationDidNotConverge`]| [`ErrorKind::StationDidNotConverge`] (125)    |
 //! | [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`] | [`ErrorKind::TrimLeaks`] (126) |
-//! | [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinMeasureNotFinite`] | [`ErrorKind::StageFailed`] (127) |
-//! | [`BlendFailure::SkinPastStationCap`]   | [`ErrorKind::NotWithinTolerance`] (9)         |
+//! | [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::PlaneCurveStepVanished`] | [`ErrorKind::StageFailed`] (127) |
+//! | [`BlendFailure::SkinPastStationCap`], [`BlendFailure::PlaneCurveFitCap`] | [`ErrorKind::NotWithinTolerance`] (9) |
+//! | [`BlendFailure::PlaneCurveTouches`]    | [`ErrorKind::Degenerate`] (3)                |
+//! | [`BlendFailure::PlaneCurveEndOff`]     | [`ErrorKind::NotFound`] (2)                  |
+//! | [`BlendFailure::PlaneCurveLeavesDomain`] | [`ErrorKind::OutsideDomain`] (8)           |
 //! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
 //! | [`BlendFailure::CreasePieceEndUnbuildable`] | [`ErrorKind::Unsupported`] (5)           |
 //! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
@@ -33,7 +36,7 @@
 //!
 //! | Rust                                   | Status difftest compares          |
 //! |----------------------------------------|-----------------------------------|
-//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`] | `SM_ERR` |
+//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::PlaneCurveTouches`], [`BlendFailure::PlaneCurveEndOff`], [`BlendFailure::PlaneCurveLeavesDomain`], [`BlendFailure::PlaneCurveStepVanished`], [`BlendFailure::PlaneCurveFitCap`] | `SM_ERR` |
 //! | [`BlendFailure::Failed`]               | `SM_ERR`                          |
 //! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`] | `SM_ERR_NULL_POINTER` |
 //! | [`BlendFailure::InvalidValue`]        | `SM_ERR_INVALID_INPUT`            |
@@ -81,6 +84,18 @@ pub enum BlendFailure {
     /// and 129; [`no_room_class`]). A refusal: the failure's fit, where the
     /// check computed one, is the size that builds.
     NoRoom(NoRoomReason),
+    /// The interior section did not divide the periodic blend face. Status `SM_ERR`.
+    ClosedCliffWouldNotSplit {
+        /// The blend face in the sheet being trimmed.
+        face: crate::topology::FaceId,
+    },
+    /// A cliff face lacks geometry needed to trim the blend. Status `SM_ERR_NULL_POINTER`.
+    CliffInputMissing {
+        /// The face that lacks the input.
+        face: crate::topology::FaceId,
+        /// The missing geometry.
+        input: CliffInput,
+    },
     /// A fillet removal refuses the face it is asked to remove, for the reason named
     /// (classes 130 and 131; [`removal_class`]). A refusal that no size decides.
     RemovalRefused(RemovalRefusal),
@@ -167,6 +182,55 @@ pub enum BlendFailure {
         /// The end's parameter on the crease.
         t: f64,
     },
+    /// Tracing a surface/plane crossing found a station where the surface touches the
+    /// plane: its tangent along the crossing has no length, so the crossing has no direction.
+    /// Degenerate ([`ErrorKind::Degenerate`]); status `SM_ERR`.
+    PlaneCurveTouches {
+        /// The station's surface parameter u.
+        u: f64,
+        /// The station's surface parameter v.
+        v: f64,
+    },
+    /// An end given to a surface/plane crossing could not be put on the crossing within
+    /// tolerance. An empty search ([`ErrorKind::NotFound`]); status `SM_ERR`.
+    PlaneCurveEndOff {
+        /// True for the crossing's end, false for its start.
+        at_end: bool,
+        /// The larger of the distance from the given end to the crossing point found and
+        /// its distance to the plane; `None` when the drop or projection found no point.
+        distance: Option<f64>,
+    },
+    /// The crossing's trace leaves the surface's parameter domain in a direction it is not
+    /// closed in, before reaching its end. Outside the domain ([`ErrorKind::OutsideDomain`]);
+    /// status `SM_ERR`.
+    PlaneCurveLeavesDomain {
+        /// The station's surface parameter u.
+        u: f64,
+        /// The station's surface parameter v.
+        v: f64,
+    },
+    /// A surface/plane trace's step was halved below its minimum at a station without a
+    /// step being accepted: the march stopped. A defect ([`ErrorKind::StageFailed`]);
+    /// status `SM_ERR`.
+    PlaneCurveStepVanished {
+        /// The last accepted station's surface parameter u.
+        u: f64,
+        /// The last accepted station's surface parameter v.
+        v: f64,
+        /// The step after halving.
+        step: f64,
+        /// The minimum step allowed.
+        minimum: f64,
+    },
+    /// The crossing's Hermite fit still has spans farther than a tenth of the tolerance
+    /// from the exact curve when its station cap or its 20 refinement passes ran out.
+    /// Not within tolerance ([`ErrorKind::NotWithinTolerance`]); status `SM_ERR`.
+    PlaneCurveFitCap {
+        /// The stations held when fitting stopped.
+        stations: usize,
+        /// The refinement passes completed.
+        passes: usize,
+    },
     /// The routine could not continue, as the phrase says (for example "the fillet's law
     /// has no value at the base"). Upstream `return SE(SM_ERR)`. A phrase cause
     /// ([`BlendFailure::is_phrase`]).
@@ -232,6 +296,28 @@ pub enum BlendFailure {
     /// kind of that status ([`ErrorKind::Missing`]), as the phrase cause it replaces; typed,
     /// so not a phrase cause ([`BlendFailure::is_phrase`]).
     BandInputMissing(BandInput),
+}
+
+/// A face input required to trim a blend at a cliff.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CliffInput {
+    /// The face's surface.
+    Surface,
+    /// The planar support extending the wall.
+    Plane,
+    /// The face use facing out of the body.
+    OutwardFaceUse,
+}
+
+impl CliffInput {
+    const fn what(self) -> &'static str {
+        match self {
+            Self::Surface => "surface",
+            Self::Plane => "plane",
+            Self::OutwardFaceUse => "outward face use",
+        }
+    }
 }
 
 /// Which input of the planar-band contact query is missing ([`BlendFailure::BandInputMissing`]).
@@ -451,15 +537,23 @@ impl BlendFailure {
             | Self::StationDidNotConverge { .. }
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
+            | Self::ClosedCliffWouldNotSplit { .. }
             | Self::StageFailed
             | Self::Defect { .. }
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
             | Self::CreasePieceEndUnbuildable { .. }
+            | Self::PlaneCurveTouches { .. }
+            | Self::PlaneCurveEndOff { .. }
+            | Self::PlaneCurveLeavesDomain { .. }
+            | Self::PlaneCurveStepVanished { .. }
+            | Self::PlaneCurveFitCap { .. }
             | Self::NotCertified { .. }
             | Self::Failed(_) => SM_ERR,
-            Self::Missing(_) | Self::BandInputMissing(_) => SM_ERR_NULL_POINTER,
+            Self::Missing(_) | Self::BandInputMissing(_) | Self::CliffInputMissing { .. } => {
+                SM_ERR_NULL_POINTER
+            }
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::BadIntersections(_) => SM_ERR_BAD_INTERSECTIONS,
@@ -475,10 +569,15 @@ impl BlendFailure {
     /// [`BlendFailure::RemovalRefused`] ([`removal_class`]),
     /// [`ErrorKind::StationDidNotConverge`], [`ErrorKind::TrimLeaks`] for an open or leaking
     /// trim loop, [`ErrorKind::StageFailed`] for [`BlendFailure::StageFailed`],
-    /// [`BlendFailure::Defect`] and [`BlendFailure::SkinMeasureNotFinite`], [`ErrorKind::NotWithinTolerance`] for
-    /// [`BlendFailure::SkinPastStationCap`] and for a surface not certified within its
-    /// tolerance in its work budget ([`BlendFailure::NotCertified`]), and
-    /// [`ErrorKind::BallsFold`] for [`BlendFailure::BallsNest`], and
+    /// [`BlendFailure::Defect`], [`BlendFailure::SkinMeasureNotFinite`] and
+    /// [`BlendFailure::PlaneCurveStepVanished`], [`ErrorKind::NotWithinTolerance`] for
+    /// [`BlendFailure::SkinPastStationCap`], [`BlendFailure::PlaneCurveFitCap`] and for a
+    /// surface not certified within its tolerance in its work budget
+    /// ([`BlendFailure::NotCertified`]), [`ErrorKind::Degenerate`] for
+    /// [`BlendFailure::PlaneCurveTouches`], [`ErrorKind::NotFound`] for
+    /// [`BlendFailure::PlaneCurveEndOff`], [`ErrorKind::OutsideDomain`] for
+    /// [`BlendFailure::PlaneCurveLeavesDomain`], [`ErrorKind::BallsFold`] for
+    /// [`BlendFailure::BallsNest`], and
     /// [`ErrorKind::Unsupported`] for [`BlendFailure::CreasePieceEndUnbuildable`]. A phrase
     /// cause keeps the kind of its status ([`ErrorKind::Failed`], [`ErrorKind::Missing`],
     /// [`ErrorKind::InvalidInput`], ...), as before the record ([`BlendFailure::is_phrase`]).
@@ -489,15 +588,20 @@ impl BlendFailure {
             Self::RemovalRefused(reason) => removal_class(*reason),
             Self::StationDidNotConverge { .. } => ErrorKind::StationDidNotConverge,
             Self::TrimLoopOpen | Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
-            Self::StageFailed | Self::Defect { .. } | Self::SkinMeasureNotFinite { .. } => {
-                ErrorKind::StageFailed
-            }
-            Self::SkinPastStationCap { .. } | Self::NotCertified { .. } => {
-                ErrorKind::NotWithinTolerance
-            }
+            Self::ClosedCliffWouldNotSplit { .. } => ErrorKind::Failed,
+            Self::StageFailed
+            | Self::Defect { .. }
+            | Self::SkinMeasureNotFinite { .. }
+            | Self::PlaneCurveStepVanished { .. } => ErrorKind::StageFailed,
+            Self::SkinPastStationCap { .. }
+            | Self::NotCertified { .. }
+            | Self::PlaneCurveFitCap { .. } => ErrorKind::NotWithinTolerance,
+            Self::PlaneCurveTouches { .. } => ErrorKind::Degenerate,
+            Self::PlaneCurveEndOff { .. } => ErrorKind::NotFound,
+            Self::PlaneCurveLeavesDomain { .. } => ErrorKind::OutsideDomain,
             Self::BallsNest { .. } => ErrorKind::BallsFold,
             Self::CreasePieceEndUnbuildable { .. } => ErrorKind::Unsupported,
-            Self::BandInputMissing(_) => ErrorKind::Missing,
+            Self::BandInputMissing(_) | Self::CliffInputMissing { .. } => ErrorKind::Missing,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -523,13 +627,20 @@ impl BlendFailure {
             | Self::StationDidNotConverge { .. }
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
+            | Self::ClosedCliffWouldNotSplit { .. }
             | Self::StageFailed
             | Self::Defect { .. }
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
             | Self::CreasePieceEndUnbuildable { .. }
+            | Self::PlaneCurveTouches { .. }
+            | Self::PlaneCurveEndOff { .. }
+            | Self::PlaneCurveLeavesDomain { .. }
+            | Self::PlaneCurveStepVanished { .. }
+            | Self::PlaneCurveFitCap { .. }
             | Self::BandInputMissing(_)
+            | Self::CliffInputMissing { .. }
             | Self::NotCertified { .. } => false,
             Self::Failed(_)
             | Self::Missing(_)
@@ -558,13 +669,20 @@ impl BlendFailure {
             | Self::StationDidNotConverge { .. }
             | Self::TrimLoopOpen
             | Self::TrimLoopDoesNotSeparate
+            | Self::ClosedCliffWouldNotSplit { .. }
             | Self::StageFailed
             | Self::Defect { .. }
             | Self::SkinPastStationCap { .. }
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
             | Self::CreasePieceEndUnbuildable { .. }
+            | Self::PlaneCurveTouches { .. }
+            | Self::PlaneCurveEndOff { .. }
+            | Self::PlaneCurveLeavesDomain { .. }
+            | Self::PlaneCurveStepVanished { .. }
+            | Self::PlaneCurveFitCap { .. }
             | Self::BandInputMissing(_)
+            | Self::CliffInputMissing { .. }
             | Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -584,6 +702,10 @@ impl core::fmt::Display for BlendFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::NoRoom(reason) => write!(f, "{}: {reason:?}", self.class()),
+            Self::ClosedCliffWouldNotSplit { face } => write!(
+                f,
+                "the closed cliff blend face {face:?} does not divide at its interior section"
+            ),
             Self::RemovalRefused(reason) => write!(f, "{}: {reason:?}", self.class()),
             Self::StationDidNotConverge {
                 s,
@@ -634,6 +756,38 @@ impl core::fmt::Display for BlendFailure {
                 self.class(),
                 if *at_end { "end" } else { "start" },
             ),
+            Self::PlaneCurveTouches { u, v } => write!(
+                f,
+                "{}: the surface touches the plane at (u, v) = ({u}, {v}): the crossing has no direction",
+                self.class()
+            ),
+            Self::PlaneCurveEndOff { at_end, distance } => {
+                write!(
+                    f,
+                    "{}: the crossing's {} is off the surface or the plane",
+                    self.class(),
+                    if *at_end { "end" } else { "start" },
+                )?;
+                match distance {
+                    Some(distance) => write!(f, " by {distance}"),
+                    None => f.write_str(": the drop or projection found no point"),
+                }
+            }
+            Self::PlaneCurveLeavesDomain { u, v } => write!(
+                f,
+                "{}: the crossing leaves the surface's domain at (u, v) = ({u}, {v}) before its end",
+                self.class()
+            ),
+            Self::PlaneCurveStepVanished { u, v, step, minimum } => write!(
+                f,
+                "{}: the crossing's step at (u, v) = ({u}, {v}) was halved to {step}, below its minimum {minimum}, without an accepted step",
+                self.class()
+            ),
+            Self::PlaneCurveFitCap { stations, passes } => write!(
+                f,
+                "{}: the crossing's Hermite fit is still off the exact curve by more than a tenth of the tolerance with {stations} stations after {passes} passes",
+                self.class()
+            ),
             Self::Failed(what)
             | Self::InvalidValue(what)
             | Self::BadIntersections(what)
@@ -643,6 +797,7 @@ impl core::fmt::Display for BlendFailure {
             | Self::PassedOn { what, .. } => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::BandInputMissing(input) => write!(f, "{} is missing", input.what()),
+            Self::CliffInputMissing { face, input } => write!(f, "cliff face {face:?} is missing its {}", input.what()),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::NotCertified { halvings, stations } => write!(
                 f,
@@ -1200,6 +1355,75 @@ mod tests {
         assert!(sited.sized());
     }
 
+    fn assert_plane_curve_cause(cause: BlendFailure, class: ErrorKind, message: &str) {
+        assert_eq!(cause.class(), class);
+        assert!(!cause.is_phrase());
+        assert!(cause.replaces_upstream_status());
+        assert_eq!(variant_index_and_phrase_name(&cause).1, None);
+        assert_eq!(cause.comparison_status(), SM_ERR);
+        let e = SolidError::blend("blend::op", cause);
+        assert_eq!(e.kind(), class);
+        assert_eq!(e.operation(), "blend::op");
+        assert_eq!(e.blend_failure(), Some(&cause));
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.is_defect(), class.is_defect());
+        assert!(!e.is_refusal() && !e.sized());
+        assert_eq!(e.to_string(), format!("blend::op: {class}: {message}"));
+    }
+
+    #[test]
+    fn a_plane_curve_touch_names_its_station() {
+        assert_plane_curve_cause(
+            BlendFailure::PlaneCurveTouches { u: 0.25, v: 0.5 },
+            ErrorKind::Degenerate,
+            "the surface touches the plane at (u, v) = (0.25, 0.5): the crossing has no direction",
+        );
+    }
+
+    #[test]
+    fn a_plane_curve_end_off_names_the_end_and_distance_when_found() {
+        for (at_end, end) in [(false, "start"), (true, "end")] {
+            for (distance, detail) in [
+                (Some(0.125), " by 0.125"),
+                (None, ": the drop or projection found no point"),
+            ] {
+                assert_plane_curve_cause(
+                    BlendFailure::PlaneCurveEndOff { at_end, distance },
+                    ErrorKind::NotFound,
+                    &format!("the crossing's {end} is off the surface or the plane{detail}"),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_plane_curve_leaving_the_domain_names_its_station() {
+        assert_plane_curve_cause(
+            BlendFailure::PlaneCurveLeavesDomain { u: -0.25, v: 0.5 },
+            ErrorKind::OutsideDomain,
+            "the crossing leaves the surface's domain at (u, v) = (-0.25, 0.5) before its end",
+        );
+    }
+
+    #[test]
+    fn a_plane_curve_vanished_step_is_a_defect_with_its_numbers() {
+        assert_plane_curve_cause(
+            BlendFailure::PlaneCurveStepVanished { u: 0.25, v: 0.5, step: 0.0000000005, minimum: 0.000000001 },
+            ErrorKind::StageFailed,
+            "the crossing's step at (u, v) = (0.25, 0.5) was halved to 0.0000000005, below its minimum 0.000000001, without an accepted step",
+        );
+    }
+
+    #[test]
+    fn a_plane_curve_fit_cap_names_its_stations_and_passes() {
+        assert_plane_curve_cause(
+            BlendFailure::PlaneCurveFitCap { stations: 128, passes: 20 },
+            ErrorKind::NotWithinTolerance,
+            "the crossing's Hermite fit is still off the exact curve by more than a tenth of the tolerance with 128 stations after 20 passes",
+        );
+    }
+
     #[test]
     fn a_stage_failure_keeps_its_operation_status_and_origin_but_shows_neither() {
         let before = line!();
@@ -1345,7 +1569,7 @@ mod tests {
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 22;
+    const VARIANTS: usize = 29;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -1374,6 +1598,13 @@ mod tests {
             BlendFailure::OutsideDomain(_) => (19, Some("OutsideDomain")),
             BlendFailure::NotWithinTolerance(_) => (20, Some("NotWithinTolerance")),
             BlendFailure::PassedOn { .. } => (21, Some("PassedOn")),
+            BlendFailure::PlaneCurveTouches { .. } => (22, None),
+            BlendFailure::PlaneCurveEndOff { .. } => (23, None),
+            BlendFailure::PlaneCurveLeavesDomain { .. } => (24, None),
+            BlendFailure::PlaneCurveStepVanished { .. } => (25, None),
+            BlendFailure::PlaneCurveFitCap { .. } => (26, None),
+            BlendFailure::ClosedCliffWouldNotSplit { .. } => (27, None),
+            BlendFailure::CliffInputMissing { .. } => (28, None),
         }
     }
 
@@ -1418,10 +1649,33 @@ mod tests {
                 at_end: true,
                 t: 0.0,
             },
+            BlendFailure::PlaneCurveTouches { u: 0.0, v: 0.0 },
+            BlendFailure::PlaneCurveEndOff {
+                at_end: false,
+                distance: None,
+            },
+            BlendFailure::PlaneCurveLeavesDomain { u: 0.0, v: 0.0 },
+            BlendFailure::PlaneCurveStepVanished {
+                u: 0.0,
+                v: 0.0,
+                step: 0.0,
+                minimum: 0.0,
+            },
+            BlendFailure::PlaneCurveFitCap {
+                stations: 0,
+                passes: 0,
+            },
             BlendFailure::BandInputMissing(BandInput::SharedFace),
             BlendFailure::TrimLoopOpen,
             BlendFailure::TrimLoopDoesNotSeparate,
             BlendFailure::RemovalRefused(RemovalRefusal::FaceGrowsPastDomain),
+            BlendFailure::ClosedCliffWouldNotSplit {
+                face: crate::topology::FaceId::from_index(0),
+            },
+            BlendFailure::CliffInputMissing {
+                face: crate::topology::FaceId::from_index(0),
+                input: CliffInput::Plane,
+            },
             BlendFailure::StageFailed,
             BlendFailure::Defect { why: "x" },
             BlendFailure::NotCertified {

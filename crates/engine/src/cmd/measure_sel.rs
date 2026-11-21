@@ -375,6 +375,14 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
             slot: None,
             exact: Some(Exact::Point(*point)),
         }),
+        Sel::PointCloudPoint { cloud, index, point } => Some(Item {
+            geo: Geo::Points(vec![*point]),
+            dir: None,
+            json: json!({"type": "point", "cloud": cloud, "point_index": index, "position": point}),
+            shape: Shape::Point(*point),
+            slot: None,
+            exact: Some(Exact::Point(*point)),
+        }),
         Sel::Edge { body, index, point } => {
             let b = st.body(body)?;
             let m = b.mesh();
