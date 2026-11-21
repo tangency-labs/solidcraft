@@ -484,7 +484,7 @@ fn built_in() -> Library {
     };
     let mut entries: Vec<Listed> = MATERIALS
         .iter()
-        .map(|&(name, density)| {
+        .map(|&(name, density, _)| {
             let definition = appearance::material_look(name).as_ref().map(LibraryLook::from_look).transpose().map(|appearance| {
                 Definition::Material(LibraryMaterial { name: name.to_string(), density_g_cm3: density, appearance, physical_card: None })
             });
