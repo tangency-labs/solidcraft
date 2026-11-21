@@ -49,6 +49,7 @@
 //! an edge end (`SE_MSG`); another refused split returns `SM_ERR`.
 
 use crate::error::heal::HealFailure;
+use crate::error::topology::TopologyFailure;
 use crate::error::{ignored as ignore_soft, EntityRef, Failure, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::context::{MarkLock, ALL_MARKS};
@@ -921,9 +922,15 @@ impl<O: LoopObject> HealData<O> {
             // Only endpoint rejection is known to leave the edge unsplit. Other errors
             // can follow interval/curve edits, so do not continue with stale properties.
             if !split.split {
+                // the split declines with editing off (the caller's state; only
+                // `heal_targets` enables it) or a parameter outside the edge's interval
+                if !b.editing_enabled() {
+                    return Err(SolidError::topology(OP, TopologyFailure::EditingDisabled));
+                }
                 return Err(defect(
-                    "the edge split was declined without naming the end it is near, though \
-                     the split declines only near an end, which it names",
+                    "the edge split was declined without naming an end, on a B-rep open for \
+                     editing, so the pole's parameter lies outside the edge's interval, \
+                     though the healer takes it from a crossing on that edge",
                 ));
             }
             // UpdateTargetLists deletes old properties. Reacquire the next candidate.
@@ -1738,6 +1745,8 @@ mod tests {
                 HealerOpType::FixDegenEdges
             ),
             Err(e) if e.upstream_status() == Some(SM_ERR)
+                && e.is_defect()
+                && matches!(e.heal_failure(), Some(HealFailure::Defect { .. }))
         ));
     }
 
