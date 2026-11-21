@@ -585,6 +585,10 @@ impl Libraries {
     pub fn set(&self) -> &Set {
         &self.set
     }
+    /// The place listed at `path`, My Library included, however the folder is spelled.
+    pub fn listed(&self, path: &str) -> Option<&PlaceRow> {
+        self.my_library.iter().chain(&self.rows).find(|r| r.place.path().is_some_and(|p| place_key(p) == place_key(path)))
+    }
     /// The user's places after `edit`, or why not. My Library can't be added again, and the list
     /// holds at most [`MAX_PLACES`]. The engine checks a change with this and the app applies it
     /// with this, so the two never disagree.
@@ -598,8 +602,7 @@ impl Libraries {
         match edit {
             PlaceEdit::Add { row, at } => {
                 let Some(path) = row.place.path() else { return Err("the built-in library is always listed".into()) };
-                let mine = self.my_library.as_ref().and_then(|m| m.place.path()).is_some_and(|p| place_key(p) == place_key(path));
-                if mine || at_path(&rows, path).is_some() {
+                if self.listed(path).is_some() {
                     return Err(format!("{path} is listed already"));
                 }
                 if rows.len() >= MAX_PLACES {

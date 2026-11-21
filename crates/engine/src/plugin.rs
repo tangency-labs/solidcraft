@@ -288,6 +288,8 @@ fn approved_file_folders(granted: &[FileGrant], requested: &[craft_plugin::FileP
 pub fn command_group(id: &str) -> Option<&'static str> {
     let family = id.split_once('.').map_or(id, |(family, _)| family);
     match family {
+        // The library places are app settings, so a plugin never adds a folder it was granted.
+        _ if id.starts_with("library.places.") => Some("app"),
         "plugin" => Some("plugin"),
         "doc" => Some("doc"),
         "file" | "library" => Some("file"),

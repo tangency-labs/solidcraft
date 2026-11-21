@@ -1359,6 +1359,7 @@ fn hostile_params_never_panic() {
         "depth",
         "dot_grid",
         "turn",
+        "read_only",
     ];
     // Commands are independent; worker threads take them one at a time (their costs vary a lot).
     let ids: Vec<&str> = command_specs()

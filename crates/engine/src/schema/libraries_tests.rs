@@ -1,6 +1,10 @@
 use serde_json::{Value, json};
 
-use super::{LibraryApplied, LibraryApplyParams, LibraryExportParams, LibraryExported, LibraryInspectParams, LibraryInspected};
+use super::{
+    LibraryApplied, LibraryApplyParams, LibraryExportParams, LibraryExported, LibraryInspectParams, LibraryInspected, LibraryPlaceChange,
+    LibraryPlacesAddParams, LibraryPlacesListParams, LibraryPlacesListed, LibraryPlacesRefreshParams, LibraryPlacesRefreshed,
+    LibraryPlacesRemoveParams, LibraryPlacesSetParams,
+};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -26,6 +30,11 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<LibraryInspectParams>(), &["path"]);
     assert_keys(input_schema_for::<LibraryExportParams>(), &["format", "id", "name", "overwrite", "path", "provenance"]);
     assert_keys(input_schema_for::<LibraryApplyParams>(), &["entry", "name", "path", "revision", "targets"]);
+    assert_keys(input_schema_for::<LibraryPlacesListParams>(), &[]);
+    assert_keys(input_schema_for::<LibraryPlacesAddParams>(), &["at", "kind", "path", "read_only"]);
+    assert_keys(input_schema_for::<LibraryPlacesRemoveParams>(), &["path"]);
+    assert_keys(input_schema_for::<LibraryPlacesSetParams>(), &["at", "path", "read_only"]);
+    assert_keys(input_schema_for::<LibraryPlacesRefreshParams>(), &["path"]);
 }
 
 #[test]
@@ -95,5 +104,24 @@ fn library_commands_reply_with_their_schemas() {
         let mut s = Session { param_check: level, ..Session::default() };
         let error = s.execute("library.inspect", &json!({"path": file.0, "pth": 1})).err().map(|e| e.to_string()).unwrap_or_default();
         assert!(error.contains("pth"), "{level:?}: {error}");
+    }
+}
+
+/// The place commands reply as their output schemas say, in Warn without warnings.
+#[test]
+fn library_place_commands_reply_with_their_schemas() {
+    let (listed, change, refreshed) =
+        (output_schema_for::<LibraryPlacesListed>(), output_schema_for::<LibraryPlaceChange>(), output_schema_for::<LibraryPlacesRefreshed>());
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let path = solidcraft_io::vfs::temp_dir().join("sc-places-schema").to_string_lossy().into_owned();
+    for (id, p, schema) in [
+        ("library.places.list", json!({}), &listed),
+        ("library.places.add", json!({"path": path, "kind": "folder"}), &change),
+        ("library.places.refresh", json!({}), &refreshed),
+    ] {
+        let r = s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        let schema = schema.as_value();
+        assert!(conforms(schema, schema, &r), "{id}: {r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{id}: {r}");
     }
 }

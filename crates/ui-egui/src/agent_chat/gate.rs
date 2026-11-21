@@ -448,6 +448,22 @@ mod tests {
         }
     }
 
+    /// A change to a library place names its folder, so it asks first; listing only reads, and
+    /// rescanning every place runs.
+    #[test]
+    fn library_place_changes_ask() {
+        for (id, p) in [
+            ("library.places.add", json!({"path": "/srv/lib", "kind": "library"})),
+            ("library.places.remove", json!({"path": "/srv/lib"})),
+            ("library.places.set", json!({"path": "/srv/lib", "read_only": true})),
+            ("library.places.refresh", json!({"path": "/srv/lib"})),
+        ] {
+            assert!(matches!(exec(id, p.clone()), Verdict::Ask(a) if a.contains("/srv/lib")), "{id} {p}");
+        }
+        assert_eq!(exec("library.places.list", json!({})), Verdict::Run { change: false });
+        assert_eq!(exec("library.places.refresh", json!({})), Verdict::Run { change: true });
+    }
+
     /// Every registered `file.*` and `doc.*` command asks, so a new one cannot slip through by
     /// name (the read-only ones, `reads_only`, are the listed exceptions).
     #[test]

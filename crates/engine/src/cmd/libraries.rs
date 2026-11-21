@@ -1,16 +1,27 @@
-//! Local material libraries: inspect/export files and copy exact revisions into a design.
+//! Local material libraries: inspect/export files and copy exact revisions into a design, and
+//! the library places. The app keeps the places: like `settings.profile.*`, the place commands
+//! check a change and echo it, and the app applies it (`library_places` in the UI crate).
 use super::CommandSpec;
 use crate::schema::libraries::{
-    LibraryApplied, LibraryApplyParams, LibraryExportParams, LibraryExported, LibraryInspectParams, LibraryInspected, LibraryTargets,
+    LibraryApplied, LibraryApplyParams, LibraryExportParams, LibraryExported, LibraryInspectParams, LibraryInspected, LibraryPlaceChange,
+    LibraryPlacesAddParams, LibraryPlacesListParams, LibraryPlacesListed, LibraryPlacesRefreshParams, LibraryPlacesRefreshed,
+    LibraryPlacesRemoveParams, LibraryPlacesSetParams, LibraryTargets, ListedLibrary, ListedPlace,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session, params::bad};
 use serde_json::{Value, json};
 use solidcraft_io::catalog::{Catalog, Definition};
+use solidcraft_io::library::{Library, Place, PlaceEdit, PlaceRow, RowState, Scanned, Status};
+use solidcraft_io::vfs::{self, Remote};
 
 const INSPECT_CONTRACT: TypedContract<LibraryInspectParams> = TypedContract::new();
 const EXPORT_CONTRACT: TypedContract<LibraryExportParams> = TypedContract::new();
 const APPLY_CONTRACT: TypedContract<LibraryApplyParams> = TypedContract::new();
+const PLACES_LIST_CONTRACT: TypedContract<LibraryPlacesListParams> = TypedContract::new();
+const PLACES_ADD_CONTRACT: TypedContract<LibraryPlacesAddParams> = TypedContract::new();
+const PLACES_REMOVE_CONTRACT: TypedContract<LibraryPlacesRemoveParams> = TypedContract::new();
+const PLACES_SET_CONTRACT: TypedContract<LibraryPlacesSetParams> = TypedContract::new();
+const PLACES_REFRESH_CONTRACT: TypedContract<LibraryPlacesRefreshParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("library.inspect", "Inspect Local Library", crate::checked!("library.inspect", inspect)).icon("inspect").noundo().doc_only()
@@ -25,6 +36,26 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&APPLY_CONTRACT)
         .output(output_schema_for::<LibraryApplied>)
         .params("path, entry: qualified ID, revision: exact content SHA-256; targets?: {bodies?, faces?: [{body,point}], components?}; name?: physical material name on import. Copies values in one undo step; material conflicts are explicit"),
+    CommandSpec::new("library.places.list", "List Library Places", crate::checked!("library.places.list", places_list)).icon("list").noundo().doc_only()
+        .contract(&PLACES_LIST_CONTRACT)
+        .output(output_schema_for::<LibraryPlacesListed>)
+        .params("→ places: [{kind, path, read_only, my_library, scan, why, libraries}], the built-in library first; reads no files"),
+    CommandSpec::new("library.places.add", "Add Library Place", crate::checked!("library.places.add", places_add)).icon("add").noundo().doc_only()
+        .contract(&PLACES_ADD_CONTRACT)
+        .output(output_schema_for::<LibraryPlaceChange>)
+        .params("path: absolute folder, kind: library | folder, read_only? (default: true for a network folder), at? (default: the end); the app adds it"),
+    CommandSpec::new("library.places.remove", "Remove Library Place", crate::checked!("library.places.remove", places_remove)).icon("delete").noundo().doc_only()
+        .contract(&PLACES_REMOVE_CONTRACT)
+        .output(output_schema_for::<LibraryPlaceChange>)
+        .params("path: a listed place; its files are left as they are; the app removes it"),
+    CommandSpec::new("library.places.set", "Change Library Place", crate::checked!("library.places.set", places_set)).icon("settings").noundo().doc_only()
+        .contract(&PLACES_SET_CONTRACT)
+        .output(output_schema_for::<LibraryPlaceChange>)
+        .params("path: a listed place, read_only?, at?: its new position; the app changes it"),
+    CommandSpec::new("library.places.refresh", "Rescan Library Places", crate::checked!("library.places.refresh", places_refresh)).icon("refresh").noundo().doc_only()
+        .contract(&PLACES_REFRESH_CONTRACT)
+        .output(output_schema_for::<LibraryPlacesRefreshed>)
+        .params("path?: a listed place (default: every place); the app scans it again"),
 ];
 
 impl LibraryTargets {
@@ -168,6 +199,145 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     reply(cmd, LibraryApplied { entry: entry.id.clone(), revision: entry.revision.clone(), copied: true, result, param_warnings: Vec::new() })
+}
+
+fn parse<T: serde::de::DeserializeOwned>(cmd: &str, p: &Value) -> Result<T> {
+    serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// The folder of a new place: a library path ([`path`]) that is absolute, on this computer or a
+/// network share, never a device.
+fn place_path(cmd: &str, value: &str) -> Result<()> {
+    path(cmd, value)?;
+    match vfs::remote(value) {
+        Some(Remote::Device) => Err(bad(cmd, "a library place is a folder, not a device")),
+        Some(Remote::Network(_)) => Ok(()),
+        None if std::path::Path::new(value).is_absolute() => Ok(()),
+        None => Err(bad(cmd, "a library place needs an absolute path")),
+    }
+}
+
+/// Checks `edit` against the session's places with the rule the app applies it by.
+fn check_edit(s: &Session, cmd: &str, edit: &PlaceEdit) -> Result<()> {
+    s.libraries.edit(edit).map(drop).map_err(|e| bad(cmd, e))
+}
+
+fn places_list(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "library.places.list";
+    parse::<LibraryPlacesListParams>(cmd, p)?;
+    let set = s.libraries.set();
+    // The set holds the built-in scan, then one scan per scanned place in place order, and one
+    // status per library in that same order.
+    let mut scans = set.places().iter();
+    let mut statuses = set.libraries().map(|(_, status)| status);
+    let mut listed = |scan: &Scanned| -> Vec<ListedLibrary> {
+        scan.libraries().iter().zip(statuses.by_ref()).map(|(l, status)| listed_library(l, status)).collect()
+    };
+    let mut places = Vec::new();
+    if let Some(built_in) = scans.next() {
+        let why = unavailable(built_in.status());
+        places.push(ListedPlace {
+            kind: "built_in".into(),
+            path: None,
+            read_only: true,
+            my_library: false,
+            scan: "scanned".into(),
+            why,
+            libraries: listed(built_in),
+        });
+    }
+    let has_mine = s.libraries.my_library().is_some();
+    for (i, (row, state)) in s.libraries.places().enumerate() {
+        let (scan, why, libraries) = match state {
+            RowState::Scanned => {
+                let found = scans.next().ok_or_else(|| bad(cmd, "the session's library places are out of step with their scans"))?;
+                ("scanned", unavailable(found.status()), listed(found))
+            }
+            RowState::Scanning => ("scanning", None, Vec::new()),
+            RowState::NotScanned(why) => ("not_scanned", Some(why.clone()), Vec::new()),
+        };
+        let kind = match row.place {
+            Place::BuiltIn => "built_in",
+            Place::Library(_) => "library",
+            Place::Folder(_) => "folder",
+        };
+        let path = row.place.path().map(str::to_string);
+        places.push(ListedPlace {
+            kind: kind.into(),
+            path,
+            read_only: row.read_only,
+            my_library: has_mine && i == 0,
+            scan: scan.into(),
+            why,
+            libraries,
+        });
+    }
+    reply(cmd, LibraryPlacesListed { places, param_warnings: Vec::new() })
+}
+
+fn unavailable(status: &Status) -> Option<String> {
+    match status {
+        Status::Available => None,
+        Status::Unavailable(reason) => Some(reason.to_string()),
+    }
+}
+
+fn listed_library(library: &Library, status: &Status) -> ListedLibrary {
+    ListedLibrary {
+        id: library.id().map(str::to_string),
+        name: library.name().map(str::to_string),
+        folder: library.folder().map(str::to_string),
+        available: *status == Status::Available,
+        why: unavailable(status).or_else(|| library.read_only().map(ToString::to_string)),
+        entries: library.entries().len(),
+        refused: library.entries().iter().filter(|e| e.entry().is_err()).count(),
+    }
+}
+
+fn places_add(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "library.places.add";
+    let request: LibraryPlacesAddParams = parse(cmd, p)?;
+    place_path(cmd, &request.path)?;
+    let place = match request.kind.as_str() {
+        "library" => Place::Library(request.path.clone()),
+        "folder" => Place::Folder(request.path.clone()),
+        other => return Err(bad(cmd, format!("`kind` is `library` or `folder`, not `{other}`"))),
+    };
+    // A network folder is read-only unless the user says otherwise.
+    let read_only = request.read_only.unwrap_or(matches!(vfs::remote(&request.path), Some(Remote::Network(_))));
+    check_edit(s, cmd, &PlaceEdit::Add { row: PlaceRow { place, read_only }, at: request.at })?;
+    reply(
+        cmd,
+        LibraryPlaceChange { path: request.path, kind: Some(request.kind), read_only: Some(read_only), at: request.at, param_warnings: Vec::new() },
+    )
+}
+
+fn places_remove(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "library.places.remove";
+    let request: LibraryPlacesRemoveParams = parse(cmd, p)?;
+    path(cmd, &request.path)?;
+    check_edit(s, cmd, &PlaceEdit::Remove { path: request.path.clone() })?;
+    reply(cmd, LibraryPlaceChange { path: request.path, kind: None, read_only: None, at: None, param_warnings: Vec::new() })
+}
+
+fn places_set(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "library.places.set";
+    let request: LibraryPlacesSetParams = parse(cmd, p)?;
+    path(cmd, &request.path)?;
+    check_edit(s, cmd, &PlaceEdit::Set { path: request.path.clone(), read_only: request.read_only, at: request.at })?;
+    reply(cmd, LibraryPlaceChange { path: request.path, kind: None, read_only: request.read_only, at: request.at, param_warnings: Vec::new() })
+}
+
+fn places_refresh(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "library.places.refresh";
+    let request: LibraryPlacesRefreshParams = parse(cmd, p)?;
+    if let Some(path) = &request.path {
+        // A refresh never adds a place: only a listed one, My Library included, is scanned again.
+        if s.libraries.listed(path).is_none() {
+            return Err(bad(cmd, format!("no place is listed at {path}")));
+        }
+    }
+    reply(cmd, LibraryPlacesRefreshed { path: request.path, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]

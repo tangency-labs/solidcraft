@@ -488,3 +488,94 @@ fn a_sessions_library_places_are_shared_with_its_copies_and_kept_across_designs(
     s.replace_design(Session::default());
     assert!(Arc::ptr_eq(&s.libraries, &places), "opening or starting a design keeps the user's places");
 }
+
+/// A session whose user has listed `rows`, none scanned yet.
+fn with_places(rows: Vec<solidcraft_io::library::PlaceRow>) -> Session {
+    use solidcraft_io::library::{Libraries, Place, scan};
+    Session { libraries: Arc::new(Libraries::new(Arc::new(scan(&Place::BuiltIn)), None, rows, &[], &[])), ..Default::default() }
+}
+
+fn local_folder(name: &str) -> String {
+    solidcraft_io::vfs::temp_dir().join(format!("{name}-{}", std::process::id())).to_string_lossy().into_owned()
+}
+
+/// The place commands check a change by the rule the app applies it with, and echo it for the
+/// app. Nothing in the session changes, and nothing is read.
+#[test]
+fn the_library_place_commands_check_a_change_and_echo_it() {
+    use solidcraft_io::library::{Place, PlaceRow};
+    let shop = local_folder("sc-places-shop");
+    let mine = local_folder("sc-places-mine");
+    let mut s = with_places(vec![PlaceRow { place: Place::Folder(shop.clone()), read_only: false }]);
+    let before = Arc::clone(&s.libraries);
+
+    let added = s.execute("library.places.add", &json!({"path": mine, "kind": "library", "at": 0})).unwrap();
+    assert_eq!(added, json!({"path": mine, "kind": "library", "read_only": false, "at": 0}), "a local folder can be changed");
+    let shared = s.execute("library.places.add", &json!({"path": r"\\server.example\lib", "kind": "folder"})).unwrap();
+    assert_eq!(shared["read_only"], json!(true), "a network folder is read-only unless the user says otherwise");
+    let writable = s.execute("library.places.add", &json!({"path": r"\\server.example\lib", "kind": "folder", "read_only": false})).unwrap();
+    assert_eq!(writable["read_only"], json!(false));
+
+    let set = s.execute("library.places.set", &json!({"path": shop, "read_only": true, "at": 0})).unwrap();
+    assert_eq!(set, json!({"path": shop, "read_only": true, "at": 0}));
+    assert_eq!(s.execute("library.places.remove", &json!({"path": shop})).unwrap(), json!({"path": shop}));
+    assert_eq!(s.execute("library.places.refresh", &json!({"path": shop})).unwrap(), json!({"path": shop}));
+    assert_eq!(s.execute("library.places.refresh", &json!({})).unwrap(), json!({"path": null}));
+
+    for (id, p, why) in [
+        ("library.places.add", json!({"path": shop, "kind": "folder"}), "listed already"),
+        ("library.places.add", json!({"path": mine, "kind": "library", "at": 2}), "past the end"),
+        ("library.places.remove", json!({"path": mine}), "no place is listed"),
+        ("library.places.set", json!({"path": mine, "at": 0}), "no place is listed"),
+        ("library.places.refresh", json!({"path": mine}), "no place is listed"),
+    ] {
+        let e = s.execute(id, &p).unwrap_err().to_string();
+        assert!(e.contains(why), "{id} {p}: {e}");
+    }
+    assert!(Arc::ptr_eq(&s.libraries, &before), "the app applies the change; the engine only checks it");
+}
+
+/// A place is an absolute folder, on this computer or a network share, inside the folders the
+/// caller may reach, named in at most 4096 bytes without control characters.
+#[test]
+fn a_library_place_that_is_no_folder_the_caller_may_reach_is_refused() {
+    let mut s = Session::default();
+    let add = |s: &mut Session, path: &str| s.execute("library.places.add", &json!({"path": path, "kind": "library"}));
+    let too_long = format!("/{}", "a".repeat(4096));
+    for path in ["", "relative/lib", r"\\.\pipe\lib", "/lib/a\u{7}b", too_long.as_str()] {
+        assert!(add(&mut s, path).is_err(), "{path:.40}");
+    }
+    assert!(s.execute("library.places.add", &json!({"path": local_folder("sc-places-kind"), "kind": "shelf"})).is_err());
+
+    let (allowed, elsewhere) = (local_folder("sc-places-allowed"), local_folder("sc-places-elsewhere"));
+    for folder in [&allowed, &elsewhere] {
+        std::fs::create_dir_all(folder).unwrap();
+    }
+    let scope = solidcraft_io::vfs::PathScope::new([std::path::PathBuf::from(&allowed)]);
+    solidcraft_io::vfs::scoped(Some(scope), || {
+        assert!(add(&mut s, &allowed).is_ok());
+        assert!(add(&mut s, &elsewhere).is_err(), "a place outside the caller's folders is refused");
+    });
+    for folder in [&allowed, &elsewhere] {
+        let _ = std::fs::remove_dir(folder);
+    }
+}
+
+/// Listing reads no files: it answers from what the session holds, so it works under a scope
+/// that refuses every path.
+#[test]
+fn listing_the_library_places_reads_no_files() {
+    use solidcraft_io::library::{Place, PlaceRow};
+    let shop = local_folder("sc-places-list");
+    let mut s = with_places(vec![PlaceRow { place: Place::Library(shop.clone()), read_only: true }]);
+    let listed = solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::default()), || s.execute("library.places.list", &json!({}))).unwrap();
+    let places = listed["places"].as_array().unwrap();
+    assert_eq!(places.len(), 2, "{listed}");
+    assert_eq!((&places[0]["kind"], &places[0]["scan"]), (&json!("built_in"), &json!("scanned")));
+    let built_in = places[0]["libraries"].as_array().unwrap();
+    assert_eq!(built_in.len(), 1, "{listed}");
+    assert_eq!(built_in[0]["available"], json!(true));
+    assert!(built_in[0]["entries"].as_u64().unwrap() > 0, "{listed}");
+    let expected = json!({"kind": "library", "path": shop, "read_only": true, "my_library": false, "scan": "scanning", "why": null, "libraries": []});
+    assert_eq!(places[1], expected);
+}
