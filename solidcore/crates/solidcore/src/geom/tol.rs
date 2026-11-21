@@ -23,6 +23,8 @@
 //! | [`calc_vertex_zone_tol_3d`]            | `SmTol::CalcVertexZoneTol3d(double, double, SmZoneTol3d*, const SmContext*)` |
 //! | [`eff_zero`], [`eff_zero_sq`], [`eff_zero_param`], [`eff_zero_ang_rad`] | `SmTol::GetEffZero`, `GetEffZeroSq`, `GetEffZeroParam`, `GetEffZeroAngRad` |
 //! | [`xsect_tol_3d_from_zones`]            | `SmTol::GetXSectTol3d(const SmZoneTol3d&, const SmZoneTol3d&)` |
+//! | [`contact_tol_3d`]                     | not upstream (WR-787, #15429): when circles a hair less than tangent touch |
+//! | [`within_contact_tol`]                 | not upstream: the one reading of a contact at the tolerance, shared by every contact site |
 //! | [`ang_tol_rad`]                        | `SmTol::GetAngTolRad()`                        |
 //! | [`model_size_estimate`]                | `SmTol::GetModelSizeEstimate()`                |
 //! | [`context_model_size_estimate`]        | `SmTol::GetModelSizeEstimate(const SmContext&)` |
@@ -94,7 +96,7 @@
 //!   an unspecified, address-dependent order. [`Relation`] keeps keys in `BTreeMap`s /
 //!   `BTreeSet`s and returns them sorted (see `plan/findings.md`). `RelatePair`'s null
 //!   checks have no Rust counterpart; its `SM_ERR` status is
-//!   [`SolidError::Upstream`] with code 1001. `GetSecond`'s `SE(SM_ERR)` for an
+//!   [`GeomFailure`](crate::error::geom::GeomFailure) with code 1001. `GetSecond`'s `SE(SM_ERR)` for an
 //!   ambiguous key is a no-op in the release build; [`Relation::second`] returns
 //!   `None` there as upstream returns `NULL`. `GetType`, `GetTypeString`, `IsKindOf`
 //!   (the `SmObject` run-time type system) are replaced by Rust's static types.
@@ -109,7 +111,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError, SM_ERR_INVALID_INPUT};
+use crate::error::geom::GeomFailure;
+use crate::error::{Result, SolidError};
 use crate::geom::context::Context;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -121,6 +124,7 @@ use crate::math::{
     max2, max3, max4, rad_to_deg, Vec3, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_RAD, EFF_ZERO_SQ,
     EFF_ZERO_SQRT, PI,
 };
+use crate::nurbs::math::gamma;
 use crate::surface::volume::Volume;
 use crate::topology::{Brep, EdgeId, FaceId, VertexId};
 
@@ -202,9 +206,6 @@ pub const TOL_GAP_GAIN: f64 = 1.1;
 pub const ANG_TOL_DEG: f64 = 0.5;
 /// `SM_ANG_TOL_RAD` = `SM_ANG_TOL_DEG * SM_PI / 180.0`.
 pub const ANG_TOL_RAD: f64 = ANG_TOL_DEG * PI / 180.0;
-
-// Upstream status `SM_ERR`.
-use crate::error::SM_ERR;
 
 // ---- tolerance values ------------------------------------------------------------
 
@@ -425,6 +426,55 @@ pub fn context_xsect_tol_3d(k: &Kernel, ctx: Option<&Context>, small: SmallTopoT
 #[must_use]
 pub fn xsect_tol_3d_from_zones(k: &Kernel, zone1: f64, zone2: f64) -> f64 {
     xsect_tol3d(k, zone1 + zone2)
+}
+
+/// The tolerance up to which two circles or parallel cylinders, or a circle and a line in
+/// its plane, that overlap past touching touch on the boolean's path (read by
+/// [`within_contact_tol`]): the system zone
+/// tolerance, 1e-5 by default. Not upstream (WR-787, #15429, #14599): one value for every
+/// site that decides the contact (the walls, the rims, the curve/surface classifier),
+/// whatever tolerances earlier operations grew the edges and faces to, so the same two
+/// holes give the same topology whatever came before. The touching point midway lies δ/2 from each operand, so below it the
+/// point lies within the approximation tolerance (half the zone tolerance) of both, as
+/// the intersection curves through it do. At the intersection tolerance (twice the zone
+/// tolerance) two through holes overlapping by 1.02e-5 to 1.99e-5 came out a valid solid
+/// that kept the second tool whole, as a void.
+#[must_use]
+pub fn contact_tol_3d(k: &Kernel) -> f64 {
+    zone_tol_3d(k, SmallTopoType::NormalSize)
+}
+
+/// Whether `distance`, a length that decides a contact (how far two circles, or a circle
+/// and a line in its plane, overlap past touching; how far a plane dips into a cylinder or
+/// stands off a cone's generator; how far apart such curves lie all round), is within the
+/// contact tolerance `contact`: not proved past it. Not upstream: the one reading of the
+/// contact rule, shared by every site that decides a contact
+/// (`circle_coplanar_circle_intersect_in_contact` and
+/// `line_coplanar_circle_intersect_distinct` in `geom::geom_utility`, which the walls, the
+/// rims and the curve/surface classifier call with [`contact_tol_3d`]; a plane's section
+/// of a cylinder or a cone touching a side of the plane's domain,
+/// `Plane::make_new_plane_ellipse_in_contact`, with it too; and the plane's tangent line
+/// on a cylinder or a cone, `Cone::intersect_with_plane`, with the faces' zone
+/// tolerance), as two points are one unless proved apart
+/// (`ProtoTopologyManager::find_proto_vertex_within`).
+///
+/// Each site decides one contact from its own copies of the two curves: an edge's curve,
+/// a face pair's intersection curve, a surface's osculating circle. They are the same
+/// curves computed by different constructions, so their coordinates differ by a few
+/// roundings of their size, and a length read off them differs by that much from site to
+/// site. Read sharply, a contact at the tolerance (a boss placed exactly the tolerance over
+/// a rim) touched at one site and crossed at another, 9.99999999962e-6 against
+/// 1.0000000000673e-5; and where every site crossed, the vertices on the two sides of the
+/// lens were one point by their tolerances while the curves between them crossed. So a
+/// distance at the tolerance is within it, and so is one up to `γ_32` of `size` past it,
+/// `size` the largest coordinate a point of either curve has: the overlap's own arithmetic
+/// (a projection, a distance and two sums, about fifteen roundings) and as many again for
+/// the constructions of the copies (sixteen failing booleans of the stress corpus read
+/// their copies at most 3.3 unit roundoffs of `size` apart). A distance proved past the
+/// tolerance by more than that is past it at every site.
+#[must_use]
+pub fn within_contact_tol(distance: f64, contact: f64, size: f64) -> bool {
+    distance <= contact + gamma(32) * size.abs()
 }
 
 /// The system angle tolerance in radians (`SmTol::GetAngTolRad()`, `SM_ANG_TOL_RAD`).
@@ -1131,7 +1181,7 @@ impl<A: Ord + Copy, B: Ord + Copy> Relation<A, B> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Upstream`] with code 1001 (`SM_ERR`) when the pair would violate
+    /// [`GeomFailure`](crate::error::geom::GeomFailure) with code 1001 (`SM_ERR`) when the pair would violate
     /// the cardinality; nothing is changed then.
     pub fn relate_pair(&mut self, first: A, second: B) -> Result<()> {
         let has_second = self.first_to_second.contains_key(&first);
@@ -1143,11 +1193,10 @@ impl<A: Ord + Copy, B: Ord + Copy> Relation<A, B> {
             Cardinality::ManyToMany => false,
         };
         if violates {
-            return Err(SolidError::Upstream {
-                operation: "geom::tol::Relation::relate_pair",
-                code: SM_ERR,
-                entity: None,
-            });
+            return Err(SolidError::geom_failed(
+                "geom::tol::Relation::relate_pair",
+                "the pair would break the relation's cardinality",
+            ));
         }
         self.first_to_second
             .entry(first)
@@ -1188,7 +1237,10 @@ impl<A: Ord + Copy, B: Ord + Copy> Relation<A, B> {
     pub fn remove_pair(&mut self, first: A, second: B) -> Result<()> {
         if !self.first_to_second.contains_key(&first) || !self.second_to_first.contains_key(&second)
         {
-            return Err(SolidError::sm_err("geom::tol::Relation::remove_pair"));
+            return Err(SolidError::geom_failed(
+                "geom::tol::Relation::remove_pair",
+                "the pair is not related",
+            ));
         }
         if let Some(seconds) = self.first_to_second.get_mut(&first) {
             seconds.remove(&second);
@@ -1651,11 +1703,12 @@ pub fn update_object_tolerance(
 
     // If both input gap and tol are zero, there's nothing to do.
     if tol_to_use < EFF_ZERO {
-        return Err(SolidError::Upstream {
-            operation: OP_UPDATE,
-            code: SM_ERR_INVALID_INPUT,
-            entity: None,
-        });
+        return Err(SolidError::geom(
+            OP_UPDATE,
+            GeomFailure::ToleranceTooSmall {
+                tolerance: tol_to_use,
+            },
+        ));
     }
 
     match topo {

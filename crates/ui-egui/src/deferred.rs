@@ -11,7 +11,8 @@
 //! the features it evaluated ([`solidcraft_engine::Session::prime`]) rather than computing them
 //! again. Commands asked for meanwhile wait their turn; a marker moved again
 //! replaces the move still waiting, so a drag computes where it ends rather than every slot it
-//! crossed.
+//! crossed. A parameter changed in the Parameters dialog and a configuration activated in the
+//! configurations table compute the same way (#6777).
 //!
 //! A delete first checks what it takes with it and what it would make fail (#2678): the
 //! timeline's Delete asks `timeline.dependents`, Delete on the selection runs `selection.delete`
@@ -257,7 +258,16 @@ impl SolveApp {
                 self.deferred = Some(job);
                 Ok(Value::Null)
             }
-            Start::Now(evaluated, kept) => self.run_evaluated(id, params, evaluated.as_ref(), kept),
+            Start::Now(evaluated, kept) => {
+                let r = self.run_evaluated(id, params, evaluated.as_ref(), kept);
+                // One that waited its turn (a row) and then ran at once ends here.
+                let outcome = match &r {
+                    Ok(_) => crate::operations::Outcome::Done,
+                    Err(e) => crate::operations::Outcome::Failed(crate::friendly_error(id, e)),
+                };
+                crate::operations::ended(self, &format!("history:{serial}"), outcome);
+                r
+            }
         }
     }
 
@@ -317,7 +327,7 @@ impl SolveApp {
         }
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(wait) = self.apply_off_thread
-            && !self.file_load.busy()
+            && !self.file_load_holds()
             && self.file_picker.is_none()
         {
             let ahead = self.session.ahead();
@@ -357,10 +367,17 @@ impl SolveApp {
             Ok(replies) => Some(replies),
         };
         let Some(check) = self.delete_check.take() else { return };
+        use crate::operations::{Outcome, ended};
         match replies {
-            None => self.set_status("the delete could not be checked", true),
+            None => {
+                ended(self, "delete_check", Outcome::Failed("the delete could not be checked".into()));
+                self.set_status("the delete could not be checked", true);
+            }
             Some(_) if check.revision != self.session.revision => check.then.restart(self),
-            Some(replies) => check.then.finish(self, replies, Some(check.kept)),
+            Some(replies) => {
+                ended(self, "delete_check", Outcome::Done);
+                check.then.finish(self, replies, Some(check.kept));
+            }
         }
     }
 
@@ -374,14 +391,23 @@ impl SolveApp {
             if let Some(mut job) = self.deferred.take() {
                 let (id, params) = std::mem::take(&mut job.command);
                 let superseded = replaced_by_a_later_one(&id) && self.deferred_queue.first().is_some_and(|(q, _, _)| *q == id);
+                let key = format!("history:{}", job.serial);
                 if job.revision != self.session.revision {
                     // The design changed meanwhile: computed again for the design as it is now.
                     let _ = self.run_heavy_as(&id, params, job.serial);
                 } else if !superseded {
                     // This is playback's own completed step, not a manual history edit.
                     let playback = self.timeline_playback.take();
-                    let _ = self.run_evaluated(&id, params, job.evaluated.take().flatten().as_ref(), job.kept.take());
+                    let r = self.run_evaluated(&id, params, job.evaluated.take().flatten().as_ref(), job.kept.take());
                     self.timeline_playback = playback;
+                    let outcome = match r {
+                        Ok(_) => crate::operations::Outcome::Done,
+                        Err(e) => crate::operations::Outcome::Failed(crate::friendly_error(&id, &e)),
+                    };
+                    crate::operations::ended(self, &key, outcome);
+                } else {
+                    // A later one of the same kind does it (where the marker ends is all that counts).
+                    crate::operations::ended(self, &key, crate::operations::Outcome::Done);
                 }
             }
         }
@@ -405,7 +431,7 @@ impl SolveApp {
     #[cfg(not(target_arch = "wasm32"))]
     fn begin_deferred(&self, id: &str, params: &Value, serial: u64) -> Start {
         let Some(wait) = self.apply_off_thread else { return Start::Now(None, None) };
-        if self.file_load.busy() || self.file_picker.is_some() {
+        if self.file_load_holds() || self.file_picker.is_some() {
             return Start::Now(None, None);
         }
         let ahead = self.session.ahead();
@@ -415,9 +441,19 @@ impl SolveApp {
         let (tx, rx) = std::sync::mpsc::channel();
         let progress = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
         let watching = progress.clone();
+        // Tests hold the result until let go (`apply_gate`), so a window thread held up under load
+        // cannot find the work already in where the command should still be computing.
+        #[cfg(test)]
+        let gate = self.apply_gate.clone();
         let spawned = std::thread::Builder::new().name("history".into()).spawn(move || {
             let cancelled = watching.clone();
             let evaluated = solidcraft_engine::doc::progress::watch(watching, || ahead.evaluate(&commands).ok());
+            #[cfg(test)]
+            if let Some(gate) = gate
+                && let Ok(gate) = gate.lock()
+            {
+                let _ = gate.recv();
+            }
             // A cancelled evaluation skipped features: what it holds is not the design's.
             let _ = tx.send(evaluated.filter(|_| !cancelled.is_cancelled()));
         });

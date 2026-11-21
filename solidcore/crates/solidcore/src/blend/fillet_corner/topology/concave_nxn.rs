@@ -40,7 +40,7 @@ impl FilletCorner {
     ///
     /// # Errors
     /// `SM_ERR` unless exactly two concave edge uses are found;
-    /// [`SolidError::null_pointer`] when two consecutive edge uses share no face;
+    /// `SM_ERR_NULL_POINTER` when two consecutive edge uses share no face;
     /// [`SolidError::InvalidInput`] for a different corner kind, a setback corner (the
     /// caller delegates it), a solver list that does not match the edge uses, or
     /// missing topology upstream dereferences; those of the convexity, solver and
@@ -81,7 +81,10 @@ impl FilletCorner {
         let vertex = need(self.vertex, "corner without vertex")?;
         let concave = find_concave_edgeuses(k, target, vertex, &all)?;
         let [concave_eu1, concave_eu2] = concave[..] else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the corner does not have exactly two concave edge uses",
+            ));
         };
         let total_eus = all.len();
         if solvers.len() != total_eus {
@@ -114,7 +117,10 @@ impl FilletCorner {
             let common_face = face_by_two_edgeuses(target, Some(prev_eu), Some(curr_eu), None)?;
             let Some(common_face) = common_face else {
                 //Unrecoverable error
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::blend_missing(
+                    OP,
+                    "the face between two of the corner's edge uses",
+                ));
             };
             pseudo
                 .fillet_vertex_mut(curr_fv)?

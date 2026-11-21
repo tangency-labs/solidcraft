@@ -12,10 +12,9 @@
 //!
 //! Upstream (the C++ reference gives the same reports on the same body): the flank/end-face
 //! curves cross the rim at a grazing angle, two edges end 1.46e-5 from their vertices
-//! (`SmBrep` test #0) and two faces fail test #34. With
-//! `Kernel::fixes.imprint_trims_edge_to_proto_vertex` and
-//! `imprint_extends_edge_to_proto_vertex` (WR-452, WR-453) the result passes the whole check,
-//! and its volume is Pappus's. That needs the boolean's edge uses to own their UV trim
+//! (`SmBrep` test #0) and two faces fail test #34. solidcore fits the edges' ends to their
+//! proto vertices (WR-452, WR-453): the result passes the whole
+//! check, and its volume is Pappus's. That needs the boolean's edge uses to own their UV trim
 //! curves under the result's names: a merge left those it made under its own namespace's
 //! keys, so the port's check reported `SmEdgeuse` test #6 on them, which upstream never does.
 #![allow(
@@ -87,10 +86,8 @@ fn screw_groove(k: &mut Kernel, z0: f64, turns: f64, per_turn: usize) -> Brep {
 }
 
 /// Case 1250: the shaft minus the groove, run a pitch past each end.
-fn threaded_shaft(trim: bool, extend: bool) -> (Kernel, Brep) {
+fn threaded_shaft() -> (Kernel, Brep) {
     let mut k = Kernel::default();
-    k.fixes.imprint_trims_edge_to_proto_vertex = trim;
-    k.fixes.imprint_extends_edge_to_proto_vertex = extend;
     let shaft = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), RADIUS, LENGTH).unwrap();
     let turns = (LENGTH + 2.0 * PITCH) / PITCH;
     let groove = screw_groove(&mut k, -PITCH, turns, 16);
@@ -123,22 +120,9 @@ fn analytic_volume() -> f64 {
     PI * RADIUS * RADIUS * LENGTH - LENGTH / PITCH * 2.0 * PI * centroid * area
 }
 
-fn count(lines: &[String], prefix: &str) -> usize {
-    lines.iter().filter(|l| l.starts_with(prefix)).count()
-}
-
 #[test]
-fn issue_435_m10_full_length_upstream_fails_test_34() {
-    let (mut k, mut b) = threaded_shaft(false, false);
-    let lines = check(&mut k, &mut b);
-    assert_eq!(count(&lines, "SmFace::Test #34 "), 2, "{lines:#?}");
-    assert_eq!(count(&lines, "SmBrep::Test #0 "), 2, "{lines:#?}");
-    assert_eq!(lines.len(), 4, "{lines:#?}");
-}
-
-#[test]
-fn issue_435_m10_full_length_is_valid_with_the_imprint_fixes() {
-    let (mut k, mut b) = threaded_shaft(true, true);
+fn issue_435_m10_full_length_is_valid() {
+    let (mut k, mut b) = threaded_shaft();
     let lines = check(&mut k, &mut b);
     assert!(lines.is_empty(), "{lines:#?}");
     // The skin's cubic through sixteen sections a turn is 6.5e-5 short of the screw.

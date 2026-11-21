@@ -10,15 +10,18 @@
 //! Deviations: typed arena ids and caller-owned notification routing. Edge
 //! construction delegates to the ported fillet geometry builder; surface
 //! intersection calls the ported `blend::fillet_geom::p2::srf_srf_intersection`.
+//! [`split_rail_along`] is not upstream (WR-19502): it splits a rail into given pieces.
 //! No recursion.
 use crate::blend::fillet_geom::p1::{
     CliffHandle, FilStatus, FilletBrep, FilletEdgeType, FilletGeomId, FilletVertex,
 };
 use crate::curve::curve::{p2::OwnerChange, Curve};
 use crate::error::{ignored, EntityRef, Result, SolidError};
+use crate::geom::extent1d::Extent1d;
 use crate::geom::{global_solver::SolverOperation, object::ObjectRef};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
+use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::surface::surface::Surface;
 use crate::topology::{edge, edgeuse::p1 as eu, Brep, EdgeId, Vertex, VertexId};
 fn invalid(reason: &'static str) -> SolidError {
@@ -218,6 +221,7 @@ pub(crate) trait RailOps {
             crate::blend::fillet_geom::p2::SrfSrfOptions {
                 skip_two_pnts_intersection: skip_two_points_intersection,
                 ref_point: reference_point,
+                closed_by_start_direction: false,
             },
         )
         .map(|curves| curves.curve_3d)
@@ -253,6 +257,99 @@ pub(crate) fn split_rail_with_ops(
         ownership,
     }
     .split_rail(geom, rail, ops)
+}
+/// (Not upstream; #19502) Splits rail `rail` of geometry `geom` into one rail per piece
+/// of its curve, `pieces` being consecutive intervals of the curve in its parameter
+/// order (as `FilletBrep::fillet_brep_pieces_along` finds them). Each piece keeps the
+/// rail's type and original face (`split_rail`), and its 3D and UV curves trimmed to the
+/// piece; the vertices between pieces lie on the curve and are processed. Returns the new
+/// rails in the order they follow `rail` from its start vertex (`rail` keeps the first
+/// piece): an `other_rails` list's order.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for fewer than two pieces or a closed rail; those of
+/// `split_rail`, the evaluations and the trims.
+pub fn split_rail_along(
+    k: &Kernel,
+    fillets: &mut FilletBrep,
+    ownership: &mut dyn RailOwnership,
+    geom: FilletGeomId,
+    rail: EdgeId,
+    pieces: &[Extent1d],
+) -> Result<Vec<EdgeId>> {
+    if pieces.len() < 2 {
+        return Err(invalid("a rail split along fewer than two pieces"));
+    }
+    let start = required(edge::vertex(fillets.brep(), rail)?)?;
+    let end = required(edge::other_vertex(fillets.brep(), rail, Some(start))?)?;
+    if start == end {
+        return Err(invalid("a closed rail split along pieces"));
+    }
+    let curve = required(edge::curve(fillets.brep(), rail)?)?.copy(k)?;
+    let ivl = curve.natural_interval();
+    let start_point = fillets.brep().vertex(start)?.point;
+    let forward = curve.evaluate_point(k, ivl.min())?.distance(start_point)
+        <= curve.evaluate_point(k, ivl.max())?.distance(start_point);
+    let mut ordered = pieces.to_vec();
+    if !forward {
+        ordered.reverse();
+    }
+    let tolerance = edge::tolerance(fillets.brep(), rail)?;
+
+    // the UV curves of the rail's uses: the one on this geometry's fillet surface, and
+    // the other (on the original face), which split_rail drops from the split end's use
+    let mut on_geom = None;
+    let mut other = None;
+    for e_use in edge::edgeuses(fillets.brep(), rail, None, None)? {
+        let uv = fillets.brep().edgeuse(e_use)?.uv_trim_curve.clone();
+        if fillets.fillet_edgeuse(e_use)?.fillet_geom() == Some(geom) {
+            on_geom = uv;
+        } else {
+            other = uv;
+        }
+    }
+
+    let mut new_rails = Vec::new();
+    let mut current = rail;
+    for piece in ordered.iter().take(ordered.len().saturating_sub(1)) {
+        let (vertex, next) = split_rail(k, fillets, ownership, geom, current)?;
+        let at = if forward { piece.max() } else { piece.min() };
+        let point = curve.evaluate_point(k, at)?;
+        let v = fillets.brep_mut().vertex_mut(vertex)?;
+        v.point = point;
+        v.tolerance = tolerance;
+        fillets
+            .fillet_vertex_mut(vertex)?
+            .set_status(FilStatus::Processed);
+        new_rails.push(next);
+        current = next;
+    }
+
+    for (&e, piece) in std::iter::once(&rail).chain(&new_rails).zip(&ordered) {
+        let mut piece = *piece;
+        if let Some(c) = fillets.brep_mut().edge_mut(e)?.curve.as_mut() {
+            c.trim(k, &mut piece, TrimMode::Notify)?;
+        }
+        edge::set_interval(fillets.brep_mut(), e, &piece)?;
+        for e_use in edge::edgeuses(fillets.brep(), e, None, None)? {
+            let source = if fillets.fillet_edgeuse(e_use)?.fillet_geom() == Some(geom) {
+                &on_geom
+            } else {
+                &other
+            };
+            let uv = match source {
+                Some(c) => {
+                    let mut c = c.copy(k)?;
+                    c.trim(k, &mut piece, TrimMode::Notify)?;
+                    Some(c)
+                }
+                None => None,
+            };
+            fillets.set_edgeuse_uv_curve(e_use, uv, true, true)?;
+        }
+    }
+    Ok(new_rails)
 }
 /// Compute, trim and install a support curve between its adjacent fillet surfaces.
 ///
@@ -296,7 +393,7 @@ pub(crate) fn compute_support_edge_with_ops(
     .support_edge(support, geom, approx, angle, ops)
 }
 fn required<T>(value: Option<T>) -> Result<T> {
-    value.ok_or_else(|| SolidError::null_pointer(OP))
+    value.ok_or_else(|| SolidError::blend_missing(OP, "a fillet entity the support edge needs"))
 }
 struct Rails<'a> {
     k: &'a Kernel,
@@ -391,7 +488,10 @@ impl Rails<'_> {
     ) -> Result<()> {
         let start = self.start(support)?;
         if !self.fillets.fillet_vertex(start)?.is_processed() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the support edge's start vertex is not processed",
+            ));
         }
         let start_point = self.fillets.vertex_point(start)?;
         let primary = required(eu::primary_edgeuse(self.fillets.brep(), support)?)?;
@@ -422,7 +522,10 @@ impl Rails<'_> {
                 self.fillets
                     .fillet_edge_mut(support)?
                     .set_status(FilStatus::SurfIntFailure);
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the two fillet surfaces do not intersect",
+                ));
             }
         };
         let mut interval = curve.natural_interval();
@@ -435,13 +538,12 @@ impl Rails<'_> {
             &interval,
             approx,
         )?;
-        let sol = solutions.get(0).ok_or_else(|| SolidError::sm_err(OP))?;
-        let t = sol
-            .start
-            .parameters
-            .first()
-            .copied()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        let sol = solutions.get(0).ok_or_else(|| {
+            SolidError::blend_failed(OP, "the support curve does not meet the surface")
+        })?;
+        let t = sol.start.parameters.first().copied().ok_or_else(|| {
+            SolidError::blend_missing(OP, "the curve parameter of the intersection")
+        })?;
         let end_point = curve.evaluate_point(self.k, t)?;
         let end = self.end(support)?;
         self.fillets.brep_mut().vertex_mut(end)?.point = end_point;
@@ -458,7 +560,10 @@ impl Rails<'_> {
             SolverOperation::Minimize,
         )?;
         if !drop1.success {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the start point does not drop onto the curve",
+            ));
         }
         let drop2 = curve.drop_point(
             self.k,
@@ -470,7 +575,10 @@ impl Rails<'_> {
             SolverOperation::Minimize,
         )?;
         if !drop2.success {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the end point does not drop onto the curve",
+            ));
         }
         let reverse = drop1.parameter > drop2.parameter;
         if reverse {
@@ -478,11 +586,7 @@ impl Rails<'_> {
         } else {
             ignored(interval.set_min_max(drop1.parameter, drop2.parameter))?;
         }
-        curve.trim(
-            self.k,
-            &mut interval,
-            crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
-        )?;
+        curve.trim(self.k, &mut interval, TrimMode::Notify)?;
         if reverse {
             curve.reverse_parameterization(self.k, &interval)?;
         }

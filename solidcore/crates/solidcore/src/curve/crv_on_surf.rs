@@ -1819,7 +1819,10 @@ impl CrvOnSurf {
     ) -> Result<Extent1d> {
         // Don't own curve can not reverse parameterization
         if self.owner_flag == 0 {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::curve_failed(
+                OP,
+                "a curve that does not own its base curve cannot be reparametrised",
+            ));
         }
         *self.curve_cache_mut() = None;
         self.uv_curve.reverse_parameterization(k, old_interval)
@@ -1850,7 +1853,10 @@ impl CrvOnSurf {
     ) -> Result<()> {
         // Don't own curve can not trim the curve
         if self.owner_flag == 0 {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::curve_failed(
+                OP,
+                "a curve that does not own its base curve cannot be trimmed",
+            ));
         }
 
         // pass the call along to the UVCurve
@@ -2309,6 +2315,32 @@ mod tests {
             Point3::new(1.0, 1.0, 1.0),
         )
         .unwrap()
+    }
+
+    /// On a curve-bounded surface, whose generic `GetKnots` fails, the classification
+    /// against the surface knot lines fails, so `GetKnots` of the curve on it returns
+    /// a failing status. `FindParameterAtArcLength` and `CurveMaxDistanceBetween` pass
+    /// that status on, as the fork's `SER` does, instead of using the unclassified
+    /// knots (WR-663).
+    #[test]
+    fn a_failing_knot_status_is_passed_on_by_the_arc_length_and_max_distance() {
+        use crate::geom::extent1d::Extent1d;
+        use crate::surface::curve_bounded_surface::CurveBoundedSurface;
+        let k = Kernel::default();
+        let bounded = CurveBoundedSurface::new(patch().into(), vec![], vec![], true).unwrap();
+        let c = Curve::from(CrvOnSurf::new(&k, uv(), bounded.into(), None, 3).unwrap());
+        let ws = c.knots_with_status(&k, None).unwrap();
+        let Err(status) = ws.status else {
+            panic!("the classification succeeded: {:?}", ws.knots)
+        };
+        let empty = |e: &SolidError| e.to_string().contains("the knot vector is empty");
+        assert!(empty(&status), "{status}");
+        let arc = c.find_parameter_at_arc_length(&k, 0.0, 0.1);
+        assert!(arc.as_ref().is_err_and(empty), "{:?}", arc.map(|_| ()));
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let other = c.clone();
+        let maxd = c.curve_max_distance_between(&k, &ivl, &other, 0.0, 1.0, 0, None);
+        assert!(maxd.as_ref().is_err_and(empty), "{:?}", maxd.map(|_| ()));
     }
 
     /// A 2D quadratic UV curve on `[0, 1]`.
@@ -2886,7 +2918,7 @@ mod tests {
                 // full volume chain and must not become a depth refusal.
                 assert!(matches!(
                     curve.transform(&k, &motion, Some(Vec3::new(2.0, 3.0, 4.0))),
-                    Err(SolidError::Upstream { code: 1001, .. })
+                    Err(e) if crate::error::upstream_status(&e) == Some(1001)
                 ));
                 assert_eq!(curve.evaluate(&k, sample, 1, true, false).unwrap(), before);
             }

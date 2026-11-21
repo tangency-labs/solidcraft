@@ -421,10 +421,7 @@ fn seed_box() -> Extent3d {
 
 /// The `SmStatus` of a Rust result; `None` for an error upstream has no status for.
 fn status_code(e: &SolidError) -> Option<f64> {
-    match e {
-        SolidError::Upstream { code, .. } => Some(f64::from(*code)),
-        _ => None,
-    }
+    solidcore::error::upstream_status(e).map(f64::from)
 }
 
 /// Appends a box step's status and box (the seed when it failed).
@@ -463,9 +460,16 @@ fn run_steps(k: &Kernel, b: &mut Brep, steps: &[StepIn]) -> Result<Vec<f64>, Fai
                         expand_by_zone_tol_3d: expand,
                     }
                 };
+                if opts.tight {
+                    crate::dump::body(k, "tight", b);
+                }
                 push_box(&mut o, qb::calculate_bounding_box(k, &mut *b, opts))?;
             }
-            StepIn::Tight => push_box(&mut o, qb::calculate_tight_bounding_box(k, &mut *b))?,
+            StepIn::Tight => {
+                // the body boxed, kept when a test captures it (`dump::capture`)
+                crate::dump::body(k, "tight", b);
+                push_box(&mut o, qb::calculate_tight_bounding_box(k, &mut *b))?;
+            }
             StepIn::Lock { tight, defaults } => {
                 // the default argument is `FALSE`
                 let r = qb::lock_bounding_box(k, b, tight && !defaults);
@@ -480,6 +484,9 @@ fn run_steps(k: &Kernel, b: &mut Brep, steps: &[StepIn]) -> Result<Vec<f64>, Fai
             }
         }
     }
+    // the boxed body, for the tolerance certificate (`certify::trim_tolerance`)
+    #[cfg(test)]
+    crate::certify::written(b);
     Ok(o)
 }
 

@@ -3,11 +3,9 @@
 //! shaft's rim at a grazing angle, so the proto vertex there lies a few tolerances off the
 //! curve's end, which the edge then ran past (`SmFace` test #34, "Face has partially
 //! Coincident Edges") or stopped short of (a vertex gap over its tolerance). Upstream
-//! `SmEdgeDefinition::Imprint` makes the edge over the curve's whole interval anyway. The
-//! opt-in `Kernel::fixes.imprint_trims_edge_to_proto_vertex` moves the interval's ends to
-//! the curve's point nearest each proto vertex, and
-//! `Kernel::fixes.imprint_extends_edge_to_proto_vertex` continues a curve that stops short
-//! of its vertex to it.
+//! `SmEdgeDefinition::Imprint` makes the edge over the curve's whole interval anyway.
+//! solidcore moves the interval's ends to the curve's point nearest each proto vertex
+//! (WR-452), and continues a curve that stops short of its vertex to it (WR-453).
 //!
 //! The groove is a 60-degree trapezoid under a screw motion about the shaft's axis (sections
 //! in meridian planes, sixteen a turn, skinned cubically and capped), run a pitch past each
@@ -110,56 +108,32 @@ fn worst_vertex_gap(k: &Kernel, b: &Brep) -> (f64, f64) {
     (worst, tol)
 }
 
-/// The worst gap of the cut with the fixes set as `set` says.
-fn cut(p: f64, r: f64, len: f64, depth: f64, flat: f64, set: impl Fn(&mut Kernel)) -> (f64, f64) {
+/// The worst gap of the cut.
+fn cut(p: f64, r: f64, len: f64, depth: f64, flat: f64) -> (f64, f64) {
     let mut k = Kernel::default();
-    set(&mut k);
     let b = threaded_shaft(&mut k, p, r, len, depth, flat);
     worst_vertex_gap(&k, &b)
-}
-
-#[test]
-fn issue_435_edge_end_fixes_are_off_by_default() {
-    let k = Kernel::default();
-    assert!(!k.fixes.imprint_trims_edge_to_proto_vertex);
-    assert!(!k.fixes.imprint_extends_edge_to_proto_vertex);
 }
 
 /// M44x1 on 4 mm (SolidCraft case 2209). On the helix-swept groove an edge ended 9.8e-6
 /// from its vertex; on the screw-motion groove the worst edge ends 3.54e-6 from its vertex,
 /// under half the vertex's tolerance, as the C++ reference gives on the same body (which
-/// passes SMLib's check there). The fixes leave that edge as it is.
+/// passes SMLib's check there). The end fits leave that edge as it is.
 #[test]
 fn issue_435_m44x1_edges_end_at_their_vertices() {
-    let cut = |trim, extend| {
-        cut(1.0, 22.0, 4.0, 0.61, 0.25, |k| {
-            k.fixes.imprint_trims_edge_to_proto_vertex = trim;
-            k.fixes.imprint_extends_edge_to_proto_vertex = extend;
-        })
-    };
-    for (trim, extend) in [(false, false), (true, false), (true, true)] {
-        let (gap, tol) = cut(trim, extend);
-        assert!(
-            gap < tol / 2.0 && (gap - 3.5414e-6).abs() < 1e-9,
-            "trim {trim}, extend {extend}: gap {gap:e}, tolerance {tol:e}"
-        );
-    }
+    let (gap, tol) = cut(1.0, 22.0, 4.0, 0.61, 0.25);
+    assert!(
+        gap < tol / 2.0 && (gap - 3.5414e-6).abs() < 1e-9,
+        "gap {gap:e}, tolerance {tol:e}"
+    );
 }
 
 /// M33x3.5 on 14 mm (SolidCraft case 2193): the flank/end-face curves cross the rim at a
 /// grazing angle and an edge ends 1.52e-5 from its vertex, over the vertex's tolerance (the
 /// C++ reference gives 1.52342e-5 on the same body and fails `SmBrep` test #0 and `SmFace`
-/// test #34 twice each); with the fixes every edge ends within 2e-6 of its vertex.
+/// test #34 twice each); with the ends fitted every edge ends within 2e-6 of its vertex.
 #[test]
 fn issue_435_m33x3_5_edges_end_at_their_vertices() {
-    let cut = |trim| {
-        cut(3.5, 16.5, 14.0, 2.15, 0.875, |k| {
-            k.fixes.imprint_trims_edge_to_proto_vertex = trim;
-            k.fixes.imprint_extends_edge_to_proto_vertex = trim;
-        })
-    };
-    let (gap, tol) = cut(false);
-    assert!(gap > tol, "upstream: gap {gap:e}, tolerance {tol:e}");
-    let (gap, tol) = cut(true);
+    let (gap, tol) = cut(3.5, 16.5, 14.0, 2.15, 0.875);
     assert!(gap < 2e-6, "gap {gap:e}, tolerance {tol:e}");
 }

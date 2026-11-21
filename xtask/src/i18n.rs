@@ -148,12 +148,33 @@ fn locales(root: &Path) -> Result<Vec<String>, String> {
 fn read(root: &Path, locale: &str) -> Result<Map<String, Value>, String> {
     let path = root.join(DIR).join(format!("{locale}.json"));
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-    // Messages still in assets/locales/pending/ count: they are folded on main.
+    // Messages still in assets/locales/pending/ count: they are folded on main. So do the shared
+    // crates' messages, which the app's build merges into the same catalog.
     let pending = crate::pending::locale_messages(root, locale)?;
+    let shared = crate::pending::shared_messages(root, locale)?;
     match serde_json::from_str(&text) {
         Ok(Value::Object(mut map)) => {
-            for (id, text) in pending {
-                map.entry(id).or_insert(Value::String(text));
+            // The app's build merges the three sources into one catalog, so an id may live in one
+            // of them only; a repeat would silently keep one text, so it is an error here.
+            let app = format!("{DIR}/{locale}.json");
+            let mut from: BTreeMap<String, String> = map.keys().map(|id| (id.clone(), app.clone())).collect();
+            let pending_name = format!("{}/*.json", crate::pending::LOCALES_PENDING);
+            let shared_name = format!("{}/{locale}.json", crate::pending::SHARED_LOCALES);
+            let mut problems = Vec::new();
+            let sources = pending
+                .into_iter()
+                .map(|(id, text)| (id, Value::String(text), &pending_name))
+                .chain(shared.into_iter().map(|(id, text)| (id, text, &shared_name)));
+            for (id, text, source) in sources {
+                if let Some(first) = from.get(&id) {
+                    problems.push(format!("i18n: `{id}` ({locale}) is in both {first} and {source} (one catalog holds each id)"));
+                } else {
+                    from.insert(id.clone(), source.clone());
+                    map.insert(id, text);
+                }
+            }
+            if !problems.is_empty() {
+                return Err(problems.join("\n"));
             }
             Ok(map)
         }
@@ -192,7 +213,7 @@ fn registry(cli: Option<&str>) -> Result<Vec<Value>, String> {
         }
         None => {
             let mut c = crate::cargo();
-            c.args(["run", "-q", "--release", "-p", "solidcraft-cli", "--", "commands"]);
+            c.args(["run", "-q", "--profile", "ci", "-p", "solidcraft-cli", "--", "commands"]);
             c
         }
     };
@@ -287,6 +308,21 @@ mod tests {
                 assert_eq!(std::fs::read(&english).unwrap(), before, "a registry failure must not rewrite the catalog");
             }
         }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_id_in_two_catalog_sources_is_rejected_naming_both() {
+        let root = catalog_root();
+        let shared = root.join(crate::pending::SHARED_LOCALES);
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::write(shared.join("en.json"), "{\"cmd.known\":\"Other\",\"cmd.fresh\":\"Fresh\"}\n").unwrap();
+        let error = run_with_registry(&root, &["--check"], || Ok(Vec::new())).unwrap_err();
+        assert!(
+            error.contains("`cmd.known`") && error.contains("assets/locales/en.json") && error.contains("crates/ui-text/locales/en.json"),
+            "{error}"
+        );
+        assert!(!error.contains("cmd.fresh"), "{error}");
         std::fs::remove_dir_all(root).unwrap();
     }
 

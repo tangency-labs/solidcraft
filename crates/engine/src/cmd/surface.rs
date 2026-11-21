@@ -16,13 +16,16 @@ use super::features::{add_feature, axis_param, check_expr, extent_param, feature
 use crate::params::{bad, bool_, expr, num, str_, string_list, vec3};
 use crate::schema::features::{FeatureResult, SurfaceSweepParams};
 use crate::schema::surface::{
-    FairParams, OffsetParams, ReverseNormalParams, StitchParams, SurfaceExtendParams, SurfaceLoftParams, SurfaceTrimParams, ThickenParams,
-    UnstitchParams, UntrimParams,
+    FairParams, OffsetParams, PatchParams, PatchResult, ReverseNormalParams, StitchParams, SurfaceExtendParams, SurfaceLoftParams, SurfaceTrimParams,
+    ThickenParams, UnstitchParams, UntrimParams,
 };
 use crate::schema::surface_blend::BlendParams;
+use crate::schema::surface_profile::{SurfaceExtrudeParams, SurfaceRevolveParams};
+use crate::schema::surface_ruled::SurfaceRuledParams;
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
+const PATCH_CONTRACT: TypedContract<PatchParams> = TypedContract::new();
 const STITCH_CONTRACT: TypedContract<StitchParams> = TypedContract::new();
 const UNSTITCH_CONTRACT: TypedContract<UnstitchParams> = TypedContract::new();
 const REVERSE_NORMAL_CONTRACT: TypedContract<ReverseNormalParams> = TypedContract::new();
@@ -35,12 +38,17 @@ const SURFACE_TRIM_CONTRACT: TypedContract<SurfaceTrimParams> = TypedContract::n
 const SURFACE_SWEEP_CONTRACT: TypedContract<SurfaceSweepParams> = TypedContract::new();
 const SURFACE_LOFT_CONTRACT: TypedContract<SurfaceLoftParams> = TypedContract::new();
 const BLEND_CONTRACT: TypedContract<BlendParams> = TypedContract::new();
+const SURFACE_RULED_CONTRACT: TypedContract<SurfaceRuledParams> = TypedContract::new();
+const SURFACE_EXTRUDE_CONTRACT: TypedContract<SurfaceExtrudeParams> = TypedContract::new();
+const SURFACE_REVOLVE_CONTRACT: TypedContract<SurfaceRevolveParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("surface.patch", "Patch", patch)
+    CommandSpec::new("surface.patch", "Patch", crate::checked!("surface.patch", patch))
         .at("SURFACE", "CREATE")
         .icon("surface_patch")
-        .params("sketch?: id|name and profiles? (planar patches of sketch regions) | edges: [[x,y,z]] (points on a closed loop of a body's edges: one face on them, planar when the loop is, else a smooth B-spline surface) and body?; continuity?: g0|g1|g2|g3|g4 (edges only, default g0: how the patch meets the faces beside the loop — g1 their tangent planes, g2 also their curvature across the edges, g3 also its rate of change, g4 the change of that rate) or [{edge: [x,y,z], g: g0|g1|g2|g3|g4}] (those edges so, the rest g0) or {all, edges}; points?: [[x,y,z]] (edges only, up to 64: points the patch passes through); crown?: number −0.9…3 (default 0: only a fitted patch, whose middle becomes fuller by this many times the loop's size — the bump vanishes on the loop, so the face still meets the picked edges and the continuity across them; a loop that is planar and g0 is the exact plane whatever the crown; with points, crown needs a g1 or higher edge); name?, body_name?"),
+        .contract(&PATCH_CONTRACT)
+        .output(output_schema_for::<PatchResult>)
+        .params("sketch?: id|name and profiles? (planar patches of sketch regions) or profiles_3d: [indices] (the sketch's planar 3D-sketch loops, each patched in its own plane, as listed by sketch.inspect) | edges: [[x,y,z]] (points on a closed loop of a body's edges: one face on them, planar when the loop is, else a smooth B-spline surface) and body?; continuity?: g0|g1|g2|g3|g4 (edges only, default g0: how the patch meets the faces beside the loop — g1 their tangent planes, g2 also their curvature across the edges, g3 also its rate of change, g4 the change of that rate) or [{edge: [x,y,z], g: g0|g1|g2|g3|g4}] (those edges so, the rest g0) or {all, edges}; points?: [[x,y,z]] (edges only, up to 64: points the patch passes through); crown?: number −0.9…3 (default 0: only a fitted patch, whose middle becomes fuller by this many times the loop's size — the bump vanishes on the loop, so the face still meets the picked edges and the continuity across them; a loop that is planar and g0 is the exact plane whatever the crown; with points, crown needs a g1 or higher edge); name?, body_name?"),
     CommandSpec::new("surface.stitch", "Stitch", crate::checked!("surface.stitch", stitch))
         .at("SURFACE", "MODIFY")
         .icon("surface_stitch")
@@ -65,35 +73,41 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SURFACE_TRIM_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("body: surface name; plane: XY|XZ|YZ|plane name|{origin, normal} or tool: {body, point} (a face, its surface extended) or curves: {sketch, curves?: [curve ids] (chains of curves meeting end to end; default every curve), direction?: normal|[x,y,z] (swept onto the surface along the sketch's normal, the default, or this direction)}; keep: [x,y,z] (a point on the side to keep) or [[x,y,z], ...] (points on the regions to keep: the pieces that hang together once cut). Mutual trim: with: another surface (one face each; leave out plane, tool and curves), keep_with: [x,y,z] or [[x,y,z], ...] (what to keep of it); each is cut where the other's surface (extended) meets it; extend?: bool (a surface that stops short of the other is extended to meet it); stitch?: bool (the kept pieces sewn into `body`; `with` is then gone)"),
-    CommandSpec::new("surface.extrude", "Surface Extrude", surface_extrude)
+    CommandSpec::new("surface.extrude", "Surface Extrude", crate::checked!("surface.extrude", surface_extrude))
         .at("SURFACE", "CREATE")
         .icon("surface_extrude")
+        .contract(&SURFACE_EXTRUDE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("sketch?: id|name; curves?: [curve ids] (open or closed chains of curves meeting end to end) and/or profiles? (their boundaries; the default when no curves are given); distance: expr; direction?: positive|negative|symmetric (symmetric: distance is the total, split evenly around the start plane, as solid.extrude); convention?: total_distance|legacy_per_side (as solid.extrude; default total_distance; legacy_per_side: the distance on each side, as older symmetric surface extrudes keep); distance2?: expr; start_offset?: expr; name?, body_name? (a surface body: walls only, no caps)"),
-    CommandSpec::new("surface.revolve", "Surface Revolve", surface_revolve)
+    CommandSpec::new("surface.revolve", "Surface Revolve", crate::checked!("surface.revolve", surface_revolve))
         .at("SURFACE", "CREATE")
         .icon("surface_revolve")
+        .contract(&SURFACE_REVOLVE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); axis: sketch line id|x|y|X|Y|Z|{type: world, axis: X|Y|Z}|{sketch, curve} (a line of another sketch, followed in that sketch)|construction axis name|{origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (the other side); symmetric?: bool; name?, body_name? (a surface body, no caps; a solid where a full turn closes it)"),
     CommandSpec::new("surface.sweep", "Surface Sweep", crate::checked!("surface.sweep", surface_sweep))
         .at("SURFACE", "CREATE")
         .icon("surface_sweep")
         .contract(&SURFACE_SWEEP_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); path_sketch: sketch; path: [curve ids in order] (a path with corners, or 3D curves, gives ruled walls mitred at the corners); orientation?, twist?, scale?, rails?, rail_fit? (as solid.sweep); name?, body_name? (a surface body, no caps)"),
+        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); path_sketch: sketch; path: [curve ids in order] (a path with corners, or 3D curves, gives ruled walls mitred at the corners); path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); orientation?, twist?, scale?, rails?, rail_fit? (as solid.sweep); name?, body_name? (a surface body, no caps)"),
     CommandSpec::new("surface.loft", "Surface Loft", crate::checked!("surface.loft", surface_loft))
         .at("SURFACE", "CREATE")
         .icon("surface_loft")
         .contract(&SURFACE_LOFT_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sections: [{sketch, curves?: [curve ids], profiles?} | {body, edges: [[x,y,z]]}] (2…50 in order; each one chain: a profile without holes, or curves meeting end to end; all open or all closed; a body edge chain takes the face the chain bounds as the surface the end repeats); continuity?: [g0|g1|g2|g3, g0|g1|g2|g3] (each end, default g0: how much of the surface at the first and last section the loft repeats — the tangent plane, the curvature, or how that curvature changes); crown?: [number, number] (default 0: how full each end leaves, -0.9 flattest to 3 fullest); rails?, rail_fit? (as solid.loft; sketch sections only, both ends g0); name?, body_name? (a surface body: ruled between two sections, smooth through three or more; no caps)"),
+        .params("sections: [{sketch, curves?: [curve ids], profiles?} | {body, edges: [[x,y,z]]}] (2…50 in order; each one chain: a profile without holes, or curves meeting end to end, planar or of a 3D sketch; all open or all closed (all open with a 3D sketch curve); a body edge chain takes the face the chain bounds as the surface the end repeats); continuity?: [g0|g1|g2|g3, g0|g1|g2|g3] (each end, default g0: how much of the surface at the first and last section the loft repeats — the tangent plane, the curvature, or how that curvature changes); crown?: [number, number] (default 0: how full each end leaves, -0.9 flattest to 3 fullest); rails?, rail_fit? (as solid.loft; planar sketch sections only, both ends g0); name?, body_name? (a surface body: ruled between two sections, smooth through three or more; no caps)"),
     CommandSpec::new("surface.offset", "Offset Surface", crate::checked!("surface.offset", offset))
         .at("SURFACE", "CREATE")
         .icon("surface_offset")
         .contract(&OFFSET_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("faces: [[x,y,z]] (points on the faces); body?; distance: expr (signed, along the faces' normals; 0 copies the faces); chain?: bool (each pick's whole smooth chain of faces); tolerance?: expr (how far a fitted face may stray, default 0.01 mm). Planes and cylinders move exactly; other faces are fitted. A new surface body (a solid where its faces close)"),
-    CommandSpec::new("surface.ruled", "Ruled Surface", ruled)
+    CommandSpec::new("surface.ruled", "Ruled Surface", crate::checked!("surface.ruled", ruled))
         .at("SURFACE", "CREATE")
         .icon("surface_ruled")
+        .contract(&SURFACE_RULED_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("body; edges: [[x,y,z]] (points on a chain of its edges, open or closed); distance: expr (how far the strip reaches); mode?: normal|tangent|angle|direction (default normal: along the normal of the face beside each edge; tangent: continuing it); angle?: expr (angle mode: from `direction`, else from the face's normal, turned away from the face; 90 deg from the normal is tangent); direction?: [x,y,z] (direction mode: the rulings; angle mode: the reference, e.g. a pull direction for a draft); face?: [x,y,z] (a point on the face the directions come from; default: the face beside the most picked edges); flip?: bool (the other side); corners?: mitre|round (sharp corners of the chain; inside corners are always cut back); far?: [null|[[x,y,z]]] (per chain edge, the interior control points of a free strip's far curve, as the default curve's handles list them; null: the default). A constant ruling, or one keeping its angle to an arc's axis, gives an exact plane, cylinder or cone; where the rulings turn freely along an edge, the strip is the exact ruled surface to a far curve of its own (from corner to corner, fair, near the rulings' ends). A new surface body"),
     CommandSpec::new("surface.blend", "Blend Surface", crate::checked!("surface.blend", blend))
         .at("SURFACE", "CREATE")
@@ -136,9 +150,13 @@ fn patch(s: &mut Session, p: &Value) -> Result<Value> {
     let crown = crown_param(p, cmd)?;
     let continuity = patch_continuity(p, cmd)?;
     let points: Vec<Position> = patch_points(p, cmd)?.into_iter().map(Position).collect();
+    let profiles_3d = profiles_3d_param(p, cmd)?;
     let edges: Vec<solidcore_record::Vec3> =
         p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
     let mut v = if !edges.is_empty() {
+        if !profiles_3d.is_empty() {
+            return Err(bad(cmd, "`profiles_3d` is for a patch on a sketch"));
+        }
         if edges.len() > 10_000 {
             return Err(bad(cmd, "too many edges"));
         }
@@ -149,6 +167,7 @@ fn patch(s: &mut Session, p: &Value) -> Result<Value> {
             FeatureKind::Patch {
                 sketch: None,
                 profiles: ProfileSel::All,
+                profiles_3d: Vec::new(),
                 body: body.map(BodyName),
                 edges: edges.into_iter().map(Position).collect(),
                 crown,
@@ -161,10 +180,13 @@ fn patch(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "`continuity` and `points` are for a patch on a loop of edges"));
         }
         let sketch = feature_sketch(s, p, cmd)?;
-        let profiles = profiles(p, cmd)?;
+        // With only 3D loops asked for, the sketch's own-plane profiles stay untouched.
+        let profiles =
+            if !profiles_3d.is_empty() && p.get("profiles").is_none() { ProfileSel::Indices { indices: Vec::new() } } else { profiles(p, cmd)? };
         let kind = FeatureKind::Patch {
             sketch: Some(SketchId(sketch)),
             profiles,
+            profiles_3d,
             body: None,
             edges: Vec::new(),
             crown,
@@ -178,6 +200,22 @@ fn patch(s: &mut Session, p: &Value) -> Result<Value> {
         o.insert("continuity".into(), serde_json::to_value(&continuity).unwrap_or(Value::Null));
     }
     Ok(v)
+}
+
+/// Indices of the sketch's planar 3D loops (#741): `profiles_3d: [0, 2]`, as listed by
+/// `sketch.inspect`.
+fn profiles_3d_param(p: &Value, cmd: &str) -> Result<Vec<usize>> {
+    let Some(v) = p.get("profiles_3d") else { return Ok(Vec::new()) };
+    let a = v.as_array().ok_or_else(|| bad(cmd, "`profiles_3d` must be a list of indices"))?;
+    if a.is_empty() || a.len() > 128 {
+        return Err(bad(cmd, "`profiles_3d` needs 1 to 128 indices"));
+    }
+    a.iter()
+        .map(|i| {
+            let n = i.as_u64().ok_or_else(|| bad(cmd, "`profiles_3d` indices must be whole numbers"))?;
+            usize::try_from(n).map_err(|_| bad(cmd, format!("there is no profile {n}")))
+        })
+        .collect()
 }
 
 /// A continuity word for a patch, within what a patch builds ([`Construction::Patch`]).
@@ -393,13 +431,22 @@ fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "surface.sweep";
     let sketch = feature_sketch(s, p, cmd)?;
     let (profiles, curves) = sheet_inputs(p, cmd)?;
-    let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
-    let path = string_list(cmd, p, "path")?;
-    if path.is_empty() || path.len() > 1000 {
+    let (path_sketch, path, path_body, path_edges) = super::features::sweep_path(s, p, cmd)?;
+    // A surface sweep's path is the curves of one sketch (its own format keeps plain ids);
+    // a curve of another sketch is refused.
+    let path = path
+        .into_iter()
+        .map(|e| match e {
+            solidcraft_doc::PathEntry::OfPathSketch(id) => Ok(id),
+            solidcraft_doc::PathEntry::OfSketch { sketch, curve } if sketch.0 == path_sketch => Ok(curve),
+            _ => Err(bad(cmd, "the surface sweep's path curves must be in one sketch")),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if path_body.is_none() && (path.is_empty() || path.len() > 1000) {
         return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
     }
     let (orientation, twist, scale) = super::features::sweep_options(s, p, cmd)?;
-    let (rails, rail_fit) = super::features::sweep_rails(s, p, cmd, path_sketch)?;
+    let (rails, rail_fit) = super::features::sweep_rails(s, p, cmd, path_body.is_none().then_some(path_sketch))?;
     add_feature(
         s,
         p,
@@ -409,11 +456,14 @@ fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
             curves,
             path_sketch: SketchId(path_sketch),
             path,
+            path_body,
+            path_edges,
             orientation,
             twist,
             scale,
             rails,
             rail_fit,
+            spline_as_samples: false,
         },
     )
 }
@@ -879,12 +929,60 @@ mod tests {
         let edges = |z: f64| json!([[5, 0, z], [10, 3, z], [5, 6, z], [0, 3, z]]);
         run(&mut s, "surface.patch", json!({"edges": edges(0.0), "body": "Walls", "body_name": "Bottom"}));
         run(&mut s, "surface.patch", json!({"edges": edges(3.0), "body": "Walls", "body_name": "Top"}));
-        run(&mut s, "surface.stitch", json!({"bodies": ["Walls", "Bottom", "Top"]}));
+        let stitched = run(&mut s, "surface.stitch", json!({"bodies": ["Walls", "Bottom", "Top"]}));
+        assert!(stitched["warning"].is_null(), "{stitched}");
         let st = s.world_state().unwrap();
         assert!(!st.body("Walls").unwrap().body.is_surface());
         run(&mut s, "solid.extrude", json!({"sketch": "R", "distance": 3, "body_name": "Solid"}));
         assert!((volume(&s, "Walls") - volume(&s, "Solid")).abs() < 1e-9);
         assert!((volume(&s, "Walls") - 180.0).abs() < 1e-9);
+    }
+
+    /// Open results still succeed, but the reply and timeline say how many boundaries remain.
+    #[test]
+    fn stitch_reports_open_boundary_edges() {
+        for (x, edges, open) in [(20.0, 8, 8), (10.0, 7, 6)] {
+            let mut s = Session::default();
+            sheet(&mut s, "XY", "A", [0.0, 0.0], [10.0, 10.0]);
+            sheet(&mut s, "XY", "B", [x, 0.0], [x + 10.0, 10.0]);
+            let reply = run(&mut s, "surface.stitch", json!({"bodies": ["A", "B"]}));
+            let expected = format!("Stitch result `A` remains open (boundary edges: {open}).");
+            assert_eq!(reply["warning"], expected, "{reply}");
+            assert_eq!(reply["removed_bodies"], json!(["B"]));
+            let st = s.world_state().unwrap();
+            let body = &st.body("A").unwrap().body;
+            assert_eq!((body.face_count(), body.edge_count()), (2, edges));
+            assert!((area(&s, "A") - 200.0).abs() < 1e-9);
+            let id = s.doc.features.last().unwrap().id;
+            let check = |s: &Session| assert_eq!(s.model.result(id).unwrap().warning.as_deref(), Some(expected.as_str()));
+            check(&s);
+            s.model.evaluate(&s.doc);
+            check(&s);
+            run(&mut s, "edit.undo", json!({}));
+            assert_eq!(s.world_state().unwrap().bodies.len(), 2);
+            run(&mut s, "edit.redo", json!({}));
+            check(&s);
+            let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+            check(&cold);
+            let saved = s.model.saved(&s.doc).unwrap();
+            let adopted = solidcraft_doc::Model::adopt(&s.doc, &saved).unwrap();
+            assert_eq!(adopted.result(id).unwrap().warning.as_deref(), Some(expected.as_str()));
+        }
+    }
+
+    /// A cylindrical wall's seam is used twice by its face; only the two circular rims are open.
+    #[test]
+    fn stitch_does_not_count_a_periodic_seam_as_open() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Circle"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.extrude", json!({"sketch": "Circle", "distance": 10, "body_name": "Tube"}));
+        let reply = run(&mut s, "surface.stitch", json!({"bodies": ["Tube"]}));
+        assert_eq!(reply["warning"], "Stitch result `Tube` remains open (boundary edges: 2).");
+        let st = s.world_state().unwrap();
+        let body = &st.body("Tube").unwrap().body;
+        assert_eq!((body.face_count(), body.edge_count()), (1, 3));
     }
 
     /// Unstitch a box: six surface bodies whose faces keep the names they had on the box,
@@ -1098,6 +1196,124 @@ mod tests {
         assert!(
             s.execute("surface.loft", &json!({"sections": [{"sketch": "A", "curves": ["a", "apart"]}, {"sketch": "B", "curves": ["b"]}]})).is_err()
         );
+    }
+
+    /// Surface Loft through sections drawn in a 3D sketch (#15367): two 3D lines 30 apart make a
+    /// 30 × √1700 strip; a section of two 3D lines meeting end to end, lofted to a line of a
+    /// planar sketch 30 away, a 40 × 30 strip; a 3D line lofted to a box edge 30 and 40 away, drawn
+    /// either way, a flat 10 × 30 and 10 × 40 strip (the edge chain turned to run as the line
+    /// does); the two splines of the issue the same sheet Boundary Surface builds on them; undo,
+    /// redo and reopening. Refused: guide rails with a 3D section, and a 3D section of two curves
+    /// that do not meet.
+    #[test]
+    fn surface_loft_through_3d_sketch_curves() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Space"}));
+        run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+        let line3d = |s: &mut Session, a: [f64; 3], b: [f64; 3]| -> String {
+            run(s, "sketch.line3d", json!({"points": [a, b]}))["curves"][0].as_str().unwrap().to_string()
+        };
+        let a = line3d(&mut s, [0.0, 0.0, 0.0], [40.0, 0.0, 10.0]);
+        let b = line3d(&mut s, [0.0, 30.0, 0.0], [40.0, 30.0, 10.0]);
+        let near = line3d(&mut s, [0.0, 120.0, 0.0], [20.0, 120.0, 0.0]);
+        let far = line3d(&mut s, [20.0, 120.0, 0.0], [40.0, 120.0, 0.0]);
+        let apart = line3d(&mut s, [0.0, 150.0, 0.0], [10.0, 150.0, 0.0]);
+        let to_box = line3d(&mut s, [0.0, -30.0, 10.0], [10.0, -30.0, 10.0]);
+        let to_box_back = line3d(&mut s, [10.0, -40.0, 10.0], [0.0, -40.0, 10.0]);
+        let ring = [
+            line3d(&mut s, [0.0, 200.0, 0.0], [10.0, 200.0, 0.0]),
+            line3d(&mut s, [10.0, 200.0, 0.0], [5.0, 200.0, 8.0]),
+            line3d(&mut s, [5.0, 200.0, 8.0], [0.0, 200.0, 0.0]),
+        ];
+        let w1 = run(&mut s, "sketch.spline3d", json!({"points": [[-40, 0, -4], [-20, 0, -1], [0, 0, 0], [20, 0, -1], [40, 0, -4]]}))["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let w2 = run(&mut s, "sketch.spline3d", json!({"points": [[-40, 40, -4], [-20, 40, -1], [0, 40, 0], [20, 40, -1], [40, 40, -4]]}))["curves"]
+            [0]
+        .as_str()
+        .unwrap()
+        .to_string();
+        // A profile beside them, for a section that picks both.
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [100, 100], "p1": [110, 110]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Flat"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 90], [40, 90]], "ids": ["f"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let topology = |s: &Session, name: &str| {
+            let st = s.world_state().unwrap();
+            let r = st.body(name).unwrap().body.record();
+            (r.faces.len(), r.edges.len(), r.vertices.len(), r.shells.len())
+        };
+        let close = |got: f64, want: f64| assert!((got - want).abs() < want * 1e-6, "{got} vs {want}");
+
+        run(
+            &mut s,
+            "surface.loft",
+            json!({"sections": [{"sketch": "Space", "curves": [a]}, {"sketch": "Space", "curves": [b]}], "body_name": "Strip"}),
+        );
+        assert!(s.world_state().unwrap().body("Strip").unwrap().body.is_surface());
+        close(area(&s, "Strip"), 30.0 * 1700f64.sqrt());
+        assert_eq!(topology(&s, "Strip"), (1, 4, 4, 1));
+        // A chain of two 3D lines (listed far one first) to a line of a planar sketch.
+        run(
+            &mut s,
+            "surface.loft",
+            json!({"sections": [{"sketch": "Space", "curves": [far, near]}, {"sketch": "Flat", "curves": ["f"]}], "body_name": "Joined"}),
+        );
+        assert!(s.world_state().unwrap().body("Joined").unwrap().body.is_surface());
+        close(area(&s, "Joined"), 40.0 * 30.0);
+        assert_eq!(topology(&s, "Joined"), (1, 4, 4, 1));
+        // A 3D line to the top front edge of a box, drawn one way and the other.
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"}));
+        for (line, gap, name) in [(&to_box, 30.0, "ToBox"), (&to_box_back, 40.0, "ToBoxBack")] {
+            run(
+                &mut s,
+                "surface.loft",
+                json!({"sections": [{"sketch": "Space", "curves": [line]}, {"body": "Box", "edges": [[5, 0, 10]]}], "body_name": name}),
+            );
+            close(area(&s, name), 10.0 * gap);
+            assert_eq!(topology(&s, name), (1, 4, 4, 1));
+        }
+        // The issue's two splines: the sheet Boundary Surface builds through the same curves.
+        let sections = json!([{"sketch": "Space", "curves": [w1]}, {"sketch": "Space", "curves": [w2]}]);
+        run(&mut s, "surface.loft", json!({"sections": sections, "body_name": "Loft"}));
+        run(&mut s, "surface.boundary", json!({"u": sections, "body_name": "Boundary"}));
+        assert_eq!(topology(&s, "Loft"), (1, 4, 4, 1));
+        assert!((area(&s, "Loft") - area(&s, "Boundary")).abs() < area(&s, "Boundary") * 1e-3, "{} vs {}", area(&s, "Loft"), area(&s, "Boundary"));
+
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.world_state().unwrap().body("Loft").is_none());
+        run(&mut s, "edit.redo", json!({}));
+        let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert!((area(&cold, "Loft") - area(&s, "Loft")).abs() < 1e-9);
+        assert!((area(&cold, "Strip") - area(&s, "Strip")).abs() < 1e-9);
+
+        let err = |s: &mut Session, p: Value| s.execute("surface.loft", &p).unwrap_err().to_string();
+        let railed = err(
+            &mut s,
+            json!({"sections": [{"sketch": "Space", "curves": [a]}, {"sketch": "Space", "curves": [b]}], "rails": [{"sketch": "Space", "curves": [near]}]}),
+        );
+        assert!(railed.contains("not supported yet") && railed.contains("3D sketch"), "{railed}");
+        let gap = err(&mut s, json!({"sections": [{"sketch": "Space", "curves": [a, apart]}, {"sketch": "Space", "curves": [b]}]}));
+        assert!(gap.contains("not connected"), "{gap}");
+        let both = err(&mut s, json!({"sections": [{"sketch": "Space", "curves": [a], "profiles": [0]}, {"sketch": "Space", "curves": [b]}]}));
+        assert!(both.contains("one chain"), "{both}");
+        // A closed section, of 3D sketch curves or a planar profile, next to a 3D one: its winding
+        // and seam are not matched yet.
+        let ring = err(&mut s, json!({"sections": [{"sketch": "Space", "curves": ring}, {"sketch": "Space", "curves": [b]}]}));
+        assert!(ring.contains("not supported yet") && ring.contains("closed section"), "{ring}");
+        let profile = err(&mut s, json!({"sections": [{"sketch": "Space", "profiles": [0]}, {"sketch": "Space", "curves": [b]}]}));
+        assert!(profile.contains("not supported yet") && profile.contains("closed section"), "{profile}");
+        // Ends that leave tangent take 3D sections too.
+        run(
+            &mut s,
+            "surface.loft",
+            json!({"sections": [{"sketch": "Space", "curves": [a]}, {"sketch": "Space", "curves": [b]}], "continuity": ["g1", "g1"], "body_name": "Tangent"}),
+        );
+        assert_eq!(topology(&s, "Tangent"), (1, 4, 4, 1));
+        close(area(&s, "Tangent"), 30.0 * 1700f64.sqrt());
     }
 
     /// Each wall of a surface built from sketch curves is named after the curve it comes from,
@@ -1695,6 +1911,396 @@ mod tests {
         assert!((area - want).abs() < want * 1e-2, "{area} vs {want}");
         assert!(s.execute("surface.thicken", &json!({"bodies": ["Nope"], "thickness": 1})).is_err());
         assert!(s.execute("surface.trim", &json!({"body": "Sheet"})).is_err());
+    }
+
+    /// #9867: a cut or an intersect whose named target is a surface body is refused, and the
+    /// reason says what to do (Trim, or Thicken first). The surface body is left as it was.
+    #[test]
+    fn a_cut_on_a_surface_body_is_refused_and_says_why() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "C"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.extrude", json!({"sketch": "C", "distance": 40, "body_name": "Tube"}));
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "R"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 10], "p1": [15, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = area(&s, "Tube");
+        for (op, article) in [("cut", "a cut"), ("intersect", "an intersect")] {
+            let params = json!({"sketch": "R", "distance": 30, "direction": "symmetric", "operation": op, "targets": ["Tube"]});
+            let err = s.execute("solid.extrude", &params).unwrap_err().to_string();
+            let says = format!("Tube is a surface body, and {article} needs a solid: cut it with Surface › Trim, or Thicken it first");
+            assert!(err.contains(&says), "{op}: {err}");
+        }
+        let st = s.world_state().unwrap();
+        assert!(st.body("Tube").unwrap().body.is_surface());
+        assert_eq!(st.body("Tube").unwrap().body.face_count(), 1);
+        assert!((area(&s, "Tube") - before).abs() < 1e-9, "{before}");
+    }
+
+    /// Automatic targets must not let a solid cut remove the bore wall of an open body.
+    #[test]
+    fn automatic_solid_booleans_refuse_open_bodies_without_losing_faces() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "center": [0, 0, 10], "body_name": "B"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 6, "height": 20, "base": [0, 0, 0], "operation": "cut", "name": "Bore"}));
+        run(&mut s, "face.delete", json!({"faces": [[20, 5, 10]], "heal": false}));
+        let before = s.doc.clone();
+        let body = s.world_state().unwrap().body("B").unwrap().body.clone();
+        assert!(body.is_surface());
+        assert_eq!(body.face_count(), 6);
+        for (op, article) in [("cut", "a cut"), ("intersect", "an intersect")] {
+            for targets in [json!([]), json!(["*"]), json!(["B"])] {
+                let params = json!({"radius": 7, "height": 20, "base": [0, 0, 0], "operation": op, "targets": targets, "name": "Widen"});
+                let error = s.execute("solid.cylinder", &params).unwrap_err().to_string();
+                assert!(error.contains(&format!("B is a surface body, and {article} needs a solid")), "{op} {targets}: {error}");
+                assert_eq!(s.doc, before, "a refused operation must not change the design");
+                let state = s.world_state().unwrap();
+                assert_eq!(state.bodies.len(), 1);
+                assert_eq!(state.body("B").unwrap().body.record(), body.record(), "the bore wall must remain");
+            }
+        }
+    }
+
+    /// An automatic cut skips a touched surface while cutting solids; named surfaces still refuse.
+    #[test]
+    fn automatic_solid_cuts_preserve_touched_surface_bodies() {
+        for targets in [json!([]), json!(["*"])] {
+            for surface_first in [false, true] {
+                let mut s = Session::default();
+                if surface_first {
+                    sheet(&mut s, "XY", "Sheet", [0.0, 0.0], [10.0, 10.0]);
+                }
+                run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+                if !surface_first {
+                    sheet(&mut s, "XY", "Sheet", [0.0, 0.0], [10.0, 10.0]);
+                }
+                let surface = s.world_state().unwrap().body("Sheet").unwrap().body.clone();
+                let before = s.doc.clone();
+                let error = s
+                    .execute(
+                        "solid.cylinder",
+                        &json!({"radius": 2, "height": 12, "base": [5, 5, -1], "operation": "cut", "targets": ["Block", "Sheet"]}),
+                    )
+                    .unwrap_err()
+                    .to_string();
+                assert!(error.contains("Sheet is a surface body, and a cut needs a solid"), "{error}");
+                assert_eq!(s.doc, before);
+                run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 12, "base": [5, 5, -1], "operation": "cut", "targets": targets}));
+                assert!((volume(&s, "Block") - (1000.0 - 40.0 * std::f64::consts::PI)).abs() < 1e-6);
+                let state = s.world_state().unwrap();
+                assert_eq!(state.bodies.len(), 2);
+                assert_eq!(state.body("Sheet").unwrap().body.record(), surface.record());
+                let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+                assert!((volume(&cold, "Block") - (1000.0 - 40.0 * std::f64::consts::PI)).abs() < 1e-6);
+                assert_eq!(cold.world_state().unwrap().body("Sheet").unwrap().body.record(), surface.record());
+            }
+        }
+    }
+
+    /// With a body hidden, the shown scope an automatic cut names leaves out a shown surface, so
+    /// the cut runs instead of being refused for a named surface (#18083).
+    #[test]
+    fn shown_scope_skips_surface_bodies() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        sheet(&mut s, "XY", "Sheet", [0.0, 0.0], [10.0, 10.0]);
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0], "operation": "new", "body_name": "Small"}));
+        run(&mut s, "browser.visibility", json!({"items": ["Small"], "visible": false}));
+        assert_eq!(crate::shown_scope(&s), Some(vec!["Block".to_string()]));
+        let shown = crate::shown_scope(&s).unwrap();
+        run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 12, "base": [5, 5, -1], "operation": "cut", "targets": shown}));
+        assert!((volume(&s, "Block") - (1000.0 - 40.0 * std::f64::consts::PI)).abs() < 1e-6);
+    }
+
+    /// A hidden solid with only a surface shown: an automatic cut is refused, never reaching the
+    /// hidden body (an empty participant list would mean every body).
+    #[test]
+    fn automatic_cut_with_only_a_surface_shown_leaves_hidden_solid_alone() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        sheet(&mut s, "XY", "Sheet", [20.0, 0.0], [30.0, 10.0]);
+        run(&mut s, "browser.visibility", json!({"items": ["Block"], "visible": false}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Hole"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [5, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = s.doc.clone();
+        let error = s.execute("solid.extrude", &json!({"sketch": "Hole", "distance": 3, "operation": "cut"})).unwrap_err().to_string();
+        assert!(error.contains("no shown solid body"), "{error}");
+        assert_eq!(s.doc, before);
+        assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
+    }
+
+    /// Sheet-metal machining preserves separate surfaces before cutting any ordinary solids.
+    #[test]
+    fn automatic_solid_cuts_preserve_surfaces_beside_sheet_metal() {
+        for targets in [json!([]), json!(["*"])] {
+            for ordinary_solid in [false, true] {
+                let mut s = Session::default();
+                sheet(&mut s, "XY", "Sheet", [0.0, 0.0], [10.0, 10.0]);
+                run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+                run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+                run(&mut s, "sketch.finish", json!({}));
+                run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Plate"}));
+                if ordinary_solid {
+                    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 5], "body_name": "Block"}));
+                }
+                let surface = s.world_state().unwrap().body("Sheet").unwrap().body.clone();
+                let before = s.doc.clone();
+                let error = s
+                    .execute(
+                        "solid.cylinder",
+                        &json!({"radius": 2, "height": 17, "base": [5, 5, -1], "operation": "cut", "targets": ["Plate", "Sheet"]}),
+                    )
+                    .unwrap_err()
+                    .to_string();
+                assert!(error.contains("Sheet is a surface body, and a cut needs a solid"), "{error}");
+                assert_eq!(s.doc, before);
+                run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 17, "base": [5, 5, -1], "operation": "cut", "targets": targets}));
+                assert!((volume(&s, "Plate") - (250.0 - 10.0 * std::f64::consts::PI)).abs() < 1e-6);
+                assert_eq!(run(&mut s, "sheet.flat_pattern", json!({}))["cutouts"].as_array().map(Vec::len), Some(1));
+                if ordinary_solid {
+                    assert!((volume(&s, "Block") - (1000.0 - 40.0 * std::f64::consts::PI)).abs() < 1e-6);
+                }
+                assert_eq!(s.world_state().unwrap().body("Sheet").unwrap().body.record(), surface.record());
+            }
+        }
+    }
+
+    /// Later pattern copies still preserve surfaces after an earlier copy consumes the last sheet.
+    #[test]
+    fn automatic_cut_patterns_preserve_surfaces_after_consuming_sheet_metal() {
+        for with_surface in [false, true] {
+            let mut s = Session::default();
+            if with_surface {
+                sheet(&mut s, "XY", "Sheet", [0.0, 0.0], [30.0, 10.0]);
+            }
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Plate"}));
+            let surface = s.world_state().unwrap().body("Sheet").map(|b| b.body.record().clone());
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "HalfProfile"}));
+            run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.extrude", json!({"sketch": "HalfProfile", "distance": 3, "operation": "cut", "name": "Half"}));
+            assert!((volume(&s, "Plate") - 250.0).abs() < 1e-6);
+            run(&mut s, "solid.pattern.rectangular", json!({"features": ["Half"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 10}));
+            let state = s.world_state().unwrap();
+            assert!(state.body("Plate").is_none());
+            assert!(state.surface_sheets.is_empty());
+            assert_eq!(state.bodies.len(), usize::from(with_surface));
+            assert_eq!(state.body("Sheet").map(|b| b.body.record()), surface.as_ref());
+        }
+    }
+
+    /// A solid outside the automatic component scope cannot enable a surface-only cut.
+    #[test]
+    fn automatic_solid_cuts_skip_surfaces_only_with_solids_in_scope() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        run(&mut s, "component.create", json!({"name": "SurfacePart", "grounded": false}));
+        sheet(&mut s, "XY", "Sheet", [0.0, 0.0], [10.0, 10.0]);
+        let before = s.doc.clone();
+        let surface = s.world_state().unwrap().body("Sheet").unwrap().body.clone();
+        let error = s.execute("solid.cylinder", &json!({"radius": 2, "height": 12, "base": [5, 5, -1], "operation": "cut"})).unwrap_err().to_string();
+        assert!(error.contains("Sheet is a surface body, and a cut needs a solid"), "{error}");
+        assert_eq!(s.doc, before);
+        run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 12, "base": [5, 5, -1], "operation": "cut", "targets": ["*"]}));
+        assert!((volume(&s, "Block") - (1000.0 - 40.0 * std::f64::consts::PI)).abs() < 1e-6);
+        assert_eq!(s.world_state().unwrap().body("Sheet").unwrap().body.record(), surface.record());
+    }
+
+    /// A cut still works on a solid beside a distant surface; an intersect must not delete the surface.
+    #[test]
+    fn automatic_solid_booleans_preserve_distant_surface_bodies() {
+        for targets in [json!([]), json!(["*"])] {
+            let mut s = Session::default();
+            sheet(&mut s, "XY", "Sheet", [100.0, 100.0], [110.0, 110.0]);
+            let surface = s.world_state().unwrap().body("Sheet").unwrap().body.clone();
+            run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+            run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 10, "base": [5, 5, 0], "operation": "cut", "targets": targets}));
+            assert!((volume(&s, "Block") - (1000.0 - 40.0 * std::f64::consts::PI)).abs() < 1e-6);
+            assert_eq!(s.world_state().unwrap().body("Sheet").unwrap().body.record(), surface.record());
+            let before = s.doc.clone();
+            let error = s
+                .execute("solid.cylinder", &json!({"radius": 3, "height": 10, "base": [5, 5, 0], "operation": "intersect", "targets": targets}))
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("Sheet is a surface body, and an intersect needs a solid"), "{error}");
+            assert_eq!(s.doc, before);
+            assert_eq!(s.world_state().unwrap().body("Sheet").unwrap().body.record(), surface.record());
+        }
+    }
+
+    /// The surface is tested where its component is placed, not at its local coordinates.
+    #[test]
+    fn automatic_solid_booleans_use_the_surface_components_placement() {
+        for (start, shift, refused) in [(0.0, 100.0, false), (100.0, -100.0, true)] {
+            let mut s = Session::default();
+            run(&mut s, "component.create", json!({"name": "SurfacePart", "grounded": false}));
+            sheet(&mut s, "XY", "Sheet", [start, 0.0], [start + 10.0, 10.0]);
+            run(&mut s, "component.activate", json!({"component": "root"}));
+            run(&mut s, "occurrence.move", json!({"occurrence": "SurfacePart:1", "space": "world", "translate": [shift, 0, 0]}));
+            let before = s.doc.clone();
+            let surface = s.world_state().unwrap().body("Sheet").unwrap().body.clone();
+            let result = s.execute("solid.cylinder", &json!({"radius": 2, "height": 10, "base": [5, 5, 0], "operation": "cut", "targets": ["*"]}));
+            if refused {
+                let error = result.unwrap_err().to_string();
+                assert!(error.contains("Sheet is a surface body, and a cut needs a solid"), "{error}");
+                assert_eq!(s.doc, before);
+            } else {
+                result.unwrap();
+            }
+            assert_eq!(s.world_state().unwrap().body("Sheet").unwrap().body.record(), surface.record());
+            // Once solids are in scope, even a touched surface is preserved while they are cut.
+            run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+            run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 10, "base": [5, 5, 0], "operation": "cut", "targets": ["*"]}));
+            assert!((volume(&s, "Block") - (1000.0 - 40.0 * std::f64::consts::PI)).abs() < 1e-6);
+            assert_eq!(s.world_state().unwrap().body("Sheet").unwrap().body.record(), surface.record());
+        }
+    }
+
+    /// A thickened tool leaves its source surface intact while cutting or intersecting solids.
+    #[test]
+    fn automatic_thicken_booleans_preserve_their_source_surfaces() {
+        for (operation, expected_volume) in [("cut", 928.0), ("intersect", 72.0)] {
+            for targets in [json!([]), json!(["*"])] {
+                let mut s = Session::default();
+                run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+                sheet(&mut s, "XY", "Sheet", [2.0, 2.0], [8.0, 8.0]);
+                let surface = s.world_state().unwrap().body("Sheet").unwrap().body.clone();
+                run(&mut s, "surface.thicken", json!({"bodies": ["Sheet"], "thickness": 2, "operation": operation, "targets": targets}));
+                assert!((volume(&s, "Block") - expected_volume).abs() < 1e-6, "{operation} {targets}");
+                assert_eq!(s.world_state().unwrap().body("Sheet").unwrap().body.record(), surface.record());
+                // A nearby surface that supplied no tool is skipped for cuts; intersects refuse.
+                sheet(&mut s, "XY", "Other", [3.0, 3.0], [7.0, 7.0]);
+                let before = s.doc.clone();
+                let other = s.world_state().unwrap().body("Other").unwrap().body.clone();
+                let result = s.execute("surface.thicken", &json!({"bodies": ["Sheet"], "thickness": 3, "operation": operation, "targets": targets}));
+                if operation == "cut" {
+                    result.unwrap();
+                    assert!((volume(&s, "Block") - 892.0).abs() < 1e-6);
+                } else {
+                    let error = result.unwrap_err().to_string();
+                    assert!(error.contains("Other is a surface body"), "{error}");
+                    assert_eq!(s.doc, before);
+                }
+                let state = s.world_state().unwrap();
+                assert_eq!(state.body("Sheet").unwrap().body.record(), surface.record());
+                assert_eq!(state.body("Other").unwrap().body.record(), other.record());
+            }
+        }
+    }
+
+    /// #12326: a Thicken join that names no target joins the solid it meets. The surface it
+    /// thickens and every other surface body are no solids to join, and stay as they were.
+    #[test]
+    fn automatic_thicken_joins_skip_surface_bodies() {
+        for targets in [json!([]), json!(["*"])] {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+            // The slab is 16 x 6 x 2 = 192, half of it (8 x 6 x 2 = 96) inside the block.
+            sheet(&mut s, "XY", "Sheet", [2.0, 2.0], [18.0, 8.0]);
+            sheet(&mut s, "XY", "Other", [12.0, 3.0], [16.0, 7.0]);
+            let surface = s.world_state().unwrap().body("Sheet").unwrap().body.clone();
+            let other = s.world_state().unwrap().body("Other").unwrap().body.clone();
+            run(&mut s, "surface.thicken", json!({"bodies": ["Sheet"], "thickness": 2, "operation": "join", "targets": targets}));
+            assert!((volume(&s, "Block") - 1096.0).abs() < 1e-6, "{targets}: {}", volume(&s, "Block"));
+            let state = s.world_state().unwrap();
+            assert_eq!(state.bodies.len(), 3, "{targets}");
+            assert_eq!(state.body("Sheet").unwrap().body.record(), surface.record());
+            assert_eq!(state.body("Other").unwrap().body.record(), other.record());
+        }
+        // With surfaces only there is nothing to join: the slab is a new body, as it is in an
+        // empty design.
+        let mut s = Session::default();
+        sheet(&mut s, "XY", "Sheet", [2.0, 2.0], [18.0, 8.0]);
+        let surface = s.world_state().unwrap().body("Sheet").unwrap().body.clone();
+        run(&mut s, "surface.thicken", json!({"bodies": ["Sheet"], "thickness": 2, "operation": "join"}));
+        let state = s.world_state().unwrap();
+        assert_eq!(state.body("Sheet").unwrap().body.record(), surface.record());
+        let solids: Vec<_> = state.bodies.iter().filter(|b| b.is_closed()).collect();
+        assert_eq!((state.bodies.len(), solids.len()), (2, 1));
+        let made = solidcraft_kernel::measure(&solids[0].body).unwrap().volume;
+        assert!((made - 192.0).abs() < 1e-6, "{made}");
+    }
+
+    /// A 10 mm box and, through it, a surface tube (an open cylinder wall).
+    fn box_and_tube(s: &mut Session) {
+        run(s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        run(s, "sketch.create", json!({"plane": "XY", "name": "C"}));
+        run(s, "sketch.circle.center", json!({"center": [5, 5], "radius": 2}));
+        run(s, "sketch.finish", json!({}));
+        run(s, "surface.extrude", json!({"sketch": "C", "distance": 20, "body_name": "Tube"}));
+    }
+
+    /// #15913: a Combine join with a surface body, as target or as a tool in any position, is
+    /// refused up front and names the surface body; the bodies are left as they were.
+    #[test]
+    fn a_join_with_a_surface_body_is_refused_and_names_it() {
+        for (target, tools) in [("Tube", vec!["Block"]), ("Block", vec!["Tube", "Peer"]), ("Block", vec!["Peer", "Tube"])] {
+            let mut s = Session::default();
+            box_and_tube(&mut s);
+            run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 0], "body_name": "Peer"}));
+            let err = s.execute("solid.combine", &json!({"target": target, "tools": tools, "operation": "join"})).unwrap_err().to_string();
+            assert!(err.contains("Tube is a surface body, and a join needs solids"), "{target} {tools:?}: {err}");
+            let st = s.world_state().unwrap();
+            assert!(st.body("Tube").unwrap().body.is_surface());
+            assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
+        }
+    }
+
+    /// #18708: a Combine cut or intersect with an open (non-closed) tool body is refused up front
+    /// with an informative message instead of failing in kernel export; bodies are left unchanged.
+    #[test]
+    fn a_cut_with_an_open_tool_body_is_refused_and_names_it() {
+        let mut s = Session::default();
+        box_and_tube(&mut s);
+        let err = match s.execute("solid.combine", &json!({"target": "Block", "tools": ["Tube"], "operation": "cut"})) {
+            Err(e) => e.to_string(),
+            Ok(_) => String::new(),
+        };
+        assert!(
+            err.contains(
+                "\"Tube\" isn't a closed solid (it has open edges), so it can't cut. Close it with Stitch, or use a closed body as the tool"
+            ),
+            "{err}"
+        );
+        let Some(st) = s.world_state().ok() else { panic!("world state") };
+        assert!(st.body("Tube").is_some_and(|b| b.body.is_surface()));
+        assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
+    }
+
+    /// #18708: a Combine intersect with an open tool body is refused up front and names the tool.
+    #[test]
+    fn an_intersect_with_an_open_tool_body_is_refused_and_names_it() {
+        let mut s = Session::default();
+        box_and_tube(&mut s);
+        let err = match s.execute("solid.combine", &json!({"target": "Block", "tools": ["Tube"], "operation": "intersect"})) {
+            Err(e) => e.to_string(),
+            Ok(_) => String::new(),
+        };
+        assert!(
+            err.contains(
+                "\"Tube\" isn't a closed solid (it has open edges), so it can't intersect. Close it with Stitch, or use a closed body as the tool"
+            ),
+            "{err}"
+        );
+        let Some(st) = s.world_state().ok() else { panic!("world state") };
+        assert!(st.body("Tube").is_some_and(|b| b.body.is_surface()));
+        assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
+    }
+
+    /// #15913 negative control: a join of overlapping solids still makes one body of the union.
+    #[test]
+    fn a_join_of_solids_is_unchanged() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "A"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [5, 0, 0], "body_name": "B"}));
+        run(&mut s, "solid.combine", json!({"target": "A", "tools": ["B"], "operation": "join"}));
+        assert_eq!(s.world_state().unwrap().bodies.len(), 1);
+        assert!((volume(&s, "A") - 1500.0).abs() < 1e-6);
     }
 
     /// `surface.patch`: a box with its top cut away by a sideways cylinder, patched by its rim

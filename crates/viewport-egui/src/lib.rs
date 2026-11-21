@@ -11,8 +11,12 @@ use solidcraft_viewport_gpu::view::{DrawStatsHandle, Frame, GpuTarget, Renderer}
 
 /// A frame of the viewport as an egui paint callback.
 pub struct ViewportCallback(pub Frame);
+/// A frame of one of several views drawn in the same window (tiles): the view `.0` keeps its own
+/// picture on the GPU, so the tiles of one egui frame do not draw over each other
+/// ([`Renderer::prepare_view`]).
+pub struct TileCallback(pub u64, pub Frame);
 /// A transparent, depth-correct selection/hover layer over live product pixels.
-pub struct ProductHighlightCallback(pub Frame);
+pub struct ProductHighlightCallback(pub Frame, pub Option<u64>);
 
 /// The view's background: a vertical gradient from `top` at the top edge to `bottom` at the
 /// bottom edge. The viewport callback composites transparently onto this egui mesh, so the host
@@ -40,6 +44,7 @@ pub type TessReady = Arc<std::sync::OnceLock<solidcraft_viewport_gpu::TessGpu>>;
 /// blitted. GPU errors no error scope catches go to the log and to `report`
 /// ([`log_uncaptured_errors`]). Also returns the handle to what each frame drew, and the GPU plan
 /// evaluation still compiling (native: the target says `tess: false` until it is ready).
+/// [`build`] and [`adopt`] are its two halves, for a host that compiles beside its window.
 pub fn install(
     rs: &egui_wgpu::RenderState,
     scene: GpuTarget,
@@ -48,6 +53,30 @@ pub fn install(
     force_cpu: bool,
     report: impl Fn(&wgpu::Error) + Send + Sync + 'static,
 ) -> (GpuTarget, DrawStatsHandle, Option<TessReady>) {
+    adopt(rs, build(rs, scene, window, gpu_meshing, force_cpu, report))
+}
+
+/// The viewport's pipelines, compiled but not yet in a render state's callback resources
+/// ([`build`], [`adopt`]).
+pub struct Built {
+    /// The scene's target as the renderer draws it (order-independent transparency where it can).
+    pub target: GpuTarget,
+    /// The pipelines, for checks a host runs before [`adopt`] (the anti-aliasing readback).
+    pub renderer: Renderer,
+    stats: DrawStatsHandle,
+    ready: Option<TessReady>,
+}
+
+/// [`install`]'s slow half, the shader compile (seconds on some devices): it only needs the
+/// device, so a host can run it on a thread of its own while its window keeps drawing (#1210).
+pub fn build(
+    rs: &egui_wgpu::RenderState,
+    scene: GpuTarget,
+    window: GpuTarget,
+    gpu_meshing: bool,
+    force_cpu: bool,
+    report: impl Fn(&wgpu::Error) + Send + Sync + 'static,
+) -> Built {
     log_uncaptured_errors(&rs.device, report);
     // The evaluation shader compiles beside the window, which does not wait for it: on D3D12 it
     // takes seconds, most of the start (#4860). Bodies are built on the CPU until it is ready.
@@ -74,10 +103,17 @@ pub fn install(
     #[cfg(target_arch = "wasm32")]
     let ready = None;
     // What the renderer can do (order-independent transparency), not only what was asked for.
-    let scene = res.target();
+    let target = res.target();
     let stats = res.stats();
-    rs.renderer.write().callback_resources.insert(res);
-    (scene, stats, ready)
+    Built { target, renderer: res, stats, ready }
+}
+
+/// [`install`]'s other half, on the window's thread: the pipelines [`build`] made go into `rs`'s
+/// callback resources. Returns the scene's target, the handle to what each frame draws, and the
+/// GPU plan evaluation still compiling.
+pub fn adopt(rs: &egui_wgpu::RenderState, built: Built) -> (GpuTarget, DrawStatsHandle, Option<TessReady>) {
+    rs.renderer.write().callback_resources.insert(built.renderer);
+    (built.target, built.stats, built.ready)
 }
 
 /// A GPU error no error scope caught is logged and handed to `report`, never a panic: a device's
@@ -121,6 +157,28 @@ impl egui_wgpu::CallbackTrait for ViewportCallback {
     }
 }
 
+impl egui_wgpu::CallbackTrait for TileCallback {
+    fn prepare(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        _screen: &egui_wgpu::ScreenDescriptor,
+        _encoder: &mut wgpu::CommandEncoder,
+        resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        if let Some(res) = resources.get_mut::<Renderer>() {
+            res.prepare_view(self.0, device, queue, &self.1);
+        }
+        Vec::new()
+    }
+
+    fn paint(&self, info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
+        let Some(res) = resources.get::<Renderer>() else { return };
+        let vp = info.viewport_in_pixels();
+        res.paint_view(self.0, &self.1, pass, [vp.left_px as f32, vp.top_px as f32, vp.width_px as f32, vp.height_px as f32]);
+    }
+}
+
 impl egui_wgpu::CallbackTrait for ProductHighlightCallback {
     fn prepare(
         &self,
@@ -131,18 +189,23 @@ impl egui_wgpu::CallbackTrait for ProductHighlightCallback {
         resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         if let Some(renderer) = resources.get_mut::<Renderer>() {
-            renderer.prepare_product_highlights(device, queue, encoder, &self.0);
+            if let Some(tile) = self.1 {
+                renderer.prepare_product_highlights_view(tile, device, queue, &self.0);
+            } else {
+                renderer.prepare_product_highlights(device, queue, encoder, &self.0);
+            }
         }
         Vec::new()
     }
     fn paint(&self, info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
         let Some(renderer) = resources.get::<Renderer>() else { return };
         let viewport = info.viewport_in_pixels();
-        renderer.paint_product_highlights(
-            &self.0,
-            pass,
-            [viewport.left_px as f32, viewport.top_px as f32, viewport.width_px as f32, viewport.height_px as f32],
-        );
+        let pixels = [viewport.left_px as f32, viewport.top_px as f32, viewport.width_px as f32, viewport.height_px as f32];
+        if let Some(tile) = self.1 {
+            renderer.paint_product_highlights_view(tile, &self.0, pass, pixels);
+        } else {
+            renderer.paint_product_highlights(&self.0, pass, pixels);
+        }
     }
 }
 

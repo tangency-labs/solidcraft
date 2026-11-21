@@ -1,8 +1,8 @@
-//! tangency-labs/solidcore#2089: with `Kernel::fixes.ssi_tangent_curve_tracer` (WR-75)
-//! on, an r 1 crease round fails with fillet code 3 ("Fillet Corner Error: Corner Edge
-//! Computation Failure"). SolidCraft hit it once the r 2 round it runs onto is a plain
-//! B-spline surface; with only the two fillet fixes below (not SolidCraft's whole
-//! preset) the round fails as built too.
+//! tangency-labs/solidcore#2089: with the tangent curve tracer (WR-75, then the opt-in
+//! `ssi_tangent_curve_tracer`) on, an r 1 crease round failed with fillet code 3
+//! ("Fillet Corner Error: Corner Edge Computation Failure"). SolidCraft hit it once the
+//! r 2 round it runs onto is a plain B-spline surface; with only the two fillet fixes
+//! below (not SolidCraft's whole preset) the round fails as built too.
 //!
 //! A block x 0..40, y -5..5, z 0..15 and a cylinder r 10, height 30 on the Z axis (both
 //! extruded, the circle's seam at 0.6131 rad as SolidCraft's), joined; the concave arc
@@ -31,14 +31,12 @@ use solidcore::curve::curve::Curve;
 use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::line::Line;
 use solidcore::geom::a_object::BooleanOperation;
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::vector2d::Point2;
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::intersect::point_class::{PointClassType, PointClassification};
 use solidcore::kernel::UpstreamFixes;
-use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::query::api_queries::edge_closest_point;
 use solidcore::query::face::p1 as fq;
 use solidcore::sweep::api_brep::create_linear_sweep;
@@ -109,15 +107,6 @@ fn round(k: &mut Kernel, b: &mut Brep, points: &[[f64; 3]], r: f64) -> i32 {
     }
     b.refresh_cached_topology();
     code
-}
-
-fn volume(k: &Kernel, b: &mut Brep) -> f64 {
-    let store = AttributeStore::default();
-    let attrs = PropertyAttributes {
-        store: &store,
-        key_of: &|_| ObjectKey(0),
-    };
-    brep_volume(k, b, 1e-9, &attrs).unwrap()
 }
 
 fn lumps(b: &Brep) -> usize {
@@ -253,27 +242,23 @@ fn off_definition(k: &Kernel, b: &mut Brep) -> [(f64, usize); 2] {
     out
 }
 
-/// What a built crease round gives: the body's volume, its lump count, its `check_brep`
-/// failures and the round on its definition ([`off_definition`]).
+/// What a built crease round gives: its lump count, its `check_brep` failures and the
+/// round on its definition ([`off_definition`]).
 struct Built {
-    volume: f64,
     lumps: usize,
     failures: Vec<String>,
     definition: [(f64, usize); 2],
 }
 
 /// The crease round's error code and, when it builds, what it gives. SolidCraft's fixes
-/// (every `UpstreamFixes` field but `geometric_g2_continuity`), so both rounds are built
+/// (every `UpstreamFixes` field), so both rounds are built
 /// by the blend corner, the construction kept since WR-641's
-/// `fillet_through_extended_rail_end` was removed (#2500); the tangent tracer as `tracer`.
-fn crease_round(form: Form, tracer: bool) -> (i32, Option<Built>) {
+/// `fillet_through_extended_rail_end` was removed (#2500).
+fn crease_round(form: Form) -> (i32, Option<Built>) {
     let mut k = Kernel::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *k.fixes.flag_mut(name).unwrap() = true;
-        }
+        *k.fixes.flag_mut(name).unwrap() = true;
     }
-    k.fixes.ssi_tangent_curve_tracer = tracer;
     crease_round_with(k, form)
 }
 
@@ -344,7 +329,6 @@ fn crease_round_with(mut k: Kernel, form: Form) -> (i32, Option<Built>) {
         1.0,
     );
     let built = (code == 0).then(|| Built {
-        volume: volume(&k, &mut b),
         lumps: lumps(&b),
         failures: check_failures(&mut k, &mut b),
         definition: off_definition(&k, &mut b),
@@ -366,43 +350,29 @@ fn assert_valid(form: Form, built: &Built) {
 #[test]
 fn nurbs_round_crease_builds_with_the_tracer() {
     for form in [Form::RoundFaceNurbs, Form::AllNurbs] {
-        let (code, on) = crease_round(form, true);
+        let (code, on) = crease_round(form);
         assert_eq!(code, 0, "{form:?}");
-        let on = on.unwrap();
-        assert_valid(form, &on);
-        // here the tracer finds nothing the marcher has not: the same body
-        let (code_off, off) = crease_round(form, false);
-        assert_eq!(code_off, 0, "{form:?}");
-        assert_eq!(
-            on.volume.to_bits(),
-            off.unwrap().volume.to_bits(),
-            "{form:?}"
-        );
+        assert_valid(form, &on.unwrap());
     }
 }
 
+/// The as-built crease round with the tracer. Its volume was compared bit for bit with
+/// the round built without the tracer, which no longer exists (#18930).
 #[test]
-fn revolution_round_crease_is_unchanged() {
-    let (code, on) = crease_round(Form::AsBuilt, true);
+fn revolution_round_crease_builds_with_the_tracer() {
+    let (code, on) = crease_round(Form::AsBuilt);
     assert_eq!(code, 0);
-    let on = on.unwrap();
-    assert_valid(Form::AsBuilt, &on);
-    let (code_off, off) = crease_round(Form::AsBuilt, false);
-    assert_eq!(code_off, 0);
-    assert_eq!(on.volume.to_bits(), off.unwrap().volume.to_bits());
+    assert_valid(Form::AsBuilt, &on.unwrap());
 }
 
-/// The blend corner alone (with the two fillet fixes the issue's preset needs to reach the
-/// crease round): the r 1
-/// round's End on the cylinder is a tangent end, its rail on the torus ending on the
-/// torus/cylinder seam where the round touches the cylinder. Without the tangent end
-/// (#2500) the rail end was taken as the rail's crossing of the cylinder, which has none
-/// there, and the cap edge was marched into the tangency: fillet code 5.
+/// The blend corner alone (with the SSI fix the issue's preset needs to reach the crease
+/// round): the r 1 round's End on the cylinder is a tangent end, its rail on the torus
+/// ending on the torus/cylinder seam where the round touches the cylinder. Without the
+/// tangent end (#2500) the rail end was taken as the rail's crossing of the cylinder, which
+/// has none there, and the cap edge was marched into the tangency: fillet code 5.
 #[test]
 fn the_blend_corner_alone_rounds_the_crease_to_its_tangent_end() {
-    let mut k = Kernel::default();
-    k.fixes.fillet_torus_span_from_start_section = true;
-    k.fixes.ssi_tangent_curve_tracer = true;
+    let k = Kernel::default();
     let (code, built) = crease_round_with(k, Form::AsBuilt);
     assert_eq!(code, 0);
     assert_valid(Form::AsBuilt, &built.unwrap());

@@ -7,7 +7,7 @@
 //!   is the ball's arc turned about the axis (a surface of revolution of the exact volume),
 //!   where upstream traces and fits it.
 //! - The point class (two cylinders as wide as the ball, their axes meeting) is the ball's
-//!   piece without `fillet_corner_ball_patch` (WR-420), where upstream fails 1001.
+//!   piece, where upstream fails 1001.
 //! - Rounds the try-chain already made exact (a box edge's cylinder, a plate's rim on a
 //!   boss's torus) come out as before.
 #![allow(
@@ -29,6 +29,7 @@ use solidcore::surface::procedural_blend::exact::ExactClass;
 use solidcore::surface::procedural_blend::record::SupportRecord;
 use solidcore::surface::procedural_blend::BlendNet;
 use solidcore::surface::surface::SurfaceKind;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::face::p2 as face;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
@@ -80,14 +81,8 @@ fn revolved_faces(b: &Brep) -> usize {
 /// The r5 ball about the origin with the r2 cylinder up the z axis from z = 0 to 10
 /// standing out of it, the concave edge where they meet (z = sqrt 21) rounded r1.
 fn ball_and_peg(exact: bool) -> (Kernel, Brep, f64, solidcore::Result<()>) {
-    ball_and_peg_kept(exact, false)
-}
-
-/// [`ball_and_peg`], with `definition` (`fillet_round_as_definition`, #2485) set.
-fn ball_and_peg_kept(exact: bool, definition: bool) -> (Kernel, Brep, f64, solidcore::Result<()>) {
     let mut k = Kernel::default();
     k.fixes.fillet_exact_round_classes = exact;
-    k.fixes.fillet_round_as_definition = definition;
     let ball = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0).unwrap();
     let peg = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 2.0, 10.0).unwrap();
     let mut b = boolean_union(&mut k, ball, peg).unwrap();
@@ -179,16 +174,14 @@ fn upstream_traces_the_round_between_a_ball_and_a_peg() {
 /// A 25 x 25 x 10 tray, bottom edges R2, then the vertical edges R2 (the corner ball where
 /// two bottom rounds meet: the point class) as in tangency-labs/solidcore#416.
 fn tray(exact: bool) -> (f64, f64, solidcore::Result<()>) {
-    let (rounded, after, r, _, _) = tray_kept(exact, false);
+    let (rounded, after, r, _, _) = tray_body(exact);
     (rounded, after, r)
 }
 
-/// [`tray`], with `definition` (`fillet_round_as_definition`, #2485) set; also the kernel
-/// and the tray.
-fn tray_kept(exact: bool, definition: bool) -> (f64, f64, solidcore::Result<()>, Kernel, Brep) {
+/// [`tray`], also the kernel and the tray.
+fn tray_body(exact: bool) -> (f64, f64, solidcore::Result<()>, Kernel, Brep) {
     let mut k = Kernel::default();
     k.fixes.fillet_exact_round_classes = exact;
-    k.fixes.fillet_round_as_definition = definition;
     let mut tray = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 25.0, 25.0, 10.0).unwrap();
     let bottom = edges_where(&k, &tray, |m| m.z.abs() < 1e-6);
     fillet_edges(&mut k, &mut tray, &bottom, 2.0, 1, 1, 1.0).unwrap();
@@ -204,7 +197,7 @@ fn tray_kept(exact: bool, definition: bool) -> (f64, f64, solidcore::Result<()>,
 }
 
 #[test]
-fn the_point_class_makes_the_corner_ball_without_the_ball_patch_flag() {
+fn the_point_class_makes_the_corner_ball() {
     // each vertical edge loses (1 - pi/4) 4 along 8, each corner the octant of the two
     // bottom rounds' crossing (16/3) less the corner ball's (4 pi / 3)
     let removed = 4.0 * (32.0 * (1.0 - PI / 4.0) + 16.0 / 3.0 - 4.0 * PI / 3.0);
@@ -214,10 +207,13 @@ fn the_point_class_makes_the_corner_ball_without_the_ball_patch_flag() {
         (after - (rounded - removed)).abs() < 1e-7 * after,
         "{rounded} {after}"
     );
-    let (_, _, r) = tray(false);
+    // without the exact classes the corner goes through the ball patch (WR-420/541),
+    // where upstream failed 1001: the same body
+    let (rounded, after, r) = tray(false);
+    r.unwrap();
     assert!(
-        matches!(r, Err(solidcore::SolidError::Upstream { code: 1001, .. })),
-        "{r:?}"
+        (after - (rounded - removed)).abs() < 1e-7 * after,
+        "{rounded} {after}"
     );
 }
 
@@ -225,15 +221,14 @@ fn the_point_class_makes_the_corner_ball_without_the_ball_patch_flag() {
 /// to the cylinder's axis: the circle class) and one plate edge (two planes: the line
 /// class) rounded r1.
 fn plate_and_boss(exact: bool) -> (f64, usize) {
-    let (k, mut b) = plate_and_boss_kept(exact, false);
+    let (k, mut b) = plate_and_boss_body(exact);
     (volume(&k, &mut b), revolved_faces(&b))
 }
 
-/// [`plate_and_boss`]'s body, with `definition` (`fillet_round_as_definition`, #2485) set.
-fn plate_and_boss_kept(exact: bool, definition: bool) -> (Kernel, Brep) {
+/// [`plate_and_boss`]'s body.
+fn plate_and_boss_body(exact: bool) -> (Kernel, Brep) {
     let mut k = Kernel::default();
     k.fixes.fillet_exact_round_classes = exact;
-    k.fixes.fillet_round_as_definition = definition;
     let plate = create_box(&mut k, Point3::new(-10.0, -10.0, 0.0), 20.0, 20.0, 4.0).unwrap();
     let boss = create_cylinder(&mut k, Point3::new(0.0, 0.0, 2.0), 3.0, 8.0).unwrap();
     let mut b = boolean_union(&mut k, plate, boss).unwrap();
@@ -295,39 +290,6 @@ fn assert_definitions(k: &Kernel, b: &Brep) -> Vec<ExactClass> {
         classes.push(class);
     }
     classes
-}
-
-/// The points of every face's surface over a 9 x 9 grid of its natural domain, as bits.
-fn face_bits(k: &Kernel, b: &Brep) -> Vec<(u8, Vec<[u64; 3]>)> {
-    b.faces()
-        .ids()
-        .filter_map(|f| face::surface(b, f).unwrap())
-        .map(|s| {
-            let tag = match s.kind() {
-                SurfaceKind::Cone(_) => 1,
-                SurfaceKind::SurfOfRevolution(_) => 2,
-                SurfaceKind::Torus(_) => 3,
-                SurfaceKind::Sphere(_) => 4,
-                SurfaceKind::BallPatch(_) => 5,
-                SurfaceKind::Plane(_) => 6,
-                SurfaceKind::BSpline(_) => 7,
-                _ => 0,
-            };
-            let d = s.natural_uv_domain_with_nurb(k).unwrap();
-            let mut pts = Vec::new();
-            for i in 0..=8 {
-                for j in 0..=8 {
-                    let u = d.min().x + (d.max().x - d.min().x) * f64::from(i) / 8.0;
-                    let v = d.min().y + (d.max().y - d.min().y) * f64::from(j) / 8.0;
-                    let p = s
-                        .evaluate_point(k, solidcore::geom::vector2d::Point2::new(u, v))
-                        .unwrap();
-                    pts.push([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]);
-                }
-            }
-            (tag, pts)
-        })
-        .collect()
 }
 
 /// Every exact round of `b` through its record and back: the record re-serialised from the
@@ -392,53 +354,43 @@ fn assert_same_points(
 
 #[test]
 fn the_line_and_circle_rounds_are_their_definitions() {
-    let (k, mut b) = plate_and_boss_kept(true, true);
+    let (k, mut b) = plate_and_boss_body(true);
     let mut classes = assert_definitions(&k, &b);
     classes.sort_by_key(|c| c.name());
     assert_eq!(classes, vec![ExactClass::Circle, ExactClass::Line]);
-    // the volume of the closed form, as without the definition
+    // the volume of the closed form
     let foot = 2.0 * PI * (3.5 - (PI - 1.0 / 3.0));
     let expected = 1600.0 + 54.0 * PI + foot - 20.0 * (1.0 - PI / 4.0);
     let v = volume(&k, &mut b);
     assert!((v - expected).abs() < 1e-9 * expected, "{v} != {expected}");
-    // every surface bit for bit as without the definition
-    let (k0, b0) = plate_and_boss_kept(true, false);
-    assert!(exact_rounds(&b0).is_empty());
-    assert_eq!(face_bits(&k, &b), face_bits(&k0, &b0));
     assert_eq!(assert_records_round_trip(&k, &b), 2);
 }
 
 #[test]
 fn the_revolved_round_on_a_ball_is_its_definition() {
-    let (k, mut b, before, r) = ball_and_peg_kept(true, true);
+    let (k, mut b, before, r) = ball_and_peg(true);
     r.unwrap();
     assert_eq!(assert_definitions(&k, &b), vec![ExactClass::Circle]);
     let after = volume_to(&k, &mut b, 1e-7);
     let added = ball_and_peg_round_volume();
     assert!((after - (before + added)).abs() < 1e-6 * after);
-    let (k0, b0, _, r0) = ball_and_peg_kept(true, false);
-    r0.unwrap();
-    assert_eq!(face_bits(&k, &b), face_bits(&k0, &b0));
     assert_eq!(assert_records_round_trip(&k, &b), 1);
 }
 
 #[test]
 fn the_corner_balls_are_their_definitions() {
     let removed = 4.0 * (32.0 * (1.0 - PI / 4.0) + 16.0 / 3.0 - 4.0 * PI / 3.0);
-    let (rounded, after, r, k, b) = tray_kept(true, true);
+    let (rounded, after, r, k, b) = tray_body(true);
     r.unwrap();
     assert!((after - (rounded - removed)).abs() < 1e-7 * after);
     let classes = assert_definitions(&k, &b);
     assert!(classes.contains(&ExactClass::Point), "{classes:?}");
-    let (_, _, r0, k0, b0) = tray_kept(true, false);
-    r0.unwrap();
-    assert_eq!(face_bits(&k, &b), face_bits(&k0, &b0));
     assert_eq!(assert_records_round_trip(&k, &b), classes.len());
 }
 
 #[test]
 fn the_offset_of_a_line_round_is_an_exact_cylinder() {
-    let (k, b) = plate_and_boss_kept(true, true);
+    let (k, b) = plate_and_boss_body(true);
     let (f, _) = exact_rounds(&b)
         .into_iter()
         .find(|(_, c)| *c == ExactClass::Line)
@@ -461,7 +413,7 @@ fn the_offset_of_a_line_round_is_an_exact_cylinder() {
 
 #[test]
 fn a_moved_exact_round_is_certified_again() {
-    let (k, b) = plate_and_boss_kept(true, true);
+    let (k, b) = plate_and_boss_body(true);
     for (f, _) in exact_rounds(&b) {
         let mut s = face::surface(&b, f).unwrap().unwrap().copy(&k).unwrap();
         let mut place = solidcore::geom::axis2_placement::Axis2Placement::default();
@@ -545,8 +497,8 @@ fn a_box_round_offsets_to_the_round_of_r_plus_d_on_the_offset_faces() {
             panic!("d {d}: the offset is a {:?}", s.kind());
         };
         assert!(c.is_cylinder());
-        // to rounding at part scale: with every fix on the round's face is swapped
-        // (`face_swap_uv_transposes_trims`), and its offset cone's radius lands 2.5e-14 off
+        // to rounding at part scale: the round's face is swapped (`SmFace::SwapUV`), and with
+        // every fix on its offset cone's radius lands 2.5e-14 off
         assert!(
             (c.base_radius() - (2.0 + d)).abs() <= 1e-12,
             "d {d}: {}",
@@ -644,7 +596,7 @@ fn a_box_chamfer_offsets_to_the_chamfer_on_the_offset_faces() {
 /// re-certified: its offset surface lies on the class's surface of the offset supports.
 #[test]
 fn the_offset_of_a_circle_round_is_its_round_of_r_plus_minus_d() {
-    let (k, b) = plate_and_boss_kept(true, true);
+    let (k, b) = plate_and_boss_body(true);
     let (f, _) = exact_rounds(&b)
         .into_iter()
         .find(|(_, c)| *c == ExactClass::Circle)
@@ -664,4 +616,164 @@ fn the_offset_of_a_circle_round_is_its_round_of_r_plus_minus_d() {
         (radii[0] - 0.75).abs() <= 1e-14 && (radii[1] - 1.25).abs() <= 1e-14,
         "{radii:?}"
     );
+}
+
+/// The issue's frustum about x (radius 24 at x = 0, 36 at x = 48) with a rib of `sweep`
+/// degrees centred on its seam, the rib's side leaving the cone at (18, 28.5) 15 degrees off
+/// the cone's straight side; that edge (two edges, split by the seam) rounded 1 mm. The body,
+/// and its volume and its faces', edges' and vertices' counts before the round.
+fn short_rib_rounded(sweep: f64) -> (Kernel, Brep, f64, [usize; 3]) {
+    use solidcore::curve::curve::Curve;
+    use solidcore::geom::vector3d::Vec3;
+    use solidcore::primitive::api_curves::create_line_segment;
+    use solidcore::sweep::api_brep::create_rotational_sweep;
+    fn revolved(k: &mut Kernel, pts: &[Vec3], sweep: f64) -> Brep {
+        let cs: Vec<Curve> = pts
+            .iter()
+            .zip(pts.iter().cycle().skip(1))
+            .map(|(a, b)| Curve::from(create_line_segment(*a, *b).unwrap()))
+            .collect();
+        let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
+        create_rotational_sweep(
+            k,
+            &refs,
+            Point3::ZERO,
+            Vec3::new(1.0, 0.0, 0.0),
+            sweep,
+            true,
+        )
+        .unwrap()
+    }
+    let cone =
+        [[0.0, 0.0], [0.0, 24.0], [48.0, 36.0], [48.0, 0.0]].map(|p| Vec3::new(p[0], p[1], 0.0));
+    let turn = -sweep.to_radians() / 2.0;
+    let rib: Vec<Vec3> = SHORT_RIB
+        .iter()
+        .map(|p| Vec3::new(p[0], p[1] * turn.cos(), p[1] * turn.sin()))
+        .collect();
+    let mut k = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let body = revolved(&mut k, &cone, 360.0);
+    let wedge = revolved(&mut k, &rib, sweep);
+    let mut b = boolean_union(&mut k, body, wedge).unwrap();
+    let before = volume_to(&k, &mut b, 1e-6);
+    let counts = topology_counts(&b);
+    let at = Point3::new(SHORT_RIB[0][0], SHORT_RIB[0][1], 0.0);
+    let root = b
+        .edges()
+        .ids()
+        .min_by(|&e, &f| {
+            let gap = |e| midpoint(&k, &b, e).distance(at);
+            gap(e).total_cmp(&gap(f))
+        })
+        .unwrap();
+    fillet_edges(&mut k, &mut b, &[root], 1.0, 1, 1, 1.0).unwrap();
+    (k, b, before, counts)
+}
+
+fn topology_counts(b: &Brep) -> [usize; 3] {
+    [
+        b.faces().ids().count(),
+        b.edges().ids().count(),
+        b.vertices().ids().count(),
+    ]
+}
+
+/// The rib's meridian section (x, rho): its root on the cone's side, its outer and its back
+/// corner.
+const SHORT_RIB: [[f64; 2]; 3] = [
+    [18.0, 28.5],
+    [26.743_129, 33.353_628],
+    [27.370_857, 30.842_714],
+];
+
+/// The 1 mm round in the 165 degree corner between the cone's side (slope 1/4, back towards
+/// x = 0) and the rib's side at the root, per radian turned: the kite of the corner, the two
+/// feet and the ball's centre, less the ball's sector between the feet, by Pappus.
+fn short_rib_round_per_radian() -> f64 {
+    let unit = |d: [f64; 2]| {
+        let l = d[0].hypot(d[1]);
+        [d[0] / l, d[1] / l]
+    };
+    let c = SHORT_RIB[0];
+    let back = unit([-1.0, -0.25]);
+    let up = unit([SHORT_RIB[1][0] - c[0], SHORT_RIB[1][1] - c[1]]);
+    let phi = (back[0] * up[0] + back[1] * up[1]).acos();
+    let t = 1.0 / (phi / 2.0).tan();
+    let b = unit([back[0] + up[0], back[1] + up[1]]);
+    let centre = c[1] + b[1] / (phi / 2.0).sin();
+    let foot = |d: [f64; 2]| c[1] + d[1] * t;
+    let kite = t;
+    let kite_rho = (2.0 * c[1] + foot(back) + foot(up) + 2.0 * centre) / 6.0;
+    let half = (PI - phi) / 2.0;
+    let sector = half;
+    let sector_rho = centre - b[1] * 2.0 * half.sin() / (3.0 * half);
+    kite * kite_rho - sector * sector_rho
+}
+
+/// #19724, on stabler's construction from #19859: a round between the frustum's cone and a
+/// rib's cone a few degrees wide. The rib's cone is one short arc span, and the cone read off
+/// its form's control rows (`AnalyticSupport::derive`) does not prove that form (`build`:
+/// "a support's analytic kind disagrees with its NURBS form"). The record labelled it a cone
+/// all the same, and reading the round back refused it. A support is now labelled only where
+/// reading derives it back, so the rib's goes as its form and the frustum's keeps its label;
+/// both rounds read back as themselves, Circle rounds of radius 1 certified again.
+#[test]
+fn a_round_on_a_short_rib_s_cone_reads_back_from_its_record() {
+    use solidcore::surface::procedural_blend::record::SupportKindRecord;
+    for sweep in [6.0_f64, 3.0, 1.0] {
+        let (mut k, mut b, before, counts) = short_rib_rounded(sweep);
+        // two round faces; the two root edges become four rails, with an arc on each of the
+        // rib's end planes and one across the seam; the three root vertices become six
+        let [f, e, v] = counts;
+        assert_eq!(
+            topology_counts(&b),
+            [f + 2, e + 5, v + 3],
+            "{sweep} degrees"
+        );
+        let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        assert!(check.is_valid(), "{sweep} degrees: {:?}", check.lines());
+        // the round's closed form; a 0.8 mm round would add a third less
+        let added = volume_to(&k, &mut b, 1e-6) - before;
+        let want = short_rib_round_per_radian() * sweep.to_radians();
+        assert!(
+            (added - want).abs() <= 1e-3 * want,
+            "{sweep} degrees: the round adds {added}, its closed form {want}"
+        );
+        // the seam splits the root in two edges, so two rounds
+        assert_eq!(
+            assert_definitions(&k, &b),
+            vec![ExactClass::Circle; 2],
+            "{sweep} degrees"
+        );
+        assert_eq!(assert_records_round_trip(&k, &b), 2, "{sweep} degrees");
+        for (f, _) in exact_rounds(&b) {
+            let s = face::surface(&b, f).unwrap().unwrap();
+            let round = s.procedural_blend().unwrap().exact().unwrap();
+            assert!((round.radius() - 1.0).abs() <= 1e-12, "{}", round.radius());
+            let rec = exact_to_record(&k, s).unwrap();
+            for (i, support) in rec.supports.iter().enumerate() {
+                let SupportRecord::Nurbs { kind, .. } = support else {
+                    panic!("{sweep} degrees: support {i} is a blend");
+                };
+                // the frustum's side runs to rho 24 + x / 4; the rib's leaves it
+                let d = support_middle(&k, round.support(i).unwrap());
+                let on_frustum = (d.y.hypot(d.z) - (24.0 + d.x / 4.0)).abs() <= 1e-6;
+                let want = if on_frustum {
+                    SupportKindRecord::Cone
+                } else {
+                    SupportKindRecord::Free
+                };
+                assert_eq!(*kind, want, "{sweep} degrees: support {i} at {d:?}");
+            }
+        }
+    }
+}
+
+/// A surface's point at the middle of its natural domain.
+fn support_middle(k: &Kernel, s: &solidcore::surface::surface::Surface) -> Point3 {
+    let d = s.natural_uv_domain_with_nurb(k).unwrap();
+    s.evaluate_point(k, d.evaluate(0.5, 0.5)).unwrap()
 }

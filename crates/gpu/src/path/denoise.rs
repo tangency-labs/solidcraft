@@ -1,13 +1,12 @@
 //! Optional output filtering; never writes the Monte Carlo accumulation buffer.
-use super::{Context, Result, SHADER, TIMEOUT, Task, checked, placeholder_bind, scopes, warm_up};
-use solidcraft_render::job::{DenoiseDiagnostics, DenoiseGuideClass, resolve_denoise_class};
+use super::{Context, Result, SHADER, TIMEOUT, Task, checked, gpu, one_compile_at_a_time, placeholder_bind, scopes, warm_up};
+use solidcraft_render::job::{CancelToken, DenoiseDiagnostics, DenoiseGuideClass, resolve_denoise_class};
 use std::sync::atomic::{AtomicBool, Ordering};
-use wgpu::util::DeviceExt;
 
 pub(super) const GUIDE_BYTES_PER_PIXEL: u64 = 96; // two complete surface guides
 pub(super) const BYTES_PER_PIXEL: u64 = GUIDE_BYTES_PER_PIXEL + 32; // two colour vec4s
 const FILTER: &str = include_str!("denoise.wgsl");
-const GUIDES: &str = include_str!("denoise_guides.wgsl");
+pub(super) const GUIDES: &str = include_str!("denoise_guides.wgsl");
 #[cfg(test)]
 #[path = "denoise_tests.rs"]
 mod tests;
@@ -85,10 +84,21 @@ impl Pipelines {
         Ok(Self { guide, filter, classify, filter_layout })
     }
 
-    fn shared(context: &Context) -> Result<&Self> {
+    // The guide program inlines the path tracer's BVH walks, so it compiles under the
+    // process-wide lock of the path programs (#6706), never beside one of them. As for a scene
+    // program, the lock is held until the pipelines are published: a job that waited for another
+    // job's compile then uses its pipelines instead of compiling them again, and a job cancelled
+    // while it waited returns before compiling. A compile that ran is kept for the next job.
+    fn shared<'a>(context: &'a Context, cancel: &CancelToken) -> Result<&'a Self> {
         if let Some(pipelines) = context.denoise.get() {
             return Ok(pipelines);
         }
+        cancel.check()?;
+        let _compiling = one_compile_at_a_time();
+        if let Some(pipelines) = context.denoise.get() {
+            return Ok(pipelines);
+        }
+        cancel.check()?;
         let built = Self::new(context)?;
         Ok(context.denoise.get_or_init(|| built))
     }
@@ -128,7 +138,7 @@ impl Resources {
         size: u64,
         adaptive_preview: bool,
     ) -> Result<Self> {
-        Self::build(context, path_uniform, scene, accumulation, size, adaptive_preview, None)
+        Self::build(context, path_uniform, scene, accumulation, size, adaptive_preview, None, &CancelToken::default())
     }
 
     pub(super) fn new_for_layout(
@@ -138,8 +148,9 @@ impl Resources {
         accumulation: &wgpu::Buffer,
         adaptive_preview: bool,
         layout: super::image_pages::Layout,
+        cancel: &CancelToken,
     ) -> Result<Self> {
-        Self::build(context, path_uniform, scene, accumulation, u64::from(layout.max_window_pixels()) * 16, adaptive_preview, Some(layout))
+        Self::build(context, path_uniform, scene, accumulation, u64::from(layout.max_window_pixels()) * 16, adaptive_preview, Some(layout), cancel)
     }
 
     fn build(
@@ -150,8 +161,9 @@ impl Resources {
         size: u64,
         adaptive_preview: bool,
         layout: Option<super::image_pages::Layout>,
+        cancel: &CancelToken,
     ) -> Result<Self> {
-        let pipelines = Pipelines::shared(context)?;
+        let pipelines = Pipelines::shared(context, cancel)?;
         let device = &context.device;
         let error_scopes = scopes(device);
         let buffer = |label, bytes| {
@@ -175,11 +187,19 @@ impl Resources {
             .collect();
         let guide_bind =
             device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("denoise guides"), layout: &context.layout, entries: &entries });
-        let filter_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("denoise parameters"),
-            contents: &[0; 48],
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let filter_uniform = match solidcraft_viewport_gpu::buffer_init(
+            device,
+            "denoise parameters",
+            &[0; 48],
+            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        ) {
+            Ok(buffer) => buffer,
+            Err(e) => {
+                // Drain the scopes in order before returning.
+                let _ = checked(error_scopes);
+                return Err(gpu(e));
+            }
+        };
         let filter_binds = [(accumulation, &output), (&output, &temporary), (&temporary, &output)]
             .into_iter()
             .map(|(source, destination)| {
@@ -195,7 +215,16 @@ impl Resources {
                 })
             })
             .collect();
-        let adaptive = adaptive_preview.then(|| AdaptiveInput::new(context, pipelines, accumulation, &guides, &filter_uniform, &output, size));
+        let adaptive =
+            match adaptive_preview.then(|| AdaptiveInput::new(context, pipelines, accumulation, &guides, &filter_uniform, &output, size)).transpose()
+            {
+                Ok(adaptive) => adaptive,
+                Err(e) => {
+                    // Drain the scopes in order before returning.
+                    let _ = checked(error_scopes);
+                    return Err(e);
+                }
+            };
         checked(error_scopes)?;
         Ok(Self {
             adaptive,
@@ -482,7 +511,7 @@ impl AdaptiveInput {
         filter_uniform: &wgpu::Buffer,
         output: &wgpu::Buffer,
         size: u64,
-    ) -> Self {
+    ) -> Result<Self> {
         let device = &context.device;
         let pixels = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("adaptive preview denoise input"),
@@ -490,11 +519,13 @@ impl AdaptiveInput {
             usage: wgpu::BufferUsages::STORAGE,
             mapped_at_creation: false,
         });
-        let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("adaptive preview parameters"),
-            contents: &[0; 32],
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let uniform = solidcraft_viewport_gpu::buffer_init(
+            device,
+            "adaptive preview parameters",
+            &[0; 32],
+            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        )
+        .map_err(gpu)?;
         let entries: Vec<_> = (0..3)
             .map(|binding| wgpu::BindGroupLayoutEntry {
                 binding,
@@ -546,7 +577,7 @@ impl AdaptiveInput {
             layout: &pipelines.filter_layout,
             entries: &entries,
         });
-        Self { _pixels: pixels, uniform, pipeline, bind, filter_bind }
+        Ok(Self { _pixels: pixels, uniform, pipeline, bind, filter_bind })
     }
     fn normalize_window(&self, task: &Task, window: Window) -> Result<()> {
         let options = task.options.adaptive.ok_or_else(|| super::gpu("missing adaptive preview options"))?;

@@ -252,6 +252,72 @@ fn assembly_tree_hover_highlight_cost() {
     }
 }
 
+/// `each` bolts in a row, `each` rows in a frame and `each` frames in the design, so `each` cubed
+/// bolts from a few commands. Settled.
+fn nested_bolts(each: usize) -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("component.create", json!({"name": "Frame"})).unwrap();
+    h.app.run("component.create", json!({"name": "Row", "parent": "Frame"})).unwrap();
+    h.app.run("component.create", json!({"name": "Bolt", "parent": "Row"})).unwrap();
+    h.app.run("solid.cylinder", json!({"radius": 2, "height": 20, "base": [0, 0, 0], "axis": "Z", "body_name": "Shank"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    for (component, parent, step) in [("Bolt", "Row", [10, 0, 0]), ("Row", "Frame", [0, 10, 0]), ("Frame", "root", [0, 0, 30])] {
+        for i in 1..each {
+            let translate: Vec<usize> = step.iter().map(|s| s * i).collect();
+            h.app.run("occurrence.copy", json!({"component": component, "parent": parent, "translate": translate})).unwrap();
+        }
+    }
+    h.frames(3);
+    h
+}
+
+/// The browser's search on an assembly: one keystroke's search, and a whole frame with the tree
+/// unfiltered, listing a few rows and listing many. Run with `--ignored --nocapture`.
+#[test]
+#[ignore = "manual search measurement"]
+fn browser_search_cost() {
+    use solidcraft_engine::browser_find::{Pattern, find};
+    for each in [5, 10, 15] {
+        let mut h = nested_bolts(each);
+        let placements = each + each * each + each * each * each;
+        let mut line = format!("SEARCH placements={placements} bodies={}", each * each * each);
+        for text in ["shank", "bolt", "bolt:7", "*:1", "nothing like it"] {
+            let pattern = Pattern::new(text);
+            let mut times: Vec<f64> = (0..9).map(|_| ms(|| drop(find(&h.app.session, pattern.as_ref(), &[])))).collect();
+            times.sort_by(f64::total_cmp);
+            line.push_str(&format!(" find[{text}]_ms={:.2}", times[times.len() / 2]));
+        }
+        // What the bar costs with nobody searching, against the same frame without it.
+        h.frames(2);
+        let mut times: Vec<f64> = (0..21).map(|_| ms(|| h.frames(1))).collect();
+        times.sort_by(f64::total_cmp);
+        line.push_str(&format!(" no_bar_frame_ms={:.2}", times[times.len() / 2]));
+        for (name, text) in [("no_search", ""), ("few_rows", "bolt:7"), ("many_rows", "bolt")] {
+            if text.is_empty() {
+                h.app.tree.search.clear();
+            } else {
+                h.app.tree.search.show();
+                h.app.tree.search.text = text.to_string();
+            }
+            h.frames(2);
+            let mut times: Vec<f64> = (0..21).map(|_| ms(|| h.frames(1))).collect();
+            times.sort_by(f64::total_cmp);
+            line.push_str(&format!(" {name}_frame_ms={:.2}", times[times.len() / 2]));
+        }
+        // A keystroke: the frame that searches again, its rows all listed.
+        let mut times: Vec<f64> = (0..21)
+            .map(|i| {
+                h.app.tree.search.text = if i % 2 == 0 { "bol" } else { "bolt" }.to_string();
+                ms(|| h.frames(1))
+            })
+            .collect();
+        times.sort_by(f64::total_cmp);
+        line.push_str(&format!(" keystroke_frame_ms={:.2}", times[times.len() / 2]));
+        println!("{line}");
+    }
+}
+
 /// A frame of the viewport for `app`'s camera, drawing the given model and highlight scenes.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn view_frame(
@@ -280,9 +346,11 @@ pub(crate) fn view_frame(
         pv_hide: false,
         preview_bounds: None,
         view_proj: proj.vp.to_f32(),
+        turned_depth: Some(proj.vp.turned_depth_f32()),
         back: proj.cam.back().to_f32(),
         size_px: [size as f32; 2],
-        clip: [0.0; 4],
+        clip: [[0.0; 4]; solidcraft_viewport_gpu::view::MAX_SECTION_PLANES],
+        clip_hatch: [0; solidcraft_viewport_gpu::view::MAX_SECTION_PLANES],
         cap: [0.0; 4],
         images: Vec::new(),
         clouds: Vec::new(),
@@ -467,8 +535,14 @@ fn whole_body_highlight_cost_from_the_models_own_triangles() {
     let bodies = names.len();
     h.app.viewport.hover_bodies = names;
     let copied = ms(|| drop(crate::viewport::build_highlight(&h.app)));
-    h.app.viewport.gpu =
-        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true, oit: false });
+    h.app.viewport.gpu = Some(crate::gpu::GpuTarget {
+        format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+        depth: None,
+        samples: 1,
+        tess: true,
+        oit: false,
+        edges: false,
+    });
     let planned = ms(|| drop(crate::viewport::build_highlight(&h.app)));
     println!("HIGHLIGHT bodies={bodies} triangles={triangles} cpu_copy_ms={copied:.2} model_triangles_ms={planned:.2}");
 }
@@ -645,8 +719,14 @@ fn many_selected_bodies_hover_cost() {
     };
     let modes: [(&str, Option<bool>); 3] = [("headless", None), ("gpu_plans", Some(true)), ("gpu_blocks", Some(false))];
     for (mode, tess) in modes {
-        h.app.viewport.gpu =
-            tess.map(|tess| crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess, oit: false });
+        h.app.viewport.gpu = tess.map(|tess| crate::gpu::GpuTarget {
+            format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+            depth: None,
+            samples: 1,
+            tess,
+            oit: false,
+            edges: false,
+        });
         drop(crate::viewport::build_scene(&h.app));
         for (selected, biggest) in [(false, false), (true, false), (false, true), (true, true)] {
             h.app.session.selection =
@@ -785,7 +865,14 @@ fn orbit_frame_cost() {
     let mut frames = crate::gpu::OffscreenFrames::new(SIZE, true);
     h.app.viewport.gpu = match &frames {
         Some(f) => f.target(),
-        None => Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true, oit: false }),
+        None => Some(crate::gpu::GpuTarget {
+            format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+            depth: None,
+            samples: 1,
+            tess: true,
+            oit: false,
+            edges: false,
+        }),
     };
     h.app.fit_view();
     h.frames(5);
@@ -867,22 +954,60 @@ fn orbit_frame_cost() {
 #[test]
 #[ignore = "manual product preview measurement"]
 fn product_preview_rebuild_cost() {
-    let mut h = assembly(100, 100);
-    let part = crate::open_meshing::session_world(&h.app.session).bodies.iter().find(|b| b.component == 0).map(|b| b.name.clone()).unwrap();
-    let mut cache = crate::render_workspace::ProductCache::default();
-    let extract = |h: &Harness| solidcraft_engine::product_scene::extract(&h.app.session).unwrap();
-    let time = |h: &Harness, cache: &mut crate::render_workspace::ProductCache| {
-        let scene = extract(h);
-        ms(|| drop(crate::render_workspace::gpu_scene_cached(&scene, u64::MAX, cache).unwrap()))
-    };
-    let cold = time(&h, &mut cache);
-    let again = time(&h, &mut cache);
-    h.app.run("appearance.assign", json!({"bodies": [&part], "color": "#336699"})).unwrap();
-    let colour = time(&h, &mut cache);
-    h.app.run("appearance.assign", json!({"bodies": [&part], "color": "#336699", "opacity": 0.5})).unwrap();
-    let opacity = time(&h, &mut cache);
-    let extract_ms = ms(|| drop(extract(&h)));
-    println!(
-        "PRODUCTCACHE bodies=200 cold_ms={cold:.1} unchanged_ms={again:.1} colour_ms={colour:.1} opacity_ms={opacity:.1} extract_ms={extract_ms:.1}"
-    );
+    for (unique, placed) in [(100, 100), (300, 500)] {
+        let mut h = assembly(unique, placed);
+        let part = crate::open_meshing::session_world(&h.app.session).bodies.iter().find(|b| b.component == 0).map(|b| b.name.clone()).unwrap();
+        let mut cache = crate::render_workspace::ProductCache::default();
+        let extract = |h: &Harness| solidcraft_engine::product_scene::extract(&h.app.session).unwrap();
+        let time = |h: &Harness, cache: &mut crate::render_workspace::ProductCache| {
+            let scene = extract(h);
+            let placements = solidcraft_engine::product_scene::placements(&h.app.session, &scene);
+            ms(|| drop(crate::render_workspace::gpu_scene_cached(&scene, &placements, u64::MAX, cache).unwrap()))
+        };
+        let cold = time(&h, &mut cache);
+        let again = time(&h, &mut cache);
+        h.app.run("appearance.assign", json!({"bodies": [&part], "color": "#336699"})).unwrap();
+        let colour = time(&h, &mut cache);
+        h.app.run("appearance.assign", json!({"bodies": [&part], "color": "#336699", "opacity": 0.5})).unwrap();
+        let opacity = time(&h, &mut cache);
+        let extract_ms = ms(|| drop(extract(&h)));
+        let shown = extract(&h);
+        let instanced = crate::render_workspace::gpu_scene_cached(
+            &shown,
+            &solidcraft_engine::product_scene::placements(&h.app.session, &shown),
+            u64::MAX,
+            &mut crate::render_workspace::ProductCache::default(),
+        )
+        .unwrap()
+        .1;
+        // Every body PBR, then one roughness change for all of them.
+        let bodies: Vec<String> = crate::open_meshing::session_world(&h.app.session).bodies.iter().map(|b| b.name.clone()).collect();
+        let pbr = |r: f64| json!({"bodies": &bodies, "color": "#b47846", "pbr": {"metallic": 1.0, "roughness": r, "dielectric_ior": 1.5}});
+        h.app.run("appearance.assign", pbr(0.2)).unwrap();
+        let to_pbr = time(&h, &mut cache);
+        let pbr_bytes: usize = {
+            let e = extract(&h);
+            crate::render_workspace::gpu_scene_cached(
+                &e,
+                &solidcraft_engine::product_scene::placements(&h.app.session, &e),
+                u64::MAX,
+                &mut crate::render_workspace::ProductCache::default(),
+            )
+            .unwrap()
+            .1
+        }
+        .blocks
+        .iter()
+        .map(|b| b.bytes.vertices.len())
+        .sum();
+        h.app.run("appearance.assign", pbr(0.6)).unwrap();
+        let roughness = time(&h, &mut cache);
+        println!(
+            "PRODUCTCACHE bodies={} cold_ms={cold:.1} unchanged_ms={again:.1} colour_ms={colour:.1} opacity_ms={opacity:.1} extract_ms={extract_ms:.1} to_pbr_ms={to_pbr:.1} pbr_bytes={pbr_bytes} roughness_ms={roughness:.1} instanced_meshes={} placements={} block_bytes={}",
+            unique + placed,
+            instanced.instanced.len(),
+            instanced.instanced.iter().map(|m| m.count()).sum::<usize>(),
+            instanced.blocks.iter().map(|b| b.bytes.vertices.len()).sum::<usize>(),
+        );
+    }
 }

@@ -100,6 +100,55 @@ fn dimension_text_is_stored_relative_to_the_dimension_and_follows_it() {
     assert!(s.execute("sketch.dimension_text", &json!({"dimension": param, "at": [f64::NAN, 0]})).is_err());
 }
 
+/// Two lines that meet at a corner divide the plane around it into four sectors (the lines
+/// taken as extended past their ends): the text placed in one dimensions that sector's angle,
+/// and the arc is drawn there, in either of the two sectors past the corner that measure the
+/// supplement, not only the one beside the longer line (#11800).
+#[test]
+fn an_angle_dimension_measures_and_draws_the_sector_its_text_is_in() {
+    use solidcore_record::Vec2;
+    use solidcraft_sketch::dim_frame_at;
+    // A 100 long base running left from the corner, a slanted line up and right from it: 135°
+    // inside, 45° to the base's extension past the corner.
+    let corner = |at: [f64; 2], value: Option<&str>| {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points": [[-100, 0], [0, 0], [30, 30]]}));
+        let mut p = json!({"entities": ["l1", "l2"], "text_at": at});
+        if let Some(v) = value {
+            p["value"] = json!(v);
+        }
+        let measured = run(&mut s, "sketch.dimension", p)["measured"].as_f64().unwrap_or(f64::NAN);
+        (measured, sketch(&s))
+    };
+    let tau = std::f64::consts::TAU;
+    let in_sector = |d0: Vec2, sweep: f64, t: Vec2| (t.angle() - d0.angle()).rem_euclid(tau) <= sweep;
+    for (at, expected) in [([-5.0, 20.0], 135.0), ([20.0, 5.0], 45.0), ([-20.0, -5.0], 45.0), ([5.0, -20.0], 135.0)] {
+        let (measured, sk) = corner(at, None);
+        assert!((measured - expected).abs() < 1e-6, "text at {at:?}: measured {measured}");
+        let c = sk.constraints.iter().find(|c| c.kind.is_angle()).expect("an angle dimension");
+        let Some(DimFrame::Angular { vertex, d0, sweep }) = dim_frame_at(&sk, &c.kind, c.text) else { panic!("an angular frame") };
+        let t = Vec2::new(at[0], at[1]) - vertex;
+        assert!(vertex.len() < 1e-9 && (sweep.to_degrees() - expected).abs() < 1e-6, "text at {at:?}: {vertex:?} {sweep}");
+        assert!(in_sector(d0, sweep, t), "text at {at:?}: the arc from {d0:?} by {sweep} is drawn away from it");
+        // Both rays lie along the lines.
+        let along = |u: Vec2| u.y.abs() < 1e-9 || (u.x - u.y).abs() < 1e-9;
+        assert!(along(d0) && along(Vec2::from_angle(d0.angle() + sweep)), "{d0:?} {sweep}");
+        let lay = dim_layout(&DimFrame::Angular { vertex, d0, sweep }, c.text, 0.1, Default::default());
+        assert!(lay.text.dist(Vec2::new(at[0], at[1])) < 1e-9);
+    }
+    // A value typed for the sector past the corner drives that angle, and the arc stays there.
+    let (_, sk) = corner([20.0, 5.0], Some("30 deg"));
+    let pt = |id: &str| sk.point(sk.resolve_point(id).expect("a point")).expect("its position");
+    let (base, slant) = (pt("l1.end") - pt("l1.start"), pt("l2.end") - pt("l2.start"));
+    assert!((base.cross(slant).atan2(base.dot(slant)).to_degrees() - 30.0).abs() < 1e-6, "{base:?} {slant:?}");
+    let c = sk.constraints.iter().find(|c| c.kind.is_angle()).expect("an angle dimension");
+    let Some(DimFrame::Angular { vertex, d0, sweep }) = dim_frame_at(&sk, &c.kind, c.text) else { panic!("an angular frame") };
+    assert!(in_sector(d0, sweep, Vec2::new(20.0, 5.0) - vertex), "{d0:?} {sweep}");
+    // Without a text the arc keeps to the rays that point at the lines.
+    let Some(DimFrame::Angular { d0: plain, .. }) = dim_frame_at(&sk, &c.kind, None) else { panic!("an angular frame") };
+    assert!(Some(DimFrame::Angular { vertex, d0: plain, sweep }) == solidcraft_sketch::dim_frame(&sk, &c.kind));
+}
+
 #[test]
 fn deleting_a_dimension_frees_its_parameter() {
     let mut s = new_sketch();
@@ -2504,7 +2553,9 @@ fn editing_a_mid_timeline_sketch_rebuilds_later_features_once_at_finish() {
     run(&mut s, "sketch.edit", json!({"sketch": id, "restore_marker": false}));
     assert_eq!(s.doc.marker, None);
     run(&mut s, "sketch.line", json!({"points": [[0, 20], [10, 20]]}));
-    assert!(s.model.last_recomputed > 1, "in place, the later features are rebuilt");
+    // Rebuilt, or made again from what they changed when what they read is as it was (#6183).
+    let evaluated = s.model.last_recomputed + s.model.last_restored;
+    assert!(evaluated > 1, "in place, the later features are evaluated: {evaluated}");
     run(&mut s, "sketch.finish", json!({}));
     assert_eq!(s.doc.marker, None);
     assert!(s.execute("sketch.edit", &json!({"sketch": id, "restore_marker": true})).is_err());

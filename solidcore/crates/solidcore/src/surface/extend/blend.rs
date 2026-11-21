@@ -97,7 +97,10 @@ pub(super) fn blend_extended(
     let order = pb.order();
     // the section's degree in t: the chord's 1, the circle's 2, a G^n section's 3 n + 1
     let section_deg = section_degree(order);
-    let source_net = pb.net.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let source_net = pb
+        .net
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
     // a distance below the net side's resolution: none (the blend as it is)
     let Some(grown) = Surface::from(pb.net.clone()).extended_by_distance(
         k,
@@ -115,7 +118,9 @@ pub(super) fn blend_extended(
             "the net's extension is not a B-spline",
         ));
     };
-    let out_net = net.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let out_net = net
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
     let (lo, hi) = if side.is_u() {
         (dom.min().x, dom.max().x)
     } else {
@@ -211,7 +216,7 @@ fn along(
     let sigma = def
         .seeds
         .first()
-        .ok_or_else(|| SolidError::sm_err(OP))?
+        .ok_or_else(|| SolidError::surface_failed(OP, "the definition has no seed curve"))?
         .knots(None)?
         .0;
     let s_side = a[0] + b[0] * side.at(dom);
@@ -220,7 +225,10 @@ fn along(
     // the side on the definition's spine: at its end station, or inside it (extended by
     // the definition's spans already there, then past its end)
     let (Some(&first), Some(&last)) = (sigma.first(), sigma.last()) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::surface_failed(
+            OP,
+            "the seed curve has no knots",
+        ));
     };
     let end = if up { last } else { first };
     if !(s_side == end || (s_side > first && s_side < last)) {
@@ -229,7 +237,10 @@ fn along(
             reason: "the side is not on the definition's spine",
         });
     }
-    let source_net = pb.net.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let source_net = pb
+        .net
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
     let source = Local::of(source_net, side)?;
     if source.p != 3 {
         return Err(SolidError::Unsupported {
@@ -330,7 +341,9 @@ fn along(
             "the extension is not a B-spline",
         ));
     };
-    let out_net = net.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let out_net = net
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
     if !keeps(source_net, out_net, side)? {
         return Err(SolidError::port_invariant(
             OP,

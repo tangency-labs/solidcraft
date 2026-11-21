@@ -22,7 +22,7 @@ pub(super) fn move_features(s: &mut Session, p: &Value) -> Result<Value> {
     if keys.is_empty() || keys.len() > 1000 {
         return Err(bad(cmd, "`features` must list 1…1000 features"));
     }
-    if s.doc.marker.is_some() {
+    if s.doc.marker.is_some_and(|m| m < s.doc.features.len()) {
         return Err(bad(cmd, "finish timeline rollback before moving features"));
     }
     if !s.pending_moves.is_empty() {
@@ -77,6 +77,47 @@ pub(super) fn move_features(s: &mut Session, p: &Value) -> Result<Value> {
             }
             f.kind.transform_geometry(&delta);
         }
+        if let Some(m) = f.profile_frame
+            && let Some(sketch_id) = f.kind.constructor_profile_sketch()
+            && let Some(old_o) = s.doc.feature(sketch_id).map(|g| g.component)
+        {
+            let sketch_moved = moving.contains(&sketch_id);
+            let new_o = if sketch_moved { dest } else { old_o };
+            let old_lca = s.doc.common_ancestor(old.component, old_o);
+            let new_lca = s.doc.common_ancestor(dest, new_o);
+            let old_owner_in_lca = s.doc.component_transform_in(old_o, old_lca);
+            let new_owner_in_lca = s.doc.component_transform_in(new_o, new_lca);
+            let sketch_delta = if sketch_moved { mat_mul(&to_dest, &s.doc.component_transform(old_o)) } else { solidcraft_doc::IDENTITY };
+            let updated = mat_inverse(&old_owner_in_lca)
+                .and_then(|inv_old_o| {
+                    mat_inverse(&delta).map(|inv_d| mat_mul(&mat_mul(&new_owner_in_lca, &sketch_delta), &mat_mul(&inv_old_o, &mat_mul(&m, &inv_d))))
+                })
+                .filter(solidcraft_doc::is_placement)
+                .unwrap_or(m);
+            f.profile_frame = if new_o == dest && is_identity(&updated) { None } else { Some(updated) };
+        }
+    }
+    // Features outside `moved` whose captured profile sketch moved also need their frame rebased.
+    for f in &mut doc.features {
+        if moving.contains(&f.id) {
+            continue;
+        }
+        if let Some(m) = f.profile_frame
+            && let Some(sketch_id) = f.kind.constructor_profile_sketch()
+            && moving.contains(&sketch_id)
+            && let Some(old_o) = s.doc.feature(sketch_id).map(|g| g.component)
+        {
+            let old_lca = s.doc.common_ancestor(f.component, old_o);
+            let new_lca = s.doc.common_ancestor(f.component, dest);
+            let old_owner_in_lca = s.doc.component_transform_in(old_o, old_lca);
+            let new_owner_in_lca = s.doc.component_transform_in(dest, new_lca);
+            let sketch_delta = mat_mul(&to_dest, &s.doc.component_transform(old_o));
+            let updated = mat_inverse(&old_owner_in_lca)
+                .map(|inv_old_o| mat_mul(&mat_mul(&new_owner_in_lca, &sketch_delta), &mat_mul(&inv_old_o, &m)))
+                .filter(solidcraft_doc::is_placement)
+                .unwrap_or(m);
+            f.profile_frame = if dest == f.component && is_identity(&updated) { None } else { Some(updated) };
+        }
     }
     // Attached sketches and embossed faces carry the placement of the body they sit on and of
     // the component they were authored in: those that moved are rewritten, nothing else changes.
@@ -91,7 +132,17 @@ pub(super) fn move_features(s: &mut Session, p: &Value) -> Result<Value> {
             }
         };
         match &mut f.kind {
-            FeatureKind::Sketch { plane, .. } => {
+            FeatureKind::Sketch { plane, sketch } => {
+                let delta = |id| {
+                    s.doc
+                        .feature(id)
+                        .filter(|_| moving.contains(&id))
+                        .map(|old| mat_mul(&to_dest, &s.doc.component_transform(old.component)))
+                        .unwrap_or(solidcraft_doc::IDENTITY)
+                };
+                let author_delta = delta(f.id);
+                solidcraft_doc::project::reframe_link_sketch_placements(sketch, &author_delta, delta)?;
+                solidcraft_doc::reframe_plane_placements(plane, &author_delta, delta)?;
                 if let Some(anchor) = crate::cmd::sketch::face::anchor_mut(plane) {
                     let moved_body = moved_bodies.contains(&anchor.target.body);
                     let author_delta = if authored_here {
@@ -115,6 +166,10 @@ pub(super) fn move_features(s: &mut Session, p: &Value) -> Result<Value> {
             }
             _ => {}
         }
+    }
+    let sketches: Vec<_> = doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.id).collect();
+    for sketch in sketches {
+        solidcraft_doc::project::capture_missing_sketch_references(doc, sketch, None)?;
     }
     scratch.refresh();
     // Any feature that gains an error, moved or left behind, stops the move.

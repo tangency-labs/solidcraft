@@ -17,10 +17,10 @@ use super::exact::{ExactClass, ExactRound};
 use super::record::{
     BezierCurveRecord, BlendDefinitionRecord, ChamferRecord, ChamferSizeRecord, ClassInputsRecord,
     CornerRecord, DraftRecord, EndCornerRecord, ExactClassRecord, ExactNetKindRecord,
-    ExactNetRecord, ExactRoundRecord, LeaderMapRecord, MixedCornerRecord, MixedSideRecord,
-    NurbsCurveRecord, NurbsSurfaceRecord, ParameterMapRecord, PlaneRecord, ProceduralBlendRecord,
-    QuadricKindRecord, QuadricRecord, RadiusRecord, SetbackCornerRecord, SetbackRoundRecord,
-    SupportKindRecord, SupportRecord, SweptCornerRecord,
+    ExactNetRecord, ExactRoundDefinition, ExactRoundRecord, FaceDefinition, LeaderMapRecord,
+    MixedCornerRecord, MixedSideRecord, NurbsCurveRecord, NurbsSurfaceRecord, ParameterMapRecord,
+    PlaneRecord, ProceduralBlendRecord, QuadricKindRecord, QuadricRecord, RadiusRecord,
+    SetbackCornerRecord, SetbackRoundRecord, SupportKindRecord, SupportRecord, SweptCornerRecord,
 };
 use super::record::{EndOrderRecord, MotionRecord, SectionBlendRecord, SectionFrameRecord};
 use super::{BlendDefinitionInput, BlendRef, ProceduralBlend, BLEND_MAX_DEPTH};
@@ -29,7 +29,8 @@ use crate::blend::blend_setback::{Face, FaceKind, Round};
 use crate::blend::fillet_exact::{classify_supports, BlendSpine, ClassInputs};
 use crate::blend::fillet_section::section::GnSectionFsg;
 use crate::blend::fillet_section::station::as_b_spline;
-use crate::error::{EntityRef, Result, SolidError, SM_ERR_INVALID_INPUT};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
 use crate::math::Point3;
@@ -99,8 +100,31 @@ fn to_record_at(k: &Kernel, pb: &ProceduralBlend, depth: u32) -> Result<Procedur
 }
 
 /// A support's record: a nested blend's own record, or the NURBS form its stations are
-/// solved on ([`as_b_spline`]: an analytic support is evaluated as its net).
+/// solved on ([`as_b_spline`]: an analytic support is evaluated as its net), labelled with
+/// its analytic kind only where reading the record derives that surface back from the form
+/// written ([`AnalyticSupport::derive`], then [`AnalyticSupport::build`], as
+/// [`exact_from_record`], [`from_record`] and [`corner_from_record`] do). The record holds
+/// no numbers for the label: reading it takes them off the form's control rows, and a form
+/// whose rows give them only to more than the evaluation's rounding (a cone's short arc
+/// span, whose control points carry the rounding of the conversions that made them) does
+/// not prove the surface read off it, though the support's own numbers prove the form. Such
+/// a support goes unlabelled, as its form, as a face whose form does not prove its label
+/// does (`face_surface::record_face`, owner 22254), and the record reads back.
 fn support_record(k: &Kernel, s: &Surface, depth: u32) -> Result<SupportRecord> {
+    nurbs_record(k, s, depth, true)
+}
+
+/// A corner's net or a draft's source or net: its record with its analytic label as it is,
+/// proved or not, since the record requires the label (a swept turn's net is a torus, a
+/// drafted plane a plane and a drafted cone a cone: [`CornerRecord::validate`],
+/// [`DraftRecord::validate`]).
+fn face_record(k: &Kernel, s: &Surface) -> Result<SupportRecord> {
+    nurbs_record(k, s, 1, false)
+}
+
+/// [`support_record`] (`proved`: a label only where reading derives it back) or
+/// [`face_record`].
+fn nurbs_record(k: &Kernel, s: &Surface, depth: u32, proved: bool) -> Result<SupportRecord> {
     if let SurfaceKind::ProceduralBlend(inner) = s.kind() {
         return Ok(SupportRecord::Blend(Box::new(to_record_at(
             k,
@@ -114,7 +138,20 @@ fn support_record(k: &Kernel, s: &Surface, depth: u32) -> Result<SupportRecord> 
             reason: "a support that is not a NURBS surface has no record",
         });
     };
-    let kind = match AnalyticSupport::of(s).map(|a| a.kind()) {
+    let form = surface_record(&b)?;
+    // the reader's own steps on the form as it reads it
+    let reads_back = |kind: SupportKind| -> Result<bool> {
+        match labelled(k, kind, surface_of(&form)?) {
+            Ok(_) => Ok(true),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+            Err(_) => Ok(false),
+        }
+    };
+    let label = match AnalyticSupport::of(s).map(|a| a.kind()) {
+        Some(kind) if !proved || reads_back(kind)? => Some(kind),
+        _ => None,
+    };
+    let kind = match label {
         None => SupportKindRecord::Free,
         Some(SupportKind::Plane) => SupportKindRecord::Plane,
         Some(SupportKind::Cylinder) => SupportKindRecord::Cylinder,
@@ -122,10 +159,14 @@ fn support_record(k: &Kernel, s: &Surface, depth: u32) -> Result<SupportRecord> 
         Some(SupportKind::Sphere) => SupportKindRecord::Sphere,
         Some(SupportKind::Torus) => SupportKindRecord::Torus,
     };
-    Ok(SupportRecord::Nurbs {
-        kind,
-        form: surface_record(&b)?,
-    })
+    Ok(SupportRecord::Nurbs { kind, form })
+}
+
+/// A labelled form's analytic surface, as every reader of a record makes it and
+/// [`support_record`] proves it before it writes the label: derived from the form
+/// ([`AnalyticSupport::derive`]) and proved its parametrisation ([`AnalyticSupport::build`]).
+fn labelled(k: &Kernel, kind: SupportKind, form: BSplineSurface) -> Result<Surface> {
+    AnalyticSupport::derive(k, kind, &form).and_then(|a| a.build(k, form))
 }
 
 /// The kernel's kind a record's label names.
@@ -146,12 +187,16 @@ fn to_u32(x: usize) -> Result<u32> {
 
 /// A NURBS curve's stored numbers.
 fn curve_record(c: &BSplineCurve) -> Result<NurbsCurveRecord> {
-    let nurb = c.nurb.as_ref().ok_or_else(|| SolidError::sm_err(OP_TO))?;
+    let nurb = c
+        .nurb
+        .as_ref()
+        .ok_or_else(|| SolidError::surface_failed(OP_TO, "the B-spline curve has no NURB"))?;
     let rational = nurb.is_rational();
     let points_3d = nurb.is_3d();
     let cpts = nurb.cpts();
     Ok(NurbsCurveRecord {
-        dim: u32::try_from(c.dim).map_err(|_| SolidError::sm_err(OP_TO))?,
+        dim: u32::try_from(c.dim)
+            .map_err(|_| SolidError::surface_failed(OP_TO, "the curve's dimension is past u32"))?,
         points_3d,
         degree: to_u32(nurb.degree())?,
         knots: nurb.knots().to_vec(),
@@ -165,7 +210,9 @@ fn curve_record(c: &BSplineCurve) -> Result<NurbsCurveRecord> {
 
 /// A NURBS surface's stored numbers.
 fn surface_record(s: &BSplineSurface) -> Result<NurbsSurfaceRecord> {
-    let nurb = s.gw_nurb().ok_or_else(|| SolidError::sm_err(OP_TO))?;
+    let nurb = s
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP_TO, "the B-spline surface has no NURB"))?;
     let rational = nurb.is_rational();
     let mut points = Vec::new();
     let mut weights = Vec::new();
@@ -230,15 +277,15 @@ pub fn rebuild_for_face(
     rec: &ProceduralBlendRecord,
 ) -> Result<ProceduralBlend> {
     rebuild(k, rec).map_err(|e| {
-        // (a cancel ends the operation; it is no refusal of the face)
-        if e.is_cancelled() {
+        // (a cancel, or a certificate's budget spent, ends the operation; it is no refusal of the face)
+        if e.is_cancelled() || e.is_not_certified() {
             return e;
         }
-        SolidError::Upstream {
-            operation: OP_FACE,
-            code: SM_ERR_INVALID_INPUT,
-            entity: Some(EntityRef::Face(face)),
-        }
+        SolidError::surface_at(
+            OP_FACE,
+            SurfaceFailure::InvalidValue("the face's procedural blend record does not rebuild"),
+            EntityRef::Face(face),
+        )
     })
 }
 
@@ -258,19 +305,17 @@ fn from_record_at(k: &Kernel, rec: &ProceduralBlendRecord, depth: u32) -> Result
                 match kind_of(*kind) {
                     None => Surface::from(form),
                     // the analytic surface derived from the form, the form checked on it
-                    Some(kind) => AnalyticSupport::derive(k, kind, &form)
-                        .and_then(|a| a.build(k, form))
-                        .map_err(|e| match e {
-                            SolidError::InvalidInput { .. } => SolidError::invalid_input(
-                                OP_FROM,
-                                if i == 0 {
-                                    "support 1's NURBS form is not of its kind"
-                                } else {
-                                    "support 2's NURBS form is not of its kind"
-                                },
-                            ),
-                            other => other,
-                        })?,
+                    Some(kind) => labelled(k, kind, form).map_err(|e| match e {
+                        SolidError::InvalidInput { .. } => SolidError::invalid_input(
+                            OP_FROM,
+                            if i == 0 {
+                                "support 1's NURBS form is not of its kind"
+                            } else {
+                                "support 2's NURBS form is not of its kind"
+                            },
+                        ),
+                        other => other,
+                    })?,
                 }
             }
             SupportRecord::Blend(b) => Surface::from(from_record_at(k, b, depth + 1)?),
@@ -286,7 +331,10 @@ fn from_record_at(k: &Kernel, rec: &ProceduralBlendRecord, depth: u32) -> Result
     let seeds = [curve_of(seed0)?, curve_of(seed1)?];
     let net = surface_of(&rec.net)?;
     let (Some(s0), Some(s1)) = (supports.first(), supports.get(1)) else {
-        return Err(SolidError::sm_err(OP_FROM));
+        return Err(SolidError::surface_failed(
+            OP_FROM,
+            "the record has fewer than two supports",
+        ));
     };
     if !(d.map.b[0] != 0.0 && d.map.b[1] != 0.0) {
         return Err(SolidError::invalid_input(
@@ -346,10 +394,20 @@ fn stored_point(
     i: usize,
     z: bool,
 ) -> Result<CPoint> {
-    let [x, y, pz] = *points.get(i).ok_or_else(|| SolidError::sm_err(OP_FROM))?;
+    let [x, y, pz] = *points.get(i).ok_or_else(|| {
+        SolidError::surface_failed(
+            OP_FROM,
+            "the control point index is past the end of the points",
+        )
+    })?;
     let w = match weights {
         Some(ws) => {
-            let w = *ws.get(i).ok_or_else(|| SolidError::sm_err(OP_FROM))?;
+            let w = *ws.get(i).ok_or_else(|| {
+                SolidError::surface_failed(
+                    OP_FROM,
+                    "the control point index is past the end of the weights",
+                )
+            })?;
             if w.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
                 return Err(SolidError::invalid_input(
                     OP_FROM,
@@ -393,7 +451,9 @@ fn surface_of(r: &NurbsSurfaceRecord) -> Result<BSplineSurface> {
             let at = i
                 .checked_mul(nv)
                 .and_then(|x| x.checked_add(j))
-                .ok_or_else(|| SolidError::sm_err(OP_FROM))?;
+                .ok_or_else(|| {
+                    SolidError::surface_failed(OP_FROM, "the control point index overflows")
+                })?;
             row.push(stored_point(&r.points, r.weights.as_ref(), at, true)?);
         }
         net.push(row);
@@ -441,7 +501,10 @@ pub fn exact_to_record(k: &Kernel, surface: &Surface) -> Result<ExactRoundRecord
         }
     };
     let Some(form) = as_b_spline(k, net)? else {
-        return Err(SolidError::sm_err(OP_EXACT_TO));
+        return Err(SolidError::surface_failed(
+            OP_EXACT_TO,
+            "the exact net has no B-spline form",
+        ));
     };
     let i = round.inputs;
     Ok(ExactRoundRecord {
@@ -499,9 +562,7 @@ pub fn exact_from_record(k: &Kernel, rec: &ExactRoundRecord) -> Result<Surface> 
                 let form = surface_of(form)?;
                 match kind_of(*kind) {
                     None => Surface::from(form),
-                    Some(kind) => {
-                        AnalyticSupport::derive(k, kind, &form).and_then(|a| a.build(k, form))?
-                    }
+                    Some(kind) => labelled(k, kind, form)?,
                 }
             }
             SupportRecord::Blend(_) => {
@@ -513,9 +574,7 @@ pub fn exact_from_record(k: &Kernel, rec: &ExactRoundRecord) -> Result<Surface> 
         });
     }
     let form = surface_of(&rec.net.form)?;
-    let analytic = |kind: SupportKind, form: BSplineSurface| {
-        AnalyticSupport::derive(k, kind, &form).and_then(|a| a.build(k, form))
-    };
+    let analytic = |kind: SupportKind, form: BSplineSurface| labelled(k, kind, form);
     let mut net = match rec.net.kind {
         ExactNetKindRecord::Plane => analytic(SupportKind::Plane, form)?,
         ExactNetKindRecord::Cylinder => analytic(SupportKind::Cylinder, form)?,
@@ -549,7 +608,10 @@ pub fn exact_from_record(k: &Kernel, rec: &ExactRoundRecord) -> Result<Surface> 
     };
     let leader = rec.leader.as_ref().map(curve_of).transpose()?;
     let (Some(s0), Some(s1)) = (supports.first(), supports.get(1)) else {
-        return Err(SolidError::sm_err(OP_EXACT_FROM));
+        return Err(SolidError::surface_failed(
+            OP_EXACT_FROM,
+            "the record has fewer than two supports",
+        ));
     };
     if rec.net.kind == ExactNetKindRecord::BallPatch {
         // a ball patch's sphere: the ball of its point class, from its supports
@@ -561,7 +623,10 @@ pub fn exact_from_record(k: &Kernel, rec: &ExactRoundRecord) -> Result<Surface> 
             ));
         }
         let SurfaceKind::BSpline(form) = net.kind() else {
-            return Err(SolidError::sm_err(OP_EXACT_FROM));
+            return Err(SolidError::surface_failed(
+                OP_EXACT_FROM,
+                "the exact net is not a B-spline surface",
+            ));
         };
         net = Surface::from(BallPatch::create(form, blend.point, blend.radius)?);
     }
@@ -593,6 +658,244 @@ pub fn exact_rebuild(k: &Kernel, rec: &ExactRoundRecord) -> Result<Surface> {
         blend.recertify(k)?;
     }
     Ok(net)
+}
+
+const OP_ADOPT: &str = "surface::procedural_blend::convert::adopt_definitions";
+
+/// The definition a face's surface carries, without its net, when a body's record keeps it as
+/// the face's blend: a procedural blend's, or a round of an exact class's whose net has no
+/// analytic label of its own (a surface of revolution, or the rational classes' B-spline). A
+/// round whose net is an analytic surface (a plane, cylinder, cone, sphere or torus) or a ball
+/// patch keeps that label in the record, and its definition is not written; nor is a definition
+/// whose supports a record cannot hold (`Unsupported`, [`to_record`]), which then goes as its
+/// net. `None` for any other surface.
+///
+/// # Errors
+///
+/// Those of [`to_record`] and [`exact_to_record`] other than `Unsupported`.
+pub fn face_definition(k: &Kernel, surface: &Surface) -> Result<Option<FaceDefinition>> {
+    let unrecorded = |e: SolidError| match e {
+        SolidError::Unsupported { .. } => Ok(None),
+        other => Err(other),
+    };
+    if let SurfaceKind::ProceduralBlend(pb) = surface.kind() {
+        return match to_record(k, pb) {
+            Ok(rec) => Ok(Some(FaceDefinition::Procedural(Box::new(rec.definition)))),
+            Err(e) => unrecorded(e),
+        };
+    }
+    let Some(BlendRef::Exact { net, .. }) = surface.procedural_blend() else {
+        return Ok(None);
+    };
+    if !matches!(
+        net.kind(),
+        SurfaceKind::SurfOfRevolution(_) | SurfaceKind::BSpline(_)
+    ) {
+        return Ok(None);
+    }
+    let rec = match exact_to_record(k, surface) {
+        Ok(rec) => rec,
+        Err(e) => return unrecorded(e),
+    };
+    Ok(Some(FaceDefinition::ExactRound(Box::new(
+        ExactRoundDefinition {
+            class: rec.class,
+            supports: rec.supports,
+            radius: rec.radius,
+            order: rec.order,
+            leader: rec.leader,
+            inputs: rec.inputs,
+            chamfer: rec.chamfer,
+            leader_map: rec.leader_map,
+            net_kind: rec.net.kind,
+        },
+    ))))
+}
+
+/// The surface a face's definition makes on its net `net` (the face's surface as built from its
+/// record, a NURBS surface): the definition made from the record exactly ([`from_record`],
+/// [`exact_from_record`]) and the net certified against it again. `Ok(Err(eps))`, with the bound
+/// the definition states, where the net is not certified: the definition and its net disagree.
+///
+/// # Errors
+///
+/// `InvalidInput` for a net that is not a NURBS surface; those of the rebuilds; a cancel as it is.
+pub fn definition_surface(
+    k: &Kernel,
+    definition: &FaceDefinition,
+    net: &Surface,
+) -> Result<std::result::Result<Surface, f64>> {
+    let Some(form) = as_b_spline(k, net)? else {
+        return Err(SolidError::invalid_input(
+            OP_ADOPT,
+            "a blend face's net is not a NURBS surface",
+        ));
+    };
+    let net = surface_record(&form)?;
+    // (a cancel, or a certificate's work budget spent, ends the operation; any other failure
+    // of the certificate refuses the net)
+    let certified = |r: Result<f64>, eps: f64| match r {
+        Ok(_) => Ok(Ok(())),
+        Err(e) if e.is_cancelled() || e.is_not_certified() => Err(e),
+        Err(_) => Ok(Err(eps)),
+    };
+    Ok(match definition {
+        FaceDefinition::Procedural(d) => {
+            let record = ProceduralBlendRecord {
+                definition: (**d).clone(),
+                net,
+            };
+            let pb = from_record(k, &record)?;
+            certified(recertify_remembered(k, &pb, &record), d.bound)?.map(|()| Surface::from(pb))
+        }
+        FaceDefinition::ExactRound(d) => {
+            let rec = ExactRoundRecord {
+                class: d.class,
+                supports: d.supports.clone(),
+                radius: d.radius,
+                order: d.order,
+                leader: d.leader.clone(),
+                inputs: d.inputs,
+                chamfer: d.chamfer,
+                leader_map: d.leader_map,
+                net: ExactNetRecord {
+                    kind: d.net_kind,
+                    form: net,
+                },
+            };
+            let made = exact_from_record(k, &rec)?;
+            let proved = match made.procedural_blend() {
+                Some(blend) => certified(blend.recertify(k), 0.0)?,
+                None => Ok(()),
+            };
+            proved.map(|()| made)
+        }
+    })
+}
+
+/// [`RecertifyMemo`]'s cap on the bytes its keys hold, the loop area memo's 8 MiB: past it the
+/// memo starts again empty. A round's key is about 45 KB (its definition's supports and its net
+/// as text), so the cap holds about 180 of them.
+const RECERTIFY_MEMO_BYTES: usize = 8 << 20;
+
+/// The memo of the procedural blends a kernel recertified as it gave a record's faces their
+/// definitions back (not upstream): the bound [`ProceduralBlend::recertify`] proved for each,
+/// by every bit of the blend's record (its definition and its net, by their debug text,
+/// which writes each double so that it reads back exactly) and of the kernel's tolerances
+/// and fixes. The certificate reads nothing else, so a hit returns what recertifying the
+/// blend again returns. A body that goes through one boolean after another comes back from
+/// each as a record, and its blends unchanged by the boolean are certified once, not again
+/// at every import. Only a certificate that finished is kept, not a refusal or a cancel.
+/// [`Kernel::memoize_curve_caches`] turns it off, with the curve cache memo.
+#[derive(Debug, Default)]
+pub struct RecertifyMemo {
+    bounds: std::collections::HashMap<Box<str>, f64>,
+    bytes: usize,
+}
+
+impl RecertifyMemo {
+    /// The blends the memo keeps.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.bounds.len()
+    }
+
+    /// Whether it keeps none.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.bounds.is_empty()
+    }
+
+    /// Keeps `bound` for `key`, its keys holding at most `cap` bytes: past the cap the memo
+    /// starts again empty. A key larger than the cap on its own is not kept, and the memo is
+    /// left as it was, since emptying it would not make room for that key.
+    fn remember(&mut self, key: String, bound: f64, cap: usize) {
+        if key.len() > cap {
+            return;
+        }
+        if self.bytes + key.len() > cap {
+            self.bounds.clear();
+            self.bytes = 0;
+        }
+        // (a boxed key holds its length exactly, not a grown string's spare room)
+        self.bytes += key.len();
+        self.bounds.insert(key.into_boxed_str(), bound);
+    }
+}
+
+/// `pb`'s [`ProceduralBlend::recertify`], from the kernel's [`RecertifyMemo`] when it
+/// recertified the same `record` (the one `pb` was made from) before.
+fn recertify_remembered(
+    k: &Kernel,
+    pb: &ProceduralBlend,
+    record: &ProceduralBlendRecord,
+) -> Result<f64> {
+    use std::fmt::Write as _;
+    if !k.memoize_curve_caches {
+        k.work_counters.add_blend_recertified();
+        return pb.recertify(k);
+    }
+    let mut key = format!("{:?}", k.tolerances);
+    for (name, on) in k.fixes.flags() {
+        key.push_str(if on { "+" } else { "-" });
+        key.push_str(name);
+    }
+    // (writing to a `String` never fails)
+    let _ = write!(key, "\n{record:?}");
+    if let Some(&hit) = k.recertify_memo.borrow().bounds.get(key.as_str()) {
+        return Ok(hit);
+    }
+    k.work_counters.add_blend_recertified();
+    let bound = pb.recertify(k)?;
+    k.recertify_memo
+        .borrow_mut()
+        .remember(key, bound, RECERTIFY_MEMO_BYTES);
+    Ok(bound)
+}
+
+/// Give each face of `faces` its definition back: its net is the face's surface as it was
+/// built (a NURBS surface), the definition is made from the record exactly ([`from_record`],
+/// [`exact_from_record`]) and the net certified against it again, and the face's surface becomes
+/// the blend (`SetSurface`; `key_of` names a face as the body's notifications do). A net its
+/// definition does not certify refuses the face ([`SolidError::DefinitionNotCertified`]): a
+/// record's blend is never an operand until it is certified (docs/definitions-and-certificates.md
+/// §7 inv. 8).
+///
+/// # Errors
+///
+/// [`SolidError::DefinitionNotCertified`] naming the first face refused; `InvalidInput` for a
+/// face without a NURBS surface; those of the rebuilds and of `SetSurface`. A cancel passes
+/// through as it is.
+pub fn adopt_definitions(
+    k: &Kernel,
+    b: &mut crate::topology::Brep,
+    key_of: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
+    faces: &[(FaceId, FaceDefinition)],
+) -> Result<()> {
+    for (f, definition) in faces {
+        let face = *f;
+        let made = {
+            let surface =
+                b.face(face)?.surface.as_ref().ok_or_else(|| {
+                    SolidError::invalid_input(OP_ADOPT, "a face without a surface")
+                })?;
+            definition_surface(k, definition, surface)?
+        };
+        let made = made.map_err(|eps| SolidError::DefinitionNotCertified {
+            operation: OP_ADOPT,
+            face: EntityRef::Face(face),
+            eps,
+        })?;
+        crate::topology::face::p1::set_surface(
+            k,
+            b,
+            face,
+            key_of(EntityRef::Face(face)),
+            made,
+            true,
+        )?;
+    }
+    Ok(())
 }
 
 /// A chamfer's sizes as their record (#2486).
@@ -641,7 +944,7 @@ pub fn corner_to_record(k: &Kernel, surface: &Surface) -> Result<CornerRecord> {
         ));
     };
     let xyz = |p: Point3| [p.x, p.y, p.z];
-    let face_net = || support_record(k, net, 1);
+    let face_net = || face_record(k, net);
     Ok(match corner {
         // the Ball's patch is recorded as its B-rep face, its sphere the face's `BallPatch`
         // label over its net, and read back certified by solidcore-convert's `ball_patch`
@@ -668,7 +971,10 @@ pub fn corner_to_record(k: &Kernel, surface: &Surface) -> Result<CornerRecord> {
         CornerDefinition::Setback(d) => {
             let fill = &*d.fill;
             let Some(form) = as_b_spline(k, surface)? else {
-                return Err(SolidError::sm_err(OP_CORNER_TO));
+                return Err(SolidError::surface_failed(
+                    OP_CORNER_TO,
+                    "the setback corner surface has no B-spline form",
+                ));
             };
             CornerRecord::Setback(SetbackCornerRecord {
                 faces: fill
@@ -702,7 +1008,10 @@ pub fn corner_to_record(k: &Kernel, surface: &Surface) -> Result<CornerRecord> {
         }
         CornerDefinition::Mixed(d) => {
             let Some(form) = as_b_spline(k, surface)? else {
-                return Err(SolidError::sm_err(OP_CORNER_TO));
+                return Err(SolidError::surface_failed(
+                    OP_CORNER_TO,
+                    "the mixed corner surface has no B-spline form",
+                ));
             };
             let [b1, b2] = &d.blends;
             CornerRecord::Mixed(Box::new(MixedCornerRecord {
@@ -730,9 +1039,7 @@ fn corner_surface_of(k: &Kernel, s: &SupportRecord) -> Result<Surface> {
             let form = surface_of(form)?;
             match kind_of(*kind) {
                 None => Ok(Surface::from(form)),
-                Some(kind) => {
-                    AnalyticSupport::derive(k, kind, &form).and_then(|a| a.build(k, form))
-                }
+                Some(kind) => labelled(k, kind, form),
             }
         }
         SupportRecord::Blend(_) => Err(SolidError::invalid_input(
@@ -969,13 +1276,13 @@ pub fn draft_to_record(k: &Kernel, surface: &Surface) -> Result<DraftRecord> {
     let xyz = |p: Point3| [p.x, p.y, p.z];
     let d = draft.draft();
     Ok(DraftRecord {
-        source: support_record(k, draft.source(), 1)?,
+        source: face_record(k, draft.source())?,
         outward: draft.outward(),
         neutral_origin: xyz(d.neutral_origin()),
         neutral_normal: xyz(d.neutral_normal()),
         pull: xyz(d.pull()),
         angle: d.angle(),
-        net: support_record(k, net, 1)?,
+        net: face_record(k, net)?,
     })
 }
 
@@ -1148,4 +1455,95 @@ pub fn section_blend_rebuild(rec: &SectionBlendRecord) -> Result<Surface> {
         blend.recertify(n)?;
     }
     Ok(net)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The memo keeps keys up to its cap, starts again empty when the next key would pass it,
+    /// and keeps no key larger than the cap on its own, so no such allocation outlives the call.
+    #[test]
+    fn the_recertify_memo_keeps_no_key_larger_than_its_cap() {
+        let mut memo = RecertifyMemo::default();
+        memo.remember("a".repeat(6), 1.0, 10);
+        memo.remember("b".repeat(4), 2.0, 10);
+        assert_eq!(
+            (memo.len(), memo.bytes),
+            (2, 10),
+            "two keys fill the cap exactly"
+        );
+        memo.remember("c".repeat(3), 3.0, 10);
+        assert_eq!(
+            (memo.len(), memo.bytes),
+            (1, 3),
+            "a key past the cap starts the memo again"
+        );
+        assert_eq!(memo.bounds.get("ccc"), Some(&3.0));
+        memo.remember("d".repeat(11), 4.0, 10);
+        assert_eq!(
+            (memo.len(), memo.bytes),
+            (1, 3),
+            "a key larger than the cap is not kept"
+        );
+        assert_eq!(memo.bounds.get("d".repeat(11).as_str()), None);
+    }
+
+    /// The record conversion failures keep the operation, status, kind and entity of the bare
+    /// `Upstream` statuses they replace (a sample).
+    #[test]
+    fn typed_surface_failures_keep_their_upstream_answers() {
+        use crate::error::surface::SurfaceFailure;
+        let samples: [(&'static str, SurfaceFailure, i32); 2] = [
+            (
+                OP_TO,
+                SurfaceFailure::Failed("the B-spline surface has no NURB"),
+                crate::error::SM_ERR,
+            ),
+            (
+                OP_EXACT_FROM,
+                SurfaceFailure::Failed("the record has fewer than two supports"),
+                crate::error::SM_ERR,
+            ),
+        ];
+        for (operation, failure, code) in samples {
+            let typed = SolidError::surface(operation, failure);
+            let before = SolidError::Upstream {
+                operation,
+                code,
+                entity: None,
+            };
+            assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
+            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.operation(), before.operation(), "{typed:?}");
+            assert_eq!(typed.entity(), None, "{typed:?}");
+            assert_eq!(typed.is_port_failure(), before.is_port_failure());
+            assert_eq!(typed.is_status_answer(), before.is_status_answer());
+            assert_eq!(typed.surface_failure(), Some(&failure));
+        }
+    }
+
+    /// The rebuild refusal keeps the face the bare status named.
+    #[test]
+    fn the_rebuild_refusal_keeps_its_face() {
+        use crate::error::surface::SurfaceFailure;
+        let face = EntityRef::Face(FaceId::from_index(3));
+        let typed = SolidError::surface_at(
+            OP_FACE,
+            SurfaceFailure::InvalidValue("the face's procedural blend record does not rebuild"),
+            face,
+        );
+        let before = SolidError::Upstream {
+            operation: OP_FACE,
+            code: crate::error::SM_ERR_INVALID_INPUT,
+            entity: Some(face),
+        };
+        assert_eq!(typed.sm_status(), before.sm_status());
+        assert_eq!(typed.upstream_status(), before.upstream_status());
+        assert_eq!(typed.kind(), before.kind());
+        assert_eq!(typed.operation(), before.operation());
+        assert_eq!(typed.entity(), Some(face));
+        assert_eq!(typed.is_status_answer(), before.is_status_answer());
+    }
 }

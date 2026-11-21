@@ -351,7 +351,10 @@ fn box_lower(a: &Piece, b: &Piece) -> Result<f64> {
         let (Some(&x0), Some(&x1), Some(&y0), Some(&y1)) =
             (al.get(i), ah.get(i), bl.get(i), bh.get(i))
         else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::query_failed(
+                OP,
+                "a box has fewer than three axes",
+            ));
         };
         let gap = (y0 - x1).max(x0 - y1).max(0.0);
         // (the difference rounded up by at most gamma_1 of its terms)
@@ -484,7 +487,10 @@ fn bracket(
     first.sort_by(|x, y| x.lower.total_cmp(&y.lower));
     for pair in first {
         let (Some(fa), Some(fb)) = (pa.faces.get(pair.a.0), pb.faces.get(pair.b.0)) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::query_failed(
+                OP,
+                "a pair's face is not among its piece's faces",
+            ));
         };
         if pair.lower < upper {
             witness_from(
@@ -515,7 +521,10 @@ fn bracket(
         let (ia, x) = &pair.a;
         let (ib, y) = &pair.b;
         let (Some(fa), Some(fb)) = (pa.faces.get(*ia), pb.faces.get(*ib)) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::query_failed(
+                OP,
+                "a pair's face is not among its piece's faces",
+            ));
         };
         // a witness from the pair's centres (none can be nearer than the pair's bound, so a
         // pair past the witness so far is skipped)

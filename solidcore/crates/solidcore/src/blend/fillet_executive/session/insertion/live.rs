@@ -281,7 +281,10 @@ impl LiveGeometryInsertion<'_> {
         managed: EdgeId,
     ) -> Result<()> {
         let binding = curve.ok_or_else(|| {
-            SolidError::null_pointer("SmTopologyIntersector::MergeCurveOnSurfaces")
+            SolidError::blend_missing(
+                "SmTopologyIntersector::MergeCurveOnSurfaces",
+                "the curve's binding",
+            )
         })?;
         let actual = match binding.object {
             FilletObject::IntermediateCurve(e) => self.intermediate.edge(e)?.curve.as_ref(),
@@ -417,10 +420,15 @@ impl IntersectionTopologyContext for LiveGeometryInsertion<'_> {
         managed: EdgeId,
         deleted: &mut Vec<EdgeId>,
     ) -> Result<()> {
-        let primary = edgeuse::p1::primary_edgeuse(pseudo.brep(), edge)?
-            .ok_or_else(|| SolidError::null_pointer("SmFilletEdge::GetOriginalUVCurve"))?;
-        let mate = edgeuse::p1::mate(pseudo.brep(), primary)?
-            .ok_or_else(|| SolidError::null_pointer("SmFilletEdge::GetOriginalUVCurve"))?;
+        let primary = edgeuse::p1::primary_edgeuse(pseudo.brep(), edge)?.ok_or_else(|| {
+            SolidError::blend_missing(
+                "SmFilletEdge::GetOriginalUVCurve",
+                "the edge's primary edge use",
+            )
+        })?;
+        let mate = edgeuse::p1::mate(pseudo.brep(), primary)?.ok_or_else(|| {
+            SolidError::blend_missing("SmFilletEdge::GetOriginalUVCurve", "the edge use's mate")
+        })?;
         let uv = pseudo
             .original_uv_curve(edge)?
             .map(|_| FilletObject::UvCurve(FilletBody::Pseudo, mate));

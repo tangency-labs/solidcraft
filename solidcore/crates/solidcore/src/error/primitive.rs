@@ -7,22 +7,29 @@
 //! for it (crate-private `comparison_status`, read through
 //! [`crate::SolidError::sm_status`]).
 //!
-//! | Rust                                 | Status difftest compares      |
-//! |--------------------------------------|-------------------------------|
-//! | [`PrimitiveFailure::Failed`]         | `SM_ERR`                      |
-//! | [`PrimitiveFailure::Missing`]        | `SM_ERR_NULL_POINTER`         |
-//! | [`PrimitiveFailure::HelixDeviates`]  | `SM_ERR_NOT_WITHIN_TOLERANCE` |
-//! | [`PrimitiveFailure::AxisInsideFace`] | `SM_ERR_AXIS_INSIDE_FACE`     |
+//! | Rust                                   | Status difftest compares      |
+//! |----------------------------------------|-------------------------------|
+//! | [`PrimitiveFailure::Failed`]           | `SM_ERR`                      |
+//! | [`PrimitiveFailure::Missing`]          | `SM_ERR_NULL_POINTER`         |
+//! | [`PrimitiveFailure::HelixDeviates`]    | `SM_ERR_NOT_WITHIN_TOLERANCE` |
+//! | [`PrimitiveFailure::AxisInsideFace`]   | `SM_ERR_AXIS_INSIDE_FACE`     |
+//! | [`PrimitiveFailure::PlaneCannotCover`] | `SM_ERR_INVALID_INPUT`        |
+//! | [`PrimitiveFailure::Defect`]           | `SM_ERR` (or the site's, through `with_status`) |
+//!
+//! [`PrimitiveFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
+//! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
+//! not yet converted (the conversion guide: `docs/failure-codes-and-reproduction.md` §6).
 //!
 //! Deviations: not upstream. A failure says in a phrase (or its data) what went wrong;
 //! the failure's `operation` path says which routine. No failure names an entity: the
 //! sites they replace named none. The failures that are checks of a caller's arguments
-//! stay [`crate::SolidError::InvalidInput`]. `primitive_creation/p1/primitives.rs` does
-//! not use these yet.
+//! stay [`crate::SolidError::InvalidInput`]. [`PrimitiveFailure::PlaneCannotCover`] is
+//! not upstream: it is the refusal of WR-536's fix (`Boolean2D` refuses a plane it cannot grow
+//! to cover the other faces).
 
 use super::{
-    ErrorKind, Failure, Reason, SM_ERR, SM_ERR_AXIS_INSIDE_FACE, SM_ERR_NOT_WITHIN_TOLERANCE,
-    SM_ERR_NULL_POINTER,
+    ErrorKind, Failure, Reason, SM_ERR, SM_ERR_AXIS_INSIDE_FACE, SM_ERR_INVALID_INPUT,
+    SM_ERR_NOT_WITHIN_TOLERANCE, SM_ERR_NULL_POINTER,
 };
 
 /// Why a primitive, extrusion, revolution, skin or taper fails.
@@ -46,25 +53,43 @@ pub enum PrimitiveFailure {
     /// A revolution's axis runs inside the face it would turn, so the revolved solid
     /// would cross itself.
     AxisInsideFace,
+    /// A planar 2D boolean's face lies on a plane that cannot be grown to cover the
+    /// other faces, so the faces rebuilt on it would carry edges far off their surface
+    /// (not upstream: WR-536's fix refuses these, where upstream builds them).
+    PlaneCannotCover,
+    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
+    /// `why` names the step that failed and why that is the kernel's fault, not the
+    /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
+    /// says otherwise.
+    Defect {
+        /// The step that failed, and why that is the kernel's fault.
+        why: &'static str,
+    },
 }
 
 impl PrimitiveFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) => SM_ERR,
+            Self::Failed(_) | Self::Defect { .. } => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::HelixDeviates { .. } => SM_ERR_NOT_WITHIN_TOLERANCE,
             Self::AxisInsideFace => SM_ERR_AXIS_INSIDE_FACE,
+            Self::PlaneCannotCover => SM_ERR_INVALID_INPUT,
         }
     }
 
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::Missing`] for
     /// [`PrimitiveFailure::Missing`], [`ErrorKind::NotWithinTolerance`] for
-    /// [`PrimitiveFailure::HelixDeviates`], [`ErrorKind::Failed`] otherwise.
+    /// [`PrimitiveFailure::HelixDeviates`], [`ErrorKind::InvalidInput`] for
+    /// [`PrimitiveFailure::PlaneCannotCover`], [`ErrorKind::Failed`] otherwise.
+    /// [`PrimitiveFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
-        ErrorKind::of_status(self.comparison_status())
+        match self {
+            Self::Defect { .. } => ErrorKind::StageFailed,
+            _ => ErrorKind::of_status(self.comparison_status()),
+        }
     }
 }
 
@@ -73,6 +98,7 @@ impl core::fmt::Display for PrimitiveFailure {
         match self {
             Self::Failed(what) => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
             Self::HelixDeviates {
                 deviation,
                 tolerance,
@@ -82,6 +108,9 @@ impl core::fmt::Display for PrimitiveFailure {
             ),
             Self::AxisInsideFace => {
                 f.write_str("the revolution axis runs inside the face it would turn")
+            }
+            Self::PlaneCannotCover => {
+                f.write_str("a face's plane cannot be grown to cover the other faces")
             }
         }
     }
@@ -143,6 +172,7 @@ mod tests {
                 SM_ERR_NOT_WITHIN_TOLERANCE,
             ),
             (PrimitiveFailure::AxisInsideFace, SM_ERR_AXIS_INSIDE_FACE),
+            (PrimitiveFailure::PlaneCannotCover, SM_ERR_INVALID_INPUT),
         ];
         for (failure, code) in cases {
             let typed = SolidError::primitive("primitive::op", failure);
@@ -195,49 +225,89 @@ mod tests {
         );
     }
 
-    /// The primitive-creation routines that describe their failures build no bare
-    /// `Upstream` status in their library code (the count is the bare sites a file may
-    /// still hold while a site waits on other work).
+    /// The primitive-creation routines describe their failures: their library code builds
+    /// no bare `Upstream` status.
     #[test]
-    fn the_described_primitive_routines_build_no_bare_statuses() {
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/primitive");
-        let files = [
-            ("api_curve_ops.rs", 0),
-            ("api_curves.rs", 0),
-            ("api_primitives.rs", 0),
-            ("api_surface_ops.rs", 0),
-            ("primitive_creation/model.rs", 0),
-            ("primitive_creation/model/merge.rs", 0),
-            ("primitive_creation/p1.rs", 0),
-            ("primitive_creation/p1/boolean.rs", 0),
-            ("primitive_creation/p1/offset_profile.rs", 0),
-            ("primitive_creation/p2/access.rs", 0),
-            ("primitive_creation/p2/curve_sweeps.rs", 0),
-            ("primitive_creation/p2/planar_path.rs", 0),
-            ("primitive_creation/p2/rotational.rs", 0),
-            ("primitive_creation/p2/skin.rs", 0),
-            ("primitive_creation/p2/taper.rs", 0),
-            ("primitive_creation/p2/taper_walls.rs", 0),
-            ("primitive_creation/p3/access.rs", 0),
-            ("primitive_creation/p3/construct.rs", 0),
-            ("primitive_creation/p3/geometry.rs", 0),
-            ("primitive_creation/p3/ruled.rs", 0),
-            ("primitive_creation/p3/sweeps.rs", 0),
+    fn the_primitive_routines_build_no_bare_statuses() {
+        assert_eq!(
+            super::super::query::tests::bare_statuses_in("primitive", 25),
+            Vec::<(String, usize)>::new()
+        );
+    }
+
+    /// A reviewed defect is of class 127 with the status of the phrase cause it replaces,
+    /// and says why.
+    #[test]
+    fn a_reviewed_defect_is_class_127_with_its_reason() {
+        let why = "the face the extrusion just built has no loop, which its own construction always gives";
+        let defect = PrimitiveFailure::Defect { why };
+        let op = "primitive::op";
+        super::super::tests::assert_defect(
+            &SolidError::primitive(op, defect),
+            &SolidError::primitive(op, PrimitiveFailure::Failed("x")),
+            op,
+            SM_ERR,
+            &format!("{op}: stage_failed: {why}"),
+        );
+        let missing = Failure::new(op, defect)
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error();
+        super::super::tests::assert_defect(
+            &missing,
+            &SolidError::primitive(op, PrimitiveFailure::Missing("x")),
+            op,
+            SM_ERR_NULL_POINTER,
+            &format!("{op}: stage_failed: {why}"),
+        );
+        assert_eq!(missing.primitive_failure(), Some(&defect));
+    }
+
+    /// The sites that build a primitive phrase cause only fall:
+    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
+    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
+    /// files' counts here, and a file at 0 loses its line (the conversion guide:
+    /// `docs/failure-codes-and-reproduction.md` §6).
+    #[test]
+    fn the_primitive_phrase_cause_sites_only_shrink() {
+        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
+        const PHRASES: Scan = Scan {
+            builders: &[
+                Builder::Variant("PrimitiveFailure", "Failed"),
+                Builder::Variant("PrimitiveFailure", "Missing"),
+                Builder::Method("primitive_failed", Some(1)),
+                Builder::Method("primitive_missing", Some(1)),
+            ],
+            wrappers: Wrappers::Phrase,
+        };
+        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
+        const PINNED: &[(&str, usize)] = &[
+            ("solidcore/src/primitive/api_curve_ops.rs", 1),
+            ("solidcore/src/primitive/api_curves.rs", 4),
+            ("solidcore/src/primitive/api_primitives.rs", 2),
+            ("solidcore/src/primitive/api_surface_ops.rs", 1),
+            ("solidcore/src/primitive/primitive_creation/model.rs", 18),
+            ("solidcore/src/primitive/primitive_creation/model/merge.rs", 13),
+            ("solidcore/src/primitive/primitive_creation/p1.rs", 1),
+            ("solidcore/src/primitive/primitive_creation/p1/boolean.rs", 5),
+            ("solidcore/src/primitive/primitive_creation/p1/offset_profile.rs", 2),
+            ("solidcore/src/primitive/primitive_creation/p1/primitives.rs", 26),
+            ("solidcore/src/primitive/primitive_creation/p2/access.rs", 2),
+            ("solidcore/src/primitive/primitive_creation/p2/curve_sweeps.rs", 4),
+            ("solidcore/src/primitive/primitive_creation/p2/planar_path.rs", 17),
+            ("solidcore/src/primitive/primitive_creation/p2/rotational.rs", 10),
+            ("solidcore/src/primitive/primitive_creation/p2/skin.rs", 17),
+            ("solidcore/src/primitive/primitive_creation/p2/taper.rs", 7),
+            ("solidcore/src/primitive/primitive_creation/p2/taper_walls.rs", 22),
+            ("solidcore/src/primitive/primitive_creation/p3/access.rs", 1),
+            ("solidcore/src/primitive/primitive_creation/p3/construct.rs", 7),
+            ("solidcore/src/primitive/primitive_creation/p3/geometry.rs", 5),
+            ("solidcore/src/primitive/primitive_creation/p3/ruled.rs", 9),
+            ("solidcore/src/primitive/primitive_creation/p3/sweeps.rs", 10),
         ];
-        for (rel, held) in files {
-            let text = std::fs::read_to_string(src.join(rel)).expect("read");
-            let library = text
-                .find("\n#[cfg(test)]\n")
-                .map_or(text.as_str(), |at| &text[..at]);
-            let bare: usize = [
-                "SolidError::sm_err(",
-                "SolidError::null_pointer(",
-                "SolidError::Upstream {",
-            ]
-            .iter()
-            .map(|needle| library.matches(needle).count())
-            .sum();
-            assert_eq!(bare, held, "bare statuses in {rel}");
-        }
+        assert_pinned(
+            "primitive phrase-cause sites",
+            &crate_sites(&PHRASES),
+            PINNED,
+        );
     }
 }

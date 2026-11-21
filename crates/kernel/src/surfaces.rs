@@ -30,7 +30,17 @@ use crate::{KernelError, Result, record};
 impl Body {
     /// A surface body: some shell does not close (an edge bounds a face on one side only).
     pub fn is_surface(&self) -> bool {
-        !self.is_mesh() && self.record().edges.iter().any(|e| e.uses.len() == 1)
+        // Topology only: a placed copy answers from its part's record without moving its own.
+        !self.is_mesh() && self.record.topology().edges.iter().any(|e| e.uses.len() == 1)
+    }
+
+    /// The number of open boundary edges, read from exact topology. A face's periodic seam
+    /// is used twice and is not open. Mesh bodies and topology the kernel cannot read are errors.
+    pub fn open_edge_count(&self) -> Result<usize> {
+        self.require_brep("open boundary edges")?;
+        let form = self.ops_body().ok_or_else(|| failed("open boundary edges: the body's topology could not be read"))?;
+        let (body, _) = &*form;
+        solidcore_ops::stitch::open_edges(body).map(|edges| edges.len()).map_err(|e| failed(format!("open boundary edges: {e}")))
     }
 }
 
@@ -701,11 +711,18 @@ const SAMPLES: usize = 64;
 
 /// The parameter of the curve's point nearest `p` inside `interval`, and the distance: the
 /// nearest of evenly spaced samples, then a golden-section search between its neighbours.
-pub(crate) fn nearest_parameter(c: &CurveEval, [a, b]: [f64; 2], p: Vec3) -> Option<(f64, f64)> {
+pub(crate) fn nearest_parameter(c: &CurveEval, interval: [f64; 2], p: Vec3) -> Option<(f64, f64)> {
+    nearest_parameter_in(c, interval, p, SAMPLES)
+}
+
+/// [`nearest_parameter`] from `samples` evenly spaced samples: a curve of many spans needs
+/// several in each, or the search can settle beside the point on the wrong span.
+pub(crate) fn nearest_parameter_in(c: &CurveEval, [a, b]: [f64; 2], p: Vec3, samples: usize) -> Option<(f64, f64)> {
+    let samples = samples.max(1);
     let dist = |t: f64| c.point(t).map_or(f64::INFINITY, |q| q.dist(p));
-    let at = |k: usize| a + (b - a) * k as f64 / SAMPLES as f64;
-    let best = (0..=SAMPLES).min_by(|&i, &j| dist(at(i)).total_cmp(&dist(at(j))))?;
-    let (mut lo, mut hi) = (at(best.saturating_sub(1)), at((best + 1).min(SAMPLES)));
+    let at = |k: usize| a + (b - a) * k as f64 / samples as f64;
+    let best = (0..=samples).min_by(|&i, &j| dist(at(i)).total_cmp(&dist(at(j))))?;
+    let (mut lo, mut hi) = (at(best.saturating_sub(1)), at((best + 1).min(samples)));
     let ratio = 0.5 * (5f64.sqrt() - 1.0);
     for _ in 0..80 {
         let (x, y) = (hi - ratio * (hi - lo), lo + ratio * (hi - lo));
@@ -785,7 +802,12 @@ pub(crate) fn offset_faces(body: &Body, picked: &[usize], distance: f64, toleran
     if distance == 0.0 {
         return taken(body, r, &picked.iter().map(|f| (*f, false)).collect::<Vec<_>>());
     }
-    let moved = picked.iter().map(|f| imp::offset_face(r, *f, distance)).collect::<Result<Vec<_>>>()?;
+    // SMLib offsets along the surface's normal, so a face the body uses from its surface's back moves the other way.
+    let sides = face_sides(r);
+    let moved = picked
+        .iter()
+        .map(|f| imp::offset_face(r, *f, if sides.get(*f).copied().unwrap_or(true) { distance } else { -distance }))
+        .collect::<Result<Vec<_>>>()?;
     let (parts, offsets) = Parts::joined(&moved.iter().collect::<Vec<_>>())?;
     let c = parts.canonical()?;
     let (result, h) = imp::stitched(&c.brep, tolerance.max(c.brep.tolerance))?;
@@ -1137,6 +1159,14 @@ pub fn sweep_sheet_points_with(plane: &Plane, chains: &[Vec<Seg2>], path: &[Vec3
     sweep_sheet_with(plane, chains, &segs, ctl)
 }
 
+/// A surface swept from chains of sketch segments on `plane` along a path through 3D sketch curves
+/// ([`crate::PointPath`]): each drawn 3D spline exactly, as its spans, and each polyline as the
+/// lines between its points, as the solid sweep follows them ([`crate::sweep_point_path_with`]).
+/// A smooth spline is one smooth run, so each chain sweeps to one wall along it (#17828).
+pub fn sweep_sheet_point_path_with(plane: &Plane, chains: &[Vec<Seg2>], path: &crate::PointPath, ctl: &crate::SweepControl) -> Result<Body> {
+    sweep_sheet_with(plane, chains, &path.segs()?, ctl)
+}
+
 /// A surface lofted through two or more sections, each a chain of sketch segments on its plane,
 /// all open or all closed: ruled between two sections, smooth through three or more. Closed
 /// sections are matched as the solid loft matches them; open ones are split to the same number of
@@ -1150,8 +1180,8 @@ pub fn loft_sheet(sections: &[(Plane, Vec<Seg2>)]) -> Result<Body> {
 /// through every section's curve; see [`crate::loft_rails`]), `fit` saying how they reshape the
 /// sections between. Without rails, the plain sheet loft.
 ///
-/// The k-th segments of every section make a column: SMLib lofts each column on its own (one wall
-/// from the column's segments), and the columns are stitched along the edges they share.
+/// The k-th segments of every section make a column: one skin runs through every column, so the
+/// walls share their seams (#14048), each wall named by its column's segments.
 pub fn loft_sheet_with_rails(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Body> {
     if sections.len() < 2 || sections.len() > 50 {
         return Err(invalid("a loft needs 2…50 sections"));
@@ -1175,17 +1205,31 @@ pub fn loft_sheet_with_rails(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>
     }
     let matched = if all_closed { closed_sections(sections)? } else { open_sections(sections)? };
     let lofted = crate::loft_rails::railed(&matched, all_closed, rails, fit)?;
-    let count = matched.first().map_or(0, |s| s.curves.len());
-    let pieces = (0..count)
-        .map(|k| {
-            let column: Vec<&solidcraft_geom::bspline::CurveN<4>> = lofted.iter().filter_map(|s| s.get(k)).collect();
-            let r = imp::lofted(&column)?;
-            let numbers: BTreeSet<usize> = matched.iter().filter_map(|s| s.numbers.get(k)).flatten().copied().collect();
-            let h = vec![record::profile(numbers.iter()); r.faces.len()];
-            Ok((r, h))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    sheet_of(pieces, true, &[])
+    let curves: usize = lofted.iter().map(Vec::len).sum();
+    if curves > solidcore_ops::sweep::MAX_CURVES {
+        return Err(invalid(format!(
+            "a surface loft takes at most {} curves in all its sections and stations, this one has {curves}",
+            solidcore_ops::sweep::MAX_CURVES
+        )));
+    }
+    let (r, sources) = imp::lofted(&lofted)?;
+    let h = match sources {
+        // each face named by the curves of every section in the columns of its curves (curve k
+        // of a section of n is any s n + k)
+        Some(faces) => {
+            let n = matched.first().map_or(0, |s| s.curves.len());
+            faces
+                .iter()
+                .map(|cs| {
+                    let ks: BTreeSet<usize> = cs.iter().filter_map(|c| c.checked_rem(n)).collect();
+                    record::profile(ks.iter().flat_map(|k| matched.iter().filter_map(|s| s.numbers.get(*k)).flatten()))
+                })
+                .collect()
+        }
+        // a skin the kernel did not trace: its faces are named from their geometry
+        None => vec![record::generated(Vec::new()); r.faces.len()],
+    };
+    sheet_of(vec![(r, h)], false, &[])
 }
 
 /// Closed sections matched as the solid loft matches them ([`crate::build::loft_numbered_loops`]),
@@ -1254,6 +1298,16 @@ mod imp {
         r.to_native().map_err(|e| failed(format!("SMLib {what}: {e}")))
     }
 
+    /// [`checked`] for a body a stitch produced: its gaps are held to the sums of the zones they
+    /// span, each proven to reach no topology it does not bound (`Brep::check_stitched`).
+    fn checked_stitched(r: &SmBrep, what: &'static str) -> Result<Brep> {
+        let check = r.check_stitched(CheckLevel::All).map_err(sm(what))?;
+        if !check.is_valid() {
+            return Err(failed(format!("SMLib {what}: SMLib's check refuses the result: {check}")));
+        }
+        r.to_native().map_err(|e| failed(format!("SMLib {what}: {e}")))
+    }
+
     /// Whether two records of one body number its faces, edges and vertices alike: the same
     /// loops of the same edges, run the same ways, and each edge between the same vertices.
     fn same_numbering(a: &Brep, b: &Brep) -> bool {
@@ -1277,7 +1331,7 @@ mod imp {
     /// and edges by their index in `r`); none where SMLib's import of `r` does not number it as
     /// `r` does.
     pub(super) fn stitched(r: &Brep, tol: f64) -> Result<(Body, Option<History>)> {
-        stitched_with(r, tol, |_, sewn| checked(sewn, "stitch").map(|_| ()))
+        stitched_with(r, tol, |_, sewn| checked_stitched(sewn, "stitch").map(|_| ()))
     }
 
     /// [`stitched`], taking a result whose check fails no more tests outside `exempt` than the
@@ -1595,18 +1649,33 @@ mod imp {
         }
     }
 
-    /// One column of a loft: its curve in each section (and station) in loft order, skinned by
-    /// SMLib with no caps (`smlib_loft`), ruled between two, cubic through four or more.
-    pub(super) fn lofted(column: &[&solidcraft_geom::bspline::CurveN<4>]) -> Result<Brep> {
-        let sections: Vec<Vec<Curve>> = column
+    /// A loft's sheet: each section's (and station's) curves in loft order, the k-th of each
+    /// making column k, in one skin with no caps (`solidcore_ops::sweep::loft_sheet`), ruled
+    /// between two, cubic through four or more; with the curves each record face is skinned
+    /// from (curve k of section s as s n + k), when the kernel traced them. SMLib's own check
+    /// accepts it.
+    pub(super) fn lofted(sections: &[Vec<solidcraft_geom::bspline::CurveN<4>>]) -> Result<(Brep, Option<Vec<Vec<usize>>>)> {
+        use solidcore_ops::sweep::Curve as OpsCurve;
+        let curves: Vec<Vec<OpsCurve>> = sections
             .iter()
-            .map(|c| {
-                let points = c.ctrl.iter().map(|h| [h[0] / h[3], h[1] / h[3], h[2] / h[3], h[3]]).collect();
-                vec![Curve::Nurbs { degree: c.degree, points, knots: c.knots.clone() }]
+            .map(|s| {
+                s.iter()
+                    .map(|c| {
+                        let points = c.ctrl.iter().map(|h| [h[0] / h[3], h[1] / h[3], h[2] / h[3], h[3]]).collect();
+                        OpsCurve::Nurbs { degree: c.degree, points, knots: c.knots.clone() }
+                    })
+                    .collect()
             })
             .collect();
-        let degree = u32::try_from(column.len().saturating_sub(1).clamp(1, 3)).unwrap_or(3);
-        checked(&SmBrep::loft(&sections, degree, false).map_err(sm("surface loft"))?, "surface loft")
+        let degree = u32::try_from(sections.len().saturating_sub(1).clamp(1, 3)).unwrap_or(3);
+        let ops = |e: solidcore_ops::Error| failed(format!("surface loft: {e}"));
+        let (body, sources) = solidcore_ops::sweep::loft_sheet(&curves, degree).map_err(ops)?;
+        let (r, _) = body.to_record().map_err(ops)?;
+        let check = SmBrep::from_record(&r, true).and_then(|b| b.check(CheckLevel::All)).map_err(sm("surface loft"))?;
+        if !check.is_valid() {
+            return Err(failed(format!("SMLib surface loft: SMLib's check refuses the result: {check}")));
+        }
+        Ok((r, sources))
     }
 }
 
@@ -1742,6 +1811,43 @@ mod tests {
         assert_eq!(two.edge_count(), 2 * 41 + 3 * 40, "the walls share their seams");
     }
 
+    /// A line swept along a closed 3D sketch spline (eight fit points round a circle of radius 20)
+    /// follows the spline exactly: one wall, closed round the path, not a wall along each line of
+    /// the spline's samples (#17828). In a plane, the line square to it, the wall is a band of the
+    /// line's length times the spline's: its length from its exact spans, not its samples.
+    #[test]
+    fn sweep_sheet_along_a_closed_spline_is_one_closed_wall() {
+        use crate::{PathPiece, PointPath, SpaceBezier, SweepControl};
+        let ring = |z: &dyn Fn(usize) -> f64| -> Vec<Vec3> {
+            (0..=8)
+                .map(|i| {
+                    let t = std::f64::consts::TAU * (i % 8) as f64 / 8.0;
+                    Vec3::new(20.0 * t.cos(), 20.0 * t.sin(), z(i % 8))
+                })
+                .collect()
+        };
+        let line = vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(0.0, 5.0) }];
+        let flat = ring(&|_| 0.0);
+        let path = PointPath { pieces: vec![PathPiece::Spline { fit: flat.clone(), reversed: false }] };
+        // The profile stands on the path's start, square to it: x out from the centre, y up.
+        let plane = Plane { origin: Vec3::new(20.0, 0.0, 0.0), x: Vec3::X, y: Vec3::Z };
+        let band = sweep_sheet_point_path_with(&plane, std::slice::from_ref(&line), &path, &SweepControl::default()).unwrap();
+        let length: f64 =
+            solidcraft_geom::catmull_rom::beziers(&flat).unwrap().into_iter().map(|p| SpaceBezier::cubic(p).unwrap().length().unwrap()).sum();
+        // One wall, its two ends one seam: the seam and the line's two ends round the path.
+        assert!(band.is_surface() && band.face_count() == 1 && band.edge_count() == 3, "{} faces, {} edges", band.face_count(), band.edge_count());
+        let area = measure(&band).unwrap().area;
+        assert!(rel(area, 5.0 * length) < 1e-6, "{area} vs {}", 5.0 * length);
+        // As the reported path: the fit points up and down by 5 in turn, a line out from it in
+        // the plane of the path's start. Its frame closes round the path, so the wall does too.
+        let wavy = ring(&|i| if i % 2 == 0 { 9.0 } else { 4.0 });
+        let path = PointPath { pieces: vec![PathPiece::Spline { fit: wavy, reversed: false }] };
+        let flat_at = Plane { origin: Vec3::new(0.0, 0.0, 9.0), x: Vec3::X, y: Vec3::Y };
+        let radial = vec![Seg2::Line { a: Vec2::new(20.0, 0.0), b: Vec2::new(28.0, 0.0) }];
+        let wall = sweep_sheet_point_path_with(&flat_at, &[radial], &path, &SweepControl::default()).unwrap();
+        assert!(wall.is_surface() && wall.face_count() == 1 && wall.edge_count() == 3, "{} faces, {} edges", wall.face_count(), wall.edge_count());
+    }
+
     #[test]
     fn sweep_sheet_refuses_bad_input() {
         use crate::PathSeg;
@@ -1754,11 +1860,14 @@ mod tests {
         assert!(sweep_sheet(&Plane::XY, std::slice::from_ref(&line), &[no_axis]).is_err());
         assert!(sweep_sheet_points(&Plane::XY, std::slice::from_ref(&line), &[Vec3::ZERO]).is_err());
         assert!(sweep_sheet_points(&Plane::XY, std::slice::from_ref(&line), &[Vec3::ZERO, Vec3::new(f64::NAN, 0.0, 0.0)]).is_err());
+        let nan = crate::PointPath::polyline(vec![Vec3::ZERO, Vec3::new(0.0, 0.0, f64::NAN), Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, 10.0)]);
+        assert!(sweep_sheet_point_path_with(&Plane::XY, std::slice::from_ref(&line), &nan, &crate::SweepControl::default()).is_err());
     }
 
     /// Sheets lofted between open lines and closed loops: a ruled strip (even when the second
-    /// line runs the other way, or is in two pieces), a smooth strip through three, the walls
-    /// between two squares, and a cylinder through three circles.
+    /// line runs the other way, or is in two pieces: one flat face, the first line split in half
+    /// to match and both halves in one skin), a smooth strip through three, the walls between two
+    /// squares, and a cylinder through three circles.
     #[test]
     fn loft_sheet_areas() {
         use std::f64::consts::PI;
@@ -1770,7 +1879,7 @@ mod tests {
         let turned = loft_sheet(&[(at(0.0), vec![line(0.0, 10.0)]), (at(5.0), vec![line(10.0, 0.0)])]).unwrap();
         assert!(rel(area(&turned), 50.0) < 1e-6, "not twisted: {}", area(&turned));
         let pieces = loft_sheet(&[(at(0.0), vec![line(0.0, 10.0)]), (at(5.0), vec![line(0.0, 5.0), line(5.0, 10.0)])]).unwrap();
-        assert!(rel(area(&pieces), 50.0) < 1e-6 && pieces.face_count() == 2, "{}", area(&pieces));
+        assert!(rel(area(&pieces), 50.0) < 1e-6 && pieces.face_count() == 1, "{}", area(&pieces));
         let three = loft_sheet(&[(at(0.0), vec![line(0.0, 10.0)]), (at(5.0), vec![line(0.0, 10.0)]), (at(10.0), vec![line(0.0, 10.0)])]).unwrap();
         assert!(rel(area(&three), 100.0) < 1e-3, "{}", area(&three)); // (measured on meshes)
         let sq = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 10.0), Vec2::new(0.0, 10.0)]);
@@ -1781,6 +1890,38 @@ mod tests {
         assert!(tube.is_surface());
         let want = 2.0 * PI * 2.0 * 10.0;
         assert!(rel(area(&tube), want) < 2e-3, "{} vs {want}", area(&tube)); // (measured on meshes)
+    }
+
+    /// A sheet lofted through three open sections of two cubics each, meeting tangent at x = 5
+    /// at a height and with handles that change from one plane to the next, is one sheet: its
+    /// two walls share the seam between them (#14048, where each column was skinned on its own
+    /// and the walls ended up to 0.33 mm apart, with an edge of their own each). Split Body by
+    /// either wall then cuts a box it crosses into two closed bodies, each the box's five faces
+    /// it reaches and the two walls' pieces, whose volumes add up to the box.
+    #[test]
+    fn loft_sheet_walls_through_three_sections_share_their_seam() {
+        let at = |z: f64| Plane::XY.offset(z);
+        // y at the ends and at the join, the join's handles to the left and to the right
+        let chain = |ends: f64, join: f64, left: f64, right: f64| {
+            let p = Vec2::new;
+            vec![
+                Seg2::Cubic { p0: p(0.0, ends), p1: p(2.0, ends), p2: p(5.0 - left, join), p3: p(5.0, join) },
+                Seg2::Cubic { p0: p(5.0, join), p1: p(5.0 + right, join), p2: p(8.0, ends), p3: p(10.0, ends) },
+            ]
+        };
+        let sheet =
+            loft_sheet(&[(at(0.0), chain(0.0, 0.0, 1.0, 1.0)), (at(5.0), chain(1.0, 6.0, 3.0, 0.5)), (at(10.0), chain(0.0, 2.0, 0.5, 2.5))]).unwrap();
+        let r = sheet.record();
+        assert_eq!((r.faces.len(), r.edges.len(), r.vertices.len()), (2, 7, 6), "the walls share one seam");
+        assert_eq!(r.edges.iter().filter(|e| e.uses.len() == 1).count(), 6, "free edges: the sheet's rim only");
+        let bx = crate::box_solid(Vec3::new(1.0, -5.0, 1.0), Vec3::new(9.0, 10.0, 9.0)).unwrap();
+        for face in 0..2 {
+            let parts = crate::split_body(&bx, &crate::SplitTool::Face { body: &sheet, face }).unwrap();
+            let got: Vec<_> = parts.iter().map(|b| (!b.is_surface(), b.face_count(), b.lumps().unwrap().len())).collect();
+            assert_eq!(got, vec![(true, 7, 1); 2], "split by wall {face}");
+            let v: f64 = parts.iter().map(|b| measure(b).unwrap().volume).sum();
+            assert!(rel(v, 8.0 * 15.0 * 8.0) < 1e-9, "split by wall {face}: {v}");
+        }
     }
 
     #[test]
@@ -1931,6 +2072,53 @@ mod tests {
             let t = thicken(&corner, t, symmetric).unwrap();
             let v = measure(&t).unwrap().volume;
             assert!(rel(v, want) < 1e-9 && t.validity().is_empty(), "{v} vs {want}");
+        }
+    }
+
+    /// A half circle of radius 5 extruded 10 as a sheet on each origin plane, thickened by 1, 2
+    /// and 4 out, in and half each way: a half tube between radii r0 and r1, π/2·(r1² − r0²)·10,
+    /// closed by a half ring at each end and a strip along each side (6 faces, 12 edges, 8
+    /// vertices), that every check accepts. The end rings lie square to the extrusion whatever
+    /// axis it runs along (#13348: off the XY plane the rings went onto planes through the axis).
+    #[test]
+    fn thicken_a_half_tube_on_every_origin_plane() {
+        use std::f64::consts::PI;
+        let arc = vec![Seg2::Arc { center: Vec2::new(0.0, 0.0), radius: 5.0, start: 0.0, sweep: PI }];
+        for (name, plane) in [("XY", Plane::XY), ("YZ", Plane::YZ), ("XZ", Plane::XZ)] {
+            let sheet = extrude_sheet(&plane, std::slice::from_ref(&arc), 0.0, 10.0).unwrap();
+            for t in [1.0, 2.0, 4.0] {
+                for (thickness, symmetric, r0, r1) in [(t, false, 5.0, 5.0 + t), (-t, false, 5.0 - t, 5.0), (t, true, 5.0 - t / 2.0, 5.0 + t / 2.0)] {
+                    let what = format!("{name}, {thickness} mm, symmetric {symmetric}");
+                    let b = thicken(&sheet, thickness, symmetric).unwrap_or_else(|e| panic!("{what}: {e}"));
+                    assert!(!b.is_surface() && b.shell_count() == 1, "{what}");
+                    assert_eq!((b.face_count(), b.edge_count(), b.vertex_count()), (6, 12, 8), "{what}");
+                    assert!(b.validity().is_empty(), "{what}: {:?}", b.validity());
+                    let (v, want) = (measure(&b).unwrap().volume, PI / 2.0 * (r1 * r1 - r0 * r0) * 10.0);
+                    assert!(rel(v, want) < 1e-9, "{what}: {v} vs {want}");
+                    // The four flat faces: the rings square to the extrusion at 0 and 10 along it,
+                    // the strips in the sketch's x axis' plane through the axis.
+                    let n = plane.normal().normalized().unwrap();
+                    let mut rings = Vec::new();
+                    let mut strips = 0;
+                    for f in (0..b.face_count()).filter_map(|i| b.planar_face(i)) {
+                        let m = f.normal().normalized().unwrap();
+                        if (m.dot(n).abs() - 1.0).abs() < 1e-9 {
+                            rings.push(f.origin.dot(n));
+                        } else {
+                            assert!(
+                                (m.dot(plane.y).abs() - 1.0).abs() < 1e-9 && f.origin.dot(plane.y).abs() < 1e-9,
+                                "{what}: a strip off the axis plane: {f:?}"
+                            );
+                            strips += 1;
+                        }
+                    }
+                    rings.sort_by(f64::total_cmp);
+                    assert!(
+                        rings.len() == 2 && rings[0].abs() < 1e-9 && (rings[1] - 10.0).abs() < 1e-9 && strips == 2,
+                        "{what}: rings at {rings:?}, {strips} strips"
+                    );
+                }
+            }
         }
     }
 

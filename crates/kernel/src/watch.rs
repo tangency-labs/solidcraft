@@ -38,6 +38,11 @@ pub fn current() -> Option<Arc<dyn Watch>> {
     CURRENT.with(|c| c.borrow().clone())
 }
 
+/// Whether the watch over this thread's work asked it to stop.
+pub(crate) fn cancelled() -> bool {
+    CURRENT.with(|c| c.borrow().as_ref().is_some_and(|w| w.cancelled()))
+}
+
 /// The error long work returns when its watch cancelled it.
 pub(crate) fn cancelled_error(what: &str) -> crate::KernelError {
     crate::KernelError::Failed(format!("{what} cancelled"))

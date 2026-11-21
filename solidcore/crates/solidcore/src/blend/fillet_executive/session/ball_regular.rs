@@ -22,6 +22,7 @@
 //! | `largest_curvature_toward_ball` (private) | `sm_LargestCurvatureTowardBall`    |
 //! | `solve4` (private)         | `sm_Solve4`                                       |
 //! | `ball_section_at` (private) | `sm_BallSectionAt`                               |
+//! | `solve_section` (private)  | none (`sm_BallSectionAt`'s solves, wrapping a closed base's seam) |
 //! | `regular_at` (private)     | `sm_RegularAt`                                    |
 //!
 //! Deviations: the solver's virtuals are a match on the session's concrete solver
@@ -37,7 +38,9 @@
 // the fork's NaN-safe tests (`!(a > b)`) are kept as written
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 use crate::blend::fillet_executive::session::SolverObject;
-use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, FilletSurfaceGeneratorType};
+use crate::blend::fillet_solver::p1::{
+    FilletSolver, FilletSolverOps, FilletSurfaceGeneratorType, SeamDomain,
+};
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
@@ -92,6 +95,15 @@ pub enum BallCheck {
     NotEnclosed,
     /// `SM_BS_REGRESSIVE`: a point of the section is not progressive (`f_tt <= 0`).
     Regressive,
+    /// Not the fork's (#16768): no section of the ball is found at any station along the
+    /// edge, and one of its faces is as wide as the ball by its definition, its offset by the
+    /// ball collapsed
+    /// ([`ball_as_wide_as_a_face_along_the_edge`](crate::blend::fillet_exact::ball_as_wide_as_a_face_along_the_edge)).
+    Collapsed,
+    /// Not the fork's (#16768): as [`BallCheck::Collapsed`], but sections of the ball are
+    /// found at some stations, none of them judged (a singular face jet, contacts that meet):
+    /// the face's offset collapses all the same, by its definition.
+    CollapsedUnjudged,
 }
 
 /// `SmBallStation`: the rolling ball's local regularity at a station of a blend.
@@ -216,7 +228,7 @@ pub fn ball_law(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> Result
 ///
 /// # Errors
 ///
-/// A missing offset surface ([`SolidError::null_pointer`]; the fork dereferences it).
+/// A missing offset surface (`BlendFailure::Missing`; the fork dereferences it).
 pub fn set_ball_radius(solver: &mut SolverObject, radius: f64) -> Result<bool> {
     let (radii, base): (&mut [f64; 2], &mut FilletSolver) = match solver {
         SolverObject::ConstantRadius(s) => (&mut s.fillet_radii, &mut s.solver),
@@ -228,7 +240,7 @@ pub fn set_ball_radius(solver: &mut SolverObject, radius: f64) -> Result<bool> {
     for (rail, orientation) in orientations.into_iter().enumerate() {
         let slot = base
             .surface_mut(rail)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
         slot.surface.set_offset_distance(radius * orientation);
     }
     Ok(true)
@@ -418,7 +430,7 @@ fn solve4(a: &[[f64; 4]; 4], b: &[f64; 4]) -> Option<[f64; 4]> {
 /// # Errors
 ///
 /// Those of the law's, the offsets' and the surfaces' evaluations; a missing offset
-/// surface ([`SolidError::null_pointer`]).
+/// surface (a `BlendFailure::Missing`).
 pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> Result<BallStation> {
     let mut station = BallStation::default();
     let law = ball_law(k, solver, pnt)?;
@@ -430,7 +442,7 @@ pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> R
     let approx_tol = solver.base().this_approx_tol_3d();
     let ops = ops_of(solver);
     if ops.solver().surface(0)?.is_none() || ops.solver().surface(1)?.is_none() {
-        return Err(SolidError::null_pointer(OP));
+        return Err(SolidError::blend_missing(OP, "the solver's offset surface"));
     }
     station.law = on_edge;
     station.ball = ball;
@@ -448,7 +460,7 @@ pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> R
             let slot = ops
                 .solver_mut()
                 .surface_mut(rail)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
             *dst = slot.surface.surface.evaluate_point_extending(k, uv)?;
         }
         Ok(on)
@@ -467,7 +479,7 @@ pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> R
         let slot = ops
             .solver()
             .surface(rail)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
         let offset: &OffsetSurface = &slot.surface.surface;
         let uv = uvs.get(rail).copied().unwrap_or(Point2::UNDEF);
         let base = offset.base_surface();
@@ -659,6 +671,24 @@ pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> R
 /// `sm_BallSectionAt`: the solver's section in the plane square to its filleted edge at
 /// the edge's `t`, on the faces' surfaces extended as the trace extends them; its guess
 /// is the edge point dropped on each face, or where that finds none, `guess`'s contacts.
+/// Not the fork's: for a rail rolled over a smooth far edge of its face, the whole length
+/// (`fillet_tangent_rollover`), the point dropped is that edge's point nearest the edge
+/// point ([`rolled_edge_point`]), on the face beyond: the edge point lies off that face, and
+/// dropped on its surface extended it may land on another sheet of it (the far side of a
+/// boss), where the solve finds the ball rolling there (#15767). On a seam of that surface the
+/// point is taken on the side the ball rolls onto (`fillet_tangent_rollover::section_seeds`).
+/// Also not the fork's: with `seam` [`SeamDomain::Wrapped`], a face's surface that closes on
+/// itself in a direction is solved over its natural interval there, wrapping across its seam
+/// (`FilletSolver::seam_domain`), not over that interval extended past the seam, where the
+/// extension is not the closed surface: a contact just past the seam of the face it rolls on
+/// is found on the same surface (#15767). [`SeamDomain::Extended`] solves as the trace does,
+/// the domain extended past the seam: the proposal of a rollover of a round in a blend of
+/// several (`rails_wholly_past`) asks for it: a proposal there that is not accepted after the
+/// trace is refused, and the acceptance refuses a rolled rail that comes within the gap of a
+/// face across its face's edges (as one ending on such a face does), so wrapping would refuse
+/// rails rolled across a seam that the rollover recovery after the trace builds on main.
+///
+/// [`rolled_edge_point`]: crate::blend::fillet_tangent_rollover::rolled_edge_point
 pub(crate) fn ball_section_at(
     k: &Kernel,
     target: &mut Brep,
@@ -666,17 +696,18 @@ pub(crate) fn ball_section_at(
     edge_curve: &Curve,
     t: f64,
     guess: Option<&TsectPnt>,
+    seam: SeamDomain,
 ) -> Result<Option<TsectPnt>> {
     let ops = ops_of(solver);
     let bases: [Surface; 2] = {
         let s0 = ops
             .solver()
             .surface(0)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
         let s1 = ops
             .solver()
             .surface(1)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
         [
             s0.surface.base_surface().clone(),
             s1.surface.base_surface().clone(),
@@ -698,28 +729,80 @@ pub(crate) fn ball_section_at(
         return Ok(None);
     }
     let normal = tangent.unitize()?;
+    // where a ball of radius 0 touches each face: the edge's point, or for a rail rolled over a
+    // smooth far edge of its face (`fillet_tangent_rollover`) that edge's point nearest it, on
+    // the face beyond
+    let seeds =
+        crate::blend::fillet_tangent_rollover::section_seeds(k, target, ops.solver(), point)?;
     let mut guesses = [Point2::UNDEF; 2];
     let mut dropped = true;
-    for ((base, domain), g) in bases.iter().zip(&domains).zip(guesses.iter_mut()) {
+    for (((base, domain), g), seed) in bases
+        .iter()
+        .zip(&domains)
+        .zip(guesses.iter_mut())
+        .zip(seeds)
+    {
         if !dropped {
             break;
         }
-        let drop = base.drop_point::<NoObject>(k, point, domain, &DropPointOptions::default())?;
+        let drop = base.drop_point::<NoObject>(
+            k,
+            seed.point,
+            domain,
+            &DropPointOptions {
+                tgt_seam_side: seed.seam_side,
+                ..DropPointOptions::default()
+            },
+        )?;
         dropped = drop.success;
         *g = drop.result_uv;
     }
+    // the plane solves on the caller's domain (`FilletSolver::seam_domain`): wrapped, a closed
+    // base across its seam, as a contact just past the seam lies on the same surface, where the
+    // domain extended past the seam is no longer it; the solver's own flag back after, whatever
+    // the solves did
+    let saved = ops.solver().seam_domain;
+    ops.solver_mut().seam_domain = seam;
+    let solved = solve_section(
+        ops,
+        k,
+        target,
+        (point, normal),
+        &domains,
+        dropped.then_some(guesses),
+        guess,
+    );
+    ops.solver_mut().seam_domain = saved;
+    solved
+}
+
+/// [`ball_section_at`]'s plane solves through `plane` (its point and normal) on `domains`: from
+/// `guesses` (the dropped seeds), and where that finds none, from `guess`'s contacts.
+///
+/// # Errors
+/// Those of the solves.
+fn solve_section(
+    ops: &mut dyn FilletSolverOps,
+    k: &Kernel,
+    target: &mut Brep,
+    (point, normal): (Point3, Vec3),
+    domains: &[Extent2d; 2],
+    guesses: Option<[Point2; 2]>,
+    guess: Option<&TsectPnt>,
+) -> Result<Option<TsectPnt>> {
+    let [d0, d1] = domains;
     let mut found = false;
     let mut section = TsectPnt::new();
-    if dropped {
+    if let Some([g0, g1]) = guesses {
         found = ops.point_on_plane_solve(
             k,
             Some(&mut *target),
             point,
             normal,
-            &domains[0],
-            &domains[1],
-            guesses[0],
-            guesses[1],
+            d0,
+            d1,
+            g0,
+            g1,
             &mut section,
         )?;
     }
@@ -731,8 +814,8 @@ pub(crate) fn ball_section_at(
                 Some(&mut *target),
                 point,
                 normal,
-                &domains[0],
-                &domains[1],
+                d0,
+                d1,
                 g.uv_pos(SrfIndex::First),
                 g.uv_pos(SrfIndex::Second),
                 &mut section,
@@ -774,7 +857,15 @@ fn regular_at(
     }
     let mut found = false;
     let result = (|| -> Result<()> {
-        if let Some(pnt) = ball_section_at(k, target, solver, edge_curve, t, near.0.as_ref())? {
+        if let Some(pnt) = ball_section_at(
+            k,
+            target,
+            solver,
+            edge_curve,
+            t,
+            near.0.as_ref(),
+            SeamDomain::Wrapped,
+        )? {
             found = true;
             let judged = judge_ball_at(k, solver, &pnt);
             near.0 = Some(pnt);
@@ -825,9 +916,10 @@ pub fn ball_is_regular(
     let Some(edgeuse) = base.edgeuse(0)? else {
         return Ok(first);
     };
-    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let edge_id = eu::edge(target, edgeuse)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     let curve = edge::evaluation_curve(target, edge_id)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?
         .clone();
     let ivl = edge::interval(target, edge_id)?;
     let closed = edge::is_closed(target, edge_id)?;
@@ -1050,6 +1142,45 @@ pub fn ball_is_regular(
         return Ok(first);
     }
 
+    // (#16768) no station judged (no section of the ball found, a pole, a singular face jet,
+    // or contacts that meet at every one) proves nothing by itself: such an edge goes on to
+    // be built, as before. It is refused only where the faces prove in closed form why no
+    // ball rolls: one face is as wide as the ball by its definition (an analytic cylinder,
+    // sphere or torus of the ball's radius, a surface of revolution that is one, or a round
+    // of one ball of that radius), so its
+    // offset, the surface the ball's centre rolls on, collapses over the whole face. Any other
+    // face is not judged so
+    if rolls && !ts.is_empty() && margins[0].iter().all(|&m| m >= BIG_DOUBLE) {
+        let (_, on_edge) = rolls_a_ball(solver);
+        if !on_edge {
+            let radius = ball_law(k, solver, &TsectPnt::new())?.r[0];
+            if radius > EFF_ZERO
+                && crate::blend::fillet_exact::ball_as_wide_as_a_face_along_the_edge(
+                    ops_of(solver),
+                    k,
+                    target,
+                    radius,
+                )?
+            {
+                // no radius is named: sections found at radii a hair under it are the offset's
+                // collapsed loop, not a ball that rolls along the edge
+                // a section found at some station (the last one found is kept in `near`)
+                // that was not judged, or none found at all
+                let check = if near.0.is_some() {
+                    BallCheck::CollapsedUnjudged
+                } else {
+                    BallCheck::Collapsed
+                };
+                return Ok(BallStation {
+                    check,
+                    radius,
+                    fits: radius,
+                    ..BallStation::default()
+                });
+            }
+        }
+    }
+
     // every section regular: each margin's least between the sections about its least one
     for (m, marg) in margins.iter().enumerate() {
         let mut least_idx = 0;
@@ -1170,5 +1301,173 @@ mod tests {
             [0.0, 0.0, 0.0, 1.0],
         ];
         assert!(solve4(&s, &[1.0; 4]).is_none());
+    }
+
+    /// The wall of the cylinder of `radius` about `(cx, cy)`, 15 tall along z, its circle
+    /// starting at `seam_deg` (a swept arc, as SolidCraft's cylinders), with its offset sign: the
+    /// one that moves the wall away from its axis.
+    fn wall(k: &mut Kernel, cx: f64, cy: f64, radius: f64, seam_deg: f64) -> (Surface, f64) {
+        use crate::surface::surface::SurfaceKind;
+        let circle = Curve::from(
+            crate::primitive::api_curves::create_arc(
+                Point3::new(cx, cy, 0.0),
+                radius,
+                seam_deg - 360.0,
+                seam_deg,
+            )
+            .unwrap(),
+        );
+        let b = crate::sweep::api_brep::create_linear_sweep(
+            k,
+            &[Some(&circle)],
+            Vec3::new(0.0, 0.0, 1.0),
+            15.0,
+            true,
+        )
+        .unwrap();
+        // the wall's surface, on its own (not owned by the face)
+        let mut surface = b
+            .face_list()
+            .iter()
+            .find_map(|&f| {
+                let s = crate::topology::face::p2::surface(&b, f).unwrap()?;
+                matches!(s.kind(), SurfaceKind::Cone(_)).then(|| s.clone_for_evaluation().unwrap())
+            })
+            .unwrap();
+        surface.set_owner(None);
+        let domain = surface.natural_uv_domain_with_nurb(k).unwrap();
+        let uv = domain.evaluate(0.5, 0.5);
+        let p = surface.evaluate_point(k, uv).unwrap();
+        let n = surface
+            .evaluate_normal(k, uv, Side::Left, Side::Left)
+            .unwrap();
+        let outward = (p - Point3::new(cx, cy, p.z)).dot(n);
+        (surface, if outward > 0.0 { 1.0 } else { -1.0 })
+    }
+
+    /// SolidCraft #17345's lobes (ø82 at (40, 0), ø60 at (-20, 15), each with its seam at 35.13
+    /// deg about its axis): the R10 ball along their crossing near (8.036, 25.677) touches the
+    /// ø60 wall at 41.16 deg about its axis, 6 deg past its seam, where the wall's domain ends.
+    /// The ball's section there is found on the same closed surface across its seam, on either
+    /// rail (the solve's own first surface, and the second the solver sets up), at the closed
+    /// form's contacts: on each wall towards the ball's centre (10.115, 41.327), its distances
+    /// 51 and 40 from the centres. Before, the solve stopped at the domain's end: its contact on
+    /// the ø60 wall was the seam's point (4.536, 32.262), not the ball's.
+    #[test]
+    fn a_ball_section_past_a_closed_surface_s_seam_is_found_across_it() {
+        use crate::blend::fillet_custom_solver::{
+            ConstantRadiusAssistedFs, OffsetSurface as SolverOffset, SurfaceId,
+        };
+        use crate::surface::offset_surface::SS_UNKNOWN;
+        let mut k = Kernel::default();
+        let seam = 0.6131_f64.to_degrees();
+        let r = 10.0;
+        let lobes = [((-20.0, 15.0), 30.0), ((40.0, 0.0), 41.0)];
+        // the crossing on the ball's side and the ball's centre, in closed form
+        let cross = |(a, ra): ((f64, f64), f64), (b, rb): ((f64, f64), f64)| {
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let d = (dx * dx + dy * dy).sqrt();
+            let along = (d * d + ra * ra - rb * rb) / (2.0 * d);
+            let h = (ra * ra - along * along).sqrt();
+            let (ux, uy) = (dx / d, dy / d);
+            (a.0 + ux * along - uy * h, a.1 + uy * along + ux * h)
+        };
+        let p = cross(lobes[0], lobes[1]);
+        assert!(
+            (p.0 - 8.03584).abs() < 1e-4 && (p.1 - 25.67669).abs() < 1e-4,
+            "{p:?}"
+        );
+        let centre = cross((lobes[0].0, lobes[0].1 + r), (lobes[1].0, lobes[1].1 + r));
+        assert!((centre.0 - 10.115).abs() < 1e-3 && (centre.1 - 41.327).abs() < 1e-3);
+        let contact = |((cx, cy), radius): ((f64, f64), f64)| {
+            let (dx, dy) = (centre.0 - cx, centre.1 - cy);
+            let l = (dx * dx + dy * dy).sqrt();
+            Point3::new(cx + radius * dx / l, cy + radius * dy / l, 7.5)
+        };
+        // the premise: the ø60 contact lies past that wall's seam
+        let small = contact(lobes[0]);
+        let angle = (small.y - 15.0).atan2(small.x + 20.0).to_degrees();
+        assert!(angle > seam + 5.0 && angle < seam + 7.0, "{angle}");
+        let edge = Curve::from(
+            crate::primitive::api_curves::create_line_segment(
+                Point3::new(p.0, p.1, 0.0),
+                Point3::new(p.0, p.1, 15.0),
+            )
+            .unwrap(),
+        );
+        let walls = lobes.map(|((cx, cy), radius)| wall(&mut k, cx, cy, radius, seam));
+        for first in [0, 1] {
+            let order = [first, 1 - first];
+            let mut surfaces = Vec::new();
+            let mut signs = [0.0; 2];
+            for (rail, &lobe) in order.iter().enumerate() {
+                let (surface, sign) = &walls[lobe];
+                let mut s = SolverOffset::new(
+                    &k,
+                    sign * r,
+                    surface.clone_for_evaluation().unwrap(),
+                    SurfaceId::Free(rail as u32),
+                    SS_UNKNOWN,
+                )
+                .unwrap();
+                s.set_allow_extension(true);
+                surfaces.push(Some(s));
+                signs[rail] = *sign;
+            }
+            let s1 = surfaces.pop().unwrap();
+            let s0 = surfaces.pop().unwrap();
+            let fs = ConstantRadiusAssistedFs::from_parts(
+                1e-6,
+                30.0_f64.to_radians(),
+                2.0_f64.to_radians(),
+                [r, r],
+                [s0, s1],
+                signs,
+                [None, None],
+            );
+            let mut solver = SolverObject::ConstantRadius(Box::new(fs));
+            let mut target = crate::sweep::api_brep::create_linear_sweep(
+                &mut k,
+                &[Some(&edge)],
+                Vec3::new(1.0, 0.0, 0.0),
+                1.0,
+                false,
+            )
+            .unwrap();
+            let t = edge.natural_interval().evaluate(0.5);
+            let section = ball_section_at(
+                &k,
+                &mut target,
+                &mut solver,
+                &edge,
+                t,
+                None,
+                SeamDomain::Wrapped,
+            )
+            .unwrap()
+            .unwrap_or_else(|| {
+                panic!(
+                    "ø60 on rail {}: no section",
+                    order.iter().position(|&l| l == 0).unwrap()
+                )
+            });
+            assert!(
+                ops_of(&mut solver).solver().seam_domain == SeamDomain::Extended,
+                "the flag is restored"
+            );
+            for (rail, &lobe) in order.iter().enumerate() {
+                let uv = section.uv_pos(if rail == 0 {
+                    SrfIndex::First
+                } else {
+                    SrfIndex::Second
+                });
+                let got = walls[lobe].0.evaluate_point(&k, uv).unwrap();
+                let want = contact(lobes[lobe]);
+                assert!(
+                    got.distance(want) < 1e-6,
+                    "first {first} rail {rail}: {got:?} vs {want:?}"
+                );
+            }
+        }
     }
 }

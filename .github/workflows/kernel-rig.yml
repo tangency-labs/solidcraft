@@ -14,46 +14,27 @@
 # - The ladder fails on any case whose status or counts differ from
 #   tests/kernel-cases/ladder/golden.json; a right change is re-recorded (`--record "why"`).
 #
-# The trigger paths are whole folders that hold every area's PATHS (a self-test,
-# scripts/ci/test_kernel_rig_plan.py, checks they do), so a pull request that touches none of
-# them (the UI, docs, packaging) starts no runner at all, and a new area needs no edit here: the
-# plan finds the areas from the folders. Merge groups run the areas their batch's diff reaches, like a
-# pull request. Pushes to main and develop on the same paths, the release gate (release-gate.yml, workflow_call) and a run by hand run
-# every area; those pushes also commit the compiler cache (a Blacksmith sticky disk) that every
-# other run mounts read-only.
+# Pull requests and merge groups run the rig inside CI: ci.yml calls this workflow (workflow_call)
+# for them, and its required `ci` check fails when the rig does. A called workflow sees the
+# caller's event, so the plan below still diffs the pull request or the merge group. A change
+# that reaches no area costs the plan job and the summary, both on the smallest runner, and never
+# blocks. A merge group is diffed from main's tip, not from the queue entry ahead of it, so the
+# rig runs for every group whose batch since main holds a kernel change. Pushes to main and develop on the paths below, the release gate
+# (release-gate.yml, workflow_call) and a run by hand run every area; those pushes also commit
+# the compiler cache (a Blacksmith sticky disk) that every other run mounts read-only.
 name: Kernel rig
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - "crates/kernel/**"
-      - "crates/geom/**"
-      - "crates/smlib/**"
-      - "crates/step/**"
-      - "crates/io/src/**"
-      - "crates/doc/src/**"
-      - "crates/engine/src/**"
-      - "tests/kernel-cases/**"
-      # The vendored kernel: a change here runs every area (tests/kernel-cases/PATHS-ALL).
-      - "solidcore/**"
-      # The rig itself: the grading, the runner, the selection and this workflow.
-      - "apps/solidcraft-cli/src/kernel_cases.rs"
-      - "xtask/src/kernel_cases.rs"
-      - "xtask/src/kernel_ladder.rs"
-      - "scripts/ci/kernel_rig_plan.py"
-      - "scripts/ci/test_kernel_rig_plan.py"
-      - ".github/workflows/kernel-rig.yml"
   push:
     branches: [main, develop]
-    # The same paths as pull_request.
+    # Whole folders that hold every area's PATHS (the self-test checks they do).
     paths:
       - "crates/kernel/**"
       - "crates/geom/**"
       - "crates/smlib/**"
-      - "crates/step/**"
       - "crates/io/src/**"
       - "crates/doc/src/**"
+      - "crates/develop/**"
       - "crates/engine/src/**"
       - "tests/kernel-cases/**"
       # The vendored kernel: a change here runs every area (tests/kernel-cases/PATHS-ALL).
@@ -65,7 +46,8 @@ on:
       - "scripts/ci/kernel_rig_plan.py"
       - "scripts/ci/test_kernel_rig_plan.py"
       - ".github/workflows/kernel-rig.yml"
-  merge_group:
+  # CI (ci.yml) calls this on pull requests and merge groups, so the rig is part of the required
+  # `ci` check; the release gate (release-gate.yml) calls it too.
   workflow_call:
   workflow_dispatch:
 
@@ -74,7 +56,8 @@ permissions:
 
 concurrency:
   # A new push to a pull request replaces its old run.
-  group: kernel-rig-${{ github.event_name }}-${{ github.ref }}
+  # A re-run (attempt 2 or later, often of an older commit) gets a group of its own, so it never cancels the live run for the PR's current head.
+  group: kernel-rig-${{ github.event_name }}-${{ github.ref }}${{ github.run_attempt > 1 && format('-rerun-{0}', github.run_id) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -86,7 +69,8 @@ jobs:
     # Draft pull requests run no CI, as in ci.yml.
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 5
+    # The checkout fetches history without file contents (below), so this takes well under a minute.
+    timeout-minutes: 10
     outputs:
       # The shard matrix (JSON list of areas and the ladder; [] when nothing is selected).
       shards: ${{ steps.plan.outputs.shards }}
@@ -95,19 +79,31 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # A pull request's diff needs its base's history.
+          # A pull request's diff needs its base's history: the commits and trees, not every file
+          # version. A full clone of every blob took over the 5-minute timeout on a 2-vCPU runner and
+          # cancelled the merge queue's rig selection (Select the rig areas) again and again.
           fetch-depth: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && '0' || '1' }}
+          filter: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'blob:none' || '' }}
       - name: Selection self-test
         run: python3 -I scripts/ci/test_kernel_rig_plan.py
       - id: plan
         name: Map the changed files to areas
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
         run: |
-          # Pull requests and merge groups run the areas their diff reaches (a batch that touches no
+          # Pull requests and merge groups run the areas their diff reaches (a change that touches no
           # kernel path runs none); pushes to main, the release gate and a run by hand run every area.
+          # A merge group's base_sha is the queue entry ahead of it, so its own diff is only its pull
+          # request's. Diff it from main's tip instead: the whole batch that would land with it, so
+          # a kernel change ahead in the queue is graded in every group behind it, too.
+          if [ "$EVENT_NAME" = merge_group ]; then
+            git fetch --no-tags --filter=blob:none origin "+$GROUP_BASE_REF:refs/remotes/origin/rig-base"
+            BASE_SHA=$(git merge-base refs/remotes/origin/rig-base "$HEAD_SHA")
+            echo "Merge group: diffing $BASE_SHA ($GROUP_BASE_REF tip) ... $HEAD_SHA"
+          fi
           if [ "$EVENT_NAME" = pull_request ] || [ "$EVENT_NAME" = merge_group ]; then
             git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/rig-paths"
             python3 -I scripts/ci/kernel_rig_plan.py --paths "$RUNNER_TEMP/rig-paths" \
@@ -131,7 +127,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.1
       # Only pushes to main and develop commit the cache; pull requests, merge groups and forks
       # mount a clone and never write back.
       - name: Mount the compiler cache

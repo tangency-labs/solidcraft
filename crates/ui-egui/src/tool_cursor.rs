@@ -64,13 +64,46 @@ fn badge_rect(at: Pos2, bounds: Rect, readout_height: f32) -> Rect {
     Rect::from_min_size(min, vec2(BADGE, BADGE))
 }
 
+/// The badge's rectangle for a pointer at `at`, as [`show`] places it.
+fn badge_at(painter: &egui::Painter, at: Pos2) -> Rect {
+    let t = Tokens::get();
+    // The readout's line height, as `tools::preview` lays it out.
+    let readout = painter.layout_no_wrap("0".into(), egui::FontId::proportional(t.font_small), t.text_dim).size().y;
+    badge_rect(at, painter.clip_rect(), readout)
+}
+
+/// Where a small label next to the pointer (the sketch tools' snap hint: "on", "mid", "H", ...)
+/// goes so the badge does not cover it (#15391): `label` itself when no badge shows, else moved
+/// beside the badge. The badge is drawn last, over everything, so the label has to move.
+pub(crate) fn clear_of_badge(app: &SolveApp, painter: &egui::Painter, view: Rect, label: Rect) -> Rect {
+    if icon(app).is_none() {
+        return label;
+    }
+    let Some(at) = painter.ctx().pointer_hover_pos().filter(|p| view.contains(*p)) else { return label };
+    beside(label, badge_at(painter, at), painter.clip_rect())
+}
+
+/// `label` moved off `badge`: right of it, or left of it when that runs past the right edge of
+/// `bounds`. A label that does not touch the badge stays where it is.
+fn beside(label: Rect, badge: Rect, bounds: Rect) -> Rect {
+    if !label.intersects(badge) {
+        return label;
+    }
+    let mut x = badge.right() + LABEL_GAP;
+    if x + label.width() > bounds.right() {
+        x = badge.left() - LABEL_GAP - label.width();
+    }
+    label.translate(vec2(x - label.left(), 0.0))
+}
+
+/// The gap between the badge and a label moved beside it, in points.
+const LABEL_GAP: f32 = 4.0;
+
 /// Draw the badge for a pointer at `at` (None: the pointer is not over the model).
 pub(crate) fn show(app: &SolveApp, painter: &egui::Painter, at: Option<Pos2>) {
     let (Some(at), Some(icon)) = (at, icon(app)) else { return };
     let t = Tokens::get();
-    // The readout's line height, as `tools::preview` lays it out.
-    let readout = painter.layout_no_wrap("0".into(), egui::FontId::proportional(t.font_small), t.text_dim).size().y;
-    let r = badge_rect(at, painter.clip_rect(), readout);
+    let r = badge_at(painter, at);
     painter.rect(r, t.radius_sm, t.panel.gamma_multiply(0.92), Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
     crate::icons::paint_icon(painter, Rect::from_center_size(r.center(), vec2(ICON, ICON)), icon, 1.0);
     crate::scenario::publish_rect("viewport:tool_cursor", r);
@@ -248,6 +281,51 @@ mod tests {
             assert!(!badge.intersects(readout), "at {at:?}: {badge:?} covers the readout {readout:?}");
             assert!(!badge.contains(at), "at {at:?}: {badge:?} covers the hot spot");
         }
+    }
+
+    /// A label in the badge's corner moves right of the badge, or left of it at the right edge;
+    /// a label clear of the badge stays put (#15391).
+    #[test]
+    fn a_label_under_the_badge_moves_beside_it() {
+        let bounds = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        for at in [pos2(400.0, 300.0), pos2(795.0, 300.0), pos2(400.0, 5.0)] {
+            let badge = badge_rect(at, bounds, 14.0);
+            // Where the sketch tools draw their snap hint: 12 right and 24 up from the point.
+            let label = Rect::from_min_size(at + vec2(12.0, -24.0), vec2(24.0, 14.0));
+            let moved = beside(label, badge, bounds);
+            assert!(!moved.intersects(badge), "at {at:?}: the label {moved:?} is under the badge {badge:?}");
+            if moved != label {
+                assert!(bounds.contains_rect(moved), "at {at:?}: the moved label {moved:?} leaves {bounds:?}");
+            }
+            assert_eq!(moved.top(), label.top(), "at {at:?}: the label keeps its height");
+        }
+        let badge = badge_rect(pos2(780.0, 300.0), bounds, 14.0);
+        let label = Rect::from_min_size(pos2(badge.left() + 2.0, badge.top() + 2.0), vec2(24.0, 14.0));
+        assert!(beside(label, badge, bounds).right() <= badge.left(), "at the right edge the label goes left of the badge");
+        let clear = Rect::from_min_size(pos2(100.0, 100.0), vec2(24.0, 14.0));
+        assert_eq!(beside(clear, badge, bounds), clear);
+    }
+
+    /// While the Line tool shows a snap hint ("H" here), the tool at the cursor does not cover
+    /// it (#15391).
+    #[test]
+    fn the_badge_does_not_cover_the_line_tools_snap_hint() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.tool_cursor = true;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        h.step(&json!({"start": "sketch.line"})).unwrap();
+        let c = h.app.viewport.rect.map(|r| r.center()).unwrap();
+        h.step(&json!({"click": [c.x, c.y]})).unwrap();
+        h.frames(2);
+        // Level with the first point: the Line tool snaps horizontal and says "H".
+        h.step(&json!({"move": {"sketch": [20.0, 0.3]}})).unwrap();
+        h.frames(2);
+        let badge = rect_of("viewport:tool_cursor").expect("the badge is drawn");
+        let hint = rect_of("viewport:snap_hint").expect("the snap hint is drawn");
+        assert!(!hint.intersects(badge), "the badge {badge:?} covers the snap hint {hint:?}");
+        h.step(&json!({"key": "Escape"})).unwrap();
     }
 
     /// A line's coordinate readout starts right of the system arrow, which hangs below and

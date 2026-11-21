@@ -4,12 +4,16 @@ use solidcraft_geom::MeshGeom;
 use std::sync::Arc;
 
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
+// For the test modules below, which take it with `use super::*`.
+#[cfg(test)]
+use serde_json::json;
 use solidcraft_doc::render_settings::{RenderSettings, RenderSetup};
 
 use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::render_camera::{CameraApplied, CameraFitted, CameraInfo, CameraSet, RenderCamera};
+use crate::schema::render_info::{Bounds, CpuResourceProfile, RenderBackends, RenderObject, RenderSceneInfo, SceneBody};
 use crate::schema::render_settings::{RenderSettingsGot, RenderSettingsInfo, RenderSettingsSaved, SETUP_FIELDS, SetupFields, set_message};
 use crate::{Result, Session};
 
@@ -18,7 +22,11 @@ mod coat_bindings;
 mod effects;
 mod environment;
 mod jobs;
-pub(crate) use jobs::{Prepared as PreparedCapture, cancel_params as render_cancel_params, prepare_with_metadata as prepare_capture_with_metadata};
+pub(crate) use jobs::{
+    Prepared as PreparedCapture, cancel_params as render_cancel_params, form_refusal as render_form_refusal,
+    prepare_with_metadata as prepare_capture_with_metadata, read_request as read_render_request, saved_job_refusal as render_saved_job_refusal,
+    started as render_started,
+};
 mod library;
 mod library_data;
 #[cfg(test)]
@@ -80,9 +88,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&crate::schema::TypedContract::<crate::schema::render_lights::ListParams>::new())
         .output(crate::schema::output_schema_for::<crate::schema::render_lights::ListResult>)
         .params("setup?: saved setup name OR settings?: complete RenderSetup snapshot; neither uses defaults. Returns {lights:[{id,kind,name,name_key,number,implicit,intensity,colour,...spatial fields}]}. IDs are kind:zero-based-source-slot, stable across numerical edits but not family changes/reordering/removal/rig replacement; point and spot share punctual slots. Includes implicit default/preset lights. GPU RGB radiance is factored as colour * intensity; area edges are full world-mm vectors. Read-only, no host, camera change, save, render, model evaluation or undo. See docs/render-settings.md."),
-    CommandSpec::new("render.aging.describe","Layered Surface Aging",effects::aging).icon("appearance").noundo().doc_only()
+    CommandSpec::new("render.aging.describe","Layered Surface Aging",crate::checked!("render.aging.describe", effects::aging)).icon("appearance").noundo().doc_only()
+        .contract(&crate::schema::TypedContract::<crate::schema::render_info::NoParams>::new())
+        .output(crate::schema::output_schema_for::<crate::schema::render_info::AgingDescription>)
         .params("Empty object. Read-only original Rust/patina/dust/grime/scratch/chip/fading presets and exact GPU aging contract. UI activation opens the shared Aging tab; edits remain a saved render draft, never engineering geometry or material-property mutation."),
-    CommandSpec::new("render.effects.describe","Lens and Creative Effects",effects::presentation).icon("camera").noundo().doc_only()
+    CommandSpec::new("render.effects.describe","Lens and Creative Effects",crate::checked!("render.effects.describe", effects::presentation)).icon("camera").noundo().doc_only()
+        .contract(&crate::schema::TypedContract::<crate::schema::render_info::NoParams>::new())
+        .output(crate::schema::output_schema_for::<crate::schema::render_info::EffectsDescription>)
         .params("Empty object. Read-only original photographic/creative filter defaults and constraints. UI activation opens shared Effects controls. Saved finishing and exact-master regrading preserve raw EXR bytes; no physical lens or branded-film calibration is implied."),
     CommandSpec::new("render.coat.bind", "Save Clear Coat", crate::checked!("render.coat.bind", coat_bindings::bind)).icon("appearance").doc_only()
         .contract(&crate::schema::TypedContract::<crate::schema::render::CoatBindParams>::new())
@@ -212,9 +224,13 @@ CommandSpec::new("render.settings.capture_hdr", "Save Render Settings with HDR",
     .contract(&resources::CAPTURE_CONTRACT)
     .output(crate::schema::output_schema_for::<crate::schema::render_hdr::HdrCaptured>)
     .params("name, set: typed CPU/GPU setup patch with hdr/environment unset; path: scoped HDR; expected_sha256?: digest returned by render.hdr.inspect (changed sources refuse); rotation_rad?:0, intensity?:1; samples?:1/4/16/64 for CPU only (default16); assume_linear_srgb?:false for GPU only. Captures immutable bytes and saves resource plus setup atomically in one undo, without a host; returns name/setup/resource metadata, never source bytes"),
-CommandSpec::new("render.preflight", "Check Render Request", jobs::preflight).icon("inspect").noundo().doc_only()
+CommandSpec::new("render.preflight", "Check Render Request", crate::checked!("render.preflight", jobs::preflight)).icon("inspect").noundo().doc_only()
+    .contract(&crate::schema::TypedContract::<crate::schema::render_start::RenderRequest>::new())
+    .output(crate::schema::output_schema_for::<crate::schema::render_start::RenderChecked>)
     .params("setup?: saved name OR settings?: full RenderSetup. A typed job selects raster/cpu_raytrace/gpu_path and its numerical options plus embedded HDR before dispatch; only replace and transient studio_weights may accompany it. Without job, the legacy runtime controls below remain available. See docs/render-settings.md. studio_weights?: three finite 0..1 visibility weights for raster or implicit GPU studio sources only; never saved. integrator?: raster (default) or raytrace; progressive?: false (registered GPU path, CPU integrator/LED options are mutually exclusive); texture_filtering?: false (GPU); CPU raytrace.texture_filtering?: false. Explicitly enables ray-footprint mip and bounded anisotropic map filtering on GPU, and bounded anisotropic filtering on CPU. GPU filtering off retains bilinear LOD0; CPU filtering off retains isotropic mip selection, using the coarsest available mip when footprint data is unavailable. samples?: 1..65536; max_depth?: 1..64; seed?: u32 for progressive; raytrace?: bounded runtime progressive/primary_samples/lights/punctual_lights/area_lights/area_samples/seed/exposure_ev/shadows/reflections/anisotropic_faces/emissions/surface_effects/dielectrics/environment options, only with raytrace. CPU raytrace.lens?: {aperture_radius_mm:0..10000000,focus_distance_mm:0.000001..1000000000}; positive aperture requires explicit CPU progressive sampling and a bounded perspective camera; absent/zero keeps the original CPU ray stream. See docs/render-thin-lens.md. CPU raytrace.volume?: one HomogeneousVolume box with world-mm min_mm/max_mm, extinction_per_mm:0..1000, RGB scattering_albedo:0..1 and anisotropy:-0.95..0.95. Positive extinction requires explicit Indirect lighting and cannot combine with Glass/SSS or surface Denoise. Physical eye/pupil prefixes and the orthographic line/box union preserve camera/model framing under existing ray/profile caps. See docs/render-cpu-volume.md. CPU raytrace.sun? uses the shared finite-disk Sun contract; raytrace.sky? uses {gradient,rotation_rad,intensity}. Both require explicit Indirect lighting, and gradient Sky excludes a constant/HDR environment. Their medium NEE uses the HG response/PDF and physical light source; see docs/render-cpu-celestial.md. CPU transparent_background?:false exports straight-alpha primary geometry coverage for fixed/progressive sampling; body/face opacity must remain 1, and active bloom/backdrop/photographic effects require opaque output. CPU raytrace.output?: {tone_map,finishing,backdrop,linear_exr}; shared presentation supports up to 8192 per side and 33554432 output pixels, CPU exposure remains raytrace.exposure_ev; raw FLOAT32 EXR is retained only at final completion. CPU raytrace.budget?: compact (legacy default), studio or workstation; see docs/render-cpu-resource-profiles.md for explicit image/geometry/memory/work limits. CPU raytrace.progressive?: {samples_per_pixel:1..profile limit, seed:u32}; requires primary_samples:1 and selected reflections.samples:1; area/LED sources and certified planar anisotropy/thin-sheet/axis-aligned-box dielectric continuations share the existing bounded transport and compatibility checks. See docs/render-cpu-progressive.md; environment?: {path: scoped HDR, expected_sha256?: inspected digest, rotation_radians: 0, intensity: 1, samples: 16} OR {resource: saved HDR digest, rotation_radians, intensity, samples}; embedded resources cannot combine with path/hash; explicit sRGB/D65 HDR primaries required. Opaque CPU preview with selected mirror/rough-specular reflections and certified planar anisotropy. HDR with rough reflections or anisotropy requires fully metallic selected bodies and all effective faces; unsupported combinations refuse. Optional raytrace.path:{max_depth:1..64} enables CPU diffuse/specular GI with matched rectangle/HDR light and BSDF MIS plus certified closed-mesh Glass. It requires explicit progressive camera sampling, primary_samples:1 and traced shadows; selected reflections and certified anisotropy refuse before HDR IO without changing intent. CPU Path dielectric subsurface?:{scattering_per_mm:0..100,anisotropy:-0.95..0.95} enables homogeneous free-flight/HG walks inside certified closed media; positive rates require denoising off. Contained light connections include scattering survival; closed refractive light connections and combining Glass with external volume remain unsupported. Absent path keeps the old certified thin_sheet/closed_box producer and refuses subsurface intent explicitly. See docs/render-cpu-general-glass.md and render-raytrace-dielectrics.md. CPU emissions are visible radiance and may light neighbors through sampled Path continuation, without mesh-emitter next-event sampling; surface_effects change roughness/shading normals without geometry changes. led_strip?: continuous world-mm LED rectangle recipe; led_samples?: 1/4/16/64 for the whole strip, default16. At most8directional+8punctual+4rectangle/LED sources; shared area N. See docs/render-light-union.md. transparent_background?: false; replace?: false. With progressive:true, raytrace instead accepts GPU dielectrics/clear_coats/textures; environment instead accepts tagged hdr/embedded_hdr/sky with rotation_rad/intensity; file hdr supports expected_sha256, embedded_hdr uses a document resource digest. See docs/render-hdr-resources.md. GPU lens, studio lighting, tone_map, denoise, clamp_indirect?: 0.000001..1000000 (biased; caps each contribution from the first bounce on, keeping its hue; see docs/render-path.md), bounded finishing/backdrop and linear_exr retention are also available. CPU raytrace and GPU top-level controls accept supersampling:1|2 (default 1; doubles internal width and height at 2, averages scene-linear premultiplied samples before tone mapping, exports selected dimensions), denoise_settings:{passes:1..3,strength:0..1,firefly_suppression:bool,optical_filter:bool}, and denoise_diagnostics:false. Optical filtering defaults to true for eligible mirror/glass guides; optical_filter:false restores legacy opaque-only display denoising. Guides and diagnostics retain their independent eligibility policy and conservative highlight protection. CPU raytrace.threads:0..64 selects bounded automatic workers at 0 (default), serial work at 1 or an explicit count from 2 through 64. Resource checks include internal image buffers and worker scratch. See docs/render-quality-controls.md. Both path tracers accept optional metal_energy_compensation: true for rough isotropic metals (inside CPU raytrace or top-level GPU). Both methods accept optional caustics {photons:1..1048576,radius_mm:0.000001..1000000,max_depth:1..64,seed:u32,area_lights?:false,environment?:false,guided_emission?:false,refresh_per_pass?:false} (inside CPU raytrace; top-level GPU). Optical assignments accept optional model {roughness:0..1,dispersion?:{abbe_number:5..200},thin_film?:{ior:1..3,thickness_nm:0..100000}}. CPU advanced models require Path; rough sheets require straight transmitted shadows off. See docs/render-glass-material-models.md. GPU adaptive?: {pilot_samples:16..256,min_samples:16..samples,relative_error:0..1,absolute_error:0.000001..1000000,coverage_error:0.001..0.25} allocates independent production budgets; pilots are discarded, not a certified error guarantee. transmission_samples?:1|2|4 stratifies the first Fresnel branch with extra path cost. volume?:{min_mm:[x,y,z],max_mm:[x,y,z],extinction_per_mm:0..1000,scattering_albedo:[r,g,b],anisotropy:-0.95..0.95} is one finite homogeneous world-mm medium; active media require explicit lighting/environment and refuse glass, denoise and multiple transmission strata. These fields also persist in GPU job.options. See docs/render-materials/TRANSPORT-MASTER-BATCH-2026-10-23.md; see docs/render-transmission.md, render-environment.md, render-runtime-textures.md, render-thin-lens.md, render-studio-lighting.md and render-denoise.md. Optional CPU raytracing requires a raytrace-cpu build and native host, checked before scene capture. Stale geometry is rejected. See docs/render-jobs.md"),
-CommandSpec::new("render.start", "Render Image", jobs::start).key("R").noundo().doc_only().at("RENDER", "IMAGE").icon("render_image")
+CommandSpec::new("render.start", "Render Image", crate::checked!("render.start", jobs::start)).key("R").noundo().doc_only().at("RENDER", "IMAGE").icon("render_image")
+    .contract(&crate::schema::TypedContract::<crate::schema::render_start::RenderRequest>::new())
+    .output(crate::schema::output_schema_for::<crate::schema::render_start::RenderStarted>)
     .params("Same request as render.preflight. Captures an immutable product scene and queues a bounded image job. Returns its session-scoped job identity, captured scene_generation and progress. Does not change the design. See docs/render-jobs.md"),
 CommandSpec::new("render.status", "Render Progress", crate::checked!("render.status", jobs::status)).icon("list").noundo().doc_only()
     .contract(&crate::schema::TypedContract::<crate::schema::render_jobs::StatusParams>::new())
@@ -232,7 +248,9 @@ CommandSpec::new("render.export", "Export Render Image", crate::checked!("render
     .contract(&crate::schema::TypedContract::<crate::schema::render_jobs::ExportParams>::new())
     .output(crate::schema::output_schema_for::<crate::schema::render_jobs::ImageExported>)
     .params("job?: {session, serial, generation} (default selected result), path: destination matching format?: png (default), exr or denoise_mask (PNG extension), overwrite?: false. Guide masks require denoise_diagnostics captured during rendering; their separate bytes, dimensions and SHA are returned under denoise_mask, while frame identifies the parent colour result. EXR requires an opt-in raw linear master retained by that completed CPU or GPU job; never converts PNG pixels. Exports a retained completed image atomically; an existing destination is preserved on failure. See docs/render-jobs.md"),
-CommandSpec::new("render.backends", "Render Backends", backends).icon("list")
+CommandSpec::new("render.backends", "Render Backends", crate::checked!("render.backends", backends)).icon("list")
+    .contract(&crate::schema::TypedContract::<crate::schema::render_info::NoParams>::new())
+    .output(crate::schema::output_schema_for::<crate::schema::render_info::RenderBackends>)
     .noundo()
     .doc_only()
     .params("No parameters. Returns {schema_version: 1, default_backend: builtin, backends: [{id, label, availability, executors: [{id, availability, profiles, limits, scratch}]}]}. Metadata only; does not start rendering or probe a GPU. See docs/render-backends.md"),
@@ -244,7 +262,9 @@ CommandSpec::new("render.settings.set", "Save Render Settings", crate::checked!(
     .contract(&crate::schema::TypedContract::<crate::schema::render_settings::SetParams>::new())
     .output(crate::schema::output_schema_for::<RenderSettingsSaved>)
     .params("name: setup name, set: object of fields to replace (backend, mode, camera, width, height, format, exposure_ev, environment_rotation, environment_intensity, background, job, surfaces, optics, coats, stage). job?: typed active raster/cpu_raytrace/gpu_path configuration with optional validated embedded HDR reference; omitted preserves, null clears, object replaces the complete job. Creates from defaults and saves without a host, validates atomically, one undo step; identical edits are no-ops. See docs/render-settings.md"),
-CommandSpec::new("render.scene", "Inspect Render Scene", scene).noundo().at("RENDER", "SCENE").icon("render_scene")
+CommandSpec::new("render.scene", "Inspect Render Scene", crate::checked!("render.scene", scene)).noundo().at("RENDER", "SCENE").icon("render_scene")
+    .contract(&crate::schema::TypedContract::<crate::schema::render_info::NoParams>::new())
+    .output(crate::schema::output_schema_for::<crate::schema::render_info::RenderSceneInfo>)
     .params("No parameters. Authoritative product-scene metadata, without modelling overlays or mesh payloads. Explicitly settles stale geometry; does not render an image. See docs/render-workspace.md"),
 CommandSpec::new("render.settings.apply", "Apply Render Camera", crate::checked!("render.settings.apply", apply_settings)).icon("camera").noundo().doc_only()
     .contract(&crate::schema::TypedContract::<crate::schema::render_camera::ApplyParams>::new())
@@ -316,15 +336,37 @@ fn scene(s: &mut Session, params: &Value) -> Result<Value> {
             return Err(bad("render.scene", "ambiguous stable occurrence name"));
         }
     }
-    let bodies: Vec<_> = scene
+    let bounds = |b: solidcraft_geom::Aabb3| Bounds { min: b.min.into(), max: b.max.into() };
+    let bodies = scene
         .meshes
         .iter()
         .enumerate()
-        .map(|(ordinal,m)| json!({"ordinal":ordinal,"name":m.name,"stable_target":stable.get(&m.name),"triangles":m.mesh.triangles.len(),"color":m.color,"opacity":m.opacity,"face_appearances":m.faces.len(),"bounds":{"min":m.mesh.bounds().min,"max":m.mesh.bounds().max}}))
-        .collect();
-    Ok(
-        json!({"bodies":bodies,"bounds":if scene.bounds.is_empty() { Value::Null } else { json!({"min":scene.bounds.min,"max":scene.bounds.max}) },"overlays":false}),
-    )
+        .map(|(ordinal, m)| {
+            let stable_target = stable.get(&m.name).map(serde_json::to_value).transpose().map_err(|e| bad("render.scene", e.to_string()))?;
+            Ok(SceneBody {
+                ordinal,
+                name: m.name.clone(),
+                stable_target,
+                triangles: m.mesh.triangles.len(),
+                color: m.color,
+                opacity: m.opacity,
+                face_appearances: m.faces.len(),
+                bounds: bounds(m.mesh.bounds()),
+            })
+        })
+        .collect::<Result<_>>()?;
+    let reply =
+        RenderSceneInfo { bodies, bounds: (!scene.bounds.is_empty()).then(|| bounds(scene.bounds)), overlays: false, param_warnings: Vec::new() };
+    typed_reply("render.scene", reply)
+}
+
+/// A render crate value as a JSON object, for a reply that publishes it as one
+/// ([`crate::schema::render_info::RenderObject`]).
+fn render_object(cmd: &str, value: &impl serde::Serialize) -> Result<RenderObject> {
+    match serde_json::to_value(value).map_err(|e| bad(cmd, e.to_string()))? {
+        Value::Object(fields) => Ok(fields),
+        _ => Err(bad(cmd, "a render description is not an object")),
+    }
 }
 
 fn apply_settings(s: &mut Session, params: &Value) -> Result<Value> {
@@ -412,8 +454,43 @@ fn backends(s: &mut Session, params: &Value) -> Result<Value> {
     if !params.as_object().is_some_and(|p| p.is_empty()) {
         return Err(bad("render.backends", "expected an empty parameter object"));
     }
-    Ok(json!({"schema_version": 1, "default_backend": "builtin", "backends": [s.render_backend()],
-        "cpu_resource_profiles": solidcraft_render::job::CpuBudget::ALL.map(|budget| json!({"id":budget,"limits":budget.limits()}))}))
+    let cmd = "render.backends";
+    let profiles = solidcraft_render::job::CpuBudget::ALL
+        .iter()
+        .map(|budget| {
+            let id = serde_json::to_value(budget).map_err(|e| bad(cmd, e.to_string()))?;
+            Ok(CpuResourceProfile { id, limits: render_object(cmd, &budget.limits())? })
+        })
+        .collect::<Result<_>>()?;
+    let reply = RenderBackends {
+        schema_version: 1,
+        default_backend: "builtin".into(),
+        backends: vec![render_object(cmd, &s.render_backend())?],
+        cpu_resource_profiles: profiles,
+        param_warnings: Vec::new(),
+    };
+    typed_reply(cmd, reply)
+}
+
+/// The placed bodies (by world name) that a saved render setup gives an image texture or optics,
+/// each with the first such setup's name and what it gives: what a file without render setups
+/// cannot hold (GLB export, #1553). A binding whose body is gone binds nothing.
+pub(super) fn bound_bodies(s: &Session, cmd: &str) -> Result<std::collections::BTreeMap<String, (String, &'static str)>> {
+    let mut out = std::collections::BTreeMap::new();
+    let setups = &s.doc.render.setups;
+    if setups.values().all(|x| x.surfaces.is_empty() && x.optics.is_empty()) {
+        return Ok(out);
+    }
+    let names = surface_bindings::targets(s, cmd)?;
+    for (setup, x) in setups {
+        let bound = x.surfaces.iter().map(|b| (&b.target, "an image texture")).chain(x.optics.iter().map(|b| (&b.target, "optics")));
+        for (target, what) in bound {
+            if let Some(name) = names.get(target) {
+                out.entry(name.clone()).or_insert_with(|| (setup.clone(), what));
+            }
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

@@ -48,7 +48,7 @@
 
 use super::p1::{sort_by_param, AdvancedStitch, DefaultStitchCallback, SplitReason, Stitch};
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, ignored, EntityRef, SM_ERR};
+use crate::error::{ignore_status, ignored, EntityRef};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::NotifyOperation;
@@ -60,6 +60,7 @@ use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::topology::brep::p1::{self as bp1, SetRegionVoidType};
+use crate::topology::brep::p6::InfiniteHalf;
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, RegionId, ShellId, VertexId};
 use crate::{Result, SolidError};
@@ -93,12 +94,9 @@ fn deref(what: &'static str) -> SolidError {
     SolidError::invalid_input(OP, what)
 }
 
-fn sm_err() -> SolidError {
-    SolidError::Upstream {
-        code: SM_ERR,
-        operation: OP,
-        entity: None,
-    }
+/// The stitch could not continue, as the phrase says (upstream `SE(SM_ERR)`).
+fn stitch_failed(what: &'static str) -> SolidError {
+    SolidError::heal_failed(OP, what)
 }
 
 /// The edge's curve; upstream dereferences a null curve pointer.
@@ -108,7 +106,9 @@ fn curve_of(b: &Brep, e: EdgeId) -> Result<&Curve> {
 
 /// The tangent of an `Evaluate(t, 1, ..)` result.
 fn tangent(pv: &[Vec3]) -> Result<Vec3> {
-    pv.get(1).copied().ok_or_else(sm_err)
+    pv.get(1)
+        .copied()
+        .ok_or_else(|| stitch_failed("the curve has no tangent"))
 }
 
 fn set_none<T>(list: &mut [Option<T>], i: usize) -> Result<()> {
@@ -188,11 +188,11 @@ impl RadialGlue {
             }
         }
         let axis = self.axis.unitize()?;
-        let start = Self::leaving(k, b, first)?.project_to_plane(axis);
+        let start = Self::into_face(k, b, first)?.project_to_plane(axis);
         let side = axis.cross(start);
         // the angle round the axis from the first face to a face
         let angle = |k: &mut Kernel, b: &mut Brep, at: (EdgeId, f64)| -> Result<f64> {
-            let w = Self::leaving(k, b, at)?.project_to_plane(axis);
+            let w = Self::into_face(k, b, at)?.project_to_plane(axis);
             let a = w.dot(side).atan2(w.dot(start));
             Ok(if a < 0.0 { a + 2.0 * PI } else { a })
         };
@@ -269,8 +269,9 @@ impl RadialGlue {
 
     /// The direction a lamina edge's face leaves the edge at a curve parameter: the
     /// binormal of the edge's first edge use, which points into the face whichever face
-    /// use it is in.
-    fn leaving(k: &Kernel, b: &mut Brep, (e, t): (EdgeId, f64)) -> Result<Vec3> {
+    /// use it is in. Not the direction an edge leaves a vertex in
+    /// ([`crate::query::edge_turn::leaving`]): this one is across the edge, into its face.
+    fn into_face(k: &Kernel, b: &mut Brep, (e, t): (EdgeId, f64)) -> Result<Vec3> {
         let eu = edge::edgeuses(b, e, None, None)?
             .first()
             .copied()
@@ -292,7 +293,7 @@ fn edge_box(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Extent3d> {
             true,
         )?
         .normal
-        .ok_or_else(sm_err)
+        .ok_or_else(|| stitch_failed("the edge has no bounding box"))
 }
 
 /// `SmCurve::ApproximateLength(edge interval, samples)` of the edge's curve.
@@ -460,6 +461,9 @@ impl Stitch<'_> {
         let old_doing_boolean = k.context.doing_boolean();
         k.context.set_doing_boolean(true);
         let r = self.do_stitching_body(k, b, candidate_vertices, candidate_edges, &mut out);
+        // (not upstream, #18166: the joins' covers, on the final trims and faces, while
+        // editing is still enabled)
+        let r = self.finish_joins(k, b, r);
         k.context.set_doing_boolean(old_doing_boolean);
         b.set_editing_enabled(old_editing);
         r.map(|()| out)
@@ -486,10 +490,7 @@ impl Stitch<'_> {
                 // when face is a lamina sliver
                 if face_is_lamina(b, f)? && face_is_degenerate(k, b, f, true, Some(zone_tol))? {
                     // delete Face and its boundary edges and vertices from the Brep
-                    ignore_status(crate::error::passed_on(
-                        self.edit_delete_face(k, b, f, true, true, None, None),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    self.edit_delete_face(k, b, f, true, true, None, None)?;
                 }
             }
         }
@@ -583,12 +584,10 @@ impl Stitch<'_> {
 
             // Check for Vertices coincident with Edges if asked.
             if self.split_edges_with_vertices {
-                // get modified Brep Bounding box (status not checked)
-                let brep_bbox = ignored(crate::error::passed_on(
-                    qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default()),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?
-                .unwrap_or_default();
+                // get modified Brep Bounding box (status not checked upstream; passed on
+                // here, WR-658)
+                let brep_bbox =
+                    qbrep::calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
 
                 // build modified Brep Edge spatial tree (lNumPerNode only sizes the
                 // memory blocks)
@@ -1238,6 +1237,9 @@ impl Stitch<'_> {
                         orientation,
                         dist_to_curve,
                         self.do_region_nesting,
+                        // (one solid with a known outside: no ray at its closing glue)
+                        self.outside
+                            .map_or(InfiniteHalf::Searched, InfiniteHalf::Of),
                         delete,
                         None, // header default pInsideFaceuses = NULL
                     ) {
@@ -1264,7 +1266,9 @@ impl Stitch<'_> {
                             }
                         }
                         Err(err) if err.is_unported_or_cancelled() => return Err(err),
-                        Err(_) if !self.ignore_problems => return Err(sm_err()),
+                        Err(_) if !self.ignore_problems => {
+                            return Err(stitch_failed("the edges could not be glued"))
+                        }
                         Err(_) => {
                             // forget the deleted edge when the failed glue removed it
                             if let Some(slot) = at(&v_edges, deleted_slot)? {
@@ -1333,7 +1337,7 @@ impl Stitch<'_> {
             has_brep = vertex::brep(b, v)?.is_some();
         }
         if !has_brep {
-            return Err(sm_err()); // we'll flag this as an error.
+            return Err(stitch_failed("the topology belongs to no B-rep")); // we'll flag this as an error.
         }
 
         // Sort on (1,2,3), unitized so that parameter differences are 3d distances.
@@ -1580,40 +1584,31 @@ impl Stitch<'_> {
                     let mid = (vertex::point(b, v)? + vertex::point(b, new_v)?) * 0.5;
                     self.edit_set_point(k, b, v, mid)?;
 
-                    // (status not checked)
-                    ignore_status(crate::error::passed_on(
-                        self.edit_glue_vertices(k, b, v, new_v, None),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    // (status not checked upstream; passed on here, WR-658)
+                    self.edit_glue_vertices(k, b, v, new_v, None)?;
                     out.processed.push(v);
                     set_none(verts, ii)?;
 
                     // Set max distance.
                     out.max_vertex_gap = smos_max(out.max_vertex_gap, dist_to_edge);
 
-                    // (statuses not checked)
-                    ignore_status(crate::error::passed_on(
-                        update_object_tolerance(
-                            k,
-                            b,
-                            Some(TopologyToUpdate::Vertex(v)),
-                            dist_to_edge,
-                            0.0,
-                            false,
-                        ),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
-                    ignore_status(crate::error::passed_on(
-                        update_object_tolerance(
-                            k,
-                            b,
-                            Some(TopologyToUpdate::Edge(e)),
-                            dist_to_edge,
-                            0.0,
-                            false,
-                        ),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    // (statuses not checked upstream; passed on here, WR-658)
+                    update_object_tolerance(
+                        k,
+                        b,
+                        Some(TopologyToUpdate::Vertex(v)),
+                        dist_to_edge,
+                        0.0,
+                        false,
+                    )?;
+                    update_object_tolerance(
+                        k,
+                        b,
+                        Some(TopologyToUpdate::Edge(e)),
+                        dist_to_edge,
+                        0.0,
+                        false,
+                    )?;
                 } else if split.reason == SplitReason::FarFromGeom {
                     // Set min distance, if it didn't split due to being too far away
                     // (as opposed to being at a vertex).
@@ -1627,17 +1622,14 @@ impl Stitch<'_> {
                     out.new_edges.push(new_e);
 
                     let e_tol = edge::tolerance(b, e)?;
-                    ignore_status(crate::error::passed_on(
-                        update_object_tolerance(
-                            k,
-                            b,
-                            Some(TopologyToUpdate::Edge(new_e)),
-                            dist_to_edge,
-                            e_tol,
-                            false,
-                        ),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    update_object_tolerance(
+                        k,
+                        b,
+                        Some(TopologyToUpdate::Edge(new_e)),
+                        dist_to_edge,
+                        e_tol,
+                        false,
+                    )?;
 
                     // Also add to main Edges list: might still need processing here.
                     edges.push(Some(new_e));
@@ -1717,15 +1709,13 @@ pub fn solid_stitch_start(k: &Kernel, b: &Brep) -> Result<(f64, f64)> {
 /// compare, no edge splitting and manifold gluing, from a tenth of the B-rep tolerance,
 /// doubling it while lamina edges remain and it is below 1/200 of the bounding box
 /// diagonal. The result is a solid when no lamina edge is left and the B-rep has more
-/// than one region. With
-/// [`UpstreamFixes::stitch_solid_nests_cavities`](crate::kernel::UpstreamFixes::stitch_solid_nests_cavities)
-/// (WR-569) such a solid is then made a nested solid model, so a closed shell inside
-/// another bounds a void.
+/// than one region. Such a solid is then made a nested solid model, so a closed shell
+/// inside another bounds a void (WR-569; upstream leaves it solid).
 ///
 /// # Errors
 ///
 /// Those of `CalculateBoundingBox` and [`Stitch::do_stitching`];
-/// [`SolidError::InvalidInput`] past [`MAX_TOL_DOUBLINGS`]; with the opt-in, those of
+/// [`SolidError::InvalidInput`] past [`MAX_TOL_DOUBLINGS`]; those of
 /// `FindAndSetInfiniteRegion`.
 pub fn stitch_into_solid(k: &mut Kernel, b: &mut Brep) -> Result<AdvancedStitch> {
     stitch_into_solid_with(k, b, None)
@@ -1788,18 +1778,16 @@ pub(crate) fn stitch_into_solid_with(
     }
 
     if num_lamina == 0 && bp1::regions(b, None)?.len() > 1 {
-        // Not upstream (WR-569, opt-in; the fork's tangency-labs/smlib@351c57c): the
-        // stitching found the infinite region but left the regions inside nested closed
-        // shells solid, each shell where the glue put it. A solid is a nested solid model:
-        // inside the outer shell is material, inside a shell within it a void, and so on,
-        // each region's outer shell first.
-        if k.fixes.stitch_solid_nests_cavities {
-            let old = b.editing_enabled();
-            b.set_editing_enabled(false);
-            let r = find_and_set_infinite_region(k, b, None, SetRegionVoidType::NestedSolid, None);
-            b.set_editing_enabled(old);
-            r?;
-        }
+        // Not upstream (WR-569; the fork's tangency-labs/smlib@351c57c): the stitching
+        // found the infinite region but left the regions inside nested closed shells
+        // solid, each shell where the glue put it. A solid is a nested solid model: inside
+        // the outer shell is material, inside a shell within it a void, and so on, each
+        // region's outer shell first.
+        let old = b.editing_enabled();
+        b.set_editing_enabled(false);
+        let r = find_and_set_infinite_region(k, b, None, SetRegionVoidType::NestedSolid, None);
+        b.set_editing_enabled(old);
+        r?;
         out.produces_a_solid = true;
     }
     Ok(out)
@@ -2093,14 +2081,12 @@ mod tests {
     }
 
     /// A cube of side 10 with a cube cavity of side 4, as twelve loose faces: the stitch
-    /// closes both shells. With the opt-in (WR-569, the fork's
-    /// tangency-labs/smlib@351c57c) the region inside the inner shell is a void, as is the
-    /// infinite region; upstream leaves it solid.
+    /// closes both shells. The region inside the inner shell is a void (WR-569, the fork's
+    /// tangency-labs/smlib@351c57c), as is the infinite region; upstream leaves it solid.
     #[test]
     fn stitched_solid_cavity_is_a_void() {
-        let build = |fix: bool| {
+        let build = || {
             let mut k = Kernel::default();
-            k.fixes.stitch_solid_nests_cavities = fix;
             let mut b = crate::topology::brep::p3::new_brep(
                 &mut k,
                 crate::geom::tol::USE_DEFAULT,
@@ -2116,9 +2102,7 @@ mod tests {
             b
         };
         // the infinite region and the cavity are voids, between them the material
-        assert_eq!(void_count(&build(true)), 2);
-        // upstream: only the infinite region
-        assert_eq!(void_count(&build(false)), 1);
+        assert_eq!(void_count(&build()), 2);
     }
 
     /// (#2506) Four loose faces end on the z axis from the origin to (0, 0, 1): two half

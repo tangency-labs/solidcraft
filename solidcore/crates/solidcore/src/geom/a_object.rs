@@ -987,7 +987,7 @@ pub const fn cache_make_or_validate(
 ///
 /// # Errors
 ///
-/// `SM_ERR` ([`SolidError::Upstream`]) when the target is neither a B-rep nor a poly
+/// `SM_ERR` ([`GeomFailure`](crate::error::geom::GeomFailure)) when the target is neither a B-rep nor a poly
 /// B-rep; [`SolidError::InvalidInput`] when a new cache needs source geometry.
 pub fn sag_cache_make_or_validate(
     _cache_type: ObjectCacheType,
@@ -996,8 +996,9 @@ pub fn sag_cache_make_or_validate(
 ) -> Result<Option<CacheId>> {
     // check that object is an SmBrep or SmPolyBrep object
     if target_type != BREP_TYPE && target_type != POLY_BREP_TYPE {
-        return Err(SolidError::sm_err(
+        return Err(SolidError::geom_failed(
             "geom::a_object::sag_cache_make_or_validate",
+            "the target is neither a B-rep nor a poly B-rep",
         ));
     }
     // low work - use OldCache when its given
@@ -1469,7 +1470,7 @@ mod tests {
         );
         assert!(matches!(
             sag_cache_make_or_validate(ObjectCacheType::Brep, REGION_TYPE, Some(id)),
-            Err(SolidError::Upstream { code: SM_ERR, .. })
+            Err(e) if e.upstream_status() == Some(SM_ERR)
         ));
         assert!(matches!(
             get(

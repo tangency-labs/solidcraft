@@ -633,7 +633,7 @@ impl<'a> SweepStore<'a> {
                 use_existing_topology,
                 create_new_breps_for_faces,
             )?
-            .ok_or_else(|| SolidError::null_pointer(OP))
+            .ok_or_else(|| SolidError::sweep_missing(OP, "the merge's result"))
         })
     }
 
@@ -658,7 +658,7 @@ impl<'a> SweepStore<'a> {
                 use_existing_topology,
                 create_new_breps_for_faces,
             )?
-            .ok_or_else(|| SolidError::null_pointer(OP))
+            .ok_or_else(|| SolidError::sweep_missing(OP, "the merge's result"))
         })
     }
 
@@ -784,7 +784,7 @@ impl<'a> SweepStore<'a> {
             .edge(edge.1)?
             .curve
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::sweep_missing(OP, "the edge's curve"))?;
         if let Some(provider) = self.identities.0 {
             return Ok(provider.curve(edge.0, edge.1, curve));
         }
@@ -1085,11 +1085,7 @@ impl SweepAccess for SweepStore<'_> {
                 .ok_or_else(|| invalid("unknown context"))?
                 .kernel;
             if let Body::Hcr(hcr) = &mut e.body {
-                let p = k.fixes.sweep_statuses_pass_on; // fork c8f6a31 (WR-662)
-                crate::error::ignore_status(crate::error::passed_on(
-                    hcr.compute_global_visibility(k),
-                    p,
-                )?)?;
+                hcr.compute_global_visibility(k)?;
             }
             Ok(super::access::SweepScene { brep: scene })
         })();

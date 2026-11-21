@@ -25,7 +25,8 @@ pub fn sweep_helix(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec
 /// [`sweep_helix`] with the profile moved off the axis as it turns: at turn t it first moves
 /// `offset(t)` mm away from the axis (negative: towards it) in its half-plane, `offset` piecewise
 /// linear through `law`'s (turn, offset) pairs, turns ascending within [0, `turns`]. A thread's
-/// groove fading in or out over a runout: SMLib's radial screw sweep.
+/// groove fading in or out over a runout: SMLib's radial screw sweep. `continuous_flanks`
+/// joins the spline walls across cylinder seams; false retains the historical faces.
 pub fn sweep_helix_radial(
     plane: &Plane,
     region: &Region2,
@@ -34,18 +35,16 @@ pub fn sweep_helix_radial(
     pitch: f64,
     turns: f64,
     law: &[(f64, f64)],
+    continuous_flanks: bool,
 ) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "sweep_helix_radial");
-    if law.is_empty() {
-        return sweep_helix(plane, region, axis_origin, axis, pitch, turns);
-    }
     let (k, profile) = helix_profile(plane, region, axis_origin, axis, pitch, turns)?;
     if !law.windows(2).all(|w| matches!(w, [a, b] if b.0 > a.0))
         || law.iter().any(|(t, o)| !(t.is_finite() && o.is_finite() && *t >= 0.0 && *t <= turns))
     {
         return Err(KernelError::Invalid("helix: the radial law's turns must ascend within the sweep's turns".into()));
     }
-    crate::smlib_sweeps::screw_radial(plane, &crate::smlib_sweeps::pieces([&profile]), axis_origin, k, pitch, turns, law)
+    crate::smlib_sweeps::screw_radial(plane, &crate::smlib_sweeps::pieces([&profile]), axis_origin, k, pitch, turns, law, continuous_flanks)
 }
 
 /// A helical sweep's axis and profile (the region's outer loop), checked: finite turns and

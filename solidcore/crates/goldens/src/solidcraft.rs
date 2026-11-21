@@ -1054,6 +1054,18 @@ fn solid(e: &SolidError) -> Run {
                 kind: FitKindName::of(fit.kind),
             },
         },
+        // a typed blend failure reads as the bare `Upstream` it replaced did
+        // ("{operation}: upstream status N[ at entity]"), so a case's expected refusal text
+        // still matches (#13790)
+        e if e.blend_failure().is_some() => match crate::output::blend_status(e) {
+            Some(code) => Run::Error(format!(
+                "{}: upstream status {code}{}",
+                e.operation(),
+                e.entity()
+                    .map_or_else(String::new, |at| format!(" at {at}"))
+            )),
+            None => Run::Error(e.to_string()),
+        },
         _ => Run::Error(e.to_string()),
     }
 }
@@ -1564,6 +1576,7 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
                 orient_profile_perpendicular_to_path: false,
                 move_to_profile: false,
                 profile_at_path_start: false,
+                up: None,
             };
             sweeps::create_curve_sweep(k, &refs, Some(&path), None, None, Some(&options))
                 .map_err(|e| solid(&e))?
@@ -1742,47 +1755,9 @@ fn measure(k: &Kernel, b: &mut Brep) -> Result<Measured, SolidError> {
 /// resolve the same fields).
 fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
     let field = match name {
-        "sweep_frame_on_planar_path_normal" => &mut k.fixes.sweep_frame_on_planar_path_normal,
-        "imprint_extends_edge_to_proto_vertex" => &mut k.fixes.imprint_extends_edge_to_proto_vertex,
-        "imprint_extension_keeps_analytic_curve" => {
-            &mut k.fixes.imprint_extension_keeps_analytic_curve
-        }
-        "delete_vertex_joins_seam_iso_curve" => &mut k.fixes.delete_vertex_joins_seam_iso_curve,
-        "cover_refuses_folded_continuation" => &mut k.fixes.cover_refuses_folded_continuation,
-        "fillet_cleanup_removes_input_slits" => &mut k.fixes.fillet_cleanup_removes_input_slits,
-        "cover_wraps_across_closed_seam" => &mut k.fixes.cover_wraps_across_closed_seam,
-        "fillet_refuse_non_manifold_result" => &mut k.fixes.fillet_refuse_non_manifold_result,
-        "fillet_torus_rail_on_axis" => &mut k.fixes.fillet_torus_rail_on_axis,
-        "cone_parallel_line_midpoint" => &mut k.fixes.cone_parallel_line_midpoint,
-        "fillet_trace_from_tangent_point_toward_next" => {
-            &mut k.fixes.fillet_trace_from_tangent_point_toward_next
-        }
         "analytic_copy_keeps_parameterization" => &mut k.fixes.analytic_copy_keeps_parameterization,
-        "precise_properties_body_length_scale" => &mut k.fixes.precise_properties_body_length_scale,
-        "boolean_wire_edge_keeps_faceuse_shell" => {
-            &mut k.fixes.boolean_wire_edge_keeps_faceuse_shell
-        }
-        "boolean_new_face_closure_both_sides" => &mut k.fixes.boolean_new_face_closure_both_sides,
-        "loops_go_on_round_the_vertex" => &mut k.fixes.loops_go_on_round_the_vertex,
-        "revolve_nested_shells_as_cavities" => &mut k.fixes.revolve_nested_shells_as_cavities,
-        "revolve_splits_curves_on_axis" => &mut k.fixes.revolve_splits_curves_on_axis,
-        "stitch_solid_nests_cavities" => &mut k.fixes.stitch_solid_nests_cavities,
-        "ssi_low_angle_start_on_probation" => &mut k.fixes.ssi_low_angle_start_on_probation,
-        "curve_tight_box_interval_knots" => &mut k.fixes.curve_tight_box_interval_knots,
-        "fillet_tangent_point_one_sided_step" => &mut k.fixes.fillet_tangent_point_one_sided_step,
-        "fillet_rails_meet_at_one_end_point" => &mut k.fixes.fillet_rails_meet_at_one_end_point,
-        "fillet_nx1_tangent_side_edge" => &mut k.fixes.fillet_nx1_tangent_side_edge,
-        "fillet_nx1_tangent_corner_edge" => &mut k.fixes.fillet_nx1_tangent_corner_edge,
-        "fillet_3x2_mixed_concave_side_edge" => &mut k.fixes.fillet_3x2_mixed_concave_side_edge,
-        "fillet_3x2_tangent_side_edge_roles" => &mut k.fixes.fillet_3x2_tangent_side_edge_roles,
-        "fillet_mitre_concave_face_corners" => &mut k.fixes.fillet_mitre_concave_face_corners,
-        "fillet_mitre_gap_patch" => &mut k.fixes.fillet_mitre_gap_patch,
-        "fillet_corner_per_vertex_fan" => &mut k.fixes.fillet_corner_per_vertex_fan,
         "fillet_trace_reaches_rails" => &mut k.fixes.fillet_trace_reaches_rails,
-        "fillet_rail_end_on_continued_surface" => &mut k.fixes.fillet_rail_end_on_continued_surface,
-        "fillet_cliff_overflow" => &mut k.fixes.fillet_cliff_overflow,
         "offset_extension_as_itself" => &mut k.fixes.offset_extension_as_itself,
-        "fillet_run_on_past_far_end_only" => &mut k.fixes.fillet_run_on_past_far_end_only,
         _ => k
             .fixes
             .flag_mut(name)
@@ -2503,12 +2478,10 @@ mod tests {
     #[test]
     fn fixes_are_enabled_by_name() {
         let mut k = Kernel::default();
-        enable_fix(&mut k, "sweep_frame_on_planar_path_normal").unwrap();
-        enable_fix(&mut k, "cover_refuses_folded_continuation").unwrap();
-        enable_fix(&mut k, "fillet_refuse_non_manifold_result").unwrap();
-        assert!(k.fixes.sweep_frame_on_planar_path_normal);
-        assert!(k.fixes.cover_refuses_folded_continuation);
-        assert!(k.fixes.fillet_refuse_non_manifold_result);
+        enable_fix(&mut k, "offset_extension_as_itself").unwrap();
+        enable_fix(&mut k, "analytic_copy_keeps_parameterization").unwrap();
+        assert!(k.fixes.offset_extension_as_itself);
+        assert!(k.fixes.analytic_copy_keeps_parameterization);
         assert!(enable_fix(&mut k, "no_such_fix").is_err());
     }
 
@@ -2528,13 +2501,25 @@ mod tests {
         }
     }
 
+    /// The corpus has no known refusal left (`324-*/round_4_over_hole`, the last, builds
+    /// since the cliff overflow is the only path, tangency-labs/solidcraft#13841): a case
+    /// whose last step fails with a fixed error stands in for one.
     #[test]
     fn a_refusal_defers_only_its_own_step_and_error() {
-        let refused = all()
-            .into_iter()
-            .find(|l| l.id.ends_with("/round_4_over_hole"))
-            .expect("the #422 case")
-            .case;
+        let refused: Case = serde_json::from_value(json!({
+            "name": "a_step_that_fails",
+            "refused_by": {
+                "issue": "tangency-labs/solidcraft#13841",
+                "step": "result",
+                "error": "no body `missing`"
+            },
+            "steps": [
+                {"op": "box", "id": "block", "origin": [0, 0, 0], "size": [40, 20, 10]},
+                {"op": "fillet", "id": "result", "body": "missing", "edges": [[10, 20, 10]], "radius": 4}
+            ],
+            "expect": {"lumps": 1}
+        }))
+        .unwrap();
         assert!(matches!(run_rust(&refused), Run::Deferred(_)));
         let mut no_refusal = refused.clone();
         no_refusal.refused_by = None;
@@ -2552,7 +2537,7 @@ mod tests {
         assert!(matches!(run_rust(&other_step), Run::Error(_)));
         let mut other_error = refused;
         if let Some(r) = other_error.refused_by.as_mut() {
-            r.error = "upstream status 1002".into();
+            r.error = "no body `other`".into();
         }
         assert!(matches!(run_rust(&other_error), Run::Error(_)));
     }

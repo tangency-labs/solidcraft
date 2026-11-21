@@ -23,7 +23,10 @@ fn pv(c: &BSplineCurve, t: f64, from_left: bool) -> Result<(Vec3, Vec3)> {
     let v = c.evaluate(t, 1, from_left, false)?;
     match *v.as_slice() {
         [p, d, ..] => Ok((p, d)),
-        _ => Err(SolidError::sm_err(OP_CORNERS)),
+        _ => Err(SolidError::blend_failed(
+            OP_CORNERS,
+            "the curve has no first derivative",
+        )),
     }
 }
 
