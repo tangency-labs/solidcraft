@@ -135,13 +135,16 @@ fn a_tag_takes_a_seat() {
 // ---- Placing a tool (solid.amalgamate) ----
 
 /// A tool design saved at `path`: `Pocket`, a cylinder r6 from z -4 to 0 (cut), and `Boss`, a
-/// cylinder r3 from z -4 to 6 standing in it (joined), tagged `Cup`; and `Notch`, a 4 mm cube
-/// at x 10..14, y -2..2, z -4..0, tagged `Notch` (cut only, off to one side, so turns show).
+/// cylinder r3 from z -4 to 6 standing in it (joined), tagged `Cup`; `Post`, a cylinder r2 from
+/// z 2 to 7 (joined, clear of the surface), tagged `Stud`; and `Notch`, a 4 mm cube at
+/// x 10..14, y -2..2, z -4..0, tagged `Notch` (cut only, off to one side, so turns show).
 fn tool_design(path: &str) {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"base": [0, 0, -4], "radius": 6, "height": 4, "body_name": "Pocket"}));
     run(&mut s, "solid.cylinder", json!({"base": [0, 0, -4], "radius": 3, "height": 10, "body_name": "Boss", "operation": "new"}));
     run(&mut s, "solid.amalgam_tag", json!({"remove": "Pocket", "add": "Boss", "name": "Cup"}));
+    run(&mut s, "solid.cylinder", json!({"base": [30, 0, 2], "radius": 2, "height": 5, "body_name": "Post", "operation": "new"}));
+    run(&mut s, "solid.amalgam_tag", json!({"add": "Post", "name": "Stud"}));
     run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [10, -2, -4], "body_name": "Notch", "operation": "new"}));
     run(&mut s, "solid.amalgam_tag", json!({"remove": "Notch", "name": "Notch"}));
     run(&mut s, "file.save", json!({"path": path}));
@@ -192,6 +195,25 @@ fn amalgamate_cuts_then_joins_at_every_seed() {
     let doc = solidcraft_io::read_design(&solidcraft_io::write_design(&s.doc).unwrap()).unwrap();
     let opened = Session::opened(doc, None);
     assert!((volume(&opened, "Plate") - want).abs() < 1e-3);
+}
+
+/// An Add copy that touches none of the bodies named for it is not refused: it comes in as a
+/// body of its own, as a join with a tool apart from its target makes it. `Post` (r2, 5 tall:
+/// 20π) floats 2 mm above the plate at `a`; the plate keeps its 100,000 mm³.
+#[test]
+fn an_add_copy_that_touches_nothing_comes_in_on_its_own() {
+    let dir = crate::tests::Folder::new("amalgamate-apart");
+    let file = dir.path("tool.sc");
+    tool_design(&file);
+    let mut s = target();
+    let id =
+        run(&mut s, "solid.amalgamate", json!({"path": file, "tag": "Stud", "seeds": [seed("a")], "add_to": "Plate"}))["feature"].as_u64().unwrap();
+    assert!(s.model.result(id).unwrap().error.is_none());
+    let names = bodies(&s);
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert!((volume(&s, "Plate") - 100_000.0).abs() < 1e-6);
+    let post = names.iter().find(|n| *n != "Plate").unwrap();
+    assert!((volume(&s, post) - 20.0 * std::f64::consts::PI).abs() < 1e-6, "{}", volume(&s, post));
 }
 
 /// Quarter turns and the flip apply to every copy alike. The notch sits 10..14 mm along the
@@ -270,7 +292,7 @@ fn amalgamate_refuses_what_it_cannot_place() {
     let twice = refused(json!({"path": file, "seeds": [seed("a"), seed("a")], "remove_from": "Plate"}));
     assert!(twice.contains("`seeds[1]` is at the same place as an earlier seed"), "{twice}");
     let missing = refused(json!({"path": file, "tag": "Hinge", "seeds": [seed("a")], "remove_from": "Plate"}));
-    assert!(missing.contains("no Amalgam Tag named `Hinge` (it has `Cup`, `Notch`)"), "{missing}");
+    assert!(missing.contains("no Amalgam Tag named `Hinge` (it has `Cup`, `Stud`, `Notch`)"), "{missing}");
     assert!(refused(json!({"path": plain, "seeds": [seed("a")], "remove_from": "Plate"})).contains("has no Amalgam Tag"));
     assert!(refused(json!({"path": file, "seeds": [seed("a")], "remove_from": "Plate", "turns": 4})).contains("turns"));
 }

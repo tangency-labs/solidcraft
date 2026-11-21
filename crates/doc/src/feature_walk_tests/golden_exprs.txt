@@ -465,3 +465,4 @@ repair
     Gap = repair.gap (Length)
   expressions: repair.gap
 amalgam_tag
+amalgamate

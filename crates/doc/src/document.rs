@@ -2535,10 +2535,6 @@ pub enum FeatureKind {
     },
 }
 
-fn is_zero_u32(v: &u32) -> bool {
-    *v == 0
-}
-
 /// A fillet corner set back: the vertex at `vertex`, where every edge is rounded, has its corner
 /// patch start `distance` along each of its edges from the vertex, the rounds running whole up to
 /// their sections there. One distance for all of a corner's edges.

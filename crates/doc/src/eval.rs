@@ -5805,6 +5805,10 @@ fn eval_amalgamate(
     let joined = copies(Role::Add)?;
     if !joined.is_empty() {
         apply_traced(doc, st, f, joined, Operation::Join, &crate::plain::<String, _>(add_to))?;
+        // A copy that touched none of them is a body of its own, not a loose piece of one.
+        for target in add_to {
+            split_off_apart(st, target)?;
+        }
     }
     Ok(())
 }
@@ -6154,34 +6158,8 @@ fn separate_touching(state: &mut ModelState, name: &str) -> Result<Option<KeptSe
     if n < 2 {
         return Ok(None);
     }
-    // Pieces sharing a face are one solid: each group is listed under its least piece.
     let contacts = mb.body.region_contacts()?;
-    let mut root: Vec<usize> = (0..n).collect();
-    let find = |root: &[usize], mut k: usize| {
-        while let Some(&r) = root.get(k).filter(|&&r| r != k) {
-            k = r;
-        }
-        k
-    };
-    for c in contacts.iter().filter(|c| c.contact == Contact::Face) {
-        let [a, b] = c.regions.map(|k| find(&root, k));
-        if let Some(slot) = root.get_mut(a.max(b)) {
-            *slot = a.min(b);
-        }
-    }
-    let mut groups: Vec<Vec<usize>> = Vec::new();
-    let mut group_of: Vec<usize> = Vec::with_capacity(n);
-    let mut by_root: BTreeMap<usize, usize> = BTreeMap::new();
-    for k in 0..n {
-        let g = *by_root.entry(find(&root, k)).or_insert_with(|| {
-            groups.push(Vec::new());
-            groups.len() - 1
-        });
-        if let Some(list) = groups.get_mut(g) {
-            list.push(k);
-        }
-        group_of.push(g);
-    }
+    let (groups, group_of) = face_groups(n, &contacts);
     // The groups each group touches along an edge or at a point (groups never share a face), and
     // the most any two of them share.
     let mut touches: Vec<Vec<usize>> = vec![Vec::new(); groups.len()];
@@ -6235,6 +6213,62 @@ fn separate_touching(state: &mut ModelState, name: &str) -> Result<Option<KeptSe
     let named = named_pieces(mb, pieces, &mut taken);
     state.bodies.splice(i..=i, named);
     Ok(Some(most))
+}
+
+/// The `n` pieces (material regions) of a body in groups: pieces sharing a face are one solid,
+/// one group, listed in the order of their least piece. Also each piece's group.
+fn face_groups(n: usize, contacts: &[solidcore_record::brep::part::RegionContact]) -> (Vec<Vec<usize>>, Vec<usize>) {
+    let mut root: Vec<usize> = (0..n).collect();
+    let find = |root: &[usize], mut k: usize| {
+        while let Some(&r) = root.get(k).filter(|&&r| r != k) {
+            k = r;
+        }
+        k
+    };
+    for c in contacts.iter().filter(|c| c.contact == Contact::Face) {
+        let [a, b] = c.regions.map(|k| find(&root, k));
+        if let Some(slot) = root.get_mut(a.max(b)) {
+            *slot = a.min(b);
+        }
+    }
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    let mut group_of: Vec<usize> = Vec::with_capacity(n);
+    let mut by_root: BTreeMap<usize, usize> = BTreeMap::new();
+    for k in 0..n {
+        let g = *by_root.entry(find(&root, k)).or_insert_with(|| {
+            groups.push(Vec::new());
+            groups.len() - 1
+        });
+        if let Some(list) = groups.get_mut(g) {
+            list.push(k);
+        }
+        group_of.push(g);
+    }
+    (groups, group_of)
+}
+
+/// Amalgamate (#18799): an Add copy that touches none of the bodies named for it comes in as a
+/// body of its own, as a union with a tool apart from its target does. The joined body `name`
+/// keeps the groups of pieces that hold its material from before the feature (and what is joined
+/// to them along a face); every other group becomes a body of its own, named as a cut's pieces
+/// are. Where the body's history doesn't say which pieces are its own, it is left as it is.
+fn split_off_apart(state: &mut ModelState, name: &str) -> Result<()> {
+    let Some(i) = state.bodies.iter().position(|b| b.name == name) else { return Ok(()) };
+    let Some(mb) = state.bodies.get(i).filter(|b| !b.body.is_mesh()) else { return Ok(()) };
+    let n = mb.body.record().material_regions().len();
+    if n < 2 {
+        return Ok(());
+    }
+    let (groups, _) = face_groups(n, &mb.body.region_contacts()?);
+    let Some(own) = groups_from_body(mb, &groups).filter(|own| own.contains(&true) && own.contains(&false)) else { return Ok(()) };
+    let mut kept: Vec<usize> = groups.iter().zip(&own).filter(|(_, o)| **o).flat_map(|(g, _)| g.iter().copied()).collect();
+    kept.sort_unstable();
+    let parts: Vec<Vec<usize>> = std::iter::once(kept).chain(groups.into_iter().zip(&own).filter(|(_, o)| !**o).map(|(g, _)| g)).collect();
+    let pieces = mb.body.parts(&parts)?;
+    let mut taken: std::collections::BTreeSet<String> = state.bodies.iter().map(|b| b.name.clone()).collect();
+    let named = named_pieces(mb, pieces, &mut taken);
+    state.bodies.splice(i..=i, named);
+    Ok(())
 }
 
 /// The pairs of `pieces` (positions) that touch though `touches` (the pieces each touches, as
