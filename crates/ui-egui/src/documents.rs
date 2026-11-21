@@ -521,6 +521,9 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
         app.edit_anchor_hint = None;
     }
     if !presenting {
+        // A joint drag's shown frame stands for this design: it must not stay with the
+        // session, and no drag goes on into the design that comes in.
+        crate::joint_drag::leave(app);
         crate::control_joint_drive::discard(app);
     }
     let work = take_work(app, presenting);
