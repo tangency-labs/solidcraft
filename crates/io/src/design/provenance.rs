@@ -1365,6 +1365,31 @@ mod tests {
         let _ = std::fs::remove_file(&unsigned);
     }
 
+    /// Reading a design for opening gives its document, model, signature presence, provenance
+    /// records and signature check from one reading: a signed file gives no model, its records and
+    /// (when asked) its check, which matches the check of the file on its own.
+    #[test]
+    fn reading_a_design_once_gives_its_model_signature_records_and_check() {
+        let path = std::env::temp_dir().join(format!("solidcraft-read-once-signed-{}.sc", std::process::id()));
+        let bytes = signed(&Document::new("Plate"), &TestSigner::new(7), &ProvenanceChain::default());
+        std::fs::write(&path, &bytes).unwrap();
+        let shown = path.to_string_lossy().into_owned();
+        let file = crate::read_design_file_once(&shown, None::<fn(crate::DesignPreview)>, true).unwrap();
+        assert!(file.signed && file.model.is_none(), "a signed file is evaluated from its timeline");
+        assert_eq!(file.doc.name, "Plate");
+        assert_eq!(file.chain, crate::read_design_provenance_chain(&bytes));
+        assert_eq!(file.report, report(&bytes), "the check is the check of these bytes");
+        assert!(file.report.is_some());
+        let quiet = crate::read_design_file_once(&shown, None::<fn(crate::DesignPreview)>, false).unwrap();
+        assert!(quiet.signed && quiet.report.is_none(), "no check unless asked");
+        let _ = std::fs::remove_file(&path);
+        let unsigned = std::env::temp_dir().join(format!("solidcraft-read-once-unsigned-{}.sc", std::process::id()));
+        std::fs::write(&unsigned, write_design_container(&Document::new("Plate")).unwrap()).unwrap();
+        let file = crate::read_design_file_once(&unsigned.to_string_lossy(), None::<fn(crate::DesignPreview)>, true).unwrap();
+        assert!(!file.signed && file.chain.is_none() && file.report.is_none());
+        let _ = std::fs::remove_file(&unsigned);
+    }
+
     #[test]
     fn a_bound_signing_subkey_verifies_and_reports_the_primary_key() {
         let signer = TestPgpSigner::with_signing_subkey(21, false);

@@ -577,6 +577,18 @@ impl SolidCraftHost {
     }
 }
 
+/// A storage call's error as the plugin gets it: the host's own (a permission, a limit) as it is,
+/// a bad name or range as invalid input it can act on, anything else as the call failing.
+fn storage_error(call: &str, error: crate::EngineError) -> HostError {
+    if let Some(host) = error.host_error() {
+        return host.clone();
+    }
+    match error {
+        crate::EngineError::BadParams { .. } => HostError::InvalidInput { field: call.into(), reason: error.to_string() },
+        error => HostError::CommandFailed { command: call.into(), reason: error.to_string() },
+    }
+}
+
 /// The commands an importer may run on its own design to check it: they read the model, and
 /// `timeline.roll_to` moves only that private session's marker.
 pub const EVALUATE_COMMANDS: &[&str] = &["document.inspect", "inspect.measure", "model.edges", "model.faces", "timeline.roll_to"];
@@ -608,6 +620,21 @@ impl PluginHost for SolidCraftHost {
     }
     fn evaluate_close(&mut self) {
         self.evaluation = None;
+    }
+    fn storage_put_blob(&mut self, name: &str, data: &[u8], cache: bool, append: bool) -> craft_plugin::Result<u64> {
+        let s = self
+            .transaction
+            .as_mut()
+            .ok_or_else(|| HostError::CommandFailed { command: "storage.put-blob".into(), reason: "no active transaction".into() })?;
+        storage::write_blob(s, name, data, cache, append).map_err(|e| storage_error("storage.put-blob", e))
+    }
+    fn storage_get_blob(&mut self, plugin: Option<&str>, name: &str, offset: u64, len: u32) -> craft_plugin::Result<Vec<u8>> {
+        let s = self.transaction.as_ref().unwrap_or(&self.session);
+        storage::read_blob(s, plugin, name, offset, len).map(|read| read.data).map_err(|e| storage_error("storage.get-blob", e))
+    }
+    fn storage_get_document(&mut self, plugin: Option<&str>, offset: u64, len: u32) -> craft_plugin::Result<Vec<u8>> {
+        let s = self.transaction.as_ref().unwrap_or(&self.session);
+        storage::read_document(s, plugin, offset, len).map(|(data, _)| data).map_err(|e| storage_error("storage.get-document", e))
     }
     fn command_catalog(&self) -> Vec<CommandSchema> {
         crate::command_specs()

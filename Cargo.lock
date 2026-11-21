@@ -6310,6 +6310,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tiny-skia",
  "trash",
+ "unicode-normalization",
  "zip",
 ]
 

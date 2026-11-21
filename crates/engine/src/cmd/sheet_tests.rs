@@ -2986,7 +2986,7 @@ fn flat_dxf_preserves_exact_cutout_entities() {
         let mut sk = s.model.state().surface_sheets[0].clone();
         sk.sheet.panels[0].region.holes = vec![hole];
         sk.build().unwrap();
-        super::surface_dxf(s, &sk, &super::DxfOptions::default()).unwrap()
+        super::surface_dxf(s, &sk, &super::DxfOptions::default(), None).unwrap()
     };
     let dxf =
         with_hole(&s, Loop2 { segs: vec![Seg2::Arc { center: Vec2::new(40.0, -30.0), radius: 5.0, start: PI, sweep: 2.0 * PI }] }.ccw().reversed());
@@ -10365,4 +10365,42 @@ fn a_spline_sheet_with_a_notch_at_its_edge_folds() {
         let folded = sheet(Some(depth), true);
         assert!((folded - flat - bend).abs() < 1e-3, "depth {depth}: the fold adds {} not {bend}", folded - flat);
     }
+}
+
+/// #20417: a sheet metal sheet in a moved component folds where its sketch line lies in the
+/// world, not where the line would lie before the move. Sketched outside the moved sheet the
+/// fold is refused; sketched on the moved sheet the sheet folds there.
+#[test]
+fn a_fold_line_sketched_outside_a_moved_component_acts_where_it_lies() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "Plate", "active": true, "thickness": "2 mm", "k_factor": 0.4, "bend_radius": "2 mm"}));
+    run(&mut s, "component.create", json!({"name": "P", "grounded": false}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [120, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base", "name": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "P", "translate": [200, 0, 0]}));
+    run(&mut s, "component.capture_position", json!({}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+
+    // Sketched at world x = 50: does not touch the sheet at world x in [200, 320].
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 2, "name": "FL_Off"}));
+    run(&mut s, "sketch.line", json!({"points": [[50, 0], [50, 60]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let err = s.execute("sheet.fold", &json!({"sketch": "FL_Off", "curve": "l1"})).unwrap_err().to_string();
+    assert!(err.contains("the fold line must lie on a flat face of the sheet"), "{err}");
+
+    // Sketched at world x = 250: lies directly on the sheet (local x = 50 in component P).
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 2, "name": "FL_On"}));
+    run(&mut s, "sketch.line", json!({"points": [[250, 0], [250, 60]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.fold", json!({"sketch": "FL_On", "curve": "l1"}));
+
+    let m = run(&mut s, "inspect.measure", json!({}));
+    let bb = &m["bodies"][0]["bbox"];
+    let min_x = bb["min"][0].as_f64().unwrap();
+    let max_x = bb["max"][0].as_f64().unwrap();
+    assert!(min_x > 240.0 && min_x < 250.0, "min_x: {min_x}");
+    assert!(max_x > 310.0 && max_x < 325.0, "max_x: {max_x}");
 }
