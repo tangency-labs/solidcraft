@@ -332,7 +332,7 @@ pub struct TangentEndRib {
 /// rib's midpoints within tolerance; [`BlendFailure::NotCertified`] (#17744)
 /// where both faces are enclosed and no station count certifies the rib within tolerance;
 /// those of the drops, evaluations and fits.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
+#[allow(clippy::too_many_arguments)] // one upstream routine
 pub fn tangent_end_rib(
     k: &Kernel,
     fillet: &Surface,
@@ -343,6 +343,44 @@ pub fn tangent_end_rib(
     stop: Option<Point3>,
     reverse: bool,
     approx_tol: f64,
+) -> Result<TangentEndRib> {
+    tangent_end_rib_with(
+        k,
+        fillet,
+        end,
+        order,
+        [tangent_end, other_end],
+        stop,
+        reverse,
+        approx_tol,
+        &|solve, t, alpha, uv| solve(t, alpha, uv),
+    )
+}
+
+/// The exact rib point at `t` from a guess `(alpha, end uv)`: `(alpha, end uv, point)`, or
+/// `None` where its solve stops.
+type RibSolve<'a> = dyn Fn(f64, f64, Point2) -> Result<Option<(f64, Point2, Point3)>> + 'a;
+
+/// How [`tangent_end_rib_with`] takes each exact rib point: given the routine's own solve and
+/// the point's `(t, alpha, end uv)`.
+type RibSolveWith<'a> =
+    dyn Fn(&RibSolve<'_>, f64, f64, Point2) -> Result<Option<(f64, Point2, Point3)>> + 'a;
+
+/// [`tangent_end_rib`], each of its exact rib points (the stations', the midpoints' and the
+/// certificate's) taken through `solve_with`, given the routine's own solve and the point's
+/// `(t, alpha, end uv)`. [`tangent_end_rib`] passes the solve on as it is; a test stops chosen
+/// solves to reach the refinement's ends.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
+fn tangent_end_rib_with(
+    k: &Kernel,
+    fillet: &Surface,
+    end: &Surface,
+    order: u32,
+    [tangent_end, other_end]: [Point3; 2],
+    stop: Option<Point3>,
+    reverse: bool,
+    approx_tol: f64,
+    solve_with: &RibSolveWith<'_>,
 ) -> Result<TangentEndRib> {
     // both ends on the fillet surface and on the end surface
     let fil_dom = fillet.natural_uv_domain_with_nurb(k)?;
@@ -550,7 +588,7 @@ pub fn tangent_end_rib(
     // the exact rib point at t, from a guess; on the other end's side of the tangent end;
     // settled where both faces are enclosed (#17744, [`settled_point`]), upstream's point
     // where a face is not
-    let solve = |t: f64, alpha: f64, uv: Point2| -> Result<Option<(f64, Point2, Point3)>> {
+    let exact = |t: f64, alpha: f64, uv: Point2| -> Result<Option<(f64, Point2, Point3)>> {
         let sigma = sigma_at(t);
         let Some(point) = tangent_end_rib_point(k, fillet, end, section, sigma, alpha, uv)? else {
             return Ok(None);
@@ -564,6 +602,7 @@ pub fn tangent_end_rib(
         #[allow(clippy::neg_cmp_op_on_partial_ord)]
         Ok(Some(found).filter(|&(a, _, _)| !((a - alpha0) * (alpha1 - alpha0) <= 0.0)))
     };
+    let solve = |t: f64, alpha: f64, uv: Point2| solve_with(&exact, t, alpha, uv);
     let rib_newton = |t: f64, y: [f64; 3]| -> Result<Option<[f64; 3]>> {
         let [a, u, v] = y;
         Ok(solve(t, a, Point2::new(u, v))?.map(|(a, e, _)| [a, e.x, e.y]))
@@ -1164,6 +1203,56 @@ mod tests {
     /// misses the bump's third-derivative jumps by more at a span's midpoint, so no station
     /// count fits it. Not within the tolerance, with its stations and halvings, keeping
     /// upstream's `SM_ERR`.
+    /// A regular rib on a face not enclosed (the offset of the flat fillet; the rib is a
+    /// line, which any count fits) whose first station stops at every span count up to 512,
+    /// so each moves on to the next, and whose first midpoint stops at 1024 spans, the cap,
+    /// after all its stations solved: the fit built there is never measured. The stopped
+    /// midpoint is reported at its t = 1/2048, keeping upstream's `SM_ERR`, not as a fit past
+    /// its cap.
+    #[test]
+    fn a_rib_whose_last_midpoint_solve_stops_names_the_midpoint() {
+        let k = Kernel::default();
+        let (plane, end) = bumped_rib_surfaces(0.0);
+        let fillet = Surface::from(
+            crate::surface::offset_surface::OffsetSurface::new(
+                &k,
+                0.1,
+                plane,
+                true,
+                crate::surface::offset_surface::SS_UNKNOWN,
+            )
+            .unwrap(),
+        );
+        let c = fillet.evaluate_point(&k, Point2::new(0.5, 0.5)).unwrap().z;
+        let (p, q) = (Point3::new(-0.5, 0.0, c), Point3::new(0.5, 1.0, c));
+        // the first station of 1024 spans is the first solve let through; after it, only the
+        // first midpoint, 1/2048, stops
+        let at_cap = std::cell::Cell::new(false);
+        let stopping = |solve: &RibSolve<'_>, t: f64, alpha: f64, uv: Point2| {
+            if t == 1.0 / 1024.0 {
+                at_cap.set(true);
+            }
+            if !at_cap.get() || t == 1.0 / 2048.0 {
+                return Ok(None);
+            }
+            solve(t, alpha, uv)
+        };
+        let err = tangent_end_rib_with(&k, &fillet, &end, 2, [p, q], None, false, 1e-6, &stopping)
+            .unwrap_err();
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::RibStationNotSolved { t: 1.0 / 2048.0 }),
+            "{err:?}"
+        );
+        assert!(!matches!(
+            err.blend_failure(),
+            Some(BlendFailure::RibFitCap { .. })
+        ));
+        assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR));
+        // the same rib through the routine's own solve builds
+        assert!(tangent_end_rib(&k, &fillet, &end, 2, p, q, None, false, 1e-6).is_ok());
+    }
+
     #[test]
     fn a_rib_on_a_face_not_enclosed_that_no_station_count_fits_names_the_cap() {
         let k = Kernel::default();
