@@ -54,7 +54,6 @@ const PROFILE_KEYS: &[&str] = &[
     "design_reuse_views",
     "design_sub_tab_render",
     "design_sub_tab_sheets",
-    "design_sub_tab_sketches",
     "design_views_as_tabs",
     "dialog_buttons",
     "direct_interaction",

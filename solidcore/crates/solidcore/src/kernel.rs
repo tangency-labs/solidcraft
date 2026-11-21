@@ -132,7 +132,7 @@ impl Rng {
 /// Memoisation caches owned by a [`Kernel`] (upstream `SmCacheMgr*`).
 ///
 /// Clearing must never change results, only speed.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct Caches {
     /// Not upstream (#2568): the results of `SmBSplineCurve::AssertValid`'s global
@@ -140,12 +140,32 @@ pub struct Caches {
     /// is not solved again. A [`RefCell`] so the check can fill it through the `&Kernel`
     /// it takes (the kernel stays `Send`; it is not shared between threads).
     pub(crate) curve_analysis: RefCell<crate::nurbs::b_spline_curve::analysis::AnalysisMemo>,
+    /// Not upstream (#18166): whether a lazily built UV trim raises its edge's tolerance by
+    /// the trim's proved distance from the edge (`topology::edgeuse::p3::trim_raise_distance`),
+    /// as it does by default, or by upstream's sampled distance, as a file's translation asks
+    /// through [`Kernel::with_sampled_trim_raise`]. Crate-private: this is not a kernel
+    /// option, only the import's narrow seam. (tangency-labs/solidcore#3368 makes the proved
+    /// raise fast enough for import and removes the sampled path.)
+    pub(crate) prove_lazy_trim_raise: bool,
+}
+
+impl Default for Caches {
+    fn default() -> Self {
+        Self {
+            curve_analysis: RefCell::default(),
+            prove_lazy_trim_raise: true,
+        }
+    }
 }
 
 impl Caches {
-    /// Drops all cached data.
+    /// Drops all cached data. The trim raise's mode stays: clearing a kernel's caches must
+    /// change no result.
     pub fn clear(&mut self) {
-        *self = Self::default();
+        *self = Self {
+            prove_lazy_trim_raise: self.prove_lazy_trim_raise,
+            ..Self::default()
+        };
     }
 }
 
@@ -989,6 +1009,28 @@ impl Kernel {
             #[cfg(feature = "wr57-replay")]
             replay: crate::surface::surface::replay::ReplaySeam::default(),
         }
+    }
+
+    /// Internal to file import, not a kernel option: runs `f` with lazily built UV trims
+    /// raised by upstream's sampled distance instead of #18166's proved one, then restores
+    /// the proved raise, whether `f` returns a value or an error.
+    ///
+    /// A file's translation builds every trim of every face it reads, and proving each one
+    /// cost many times the translation (a 561-part assembly opened in 126 s instead of
+    /// 20 s). Its trims are then raised as before #18166. A panic instead drops the kernel
+    /// (solidcraft-smlib's `call_on` never reuses a kernel a panic interrupted), so no
+    /// kernel keeps sampled trims past the import.
+    ///
+    /// Do not call this outside file import: https://github.com/tangency-labs/solidcore/issues/3368
+    /// makes the proved raise fast enough for import and then removes this path, so one
+    /// implementation remains.
+    #[doc(hidden)]
+    pub fn with_sampled_trim_raise<T>(&mut self, f: impl FnOnce(&mut Kernel) -> T) -> T {
+        let proved = self.caches.prove_lazy_trim_raise;
+        self.caches.prove_lazy_trim_raise = false;
+        let out = f(self);
+        self.caches.prove_lazy_trim_raise = proved;
+        out
     }
 
     /// What the profiler recorded since the last call (feature `profile`;
