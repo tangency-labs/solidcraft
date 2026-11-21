@@ -3434,13 +3434,25 @@ mod tests {
             .unwrap();
         let (u, v) = (domain.u_interval(), domain.v_interval());
         let line = |a, z, c, w| {
-            Curve::from(Line::from_points(Point3::new(a, z, 0.0), Point3::new(c, w, 0.0), 2))
+            Curve::from(Line::from_points(
+                Point3::new(a, z, 0.0),
+                Point3::new(c, w, 0.0),
+                2,
+            ))
         };
         for at in [u.min(), u.max()] {
             let trim = line(at, v.min(), at, v.max());
-            assert_eq!(imported_trim_shift(&k, &b, face, &trim).unwrap(), Some(Vec3::ZERO));
+            assert_eq!(
+                imported_trim_shift(&k, &b, face, &trim).unwrap(),
+                Some(Vec3::ZERO)
+            );
         }
-        let trim = line(u.max() - 0.1 * u.length(), v.min(), u.max() + 0.1 * u.length(), v.max());
+        let trim = line(
+            u.max() - 0.1 * u.length(),
+            v.min(),
+            u.max() + 0.1 * u.length(),
+            v.max(),
+        );
         assert_eq!(imported_trim_shift(&k, &b, face, &trim).unwrap(), None);
         for periods in [-2.0, 1.0, 3.0] {
             let shift = periods * u.length();

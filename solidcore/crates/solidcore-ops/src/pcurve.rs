@@ -97,10 +97,17 @@ pub fn complete_periodic_seams(
     let mut kernel = solidcore::Kernel::default();
     let (mut body, order) =
         to_kernel(&mut kernel, record, true).map_err(PeriodicSeamError::Conversion)?;
-    let mut origins: BTreeMap<_, _> =
-        order.faces.iter().enumerate().map(|(i, &f)| (f, i)).collect();
+    let mut origins: BTreeMap<_, _> = order
+        .faces
+        .iter()
+        .enumerate()
+        .map(|(i, &f)| (f, i))
+        .collect();
     for i in targets {
-        let f = *order.faces.get(i).ok_or(PeriodicSeamError::InputFaceLost(i))?;
+        let f = *order
+            .faces
+            .get(i)
+            .ok_or(PeriodicSeamError::InputFaceLost(i))?;
         let pieces =
             solidcore::topology::face::p1::complete_imported_face_seams(&mut kernel, &mut body, f)
                 .map_err(PeriodicSeamError::Topology)?;
@@ -113,7 +120,12 @@ pub fn complete_periodic_seams(
     let faces = order
         .faces
         .iter()
-        .map(|&f| origins.get(&f).copied().ok_or(PeriodicSeamError::OutputFaceLost(f)))
+        .map(|&f| {
+            origins
+                .get(&f)
+                .copied()
+                .ok_or(PeriodicSeamError::OutputFaceLost(f))
+        })
         .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(Some((completed, faces)))
 }

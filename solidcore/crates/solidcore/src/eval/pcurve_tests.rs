@@ -1021,13 +1021,20 @@ fn stored_trim_hulls_leaving_a_base_period_request_a_topology_edit() {
     assert!(leaves_base_period(domain, &line([3.9, 0.], [4.1, 3.])));
     assert!(leaves_base_period(domain, &line([-0.1, 0.], [0.1, 3.])));
     // The analogous cut in v is handled the same way; an open direction is not a seam.
-    let Surface::Spline { u_knots, v_knots, points } = &surface else {
+    let Surface::Spline {
+        u_knots,
+        v_knots,
+        points,
+    } = &surface
+    else {
         unreachable!()
     };
     let transposed = Surface::Spline {
         u_knots: v_knots.clone(),
         v_knots: u_knots.clone(),
-        points: (0..2).map(|j| points.iter().map(|row| row[j]).collect()).collect(),
+        points: (0..2)
+            .map(|j| points.iter().map(|row| row[j]).collect())
+            .collect(),
     };
     assert!(leaves_base_period(
         SurfaceEval::new(&transposed).unwrap().domain(),

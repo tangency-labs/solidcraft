@@ -1027,7 +1027,12 @@ fn periodic_seam_completion_splits_real_boundaries_and_keeps_their_shell() {
             edge: i as u32,
             forward: directions[i],
             pcurve: Curve2::Spline {
-                knots: vec![intervals[i][0], intervals[i][0], intervals[i][1], intervals[i][1]],
+                knots: vec![
+                    intervals[i][0],
+                    intervals[i][0],
+                    intervals[i][1],
+                    intervals[i][1],
+                ],
                 points: pc[i].to_vec(),
             },
         })
@@ -1055,11 +1060,17 @@ fn periodic_seam_completion_splits_real_boundaries_and_keeps_their_shell() {
         edges,
         vertices,
     };
-    let (completed, origins) = crate::pcurve::complete_periodic_seams(&source).unwrap().unwrap();
+    let (completed, origins) = crate::pcurve::complete_periodic_seams(&source)
+        .unwrap()
+        .unwrap();
     assert_eq!(origins, [0, 0]);
     assert_eq!(completed.shells.len(), 1);
     assert_eq!(
-        (completed.faces.len(), completed.edges.len(), completed.vertices.len()),
+        (
+            completed.faces.len(),
+            completed.edges.len(),
+            completed.vertices.len()
+        ),
         (2, 7, 6)
     );
     crate::record_check::validate(&completed).unwrap();
@@ -1071,7 +1082,9 @@ fn periodic_seam_completion_splits_real_boundaries_and_keeps_their_shell() {
         assert!((x - r).abs() < 1e-9 && y.abs() < 1e-9);
         assert!(z.abs() < 1e-9 || (z - h).abs() < 1e-9);
     }
-    assert!(crate::pcurve::complete_periodic_seams(&completed).unwrap().is_none());
+    assert!(crate::pcurve::complete_periodic_seams(&completed)
+        .unwrap()
+        .is_none());
     let (body, _) = Body::from_record(&completed, true).unwrap();
     let check = body.check(CheckLevel::All).unwrap();
     assert!(check.is_valid(), "{check}");

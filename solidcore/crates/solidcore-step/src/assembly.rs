@@ -1073,12 +1073,8 @@ impl<'t> Assembly<'t> {
                 .iter()
                 .map(|&i| face_origin.get(i).copied().ok_or_else(|| pcurve::PeriodicSeamError::InputFaceLost(i).to_string()))
                 .collect::<R<Vec<_>>>()?;
-            turned_faces = from
-                .iter()
-                .enumerate()
-                .filter(|(_, i)| turned_faces.contains(&(**i as u32)))
-                .map(|(i, _)| index(i))
-                .collect::<R<Vec<_>>>()?;
+            turned_faces =
+                from.iter().enumerate().filter(|(_, i)| turned_faces.contains(&(**i as u32))).map(|(i, _)| index(i)).collect::<R<Vec<_>>>()?;
             brep = completed;
         }
         solidcore_ops::record_check::validate(&brep).map_err(|e| format!("the record is invalid: {e}"))?;
