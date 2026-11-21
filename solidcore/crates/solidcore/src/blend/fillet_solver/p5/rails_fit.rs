@@ -47,6 +47,7 @@ use crate::kernel::Kernel;
 use crate::math::Point3;
 use crate::math::BIG_DOUBLE;
 use crate::topology::edgeuse::p2 as eu2;
+use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use crate::topology::face::p4 as face_p4;
 use crate::topology::{edge, edgeuse::p1 as eu, Brep, EdgeId, FaceId};
 
@@ -78,6 +79,25 @@ pub struct RailsFit {
     /// side of the rail. The face is smaller than the blend beyond both ends, not cut off
     /// by a cliff between them.
     pub wraps_past_both_ends: bool,
+}
+
+/// Compare the adjacent face-use normals at this boundary contact, not elsewhere
+/// along the edge: a curved boundary can be smooth at one point and sharp at another.
+fn rim_is_smooth_at(
+    k: &Kernel,
+    target: &mut Brep,
+    e: EdgeId,
+    parameter: f64,
+    tangency_tol: f64,
+) -> Result<bool> {
+    let primary = eu::primary_edgeuse(target, e)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the rim's primary edge use"))?;
+    let radial = eu::radial(target, primary)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the rim's radial edge use"))?;
+    let options = BinormalOptions::default();
+    let first = evaluate_binormal(k, target, primary, parameter, false, &options)?.face_normal;
+    let second = evaluate_binormal(k, target, radial, parameter, false, &options)?.face_normal;
+    Ok(first.angle_between(second)? <= tangency_tol)
 }
 
 /// A closed rail touching a sharp rim without crossing it leaves two touching loops.
@@ -126,23 +146,34 @@ fn closed_rail_touches_rim(
                 continue;
             };
             let edges = match (point.point_class(), object.target_entity()?) {
-                (PointClassType::Edge, EntityRef::Edge(e)) => vec![e],
+                (PointClassType::Edge, EntityRef::Edge(e)) => {
+                    if !point.are_parameters_set() {
+                        return Err(SolidError::blend_missing(OP, "the rim contact's parameter"));
+                    }
+                    // The classifier has already located the contact on this edge.
+                    vec![(e, point.t_param())]
+                }
                 (PointClassType::Vertex, EntityRef::Vertex(v)) => {
                     let mut incident = Vec::new();
                     for e in face_p4::edges(target, face, None, false, None)? {
                         let (a, b) = edge::start_end_vertices(target, e)?;
-                        if a == Some(v) || b == Some(v) {
-                            incident.push(e);
+                        let interval = edge::interval(target, e)?;
+                        if a == Some(v) {
+                            incident.push((e, interval.min()));
+                        }
+                        // At a closed edge's seam, check both one-sided endpoints.
+                        if b == Some(v) {
+                            incident.push((e, interval.max()));
                         }
                     }
                     incident
                 }
                 _ => continue,
             };
-            for e in edges {
+            for (e, parameter) in edges {
                 if e != filleted
                     && !edge::face_on_both_sides(target, e, face)?
-                    && !test_manifold_tangent_rollover(k, target, e, tangency_tol)?.0
+                    && !rim_is_smooth_at(k, target, e, parameter, tangency_tol)?
                 {
                     return Ok(true);
                 }

@@ -216,12 +216,35 @@ fn hole_rim_touching_the_outer_loop_is_refused_with_a_fit() {
 fn hole_rim_just_below_the_contact_builds_a_valid_solid() {
     let mut k = kernel(|f| *f = UpstreamFixes::all());
     let (mut b, rim) = cube_with_round_hole(&mut k);
-    fillet_edges(&mut k, &mut b, &[rim], 2.499, 1, 1, 1.0).unwrap();
+    let r = 2.499;
+    fillet_edges(&mut k, &mut b, &[rim], r, 1, 1, 1.0).unwrap();
     assert!(is_manifold_solid(&b).unwrap());
+    // Top, round, bore, four sides and bottom: the round adds one face to the bored cube.
+    assert_eq!(b.faces().ids().count(), 8);
     let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
         .unwrap()
         .lines();
     assert!(lines.is_empty(), "{lines:?}");
+
+    // In radial distance x from the bore and depth from the top, the removed section
+    // is the r-square minus the quarter disk centred at (r, r). Its area is
+    // A = r^2 (1 - pi/4). Its first moment in x is the square's r^3/2 minus
+    // the quarter disk's (pi r^2/4)(r - 4r/(3pi)): M = r^3 (5/6 - pi/4).
+    // Thus the centroid's radius is R + M/A = R + r - r/(6(1 - pi/4)).
+    // Pappus gives the removed ring's volume as 2 pi A times that radius.
+    let pi = std::f64::consts::PI;
+    let hole_radius = 2.5;
+    let area = r * r * (1.0 - pi / 4.0);
+    let centroid = hole_radius + r - r / (6.0 * (1.0 - pi / 4.0));
+    let expected = 1000.0 - pi * hole_radius * hole_radius * 10.0 - 2.0 * pi * area * centroid;
+    let got = volume(&k, &mut b);
+    // The round's area is below 85 mm^2; its 4e-5 mm construction tolerance changes
+    // volume by under 0.0034 mm^3, plus the integrator's 1e-6. 0.01 is still far below
+    // the roughly 26 mm^3 removed, so a no-op or a round of the wrong size fails.
+    assert!(
+        (got - expected).abs() < 0.01,
+        "volume {got}, expected {expected}"
+    );
 }
 
 // ---- WR-303: the end of a round that crosses more than one face at a three-edge vertex ----
