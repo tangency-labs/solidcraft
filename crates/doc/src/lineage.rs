@@ -167,6 +167,22 @@ impl Lineage {
             })
             .collect()
     }
+
+    /// [`Lineage::lumps`] for pieces that become bodies of their own rather than one body's lumps: each piece is
+    /// named through a stage of its own, so [`order_lumps`] never trades their body names (a frame tube split where
+    /// another overlaps it keeps its pieces in order along its line, #4003).
+    pub(crate) fn pieces(whole: &Body, lineage: Option<&Lineage>, pieces: &[Body]) -> Vec<Option<Lineage>> {
+        let Some(lineage) = lineage else { return vec![None; pieces.len()] };
+        pieces
+            .iter()
+            .map(|piece| {
+                let history = piece.history()?.clone();
+                let body = crate::ModelBody::new(String::new(), whole.clone(), 0);
+                let stage = Arc::new(Operand::Stage(Box::new(Stage { body, lineage: lineage.clone(), names: OnceLock::new() })));
+                (history.operands == 1).then(|| Lineage { history, operands: vec![stage] })
+            })
+            .collect()
+    }
 }
 
 /// A body made during a feature, with its lineage (`None`: not known; it is then named from

@@ -6215,6 +6215,7 @@ dependencies = [
  "toml_edit",
  "wat",
  "web-time",
+ "zip",
 ]
 
 [[package]]
