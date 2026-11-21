@@ -3949,13 +3949,12 @@ mod tests {
         );
     }
 
+    /// A cap circle: its planar face, its curve and the curve's interval.
+    type CapCircle = (crate::topology::FaceId, BSplineCurve, [f64; 2]);
+
     /// A cylinder of radius 12.5 (a round tube's profile, #20373): each of its two cap
     /// circles (an ellipse's B-spline, with its interval) and its planar cap face.
-    fn cap_circles() -> (
-        Kernel,
-        crate::topology::Brep,
-        Vec<(crate::topology::FaceId, BSplineCurve, [f64; 2])>,
-    ) {
+    fn cap_circles() -> (Kernel, crate::topology::Brep, Vec<CapCircle>) {
         use crate::curve::curve::p2::CurveKind;
         let mut k = Kernel::default();
         let b = crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 12.5, 50.0)
