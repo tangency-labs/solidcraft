@@ -149,14 +149,8 @@ fn exhausted(limit: &str, allowed: u64) -> String {
 /// The capabilities this host serves, as name and `major.minor`. Each is a set of WIT interfaces
 /// a plugin names in its manifest's `capabilities` list. While a major version is 0, a minor
 /// version may break the one before it, so 0.x matches only the same minor.
-pub const CAPABILITIES: &[(&str, (u32, u32))] = &[
-    ("commands", (0, 2)),
-    ("design", (0, 1)),
-    ("evaluate", (0, 2)),
-    ("formats", (0, 2)),
-    ("storage", (0, 1)),
-    ("workspaces", (0, 1)),
-];
+pub const CAPABILITIES: &[(&str, (u32, u32))] =
+    &[("commands", (0, 2)), ("design", (0, 1)), ("evaluate", (0, 2)), ("formats", (0, 2)), ("storage", (0, 1)), ("workspaces", (0, 1))];
 /// Older versions of [`CAPABILITIES`] the host still serves: plugins built against
 /// `craft:plugin@0.1.0` ([`WIT_0_1`]) run unchanged.
 pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1))];
