@@ -167,6 +167,29 @@ fn a_sketch_curve_in_the_viewport_offers_the_sketch_menu() {
     assert!(!editing.iter().any(|i| i.label == "Edit Sketch"), "{:?}", labels(&editing));
 }
 
+/// The History bar names the edit item as the Browser does: Edit Sketch on a sketch, Edit
+/// Feature on any other feature (#14366).
+#[test]
+fn the_history_bar_offers_edit_sketch_on_a_sketch() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("solid.extrude", json!({"sketch": "Base", "distance": 10, "name": "Block"})).unwrap();
+    let id = |app: &SolveApp, name: &str| app.session.doc.features.iter().find(|f| f.name == name).unwrap().id;
+    let (sketch, block) = (id(&app, "Base"), id(&app, "Block"));
+    let labels = |v: &[Item]| v.iter().map(|i| i.label.clone()).collect::<Vec<_>>();
+    let on_sketch = context_menu::items(&app, &Target::Timeline { feature: sketch });
+    assert!(!on_sketch.iter().any(|i| i.label == "Edit Feature"), "{:?}", labels(&on_sketch));
+    let edit = find(&on_sketch, "Edit Sketch");
+    assert_eq!((edit.icon.as_str(), edit.params.clone()), ("sketch", Some(json!({"feature": sketch}))));
+    let on_block = context_menu::items(&app, &Target::Timeline { feature: block });
+    assert!(find(&on_block, "Edit Feature").enabled);
+    assert!(!on_block.iter().any(|i| i.label == "Edit Sketch"), "{:?}", labels(&on_block));
+    context_menu::run_item(&mut app, &edit, pos2(0.0, 0.0));
+    assert_eq!(app.session.active_sketch, Some(sketch), "Edit Sketch opens the sketch that was right-clicked");
+}
+
 /// Solid geometry in the selection keeps the body menu: a right-click on a face offers the
 /// face's commands even when a sketch curve is selected as well.
 #[test]
