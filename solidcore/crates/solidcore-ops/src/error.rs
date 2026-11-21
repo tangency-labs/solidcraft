@@ -28,6 +28,12 @@ pub enum Error {
     Argument,
     /// The kernel reported success but the result has no faces (for a boolean: it is empty).
     Empty,
+    /// An empty boolean of solids refuted by the vertex `at` of an operand, which lies where the
+    /// result must hold material: an intersection of the operands was missed.
+    EmptyRefuted {
+        /// The operand's vertex the result must hold.
+        at: [f64; 3],
+    },
     /// The kernel reported success, but a solid input gave a result that is not a closed solid.
     NotSolid,
     /// A body that is not a closed solid facing out, and the test it fails (the kernel's
@@ -468,6 +474,7 @@ impl Error {
             Error::Refused { .. } => "Refused",
             Error::Argument => "Argument",
             Error::Empty => "Empty",
+            Error::EmptyRefuted { .. } => "EmptyRefuted",
             Error::NotSolid => "NotSolid",
             Error::NotSolidBecause(..) => "NotSolidBecause",
             Error::NoRoom => "NoRoom",
@@ -910,6 +917,10 @@ impl std::fmt::Display for Error {
             Error::Refused { operation, reason } => write!(f, "{operation}: {reason}"),
             Error::Argument => write!(f, "invalid argument"),
             Error::Empty => write!(f, "the result is empty"),
+            Error::EmptyRefuted { at: [x, y, z] } => write!(
+                f,
+                "the result is empty, but the operand's vertex ({x}, {y}, {z}) lies where it must have material: an intersection was missed"
+            ),
             Error::NotSolid => write!(f, "the result is not a closed solid"),
             Error::NotSolidBecause(test) => {
                 write!(f, "the body is not a closed solid facing out: {test}")
