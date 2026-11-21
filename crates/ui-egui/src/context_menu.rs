@@ -2114,6 +2114,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         | "ui.toolbarCustomize"
         | "ui.toolbarTab"
         | "ui.shortcutPin"
+        | "ui.shortcutKey"
         | "ui.quickAccessAdd"
         | "ui.quickAccessRemove"
         | "ui.appBarReset" => crate::toolbar_custom::run(app, &item.id, &p),
