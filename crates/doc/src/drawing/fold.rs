@@ -13,6 +13,7 @@
 //! (2nd ed.), §27.8 (a length scaled by its largest component before squaring, so that it can't
 //! overflow).
 
+use serde::{Deserialize, Serialize};
 use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::prelude::*;
@@ -50,19 +51,79 @@ pub fn axonometric(frame: &Plane, corner: [f64; 3]) -> Result<Plane> {
     Ok(Plane { origin: frame.origin, x: across, y: across.cross(toward) })
 }
 
+/// Which axonometry a pictorial view is (ISO 5456-3 §5), by how long it shows its parent's paper x,
+/// its paper y and its depth: isometric (all three the same, the default), dimetric (the depth at
+/// half, ISO's §5.2: the parent is the view of main importance), or any three scales, such as a
+/// trimetric view's, for which ISO gives no standard values. Read and written as `"isometric"`,
+/// `"dimetric"` or `{"scales": [x, y, depth]}`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum Axonometry {
+    #[default]
+    Isometric,
+    Dimetric,
+    Scales([f64; 3]),
+}
+
+impl Axonometry {
+    pub fn is_isometric(&self) -> bool {
+        *self == Axonometry::Isometric
+    }
+
+    /// The size of each component of the corner it looks from, along the parent's paper x, paper y
+    /// and normal ([`axonometric`]): `(1, 1, 1)`, `(1, 1, √7)`, or from scales `r`, `k_i = √(r_j² +
+    /// r_k² - r_i²)`. An orthographic view shows an axis at the cosine of its angle to the paper, so
+    /// the three scales `u` square to 2 and `k_i = √(1 - u_i²)`; with the ratios `r = u / c`, that is
+    /// the root above up to a common factor, which [`axonometric`] drops. The ratios are scaled by the
+    /// largest first, the module's rule, so none overflows.
+    ///
+    /// # Errors
+    ///
+    /// [`DocError::Invalid`] for a scale that isn't a number above 0, or one more than the other two
+    /// allow (its square past theirs together: no view shows it), with the most it may be.
+    pub fn corner(self) -> Result<[f64; 3]> {
+        let scales = match self {
+            Axonometry::Isometric => return Ok([1.0; 3]),
+            Axonometry::Dimetric => return Ok([1.0, 1.0, 7f64.sqrt()]),
+            Axonometry::Scales(scales) => scales,
+        };
+        let [x, y, depth] = scales;
+        let refuse = |reason: String| DocError::Invalid(format!("no axonometry of scales {x} : {y} : {depth}: {reason}"));
+        if !scales.iter().all(|r| r.is_finite() && *r > 0.0) {
+            return Err(refuse("each scale is a number above 0".into()));
+        }
+        let largest = x.max(y).max(depth);
+        let squares = scales.map(|r| (r / largest) * (r / largest));
+        let total: f64 = squares.iter().sum();
+        let mut corner = [0.0; 3];
+        for (i, (k, name)) in corner.iter_mut().zip(["x", "y", "depth"]).enumerate() {
+            let others = total - squares[i];
+            if squares[i] > others {
+                return Err(refuse(format!("its {name} scale is more than the other two allow: at most {:.3}", largest * others.sqrt())));
+            }
+            *k = (others - squares[i]).sqrt();
+        }
+        Ok(corner)
+    }
+}
+
 /// The basis of the pictorial view on `parent`'s diagonal `(right, up)` (each ±1: which way along
-/// the parent's paper x and y it sits), in `projection`: an isometric view through the parent's
-/// origin, its paper x horizontal in the parent. As a projected view does
+/// the parent's paper x and y it sits), in `projection` and `axonometry`: a view through the
+/// parent's origin, its paper x horizontal in the parent. As a projected view does
 /// (`solidcraft_geom::drawing_view::projected_basis`), it looks from the corner it sits by in third
-/// angle and from the opposite one in first: the corner `(right, up, 1)` along the parent's paper
-/// x, paper y and normal, each paper sign times 1 in third angle and -1 in first.
+/// angle and from the opposite one in first: the axonometry's corner `(k_x, k_y, k_n)`
+/// ([`Axonometry::corner`]) along the parent's paper x, paper y and normal, each paper component
+/// signed by the diagonal, times 1 in third angle and -1 in first.
 ///
 /// # Errors
 ///
-/// [`DocError::Invalid`] for a parent basis [`validate_plane`] refuses.
-pub fn pictorial_basis(parent: &Plane, (right, up): (f64, f64), projection: Projection) -> Result<Plane> {
+/// [`DocError::Invalid`] for a parent basis [`validate_plane`] refuses, an axonometry
+/// [`Axonometry::corner`] refuses, or a corner [`axonometric`] refuses (scales that leave it on the
+/// parent's paper y).
+pub fn pictorial_basis(parent: &Plane, (right, up): (f64, f64), projection: Projection, axonometry: Axonometry) -> Result<Plane> {
     let from = facing(projection);
-    let view = axonometric(parent, [right * from, up * from, 1.0])?;
+    let [kx, ky, kn] = axonometry.corner()?;
+    let view = axonometric(parent, [right * from * kx, up * from * ky, kn])?;
     Ok(Plane { origin: view.origin, x: positive_zeros(view.x), y: positive_zeros(view.y) })
 }
 

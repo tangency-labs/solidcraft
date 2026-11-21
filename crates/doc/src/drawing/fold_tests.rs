@@ -201,41 +201,125 @@ fn a_pictorial_view_of_a_side_view_is_a_named_iso_view() {
         (Front, below_right, Projection::First, IsoFrontLeft),
     ];
     for (parent, diagonal, projection, named) in cases {
-        let view = pictorial_basis(&parent.basis(), diagonal, projection).unwrap();
+        let view = pictorial_basis(&parent.basis(), diagonal, projection, Axonometry::Isometric).unwrap();
         assert_eq!(view, named.basis(), "{parent:?} {diagonal:?} {projection:?}");
         assert!(!negative_zero(view.x) && !negative_zero(view.y), "{parent:?} {diagonal:?} {projection:?}: {view:?}");
     }
     let looking_along_minus_x = basis_looking(Vec3::new(-1.0, 0.0, 0.0), Vec3::Z, Vec3::ZERO).unwrap();
     assert!(negative_zero(looking_along_minus_x.x), "{looking_along_minus_x:?}");
-    let view = pictorial_basis(&looking_along_minus_x, (1.0, 1.0), Projection::Third).unwrap();
+    let view = pictorial_basis(&looking_along_minus_x, (1.0, 1.0), Projection::Third, Axonometry::Isometric).unwrap();
     assert_eq!(view, IsoBackRight.basis());
     assert!(!negative_zero(view.x) && !negative_zero(view.y), "{view:?}");
 }
 
-/// From any view, on each diagonal in either angle: a basis through the parent's origin, its paper x
-/// horizontal in the parent (square to its paper y), looking from the parent's corner
-/// `(right, up, 1) / sqrt 3` in third angle and `(-right, -up, 1) / sqrt 3` in first. A parent that
-/// isn't orthonormal or finite is refused.
+/// From any view, on each diagonal in either angle, in each axonometry: a basis through the parent's
+/// origin, its paper x horizontal in the parent (square to its paper y), looking from the parent's
+/// corner `(right k_x, up k_y, k_n)` in third angle and `(-right k_x, -up k_y, k_n)` in first, `k` the
+/// axonometry's corner: `(1, 1, 1)` isometric, `(1, 1, sqrt 7)` dimetric, and for scales
+/// `1 : 0.9 : 0.6`, `k_i = sqrt(r_j² + r_k² - r_i²)`. A parent that isn't orthonormal or finite is
+/// refused.
 #[test]
 fn a_pictorial_view_looks_from_its_corner() {
     let leaning = basis_looking(Vec3::new(0.3, 1.0, -0.2), Vec3::new(0.1, 0.2, 1.0), Vec3::new(5.0, -7.0, 2.0)).unwrap();
+    let trimetric = [(0.81f64 + 0.36 - 1.0).sqrt(), (1.0f64 + 0.36 - 0.81).sqrt(), (1.0f64 + 0.81 - 0.36).sqrt()];
+    let kinds =
+        [(Axonometry::Isometric, [1.0, 1.0, 1.0]), (Axonometry::Dimetric, [1.0, 1.0, 7f64.sqrt()]), (Axonometry::Scales([1.0, 0.9, 0.6]), trimetric)];
     for parent in NamedView::ALL.map(NamedView::basis).into_iter().chain([leaning]) {
         for (projection, from) in [(Projection::Third, 1.0), (Projection::First, -1.0)] {
             for (right, up) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
-                let view = pictorial_basis(&parent, (right, up), projection).unwrap();
-                validate_plane(&view).unwrap();
-                assert_eq!(view.origin, parent.origin);
-                let corner = (parent.x * (right * from) + parent.y * (up * from) + parent.normal()) * (1.0 / 3f64.sqrt());
-                assert!(close(view.normal(), corner), "{parent:?} {right} {up} {projection:?}: {view:?}");
-                assert!(view.x.dot(parent.y).abs() < EPS, "{parent:?} {right} {up} {projection:?}: paper x is horizontal");
+                for (axonometry, [kx, ky, kn]) in kinds {
+                    let view = pictorial_basis(&parent, (right, up), projection, axonometry).unwrap();
+                    validate_plane(&view).unwrap();
+                    assert_eq!(view.origin, parent.origin);
+                    let corner = parent.x * (right * from * kx) + parent.y * (up * from * ky) + parent.normal() * kn;
+                    let corner = corner * (1.0 / corner.len());
+                    assert!(close(view.normal(), corner), "{parent:?} {right} {up} {projection:?} {axonometry:?}: {view:?}");
+                    assert!(view.x.dot(parent.y).abs() < EPS, "{parent:?} {right} {up} {projection:?} {axonometry:?}: paper x is horizontal");
+                }
             }
         }
     }
     let skewed = Plane { x: Vec3::new(1.0, 0.1, 0.0), ..front() };
     let not_finite = Plane { origin: Vec3::new(f64::NAN, 0.0, 0.0), ..front() };
     for parent in [skewed, not_finite] {
-        assert!(says(pictorial_basis(&parent, (1.0, 1.0), Projection::Third), "a frame not finite or not orthonormal"));
+        assert!(says(pictorial_basis(&parent, (1.0, 1.0), Projection::Third, Axonometry::Isometric), "a frame not finite or not orthonormal"));
     }
+}
+
+/// How long model direction `e` shows in `view`, and its angle on paper from paper x, in degrees.
+fn on_paper(view: &Plane, e: Vec3) -> (f64, f64) {
+    let (x, y) = (e.dot(view.x), e.dot(view.y));
+    (x.hypot(y), y.atan2(x).to_degrees())
+}
+
+/// The dimetric view above right of the front view is ISO 5456-3's (§5.2, Figures 7 and 8): the
+/// model's Z vertical, its X and Z at sqrt(8/9) and its Y (the front view's depth) at sqrt(2/9), half
+/// as long; X runs atan(1 / (3 sqrt 7)) = 7.18° below the horizontal and Y, going back,
+/// atan(sqrt 7 / 3) = 41.41° above it (the standard's 7° and 42°).
+#[test]
+fn a_dimetric_view_is_iso_5456_3s() {
+    let view = pictorial_basis(&front(), (1.0, 1.0), Projection::Third, Axonometry::Dimetric).unwrap();
+    let ((x, x_at), (y, y_at), (z, z_at)) = (on_paper(&view, Vec3::X), on_paper(&view, Vec3::Y), on_paper(&view, Vec3::Z));
+    let (full, half) = ((8.0f64 / 9.0).sqrt(), (2.0f64 / 9.0).sqrt());
+    assert!((x - full).abs() < EPS && (z - full).abs() < EPS && (y - half).abs() < EPS, "{x} {y} {z}");
+    assert!((z_at - 90.0).abs() < 1e-12, "{z_at}");
+    assert!((x_at + (1.0 / (3.0 * 7f64.sqrt())).atan().to_degrees()).abs() < 1e-12, "{x_at}");
+    assert!((y_at - (7f64.sqrt() / 3.0).atan().to_degrees()).abs() < 1e-12, "{y_at}");
+    assert!((x_at + 7.180_755_781_458).abs() < 1e-9 && (y_at - 41.409_622_109_271).abs() < 1e-9, "{x_at} {y_at}");
+}
+
+/// Scales of the named views give those views: `1 : 1 : 1` (any size) the isometric view to the
+/// bit, and `1 : 1 : 1/2` (up to 1e300) the dimetric view to rounding.
+#[test]
+fn scales_give_the_named_views() {
+    let at = |axonometry| pictorial_basis(&front(), (1.0, 1.0), Projection::Third, axonometry).unwrap();
+    let iso = at(Axonometry::Isometric);
+    for size in [1.0, 7.0, 1e-300, 1e300] {
+        assert_eq!(at(Axonometry::Scales([size; 3])), iso, "{size}");
+    }
+    let dimetric = at(Axonometry::Dimetric);
+    for [x, y, depth] in [[1.0, 1.0, 0.5], [2.0, 2.0, 1.0], [2e300, 2e300, 1e300]] {
+        let got = at(Axonometry::Scales([x, y, depth]));
+        assert!(close(got.x, dimetric.x) && close(got.y, dimetric.y), "{x} {y} {depth}: {got:?}");
+    }
+}
+
+/// A trimetric view shows the parent's x, its y and its depth in the ratio of its scales, and an
+/// orthographic axonometry's scales square to 2 (each axis shows at the cosine of its angle to the
+/// paper): `1 : 0.9 : 0.6` and `3 : 4 : 5` (the bound, its depth in the paper's plane, full length)
+/// on the front view, from each diagonal in either angle.
+#[test]
+fn a_trimetric_view_shows_its_axes_at_its_scales() {
+    for scales in [[1.0, 0.9, 0.6], [3.0, 4.0, 5.0]] {
+        for projection in [Projection::Third, Projection::First] {
+            for diagonal in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
+                let view = pictorial_basis(&front(), diagonal, projection, Axonometry::Scales(scales)).unwrap();
+                let shown = [Vec3::X, Vec3::Z, Vec3::Y].map(|e| on_paper(&view, e).0);
+                assert!((shown.iter().map(|u| u * u).sum::<f64>() - 2.0).abs() < 1e-14, "{scales:?} {shown:?}");
+                for (u, r) in shown.iter().zip(scales) {
+                    assert!((u / shown[0] - r / scales[0]).abs() < 1e-14, "{scales:?} {diagonal:?} {projection:?}: {shown:?}");
+                }
+            }
+        }
+    }
+}
+
+/// Scales no view shows are refused, each with the size that fits: one that isn't a number above
+/// 0, and one more than the other two allow (its square past theirs together), with the most it may
+/// be. A scale so small beside the others that it leaves the corner on the parent's y is refused as
+/// a corner with no horizontal.
+#[test]
+fn scales_no_view_shows_are_refused() {
+    let corner = |scales| Axonometry::Scales(scales).corner();
+    for bad in [[f64::NAN, 1.0, 1.0], [1.0, f64::INFINITY, 1.0], [0.0, 1.0, 1.0], [1.0, -1.0, 1.0], [1.0, 1.0, -0.0]] {
+        assert!(says(corner(bad), "each scale is a number above 0"), "{bad:?}");
+    }
+    assert!(says(corner([1.0, 1.0, 1.5]), "its depth scale is more than the other two allow: at most 1.414"));
+    assert!(says(corner([2.0, 0.5, 1.0]), "its x scale is more than the other two allow: at most 1.118"));
+    assert!(says(corner([1.0, 3.0, 1.0]), "its y scale is more than the other two allow: at most 1.414"));
+    assert!(corner([3.0, 4.0, 5.0]).is_ok());
+    assert!(says(pictorial_basis(&front(), (1.0, 1.0), Projection::Third, Axonometry::Scales([1.0, 1e-300, 1.0])), "no horizontal"));
+    assert!(says(pictorial_basis(&front(), (1.0, 1.0), Projection::Third, Axonometry::Scales([1.0, 1.5, 1.0])), "at most 1.414"));
 }
 
 /// The paper lengths of the model's edges along X, Y and Z from the origin, in the pictorial view
@@ -249,7 +333,7 @@ fn edges_in_iso(lengths: [f64; 3]) -> [f64; 3] {
 
 /// The pictorial view above right of the front view, at 1:1, centred on the origin.
 fn iso_frame() -> ViewFrame {
-    let basis = pictorial_basis(&front(), (1.0, 1.0), Projection::Third).unwrap();
+    let basis = pictorial_basis(&front(), (1.0, 1.0), Projection::Third, Axonometry::Isometric).unwrap();
     ViewFrame::new(basis, Scale::new(1.0, 1.0).unwrap(), Vec2::ZERO, Vec2::ZERO).unwrap()
 }
 

@@ -9,8 +9,8 @@
 //! ([`Drawing::move_view`]), or beside it on another ([`Drawing::places_beside`]).
 //!
 //! A **pictorial view** sits on one of its parent's four diagonals ([`Diagonal`]) and looks at it
-//! isometric from that corner, or from the opposite one in first angle ([`pictorial_basis`]); it is
-//! placed at a point, never lined up. Where a view made from a parent sits by it, of the eight, is a
+//! from that corner, or from the opposite one in first angle: isometric, dimetric or at three scales
+//! of its own ([`Axonometry`], [`pictorial_basis`]). It is placed at a point, never lined up. Where a view made from a parent sits by it, of the eight, is a
 //! [`Beside`], and [`Beside::of_offset`] says which a point that far from the parent's centre gives.
 //! An **auxiliary view** is folded from its parent toward a side of its own, `toward`, a direction
 //! on the parent's paper, so it looks square to an edge or a face the parent shows as a line, or
@@ -47,7 +47,7 @@ use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_render::VisualStyle;
 
 use super::cutting_line::CuttingLine;
-use super::fold::{auxiliary_basis, pictorial_basis};
+use super::fold::{Axonometry, auxiliary_basis, pictorial_basis};
 use super::{Drawing, add_by_id, in_id_order, require};
 use crate::drawing_view::{
     Exploded, MAX_JOINT_VALUES, MAX_POSE_JOINTS, MAX_POSE_VALUE, MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, Pose, TangentEdges, ViewConfiguration,
@@ -217,11 +217,14 @@ pub enum ViewKind {
         parent: u64,
         line: CuttingLine,
     },
-    /// An isometric view of `parent` from `diagonal` of it, at its scale and settings, placed apart.
+    /// A view of `parent` from `diagonal` of it in `axonometry` (isometric unless written), at its
+    /// scale and settings, placed apart ([`pictorial_basis`]).
     Pictorial {
         #[serde(with = "crate::ids")]
         parent: u64,
         diagonal: Diagonal,
+        #[serde(default, skip_serializing_if = "Axonometry::is_isometric")]
+        axonometry: Axonometry,
     },
     /// A view of `parent` folded toward the side `toward` of it (a unit along the parent's paper x
     /// and y), at its scale and settings, placed apart ([`auxiliary_basis`]).
@@ -360,12 +363,13 @@ impl Beside {
         })
     }
 
-    /// The basis of the view made here of a view whose basis is `parent`, in `projection`: the one
-    /// rule for a child's basis ([`projected_basis`], [`pictorial_basis`]).
-    pub fn basis(self, parent: &Plane, projection: Projection) -> Result<Plane> {
+    /// The basis of the view made here of a view whose basis is `parent`, in `projection`, a
+    /// diagonal's pictorial view in `axonometry` (a side's view has none): the one rule for a child's
+    /// basis ([`projected_basis`], [`pictorial_basis`]).
+    pub fn basis(self, parent: &Plane, projection: Projection, axonometry: Axonometry) -> Result<Plane> {
         match self {
             Beside::Side(side) => projected_basis(parent, side, projection).map_err(|e| DocError::Invalid(e.to_string())),
-            Beside::Diagonal(diagonal) => pictorial_basis(parent, diagonal.signs(), projection),
+            Beside::Diagonal(diagonal) => pictorial_basis(parent, diagonal.signs(), projection, axonometry),
         }
     }
 }
@@ -723,9 +727,10 @@ impl Drawing {
                 self.can_project_from(*parent)?;
                 require(matches!(view.place, ViewPlace::At(_)), || "a section view is placed at a point: it has no side to line up on".into())
             }
-            ViewKind::Pictorial { parent, .. } => {
+            ViewKind::Pictorial { parent, axonometry, .. } => {
                 self.chain_of(view.id)?;
                 self.can_project_from(*parent)?;
+                axonometry.corner()?;
                 require(matches!(view.place, ViewPlace::At(_)), || "a pictorial view is placed at a point: it isn't lined up with its parent".into())
             }
             ViewKind::Auxiliary { parent, toward } => {
@@ -800,8 +805,10 @@ impl Drawing {
                 ViewKind::Base { .. } | ViewKind::Flat { .. } => {}
                 // The parent's basis: only the view itself shows the region.
                 ViewKind::Detail { boundary, .. } => detail = (view.id == id).then(|| boundary.geometry()).transpose()?,
-                ViewKind::Projected { side, .. } => basis = Beside::Side(*side).basis(&basis, self.projection)?,
-                ViewKind::Pictorial { diagonal, .. } => basis = Beside::Diagonal(*diagonal).basis(&basis, self.projection)?,
+                ViewKind::Projected { side, .. } => basis = Beside::Side(*side).basis(&basis, self.projection, Axonometry::Isometric)?,
+                ViewKind::Pictorial { diagonal, axonometry, .. } => {
+                    basis = Beside::Diagonal(*diagonal).basis(&basis, self.projection, *axonometry)?
+                }
                 ViewKind::Section { line, .. } => {
                     let parent = basis;
                     basis = line.basis(&parent)?;
