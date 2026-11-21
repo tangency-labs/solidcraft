@@ -1597,6 +1597,25 @@ fn split_touching(faces: &mut [Face], edges: &mut Vec<Edge>, edge_source: &mut V
 
     for e in crowded {
         let mine = records_of.get(e).cloned().unwrap_or_default();
+        // An edge only sheet faces use (no material on either side of any of them) has no
+        // sectors to pair across: the first two uses keep it, every further use gets a copy of
+        // its own, so the sheet stays one open body with the extra uses as boundary edges.
+        let only_sheets = mine.iter().all(|r| face_of(*r).ok().and_then(|f| radial.material_same.get(f).copied()).is_some_and(|m| m.is_none()));
+        if only_sheets {
+            for &r in mine.iter().skip(2) {
+                let c = edges.len();
+                edges.push(edges.get(e).ok_or_else(|| invalid("edge"))?.clone());
+                edge_source.push(edge_source.get(e).copied().ok_or_else(|| invalid("edge"))?);
+                let (f, li, p) = place.get(&r).copied().ok_or_else(|| invalid("edgeuse record"))?;
+                let slot = faces
+                    .get_mut(f)
+                    .and_then(|face| face.loops.get_mut(li))
+                    .and_then(|l| if let Loop::Edges(u) = l { u.get_mut(p) } else { None })
+                    .ok_or_else(|| invalid("edgeuse record"))?;
+                slot.0 = index(c)?;
+            }
+            continue;
+        }
         let start = *mine.first().ok_or_else(|| invalid("edge"))?;
         // The edge's radial list from one of its records, keeping this edge's (another solid's
         // faces may lie between them where solids touch each other too).

@@ -1171,6 +1171,40 @@ fn split_touching(
 
     for e in crowded {
         let mine = records_of.get(e).cloned().unwrap_or_default();
+        // An edge only sheet faces use (no material on either side of any of them) has no
+        // sectors to pair across: the first two uses keep it, every further use gets a copy
+        // of its own, so the sheet stays one open body with the extra uses as boundary edges.
+        let only_sheets = mine.iter().all(|rec| {
+            face_of(*rec)
+                .ok()
+                .and_then(|f| radial.material_same.get(f).copied())
+                .is_some_and(|m| m.is_none())
+        });
+        if only_sheets {
+            for &rec in mine.iter().skip(2) {
+                let made = edges.len();
+                let original = edges.get(e).ok_or(Unsupported::Invalid("edge"))?.clone();
+                edges.push(original);
+                edge_source.push(*at(edge_source, e)?);
+                let (f, li, p) = place
+                    .get(&rec)
+                    .copied()
+                    .ok_or(Unsupported::Invalid("edgeuse"))?;
+                let slot = faces
+                    .get_mut(f)
+                    .and_then(|face| face.loops.get_mut(li))
+                    .and_then(|l| {
+                        if let Loop::Edges(u) = l {
+                            u.get_mut(p)
+                        } else {
+                            None
+                        }
+                    })
+                    .ok_or(Unsupported::Invalid("edgeuse"))?;
+                slot.0 = index(made)?;
+            }
+            continue;
+        }
         let start = *mine.first().ok_or(Unsupported::Invalid("edge"))?;
         // The edge's radial list from one of its uses, keeping this edge's.
         let mut cycle = Vec::new();

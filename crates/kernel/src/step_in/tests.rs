@@ -3231,6 +3231,102 @@ fn extruded_ellipse_patch_crossing_profile_seam_stays_trimmed() {
     }
 }
 
+/// A surface model of planar rectangular sheets standing on the z axis from (0,0,0) to (0,0,10),
+/// one per `(x, y)` direction, all sharing the one `EDGE_CURVE` along the axis.
+fn sheets_on_one_edge(directions: &[[f64; 2]]) -> String {
+    let mut out = String::from(
+        "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1');\nFILE_NAME('t','',(''),(''),'','hand','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN { 1 0 10303 214 1 1 1 1 }'));\nENDSEC;\nDATA;\n\
+#1=CARTESIAN_POINT('',(0.,0.,0.));#2=CARTESIAN_POINT('',(0.,0.,10.));#3=VERTEX_POINT('',#1);#4=VERTEX_POINT('',#2);\n\
+#5=DIRECTION('',(0.,0.,1.));#6=VECTOR('',#5,1.);#7=LINE('',#1,#6);#8=EDGE_CURVE('',#3,#4,#7,.T.);#9=ORIENTED_EDGE('',*,*,#8,.T.);\n",
+    );
+    let mut faces = Vec::new();
+    let mut id = 10;
+    for [dx, dy] in directions {
+        let (a, b, c, d) = (id, id + 1, id + 2, id + 3);
+        // Far corners (top, bottom), their vertices, and the three edges round the shared one.
+        out += &format!("#{a}=CARTESIAN_POINT('',({},{},10.));#{b}=CARTESIAN_POINT('',({},{},0.));\n", dx * 10.0, dy * 10.0, dx * 10.0, dy * 10.0);
+        out += &format!("#{c}=VERTEX_POINT('',#{a});#{d}=VERTEX_POINT('',#{b});\n");
+        let dir = id + 4;
+        out += &format!("#{dir}=DIRECTION('',({dx:.1},{dy:.1},0.));#{}=VECTOR('',#{dir},1.);#{}=LINE('',#2,#{});\n", dir + 1, dir + 2, dir + 1);
+        out += &format!("#{}=DIRECTION('',(0.,0.,-1.));#{}=VECTOR('',#{},1.);#{}=LINE('',#{a},#{});\n", dir + 3, dir + 4, dir + 3, dir + 5, dir + 4);
+        out += &format!(
+            "#{}=DIRECTION('',({:.1},{:.1},0.));#{}=VECTOR('',#{},1.);#{}=LINE('',#{b},#{});\n",
+            dir + 6,
+            -dx,
+            -dy,
+            dir + 7,
+            dir + 6,
+            dir + 8,
+            dir + 7
+        );
+        let e = dir + 9;
+        out += &format!(
+            "#{e}=EDGE_CURVE('',#4,#{c},#{},.T.);#{}=EDGE_CURVE('',#{c},#{d},#{},.T.);#{}=EDGE_CURVE('',#{d},#3,#{},.T.);\n",
+            dir + 2,
+            e + 1,
+            dir + 5,
+            e + 2,
+            dir + 8
+        );
+        let o = e + 3;
+        out += &format!(
+            "#{o}=ORIENTED_EDGE('',*,*,#{e},.T.);#{}=ORIENTED_EDGE('',*,*,#{},.T.);#{}=ORIENTED_EDGE('',*,*,#{},.T.);\n",
+            o + 1,
+            e + 1,
+            o + 2,
+            e + 2
+        );
+        // The loop runs up the shared edge, out, down and back, so its normal is (-dy, dx, 0).
+        let (nx, ny) = (-dy, *dx);
+        out += &format!(
+            "#{}=EDGE_LOOP('',(#9,#{o},#{},#{}));#{}=FACE_OUTER_BOUND('',#{},.T.);\n#{}=DIRECTION('',({nx:.1},{ny:.1},0.));#{}=AXIS2_PLACEMENT_3D('',#1,#{},#{dir});#{}=PLANE('',#{});\n",
+            o + 3,
+            o + 1,
+            o + 2,
+            o + 4,
+            o + 3,
+            o + 5,
+            o + 6,
+            o + 5,
+            o + 7,
+            o + 6
+        );
+        out += &format!("#{}=ADVANCED_FACE('',(#{}),#{},.T.);\n", o + 8, o + 4, o + 7);
+        faces.push(format!("#{}", o + 8));
+        id = o + 9;
+    }
+    out += &format!(
+        "#{id}=OPEN_SHELL('',({}));#{}=SHELL_BASED_SURFACE_MODEL('Sheets',(#{id}));\n#{}=SHAPE_REPRESENTATION('',(#{}),$);\nENDSEC;\nEND-ISO-10303-21;\n",
+        faces.join(","),
+        id + 1,
+        id + 2,
+        id + 1
+    );
+    out
+}
+
+/// Sheets standing on one edge, three of them (a "T"): the edge has three face uses, which an
+/// open body may have, so the model is one open body with every face, not refused.
+#[test]
+fn a_surface_model_with_an_edge_of_three_faces_imports_as_one_open_body() {
+    let imp = step_import(&sheets_on_one_edge(&[[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0]])).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let body = &imp.bodies[0].body;
+    assert!(!imp.bodies[0].closed);
+    assert_eq!(body.face_count(), 3);
+    // The shared edge and the three edges round each sheet, the third use on a copy of its own.
+    assert!(body.edge_count() >= 10, "{}", body.edge_count());
+}
+
+/// Two sheets sharing an edge, as before.
+#[test]
+fn a_surface_model_with_an_edge_of_two_faces_still_imports_as_one_open_body() {
+    let imp = step_import(&sheets_on_one_edge(&[[1.0, 0.0], [0.0, 1.0]])).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(!imp.bodies[0].closed);
+    assert_eq!(imp.bodies[0].body.face_count(), 2);
+}
+
 /// Parts of known shape from the step-conformance corpus (`tests/step-conformance`, generated
 /// from formulas by https://github.com/dan335/step-conformance at 96f30bb, CC0 1.0):
 /// each reads back with its exact volume (from the generator's own profile), its box and its
