@@ -1376,7 +1376,7 @@ pub(crate) fn structured_trim_gap_bound(
     }
     for i in 0..cn.n {
         let (c, wc) = point(&cn.pw, i)?;
-        let &(d, w) = row.get(if rev { cn.n - 1 - i } else { i })?;
+        let &(d, w) = row.get(if rev { cn.n.checked_sub(1 + i)? } else { i })?;
         if w.to_bits() != wc.to_bits() {
             return None;
         }
@@ -1407,11 +1407,12 @@ pub(crate) fn structured_trim_gap_bound(
 /// `|r'| <= 2p w_max diam / ((b - a) w_min)`; the chain's speed is at most the largest
 /// segment's. `None` for data not of that shape or a bound that is not finite.
 fn row_lipschitz(row: &[(V3<Ivl>, f64)], k: &[f64], p: usize) -> Option<f64> {
-    if p == 0 || row.len() < p + 1 || (row.len() - 1) % p != 0 {
+    let spans = row.len().checked_sub(1)?;
+    if p == 0 || spans < p || spans.checked_rem(p)? != 0 {
         return None;
     }
     let mut most = 0.0_f64;
-    for j in 0..(row.len() - 1) / p {
+    for j in 0..spans.checked_div(p)? {
         let seg = row.get(j * p..=j * p + p)?;
         let (a, b) = (*k.get(p + j * p)?, *k.get(p + (j + 1) * p)?);
         let span = Ivl::from(b) - Ivl::from(a);
