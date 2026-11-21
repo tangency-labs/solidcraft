@@ -494,11 +494,9 @@ pub(crate) fn track_and_show(app: &mut SolveApp, painter: &egui::Painter, proj: 
         *tracking = Tracking { sketch: active, document, ..Default::default() };
     }
     let state = crate::open_meshing::session_world(&app.session);
-    let Some((ss, cursor)) = active
-        .and_then(|id| state.sketch(id))
-        .zip(cursor)
-        .filter(|_| app.preferences.sketch_tracking_guides && !crate::drag_snap::suppressed() && app.viewport.point_drag.is_none())
-    else {
+    let Some((ss, cursor)) = active.and_then(|id| state.sketch(id)).zip(cursor).filter(|_| {
+        app.tool.is_some() && app.preferences.sketch_tracking_guides && !crate::drag_snap::suppressed() && app.viewport.point_drag.is_none()
+    }) else {
         *tracking = Tracking::default();
         return;
     };

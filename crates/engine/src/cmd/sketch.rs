@@ -17,9 +17,10 @@ use crate::schema::sketch::{
 use crate::schema::sketch_dimension::{DimensionResult, SketchDimensionParams};
 use crate::schema::sketch_dimensioned::{DrawDimensionedParams, DrawDimensionedResult};
 use crate::schema::sketch_session::{
-    Activated, Attachment, ChainParams, ChainResult, ConstructionParams, ConstructionResult, CreateParams, CreateResult, DeleteParams, DeleteResult,
-    DimensionTextParams, DimensionTextResult, DragEndParams, DragEndResult, DragParams, DragResult, Frame, MovePointParams, MovePointResult,
-    MovePointsParams, MovePointsResult, MovedPoint, OptionsParams, OptionsReply, OptionsResult, SketchOptions, SolveParams, SolveResult,
+    Activated, Attachment, ChainParams, ChainResult, ConstructionParams, ConstructionResult, CreateParams, CreateResult, CurveGroupKind,
+    DeleteParams, DeleteResult, DetachPointParams, DetachPointResult, DimensionTextParams, DimensionTextResult, DragEndParams, DragEndResult,
+    DragParams, DragResult, Frame, MovePointParams, MovePointResult, MovePointsParams, MovePointsResult, MovedPoint, OptionsParams, OptionsReply,
+    OptionsResult, SketchOptions, SolveParams, SolveResult, UnlinkCurveGroupParams, UnlinkCurveGroupResult,
 };
 use crate::schema::sketch_shapes::{
     ArcCenterPointParams, ArcThreePointParams, CircleCenterParams, CircleThreePointParams, CircleTwoPointParams, Created, DrawResult,
@@ -57,6 +58,8 @@ macro_rules! model_operand_doc {
 const CREATE_CONTRACT: TypedContract<CreateParams> = TypedContract::new();
 const CONSTRUCTION_CONTRACT: TypedContract<ConstructionParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<DeleteParams> = TypedContract::new();
+const DETACH_POINT_CONTRACT: TypedContract<DetachPointParams> = TypedContract::new();
+const UNLINK_CURVE_GROUP_CONTRACT: TypedContract<UnlinkCurveGroupParams> = TypedContract::new();
 const MOVE_POINT_CONTRACT: TypedContract<MovePointParams> = TypedContract::new();
 const MOVE_POINTS_CONTRACT: TypedContract<MovePointsParams> = TypedContract::new();
 const DRAG_CONTRACT: TypedContract<DragParams> = TypedContract::new();
@@ -379,6 +382,18 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&DELETE_CONTRACT)
         .output(output_schema_for::<DeleteResult>)
         .params("entities: [curve, point or constraint ids]"),
+    CommandSpec::new("sketch.detach_point", "Detach Sketch Point", crate::checked!("sketch.detach_point", detach_point))
+        .icon("c_coincident")
+        .enabled(in_sketch)
+        .contract(&DETACH_POINT_CONTRACT)
+        .output(output_schema_for::<DetachPointResult>)
+        .params("curve: curve id, point: point ref, offset?: [dx, dy], constraint?: id"),
+    CommandSpec::new("sketch.unlink_curve_group", "Unlink Curve From Constraint Group", crate::checked!("sketch.unlink_curve_group", unlink_curve_group))
+        .icon("c_equal")
+        .enabled(in_sketch)
+        .contract(&UNLINK_CURVE_GROUP_CONTRACT)
+        .output(output_schema_for::<UnlinkCurveGroupResult>)
+        .params("curve: curve id, kind: equal | parallel"),
     CommandSpec::new("sketch.move_point", "Drag Sketch Point", crate::checked!("sketch.move_point", move_point))
         .in_sketch_part()
         .icon("sketch_move")
@@ -840,8 +855,72 @@ pub(super) mod solve_counts {
 /// How close (mm) a new point must land to an existing one to be connected to it.
 pub(super) const CONNECT_TOL: f64 = 1e-6;
 
-/// New points (index `first` on) that land on an existing point, the origin included, get a
-/// coincident constraint to it, as when a click snaps there; `connect: false` leaves them free.
+fn point_is_protected(sk: &Sketch, idx: usize) -> bool {
+    if idx == 0 {
+        return true;
+    }
+    let Some(pt) = sk.points.get(idx) else {
+        return true;
+    };
+    if pt.fixed || pt.link.is_some() || pt.exprs.is_some() {
+        return true;
+    }
+    let offset_curves: std::collections::HashSet<&str> =
+        sk.offsets.iter().flat_map(|o| o.outputs.iter().map(String::as_str)).chain(sk.freeform_offsets.iter().map(|o| o.output.as_str())).collect();
+    if sk.curves.iter().enumerate().any(|(ci, c)| c.kind.uses(idx) && (sk.is_linked_curve(ci) || offset_curves.contains(c.id.as_str()))) {
+        return true;
+    }
+    sk.constraints.iter().any(|c| match c.kind {
+        ConstraintKind::Fix { p } | ConstraintKind::Pierce { p, .. } => p == idx,
+        ConstraintKind::PatternPoint { p, q, center, .. } => p == idx || q == idx || center == Some(idx),
+        _ => false,
+    })
+}
+
+fn can_merge_points(sk: &Sketch, survive: usize, remove: usize) -> bool {
+    if survive == remove || survive >= sk.points.len() || remove >= sk.points.len() {
+        return false;
+    }
+    if point_is_protected(sk, survive) || point_is_protected(sk, remove) {
+        return false;
+    }
+    if sk.curves.iter().any(|c| c.kind.uses(survive) && c.kind.uses(remove)) {
+        return false;
+    }
+    !sk.constraints.iter().any(|other| {
+        let points = other.kind.indices().0;
+        !matches!(other.kind, ConstraintKind::Coincident { .. }) && points.contains(&survive) && points.contains(&remove)
+    })
+}
+
+fn merge_points(sk: &mut Sketch, survive: usize, remove: usize) -> Option<usize> {
+    if !can_merge_points(sk, survive, remove) {
+        return None;
+    }
+    for c in sk.curves.iter_mut() {
+        c.kind.map_points(&|x| if x == remove { survive } else { x });
+    }
+    for k in sk.constraints.iter_mut() {
+        k.kind.remap(&|x| Some(if x == remove { survive } else { x }), &Some);
+    }
+    let mut seen_coincident = std::collections::HashSet::new();
+    sk.constraints.retain(|k| {
+        if let ConstraintKind::Coincident { p, q } = k.kind {
+            if p == q {
+                return false;
+            }
+            let pair = if p <= q { (p, q) } else { (q, p) };
+            return seen_coincident.insert(pair);
+        }
+        true
+    });
+    sk.remove_points(&[remove]);
+    Some(if remove < survive { survive - 1 } else { survive })
+}
+
+/// New points (index `first` on) that land on an existing point get merged into it when both
+/// are plain points, or get a coincident constraint when either is special (origin, linked,
+/// expression-driven, fixed, pattern/offset-owned); `connect: false` leaves them free.
 /// A point placed by parameter expressions is never tied: it follows its expressions, and a
 /// Coincident to where the expressions happened to come to at draw time conflicts with the
 /// next parameter change (#10703).
@@ -872,7 +951,15 @@ fn connect_points_except(sk: &mut Sketch, first: usize, p: &Value, joined: &[usi
             ties.push((o, q));
         }
     }
-    ties.into_iter().map(|(o, q)| add_c(sk, ConstraintKind::Coincident { p: o, q })).collect()
+    // Remove higher-indexed new points first so `o < first` and lower `q` indices stay valid.
+    ties.sort_by_key(|a| std::cmp::Reverse(a.1));
+    let mut cons = Vec::new();
+    for (o, q) in ties {
+        if merge_points(sk, o, q).is_none() {
+            cons.push(add_c(sk, ConstraintKind::Coincident { p: o, q })?);
+        }
+    }
+    Ok(cons)
 }
 
 /// `edit` for drawing commands whose step returns (curve ids, constraint ids): the points it
@@ -3253,6 +3340,42 @@ fn c_horizontal_vertical(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 
+fn same_coincident_cluster(sk: &Sketch, a: usize, b: usize) -> bool {
+    if a == b {
+        return true;
+    }
+    let mut visited = vec![false; sk.points.len()];
+    let mut queue = std::collections::VecDeque::from([a]);
+    if let Some(slot) = visited.get_mut(a) {
+        *slot = true;
+    }
+    while let Some(cur) = queue.pop_front() {
+        for c in &sk.constraints {
+            if let ConstraintKind::Coincident { p, q } = c.kind {
+                let next = if p == cur {
+                    Some(q)
+                } else if q == cur {
+                    Some(p)
+                } else {
+                    None
+                };
+                if let Some(n) = next {
+                    if n == b {
+                        return true;
+                    }
+                    if !visited.get(n).copied().unwrap_or(true) {
+                        if let Some(slot) = visited.get_mut(n) {
+                            *slot = true;
+                        }
+                        queue.push_back(n);
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
 fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constraint.coincident";
     if let Some(reply) = super::sketch_3d::coincident_3d(s, p, cmd)? {
@@ -3277,12 +3400,21 @@ fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
         return reply(cmd, CoincidentResult { made: CoincidentMade::Added(made), param_warnings: Vec::new() });
     }
     let pt = |k: &str| p.get(k).and_then(Value::as_str).and_then(|r| sk.resolve_point(r));
-    if let Some((a, b)) = pt("a").zip(pt("b"))
-        && let Some(c) = sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if (p, q) == (a, b) || (p, q) == (b, a)))
-    {
-        let rep = solve(&mut sk.clone());
-        let made = CoincidentMade::Existing { constraint: c.id.clone(), existing: true, sketch: report_json(&rep) };
-        return reply(cmd, CoincidentResult { made, param_warnings: Vec::new() });
+    if let Some((a, b)) = pt("a").zip(pt("b")) {
+        if a == b {
+            if p.get("a") == p.get("b") {
+                return Err(bad(cmd, "pick two different points"));
+            }
+            let rep = solve(&mut sk.clone());
+            let made = CoincidentMade::Merged { point: sk.points[a].id.clone(), existing: true, sketch: report_json(&rep) };
+            return reply(cmd, CoincidentResult { made, param_warnings: Vec::new() });
+        }
+        if let Some(c) = sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if (p, q) == (a, b) || (p, q) == (b, a)))
+        {
+            let rep = solve(&mut sk.clone());
+            let made = CoincidentMade::Existing { constraint: c.id.clone(), existing: true, sketch: report_json(&rep) };
+            return reply(cmd, CoincidentResult { made, param_warnings: Vec::new() });
+        }
     }
     let pick = |sk: &mut Sketch| -> Result<ConstraintKind> {
         // A line's middle, `{midpoint: line}` as a selected midpoint is sent (#10311): the point
@@ -3322,7 +3454,16 @@ fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
         let c = curve_or_axis(sk, bref)?.ok_or_else(|| bad(cmd, format!("unknown entity `{bref}`")))?;
         Ok(ConstraintKind::PointOnCurve { p: a, c })
     };
-    let made = constrain(s, p, cmd, |sk| {
+
+    enum Outcome {
+        Added(String, Option<usize>, Option<f64>),
+        Existing(String),
+        Merged(String),
+    }
+
+    let mut before_dof = None;
+    let mut residual = None;
+    let (outcome, info) = edit(s, p, cmd, true, |sk, _| {
         let k = pick(sk)?;
         // A line's two ends on each other shrink it to a point, as a line's own end at its
         // middle does (see `c_midpoint`).
@@ -3331,9 +3472,55 @@ fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
         {
             return Err(bad(cmd, "a line's two ends can't be coincident: the line would shrink to a point"));
         }
-        Ok(k)
+        // Midpoint already englobes PointOnCurve on the same point and line; avoid duplicates.
+        if let ConstraintKind::PointOnCurve { p: q, c } = k
+            && let Some(existing) = sk.constraints.iter().find(|con| {
+                !con.driven
+                    && match con.kind {
+                        ConstraintKind::Midpoint { p: mp, l } => l == c && same_coincident_cluster(sk, mp, q),
+                        ConstraintKind::PointOnCurve { p: qp, c: qc } => qc == c && same_coincident_cluster(sk, qp, q),
+                        _ => false,
+                    }
+            })
+        {
+            return Ok(Outcome::Existing(existing.id.clone()));
+        }
+        let rep = solve(&mut sk.clone());
+        before_dof = Some(rep.dof);
+        let order = entity_order(sk, p);
+        let can_merge = matches!(k, ConstraintKind::Coincident { p: a, q: b } if can_merge_points(sk, a, b));
+        let id = add_c(sk, k.clone())?;
+        residual = residual_of(sk, &id);
+        let holds = residual.is_some_and(|r| r <= solidcraft_sketch::CONSISTENT);
+        if let Some((first, second)) = order.filter(|_| !holds) {
+            apply_in_order(sk, &rep, &[first], second, cmd, std::slice::from_ref(&id))?;
+        }
+        if can_merge && let ConstraintKind::Coincident { p: a, q: b } = k {
+            // Solve once with the temporary constraint so `survive` sits at the solved position,
+            // but keep an explicit Coincident constraint when it is redundant so callers see `redundant: true`.
+            let after_rep = solve(sk);
+            let is_redundant = holds && before_dof == Some(after_rep.dof);
+            if !is_redundant && let Some(surviving) = merge_points(sk, a, b) {
+                let point_id = sk.points.get(surviving).map(|pt| pt.id.clone()).unwrap_or_default();
+                return Ok(Outcome::Merged(point_id));
+            }
+        }
+        Ok(Outcome::Added(id, before_dof, residual))
     })?;
-    reply(cmd, CoincidentResult { made: CoincidentMade::Added(made), param_warnings: Vec::new() })
+
+    match outcome {
+        Outcome::Merged(point) => {
+            reply(cmd, CoincidentResult { made: CoincidentMade::Merged { point, existing: false, sketch: info }, param_warnings: Vec::new() })
+        }
+        Outcome::Existing(constraint) => {
+            reply(cmd, CoincidentResult { made: CoincidentMade::Existing { constraint, existing: true, sketch: info }, param_warnings: Vec::new() })
+        }
+        Outcome::Added(id, before, res) => {
+            let by = redundancy(s, p, cmd, before, &info, res, &id)?;
+            let made = constrained(p, cmd, id, info, by)?;
+            reply(cmd, CoincidentResult { made: CoincidentMade::Added(made), param_warnings: Vec::new() })
+        }
+    }
 }
 
 /// `a` and `b` both circles or arcs (two different ones).
@@ -3483,14 +3670,20 @@ fn tangent_at_end(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         let (pa, pb) = (tangent_end(sk, p, "a"), tangent_end(sk, p, "b"));
         let ca = if pa.is_none() { Some(line_or_axis_ref(sk, p.get("a"), cmd, "a")?) } else { None };
         let cb = if pb.is_none() { Some(line_or_axis_ref(sk, p.get("b"), cmd, "b")?) } else { None };
+        let end_owner = |key: &str| {
+            p.get(key)
+                .and_then(Value::as_str)
+                .and_then(|r| r.strip_suffix(".start").or_else(|| r.strip_suffix(".end")))
+                .and_then(|c| sk.curve_index(c))
+        };
         let a = match (ca, pa) {
             (Some(c), _) => c,
-            (None, Some(q)) => ended_by(sk, q, cb).ok_or_else(|| not_an_end("a"))?,
+            (None, Some(q)) => end_owner("a").or_else(|| ended_by(sk, q, cb)).ok_or_else(|| not_an_end("a"))?,
             (None, None) => return Err(not_an_end("a")),
         };
         let b = match (cb, pb) {
             (Some(c), _) => c,
-            (None, Some(q)) => ended_by(sk, q, Some(a)).ok_or_else(|| not_an_end("b"))?,
+            (None, Some(q)) => end_owner("b").or_else(|| ended_by(sk, q, Some(a))).ok_or_else(|| not_an_end("b"))?,
             (None, None) => return Err(not_an_end("b")),
         };
         let (a, b) = two_different(cmd, (a, b))?;
@@ -3501,7 +3694,7 @@ fn tangent_at_end(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
             _ => None,
         };
         // A joint: the end already lies on the other curve (it is that curve's end, or joined to it).
-        let joint = touch.as_ref().is_some_and(|k| already_held(sk, k));
+        let joint = touch.is_none() || touch.as_ref().is_some_and(|k| already_held(sk, k));
         let mut ids = Vec::new();
         if let Some(k) = touch.filter(|_| !joint) {
             ids.push(add_c(sk, k)?);
@@ -3685,10 +3878,20 @@ fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
         // A line's own end at its middle shrinks the line to a point; an angle, tangent or
         // parallel on it afterwards had no direction to hold and threw points millions of
         // millimetres away.
-        if let ConstraintKind::Midpoint { p: q, l } = k
-            && matches!(sk.curves.get(l).map(|c| &c.kind), Some(CurveKind::Line { a, b }) if *a == q || *b == q)
-        {
-            return Err(bad(cmd, "a line's own end can't be its midpoint: the line would shrink to a point"));
+        if let ConstraintKind::Midpoint { p: q, l } = k {
+            if matches!(sk.curves.get(l).map(|c| &c.kind), Some(CurveKind::Line { a, b }) if *a == q || *b == q) {
+                return Err(bad(cmd, "a line's own end can't be its midpoint: the line would shrink to a point"));
+            }
+            // Midpoint subsumes PointOnCurve on the same point (or coincident cluster) and line.
+            let redundant_pocs: Vec<String> = sk
+                .constraints
+                .iter()
+                .filter(|c| matches!(c.kind, ConstraintKind::PointOnCurve { p: cp, c: cl } if cl == l && same_coincident_cluster(sk, cp, q)))
+                .map(|c| c.id.clone())
+                .collect();
+            if !redundant_pocs.is_empty() {
+                sk.constraints.retain(|c| !redundant_pocs.contains(&c.id));
+            }
         }
         Ok(k)
     })
@@ -4989,6 +5192,237 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
         s.doc_mut().prune_model_params();
     }
     reply(cmd, DeleteResult { deleted: n, sketch: info, param_warnings: Vec::new() })
+}
+
+fn reflect_across_line(p: Vec2, a: Vec2, b: Vec2) -> Option<Vec2> {
+    let d = b - a;
+    let len2 = d.x * d.x + d.y * d.y;
+    if len2 < 1e-18 {
+        return None;
+    }
+    let v = p - a;
+    let foot = a + d * ((v.x * d.x + v.y * d.y) / len2);
+    Some(foot * 2.0 - p)
+}
+
+fn find_mirrored_curve(
+    sk: &Sketch,
+    cur_ci: usize,
+    cur_pi: usize,
+    other_pi: usize,
+    l: usize,
+    seen_curves: &std::collections::HashSet<usize>,
+) -> Option<usize> {
+    let (ax_a, ax_b) = line_pts(sk, l)?;
+    let cur = sk.curves.get(cur_ci)?;
+    let cur_others: Vec<usize> = cur.kind.point_ids().into_iter().filter(|&x| x != cur_pi).collect();
+    let sym_pair = |x: usize, y: usize| {
+        x == y
+            || sk
+                .constraints
+                .iter()
+                .any(|c| matches!(c.kind, ConstraintKind::Symmetric { p, q, l: axis } if axis == l && ((p == x && q == y) || (p == y && q == x))))
+    };
+    let offset_curves: std::collections::HashSet<&str> =
+        sk.offsets.iter().flat_map(|o| o.outputs.iter().map(String::as_str)).chain(sk.freeform_offsets.iter().map(|o| o.output.as_str())).collect();
+
+    sk.curves.iter().enumerate().position(|(mc, cu)| {
+        if mc == cur_ci
+            || seen_curves.contains(&mc)
+            || !cu.kind.uses(other_pi)
+            || sk.is_linked_curve(mc)
+            || offset_curves.contains(cu.id.as_str())
+            || std::mem::discriminant(&cu.kind) != std::mem::discriminant(&cur.kind)
+        {
+            return false;
+        }
+        let mc_others: Vec<usize> = cu.kind.point_ids().into_iter().filter(|&x| x != other_pi).collect();
+        if mc_others.len() != cur_others.len() {
+            return false;
+        }
+        cur_others.iter().all(|&co| {
+            let Some(co_pos) = sk.point(co) else { return false };
+            let Some(reflected) = reflect_across_line(co_pos, ax_a, ax_b) else { return false };
+            mc_others.iter().any(|&mo| sym_pair(co, mo) || sk.point(mo).is_some_and(|mp| mp.dist(reflected) <= 1e-2))
+        })
+    })
+}
+
+fn detach_point(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.detach_point";
+    let curve_id = str_(p, "curve").ok_or_else(|| bad(cmd, "missing `curve`"))?.to_owned();
+    let point_ref_str = str_(p, "point").ok_or_else(|| bad(cmd, "missing `point`"))?.to_owned();
+    let offset = match p.get("offset") {
+        None | Some(Value::Null) => Vec2::ZERO,
+        Some(v) => vec2(v).ok_or_else(|| bad(cmd, "`offset` must be [dx, dy]"))?,
+    };
+    let specific_constraint = p.get("constraint").and_then(Value::as_str).map(str::to_owned);
+    let ((point, detached_coincident), info) = edit_solve(s, p, cmd, false, |sk, _| {
+        let ci = sk.curve_index(&curve_id).ok_or_else(|| bad(cmd, format!("unknown curve `{curve_id}`")))?;
+        let pi = sk.resolve_point(&point_ref_str).ok_or_else(|| bad(cmd, format!("unknown sketch point `{point_ref_str}`")))?;
+        if !sk.curves.get(ci).is_some_and(|c| c.kind.uses(pi)) {
+            return Err(bad(cmd, format!("curve `{curve_id}` does not use point `{point_ref_str}`")));
+        }
+        if sk.is_linked_curve(ci) {
+            return Err(bad(cmd, "cannot detach a projected or linked curve; break its link first"));
+        }
+        let in_offset =
+            sk.offsets.iter().any(|o| o.outputs.iter().any(|id| id == &curve_id)) || sk.freeform_offsets.iter().any(|o| o.output == curve_id);
+        if in_offset {
+            return Err(bad(cmd, "break the offset association before detaching its curve"));
+        }
+        let users = sk.curves.iter().filter(|c| c.kind.uses(pi)).count();
+        let coinc_ids: Vec<String> = sk
+            .constraints
+            .iter()
+            .filter(|c| {
+                matches!(c.kind, ConstraintKind::Coincident { p, q } if p == pi || q == pi)
+                    && specific_constraint.as_ref().is_none_or(|cid| cid == &c.id)
+            })
+            .map(|c| c.id.clone())
+            .collect();
+        let protected = pi == 0 || sk.points.get(pi).is_some_and(|pt| pt.fixed || pt.link.is_some() || pt.exprs.is_some());
+        if users > 1 || (protected && users >= 1) {
+            let pos = sk.point(pi).ok_or_else(|| bad(cmd, "missing point position"))?;
+            let new_pos = pos + offset;
+            let new_idx = sk.add_point(new_pos, None)?;
+            if let Some(cu) = sk.curves.get_mut(ci) {
+                cu.kind.map_points(&|x| if x == pi { new_idx } else { x });
+            }
+            // Mirror detachment across any active Symmetry constraints so mirrored lines stay
+            // mirrored and separate from the shared corner cleanly.
+            let mut seen_curves = std::collections::HashSet::from([ci]);
+            let mut queue = std::collections::VecDeque::from([(ci, pi, new_idx, new_pos)]);
+            while let Some((cur_ci, cur_pi, cur_new_idx, cur_new_pos)) = queue.pop_front() {
+                let sym_links: Vec<(String, usize, usize)> = sk
+                    .constraints
+                    .iter()
+                    .filter_map(|c| match c.kind {
+                        ConstraintKind::Symmetric { p, q, l } if p == cur_pi => Some((c.id.clone(), q, l)),
+                        ConstraintKind::Symmetric { p, q, l } if q == cur_pi => Some((c.id.clone(), p, l)),
+                        _ => None,
+                    })
+                    .collect();
+                for (sym_id, other_pi, l) in sym_links {
+                    let Some((ax_a, ax_b)) = line_pts(sk, l) else { continue };
+                    let Some(mir_pos) = reflect_across_line(cur_new_pos, ax_a, ax_b) else { continue };
+                    let Some(mir_ci) = find_mirrored_curve(sk, cur_ci, cur_pi, other_pi, l, &seen_curves) else { continue };
+                    let other_users = sk.curves.iter().filter(|c| c.kind.uses(other_pi)).count();
+                    let other_protected =
+                        other_pi == 0 || sk.points.get(other_pi).is_some_and(|pt| pt.fixed || pt.link.is_some() || pt.exprs.is_some());
+                    seen_curves.insert(mir_ci);
+                    if other_users > 1 || other_protected {
+                        let other_new_idx = sk.add_point(mir_pos, None)?;
+                        if let Some(mcu) = sk.curves.get_mut(mir_ci) {
+                            mcu.kind.map_points(&|x| if x == other_pi { other_new_idx } else { x });
+                        }
+                        add_c(sk, ConstraintKind::Symmetric { p: cur_new_idx, q: other_new_idx, l })?;
+                        queue.push_back((mir_ci, other_pi, other_new_idx, mir_pos));
+                    } else {
+                        if let Some(pt) = sk.points.get_mut(other_pi) {
+                            pt.pos = mir_pos;
+                        }
+                        if let Some(c) = sk.constraints.iter_mut().find(|c| c.id == sym_id) {
+                            c.kind = ConstraintKind::Symmetric { p: cur_new_idx, q: other_pi, l };
+                        }
+                    }
+                }
+            }
+            let new_id = sk.points.get(new_idx).map(|pt| pt.id.clone()).unwrap_or_default();
+            Ok((new_id, Vec::new()))
+        } else if !coinc_ids.is_empty() {
+            sk.constraints.retain(|c| !coinc_ids.contains(&c.id));
+            if let Some(pt) = sk.points.get_mut(pi) {
+                pt.pos += offset;
+            }
+            let pid = sk.points.get(pi).map(|pt| pt.id.clone()).unwrap_or_default();
+            Ok((pid, coinc_ids))
+        } else {
+            Err(bad(cmd, "that point is not shared with another curve or coincident constraint"))
+        }
+    })?;
+    reply(cmd, DetachPointResult { point, detached_coincident, sketch: info, param_warnings: Vec::new() })
+}
+
+fn unlink_curve_group(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.unlink_curve_group";
+    let curve_id = str_(p, "curve").ok_or_else(|| bad(cmd, "missing `curve`"))?.to_owned();
+    let kind: CurveGroupKind =
+        serde_json::from_value(p.get("kind").cloned().unwrap_or(Value::Null)).map_err(|_| bad(cmd, "`kind` must be `equal` or `parallel`"))?;
+    let ((removed, added), info) = edit_solve(s, p, cmd, false, |sk, _| {
+        let ci = sk.curve_index(&curve_id).ok_or_else(|| bad(cmd, format!("unknown curve `{curve_id}`")))?;
+        let matches_kind = |c: &ConstraintKind| match (kind, c) {
+            (CurveGroupKind::Equal, ConstraintKind::Equal { a, b }) => Some((*a, *b)),
+            (CurveGroupKind::Parallel, ConstraintKind::Parallel { a, b }) => Some((*a, *b)),
+            _ => None,
+        };
+        let mut adj: Vec<Vec<usize>> = vec![Vec::new(); sk.curves.len()];
+        let mut incident_ids: Vec<String> = Vec::new();
+        for c in &sk.constraints {
+            if c.driven {
+                continue;
+            }
+            if let Some((a, b)) = matches_kind(&c.kind)
+                && a < sk.curves.len()
+                && b < sk.curves.len()
+            {
+                adj[a].push(b);
+                adj[b].push(a);
+                if a == ci || b == ci {
+                    incident_ids.push(c.id.clone());
+                }
+            }
+        }
+        if incident_ids.is_empty() {
+            return Err(bad(cmd, format!("curve `{curve_id}` has no matching group constraints")));
+        }
+        let mut comp: Vec<usize> = Vec::new();
+        let mut seen = vec![false; sk.curves.len()];
+        let mut q = std::collections::VecDeque::from([ci]);
+        seen[ci] = true;
+        while let Some(u) = q.pop_front() {
+            comp.push(u);
+            for &v in &adj[u] {
+                if !seen[v] {
+                    seen[v] = true;
+                    q.push_back(v);
+                }
+            }
+        }
+        let mut sub_seen = vec![false; sk.curves.len()];
+        sub_seen[ci] = true;
+        let mut sub_reps: Vec<usize> = Vec::new();
+        for &u in &comp {
+            if sub_seen[u] {
+                continue;
+            }
+            sub_reps.push(u);
+            sub_seen[u] = true;
+            let mut sq = std::collections::VecDeque::from([u]);
+            while let Some(x) = sq.pop_front() {
+                for &y in &adj[x] {
+                    if !sub_seen[y] {
+                        sub_seen[y] = true;
+                        sq.push_back(y);
+                    }
+                }
+            }
+        }
+        let removed_set: std::collections::HashSet<&str> = incident_ids.iter().map(String::as_str).collect();
+        sk.constraints.retain(|c| !removed_set.contains(c.id.as_str()));
+        let mut added_ids: Vec<String> = Vec::new();
+        if let Some(&root) = sub_reps.first() {
+            for &other in sub_reps.iter().skip(1) {
+                let k = match kind {
+                    CurveGroupKind::Equal => ConstraintKind::Equal { a: root, b: other },
+                    CurveGroupKind::Parallel => ConstraintKind::Parallel { a: root, b: other },
+                };
+                added_ids.push(add_c(sk, k)?);
+            }
+        }
+        Ok((incident_ids, added_ids))
+    })?;
+    reply(cmd, UnlinkCurveGroupResult { removed, added, sketch: info, param_warnings: Vec::new() })
 }
 
 fn move_point(s: &mut Session, p: &Value) -> Result<Value> {

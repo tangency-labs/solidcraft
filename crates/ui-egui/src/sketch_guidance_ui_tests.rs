@@ -290,10 +290,13 @@ fn centre_and_midpoint_tracking_is_visual_in_idle_and_drawing_modes() {
     let mut h = tracking_fixture();
     let before = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();
-    for tool in [None, Some("sketch.line"), Some("sketch.circle.center")] {
-        if let Some(tool) = tool {
-            h.app.start(tool);
-        }
+    for (anchor, end) in [([-10.0, 3.0], [20.0, 3.0]), ([0.0, 20.0], [0.0, -10.0]), ([30.0, 0.0], [-10.0, 0.0])] {
+        step(&mut h, json!({"move":{"sketch":anchor}}));
+        step(&mut h, json!({"move":{"sketch":end}}));
+        assert!(h.app.viewport.tracking.guide.is_none(), "idle mode hides tracking guides");
+    }
+    for tool in ["sketch.line", "sketch.circle.center"] {
+        h.app.start(tool);
         for (anchor, end) in [([-10.0, 3.0], [20.0, 3.0]), ([0.0, 20.0], [0.0, -10.0]), ([30.0, 0.0], [-10.0, 0.0])] {
             step(&mut h, json!({"move":{"sketch":anchor}}));
             step(&mut h, json!({"move":{"sketch":end}}));
@@ -418,6 +421,9 @@ fn two_recent_midpoints_snap_where_their_guides_meet() {
 fn tracking_clears_on_escape_sketch_exit_and_preference_and_respects_suppression() {
     let mut h = tracking_fixture();
     for action in ["suppression", "preference", "escape", "exit"] {
+        if h.app.tool.is_none() {
+            h.app.start("sketch.line");
+        }
         step(&mut h, json!({"move":{"sketch":[-10,3]}}));
         step(&mut h, json!({"move":{"sketch":[20,3]}}));
         assert!(h.app.viewport.tracking.guide.is_some());
@@ -447,6 +453,7 @@ fn tracking_clears_on_escape_sketch_exit_and_preference_and_respects_suppression
 #[test]
 fn tracking_does_not_leak_outside_the_viewport_or_into_another_sketch() {
     let mut h = tracking_fixture();
+    h.app.start("sketch.line");
     step(&mut h, json!({"move":{"sketch":[-10,3]}}));
     step(&mut h, json!({"move":{"sketch":[20,3]}}));
     assert!(h.app.viewport.tracking.guide.is_some());
