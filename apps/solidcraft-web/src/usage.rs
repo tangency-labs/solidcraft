@@ -1,5 +1,5 @@
-//! Posts a usage statistics report with `fetch` (`solidcraft_ui_egui::usage_stats`): to its one
-//! endpoint only, without cookies or credentials. The answer comes on the channel; the page never
+//! Sends a usage statistics request with `fetch` (`solidcraft_ui_egui::usage_stats`): to its
+//! endpoints only (`allowed_url`), without cookies or credentials. The answer comes on the channel; the page never
 //! waits on it.
 
 use std::sync::mpsc::Sender;
@@ -14,7 +14,8 @@ use crate::files::err;
 
 pub fn post(r: HttpRequest, done: Sender<Reply>) {
     spawn_local(async move {
-        let reply = if r.url == solidcraft_ui_egui::usage_stats::ENDPOINT { send(&r).await } else { Err("not the usage statistics endpoint".into()) };
+        let reply =
+            if solidcraft_ui_egui::usage_stats::allowed_url(&r.url) { send(&r).await } else { Err("not the usage statistics endpoint".into()) };
         let _ = done.send(reply);
     });
 }

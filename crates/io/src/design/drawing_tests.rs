@@ -9,7 +9,7 @@ use solidcraft_doc::ids::IdSource;
 use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile, Orientation, PaperSize};
 
 use super::*;
-use crate::{is_drawing_path, read_design, write_design, write_design_container};
+use crate::{is_drawing_path, read_design, read_drawing, write_design, write_design_container, write_drawing_container};
 
 /// A design with two drawings of it, each on one A3 sheet, in their order.
 fn plate() -> Document {
@@ -499,4 +499,56 @@ fn a_design_keeps_the_layout_the_last_release_reads() {
     assert!(record["image_files"].is_array() && record["placed_images"].is_array() && record["logo_cells"].is_array(), "{record}");
     let cells = record.pointer("/sheets/0/title_block/cells").and_then(Value::as_array).unwrap();
     assert!(cells.iter().all(|cell| cell.pointer("/kind/text/image").is_none()), "a logo cell keeps its text only");
+}
+
+/// A drawing a newer build saved that this build can't read at all keeps the rest of the design
+/// from nothing: the design opens without it, the notice names it, and saving writes its entry and
+/// the parts it names back byte for byte. A drawing this build's own format calls damaged still
+/// refuses the design, as damage does.
+#[test]
+fn a_newer_builds_unreadable_drawing_is_kept_and_the_rest_opens() {
+    let doc = plate();
+    let mut entries = parts(&write_design_container(&doc).unwrap());
+    let name = entry(doc.drawings[1].id);
+    let mut record: Value = serde_json::from_slice(&entries[&name]).unwrap();
+    let payload = b"a future drawing's part".to_vec();
+    let blob = format!("blobs/{}.future", "ab".repeat(32));
+    record["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+    record["hologram"] = json!({"part": blob, "layers": 3});
+    record["sheets"] = json!("in a shape this build can't read");
+    let future = serde_json::to_vec(&record).unwrap();
+    entries.insert(name.clone(), future.clone());
+    entries.insert(blob.clone(), payload.clone());
+
+    let opened = read_design(&container(&entries)).unwrap();
+    assert_eq!(opened.drawings.len(), 1, "the drawing it can read");
+    assert_eq!(opened.drawings[0].id, doc.drawings[0].id);
+    let said = &opened.newer_file.as_ref().unwrap().not_understood;
+    assert!(said.iter().any(|what| what.contains("drawing `Details`") && what.contains("newer SolidCraft")), "{said:?}");
+    let resaved = parts(&write_design_container(&opened).unwrap());
+    assert_eq!(resaved.get(&name), Some(&future), "the drawing's entry, as it came");
+    assert_eq!(resaved.get(&blob), Some(&payload), "the part it names, as it came");
+    // Reopened, it is kept again.
+    assert_eq!(read_design(&container(&resaved)).unwrap().drawings.len(), 1);
+
+    // Damage in this build's own format is not a newer drawing: the design is refused.
+    let mut damaged = parts(&write_design_container(&doc).unwrap());
+    let mut record: Value = serde_json::from_slice(&damaged[&name]).unwrap();
+    record["sheets"] = json!("broken");
+    damaged.insert(name, serde_json::to_vec(&record).unwrap());
+    assert!(read_design(&container(&damaged)).is_err());
+}
+
+/// A drawing file (`.scdwg`) saved by main, its placed image and logo parts of it, reads back whole.
+/// The last release can't open one at all: it refuses it, by name, and writes nothing
+/// (`tests/fixtures/mixed-version/README.md`), so it never rewrites one without its parts.
+#[test]
+fn a_drawing_file_saved_by_main_reads_back_with_its_images() {
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mixed-version/drawing-saved-by-main.scdwg");
+    let bytes = std::fs::read(&fixture).unwrap();
+    let d = read_drawing(&bytes).unwrap();
+    assert!(d.sheet_images.iter().next().is_some() && d.logos().next().is_some(), "the placed image and the logo");
+    assert!(d.images.iter().all(|i| !i.data.is_empty()), "every image has its bytes");
+    let again = write_drawing_container(&d).unwrap();
+    assert_eq!(read_drawing(&again).unwrap(), d);
 }
