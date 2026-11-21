@@ -2116,6 +2116,8 @@ mod install_zip {
         std::fs::create_dir_all(plugins.join("sample")).unwrap();
         let saved = BTreeMap::from([("hinge".into(), json!(42))]);
         user_storage::save(&settings, "sample", &saved).unwrap();
+        // This helper's sessions keep grants in memory unless store synchronisation is enabled.
+        s.plugin_state.stored = Some(Default::default());
         s.plugin_state.grants.insert("sample".into(), Grants::default());
         s.plugin_state.persist_stored().unwrap();
         let record = plugins.join(".grants/sample.json");
