@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Weak};
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_sketch::CurveKind;
 
 use super::CommandSpec;
