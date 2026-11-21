@@ -849,6 +849,7 @@ pub(crate) fn fits(a: Accept, s: &Sel) -> bool {
         Sel::SketchCurve { .. } => a & (AXES | CURVES | selection::SKETCH_LINES) != 0,
         Sel::ExternalSketchCurve { .. } => a & selection::SKETCH_LINES != 0,
         Sel::Vertex { .. } => a & selection::VERTICES != 0,
+        Sel::PointCloudPoint { .. } => a & selection::CLOUD_POINTS != 0,
         Sel::Feature { .. } => a & selection::FEATURES != 0,
         // Sketch points go into a sketch command's own inputs (Entities, a base point), so a
         // box selection and a pre-selection reach them the way a click already does.
@@ -1106,7 +1107,8 @@ impl Dialog {
                         | AXES
                         | selection::CONSTRUCTION_POINTS
                         | selection::ORIGIN
-                        | selection::SNAP_POINTS,
+                        | selection::SNAP_POINTS
+                        | selection::CLOUD_POINTS,
                     true,
                 )],
             ),
@@ -3476,6 +3478,10 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
         // A point of the model: a vertex, a snapped centre or middle, or the centre a round edge
         // stands for. Where it is tells two picks on one body apart.
         Sel::Vertex { body, point } if !body.is_empty() => format!("{body} · {}", crate::snap_wake::label(*point)),
+        Sel::PointCloudPoint { cloud, point, .. } => {
+            let name = s.doc.point_clouds.iter().find(|c| c.id == *cloud).map(|c| c.name.as_str()).unwrap_or("Point Cloud");
+            format!("{name} · {}", crate::snap_wake::label(*point))
+        }
         Sel::Feature { id } => s.doc.feature(*id).map(|f| f.name.clone()).unwrap_or_else(|| format!("Feature {id}")),
         Sel::Drawing { object, .. } => format!("Drawing object {object}"),
         Sel::Occurrence { path } if path.is_empty() => s.doc.name.clone(),
@@ -7680,7 +7686,7 @@ fn emboss_face_sel(s: &Session, component: u64, face: &solidcraft_engine::doc::E
 /// Plane At Angle have dialogs of their own.
 fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&'static str, Accept, &'static str)])> {
     const PLANE: Accept = PLANES | PLANAR_FACES;
-    const POINT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS | selection::SNAP_POINTS;
+    const POINT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS | selection::SNAP_POINTS | selection::CLOUD_POINTS;
     const LINE: Accept = EDGES | AXES;
     const CURVE: Accept = EDGES | CURVES;
     Some(match id {
@@ -7742,6 +7748,7 @@ pub(crate) fn construct_ref(app: &SolveApp, sel: &Sel) -> Result<Value, String> 
         Sel::Face { point, .. } => json!({"face": pt(*point)}),
         Sel::Edge { point, .. } => json!({"edge": pt(*point)}),
         Sel::Vertex { body, point } if is_mesh_body(&app.session, body) => json!({"point": pt(*point)}),
+        Sel::PointCloudPoint { point, .. } => json!({"point": pt(*point)}),
         Sel::Vertex { point, .. } => match crate::snap_wake::snapped(app, *point) {
             Some((item, snap)) => snap_ref(app, item, snap)?,
             None => json!({"vertex": pt(*point)}),

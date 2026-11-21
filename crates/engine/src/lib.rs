@@ -39,6 +39,7 @@ pub mod origins;
 pub mod panels;
 pub mod params;
 pub mod plugin;
+pub mod point_cloud_pick;
 pub mod product_scene;
 pub mod recovery;
 pub mod render_jobs;
@@ -294,6 +295,12 @@ pub enum Sel {
     /// A body vertex at a point.
     Vertex {
         body: String,
+        point: Vec3,
+    },
+    /// A sampled point of an imported point cloud (#8933).
+    PointCloudPoint {
+        cloud: u64,
+        index: usize,
         point: Vec3,
     },
 }

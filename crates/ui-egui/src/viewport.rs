@@ -227,6 +227,8 @@ pub struct ViewportState {
     /// Each body mesh's picking index (made the first time a pick reaches the body), kept while
     /// the mesh is part of the world state.
     pub(crate) pick_index: crate::pick_index::PickIndexes,
+    /// Spatial picking indexes for point clouds (#8933), keyed by their shared point array.
+    pub(crate) cloud_pick_index: crate::pick_index::CloudPickIndexes,
     /// The last click in the view was the middle button's (for the middle double-click).
     pub(crate) middle_clicked: bool,
     /// The right button held down has moved or been held too long for a click, so it navigates.
@@ -540,6 +542,13 @@ pub enum Hit {
     /// An origin or construction axis.
     Axis {
         name: String,
+    },
+    /// A visible sampled point of a point cloud (#8933).
+    PointCloudPoint {
+        cloud: u64,
+        cloud_name: String,
+        index: usize,
+        point: Vec3,
     },
 }
 
@@ -3970,6 +3979,9 @@ pub(crate) fn body_bounds(
         // shared mesh).
         let live: std::collections::HashSet<usize> = now.keys().map(|(mesh, _)| *mesh).collect();
         app.viewport.pick_index.retain(|k| live.contains(&k));
+        let live_clouds: std::collections::HashSet<usize> =
+            app.session.doc.point_clouds.iter().map(|c| std::sync::Arc::as_ptr(c.points.values()).cast::<f32>() as usize).collect();
+        app.viewport.cloud_pick_index.retain(|k| live_clouds.contains(&k));
         if let Ok(mut k) = app.viewport.mesh_bounds.lock() {
             *k = now;
         }
@@ -4188,6 +4200,29 @@ fn pick_cached_with(app: &mut SolveApp, proj: &Proj, pos: Pos2, feedback: Option
     app.session.visibility.hidden_bodies.hash(&mut h);
     app.dialog.as_ref().map(|d| &d.edit_source_bodies).hash(&mut h);
     app.session.visibility.hidden_occurrences.hash(&mut h);
+    for c in solidcraft_engine::view::shown_point_clouds(&app.session) {
+        c.id.hash(&mut h);
+        (std::sync::Arc::as_ptr(c.points.values()).cast::<f32>() as usize).hash(&mut h);
+        [c.origin.x, c.origin.y, c.origin.z].map(f64::to_bits).hash(&mut h);
+        for col in &c.transform {
+            for v in col {
+                v.to_bits().hash(&mut h);
+            }
+        }
+        c.point_size.to_bits().hash(&mut h);
+        c.filters.len().hash(&mut h);
+        for (k, f) in c.filters.iter().enumerate() {
+            f.property.hash(&mut h);
+            if let Some(range) = app.tree.cloud_panel.as_ref().and_then(|p| p.playing(c.id, k)) {
+                range.map(f64::to_bits).hash(&mut h);
+            } else {
+                match &f.keep {
+                    solidcraft_engine::doc::point_cloud::Keep::Range { range } => range.map(f64::to_bits).hash(&mut h),
+                    solidcraft_engine::doc::point_cloud::Keep::Values { values } => values.hash(&mut h),
+                }
+            }
+        }
+    }
     origin_point_shown(app).hash(&mut h);
     // Where each woken point shows (a Move preview moves them), on which body and of what kind:
     // a hit of the same place on another body is another hit.
@@ -4289,6 +4324,7 @@ pub fn same_target(a: &Hit, b: &Hit) -> bool {
         (Hit::Plane { name: a, .. }, Hit::Plane { name: b, .. })
         | (Hit::Axis { name: a }, Hit::Axis { name: b })
         | (Hit::ConstructionPoint { name: a }, Hit::ConstructionPoint { name: b }) => a == b,
+        (Hit::PointCloudPoint { cloud: a, index: i, .. }, Hit::PointCloudPoint { cloud: b, index: j, .. }) => a == b && i == j,
         _ => false,
     }
 }
@@ -4751,6 +4787,36 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     hits.splice(after_points..after_points, behind_points.into_iter().map(|x| x.1));
     hits.splice(0..0, woken.into_iter().map(|x| x.1));
     hits.extend(bestv.hits());
+    // Visible point-cloud points (#8933): respect filters (including playing sliders), section
+    // clipping, and body/cap occlusion. Large clouds building their index off the window thread
+    // defer hover scans and repaint once ready.
+    let mut best_cloud = Near::new(all);
+    let cloud_max = if through || wireframe { None } else { hidden_from.map(|t| t + slack) };
+    for raw_cloud in solidcraft_engine::view::shown_point_clouds(s) {
+        if raw_cloud.is_empty() {
+            continue;
+        }
+        let index = app.viewport.cloud_pick_index.of(raw_cloud.points.values());
+        if let Some(ctx) = feedback
+            && raw_cloud.len() > crate::pick_index::CLOUD_AT_ONCE
+            && index.is_none()
+        {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+            continue;
+        }
+        let playing = |k: usize| app.tree.cloud_panel.as_ref().and_then(|p| p.playing(raw_cloud.id, k));
+        let cloud = crate::point_clouds::as_drawn(raw_cloud, playing);
+        let px = ((cloud.point_size as f32) * 0.5 + 2.0).max(6.0);
+        let (a, b) = crate::pick_index::reach(proj, pos, px);
+        if let Some((hit, dd)) =
+            solidcraft_engine::point_cloud_pick::pick_cloud_screen(&cloud, index.as_deref(), o, d, a, b, cloud_max, &section, |w| {
+                proj.to_screen(w).map(|sp| sp.distance(pos)).filter(|d| *d <= px)
+            })
+        {
+            best_cloud.offer(dd, Hit::PointCloudPoint { cloud: hit.cloud, cloud_name: hit.cloud_name, index: hit.index, point: hit.point });
+        }
+    }
+    hits.extend(best_cloud.hits());
     hits.extend(beste.hits());
     // Origin axes.
     let size = origin_size(app.cam.half_height());
@@ -5275,6 +5341,7 @@ pub fn hit_sel(h: &Hit) -> Option<Sel> {
         Hit::Plane { name, .. } => Sel::Plane { name: name.clone() },
         Hit::Axis { name } => Sel::Axis { name: name.clone() },
         Hit::ConstructionPoint { name } => Sel::ConstructionPoint { name: name.clone() },
+        Hit::PointCloudPoint { cloud, index, point, .. } => Sel::PointCloudPoint { cloud: *cloud, index: *index, point: *point },
     })
 }
 
@@ -5303,6 +5370,10 @@ pub(crate) fn sel_hit(app: &SolveApp, sel: &Sel) -> Option<Hit> {
         Sel::Plane { name } => Hit::Plane { name: name.clone(), point: Vec3::ZERO },
         Sel::Axis { name } => Hit::Axis { name: name.clone() },
         Sel::ConstructionPoint { name } => Hit::ConstructionPoint { name: name.clone() },
+        Sel::PointCloudPoint { cloud, index, point } => {
+            let cloud_name = app.session.doc.point_clouds.iter().find(|c| c.id == *cloud).map(|c| c.name.clone()).unwrap_or_default();
+            Hit::PointCloudPoint { cloud: *cloud, cloud_name, index: *index, point: *point }
+        }
         Sel::SketchCurve { id, sketch } => curve((*sketch).or(active)?, id)?,
         Sel::ExternalSketchCurve { sketch, id } => curve(*sketch, id)?,
         Sel::ExternalSketchPoint { sketch, id } => Hit::SketchPoint { sketch: *sketch, id: id.clone(), at: point(*sketch, id)? },
@@ -5413,6 +5484,7 @@ fn pick_allowed(app: &SolveApp, h: &Hit) -> bool {
         Hit::Edge { .. } => !off("edges") && !app.picks_bodies() && !app.picks_components(),
         Hit::Face { .. } => !off("faces") || app.picks_bodies() || app.picks_components(),
         Hit::Plane { .. } | Hit::Axis { .. } | Hit::ConstructionPoint { .. } => true,
+        Hit::PointCloudPoint { .. } => !off("vertices") && !app.picks_bodies() && !app.picks_components(),
     }
 }
 
@@ -9230,13 +9302,13 @@ fn points_2d(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         }
     }
     for x in app.highlighted() {
-        if let Sel::Vertex { point, .. } = x
+        if let Sel::Vertex { point, .. } | Sel::PointCloudPoint { point, .. } = x
             && let Some(p) = proj.to_screen(point)
         {
             painter.circle(p, 4.0, t.sel_vertex, Stroke::new(1.5, t.sel_edge));
         }
     }
-    if let Some(Hit::Vertex { point, .. }) = &app.viewport.hover
+    if let Some(Hit::Vertex { point, .. } | Hit::PointCloudPoint { point, .. }) = &app.viewport.hover
         && let Some(p) = proj.to_screen(*point)
     {
         painter.circle(p, 4.5, t.hover_edge_halo, Stroke::new(1.5, t.hover_edge));
