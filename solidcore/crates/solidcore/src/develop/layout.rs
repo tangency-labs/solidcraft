@@ -2389,6 +2389,15 @@ fn first_meeting(s: &Seg2, frame: &JointFrame, levels: &[f64]) -> Option<(f64, u
 fn follow(s: &Seg2, frame: &JointFrame, map: &BendMap, on_b: bool) -> Option<Vec<Seg2>> {
     let (curve, span) = record_curve(s)?;
     let g = map.bounds();
+    // How large the numbers the pieces are made of can be: the furthest of the segment's points
+    // and control points from the origin, and the frame's origin.
+    let size_of = |s: &Seg2| {
+        extremes(s, &[X, Y])
+            .iter()
+            .map(|p| p.len())
+            .fold(0.0, f64::max)
+    };
+    let inputs = size_of(s) + frame.origin.len();
     let mut out = Vec::new();
     for piece in hermite::smooth_pieces(&curve, span)? {
         let fourth = hermite::fourth(piece.rates(), g);
@@ -2406,13 +2415,11 @@ fn follow(s: &Seg2, frame: &JointFrame, map: &BendMap, on_b: bool) -> Option<Vec
             let [t0, t1] = [*w.first()?, *w.get(1)?];
             let ((p0, d0), (p3, d3)) = (carried_at(t0)?, carried_at(t1)?);
             let cubic = hermite::cubic(p0, d0, p3, d3, t1 - t0);
-            // Its control points are read with the rounding of a few operations on numbers as
-            // large as they are.
-            let size = extremes(&cubic, &[X, Y])
-                .iter()
-                .map(|p| p.len())
-                .fold(0.0, f64::max);
-            if !(hermite::ROUNDING * size <= TEAR_TOL / 4.0) {
+            // Its control points are read with the rounding of a few operations on the numbers
+            // they are made of: the segment's points, the joint's frame they are measured from
+            // (carried points are taken off its origin and put back on it) and the control
+            // points themselves.
+            if !(hermite::ROUNDING * (inputs + size_of(&cubic)) <= TEAR_TOL / 4.0) {
                 return None;
             }
             out.push(cubic);

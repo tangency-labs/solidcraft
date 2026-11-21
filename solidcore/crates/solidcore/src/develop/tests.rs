@@ -1814,3 +1814,22 @@ fn an_outline_that_turns_back_before_the_sharp_is_refused() {
         })
     ));
 }
+
+/// Laid out 1e12 mm from the flat frame's origin, the slanted bracket's free end can't be carried
+/// within its tolerance: its points are taken off and put back on a frame that far away, whose
+/// rounding (64 units in the last place of 1e12, about 1.4e-2 mm) is over the quarter of the
+/// tolerance the carry leaves for it. It is refused, naming the joint, rather than built from
+/// rounded numbers. Near the origin the same bracket lays out.
+#[test]
+fn a_free_end_laid_out_too_far_to_carry_within_its_tolerance_is_refused() {
+    let sheet = slanted_bracket(Relief::Outline);
+    let far = Rigid2::onto(Vec2::ZERO, X, Vec2::new(1e12, 0.0), X).unwrap_or(Rigid2::IDENTITY);
+    assert!(matches!(
+        develop(&sheet, &[(0, far)]),
+        Err(Refusal::Joint {
+            joint: 0,
+            why: JointRefusal::OutlineFit
+        })
+    ));
+    assert!(develop(&sheet, &[(0, Rigid2::IDENTITY)]).is_ok());
+}
