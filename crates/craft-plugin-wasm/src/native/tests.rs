@@ -19,8 +19,17 @@ struct App {
     /// The sensitive group `app.write` is in, and the groups the user granted.
     write_group: Option<String>,
     groups: BTreeSet<String>,
+    interactive: bool,
+    forms: Vec<(String, Value)>,
 }
 impl PluginHost for App {
+    fn open_form(&mut self, entry: &str, params: &Value) -> Result<()> {
+        if !self.interactive {
+            return Err(HostError::InteractiveRequired { entry: entry.into() });
+        }
+        self.forms.push((entry.into(), params.clone()));
+        Ok(())
+    }
     fn design_token(&self) -> Result<Option<craft_plugin::DesignToken>> {
         Ok((!self.no_design)
             .then(|| craft_plugin::DesignToken { document_id: "design-one".into(), revision: "0123456789abcdef0123456789abcdef:7".into() }))
@@ -57,6 +66,7 @@ impl PluginHost for App {
     fn rollback_transaction(&mut self) -> Result<()> {
         self.value = self.saved.take().unwrap();
         self.rollbacks += 1;
+        self.forms.clear();
         Ok(())
     }
     fn granted_folders(&self) -> Vec<FileGrant> {
@@ -96,6 +106,108 @@ fn component_for(version: &str, code: &str) -> Vec<u8> {
     assert!(template.contains(original));
     wat::parse_str(template.replacen(original, &format!("      {code}\n"), 1)).unwrap()
 }
+fn form_component() -> Vec<u8> {
+    form_component_with_dialog(false)
+}
+
+fn form_component_with_dialog(hook: bool) -> Vec<u8> {
+    let (package, version) = API.split_once('@').unwrap();
+    let template = include_str!("../fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version);
+    let (types, _) = template.split_once(&format!("  (type $ty-{package}/commands@{version}")).unwrap();
+    let dialog = if hook {
+        format!(
+            r#"(instance $dialog (export "json" (type $json)) (export "plugin-error" (type $plugin-error)) (export "update-fields" (func $execute)))
+      (export "{package}/dialog-provider@{version}" (instance $dialog))"#
+        )
+    } else {
+        String::new()
+    };
+    wat::parse_str(format!(
+        r#"{types}
+      (type $form-type (instance
+        (alias outer 1 $json (type $json)) (export "json" (type (eq $json)))
+        (alias outer 1 $plugin-error (type $error)) (export "plugin-error" (type (eq $error)))
+        (type $result (result (error $error)))
+        (export "open" (func (param "entry" string) (param "params" $json) (result $result)))))
+      (import "{package}/forms@{version}" (instance $forms (type $form-type)))
+      (alias export $forms "open" (func $open))
+      (core module $allocation
+        (memory (export "memory") 1)
+        (global $heap (mut i32) i32.const 4096)
+        (func (export "realloc") (param i32 i32 i32 i32) (result i32)
+          (local $at i32) global.get $heap local.tee $at local.get 3 i32.add global.set $heap local.get $at))
+      (core instance $allocation (instantiate $allocation))
+      (alias core export $allocation "memory" (core memory $memory))
+      (alias core export $allocation "realloc" (core func $realloc))
+      (core func $open (canon lower (func $open) (memory $memory) (realloc $realloc)))
+      (core instance $imports (export "open" (func $open)) (export "memory" (memory $memory)))
+      (core module $main
+        (import "host" "open" (func $open (param i32 i32 i32 i32 i32)))
+        (import "host" "memory" (memory 1))
+        (data (i32.const 64) "make") (data (i32.const 96) "{{}}")
+        (func (export "execute") (param i32 i32 i32 i32) (result i32)
+          i32.const 64 i32.const 4 i32.const 96 i32.const 2 i32.const 0 call $open
+          i32.const 0 i32.const 0 i32.store
+          i32.const 4 i32.const 96 i32.store i32.const 8 i32.const 2 i32.store i32.const 0))
+      (core instance $main (instantiate $main (with "host" (instance $imports))))
+      (alias core export $main "execute" (core func $execute))
+      (func $execute (param "entry" string) (param "params" $json) (result (result $json (error $plugin-error)))
+        (canon lift (core func $execute) (memory $memory) (realloc $realloc)))
+      (instance $entry (export "json" (type $json)) (export "plugin-error" (type $plugin-error)) (export "execute" (func $execute)))
+      (export "{package}/entry@{version}" (instance $entry))
+      {dialog})"#
+    ))
+    .unwrap()
+}
+
+#[test]
+fn dialog_hook_cannot_open_forms_even_when_the_command_can() {
+    let bytes = form_component_with_dialog(true);
+    let mut m = manifest();
+    m.capabilities.extend(["forms@0.1".into(), "dialog@0.1".into()]);
+    m.runtime.as_mut().unwrap().entries[0].dialog_hook = true;
+    crate::check_component(&m, &bytes).unwrap();
+    let mut app = App { interactive: true, ..Default::default() };
+    assert_eq!(run(&mut app, &m, &bytes, "make", &json!({})).unwrap(), json!({}));
+    assert_eq!(app.forms.len(), 1, "ordinary interactive execution retains form requests");
+    let (app, result) = crate::dialog_fields(app, &m, &bytes, "make", &json!({}), craft_plugin::HostLimits::default());
+    assert!(matches!(result, Err(HostError::PermissionDenied { .. })), "a hook is read-only");
+    assert!(app.forms.is_empty(), "the hook cannot enqueue forms");
+}
+
+#[test]
+fn form_import_accepts_patch_capability_versions() {
+    let bytes = form_component();
+    let mut m = manifest();
+    m.capabilities.push("forms@0.1.0".into());
+    let mut app = App { interactive: true, ..Default::default() };
+    assert_eq!(run(&mut app, &m, &bytes, "make", &json!({})).unwrap(), json!({}));
+    assert_eq!(app.forms, vec![("make".into(), json!({}))]);
+    let _ = m.capabilities.pop();
+    assert!(matches!(run(&mut app, &m, &bytes, "make", &json!({})), Err(HostError::PermissionDenied { .. })));
+    m.capabilities.push("forms@0.2".into());
+    assert!(matches!(craft_plugin::check_capabilities(&m.capabilities, "Test host"), Err(HostError::UnsupportedCapability { .. })));
+    assert!(run(&mut app, &m, &bytes, "make", &json!({})).is_err());
+}
+
+#[test]
+fn additive_form_import_links_and_only_interactive_calls_can_open() {
+    let bytes = form_component();
+    let mut m = manifest();
+    let mut app = App { interactive: true, ..Default::default() };
+    assert!(run(&mut app, &m, &bytes, "make", &json!({})).is_err());
+    assert!(app.forms.is_empty(), "undeclared capability cannot open forms");
+    m.capabilities.push("forms@0.1".into());
+    assert_eq!(run(&mut app, &m, &bytes, "make", &json!({})).unwrap(), json!({}));
+    assert_eq!(app.forms, vec![("make".into(), json!({}))]);
+    let mut program = App::default();
+    assert!(matches!(run(&mut program, &m, &bytes, "make", &json!({})), Err(HostError::InteractiveRequired { .. })));
+    assert!(program.forms.is_empty());
+    let mut failed = App { interactive: true, fail_commit: true, ..Default::default() };
+    assert!(run(&mut failed, &m, &bytes, "make", &json!({})).is_err());
+    assert!(failed.forms.is_empty(), "rollback discards deferred forms");
+}
+
 fn dialog_component(version: &str, code: &str, reply: &str) -> Vec<u8> {
     let source = include_str!("../dialog_fixture.wat")
         .replace("__PACKAGE__", "craft:plugin")
@@ -449,6 +561,7 @@ fn state<H: PluginHost>(app: H) -> State<H> {
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
         clock: false,
+        forms: false,
         limits: StoreLimitsBuilder::new().build(),
         failed: None,
         calls: 0,
@@ -458,6 +571,19 @@ fn state<H: PluginHost>(app: H) -> State<H> {
         import: None,
     }
 }
+#[test]
+fn form_import_requires_capability_and_refuses_programmatic_hosts() {
+    let mut denied = state(App::default());
+    assert!(matches!(forms::Host::open(&mut denied, "make".into(), "{}".into()), Err(PluginError::PermissionDenied(_))));
+    let mut program = state(App::default());
+    program.forms = true;
+    assert!(forms::Host::open(&mut program, "make".into(), "{}".into()).is_err());
+    assert!(matches!(program.failed, Some(HostError::InteractiveRequired { .. })));
+    let mut hostile = state(App::default());
+    hostile.forms = true;
+    assert!(forms::Host::open(&mut hostile, "../entry".into(), "{}".into()).is_err());
+}
+
 #[test]
 fn files_are_denied_without_an_explicit_folder_grant() {
     use files::Host;

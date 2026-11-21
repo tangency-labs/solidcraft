@@ -101,6 +101,8 @@ pub enum HostError {
     Trap { reason: String },
     #[error("plugin cancelled")]
     Cancelled,
+    #[error("interactive_required: opening {entry} requires the app form; call the entry with params instead")]
+    InteractiveRequired { entry: String },
     /// The plugin needs a capability, or a version of one, that this host does not serve.
     #[error("{reason}")]
     UnsupportedCapability { capability: String, reason: String },
@@ -145,8 +147,15 @@ fn exhausted(limit: &str, allowed: u64) -> String {
 /// The capabilities this host serves, as name and `major.minor`. Each is a set of WIT interfaces
 /// a plugin names in its manifest's `capabilities` list. While a major version is 0, a minor
 /// version may break the one before it, so 0.x matches only the same minor.
-pub const CAPABILITIES: &[(&str, (u32, u32))] =
-    &[("commands", (0, 2)), ("design", (0, 1)), ("dialog", (0, 1)), ("evaluate", (0, 2)), ("formats", (0, 2)), ("storage", (0, 1))];
+pub const CAPABILITIES: &[(&str, (u32, u32))] = &[
+    ("commands", (0, 2)),
+    ("design", (0, 1)),
+    ("dialog", (0, 1)),
+    ("evaluate", (0, 2)),
+    ("formats", (0, 2)),
+    ("forms", (0, 1)),
+    ("storage", (0, 1)),
+];
 /// Older versions of [`CAPABILITIES`] the host still serves: plugins built against
 /// `craft:plugin@0.1.0` ([`WIT_0_1`]) run unchanged.
 pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1))];
@@ -158,7 +167,8 @@ pub const WIT_0_1: &str = include_str!("../wit-0.1/plugin.wit");
 /// The highest data format number a plugin may declare (`runtime.data_format`).
 pub const MAX_DATA_FORMAT: u32 = 1_000_000;
 
-fn capability_version(text: &str) -> Option<(u32, u32)> {
+/// Parse a capability version as major/minor, accepting an optional numeric patch.
+pub fn capability_version(text: &str) -> Option<(u32, u32)> {
     let mut parts = text.split('.');
     let major = parts.next()?.parse().ok()?;
     let minor = parts.next()?.parse().ok()?;
@@ -251,6 +261,10 @@ pub struct FileGrant {
 /// removes staged files without replacing their targets. Publication errors after app
 /// commit can leave a subset of files applied and must be reported to the caller.
 pub trait PluginHost {
+    /// Request a populated form. Programs refuse; interactive hosts defer opening until success.
+    fn open_form(&mut self, entry: &str, _params: &Value) -> Result<()> {
+        Err(HostError::InteractiveRequired { entry: entry.into() })
+    }
     /// The active document's identity and committed revision (`design@0.1`), or none when closed.
     /// Existing hosts need not implement this additive read-only capability.
     fn design_token(&self) -> Result<Option<DesignToken>> {
