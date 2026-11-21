@@ -538,6 +538,8 @@ fn new_extrude_starts_at_ten_unless_the_preference_asks_for_the_last_or_a_typed_
     assert_eq!(opened(&h), "10 in");
     h.call("ui.prefs", json!({"extrude_start": "custom"}));
     assert_eq!(opened(&h), "25 mm");
+    h.call("ui.prefs", json!({"extrude_custom_distance": "0"}));
+    assert_eq!(opened(&h), "0 in", "a custom 0 is kept: the dialog opens with no depth");
     h.call("ui.prefs", json!({"extrude_custom_distance": "nonsense"}));
     assert_eq!(opened(&h), "10 in", "a custom value that isn't a length gives the fixed 10");
     h.call("ui.prefs", json!({"extrude_start": "last_used", "extrude_last_distance": ""}));
