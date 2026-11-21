@@ -125,7 +125,8 @@ impl Resize {
                 .ok()
                 .is_some_and(|d| row.get("d").and_then(Value::as_f64) == Some(d)),
             "bearing" => s == part.size.trim(),
-            _ => s.eq_ignore_ascii_case(&part.size),
+            // `parts.insert` accepts a size with spaces around it and stores it as given.
+            _ => s.eq_ignore_ascii_case(part.size.trim()),
         })?;
         Some(Self { component, size, original_size: size, length: part.length, family, source: app.session.doc.clone() })
     }
@@ -509,6 +510,19 @@ mod tests {
             assert_eq!(k.family.sizes[k.size].0, size);
             assert_eq!(k.length, length);
             assert!(commands(&app, &k).unwrap().is_empty(), "confirming unchanged values does not rebuild");
+        }
+    }
+
+    /// `parts.insert` takes a heat-set insert's size in any case and with spaces around it, as a
+    /// script may write it; Change Part Size still opens on that part, at the library's size.
+    #[test]
+    fn part_size_opens_on_a_size_written_with_spaces_or_another_case() {
+        for (family, written, listed) in
+            [("heat_set_insert_cnc_kitchen", " m3x4 voron ", "M3x4 VORON"), ("heat_set_insert_ruthex_inch", "#2-56 unc x 4 ", "#2-56 UNC x 4")]
+        {
+            let (app, id) = part(family, written, None);
+            let k = Resize::new(&app, id).unwrap();
+            assert_eq!(k.family.sizes[k.size].0, listed, "{family}");
         }
     }
 
