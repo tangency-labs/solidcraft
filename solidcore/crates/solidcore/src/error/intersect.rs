@@ -100,6 +100,14 @@ pub enum IntersectFailure {
         /// How many nearest points the second solve found.
         found: usize,
     },
+    /// The boundary fix-up refused the dropped UV curve (an empty domain, a number not
+    /// finite, or a span's move not proved within the tolerance left: the fix-up's own
+    /// cause is chained), and the drop of the curve stops. Class `failed`.
+    BoundaryFixRefused,
+    /// The cache of the curve to drop could not be built (the build's error is the cause).
+    /// Class `failed`; whether it is a defect or a refusal is its cause's
+    /// ([`crate::SolidError::is_defect`] follows the chain).
+    CurveCacheNotBuilt,
     /// The object point of a point classification was asked for before its parameters were
     /// set. The caller's state: [`ErrorKind::InvalidInput`].
     ParametersNotSet,
@@ -114,6 +122,17 @@ pub enum IntersectFailure {
     /// points, a cache's tree), and the caller has not run that step.
     /// [`ErrorKind::InvalidInput`].
     NotSetUp,
+    /// The span stack holds no point and tangent to read. [`ErrorKind::InvalidInput`].
+    EmptyStack,
+    /// The UV domain given does not fit within the surface's natural domain.
+    /// [`ErrorKind::InvalidInput`].
+    DomainOutsideSurface,
+    /// The UV domain given is empty or its bounds are not numbers.
+    /// [`ErrorKind::InvalidInput`].
+    EmptyDomain,
+    /// A control point of the UV polygon given is not a finite number.
+    /// [`ErrorKind::InvalidInput`].
+    NotFinite,
     /// A face of the caller's poly B-rep has no outer loop, or its outer loop no edge, so
     /// its plane has no point to pass through. [`ErrorKind::InvalidInput`].
     PolyFaceWithoutEdges,
@@ -125,6 +144,42 @@ pub enum IntersectFailure {
     /// caller's B-rep, or the classification's parameter is not within the edge's interval.
     /// [`ErrorKind::InvalidInput`].
     EdgeNotSplit,
+    /// The dropped UV curve is of a kind with no B-spline form. [`ErrorKind::Unsupported`].
+    CurveNotBSpline,
+    /// A singular point of the surface lies inside its domain, not on its boundary, so the
+    /// drop has no iso direction to start along. [`ErrorKind::Unsupported`].
+    SingularPointInside,
+    /// The dropped UV curve reached `limit` control points, more than the drop builds.
+    /// [`ErrorKind::Unsupported`].
+    TooManyControlPoints {
+        /// The number of control points the drop stops at.
+        limit: usize,
+    },
+    /// The surface has no normal at the dropped point (the cross product of its tangents and
+    /// the evaluated normal are both shorter than the kernel's zero). [`ErrorKind::Degenerate`].
+    NoSurfaceNormal,
+    /// The curve to drop has no tangent to step along: its first derivative is zero where
+    /// the curve is not marked degenerate, or its tangent projected onto the surface's tangent
+    /// plane is zero at the first point. [`ErrorKind::Degenerate`].
+    DegenerateTangent,
+    /// The curve's tangent is `degrees` from the surface normal, within the 3 degrees under
+    /// which its drop onto the tangent plane has no direction. [`ErrorKind::Degenerate`].
+    TangentAlongNormal {
+        /// The angle between the curve's tangent and the surface normal, in degrees.
+        degrees: f64,
+    },
+    /// The surface's UV domain is degenerate in `u` or `v`. [`ErrorKind::Degenerate`].
+    DegenerateDomain,
+    /// The span's end crosses the seam of a closed surface and does not snap onto it within
+    /// the tolerance. [`ErrorKind::OutsideDomain`].
+    SeamJumpNotSnapped,
+    /// The boundary fix-up moved a span of the UV polygon by an amount it cannot prove within
+    /// `budget`, what is left of the drop's tolerance (negative where the trace already
+    /// accepted a span over it). [`ErrorKind::NotWithinTolerance`].
+    MoveNotProved {
+        /// What is left of the drop's tolerance for the move.
+        budget: f64,
+    },
 }
 
 impl IntersectFailure {
@@ -139,16 +194,30 @@ impl IntersectFailure {
             | Self::NoIntersection
             | Self::NoFoot
             | Self::NotOneFoot { .. }
+            | Self::BoundaryFixRefused
             | Self::ParametersNotSet
+            | Self::EmptyStack
+            | Self::DomainOutsideSurface
+            | Self::EmptyDomain
+            | Self::NotFinite
             | Self::UnsupportedObjectKind
-            | Self::EdgeNotSplit => SM_ERR,
+            | Self::EdgeNotSplit
+            | Self::SingularPointInside
+            | Self::TooManyControlPoints { .. }
+            | Self::NoSurfaceNormal
+            | Self::DegenerateTangent
+            | Self::TangentAlongNormal { .. }
+            | Self::DegenerateDomain
+            | Self::MoveNotProved { .. } => SM_ERR,
             Self::Missing(_)
+            | Self::CurveCacheNotBuilt
             | Self::FaceWithoutSurface
             | Self::EdgeWithoutCurve
             | Self::NoClassObject
             | Self::NotSetUp
-            | Self::PolyFaceWithoutEdges => SM_ERR_NULL_POINTER,
-            Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
+            | Self::PolyFaceWithoutEdges
+            | Self::CurveNotBSpline => SM_ERR_NULL_POINTER,
+            Self::OutsideDomain(_) | Self::SeamJumpNotSnapped => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
         }
     }
@@ -157,23 +226,39 @@ impl IntersectFailure {
     /// [`IntersectFailure::StageFailed`] and [`IntersectFailure::Defect`], a defect;
     /// [`ErrorKind::Missing`] for
     /// [`IntersectFailure::Missing`], [`ErrorKind::OutsideDomain`] for
-    /// [`IntersectFailure::OutsideDomain`], [`ErrorKind::NotWithinTolerance`] for
-    /// [`IntersectFailure::PointsWhereAPlaneCrosses`], [`ErrorKind::InvalidInput`] for a check
-    /// of the caller's argument, state or body, [`ErrorKind::Unsupported`] for a kind the
-    /// routine does not take, [`ErrorKind::Failed`] otherwise.
+    /// [`IntersectFailure::OutsideDomain`] and [`IntersectFailure::SeamJumpNotSnapped`],
+    /// [`ErrorKind::NotWithinTolerance`] for [`IntersectFailure::PointsWhereAPlaneCrosses`]
+    /// and [`IntersectFailure::MoveNotProved`], [`ErrorKind::InvalidInput`] for a check of
+    /// the caller's argument, state or body, [`ErrorKind::Unsupported`] for a kind or size
+    /// the routine does not take, [`ErrorKind::Degenerate`] for a degenerate normal, tangent
+    /// or domain, [`ErrorKind::Failed`] otherwise.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
-            Self::PointsWhereAPlaneCrosses { .. } => ErrorKind::NotWithinTolerance,
+            Self::PointsWhereAPlaneCrosses { .. } | Self::MoveNotProved { .. } => {
+                ErrorKind::NotWithinTolerance
+            }
             Self::ParametersNotSet
             | Self::FaceWithoutSurface
             | Self::EdgeWithoutCurve
             | Self::NoClassObject
             | Self::NotSetUp
+            | Self::EmptyStack
+            | Self::DomainOutsideSurface
+            | Self::EmptyDomain
+            | Self::NotFinite
             | Self::PolyFaceWithoutEdges
             | Self::EdgeNotSplit => ErrorKind::InvalidInput,
-            Self::UnsupportedObjectKind => ErrorKind::Unsupported,
+            Self::UnsupportedObjectKind
+            | Self::CurveNotBSpline
+            | Self::SingularPointInside
+            | Self::TooManyControlPoints { .. } => ErrorKind::Unsupported,
+            Self::NoSurfaceNormal
+            | Self::DegenerateTangent
+            | Self::TangentAlongNormal { .. }
+            | Self::DegenerateDomain => ErrorKind::Degenerate,
+            Self::CurveCacheNotBuilt => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -205,6 +290,10 @@ impl core::fmt::Display for IntersectFailure {
                 f,
                 "no single nearest point on the face's surface was found ({found} found)"
             ),
+            Self::BoundaryFixRefused => {
+                f.write_str("the boundary fix-up refused the dropped curve")
+            }
+            Self::CurveCacheNotBuilt => f.write_str("the curve cache could not be built"),
             Self::ParametersNotSet => {
                 f.write_str("the point's classification parameters are not set")
             }
@@ -214,11 +303,39 @@ impl core::fmt::Display for IntersectFailure {
                 f.write_str("the classification has no object of the kind its class names")
             }
             Self::NotSetUp => f.write_str("a step this one reads from has not run"),
+            Self::EmptyStack => f.write_str("the stack holds no point and tangent"),
+            Self::DomainOutsideSurface => {
+                f.write_str("the uv domain does not fit within the surface's natural domain")
+            }
+            Self::EmptyDomain => f.write_str("the uv domain is empty or not a number"),
+            Self::NotFinite => f.write_str("a control point is not a finite number"),
             Self::PolyFaceWithoutEdges => f.write_str("a poly face has no outer loop edge"),
             Self::UnsupportedObjectKind => {
                 f.write_str("the object is of a kind the routine does not take")
             }
             Self::EdgeNotSplit => f.write_str("the edge was not split at the point"),
+            Self::CurveNotBSpline => f.write_str("the dropped uv curve has no B-spline form"),
+            Self::SingularPointInside => {
+                f.write_str("the singular surface point is not on the domain's boundary")
+            }
+            Self::TooManyControlPoints { limit } => write!(
+                f,
+                "the dropped curve reached {limit} control points, more than the drop builds"
+            ),
+            Self::NoSurfaceNormal => f.write_str("the surface has no normal at the dropped point"),
+            Self::DegenerateTangent => f.write_str("the curve to drop has no tangent there"),
+            Self::TangentAlongNormal { degrees } => write!(
+                f,
+                "the curve's tangent is {degrees} degrees from the surface normal, within 3"
+            ),
+            Self::DegenerateDomain => f.write_str("the surface's uv domain is degenerate"),
+            Self::SeamJumpNotSnapped => f.write_str(
+                "the span's end crosses the seam and does not snap onto it within the tolerance",
+            ),
+            Self::MoveNotProved { budget } => write!(
+                f,
+                "a span's move is not proved within the tolerance left ({budget:e})"
+            ),
         }
     }
 }
@@ -423,11 +540,17 @@ pub(super) mod tests {
             (F::NoIntersection, SM_ERR, K::Failed),
             (F::NoFoot, SM_ERR, K::Failed),
             (F::NotOneFoot { found: 2 }, SM_ERR, K::Failed),
+            (F::BoundaryFixRefused, SM_ERR, K::Failed),
+            (F::CurveCacheNotBuilt, SM_ERR_NULL_POINTER, K::Failed),
             (F::ParametersNotSet, SM_ERR, K::InvalidInput),
             (F::FaceWithoutSurface, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::EdgeWithoutCurve, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::NoClassObject, SM_ERR_NULL_POINTER, K::InvalidInput),
             (F::NotSetUp, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::EmptyStack, SM_ERR, K::InvalidInput),
+            (F::DomainOutsideSurface, SM_ERR, K::InvalidInput),
+            (F::EmptyDomain, SM_ERR, K::InvalidInput),
+            (F::NotFinite, SM_ERR, K::InvalidInput),
             (
                 F::PolyFaceWithoutEdges,
                 SM_ERR_NULL_POINTER,
@@ -435,6 +558,27 @@ pub(super) mod tests {
             ),
             (F::UnsupportedObjectKind, SM_ERR, K::Unsupported),
             (F::EdgeNotSplit, SM_ERR, K::InvalidInput),
+            (F::CurveNotBSpline, SM_ERR_NULL_POINTER, K::Unsupported),
+            (F::SingularPointInside, SM_ERR, K::Unsupported),
+            (F::TooManyControlPoints { limit: 9 }, SM_ERR, K::Unsupported),
+            (F::NoSurfaceNormal, SM_ERR, K::Degenerate),
+            (F::DegenerateTangent, SM_ERR, K::Degenerate),
+            (
+                F::TangentAlongNormal { degrees: 1.5 },
+                SM_ERR,
+                K::Degenerate,
+            ),
+            (F::DegenerateDomain, SM_ERR, K::Degenerate),
+            (
+                F::SeamJumpNotSnapped,
+                SM_ERR_OUTSIDE_OF_DOMAIN,
+                K::OutsideDomain,
+            ),
+            (
+                F::MoveNotProved { budget: 1e-6 },
+                SM_ERR,
+                K::NotWithinTolerance,
+            ),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::intersect(op, failure);
@@ -455,6 +599,15 @@ pub(super) mod tests {
             .into_error();
         assert_eq!(super::super::upstream_status(&e), Some(SM_ERR));
         assert_eq!(e.kind(), K::InvalidInput);
+        // the cache build's error stays the cause, and decides defect or refusal
+        let why = "a step the kernel got wrong";
+        let cause = SolidError::intersect(op, F::Defect { why });
+        let e = Failure::new(op, F::CurveCacheNotBuilt)
+            .caused_by(cause.clone())
+            .into_error();
+        assert_eq!(e.cause(), Some(&cause));
+        assert!(e.is_defect());
+        assert_eq!(super::super::upstream_status(&e), Some(SM_ERR_NULL_POINTER));
     }
 
     /// The intersection routines describe their failures: their library code builds no
@@ -495,11 +648,6 @@ pub(super) mod tests {
             ("solidcore/src/intersect/curve_class/p7.rs", 17),
             ("solidcore/src/intersect/curve_class/p8.rs", 17),
             ("solidcore/src/intersect/curve_class/p9.rs", 17),
-            ("solidcore/src/intersect/surface_drop_curve.rs", 8),
-            ("solidcore/src/intersect/surface_drop_lib/boundary_moves.rs", 3),
-            ("solidcore/src/intersect/surface_drop_lib/p1.rs", 4),
-            ("solidcore/src/intersect/surface_drop_lib/p2.rs", 7),
-            ("solidcore/src/intersect/surface_drop_lib/p3.rs", 10),
             ("solidcore/src/intersect/surface_intersector/p2.rs", 9),
             ("solidcore/src/intersect/surface_intersector/p3.rs", 5),
             ("solidcore/src/intersect/surface_intersector/p4.rs", 17),

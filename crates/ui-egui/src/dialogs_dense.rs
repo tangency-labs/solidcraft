@@ -428,6 +428,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         crate::dialogs_move::type_row(app, d, ui);
         let n = d.inputs.len();
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 1..n);
+    } else if matches!(d.kind, Kind::Frame(_)) {
+        // Corner Overrides shows among Frame Member's own rows, under the corner settings.
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..2);
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
     }
@@ -1222,7 +1225,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Surface(k) => enter |= crate::dialogs_surface::rows(ui, k),
         Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
         Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
-        Kind::Frame(k) => enter |= crate::dialogs_frame::rows(app, ui, k, &d.inputs),
+        Kind::Frame(_) => enter |= crate::dialogs_frame::rows(app, ui, d),
         Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),
         Kind::RotateMember(k) => enter |= crate::dialogs_rotate_member::rows(app, ui, k, &mut d.inputs),
         Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
