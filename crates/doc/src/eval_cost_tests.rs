@@ -3467,6 +3467,39 @@ fn a_heal_the_next_read_finds_again_is_told_once() {
     assert_eq!(model.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>(), fingerprints);
 }
 
+/// #20133: a save while an import's SMLib check of its parts runs does not wait for it. The
+/// model is left out of the save (the design is rebuilt when it opens), since what the check
+/// finds is part of the model; once the check ends, the model is kept with what it found.
+#[test]
+fn a_save_while_an_import_is_checked_keeps_no_model_and_does_not_wait() {
+    let doc = placed_imports(1);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let import = doc.features[0].id;
+    let (checks, end) = kernel::ImportChecks::running_for_tests();
+    let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+    assert!(model.checking_imports());
+    // (were it to wait, this would never return: nothing else ends the check)
+    assert!(model.saved_if_checked(&doc).is_none(), "no model while the check runs");
+    let issue = kernel::ImportIssue {
+        kind: kernel::IssueKind::NeedsRepair,
+        item: Some(1),
+        part: String::new(),
+        paths: Vec::new(),
+        faces: 0,
+        times: 1,
+        detail: "fails SMLib's check".into(),
+    };
+    end(vec![issue]);
+    assert!(!model.checking_imports());
+    let saved = model.saved_if_checked(&doc).expect("the model once the check has ended");
+    let feature = &saved.records["features"][0];
+    assert_eq!(feature["warning"], serde_json::json!(crate::eval::import_warning(&["fails SMLib's check"])));
+    assert_eq!(feature["import_report"]["issues"][0]["detail"], "fails SMLib's check", "kept with what the check found");
+    assert_eq!(saved.records, model.saved(&doc).unwrap().records, "as a save that waited keeps it");
+}
+
 /// The tolerance heal preference is part of an import's and a Repair's fingerprint, and of no
 /// other feature's: turned off, the model is not current and evaluates both again (the import
 /// read as it is, the Repair without its heal); turned back on, it comes back to the first
