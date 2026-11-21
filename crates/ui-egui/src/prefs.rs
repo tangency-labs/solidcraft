@@ -31,6 +31,7 @@ mod mouse3d;
 mod navbar;
 mod navigation;
 mod panel_layout;
+mod privacy;
 mod security;
 mod sketch;
 mod theme_picker;
@@ -386,6 +387,7 @@ pub const PAGES: &[&str] = &[
     "Shortcuts",
     "Assistant",
     "Plugins",
+    "Privacy",
 ];
 pub const PAGE_GENERAL: usize = 0;
 pub const PAGE_APPEARANCE: usize = 1;
@@ -400,6 +402,7 @@ pub const PAGE_MOUSE3D: usize = 9;
 pub const PAGE_SHORTCUTS: usize = 10;
 pub const PAGE_ASSISTANT: usize = 11;
 pub const PAGE_PLUGINS: usize = 12;
+pub const PAGE_PRIVACY: usize = 13;
 /// What Preferences accepts for `parameter_list_rows`: `parameters.complete` answers at most 200.
 pub const PARAMETER_LIST_ROWS: std::ops::RangeInclusive<u16> = 5..=200;
 const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
@@ -451,7 +454,8 @@ const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
     prefs_window::Page::Host(prefs_window::HostPage {
         icon: ui_kit::Icon::Kit("shield"),
         label: "prefs.security",
-        group: Some("prefs.structure.work"),
+        // Already in Work, after Design: a group here drew a second "Work" heading.
+        group: None,
         handle: "prefs:page:Security",
         scroll: true,
         draw: page_draw::<PAGE_SECURITY>,
@@ -519,6 +523,15 @@ const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
         scroll: true,
         draw: page_draw::<PAGE_PLUGINS>,
         defaults: page_defaults::<PAGE_PLUGINS>,
+    }),
+    prefs_window::Page::Host(prefs_window::HostPage {
+        icon: ui_kit::Icon::Kit("eye"),
+        label: "prefs.privacy",
+        group: None,
+        handle: "prefs:page:Privacy",
+        scroll: true,
+        draw: page_draw::<PAGE_PRIVACY>,
+        defaults: page_defaults::<PAGE_PRIVACY>,
     }),
 ];
 
@@ -1510,6 +1523,8 @@ preference_settings! {
     /// and entering a sketch or Render opens a view of its own, as in 0.43.0. Off: the tab looks as
     /// it did before design views, with no switcher until the user opens a second view.
     show_design_view_switcher: bool = false, PAGE_LAYOUT;
+    /// Use distinct tab treatments for the focused view, cards, hidden views, and pop-outs.
+    clear_view_tabs: bool = true, PAGE_LAYOUT;
     /// A drawing sheet opens as a view (a sub-tab) of its design.
     design_sub_tab_sheets: bool = true, PAGE_LAYOUT;
     /// Editing a sketch opens it as a view of its design; Finish Sketch returns to the previous view.
@@ -1738,6 +1753,10 @@ preference_settings! {
     network_locations: bool = false, PAGE_GENERAL => check_tr("prefs.network_locations");
     /// The servers the files a design names may be on ("Always allow this server").
     network_hosts: Vec<String> = Vec::new(), PAGE_GENERAL;
+    /// Folders linked files are loaded from when a design opens, besides the design's own folder
+    /// (`link_folders_prompt`): those the user answered Load for. Kept in the user's settings,
+    /// never in a design.
+    linked_file_folders: Vec<String> = Vec::new(), PAGE_GENERAL;
     /// What a middle-button double-click in the view does: `home`, `fit` or `off`.
     middle_double_click: String = "home".into(), PAGE_NAVIGATION;
     /// A view chosen on the navigator (a face, corner or arrow, an axis tip) also frames the
@@ -3437,6 +3456,7 @@ fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
         }
         PAGE_DESIGN => design::show(app, ui),
         PAGE_SECURITY => security::show(app, ui),
+        PAGE_PRIVACY => privacy::show(app, ui),
         PAGE_NAVIGATION => navigation::show(app, ui, t),
         PAGE_GRAPHICS => graphics::show(app, ui),
         PAGE_SKETCH => sketch::show(app, ui),
@@ -7311,6 +7331,7 @@ mod tests {
             ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
             ("design_views_as_tabs", json!(false), PAGE_LAYOUT),
             ("show_design_view_switcher", json!(true), PAGE_LAYOUT),
+            ("clear_view_tabs", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_sheets", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_sketches", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_render", json!(false), PAGE_LAYOUT),
@@ -7390,6 +7411,7 @@ mod tests {
             ("signing_key", json!("0123456789ABCDEF0123456789ABCDEF01234567"), PAGE_SECURITY),
             ("trusted_signing_keys", json!("0123456789ABCDEF0123456789ABCDEF01234567"), PAGE_SECURITY),
             ("verify_opened_designs", json!(true), PAGE_SECURITY),
+            ("linked_file_folders", json!(["/work/parts"]), PAGE_GENERAL),
         ];
         let defaults = serde_json::to_value(Prefs::default()).unwrap();
         for (field, value, owner) in fields {
@@ -7449,16 +7471,14 @@ mod tests {
                 "3D mouse",
                 "Shortcuts",
                 "Assistant",
-                "Plugins"
+                "Plugins",
+                "Privacy"
             ]
         );
         assert_eq!(WINDOW_PAGES.len(), PAGES.len());
         let groups: Vec<_> =
             WINDOW_PAGES.iter().map(host_page).enumerate().filter_map(|(i, p)| p.group.map(|g| (i, solidcraft_ui_text::tr(g)))).collect();
-        assert_eq!(
-            groups,
-            [(PAGE_APPEARANCE, "Look"), (PAGE_DESIGN, "Work"), (PAGE_SECURITY, "Work"), (PAGE_NAVIGATION, "Input"), (PAGE_ASSISTANT, "Extend")]
-        );
+        assert_eq!(groups, [(PAGE_APPEARANCE, "Look"), (PAGE_DESIGN, "Work"), (PAGE_NAVIGATION, "Input"), (PAGE_ASSISTANT, "Extend")]);
         let mut fields = std::collections::BTreeSet::new();
         for (field, page) in FIELD_PAGES {
             assert!(fields.insert(field), "duplicate home for {field}");
