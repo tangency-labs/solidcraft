@@ -1881,7 +1881,7 @@ impl OffsetExecutive {
     ///
     /// # Errors
     ///
-    /// A null-pointer error without an offset B-rep; those of the attribute store.
+    /// Those of the attribute store; without an offset B-rep there is nothing to mark.
     fn mark_offset_roles(&mut self, original: &mut Brep) -> Result<()> {
         let mut roles: Vec<(FaceId, i64)> = Vec::new();
         for fu in self.faceuse_to_faces.all_firsts() {
@@ -1905,7 +1905,10 @@ impl OffsetExecutive {
             roles.push((f, ids::OFFSET_ROLE_EDGE));
         }
         clear_offset_roles(original)?;
-        let offset = required(self.offset_brep.as_mut())?;
+        let Some(offset) = self.offset_brep.as_mut() else {
+            // no offset yet: no face to mark
+            return Ok(());
+        };
         clear_offset_roles(offset)?;
         let mut marked: BTreeSet<FaceId> = BTreeSet::new();
         let faces: BTreeSet<FaceId> = offset.face_list().iter().copied().collect();
