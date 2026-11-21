@@ -274,8 +274,10 @@ pub fn start(settings: Option<&Path>, ctx: &egui::Context) {
 /// Stop advertising this instance and taking files (at exit).
 pub fn stop() {
     if let Some((endpoint, open)) = LISTENING.get() {
-        open.store(false, Ordering::SeqCst);
-        cleanup(endpoint);
+        // Only once: a second call at exit would delete the token the next launch just wrote.
+        if open.swap(false, Ordering::SeqCst) {
+            cleanup(endpoint);
+        }
     }
 }
 
@@ -448,6 +450,9 @@ mod tests {
         assert!(!ask(&endpoint, &request), "a stopped instance took a hand-off");
         std::thread::sleep(Duration::from_millis(100));
         assert!(take().is_empty());
+        std::fs::write(&endpoint.token, "next launch").unwrap();
+        stop();
+        assert!(endpoint.token.exists(), "a second stop removed the next launch's token");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
