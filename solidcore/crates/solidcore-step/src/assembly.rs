@@ -1572,12 +1572,22 @@ impl<'t> Assembly<'t> {
         // Which loop is largest is decided on the areas the loops' pcurves enclose, integrated
         // along them, not on polygons: nested loops of nearly one size (a thin ring) must not swap
         // places by how finely, or in how many edges, each is sampled.
-        let sizes: Vec<Option<f64>> = if edge_loops.len() > 1 {
-            edge_loops.iter().zip(&pcs).zip(&shapes).map(|((l, pc), coarse)| coarse.and(loop_area_integrated(l, pc))).collect()
+        // Each with the bound on its integration error: `(area, error)`.
+        let sizes: Vec<Option<(f64, f64)>> = if edge_loops.len() > 1 {
+            edge_loops
+                .iter()
+                .zip(&pcs)
+                .zip(&shapes)
+                .map(|((l, pc), coarse)| coarse.and_then(|scale| loop_area_integrated(l, pc, scale.abs())))
+                .collect()
         } else {
-            shapes.clone()
+            shapes.iter().map(|a| a.map(|a| (a, 0.0))).collect()
         };
-        let largest = sizes.iter().enumerate().filter_map(|(i, a)| a.map(|a| (i, a.abs()))).max_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| i);
+        // Certainly the largest; else the file's own outer bound; else, with nothing better, the
+        // largest measured.
+        let largest = largest_loop(&sizes).or(marked).or_else(|| {
+            sizes.iter().enumerate().filter_map(|(i, a)| a.map(|(a, _)| (i, a.abs()))).max_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| i)
+        });
         let outer = match (marked, largest) {
             // A marked outer loop that closes in (u, v) but another encloses more: that one.
             (Some(m), Some(l)) if shapes.get(m).copied().flatten().is_some() => l,
@@ -1921,18 +1931,29 @@ fn loop_area(l: &[(u32, bool)], pcs: &[Curve2], periodic: [bool; 2]) -> Option<f
     loop_area_sampled(l, pcs, periodic, 16)
 }
 
-/// The signed area a closed loop of pcurves encloses in (u, v), integrated along the curves:
-/// half of the integral of `(u - u0) dv - (v - v0) du` (Green), with `(u0, v0)` the loop's first
-/// point. Each edge is integrated knot span by knot span (the curve is smooth within a span),
-/// four Gauss–Legendre pieces of eight points to a span, so a rational arc is measured to
-/// rounding, not to a polygon's chord error, whatever the number of edges. A gap between one
-/// edge's end and the next edge's start (within the file's tolerance) is closed by a straight
-/// chord. `None` for a malformed pcurve. Only call it on a loop [`loop_area`] found closed.
-fn loop_area_integrated(l: &[(u32, bool)], pcs: &[Curve2]) -> Option<f64> {
-    // Eight-point Gauss–Legendre nodes on [-1, 1] and their weights.
-    const NODES: &[f64] = &[0.1834346424956498, 0.5255324099163290, 0.7966664774136267, 0.9602898564975363];
-    const WEIGHTS: &[f64] = &[0.3626837833783620, 0.3137066458778873, 0.2223810344533745, 0.1012285362903763];
-    const PIECES: u32 = 4;
+/// The loop that encloses the most, by `sizes` (`(area, error bound)` per loop, `None` for one that
+/// doesn't close): only when its lead over every other loop is more than their error bounds
+/// together, so the choice is certain. `None` when no loop is certainly the largest; the file's
+/// own outer bound then decides.
+fn largest_loop(sizes: &[Option<(f64, f64)>]) -> Option<usize> {
+    let known: Vec<(usize, f64, f64)> = sizes.iter().enumerate().filter_map(|(i, s)| s.map(|(a, e)| (i, a.abs(), e))).collect();
+    let &(best, area, error) = known.iter().max_by(|a, b| a.1.total_cmp(&b.1))?;
+    let certain = known.iter().all(|&(i, other, other_error)| i == best || area - error > other + other_error + 4.0 * f64::EPSILON * (area + other));
+    certain.then_some(best)
+}
+
+/// The signed area a closed loop of pcurves encloses in (u, v), integrated along the curves, and
+/// a bound on the integration's error: half of the integral of `(u - u0) dv - (v - v0) du`
+/// (Green), with `(u0, v0)` the loop's first point. Each edge is integrated knot span by knot span
+/// (the curve is smooth within a span) by an adaptive eight-point Gauss–Legendre rule: a piece is
+/// halved until its halves agree with it, so a rational arc is measured to rounding however its
+/// parameter runs, and where the halving budget ends first the disagreement left is the reported
+/// error. Halves agree once they differ by rounding: relative to the piece, or to `scale` (the
+/// loop's rough area, [`loop_area`]) for a piece that adds little. A gap between one edge's end
+/// and the next edge's start (within the file's tolerance) is closed by a straight chord. `None`
+/// for a malformed pcurve. Only call it on a loop [`loop_area`] found closed.
+fn loop_area_integrated(l: &[(u32, bool)], pcs: &[Curve2], scale: f64) -> Option<(f64, f64)> {
+    let floor = 1e-15 * scale;
     let ends = |c: &Curve2, forward: bool| -> Option<([f64; 2], [f64; 2])> {
         let [a, b] = c.interval()?;
         let (p, q) = (solidcore_ops::pcurve::eval(c, a)?, solidcore_ops::pcurve::eval(c, b)?);
@@ -1941,7 +1962,8 @@ fn loop_area_integrated(l: &[(u32, bool)], pcs: &[Curve2]) -> Option<f64> {
     let (&(_, first_forward), first_curve) = (l.first()?, pcs.first()?);
     let origin = ends(first_curve, first_forward)?.0;
     let cross = |p: [f64; 2], q: [f64; 2]| (p[0] - origin[0]) * (q[1] - origin[1]) - (q[0] - origin[0]) * (p[1] - origin[1]);
-    let mut twice = 0.0;
+    let mut budget = GREEN_BUDGET;
+    let (mut twice, mut error) = (0.0, 0.0);
     let mut previous_end: Option<[f64; 2]> = None;
     for (&(_, forward), c) in l.iter().zip(pcs) {
         let [t0, t1] = c.interval()?;
@@ -1955,17 +1977,10 @@ fn loop_area_integrated(l: &[(u32, bool)], pcs: &[Curve2]) -> Option<f64> {
         let mut edge = 0.0;
         for span in breaks.windows(2) {
             let (a, b) = (*span.first()?, *span.get(1)?);
-            for k in 0..PIECES {
-                let lo = a + (b - a) * f64::from(k) / f64::from(PIECES);
-                let hi = a + (b - a) * f64::from(k + 1) / f64::from(PIECES);
-                let (mid, half) = (0.5 * (lo + hi), 0.5 * (hi - lo));
-                for (x, w) in NODES.iter().zip(WEIGHTS) {
-                    for t in [mid - half * x, mid + half * x] {
-                        let (p, d) = solidcore_ops::pcurve::eval_d1(c, t)?;
-                        edge += w * half * ((p[0] - origin[0]) * d[1] - (p[1] - origin[1]) * d[0]);
-                    }
-                }
-            }
+            let whole = green_piece(c, origin, a, b)?;
+            let (value, e) = green_adaptive(c, origin, [a, b], whole, floor, GREEN_DEPTH, &mut budget)?;
+            edge += value;
+            error += e;
         }
         let (start, end) = ends(c, forward)?;
         if let Some(prev) = previous_end {
@@ -1975,7 +1990,44 @@ fn loop_area_integrated(l: &[(u32, bool)], pcs: &[Curve2]) -> Option<f64> {
         previous_end = Some(end);
     }
     twice += cross(previous_end?, origin);
-    twice.is_finite().then_some(0.5 * twice)
+    (twice.is_finite() && error.is_finite()).then_some((0.5 * twice, 0.5 * error))
+}
+
+/// Most halvings of one piece in [`loop_area_integrated`].
+const GREEN_DEPTH: u32 = 40;
+/// Most pieces [`loop_area_integrated`] integrates for one loop.
+const GREEN_BUDGET: usize = 100_000;
+
+/// `(u - u0) v' - (v - v0) u'` of `c` over `[a, b]` by eight-point Gauss–Legendre.
+fn green_piece(c: &Curve2, origin: [f64; 2], a: f64, b: f64) -> Option<f64> {
+    const NODES: &[f64] = &[0.1834346424956498, 0.5255324099163290, 0.7966664774136267, 0.9602898564975363];
+    const WEIGHTS: &[f64] = &[0.3626837833783620, 0.3137066458778873, 0.2223810344533745, 0.1012285362903763];
+    let (mid, half) = (0.5 * (a + b), 0.5 * (b - a));
+    let mut sum = 0.0;
+    for (x, w) in NODES.iter().zip(WEIGHTS) {
+        for t in [mid - half * x, mid + half * x] {
+            let (p, d) = solidcore_ops::pcurve::eval_d1(c, t)?;
+            sum += w * half * ((p[0] - origin[0]) * d[1] - (p[1] - origin[1]) * d[0]);
+        }
+    }
+    Some(sum)
+}
+
+/// [`green_piece`] over `[a, b]` (`whole` its value there) refined by halving until the halves
+/// agree with the whole to rounding (relative, or within `floor`), at most `depth` times and within
+/// `budget` pieces: the value, and the disagreement left where the refining ended early.
+fn green_adaptive(c: &Curve2, origin: [f64; 2], [a, b]: [f64; 2], whole: f64, floor: f64, depth: u32, budget: &mut usize) -> Option<(f64, f64)> {
+    let m = 0.5 * (a + b);
+    let (left, right) = (green_piece(c, origin, a, m)?, green_piece(c, origin, m, b)?);
+    *budget = budget.saturating_sub(2);
+    let halves = left + right;
+    let gap = (halves - whole).abs();
+    if gap <= 1e-13 * (left.abs() + right.abs()) + floor || depth == 0 || *budget == 0 {
+        return Some((halves, gap));
+    }
+    let (l, el) = green_adaptive(c, origin, [a, m], left, floor, depth - 1, budget)?;
+    let (r, er) = green_adaptive(c, origin, [m, b], right, floor, depth - 1, budget)?;
+    Some((l + r, el + er))
 }
 
 /// [`loop_area`] with `steps` chords on each edge. A rational arc sampled evenly in its parameter
