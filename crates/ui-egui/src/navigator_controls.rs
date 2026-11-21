@@ -98,10 +98,8 @@ const ROLL_ARROWS: [(&str, egui::Vec2, egui::Vec2, bool, &str); 2] = [
 /// compass circle in its lower-right corner, where the navigator's box has the most room outside
 /// the circle and no other control sits (the upper corners are Home's and Turn Around's), and meet
 /// at 45°.
-const AXES_ROLL_ARROWS: [(&str, (f32, f32), bool, &str); 2] = [
-    ("clockwise", (0.80, 1.08), true, "Rotate view clockwise 90°"),
-    ("counterclockwise", (0.77, 0.49), false, "Rotate view counterclockwise 90°"),
-];
+const AXES_ROLL_ARROWS: [(&str, (f32, f32), bool, &str); 2] =
+    [("clockwise", (0.80, 1.08), true, "Rotate view clockwise 90°"), ("counterclockwise", (0.77, 0.49), false, "Rotate view counterclockwise 90°")];
 /// How far outside the compass circle the axes navigator's roll arrows run.
 const AXES_ROLL_GAP: f32 = 6.5;
 
