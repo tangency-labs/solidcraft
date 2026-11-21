@@ -166,7 +166,7 @@ fn label(painter: &egui::Painter, clip: Rect, c: Pos2, (name, d, at, depth): Tip
         solidcraft_ui_text::tr(view_name(name)).to_owned()
     };
     let font = crate::type_face::bold(t.font_compass);
-    let galley = painter.layout_no_wrap(text, font, t.on_accent);
+    let galley = painter.layout_no_wrap(text.clone(), font.clone(), t.on_accent);
     // The resting disc's radius at edge-on size: a far tip grows to it while it is labelled.
     let r = 11.0;
     // The name starts past the letter on a positive tip, near the disc's edge on a negative one.
@@ -177,23 +177,29 @@ fn label(painter: &egui::Painter, clip: Rect, c: Pos2, (name, d, at, depth): Tip
     let rightward =
         if at.x >= c.x { right.max.x <= clip.max.x || left.min.x < clip.min.x } else { left.min.x < clip.min.x && right.max.x <= clip.max.x };
     let pill = if rightward { right } else { left };
-    // Neither side has room (panels close on both sides): slide the pill back inside, its left
-    // edge first when it is wider than the room. The letter then gives way to the name.
-    let shift = if pill.min.x < clip.min.x {
-        clip.min.x - pill.min.x
-    } else if pill.max.x > clip.max.x {
-        (clip.max.x - pill.max.x).max(clip.min.x - pill.min.x)
-    } else {
-        0.0
-    };
-    let pill = pill.translate(vec2(shift, 0.0));
-    painter.rect_filled(pill, r, colour);
-    if positive && shift == 0.0 {
-        let letter = painter.layout_no_wrap(name.to_uppercase(), crate::type_face::bold(t.font_compass), t.on_accent);
-        painter.galley(at - crate::type_face::ink_centre(&letter), letter, t.on_accent);
+    if clip.contains_rect(pill) {
+        painter.rect_filled(pill, r, colour);
+        if positive {
+            let letter = painter.layout_no_wrap(name.to_uppercase(), crate::type_face::bold(t.font_compass), t.on_accent);
+            painter.galley(at - crate::type_face::ink_centre(&letter), letter, t.on_accent);
+        }
+        let x = if rightward { at.x + lead } else { at.x - lead - w };
+        painter.galley(pos2(x, at.y - crate::type_face::ink_centre(&galley).y), galley, t.on_accent);
+        return pill;
     }
-    let x = shift + if rightward { at.x + lead } else { at.x - lead - w };
-    painter.galley(pos2(x, at.y - crate::type_face::ink_centre(&galley).y), galley, t.on_accent);
+    // Neither side has room (panels close on both sides): the name alone, wrapped to the room's
+    // width when it is narrower than the name, in a pill centred on the tip and kept inside.
+    let room = (clip.width() - 2.0 * pad).max(1.0);
+    let galley = painter.layout(text, font, t.on_accent, room);
+    let size = vec2(galley.size().x + 2.0 * pad, galley.size().y.max(2.0 * r - 4.0) + 4.0);
+    let pill = Rect::from_center_size(at, size);
+    let shift = vec2(
+        (clip.min.x - pill.min.x).max(0.0) + (clip.max.x - pill.max.x).min(0.0),
+        (clip.min.y - pill.min.y).max(0.0) + (clip.max.y - pill.max.y).min(0.0),
+    );
+    let pill = pill.translate(shift);
+    painter.rect_filled(pill, r, colour);
+    painter.galley(pill.center() - galley.size() / 2.0, galley, t.on_accent);
     pill
 }
 
@@ -435,6 +441,11 @@ mod tests {
                 let narrow = Rect::from_min_max(pos2(x.2.x - w / 2.0 - 20.0, 0.0), pos2(x.2.x + w / 2.0 + 20.0, 400.0));
                 let pill = label(ui.painter(), narrow, c, (x.0, x.1, x.2, 1.0), Tokens::get());
                 assert!(narrow.contains_rect(pill), "{pill:?} in {narrow:?}");
+                // Room narrower than the label: the text wraps and the pill still fits.
+                let slim = Rect::from_min_max(pos2(x.2.x - w / 3.0, 0.0), pos2(x.2.x + w / 3.0, 400.0));
+                let pill = label(ui.painter(), slim, c, (x.0, x.1, x.2, 1.0), Tokens::get());
+                assert!(slim.contains_rect(pill), "{pill:?} in {slim:?}");
+                assert!(pill.height() > 2.0 * 11.0, "the label wrapped onto more lines: {pill:?}");
                 let minus_x = tips(&FRONT, pos2(200.0, 200.0)).into_iter().find(|t| t.0 == "-x").unwrap();
                 let pill = label(ui.painter(), clip, pos2(200.0, 200.0), minus_x, Tokens::get());
                 assert!(pill.max.x <= minus_x.2.x + 12.0, "a left tip grows leftward");

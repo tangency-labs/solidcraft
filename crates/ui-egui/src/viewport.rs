@@ -9697,7 +9697,7 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         orbiting,
         home_label: solidcraft_ui_text::tr_label("Home view").to_owned(),
     };
-    // The two roll arrows round the compass's upper-right edge, inside the navigator's box; shown
+    // The two roll arrows round the compass's lower-right edge, inside the navigator's box; shown
     // while the pointer is over the navigator or it is orbiting. Drawn before the compass, so a
     // hovered end's label covers them rather than the other way round.
     let outer = axis_rect(app, rect);

@@ -94,12 +94,13 @@ const ROLL_ARROWS: [(&str, egui::Vec2, egui::Vec2, bool, &str); 2] = [
 ];
 
 /// The axes navigator's two roll arrows: action, the arc's span (radians, screen y down, so
-/// negative is up), whether it curls clockwise, tooltip. They run along the outside of the compass
-/// circle in its upper-right corner, the one part of the navigator's box with room outside the
-/// circle, and meet at 45°.
+/// positive is down), whether it curls clockwise, tooltip. They run along the outside of the
+/// compass circle in its lower-right corner, where the navigator's box has the most room outside
+/// the circle and no other control sits (the upper corners are Home's and Turn Around's), and meet
+/// at 45°.
 const AXES_ROLL_ARROWS: [(&str, (f32, f32), bool, &str); 2] = [
-    ("counterclockwise", (-0.80, -1.08), false, "Rotate view counterclockwise 90°"),
-    ("clockwise", (-0.77, -0.49), true, "Rotate view clockwise 90°"),
+    ("clockwise", (0.80, 1.08), true, "Rotate view clockwise 90°"),
+    ("counterclockwise", (0.77, 0.49), false, "Rotate view counterclockwise 90°"),
 ];
 /// How far outside the compass circle the axes navigator's roll arrows run.
 const AXES_ROLL_GAP: f32 = 6.5;
