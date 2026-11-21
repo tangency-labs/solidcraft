@@ -203,7 +203,7 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     if let Err(e) = plugins_dir(&mut args) {
-        eprintln!("error: {e}");
+        solidcraft_engine::note!("error: {e}");
         return ExitCode::FAILURE;
     }
     // Compiled plugins are kept in the per-user cache folder, as the desktop app keeps them.
@@ -731,12 +731,12 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         let quiet = args.iter().any(|a| a == "--quiet");
         // A body left out of the file is said whatever --quiet says: a part is missing from it.
         for line in skipped_body_lines(out, &reply) {
-            eprintln!("{line}");
+            solidcraft_engine::note!("{line}");
         }
         if !quiet {
             for w in reply.get("warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
                 if !w.contains(SKIPPED_NOTE) {
-                    eprintln!("{out}: warning: {w}");
+                    solidcraft_engine::note!("{out}: warning: {w}");
                 }
             }
         }
