@@ -416,8 +416,12 @@ Explicit Opaque wins, then explicit Translucent. Otherwise FollowZone is opaque
 for Bottom/Window or a multi-tab group containing a text-heavy member, and
 translucent elsewhere. Effective opacity may increase to protect both primary
 and muted text at 4.5:1 over possible viewport backgrounds. When the authored
-token pair cannot meet that guarantee even at full opacity, the renderer uses a
-known accessible opaque fallback pair and reports the failure, rather than
+token pair cannot meet that guarantee even at full opacity, the renderer keeps
+the authored surface and moves each ink that cannot read onto it along its own
+colour, so the panel keeps the tint the theme exists for. Only an ink that
+cannot move at all — an ink as light as the surface, an invisible ink, or a
+surface with no room for 4.5:1 — replaces the surface with a known accessible
+opaque fallback pair. Either way the renderer reports the failure, rather than
 describing the authored pair as compliant. Existing blur infrastructure remains
 independent of opacity and input capture.
 
