@@ -360,7 +360,7 @@ pub(crate) fn moved_bodies(app: &SolveApp) -> Vec<String> {
 }
 
 /// Whether a Move dialog takes the components picked (not their bodies) into its bodies input: a
-/// click on a component in the component pick mode, or a Browser row. Not when it edits a move
+/// click on a component in the Parts selection mode, or a Browser row. Not when it edits a move
 /// that is already a feature (its picks stay bodies). Without Create Copy the components still
 /// move their bodies (`targets`).
 pub(crate) fn picks_components(app: &SolveApp) -> bool {

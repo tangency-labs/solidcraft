@@ -23,13 +23,14 @@ mod gerber_area;
 mod gerber_set;
 mod glb;
 pub use design::{
-    DesignCompression, DesignContainerReader, DesignPreview, FileKind, ImportCache, OpenPgpSignature, OpenPgpSigner, ProvenanceChain,
+    DesignCompression, DesignContainerReader, DesignFile, DesignPreview, FileKind, ImportCache, OpenPgpSignature, OpenPgpSigner, ProvenanceChain,
     ProvenanceRecord, ProvenanceReport, ProvenanceSave, ProvenanceSigner, ProvenanceStatus, ProvenanceSummary, SignatureSource, Signer,
-    THUMBNAIL_SIZE, file_kind, has_design_provenance, is_design_container, read_design_file, read_design_geometry, read_design_preview,
-    read_design_provenance, read_design_provenance_chain, read_design_provenance_chain_file, read_design_provenance_file,
-    read_design_provenance_file_checked, read_design_provenance_summary_file, read_design_thumbnail, read_design_thumbnail_file, read_drawing,
-    read_drawing_file, write_design_container, write_design_container_with_cache, write_design_container_with_compression,
-    write_design_container_with_preview, write_design_container_with_provenance, write_design_container_with_thumbnail, write_drawing_container,
+    THUMBNAIL_SIZE, file_kind, has_design_provenance, is_design_container, read_design_file, read_design_file_once, read_design_geometry,
+    read_design_preview, read_design_provenance, read_design_provenance_chain, read_design_provenance_chain_file, read_design_provenance_file,
+    read_design_provenance_file_checked, read_design_provenance_summary_file, read_design_thumbnail, read_design_thumbnail_file,
+    read_design_with_model, read_drawing, read_drawing_file, write_design_container, write_design_container_with_cache,
+    write_design_container_with_compression, write_design_container_with_preview, write_design_container_with_provenance,
+    write_design_container_with_thumbnail, write_drawing_container,
 };
 pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, MAX_GLB_BYTES, export_glb};
 mod legacy_dir;
@@ -67,9 +68,11 @@ pub mod vfs;
 pub use airfoil::{Airfoil, AirfoilFormat, MAX_AIRFOIL_BYTES, MAX_AIRFOIL_POINTS, read_airfoil};
 pub use dxf::{DxfReadProfile, DxfWriteOptions, read_dxf, read_dxf_file, read_dxf_file_with_profile, write_dxf, write_dxf_entities, write_dxf_opts};
 pub use dxf_out::{
-    DxfEntity, DxfEntityWeight, DxfFile, DxfFileEntity, DxfFileLayer, DxfGeometryBounds, DxfLayer, DxfLayerId, DxfLinetype, DxfPath, DxfPathStyle,
-    DxfShape, DxfSourceBlock, DxfStandardWeight, DxfTextHorizontalAlignment, DxfTextRecordKind, DxfTextSource, DxfTextVerticalAlignment, DxfVertex,
-    admit_path, loop_lwpolyline, loop_lwpolyline_scaled, path_shapes, write_dxf_drawing_units, write_dxf_file, write_dxf_file_with_text_bounds,
+    DXF_PROFILE_FORMAT, DXF_PROFILE_VERSION, DxfEntity, DxfEntityWeight, DxfExportProfile, DxfFile, DxfFileEntity, DxfFileLayer, DxfGeometryBounds,
+    DxfLayer, DxfLayerId, DxfLinetype, DxfPath, DxfPathStyle, DxfRole, DxfRoleStyle, DxfShape, DxfSourceBlock, DxfStandardWeight,
+    DxfTextHorizontalAlignment, DxfTextRecordKind, DxfTextSource, DxfTextVerticalAlignment, DxfVertex, MAX_DXF_PROFILE_BYTES, admit_path,
+    loop_lwpolyline, loop_lwpolyline_scaled, path_shapes, write_dxf_drawing_units, write_dxf_file, write_dxf_file_as,
+    write_dxf_file_with_text_bounds,
 };
 pub use excellon::{DrillArc, DrillHit, DrillSlot, Drills, read_excellon};
 pub use gerber::{GerberLayer, GerberOutline, read_gerber_layer, read_gerber_outline};
@@ -980,24 +983,89 @@ pub fn stl_binary(meshes: &[Mesh], name: &str) -> Vec<u8> {
 
 /// ASCII STL.
 pub fn stl_ascii(meshes: &[Mesh], name: &str) -> String {
-    use std::fmt::Write as _;
     let name: String = name.chars().filter(|c| c.is_ascii_graphic()).collect();
     let mut s = format!("solid {name}\n");
     for m in meshes {
         for t in &m.triangles {
-            let Some([a, b, c]) = m.tri(t) else { continue };
-            let n = (b - a).cross(c - a).normalized().unwrap_or_default();
-            // Written into the text rather than formatted apart and appended: the same bytes,
-            // without a string made and dropped per line.
-            let _ = write!(s, "  facet normal {:e} {:e} {:e}\n    outer loop\n", n.x, n.y, n.z);
-            for v in [a, b, c] {
-                let _ = writeln!(s, "      vertex {:e} {:e} {:e}", v.x, v.y, v.z);
+            if let Some(tri) = m.tri(t) {
+                push_facet(&mut s, tri);
             }
-            s += "    endloop\n  endfacet\n";
         }
     }
     s += &format!("endsolid {name}\n");
     s
+}
+
+/// One ASCII STL facet. Written into the text rather than formatted apart and appended: the same
+/// bytes, without a string made and dropped per line.
+fn push_facet(s: &mut String, [a, b, c]: [Vec3; 3]) {
+    use std::fmt::Write as _;
+    let n = (b - a).cross(c - a).normalized().unwrap_or_default();
+    let _ = write!(s, "  facet normal {:e} {:e} {:e}\n    outer loop\n", n.x, n.y, n.z);
+    for v in [a, b, c] {
+        let _ = writeln!(s, "      vertex {:e} {:e} {:e}", v.x, v.y, v.z);
+    }
+    *s += "    endloop\n  endfacet\n";
+}
+
+/// A name written after `solid` in an ASCII STL: every character that is not printable ASCII
+/// (white space, control characters, anything beyond ASCII) becomes `_`, so the name is one
+/// word; an empty name becomes `_`.
+fn stl_solid_name(raw: &str) -> String {
+    let name: String = raw.chars().map(|c| if c.is_ascii_graphic() { c } else { '_' }).collect();
+    if name.is_empty() { "_".to_string() } else { name }
+}
+
+/// ASCII STL with one `solid <name>` ... `endsolid <name>` block per B-rep face of the given
+/// bodies (all when `bodies` is empty), for meshers that make a patch of each solid. Meshed and
+/// welded as [`export_with_parts_noted`] does for STL, so the triangles are those of the body
+/// export, grouped by the face each came from.
+///
+/// A block is named by its face's persistent name ([`solidcraft_doc::naming::face_names`]) made
+/// safe by [`stl_solid_name`]; with several bodies each name is led by the body's name and `_`.
+/// A name already used in the file gets `_2`, `_3`, … after it, so names are unique and stable for
+/// a given design. A face without triangles has no block. Returns the bytes and what meshing the
+/// bodies reported.
+pub fn export_stl_face_solids(state: &ModelState, bodies: &[String], quality: MeshQuality) -> Result<(Vec<u8>, Vec<String>)> {
+    let sel = selected(state, bodies)?;
+    let (items, notes) = per_placed_body(&sel, |b, body| {
+        let (m, mut n) = body_mesh(b, body, quality)?;
+        let count = u32::try_from(m.triangles.len()).map_err(|_| IoError::Invalid("mesh too large".into()))?;
+        let (positions, triangles, origin) = threemf::weld_tagged(&m.positions, &m.triangles, &(0..count).collect::<Vec<_>>(), weld_eps(&b.body));
+        if !b.body.is_surface() && !b.body.is_mesh() {
+            n.extend(unsealed_note(&positions, &triangles, true).map(|note| format!("{}: {note}", b.name)));
+        }
+        let faces: Vec<u32> = origin.iter().map(|t| m.tri_face.get(*t as usize).copied().unwrap_or(0)).collect();
+        Ok(((Mesh { positions, triangles, ..Mesh::default() }, faces), n))
+    })?;
+    let several = items.len() > 1;
+    let mut used = std::collections::HashSet::new();
+    let mut out = String::new();
+    for (b, (mesh, faces)) in &items {
+        let names = solidcraft_doc::naming::face_names(b);
+        let mut by_face: std::collections::BTreeMap<u32, Vec<&[u32; 3]>> = std::collections::BTreeMap::new();
+        for (t, f) in mesh.triangles.iter().zip(faces) {
+            by_face.entry(*f).or_default().push(t);
+        }
+        for (face, tris) in by_face {
+            let face_name = names.get(face as usize).cloned().unwrap_or_else(|| format!("face{face}"));
+            let wanted = stl_solid_name(&if several { format!("{}_{face_name}", b.name) } else { face_name });
+            let mut name = wanted.clone();
+            let mut n = 2usize;
+            while !used.insert(name.clone()) {
+                name = format!("{wanted}_{n}");
+                n += 1;
+            }
+            out += &format!("solid {name}\n");
+            for t in tris {
+                if let Some(tri) = mesh.tri(t) {
+                    push_facet(&mut out, tri);
+                }
+            }
+            out += &format!("endsolid {name}\n");
+        }
+    }
+    Ok((out.into_bytes(), notes))
 }
 
 /// A body in an OBJ export: the name it is written with, its mesh and the colour it is shown
