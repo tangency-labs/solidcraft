@@ -150,7 +150,6 @@ pub fn listen(endpoint: &Endpoint, sink: Sink) -> bool {
     listen_while(endpoint, sink, Arc::new(AtomicBool::new(true)))
 }
 
-/// Listen as `listen` does, refusing every request once `open` is false.
 fn listen_while(endpoint: &Endpoint, sink: Sink, open: Arc<AtomicBool>) -> bool {
     if forward(endpoint, &[]) {
         return false;
@@ -252,7 +251,7 @@ pub fn cleanup(endpoint: &Endpoint) {
 
 /// Files that arrived and have not been opened yet.
 static PENDING: Mutex<Vec<String>> = Mutex::new(Vec::new());
-/// The endpoint this instance listens at and whether it still takes files, for [`stop`].
+/// The endpoint this instance listens at, for [`stop`].
 static LISTENING: OnceLock<(Endpoint, Arc<AtomicBool>)> = OnceLock::new();
 
 /// Start listening for files other launches hand over; the window comes forward and opens them.
@@ -271,7 +270,7 @@ pub fn start(settings: Option<&Path>, ctx: &egui::Context) {
     }
 }
 
-/// Stop advertising this instance and taking files (at exit).
+/// Stop advertising this instance (at exit).
 pub fn stop() {
     if let Some((endpoint, open)) = LISTENING.get() {
         // Only once: a second call at exit would delete the token the next launch just wrote.
@@ -435,8 +434,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// A closing window starts its successor (a graphics restart reopening the saved designs)
-    /// after `stop`: the successor must not hand its designs back to it (#19340).
+    /// #19340: after `stop`, a successor this window starts must not hand its designs back to it.
     #[test]
     fn a_stopped_instance_takes_no_files() {
         let dir = temp("stopped");
