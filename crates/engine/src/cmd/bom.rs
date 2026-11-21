@@ -59,7 +59,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          number of pieces (\"4\") or a length (\"2.5 m\", \"2 * span + 50 mm\"), evaluated with the design's parameters, above \
          0 (empty or null removes it: one piece); virtual?: true|false (a component with no geometry, such as grease or a \
          label: it can't be the active component or hold bodies, sketches or components); values?: {key: value} (SolidCraft's \
-         keys, as document.metadata's properties lists them, bom_type, material, bom_quantity, virtual, or a reverse-DNS key \
+         keys, as document.metadata's properties lists them (material and finish too), bom_type, bom_quantity, virtual, or a reverse-DNS key \
          holding an object); properties?: {name: text, …} (free properties; empty or null removes). All or nothing, one undo step → component, metadata, \
          properties, changed: [keys]",
         ),

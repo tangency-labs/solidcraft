@@ -374,7 +374,7 @@ fn a_components_refusals_speak_of_part_properties() {
     assert!(
         bogus.ends_with(
             "`bogus` is not a part property: SolidCraft's are project, part_number, revision, author, organization, description, \
-             license, bom_type, material, bom_quantity, virtual; another tool's data goes under a reverse-DNS key such as \
+             material, finish, license, bom_type, bom_quantity, virtual; another tool's data goes under a reverse-DNS key such as \
              `com.example.tool`"
         ),
         "{bogus}"
@@ -383,8 +383,8 @@ fn a_components_refusals_speak_of_part_properties() {
     assert!(refusal(&mut s, json!({"component": "Pin", "values": {"": "x"}})).contains("`` is not a part property"));
     // Nothing to change: the same list as before the table.
     assert!(refusal(&mut s, json!({"component": "Pin"})).ends_with(
-        "give part_number, description, revision, bom_type, material, bom_quantity, virtual, values or properties (project, \
-         part_number, revision, author, organization, description, license, bom_type, material, bom_quantity, virtual)"
+        "give part_number, description, revision, material, finish, bom_type, bom_quantity, virtual, values or properties (project, \
+         part_number, revision, author, organization, description, material, finish, license, bom_type, bom_quantity, virtual)"
     ));
     // Only the bill of materials' keys are parameters of their own; the others go in `values`.
     assert!(refusal(&mut s, json!({"component": "Pin", "author": "Jane"})).contains("give part_number, description, revision"));

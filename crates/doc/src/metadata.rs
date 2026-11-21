@@ -553,7 +553,9 @@ mod tests {
     #[test]
     fn each_key_is_one_row_in_the_order_the_dialog_shows() {
         let names: Vec<&str> = KEYS.iter().map(|k| k.name).collect();
-        assert_eq!(names, [PROJECT, PART_NUMBER, REVISION, AUTHOR, ORGANIZATION, DESCRIPTION, LICENSE]);
+        assert_eq!(names, [PROJECT, PART_NUMBER, REVISION, AUTHOR, ORGANIZATION, DESCRIPTION, MATERIAL, FINISH, LICENSE]);
+        // The material and finish follow the description (what the part is, then what it is made of
+        // and finished with); the licence stays last, as the dialog's closing legal line.
         for (i, k) in KEYS.iter().enumerate() {
             assert!(!names[..i].contains(&k.name), "`{}` has two rows", k.name);
             assert!(!k.name.is_empty() && !is_namespaced(k.name), "`{}` is unprefixed", k.name);
@@ -564,11 +566,11 @@ mod tests {
             assert!(!is_well_known(name), "{name:?}");
         }
         // Every key SolidCraft took on the design and on a component before the table still is.
-        assert_eq!(key_list(Design), "project, part_number, revision, author, organization, description, license");
+        assert_eq!(key_list(Design), "project, part_number, revision, author, organization, description, material, finish, license");
         assert_eq!(
             key_list(Component),
-            format!("{}, {BOM_TYPE}, {MATERIAL}, {BOM_QUANTITY}, {VIRTUAL}", key_list(Design)),
-            "a component also takes its bill of materials type, static material, quantity and virtual flag"
+            format!("{}, {BOM_TYPE}, {BOM_QUANTITY}, {VIRTUAL}", key_list(Design)),
+            "a component also takes its bill of materials type, quantity and virtual flag (material and finish are keys of both)"
         );
     }
 
@@ -595,13 +597,13 @@ mod tests {
         assert_eq!(
             refusal(Design, "colour"),
             "`colour` is not a design property: SolidCraft's are project, part_number, revision, author, organization, \
-             description, license; another tool's data goes under a reverse-DNS key such as `com.example.tool`",
+             description, material, finish, license; another tool's data goes under a reverse-DNS key such as `com.example.tool`",
             "the design's wording is as it was"
         );
         assert_eq!(
             refusal(Component, "colour"),
             "`colour` is not a part property: SolidCraft's are project, part_number, revision, author, organization, \
-             description, license, bom_type, material, bom_quantity, virtual; another tool's data goes under a reverse-DNS key \
+             description, material, finish, license, bom_type, bom_quantity, virtual; another tool's data goes under a reverse-DNS key \
              such as `com.example.tool`"
         );
         for owner in [Design, Component] {

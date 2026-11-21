@@ -634,7 +634,7 @@ mod tests {
         h.step(&json!({"start": "document.metadata"})).unwrap();
         h.frames(2);
         let labels: Vec<&str> = keys(Owner::Design).map(|k| english.text(k.label)).collect();
-        assert_eq!(labels, ["Project", "Part number", "Revision", "Author", "Organization", "Description", "License"]);
+        assert_eq!(labels, ["Project", "Part number", "Revision", "Author", "Organization", "Description", "Material", "Finish", "License"]);
         for label in &labels {
             assert!(h.widget(label).is_some(), "{label}");
         }

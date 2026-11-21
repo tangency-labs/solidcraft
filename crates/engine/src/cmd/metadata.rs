@@ -407,7 +407,10 @@ mod tests {
         for k in keys {
             assert_eq!(properties[k], format!("{k} text"), "{k}");
         }
-        assert_eq!(properties.as_object().map(Map::len), Some(keys.len()), "{properties}");
+        // The design also takes material and finish now (#20114): they read as absent until set, so the
+        // seven keys it took before are all that hold text, and each still reads back.
+        assert_eq!(properties.as_object().map(Map::len), Some(keys.len() + 2), "{properties}");
+        assert_eq!((&properties["material"], &properties["finish"]), (&Value::Null, &Value::Null));
         let refused = s.execute("document.metadata.set", &json!({"key": "colour", "value": "red"})).unwrap_err().to_string();
         assert!(refused.contains("`colour` is not a design property: SolidCraft's are project, part_number,"), "{refused}");
     }
