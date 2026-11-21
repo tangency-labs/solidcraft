@@ -4330,6 +4330,7 @@ impl SolveApp {
         self.frame_ms = now_ms() - t0;
         frame_watch::end(self);
         render_workspace::displayed::finish(self, ui.ctx());
+        documents::sync_linked_active(self);
         documents::sync_views(self);
         documents::sync_window_title(self, ui.ctx());
         plugin_events::tick(self, ui.ctx());
@@ -4355,6 +4356,10 @@ impl SolveApp {
         self.poll_deferred(ui.ctx());
         self.poll_delete_check(ui.ctx());
         timeline::tick_playback(self, ui.ctx());
+        if !self.home.open && view_windows::is_clean(self) {
+            view_windows::show_clean(self, ui);
+            return;
+        }
         if !self.embedded && !self.embed_editor {
             toolbar::app_bar(self, ui);
         }
