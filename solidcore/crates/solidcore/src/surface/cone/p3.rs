@@ -490,9 +490,13 @@ impl Cone {
                 // The touch at an end of the sweep (below) is the contact the face's rim
                 // reads against the plane's edge, so it takes the rim's tolerance,
                 // `contact_tol_3d`, not the faces' zone tolerance, which may have grown
-                // past it: between the two the rim crosses, and so does the wall.
+                // past it: between the two the rim crosses, and so does the wall. As at the
+                // rim, a wall whose whole circle lies within that tolerance of the plane
+                // touches it at no single line and keeps its crossings
+                // (`line_coplanar_circle_intersect_distinct`).
                 let end_contact = zone_tol > 0.0
-                    && within_contact_tol(bot_radius - distance.abs(), contact_tol_3d(k), size);
+                    && within_contact_tol(bot_radius - distance.abs(), contact_tol_3d(k), size)
+                    && !within_contact_tol(bot_radius + distance.abs(), contact_tol_3d(k), size);
                 if tangent {
                     if line_in_sweep {
                         let start = bottom + bot_radius * dir;
@@ -1847,11 +1851,16 @@ mod tests {
 
     /// The wall face of the radius-3 cylinder along z swept over `start`..`end` degrees.
     fn wall_swept(k: &Kernel, start: f64, end: f64) -> Cone {
+        wall_of_radius(k, 3.0, start, end)
+    }
+
+    /// [`wall_swept`] for a cylinder of `radius`.
+    fn wall_of_radius(k: &Kernel, radius: f64, start: f64, end: f64) -> Cone {
         let mut c = Cone::new_cylinder_bounded(
             Vec3::ZERO,
             Vec3::X,
             Vec3::Y,
-            3.0,
+            radius,
             start,
             end,
             12.0,
@@ -2061,6 +2070,18 @@ mod tests {
                 && (lines[0].2.abs() - crossing.1).abs() < 1e-12,
             "{lines:?}"
         );
+
+        // a wall so small that its whole circle lies within the contact tolerance of the
+        // plane (radius 5e-6, the plane through its axis) touches it at no single line: the
+        // rim keeps its crossings there, and so does the wall, swept from 10° to 170°, at 90°
+        let tiny = wall_of_radius(&k, 5e-6, 10.0, 170.0);
+        for (owner, zone_tols) in faces {
+            let lines = section_lines(&wall_section(&k, &tiny, 0.0, owner, zone_tols));
+            assert!(
+                is(&lines, TsectCurveType::Crossing, (0.0, 5e-6)),
+                "{owner:?}: {lines:?}"
+            );
+        }
 
         // a zone tolerance grown past the contact tolerance
         let grown = Some(1e-4);
