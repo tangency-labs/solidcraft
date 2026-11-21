@@ -57,7 +57,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&OPEN_CONTRACT)
         .output(output_schema_for::<OpenResult>)
-        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.pcd/.xyz/.pts/.asc point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); reader?: solidcraft|cadmpeg for a STEP, FreeCAD or Rhino file (see file.insert_step); geometry?: meshes|exact for an OpenUSD file (see file.insert_mesh); for a KiCad PCB: thickness?: board thickness in mm (default from the board); components?: bool (default true); copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); silkscreen?: bool (default true: the silk shapes and text); color?: \"#rrggbb\" or [r, g, b] (board substrate colour); representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
+        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.pcd/.e57/.xyz/.pts/.asc point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); reader?: solidcraft|cadmpeg for a STEP, FreeCAD or Rhino file (see file.insert_step); geometry?: meshes|exact for an OpenUSD file (see file.insert_mesh); for a KiCad PCB: thickness?: board thickness in mm (default from the board); components?: bool (default true); copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); silkscreen?: bool (default true: the silk shapes and text); color?: \"#rrggbb\" or [r, g, b] (board substrate colour); representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
     CommandSpec::new("file.insert_step", "Insert STEP", crate::checked!("file.insert_step", insert_step))
         .at("SOLID", "INSERT")
         .icon("import")
@@ -76,14 +76,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&SAVE_CONTRACT)
         .output(output_schema_for::<SaveResult>)
-        .params("path? (default: current file; a name that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused); sign?: bool (the app's own Save only: sign the save with GnuPG, appending a provenance record; container only; a script or agent is refused); signing_key?: fingerprint or user id (default: GnuPG's default signing key) → signature: {method, fingerprint, user_id?} when signed"),
+        .params("path? (default: current file; a name that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true; left out, without waiting, while an imported file's check of its parts still runs); preview?: bool (saved display meshes, default: false); overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused); sign?: bool (the app's own Save only: sign the save with GnuPG, appending a provenance record; container only; a script or agent is refused); signing_key?: fingerprint or user id (default: GnuPG's default signing key) → signature: {method, fingerprint, user_id?} when signed"),
     CommandSpec::new("file.save_as", "Save As", crate::checked!("file.save_as", save_as)).any_part()
         .icon("save")
         .key("Ctrl+Shift+S")
         .noundo()
         .contract(&SAVE_AS_CONTRACT)
         .output(output_schema_for::<SaveResult>)
-        .params("path (a design file name, .sc as a rule; one that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file); sign?: bool and signing_key? (as file.save, and likewise only from the app's own Save)"),
+        .params("path (a design file name, .sc as a rule; one that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true; left out, without waiting, while an imported file's check of its parts still runs); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file); sign?: bool and signing_key? (as file.save, and likewise only from the app's own Save)"),
     CommandSpec::new("file.verify", "Verify Signature", crate::checked!("file.verify", verify)).any_part()
         .icon("shield")
         .noundo()
@@ -576,6 +576,8 @@ fn open_step(
     let key = solidcraft_io::ImportCache::key(&bytes, path, &import_key_options(&options));
     let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
     if let Some((doc, saved, mut reply)) = cache.and_then(|cache| cache.read(&key)) {
+        // The cache holds an import template. A fresh session owns its tracking
+        // identity without changing the cached authored design.
         let mut fresh = Session::opened_validating(doc, Some(&saved), validation);
         // An import is still an unsaved design, with the same dirty state as a cold import.
         fresh.saved = std::sync::Arc::new(Document::new(&stem));
@@ -695,7 +697,7 @@ fn add_mesh(
     // A mesh file is read up to the limit for STEP and import files, which Preferences raise
     // (#17446, #14548).
     let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let (mut mf, plan, looks) = if gltf {
+    let (mut mf, plan, looks, mut prepared) = if gltf {
         let dir = std::path::Path::new(path).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
         let mut load =
             |name: &str| solidcraft_io::limits::read(&dir.join(name).to_string_lossy(), solidcraft_io::limits::Kind::Step).map_err(|e| e.to_string());
@@ -703,25 +705,33 @@ fn add_mesh(
         if !import::mesh_plan_fits(&g.plan) {
             g.flatten();
         }
-        (g.feature, Some(g.plan), g.looks)
+        (g.feature, Some(g.plan), g.looks, None)
     } else if usd {
         let (mut g, y_up) = solidcraft_io::read_usd(&bytes, path).map_err(err)?;
         file_y_up = y_up;
         if !import::mesh_plan_fits(&g.plan) {
             g.flatten();
         }
-        (g.feature, Some(g.plan), g.looks)
+        (g.feature, Some(g.plan), g.looks, None)
     } else {
-        (solidcraft_io::mesh_import_feature_in(&bytes, path, unit.map_or(1.0, |(_, mm)| mm)).map_err(err)?, None, Vec::new())
+        let (feature, prepared) = solidcraft_io::mesh_import_feature_in_prepared(&bytes, path, unit.map_or(1.0, |(_, mm)| mm)).map_err(err)?;
+        (feature, None, Vec::new(), prepared)
     };
+    drop(bytes);
     if let Some(angle) = crease_angle
         && let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = &mut mf.kind
     {
+        if angle != 0.0 || meshes.iter().any(|mesh| !mesh.corner_normals.is_empty()) {
+            // Smoothing or removing authored normals changes the input to the evaluator.
+            prepared = None;
+        }
         for mesh in meshes {
             if angle == 0.0 {
                 // Keep the original flat display path, including its normalization
                 // and storage behavior, when the caller opts out of imported shading.
-                mesh.corner_normals = Default::default();
+                if !mesh.corner_normals.is_empty() {
+                    mesh.corner_normals = Default::default();
+                }
             } else {
                 mesh.generate_crease_normals(angle).map_err(|e| bad("file.insert_mesh", e.to_string()))?;
             }
@@ -731,7 +741,7 @@ fn add_mesh(
     let cname = import::component_name(path, name);
     let tree = match &plan {
         Some(p) if !p.places.is_empty() => import::Tree::Mesh(p),
-        _ => import::Tree::Flat,
+        _ => import::Tree::Flat(prepared),
     };
     let (id, placed) = import::add_in_component(s, mf.kind, &fname, mf.body_names, &[], &cname, tree)?;
     let bodies = created_bodies(s, id);
@@ -1104,7 +1114,7 @@ fn add_kicad(s: &mut Session, path: &str, name: Option<&str>, options: &solidcra
     let feature = imported.feature;
     let feature_name = name.filter(|n| !n.trim().is_empty()).unwrap_or(&feature.name).to_string();
     let component_name = import::component_name(path, name);
-    let tree = if imported.plan.places.is_empty() { import::Tree::Flat } else { import::Tree::Mesh(&imported.plan) };
+    let tree = if imported.plan.places.is_empty() { import::Tree::Flat(None) } else { import::Tree::Mesh(&imported.plan) };
     // A board hides none of its own bodies; its layers are all wanted.
     let (id, placed) = import::add_in_component(s, feature.kind, &feature_name, feature.body_names, &[], &component_name, tree)?;
     // The board stands at the origin: its lower-left outline corner goes to X = Y = 0, not to the
@@ -1314,8 +1324,10 @@ fn read_kicad_model(path: &str) -> std::io::Result<solidcraft_io::KicadModelFile
     let Some(stem) = named.file_stem() else { return Err(missing) };
     let Some(dir) = named.parent() else { return Err(missing) };
     let format = named.extension().and_then(|e| e.to_str()).unwrap_or("");
-    for other in ["step", "stp", "wrl"] {
-        if other.eq_ignore_ascii_case(format) {
+    // KiCad 10's zipped STEP comes after VRML, so a board that already found a `….wrl` keeps it,
+    // and in both spellings, as the file system may tell `….stpZ` from `….stpz`.
+    for other in ["step", "stp", "wrl", "stpZ", "stpz"] {
+        if other == format {
             continue;
         }
         // Not `with_extension`: a model named `DIP-14_W7.62mm` has `62mm` as its extension.
@@ -1744,6 +1756,7 @@ fn saved_name(name: &str, old_path: Option<&str>, path: &str, user_named: bool) 
 /// Rename the design, and the undo and redo states that still carry the old name, so undo
 /// does not bring the default name back and leave the design looking changed.
 fn rename_design(s: &mut Session, from: &str, to: &str) {
+    let token_current = s.design_token_is_current();
     // A prepared world is keyed by the document's Arc. Changing only its name
     // must not make an opted-in save lose warm geometry and display caches.
     // Retag only a cache that already matches: cold or stale placements stay so.
@@ -1776,6 +1789,9 @@ fn rename_design(s: &mut Session, from: &str, to: &str) {
         && let Some(cache) = cache.as_mut()
     {
         cache.doc = std::sync::Arc::clone(&s.doc);
+    }
+    if token_current {
+        s.follow_design_token();
     }
 }
 
@@ -1876,8 +1892,11 @@ fn write_file(
 }
 
 /// Report a requested model cache missing from the file just written. Inspecting the
-/// container directory avoids decoding the large model a second time (#18815).
-fn missing_save_cache(s: &Session, format: &str, cache: bool, bytes: &[u8]) -> Option<String> {
+/// container directory avoids decoding the large model a second time (#18815). `checking`: an
+/// import's check of its parts was still running when the save began, so the save left the
+/// cache out without waiting for it ([`saved_geometry`], #20133); taken then, as the check may
+/// have ended since.
+fn missing_save_cache(s: &Session, format: &str, cache: bool, checking: bool, bytes: &[u8]) -> Option<String> {
     if !cache || format != "container" || s.doc.features.is_empty() {
         return None;
     }
@@ -1894,6 +1913,8 @@ fn missing_save_cache(s: &Session, format: &str, cache: bool, bytes: &[u8]) -> O
         "temporary component placements are active (for example an exploded view)".into()
     } else if s.model.state().bodies.is_empty() {
         "there are no evaluated bodies to cache".into()
+    } else if checking {
+        "an imported file's parts were still being checked (a save once the check ends keeps it)".into()
     } else {
         "the cache could not fit or be encoded within the design file budget".into()
     };
@@ -1910,6 +1931,8 @@ fn write_bytes(
     sign: bool,
     signing_key: Option<&str>,
 ) -> Result<Value> {
+    // Before the bytes are made: a check that ends meanwhile leaves this save without the cache.
+    let checking = s.model.checking_imports();
     let chain = s.provenance_chain.clone().unwrap_or_default();
     let mut signature = None;
     let mut notes: Vec<String> = Vec::new();
@@ -1944,7 +1967,7 @@ fn write_bytes(
         // as covering an earlier version instead of the chain being destroyed.
         if format != "container" {
             match format {
-                "json" => solidcraft_io::write_design(&s.design_at(Some(path))),
+                "json" => solidcraft_io::write_design(&s.design_at(Some(path))).map_err(|e| EngineError::Other(format!("{path}: {e}")))?,
                 _ => return Err(bad("file.save", "format must be container or json")),
             }
         } else {
@@ -1955,11 +1978,11 @@ fn write_bytes(
     } else {
         match format {
             "container" => s.design_container_at(Some(path), compression, preview, cache)?,
-            "json" => solidcraft_io::write_design(&s.design_at(Some(path))),
+            "json" => solidcraft_io::write_design(&s.design_at(Some(path))).map_err(|e| EngineError::Other(format!("{path}: {e}")))?,
             _ => return Err(bad("file.save", "format must be container or json")),
         }
     };
-    let cache_not_saved = missing_save_cache(s, format, cache, &bytes);
+    let cache_not_saved = missing_save_cache(s, format, cache, checking, &bytes);
     // Cancelled while the design was being prepared (a watched save): nothing is written.
     if solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()) {
         return Err(EngineError::Other(format!("{path}: save cancelled")));
@@ -2177,6 +2200,7 @@ impl Session {
         if unpinned || dropped || !std::sync::Arc::ptr_eq(&before, &session.doc) {
             session.pin_rolled_back_body_names();
         }
+        session.follow_design_token();
         session.saved = session.doc.clone();
         session
     }
@@ -2352,12 +2376,14 @@ impl Session {
 }
 
 /// The evaluated model a save keeps, so opening need not rebuild it: only the finished evaluation
-/// of `design`, the document saved (no sketch being edited, no uncaptured moves, no feature errors).
+/// of `design`, the document saved (no sketch being edited, no uncaptured moves, no feature errors),
+/// and none while an import's SMLib check of its parts still runs: the save does not wait for it
+/// ([`solidcraft_doc::Model::saved_if_checked`], #20133).
 fn saved_geometry(s: &Session, design: &Document) -> Option<solidcraft_doc::SavedModel> {
     if s.active_sketch.is_some() || !s.pending_moves.is_empty() || s.model.state().bodies.is_empty() {
         return None;
     }
-    s.model.saved(design)
+    s.model.saved_if_checked(design)
 }
 
 /// [`saved_geometry`] without waiting for the imports' checks ([`solidcraft_doc::Model::saved_now`]).
@@ -2515,7 +2541,7 @@ fn export_to(
         if !bodies.is_empty() {
             return Err(bad(cmd, "design JSON exports the complete document; omit bodies"));
         }
-        solidcraft_io::write_design(&s.design())
+        solidcraft_io::write_design(&s.design()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?
     } else if format == Format::Step && bodies.is_empty() && !s.doc.occurrences.is_empty() {
         solidcraft_io::step_assembly(&s.doc, &s.doc.painted(&s.model.state()), &name)?
     } else {
@@ -2779,10 +2805,11 @@ fn shown_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState,
     let (vals, _) = doc.param_values();
     let mut decals = Vec::new();
     for c in doc.canvases.iter().filter(|c| c.visible) {
-        let Some(image) = c.bytes() else {
+        let image = c.bytes().to_vec();
+        if image.is_empty() {
             warnings.push(format!("decal `{}`: its image is damaged: left out", c.name));
             continue;
-        };
+        }
         let corners = match doc.canvas_corners(&vals, c, st) {
             Ok(corners) => corners,
             Err(e) => {
@@ -3595,6 +3622,7 @@ mod tests {
             let (mut first, cold) = open_step(&path, &json!({}), Some(&cache), solidcraft_kernel::Validation::default()).unwrap();
             assert_eq!(cold["import_reused"], false);
             let before = first.doc.to_json();
+            let first_token = first.design_token();
             let bounds = crate::view::bounds(&first).unwrap();
             assert!(first.is_dirty());
             assert!((solidcraft_kernel::measure_mass(&first.model.state().bodies[0].body).unwrap().volume - 2000.0).abs() < 1e-6);
@@ -3603,6 +3631,7 @@ mod tests {
             assert_eq!(hit["import_reused"], true);
             assert_eq!(hit["content_sha256"], cold["content_sha256"]);
             assert_eq!(hit["warnings"], cold["warnings"]);
+            assert_ne!(reopened.design_token().document_id, first_token.document_id, "a cached import starts a distinct open session");
             assert_eq!(reopened.doc.to_json(), before, "subsequent edits never enter the cache");
             assert_eq!(reopened.model.last_recomputed, 0, "cache hit adopts the model without importing");
             assert!(reopened.is_dirty());
@@ -4188,12 +4217,15 @@ mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
         let omitted = s.design_container(solidcraft_io::DesignCompression::Fast, false, false).unwrap();
-        let notice = missing_save_cache(&s, "container", true, &omitted).unwrap();
+        let notice = missing_save_cache(&s, "container", true, false, &omitted).unwrap();
         assert!(notice.contains("design file budget"), "{notice}");
-        assert!(missing_save_cache(&s, "container", false, &omitted).is_none());
-        assert!(missing_save_cache(&s, "json", true, &omitted).is_none());
+        // Left out while an import's parts were being checked (#20133): that is the reason given.
+        let checking = missing_save_cache(&s, "container", true, true, &omitted).unwrap();
+        assert!(checking.contains("still being checked") && !checking.contains("budget"), "{checking}");
+        assert!(missing_save_cache(&s, "container", false, false, &omitted).is_none());
+        assert!(missing_save_cache(&s, "json", true, false, &omitted).is_none());
         let included = s.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
-        assert!(missing_save_cache(&s, "container", true, &included).is_none());
+        assert!(missing_save_cache(&s, "container", true, false, &included).is_none());
     }
 
     #[test]
@@ -4903,7 +4935,7 @@ mod tests {
         // version before #1710): Save As names the design after the new file, while a plain
         // Save to the file it has leaves the name alone.
         let odd = dir.join("renamed.solidcraft");
-        std::fs::write(&odd, solidcraft_io::write_design(&Document::new("Sample Plate"))).unwrap();
+        std::fs::write(&odd, solidcraft_io::write_design(&Document::new("Sample Plate")).unwrap()).unwrap();
         let mut s = Session::default();
         s.execute("doc.open", &json!({"path":odd})).unwrap();
         assert_eq!(s.doc.name, "Sample Plate");
@@ -4919,7 +4951,7 @@ mod tests {
         let dir = name_dir("open");
         for (stored, file) in [("Untitled", "hinge.solidcraft"), ("", "spacer.json")] {
             let path = dir.join(file);
-            let bytes = solidcraft_io::write_design(&Document::new(stored));
+            let bytes = solidcraft_io::write_design(&Document::new(stored)).unwrap();
             std::fs::write(&path, bytes).unwrap();
             let mut s = Session::default();
             let r = s.execute("doc.open", &json!({"path":path})).unwrap();

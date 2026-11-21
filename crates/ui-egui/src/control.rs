@@ -541,6 +541,9 @@ pub fn view_png(app: &SolveApp, w: u32, h: u32) -> Result<Vec<u8>, String> {
 }
 
 pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
+    // What a request does is an agent's action in usage statistics (`usage_stats`).
+    #[cfg(feature = "usage-stats")]
+    let _source = solidcraft_engine::usage::from(solidcraft_engine::usage::Source::Agent);
     crate::agent_chat::with_tool_request(app, req.chat_turn.as_ref(), |app| handle_request(app, ctx, req))
 }
 
@@ -1509,7 +1512,7 @@ fn app_quit(app: &mut SolveApp, ctx: &egui::Context, q: params::Quit) -> Outcome
     } else {
         crate::documents::request_quit(app);
     }
-    if app.quit_requested {
+    if app.ready_to_quit() {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
     ok(json!({"quitting": app.quit_requested, "asking": app.docs.closing.is_some()}))
@@ -3644,7 +3647,7 @@ pub(crate) mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
         for d in [&root, &out] {
-            std::fs::write(d.join("part.solidcraft"), solidcraft_engine::io::write_design(&s.doc)).unwrap();
+            std::fs::write(d.join("part.solidcraft"), solidcraft_engine::io::write_design(&s.doc).unwrap()).unwrap();
         }
         s.execute("file.export", &json!({"path": out.join("part.step").to_string_lossy()})).unwrap();
         let load = |command: &str, d: &std::path::Path, file: &str| json!({"command": command, "params": {"path": d.join(file).to_string_lossy()}, "allow_paths": [root.to_string_lossy()]});

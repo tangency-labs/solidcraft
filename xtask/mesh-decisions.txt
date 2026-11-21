@@ -51,7 +51,6 @@ crates/doc/src/name_lookup.rs:face_triangles reads a face's mesh triangles for n
 crates/doc/src/name_lookup.rs:locate_edge finds a named edge on the display mesh
 crates/doc/src/name_lookup.rs:locate_in finds a named face among bodies by the display mesh
 crates/doc/src/name_lookup.rs:nearest_on_face finds the nearest point of a face on its mesh triangles
-crates/doc/src/name_lookup.rs:sheet_locate finds a sheet face by its name on the display mesh
 crates/doc/src/naming.rs:FaceIndex::new indexes faces by mesh triangles for naming
 crates/doc/src/naming.rs:blend_seams finds blend seams on the display mesh
 crates/doc/src/naming.rs:carried_face_names carries face names to imported bodies by the display mesh

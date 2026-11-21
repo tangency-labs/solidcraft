@@ -1198,6 +1198,38 @@ fn shared_imported_mesh_inputs_keep_payload_identity_and_invalidate_replacements
 }
 
 #[test]
+fn mesh_import_reuses_the_validated_body_only_for_its_input_arrays() {
+    let mesh = crate::MeshData {
+        name: "Triangle".into(),
+        positions: vec![0., 0., 0., 1., 0., 0., 0., 1., 0.].into(),
+        triangles: vec![0, 1, 2].into(),
+        corner_normals: Default::default(),
+        color: None,
+    };
+    let mut doc = Document::default();
+    let id = doc.add_feature(FeatureKind::MeshImport { file: "triangle.stl".into(), meshes: vec![mesh.clone()] }, None).unwrap();
+    let prepared = PreparedMeshImport::build(std::slice::from_ref(&mesh)).unwrap();
+    let built = prepared.body(0, &mesh).unwrap().clone();
+
+    let mut model = Model::default();
+    model.prime_mesh_import(id, prepared);
+    model.evaluate(&doc);
+    assert!(model.state().bodies[0].body.same_shape(&built));
+    assert!(model.prepared_meshes.is_none());
+
+    // A prepared body for the same feature cannot replace new shading data.
+    let prepared = PreparedMeshImport::build(&[mesh]).unwrap();
+    let FeatureKind::MeshImport { meshes, .. } = &mut doc.feature_mut(id).unwrap().kind else { panic!("mesh import") };
+    meshes[0].corner_normals = vec![0., 0., 1., 0., 0., 1., 0., 0., 1.].into();
+    model.prime_mesh_import(id, prepared);
+    model.evaluate(&doc);
+    let state = model.state();
+    let body = &state.bodies[0].body;
+    assert!(!body.same_shape(&built));
+    assert_eq!(body.triangle_corner_normals().unwrap().len(), 1);
+}
+
+#[test]
 fn shared_evaluation_refreshes_live_sketches_and_keeps_unknown_features_conservative() {
     let mut doc = Document::new("live and unknown inputs");
     let feature = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(2., 1.)), None).unwrap();
@@ -3435,6 +3467,39 @@ fn a_heal_the_next_read_finds_again_is_told_once() {
     assert_eq!(model.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>(), fingerprints);
 }
 
+/// #20133: a save while an import's SMLib check of its parts runs does not wait for it. The
+/// model is left out of the save (the design is rebuilt when it opens), since what the check
+/// finds is part of the model; once the check ends, the model is kept with what it found.
+#[test]
+fn a_save_while_an_import_is_checked_keeps_no_model_and_does_not_wait() {
+    let doc = placed_imports(1);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let import = doc.features[0].id;
+    let (checks, end) = kernel::ImportChecks::running_for_tests();
+    let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+    assert!(model.checking_imports());
+    // (were it to wait, this would never return: nothing else ends the check)
+    assert!(model.saved_if_checked(&doc).is_none(), "no model while the check runs");
+    let issue = kernel::ImportIssue {
+        kind: kernel::IssueKind::NeedsRepair,
+        item: Some(1),
+        part: String::new(),
+        paths: Vec::new(),
+        faces: 0,
+        times: 1,
+        detail: "fails SMLib's check".into(),
+    };
+    end(vec![issue]);
+    assert!(!model.checking_imports());
+    let saved = model.saved_if_checked(&doc).expect("the model once the check has ended");
+    let feature = &saved.records["features"][0];
+    assert_eq!(feature["warning"], serde_json::json!(crate::eval::import_warning(&["fails SMLib's check"])));
+    assert_eq!(feature["import_report"]["issues"][0]["detail"], "fails SMLib's check", "kept with what the check found");
+    assert_eq!(saved.records, model.saved(&doc).unwrap().records, "as a save that waited keeps it");
+}
+
 /// The tolerance heal preference is part of an import's and a Repair's fingerprint, and of no
 /// other feature's: turned off, the model is not current and evaluates both again (the import
 /// read as it is, the Repair without its heal); turned back on, it comes back to the first
@@ -3552,8 +3617,10 @@ fn a_cut_measures_the_tight_box_of_its_tool_only() {
     assert_eq!(work.cut, 1, "{work:?}");
     assert_eq!(model.state().bodies.len(), 1);
 
-    // A tool that reaches out of the body: the box can show it apart of the body, so
-    // it is measured.
+    // A tool that reaches out of the body but meets the box of its vertices: that box lies
+    // inside the body's exact box, so the exact box cannot show the tool apart of the body
+    // and is not measured either (a hole through a wall of a rounded spline body measured
+    // it for over a minute).
     let mut doc = Document::new("a cut through");
     block(&mut doc, "A", Vec3::ZERO, [20.0, 20.0, 20.0]);
     let kind = FeatureKind::Box {
@@ -3568,13 +3635,36 @@ fn a_cut_measures_the_tight_box_of_its_tool_only() {
     let mut model = Model::new();
     let work = counted(|| model.evaluate(&doc));
     assert!(model.result(cut).is_some_and(|r| r.error.is_none()), "{:?}", model.result(cut));
-    // The tool's tight box and the body's.
-    assert_eq!(work.tight_boxes, 2, "{work:?}");
+    // The tool's tight box, and no other.
+    assert_eq!(work.tight_boxes, 1, "{work:?}");
     assert_eq!(work.cut, 1, "{work:?}");
     let st = model.state();
     assert_eq!(st.bodies.len(), 1);
     // The tool crosses the top face: it takes 500 mm3 of the block with it.
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - (8000.0 - 500.0)).abs() < 1e-6);
+
+    // A tool clear of the box of the body's vertices: only the exact box can show it apart of
+    // the body, so it is measured, and the body is left as it was without a boolean.
+    let mut doc = Document::new("a cut beside");
+    block(&mut doc, "A", Vec3::ZERO, [20.0, 20.0, 20.0]);
+    let kind = FeatureKind::Box {
+        corner: point_expr(Vec3::new(30.0, 5.0, 5.0)),
+        length: "10".into(),
+        width: "10".into(),
+        height: "10".into(),
+        operation: Operation::Cut,
+        centred: false,
+    };
+    let cut = doc.add_feature(kind, None).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(cut).is_some(), "{:?}", model.result(cut));
+    // The tool's tight box and the body's.
+    assert_eq!(work.tight_boxes, 2, "{work:?}");
+    assert_eq!(work.cut, 0, "{work:?}");
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - 8000.0).abs() < 1e-6);
 }
 
 /// The design of #4282: a cube with a hole through it along each of the three axes, all of

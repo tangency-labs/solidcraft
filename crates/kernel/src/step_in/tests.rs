@@ -1716,6 +1716,28 @@ fn hand_written_assembly() {
     assert!((root.children[1].transform[3][0] - 100.0).abs() < 1e-9);
 }
 
+/// Writers disagree on the order of a placement's two items: the part's own origin first (the
+/// fixture), the assembly's placement first though the part's representation comes first
+/// (HOOPS Exchange), or both items listed in the assembly. Each places the part the same way,
+/// with each item read in the units of the representation that lists it.
+#[test]
+fn assembly_placement_items_in_any_order() {
+    let usual = two_instance_assembly();
+    let expected = step_import(&usual).unwrap().tree[0].children[1].transform;
+    for items in ["#84,#65", "#81,#84"] {
+        let t = usual.replace("ITEM_DEFINED_TRANSFORMATION('','',#65,#84)", &format!("ITEM_DEFINED_TRANSFORMATION('','',{items})"));
+        assert_ne!(t, usual);
+        let imp = step_import(&t).unwrap();
+        assert!(imp.warnings.is_empty(), "{items}: {:?}", imp.warnings);
+        let got = imp.tree[0].children[1].transform;
+        for (a, b) in got.iter().flatten().zip(expected.iter().flatten()) {
+            assert!((a - b).abs() < 1e-9, "{items}: {got:?} instead of {expected:?}");
+        }
+        let m = measure(&imp.bodies[1].body).unwrap();
+        assert!(m.bbox.min.dist(Vec3::new(90.0, 0.0, 0.0)) < 1e-6, "{items}: {:?}", m.bbox);
+    }
+}
+
 /// The cube part (in cm) placed `n` times in a millimetre assembly, each instance moved along X
 /// and turned about Z.
 fn instanced_assembly(n: u64) -> String {
@@ -3329,6 +3351,13 @@ fn a_cylinder_whose_rim_lies_a_little_off_its_wall_keeps_its_wall() {
 /// file's own seam (a line at angle 0) and by rims that are rational spline circles starting at
 /// their vertex there.
 fn spline_band_step(start: f64) -> String {
+    spline_band_step_with_seam(start, 0.0)
+}
+
+/// The same cylinder, with a cubic seam bowed along its tangent when `bend` is nonzero.
+/// This changes only its internal parameter cut; its material remains a radius-5,
+/// height-4 cylinder, of volume 100π and area 90π.
+fn spline_band_step_with_seam(start: f64, bend: f64) -> String {
     use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, SQRT_2, TAU};
     let (r, h) = (5.0, 4.0);
     let mut out: Vec<String> = Vec::new();
@@ -3369,7 +3398,14 @@ fn spline_band_step(start: f64) -> String {
     let d = add("DIRECTION('',(0.,0.,1.))".into());
     let d = add(format!("VECTOR('',#{d},{h:.16})"));
     let line = add(format!("LINE('',#{o},#{d})"));
-    let seam = add(format!("EDGE_CURVE('',#{v0},#{v1},#{line},.T.)"));
+    let curve = if bend == 0.0 {
+        line
+    } else {
+        let controls: Vec<_> =
+            [[r, 0.0, 0.0], [r, bend, h / 3.0], [r, -bend, 2.0 * h / 3.0], [r, 0.0, h]].into_iter().map(|p| add(point(p))).collect();
+        add(format!("B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,(4,4),(0.,1.),.UNSPECIFIED.)", ids(&controls)))
+    };
+    let seam = add(format!("EDGE_CURVE('',#{v0},#{v1},#{curve},.T.)"));
     let (lo, hi) = (quarters(start, 0.0), quarters(start, h));
     let rows: Vec<String> = lo.iter().zip(&hi).map(|((a, _), (b, _))| format!("(#{},#{})", add(point(*a)), add(point(*b)))).collect();
     let weights: Vec<String> = lo.iter().map(|(_, w)| format!("({w:.16},{w:.16})")).collect();
@@ -3424,6 +3460,22 @@ fn a_band_round_a_closed_spline_with_its_seam_off_the_knots_start_reads_whole() 
         assert_eq!(m.faces, 3, "start {start}");
         assert!(rel(m.volume, 100.0 * PI) < 1e-6, "start {start}: volume {}", m.volume);
         assert!(rel(m.area, 90.0 * PI) < 1e-6, "start {start}: area {}", m.area);
+    }
+}
+
+/// A seam bowed across the closed spline's cut needs a continuous lift of the
+/// projected parameters before interpolation. Wrapped samples made a cubic that
+/// swung across the opposite side of the surface and the wall was left out.
+#[test]
+fn a_closed_spline_wall_with_a_curved_seam_keeps_all_faces() {
+    for start in [0.0, 0.3] {
+        let imp = step_import(&spline_band_step_with_seam(start, 0.02)).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+        assert!(imp.bodies[0].closed, "{:?}", imp.warnings);
+        assert!(!imp.warnings.iter().any(|w| w.contains("left out") || w.contains("as surfaces")), "{:?}", imp.warnings);
+        let m = measure(&imp.bodies[0].body).unwrap();
+        assert_eq!(m.faces, 3);
+        assert!(rel(m.volume, 100.0 * std::f64::consts::PI) < 1e-6, "{}", m.volume);
     }
 }
 
@@ -5533,4 +5585,28 @@ fn repair_without_heal_first_is_the_repair_before_the_heal() {
     assert_eq!(off.err(), Some(KernelError::Repair(crate::RepairRefusal::CheckFails(failure))));
     let (out, report) = crate::repair(&hair, &crate::RepairOptions { gap: 0.01, patch_holes: false, heal_first: true }).unwrap();
     assert!(report.healed.is_some() && out.face_count() == 7);
+}
+
+/// #18539: a face whose one boundary loop is a whole turn written as a single closed edge (the
+/// way Onshape writes a parallel circle: one `EDGE_CURVE` whose two ends are the same vertex, no
+/// pcurves) reads with the loop inside its face's parameter domain, so the solid measures its
+/// true volume and its whole box. Read before the fix, the pcurve maker followed the rim a whole
+/// turn off the face's form range, the face's domain covered only part of it and the body
+/// measured a fraction of its volume with a box clipped at its rim's edge vertices.
+#[test]
+fn a_cap_whose_rim_is_one_closed_edge_measures_its_whole_volume() {
+    let mut e = Entities::default();
+    let sphere_axis = e.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let sphere = e.add(format!("SPHERICAL_SURFACE('',#{sphere_axis},100.0)"));
+    let rim_axis = e.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let rim = e.add(format!("CIRCLE('',#{rim_axis},100.0)"));
+    let v = e.vertex([6.12323e-15, 100.0, 0.0]);
+    let edge = e.add(format!("EDGE_CURVE('',#{v},#{v},#{rim},.T.)"));
+    let cap = e.face(&[(edge, true)], sphere);
+    let bottom_axis = e.axis([0.0, 0.0, 0.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+    let bottom = e.add(format!("PLANE('',#{bottom_axis})"));
+    let base = e.face(&[(edge, false)], bottom);
+    let text = e.solid(&[cap, base]);
+    // The hemisphere: 2 pi R^3 / 3.
+    assert_closed_solid(&text, 2, 2.0 * std::f64::consts::PI * 100.0_f64.powi(3) / 3.0);
 }

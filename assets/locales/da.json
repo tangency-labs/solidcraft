@@ -3785,7 +3785,6 @@
   "sketch_panel.plane_offset": "{plane}, forskudt med {distance}",
   "sketch_panel.plane_origin": "Planet {plane}",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "Tilknyttet en plan flade på et pladeemne; den følger panelet, når pladen ændres.",
   "sketch_panel.text_hint": "Redigér teksten og dens placering, og tryk derefter på OK.",
   "sketch_panel.use_plane": "Brug planet {plane}",
   "sketch_text.align_center": "Centreret",

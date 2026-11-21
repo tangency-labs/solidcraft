@@ -343,6 +343,15 @@ pub static FORMATS: &[FormatSpec] = &[
         import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
         export: None,
     },
+    // The open file for laser scans (ASTM E2807), often several scans of a site in one file.
+    FormatSpec {
+        id: "e57",
+        label: "E57 point cloud",
+        extensions: &["e57"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
+        export: None,
+    },
     FormatSpec {
         id: "xyz",
         label: "XYZ point cloud",
@@ -455,15 +464,22 @@ pub fn exportable() -> impl Iterator<Item = &'static FormatSpec> {
     FORMATS.iter().filter(|f| f.export.is_some())
 }
 
-/// Every extension `doc.open` reads (designs, CAD files and meshes; not sketch drawings),
-/// without duplicates, in table order.
+/// Every extension `doc.open` reads (designs, CAD files, boards, meshes, scans and sketch
+/// drawings, which it opens as a sketch), without duplicates, in table order.
 pub fn open_extensions(native: bool) -> Vec<&'static str> {
+    extensions_where(native, |_| true)
+}
+
+/// The extensions Start › Import offers: foreign CAD files, boards, meshes and scans. Designs open
+/// with Open, and sketch drawings go into a sketch with Insert. Without duplicates, in table order.
+pub fn import_extensions(native: bool) -> Vec<&'static str> {
+    extensions_where(native, |target| matches!(target, ImportTarget::Brep | ImportTarget::Kicad | ImportTarget::Mesh | ImportTarget::PointCloud))
+}
+
+/// The extensions of the importing rows whose target `keep` takes, each once, in table order.
+fn extensions_where(native: bool, keep: impl Fn(ImportTarget) -> bool) -> Vec<&'static str> {
     let mut exts = Vec::new();
-    for f in importable(native) {
-        let importing = f.import.as_ref().map(|i| i.target);
-        if importing == Some(ImportTarget::Sketch) {
-            continue;
-        }
+    for f in importable(native).filter(|f| f.import.as_ref().is_some_and(|i| keep(i.target))) {
         for e in f.extensions {
             if !exts.contains(e) {
                 exts.push(*e);
@@ -498,7 +514,7 @@ pub fn import_filters(native: bool) -> Vec<(&'static str, Vec<&'static str>)> {
             // An OpenUSD scene is read as meshes, but it is its own kind of file to most people.
             ImportTarget::Mesh if f.id == "usd" => add(f.label, f.extensions),
             ImportTarget::Mesh => add("Mesh (3MF, STL, OBJ, glTF)", f.extensions),
-            ImportTarget::PointCloud => add("Point cloud (PLY, PCD, XYZ, PTS, ASC)", f.extensions),
+            ImportTarget::PointCloud => add("Point cloud (PLY, PCD, E57, XYZ, PTS, ASC)", f.extensions),
             ImportTarget::Sketch => add("Sketch drawings (DXF, SVG)", f.extensions),
         }
     }
@@ -563,7 +579,7 @@ mod tests {
         for e in ["3mf", "stl", "obj", "glb", "gltf"] {
             assert!(with_target(ImportTarget::Mesh).contains(&e), "registry misses mesh .{e}");
         }
-        for e in ["ply", "pcd", "xyz", "pts", "asc"] {
+        for e in ["ply", "pcd", "e57", "xyz", "pts", "asc"] {
             assert!(with_target(ImportTarget::PointCloud).contains(&e), "registry misses point cloud .{e}");
             assert!(crate::is_point_cloud_path(&format!("scan.{e}")));
             assert!(open_extensions(true).contains(&e));
@@ -638,8 +654,37 @@ mod tests {
         assert_eq!(find("FreeCAD and Rhino"), vec!["fcstd", "3dm"]);
         assert_eq!(find("Mesh (3MF, STL, OBJ, glTF)"), vec!["stl", "3mf", "obj", "glb", "gltf"]);
         assert_eq!(find("OpenUSD"), vec!["usd", "usda", "usdc", "usdz"]);
-        assert_eq!(find("Point cloud (PLY, PCD, XYZ, PTS, ASC)"), vec!["ply", "pcd", "xyz", "pts", "asc"]);
+        assert_eq!(find("Point cloud (PLY, PCD, E57, XYZ, PTS, ASC)"), vec!["ply", "pcd", "e57", "xyz", "pts", "asc"]);
         assert_eq!(find("Sketch drawings (DXF, SVG)"), vec!["dxf", "svg"]);
         assert!(import_filters(false).iter().all(|(l, _)| *l != "FreeCAD and Rhino"));
+    }
+
+    /// `doc.open` opens a DXF or SVG drawing as a sketch (#4635), so the Open lists offer them
+    /// with no host adding them by hand (#7328).
+    #[test]
+    fn open_extensions_include_the_sketch_drawings() {
+        let open = open_extensions(true);
+        for e in ["dxf", "svg"] {
+            assert_eq!(open.iter().filter(|x| **x == e).count(), 1, "{e} once in {open:?}");
+        }
+    }
+
+    /// Start › Import offers every foreign CAD, board, mesh and scan file SolidCraft reads, and no
+    /// design or sketch drawing (#7328).
+    #[test]
+    fn import_extensions_are_the_foreign_cad_mesh_and_scan_files() {
+        let import = import_extensions(true);
+        for e in ["step", "igs", "fcstd", "3dm", "kicad_pcb", "stl", "usdz", "ply"] {
+            assert!(import.contains(&e), "{e} missing from {import:?}");
+        }
+        for e in ["sc", "solidcraft", "json", "dxf", "svg"] {
+            assert!(!import.contains(&e), "{e} is not imported: {import:?}");
+        }
+        let foreign = [ImportTarget::Brep, ImportTarget::Kicad, ImportTarget::Mesh, ImportTarget::PointCloud];
+        for f in importable(true).filter(|f| f.import.as_ref().is_some_and(|i| foreign.contains(&i.target))) {
+            assert!(f.extensions.iter().all(|e| import.contains(e)), "{} missing", f.id);
+        }
+        let once: std::collections::BTreeSet<_> = import.iter().collect();
+        assert_eq!(once.len(), import.len(), "no duplicates in {import:?}");
     }
 }

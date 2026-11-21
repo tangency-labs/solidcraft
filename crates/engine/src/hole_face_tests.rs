@@ -859,3 +859,35 @@ fn a_hole_to_the_far_side_of_a_wall_opens_the_whole_exit() {
     near(body_volume(&mut s, "Body1"), 3600.0 - 48.0 * std::f64::consts::PI);
     near(body_volume(&mut s, "Beyond"), 3600.0);
 }
+
+/// A counterbore drilled up from a sketch below the part into a face that slopes at 40° across the
+/// axis opens the whole slanted face (#20045). The face rises 11 tan 40° = 9.2 mm over the
+/// counterbore's radius above the point where the axis enters it; the tools ran on only about 1 mm
+/// past that point and left a wedge over the low side, half closing the bore. Both tools now start
+/// clear of the face, so the cut is the two plain cylinders' from the face: the slanted face is
+/// linear, so over each tool's disc it averages to its height on the axis.
+#[test]
+fn a_counterbore_into_a_slanted_face_opens_the_whole_face() {
+    let mut s = Session::default();
+    let rise = 60.0 * 40f64.to_radians().tan();
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [60, -rise], [60, -80], [0, -80]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 40}));
+    let block = volume(&mut s);
+    near(block, (60.0 * 80.0 - 60.0 * rise / 2.0) * 40.0);
+    let ids = points_sketch(&mut s, 0.0, &[[30.0, 20.0]]);
+    drill(&mut s, &ids, json!({"type": "counterbore", "diameter": 10.5, "cb_diameter": 22, "cb_depth": 20}));
+    assert_eq!(said(&s, "H"), "");
+    // The axis enters the slanted face at z = rise / 2; the counterbore's floor is 20 above that.
+    let entry = rise / 2.0;
+    let floor = entry + 20.0;
+    let expected = std::f64::consts::PI * (11.0f64.powi(2) * 20.0 + 5.25f64.powi(2) * (80.0 - floor));
+    let cut = block - volume(&mut s);
+    assert!((cut - expected).abs() < 0.05, "removed {cut} mm³, the two cylinders from the face {expected} mm³");
+    // Air on the low side of the counterbore and of the bore, just above the slanted face there.
+    for x in [20.5, 26.0] {
+        let face = rise * x / 60.0;
+        assert!(!solid_at(&s, x, 20.0, face + 0.5), "material over the slanted face at x = {x}");
+    }
+}

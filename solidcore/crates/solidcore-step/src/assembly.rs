@@ -103,6 +103,10 @@ pub enum Kind {
     /// A surface model: open shells in the infinite region, and closed ones each bounding a
     /// region of its own.
     Model,
+    /// A region of a general body (CADIR's, a solid's regions beside a sheet's): a solid with
+    /// voids ([`Kind::Voids`]) when it has several shells and every one is closed, else a
+    /// surface model ([`Kind::Model`]).
+    General,
     /// A solid with faces left out (`crate::topology::read_solid_without`): its shells are
     /// sheets, but for a shell still closed, which bounds a region of its own (a void's cavity,
     /// where `voids`: the solid's shells after the first are its voids).
@@ -210,7 +214,7 @@ pub struct Assembly<'t> {
     /// Spline surfaces whose first and last control lines met within the tolerance, closed.
     pub(crate) splines_closed: usize,
     /// Control points of spline curves and surfaces whose polygon turned back on itself within
-    /// the tolerance, moved onto their neighbours ([`crate::topology::unfolded_curve`],
+    /// the tolerance, moved to take the turn out ([`crate::topology::unfolded_curve`],
     /// [`crate::topology::unfolded_surface`]).
     pub(crate) points_unfolded: usize,
     /// Sides of spline surfaces that collapsed to within the tolerance of a point, made exact
@@ -660,7 +664,7 @@ impl<'t> Assembly<'t> {
         }
         if self.points_unfolded > 0 {
             notes.push(format!(
-                "{} control points of spline curves and surfaces whose polygon turned back on itself by less than {} mm moved onto their neighbours",
+                "{} control points of spline curves and surfaces whose polygon turned back on itself by less than {} mm moved to take the turn out",
                 self.points_unfolded, self.tol
             ));
         }
@@ -773,6 +777,11 @@ impl<'t> Assembly<'t> {
 
         // Regions: which shells are closed (every edge used at least twice among its faces).
         let closed: Vec<bool> = shells.iter().map(|s| self.closed(s)).collect();
+        let kind = match kind {
+            Kind::General if closed.len() > 1 && closed.iter().all(|c| *c) => Kind::Voids,
+            Kind::General => Kind::Model,
+            k => k,
+        };
         // A closed solid's edge sides must cancel. Local loop normalization alone can
         // preserve an exporter's inconsistent shell sides (#17149).
         let mut reoriented = false;
@@ -845,7 +854,7 @@ impl<'t> Assembly<'t> {
                     }
                 }
             }
-            Kind::Model => {
+            Kind::Model | Kind::General => {
                 if let Some(r) = regions.first_mut() {
                     r.shells = (0..index(shells.len())?).collect();
                 }

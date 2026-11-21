@@ -88,7 +88,7 @@ fn transfer(s: &mut Session, p: &Value, moving: bool) -> Result<Value> {
     let mut moved = std::borrow::Cow::Borrowed(&doc);
     super::design_link::filed(&mut moved, Some(path), destination);
     let contents = if let std::borrow::Cow::Owned(doc) = moved {
-        if destination.to_lowercase().ends_with(".json") { solidcraft_io::write_design(&doc) } else { solidcraft_io::write_design_container(&doc)? }
+        if destination.to_lowercase().ends_with(".json") { solidcraft_io::write_design(&doc)? } else { solidcraft_io::write_design_container(&doc)? }
     } else {
         original.clone()
     };
@@ -129,7 +129,7 @@ mod tests {
         }
         fn design(&self, name: &str) -> std::path::PathBuf {
             let path = self.0.join(name);
-            std::fs::write(&path, solidcraft_io::write_design(&solidcraft_doc::Document::new(name))).unwrap();
+            std::fs::write(&path, solidcraft_io::write_design(&solidcraft_doc::Document::new(name)).unwrap()).unwrap();
             path
         }
     }
@@ -213,13 +213,34 @@ mod tests {
     }
 
     #[test]
+    fn library_copy_keeps_authored_bytes_and_model_cache_with_a_fresh_session_identity() {
+        let f = Fixture::new();
+        let source = f.0.join("Source.sc");
+        let destination = f.0.join("Copy.sc");
+        let mut original = session();
+        original.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})).unwrap();
+        let source_bytes = original.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
+        std::fs::write(&source, &source_bytes).unwrap();
+        session().execute("file.copy", &json!({"path": source, "destination": destination})).unwrap();
+        assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
+        let copied_bytes = std::fs::read(&destination).unwrap();
+        assert_eq!(copied_bytes, source_bytes);
+        let mut reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(copied_bytes)).unwrap();
+        let saved = reader.geometry().unwrap();
+        let copied = reader.read_document().unwrap();
+        let reopened = Session::opened(copied, Some(&saved));
+        assert_ne!(reopened.design_token().document_id, original.design_token().document_id);
+        assert_eq!(reopened.model.last_recomputed, 0, "the saved model remains adoptable");
+    }
+
+    #[test]
     fn library_guards_open_and_linked_files_and_rebases_assemblies() {
         let f = Fixture::new();
         let original = f.design("Part.solidcraft");
         let assembly = f.0.join("Assembly.solidcraft");
         let mut doc = solidcraft_doc::Document::new("Assembly");
         doc.links.insert(1, solidcraft_doc::DesignLink { path: "Part.solidcraft".into(), feature: 1, ..Default::default() });
-        std::fs::write(&assembly, solidcraft_io::write_design(&doc)).unwrap();
+        std::fs::write(&assembly, solidcraft_io::write_design(&doc).unwrap()).unwrap();
         let mut s = session();
         s.path = Some(original.to_string_lossy().into_owned());
         assert!(s.execute("file.move", &json!({"path":original,"destination":f.0.join("Other.solidcraft")})).is_err());

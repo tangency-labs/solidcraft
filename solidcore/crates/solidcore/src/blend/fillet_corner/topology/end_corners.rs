@@ -27,21 +27,95 @@ use crate::blend::fillet_geom::p1::{
     CornerLookup, FilStatus, FilletBrep, FilletCornerId, FilletEdgeType, FilletSolverId,
     FilletVertexType,
 };
-use crate::blend::fillet_solver::p1::FilletSolver;
+use crate::blend::fillet_solver::p1::{seam_periods, FilletSolver};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
+use crate::geom::solution_array::{Solution, SolutionType};
 use crate::intersect::point_class::PointClassType;
 use crate::intersect::surface_intersector::p1::{IntersectionPointType, SrfIndex};
 use crate::kernel::Kernel;
 use crate::math::Point2;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::surface::p1::map_to_2d;
+use crate::surface::surface::p2::Surface;
 use crate::topology::edgeuse::p1 as eu1;
-use crate::topology::{vertex, Brep, EdgeuseId, ObjectHandle};
+use crate::topology::edgeuse::p3::normalized_evaluate_read_only;
+use crate::topology::{vertex, Brep, EdgeuseId, ObjectHandle, VertexId};
 
 const OP: &str = "blend::fillet_corner::topology::end_corners";
 
 fn invalid(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
+}
+
+/// Select the solution on the same side of a periodic seam as the face's trim.
+/// A self-intersection, a range, a missing trim or an ambiguous branch is insufficient.
+fn periodic_corner_drop(
+    k: &Kernel,
+    base: &Surface,
+    target: &Brep,
+    edgeuse: EdgeuseId,
+    vertex: VertexId,
+    solutions: &[Solution<ObjectHandle>],
+) -> Result<Option<Point2>> {
+    if !(2..=4).contains(&solutions.len()) || eu1::uv_trim_curve(target, edgeuse)?.0.is_none() {
+        return Ok(None);
+    }
+    let Some(vu) = eu1::vertexuse(target, edgeuse)? else {
+        return Ok(None);
+    };
+    let Some(next) = eu1::ccw_edgeuse(target, edgeuse)? else {
+        return Ok(None);
+    };
+    let Some(end_vu) = eu1::vertexuse(target, next)? else {
+        return Ok(None);
+    };
+    let parameter = match (
+        target.vertexuse(vu)?.vertex == Some(vertex),
+        target.vertexuse(end_vu)?.vertex == Some(vertex),
+    ) {
+        (true, false) => 0.0,
+        (false, true) => 1.0,
+        _ => return Ok(None),
+    };
+    let end = normalized_evaluate_read_only(k, target, edgeuse, parameter, true, false)?.point;
+    let anchor = Point2::new(end.x, end.y);
+    let corner = target.vertex(vertex)?.point;
+    let tol = vertex::tolerance(target, vertex)?;
+    let domain = base.natural_uv_domain_with_nurb(k)?;
+    if !domain.contains_point(anchor, 0.0)
+        || !base.evaluate_point(k, anchor)?.closer_than(tol, corner)
+    {
+        return Ok(None);
+    }
+    let uv_tol = map_to_2d(k, tol, anchor, base)?;
+    let periods = seam_periods(k, base)?;
+    let mut branch = None;
+    for hit in solutions {
+        if hit.solution_type != SolutionType::SingleValue {
+            return Ok(None);
+        }
+        let uv = Point2::new(hit.start.param(0)?, hit.start.param(1)?);
+        if !domain.contains_point(uv, 0.0) || !base.evaluate_point(k, uv)?.closer_than(tol, corner)
+        {
+            return Ok(None);
+        }
+        if (uv.x - anchor.x).abs() <= uv_tol && (uv.y - anchor.y).abs() <= uv_tol {
+            if branch.replace(uv).is_some() {
+                return Ok(None);
+            }
+            continue;
+        }
+        for (delta, interval) in [(uv.x - anchor.x, periods[0]), (uv.y - anchor.y, periods[1])] {
+            if delta.abs() <= uv_tol {
+                continue;
+            }
+            if !interval.is_some_and(|p| (delta.abs() - p.length()).abs() <= uv_tol) {
+                return Ok(None);
+            }
+        }
+    }
+    Ok(branch)
 }
 
 /// Actual objects used by the 4x3, open and degenerate corners'
@@ -347,7 +421,8 @@ impl FilletCorner {
     ///
     /// # Errors
     /// `SM_ERR_NULL_POINTER` without the solver or a solver surface; `SM_ERR` unless each
-    /// drop has exactly one solution; invalid topology or corner kind; those of the
+    /// drop has one solution or equivalent periodic-seam solutions with a unique trim-side
+    /// branch; invalid topology or corner kind; those of the
     /// drops, the solver rail lookups and pseudo-topology operations.
     pub fn make_degenerate_corner_topology(&mut self, env: EndCornerTopologyEnv<'_>) -> Result<()> {
         if self.kind != FilletCornerKind::Degenerate {
@@ -404,13 +479,18 @@ impl FilletCorner {
                 None,
                 SolutionRequested::Single,
             )?;
-            let [solution] = solutions.as_slice() else {
-                return Err(SolidError::blend_failed(
-                    OP,
-                    "the corner point does not drop onto the surface at exactly one point",
-                ));
+            *slot = if let [solution] = solutions.as_slice() {
+                Point2::new(solution.start.param(0)?, solution.start.param(1)?)
+            } else {
+                let edgeuse = need(solver.edgeuse(ii)?, "a solver rail without an edge use")?;
+                periodic_corner_drop(k, base, target, edgeuse, cp_vertex, solutions.as_slice())?
+                    .ok_or_else(|| {
+                        SolidError::blend_failed(
+                            OP,
+                            "the corner point does not drop onto the surface at exactly one point",
+                        )
+                    })?
             };
-            *slot = Point2::new(solution.start.param(0)?, solution.start.param(1)?);
         }
 
         let fillet_geom = solver.first_fillet_geom()?;

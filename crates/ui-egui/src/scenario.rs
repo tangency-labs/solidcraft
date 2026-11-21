@@ -212,6 +212,12 @@ impl Harness {
         self.frame_with_pen(events, None);
     }
 
+    /// One frame with these keys held (Shift, Ctrl, Alt) while `events` come in.
+    pub fn frame_with_modifiers(&mut self, mut events: Vec<egui::Event>, modifiers: egui::Modifiers) {
+        events.insert(0, egui::Event::ModifiersChanged(modifiers));
+        self.frame_with(events);
+    }
+
     /// One frame with a release identified as a pen tip by the platform.
     pub fn frame_with_pen(&mut self, events: Vec<egui::Event>, pen_release: Option<egui::Pos2>) {
         self.frame_with_taps(events, crate::pencil::PlatformTaps { pen_release, ..Default::default() });
@@ -1206,3 +1212,15 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
 #[cfg(test)]
 #[path = "scenario_publication_tests.rs"]
 mod publication_tests;
+
+/// Writes `bytes` to an image file of its own for a test and returns its path: an image is given
+/// to `canvas.insert` and `canvas.decal` as a file, never as text.
+#[cfg(test)]
+pub(crate) fn image_file(bytes: &[u8]) -> String {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!("solidcraft-ui-test-images-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("{}.img", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    std::fs::write(&path, bytes).unwrap();
+    path.to_string_lossy().into_owned()
+}

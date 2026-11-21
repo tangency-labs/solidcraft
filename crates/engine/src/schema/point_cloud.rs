@@ -13,23 +13,24 @@ use super::component::{MatrixParam, MatrixTolerance, refusal};
 use super::file::{CloudUnits, MaxPoints, OpenPath};
 use super::types::IdOrName;
 
-/// Insert a point cloud: the points of a `.ply`, `.pcd`, `.xyz`, `.pts` or `.asc` file join the
-/// design as a reference to model from. They are drawn as points and never become a body; a PLY's
-/// red, green and blue or a PCD's packed `rgb` become the cloud's colours, the other properties of
-/// a PLY or PCD can colour and filter the points, and a PLY's edge and face elements become
-/// segments and triangles.
+/// Insert a point cloud: the points of a `.ply`, `.pcd`, `.e57`, `.xyz`, `.pts` or `.asc` file
+/// join the design as a reference to model from. They are drawn as points and never become a body;
+/// a PLY's red, green and blue, a PCD's packed `rgb` or an E57 file's colours become the cloud's
+/// colours, the other properties of a PLY or PCD and an E57 file's intensity can colour and filter
+/// the points, every scan of an E57 file is read and moved by its pose, and a PLY's edge and face
+/// elements become segments and triangles.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct PointCloudInsertParams {
-    /// The file to read: a `.ply`, `.pcd`, `.xyz`, `.pts` or `.asc` file. Any other file is
-    /// refused.
+    /// The file to read: a `.ply`, `.pcd`, `.e57`, `.xyz`, `.pts` or `.asc` file. Any other file
+    /// is refused.
     pub path: OpenPath,
     /// The cloud's name in the design. Default: the file's name without its extension, with
     /// ` (2)` and so on added when another cloud already has that name.
     #[serde(default)]
     pub name: Option<String>,
     /// The file's length unit: the points are scaled from the unit they came in as to mm.
-    /// Default: mm.
+    /// Default: mm, and m for an E57 file (the format is always in metres).
     #[serde(default)]
     pub units: Option<CloudUnits>,
     /// The most points kept; a file with more is thinned evenly. Default: 5000000.
