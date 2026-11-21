@@ -291,6 +291,9 @@ fn a_sheets_title_block_by_command() {
     // The built-in block comes back by name.
     run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 2", "title_block": "built-in"}));
     assert_eq!(sheets(&s)[1].title_block, Some(solidcraft_geom::title_block::default_block()));
+    // So does the older, compact one (#20126).
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 2", "title_block": "compact"}));
+    assert_eq!(sheets(&s)[1].title_block, Some(solidcraft_geom::title_block::compact_block()));
 }
 
 /// A view a new block covers is listed with the ones the drawing space leaves out, and nothing
