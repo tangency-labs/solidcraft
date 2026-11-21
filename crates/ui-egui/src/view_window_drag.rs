@@ -94,6 +94,7 @@ struct Slot {
 
 enum Target {
     Strip { slot: Slot, label: String, blocked: bool },
+    Elsewhere { window: WindowId, rect: Rect, label: String, blocked: bool },
     Dock { dock: DockTarget, attraction: f32, viewport: egui::ViewportId, window: WindowId },
     Window { window: DragWindow, refusal: Option<&'static str> },
 }
@@ -101,7 +102,7 @@ enum Target {
 impl Target {
     fn label(&self) -> &str {
         match self {
-            Self::Strip { label, .. } => label,
+            Self::Strip { label, .. } | Self::Elsewhere { label, .. } => label,
             Self::Dock { dock, .. } => &dock.label,
             Self::Window { window, refusal } => refusal.unwrap_or(&window.label),
         }
@@ -299,6 +300,16 @@ fn take_target(app: &SolveApp, ctx: &Context, drag: &Drag, pointer: Pos2) -> Opt
     };
     let outside = !client.contains(pointer);
     let strips = &app.view_window_drag.strips;
+    if let Some((window, rect)) = strips
+        .iter()
+        .filter(|strip| strip.tab == drag.tab && strip.viewport == drag.viewport)
+        .flat_map(|strip| strip.zone.elsewhere.iter().copied())
+        .find(|(window, rect)| *window != drag.window && rect.contains(pointer))
+        && let Some(choice) = crate::view_windows::window_choices(app).iter().find(|choice| choice.id == window)
+    {
+        let label = if drag.source_is_last { app.tr("multi_window.last_view").to_owned() } else { choice.label.clone() };
+        return Some(Target::Elsewhere { window, rect, label, blocked: drag.source_is_last });
+    }
     let strip_at = |local: bool| {
         strips.iter().rev().filter(|strip| strip.tab == drag.tab && (strip.viewport == drag.viewport) == local).find_map(|strip| {
             let point = if local { pointer } else { strip.screen.local(desktop?) };
@@ -509,6 +520,9 @@ fn finish(app: &mut SolveApp, ctx: &Context, mut drag: Drag) {
                 app.run("tab.view.move_to_window", serde_json::json!({"view":drag.view.id,"window":slot.window,"index":slot.index})).map(|_| ())
             }
         }
+        Some(Target::Elsewhere { window, blocked: false, .. }) => {
+            app.run("tab.view.move_to_window", serde_json::json!({"view":drag.view.id,"window":window})).map(|_| ())
+        }
         Some(Target::Dock { dock, attraction, window, .. }) if !dock.blocked && attraction == 1.0 => {
             if window == drag.window {
                 crate::view_tiles::commit_dock(app, drag.view.id, dock.placement)
@@ -635,6 +649,12 @@ fn draw(app: &SolveApp, ctx: &Context, drag: &Drag) {
             let rect = Screen::current(ctx).map(|screen| Rect::from_min_max(screen.local(window.outline.min), screen.local(window.outline.max)));
             let label = refusal.unwrap_or(&window.label);
             paint_preview(ctx, &drag.view, drag.origin, drag.pointer, Preview::Window { rect, label, blocked: refusal.is_some() });
+        }
+        Some(Target::Elsewhere { rect, label, blocked, .. }) => {
+            let p = painter(ctx);
+            let t = Tokens::get();
+            p.rect_stroke(*rect, 6, Stroke::new(2.0, if *blocked { t.error } else { t.accent }), StrokeKind::Inside);
+            paint_hint_label(&p, ctx.viewport_rect(), rect.center_bottom() + vec2(0.0, 6.0), label, *blocked);
         }
         Some(Target::Strip { label, .. }) => paint_preview(ctx, &drag.view, drag.origin, drag.pointer, Preview::Held(Some(label))),
         None => paint_preview(ctx, &drag.view, drag.origin, drag.pointer, Preview::Held(None)),
@@ -1033,6 +1053,7 @@ mod tests {
                         2,
                         ViewDropZone {
                             document: 0,
+                            elsewhere: Vec::new(),
                             rect: Rect::from_min_max(pos2(85.0, 0.0), pos2(280.0, 32.0)),
                             view_centres: vec![(0, 140.0), (1, 210.0)],
                         },
@@ -1071,7 +1092,12 @@ mod tests {
             tab: app.docs.current_tab(),
             window: 1,
             screen,
-            zone: ViewDropZone { document: 0, rect: Rect::from_min_max(pos2(100.0, 0.0), pos2(300.0, 30.0)), view_centres: vec![(0, 145.0)] },
+            zone: ViewDropZone {
+                document: 0,
+                elsewhere: Vec::new(),
+                rect: Rect::from_min_max(pos2(100.0, 0.0), pos2(300.0, 30.0)),
+                view_centres: vec![(0, 145.0)],
+            },
             count: 1,
             name: "Secondary".into(),
         });
@@ -1092,6 +1118,35 @@ mod tests {
     }
 
     #[test]
+    fn a_detached_tab_routes_the_drop_to_its_window() {
+        use solidcraft_views::{ViewKind, WindowTarget};
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let dragged = app.docs.views.open(ViewKind::Model, None, false);
+        let detached = app.docs.views.open(ViewKind::Model, None, false);
+        let window = app.docs.views.move_to_window(detached, WindowTarget::New { placement: None }).unwrap().window;
+        let badge = Rect::from_min_size(pos2(240.0, 4.0), vec2(100.0, 26.0));
+        app.view_window_drag.strips.push(Strip {
+            viewport: egui::ViewportId::ROOT,
+            tab: app.docs.current_tab(),
+            window: 0,
+            screen: Screen { origin: Pos2::ZERO, pixels_per_point: 1.0 },
+            name: "Design".into(),
+            zone: ViewDropZone {
+                document: 0,
+                rect: Rect::from_min_size(pos2(80.0, 0.0), vec2(340.0, 34.0)),
+                view_centres: vec![],
+                elsewhere: vec![(window, badge)],
+            },
+            count: 2,
+        });
+        let ctx = Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let drag = begin(&app, ui.ctx(), dragged, Rect::from_min_size(pos2(170.0, 4.0), vec2(70.0, 26.0)), false).unwrap();
+            assert!(matches!(take_target(&app, ui.ctx(), &drag, badge.center()), Some(Target::Elsewhere { window: target, blocked: false, .. }) if target == window));
+        });
+    }
+
+    #[test]
     fn strip_band_and_slot_hysteresis_use_the_destination_scale() {
         let screen = Screen { origin: pos2(-1000.0, 200.0), pixels_per_point: 1.5 };
         let strip = Strip {
@@ -1102,6 +1157,7 @@ mod tests {
             name: "Design".into(),
             zone: ViewDropZone {
                 document: 0,
+                elsewhere: Vec::new(),
                 rect: Rect::from_min_max(pos2(100.0, 0.0), pos2(300.0, 30.0)),
                 view_centres: vec![(0, 140.0), (1, 180.0), (2, 250.0)],
             },

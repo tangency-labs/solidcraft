@@ -290,6 +290,69 @@ themselves; to show words instead, list the options as `oneOf`, each `{"const": 
 ]}
 ```
 
+### Edit a stored operation through its normal form
+
+This host adds `forms@0.1` alongside the existing `commands@0.1` and `commands@0.2`
+capabilities. Require a host advertising `forms@0.1`; older hosts reject that capability
+before executing the plugin. Existing plugins link unchanged and can keep making explicit
+entry calls without adding the capability. A plugin that needs populated forms declares
+`"capabilities": ["commands@0.2", "forms@0.1"]` and imports
+`craft:plugin/forms@0.2.0.open(entry, params) -> result<_, plugin-error>`.
+`params` is JSON with the target entry's normal input schema, including the selection objects
+returned by selection fields. The target must be a command entry of the same plugin.
+At most eight forms may be requested in one run; parameters are limited to 1 MiB.
+The host opens requested forms only after a successful interactive run, on the design tab that
+ran the entry. If another tab is active when the reply arrives, the reply waits until the original
+tab is active again. Preview discards form requests.
+A failed or cancelled run discards every request.
+
+The application opening path is `plugin_menu::open_form(app, plugin_id, entry, params)`.
+It draws the usual form filled with the supplied values and picks. Opening it only validates
+inputs; the entry runs on Apply, or on a scratch design when Preview is explicitly enabled.
+From the application control surface, use:
+
+```json
+{"method":"ui.start","params":{"command":"plugin.edit","params":{
+  "plugin":"my_cam","entry":"pocket_edit","params":{"depth":5,"edges":[]}
+}}}
+```
+
+Plugins-menu entry forms use this same form implementation. The panel work in #19516 is not
+on main yet: its future Edit row action can call the plain opening function or `ui.start` above.
+An entry that already has an unsubmitted form is refused rather than replacing its values.
+
+Scripts and MCP use explicit parameters to call `<plugin>.<entry>` or `plugin.run`.
+`engine.execute("plugin.edit", ...)` returns typed `interactive_required`, with the instruction
+to call the entry with params instead. Control replies expose `plugin_error.kind: "interactive_required"`;
+MCP exposes the same data in `structuredContent.plugin_error`, with `entry` and
+`action: "call_entry_with_params"`. The `forms.open` import returns that same typed host
+refusal for programmatic invocations (represented by WIT `unsupported`); it never opens a window.
+The capability grants no permission to edit another plugin's form or bypass execution approval.
+
+Stored values are treated as user edits: conditional defaults do not replace them, and the
+conditions below apply immediately. Schema-allowed extra properties are preserved in Preview
+and Apply. Invalid values and missing geometry appear beside the
+corresponding fields and keep Apply off. Validation runs on a cancellable worker; the form
+shows “Checking inputs…” until the current inputs and model have been checked. Results for
+older inputs or models are discarded. A stored edge or face must still match its exact
+indexed geometry and point. Approximate hit coordinates have an allowance of 0.1% of the
+exact body bounds diagonal, at least 0.001 mm and the body modelling tolerance. Only the
+supplied face or edge index is tested using exact geometry; there is no nearest-entity fallback.
+Display settings do not change this allowance.
+These selection objects are the current selection contract, not a new persistent naming format.
+
+Preview starts off for a populated form. Enabling it computes on a scratch design; Cancel discards it and leaves the design equal to its
+previous state. Apply invokes the entry once through the ordinary `plugin.run` transaction.
+The plugin replaces its own saved operation using its operation id in `params`; the host does
+not invent or reorder operations. One Undo restores the previous state, and Redo reapplies it.
+
+The form captures `document.revision` and document identity on opening. Apply carries these in
+`plugin.run.form_guard`; checking and execution happen in the same command transaction. If the
+revision changed, the entry does not run: the form revalidates against the current design,
+reports missing picks beside their fields, and asks the person to review and Apply again.
+If the design changes while a worker computes, atomic command acceptance rejects its result.
+No stale result can overwrite the current design.
+
 ### Conditional fields, choices and defaults
 
 Command dialogs evaluate declarative conditions on sibling scalar properties. Changing a field
@@ -488,11 +551,12 @@ key is the argument the plugin receives. The design follows the
   picks and the hover highlight work as in the native tools. One tool picks at a time: while a
   native tool is open, clicking a plugin field says to finish or cancel it first (a sketch tool too).
   Escape and Cancel close the dialog and stop the picking.
-- **References stay true.** The picks belong to the design they were made on. Any change to the
-  design while the dialog is open (an edit, an undo) clears them and the dialog says so; turning
+- **References stay true.** In ordinary plugin forms, picks belong to the design they were made on.
+  Any change to the design while the dialog is open (an edit, an undo) clears them and the dialog says so; turning
   the view or changing the selection does not. Picking runs no plugin code; Run sends the picks
   through the same `plugin.run` request. Programs calling `plugin.run` pass the same references
-  themselves; nothing fills them from the selection.
+  themselves; nothing fills them from the selection. Populated forms for editing stored operations
+  retain stale picks and validate them beside their fields, so they can be corrected.
 
 ### Seating a custom fastener
 
@@ -562,10 +626,13 @@ A run with no view command leaves the camera unchanged.
 
 ### Preview
 
-A command entry that edits the design is previewed the way native tools are: while its dialog's
-fields make parameters, the host runs the entry on a scratch copy of the design and draws what
-it would change in the viewport (new material tinted, removed material as a see-through ghost).
-The dialog has a **Preview** box, on when it opens; with it off, nothing runs until Run.
+In an ordinary plugin form, a command entry that edits the design is previewed the way native
+tools are: while its fields make parameters, the host runs the entry on a scratch copy of the
+design and draws what it would change in the viewport (new material tinted, removed material
+as a see-through ghost).
+An ordinary plugin form has a **Preview** box, on when it opens; with it off, nothing runs until Run.
+A populated form for editing a stored operation starts with Preview off and retains stale picks
+for field validation. Nothing runs until Apply or an explicit Preview request.
 
 - The preview is a dry run of the same `plugin.run`: the plugin's code is unchanged and declares
   nothing new. It runs on a scratch session that is thrown away, so the design, the undo history

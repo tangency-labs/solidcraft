@@ -2,6 +2,111 @@ use super::*;
 use serde_json::{Value, json};
 
 #[test]
+fn edit_form_prefill_validates_fields_and_programmatic_open_is_refused() {
+    let mut s = Session::default();
+    let schema = json!({"type":"object","required":["depth","edges"],"properties":{
+        "depth":{"type":"number","minimum":0,"maximum":20},
+        "edges":{"type":"array","x-solidcraft-selection":{"version":1,"accept":["edge"]}}
+    }});
+    assert!(form_errors(&s, &schema, &json!({"depth":5,"edges":[]})).is_empty());
+    let errors = form_errors(&s, &schema, &json!({"depth":-1,"edges":[{"type":"edge","body":"gone","index":0,"point":[0,0,0]}]}));
+    assert!(errors.contains_key("depth") && errors.contains_key("edges"), "{errors:?}");
+    let face_schema = json!({"type":"object","properties":{"face":{"type":"array","x-solidcraft-selection":{"version":1,"accept":["face"]}}}});
+    assert!(matches!(
+        form_errors(&s, &face_schema, &json!({"face":[{"type":"face","body":"gone","index":0,"point":[0,0,0]}]})).get("face"),
+        Some(crate::schema::plugin::FormFieldError::MissingPick)
+    ));
+
+    let before = s.doc.clone();
+    let error = s.execute("plugin.edit", &json!({"plugin":"sample","entry":"make","params":{}})).unwrap_err();
+    assert!(matches!(error.host_error(), Some(HostError::InteractiveRequired { .. })), "{error}");
+    assert!(error.to_string().contains("call the entry with params"));
+    assert_eq!(
+        structured_tool_error(&error.to_string()),
+        Some(json!({"kind":"interactive_required","entry":"sample.make","action":"call_entry_with_params"}))
+    );
+    let scripted = s.run_script(&json!([{"command":"plugin.edit","params":{"plugin":"sample","entry":"make","params":{}}}])).unwrap_err();
+    assert!(scripted.to_string().contains("call the entry with params"), "{scripted}");
+    assert_eq!(structured_tool_error(&scripted.to_string()), structured_tool_error(&error.to_string()));
+    assert_eq!(s.doc, before);
+}
+
+#[test]
+fn edit_form_prefill_uses_visible_controllers_and_reports_condition_errors() {
+    let s = Session::default();
+    let mut schema = json!({"type":"object","required":["secret"],"properties":{
+        "gate":{"type":"boolean"},
+        "mode":{"type":"boolean","x-solidcraft-visible-when":{"field":"gate","eq":true}},
+        "secret":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}}
+    }});
+    let before = s.doc.clone();
+    assert!(form_errors(&s, &schema, &json!({"gate":false,"mode":true,"secret":"hidden"})).is_empty());
+    assert!(form_errors(&s, &schema, &json!({"gate":false,"mode":true})).is_empty());
+    assert!(form_errors(&s, &schema, &json!({"gate":true,"mode":true,"secret":"invalid"})).contains_key("secret"));
+    assert!(form_errors(&s, &schema, &json!({"gate":true,"mode":true})).contains_key("secret"));
+    schema["properties"]["mode"]["x-solidcraft-visible-when"] = json!({"field":"missing","eq":true});
+    let errors = form_errors(&s, &schema, &json!({"gate":false,"mode":true}));
+    assert!(matches!(errors.get("params"), Some(crate::schema::plugin::FormFieldError::InvalidValue { .. })));
+    assert_eq!(s.doc, before, "validating visibility never changes the design");
+}
+
+#[test]
+fn edit_form_accepts_approximate_pick_coordinates_without_substituting_indices() {
+    use solidcore_record::Vec3;
+    let mut s = Session::default();
+    s.execute("solid.cylinder", &json!({"radius":10,"height":20,"body_name":"Stock"})).unwrap();
+    let state = s.model.state();
+    let body = state.body("Stock").unwrap();
+    let wall = body.body.nearest_face(Vec3::new(10.0, 0.0, 10.0)).unwrap().1;
+    let cap = body.body.nearest_face(Vec3::new(0.0, 0.0, 20.0)).unwrap().1;
+    let bottom = crate::kernel::blend_edges(&body.body, &[Vec3::new(10.0, 0.0, 0.0)]).unwrap()[0];
+    let top = crate::kernel::blend_edges(&body.body, &[Vec3::new(10.0, 0.0, 20.0)]).unwrap()[0];
+    let schema = json!({"type":"object","properties":{
+        "faces":{"type":"array","items":{"type":"object"},"x-solidcraft-selection":{"version":1,"accept":["face"]}},
+        "edges":{"type":"array","items":{"type":"object"},"x-solidcraft-selection":{"version":1,"accept":["edge"]}}
+    }});
+    // A 1 micrometre chord inset is larger than the modelling tolerance but smaller than
+    // the shared pick coordinate allowance (0.1% of this 20 x 20 x 20 mm body's exact bounds).
+    let mut values = json!({
+        "faces":[{"type":"face","body":"Stock","index":wall,"point":[9.999,0,10]}],
+        "edges":[{"type":"edge","body":"Stock","index":bottom,"point":[9.999,0,0]}]
+    });
+    let before = s.doc.clone();
+    assert!(form_errors(&s, &schema, &values).is_empty(), "normal picks can be approximate");
+    values["faces"][0]["index"] = json!(cap);
+    values["edges"][0]["index"] = json!(top);
+    let errors = form_errors(&s, &schema, &values);
+    assert!(matches!(errors.get("faces"), Some(crate::schema::plugin::FormFieldError::MissingPick)));
+    assert!(matches!(errors.get("edges"), Some(crate::schema::plugin::FormFieldError::MissingPick)));
+    assert_eq!(s.doc, before, "validation never substitutes a nearby entity or changes the design");
+}
+
+#[test]
+fn deferred_forms_are_scoped_to_interactive_plugin_entries_and_rollback() {
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: vec![],
+        view: None,
+        groups: BTreeSet::new(),
+        file_folders: vec![],
+        file_read_folders: vec![],
+        evaluation: None,
+        forms: vec![],
+        form_source: Some(("sample".into(), parse_manifest(&serde_json::to_vec(&manifest()).unwrap(), "sample").unwrap().runtime.unwrap().entries)),
+    };
+    assert!(matches!(host.open_form("make", &json!({})), Err(HostError::InteractiveRequired { .. })));
+    host.session.plugin_forms_interactive = true;
+    assert!(host.open_form("unknown", &json!({})).is_err());
+    host.begin_transaction().unwrap();
+    host.open_form("make", &json!({"depth":-10,"edges":["missing"]})).unwrap();
+    assert_eq!(host.forms.len(), 1, "invalid prefill opens a form, not a failed run");
+    assert_eq!(host.forms[0].plugin, "sample");
+    host.rollback_transaction().unwrap();
+    assert!(host.forms.is_empty());
+}
+
+#[test]
 fn named_tool_refusals_keep_plugin_file_and_budget_details() {
     let session = Session::default();
     let mut m = manifest();
@@ -116,6 +221,8 @@ fn an_importer_checks_its_own_design_apart_from_the_open_one() {
         file_folders: Vec::new(),
         file_read_folders: Vec::new(),
         evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
     };
     let mut made = Session::new(solidcraft_doc::Document::new("Bracket"));
     made.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
@@ -146,6 +253,8 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
         file_folders: Vec::new(),
         file_read_folders: Vec::new(),
         evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
     };
     let catalog = host.command_catalog();
     let built = crate::command_specs().into_iter().filter(|c| c.planned.is_none()).count();
@@ -233,6 +342,8 @@ fn read_only_folder_allows_step_insert_but_refuses_file_writes() {
         file_folders: Vec::new(),
         file_read_folders: vec![read.clone()],
         evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
     };
     host.begin_transaction().unwrap();
     let inserted = host.run_command("file.insert_step", &json!({"path":source_path}));
@@ -263,6 +374,8 @@ fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees
         file_folders: Vec::new(),
         file_read_folders: Vec::new(),
         evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
     };
     host.begin_transaction().unwrap();
     s_box(&mut host);
@@ -286,6 +399,8 @@ fn nested_plugin_edits_save_their_current_token_without_retagging_at_acceptance(
     let folder = crate::tests::Folder::new("nested-plugin-save-token");
     let path = folder.path("edited.sc");
     let mut host = SolidCraftHost {
+        forms: Vec::new(),
+        form_source: None,
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
@@ -333,6 +448,8 @@ fn a_command_in_another_spelling_is_never_granted() {
         file_folders: Vec::new(),
         file_read_folders: Vec::new(),
         evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
     };
     host.begin_transaction().unwrap();
     for id in ["file.save_as", "file.export_step", "doc.open", "plugin.run", "plugin.list", "settings.get", "diagnostics.crash_reports", "solid.box"]
@@ -979,6 +1096,8 @@ mod native {
         let mut session = Session::default();
         session.plugin_state.listener_design = Some(Some(session.design_token()));
         let mut host = SolidCraftHost {
+            forms: Vec::new(),
+            form_source: None,
             session,
             transaction: None,
             sketch_exits: Vec::new(),
@@ -1155,6 +1274,8 @@ mod native {
                     file_folders: Vec::new(),
                     file_read_folders: Vec::new(),
                     evaluation: None,
+                    forms: Vec::new(),
+                    form_source: None,
                 };
                 solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([f.0.clone()])), || {
                     assert!(host.authorize_file_path(&target, write).is_ok(), "explicit scope grants hidden access");
@@ -1432,6 +1553,91 @@ mod native {
         wat::parse_str(source).unwrap()
     }
     #[test]
+    fn expected_design_and_form_guard_both_apply_to_the_same_plugin_call() {
+        let f = Fixture::new("call $box");
+        let mut s = Session::default();
+        let expected = s.design_token();
+        let revision = s.design_revision();
+        let approval = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap()["approval"].clone();
+        let mut args = json!({"path":f.path(),"approval":approval,"entry":"make","expected_design":expected,
+            "form_guard":{"document_id":"another-design","revision":revision}});
+        let before = s.doc.clone();
+        let reply = s.execute("plugin.run", &args).unwrap();
+        assert_eq!(reply["form_validation"]["changed"], true, "a current design token still requires form acknowledgement");
+        assert_eq!(s.doc, before);
+        assert!(s.undo.is_empty(), "revalidation does not run the entry");
+
+        args["form_guard"]["document_id"] = json!(s.document_id);
+        let reply = s.execute("plugin.run", &args).unwrap();
+        assert!(reply.get("form_validation").is_none(), "both current guards permit execution");
+        assert_eq!(s.undo.len(), 1);
+        let actual = s.design_token();
+        assert_ne!(expected, actual);
+        let after = s.doc.clone();
+        let error = s.execute("plugin.run", &args).unwrap_err();
+        assert_eq!(
+            error.host_error(),
+            Some(&HostError::StaleRevision { expected, actual }),
+            "a stale explicit design token refuses the call even when its form guard is stale too"
+        );
+        assert_eq!(s.doc, after);
+        assert_eq!(s.undo.len(), 1);
+    }
+
+    #[test]
+    fn edit_form_apply_replaces_storage_once_and_stale_inputs_are_revalidated() {
+        let f = Fixture::new("call $box");
+        std::fs::write(f.0.join("sample/plugin.wasm"), storage_component()).unwrap();
+        let mut m = manifest();
+        m["capabilities"] = json!(["commands@0.1", "storage@0.1"]);
+        m["runtime"]["commands"] = json!(["storage.set"]);
+        m["runtime"]["data_format"] = json!(1);
+        m["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{
+            "depth":{"type":"number","minimum":0},
+            "edges":{"type":"array","x-solidcraft-selection":{"version":1,"accept":["edge"]}}
+        }}}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        s.plugin_state.storage_caller =
+            Some(storage::StorageCaller { id: "sample".into(), name: "Sample".into(), version: "0.1.0".into(), data_format: 1 });
+        s.execute("storage.set", &json!({"document":{"teeth":12}})).unwrap();
+        s.plugin_state.storage_caller = None;
+        let before = s.doc.clone();
+        let undo = s.undo.len();
+        let inspected = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
+        let guard = json!({"document_id":s.document_id,"revision":s.design_revision()});
+        let mut args = json!({"path":f.path(),"approval":inspected["approval"],"entry":"make","params":{"depth":5,"edges":[]},"form_guard":guard});
+        let prepared = s.scratch().compute_commands(&[("plugin.run".into(), args.clone())], None).unwrap();
+        assert_eq!(s.doc, before, "preview/cancel does not commit");
+        drop(prepared);
+        assert_eq!(s.doc, before, "cancel compares equal");
+        let reply = s.execute("plugin.run", &args).unwrap();
+        assert!(reply.get("form_validation").is_none(), "{reply}");
+        assert_eq!(s.undo.len(), undo + 1);
+        assert_eq!(s.execute("storage.get", &json!({"plugin":"sample"})).unwrap()["document"]["teeth"], 24);
+        let after = s.doc.clone();
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc, before);
+        s.execute("edit.redo", &json!({})).unwrap();
+        assert_eq!(s.doc, after);
+        let history = s.undo.len();
+        args["params"]["edges"] = json!([{"type":"edge","body":"deleted","index":0,"point":[0,0,0]}]);
+        let stale = s.execute("plugin.run", &args).unwrap();
+        assert_eq!(stale["form_validation"]["changed"], true);
+        assert_eq!(stale["form_validation"]["errors"]["edges"]["kind"], "missing_pick");
+        assert_eq!(s.doc, after);
+        assert_eq!(s.undo.len(), history, "revalidation never runs the entry");
+        args["params"] = json!({"depth":-1});
+        args["form_guard"]["revision"] = json!(s.design_revision());
+        let invalid = s.execute("plugin.run", &args).unwrap();
+        assert_eq!(invalid["form_validation"]["errors"]["depth"]["kind"], "invalid_value");
+        args["params"] = json!({"depth":5});
+        let prepared = s.scratch().compute_commands(&[("plugin.run".into(), args)], None).unwrap();
+        s.execute("solid.box", &json!({"length":1,"width":1,"height":1})).unwrap();
+        assert!(s.accept_commands(prepared).is_err(), "a design change between validation and acceptance rejects the transaction");
+    }
+
+    #[test]
     fn a_plugin_keeps_its_data_in_the_design_as_one_undo_step_and_a_newer_formats_data_stays_read_only() {
         let f = Fixture::new("call $box");
         std::fs::write(f.0.join("sample/plugin.wasm"), storage_component()).unwrap();
@@ -1699,6 +1905,8 @@ fn command_effects_are_explicit_and_independent_of_undo() {
         file_folders: Vec::new(),
         file_read_folders: Vec::new(),
         evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
     };
     let catalog = host.command_catalog();
     for command in ["sketch.edit", "sketch.finish", "sketch.cancel", "solid.box", "sketch.export_dxf"] {
@@ -1733,6 +1941,8 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         file_folders: Vec::new(),
         file_read_folders: Vec::new(),
         evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
     };
     solidcraft_io::vfs::scoped(None, || {
         for write in [false, true] {

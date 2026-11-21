@@ -449,6 +449,11 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::rows(ui, p),
         Kind::InsertAirfoil(a) => crate::dialogs_insert_airfoil::rows(ui, a),
         Kind::Sketch => {
+            let edge_on = edge_on_origin_planes(&app.cam);
+            if !edge_on.is_empty() {
+                let text = solidcraft_ui_text::format("sketch_panel.edge_on_hint", &[("planes", &edge_on.join(", "))]);
+                ui_kit::text(ui, &text, ui_kit::Text::Hint("edge_on"));
+            }
             if d.error.is_some() && matches!(d.inputs.first().and_then(|i| i.items.first()), Some(Sel::Face { .. })) {
                 ui_kit::text(
                     ui,
@@ -1322,10 +1327,51 @@ fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut
     }
 }
 
+/// The origin planes the view sees edge-on, as lines with nothing to click (#17606): in a top
+/// view XZ and YZ, in a front view XY and YZ. Create Sketch then says where else to pick them.
+pub(crate) fn edge_on_origin_planes(cam: &solidcraft_viewport::Camera) -> Vec<&'static str> {
+    let back = cam.back();
+    [("XY", back.z), ("XZ", back.y), ("YZ", back.x)].into_iter().filter(|(_, along_normal)| along_normal.abs() < 1e-2).map(|(name, _)| name).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::scenario::{self, Harness};
+
+    /// #17606: Create Sketch says how to pick a plane the view shows edge-on, and only then.
+    #[test]
+    fn create_sketch_hints_at_planes_seen_edge_on_only_when_there_are_some() {
+        use solidcraft_viewport::StandardView;
+        let mut cam = solidcraft_viewport::Camera::default();
+        assert!(edge_on_origin_planes(&cam).is_empty(), "the iso view sees every origin plane");
+        for (view, planes) in
+            [(StandardView::Top, vec!["XZ", "YZ"]), (StandardView::Front, vec!["XY", "YZ"]), (StandardView::Right, vec!["XY", "XZ"])]
+        {
+            cam.set_view(view);
+            assert_eq!(edge_on_origin_planes(&cam), planes, "{view:?}");
+        }
+        cam.yaw += 0.3;
+        cam.pitch = 0.4;
+        assert!(edge_on_origin_planes(&cam).is_empty(), "a turned view sees every plane again");
+
+        fn has_text(shape: &egui::Shape, text: &str) -> bool {
+            match shape {
+                egui::Shape::Text(t) => t.galley.text() == text,
+                egui::Shape::Vec(shapes) => shapes.iter().any(|s| has_text(s, text)),
+                _ => false,
+            }
+        }
+        let mut h = Harness::new();
+        let hint = solidcraft_ui_text::format("sketch_panel.edge_on_hint", &[("planes", "XZ, YZ")]);
+        assert!(hint.starts_with("XZ, YZ are seen edge-on"), "{hint}");
+        h.step(&json!({"start":"sketch.create"})).unwrap();
+        h.frames(2);
+        assert!(!h.shapes.iter().any(|s| has_text(&s.shape, &hint)), "no hint while every plane can be clicked");
+        h.app.cam.set_view(StandardView::Top);
+        h.frames(2);
+        assert!(h.shapes.iter().any(|s| has_text(&s.shape, &hint)), "the panel says how to pick XZ and YZ: {hint}");
+    }
 
     const COMMANDS: [&str; 6] =
         ["solid.extrude", "solid.fillet", "solid.chamfer", "solid.hole", "solid.pattern.rectangular", "solid.pattern.circular"];
