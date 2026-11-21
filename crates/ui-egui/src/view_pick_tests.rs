@@ -93,15 +93,32 @@ fn clipped_mesh_pick_measures_from_the_original_ray_origin() {
     let state = crate::open_meshing::session_world(&h.app.session);
     let body = state.body(&names[0]).unwrap();
     assert!(body.body.is_mesh());
-    assert!(!solidcraft_engine::doc::is_identity(&body.mesh_in_place().1), "the ray must be transformed to the definition's mesh");
+    let (mesh, place) = body.mesh_in_place();
+    assert!(!solidcraft_engine::doc::is_identity(&place), "the ray must be transformed to the definition's mesh");
+    assert!(h.app.viewport.pick_index.of(&mesh).is_some(), "the small mesh gets an index immediately");
 
     // The copy's triangles are at world z = 12 and z = 6. The ray crosses their interiors.
     let origin = Vec3::new(43.0, -3.0, 30.0);
     let dir = Vec3::new(0.0, 0.0, -1.0);
-    let hit = |clip| super::mesh_hit_in_clip(&h.app, body, origin, dir, clip);
-    assert!(hit((0.0, 30.0)).is_some_and(|depth| (depth - 18.0).abs() < 1e-9), "the nearer triangle");
-    assert!(hit((21.0, 30.0)).is_some_and(|depth| (depth - 24.0).abs() < 1e-9), "the farther triangle, from the original origin");
-    assert_eq!(hit((21.0, 23.0)), None, "the farther triangle is beyond the far cutoff");
+    let cases = [
+        ((0.0, 30.0), Some(18.0)),
+        // A hit exactly on the near cutoff remains visible even if the far triangle is clipped.
+        ((18.0, 30.0), Some(18.0)),
+        ((18.0, 23.0), Some(18.0)),
+        ((21.0, 30.0), Some(24.0)),
+        ((21.0, 23.0), None),
+    ];
+    for scan in [false, true] {
+        let depths = crate::pick_index::SCAN.with(|setting| {
+            let previous = setting.replace(scan);
+            let depths = cases.map(|(clip, _)| super::mesh_hit_in_clip(&h.app, body, origin, dir, clip));
+            setting.set(previous);
+            depths
+        });
+        for ((clip, expected), depth) in cases.into_iter().zip(depths) {
+            assert_eq!(depth, expected, "scan {scan}, clip {clip:?}");
+        }
+    }
 }
 
 /// A hidden body answers with nothing, as the viewport does not show it.

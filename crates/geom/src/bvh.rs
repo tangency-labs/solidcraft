@@ -4,7 +4,7 @@
 //! a mesh's triangles and one over its edge segments, for picking.
 
 use crate::prelude::*;
-use crate::{Aabb3, Mesh};
+use crate::{Aabb3, Mesh, RaycastStart, raycast_mesh_with_start};
 use solidcore_record::Vec3;
 
 /// Most items in a leaf.
@@ -297,10 +297,15 @@ impl MeshIndex {
     /// [`Mesh::raycast`] through the index: the same answer, including which triangle wins a tie.
     /// For a mesh other than the one indexed, the plain scan answers.
     pub fn raycast(&self, mesh: &Mesh, o: Vec3, dir: Vec3) -> Option<(f64, usize)> {
+        self.raycast_with_start(mesh, o, dir, RaycastStart::SkipSelfHit)
+    }
+
+    /// [`raycast_mesh_with_start`] through the index, with ties resolved as in the scan.
+    pub fn raycast_with_start(&self, mesh: &Mesh, o: Vec3, dir: Vec3, start: RaycastStart) -> Option<(f64, usize)> {
         if mesh.triangles.len() != self.triangle_count {
-            return mesh.raycast(o, dir);
+            return raycast_mesh_with_start(mesh, o, dir, start);
         }
-        let frame = crate::mesh::RayFrame::new(o, dir)?;
+        let frame = crate::mesh::RayFrame::new(o, dir, start)?;
         self.triangles
             .nearest(o, dir, |i| mesh.triangles.get(i as usize).and_then(|t| mesh.tri(t)).and_then(|p| frame.hit(p)))
             .map(|(t, i)| (t, i as usize))

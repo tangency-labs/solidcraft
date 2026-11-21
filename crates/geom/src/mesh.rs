@@ -302,6 +302,15 @@ pub struct MassProperties {
     pub inertia: [[f64; 3]; 3],
 }
 
+/// Where a mesh ray starts accepting intersections.
+#[derive(Clone, Copy)]
+pub enum RaycastStart {
+    /// Ignore the ray's origin and the usual self-intersection margin just ahead of it.
+    SkipSelfHit,
+    /// Include the origin itself, for a ray starting on a kept clipping boundary.
+    IncludeOrigin,
+}
+
 /// The geometry of a display mesh (solidcore-tess's [`Mesh`]): its measures, point and ray
 /// queries, and the edge chains and face patches picking extends to. In scope with
 /// `use solidcraft_geom::prelude::*`.
@@ -784,17 +793,7 @@ impl MeshGeom for Mesh {
     }
 
     fn raycast(&self, o: Vec3, dir: Vec3) -> Option<(f64, usize)> {
-        let frame = RayFrame::new(o, dir)?;
-        let mut best: Option<(f64, usize)> = None;
-        for (i, t) in self.triangles.iter().enumerate() {
-            let Some(p) = self.tri(t) else { continue };
-            if let Some(t) = frame.hit(p)
-                && best.is_none_or(|(bt, _)| t < bt)
-            {
-                best = Some((t, i));
-            }
-        }
-        best
+        raycast_mesh_with_start(self, o, dir, RaycastStart::SkipSelfHit)
     }
 
     fn inside_index(&self) -> InsideIndex<'_> {
@@ -873,12 +872,29 @@ fn smooth_seam(mesh: &Mesh, i: usize, cos: f64) -> bool {
     sample.iter().all(|&q| matches!((normal_near(*a, q), normal_near(*b, q)), (Some(na), Some(nb)) if na.dot(nb) > cos))
 }
 
+/// Closest watertight intersection of the ray with the mesh (ray parameter, triangle index),
+/// with an explicit choice for hits at the ray's start. The lowest triangle index wins ties.
+pub fn raycast_mesh_with_start(mesh: &Mesh, o: Vec3, dir: Vec3, start: RaycastStart) -> Option<(f64, usize)> {
+    let frame = RayFrame::new(o, dir, start)?;
+    let mut best: Option<(f64, usize)> = None;
+    for (i, t) in mesh.triangles.iter().enumerate() {
+        let Some(p) = mesh.tri(t) else { continue };
+        if let Some(t) = frame.hit(p)
+            && best.is_none_or(|(bt, _)| t < bt)
+        {
+            best = Some((t, i));
+        }
+    }
+    best
+}
+
 /// A ray in the frame of [`Mesh::raycast`]'s watertight test: its dominant axis becomes z; x and
 /// y follow it cyclically, swapped to keep the frame right-handed when the ray runs towards −z.
 pub(crate) struct RayFrame {
     o: Vec3,
     k: [usize; 3],
     s: [f64; 3],
+    start: RaycastStart,
 }
 
 fn comp(v: Vec3, k: usize) -> f64 {
@@ -891,7 +907,7 @@ fn comp(v: Vec3, k: usize) -> f64 {
 
 impl RayFrame {
     /// `None` for a direction that is zero or not finite.
-    pub(crate) fn new(o: Vec3, dir: Vec3) -> Option<RayFrame> {
+    pub(crate) fn new(o: Vec3, dir: Vec3, start: RaycastStart) -> Option<RayFrame> {
         let a = [dir.x.abs(), dir.y.abs(), dir.z.abs()];
         let kz = if a[0] >= a[1] && a[0] >= a[2] {
             0
@@ -908,7 +924,7 @@ impl RayFrame {
         if dz < 0.0 {
             std::mem::swap(&mut kx, &mut ky);
         }
-        Some(RayFrame { o, k: [kx, ky, kz], s: [comp(dir, kx) / dz, comp(dir, ky) / dz, 1.0 / dz] })
+        Some(RayFrame { o, k: [kx, ky, kz], s: [comp(dir, kx) / dz, comp(dir, ky) / dz, 1.0 / dz], start })
     }
 
     /// A vertex in the ray's frame: (x, y) across the ray, z scaled along it.
@@ -918,7 +934,7 @@ impl RayFrame {
         (comp(q, self.k[0]) - self.s[0] * z, comp(q, self.k[1]) - self.s[1] * z, self.s[2] * z)
     }
 
-    /// The distance along the ray to triangle `[pa, pb, pc]` (`None`: missed, or not in front).
+    /// The ray parameter of a triangle hit at or beyond the configured start.
     pub(crate) fn hit(&self, [pa, pb, pc]: [Vec3; 3]) -> Option<f64> {
         let ((ax, ay, az), (bx, by, bz), (cx, cy, cz)) = (self.frame(pa), self.frame(pb), self.frame(pc));
         let u = cx * by - cy * bx;
@@ -932,7 +948,11 @@ impl RayFrame {
             return None;
         }
         let t = (u * az + v * bz + w * cz) / det;
-        (t.is_finite() && t > 1e-9).then_some(t)
+        let within_ray = match self.start {
+            RaycastStart::SkipSelfHit => t > 1e-9,
+            RaycastStart::IncludeOrigin => t >= 0.0,
+        };
+        (t.is_finite() && within_ray).then_some(t)
     }
 }
 

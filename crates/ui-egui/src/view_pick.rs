@@ -22,7 +22,7 @@ use solidcore_ops::affine::{clipped_line_box_interval, line_halfspace_interval, 
 use solidcore_record::Vec3;
 use solidcraft_engine::SectionPlane;
 use solidcraft_engine::doc::{apply_point, is_identity};
-use solidcraft_engine::geom::Mesh;
+use solidcraft_engine::geom::{Mesh, RaycastStart};
 
 use crate::SolveApp;
 
@@ -372,7 +372,13 @@ fn mesh_hit_in_clip(app: &SolveApp, body: &solidcraft_engine::doc::ModelBody, or
     let (mesh, place) = body.mesh_in_place();
     let clipped_origin = Vec3::from(line_point_at(origin.into(), dir.into(), clip.0));
     let (local_origin, local_dir) = crate::viewport::local_ray(&place, clipped_origin, dir)?;
-    let (t, _) = crate::pick_index::raycast(app.viewport.pick_index.of(&mesh).as_deref(), &mesh, local_origin, local_dir)?;
+    let (t, _) = crate::pick_index::raycast_with_start(
+        app.viewport.pick_index.of(&mesh).as_deref(),
+        &mesh,
+        local_origin,
+        local_dir,
+        RaycastStart::IncludeOrigin,
+    )?;
     line_parameter_from_start(clip, t)
 }
 
