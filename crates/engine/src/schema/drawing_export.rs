@@ -24,8 +24,8 @@ pub struct ExportParams {
     /// The file format (svg when not given).
     #[serde(default)]
     pub format: ExportFormat,
-    /// The file to write, ending in the format's extension (the reply holds the document when
-    /// not given).
+    /// The file to write, ending in the format's extension. Required for a PNG or PDF; an SVG's or
+    /// DXF's text is in the reply when not given.
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub path: Option<String>,
@@ -48,7 +48,7 @@ pub struct ExportParams {
 #[serde(deny_unknown_fields)]
 #[schemars(deny_unknown_fields)]
 pub struct PrintParams {
-    /// The .pdf file to write (the reply holds the document when not given).
+    /// The .pdf file to write. The app's own print takes the PDF's bytes in-process instead.
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub path: Option<String>,
@@ -183,9 +183,6 @@ pub struct ExportResult {
     /// The DXF's text when no path was given.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dxf: Option<String>,
-    /// The document as base64 when no path was given and it is binary (PNG, PDF).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<String>,
     pub report: ExportReport,
     /// Each view on the sheet, in id order, as `drawing.scene` reports it.
     pub views: Vec<SheetSceneView>,

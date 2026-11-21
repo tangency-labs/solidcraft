@@ -24,6 +24,10 @@ pub const MESSAGES: &[(&str, &str)] = &[
     ),
     ("plugin_error.out_of_stack", "it ran out of its {allowed} KiB stack and was stopped. Ask its author to raise its stack size."),
     ("plugin_error.out_of_time", "it ran longer than its time limit of {seconds} s and was stopped. Ask its author to raise its time limit."),
+    (
+        "plugin_error.stale_revision",
+        "the design changed since this edit was calculated (expected {expected}; current {actual}). Run the calculation again.",
+    ),
     ("plugin_error.trap", "it stopped on an error inside the plugin ({reason}). Report this to its author."),
     ("plugin_error.unsupported", "{plugin} does not support this: {reason}"),
     ("plugin_error.unsupported_file", "{plugin} does not support {file}: {reason}"),
@@ -86,6 +90,10 @@ impl PluginFailure {
     fn reason(&self) -> String {
         let number = |n: u64| n.to_string();
         match &self.error {
+            HostError::StaleRevision { expected, actual } => {
+                let token = |token: &craft_plugin::DesignToken| format!("{}@{}", token.document_id, token.revision);
+                say("plugin_error.stale_revision", &[("expected", &token(expected)), ("actual", &token(actual))])
+            }
             HostError::OverCeiling { limit, requested, allowed } if limit == "memory_mib" => {
                 say("plugin_error.memory_ceiling", &[("requested", &number(*requested)), ("allowed", &number(*allowed))])
             }
@@ -128,7 +136,8 @@ pub(crate) fn named(plugin: &str, file: Option<&str>) -> impl Fn(crate::EngineEr
         crate::EngineError::Plugin(error) => {
             crate::EngineError::PluginFailed(Box::new(PluginFailure { plugin: plugin.into(), file: file.map(String::from), error }))
         }
-        crate::EngineError::Other(text) => {
+        e @ (crate::EngineError::Other(_) | crate::EngineError::Feature(_)) => {
+            let text = e.to_string();
             let text = text.strip_prefix("plugin: ").unwrap_or(&text);
             match file {
                 Some(file) => crate::EngineError::Other(say("plugin_error.failed_file", &[("plugin", plugin), ("file", file), ("reason", text)])),
