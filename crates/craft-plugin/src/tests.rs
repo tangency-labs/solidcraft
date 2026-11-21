@@ -86,6 +86,85 @@ fn swatch_files_stay_inside_the_resolved_package() {
 }
 
 #[test]
+fn conditional_selection_items_keep_shared_pick_objects() {
+    let schema = json!({"type":"object","properties":{
+        "has_pick":{"type":"boolean"},
+        "faces":{"type":"array","items":{"type":"object"},"x-solidcraft-selection":{"version":1,"accept":["face"]},
+            "x-solidcraft-visible-when":{"field":"has_pick","eq":true}}
+    }});
+    let values = json!({"has_pick":true,"faces":[{"type":"face","body":"Box","index":0,"point":[0,0,0]}]});
+    assert_eq!(prepare_input(&schema, &values).unwrap(), values);
+    assert!(
+        strict_input_schema(&schema)["properties"]["faces"]["items"].get("additionalProperties").is_none(),
+        "the MCP schema accepts the same shared pick objects"
+    );
+}
+
+#[test]
+fn selection_alternatives_preserve_strict_schema_parity() {
+    for alternative in ["oneOf", "anyOf"] {
+        for (key, annotated, selection) in [("targets", false, true), ("faces", true, true), ("records", false, false)] {
+            let mut property = json!({alternative:[{"type":"array","items":{"type":"object"}}]});
+            if annotated {
+                property["x-solidcraft-selection"] = json!({"version":1,"accept":["face"]});
+            }
+            let schema = json!({"type":"object","properties":{key:property}});
+            let value = json!({key:[{"type":"face","body":"Box","index":0,"point":[0,0,0]}]});
+            assert_eq!(check_input(&schema, &value).is_ok(), selection, "{key}/{alternative}");
+            if selection {
+                assert_eq!(prepare_input(&schema, &value).unwrap(), value);
+            }
+            let strict = strict_input_schema(&schema);
+            assert_eq!(check_input(&strict, &value).is_ok(), selection, "{key}/{alternative}: {strict}");
+            assert_eq!(strict["properties"][key][alternative][0]["items"].get("additionalProperties").is_none(), selection);
+        }
+    }
+}
+
+#[test]
+fn conditional_composition_preserves_selection_context_across_scopes() {
+    for alternative in ["oneOf", "anyOf"] {
+        for (key, annotated, selection) in [("targets", false, true), ("faces", true, true), ("records", false, false)] {
+            let mut picks = json!({alternative:[{"type":"array","items":{"type":"object"}}]});
+            if annotated {
+                picks["x-solidcraft-selection"] = json!({"version":1,"accept":["face"]});
+            }
+            let mut schema = json!({"type":"object","additionalProperties":true,"properties":{
+                "gate":{"type":"boolean"},
+                "mode":{"type":"boolean","x-solidcraft-visible-when":{"field":"gate","eq":true}},
+                key:picks
+            }});
+            schema[alternative] = json!([{"additionalProperties":true,"required":["secret"],"properties":{
+                "mode":{"type":"boolean"},
+                "secret":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}}
+            }}]);
+            let values = json!({"gate":false,"mode":true,"secret":"hidden",key:[{"type":"face","body":"Box","index":0,"point":[0,0,0]}]});
+            assert_eq!(check_input(&schema, &values).is_ok(), selection, "{key}/{alternative}");
+            assert_eq!(check_input(&strict_input_schema(&schema), &values).is_ok(), selection);
+            if selection {
+                assert_eq!(prepare_input(&schema, &values), Ok(json!({"gate":false,key:values[key]})));
+                assert!(crate::input::check_value(&schema, &values).is_err(), "Ignore still checks hidden values against their types");
+                let mut visible = values.clone();
+                visible["gate"] = json!(true);
+                visible["secret"] = json!(7);
+                assert_eq!(prepare_input(&schema, &visible), Ok(visible.clone()));
+                assert_eq!(crate::input::check_value(&schema, &visible), Ok(()));
+            }
+        }
+    }
+}
+
+#[test]
+fn forms_capability_is_additive_and_versioned() {
+    let mut value = manifest();
+    value["capabilities"] = json!(["commands@0.1", "forms@0.1"]);
+    assert!(parse(&value).is_ok());
+    value["capabilities"] = json!(["commands@0.1", "forms@0.2"]);
+    assert!(matches!(parse(&value), Err(HostError::UnsupportedCapability { .. })));
+    assert!(parse(&manifest()).is_ok(), "existing plugins still link without forms");
+}
+
+#[test]
 fn metadata_normalization_and_legacy_entries() {
     let parsed = parse(&manifest()).unwrap();
     assert_eq!(parsed.name, "Sample");

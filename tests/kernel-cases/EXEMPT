@@ -271,6 +271,7 @@ parameters.users                  parameter bookkeeping; a value change that reb
 parts.library                     a listing of the parts library
 parts.seats                       read-only bore seat frames from the current model
 plugin.check                      plugins: checks a package's manifest and component without running it, no geometry; crates/engine/src/plugin/tests.rs
+plugin.edit                       plugins: reads an existing plugin operation's stored values into its command form, no geometry; crates/engine/src/plugin/tests.rs
 plugin.grants                     plugins: lists the stored approvals, no geometry; apps/solidcraft-cli/tests/run_results.rs
 plugin.inspect                    plugins: a package's manifest and entries, no geometry; crates/engine/src/plugin/tests.rs
 plugin.install                    plugins: unpacks a plugin .zip into the plugins folder, no geometry; crates/engine/src/plugin/tests.rs

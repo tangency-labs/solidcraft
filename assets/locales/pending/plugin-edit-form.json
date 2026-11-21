@@ -1,0 +1,82 @@
+{
+  "ar": {
+    "cmd.plugin.edit": "تحرير عملية الإضافة",
+    "ui.plugin_edit_already_open": "يوجد نموذج مفتوح لهذا الإدخال. أكمله أو ألغِه أولاً.",
+    "ui.plugin_edit_apply": "تطبيق",
+    "ui.plugin_edit_changed": "تغير التصميم. راجع المدخلات وفقاً للتصميم الحالي.",
+    "ui.plugin_edit_checking": "جارٍ التحقق من المدخلات…",
+    "ui.plugin_edit_missing_pick": "هذا العنصر المحدد مفقود أو لم يعد يطابق النموذج. حدده مجدداً.",
+    "ui.plugin_edit_revalidated": "تغير التصميم. راجع الحقول، ثم اضغط تطبيق مرة أخرى.",
+    "ui.plugin_edit_unknown": "أمر الإضافة هذا غير متاح."
+  },
+  "de": {
+    "cmd.plugin.edit": "Plugin-Operation bearbeiten",
+    "ui.plugin_edit_already_open": "Für diesen Eintrag ist bereits ein Formular geöffnet. Schließen Sie es zuerst ab oder brechen Sie es ab.",
+    "ui.plugin_edit_apply": "Anwenden",
+    "ui.plugin_edit_changed": "Der Entwurf wurde geändert. Prüfen Sie die Eingaben anhand des aktuellen Entwurfs.",
+    "ui.plugin_edit_checking": "Eingaben werden geprüft…",
+    "ui.plugin_edit_missing_pick": "Diese Auswahl fehlt oder passt nicht mehr zum Modell. Wählen Sie sie erneut.",
+    "ui.plugin_edit_revalidated": "Der Entwurf wurde geändert. Prüfen Sie die Felder und klicken Sie dann erneut auf Anwenden.",
+    "ui.plugin_edit_unknown": "Dieser Plugin-Befehl ist nicht verfügbar."
+  },
+  "en": {
+    "cmd.plugin.edit": "Edit Plugin Operation",
+    "ui.plugin_edit_already_open": "This entry already has an open form. Finish or cancel it first.",
+    "ui.plugin_edit_apply": "Apply",
+    "ui.plugin_edit_changed": "The design changed. Review the inputs against the current design.",
+    "ui.plugin_edit_checking": "Checking inputs…",
+    "ui.plugin_edit_missing_pick": "This pick is missing or no longer matches the model. Pick it again.",
+    "ui.plugin_edit_revalidated": "The design changed. Review the fields, then press Apply again.",
+    "ui.plugin_edit_unknown": "This plugin command is unavailable."
+  },
+  "he": {
+    "cmd.plugin.edit": "עריכת פעולת תוסף",
+    "ui.plugin_edit_already_open": "כבר פתוח טופס עבור רשומה זו. יש לסיים או לבטל אותו תחילה.",
+    "ui.plugin_edit_apply": "החל",
+    "ui.plugin_edit_changed": "התכנון השתנה. בדקו את הקלט מול התכנון הנוכחי.",
+    "ui.plugin_edit_checking": "הקלט נבדק…",
+    "ui.plugin_edit_missing_pick": "הבחירה חסרה או אינה תואמת עוד למודל. יש לבחור שוב.",
+    "ui.plugin_edit_revalidated": "התכנון השתנה. בדקו את השדות ולחצו שוב על החל.",
+    "ui.plugin_edit_unknown": "פקודת תוסף זו אינה זמינה."
+  },
+  "ja": {
+    "cmd.plugin.edit": "プラグイン操作を編集",
+    "ui.plugin_edit_already_open": "この項目のフォームは既に開いています。先に完了するかキャンセルしてください。",
+    "ui.plugin_edit_apply": "適用",
+    "ui.plugin_edit_changed": "設計が変更されました。現在の設計に対して入力を確認してください。",
+    "ui.plugin_edit_checking": "入力を確認しています…",
+    "ui.plugin_edit_missing_pick": "選択した要素が存在しないか、モデルと一致しません。再選択してください。",
+    "ui.plugin_edit_revalidated": "設計が変更されました。各フィールドを確認し、もう一度適用を押してください。",
+    "ui.plugin_edit_unknown": "このプラグインコマンドは利用できません。"
+  },
+  "ko": {
+    "cmd.plugin.edit": "플러그인 작업 편집",
+    "ui.plugin_edit_already_open": "이 항목의 양식이 이미 열려 있습니다. 먼저 완료하거나 취소하세요.",
+    "ui.plugin_edit_apply": "적용",
+    "ui.plugin_edit_changed": "설계가 변경되었습니다. 현재 설계에 맞게 입력을 검토하세요.",
+    "ui.plugin_edit_checking": "입력을 확인하는 중…",
+    "ui.plugin_edit_missing_pick": "선택한 요소가 없거나 모델과 더 이상 일치하지 않습니다. 다시 선택하세요.",
+    "ui.plugin_edit_revalidated": "설계가 변경되었습니다. 필드를 검토한 후 적용을 다시 누르세요.",
+    "ui.plugin_edit_unknown": "이 플러그인 명령을 사용할 수 없습니다."
+  },
+  "vi": {
+    "cmd.plugin.edit": "Chỉnh sửa thao tác phần bổ trợ",
+    "ui.plugin_edit_already_open": "Biểu mẫu của mục này đang mở. Hãy hoàn tất hoặc hủy trước.",
+    "ui.plugin_edit_apply": "Áp dụng",
+    "ui.plugin_edit_changed": "Thiết kế đã thay đổi. Hãy xem lại dữ liệu theo thiết kế hiện tại.",
+    "ui.plugin_edit_checking": "Đang kiểm tra dữ liệu…",
+    "ui.plugin_edit_missing_pick": "Đối tượng đã chọn bị thiếu hoặc không còn khớp với mô hình. Hãy chọn lại.",
+    "ui.plugin_edit_revalidated": "Thiết kế đã thay đổi. Hãy xem lại các trường rồi nhấn Áp dụng lần nữa.",
+    "ui.plugin_edit_unknown": "Lệnh phần bổ trợ này không khả dụng."
+  },
+  "zh": {
+    "cmd.plugin.edit": "编辑插件操作",
+    "ui.plugin_edit_already_open": "此条目的表单已打开。请先完成或取消。",
+    "ui.plugin_edit_apply": "应用",
+    "ui.plugin_edit_changed": "设计已更改。请根据当前设计检查输入。",
+    "ui.plugin_edit_checking": "正在检查输入…",
+    "ui.plugin_edit_missing_pick": "此选择已丢失或不再与模型匹配。请重新选择。",
+    "ui.plugin_edit_revalidated": "设计已更改。请检查各字段，然后再次点击应用。",
+    "ui.plugin_edit_unknown": "此插件命令不可用。"
+  }
+}
