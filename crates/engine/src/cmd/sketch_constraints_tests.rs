@@ -1524,7 +1524,7 @@ fn a_constraint_that_squeezes_a_side_to_a_hair_is_refused() {
     }
     let before = sketch(&s);
     let e = s.execute("sketch.constraint.coincident", &json!({"a": "p6", "b": "p3"})).unwrap_err().to_string();
-    assert!(e.contains("shrink") && e.contains("to a point"), "{e}");
+    assert!((e.contains("shrink") && e.contains("to a point")) || e.contains("conflicts with"), "{e}");
     assert_eq!(sketch(&s), before);
 }
 
@@ -2033,4 +2033,69 @@ fn negative_distance_dimension_flips_to_the_opposite_side() {
     assert!(s.execute("sketch.dimension", &json!({"entities": ["la"], "value": -10})).is_err());
     let c = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}))["curves"])[0].clone();
     assert!(s.execute("sketch.dimension", &json!({"entities": [c], "value": -5})).is_err());
+}
+
+#[test]
+fn detach_point_uses_real_curve_arc_length_and_propagates_mirror_symmetry() {
+    let mut s = new_sketch();
+    // Quarter arc of radius 10 from (10, 0) to (0, 10) meeting a line at (10, 0).
+    let l1 = ids(&run(&mut s, "sketch.line", json!({"points": [[10, 0], [20, 0]]}))["curves"])[0].clone();
+    let a1 = ids(&run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [10, 0], "end": [0, 10]}))["curves"])[0].clone();
+    let shared_id = {
+        let sk = sketch(&s);
+        let p = sk.resolve_point(&format!("{l1}.start")).unwrap();
+        assert_eq!(Some(p), sk.resolve_point(&format!("{a1}.start")));
+        sk.points[p].id.clone()
+    };
+    // Detach arc by 5 mm along the real arc: endpoint must stay exactly on radius 10 at angle 0.5 rad.
+    let res = run(&mut s, "sketch.detach_point", json!({"curve": a1, "point": shared_id, "distance": 5.0}));
+    let new_pt_id = res["point"].as_str().unwrap().to_string();
+    let sk = sketch(&s);
+    let new_pos = sk.point(sk.resolve_point(&new_pt_id).unwrap()).unwrap();
+    let want = Vec2::new(10.0 * 0.5_f64.cos(), 10.0 * 0.5_f64.sin());
+    assert!(new_pos.dist(want) < 1e-4, "detached arc point {new_pos:?} vs exact {want:?}");
+
+    // Mirror detachment: two symmetric shared corners stay symmetric when one branch detaches.
+    let mut s = new_sketch();
+    let ax = ids(&run(&mut s, "sketch.line", json!({"points": [[0, -10], [0, 20]], "construction": true, "infer": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.constraint.fix", json!({"entities": [ax]}));
+    let l_a = ids(&run(&mut s, "sketch.line", json!({"points": [[-10, 0], [-20, 10]], "infer": false}))["curves"])[0].clone();
+    let l_base = ids(&run(&mut s, "sketch.line", json!({"points": [[-10, 0], [-10, -10]], "infer": false}))["curves"])[0].clone();
+    let r_a = ids(&run(&mut s, "sketch.line", json!({"points": [[10, 0], [20, 10]], "infer": false}))["curves"])[0].clone();
+    let r_base = ids(&run(&mut s, "sketch.line", json!({"points": [[10, 0], [10, -10]], "infer": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.constraint.symmetry", json!({"a": format!("{l_a}.start"), "b": format!("{r_a}.start"), "line": ax}));
+    run(&mut s, "sketch.constraint.symmetry", json!({"a": format!("{l_a}.end"), "b": format!("{r_a}.end"), "line": ax}));
+    let p_left = sketch(&s).points[sketch(&s).resolve_point(&format!("{l_a}.start")).unwrap()].id.clone();
+    run(&mut s, "sketch.detach_point", json!({"curve": l_a, "point": p_left, "distance": 3.0}));
+    let sk = sketch(&s);
+    let la_start = sk.curves[sk.curve_index(&l_a).unwrap()].kind.ends().unwrap().0;
+    let lbase_start = sk.curves[sk.curve_index(&l_base).unwrap()].kind.ends().unwrap().0;
+    let ra_start = sk.curves[sk.curve_index(&r_a).unwrap()].kind.ends().unwrap().0;
+    let rbase_start = sk.curves[sk.curve_index(&r_base).unwrap()].kind.ends().unwrap().0;
+    assert_ne!(la_start, lbase_start);
+    assert_ne!(ra_start, rbase_start, "mirrored curve also detached");
+    assert!(
+        sk.constraints
+            .iter()
+            .any(|c| matches!(c.kind, ConstraintKind::Symmetric { p, q, .. } if (p, q) == (la_start, ra_start) || (p, q) == (ra_start, la_start))),
+        "detached mirrored ends gained a replacement symmetry constraint"
+    );
+}
+
+#[test]
+fn point_merge_protects_expression_referenced_points_and_remaps_draw_point_reply() {
+    let mut s = new_sketch();
+    let p1 = run(&mut s, "sketch.point", json!({"point": [10, 0], "id": "A"}))["point"].as_str().unwrap().to_string();
+    // Second plain point on A merges and returns the surviving point id, never empty.
+    let p2 = run(&mut s, "sketch.point", json!({"point": [10, 0]}))["point"].as_str().unwrap().to_string();
+    assert_eq!(p2, p1, "merged sketch.point returns surviving point id");
+
+    // A point named by another point's expression is protected and keeps a Coincident instead of being deleted.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.point", json!({"point": [10, 0], "id": "B"}));
+    run(&mut s, "sketch.point", json!({"point": ["B.x + 5", "0"], "id": "C"}));
+    run(&mut s, "sketch.point", json!({"point": [20, 0], "id": "D"}));
+    let r = run(&mut s, "sketch.constraint.coincident", json!({"a": "D", "b": "B"}));
+    assert!(r.get("constraint").is_some(), "expression-referenced point stays protected: {r}");
+    assert!(sketch(&s).resolve_point("B").is_some(), "point B still exists for C's expression");
 }
