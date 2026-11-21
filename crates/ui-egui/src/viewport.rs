@@ -257,6 +257,7 @@ pub struct ViewportState {
     /// The view being drawn is a card of a tiled window: what belongs to the whole window (the
     /// notices, the legends) is the focused view's to draw, once.
     pub(crate) card: bool,
+    pub(crate) compass_view: Option<u64>,
     /// The free area of a tiled window, where the notices lie instead of the focused view's frame.
     pub(crate) window: Option<Rect>,
     /// The shapes of the last tile's picture and background in the paint list, so the window can
@@ -10267,6 +10268,9 @@ pub(crate) fn control_region(app: &SolveApp, rect: Rect) -> solidcraft_engine::p
 /// The opt-in host paints its existing controls after resolving actual Area
 /// visibility. This does not render the scene or call navigation::handle again.
 pub(crate) fn show_host_controls(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
+    if crate::view_window_drag::unanchored(app, ui.ctx(), app.docs.views.active().id) {
+        return;
+    }
     refresh_layout(app, ui.ctx());
     if crate::navigation_bar_view::canvas_caps(app).orbit {
         axis_view(app, ui, rect);
@@ -10297,8 +10301,17 @@ fn axis_center(app: &SolveApp, rect: Rect) -> Pos2 {
 /// How far the signed-axis compass is lifted inside its reserved box.
 pub(crate) const AXIS_CENTER_LIFT: f32 = 4.0;
 
+fn compass_enabled(app: &SolveApp) -> bool {
+    let views = &app.docs.views;
+    app.viewport.compass_view.and_then(|id| views.get(id)).unwrap_or_else(|| views.active()).compass
+}
+
 pub(crate) fn axis_rect(app: &SolveApp, rect: Rect) -> Rect {
-    app.viewport
+    if !compass_enabled(app) {
+        return Rect::NOTHING;
+    }
+    let axis = app
+        .viewport
         .layout
         .as_ref()
         .filter(|layout| layout.viewport == rect || layout.viewport == crate::render_workspace::camera_rect(app, rect))
@@ -10306,7 +10319,13 @@ pub(crate) fn axis_rect(app: &SolveApp, rect: Rect) -> Rect {
         .unwrap_or_else(|| {
             let size = axis_view_size(crate::view_gizmo::style(app));
             Rect::from_min_size(pos2(rect.right() - size, rect.top()), vec2(size, size))
-        })
+        });
+    // The edge bar leaves the native caption controls visible over the canvas.
+    app.shell.top_bar_overlays[2].filter(|caption| caption.intersects(axis)).map_or(axis, |caption| {
+        let available = (rect.bottom() - axis.bottom()).max(0.0);
+        let offset = (caption.bottom() - axis.top() + AXIS_CENTER_LIFT).clamp(0.0, available);
+        axis.translate(vec2(0.0, offset))
+    })
 }
 
 /// The camera's view axes, as the view compass takes them.
@@ -10339,6 +10358,11 @@ fn axis_hit(tips: &[crate::view_compass::Tip], p: Pos2) -> Option<usize> {
 /// Dragging anywhere on the view navigator orbits about the selected origin or the camera target. A stationary press
 /// on a tip chooses its view. Floating windows own their input over the gizmo.
 fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
+    if !compass_enabled(app) {
+        app.viewport.axis_drag = None;
+        app.viewport.axis_warp = None;
+        return false;
+    }
     let pos = ui.input(|i| i.pointer.interact_pos());
     let may_start = ui.is_enabled() && ui.rect_contains_pointer(rect) && !pos.is_some_and(|p| crate::shell::covered(app, p));
     let mut drag = crate::view_compass::Drag { at: app.viewport.axis_drag, warp: app.viewport.axis_warp };
@@ -10391,6 +10415,9 @@ pub(crate) fn view_gizmo_at(app: &SolveApp, p: Pos2) -> bool {
 }
 
 pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
+    if !compass_enabled(app) {
+        return;
+    }
     gizmo_menu(app, ui, rect);
     let shown = crate::view_gizmo::shown(app);
     match shown.style {
@@ -18089,6 +18116,19 @@ mod tests {
         assert!(h.app.viewport.hover.is_some(), "closing the dialog must restore model highlights");
         h.call("ui.click", json!({"x": p.x, "y": p.y}));
         assert!(!h.app.session.selection.is_empty());
+    }
+
+    #[test]
+    fn compass_stays_below_pop_out_caption_buttons() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let view = Rect::from_min_size(Pos2::ZERO, vec2(380.0, 325.0));
+        let original = axis_rect(&app, view);
+        let captions = Rect::from_min_max(pos2(240.0, 0.0), pos2(380.0, 34.0));
+        app.shell.top_bar_overlays[2] = Some(captions);
+        let moved = axis_rect(&app, view);
+        assert_eq!(moved.right(), original.right());
+        assert_eq!(moved.size(), original.size());
+        assert!(moved.top() - AXIS_CENTER_LIFT >= captions.bottom());
     }
 
     #[test]
