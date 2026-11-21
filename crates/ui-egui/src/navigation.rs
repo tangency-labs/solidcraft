@@ -333,8 +333,8 @@ pub(crate) fn claims_scroll(modifiers: egui::Modifiers, zoom_modifier: Option<eg
     zoom_modifier.is_some_and(|chosen| modifiers.matches_exact(chosen) && !(modifiers.mac_cmd && modifiers.ctrl))
 }
 
-/// How long a twist may pause, in seconds, before it has ended and its cursor pivot is let go.
-const TWIST_PAUSE: f64 = 0.25;
+/// A pause in a device bridge orbit or a trackpad twist ends the gesture and releases its pivot.
+const UNBRACKETED_ORBIT_PAUSE: f64 = 0.25;
 
 /// The trackpad's two-finger rotation this frame in radians, counter-clockwise positive (egui's
 /// `Event::Rotate` counts clockwise). Events that carry a non-finite angle are ignored.
@@ -1002,7 +1002,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     // That is checked before this frame's rotation: an idle window draws no frames in between, so
     // the first rotation of a new twist must not turn about the last twist's point.
     let (twist, now, pressed) = ui.input(|i| (twist_radians(i), i.time, i.pointer.any_pressed()));
-    if pressed || app.viewport.twist_last.is_none_or(|last| now - last > TWIST_PAUSE) {
+    if pressed || app.viewport.twist_last.is_none_or(|last| now - last > UNBRACKETED_ORBIT_PAUSE) {
         app.viewport.twist_pivot = None;
         app.viewport.twist_last = None;
     }
@@ -1344,6 +1344,28 @@ fn unwrapped_delta(app: &mut SolveApp, delta: egui::Vec2) -> egui::Vec2 {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OrbitDevice {
+    Cap,
+    Bridge,
+}
+
+/// The depth chosen for a run of pure Classic turns. Mixed motion resolves its own depth.
+pub(crate) struct DeviceCentreOrbit {
+    device: OrbitDevice,
+    pivot: Option<Vec3>,
+    camera: Camera,
+    rect: Rect,
+    scene: u64,
+    last_packet: f64,
+}
+
+pub(crate) fn release_cap_centre_orbit(app: &mut SolveApp) {
+    if app.viewport.device_centre_orbit.as_ref().is_some_and(|held| held.device == OrbitDevice::Cap) {
+        app.viewport.device_centre_orbit = None;
+    }
+}
+
 /// The 3D mouse's motion this frame (#1336), on a page `rect` whose camera may do `caps`: the cap
 /// pans and zooms every page, and turns the view where the page may orbit. In a sketch, turning
 /// stays off while the camera is in its initial sketch orientation, unless the user lets the 3D
@@ -1353,6 +1375,7 @@ fn unwrapped_delta(app: &mut SolveApp, delta: egui::Vec2) -> egui::Vec2 {
 pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
     let rect = crate::render_workspace::camera_rect(app, rect);
     if app.viewport.device_motion.is_none() && app.viewport.bridge_motion.is_none() {
+        release_cap_centre_orbit(app);
         return;
     }
     let sketch_turns = app.preferences.space_mouse_sketch_orbit;
@@ -1391,10 +1414,33 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
     } else {
         None
     };
-    let centre_pivot = |app: &SolveApp| {
+    let choose_centre = |app: &SolveApp| {
         let proj = projection(app, rect);
         view_pivot_at(app, &proj, proj.rect.center())
     };
+    // Angle locks can alter the final orientation after the pivot was held in place.
+    let holds = classic && !["yaw", "pitch", "roll"].into_iter().any(|axis| crate::view_angles::locked_angle(app, axis));
+    let pure_turn = match (app.viewport.device_motion, app.viewport.bridge_motion) {
+        (Some(cap), None) if holds && cap_turns && cap.motion.translation == [0.0; 3] => Some(OrbitDevice::Cap),
+        (None, Some(bridge)) if holds && bridge.orbit != [0.0; 2] && bridge.pan == [0.0; 2] && bridge.zoom == 0.0 => Some(OrbitDevice::Bridge),
+        _ => None,
+    };
+    let previous = app.viewport.device_centre_orbit.take();
+    let mut held = pure_turn.map(|device| {
+        let camera = Camera { fov: app.view_fov(), ..app.cam };
+        let scene = crate::view_pick::orbit_scene_key(app);
+        let reused = previous.filter(|last| {
+            last.device == device
+                && last.camera == camera
+                && last.rect == rect
+                && last.scene == scene
+                // The cap signals rest. Bridge packets have no end event, as with trackpad twists.
+                && (device == OrbitDevice::Cap || (0.0..=UNBRACKETED_ORBIT_PAUSE).contains(&(app.now - last.last_packet)))
+        });
+        let pivot = reused.map_or_else(|| choose_centre(app), |last| last.pivot);
+        DeviceCentreOrbit { device, pivot, camera, rect, scene, last_packet: app.now }
+    });
+    let centre_pivot = |app: &SolveApp| held.as_ref().map_or_else(|| choose_centre(app), |turn| turn.pivot);
     if let Some(queued) = app.viewport.device_motion.take() {
         let before = app.cam;
         let pivot = if classic && cap_turns { centre_pivot(app).map(DeviceOrbitPivot::ViewDepth) } else { traced.map(DeviceOrbitPivot::Point) };
@@ -1410,6 +1456,10 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
         with_fov(&mut app.cam, fov, |cam| bridge_camera(cam, queued, height, turn, reverse, free, anchor, pivot));
         app.cam = crate::view_angles::keep_locked(app, before, app.cam);
     }
+    if let Some(held) = &mut held {
+        held.camera = Camera { fov: app.view_fov(), ..app.cam };
+    }
+    app.viewport.device_centre_orbit = held;
 }
 
 /// How far one zoom step of a device app (a click of its ring or wheel) moves the camera: this
@@ -1499,9 +1549,8 @@ pub(crate) fn device_camera(
             let p = match pivot {
                 DeviceOrbitPivot::Point(p) => p,
                 DeviceOrbitPivot::ViewDepth(reference) => {
-                    let back = cam.back();
-                    let depth = (reference - cam.target).dot(back);
-                    let p = cam.target + back * depth;
+                    let depth = cam.frame_coords(reference).z;
+                    let p = cam.target + cam.back() * depth;
                     if p.is_finite() && (cam.fov <= 0.0 || depth < cam.distance - 1e-9) { p } else { cam.target }
                 }
             };
@@ -1799,24 +1848,22 @@ pub(crate) fn view_middle(app: &SolveApp, rect: Rect) -> Option<Vec3> {
     view_pivot_at(app, &projection(app, rect), middle)
 }
 
-/// Keep the screen point and use the camera target's depth if its plane meets the nearest
-/// body's box on that ray. When the target is far away, turn about the body instead (#20257).
-/// A ray that misses every visible body keeps the target's depth.
+/// Keep the screen point and use the camera target's depth if it is within the first material
+/// the ray meets. When the target is far away, turn about that material instead (#20257).
+/// A ray that misses the displayed geometry keeps the target's depth.
 fn view_pivot_at(app: &SolveApp, proj: &Proj, at: Pos2) -> Option<Vec3> {
     if !at.is_finite() {
         return None;
     }
     let centre = proj.rect.center();
     let centred = at.distance(centre) < 0.5;
-    // An orthographic picking ray starts in front of the scene even after a large depth shift.
-    let (origin, dir) = proj.ray(if centred { centre } else { at });
-    let back = proj.cam.back();
-    let along = dir.dot(back);
+    let (origin, dir, material) = crate::view_pick::orbit_ray(app, proj, if centred { centre } else { at });
+    let along = dir.dot(proj.cam.back());
     if along.abs() < 1e-9 {
         return None;
     }
-    let target = (proj.cam.target - origin).dot(back) / along;
-    let depth = match view_body_interval(app, origin, dir) {
+    let target = -proj.cam.frame_coords(origin).z / along;
+    let depth = match material {
         Some((near, far)) if !(near..=far).contains(&target) => f64::midpoint(near, far),
         _ => target,
     };
@@ -1826,28 +1873,6 @@ fn view_pivot_at(app: &SolveApp, proj: &Proj, at: Pos2) -> Option<Vec3> {
     }
     let pivot = origin + dir * depth;
     pivot.is_finite().then_some(pivot)
-}
-
-/// Where the ray enters and leaves the nearest visible body's box. Use the viewport's cached
-/// hierarchy: neither the other bodies in view nor the geometry behind the subject set its depth.
-fn view_body_interval(app: &SolveApp, origin: Vec3, dir: Vec3) -> Option<(f64, f64)> {
-    use crate::viewport::{body_bounds, body_tree, ray_box};
-
-    let boxes = body_bounds(app, &crate::open_meshing::shown_world(app));
-    let entry = |bounds: &solidcraft_engine::geom::Aabb3| ray_box(origin, dir, bounds, 0.0).filter(|t| t.is_finite());
-    body_tree(app, &boxes)
-        .candidates(&boxes, |bounds| entry(bounds).is_some())
-        .into_iter()
-        .filter_map(|index| {
-            let (name, bounds) = boxes.get(index)?;
-            if bounds.is_empty() || !app.session.body_visible(name) {
-                return None;
-            }
-            let near = entry(bounds)?.max(0.0);
-            let far = -ray_box(origin, -dir, bounds, 0.0)?;
-            (far.is_finite() && near <= far).then_some((near, far))
-        })
-        .min_by(|a, b| a.0.total_cmp(&b.0))
 }
 
 /// An orbit drag so far: the camera it began with, its total turn since (the pointer's motion,
@@ -4830,7 +4855,151 @@ mod view_key_tests {
 
         let proj = projection(&h.app, rect);
         let over_empty_space = view_pivot_at(&h.app, &proj, rect.right_top()).expect("a ray over empty space uses the target depth");
-        assert!((over_empty_space - proj.cam.target).dot(proj.cam.back()).abs() < 1e-6);
+        assert!(proj.cam.frame_coords(over_empty_space).z.abs() < 1e-6);
+    }
+
+    #[test]
+    fn view_centre_orbit_looks_through_a_hole_to_the_aligned_part() {
+        use super::*;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.perspective = false;
+        h.app.preferences.orbit_around = OrbitAround::ViewCentre;
+        for params in [
+            json!({"length": 120, "width": 8, "height": 120, "corner": [-60, -4, -60], "body_name": "Frame"}),
+            json!({"length": 50, "width": 16, "height": 50, "corner": [-25, -8, -25], "operation": "cut", "targets": ["Frame"]}),
+            json!({"length": 20, "width": 20, "height": 20, "corner": [-10, 4990, -10], "body_name": "Cube"}),
+        ] {
+            h.app.run("solid.box", params).unwrap();
+        }
+        h.settle();
+        let rect = h.app.viewport.rect.expect("the viewport");
+        let subject = Vec3::new(0.0, 5000.0, 0.0);
+        h.app.cam = Camera { target: subject, yaw: 0.0, pitch: 0.0, ..Camera::default() };
+        let middle = home_centre(&h.app).expect("the free view's middle");
+        let screen = |app: &SolveApp| projection(app, rect).to_screen(subject).expect("the cube centre projects");
+        let shift = middle - screen(&h.app);
+        h.app.cam.pan(f64::from(shift.x), f64::from(shift.y), f64::from(rect.height()));
+        let aligned = h.app.cam;
+        let before = screen(&h.app);
+        assert!(before.distance(middle) < 0.1, "the cube and the hole surround the orbit point");
+        orbit(&mut h.app, rect, 25.0, 0.0, None);
+        assert!(h.app.cam.yaw.abs() > 0.05, "the orbit turns");
+        assert!(screen(&h.app).distance(before) < 0.5, "the foreground hole must not swing the background cube away");
+
+        h.app.cam = aligned;
+        h.app.session.visibility.hidden_bodies.push("Cube".into());
+        let proj = projection(&h.app, rect);
+        let pivot = view_pivot_at(&h.app, &proj, middle).unwrap_or(proj.cam.target);
+        assert!(proj.cam.frame_coords(pivot).z.abs() < 1e-6, "with only the empty hole, use the target plane: {pivot:?}");
+    }
+
+    #[test]
+    fn view_centre_pivot_uses_the_first_occupied_interval_that_the_section_keeps() {
+        use super::*;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.perspective = false;
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [-10, -10, -10], "body_name": "Box"})).unwrap();
+        h.app
+            .run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-5, -5, -5], "operation": "cut", "targets": ["Box"]}))
+            .unwrap();
+        h.settle();
+        let rect = h.app.viewport.rect.expect("the viewport");
+        h.app.cam = Camera { yaw: 0.0, pitch: 0.0, ..Camera::default() };
+        let assert_pivot = |app: &SolveApp, y: f64| {
+            let proj = projection(app, rect);
+            let pivot = view_pivot_at(app, &proj, rect.center()).expect("the ray crosses material");
+            assert!(pivot.dist(Vec3::new(0.0, y, 0.0)) < 1e-6, "expected y={y}, got {pivot:?}");
+        };
+        // The target is in the void, with material on each side.
+        assert_pivot(&h.app, -7.5);
+        h.app.run("inspect.section", json!({"plane": {"origin": [0, 0, 0], "normal": [0, -1, 0]}})).unwrap();
+        assert_pivot(&h.app, 7.5);
+        // With the cut cap inside the back wall, the visible interval begins at the cut plane.
+        h.app.run("inspect.section", json!({"plane": {"origin": [0, 8, 0], "normal": [0, -1, 0]}})).unwrap();
+        assert_pivot(&h.app, 9.0);
+    }
+
+    #[test]
+    fn view_centre_pivot_sees_a_hidden_source_while_editing_its_face_extrusion() {
+        use super::*;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.perspective = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Source"})).unwrap();
+        h.app.run("solid.extrude", json!({"face": [5, 5, 10], "face_body": "Source", "distance": 5, "operation": "new", "name": "Depth"})).unwrap();
+        h.app.session.visibility.hidden_bodies.push("Source".into());
+        h.call("ui.editFeature", json!({"feature": "Depth"}));
+        assert!(h.app.dialog.is_some());
+        assert!(h.app.body_visible("Source"));
+        assert!(!h.app.session.body_visible("Source"));
+        let rect = h.app.viewport.rect.expect("the viewport");
+        h.app.cam = Camera { target: Vec3::new(5.0, 5000.0, 5.0), yaw: 0.0, pitch: 0.0, ..Camera::default() };
+        let proj = projection(&h.app, rect);
+        let pivot = view_pivot_at(&h.app, &proj, rect.center()).expect("the temporarily displayed source anchors the orbit");
+        assert!(pivot.dist(Vec3::new(5.0, 5.0, 5.0)) < 1e-6, "{pivot:?}");
+    }
+
+    #[test]
+    fn classic_device_holds_the_pivot_during_a_pure_turn_and_reselects_it_after_changes() {
+        use super::*;
+        use crate::space_mouse::DeviceMotion;
+        for cap in [true, false] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.ui.perspective = false;
+            h.app.preferences.space_mouse_model_pivot = false;
+            h.app.preferences.free_orbit = false;
+            h.app.preferences.zoom_stop_at_model = false;
+            h.app.run("solid.box", json!({"length": 40, "width": 40, "height": 40, "corner": [-20, -20, -20], "body_name": "Box"})).unwrap();
+            h.settle();
+            let rect = h.app.viewport.rect.expect("the viewport");
+            h.app.cam = Camera { target: Vec3::new(15.0, 5000.0, 0.0), yaw: 0.0, pitch: 0.0, ..Camera::default() };
+            let choose = |app: &SolveApp| {
+                let proj = projection(app, rect);
+                view_pivot_at(app, &proj, rect.center())
+            };
+            let original = choose(&h.app).expect("the off-centre ray crosses the box");
+            let turn = |app: &mut SolveApp, pan: bool| {
+                if cap {
+                    let translation = if pan { [0.5, 0.0, 0.0] } else { [0.0; 3] };
+                    app.viewport.device_motion = Some(DeviceMotion { motion: Motion { translation, rotation: [0.0, 1.0, 0.0] }, seconds: 0.05 });
+                } else {
+                    let pan = if pan { [4.0, 0.0] } else { [0.0; 2] };
+                    app.viewport.bridge_motion = Some(BridgeMotion { orbit: [12.5, 0.0], pan, ..Default::default() });
+                }
+                device(app, rect, NavCaps::MODEL);
+            };
+            for _ in 0..8 {
+                turn(&mut h.app, false);
+                assert_eq!(h.app.viewport.device_centre_orbit.as_ref().and_then(|held| held.pivot), Some(original));
+                let screen = projection(&h.app, rect).to_screen(original).expect("the held pivot projects");
+                assert!(screen.distance(rect.center()) < 0.1, "{screen:?}");
+            }
+            let from_new_angle = choose(&h.app).expect("the turned ray still crosses the box");
+            assert!(from_new_angle.dist(original) > 1.0, "the changed chord would have moved the pivot");
+            if cap {
+                device(&mut h.app, rect, NavCaps::MODEL);
+            } else {
+                h.app.now += UNBRACKETED_ORBIT_PAUSE + 0.01;
+            }
+            turn(&mut h.app, false);
+            assert_eq!(h.app.viewport.device_centre_orbit.as_ref().and_then(|held| held.pivot), Some(from_new_angle));
+
+            h.app.cam.pan(4.0, 0.0, f64::from(rect.height()));
+            let after_pan = choose(&h.app);
+            assert_ne!(after_pan, Some(from_new_angle));
+            turn(&mut h.app, false);
+            assert_eq!(h.app.viewport.device_centre_orbit.as_ref().and_then(|held| held.pivot), after_pan);
+
+            // A changed scene and mixed device motion both invalidate the held point.
+            h.app.session.visibility.hidden_bodies.push("Box".into());
+            turn(&mut h.app, false);
+            assert!(h.app.viewport.device_centre_orbit.as_ref().expect("a pure turn").pivot.is_none());
+            turn(&mut h.app, true);
+            assert!(h.app.viewport.device_centre_orbit.is_none());
+        }
     }
 
     #[test]
