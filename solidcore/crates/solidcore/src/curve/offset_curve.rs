@@ -78,6 +78,7 @@
 //!   an unbounded caller value).
 
 use crate::curve::curve::p2::{is_kind_of as curve_is_kind_of, Curve, OFFSET_CURVE_TYPE};
+use crate::error::curve::CurveFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -333,7 +334,7 @@ impl OffsetCurve {
     fn base(&self) -> Result<&Curve> {
         self.base
             .as_deref()
-            .ok_or_else(|| SolidError::curve_missing(OP_BASE, "the offset curve's base curve"))
+            .ok_or_else(|| SolidError::curve(OP_BASE, CurveFailure::OffsetWithoutBase))
     }
 
     /// `operator==`: same dimension, equal base curves, normals and intervals, offset
@@ -408,6 +409,8 @@ impl OffsetCurve {
 
         // Adjust parameter if reversed: mirror within the interval.
         let mut t = self.base_parameter(input_t);
+        // A failure names this parameter, not the finite-difference retry's.
+        let at = t;
 
         // If offset dist is zero, just evaluate base curve (upstream does not return
         // here: the result is overwritten below).
@@ -454,9 +457,9 @@ impl OffsetCurve {
             }
 
             if pv[1].length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::curve_failed(
+                return Err(SolidError::curve(
                     OP_EVAL,
-                    "the tangent has zero length",
+                    CurveFailure::NoOffsetDirection { t: at },
                 ));
             }
         } // end zero-1st-deriv check.
@@ -488,9 +491,9 @@ impl OffsetCurve {
         } else if num_calc == 2 {
             let bin_t = pv[2].cross(self.normal);
             let bin_tt = pv[3].cross(self.normal);
-            let [a, b] = bin
-                .unitized_derivative2(bin_t, bin_tt)
-                .map_err(|_| SolidError::curve_failed(OP_EVAL, "the binormal does not unitize"))?;
+            let [a, b] = bin.unitized_derivative2(bin_t, bin_tt).map_err(|_| {
+                SolidError::curve(OP_EVAL, CurveFailure::NoOffsetDirection { t: at })
+            })?;
             ubin_t = a;
             ubin_tt = b;
         } else if num_calc == 3 {
@@ -499,7 +502,9 @@ impl OffsetCurve {
             let bin_ttt = pv[4].cross(self.normal);
             let [a, b, c] = bin
                 .unitized_derivative3(bin_t, bin_tt, bin_ttt)
-                .map_err(|_| SolidError::curve_failed(OP_EVAL, "the binormal does not unitize"))?;
+                .map_err(|_| {
+                    SolidError::curve(OP_EVAL, CurveFailure::NoOffsetDirection { t: at })
+                })?;
             ubin_t = a;
             ubin_tt = b;
             ubin_ttt = c;
@@ -587,6 +592,8 @@ impl OffsetCurve {
 
         // Adjust parameter if reversed: mirror within the interval.
         let mut t = self.base_parameter(input_t);
+        // A failure names this parameter, not the finite-difference retry's.
+        let at = t;
 
         if self.distance.abs() < EFF_ZERO {
             return base.evaluate_point(k, t);
@@ -615,9 +622,9 @@ impl OffsetCurve {
             }
             pv[1] = (pv2[0] - pv[0]) / (sign * EFF_ZERO_SQRT * self.interval.length());
             if pv[1].length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::curve_failed(
+                return Err(SolidError::curve(
                     OP_EVAL_POINT,
-                    "the tangent has zero length",
+                    CurveFailure::NoOffsetDirection { t: at },
                 ));
             }
         }
@@ -626,9 +633,9 @@ impl OffsetCurve {
         let tan = pv[1];
         let bin = tan.cross(self.normal); // Bin is right hand side of curve
         if bin.length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP_EVAL_POINT,
-                "the binormal has zero length",
+                CurveFailure::NoOffsetDirection { t: at },
             ));
         }
         let bin = bin.unitize_or_z();
@@ -728,9 +735,9 @@ impl OffsetCurve {
         // Check compatibility with base curve.
         let base_ivl = self.base()?.natural_interval();
         if !self.interval.is_contained_by(&base_ivl, EFF_ZERO) {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP_TRIM,
-                "the interval is not within the base curve's",
+                CurveFailure::IntervalOutsideBase,
             ));
         }
 
@@ -829,7 +836,7 @@ impl OffsetCurve {
         let base = self
             .base
             .as_deref()
-            .ok_or_else(|| SolidError::curve_missing(OP_WRITE, "the offset curve's base curve"))?;
+            .ok_or_else(|| SolidError::curve(OP_WRITE, CurveFailure::OffsetWithoutBase))?;
         let n = self.normal;
         let (lo, hi) = (self.interval.min(), self.interval.max());
         let ascii = db.file_type() == FileType::Ascii;
@@ -960,7 +967,14 @@ mod tests {
         assert_eq!(c.natural_interval(), Extent1d::from_min_max(0.2, 0.4));
         let mut bad = offset(0.5);
         bad.interval = Extent1d::from_min_max(-1.0, 1.0);
-        assert!(bad.trim(&Extent1d::from_min_max(0.0, 1.0), false).is_err());
+        let err = bad
+            .trim(&Extent1d::from_min_max(0.0, 1.0), false)
+            .unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::IntervalOutsideBase)
+        );
+        assert_eq!(crate::error::upstream_status(&err), Some(1001));
     }
 
     #[test]
@@ -975,7 +989,12 @@ mod tests {
         assert!(!a.is_kind_of(HermiteCurve::TYPE));
         assert_eq!(a.type_string(), "SmOffsetCurve_TYPE");
         assert_eq!(a.class_string(), "SmOffsetCurve");
-        assert!(OffsetCurve::empty().evaluate_point(k, 0.0).is_err());
+        let err = OffsetCurve::empty().evaluate_point(k, 0.0).unwrap_err();
+        assert_eq!(err.curve_failure(), Some(&CurveFailure::OffsetWithoutBase));
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
     }
 
     #[test]
@@ -1031,8 +1050,46 @@ mod tests {
             false,
         )
         .unwrap();
-        assert!(c.evaluate_point(k, 0.5).is_err());
+        let err = c.evaluate_point(k, 0.5).unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::NoOffsetDirection { t: 0.5 })
+        );
+        assert_eq!(crate::error::upstream_status(&err), Some(1001));
         assert!(c.evaluate(k, 0.5, 2, true, true).is_err());
+    }
+
+    #[test]
+    fn zero_tangent_names_the_parameter_asked() {
+        // a base curve that stays at one point: its tangent is zero at the parameter and
+        // at the finite-difference retry beside it
+        let k = &Kernel::default();
+        let p = Vec3::new(1.0, 2.0, 0.0);
+        let point = Curve::from(HermiteCurve::new(p, Vec3::ZERO, p, Vec3::ZERO, 3));
+        let c = OffsetCurve::new(
+            3,
+            point,
+            Extent1d::from_min_max(0.0, 1.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            0.5,
+            false,
+        )
+        .unwrap();
+        for t in [0.25, 1.0] {
+            let err = c.evaluate_point(k, t).unwrap_err();
+            assert_eq!(
+                err.curve_failure(),
+                Some(&CurveFailure::NoOffsetDirection { t }),
+                "{err:?}"
+            );
+            assert_eq!(crate::error::upstream_status(&err), Some(1001));
+            let err = c.evaluate(k, t, 1, true, true).unwrap_err();
+            assert_eq!(
+                err.curve_failure(),
+                Some(&CurveFailure::NoOffsetDirection { t }),
+                "{err:?}"
+            );
+        }
     }
 
     #[test]
