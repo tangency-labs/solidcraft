@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 
 use solidcraft_engine::panels::*;
 
+#[cfg(not(target_arch = "wasm32"))]
+use super::drag_paint::WindowCard;
 use super::drag_paint::{CardPaint, DragPaint, shape_count};
 use super::runtime::{RuntimeHostProposal, standalone_header_action};
 use super::*;
@@ -191,6 +193,17 @@ enum HostMenu {
     Tabs(SectionId),
 }
 
+/// A grip drag in a panel's desktop window, in screen points. Only desktop
+/// windows have the grip.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) enum WindowDragEvent {
+    Begin { instance: InstanceId, at: Point },
+    Move { at: Point },
+    Release { at: Point },
+    Cancel,
+}
+
 enum HostCommand {
     Contextual(ContextualPanelAction, egui::Id),
     Layout(LayoutAction),
@@ -268,6 +281,22 @@ pub struct WorkspacePanelHost {
     last_mount_revision: Option<u64>,
     preview_started: Option<f64>,
     live_drag: bool,
+    /// The panel a drag popped out, and the screen rectangle its window was
+    /// shown at; the desktop adapter opens the window there.
+    window_landing: Option<(InstanceId, LogicalRect)>,
+    /// The paint of a panel being dragged out, for its window's preview.
+    #[cfg(not(target_arch = "wasm32"))]
+    window_card: Option<WindowCard>,
+    /// A panel dragged out of the bottom strip, as the side card the app's left
+    /// edge would dock it as: its body is painted once in that shape for its window.
+    leaving_side_card: Option<HostSection>,
+    /// What `leaving_side_card` was projected for: the panel, the layout revision,
+    /// the capacity and the content measurements. It is kept while they stay.
+    side_card_key: Option<(InstanceId, u64, LogicalRect, u64)>,
+    /// A popped-out panel dragged back by its window's grip. Its own capture:
+    /// focus is in that window, which would cancel this host's pointer capture.
+    window_drag: HostInteraction,
+    window_drag_events: Vec<WindowDragEvent>,
     drag_paint: DragPaint,
     pending_escape: bool,
     last_rejection: Option<PanelError>,
@@ -349,11 +378,157 @@ impl WorkspacePanelHost {
         }
     }
 
+    /// The narrowest width of the panel's content in its title's place, when it
+    /// takes that place (`set_header_content`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn header_content(&self, instance: &InstanceId) -> Option<f32> {
+        self.options.geometry.header_content.get(instance).copied()
+    }
+
+    /// The panel's header action is hidden (`set_header_action_visible`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn header_action_hidden(&self, instance: &InstanceId, action: &ControlId) -> bool {
+        self.options.geometry.hidden_header_actions.get(instance).is_some_and(|actions| actions.contains(action))
+    }
+
     pub(crate) fn set_live_drag(&mut self, enabled: bool) {
         self.live_drag = enabled;
         self.interaction.set_live_drag(enabled);
         if !enabled {
             self.drag_paint.clear();
+        }
+    }
+
+    /// A panel dragged out of the app pops out to a desktop window: only where
+    /// the host opens native panel windows.
+    fn drags_out(&self) -> bool {
+        self.native_capabilities.native_windows && !cfg!(target_arch = "wasm32")
+    }
+
+    /// The panel and screen point where a drag would open its desktop window.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn window_landing_preview(&self) -> Option<(InstanceId, Point)> {
+        self.interaction.window_landing().map(|(instance, origin)| (instance.clone(), origin))
+    }
+
+    /// How the panel being dragged out looks this frame.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn window_card(&self) -> Option<&WindowCard> {
+        self.window_card.as_ref()
+    }
+
+    /// The side card a panel dragged out of the bottom strip is painted as.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn leaving_side_card(&self) -> Option<&HostSection> {
+        self.leaving_side_card.as_ref()
+    }
+
+    /// A panel leaving the app from the bottom strip has no body there to copy:
+    /// with live drag paint, which hides it in the app, its real body is laid out
+    /// once as the side card the app's left edge would dock it as, as a dock
+    /// target's preview is. The projection is kept while its inputs stay.
+    fn update_side_card(&mut self, runtime: &PanelRuntime, frame: &HostFrame) {
+        let key = self
+            .side_card_source(frame)
+            .map(|source| (source, frame.layout.revision, frame.layout.capacity, frame.layout.geometry_policy.content_revision));
+        if key.is_none() || key != self.side_card_key {
+            self.leaving_side_card = key.as_ref().and_then(|(source, ..)| Self::side_card_for_window(runtime, frame, source));
+            self.side_card_key = key;
+        }
+    }
+
+    /// The panel leaving the app from the bottom strip, when live drag paint shows it.
+    fn side_card_source(&self, frame: &HostFrame) -> Option<InstanceId> {
+        if !self.live_drag || cfg!(target_arch = "wasm32") {
+            return None;
+        }
+        frame.preview.as_ref().filter(|preview| preview.rejection.is_none() && preview.window.is_some())?;
+        let source = self.interaction.move_source()?;
+        frame.layout.sections.iter().find(|card| &card.instance == source && card.zone == Zone::Bottom && !card.collapsed)?;
+        Some(source.clone())
+    }
+
+    fn side_card_for_window(runtime: &PanelRuntime, frame: &HostFrame, source: &InstanceId) -> Option<HostSection> {
+        // As the app's left edge would dock it: a new column of the dock area's full
+        // height, whatever is already docked there.
+        let edge = super::interaction::host_drop_targets(runtime.layout(), &frame.layout, source)
+            .ok()?
+            .into_iter()
+            .find(|target| target.id == HostDropTargetId::Dock { zone: Zone::Left, before: None })?;
+        let action =
+            apply_action(runtime.layout().inspect().revision, vec![Mutation::Move { instance: source.clone(), destination: edge.destination }]);
+        let prepared = prepare_host_layout(runtime.layout(), &runtime_scope(runtime), &frame.layout, action).ok()?;
+        prepared.layout().sections.iter().find(|card| &card.instance == source && !card.inline).cloned()
+    }
+
+    /// The host showed the window for the landing at `requested` at `shown` this frame.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn confirm_window_shown(&mut self, requested: Point, shown: LogicalRect) {
+        self.interaction.confirm_window_shown(requested, shown);
+    }
+
+    /// Where the last drag past the edge of the app popped a panel out.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn take_window_landing(&mut self) -> Option<(InstanceId, LogicalRect)> {
+        self.window_landing.take()
+    }
+
+    /// A grip drag in a panel's desktop window; this host's next paint handles it.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn queue_window_drag(&mut self, event: WindowDragEvent) {
+        if self.window_drag_events.len() < 64 {
+            self.window_drag_events.push(event);
+        }
+    }
+
+    /// Feed queued grip drags to their own capture, in this host's coordinates,
+    /// and show its preview. A drag that cannot continue cancels.
+    fn window_drag_input(
+        &mut self,
+        ui: &egui::Ui,
+        runtime: &PanelRuntime,
+        scope: &LocalScope,
+        frame: &mut HostFrame,
+        commands: &mut Vec<HostCommand>,
+        blocked: bool,
+    ) {
+        let events = std::mem::take(&mut self.window_drag_events);
+        let origin = ui.input(|input| input.viewport().inner_rect).filter(|rect| rect.is_finite()).map(|rect| rect.min);
+        let Some(origin) = origin.filter(|_| !blocked) else {
+            self.window_drag.cancel();
+            return;
+        };
+        let local = |at: Point| Point { x: at.x - origin.x, y: at.y - origin.y };
+        let service = runtime.layout();
+        let mut updates = Vec::new();
+        for event in events {
+            let pointer = match event {
+                WindowDragEvent::Begin { instance, at } => match self.window_drag.begin_window_move(service, scope, &frame.layout, &instance) {
+                    Ok(()) => HostPointerEvent::Move { at: local(at) },
+                    Err(reason) => {
+                        frame.events.push(HostEvent::Rejected { action: None, error: reason });
+                        continue;
+                    }
+                },
+                WindowDragEvent::Move { at } => HostPointerEvent::Move { at: local(at) },
+                WindowDragEvent::Release { at } => HostPointerEvent::Release { at: local(at) },
+                WindowDragEvent::Cancel => HostPointerEvent::Cancel,
+            };
+            updates.push(self.window_drag.update(service, scope, &frame.layout, pointer));
+        }
+        if updates.is_empty() && self.window_drag.is_captured() {
+            updates.push(self.window_drag.update(service, scope, &frame.layout, HostPointerEvent::Reconcile));
+        }
+        for update in updates {
+            if let Some(candidate) = update.candidate {
+                commands.push(HostCommand::Prepared(Box::new(candidate)));
+            }
+            if let Some(error) = update.rejection {
+                frame.events.push(HostEvent::Rejected { action: None, error });
+            }
+        }
+        if self.window_drag.is_captured() {
+            frame.preview = self.window_drag.preview().cloned();
         }
     }
 
@@ -394,6 +569,13 @@ impl WorkspacePanelHost {
             last_mount_revision: None,
             preview_started: None,
             live_drag: false,
+            window_landing: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            window_card: None,
+            leaving_side_card: None,
+            side_card_key: None,
+            window_drag: HostInteraction::default(),
+            window_drag_events: Vec::new(),
             drag_paint: DragPaint::default(),
             pending_escape: false,
             last_rejection: None,
@@ -663,6 +845,9 @@ impl WorkspacePanelHost {
     pub(crate) fn invalidate_context(&mut self) {
         self.drag_paint.clear();
         self.invalidate_geometry();
+        // A grip drag from another context must not start in this one.
+        self.window_drag_events.clear();
+        self.window_drag.cancel();
         self.content_focus = None;
         self.content_bookmarks.clear();
         self.content_reports.clear();
@@ -1014,8 +1199,9 @@ impl WorkspacePanelHost {
         let mut unpainted = Vec::new();
         self.content_reports.clear();
         let mut drag_cards = Vec::new();
-        let capture_drag =
-            self.live_drag && (self.interaction.is_captured() || self.drag_paint.active() || ui.input(|input| input.pointer.primary_down()));
+        self.update_side_card(runtime, &frame);
+        let capture_drag = (self.live_drag || self.drags_out())
+            && (self.interaction.is_captured() || self.drag_paint.active() || ui.input(|input| input.pointer.primary_down()));
         let drag_layout = self
             .live_drag
             .then(|| {
@@ -1034,6 +1220,7 @@ impl WorkspacePanelHost {
             move_source: (!self.live_drag).then_some(self.interaction.move_source()).flatten(),
             drag_cards: capture_drag.then_some(&mut drag_cards),
             drag_layout,
+            side_card: self.leaving_side_card.as_ref(),
             tab_drop: self
                 .live_drag
                 .then(|| {
@@ -1366,6 +1553,10 @@ impl WorkspacePanelHost {
             self.interaction.cancel();
             frame.preview = None;
         }
+        if !self.window_drag_events.is_empty() || self.window_drag.is_captured() {
+            let blocked = stale || hard_modal || mount.is_err() || !ui.is_enabled() || !ui.is_visible();
+            self.window_drag_input(ui, runtime, &scope, &mut frame, &mut commands, blocked);
+        }
         if let Some(preview) = &frame.preview
             && !(self.live_drag && self.interaction.move_source().is_some())
             && preview.rejection.is_none()
@@ -1395,7 +1586,10 @@ impl WorkspacePanelHost {
                     }
                 }
             }
-            ui_kit::panel_host_preview(ui, egui_rect(preview.bounds), true, None, opacity);
+            // A desktop window's landing is outside the app; the desktop host shows it.
+            if preview.window.is_none() {
+                ui_kit::panel_host_preview(ui, egui_rect(preview.bounds), true, None, opacity);
+            }
             if let Some(marker) = preview.tab_marker {
                 ui_kit::panel_host_tab_insertion(ui, egui_rect(marker), opacity);
             }
@@ -1496,6 +1690,7 @@ impl WorkspacePanelHost {
                 }
                 HostCommand::Prepared(candidate) if !sent_layout => {
                     sent_layout = true;
+                    let landing = candidate.window_landing().cloned();
                     let result = with_local_tracking(services, &scope, frame.layout.capacity, &mut overlays, |services| {
                         let proposal = runtime.retain_host_candidate(*candidate, frame.layout.clone(), services.models)?;
                         commit_catalogued_proposal(runtime, proposal, native, services, catalogue)
@@ -1507,6 +1702,7 @@ impl WorkspacePanelHost {
                             frame.events.push(HostEvent::PreparedCommitted { reply: reply.clone() });
                             frame.reply = reply;
                             self.last_rejection = None;
+                            self.window_landing = landing;
                             self.clear_menu();
                             frame.next_layout = resolve_frame_layout(
                                 runtime,
@@ -1608,7 +1804,30 @@ impl WorkspacePanelHost {
         if self.live_drag && painted_landing.as_ref() != frame.preview.as_ref().and_then(|preview| preview.target.as_ref()) {
             ui.ctx().request_repaint();
         }
-        let landing = frame.preview.as_ref().filter(|preview| preview.rejection.is_none()).and_then(|preview| preview.projected.as_ref());
+        // A panel leaving the app has no landing in it: live paint shows the app without it.
+        let leaving = frame.preview.as_ref().is_some_and(|preview| preview.window.is_some());
+        let landing = frame.preview.as_ref().filter(|preview| preview.rejection.is_none() && !leaving).and_then(|preview| preview.projected.as_ref());
+        // Copied before live paint hides it: the window preview shows the panel.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.window_card = leaving
+                .then(|| source.and_then(|source| drag_cards.iter().find(|card| &card.instance == source)))
+                .flatten()
+                .zip(source.and_then(|source| {
+                    self.leaving_side_card
+                        .as_ref()
+                        .filter(|card| &card.instance == source)
+                        .or_else(|| frame.layout.sections.iter().find(|section| &section.instance == source))
+                }))
+                .map(|(card, section)| {
+                    // The window's title bar takes the header's place: copy the body only,
+                    // with the row of actions the card has above it.
+                    let header = (section.header.origin.y + section.header.size.height - section.outer.origin.y).max(0.0);
+                    let body = egui::Rect::from_min_max(card.bounds.min + egui::vec2(0.0, header), card.bounds.max);
+                    let action_row = section.action_bar.map_or(0.0, |row| row.size.height);
+                    WindowCard::copy(ui.ctx(), card, body, action_row)
+                });
+        }
         if source.is_none() && drag_cards.is_empty() {
             self.drag_paint.clear();
         }
@@ -1635,6 +1854,7 @@ impl WorkspacePanelHost {
             }
         }
         if (!self.live_drag || landing.is_none())
+            && !leaving
             && let (Some(instance), Some(at)) = (source, self.interaction.move_position())
             && let Ok(presentation) = runtime.instance_presentation(instance)
         {
@@ -1869,6 +2089,17 @@ impl WorkspacePanelHost {
             }
         }
     }
+    /// The app window for the Window drop target: only where panels drag out
+    /// and the platform reports the window's screen position.
+    fn drag_out_context(&self, ui: &egui::Ui) -> Option<HostDragOut> {
+        if !self.drags_out() {
+            return None;
+        }
+        let (inner, content) = ui.input(|input| (input.viewport().inner_rect, input.content_rect()));
+        let inner = inner.filter(|rect| rect.is_finite())?;
+        Some(HostDragOut { window: logical_rect(content), screen_origin: Point { x: inner.min.x, y: inner.min.y } })
+    }
+
     fn pointer_input(
         &mut self,
         ui: &egui::Ui,
@@ -1878,6 +2109,7 @@ impl WorkspacePanelHost {
         commands: &mut Vec<HostCommand>,
         extra: Vec<(egui::Id, HostPointerEvent)>,
     ) {
+        self.interaction.set_drag_out(self.drag_out_context(ui));
         let raw = ui.input(|input| input.events.iter().take(4097).cloned().collect::<Vec<_>>());
         if raw.len() > 4096 {
             self.interaction.cancel();
@@ -2374,6 +2606,8 @@ struct WorkspaceContentHost<'a> {
     move_source: Option<&'a InstanceId>,
     drag_cards: Option<&'a mut Vec<CardPaint>>,
     drag_layout: Option<&'a HostLayout>,
+    /// The dragged panel's geometry as a side card, for its window's preview.
+    side_card: Option<&'a HostSection>,
     tab_drop: Option<(&'a SectionId, &'a InstanceId, usize)>,
     open_menu: Option<&'a HostMenu>,
     controls: &'a mut Vec<HostFrameControl>,
@@ -2439,13 +2673,16 @@ impl PanelHost for WorkspaceContentHost<'_> {
         // Lay out the real body once at its landing size. Capture the resulting
         // paint and animate from the committed position without stretching widgets.
         let committed_bounds = egui_rect(section.outer);
-        let projected = self.drag_layout.and_then(|layout| {
-            layout.sections.iter().find(|target| {
-                target.instance == section.instance
-                    && target.inline == section.inline
-                    && target.collapsed == section.collapsed
-                    && target.outer.size.width == section.outer.size.width
-                    && (target.zone == Zone::Floating) == (section.zone == Zone::Floating)
+        let side_card = self.side_card.filter(|target| target.instance == section.instance);
+        let projected = side_card.or_else(|| {
+            self.drag_layout.and_then(|layout| {
+                layout.sections.iter().find(|target| {
+                    target.instance == section.instance
+                        && target.inline == section.inline
+                        && target.collapsed == section.collapsed
+                        && target.outer.size.width == section.outer.size.width
+                        && (target.zone == Zone::Floating) == (section.zone == Zone::Floating)
+                })
             })
         });
         let paint_section = projected.unwrap_or(section);
@@ -2456,6 +2693,8 @@ impl PanelHost for WorkspaceContentHost<'_> {
             outer: target.outer,
             usable_body: target.body.or(target.inline_content),
             preview_geometry: true,
+            // A side card lays its content out tall, as docked at a side.
+            flow: if side_card.is_some() { Flow::Tall } else { context.flow },
             ..context.clone()
         });
         let content_context = paint_context.as_ref().unwrap_or(context);
@@ -2510,6 +2749,11 @@ impl PanelHost for WorkspaceContentHost<'_> {
                         continue;
                     }
                     if tab_drop.is_some() && matches!(target, HostPointerTarget::Tab { .. } | HostPointerTarget::TabOverflow { .. }) {
+                        continue;
+                    }
+                    // Painted as a side card for its window, whose title bar replaces the
+                    // header: the strip's header controls would not fit that header.
+                    if side_card.is_some() && !matches!(target, HostPointerTarget::HeaderAction { .. }) {
                         continue;
                     }
                     let data = pointer_instance(target).and_then(|instance| self.metadata.get(instance));
@@ -2730,7 +2974,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                         &mut failure,
                     );
                 }
-                if !section.collapsed && section.inline {
+                if !section.collapsed && paint_section.inline {
                     if let Some(body) = paint_section.inline_content {
                         render_slot(
                             content_ui,
@@ -2905,9 +3149,7 @@ fn render_slot(
     if failure.is_some() || bounds.size.width <= 0.0 || bounds.size.height <= 0.0 {
         return;
     }
-    let bounds = egui_rect(bounds);
-    let t = solidcraft_theme::Tokens::get();
-    let inset = bounds.shrink2(egui::vec2(t.space_4.min(bounds.width().max(0.0) / 2.0), t.space_2.min(bounds.height().max(0.0) / 2.0)));
+    let inset = content_inset(egui_rect(bounds));
     let clip = ui.clip_rect().intersect(inset);
     if !clip.is_positive() {
         return;
@@ -2933,6 +3175,33 @@ fn render_slot(
     if let Err(reason) = result {
         *failure = Some(reason);
     }
+}
+
+/// A panel's `ContentSlot::Title` in the title bar of its desktop window, in
+/// `bounds`: drawn as the docked header draws it, before the panel's body.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn render_window_title(
+    ui: &mut egui::Ui,
+    bounds: egui::Rect,
+    context: &PanelContext,
+    content: &mut dyn PanelController,
+    services: &mut ContentServices<'_>,
+    frame_content: &mut dyn FramePanelContent,
+) -> PanelResult<()> {
+    let mut failure = None;
+    render_slot(
+        ui,
+        ContentSlot::Title,
+        logical_rect(bounds),
+        context,
+        content,
+        services,
+        frame_content,
+        &mut egui::IdMap::default(),
+        None,
+        &mut failure,
+    );
+    failure.map_or(Ok(()), Err)
 }
 
 /// The render call supplies provenance directly; no previous-pass widget lookup
@@ -3342,6 +3611,70 @@ impl WorkspacePanelHost {
     }
 }
 
+/// Where a panel's content draws inside its body, docked or in a window.
+pub(super) fn content_inset(bounds: egui::Rect) -> egui::Rect {
+    let t = solidcraft_theme::Tokens::get();
+    bounds.shrink2(egui::vec2(t.space_4.min(bounds.width().max(0.0) / 2.0), t.space_2.min(bounds.height().max(0.0) / 2.0)))
+}
+
+/// An entry of a panel window's menu: its label, icon and checked layout action.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct WindowMenuEntry {
+    pub label: String,
+    pub icon: ui_kit::Icon<'static>,
+    pub action: LayoutAction,
+}
+
+impl WorkspacePanelHost {
+    /// The menu of `instance`'s desktop window: the dock places and the app's
+    /// panels it can join, then Close, each admitted as the docked panel menu
+    /// admits it. Each inner list is one group of the menu.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn window_menu(&self, runtime: &PanelRuntime, instance: &InstanceId) -> Vec<Vec<WindowMenuEntry>> {
+        let Some(frame) = self.frame() else { return Vec::new() };
+        let locale = solidcraft_ui_text::Locale::for_language(solidcraft_ui_text::language());
+        let metadata: BTreeMap<_, _> = runtime
+            .layout()
+            .layout()
+            .instances
+            .iter()
+            .filter_map(|panel| Some((panel.id.clone(), runtime.instance_presentation(&panel.id).ok()?)))
+            .collect();
+        let mut placement: Vec<_> = [Zone::Left, Zone::Right, Zone::Bottom, Zone::Floating].into_iter().map(HostSharedAction::Move).collect();
+        placement.extend(
+            frame
+                .layout
+                .sections
+                .iter()
+                .filter(|card| !card.peek && intersect_rect(card.outer, frame.layout.capacity).is_some())
+                .map(|card| HostSharedAction::Join(card.section.clone())),
+        );
+        [placement, vec![HostSharedAction::Close]]
+            .into_iter()
+            .map(|group| {
+                group
+                    .into_iter()
+                    .filter_map(|shared| {
+                        let action = shared_action(
+                            runtime,
+                            instance,
+                            &shared,
+                            &self.native_capabilities,
+                            frame.layout.capacity,
+                            &frame.layout.geometry_policy.identity_reservations,
+                        )
+                        .ok()?;
+                        prepare_host_layout(runtime.layout(), &runtime_scope(runtime), &frame.layout, action.clone()).ok()?;
+                        let label = shared_label(&shared, instance, runtime, &metadata, locale);
+                        Some(WindowMenuEntry { label, icon: shared_menu_icon(&shared, false, frame.layout.direction), action })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .filter(|group| !group.is_empty())
+            .collect()
+    }
+}
+
 fn menu_geometry(capacity: LogicalRect, anchor: LogicalRect, rows: usize, separators: usize) -> Option<egui::Rect> {
     let capacity = egui_rect(capacity);
     if rows == 0 || !capacity.is_positive() || !capacity.is_finite() {
@@ -3576,70 +3909,79 @@ fn shared_action(
             if cfg!(target_arch = "wasm32") {
                 return shared_action(runtime, instance, &HostSharedAction::Move(Zone::Floating), native, capacity, reservations);
             }
-            if !native.native_windows || !service.capabilities().native_windows {
+            if !native.native_windows {
                 return Err(error(Rule::Capability, "native panel windows unavailable"));
             }
-            let (id, index) = new_section_identity(service, instance, reservations)?;
-            let mut number = 0;
-            let host = loop {
-                let candidate = HostId::new(format!("host.window.{number}"))?;
-                if !service
-                    .layout()
-                    .sections
-                    .iter()
-                    .any(|section| matches!(&section.location, SectionLocation::Window { host, .. } if *host == candidate))
-                {
-                    break candidate;
-                }
-                number += 1;
-                if number > MAX_SECTIONS {
-                    return Err(error(Rule::CollectionLimit, "native host identity capacity"));
-                }
-            };
-            let zone = if section.location.zone().docked() { section.location.zone() } else { spec.default_zone };
-            let zone = if zone.docked() { zone } else { Zone::Left };
-            let return_index = service.layout().sections.iter().position(|entry| entry.id == section.id).unwrap_or(0);
-            let join = if section.tabs.len() > 1 {
-                Some(ReturnTab { section: section.id.clone(), index: section.tabs.iter().position(|entry| entry == instance).unwrap_or(0) })
-            } else {
-                None
-            };
-            let location = SectionLocation::Window {
-                host,
-                origin: capacity.origin,
-                return_to: DockReturn {
-                    zone,
-                    index: return_index,
-                    size: section.size,
-                    collapsed: section.collapsed,
-                    join,
-                    section: Some(section.id.clone()),
-                    column: section.column.clone(),
-                    column_index: service
-                        .layout()
-                        .columns
-                        .iter()
-                        .filter(|column| column.zone == zone)
-                        .position(|column| Some(&column.id) == section.column.as_ref())
-                        .unwrap_or(0),
-                    column_width: section
-                        .column
-                        .as_ref()
-                        .and_then(|id| service.layout().columns.iter().find(|column| column.id == *id).map(|column| column.width)),
-                    weight: section.weight,
-                    preferred_extent: section.preferred_extent,
-                    extent_priority: section.extent_priority,
-                },
-            };
-            vec![Mutation::Move {
-                instance: instance.clone(),
-                destination: Destination::NewSection { section: id, index, location, size: section.size },
-            }]
+            vec![Mutation::Move { instance: instance.clone(), destination: popout_destination(service, instance, capacity.origin, reservations)? }]
         }
     };
     let action = apply_action(service.inspect().revision, mutations);
     service.prepare(action.clone())?;
     Ok(action)
+}
+
+/// Where a panel goes when it pops out to a desktop window: a new native host
+/// that remembers the dock place to return to. Pop out to window and a drag
+/// past the edge of the app both use it.
+pub(super) fn popout_destination(
+    service: &LayoutService,
+    instance: &InstanceId,
+    origin: Point,
+    reservations: &HostIdentityReservations,
+) -> PanelResult<Destination> {
+    if !service.capabilities().native_windows {
+        return Err(error(Rule::Capability, "native panel windows unavailable"));
+    }
+    let section = service.layout().containing(instance)?;
+    let spec = service.registry().get(&service.layout().instance(instance)?.kind)?;
+    let (id, index) = new_section_identity(service, instance, reservations)?;
+    let mut number = 0;
+    let host = loop {
+        let candidate = HostId::new(format!("host.window.{number}"))?;
+        if !service.layout().sections.iter().any(|section| matches!(&section.location, SectionLocation::Window { host, .. } if *host == candidate)) {
+            break candidate;
+        }
+        number += 1;
+        if number > MAX_SECTIONS {
+            return Err(error(Rule::CollectionLimit, "native host identity capacity"));
+        }
+    };
+    let zone = if section.location.zone().docked() { section.location.zone() } else { spec.default_zone };
+    let zone = if zone.docked() { zone } else { Zone::Left };
+    let return_index = service.layout().sections.iter().position(|entry| entry.id == section.id).unwrap_or(0);
+    let join = if section.tabs.len() > 1 {
+        Some(ReturnTab { section: section.id.clone(), index: section.tabs.iter().position(|entry| entry == instance).unwrap_or(0) })
+    } else {
+        None
+    };
+    let location = SectionLocation::Window {
+        host,
+        origin,
+        return_to: DockReturn {
+            zone,
+            index: return_index,
+            size: section.size,
+            collapsed: section.collapsed,
+            join,
+            section: Some(section.id.clone()),
+            column: section.column.clone(),
+            column_index: service
+                .layout()
+                .columns
+                .iter()
+                .filter(|column| column.zone == zone)
+                .position(|column| Some(&column.id) == section.column.as_ref())
+                .unwrap_or(0),
+            column_width: section
+                .column
+                .as_ref()
+                .and_then(|id| service.layout().columns.iter().find(|column| column.id == *id).map(|column| column.width)),
+            weight: section.weight,
+            preferred_extent: section.preferred_extent,
+            extent_priority: section.extent_priority,
+        },
+    };
+    Ok(Destination::NewSection { section: id, index, location, size: section.size })
 }
 
 fn new_section_identity(service: &LayoutService, instance: &InstanceId, reservations: &HostIdentityReservations) -> PanelResult<(SectionId, usize)> {
