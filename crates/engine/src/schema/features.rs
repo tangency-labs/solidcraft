@@ -144,9 +144,10 @@ pub struct ExtrudeParams {
     /// How far past `to` to go.
     #[serde(default)]
     pub to_offset: Option<LengthExpr>,
-    /// A Join To Object: true (the default for a new extrude) joins the body `to` lies on only
-    /// when it is one of the targets; false joins it whatever the targets say, as Joins To
-    /// Object did before. An edit that leaves it out keeps the extrude's own.
+    /// Kept for older designs. A Join To Object joins the body `to` lies on only when it is one
+    /// of the targets (true, the default). False is the value designs saved before that keep:
+    /// the body joins whatever the targets say. An edit that leaves it out keeps the extrude's
+    /// own.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub to_body_apart: Option<bool>,
