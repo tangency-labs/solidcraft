@@ -2011,8 +2011,9 @@ fn other_trims_bound(
 /// After a raise, the faces' own bounds are settled at the raised tolerance
 /// ([`settle_face_bounds`]): each bound is cut to a thousandth of the fit, and the fit after
 /// the raise is the raised tolerance, at which a bound can come out a rounding above the one
-/// it raised to, leaving the edge short of the face by its own measure. The raised edge is
-/// then raised to cover its UV trims ([`cover_raised_trims`]) and its vertices the ends of
+/// it raised to, leaving the edge short of the face by its own measure. An edge raised, or
+/// holding a UV trim, is then raised to cover its UV trims ([`cover_raised_trims`]; #20373:
+/// whether or not a face raised it), and an edge raised by either its vertices the ends of
 /// their edges ([`cover_vertex_ends`]).
 ///
 /// # Errors
@@ -2091,7 +2092,15 @@ pub(crate) fn cover_joined_faces(
     }
     if raised {
         settle_face_bounds(k, b, e, &settle)?;
+    }
+    // (#20373: the joined edge covers its UV trims whether or not a face raised it; the trims
+    // were covered only through a face raise, which a face bound proved within the tolerance
+    // no longer makes: `primitive.api_primitives` gen1108)
+    let before = b.edge(e)?.tolerance;
+    if raised || !trimmed.is_empty() {
         cover_raised_trims(k, b, e)?;
+    }
+    if raised || b.edge(e)?.tolerance > before {
         cover_vertex_ends(k, b, e)?;
     }
     Ok(())
@@ -2145,16 +2154,16 @@ fn sampled_face_gap(k: &Kernel, b: &Brep, e: EdgeId, f: FaceId) -> Result<Option
     Ok(Some(most))
 }
 
-/// Not upstream (#18166): after the cover raised `e` ([`cover_joined_faces`]), raises it once
-/// to the largest proved bound of its UV trims ([`raised_trim_bound`]) that the raised
-/// tolerance does not cover. Each bound is taken at the fit the raised tolerance gives, once:
+/// Not upstream (#18166, #20373): for an edge `e` the cover raised or that holds a UV trim
+/// ([`cover_joined_faces`]), raises it once to the largest proved bound of its UV trims
+/// ([`raised_trim_bound`]) that its tolerance does not cover. Each bound is taken at the fit the raised tolerance gives, once:
 /// a proved bound holds whatever the edge's tolerance, and bounding again at each raised
 /// tolerance only coarsens the fit (gen1108 edge 9 climbed 2.48e-5, 2.97e-5, ... 5.83e-5 in
-/// eight such rounds, for one trim bounded at 2.48e-5). A raised edge covers
+/// eight such rounds, for one trim bounded at 2.48e-5). A joined edge covers
 /// everything it lies on: a trim set by an edit raised the tolerance when it was set
 /// (`keep_trim_covered`), but a trim the operation was given is bounded only here
-/// (`primitive.api_primitives` gen1108: a line 5.5e8 long, raised to 1.17e-5 for its
-/// trimless face, with a trim bounded at 2.8e-5 under the tolerance of 1e-5 it came with).
+/// (`primitive.api_primitives` gen1108: a line 5.5e8 long, proved within its tolerance of
+/// 1e-5 of its trimless plane face, with a trim bounded at 2.8e-5 under that tolerance).
 /// A trim whose bound is not enclosed, or is past the B-rep check's limit
 /// ([`within_edge_tolerance_limit`]), is left as upstream leaves it (UNPROVED; stricter
 /// than [`cover_joined_faces`], which takes a face bound past the limit where it is seen).
