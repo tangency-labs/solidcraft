@@ -1388,6 +1388,35 @@ mod tests {
         assert!(s.execute("surface.offset", &json!({"distance": 1})).is_err());
     }
 
+    /// A positive Offset Surface distance goes outward from the solid on a mirrored body too
+    /// (#20236), picked as the issue picks them (no body named): a 10 mm cube on x = 5..15
+    /// mirrored in YZ, its copy on x = -15..-5. The mirror uses the copy's faces from their
+    /// surfaces' backs. Each end face moved 3 out lands at x = 18 and x = -18; the copy's landed
+    /// at -12, inside the copy. A negative distance goes in on both (x = -12); a cylinder of radius
+    /// 5 beside them moves out to radius 8.
+    #[test]
+    fn offset_surface_goes_outward_on_a_mirrored_body() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [5, 0, 0], "body_name": "A"}));
+        let copy = run(&mut s, "solid.mirror", json!({"bodies": ["A"], "plane": "YZ"}))["created_bodies"][0].as_str().unwrap().to_string();
+        assert!((volume(&s, &copy) - 1000.0).abs() < 1e-6, "the copy is a solid: {}", volume(&s, &copy));
+        let bbox = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().unwrap().body(name).unwrap().body).unwrap().bbox;
+        let at_x = |s: &Session, name: &str, x: f64| {
+            let b = bbox(s, name);
+            assert!((b.min.x - x).abs() < 1e-9 && (b.max.x - x).abs() < 1e-9, "{name}: x {}..{}, expected {x}", b.min.x, b.max.x);
+        };
+        run(&mut s, "surface.offset", json!({"faces": [[15, 5, 5]], "distance": "3", "body_name": "Right"}));
+        run(&mut s, "surface.offset", json!({"faces": [[-15, 5, 5]], "distance": "3", "body_name": "Left"}));
+        run(&mut s, "surface.offset", json!({"faces": [[-15, 5, 5]], "distance": "-3", "body_name": "Inside"}));
+        at_x(&s, "Right", 18.0);
+        at_x(&s, "Left", -18.0);
+        at_x(&s, "Inside", -12.0);
+        run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 10, "base": [0, 40, 0], "body_name": "C"}));
+        run(&mut s, "surface.offset", json!({"faces": [[5, 40, 5]], "distance": "3", "body_name": "Ring"}));
+        let ring = bbox(&s, "Ring");
+        assert!((ring.max.x - 8.0).abs() < 1e-6 && (ring.min.x + 8.0).abs() < 1e-6, "Ring: x {}..{}, expected -8..8", ring.min.x, ring.max.x);
+    }
+
     /// Ruled Surface round a box top (10 × 10), 2 wide: across the top, mitred, a 14 × 14 frame
     /// less the top (96); up the top's normal, 80; at 45° with round corners, 80 + π·√2·2; along
     /// a direction, 2 × 10 off one edge. The strips' faces are named after the edges they stand
