@@ -85,7 +85,8 @@ use crate::curve::curve::p9::CurveSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
 use crate::curve::line::Line;
-use crate::error::{ignored, Result, SolidError};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_closest_point;
@@ -702,11 +703,11 @@ impl<'s> SurfaceDropCurve<'s> {
         if norm.length_squared() < EFF_ZERO_SQ {
             norm = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
 
-            // signal error when unable to get a surfaceNormal
+            // signal error when unable to get a surfaceNormal (the geometry's)
             if norm.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::intersect_failed(
+                return Err(SolidError::intersect(
                     OP_CPV,
-                    "the surface has no normal at the dropped point",
+                    IntersectFailure::NoSurfaceNormal,
                 ));
             }
         }
@@ -725,9 +726,9 @@ impl<'s> SurfaceDropCurve<'s> {
             match prev.as_deref() {
                 Some(p) => pnt.curve_3d[1] = p.curve_3d[1],
                 None => {
-                    return Err(SolidError::intersect_failed(
+                    return Err(SolidError::intersect(
                         OP_CPV,
-                        "the dropped curve's tangent is degenerate at its first point",
+                        IntersectFailure::DegenerateTangent,
                     ))
                 }
             }
@@ -751,10 +752,10 @@ impl<'s> SurfaceDropCurve<'s> {
             let domain = surface.natural_uv_domain_with_nurb(k)?;
             let (on_boundary, uv_tang) = domain.is_point_on_boundary(uv, EFF_ZERO_SQRT);
             if !on_boundary {
-                // error - singular surface point not on boundary
-                return Err(SolidError::intersect_failed(
+                // error - singular surface point not on boundary (rule 8)
+                return Err(SolidError::intersect(
                     OP_CPV,
-                    "the singular surface point is not on the domain's boundary",
+                    IntersectFailure::SingularPointInside,
                 ));
             }
 
@@ -821,9 +822,11 @@ impl<'s> SurfaceDropCurve<'s> {
         }
 
         // locals - knot indices of CurveToDrop knot interval containing CurrPnt.parameter
-        let knots = self.curve_knot_vector.as_ref().ok_or_else(|| {
-            SolidError::intersect_missing(OP_STEP, "the knot vector of the curve to drop")
-        })?;
+        // set by `boundary_start_points`, which the caller has not run (its state)
+        let knots = self
+            .curve_knot_vector
+            .as_ref()
+            .ok_or_else(|| SolidError::intersect(OP_STEP, IntersectFailure::NotSetUp))?;
         let knot = |i: usize| -> Result<f64> {
             knots
                 .get(i)
@@ -1063,11 +1066,13 @@ impl<'s> SurfaceDropCurve<'s> {
         let curve_cache = match make_curve_cache::<()>(k, curve, None) {
             Ok(c) => c,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => {
-                return Err(SolidError::intersect_missing(
-                    OP_BOUNDARY,
-                    "the curve cache",
-                ))
+            // the build's error stays the cause (rule 6)
+            Err(e) => {
+                return Err(
+                    Failure::new(OP_BOUNDARY, IntersectFailure::CurveCacheNotBuilt)
+                        .caused_by(e)
+                        .into_error(),
+                )
             }
         };
 
@@ -1403,11 +1408,9 @@ impl<'s> SurfaceDropCurve<'s> {
                         tmp.first().copied()
                     };
                     let Some(p) = pick else {
-                        // we failed to resolve singularity problem
-                        return Err(SolidError::intersect_failed(
-                            OP_BOUNDARY,
-                            "the singular point on the boundary could not be resolved",
-                        ));
+                        // we failed to resolve singularity problem: the drop of the point
+                        // just off the singular point found no foot (rule 7)
+                        return Err(SolidError::intersect(OP_BOUNDARY, IntersectFailure::NoFoot));
                     };
                     if singular_dir == SurfParamType::U {
                         uv.x = p.x;
@@ -1460,7 +1463,15 @@ impl<'s> SurfaceDropCurve<'s> {
                     }
 
                     let iso_curve = iso_curve.ok_or_else(|| {
-                        SolidError::intersect_missing(OP_BOUNDARY, "the boundary iso curve")
+                        Failure::new(
+                            OP_BOUNDARY,
+                            IntersectFailure::Defect {
+                                why: "the iso-curve drop succeeded without its UV curve, which \
+                                      it returns whenever it succeeds",
+                            },
+                        )
+                        .with_status(SM_ERR_NULL_POINTER)
+                        .into_error()
                     })?;
 
                     // If there are more solutions to check, see if they're contained in this iso curve
@@ -1775,10 +1786,11 @@ impl<'s> SurfaceDropCurve<'s> {
         mut context: Option<DropSolveContext<'_, O>>,
     ) -> Result<()> {
         self.base.curve_points.push(start);
+        // set by `boundary_start_points`, which the caller has not run (its state)
         let breaks = self
             .curve_breaks
             .clone()
-            .ok_or_else(|| SolidError::intersect_missing(OP_TRACE2, "the curve's break points"))?;
+            .ok_or_else(|| SolidError::intersect(OP_TRACE2, IntersectFailure::NotSetUp))?;
         let surface = self.base.surface;
 
         // If there are curve breaks - replace dMaxT with first break after dMinT.

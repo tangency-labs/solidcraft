@@ -381,6 +381,12 @@ impl crate::Feature {
             | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
             | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. }
             | K::Move { rotate_about: Some(geo), .. } => checked_geo(geo, 0)?,
+            K::FrameMember { pairs, .. } => {
+                for p in pairs {
+                    checked_geo(&p.a, 0)?;
+                    checked_geo(&p.b, 0)?;
+                }
+            }
             _ => {}
         }
         // Feature names are remapped once here; the geometry pass below handles only
@@ -460,6 +466,12 @@ impl crate::Feature {
             | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
             | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. }
             | K::Move { rotate_about: Some(geo), .. } => remap_geo(geo, ids, bodies, 0, occurrences, doc)?,
+            K::FrameMember { pairs, .. } => {
+                for p in pairs {
+                    remap_geo(&mut p.a, ids, bodies, 0, occurrences, doc)?;
+                    remap_geo(&mut p.b, ids, bodies, 0, occurrences, doc)?;
+                }
+            }
             // An Align frame's joint origin finds its faces and edges by name, as the feature's
             // own face names are found.
             K::Align { from_frame, to_frame, .. } => {

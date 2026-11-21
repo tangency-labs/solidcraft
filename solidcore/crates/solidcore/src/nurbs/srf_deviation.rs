@@ -26,6 +26,7 @@
 //! Deviations: none (no upstream counterpart). Non-rational 3D surfaces only, of degrees 1 to
 //! [`MAX_DEGREE`], their knot vectors clamped on one domain.
 
+use crate::error::query::QueryFailure;
 use crate::error::{Result, SolidError};
 use crate::nurbs::crv_deviation::norm_up;
 use crate::nurbs::knots::MAX_DEGREE;
@@ -45,8 +46,8 @@ const OP: &str = "nurbs::srf_deviation::certified_distance";
 ///
 /// `InvalidInput` for a rational or 2D surface, a number not finite, a degree outside
 /// `1..=MAX_DEGREE` or knots that do not fit the net, knots not clamped, or two surfaces on
-/// different domains; a query failure when their patches do not match or the bound is not
-/// finite; those of the refinement, the extraction and the elevation.
+/// different domains; [`QueryFailure::BoundOverflows`] when the bound overflows the floating
+/// range; those of the refinement, the extraction and the elevation.
 pub fn certified_distance(a: &Surface, b: &Surface) -> Result<f64> {
     check(a)?;
     check(b)?;
@@ -83,7 +84,9 @@ pub fn certified_distance(a: &Surface, b: &Surface) -> Result<f64> {
     let moved = gamma(2) * size;
     let (pa, ea) = patches(a, b, degrees, size)?;
     let (pb, eb) = patches(b, a, degrees, size)?;
-    let mismatch = || SolidError::query_failed(OP, "the surfaces' patches do not match");
+    let mismatch = || {
+        SolidError::query(OP, QueryFailure::Defect { why: "both surfaces are cut into Bézier patches at the union of their knots and raised to the same degrees, so their patches pair up span by span with nets of one size" })
+    };
     if pa.len() != pb.len() {
         return Err(mismatch());
     }
@@ -105,7 +108,7 @@ pub fn certified_distance(a: &Surface, b: &Surface) -> Result<f64> {
                 }
                 for (p, r) in row_x.iter().zip(row_y) {
                     let d = norm_up(p.x - r.x, p.y - r.y, p.z - r.z)
-                        .ok_or_else(|| SolidError::query_failed(OP, "the bound is not finite"))?;
+                        .ok_or_else(|| SolidError::query(OP, QueryFailure::BoundOverflows))?;
                     largest = largest.max(d);
                 }
             }
@@ -113,7 +116,7 @@ pub fn certified_distance(a: &Surface, b: &Surface) -> Result<f64> {
     }
     let bound = (largest + 2.0 * (ea + eb + 2.0 * moved)) * (1.0 + gamma(2));
     if !bound.is_finite() {
-        return Err(SolidError::query_failed(OP, "the bound is not finite"));
+        return Err(SolidError::query(OP, QueryFailure::BoundOverflows));
     }
     Ok(bound)
 }

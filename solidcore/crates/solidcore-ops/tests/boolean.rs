@@ -716,6 +716,17 @@ fn the_check_of_a_long_coil_cut_stops_on_cancel() {
 /// seam: inside the vertex's 1e-5 tolerance, with no sliver beside the seam. The check
 /// refused it (face test 36) for centres 1e-7 to 1e-5 off. Every offset now gives one valid
 /// solid, its volume moving with the offset by no more than the wall's swept area allows.
+///
+/// The seam's corner on the bar's edge `d` off (the seam vertex, made one with its drop on the
+/// edge and placed midway) is `d` from where the seam crosses the step face beside the edge
+/// and 1.118 `d` from the midway point: for `d` from 1e-5 to 1.3e-5 the crossing lies within
+/// the seam vertex's tolerance of it but farther than that from the midway point, so it is
+/// one point only by the vertex's own ball, which its proto vertex holds (docs/booleans.md,
+/// "One point or two"). Without it the cut was refused (`MergedVertexReaches`) at 1e-5, 1.1e-5
+/// and 1.3e-5 once two points are one only within the larger of their tolerances. From 2.05e-5
+/// to 2.4e-5 the step face's curve leaves the seam where the seam's end vertex is past both
+/// tolerances but within their sum: it no longer runs "along" the seam to there (docs/booleans.md,
+/// "Seams and poles"), and the cut, refused (not a solid) or empty before, is valid.
 #[test]
 fn a_cut_whose_seam_edge_ends_within_tolerance_across_the_seam_is_valid() {
     all_fixes();
@@ -776,7 +787,22 @@ fn a_cut_whose_seam_edge_ends_within_tolerance_across_the_seam_is_valid() {
     };
     let exact = volume(&cut(0.0));
     // (1e-6 off, the cut is no solid, before this change too: #14840)
-    for d in [1e-9, 1e-7, 3e-7, 2e-6, 7.868_858_162e-6, 1e-5, 3e-5, 1e-4] {
+    for d in [
+        1e-9,
+        1e-7,
+        3e-7,
+        2e-6,
+        7.868_858_162e-6,
+        1e-5,
+        1.1e-5,
+        1.3e-5,
+        1.5e-5,
+        2e-5,
+        2.2e-5,
+        2.4e-5,
+        3e-5,
+        1e-4,
+    ] {
         let r = cut(d);
         let report = r.check(CheckLevel::All).unwrap();
         assert!(report.is_valid(), "d {d}: {}", report.text);

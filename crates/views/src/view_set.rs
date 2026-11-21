@@ -69,6 +69,7 @@ impl ViewKind {
 /// One view of a design.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DesignView {
+    pub compass: bool,
     /// Unique within its design for as long as the set lives; never reused.
     pub id: u64,
     pub kind: ViewKind,
@@ -108,6 +109,16 @@ impl WindowLevel {
     fn from_key(key: &str) -> Option<Self> {
         [Self::ViewsOnly, Self::Clean, Self::Full].into_iter().find(|level| level.key() == key)
     }
+}
+
+/// An arrangement of existing views in one window.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WindowArrangement {
+    pub views: Vec<u64>,
+    pub active: Option<u64>,
+    pub tiles: Option<Tiles>,
+    pub level: WindowLevel,
+    pub placement: Option<WindowPlacement>,
 }
 
 /// Logical window coordinates relative to the selected display.
@@ -242,6 +253,16 @@ impl MoveError {
         }
     }
 }
+/// Camera components shared by the visible Model views in a window.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CameraLinkMode {
+    #[default]
+    Off,
+    Orientation,
+    Zoom,
+    Both,
+}
+
 /// The views of a design in tab order, the active one, and the views closed lately.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ViewSet {
@@ -257,6 +278,7 @@ pub struct ViewSet {
     elsewhere: usize,
     /// How the window lays its views out side by side. Dormant while the active view is outside it.
     tiles: Option<Tiles>,
+    camera_link: CameraLinkMode,
 }
 
 impl Default for ViewSet {
@@ -268,12 +290,79 @@ impl Default for ViewSet {
 impl ViewSet {
     /// A design's first views: one Model view, active.
     pub fn new() -> Self {
-        let model = DesignView { id: 1, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None };
+        let model = DesignView { id: 1, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None, compass: true };
         Self::strip(vec![model], 1, 2, 0)
     }
 
     fn strip(views: Vec<DesignView>, active: u64, next_id: u64, window_id: WindowId) -> Self {
-        Self { views, active, closed: Vec::new(), next_id, window_id, windows: Vec::new(), next_window: 1, elsewhere: 0, tiles: None }
+        Self {
+            views,
+            active,
+            closed: Vec::new(),
+            next_id,
+            window_id,
+            windows: Vec::new(),
+            next_window: 1,
+            elsewhere: 0,
+            tiles: None,
+            camera_link: CameraLinkMode::Off,
+        }
+    }
+
+    /// Arrange the live views in their new strips, reusing existing window identities in order.
+    /// The input must assign each open view exactly once and leave at least one in the main window.
+    pub fn arrange_windows(&mut self, groups: Vec<WindowArrangement>) -> bool {
+        if self.window_id != 0 || groups.is_empty() || groups.len() > MAX_POPOUTS + 1 {
+            return false;
+        }
+        let all = std::iter::once(&*self).chain(self.windows.iter().map(|window| &window.views));
+        let mut unassigned: std::collections::BTreeMap<_, _> = all.flat_map(|strip| strip.views.iter().map(|view| (view.id, view.clone()))).collect();
+        let mut assigned = Vec::new();
+        for group in groups {
+            if group.views.is_empty() || group.placement.as_ref().is_some_and(|placement| !placement.is_valid()) {
+                return false;
+            }
+            let views = group.views.iter().map(|id| unassigned.remove(id)).collect::<Option<Vec<_>>>();
+            let Some(views) = views else { return false };
+            assigned.push((group, views));
+        }
+        if !unassigned.is_empty() {
+            return false;
+        }
+        let mut assigned = assigned.into_iter();
+        let Some((main, views)) = assigned.next() else { return false };
+        self.apply_arrangement(main, views);
+        let mut old = std::mem::take(&mut self.windows).into_iter();
+        for (group, views) in assigned {
+            let mut window = old.next().unwrap_or_else(|| {
+                let id = self.allocate_window_id();
+                PopOut { id, level: WindowLevel::ViewsOnly, placement: None, views: Self::strip(Vec::new(), 0, self.next_id, id) }
+            });
+            window.level = group.level;
+            if let Some(placement) = &group.placement {
+                window.placement = Some(placement.clone());
+            }
+            window.views.apply_arrangement(group, views);
+            self.put_window(window);
+        }
+        for window in old {
+            self.closed.extend(window.views.closed);
+        }
+        let excess = self.closed.len().saturating_sub(CLOSED_CAP);
+        self.closed.drain(..excess);
+        true
+    }
+
+    fn apply_arrangement(&mut self, group: WindowArrangement, views: Vec<DesignView>) {
+        self.views = views;
+        let requested = group.active.unwrap_or(self.active);
+        if self.get(requested).is_some() {
+            self.active = requested;
+        } else if let Some(first) = self.views.first() {
+            self.active = first.id;
+        }
+        self.tiles = group.tiles;
+        self.prune_tiles();
     }
 
     /// The open pop-outs in this design. The main strip is this ViewSet itself.
@@ -636,7 +725,7 @@ impl ViewSet {
         }
         let Some(id) = self.take_id() else { return self.active };
         let name = self.default_name(kind);
-        self.views.push(DesignView { id, kind, name, subject, spec: None });
+        self.views.push(DesignView { id, kind, name, subject, spec: None, compass: true });
         self.active = id;
         id
     }
@@ -723,7 +812,7 @@ impl ViewSet {
         let fallback = self.views.iter().take(left).rev().find(|view| keep(view)).map(|view| view.id);
         self.views.retain(keep);
         if let Some(id) = replacement {
-            self.views.push(DesignView { id, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None });
+            self.views.push(DesignView { id, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None, compass: true });
         }
         if self.get(self.active).is_none() {
             self.active = fallback.or_else(|| self.views.first().map(|view| view.id)).unwrap_or(self.active);
@@ -769,6 +858,24 @@ impl ViewSet {
         Some(id)
     }
 
+    /// Set the compass on the named view without changing which view is active.
+    pub fn set_compass(&mut self, id: u64, on: bool) -> bool {
+        let Some(window) = self.window_of(id) else { return false };
+        let strip = if window == 0 {
+            self
+        } else if let Some(window) = self.window_mut(window) {
+            &mut window.views
+        } else {
+            return false;
+        };
+        let Some(view) = strip.views.iter_mut().find(|view| view.id == id) else { return false };
+        if !view.kind.can_tile() {
+            return false;
+        }
+        view.compass = on;
+        true
+    }
+
     /// Keep `spec` as how the view `id` looks at the model. False when there is no such view.
     pub fn set_spec(&mut self, id: u64, spec: ViewSpec) -> bool {
         match self.views.iter_mut().find(|view| view.id == id) {
@@ -801,7 +908,8 @@ impl ViewSet {
             return None;
         }
         let (kind, subject, spec) = (self.views[i].kind, self.views[i].subject.clone(), self.views[i].spec);
-        let copy = DesignView { id: self.take_id()?, kind, name: self.default_name(kind), subject, spec };
+        let compass = self.views[i].compass;
+        let copy = DesignView { id: self.take_id()?, kind, name: self.default_name(kind), subject, spec, compass };
         self.active = copy.id;
         self.views.insert(i + 1, copy);
         Some(self.active)
@@ -968,6 +1076,19 @@ impl ViewSet {
         self.tiles.as_mut().is_some_and(|tiles| tiles.set_ratio(splitter, ratio))
     }
 
+    /// Give every tile the same share of the available area without moving views between cells.
+    pub fn equal_sizes(&mut self) -> bool {
+        self.tiles.as_mut().is_some_and(Tiles::equal_sizes)
+    }
+
+    pub fn camera_link(&self) -> CameraLinkMode {
+        self.camera_link
+    }
+
+    pub fn set_camera_link(&mut self, mode: CameraLinkMode) {
+        self.camera_link = mode;
+    }
+
     /// Swap the places of two shown views.
     pub fn swap_tiles(&mut self, a: u64, b: u64) -> bool {
         self.tiles.as_mut().is_some_and(|tiles| tiles.swap(a, b))
@@ -1011,7 +1132,7 @@ impl ViewSet {
     /// The set as saved with the design. Window ids on the flat view list maintain compatibility
     /// with older readers, which ignore them and show all the views in their main window.
     pub fn to_json(&self) -> Value {
-        let view_json = |view: &DesignView, window| json!({"id": view.id, "kind": view.kind.key(), "name": view.name, "subject": view.subject, "spec": view.spec, "window": window});
+        let view_json = |view: &DesignView, window| json!({"id": view.id, "kind": view.kind.key(), "name": view.name, "subject": view.subject, "spec": view.spec, "window": window, "compass": view.compass});
         let strips = std::iter::once(self).chain(self.windows.iter().map(|window| &window.views));
         json!({
             "active": self.active,
@@ -1184,7 +1305,8 @@ fn view_from_json(value: &Value) -> Option<DesignView> {
     // A spec that does not read back, or holds numbers a camera cannot use, is dropped: the view
     // then starts from where the design looks.
     let spec = value.get("spec").and_then(|spec| serde_json::from_value::<ViewSpec>(spec.clone()).ok()).filter(ViewSpec::is_valid);
-    Some(DesignView { id, kind, name, subject, spec })
+    let compass = value.get("compass").and_then(Value::as_bool).unwrap_or(true);
+    Some(DesignView { id, kind, name, subject, spec, compass })
 }
 
 #[cfg(test)]
@@ -1201,6 +1323,21 @@ mod tests {
             set.open(ViewKind::Sketch, Some(format!("s{i}")), false);
         }
         set
+    }
+
+    #[test]
+    fn camera_link_is_local_to_the_window() {
+        let mut main = ViewSet::new();
+        let second = main.duplicate(main.active().id).unwrap();
+        main.set_camera_link(CameraLinkMode::Orientation);
+
+        let moved = main.move_to_window(second, new_window()).unwrap();
+        let pop_out = main.window_mut(moved.window).unwrap();
+        assert_eq!(pop_out.views.camera_link(), CameraLinkMode::Off);
+        pop_out.views.set_camera_link(CameraLinkMode::Zoom);
+
+        assert_eq!(main.camera_link(), CameraLinkMode::Orientation);
+        assert_eq!(main.views_of(moved.window).unwrap().camera_link(), CameraLinkMode::Zoom);
     }
 
     #[test]
@@ -1631,6 +1768,20 @@ mod tests {
         let (first, last) = (set.views()[0].id, set.views()[2].id);
         assert!(set.close(first));
         assert_eq!(set.active().id, last);
+    }
+
+    #[test]
+    fn compass_visibility_is_saved_per_view_and_defaults_to_on() {
+        let mut set = ViewSet::new();
+        let first = set.active().id;
+        let second = set.open(ViewKind::Model, None, false);
+        assert!(set.set_compass(first, false));
+        let mut saved = set.to_json();
+        assert_eq!(ViewSet::from_json(&saved).as_ref(), Some(&set));
+        assert!(!set.get(first).unwrap().compass);
+        assert!(set.get(second).unwrap().compass);
+        saved["views"][0].as_object_mut().unwrap().remove("compass");
+        assert!(ViewSet::from_json(&saved).unwrap().get(first).unwrap().compass);
     }
 
     #[test]

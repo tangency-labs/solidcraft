@@ -91,6 +91,9 @@ fn err(e: impl std::fmt::Display) -> Outcome {
     if let Some(reason) = solidcraft_engine::panels::commands::structured_error(&text) {
         reply["panel_error"] = reason;
     }
+    if let Some(reason) = solidcraft_engine::plugin::structured_tool_error(&text) {
+        reply["plugin_error"] = reason;
+    }
     Outcome::Done(reply)
 }
 fn wrap(r: Result<Value, String>) -> Outcome {
@@ -227,6 +230,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
             | "timeline.play"
             | "browser.expand_all"
             | "browser.collapse_all"
+            | "select.mode"
     ) && !fit_id.starts_with("settings.");
     // History changes and session swaps can return to the first-body fitting window.
     let history_may_fit = app.session.undo.len() <= 2
@@ -541,6 +545,9 @@ pub fn view_png(app: &SolveApp, w: u32, h: u32) -> Result<Vec<u8>, String> {
 }
 
 pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
+    // What a request does is an agent's action in usage statistics (`usage_stats`).
+    #[cfg(feature = "usage-stats")]
+    let _source = solidcraft_engine::usage::from(solidcraft_engine::usage::Source::Agent);
     crate::agent_chat::with_tool_request(app, req.chat_turn.as_ref(), |app| handle_request(app, ctx, req))
 }
 
@@ -1137,12 +1144,20 @@ fn ui_set(app: &mut SolveApp, p: &Value) -> Outcome {
     let mut cur = serde_json::to_value(&app.ui).unwrap_or(json!({}));
     let mut vis = serde_json::to_value(&app.session.visibility).unwrap_or(json!({}));
     let mut sketches = None;
+    let mut wrong_flag = None;
     if let (Some(o), Some(vo), Some(src)) = (cur.as_object_mut(), vis.as_object_mut(), p.as_object()) {
         for (k, v) in src {
             let shown = |v: &Value| v.as_bool().map(|b| json!(!b)).unwrap_or_else(|| v.clone());
             match (VIS.iter().find(|(camel, _)| camel == k), k.as_str()) {
                 (Some((_, snake)), _) => vo.insert(snake.to_string(), v.clone()),
                 (None, "showOrigin") => vo.insert("origin_hidden".into(), shown(v)),
+                // The older flags, read below: true or false, as the fields they were.
+                (None, "pickBodies" | "pickComponents") => {
+                    if !v.is_boolean() {
+                        wrong_flag = Some(format!("`{k}` must be true or false"));
+                    }
+                    None
+                }
                 (None, "showSketches") => {
                     sketches = Some(v.as_bool().ok_or_else(|| "`showSketches` must be true or false".to_string()));
                     None
@@ -1150,6 +1165,25 @@ fn ui_set(app: &mut SolveApp, p: &Value) -> Outcome {
                 _ => o.insert(k.clone(), v.clone()),
             };
         }
+        // The older flags are each about one mode (#4255): true picks it, components before bodies, and
+        // false goes back to Faces & edges from its own mode. A `pickMode` beside them wins.
+        if !src.contains_key("pickMode") {
+            let flag = |name: &str| src.get(name).and_then(Value::as_bool);
+            let now = o.get("pickMode").and_then(Value::as_str).unwrap_or_default();
+            let mode = match (flag("pickComponents"), flag("pickBodies")) {
+                (Some(true), _) => Some("parts"),
+                (_, Some(true)) => Some("bodies"),
+                (Some(false), _) if now == "parts" => Some("faces"),
+                (_, Some(false)) if now == "bodies" => Some("faces"),
+                _ => None,
+            };
+            if let Some(mode) = mode {
+                o.insert("pickMode".into(), json!(mode));
+            }
+        }
+    }
+    if let Some(e) = wrong_flag {
+        return err(e);
     }
     let sketches = match sketches.transpose() {
         Ok(s) => s,
@@ -1228,9 +1262,23 @@ fn ui_view(app: &mut SolveApp, ctx: &egui::Context, q: params::View) -> Outcome 
 }
 
 /// `ui.start {command, params?}`: like clicking the toolbar button. `params`: what the dialog
-/// opens on (joint.drive, motion.study). Refused: nothing starts, or the dialog closes.
+/// opens on (joint.drive, motion.study, plugin.edit). Refused: nothing starts, or the dialog closes.
 fn ui_start(app: &mut SolveApp, q: params::Start) -> Outcome {
     let id = q.command.as_str();
+    if id == "plugin.edit" {
+        let p: solidcraft_engine::schema::plugin::EditParams = match serde_json::from_value(q.params) {
+            Ok(p) => p,
+            Err(e) => return err(e.to_string()),
+        };
+        return match crate::plugin_menu::open_form(app, &p.plugin, &p.entry, &p.params) {
+            Ok(()) => {
+                let mut reply = started(app);
+                reply["plugin_form"] = json!({"plugin":p.plugin,"entry":p.entry});
+                ok(reply)
+            }
+            Err(e) => err(e),
+        };
+    }
     let preset = match (id, q.params) {
         (_, Value::Null) => None,
         ("joint.drive" | "motion.study", params) => Some(params),

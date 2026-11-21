@@ -141,7 +141,7 @@ pub(super) fn placed(body: &Body, m: &M4) -> crate::Result<Body> {
 /// refuses fails with the reason ([`surface_part`] then imports what it can of it).
 pub(super) fn smlib_part(ex: &Exchange, item: u64, units: Units) -> std::result::Result<(Part, Vec<Note>), Failure> {
     let solid = solidcraft_profile::scope("import", "step.read_solid", || {
-        solidcore_step::topology::read_solid_with(ex, item, units, &solidcraft_smlib::pcurves::SmlibTrims)
+        solidcore_step::topology::read_solid_with(ex, item, units, &solidcraft_smlib::pcurves::SmlibImportTrims)
     })
     .map_err(|msg| Failure { read: true, msg })?;
     let part = solid_part(&solid)?;
@@ -213,7 +213,8 @@ fn smlib_body(record: &solidcore_record::brep::Brep) -> std::result::Result<(Bod
     let (canonical, body_order, prepared) = brep.to_native_prepared().map_err(|e| failed(KernelError::Failed(e.to_string())))?;
     let body = Body::from_smlib_record(canonical).map_err(failed)?;
     if let Some(prepared) = prepared {
-        let _ = body.smlib.set(Ok(prepared));
+        // Kept as the body's SMLib form, as its first use would make it.
+        body.smlib.keep(prepared, body.smlib.releases());
     }
     // SMLib's face i is the record's `smlib_order` face and the body's `body_order` face (an
     // empty order is the same one).
@@ -312,7 +313,7 @@ const MAX_LEFT_OUT_ROUNDS: usize = 8;
 /// with the reason it was: a B-rep SMLib refuses is never kept as a mesh of its faces.
 fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std::result::Result<(Part, Vec<Note>), Failure> {
     let _span = solidcraft_profile::span("import", "step.refused_surfaces");
-    let trims = &solidcraft_smlib::pcurves::SmlibTrims;
+    let trims = &solidcraft_smlib::pcurves::SmlibImportTrims;
     let Ok(faces) = solidcore_step::topology::read_faces_with(ex, item, units, trims) else { return Err(refused) };
     let of_solid: std::collections::HashSet<u64> = faces.iter().map(|f| f.face).collect();
     // The faces left out, each with the refusal that names it, in the order they were found.

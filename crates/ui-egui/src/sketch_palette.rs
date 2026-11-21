@@ -354,8 +354,9 @@ pub(crate) fn shared_presentation(app: &SolveApp) -> Option<crate::panel_runtime
     if !editing(app) {
         return image_tool_presentation(app);
     }
+    let active = app.session.active_sketch?;
     let world = crate::open_meshing::session_world(&app.session);
-    let sketch = world.sketch(app.session.active_sketch?)?;
+    let sketch = world.sketch(active)?;
     let solved = sketch.report.shown_ok();
     let title =
         if sketch.name.trim().is_empty() || sketch.name.len() > 256 { app.tr("ui.palette_sketch_options").to_owned() } else { sketch.name.clone() };
@@ -378,8 +379,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     }
     let (opts, remaining, solved, total, geometry, open_ends, untied_ends) = {
+        let Some(active) = app.session.active_sketch else { return };
         let st = crate::open_meshing::session_world(&app.session);
-        let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
+        let Some(ss) = st.sketch(active) else { return };
         (
             ss.sketch.view.clone(),
             ss.report.shown_dof(),
@@ -1039,7 +1041,7 @@ mod tests {
         h.app.start("sketch.rectangle.two_point");
         h.settle();
         let rect = crate::sketch_families::family("sketch.rectangle.two_point").unwrap();
-        assert_eq!(rect.commands.len(), 4);
+        assert_eq!(rect.commands.len(), 5);
         assert_eq!(pressed_modes(&h, rect), ["sketch.rectangle.two_point"]);
         assert!(crate::scenario::handle_at("sketch_palette:feature:sketch.circle.center").is_none(), "only the running family is shown");
     }
