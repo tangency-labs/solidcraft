@@ -109,6 +109,7 @@ impl JsonSchema for SelectionItems {
                 item("edge", &[("body", &text), ("index", &count), ("point", &point)], &[]),
                 item("face", &[("body", &text), ("index", &count), ("point", &point)], &[]),
                 item("feature", &[("id", &count)], &[]),
+                item("drawing", &[("drawing", &text), ("object", &text)], &[]),
                 item("sketch_curve", &[("id", &text)], &[("sketch", &count)]),
                 item("sketch_point", &[("id", &text)], &[]),
                 item("sketch_midpoint", &[("id", &text)], &[]),
@@ -199,7 +200,21 @@ pub struct SelectionDeleteResult {
     /// occurrence deleted.
     pub deleted_joints: Vec<u64>,
     /// The bodies still there that got a Remove feature, by name.
-    pub bodies: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bodies: Option<Vec<String>>,
+    /// Drawing records deleted when a drawing is open.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub views: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dimensions: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub balloons: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub centre_marks: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub centre_lines: Option<Vec<String>>,
     /// The names of the features that would fail (or now fail) to rebuild without what went,
     /// also those after a rolled-back marker.
     pub would_fail: Vec<String>,
