@@ -137,7 +137,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ("ui.template_for_new_part_drawings", "pref_part_drawing_template", &mut p.part_drawing_template, false),
                     ("ui.template_for_new_assembly_drawings", "pref_assembly_drawing_template", &mut p.assembly_drawing_template, true),
                 ] {
-                    let names: Vec<&str> = template::BUILT_INS.iter().copied().filter(|name| super::is_template_for(name, assembly)).collect();
+                    let names = super::templates_for(assembly);
                     let titles: Vec<String> = names.iter().filter_map(|name| template::title(name)).collect();
                     let titles: Vec<&str> = titles.iter().map(String::as_str).collect();
                     ui_kit::row(ui, solidcraft_ui_text::tr(label), |ui| {

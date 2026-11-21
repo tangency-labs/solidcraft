@@ -153,13 +153,8 @@ fn thumbnail(ui: &mut egui::Ui, choice: &Choice) {
 }
 
 fn choose_template(app: &mut SolveApp) {
-    let uid = app.session.uid;
-    app.pick_open_for(&["json"], move |app, path| {
-        if super::active(app)
-            && app.session.uid == uid
-            && app.session.open_drawing.is_none()
-            && let Some(path) = path
-        {
+    super::templates::pick_template_file(app, |app, path| {
+        if app.session.open_drawing.is_none() {
             create(app, json!({"template":path}));
         }
     });

@@ -1,0 +1,102 @@
+{
+  "en": {
+    "ui.drawing_settings.deferred": "Deferred",
+    "ui.drawing_settings.deferred_help": "Deferred views keep their last lines until the drawing is updated.",
+    "ui.drawing_settings.drawing_immediate": "Drawing changes apply immediately. Each change is one drawing undo step.",
+    "ui.drawing_settings.font": "Font",
+    "ui.drawing_settings.language": "Language",
+    "ui.drawing_settings.language_help": "The language of the drawing's text. It picks the fonts for scripts the drawing's font lacks.",
+    "ui.drawing_settings.line_group": "Line group",
+    "ui.drawing_settings.line_group_help": "ISO 128 line widths, named by the wide line. A sheet or a view may choose its own.",
+    "ui.drawing_settings.projection": "Projection",
+    "ui.drawing_settings.updates": "Updates"
+  },
+  "ar": {
+    "ui.drawing_settings.deferred": "مؤجل",
+    "ui.drawing_settings.deferred_help": "تحتفظ المساقط المؤجلة بخطوطها الأخيرة حتى تحديث اللوحة.",
+    "ui.drawing_settings.drawing_immediate": "تُطبّق تغييرات اللوحة فورًا. كل تغيير خطوة تراجع واحدة.",
+    "ui.drawing_settings.font": "الخط",
+    "ui.drawing_settings.language": "اللغة",
+    "ui.drawing_settings.language_help": "لغة نص اللوحة. تختار الخطوط للأنظمة الكتابية التي يفتقر إليها خط اللوحة.",
+    "ui.drawing_settings.line_group": "مجموعة الخطوط",
+    "ui.drawing_settings.line_group_help": "عروض الخطوط وفق ISO 128، مسمّاة بالخط العريض. يمكن للورقة أو المسقط اختيار مجموعة خاصة.",
+    "ui.drawing_settings.projection": "الإسقاط",
+    "ui.drawing_settings.updates": "التحديث"
+  },
+  "de": {
+    "cmd.drawing_set": "Zeichnungseinstellungen",
+    "ui.drawing_panel.auto": "Automatisch",
+    "ui.drawing_settings.deferred": "Aufgeschoben",
+    "ui.drawing_settings.deferred_help": "Aufgeschobene Ansichten behalten ihre letzten Linien, bis die Zeichnung aktualisiert wird.",
+    "ui.drawing_settings.drawing_immediate": "Zeichnungsänderungen gelten sofort. Jede Änderung ist ein Rückgängig-Schritt.",
+    "ui.drawing_settings.font": "Schrift",
+    "ui.drawing_settings.language": "Sprache",
+    "ui.drawing_settings.language_help": "Die Sprache des Zeichnungstexts. Sie wählt die Schriften für Schriftsysteme, die der Zeichnungsschrift fehlen.",
+    "ui.drawing_settings.line_group": "Liniengruppe",
+    "ui.drawing_settings.line_group_help": "Linienbreiten nach ISO 128, benannt nach der breiten Linie. Ein Blatt oder eine Ansicht kann eine eigene wählen.",
+    "ui.drawing_settings.projection": "Projektion",
+    "ui.drawing_settings.updates": "Aktualisierung"
+  },
+  "he": {
+    "ui.drawing_settings.deferred": "דחוי",
+    "ui.drawing_settings.deferred_help": "מבטים דחויים שומרים על הקווים האחרונים שלהם עד שהשרטוט מתעדכן.",
+    "ui.drawing_settings.drawing_immediate": "שינויים בשרטוט חלים מיד. כל שינוי הוא צעד ביטול אחד.",
+    "ui.drawing_settings.font": "גופן",
+    "ui.drawing_settings.language": "שפה",
+    "ui.drawing_settings.language_help": "שפת הטקסט בשרטוט. היא בוחרת גופנים לכתבים שחסרים בגופן השרטוט.",
+    "ui.drawing_settings.line_group": "קבוצת קווים",
+    "ui.drawing_settings.line_group_help": "עובי קווים לפי ISO 128, בשם הקו העבה. גיליון או מבט יכולים לבחור קבוצה משלהם.",
+    "ui.drawing_settings.projection": "הטלה",
+    "ui.drawing_settings.updates": "עדכון"
+  },
+  "ja": {
+    "ui.drawing_settings.deferred": "保留",
+    "ui.drawing_settings.deferred_help": "保留中のビューは、図面を更新するまで最後の線を保ちます。",
+    "ui.drawing_settings.drawing_immediate": "図面の変更はすぐに適用されます。変更ごとに元に戻せます。",
+    "ui.drawing_settings.font": "フォント",
+    "ui.drawing_settings.language": "言語",
+    "ui.drawing_settings.language_help": "図面の文字の言語です。図面のフォントにない文字体系のフォントを選びます。",
+    "ui.drawing_settings.line_group": "線グループ",
+    "ui.drawing_settings.line_group_help": "ISO 128 の線の太さで、太線の幅で呼びます。シートやビューは独自に選べます。",
+    "ui.drawing_settings.projection": "投影法",
+    "ui.drawing_settings.updates": "更新"
+  },
+  "ko": {
+    "cmd.drawing_set": "도면 설정",
+    "ui.drawing_panel.auto": "자동",
+    "ui.drawing_settings.deferred": "지연",
+    "ui.drawing_settings.deferred_help": "지연된 뷰는 도면을 업데이트할 때까지 마지막 선을 유지합니다.",
+    "ui.drawing_settings.drawing_immediate": "도면 변경은 즉시 적용됩니다. 각 변경은 한 번에 실행 취소할 수 있습니다.",
+    "ui.drawing_settings.font": "글꼴",
+    "ui.drawing_settings.language": "언어",
+    "ui.drawing_settings.language_help": "도면 텍스트의 언어입니다. 도면 글꼴에 없는 문자 체계의 글꼴을 고릅니다.",
+    "ui.drawing_settings.line_group": "선 그룹",
+    "ui.drawing_settings.line_group_help": "ISO 128 선 굵기로, 굵은 선의 굵기로 부릅니다. 시트나 뷰는 따로 고를 수 있습니다.",
+    "ui.drawing_settings.projection": "투영법",
+    "ui.drawing_settings.updates": "업데이트"
+  },
+  "vi": {
+    "ui.drawing_settings.deferred": "Hoãn lại",
+    "ui.drawing_settings.deferred_help": "Các hình chiếu hoãn lại giữ nét cuối cùng cho đến khi bản vẽ được cập nhật.",
+    "ui.drawing_settings.drawing_immediate": "Thay đổi bản vẽ được áp dụng ngay. Mỗi thay đổi là một bước hoàn tác.",
+    "ui.drawing_settings.font": "Phông chữ",
+    "ui.drawing_settings.language": "Ngôn ngữ",
+    "ui.drawing_settings.language_help": "Ngôn ngữ của chữ trên bản vẽ. Nó chọn phông cho các hệ chữ mà phông của bản vẽ không có.",
+    "ui.drawing_settings.line_group": "Nhóm nét",
+    "ui.drawing_settings.line_group_help": "Độ dày nét theo ISO 128, đặt tên theo nét đậm. Một tờ hoặc một hình chiếu có thể chọn riêng.",
+    "ui.drawing_settings.projection": "Phép chiếu",
+    "ui.drawing_settings.updates": "Cập nhật"
+  },
+  "zh": {
+    "ui.drawing_settings.deferred": "延迟",
+    "ui.drawing_settings.deferred_help": "延迟的视图保留最后的线条，直到绘图更新。",
+    "ui.drawing_settings.drawing_immediate": "绘图更改立即生效。每次更改都是一个绘图撤销步骤。",
+    "ui.drawing_settings.font": "字体",
+    "ui.drawing_settings.language": "语言",
+    "ui.drawing_settings.language_help": "绘图文字的语言。它为绘图字体缺少的文字选择字体。",
+    "ui.drawing_settings.line_group": "线宽组",
+    "ui.drawing_settings.line_group_help": "ISO 128 线宽，以粗线宽度命名。图纸或视图可以另选。",
+    "ui.drawing_settings.projection": "投影法",
+    "ui.drawing_settings.updates": "更新"
+  }
+}
