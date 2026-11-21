@@ -86,21 +86,48 @@ pub enum TopologyFailure {
     EditingDisabled,
     /// The caller gave no B-rep. [`ErrorKind::InvalidInput`].
     NoBrepGiven,
+    /// The caller gave no region. [`ErrorKind::InvalidInput`].
+    NoRegionGiven,
+    /// The caller gave no edge use. [`ErrorKind::InvalidInput`].
+    NoEdgeuseGiven,
     /// An entity the caller named (a region, a face) is not one of the B-rep's.
     /// [`ErrorKind::InvalidInput`].
     NotInBrep,
+    /// The B-rep the caller gave has no infinite region. [`ErrorKind::InvalidInput`].
+    NoInfiniteRegion,
+    /// The infinite region of the B-rep the caller gave is not first on its region list.
+    /// [`ErrorKind::InvalidInput`].
+    InfiniteRegionNotFirst,
     /// The vertex the caller named to survive is not a vertex of the edge.
     /// [`ErrorKind::InvalidInput`].
     VertexNotOnEdge,
     /// The edge starts and ends at one vertex, which the routine does not take.
     /// [`ErrorKind::InvalidInput`].
     ClosedEdge,
+    /// A corner blend was given `given` edge uses, fewer than the two it needs.
+    /// [`ErrorKind::InvalidInput`].
+    TooFewEdgeuses {
+        /// The number of edge uses given.
+        given: usize,
+    },
+    /// The edge uses given for a corner blend do not join end to end, even once the match
+    /// tolerance has grown past a hundredfold. [`ErrorKind::InvalidInput`].
+    EdgeuseChainGap,
+    /// A face of the caller's body has no surface. [`ErrorKind::InvalidInput`].
+    FaceWithoutSurface,
+    /// A loop the marking crosses has an edge that is a wire, lamina or non-manifold,
+    /// across which the marking cannot follow the face's neighbours.
+    /// [`ErrorKind::Unsupported`].
+    EdgeNotManifold,
     /// A curve the routine needs as a B-spline is of a kind with no B-spline form here.
     /// [`ErrorKind::Unsupported`].
     CurveNotBSpline {
         /// The curve's owner, in the B-rep the routine read it from, where it has one.
         entity: Option<EntityRef>,
     },
+    /// An edge gave no B-spline copy of its curve trimmed to its interval: it has no curve,
+    /// its curve has no B-spline form, or the trim failed. Class `failed`.
+    NoTrimmedBSpline,
     /// A surface has no NURBS form. [`ErrorKind::Unsupported`].
     SurfaceWithoutNurbs {
         /// The face the surface belongs to, where it has one.
@@ -112,9 +139,36 @@ pub enum TopologyFailure {
     /// The edge to squeeze ends a wire at the vertex to delete, so no other edge there can
     /// take the head of the wire's shell. [`ErrorKind::Unsupported`].
     WireEndSqueezed,
+    /// An end of the edge use's UV trim curve, lifted by its face's surface, lies
+    /// `distance` from the edge's vertex or curve end there, past `tolerance` (the face's
+    /// tolerance plus the vertex's or the edge's). [`ErrorKind::NotWithinTolerance`].
+    TrimCurveOffEnd {
+        /// Whether it is the trim curve's end (else its start).
+        at_end: bool,
+        /// Whether it is measured to the vertex (else to the edge curve's end).
+        to_vertex: bool,
+        /// The distance between the lifted end and the vertex or curve end.
+        distance: f64,
+        /// The tolerance it exceeds.
+        tolerance: f64,
+    },
+    /// The side of the curve the point lies on is left open, for the reason given.
+    /// Class `failed`.
+    SideUndecided {
+        /// Why the side is open.
+        why: SideOpen,
+    },
     /// A search for the point's foot on the face's surface found none.
     /// Class `failed`.
     NoFootOnSurface,
+    /// The test vector has zero length: the point to classify lies on the face's surface,
+    /// or the test direction given is zero, so there is no direction to classify along.
+    /// Class `failed`.
+    TestVectorZero,
+    /// The cache of the face's surface (with the face's trim) could not be made; the error
+    /// that stopped it is the cause. Class `failed`; whether it is a defect or a refusal is
+    /// its cause's.
+    SurfaceCacheNotMade,
     /// The edge's curve could be neither lifted nor approximated as a B-spline (the
     /// approximation's failure is the cause). Class `failed`; whether it is a defect or a
     /// refusal is its cause's ([`crate::SolidError::is_defect`] follows the chain).
@@ -141,6 +195,38 @@ pub enum TopologyFailure {
     VertexHasEdges,
 }
 
+/// Why [`TopologyFailure::SideUndecided`] leaves the side of a curve open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SideOpen {
+    /// The point is on the curve, within the tolerance.
+    OnCurve,
+    /// The curve's tangent, seen along the projection direction, is zero.
+    TangentAlongProjection,
+    /// The point lies along the curve's tangent at its foot.
+    AlongTangent,
+    /// The point does not project onto the curve exactly once: the projection found no
+    /// foot (the curve is nearest at an end) or more than one.
+    NotProjectedOnce,
+    /// The point's one foot is an end of the open curve, and the point lies beyond that
+    /// end, on neither side of the curve.
+    BeyondEnd,
+}
+
+impl core::fmt::Display for SideOpen {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::OnCurve => "the point is on the curve",
+            Self::TangentAlongProjection => {
+                "the curve tangent is zero or along the projection direction"
+            }
+            Self::AlongTangent => "the point lies along the curve tangent",
+            Self::NotProjectedOnce => "the point does not project onto the curve exactly once",
+            Self::BeyondEnd => "the point lies beyond the end of the curve",
+        })
+    }
+}
+
 impl TopologyFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
@@ -150,20 +236,34 @@ impl TopologyFailure {
             | Self::Defect { .. }
             | Self::EditingDisabled
             | Self::NotInBrep
+            | Self::NoInfiniteRegion
+            | Self::InfiniteRegionNotFirst
             | Self::VertexNotOnEdge
             | Self::ClosedEdge
+            | Self::TooFewEdgeuses { .. }
+            | Self::EdgeuseChainGap
+            | Self::EdgeNotManifold
             | Self::FaceWithoutEdges
             | Self::WireEndSqueezed
+            | Self::TrimCurveOffEnd { .. }
+            | Self::SideUndecided { .. }
             | Self::NoFootOnSurface
+            | Self::TestVectorZero
             | Self::EdgeNotDeletable
             | Self::InnerLoopsOnBothSides
             | Self::LaminaEdgeIsStrut
             | Self::VertexHasEdges => SM_ERR,
             Self::Missing(_)
+            | Self::NoEdgeuseGiven
+            | Self::FaceWithoutSurface
             | Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
-            | Self::CurveNotApproximated => SM_ERR_NULL_POINTER,
-            Self::InvalidValue(_) | Self::NoBrepGiven => SM_ERR_INVALID_INPUT,
+            | Self::CurveNotApproximated
+            | Self::SurfaceCacheNotMade => SM_ERR_NULL_POINTER,
+            Self::InvalidValue(_)
+            | Self::NoBrepGiven
+            | Self::NoRegionGiven
+            | Self::NoTrimmedBSpline => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) | Self::GatheredBothSides => SM_ERR_ASSERT_FAILURE,
             Self::OutOfMemory(_) => SM_ERR_OUT_OF_MEMORY,
             Self::DropFailed { status } => *status,
@@ -174,27 +274,38 @@ impl TopologyFailure {
     /// [`TopologyFailure::Missing`], [`ErrorKind::InvalidInput`] for
     /// [`TopologyFailure::InvalidValue`] and for a check of the caller's arguments, state or
     /// body, [`ErrorKind::Unsupported`] for a kind or configuration the routine does not
-    /// handle, the drop status's kind for [`TopologyFailure::DropFailed`],
-    /// [`ErrorKind::Failed`] otherwise. [`TopologyFailure::Defect`] is
-    /// [`ErrorKind::StageFailed`], a defect.
+    /// handle, [`ErrorKind::NotWithinTolerance`] for a trim curve end off its edge, the
+    /// drop status's kind for [`TopologyFailure::DropFailed`], [`ErrorKind::Failed`]
+    /// otherwise. [`TopologyFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::Defect { .. } => ErrorKind::StageFailed,
             Self::EditingDisabled
             | Self::NoBrepGiven
+            | Self::NoRegionGiven
+            | Self::NoEdgeuseGiven
             | Self::NotInBrep
+            | Self::NoInfiniteRegion
+            | Self::InfiniteRegionNotFirst
             | Self::VertexNotOnEdge
             | Self::ClosedEdge
+            | Self::TooFewEdgeuses { .. }
+            | Self::EdgeuseChainGap
+            | Self::FaceWithoutSurface
             | Self::VertexHasEdges => ErrorKind::InvalidInput,
-            Self::CurveNotBSpline { .. }
+            Self::EdgeNotManifold
+            | Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
             | Self::FaceWithoutEdges
             | Self::WireEndSqueezed
             | Self::EdgeNotDeletable
             | Self::InnerLoopsOnBothSides
             | Self::LaminaEdgeIsStrut => ErrorKind::Unsupported,
-            Self::CurveNotApproximated => ErrorKind::Failed,
+            Self::TrimCurveOffEnd { .. } => ErrorKind::NotWithinTolerance,
+            Self::CurveNotApproximated | Self::SurfaceCacheNotMade | Self::NoTrimmedBSpline => {
+                ErrorKind::Failed
+            }
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -229,12 +340,34 @@ impl core::fmt::Display for TopologyFailure {
             ),
             Self::EditingDisabled => f.write_str("editing is not enabled on the B-rep"),
             Self::NoBrepGiven => f.write_str("no B-rep was given"),
+            Self::NoRegionGiven => f.write_str("no region was given"),
+            Self::NoEdgeuseGiven => f.write_str("no edge use was given"),
             Self::NotInBrep => f.write_str("the entity given is not one of the B-rep's"),
+            Self::NoInfiniteRegion => f.write_str("the B-rep has no infinite region"),
+            Self::InfiniteRegionNotFirst => {
+                f.write_str("the infinite region is not first on the B-rep's region list")
+            }
             Self::VertexNotOnEdge => f.write_str("the surviving vertex is not on the edge"),
             Self::ClosedEdge => f.write_str("the edge starts and ends at one vertex"),
+            Self::TooFewEdgeuses { given } => {
+                write!(
+                    f,
+                    "a corner blend needs two edge uses or more; {given} given"
+                )
+            }
+            Self::EdgeuseChainGap => {
+                f.write_str("the corner blend's edge uses do not join end to end")
+            }
+            Self::FaceWithoutSurface => f.write_str("a face has no surface"),
+            Self::EdgeNotManifold => {
+                f.write_str("a loop to delete has a wire, lamina or non-manifold edge")
+            }
             Self::CurveNotBSpline { entity: None } => f.write_str("a curve has no B-spline form"),
             Self::CurveNotBSpline { entity: Some(e) } => {
                 write!(f, "a curve has no B-spline form ({e})")
+            }
+            Self::NoTrimmedBSpline => {
+                f.write_str("an edge gave no B-spline of its curve trimmed to its interval")
             }
             Self::SurfaceWithoutNurbs { entity: None } => {
                 f.write_str("a surface has no NURBS form")
@@ -246,8 +379,30 @@ impl core::fmt::Display for TopologyFailure {
             Self::WireEndSqueezed => {
                 f.write_str("the edge to squeeze ends its wire at the vertex to delete")
             }
+            Self::TrimCurveOffEnd {
+                at_end,
+                to_vertex,
+                distance,
+                tolerance,
+            } => write!(
+                f,
+                "the UV trim curve's {} lies {distance} from {}, past the tolerance {tolerance}",
+                if *at_end { "end" } else { "start" },
+                if *to_vertex {
+                    "its vertex"
+                } else {
+                    "the edge curve's end"
+                }
+            ),
+            Self::SideUndecided { why } => write!(f, "{why}"),
             Self::NoFootOnSurface => {
                 f.write_str("the point does not project onto the face's surface")
+            }
+            Self::TestVectorZero => f.write_str(
+                "the test point is on the face's surface, or the test direction is zero",
+            ),
+            Self::SurfaceCacheNotMade => {
+                f.write_str("the cache of the face's surface could not be made")
             }
             Self::CurveNotApproximated => {
                 f.write_str("the edge's curve could not be made a B-spline")
@@ -406,7 +561,7 @@ mod tests {
         let samples = [
             (
                 "topology::brep::p1",
-                TopologyFailure::InvalidValue("no new infinite region was given"),
+                TopologyFailure::NoRegionGiven,
                 SM_ERR_INVALID_INPUT,
             ),
             (
@@ -475,13 +630,46 @@ mod tests {
                 SM_ERR_INVALID_INPUT,
                 K::InvalidInput,
             ),
+            (
+                TopologyFailure::NoRegionGiven,
+                SM_ERR_INVALID_INPUT,
+                K::InvalidInput,
+            ),
+            (
+                TopologyFailure::NoEdgeuseGiven,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
             (TopologyFailure::NotInBrep, SM_ERR, K::InvalidInput),
+            (TopologyFailure::NoInfiniteRegion, SM_ERR, K::InvalidInput),
+            (
+                TopologyFailure::InfiniteRegionNotFirst,
+                SM_ERR,
+                K::InvalidInput,
+            ),
             (TopologyFailure::VertexNotOnEdge, SM_ERR, K::InvalidInput),
             (TopologyFailure::ClosedEdge, SM_ERR, K::InvalidInput),
+            (
+                TopologyFailure::TooFewEdgeuses { given: 1 },
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (TopologyFailure::EdgeuseChainGap, SM_ERR, K::InvalidInput),
+            (
+                TopologyFailure::FaceWithoutSurface,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (TopologyFailure::EdgeNotManifold, SM_ERR, K::Unsupported),
             (
                 TopologyFailure::CurveNotBSpline { entity: None },
                 SM_ERR_NULL_POINTER,
                 K::Unsupported,
+            ),
+            (
+                TopologyFailure::NoTrimmedBSpline,
+                SM_ERR_INVALID_INPUT,
+                K::Failed,
             ),
             (
                 TopologyFailure::SurfaceWithoutNurbs { entity: None },
@@ -490,7 +678,30 @@ mod tests {
             ),
             (TopologyFailure::FaceWithoutEdges, SM_ERR, K::Unsupported),
             (TopologyFailure::WireEndSqueezed, SM_ERR, K::Unsupported),
+            (
+                TopologyFailure::TrimCurveOffEnd {
+                    at_end: true,
+                    to_vertex: false,
+                    distance: 1.0,
+                    tolerance: 0.5,
+                },
+                SM_ERR,
+                K::NotWithinTolerance,
+            ),
+            (
+                TopologyFailure::SideUndecided {
+                    why: SideOpen::NotProjectedOnce,
+                },
+                SM_ERR,
+                K::Failed,
+            ),
             (TopologyFailure::NoFootOnSurface, SM_ERR, K::Failed),
+            (TopologyFailure::TestVectorZero, SM_ERR, K::Failed),
+            (
+                TopologyFailure::SurfaceCacheNotMade,
+                SM_ERR_NULL_POINTER,
+                K::Failed,
+            ),
             (
                 TopologyFailure::CurveNotApproximated,
                 SM_ERR_NULL_POINTER,
@@ -612,7 +823,6 @@ mod tests {
             ("solidcore/src/topology/brep/cutting.rs", 11),
             ("solidcore/src/topology/brep/local_operation.rs", 5),
             ("solidcore/src/topology/brep/mirror.rs", 2),
-            ("solidcore/src/topology/brep/p1.rs", 42),
             ("solidcore/src/topology/brep/p10.rs", 10),
             ("solidcore/src/topology/brep/p2.rs", 16),
             ("solidcore/src/topology/brep/p5.rs", 61),
