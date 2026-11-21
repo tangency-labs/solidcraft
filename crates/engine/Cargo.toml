@@ -85,6 +85,8 @@ solidcraft-sketch = { workspace = true, features = ["solver-profiling"] }
 solidcraft-develop = { workspace = true }
 # Sheet PDF tests inflate the pages' content to read them back.
 flate2 = { workspace = true }
+# A temporary folder per test, removed when the test ends, a failure included.
+tempfile = "3.27"
 
 [[example]]
 name = "render_resource_workflow"

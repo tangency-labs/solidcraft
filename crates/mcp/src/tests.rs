@@ -2955,10 +2955,10 @@ fn compact_reply_counts_repeated_mesh_warnings() {
 /// to a file is not repeated in the reply; with `verbose: true` everything stays.
 #[test]
 fn compact_batch_reply_of_parameters_export_and_script() {
-    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-quiet-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let stl = dir.join("disc.stl");
-    let script = dir.join("disc.json");
+    // A new folder for this test alone, removed however the test ends; each run writes its own
+    // files, so the compact run's checks read what the compact run wrote (#19249).
+    let dir = tempfile::Builder::new().prefix("solidcraft-mcp-quiet-").tempdir_in(solidcraft_engine::io::vfs::temp_dir()).unwrap();
+    let (stl, script) = (dir.path().join("disc.stl"), dir.path().join("disc.json"));
     let steps = json!([
         {"command": "parameters.add", "params": {"name": "R", "expression": "20 mm"}},
         {"command": "parameters.add", "params": {"name": "H", "expression": "8 mm"}},
@@ -2970,12 +2970,16 @@ fn compact_batch_reply_of_parameters_export_and_script() {
         {"command": "file.export_stl", "params": {"path": stl}},
         {"command": "timeline.export_script", "params": {"path": script}},
     ]);
+    // The verbose run writes the same steps to files of its own.
+    let mut verbose_steps = steps.clone();
+    assert_eq!((&steps[7]["command"], &steps[8]["command"]), (&json!("file.export_stl"), &json!("timeline.export_script")));
+    verbose_steps[7]["params"]["path"] = json!(dir.path().join("disc-verbose.stl"));
+    verbose_steps[8]["params"]["path"] = json!(dir.path().join("disc-verbose.json"));
     let mut s = server();
-    let full = tool(&mut s, "batch", json!({"commands": steps}));
+    let full = tool(&mut s, "batch", json!({"commands": verbose_steps}));
     tool(&mut s, "new_design", json!({}));
     let r = tool(&mut s, "batch", json!({"commands": steps, "verbose": false}));
     let written = std::fs::read_to_string(&script).unwrap_or_default();
-    let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(full["results"][0]["display_value"], json!(20.0), "{full}");
     assert_eq!(r["results"][0], json!({"name": "R", "unit": "mm", "value": 20.0}), "{r}");
     assert!(r["results"][2].get("warning").is_none() && full["results"][2]["warning"].is_null(), "a null warning is left out: {r}");
