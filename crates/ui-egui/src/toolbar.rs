@@ -696,6 +696,11 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     }
     rows.push(FileRow::Separator);
     rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
+    // The open drawing's own settings, beside the design's: only while a drawing is open in Drawing.
+    if crate::drawing_workspace::drawing_settings::available(app) {
+        let id = crate::drawing_workspace::drawing_settings::COMMAND;
+        rows.push(row(id, &format!("{}…", app.tr("cmd.drawing_set")), "", "settings", shown));
+    }
     rows.push(FileRow::Separator);
     // Plugins… opens Preferences on the Plugins page: install, turn on or off, and remove plugins
     // there. The web build runs no plugins.
@@ -753,6 +758,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "file.export_sdf" => FileAction::Command("file.export_sdf").run(app),
         "document.metadata" => FileAction::Command("document.metadata").run(app),
         "drawing.print" => app.start(id),
+        "drawing.set" => FileAction::Command("drawing.set").run(app),
         "pointcloud.insert" | "file.send_to_slicer" => app.start(id),
         "save" => FileAction::Save.run(app),
         "save_as" => FileAction::SaveAs.run(app),
