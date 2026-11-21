@@ -109,14 +109,12 @@ fn curve_of(b: &Brep, e: EdgeId) -> Result<&Curve> {
 
 /// The tangent of an `Evaluate(t, 1, ..)` result.
 fn tangent(pv: &[Vec3]) -> Result<Vec3> {
-    pv.get(1)
-        .copied()
-        .ok_or_else(|| {
-            defect(
-                "the curve's evaluation returned no first derivative, though an evaluation \
-                 that succeeds returns the point and each derivative asked for",
-            )
-        })
+    pv.get(1).copied().ok_or_else(|| {
+        defect(
+            "the curve's evaluation returned no first derivative, though an evaluation \
+             that succeeds returns the point and each derivative asked for",
+        )
+    })
 }
 
 fn set_none<T>(list: &mut [Option<T>], i: usize) -> Result<()> {

@@ -135,9 +135,7 @@ impl HealFailure {
             | Self::NotInBrep
             | Self::FacesDoNotMatch => ErrorKind::InvalidInput,
             Self::DegenerateEdgeInterval => ErrorKind::Degenerate,
-            Self::VerticesApart { .. } | Self::EdgesApart { .. } => {
-                ErrorKind::NotWithinTolerance
-            }
+            Self::VerticesApart { .. } | Self::EdgesApart { .. } => ErrorKind::NotWithinTolerance,
             Self::SplitPointAtEnd | Self::EdgesNotGlued => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
@@ -206,14 +204,6 @@ impl crate::SolidError {
         Self::heal(operation, HealFailure::Failed(what))
     }
 
-    /// [`crate::SolidError::Failed`] for something a healing or stitching step needs
-    /// that is not there, as the phrase says, with status [`SM_ERR_NULL_POINTER`]
-    /// (upstream `NER(ptr)` on a `NULL` pointer).
-    #[must_use]
-    pub(crate) fn heal_missing(operation: &'static str, what: &'static str) -> Self {
-        Self::heal(operation, HealFailure::Missing(what))
-    }
-
     /// The healing failure behind this error, for a [`crate::SolidError::Failed`] with a
     /// [`Reason::Heal`].
     #[must_use]
@@ -263,7 +253,7 @@ mod tests {
             assert_eq!(typed.heal_failure(), Some(&failure));
         }
         assert_eq!(
-            SolidError::heal_missing("heal::op", "the edge").to_string(),
+            SolidError::heal("heal::op", HealFailure::Missing("the edge")).to_string(),
             "heal::op: the edge is missing"
         );
         assert_eq!(
@@ -394,7 +384,6 @@ mod tests {
                 Builder::Variant("HealFailure", "Missing"),
                 Builder::Variant("HealFailure", "Inconsistent"),
                 Builder::Method("heal_failed", Some(1)),
-                Builder::Method("heal_missing", Some(1)),
             ],
             wrappers: Wrappers::Phrase,
         };

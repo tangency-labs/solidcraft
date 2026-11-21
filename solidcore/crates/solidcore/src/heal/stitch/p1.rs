@@ -550,10 +550,7 @@ pub fn check_interior_edge(k: &Kernel, b: &Brep, e: EdgeId, t: f64, tol: f64) ->
     }
 
     let pts = curve_of(b, e)?.evaluate(k, t, 1, false, true)?;
-    let crv_pt = pts
-        .first()
-        .copied()
-        .ok_or_else(|| defect(NO_POINT))?;
+    let crv_pt = pts.first().copied().ok_or_else(|| defect(NO_POINT))?;
     let param_len = pts
         .get(1)
         .copied()
@@ -1814,10 +1811,10 @@ impl<'c> Stitch<'c> {
                                 continue;
                             }
                             // (fork e7ebc8d passes the failed inversion on: `SER`)
-                            let norm_param =
-                                ivl.inversion(dropped.parameter).parameter.ok_or_else(|| {
-                                    named(HealFailure::DegenerateEdgeInterval)
-                                })?;
+                            let norm_param = ivl
+                                .inversion(dropped.parameter)
+                                .parameter
+                                .ok_or_else(|| named(HealFailure::DegenerateEdgeInterval))?;
                             if norm_param < 0.02 || norm_param > 0.98 {
                                 continue;
                             }
@@ -2429,9 +2426,7 @@ impl<'c> Stitch<'c> {
 
 /// The tangent of an `Evaluate(t, 1, ..)` result.
 fn tangent(pv: &[Vec3]) -> Result<Vec3> {
-    pv.get(1)
-        .copied()
-        .ok_or_else(|| defect(NO_TANGENT))
+    pv.get(1).copied().ok_or_else(|| defect(NO_TANGENT))
 }
 
 fn set_none<T>(list: &mut [Option<T>], i: usize) -> Result<()> {
@@ -3269,11 +3264,8 @@ mod tests {
             assert_eq!(err.kind(), ErrorKind::InvalidInput);
         }
         let mut stitch = Stitch::new(&mut cb, 0.01, false, false);
-        let lists: [(&[FaceId], &[FaceId]); 3] = [
-            (&[], &[]),
-            (&faces[..1], &[]),
-            (&faces[..1], &faces[1..3]),
-        ];
+        let lists: [(&[FaceId], &[FaceId]); 3] =
+            [(&[], &[]), (&faces[..1], &[]), (&faces[..1], &faces[1..3])];
         for (keep, delete) in lists {
             let err = stitch
                 .do_simple_face_stitch(&mut k, &mut b, keep, delete)
