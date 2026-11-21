@@ -988,6 +988,7 @@ fn a_revolve_to_its_own_part_keeps_its_result_when_another_part_moves() {
         angle2: None,
         symmetric: false,
         convention: Default::default(),
+        join_profile_arcs: false,
         to: Some(serde_json::from_value(serde_json::json!([5.0, 5.0, 4.0])).unwrap()),
     };
     let revolve = add_named(&mut doc, kind);

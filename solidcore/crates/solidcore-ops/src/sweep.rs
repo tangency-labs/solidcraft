@@ -662,6 +662,109 @@ fn arc_definition(c: &Curve) -> Option<ArcDefinition> {
     }
 }
 
+/// Join contiguous pieces of the same circular profile arc before sweeping one wall over them.
+///
+/// Only arcs with identical circle definitions are candidates. The kernel's round-path query
+/// must certify the whole run on its first circle, including its accumulated end angles.
+/// Other curves and runs not certified are kept as given. Closed loops are handled separately,
+/// including runs crossing a loop's starting index. A single curve keeps its seam unchanged.
+/// Callers retain the original profile for construction history.
+///
+/// # Errors
+/// [`Error::Argument`] for invalid or oversized curve lists; errors of the kernel queries and
+/// arc construction.
+pub fn join_profile_arcs(profile: &[Curve]) -> Result<Vec<Curve>> {
+    fn same_circle(a: &Curve, b: &Curve) -> bool {
+        matches!((a, b), (
+            Curve::Arc { center: a, axis: u, reference: x, radius: r, .. },
+            Curve::Arc { center: b, axis: v, reference: y, radius: s, .. }
+        ) if a == b && u == v && x == y && r == s)
+    }
+    run("join_profile_arcs", |k| {
+        let made = parsed!(parse(k, profile));
+        let tol = context_zone_tol_3d(k, None, SmallTopoType::NormalSize);
+        let piece = |i: usize| {
+            made.pieces
+                .get(i)
+                .ok_or_else(|| SolidError::invalid_input("join_profile_arcs", "piece out of range"))
+        };
+        let meets = |i, j| {
+            arc::curves_meet(k, piece(i)?.curve(), piece(j)?.curve(), tol).map(Verdict::is_yes)
+        };
+        let joins = |i, j| -> solidcore::Result<bool> {
+            Ok(
+                matches!(profile.get(i).zip(profile.get(j)), Some((a, b)) if same_circle(a, b))
+                    && meets(i, j)?,
+            )
+        };
+        let mut out = Vec::new();
+        let mut first = 0;
+        while first < profile.len() {
+            let mut last = first;
+            while last + 1 < profile.len() && !meets(last, first)? && meets(last, last + 1)? {
+                last += 1;
+            }
+            let len = last - first + 1;
+            let at = |i: usize| first + i % len;
+            let mut begin = 0;
+            if len > 1 && meets(last, first)? {
+                while begin < len && joins(at(begin + len - 1), at(begin))? {
+                    begin += 1;
+                }
+                if begin == len {
+                    begin = 0;
+                }
+            }
+            let mut loop_out = Vec::new();
+            let mut merged = false;
+            let mut used = 0;
+            while used < len {
+                let mut count = 1;
+                while used + count < len
+                    && joins(at(begin + used + count - 1), at(begin + used + count))?
+                {
+                    count += 1;
+                }
+                let indices = (0..count).map(|j| at(begin + used + j));
+                if count > 1 {
+                    let pieces = indices
+                        .clone()
+                        .map(|i| piece(i).cloned())
+                        .collect::<solidcore::Result<Vec<_>>>()?;
+                    let tolerances = PathTolerances { gap: tol, ..PATH };
+                    if matches!(
+                        path::path_as_arc(k, &pieces, &tolerances)?,
+                        PathShape::Is(_)
+                    ) {
+                        let (d, _) = arc::join_arcs(k, &pieces, Join::Open, tol)?;
+                        loop_out.push(Curve::Arc {
+                            center: [d.centre.x, d.centre.y, d.centre.z],
+                            axis: [d.axis.x, d.axis.y, d.axis.z],
+                            reference: [d.reference.x, d.reference.y, d.reference.z],
+                            radius: d.radius,
+                            start: d.start,
+                            end: d.end,
+                        });
+                        merged = true;
+                    } else {
+                        loop_out.extend(indices.filter_map(|i| profile.get(i)).cloned());
+                    }
+                } else {
+                    loop_out.extend(indices.filter_map(|i| profile.get(i)).cloned());
+                }
+                used += count;
+            }
+            if merged {
+                out.extend(loop_out);
+            } else {
+                out.extend(profile.get(first..=last).into_iter().flatten().cloned());
+            }
+            first = last + 1;
+        }
+        Ok(Ok(out))
+    })?
+}
+
 /// The planar `profile` extruded `distance` along `direction` (any length; square to the
 /// profile's plane), straight (`draft` 0) or drafted (`draft` radians; positive inward), its
 /// corners closed by `corner`. The arcs of a straight extrusion's profile are taken as given:
