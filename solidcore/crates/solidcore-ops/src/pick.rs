@@ -281,7 +281,9 @@ fn stored_tolerance(body: &Body, record_tolerance: f64) -> Result<f64> {
 pub fn stored_face(record: &Record, face: usize, point: [f64; 3]) -> Result<bool> {
     let (body, order) = Body::from_record(record, true)?;
     let tolerance = stored_tolerance(&body, record.tolerance)?;
-    Ok(body.point_on_face(&order, face, point, tolerance)?.is_some())
+    Ok(body
+        .point_on_face(&order, face, point, tolerance)?
+        .is_some())
 }
 
 /// Whether a stored edge index and approximate hit still name that exact trimmed curve.
@@ -405,7 +407,10 @@ mod tests {
     fn stored_hits_validate_the_named_trimmed_entity_with_exact_scale() {
         let body = make_box([0.0; 3], [3.0, 4.0, 12.0]).unwrap();
         let (record, order) = body.to_record().unwrap();
-        assert_eq!(stored_tolerance(&body, record.tolerance).unwrap(), 13.0 * 1e-3);
+        assert_eq!(
+            stored_tolerance(&body, record.tolerance).unwrap(),
+            13.0 * 1e-3
+        );
         let face_point = [1.5, 2.0, 0.0];
         let face = (0..record.faces.len())
             .find(|&face| {
@@ -418,11 +423,9 @@ mod tests {
         assert!(stored_face(&record, face, [1.5, 2.0, 0.01]).unwrap());
         assert!(!stored_face(&record, face, [1.5, 2.0, 0.02]).unwrap());
         assert!(!stored_face(&record, face, [4.0, 2.0, 0.0]).unwrap());
-        assert!(
-            (0..record.faces.len())
-                .filter(|&other| other != face)
-                .all(|other| !stored_face(&record, other, face_point).unwrap())
-        );
+        assert!((0..record.faces.len())
+            .filter(|&other| other != face)
+            .all(|other| !stored_face(&record, other, face_point).unwrap()));
 
         let edge_point = [1.5, 0.0, 0.0];
         let edge = (0..record.edges.len())
@@ -436,11 +439,9 @@ mod tests {
         assert!(stored_edge(&record, edge, [1.5, 0.01, 0.0]).unwrap());
         assert!(!stored_edge(&record, edge, [1.5, 0.02, 0.0]).unwrap());
         assert!(!stored_edge(&record, edge, [4.0, 0.0, 0.0]).unwrap());
-        assert!(
-            (0..record.edges.len())
-                .filter(|&other| other != edge)
-                .all(|other| !stored_edge(&record, other, edge_point).unwrap())
-        );
+        assert!((0..record.edges.len())
+            .filter(|&other| other != edge)
+            .all(|other| !stored_edge(&record, other, edge_point).unwrap()));
         assert_eq!(
             stored_face(&record, record.faces.len(), face_point),
             Err(Error::Argument)
