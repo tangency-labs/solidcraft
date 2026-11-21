@@ -2373,3 +2373,21 @@ fn lateral_offset_controls_do_not_change_assembly_constraint_rules() {
     assert_eq!(harness.app.session.doc.assembly.joints[0].constraint, None);
     assert_eq!(harness.app.session.doc.assembly.joints[0].offset_xy, [12.0, 0.0]);
 }
+
+/// A joint origin clicked inside a face, a few points from its edge, is the face: an edge is taken
+/// only within `JOINT_EDGE_REACH` of the pointer, not the 6 points other picks use (#18255).
+#[test]
+fn a_joint_origin_a_few_points_inside_a_face_is_the_face() {
+    let pick_at = |dy: f64| {
+        let mut h = joint_picking_component_1();
+        let at = h.call("ui.at", json!({ "world": [15, 0, 10] }))["result"].clone();
+        let p = json!([at[0].as_f64().unwrap(), at[1].as_f64().unwrap() + dy]);
+        h.step(&json!({ "move": p })).unwrap();
+        h.step(&json!({ "click": p })).unwrap();
+        h.app.dialog.as_ref().unwrap().inputs[0].items.clone()
+    };
+    let near = pick_at(1.5);
+    assert!(matches!(near.as_slice(), [Sel::Edge { .. } | Sel::Vertex { .. }]), "right on the edge: {near:?}");
+    let inside = pick_at(4.5);
+    assert!(matches!(inside.as_slice(), [Sel::Face { body, .. }] if body == "Body1"), "inside the face: {inside:?}");
+}

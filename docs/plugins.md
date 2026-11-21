@@ -212,6 +212,113 @@ themselves; to show words instead, list the options as `oneOf`, each `{"const": 
 ]}
 ```
 
+### Conditional fields, choices and defaults
+
+Command dialogs evaluate declarative conditions on sibling scalar properties. Changing a field
+runs no plugin Wasm. The same evaluator checks agent, CLI and script inputs before execution.
+For example, a cabinet command can show either shelves or drawers:
+
+```json
+"input_schema": {
+  "type": "object",
+  "required": ["storage", "shelf_count", "drawer_count"],
+  "properties": {
+    "storage": {
+      "type": "string", "title": "Inside", "default": "shelves",
+      "oneOf": [
+        {"const": "shelves", "title": "Shelves"},
+        {"const": "drawers", "title": "Drawers"}
+      ]
+    },
+    "shelf_count": {
+      "type": "integer", "title": "Shelves", "default": 3, "minimum": 1,
+      "x-solidcraft-visible-when": {"field": "storage", "eq": "shelves"}
+    },
+    "drawer_count": {
+      "type": "integer", "title": "Drawers", "default": 4, "minimum": 1,
+      "x-solidcraft-visible-when": {"field": "storage", "eq": "drawers"}
+    },
+    "has_back": {"type": "boolean", "title": "Back panel", "default": true},
+    "back_thickness": {
+      "type": "number", "title": "Back thickness", "default": 6.0,
+      "x-solidcraft-enabled-when": {"field": "has_back", "eq": true}
+    }
+  }
+}
+```
+
+A false `x-solidcraft-visible-when` hides the row and omits its key from Run and live preview,
+including when a program supplies that hidden key. A hidden property is not required. A false
+`x-solidcraft-enabled-when` leaves the row visible and greyed; its value is kept and sent.
+
+Conditions have exactly one of these forms, with no expression parser:
+
+- `{"field": "storage", "eq": "drawers"}` compares a sibling's scalar value.
+- `{"field": "storage", "in": ["shelves", "drawers"]}` matches any listed value.
+- `{"all": [condition, ...]}` requires every condition; an empty list is true.
+- `{"any": [condition, ...]}` requires at least one condition; an empty list is false.
+- `{"not": condition}` reverses a condition.
+
+A missing or hidden controller matches neither `eq` nor `in`. Controllers must be sibling
+properties with scalar types (`string`, `boolean`, `number`, `integer` or `null`). Conditions
+cannot name nested paths. Missing properties, non-scalar controllers, values outside a
+controller's type, enum, `oneOf` or bounds, malformed conditions and dependency cycles are
+rejected when loading the plugin. `solidcraft-cli plugin check` reports these errors without
+running Wasm. An invalid schema leaves the dialog's Run button off with the existing CLI/agent
+note. Conditions are bounded in depth and size.
+
+Hidden-key removal also follows the applicable `oneOf` and `anyOf` object branches, including
+nested objects and arrays. A composition containing conditional object rules must have one
+branch, or object branches distinguished pairwise by a required, unconditional scalar property
+with disjoint `const` or `enum` values. The parent or every branch must declare `"type":"object"`
+for these discriminators. This makes the applicable branch unambiguous before hidden keys are
+removed. Conditional object rules inside ambiguous compositions or `allOf` are rejected
+at load time with an `invalid_manifest` error naming the composition's schema location. Scalar
+choice options using `x-solidcraft-when` remain supported. The 1,024-property condition limit
+applies only to object scopes declaring conditional rules; plain object scopes skip that limit.
+
+All applicable scopes share the same visible controller values. When any scope hides a
+controller, conditions in every scope see it as missing. Required checks and choice filters
+use that same view. Loading checks visibility dependency cycles across each combination of
+enclosing scopes and selected branches, including nested objects and array items. Mutually
+exclusive branches are checked separately.
+
+Put `x-solidcraft-when` on a `oneOf` option to offer it only when its condition is true. If the
+current choice becomes unavailable, the dialog selects a matching conditional default, or the
+first available option in schema order. With no available option, the choice is empty; a required
+choice keeps Run off. A program supplying an unavailable choice gets an `invalid_input` error
+naming that field.
+
+Conditional defaults use the first matching rule in `x-solidcraft-defaults`. The dialog applies
+it on opening and when a controlling value changes, until the user edits that field. Custom
+values survive later controller changes, except that unavailable choices must still reset.
+Programs provide their own values; conditional defaults do not overwrite program inputs.
+Command inputs and importer options with these annotations opt into validation and hidden-key
+removal before direct calls.
+Direct calls to schemas without conditional annotations keep their existing pass-through behaviour.
+For example:
+
+```json
+"units": {"type": "string", "enum": ["mm", "in"], "default": "mm"},
+"size": {
+  "type": "string", "default": "metric", "oneOf": [
+    {"const": "metric", "title": "M6", "x-solidcraft-when": {"field": "units", "eq": "mm"}},
+    {"const": "imperial", "title": "1/4 inch", "x-solidcraft-when": {"field": "units", "eq": "in"}}
+  ]
+},
+"clearance": {
+  "type": "number", "default": 6.5,
+  "x-solidcraft-defaults": [
+    {"when": {"field": "units", "eq": "mm"}, "value": 6.5},
+    {"when": {"field": "units", "eq": "in"}, "value": 0.25}
+  ]
+}
+```
+
+These numeric defaults are plugin arguments: the plugin decides how to interpret the selected
+units. Every conditional default must satisfy the property's base schema. Defaults and option
+filters also participate in cycle detection.
+
 ### Selection fields
 
 A field can take geometry picked in the viewport, with the same pick control as Extrude's
@@ -298,6 +405,12 @@ relative path to an `.svg` file inside the package:
   and the command works as before.
 - Images are not part of the `approval` hash: changing one changes only what is drawn.
 
+### View commands
+
+After Run commits the result, the app applies the run's last view command. `view.fit`
+frames the result, keeping the view direction; `view.home` frames it from the home direction.
+A run with no view command leaves the camera unchanged.
+
 ### Preview
 
 A command entry that edits the design is previewed the way native tools are: while its dialog's
@@ -313,6 +426,11 @@ The dialog has a **Preview** box, on when it opens; with it off, nothing runs un
 - It runs again only when the parameters or the design change, under the plugin's own fuel,
   memory and deadline limits, off the window's thread. A run left behind by newer inputs is
   dropped.
+- When the first successful preview is drawn, the app applies that run's last view command once
+  if it is `view.fit` or `view.home`. Fit includes previewed sketch geometry when there are no
+  bodies; even an empty result consumes this first-preview action. Later field changes leave the
+  camera alone, so you can move it freely. A run with no view command leaves the camera unchanged.
+  Reopening the dialog starts fresh: its first preview applies its view command again.
 - The most recently opened dialog on the design is previewed (the one picking in the viewport,
   when one is). While a native tool is open, its own preview is the one shown. Read entries and
   importers are not previewed.

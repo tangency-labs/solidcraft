@@ -525,6 +525,7 @@ pub(crate) fn modifier_motion(
     if previous.map(|(m, _)| m) != next.map(|(m, _)| m) {
         app.viewport.orbit_pivot = None;
         app.viewport.orbit_pivot_at = None;
+        app.viewport.orbit_mark = None;
         app.viewport.orbit_from = None;
         app.viewport.orbit_free = None;
     }
@@ -764,6 +765,23 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         )
     });
     let hover = hover.filter(|p| !crate::frame::dock_dragging(ui.ctx()) && !crate::shell::covered(app, *p));
+    // A drag that starts this frame starts where its button went down: the pointer's motion before
+    // it (frames skipped over a still view, #17104, bring it all in one) is not the drag's (#19477).
+    // Only a start: a button pressed while another is already held keeps the running drag's motion.
+    let delta = ui
+        .input(|i| {
+            let buttons = [
+                egui::PointerButton::Primary,
+                egui::PointerButton::Secondary,
+                egui::PointerButton::Middle,
+                egui::PointerButton::Extra1,
+                egui::PointerButton::Extra2,
+            ];
+            let starts = i.pointer.any_pressed() && buttons.iter().all(|b| !i.pointer.button_down(*b) || i.pointer.button_pressed(*b));
+            starts.then(|| i.pointer.press_origin().zip(i.pointer.latest_pos()).map(|(from, to)| to - from)).flatten()
+        })
+        .filter(|d| d.is_finite())
+        .unwrap_or(delta);
     let delta = unwrapped_delta(app, delta);
     // The right button belongs to the marking menu while it is open.
     let secondary_down = secondary_down && app.viewport.context_menu.is_none();
@@ -771,20 +789,16 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     let axes = if caps.orbit { axis_rect(app, input_rect) } else { Rect::NOTHING };
     // So is the View angles readout under it (#6032).
     let readout = crate::view_angles::readout_rect(ui.ctx(), input_rect).filter(|_| caps.orbit && app.preferences.show_view_angles);
+    let nav_bar = app.viewport.layout.as_ref().filter(|layout| layout.viewport == input_rect).map_or(Rect::NOTHING, |layout| layout.navigation);
+    let on_control = |p| axes.contains(p) || nav_bar.contains(p) || readout.is_some_and(|r| r.contains(p));
     // Floating windows and menus own input over the model, including wheel navigation. egui's
     // hit test also counts the model as under the pointer a few points past its own edge and
     // inside a window's or a list's edge (#678), so the pointer must be in the viewport too,
     // with no window or menu above it.
-    let inside = ui.is_enabled()
-        && resp.contains_pointer()
-        && ui.rect_contains_pointer(input_rect)
-        && hover.is_some_and(|p| !axes.contains(p) && !readout.is_some_and(|r| r.contains(p)));
-    // A touch release can remove hover in the same frame. Its response owns the full input
-    // surface, including letterbox outside the camera's projection rectangle.
+    let inside = ui.is_enabled() && resp.contains_pointer() && ui.rect_contains_pointer(input_rect) && hover.is_some_and(|p| !on_control(p));
+    // A touch release can remove hover in the same frame.
     let inside = if ui.input(|i| i.pointer.hover_pos().is_none()) {
-        ui.is_enabled()
-            && (resp.clicked() || resp.drag_stopped())
-            && hover.is_some_and(|p| resp.rect.contains(p) && !axes.contains(p) && !readout.is_some_and(|r| r.contains(p)))
+        ui.is_enabled() && (resp.clicked() || resp.drag_stopped()) && hover.is_some_and(|p| resp.rect.contains(p) && !on_control(p))
     } else {
         inside
     };
@@ -797,16 +811,15 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
             && !crate::value_step::enabled(ui.ctx())
             && !hover.is_some_and(|p| crate::dim_view::window::covers(ui.ctx(), p))
             && hover.is_some_and(|p| {
-                input_rect.contains(p)
-                    && !axes.contains(p)
-                    && !readout.is_some_and(|r| r.contains(p))
-                    && ui.ctx().layer_id_at(p).is_some_and(crate::ui_kit::container::is_canvas)
+                input_rect.contains(p) && !on_control(p) && ui.ctx().layer_id_at(p).is_some_and(crate::ui_kit::container::is_canvas)
             }));
     app.viewport.mouse = hover.filter(|_| inside);
     // Sketch snap suppression is set once in `viewport::show` from preferences.
     middle_double_click(app, ui, inside);
     // The 3D mouse's motion this frame, with what this page's camera may do.
-    device(app, rect, caps);
+    if !app.viewport.card {
+        device(app, rect, caps);
+    }
 
     // Pencil mode assigns finger gestures to navigation even when the separate preference is off.
     let touch_enabled = (app.preferences.touchscreen_navigation || app.preferences.pencil_mode)
@@ -1029,9 +1042,9 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     };
     // The full canvas response can report a drag whose press belonged to a panel above it.
     // A camera drag that started in free space keeps its capture when it crosses a panel.
-    let press_in_view = ui.input(|input| input.pointer.press_origin()).is_some_and(|at| {
-        input_rect.contains(at) && !axes.contains(at) && !readout.is_some_and(|rect| rect.contains(at)) && !crate::shell::covered(app, at)
-    });
+    let press_in_view = ui
+        .input(|input| input.pointer.press_origin())
+        .is_some_and(|at| input_rect.contains(at) && !on_control(at) && !crate::shell::covered(app, at));
     let captured = button.is_some_and(|button| app.viewport.orbit_from.is_some() || app.viewport.button_nav.is_some_and(|(held, _)| held == button));
     let dragging = captured || (press_in_view && (resp.dragged() || (inside && (button.is_some() || (space_pan && primary_down)))));
     // A middle or right drag keeps the mode it started with until its button is released, as a
@@ -1091,6 +1104,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
                 let at = hover.unwrap_or(rect.center()) - delta;
                 let (pivot, kept) = orbit_pivot(app, rect, (app.viewport.orbit_pivot, app.viewport.orbit_pivot_at), at);
                 (app.viewport.orbit_pivot, app.viewport.orbit_pivot_at) = kept;
+                app.viewport.orbit_mark = orbit_mark(app, pivot);
                 if let Some(pivot) = pivot {
                     params["pivot"] = json!(pivot);
                 }
@@ -1142,6 +1156,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     if !dragging && motion.is_none() && !(trackpad_orbit && app.viewport.trackpad_gesture) {
         app.viewport.orbit_pivot = None;
         app.viewport.orbit_pivot_at = None;
+        app.viewport.orbit_mark = None;
         app.viewport.orbit_from = None;
         app.viewport.cursor_wrap = None;
     }
@@ -1156,7 +1171,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         let (pressed, key, dt) = ui.input(|i| {
             (
                 i.pointer.any_pressed() && inside && !i.pointer.press_origin().is_some_and(|p| bar.contains(p)),
-                i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. })),
+                !app.viewport.card && i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. })),
                 i.stable_dt,
             )
         });
@@ -1165,6 +1180,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         } else {
             let (pivot, kept) = orbit_pivot(app, rect, (app.viewport.spin_pivot, app.viewport.spin_pivot_at), rect.center());
             (app.viewport.spin_pivot, app.viewport.spin_pivot_at) = kept;
+            app.viewport.orbit_mark = orbit_mark(app, pivot);
             let dx = f64::from(dt.min(0.1)) * 30.0;
             match pivot {
                 Some(p) => orbit_about(app, rect, dx, 0.0, p),
@@ -1555,6 +1571,7 @@ pub(crate) fn middle_double_click(app: &mut SolveApp, ui: &egui::Ui, inside: boo
 pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Option<Pos2>) {
     let (pivot, kept) = orbit_pivot(app, rect, (app.viewport.orbit_pivot, app.viewport.orbit_pivot_at), press.unwrap_or(rect.center()));
     (app.viewport.orbit_pivot, app.viewport.orbit_pivot_at) = kept;
+    app.viewport.orbit_mark = orbit_mark(app, pivot);
     if app.preferences.free_orbit {
         app.viewport.orbit_from = None;
         match pivot {
@@ -1605,6 +1622,13 @@ pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Opti
 
 /// How far (points) the pointer goes in an upright orbit while an upside-down view stands upright.
 const UNROLL_TRAVEL: f64 = 240.0;
+
+/// The point to mark while an orbit turns about `pivot`: only when Orbit around names one the user
+/// cannot see (the origin, the model point under the cursor; the view's centre is what the eye
+/// already holds still) and Mark the orbit point is on (#17474).
+fn orbit_mark(app: &SolveApp, pivot: Option<Vec3>) -> Option<Vec3> {
+    pivot.filter(|_| app.preferences.mark_orbit_point && app.preferences.orbit_around != OrbitAround::ViewCentre)
+}
 
 /// The point an orbit turns about, by Orbit around: the view's centre ([`view_middle`]), the world origin, or the
 /// model point under `at` when the turn began. `kept` is what the turn began with: its point and, for the view's
@@ -4848,5 +4872,70 @@ mod view_key_tests {
         crate::dialogs::look_at_sketch(&mut h.app);
         h.frames(2);
         assert!((back_z(&h) - 1.0).abs() < 1e-3, "{:?}", h.app.cam.back());
+    }
+
+    /// Pointer moves over a still view draw no frame (#17104), so the frame a button goes down in
+    /// brings all the motion since the last one. Pressing never moves the view, in any preset,
+    /// with any keys, for a pan, an orbit or a zoom: held still the view stays where it was, and a
+    /// small move after the press moves it exactly as it does when every move drew a frame.
+    #[test]
+    fn a_press_after_unseen_pointer_motion_never_moves_the_view() {
+        use super::*;
+        use egui::{Event, Modifiers, PointerButton, vec2};
+        let keys = [Modifiers::NONE, Modifiers::SHIFT, Modifiers::CTRL, Modifiers::ALT];
+        let close = |a: &Camera, b: &Camera| {
+            a.target.dist(b.target) < 1e-9
+                && (a.yaw - b.yaw).abs() < 1e-9
+                && (a.pitch - b.pitch).abs() < 1e-9
+                && (a.roll - b.roll).abs() < 1e-9
+                && (a.distance - b.distance).abs() < 1e-9
+        };
+        for preset in crate::prefs::NAV_PRESETS {
+            for button in [PointerButton::Middle, PointerButton::Secondary] {
+                for modifiers in keys {
+                    let run = |unseen: bool| {
+                        let mut h = crate::scenario::Harness::new();
+                        h.app.home.open = false;
+                        crate::prefs::choose_nav_preset(&mut h.app.preferences, preset);
+                        h.call("ui.view", serde_json::json!({"view":"iso"}));
+                        h.frames(2);
+                        let rect = h.app.viewport.rect.unwrap();
+                        let from = rect.center() - vec2(200.0, 100.0);
+                        let at = rect.center() + vec2(150.0, 80.0);
+                        h.frame_with(vec![Event::PointerMoved(from)]);
+                        if unseen {
+                            // The pointer travels over empty space with no frame drawn.
+                            for k in 1..=10 {
+                                let p = from + (at - from) * (k as f32 / 10.0);
+                                crate::viewport::follow_pointer_without_frame(&mut h.app, &h.ctx, p);
+                            }
+                        } else {
+                            for k in 1..=10 {
+                                h.frame_with(vec![Event::PointerMoved(from + (at - from) * (k as f32 / 10.0))]);
+                            }
+                        }
+                        let start = h.app.cam;
+                        let event = |pressed, pos| Event::PointerButton { pos, button, pressed, modifiers };
+                        let mut press = vec![Event::PointerMoved(at)];
+                        press.push(event(true, at));
+                        h.frame_with_modifiers(press, modifiers);
+                        for _ in 0..3 {
+                            h.frame_with_modifiers(vec![], modifiers);
+                        }
+                        let held = h.app.cam;
+                        h.frame_with_modifiers(vec![Event::PointerMoved(at + vec2(4.0, 3.0))], modifiers);
+                        let moved = h.app.cam;
+                        h.frame_with_modifiers(vec![event(false, at + vec2(4.0, 3.0))], modifiers);
+                        (start, held, moved)
+                    };
+                    let (start, held, moved) = run(true);
+                    let what = format!("{} {button:?} {modifiers:?}", preset.id);
+                    assert!(close(&start, &held), "{what}: the press moved the view from {start:?} to {held:?}");
+                    let (seen_start, _, seen_moved) = run(false);
+                    assert!(close(&start, &seen_start), "{what}: the two runs start apart");
+                    assert!(close(&moved, &seen_moved), "{what}: a 4 by 3 move after the press went to {moved:?}, not {seen_moved:?}");
+                }
+            }
+        }
     }
 }

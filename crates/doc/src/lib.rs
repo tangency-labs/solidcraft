@@ -8,6 +8,7 @@
 pub mod appearance;
 pub mod appearance_pack;
 mod assembly;
+pub mod blob;
 mod body_transfer;
 mod body_transfer_sheet;
 pub mod bom;
@@ -31,6 +32,7 @@ pub mod drafting_profile;
 pub mod drawing;
 pub mod drawing_view;
 pub mod end_cap;
+mod envelope;
 mod eval;
 pub mod expr;
 pub mod face_anchor;
@@ -44,10 +46,12 @@ pub mod gpu_plan;
 mod history_names;
 pub mod hole_reference;
 pub mod ids;
+pub mod import_defects;
 mod inline_params;
 pub use format_offsets::whole_profile_selection_from_value;
 pub use inline_params::Defined;
 pub mod joints;
+mod json_layout;
 mod lineage;
 pub mod metadata;
 pub use metadata::Metadata;
@@ -68,6 +72,7 @@ pub mod plugin_data;
 pub mod point_cloud;
 mod point_cloud_complex;
 pub mod point_cloud_distribution;
+mod point_expr;
 mod points;
 mod profile_refs;
 pub mod progress;
@@ -76,7 +81,9 @@ pub use thread_catalog::{
     DRILL_ALLOWANCE, TaperDrill, TappedThread, TappedThreadFamily, metric_tap_drill, parse_tapped_thread, tapped_thread_sizes, untabulated_taper_tap,
 };
 mod walk;
-pub use profile_refs::{capture_profile_selection, profile_fallback_notes, profile_selection_indices, profile_selection_indices_lenient};
+pub use profile_refs::{
+    WHOLE_PROFILE_TOO_MANY_CURVES, capture_profile_selection, profile_fallback_notes, profile_selection_indices, profile_selection_indices_lenient,
+};
 pub mod plastic;
 mod print_face;
 pub use print_face::PrintFace;
@@ -91,6 +98,7 @@ pub mod render_settings;
 pub mod render_surface;
 pub mod render_texture_resources;
 pub mod sheet;
+pub mod sheet_library;
 mod sheet_surface;
 mod sheet_surface_convert;
 mod sheet_surface_cuts;
@@ -116,13 +124,13 @@ pub use assembly::{
 pub use document::*;
 pub use eval::cell_grid::{MAX_CUT_CELLS, SLOW_CUT_CELLS};
 pub use eval::{
-    EdgeRef, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PendingChecks, PlacedBodies, RevolveExtent, SavedModel, SolvedSketch,
-    ThreadInfo, blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names, face_point_state,
-    from_slope_height, hole_direction_at, hole_on_surface, hole_start, import_body_names, join_pieces_added, keep_one_sided_direction, map_wire,
-    metric_thread_sizes, object_height, parse_metric_thread, pattern_matrices, revolve_extent, revolve_extent_for_handle,
-    revolve_extent_with_convention, same_extrude_from_face, select_profiles, sketch_hole_direction, sketch_line_plane, state_in_frame,
-    state_in_frame_at, suggested_thread, suggested_thread_in, tangent_face_chain, through_all_distance, with_placed_copies, world_state,
-    world_state_reusing,
+    EdgeRef, ExtrudeEnds, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PendingChecks, PlacedBodies, PreparedMeshImport, RevolveExtent,
+    SavedModel, SolvedSketch, ThreadInfo, blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names,
+    face_point_state, from_slope_height, hole_direction_at, hole_on_surface, hole_start, import_body_names, join_pieces_added,
+    keep_one_sided_direction, map_wire, metric_thread_sizes, object_height, parse_metric_thread, pattern_matrices, revolve_extent,
+    revolve_extent_for_handle, revolve_extent_with_convention, same_extrude_from_face, select_profiles, sketch_hole_direction, sketch_line_plane,
+    state_in_frame, state_in_frame_at, suggested_thread, suggested_thread_in, tangent_face_chain, through_all_distance, to_end_is_flat,
+    with_placed_copies, world_state, world_state_reusing,
 };
 pub use eval::{EvalCache, KeptResults};
 pub use expr::Expr;

@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use serde_json::json;
-use solidcraft_doc::canvas::base64_decode;
 use solidcraft_geom::paper::MAX_IMAGE_PIXELS;
 use solidcraft_io::vfs::{self, PathScope};
 
@@ -55,7 +54,7 @@ fn an_image_is_read_saved_without_its_path_and_one_undo_step() {
     std::fs::remove_dir_all(&dir).unwrap();
     let record = s.drawing("test").unwrap().clone();
     let id = ids::decode(reply["image"].as_str().unwrap()).unwrap();
-    assert_eq!(base64_decode(&record.images.by_id(record.sheet_images.by_id(id).unwrap().image).unwrap().data).unwrap(), bytes);
+    assert_eq!(record.images.by_id(record.sheet_images.by_id(id).unwrap().image).unwrap().data.to_vec(), bytes);
     assert!(!record.to_json().unwrap().contains("logo.png"));
 
     s.execute("edit.undo", &json!({})).unwrap();
@@ -92,8 +91,8 @@ fn the_same_bytes_are_one_file_on_each_sheet() {
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(s.drawing("test").unwrap().images.len(), 2, "an undo brings it back");
     s.execute("edit.redo", &json!({})).unwrap();
-    let again = s.drawing("test").unwrap().to_json().unwrap();
-    assert!(solidcraft_doc::drawing::Drawing::from_json(&again).is_ok());
+    let saved = solidcraft_io::write_design_container(&s.doc).unwrap();
+    assert_eq!(solidcraft_io::read_design(&saved).unwrap().drawings, s.doc.drawings);
     for d in [dir, other_dir] {
         std::fs::remove_dir_all(d).unwrap();
     }
@@ -152,7 +151,7 @@ fn a_file_outside_the_allowed_folders_is_refused() {
 /// Under the images' own cap, with another tool's properties filling the rest of the record: the
 /// save's limit is what refuses the image, and the drawing as it stands still saves.
 #[test]
-fn an_image_that_would_stop_the_drawing_saving_is_refused() {
+fn images_never_make_the_drawing_too_large_to_save() {
     let sized = |w: u32| {
         let mut file = png(w, 4);
         file.resize(MAX_IMAGE_BYTES, 0);
@@ -167,9 +166,14 @@ fn an_image_that_would_stop_the_drawing_saving_is_refused() {
     })
     .unwrap();
     let p = |file: &str| json!({"sheet": sheet, "file": file, "rect_mm": RECT});
+    // Images are parts of the container, never text in the record: two of the largest add nothing
+    // to a record that is already close to its limit, and it still saves.
     s.execute(ADD, &p(&file)).unwrap();
-    assert!(refused(&mut s, p(&file_b)).contains("too large to save"));
-    s.drawing("test").unwrap().to_json().unwrap();
+    s.execute(ADD, &p(&file_b)).unwrap();
+    let record = s.drawing("test").unwrap().to_json().unwrap();
+    assert!(record.len() < 7 << 20, "{}", record.len());
+    let saved = solidcraft_io::write_design_container(&s.doc).unwrap();
+    assert_eq!(solidcraft_io::read_design(&saved).unwrap().drawings, s.doc.drawings);
     for d in [dir, dir_b] {
         std::fs::remove_dir_all(d).unwrap();
     }
@@ -219,7 +223,7 @@ fn a_logo_by_command() {
     std::fs::remove_dir_all(&dir).unwrap();
     let record = s.drawing("test").unwrap().clone();
     let id = ids::decode(reply["image"].as_str().unwrap()).unwrap();
-    assert_eq!((record.images.iter().count(), base64_decode(&record.images.by_id(id).unwrap().data).unwrap()), (1, bytes));
+    assert_eq!((record.images.iter().count(), record.images.by_id(id).unwrap().data.to_vec()), (1, bytes));
     assert!(!record.to_json().unwrap().contains("cell-logo"));
 
     s.execute("edit.undo", &json!({})).unwrap();
@@ -288,16 +292,39 @@ fn a_logo_goes_with_its_block() {
 fn a_logo_travels_in_a_template_file() {
     let bytes = png(16, 16);
     let (dir, file) = on_disk("logo-template", &bytes);
-    let template = dir.join("mine.json").to_string_lossy().into_owned();
+    let template = dir.join("mine.scdwg").to_string_lossy().into_owned();
     let (mut s, _) = titled();
     s.execute(LOGO, &json!({"cell": "legal_owner", "file": file})).unwrap();
-    s.execute("drawing.template.save", &json!({"path": template})).unwrap();
+    // A template is one .scdwg file, its logo a part of it. Asked for as .json, as templates were,
+    // it goes beside that name as .scdwg, and the reply names the file written and the one asked for.
+    let json = dir.join("mine.json").to_string_lossy().into_owned();
+    let saved = s.execute("drawing.template.save", &json!({"path": json})).unwrap();
+    assert_eq!((saved["path"].as_str(), saved["renamed_from"].as_str()), (Some(template.as_str()), Some(json.as_str())), "{saved}");
+    assert!(!std::path::Path::new(&json).exists() && std::path::Path::new(&template).exists());
+    let again = s.execute("drawing.template.save", &json!({"path": template})).unwrap();
+    assert!(again.get("renamed_from").is_none(), "{again}");
+    // An older .json template kept its logo as base64 in the record: it still opens, logo and all.
+    // (Its records in `images`, its logo cells naming their files, as such a file has them.)
+    let mut older: Value = serde_json::from_str(&solidcraft_io::read_drawing_file(&template).unwrap().to_json().unwrap()).unwrap();
+    let mut files = older.as_object_mut().unwrap().remove("image_files").unwrap();
+    for image in files.as_array_mut().unwrap() {
+        image["data"] = json!(solidcraft_doc::canvas::base64_encode(&bytes));
+        image.as_object_mut().unwrap().remove("part");
+    }
+    older["images"] = files;
+    for logo in older.as_object_mut().unwrap().remove("logo_cells").unwrap().as_array().unwrap() {
+        let sheet = older["sheets"].as_array_mut().unwrap().iter_mut().find(|s| s["id"] == logo["sheet"]).unwrap();
+        let cell = sheet["title_block"]["cells"].as_array_mut().unwrap().iter_mut().find(|c| c["name"] == logo["cell"]).unwrap();
+        cell["kind"]["text"]["image"] = logo["image"].clone();
+    }
+    let old = dir.join("old.json").to_string_lossy().into_owned();
+    std::fs::write(&old, older.to_string()).unwrap();
     std::fs::remove_file(&file).unwrap();
 
     let shows = |s: &Session| {
         let d = s.drawing("test").unwrap();
         let logo = d.sheets[0].title_block.as_ref().unwrap().logos().next().unwrap();
-        base64_decode(&d.images.by_id(logo).unwrap().data).unwrap()
+        d.images.by_id(logo).unwrap().data.to_vec()
     };
     s.execute("drawing.close", &json!({})).unwrap();
     s.execute("drawing.create", &json!({"template": template})).unwrap();
@@ -306,5 +333,8 @@ fn a_logo_travels_in_a_template_file() {
     s.execute("drawing.create", &json!({})).unwrap();
     s.execute("drawing.template.apply", &json!({"template": template})).unwrap();
     assert_eq!(shows(&s), bytes);
+    s.execute("drawing.close", &json!({})).unwrap();
+    s.execute("drawing.create", &json!({"template": old})).unwrap();
+    assert_eq!(shows(&s), bytes, "the older .json template");
     std::fs::remove_dir_all(dir).unwrap();
 }

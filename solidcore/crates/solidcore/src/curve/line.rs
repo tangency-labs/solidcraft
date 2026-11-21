@@ -489,6 +489,21 @@ impl Line {
         self.clone()
     }
 
+    /// Not upstream: the same line by definition, exactly (IEEE `==`; a NaN refuses):
+    /// the same B-spline part
+    /// ([`BSplineCurve::same_definition`](crate::nurbs::b_spline_curve::BSplineCurve::same_definition))
+    /// and point, vector,
+    /// domain, scale and `inside_out` equal.
+    #[must_use]
+    pub fn same_definition(&self, other: &Self) -> bool {
+        self.base.same_definition(&other.base)
+            && self.point == other.point
+            && self.vector == other.vector
+            && self.anal_domain == other.anal_domain
+            && self.scale == other.scale
+            && self.inside_out == other.inside_out
+    }
+
     /// `operator==`: same B-spline part (dimension and NURB within `SM_EFF_ZERO`), and
     /// point, vector, domain, scale (within the scaled zero) and `inside_out` equal.
     #[must_use]

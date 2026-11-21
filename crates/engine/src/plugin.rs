@@ -3,7 +3,7 @@
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::{
     API, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES, MAX_JSON_BYTES,
-    MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, valid_id,
+    MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, conditions, valid_id,
 };
 use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};
@@ -330,9 +330,10 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
     }
     let rt = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
     host_limits_for(session, &package.manifest.id, &package.approval).check(&rt.limits)?;
-    if !rt.entries.iter().any(|e| e.name == entry) {
-        return Err(error("unknown entry"));
-    }
+    let declared = rt.entries.iter().find(|e| e.name == entry).ok_or_else(|| error("unknown entry"))?;
+    let prepared =
+        conditions::has_conditions(&declared.input_schema).then(|| craft_plugin::prepare_input(&declared.input_schema, params)).transpose()?;
+    let params = prepared.as_ref().unwrap_or(params);
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         // What this call may reach: the groups both the manifest asks for and the user granted,
@@ -563,25 +564,7 @@ impl PluginHost for SolidCraftHost {
         if let Some(scope) = solidcraft_io::vfs::current_scope() {
             return scope.check(&path.to_string_lossy()).map_err(|e| HostError::PermissionDenied { permission: e.to_string() });
         }
-        // The approved root and its ancestors are explicit, even in AppData or a hidden
-        // folder. Inspect only names beneath the most specific grant for this operation.
-        let relative = self
-            .session
-            .plugin_state
-            .file_grants
-            .iter()
-            .filter(|grant| if write { grant.write } else { grant.read })
-            .filter_map(|grant| path.strip_prefix(&grant.folder).ok().map(|relative| (grant.folder.components().count(), relative)))
-            .max_by_key(|(depth, _)| *depth)
-            .map(|(_, relative)| relative)
-            .ok_or_else(|| HostError::PermissionDenied { permission: "file path has no applicable folder grant".into() })?;
-        if relative.components().any(|c| {
-            let name = c.as_os_str().to_string_lossy();
-            name.starts_with('.') || (cfg!(windows) && name.eq_ignore_ascii_case("AppData"))
-        }) {
-            return Err(HostError::PermissionDenied { permission: "hidden file path requires an explicit caller scope grant".into() });
-        }
-        Ok(())
+        grant_covers(&self.session.plugin_state.file_grants, path, write)
     }
     fn log(&mut self, message: &str) {
         if let Some(s) = self.transaction.as_mut() {
@@ -594,6 +577,32 @@ impl PluginHost for SolidCraftHost {
     fn is_cancelled(&self) -> bool {
         solidcraft_doc::progress::cancelled()
     }
+}
+
+/// Whether `path` is covered by a folder grant, for reading or for writing.
+/// A refusal is the same error [`PluginHost::authorize_file_path`] returns when no caller
+/// scope is set. Choosing a folder in a dialog does not add a grant.
+pub fn require_folder_grant(grants: &[FileGrant], path: &Path) -> craft_plugin::Result<()> {
+    if grant_covers(grants, path, false).is_ok() || grant_covers(grants, path, true).is_ok() { Ok(()) } else { grant_covers(grants, path, false) }
+}
+
+/// The approved root and its ancestors are explicit, even in AppData or a hidden folder.
+/// Inspect only names beneath the most specific grant for this operation.
+fn grant_covers(grants: &[FileGrant], path: &Path, write: bool) -> craft_plugin::Result<()> {
+    let relative = grants
+        .iter()
+        .filter(|grant| if write { grant.write } else { grant.read })
+        .filter_map(|grant| path.strip_prefix(&grant.folder).ok().map(|relative| (grant.folder.components().count(), relative)))
+        .max_by_key(|(depth, _)| *depth)
+        .map(|(_, relative)| relative)
+        .ok_or_else(|| HostError::PermissionDenied { permission: "file path has no applicable folder grant".into() })?;
+    if relative.components().any(|c| {
+        let name = c.as_os_str().to_string_lossy();
+        name.starts_with('.') || (cfg!(windows) && name.eq_ignore_ascii_case("AppData"))
+    }) {
+        return Err(HostError::PermissionDenied { permission: "hidden file path requires an explicit caller scope grant".into() });
+    }
+    Ok(())
 }
 
 /// Resolve an inspected entry through the same approved plugin.run transaction.

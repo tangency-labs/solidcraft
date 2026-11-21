@@ -24,6 +24,7 @@ pub mod form;
 pub mod geometry;
 pub mod label;
 pub mod normal_section;
+pub mod outline;
 pub mod pcurve;
 #[rustfmt::skip]
 pub mod plan;
