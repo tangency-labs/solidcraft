@@ -106,7 +106,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::query::continuity::SEAM_PARTS;
-use crate::query::curve_surface_gap::{correspondence, piece as gap_piece, NetSurface};
+use crate::query::curve_surface_gap::{correspondence, piece_bound as gap_piece, NetSurface};
 use crate::surface::surface::Surface;
 use crate::topology::{Brep, EdgeId};
 

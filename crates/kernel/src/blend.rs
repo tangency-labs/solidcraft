@@ -392,7 +392,8 @@ fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -
     let Ok((picked, _)) = crate::blend_smlib::picked_edges(body, &[pick]) else { return Ok(None) };
     let [e] = picked.as_slice() else { return Ok(None) };
     let e = *e;
-    let Some((ops, order)) = body.ops_body() else { return Ok(None) };
+    let Some(form) = body.ops_body() else { return Ok(None) };
+    let (ops, order) = &*form;
     let Ok(found) = solidcore_ops::carried_faces_ordered(ops, order, e, reach) else { return Ok(None) };
     if found.is_empty() {
         return Ok(None);
@@ -1210,7 +1211,8 @@ fn second_face_first(l0: f64, l1: f64) -> Option<bool> {
 fn first_face_normal(body: &Body, pick: Vec3, flip: bool) -> Option<Vec3> {
     let (picked, _) = crate::blend_smlib::picked_edges(body, &[pick]).ok()?;
     let [e] = picked.as_slice() else { return None };
-    let (ops, order) = body.ops_body()?;
+    let form = body.ops_body()?;
+    let (ops, order) = &*form;
     let leans = |dir: [f64; 3]| solidcore_ops::edge_faces_along_ordered(ops, order, *e, dir).ok();
     let [(f0, l0), (f1, l1)] = leans([0.0, 0.0, if flip { -1.0 } else { 1.0 }])?;
     if f0 == f1 {
@@ -1288,9 +1290,10 @@ pub fn tangent_chain_beyond_points(body: &Body, picks: &[Vec3], per_edge: usize)
     let (_, chain, picked) = picked_chain(body, picks)?;
     let most = usize::try_from(solidcore_ops::EDGE_POINTS_MAX).unwrap_or(1);
     let per_edge = if per_edge == 0 { 1 } else { per_edge.min(most) };
-    let Some((ops, order)) = body.ops_body() else {
+    let Some(form) = body.ops_body() else {
         return Err(KernelError::Invalid("a mesh body has no tangent chain".into()));
     };
+    let (ops, order) = &*form;
     chain
         .into_iter()
         .skip(picked)
@@ -3140,12 +3143,15 @@ mod tests {
     /// regular tetrahedron's corner, up to which the kernel's ball between three rounds was one
     /// patch. Rounding every edge at such a corner failed ("Corner Edge Computation Failure").
     ///
-    /// The reporter's five edges build at 2 mm, and all six give the solid rounded all over:
-    /// the tetrahedron drawn in about its incentre by k = (ρ - r) / ρ (ρ = 3 V / S its
-    /// inradius) with the ball of radius r rolled over it, V k³ + S k² r + M k r² + 4 π r³ / 3
-    /// (Steiner), M half the sum of each edge's length times the angle between its faces'
-    /// normals. Its faces: the 4 faces, the 6 rounds, one patch for the apex's ball (its
-    /// normals are 101.6° apart, one patch as before) and three for each base corner's: 20.
+    /// The reporter's five edges build at 2 mm, and all six give the solid rounded all over.
+    /// Its volume is in closed form (the kernel's own test of this part derives it from the
+    /// vertices): the tetrahedron drawn in about its incentre by k = (ρ - r) / ρ with the ball
+    /// of radius r rolled over it, V k³ + S k² r + M k r² + 4 π r³ / 3 (Steiner). Here
+    /// V = (√3 / 4) 16.3² × 16.33 = 1878.7198740245956, S = 1118.0376853849825, the inradius
+    /// ρ = 3 V / S = 5.041117750993379, and M, half the sum of each edge's length times the
+    /// angle between its faces' normals, is 147.48907003975233: 1615.6336937306553 at r = 2.
+    /// Its faces: the 4 faces, the 6 rounds, one patch for the apex's ball (its normals are
+    /// 101.6° apart, one patch as before) and three for each base corner's: 20.
     #[test]
     fn every_edge_of_a_tetrahedron_rounds_with_a_ball_at_each_corner() {
         let (radius, height, r) = (16.3_f64, 16.33_f64, 2.0_f64);
@@ -3160,24 +3166,11 @@ mod tests {
         let body = crate::convex_polyhedron(&planes).unwrap();
         let before = crate::measure(&body).unwrap();
         assert_eq!((before.faces, before.edges, before.vertices), (4, 6, 4));
-        // its vertices, and each face's (the base, then the side on base edge i)
-        let v = [base[0], base[1], base[2], apex];
-        let faces = [[0, 1, 2], [0, 1, 3], [1, 2, 3], [2, 0, 3]];
-        let pairs = [(0, 1), (1, 2), (2, 0), (0, 3), (1, 3), (2, 3)];
-        let middles = pairs.map(|(i, j)| (v[i] + v[j]) * 0.5);
-        let volume = (v[1] - v[0]).cross(v[2] - v[0]).dot(v[3] - v[0]).abs() / 6.0;
-        assert!((before.volume - volume).abs() < 1e-9 * volume, "{} against {volume}", before.volume);
-        let area: f64 =
-            faces.iter().map(|f| 0.5 * (v[f[1]] - v[f[0]]).cross(v[f[2]] - v[f[0]]).dot((v[f[1]] - v[f[0]]).cross(v[f[2]] - v[f[0]])).sqrt()).sum();
-        let mean: f64 = pairs
-            .iter()
-            .map(|&(i, j)| {
-                let on: Vec<usize> = (0..4).filter(|&f| faces[f].contains(&i) && faces[f].contains(&j)).collect();
-                0.5 * (v[i] - v[j]).dot(v[i] - v[j]).sqrt() * planes[on[0]].n.dot(planes[on[1]].n).clamp(-1.0, 1.0).acos()
-            })
-            .sum();
-        let k = (3.0 * volume / area - r) / (3.0 * volume / area);
-        let all_over = volume * k.powi(3) + area * k * k * r + mean * k * r * r + 4.0 * std::f64::consts::PI * r.powi(3) / 3.0;
+        let (sharp, all_over) = (1878.7198740245956_f64, 1615.6336937306553_f64);
+        assert!((before.volume - sharp).abs() < 1e-9 * sharp, "{} against {sharp}", before.volume);
+        // a point on each edge: the base's three, then the three to the apex
+        let middles =
+            [(0, 1), (1, 2), (2, 0)].map(|(i, j)| (base[i] + base[j]) * 0.5).into_iter().chain(base.map(|b| (b + apex) * 0.5)).collect::<Vec<_>>();
 
         // the reporter's five edges: the base's three and two of the apex's
         let five = fillet(&body, &middles[..5], r).unwrap();

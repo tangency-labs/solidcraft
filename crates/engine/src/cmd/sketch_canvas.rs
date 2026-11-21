@@ -75,11 +75,28 @@ fn image_bytes(p: &Value, cmd: &str) -> Result<Vec<u8>> {
         return Err(bad(cmd, "`data` is not taken: give the image file as `path`"));
     }
     let path = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "give the image file as `path`"))?;
-    let b = solidcraft_io::vfs::read(path, MAX_CANVAS_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let b = solidcraft_io::vfs::read(path, MAX_CANVAS_BYTES).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::InvalidData && e.to_string() == "file too large" {
+            EngineError::Other(format!("{path}: {}", too_large(solidcraft_io::vfs::len(path).ok())))
+        } else {
+            EngineError::Other(format!("{path}: {e}"))
+        }
+    })?;
     if b.len() > MAX_CANVAS_BYTES {
-        return Err(bad(cmd, "the image is too large"));
+        return Err(bad(cmd, too_large(Some(b.len() as u64))));
     }
     Ok(b)
+}
+
+/// The refusal of an image over [`MAX_CANVAS_BYTES`]: its size when known, the limit, and what to
+/// do about it (#17922).
+fn too_large(size: Option<u64>) -> String {
+    let megabytes = |bytes: u64| format!("{:.1} MB", bytes as f64 / f64::from(1u32 << 20));
+    let limit = megabytes(MAX_CANVAS_BYTES as u64);
+    let seen = size.map_or_else(String::new, |s| format!("{}; ", megabytes(s)));
+    format!(
+        "the image is too large ({seen}the limit for a canvas or decal image is {limit}). Use a smaller or more compressed image, for example by exporting the photo at a lower quality or resolution"
+    )
 }
 
 fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
@@ -592,6 +609,27 @@ mod tests {
         b.extend(h.to_be_bytes());
         b.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
         image_file(&b)
+    }
+
+    /// #17922: an image file over the cap says its size, the limit and what to do, for a decal and
+    /// a canvas alike.
+    #[test]
+    fn an_image_over_the_cap_says_its_size_and_the_limit() {
+        let dir = std::env::temp_dir().join(format!("sc-17922-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let big = dir.join("photo.jpg");
+        std::fs::write(&big, vec![0u8; 17 << 20]).unwrap();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        let path = big.to_string_lossy();
+        for (command, params) in
+            [("canvas.decal", json!({"path": path, "face": [20, 15, 20]})), ("canvas.insert", json!({"path": path, "plane": "XY"}))]
+        {
+            let err = s.execute(command, &params).unwrap_err().to_string();
+            assert!(err.contains("17.0 MB") && err.contains("16.0 MB"), "{command}: {err}");
+            assert!(err.contains("smaller") && !err.contains("file too large"), "{command}: {err}");
+        }
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
