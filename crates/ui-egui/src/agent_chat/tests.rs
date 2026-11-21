@@ -1829,6 +1829,33 @@ fn new_chat_clears_everything_and_keeps_the_agent_and_mode() {
     assert!(!new_chat_needs_confirm(&app));
 }
 
+#[test]
+fn a_failed_new_chat_does_not_hide_completion_notices_after_reconnecting() {
+    for (reason, message) in [("max_tokens", "ui.agent_chat_reply_cut_off"), ("refusal", "ui.agent_chat_reply_declined")] {
+        let (mut app, old, ctx) = app_with_script();
+        send(&mut app, &ctx, "first".into());
+        new_chat(&mut app);
+        old.report(Event::Exited { tail: vec!["replacement could not start".into()] });
+        poll(&mut app, &ctx);
+        assert_eq!(app.agent_chat.state(), State::Failed);
+        assert!(app.agent_chat.backend.is_none());
+        new_chat(&mut app);
+
+        let replacement = Script::default();
+        app.agent_chat.backend = Some(Box::new(replacement.clone()));
+        replacement.report(Event::Ready { agent: "replacement".into(), images: false });
+        poll(&mut app, &ctx);
+        send(&mut app, &ctx, "second".into());
+        ended(&replacement, reason);
+        poll(&mut app, &ctx);
+        assert_eq!(app.agent_chat.state(), State::Ready);
+        assert!(
+            app.agent_chat.items.iter().any(|item| matches!(item, Item::Notice { text, .. } if text == tr(message))),
+            "{reason} must remain visible"
+        );
+    }
+}
+
 /// New chat releases an ACP adapter's sessions by ending it before starting its replacement.
 #[cfg(unix)]
 #[test]
