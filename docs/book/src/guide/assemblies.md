@@ -600,8 +600,8 @@ along length"); masking and no-coat notes stay ordinary notes. Both are text of 
 windows offer common finishes to pick from and never hold you to them. A design that is one part has
 no component to hold them, so the design carries them itself: `document.metadata.set {values:
 {material, finish}}` (Design Properties in the window). They are in the bill of materials (a
-`finish` column in the rows and the CSV), in a drawing's parts list (a FINISH column on a new list)
-and in its title block, whose Material and Finish cells read them with nothing typed over. A part
+`finish` column in the rows and the CSV), in a drawing's parts list (a FINISH column you add with the table's columns; a new list
+keeps its columns) and in its title block, whose Material and Finish cells read them with nothing typed over. A part
 that has only a free property named `finish` (as parts did before) shows that one wherever a finish
 is shown. Standard parts (`parts.insert`) get a
 part number from their standard and size (`ISO 4762 M6x20`, `GOST 7798-70 M12x60`, or a bearing's

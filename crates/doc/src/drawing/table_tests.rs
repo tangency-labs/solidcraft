@@ -170,10 +170,10 @@ fn a_lists_rows_lay_out_in_a_table() {
     let measure = |text: &str, cap: f64| text.chars().count() as f64 * cap / 2.0;
     let laid = definition.layout(&rows, solidcore_record::Vec2::new(400.0, 280.0), &measure).unwrap();
     assert_eq!(laid.rows.len(), 3);
-    // ITEM, QTY, FRAME's NAME, DESCRIPTION, MATERIAL, FINISH, MASS: letters at 1.75 mm, a 1 mm pad each
+    // ITEM, QTY, FRAME's NAME, DESCRIPTION, MATERIAL, MASS: letters at 1.75 mm, a 1 mm pad each
     // side; the outer two also hold half an outline line and half a cell line, the rest two half cell lines.
-    let letters = [4.0, 3.0, 5.0, 11.0, 8.0, 6.0, 4.0];
-    let width: f64 = letters.iter().map(|n: &f64| n * 1.75 + 2.0).sum::<f64>() + 2.0 * 0.35 + 6.0 * 0.35;
+    let letters = [4.0, 3.0, 5.0, 11.0, 8.0, 4.0];
+    let width: f64 = letters.iter().map(|n: &f64| n * 1.75 + 2.0).sum::<f64>() + 2.0 * 0.35 + 5.0 * 0.35;
     assert!((laid.outline.max.x - 400.0).abs() < 1e-9 && (laid.outline.min.x - (400.0 - width)).abs() < 1e-9, "{:?} {width}", laid.outline);
     // Four rows of 7 mm down from the corner.
     assert!((laid.outline.min.y - (280.0 - 4.0 * 7.0)).abs() < 1e-9, "{:?}", laid.outline);
@@ -181,8 +181,7 @@ fn a_lists_rows_lay_out_in_a_table() {
     assert!((row.rect.max.y - (280.0 - 2.0 * 7.0)).abs() < 1e-9 && (row.rect.min.y - (280.0 - 3.0 * 7.0)).abs() < 1e-9);
     assert_eq!(row.cells[0].lines[0].text, "2.1");
     // Not weighed: its cell shows the missing value (`cell::MISSING`, nothing), so it has no line.
-    assert!(row.cells[6].lines.is_empty(), "not weighed (the mass is the seventh column: the finish is the sixth)");
-    assert!(row.cells[5].lines.is_empty(), "and it has no finish");
+    assert!(row.cells[5].lines.is_empty(), "not weighed (the mass is the sixth column)");
 }
 
 /// A row's key fits at the deepest a list goes: 64 levels under the top, every member its longest,
@@ -223,24 +222,34 @@ fn damaged(d: &Drawing, change: impl Fn(&mut Value)) -> String {
 }
 
 /// A table saves as it is, in any order read back by id, and what a table doesn't set stays out.
-/// A table saved before parts lists had a FINISH column keeps its columns, by name and in its own
-/// order, whatever a new list starts with: the saved columns are the table's, `default_table` only
-/// gives a new one its start. Its rows still fill every column it has, and the finish a part has
-/// shows in a column only a table that has one.
+/// A saved parts list keeps its columns, by name and in its own order, whatever a new list starts
+/// with: the saved columns are the table's, `default_table` only gives a new one its start (a new list
+/// has no FINISH column; one a table adds by hand is kept). Its rows still fill every column it has,
+/// and the finish a part has shows in a column only a table that has one.
 #[test]
 fn a_parts_list_saved_before_the_finish_column_keeps_its_columns() {
     let (d, first) = tabled();
     let mut v: Value = serde_json::from_str(&d.to_json().unwrap()).unwrap();
     let old = ["item", "quantity", "name", "description", "material", "mass", "ballooned"];
-    for table in v["tables"].as_array_mut().unwrap() {
-        if let Some(columns) = table["table"]["columns"].as_array_mut()
-            && columns.iter().any(|c| c["name"] == "material")
-        {
-            columns.retain(|c| c["name"] != "finish");
+    // A list saved by an older release, and one whose editor added a FINISH column before the mass.
+    let with_finish = |v: &mut Value| {
+        for table in v["tables"].as_array_mut().unwrap() {
+            if let Some(columns) = table["table"]["columns"].as_array_mut()
+                && let Some(mass) = columns.iter().position(|c| c["name"] == "mass")
+            {
+                let mut finish = columns[mass - 1].clone();
+                finish["name"] = json!("finish");
+                finish["heading"] = json!("FINISH");
+                columns.insert(mass, finish);
+            }
         }
-    }
-    let back = Drawing::from_value(v).unwrap();
+    };
+    let mut added = v.clone();
+    with_finish(&mut added);
+    let added = Drawing::from_value(added).unwrap();
     let names = |d: &Drawing| d.tables.by_id(first).unwrap().table.columns.iter().map(|c| c.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&added), ["item", "quantity", "name", "description", "material", "finish", "mass", "ballooned"], "a column added by hand stays");
+    let back = Drawing::from_value(v).unwrap();
     assert_eq!(names(&back), old, "the same columns in the same order, with no finish");
     assert_eq!(names(&Drawing::from_json(&back.to_json().unwrap()).unwrap()), old, "and again after a save");
     let unprinted: Vec<_> = back.tables.by_id(first).unwrap().table.columns.iter().filter(|c| !c.printed).map(|c| c.name.as_str()).collect();
@@ -288,7 +297,7 @@ fn a_list_asks_for_its_view() {
     );
     assert!(!request.mass);
     let names = |kind: &Kind| kind.default_table().columns.into_iter().map(|c| c.name).collect::<Vec<_>>();
-    assert_eq!(names(&Kind::PartsList(list)), ["item", "quantity", "name", "description", "material", "finish", "mass", "ballooned"]);
+    assert_eq!(names(&Kind::PartsList(list)), ["item", "quantity", "name", "description", "material", "mass", "ballooned"]);
     assert_eq!(names(&Kind::Revision), ["revision", "description", "designer", "checker", "date"]);
     // How many balloons point at each row, for the editor alone: the only column not printed.
     let unprinted = |kind: &Kind| kind.default_table().columns.iter().filter(|c| !c.printed).map(|c| c.heading.clone()).collect::<Vec<_>>();

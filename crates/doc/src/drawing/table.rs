@@ -148,7 +148,8 @@ impl PartsList {
                 ("count", row.count.to_string()),
             ];
             fields.extend(values.map(|(key, value)| (key.to_string(), value)));
-            // Without one the free property of that name (already in `fields`) shows, as it always did.
+            // A column named `finish` (a list starts without one; the editor adds it) shows the part's
+            // finish; without one the free property of that name (already in `fields`) shows, as it always did.
             if !row.finish.is_empty() {
                 fields.insert("finish".to_string(), row.finish.clone());
             }
@@ -193,7 +194,6 @@ impl Kind {
                 column("name", "NAME", HAlign::Left),
                 column("description", "DESCRIPTION", HAlign::Left),
                 column("material", "MATERIAL", HAlign::Left),
-                column("finish", "FINISH", HAlign::Left),
                 column("mass", "MASS", HAlign::Right),
                 Column { printed: false, ..column(BALLOONED, "BALLOONED", HAlign::Centre) },
             ],
