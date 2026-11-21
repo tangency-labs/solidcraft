@@ -111,8 +111,15 @@ fn pick(s: &mut Session, p: &Value) -> Result<Value> {
             if let Some(name) = component {
                 j["component"] = json!(name);
             }
-            if crate::point_cloud_pick::section_keeps(&s.section, h.point) {
-                cover = Some(cover.map_or(h.depth, |c: f64| c.min(h.depth)));
+            if !clouds.is_empty() {
+                let shown_from = if s.section.is_empty() {
+                    Some(h.depth)
+                } else {
+                    kept_material_from(&b.body, o, d, h.depth, &s.section).map_err(|e| bad(ID, format!("body {}: {e}", b.name)))?
+                };
+                if let Some(t) = shown_from {
+                    cover = Some(cover.map_or(t, |c: f64| c.min(t)));
+                }
             }
             let at = depths.partition_point(|x| *x <= h.depth);
             depths.insert(at, h.depth);
@@ -155,6 +162,61 @@ fn pick(s: &mut Session, p: &Value) -> Result<Value> {
         });
     }
     Ok(json!({"frame": "rays", "hits": hits}))
+}
+
+/// Crossings of one body a ray follows before giving up on finding kept material.
+const MAX_CROSSINGS: usize = 64;
+
+/// How far past a crossing the next ray starts, so it does not meet the same face again.
+const CROSSING_STEP: f64 = 1e-6;
+
+/// Where along the ray `(o, d)` (unit `d`) the body first shows under a Section Analysis: the
+/// first surface crossing the section keeps, or a section plane crossed inside the material (its
+/// cut face), whichever is nearer. `None` where the section removes every bit of the body the ray
+/// passes through. `first` is the depth (distance) of the ray's first crossing of the body.
+fn kept_material_from(
+    body: &solidcraft_kernel::Body,
+    o: Vec3,
+    d: Vec3,
+    first: f64,
+    section: &[crate::SectionPlane],
+) -> std::result::Result<Option<f64>, String> {
+    use solidcraft_geom::prelude::*;
+    let Some(d) = d.normalized() else { return Ok(Some(first)) };
+    let keeps = |p: Vec3| crate::point_cloud_pick::section_keeps(section, p);
+    // The first surface crossing the section keeps.
+    let mut surface = None;
+    let mut t = first;
+    for _ in 0..MAX_CROSSINGS {
+        if keeps(o + d * t) {
+            surface = Some(t);
+            break;
+        }
+        let from = t + CROSSING_STEP;
+        match body.fire_ray(o + d * from, d).map_err(|e| e.to_string())? {
+            Some(h) => t = from + h.depth,
+            None => break,
+        }
+    }
+    // A cut face nearer than that: a section plane the ray crosses inside the material, where
+    // the other planes keep it.
+    let mut best = surface;
+    for plane in section {
+        let along = plane.normal.dot(d);
+        if along.abs() < 1e-12 {
+            continue;
+        }
+        let at = plane.normal.dot(plane.origin - o) / along;
+        if !(at.is_finite() && at >= first) || best.is_some_and(|b| at >= b) {
+            continue;
+        }
+        let p = o + d * at;
+        let others_keep = section.iter().filter(|q| q.id != plane.id).all(|q| q.keeps(p, 1e-6));
+        if others_keep && body.classify_point(p).map_err(|e| e.to_string())? == solidcraft_kernel::PointClass::Inside {
+            best = Some(at);
+        }
+    }
+    Ok(best)
 }
 
 /// Body world name → its outermost placement (path, name) and the component it places,
@@ -358,6 +420,17 @@ mod tests {
         let r = run(&mut s, "view.pick", json!({"rays": [ray], "clouds": true}));
         assert_eq!(r["hits"][0]["cloud"], 1, "{r}");
         assert_eq!(r["hits"][0]["point_index"], 2, "{r}");
+        run(&mut s, "inspect.section", json!({"clear": true}));
+
+        // A section at z = 30 cuts away only the shield's top half: its cut face (z = 30) and
+        // the half left (z = 25..30) still stand in front of the scan point at z = 20.
+        run(&mut s, "inspect.section", json!({"plane": {"origin": [0, 0, 30], "normal": [0, 0, 1]}}));
+        let r = run(&mut s, "view.pick", json!({"rays": [ray], "clouds": true}));
+        assert_eq!(r["hits"][0]["body"], "Shield", "{r}");
+        // The same with a ray that is not of unit length.
+        let long = json!({"origin": [0, 110, 50], "dir": [0, 0, -7]});
+        let r = run(&mut s, "view.pick", json!({"rays": [long], "clouds": true}));
+        assert_eq!(r["hits"][0]["body"], "Shield", "{r}");
         run(&mut s, "inspect.section", json!({"clear": true}));
 
         // Hidden cloud is not picked even with `all: true`.
