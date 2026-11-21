@@ -56,7 +56,7 @@ fn ends_at(reply: &Value, p: [f64; 3]) {
     assert!(point.iter().zip(p).all(|(a, b)| (a - b).abs() < 1e-9), "{reply}");
 }
 
-/// A note's text is centred on its place, so one placed near the paper's edge can run past it: its
+/// A centred note's text is centred on its place, so one placed near the paper's edge can run past it: its
 /// reply warns, naming where its text spans, and one that fits says nothing. A note on a view is held
 /// to the paper where its view puts it.
 #[test]
@@ -65,17 +65,40 @@ fn a_note_whose_text_runs_off_the_paper_is_warned_about() {
     let off_paper =
         |reply: &Value| reply["warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().unwrap_or("").contains("runs off the paper")));
     let long = "ALL HOLES THROUGH. MATERIAL: AL 6061.";
-    let edge = run(&mut s, ADD, json!({"anchor": {"sheet": "Sheet 1"}, "at": [10, 40], "content": long}));
+    let edge = run(&mut s, ADD, json!({"anchor": {"sheet": "Sheet 1"}, "at": [10, 40], "content": long, "align": "centre"}));
     assert!(off_paper(&edge), "{edge}");
     let note = edge["note"].as_str().unwrap().to_string();
     assert!(off_paper(&run(&mut s, INSPECT, json!({"note": note}))), "inspect warns too");
-    let inside = run(&mut s, ADD, json!({"anchor": {"sheet": "Sheet 1"}, "at": [200, 40], "content": long}));
+    let inside = run(&mut s, ADD, json!({"anchor": {"sheet": "Sheet 1"}, "at": [200, 40], "content": long, "align": "centre"}));
     assert!(!off_paper(&inside), "{inside}");
     // 200 mm left of a view at x = 200 is the paper's left edge.
-    let on_view = run(&mut s, ADD, json!({"anchor": {"view": ids::encode(view)}, "at": [-195, 0], "content": long}));
+    let on_view = run(&mut s, ADD, json!({"anchor": {"view": ids::encode(view)}, "at": [-195, 0], "content": long, "align": "centre"}));
     assert!(off_paper(&on_view), "{on_view}");
-    let centred = run(&mut s, ADD, json!({"anchor": {"view": ids::encode(view)}, "at": [0, -60], "content": long}));
+    let centred = run(&mut s, ADD, json!({"anchor": {"view": ids::encode(view)}, "at": [0, -60], "content": long, "align": "centre"}));
     assert!(!off_paper(&centred), "{centred}");
+}
+
+/// A note starting at its place runs off the paper's right edge from near it, and one ending there
+/// does not; the same place, and the text is the same width: the warning follows the alignment.
+#[test]
+fn a_note_is_held_to_the_paper_by_its_alignment() {
+    let (mut s, _, _, _) = placed();
+    let off_paper =
+        |reply: &Value| reply["warnings"].as_array().is_some_and(|w| w.iter().any(|w| w.as_str().unwrap_or("").contains("runs off the paper")));
+    let width = s.drawing("test").unwrap().sheets[0].sheet.size_mm().unwrap().x;
+    let long = "ALL HOLES THROUGH. MATERIAL: AL 6061.";
+    let at = json!([width - 10.0, 40]);
+    let sheet = json!({"sheet": "Sheet 1"});
+    let left = run(&mut s, ADD, json!({"anchor": sheet, "at": at, "content": long}));
+    assert!(off_paper(&left), "left, the default: {left}");
+    assert!(left["warnings"][0].as_str().unwrap().contains("starting at its place"), "{left}");
+    let right = run(&mut s, ADD, json!({"anchor": sheet, "at": at, "content": long, "align": "right"}));
+    assert!(!off_paper(&right), "{right}");
+    let near_left = json!([10, 40]);
+    let right = run(&mut s, ADD, json!({"anchor": sheet, "at": near_left, "content": long, "align": "right"}));
+    assert!(off_paper(&right) && right["warnings"][0].as_str().unwrap().contains("ending at its place"), "{right}");
+    let left = run(&mut s, ADD, json!({"anchor": sheet, "at": near_left, "content": long, "align": "left"}));
+    assert!(!off_paper(&left), "{left}");
 }
 
 /// Every anchor: a sheet by name, a view, an edge and a corner, each one undo step; a note that points
@@ -566,4 +589,33 @@ fn a_note_on_an_exploded_view_ends_where_the_view_draws_its_edge() {
     let added = run(&mut s, ADD, json!({"anchor": {"edge": {"view": v, "edge": edge}}, "at": [60, 40], "content": "Deburr"}));
     leader_ends_near(&added, [140.0, 0.0, 50.0]);
     leader_ends_near(&run(&mut s, INSPECT, json!({"note": added["note"]})), [140.0, 0.0, 50.0]);
+}
+
+/// A new note starts at its place: left unless it says otherwise, kept in its record, and an edit sets
+/// it in one undo step, none when it is as it was. Centre is spelt either way and saved as `centre`.
+#[test]
+fn a_new_note_is_left_aligned_and_an_edit_sets_it() {
+    let (mut s, _, _, _) = placed();
+    let anchor = json!({"sheet": "Sheet 1"});
+    let plain = run(&mut s, ADD, json!({"anchor": anchor, "at": [15, 60], "content": "2 x 8.5mm Holes - Smooth Bore"}));
+    assert_eq!((&plain["align"], &plain["record"]["align"]), (&json!("left"), &json!("left")), "{plain}");
+    let right = run(&mut s, ADD, json!({"anchor": anchor, "at": [15, 60], "content": "x", "align": "right"}));
+    assert_eq!(right["align"], json!("right"));
+    let centred = run(&mut s, ADD, json!({"anchor": anchor, "at": [15, 60], "content": "x", "align": "center"}));
+    assert_eq!((&centred["align"], &centred["record"]["align"]), (&json!("centre"), &json!("centre")), "{centred}");
+    let id = plain["note"].clone();
+    let steps = |s: &Session| s.drawing("test").unwrap().notes.len();
+    assert_eq!(steps(&s), 3);
+    let reply = run(&mut s, EDIT, json!({"note": id, "set": {"align": "right"}}));
+    assert_eq!(reply["changed"], json!(["align"]));
+    assert_eq!(run(&mut s, INSPECT, json!({"note": id}))["align"], json!("right"));
+    let before = saved(&s);
+    assert_eq!(run(&mut s, EDIT, json!({"note": id, "set": {"align": "right"}}))["changed"], json!([]));
+    assert_eq!(saved(&s), before, "no change, no step");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, INSPECT, json!({"note": id}))["align"], json!("left"));
+    for bad in [json!("middle"), json!(1), json!(["left"])] {
+        refused(&mut s, EDIT, json!({"note": id, "set": {"align": bad}}));
+        refused(&mut s, ADD, json!({"anchor": anchor, "at": [0, 0], "content": "x", "align": bad}));
+    }
 }

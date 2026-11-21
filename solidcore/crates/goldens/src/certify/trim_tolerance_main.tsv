@@ -2,6 +2,7 @@
 # topology.brep_validation: main's file without the coincidence search (WR-798): its 43 search cases and the `pairs` key gone, and the 7 generated cases that drew the search checking their bodies' pointers instead
 # offset.offset_executive_p2: main's file with the offset-role attribute (#3138): the `attributes` key of its 30 cases that mark roles, the attribute-only rows
 # blend.feature_executive, blend.fillet_executive_p3, corpus.parity, topology.brep_p10, topology.face_p3: main's files with the rows #17739's healed vertex tolerances move (a vertex covers twice its gap, tangency-labs/solidcraft#18667)
+# blend.fillet_executive_p3: main's file with the halved span's early stop (#13692): sweep5-nurb_box1-all-r0.5's edge [0, 18.0943] listed 24th instead of 1st, the topology and geometry blocks that follow it, and four mass-properties entries an ulp or two off (summation order)
 blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -9,7 +10,7 @@ blend.fillet_corner_p3	41ff3e1d687449c4
 blend.fillet_custom_solver	d5a7b6227772dc0a
 blend.fillet_executive_p1	86854330a700f392
 blend.fillet_executive_p2	68a6e765f600c883
-blend.fillet_executive_p3	725b8b03137f8b54
+blend.fillet_executive_p3	01bd061d3eaea1f0
 blend.fillet_geom_p1	82c1f975f967a59d
 blend.fillet_geom_p2	b536f37946629dc4
 blend.fillet_geom_p3	15646cd3bfb41d7e
