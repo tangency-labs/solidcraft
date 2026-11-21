@@ -326,9 +326,10 @@ pub struct TangentEndRib {
 /// surface's section leaves the end surface's tangent plane there or an interpolation's
 /// second control point leaves its end; [`BlendFailure::TangentEndSingular`] when the end
 /// surface is singular at a zero-speed rib's tangent end;
-/// [`BlendFailure::RibStationNotSolved`] when a zero-speed rib's midpoint, or a station at
-/// the last span count tried, has no exact point; [`BlendFailure::RibFitCap`] where a face is not enclosed and no station count
-/// gives the rib's midpoints within tolerance; [`BlendFailure::NotCertified`] (#17744)
+/// [`BlendFailure::RibStationNotSolved`] when a zero-speed rib's midpoint, or a station or a
+/// span's midpoint at the last span count tried, has no exact point;
+/// [`BlendFailure::RibFitCap`] where a face is not enclosed and no station count gives the
+/// rib's midpoints within tolerance; [`BlendFailure::NotCertified`] (#17744)
 /// where both faces are enclosed and no station count certifies the rib within tolerance;
 /// those of the drops, evaluations and fits.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
@@ -586,8 +587,8 @@ pub fn tangent_end_rib(
     let mut unsolved = false;
     // the station or midpoint whose exact point was last not found
     let mut unsolved_at = f64::NAN;
-    // the last span count's stations stopped at a station without its exact point: no fit
-    // was built from them
+    // the last span count tried stopped at a station or a span's midpoint without its exact
+    // point: no fit was built, or the one built was not measured against the tolerance
     let mut stations_stopped = false;
     while spans <= max_spans {
         if !stations {
@@ -782,6 +783,9 @@ pub fn tangent_end_rib(
         }
 
         if !zero_speed {
+            // a midpoint whose solve stopped leaves this count's fit unmeasured; the next
+            // count retries, and past the cap it is reported as the stopped solve
+            stations_stopped = !solved;
             // (only a fit the loop attempts counts: none past `max_spans`)
             if spans < max_spans {
                 halvings += spans;
@@ -810,7 +814,8 @@ pub fn tangent_end_rib(
         spans += off.len();
     }
 
-    // a station's solve that stopped, at the last span count tried, built no fit to measure
+    // a station's or a midpoint's solve that stopped, at the last span count tried, left no
+    // fit measured
     let unsolved = unsolved || stations_stopped;
     // no station count certifies the rib within the tolerance (#17744); upstream's check:
     // no stations give the rib within tolerance

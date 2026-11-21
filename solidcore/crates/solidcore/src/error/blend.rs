@@ -425,8 +425,9 @@ pub enum BlendFailure {
     },
     /// The Newton solve of a tangent end rib's exact point at `t` stopped (it did not
     /// converge in its 40 steps, or its system was singular): at a station of the last span
-    /// count tried, so no fit was built, or at the midpoint of a zero-speed rib's span to
-    /// halve. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR`.
+    /// count tried, so no fit was built, at a span's midpoint of that count, so the fit was
+    /// not measured, or at the midpoint of a zero-speed rib's span to halve. A defect
+    /// ([`ErrorKind::StageFailed`]); status `SM_ERR`.
     RibStationNotSolved {
         /// The rib's parameter at the span's midpoint.
         t: f64,
