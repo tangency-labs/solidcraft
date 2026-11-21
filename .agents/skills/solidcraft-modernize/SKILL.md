@@ -14,6 +14,7 @@ Modernize the idea, not just the branch. `main` changes many times a day. A clea
 - Your own branch: rebase it, and push with `--force-with-lease=<branch>:<the head you saw>`. If the lease fails, fetch and look again.
 - Someone else's branch: never force-push it. Open a replacement with `.agents/skills/solidcraft-takeover/SKILL.md`.
 - Don't push only to catch up with `main`. Rebase when the PR conflicts, or when you push a real change.
+- After a release, rebase locally and run your tests again. A draft may be pushed then (drafts run no CI). A ready PR waits for its next real change.
 - Modernizing never means merging.
 - To search many PRs, fetch their refs once (`git fetch origin 'refs/pull/*/head:refs/remotes/pr/*'`) and use `git grep` or `git log -S`. Don't make one API call per PR.
 

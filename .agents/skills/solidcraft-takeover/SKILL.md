@@ -34,5 +34,19 @@ Thanks for starting this. I continued it in <full link to the new PR>, with your
 A fresh PR on the latest main is always welcome.
 ```
 
+## Handing yours over
+When someone needs your PR finished before they can finish their own work (a stack built on it, a release item, a maintainer's request) and asks for it, or when you stop working on it:
+1. Push everything, even if it is red.
+2. Post this note on the PR, or on the issue if there is no PR. Then comment `/unclaim` on the issue.
+
+```markdown
+Handing this over. Branch <fork:branch> @ <sha>.
+Done: <what works, and the tests that show it>
+Left: <the remaining steps, in order>
+Failing now: <test or command> -> <error>
+Traps: <what did not work, and why>
+Repro: <the command that shows the bug on main>
+```
+
 ## Report
 What you inherited, what you changed, how you proved it, how the credit was kept, and both PRs with their titles and full links.

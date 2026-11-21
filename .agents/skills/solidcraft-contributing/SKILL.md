@@ -73,6 +73,15 @@ The PR workflow in detail: `.agents/skills/solidcraft-file-pr/SKILL.md` (writing
   yourself; do not ask a human for evidence you can produce. Diagrams do not replace it. Changes with
   nothing observable need none. Use a public-safe example, check for private designs, paths and account
   details, attach the media rather than committing it.
+- **Show that it fixes the issue.** List each symptom the issue reports. Run one check for each
+  (the reporter's steps, a small reproduction, or the new test) on `main` and on your branch, and
+  name both commits. `main` must fail the way the issue says. The branch must pass, with the
+  measured value. Put the rows in Validation: `Reported | Check | main <sha> | branch <sha>`.
+  Write `Fixes #N` only when every row passes; otherwise write `Refs #N` and say what is left.
+  Run the rows again after a rebase that changed code.
+- **A second look before ready.** Before you mark the PR ready, a reviewer that did not write the
+  change reads the whole diff and the rows above: a person, or a fresh agent session that has not
+  seen the author's reasoning. Say in Validation who reviewed which commit.
 - **Follow through.** Check the PR's merge status throughout and before handoff. Report the state you
   checked and any conflicts resolved. While the PR is open, keep monitoring it and say clearly that it
   is pending; do not claim it merged without checking.
