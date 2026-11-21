@@ -190,7 +190,9 @@ fn contained_surface(
 ) -> Result<bool> {
     let key = walk.next_key()?;
     let mut copy = part.clone_for_evaluation()?;
-    *copy.owner_mut() = owner;
+    // (SetOwner: the bases the copy owns, a curve-bounded surface's basis included,
+    // reach the new owner's face too)
+    copy.set_owner(owner);
     copy.assert_valid(k, list, level, key)
 }
 

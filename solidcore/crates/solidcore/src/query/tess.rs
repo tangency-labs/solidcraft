@@ -636,6 +636,7 @@ impl TessSrfCache {
                         None => s.base().clone(),
                     }
                 }),
+                // (CurveBounded: not reached, `Surface::geometry` peels it)
                 SurfaceKind::CurveBounded(_)
                 | SurfaceKind::Step(_)
                 | SurfaceKind::SrfInVolume(_)

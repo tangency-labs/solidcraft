@@ -471,6 +471,7 @@ pub fn as_b_spline<'a>(k: &Kernel, s: &'a Surface) -> Result<Option<Cow<'a, BSpl
         SurfaceKind::Sphere(sp) => Some(Cow::Borrowed(sp.base().base())),
         SurfaceKind::Torus(t) => Some(Cow::Borrowed(t.base().base())),
         SurfaceKind::SurfOfExtrusion(e) => Some(e.base_with_nurb(k)?),
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)

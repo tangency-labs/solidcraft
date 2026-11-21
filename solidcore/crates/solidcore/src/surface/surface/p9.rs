@@ -82,6 +82,7 @@ fn bss<'a>(k: &Kernel, surface: &'a Surface) -> Result<Cow<'a, BSplineSurface>> 
         SurfaceKind::SurfOfRevolution(s) => Ok(Cow::Borrowed(s.base())),
         // (the B-spline evaluation makes a missing NURB: GetOrCreateGwNurbPointer)
         SurfaceKind::SurfOfExtrusion(s) => s.base_with_nurb(k),
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)
@@ -122,6 +123,7 @@ fn typed_iso_curve(
     let surface = surface.geometry();
     let typed = match surface.kind_with_nurb(k)? {
         // (no override: the `SmSurface` body, whose approximation uses the tolerance)
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)
@@ -181,6 +183,7 @@ pub(super) fn implicit_iso(
     | SurfaceKind::Sphere(_)
     | SurfaceKind::Torus(_)
     | SurfaceKind::ProceduralBlend(_)
+    // (CurveBounded: not reached, `Surface::geometry` peels it)
     | SurfaceKind::CurveBounded(_)
     | SurfaceKind::Step(_)
     | SurfaceKind::OffsetSurface(_)

@@ -306,6 +306,7 @@ fn create_iso_parametric_curve(
     // (a curve-bounded surface's iso curve is its basis's)
     match surface.geometry().kind() {
         // the SmSurface body (surface.surface_p5) makes a B-spline
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)
@@ -367,6 +368,7 @@ pub(super) fn calculate_bounding_box(
                 .calculate_bounding_box_of(k, domain, req, Some(surface))
         }
         SurfaceKind::Plane(p) => crate::surface::surface::p1::plane_bounding_box(k, p, domain, req),
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
             // SmSurface::CalculateBoundingBox (surface::surface::p1). Its polar box asks the
             // surface's own cache for it, whose build asks this function again: upstream
@@ -479,6 +481,7 @@ fn is_singularity(
         | SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::BallPatch(_)
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::SurfOfExtrusion(_)

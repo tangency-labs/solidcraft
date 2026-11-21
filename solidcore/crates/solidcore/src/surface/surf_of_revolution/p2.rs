@@ -1115,6 +1115,7 @@ impl SurfOfRevolution {
             | SurfaceKind::Sphere(_)
             | SurfaceKind::Torus(_)
             | SurfaceKind::SurfOfRevolution(_)
+            // (CurveBounded: not reached, `Surface::geometry` peels it)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_)

@@ -6799,6 +6799,45 @@ mod tests {
         assert_eq!(reseed(&mut records, &mut b, 7), per_kind);
         assert!(reseed(&mut records, &mut b, 8) > per_kind + 6);
     }
+
+    /// A body with a curve-bounded face (its basis answers the face's geometry queries,
+    /// so operations on such a body run further than before): the body copy reaches the
+    /// face's surface copy, which is refused (`Copy`, which `SmCurveBoundedSurface` does
+    /// not override: the base class's `SM_ERR`), before
+    /// anything is written to the body, which is left as it was. `CopyBrep` does not act
+    /// on `MergeBrep`'s status (upstream's `SE`), so the copy is returned holding only the
+    /// faces merged before that face. When the copy refuses instead, the last assertion
+    /// changes.
+    #[test]
+    fn a_body_with_a_curve_bounded_face_is_left_as_it_was_by_a_refused_copy() {
+        use crate::surface::curve_bounded_surface::CurveBoundedSurface;
+        use crate::surface::surface::Surface;
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0)
+                .unwrap();
+        let face = b.face_list()[2];
+        let basis = b.face(face).unwrap().surface.clone().unwrap();
+        let owner = b.face(face).unwrap().surface.as_ref().unwrap().owner();
+        let mut bounded =
+            Surface::from(CurveBoundedSurface::new(basis, Vec::new(), Vec::new(), true).unwrap());
+        bounded.set_owner(owner);
+        b.face_mut(face).unwrap().surface = Some(bounded);
+        b.sync_face_surface_tolerance(face).unwrap();
+        let before = format!("{b:?}");
+        assert!(b
+            .face(face)
+            .unwrap()
+            .surface
+            .as_ref()
+            .unwrap()
+            .copy(&k)
+            .is_err());
+        let copy = brep_copy(&mut k, &b).unwrap();
+        assert_eq!(format!("{b:?}"), before);
+        // the faces merged before the curve-bounded one
+        assert_eq!((copy.face_list().len(), b.face_list().len()), (2, 6));
+    }
 }
 
 /// Test fixtures shared with the callers' tests.

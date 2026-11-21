@@ -192,6 +192,7 @@ fn is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<(bool, Su
         | SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::BallPatch(_)
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::SurfOfExtrusion(_)
@@ -277,6 +278,7 @@ fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Option<Vec<Po
         | SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::BallPatch(_)
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::SurfOfExtrusion(_)
@@ -342,6 +344,7 @@ fn create_iso_parametric_curve(
         SurfaceKind::Torus(s) => Ok(s
             .create_iso_parametric_curve(k, param, value, None, false)?
             .curve),
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)

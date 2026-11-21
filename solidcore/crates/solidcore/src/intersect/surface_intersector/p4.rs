@@ -2261,6 +2261,7 @@ fn surface_is_singularity(k: &Kernel, surface: &Surface, uv: Point2) -> Result<b
         | SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::BallPatch(_)
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::SurfOfExtrusion(_)

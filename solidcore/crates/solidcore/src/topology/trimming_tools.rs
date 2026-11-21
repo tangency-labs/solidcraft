@@ -2390,6 +2390,7 @@ pub fn is_loop_uv_gap_within_tolerance(
         SurfaceKind::Sphere(s) => Cow::Borrowed(s.base().base()),
         SurfaceKind::Torus(s) => Cow::Borrowed(s.base().base()),
         // (dynamic_cast<const SmBSplineSurface*> fails: FALSE)
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::SrfInVolume(_)

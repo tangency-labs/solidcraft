@@ -1091,6 +1091,7 @@ fn is_singularity(
         | SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::BallPatch(_)
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::SurfOfExtrusion(_)

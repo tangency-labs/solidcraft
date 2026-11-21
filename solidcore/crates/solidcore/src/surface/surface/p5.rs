@@ -2686,7 +2686,8 @@ mod tests {
         let basis = BSplineSurface::from_data(2, 1, 1, 1, 4, 3, &pw, &u, &v).unwrap();
         let s = Surface::from(StepSurface::new(Surface::from(basis), true).unwrap());
         let k = Kernel::default();
-        let domain = Extent2d::from_bounds(0.2, 0.1, 0.9, 0.7);
+        // (a domain that holds the iso line: its `v` range contains `v = 0`)
+        let domain = Extent2d::from_bounds(0.2, 0.0, 0.9, 0.7);
         for (dom, ivl) in [(None, (0.0, 1.0)), (Some(&domain), (0.2, 0.9))] {
             let iso = s
                 .create_iso_parametric_curve(&k, SurfParamType::V, 0.0, 1e-4, dom, false)

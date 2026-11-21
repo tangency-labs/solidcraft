@@ -1300,6 +1300,7 @@ fn is_on_seam(k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
         | SurfaceKind::BSpline(_)
         | SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::BallPatch(_)
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::SurfOfRevolution(_)
         | SurfaceKind::SurfOfExtrusion(_)
@@ -2452,6 +2453,46 @@ mod tests {
         let no_cache = Surface::from(crate::surface::surface::StepSurface::empty());
         let up_z = Point3::new(0.0, 0.0, 1.0);
         let mid_uv = Point2::new(0.5, 0.5);
+
+        // the failure is the bounding box's: the box alone fails with the same status,
+        // and the constructors without the directed maximise (no box) succeed
+        let bbox_err = no_cache
+            .calculate_bounding_box(&fixed_kernel, &unit_dom(), [true, false, false], true)
+            .unwrap_err();
+        assert_eq!(bbox_err.sm_status(), Some(SM_ERR_NULL_POINTER));
+        assert!(SurfacePointSolver::new(
+            &fixed_kernel,
+            &no_cache,
+            &unit_dom(),
+            SolverOperation::Minimize,
+            up_z,
+            1e-6,
+            None,
+            SolutionRequested::Single,
+        )
+        .is_ok());
+        assert!(SurfPtGlobalSolver::new(
+            &fixed_kernel,
+            &no_cache,
+            &unit_dom(),
+            SolverOperation::Minimize,
+            up_z,
+            1e-6,
+            None,
+            SolutionRequested::Single,
+        )
+        .is_ok());
+        assert!(SurfPtSolveStepper::new(
+            &fixed_kernel,
+            &no_cache,
+            &unit_dom(),
+            up_z,
+            mid_uv,
+            1e-12,
+            1e-6,
+            SolverOperation::Minimize,
+        )
+        .is_ok());
 
         let base_err = SurfacePointSolver::new(
             &fixed_kernel,

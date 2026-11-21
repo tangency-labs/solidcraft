@@ -2394,7 +2394,7 @@ impl Surface {
     /// [`crate::surface::curve_bounded_surface`]); any other surface itself. The kind
     /// dispatch of a query that depends only on the geometry reads this surface's kind.
     #[must_use]
-    pub fn geometry(&self) -> &Self {
+    pub(crate) fn geometry(&self) -> &Self {
         let mut s = self;
         // (bounded: construction caps the nesting at MAX_GEOMETRY_NESTING)
         while let SurfaceKind::CurveBounded(c) = s.kind() {

@@ -1027,6 +1027,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                     Some(std::borrow::Cow::Owned(tmp.base().clone()))
                 }
             }
+            // (CurveBounded: not reached, `Surface::geometry` peels it)
             SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_)

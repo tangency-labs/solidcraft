@@ -39,8 +39,10 @@
 //!   boundary arrays hold curves, never null pointers. The accessors
 //!   ([`CurveBoundedSurface::basis`], ...) are not upstream (the members are private).
 //! - **Object model.** The surface is the [`SurfaceKind::CurveBounded`] kind of
-//!   [`Surface`]; the `SmSurface` virtuals it does not override run the base-class
-//!   defaults there. Its own overrides pass the call along to the basis surface.
+//!   [`Surface`]. Its own overrides pass the call along to the basis surface; so do the
+//!   geometry queries upstream leaves to the `SmSurface` defaults (next item). The
+//!   other `SmSurface` virtuals it does not override, `Copy` among them, run the
+//!   base-class defaults there.
 //! - **Geometry queries answer the basis's** (not upstream, whose class overrides only
 //!   the evaluators, the natural domain, `GetRootSurface`, `operator==`, `WriteToDB` and
 //!   `AssertValid`). The surface is its basis over the same parameters: every evaluator
@@ -105,7 +107,7 @@ pub const TYPE: i64 = surface_p2::CURVE_BOUNDED_SURFACE_TYPE;
 
 /// The owner a curve-bounded surface gives its basis (not upstream): a surface of this
 /// type, through which the basis reaches the face the curve-bounded surface belongs to.
-pub const BASIS_OWNER: crate::geom::object::ObjectRef = crate::geom::object::ObjectRef {
+pub(crate) const BASIS_OWNER: crate::geom::object::ObjectRef = crate::geom::object::ObjectRef {
     type_code: TYPE,
     key: crate::geom::attribute::ObjectKey(0),
 };
@@ -714,8 +716,11 @@ mod tests {
     use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
     use crate::curve::curve::CurveKind;
     use crate::curve::line::Line;
+    use crate::geom::assert_array::labels::FACE_TYPE;
+    use crate::geom::attribute::ObjectKey;
     use crate::geom::extent1d::Extent1d;
     use crate::geom::geom_utility::p2::ContinuityType;
+    use crate::geom::object::ObjectRef;
     use crate::geom::vector2d::Vec2;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::b_spline_surface::BSplineSurface;
@@ -1326,6 +1331,286 @@ mod tests {
             let on = basis.evaluate_point(&k, Point2::new(at.x, at.y)).unwrap();
             let p = lifted.curve.evaluate_point(&k, lt).unwrap();
             assert!(p.distance(on) <= 1e-6, "{t}: {p:?} vs {on:?}");
+        }
+    }
+
+    // ---- the basis takes the surface's owner, face and zone tolerance -----------------
+
+    /// Every basis down a chain of curve-bounded surfaces, outermost first.
+    fn bases(s: &Surface) -> Vec<&Surface> {
+        let mut out = Vec::new();
+        let mut cur = s;
+        while let SurfaceKind::CurveBounded(c) = cur.kind() {
+            cur = c.basis();
+            out.push(cur);
+        }
+        out
+    }
+
+    /// Asserts each basis answers `face()` and `owner_zone_tol_3d()` as `s` does.
+    fn assert_bases_match(s: &Surface, want_face: Option<ObjectRef>, want_tol: Option<f64>) {
+        assert_eq!(s.face().unwrap(), want_face);
+        assert_eq!(s.owner_zone_tol_3d(), want_tol);
+        let bases = bases(s);
+        assert!(!bases.is_empty());
+        for (i, b) in bases.into_iter().enumerate() {
+            assert_eq!(b.face().unwrap(), want_face, "basis {i}");
+            assert_eq!(b.owner_zone_tol_3d(), want_tol, "basis {i}");
+            if s.owner().is_some() {
+                assert_eq!(b.owner(), Some(BASIS_OWNER), "basis {i}");
+            }
+        }
+    }
+
+    /// After `set_owner`, `set_owner_zone_tol_3d`, a clone and an evaluation copy, the
+    /// basis of a curve-bounded surface (and each basis of a nested one) reaches the same
+    /// face and zone tolerance as the surface.
+    #[test]
+    fn the_basis_reaches_the_surface_s_face_and_zone_tolerance() {
+        let face = ObjectRef {
+            type_code: FACE_TYPE,
+            key: ObjectKey(7),
+        };
+        let other = ObjectRef {
+            type_code: FACE_TYPE,
+            key: ObjectKey(8),
+        };
+        let single = bounded(Surface::from(creased()));
+        let nested = bounded(bounded(bounded(Surface::from(creased()))));
+        for mut s in [single, nested] {
+            // no owner
+            assert_bases_match(&s, None, None);
+            // a face owner, then its tolerance
+            s.set_owner(Some(face));
+            assert_bases_match(&s, Some(face), None);
+            s.set_owner_zone_tol_3d(Some(1e-4));
+            assert_bases_match(&s, Some(face), Some(1e-4));
+            // the same owner again keeps the tolerance
+            s.set_owner(Some(face));
+            assert_bases_match(&s, Some(face), Some(1e-4));
+            // the evaluation copy keeps the owner
+            let eval = s.clone_for_evaluation().unwrap();
+            assert_bases_match(&eval, Some(face), Some(1e-4));
+            // a clone resets it (the copy constructor), the bases with it
+            let copy = s.clone();
+            assert_bases_match(&copy, None, None);
+            // a copy keeping the owner
+            let kept = s.clone_keeping_owner();
+            assert_bases_match(&kept, Some(face), Some(1e-4));
+            // a new owner drops the old face's tolerance
+            s.set_owner(Some(other));
+            assert_bases_match(&s, Some(other), None);
+            s.set_owner_zone_tol_3d(Some(2e-5));
+            assert_bases_match(&s, Some(other), Some(2e-5));
+            // clearing the tolerance, then the owner
+            s.set_owner_zone_tol_3d(None);
+            assert_bases_match(&s, Some(other), None);
+            s.set_owner_zone_tol_3d(Some(3e-5));
+            s.set_owner(None);
+            assert_bases_match(&s, None, None);
+        }
+    }
+
+    // ---- every delegated geometry query answers the basis's --------------------------
+
+    /// One delegated query, answered as text (its `Debug`, errors included) so that the
+    /// table can compare answers of different types.
+    type Query = (&'static str, fn(&Kernel, &Surface, &Extent2d) -> String);
+
+    fn iso_points(k: &Kernel, s: &Surface, dom: &Extent2d, param: SurfParamType) -> String {
+        let at = if param == SurfParamType::U {
+            dom.min().x * 0.6 + dom.max().x * 0.4
+        } else {
+            dom.min().y * 0.6 + dom.max().y * 0.4
+        };
+        match s.create_iso_parametric_curve(k, param, at, 1e-6, Some(dom), true) {
+            Ok(iso) => {
+                let ivl = iso.curve.natural_interval();
+                let pts: Vec<_> = (0..=4)
+                    .map(|i| {
+                        iso.curve
+                            .evaluate_point(k, ivl.evaluate(f64::from(i) / 4.0))
+                    })
+                    .collect();
+                format!("{:?} {ivl:?} {pts:?}", iso.max_gap_3d)
+            }
+            Err(e) => format!("{e:?}"),
+        }
+    }
+
+    fn mid(dom: &Extent2d) -> Point2 {
+        Point2::new(
+            dom.min().x * 0.6 + dom.max().x * 0.4,
+            dom.min().y * 0.3 + dom.max().y * 0.7,
+        )
+    }
+
+    /// Makes a fresh surface for one row of the table.
+    type MakeSurface = fn() -> Surface;
+
+    const QUERIES: &[Query] = &[
+        ("degree", |_, s, _| {
+            format!(
+                "{} {}",
+                s.degree(SurfParamType::U),
+                s.degree(SurfParamType::V)
+            )
+        }),
+        ("degree_with_nurb", |k, s, _| {
+            format!(
+                "{:?} {:?}",
+                s.degree_with_nurb(k, SurfParamType::U),
+                s.degree_with_nurb(k, SurfParamType::V)
+            )
+        }),
+        ("number_control_points", |k, s, _| {
+            format!(
+                "{} {}",
+                s.number_control_points(k, SurfParamType::U),
+                s.number_control_points(k, SurfParamType::V)
+            )
+        }),
+        ("knots_with_nurb", |k, s, _| {
+            format!(
+                "{:?} {:?}",
+                s.knots_with_nurb(k, SurfParamType::U, None),
+                s.knots_with_nurb(k, SurfParamType::V, None)
+            )
+        }),
+        ("natural_uv_domain_with_nurb", |k, s, _| {
+            format!("{:?}", s.natural_uv_domain_with_nurb(k))
+        }),
+        ("step_uv_domain", |_, s, _| {
+            format!("{:?}", s.step_uv_domain())
+        }),
+        ("max_analytic_domain", |k, s, _| {
+            format!("{:?}", s.max_analytic_domain(k))
+        }),
+        ("convert_uv_from_step_to_nurbs", |k, s, dom| {
+            format!("{:?}", s.convert_uv_from_step_to_nurbs(k, mid(dom)))
+        }),
+        ("is_bilinear", |k, s, _| format!("{}", s.is_bilinear(k))),
+        ("is_planar", |k, s, _| format!("{:?}", s.is_planar(k, 1e-6))),
+        ("is_parallel_to_vector", |k, s, _| {
+            format!("{:?}", s.is_parallel_to_vector(k, Vec3::Z))
+        }),
+        ("is_on_seam", |k, s, dom| {
+            format!(
+                "{:?} {:?}",
+                s.is_on_seam(k, mid(dom), None),
+                s.is_on_seam(k, dom.min(), None)
+            )
+        }),
+        ("is_degenerate_point", |k, s, dom| {
+            format!("{:?}", s.is_degenerate_point(k, 1e-6, Some(dom)))
+        }),
+        ("is_singularity", |k, s, dom| {
+            format!(
+                "{:?} {:?}",
+                s.is_singularity(k, mid(dom), 1e-6, false),
+                s.is_singularity(k, dom.min(), 1e-6, false)
+            )
+        }),
+        ("calculate_continuities", |k, s, _| {
+            format!(
+                "{:?} {:?}",
+                s.calculate_continuities(k, SurfParamType::U),
+                s.calculate_continuities(k, SurfParamType::V)
+            )
+        }),
+        ("domain_with_continuity", |k, s, dom| {
+            format!(
+                "{:?}",
+                s.domain_with_continuity(k, ContinuityType::C1, mid(dom), Vec2::new(1.0, 0.0))
+            )
+        }),
+        ("create_iso_parametric_curve", |k, s, dom| {
+            format!(
+                "{} {}",
+                iso_points(k, s, dom, SurfParamType::U),
+                iso_points(k, s, dom, SurfParamType::V)
+            )
+        }),
+        ("calculate_bounding_box", |k, s, dom| {
+            format!(
+                "{:?}",
+                s.calculate_bounding_box(k, dom, [true, true, true], false)
+            )
+        }),
+        ("calculate_tight_bounding_box", |k, s, dom| {
+            format!("{:?}", s.calculate_tight_bounding_box(k, dom))
+        }),
+        ("certified_bounding_box", |k, s, dom| {
+            format!("{:?}", s.certified_bounding_box(k, dom))
+        }),
+        ("drop_point", |k, s, dom| {
+            let p = s
+                .evaluate_point(k, mid(dom))
+                .map(|p| p + Vec3::new(0.01, -0.02, 0.3));
+            match p {
+                Ok(p) => {
+                    let opts = crate::surface::surface::p5::DropPointOptions::default();
+                    match s.drop_point::<crate::surface::surface::p4::NoObject>(k, p, dom, &opts) {
+                        Ok(d) => format!("{} {:?}", d.success, d.result_uv),
+                        Err(e) => format!("{e:?}"),
+                    }
+                }
+                Err(e) => format!("{e:?}"),
+            }
+        }),
+        ("evaluate_point", |k, s, dom| {
+            format!("{:?}", s.evaluate_point(k, mid(dom)))
+        }),
+        ("out_of_bounds_enabled", |_, s, _| {
+            format!(
+                "{:?}",
+                crate::surface::surface::p3::out_of_bounds_enabled(s)
+            )
+        }),
+    ];
+
+    /// Every geometry query a curve-bounded surface passes to its basis answers what the
+    /// basis answers, for a creased B-spline, a plane, a cylinder (whose NURB the query
+    /// makes) and a curve-bounded surface nested in two more.
+    #[test]
+    fn geometry_queries_answer_the_basis_s() {
+        let k = &Kernel::default();
+        let bases: [(&str, MakeSurface); 4] = [
+            ("creased B-spline", || Surface::from(creased())),
+            ("plane", || {
+                Surface::from(crate::surface::plane::Plane::new(
+                    Point3::ZERO,
+                    Vec3::new(1.0, 0.0, 1.0),
+                    Vec3::new(0.0, 1.0, 1.0),
+                    Vec2::new(1.0, 1.0),
+                    &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+                ))
+            }),
+            ("cylinder", || {
+                Surface::from(crate::surface::cone::Cone::new_cylinder_bounded(
+                    Point3::new(0.0, 0.0, 0.0),
+                    Vec3::X,
+                    Vec3::Y,
+                    5.0,
+                    0.0,
+                    360.0,
+                    12.0,
+                    false,
+                    false,
+                    false,
+                ))
+            }),
+            ("nested", || bounded(bounded(Surface::from(creased())))),
+        ];
+        for (name, basis) in bases {
+            // fresh surfaces for each query: a query may make and keep a NURB
+            let dom = basis().natural_uv_domain_with_nurb(k).unwrap();
+            for (query, ask) in QUERIES {
+                // (the nested row's answers are the innermost basis's)
+                let want = ask(k, basis().geometry(), &dom);
+                let got = ask(k, &bounded(basis()), &dom);
+                assert_eq!(got, want, "{name}: {query}");
+            }
         }
     }
 }

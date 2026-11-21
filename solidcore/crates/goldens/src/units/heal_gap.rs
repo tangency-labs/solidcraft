@@ -1657,8 +1657,11 @@ mod tests {
     /// basis's drop: the control-polygon guess and the local solve stop at the local minimum
     /// along the `v = 0` side the moved local foot also found, 6.9e-6 farther (distance
     /// 8.1109e-4, enclosure [8.0414e-4, 8.1109e-4]), as on a plain B-spline surface of the
-    /// same geometry on main. The listed samples are asserted not certified, so a fix of
-    /// #17773 for B-spline surfaces shows here.
+    /// same geometry on main. Its golden line is withdrawn: `gen0398` is listed known
+    /// failing under #17773 (`expected/known_failing.json`), so no wrong foot is blessed.
+    /// This test still runs it: the listed samples are asserted not certified, so a fix of
+    /// #17773 for B-spline surfaces fails here, and that fix certifies them, drops them
+    /// from the list and blesses the row again.
     #[test]
     fn wr56_gap_samples_drop_to_the_nearest_point() {
         use crate::certify::{evaluation_slack, nearest};

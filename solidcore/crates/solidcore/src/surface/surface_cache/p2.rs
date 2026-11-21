@@ -570,6 +570,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             | SurfaceKind::Plane(_)
             | SurfaceKind::SurfOfRevolution(_)
             | SurfaceKind::SurfOfExtrusion(_) => None,
+            // (CurveBounded: not reached, `Surface::geometry` peels it)
             SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_)
@@ -1019,6 +1020,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                     SurfaceKind::Torus(s) => s.base().base().copy_sub_patch(&node_uv),
                     SurfaceKind::SurfOfRevolution(s) => s.base().copy_sub_patch(&node_uv),
                     SurfaceKind::SurfOfExtrusion(s) => s.base().copy_sub_patch(&node_uv),
+                    // (CurveBounded: not reached, `Surface::geometry` peels it)
                     SurfaceKind::CurveBounded(_)
                     | SurfaceKind::Step(_)
                     | SurfaceKind::OffsetSurface(_)

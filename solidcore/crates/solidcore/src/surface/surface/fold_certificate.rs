@@ -289,6 +289,7 @@ fn dispatch(
         }
         SurfaceKind::ProceduralBlend(_)
         | SurfaceKind::OffsetSurface(_)
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::SrfInVolume(_) => Ok(not(NotProvedReason::KindNotCertified)),

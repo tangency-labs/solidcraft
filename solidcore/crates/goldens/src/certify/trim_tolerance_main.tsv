@@ -1,7 +1,7 @@
 # main ee673a19bf
 # topology.brep_validation: main's file without the coincidence search (WR-798): its 43 search cases and the `pairs` key gone, and the 7 generated cases that drew the search checking their bodies' pointers instead
 # offset.offset_executive_p2: main's file with the offset-role attribute (#3138): the `attributes` key of its 30 cases that mark roles, the attribute-only rows
-# heal.gap: main's file with a curve-bounded surface sampled at its basis's knots as B-spline geometry (#20163): 16 cases; no certified trim tolerance moves
+# heal.gap: main's file with a curve-bounded surface sampled at its basis's knots as B-spline geometry (#20163) and a B-spline surface's zero-length sample domain sampled by even stride (WR-799): 21 cases, gen0373 and gen0398 known failing (#17773); no certified trim tolerance moves
 # intersect.surface_intersector_p2: main's file with curve-bounded surfaces intersected as their basis (#20163): the line and coincidence checks of 37 cases; no certified trim tolerance moves
 # intersect.surface_intersector_p3: main's file with curve-bounded surfaces intersected as their basis (#20163): 15 cases; no certified trim tolerance moves
 # intersect.surface_intersector_p4: main's file with curve-bounded surfaces intersected as their basis (#20163): 2 cases; no certified trim tolerance moves
@@ -12,7 +12,7 @@
 # surface.surface_assert_valid: main's file with the inherited check of a curve-bounded surface reading its basis's continuities (#20163): the seam and discontinuity reports of 106 cases gone, the boundary reports kept; no certified trim tolerance moves
 # surface.surface_cache_p2: main's file with the cache tree of a curve-bounded surface built from its basis (#20163): 30 cases; no certified trim tolerance moves
 # surface.surface_cache_p3: main's file with the cache tree of a curve-bounded surface built from its basis (#20163): 19 cases; no certified trim tolerance moves
-# surface.surface_p1: main's file with the continuities of a curve-bounded surface read from its basis (#20163): 12 cases; no certified trim tolerance moves
+# surface.surface_p1: main's file with the continuities of a curve-bounded surface read from its basis (#20163): 10 cases, domhist0052 and domhist0079 known failing (#20239); no certified trim tolerance moves
 # surface.surface_p5: main's file with the iso curves and singularities of a curve-bounded surface answered from its basis (#20163): 32 cases; no certified trim tolerance moves
 # surface.surface_p6: main's file with the continuity and derivative-surface queries of a curve-bounded surface answered from its basis (#20163): 58 cases; no certified trim tolerance moves
 # surface.surface_p7: main's file with the closed and planar tests of a curve-bounded surface answered from its basis (#20163): 15 cases; no certified trim tolerance moves
@@ -110,7 +110,7 @@ geom.tree	1d1b8681e1e52568
 geom.vector2d	0788c82ad3aeddae
 geom.vector3d	d42760155d895320
 heal.face_props	0eee14123a0f7dfe
-heal.gap	badff05bb1d9aea5
+heal.gap	da80f89f7158da28
 heal.heal_data_p1	814949569316074b
 heal.heal_data_p2	9fd678fc49ef523b
 heal.heal_data_p3	457871ebcf6a8779
@@ -237,7 +237,7 @@ surface.surface_assert_valid	2fcd78e4f40a2e13
 surface.surface_cache_p1	36658877fe9eeb92
 surface.surface_cache_p2	e7f5212593b4b76b
 surface.surface_cache_p3	2c4131b784efbf4d
-surface.surface_p1	98b82fba55064f80
+surface.surface_p1	3abe466618818f2c
 surface.surface_p10	4c4881a050a1ae8a
 surface.surface_p11	4813228760084e49
 surface.surface_p2	be0e87faaf6b9c35

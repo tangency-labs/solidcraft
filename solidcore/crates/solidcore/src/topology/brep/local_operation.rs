@@ -620,6 +620,7 @@ fn seam_gap(
     let surface = surface.geometry();
     let blend = match surface.kind_with_nurb(k)? {
         SurfaceKind::Plane(_)
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         | SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::OffsetSurface(_)

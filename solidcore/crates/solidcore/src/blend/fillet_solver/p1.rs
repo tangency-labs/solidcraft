@@ -3183,6 +3183,7 @@ fn evaluate_point_out_of_bounds(k: &Kernel, base: &Surface, uv: Point2) -> Resul
         SurfaceKind::Sphere(c) => *c.base.base_mut().out_of_bounds_enabled_mut() = true,
         SurfaceKind::Torus(c) => *c.base.base_mut().out_of_bounds_enabled_mut() = true,
         // an SmOffsetSurface is not an SmBSplineSurface either
+        // (CurveBounded: not reached, `Surface::geometry` peels it)
         SurfaceKind::CurveBounded(_)
         | SurfaceKind::Step(_)
         | SurfaceKind::SrfInVolume(_)
