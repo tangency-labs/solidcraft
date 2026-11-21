@@ -80,7 +80,7 @@ folders and memory. `extensions` contains inert plugin metadata.
 A zip holds one plugin, with `plugin.json` and its component at the top or inside one top-level folder.
 The existing `solidcraft_io::safe_zip` reader refuses absolute paths, `..`, symlinks and device entries.
 The installer limits the archive to 256 entries, each file to 16 MiB (an importer component may be up to 64 MiB), and input and unpacked content to
-64 MiB. The manifest has a separate 16 KiB cap. Before publication, the host checks
+64 MiB. The manifest has a separate 64 KiB cap. Before publication, the host checks
 `min_host_version`, then parses and validates the manifest. It refuses unknown or incompatible
 required capabilities; unsupported optional capabilities are left ungranted. It unpacks into a
 hidden `.install-…` folder beside the installed plugins, then renames it to `plugins/<id>/`.
