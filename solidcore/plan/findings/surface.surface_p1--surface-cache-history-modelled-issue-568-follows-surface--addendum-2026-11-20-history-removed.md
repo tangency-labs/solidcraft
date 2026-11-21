@@ -21,6 +21,7 @@ The cache-history model is removed. A surface's continuity arrays are now a pure
 
 - If the continuity computation fails, it now fails the reader during a Boolean operation too, as it already did outside one. Before, the empty arrays of a cache without a tree let the reader go on.
 - The knot query of a surface kind without one fails the same way. The fork's uninitialised domain when `GetKnots` fails (WR-663) can no longer be reached, because the continuities query the knots first. That branch is removed.
+- A curve-bounded surface is the exception for the continuity domain: `GetDomainWithContinuity` and `DomainWithContinuity` peel its curve-bounded layers (`Surface::geometry`) and answer for the basis, with the basis's own continuities. That is exact: the kind holds only its basis, its boundary curves and `implicit_outer`; every evaluator passes `uv` to the basis unchanged; its natural domain is the basis's; and every edit that would reparameterise it is refused for the kind (file and line in the doc comment of `Surface::domain_with_continuity`). Nothing else of the kind changes: `GetKnots`, its continuities, its iso curves and its cache tree still give the base-class error, so `LiftCurve` with the continuity checks on, the cache tree build and the drop's boundary start points still fail on it as before. `LiftCurve` with the checks skipped now lifts on it as on the bare basis.
 
 ## `surface.surface_p1` `DomCont`
 
@@ -30,18 +31,26 @@ The `history` input runs real calls before the query:
 
 Every `domhistNNNN` expectation equals the answer with no history. That equality is the check.
 
-The exception is a history step that fails. Its record is the marker `-1` (`DOM_CONT_HISTORY_FAILED`), not a status, followed by the query's own record, so the kernel's answer stays pinned there too. Only `GetTree` of a curve-bounded surface fails there, because it needs the knots such a surface does not answer (#20163). That holds for 0052, 0074 and 0075 under history `2`, with status 1001 and the same reason on main. Main's harness wrote 1001 for the failed step, which happened to equal the query's own answer without history. Any other failed history step is a harness error.
+The exception is a history step that fails. Its record is the marker `-1` (`DOM_CONT_HISTORY_FAILED`), not a status, followed by the query's own record, so the kernel's answer stays pinned there too. Only `GetTree` of a curve-bounded surface fails there, because the tree build needs the knots such a surface does not answer (https://github.com/tangency-labs/solidcraft/issues/20163, a general follow-up). That holds for 0052, 0074 and 0075 under history `2`, as on main. Main's harness wrote the failed step's 1001 and never ran the query. Any other failed history step is a harness error.
 
-15 outputs changed: 0009, 0011, 0023, 0043, 0049, 0061, 0062, 0063, 0067, 0070, 0071, 0073, 0078, 0079 and 0083.
-- **Proof of history-freedom.** The kernel before this change, run with no history, writes a byte-identical expected file. The old outputs came from the empty arrays of a cache without a tree. The harness now checks this on every run: a case with history also queries a fresh surface without history, and any difference is a harness error.
-- **What the new values are.** The 13 non-curve-bounded cases split by where the changed bound comes from (each equals the routine worked by hand on the surface's filled arrays):
-  - **5 interior-knot cases:** 0061 (u), 0062, 0071 (v), 0078 and 0083. The new value is the C-span around the point, correct from the knots.
-  - **10 off-domain cases:** 0009, 0011, 0023, 0043, 0049, 0061 (v), 0063, 0067, 0071 (u) and 0073. They are history-free and equal to the formula on filled arrays, but the formula is defective there: at the first and last knot it compares a component of the direction vector with the knot value, so for a start point off the domain the answer depends on the vector's size, not on the surface (WR-20239, https://github.com/tangency-labs/solidcraft/issues/20239). They are not claimed as correct continuity domains.
-- **0070 and 0079.** Both are curve-bounded surfaces, which answer no `GetKnots`: the base-class `SM_ERR`, as upstream's `SmCurveBoundedSurface`, which does not override it.
-  - Both run history `1`, and the query is reached on main and here (checked with a temporary print).
-  - The old value was an inverted box with status 0 (the WR-663 branch, reached only without a tree). The new value is status 1001, which main already gave with no history.
-  - Neither is the right answer. The exact answer is the basis surface's continuity domain; 0070's basis has a C0 crease at u = 0.50087.
-  - The change removes the history dependence only. Making curve-bounded surfaces answer their basis's knots is a separate change.
+Against main, 7 cases are blessed with new values and 39 move to known failing (13 of them changed here, 26 unchanged from main). The old values came from the empty arrays of a cache without a tree, or from the knot query a curve-bounded surface does not answer. Proof of history-freedom: the harness's standing check, on every run (a case with history also queries a fresh surface without history; any difference is a harness error).
+
+- **7 blessed, each start point on the natural domain:**
+  - **2 interior-knot cases on B-splines:** 0078 and 0083. The new value is the C-span around the point, correct from the knots.
+  - **5 on curve-bounded surfaces** (0017, 0070, 0074 and 0075 under a history, gen0471 without): each equals `GetDomainWithContinuity` of the bare basis made fresh (the goldens test `curve_bounded_domhist_rows_answer_as_the_fresh_basis`). Worked from the basis's knots:
+    - 0070 (C1C2): u knots 0, 0.50087, 1 at degree 1, the interior one C0, a real crease; the point's u = 0.6557 is past it, so u in [0.50087, 1]. The v interior knot 2.2743 is C1C2G3, so v is the whole [0.92601, 2.41351].
+    - 0017 (C1C2C3): v interior knots 0.55656 and 0.77821 are C1; v = 0.968 is past both, so v in [0.77821, 1]; u has no interior knot, [0, 1].
+    - 0074 (G1G2G3): v interior knot 0.42025 is G1; v = 0.7528 is past it, so v in [0.42025, 1]; u is the whole [0.55760, 3.53109]. The record is the marker, then status 0 and that domain.
+    - 0075 (C1C2G3): u interior knot 0.84648 is G1, u = 0.2158 is before it, so u in [0, 0.84648]; v interior knots 0.74962 and 0.77701 are C1, v = 0.8061 is past both, so v in [0.77701, 1.67144]. The record is the marker, then status 0 and that domain.
+    - gen0471 (C1G2G3): u interior knots 0.31642 and 0.76448 are C1, u = 0.9789 is past both, so u in [0.76448, 1]; v is the whole [-0.00948, 0.66687].
+    - Main answered status 1001 there (the kind's `GetKnots`), and for 0074 and 0075 never ran the query.
+  - In these seven the first and last knots are the natural bounds, so where the end-knot comparison of WR-20239 fires at an on-domain start point it sets a bound to the natural bound and does not move the answer.
+- **39 known failing, no golden line** (`expected/known_failing.json`, under https://github.com/tangency-labs/solidcraft/issues/20239): every `DomCont` case not on a STEP surface whose start point is off the natural domain by more than `EFF_ZERO_SQRT` in u or v. 13 are cases this change moves (0009, 0011, 0023, 0043, 0049, 0052, 0061, 0062, 0063, 0067, 0071, 0073, 0079); 26 are unchanged from main and removed only because the same evidence shows their values wrong (0000, 0002, 0004, 0006, 0021, 0026, 0028, 0029, 0035, 0040, 0044, 0046, 0051, 0053, 0057, 0058, 0068, 0081, 0082, 0085, 0086, 0088, 0089, 0090, 0093, 0095).
+  - The contract: `SmSurface.h` 1124-1127, "get some subdomain containing the crUV point that is everywhere at least eMinContinuity continuous", crUV "subDomain must contain this point"; `SmSurface.cpp`, "rtn: domain surrounding crUV point". Nothing documents an off-domain answer; what the routine should do there (most likely refuse) is for #20239 to decide.
+  - Evidence per case, named in its entry: (a) the answer changes when the direction is scaled by 1e-3, 1 and 1e3 (13 cases: the end-knot test compares a component of the direction with the knot value), or (b) where the vector's sign already decides that comparison, the box returned with a success status does not contain the start point (26 cases).
+  - A case is one line, so 0061, 0062 and 0071, off in one direction only, are listed whole.
+  - The goldens test `known_failing_domcont_cases_are_shown_wrong` holds the evidence both ways: listed exactly when off the domain; every listed case varies or does not contain its start point; every case with a golden line is invariant under the scaling and contains its start point.
+  - STEP surfaces are outside it: they answer their own `GetDomainWithContinuity`, the STEP domain whatever the point (6 `DomCont` cases on STEP surfaces start off the domain: 0005, 0013, 0018, 0020, 0055, 0084; not changed here).
 
 ## `offset.offset_geometry_creation`: 5 changed cases
 

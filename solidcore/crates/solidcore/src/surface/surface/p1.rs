@@ -1862,6 +1862,21 @@ impl Surface {
     /// which are empty until that cache's tree is built, so its answer off the natural
     /// domain depends on what ran before. No cache is made here.
     ///
+    ///
+    /// A curve-bounded surface answers for its basis (not upstream, whose
+    /// `SmCurveBoundedSurface` does not override `GetKnots` and so leaves an
+    /// uninitialised domain, WR-663). That is exact: the kind holds only its basis, its
+    /// boundary curves and `implicit_outer` (`curve_bounded_surface.rs` 114-123); every
+    /// evaluator passes `uv` to the basis unchanged (`evaluate`, `evaluate_point`,
+    /// `evaluate_normal`, `evaluate_step`, ..., `curve_bounded_surface.rs` 325-488); its
+    /// natural domain is the basis's (`curve_bounded_surface.rs` 316-318, dispatched at
+    /// `p2.rs` 2323); and every edit that would reparameterise it is refused for the
+    /// kind (`base_edit` / `base_split_at` in `p2.rs`: `reverse` 3343, `reparameterize`
+    /// 3438, `swap_uv` 3525, `transform` 3705, `trim_with_domain` 3748, `split_at`
+    /// 3837). So its continuity domain
+    /// around `uv` is the basis's. No other query of the kind changes (its knots stay
+    /// the base error).
+    ///
     /// # Errors
     ///
     /// Those of [`Surface::continuities`] (among them the knot queries, which upstream
@@ -1875,17 +1890,21 @@ impl Surface {
         uv: Point2,
         uv_vector: Vec2,
     ) -> Result<Extent2d> {
-        if let SurfaceKind::Step(s) = self.kind() {
+        // (before the STEP test: a basis can be a STEP surface)
+        let surface = self.geometry();
+        if let SurfaceKind::Step(s) = surface.kind() {
             return s.domain_with_continuity();
         }
-        let conts = self.continuities(k)?;
-        self.domain_with_continuity_using(k, min_continuity, uv, uv_vector, &conts)
+        let conts = surface.continuities(k)?;
+        surface.domain_with_continuity_using(k, min_continuity, uv, uv_vector, &conts)
     }
 
     /// [`Surface::domain_with_continuity`] for a caller holding the surface's cache
     /// (`DomainWithContinuity`): upstream's `smsurf_GetSurfaceCache(this)` returns the
     /// one cache of the surface, whose arrays it reads. Here the continuities are those
-    /// of the cache's surface (an exact copy of this one), whatever the cache's state.
+    /// of the cache's surface (an exact copy of this one), whatever the cache's state;
+    /// for a curve-bounded surface, those of its basis, which answers (as
+    /// [`Surface::domain_with_continuity`]).
     ///
     /// # Errors
     ///
@@ -1898,11 +1917,18 @@ impl Surface {
         uv_vector: Vec2,
         cache: &SurfaceCache<O>,
     ) -> Result<Extent2d> {
-        if let SurfaceKind::Step(s) = self.kind() {
+        // (before the STEP test: a basis can be a STEP surface)
+        let surface = self.geometry();
+        if let SurfaceKind::Step(s) = surface.kind() {
             return s.domain_with_continuity();
         }
-        let conts = cache.surface().continuities(k)?;
-        self.domain_with_continuity_using(k, min_continuity, uv, uv_vector, &conts)
+        let conts = if matches!(self.kind(), SurfaceKind::CurveBounded(_)) {
+            // (the basis's own: the cache's surface is the curve-bounded copy)
+            surface.continuities(k)?
+        } else {
+            cache.surface().continuities(k)?
+        };
+        surface.domain_with_continuity_using(k, min_continuity, uv, uv_vector, &conts)
     }
 
     fn domain_with_continuity_using(
@@ -5265,25 +5291,6 @@ mod tests {
     /// history, from the empty arrays of the cache without tree (#20054).
     #[test]
     fn domain_with_continuity_is_the_same_under_every_cache_history() {
-        use crate::nurbs::math::CPoint;
-        let roof = || {
-            let row =
-                |x: f64, z: f64| vec![CPoint::new(x, 0.0, z, 1.0), CPoint::new(x, 1.0, z, 1.0)];
-            Surface::from(
-                BSplineSurface::from_data(
-                    2,
-                    1,
-                    1,
-                    1,
-                    4,
-                    3,
-                    &[row(0.0, 0.0), row(1.0, 1.0), row(2.0, 0.0)],
-                    &[0.0, 0.0, 0.5, 1.0, 1.0],
-                    &[0.0, 0.0, 1.0, 1.0],
-                )
-                .unwrap(),
-            )
-        };
         let domain = |history: u8, uv: Point2| {
             let s = roof();
             let mut k = Kernel::default();
@@ -5311,6 +5318,129 @@ mod tests {
                 format!("{fresh_off:?}"),
                 "history {history}"
             );
+        }
+    }
+    /// The roof `S(u, v) = (2u, v, 1 - |2u - 1|)`: degree 1 in u with a C0 crease at
+    /// u = 1/2, degree 1 in v.
+    fn roof() -> Surface {
+        use crate::nurbs::math::CPoint;
+        let row = |x: f64, z: f64| vec![CPoint::new(x, 0.0, z, 1.0), CPoint::new(x, 1.0, z, 1.0)];
+        Surface::from(
+            BSplineSurface::from_data(
+                2,
+                1,
+                1,
+                1,
+                4,
+                3,
+                &[row(0.0, 0.0), row(1.0, 1.0), row(2.0, 0.0)],
+                &[0.0, 0.0, 0.5, 1.0, 1.0],
+                &[0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+        )
+    }
+
+    /// `basis` bounded by no curves (its natural domain implicitly the outer boundary).
+    fn bounded(basis: Surface) -> Surface {
+        Surface::from(
+            crate::surface::curve_bounded_surface::CurveBoundedSurface::new(
+                basis,
+                Vec::new(),
+                Vec::new(),
+                true,
+            )
+            .unwrap(),
+        )
+    }
+
+    /// A surface made fresh for each query.
+    type MakeSurface = fn() -> Surface;
+
+    /// `GetDomainWithContinuity` of a curve-bounded surface over the roof, and of one
+    /// nested in another, is the bare roof's answered fresh: left of, at (from each side)
+    /// and right of the crease, beside it, under each cache history of
+    /// [`domain_with_continuity_is_the_same_under_every_cache_history`] (a history step
+    /// the kind refuses, such as its tree build, is left out as the `domhist` cases mark
+    /// it), and read through the surface's cache where one was made.
+    #[test]
+    fn curve_bounded_domain_with_continuity_is_the_basis_s() {
+        let queries = [
+            (Point2::new(0.25, 0.5), Vec2::new(1.0, 0.25)),
+            (Point2::new(0.5, 0.5), Vec2::new(1.0, 0.0)),
+            (Point2::new(0.5, 0.5), Vec2::new(-1.0, 0.0)),
+            (Point2::new(0.5 + 1e-4, 0.5), Vec2::new(-1.0, 0.0)),
+            (Point2::new(0.5 - 1e-4, 0.5), Vec2::new(1.0, 0.0)),
+            (Point2::new(0.75, 0.5), Vec2::new(-1.0, 0.25)),
+        ];
+        let makes: [(&str, MakeSurface); 2] = [
+            ("curve-bounded", || bounded(roof())),
+            ("nested", || bounded(bounded(roof()))),
+        ];
+        let mut through_cache = 0;
+        for (name, make) in makes {
+            for history in 0..=3_u8 {
+                for &(uv, vec) in &queries {
+                    let want = roof()
+                        .domain_with_continuity(&Kernel::default(), ContinuityType::C1, uv, vec)
+                        .unwrap();
+                    let s = make();
+                    let mut k = Kernel::default();
+                    let mut cache = None;
+                    if matches!(history, 1 | 2) {
+                        k.context.set_doing_boolean(true);
+                        cache = get_surface_cache::<()>(&k, &s, None).ok();
+                        k.context.set_doing_boolean(false);
+                        if history == 2 {
+                            if let Some(c) = cache.as_mut() {
+                                let _ = c.get_tree(&k);
+                            }
+                        }
+                    }
+                    k.context.set_doing_boolean(history == 3);
+                    let got = s.domain_with_continuity(&k, ContinuityType::C1, uv, vec);
+                    assert_eq!(got.unwrap(), want, "{name}, history {history}, {uv:?}");
+                    if let Some(c) = &cache {
+                        let got =
+                            s.domain_with_continuity_from_cache(&k, ContinuityType::C1, uv, vec, c);
+                        assert_eq!(
+                            got.unwrap(),
+                            want,
+                            "{name} cache, history {history}, {uv:?}"
+                        );
+                        through_cache += 1;
+                    }
+                }
+            }
+        }
+        assert!(through_cache > 0, "no history made a cache of the kind");
+        // (the crease bounds the answers: the domain left of it ends there)
+        let left = roof()
+            .domain_with_continuity(
+                &Kernel::default(),
+                ContinuityType::C1,
+                Point2::new(0.25, 0.5),
+                Vec2::new(1.0, 0.25),
+            )
+            .unwrap();
+        assert_eq!(
+            left,
+            Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(0.5, 1.0))
+        );
+    }
+
+    /// The change above is scoped to the continuity domain: the knot queries of a
+    /// curve-bounded surface (and so its continuities) are still the base class's error.
+    #[test]
+    fn curve_bounded_knots_stay_the_base_error() {
+        let k = Kernel::default();
+        let base = format!("{:?}", super::super::p2::base_knots());
+        for s in [bounded(roof()), bounded(bounded(roof()))] {
+            for param in [SurfParamType::U, SurfParamType::V] {
+                assert_eq!(format!("{:?}", s.knots(param, None)), base);
+                assert_eq!(format!("{:?}", s.knots_with_nurb(&k, param, None)), base);
+            }
+            assert!(s.continuities(&k).is_err());
         }
     }
 }

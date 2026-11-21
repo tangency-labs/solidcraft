@@ -1587,6 +1587,19 @@ impl Surface {
         self.made_kind.get().unwrap_or(&self.kind)
     }
 
+    /// The surface whose geometry this one is: through every curve-bounded layer, its
+    /// basis surface (a curve-bounded surface is its basis over the same parameters:
+    /// [`crate::surface::curve_bounded_surface`]); any other surface itself.
+    #[must_use]
+    pub(crate) fn geometry(&self) -> &Self {
+        let mut s = self;
+        // (bounded: construction caps the nesting at MAX_GEOMETRY_NESTING)
+        while let SurfaceKind::CurveBounded(c) = s.kind() {
+            s = c.basis();
+        }
+        s
+    }
+
     /// Moves a kind made by [`Surface::kind_with_nurb`] into this surface before an
     /// edit (the edit applies to the made object, as upstream's), detaching it from the
     /// evaluation copies sharing the cell.

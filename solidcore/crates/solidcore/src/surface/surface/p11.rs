@@ -2836,4 +2836,45 @@ mod tests {
         asked.continuities(&k).unwrap();
         same(&lift(&k, &asked));
     }
+    /// `LiftCurve` with the continuity checks skipped, during a Boolean operation, on a
+    /// curve-bounded surface over the roof (and one nested in another) is the lift on the
+    /// bare roof: the segment's continuity domain is the basis's (#20054). With the
+    /// checks on, the lift still fails as before, at the kind's knot query.
+    #[test]
+    fn lift_curve_skipping_checks_on_a_curve_bounded_surface_is_the_basis_s() {
+        use crate::surface::curve_bounded_surface::CurveBoundedSurface;
+        let bounded = |b: Surface| {
+            Surface::from(CurveBoundedSurface::new(b, Vec::new(), Vec::new(), true).unwrap())
+        };
+        let tol = 1e-6;
+        let dom = Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0));
+        let uv_line = Curve::from(crate::curve::line::Line::from_points(
+            Point3::new(0.1, 0.2, 0.0),
+            Point3::new(0.4, 0.8, 0.0),
+            2,
+        ));
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let mut k = Kernel::default();
+        k.context.set_doing_boolean(true);
+        let want = roof()
+            .lift_curve(&k, &dom, &uv_line, &interval, tol, true)
+            .unwrap();
+        for s in [bounded(roof()), bounded(bounded(roof()))] {
+            let got = s
+                .lift_curve(&k, &dom, &uv_line, &interval, tol, true)
+                .unwrap();
+            assert_eq!(format!("{:?}", got.curve), format!("{:?}", want.curve));
+            assert_eq!(got.max_approx_dev, want.max_approx_dev);
+            assert_eq!(
+                format!(
+                    "{:?}",
+                    s.lift_curve(&k, &dom, &uv_line, &interval, tol, false)
+                ),
+                format!(
+                    "{:?}",
+                    Err::<LiftedCurve, _>(crate::surface::surface::p2::base_knots().unwrap_err())
+                )
+            );
+        }
+    }
 }

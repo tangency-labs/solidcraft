@@ -35,7 +35,11 @@
 //! operation, then the query after it. A history step that fails writes `-1`
 //! (`DOM_CONT_HISTORY_FAILED`) before the query's record: only `GetTree` of a
 //! curve-bounded surface fails there (0052, 0074, 0075); any other failed step is a
-//! harness error.
+//! harness error. A curve-bounded surface answers for its basis (#20054). Every case
+//! (not on a STEP surface) whose start point is off the natural domain is known failing
+//! under #20239 (`expected/known_failing.json`), each shown wrong by its answer changing
+//! with the direction's length or by a box that does not contain the start point; the
+//! test `known_failing_domcont_cases_are_shown_wrong` holds that evidence both ways.
 //!
 //! Deferred cases: the paths into unported units (every surface cache build needs
 //! `SmSurface::CalculateContinuities`, `surface.surface_p6`: `Cache`, `BBox` of
@@ -1364,5 +1368,171 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         rust(&case.parse()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The case's inputs with the surface replaced by the bare basis when it is
+    /// curve-bounded, and no history.
+    fn fresh_basis(inputs: &Inputs) -> Inputs {
+        let mut v = serde_json::to_value(inputs).expect("json");
+        let basis = v["surf"]["curve_bounded"].clone();
+        if !basis.is_null() {
+            v["surf"] = serde_json::json!({ "bspline": basis });
+        }
+        v["history"] = serde_json::json!(0);
+        serde_json::from_value(v).expect("fresh")
+    }
+
+    /// How far the case's start point is off the natural domain of its (bare) surface, in
+    /// u and v.
+    fn off_domain(inputs: &Inputs) -> (f64, f64) {
+        let OpIn::DomCont { uv, .. } = &inputs.op else {
+            panic!("not a DomCont case");
+        };
+        let fresh = fresh_basis(inputs);
+        let d = wrapped_of(fresh.wrap, &fresh.surf)
+            .expect("surface")
+            .natural_uv_domain_with_nurb(&Kernel::default())
+            .expect("domain");
+        let off = |x: f64, lo: f64, hi: f64| (lo - x).max(x - hi).max(0.0);
+        (off(uv[0], d.min().x, d.max().x), off(uv[1], d.min().y, d.max().y))
+    }
+
+    /// The positive factors the direction is scaled by in the evidence of #20239: the same
+    /// direction, so the same request about the same surface.
+    const SCALINGS: [f64; 3] = [1e-3, 1.0, 1e3];
+
+    /// `GetDomainWithContinuity` of the case's surface made fresh (the bare basis for a
+    /// curve-bounded one; no history, outside a Boolean operation), with the direction
+    /// scaled by each of [`SCALINGS`]: each domain as `[u0, u1] x [v0, v1]`, or the error.
+    fn scaled_answers(inputs: &Inputs) -> Vec<String> {
+        let OpIn::DomCont { cont, uv, vec, .. } = &inputs.op else {
+            panic!("not a DomCont case");
+        };
+        let fresh = fresh_basis(inputs);
+        let s = wrapped_of(fresh.wrap, &fresh.surf).expect("surface");
+        let c = continuity(*cont).expect("continuity");
+        SCALINGS
+            .iter()
+            .map(|f| {
+                let v = Vec2::new(vec[0] * f, vec[1] * f);
+                match s.domain_with_continuity(&Kernel::default(), c, p2(*uv), v) {
+                    Ok(d) => format!(
+                        "[{}, {}] x [{}, {}]",
+                        d.min().x,
+                        d.max().x,
+                        d.min().y,
+                        d.max().y
+                    ),
+                    Err(e) => format!("error: {e}"),
+                }
+            })
+            .collect()
+    }
+
+    /// The blessed `GetDomainWithContinuity` cases on a curve-bounded surface answer what
+    /// the bare basis answers made fresh (no history, outside a Boolean operation), each
+    /// start point on the natural domain (#20054). Where the history step failed
+    /// (`GetTree` of the kind), the record is the marker followed by that answer.
+    #[test]
+    fn curve_bounded_domhist_rows_answer_as_the_fresh_basis() {
+        for name in [
+            "domhist0017",
+            "domhist0070",
+            "domhist0074",
+            "domhist0075",
+            "gen0471",
+        ] {
+            let case = crate::case::regression_case(&Runner, name);
+            let inputs: Inputs = case.parse().expect("inputs");
+            assert!(
+                matches!(inputs.surf, SurfIn::CurveBounded(_)) && !inputs.wrap,
+                "{name}: not curve-bounded"
+            );
+            assert_eq!(off_domain(&inputs), (0.0, 0.0), "{name}: off the domain");
+            let got = rust(&inputs).expect("rust");
+            let want = rust(&fresh_basis(&inputs)).expect("fresh");
+            if got.values["status"] == [DOM_CONT_HISTORY_FAILED] {
+                let mut record = want.values["status"].clone();
+                record.extend_from_slice(&want.values["out"]);
+                assert_eq!(got.values["out"], record, "{name}");
+            } else {
+                assert_eq!(got.values, want.values, "{name}");
+            }
+        }
+    }
+
+    /// The evidence of the known-failing `DomCont` cases, both ways, so a fix of #20239
+    /// shows. Over every `DomCont` case on a surface that is not a STEP surface (a STEP
+    /// surface answers its own `GetDomainWithContinuity`, not this routine):
+    /// - a case is listed in `expected/known_failing.json` exactly when its start point is
+    ///   off the natural domain by more than `EFF_ZERO_SQRT` in u or v;
+    /// - a listed case's answer is wrong: it changes when the direction is scaled by a
+    ///   positive factor (the same request about the same surface), or, where it does not,
+    ///   the box returned with a success status does not contain the start point, which the
+    ///   routine's contract requires (`SmSurface.h` 1124-1127: "get some subdomain
+    ///   containing the crUV point", crUV "subDomain must contain this point");
+    /// - a case with a golden line answers the same under every scaling, and its box
+    ///   contains the start point.
+    #[test]
+    fn known_failing_domcont_cases_are_shown_wrong() {
+        let tol = solidcore::math::EFF_ZERO_SQRT;
+        let dir = crate::case::repo_root().join("crates/goldens/expected");
+        let listed = crate::golden::known_failing(&dir, Runner.id()).expect("known failing");
+        let cases = Runner
+            .cases(&CaseContext {
+                root: crate::case::repo_root(),
+                seeds: 16,
+            })
+            .expect("cases");
+        let mut listed_seen = 0;
+        let mut lines_seen = 0;
+        for case in cases {
+            let Ok(inputs) = case.parse::<Inputs>() else {
+                continue;
+            };
+            let OpIn::DomCont { uv, .. } = &inputs.op else {
+                continue;
+            };
+            if inputs.wrap {
+                assert!(!listed.contains_key(&case.name), "{}: a STEP surface", case.name);
+                continue;
+            }
+            let name = &case.name;
+            let (du, dv) = off_domain(&inputs);
+            let off = du > tol || dv > tol;
+            assert_eq!(listed.contains_key(name), off, "{name}: off by ({du:e}, {dv:e})");
+            let answers = scaled_answers(&inputs);
+            let varies = answers.iter().any(|a| *a != answers[1]);
+            let fresh = fresh_basis(&inputs);
+            let OpIn::DomCont { cont, vec, .. } = &fresh.op else {
+                continue;
+            };
+            let s = wrapped_of(false, &fresh.surf).expect("surface");
+            let d = s.domain_with_continuity(
+                &Kernel::default(),
+                continuity(*cont).expect("continuity"),
+                p2(*uv),
+                Vec2::new(vec[0], vec[1]),
+            );
+            let contains = d.is_ok_and(|d| d.contains_point(p2(*uv), tol));
+            if off {
+                listed_seen += 1;
+                assert!(
+                    varies || !contains,
+                    "{name}: listed, but neither scaling nor containment shows it wrong"
+                );
+            } else {
+                lines_seen += 1;
+                assert!(!varies, "{name}: changes under scaling: {answers:?}");
+                assert!(contains, "{name}: the box does not contain the start point");
+            }
+        }
+        assert_eq!(listed_seen, listed.len(), "every listed case is a DomCont case");
+        assert!(lines_seen > 0);
     }
 }
