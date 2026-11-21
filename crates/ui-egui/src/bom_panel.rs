@@ -569,9 +569,14 @@ mod tests {
         h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 3})).unwrap();
         open_report(&mut h);
         h.frames(2);
-        h.step(&json!({"widget": "1"})).unwrap();
-        h.frames(2);
+        // The Qty cell reads "1" too, so the row is picked as a click on its item would: no widget name tells them apart.
+        let row = h.app.session.execute("assembly.bom", &json!({})).unwrap()["rows"][0].clone();
+        assert_eq!(row["components"], json!([0]), "the design is the part: {row}");
         let d = h.app.bom.as_mut().unwrap();
+        d.picked = Some(0);
+        d.target = Some((row["components"].clone(), row["definition"].clone()));
+        d.fields = super::opened_fields(&row);
+        d.opened = d.fields.clone();
         d.fields[0] = "SP-1".into();
         d.fields[3] = "CRS, 16 ga".into();
         d.fields[4] = "Zinc plate, clear".into();
