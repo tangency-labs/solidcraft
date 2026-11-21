@@ -1065,6 +1065,27 @@ fn an_edge_flange_can_carry_further_bends() {
 }
 
 #[test]
+fn an_edge_flange_with_further_bends_returns_the_named_feature_or_the_last_bend() {
+    for (name, returned_bend) in [(Some(" Sides "), 0), (None, 1), (Some("  "), 1)] {
+        let mut s = Session::default();
+        wall_bracket(&mut s);
+        let start = s.doc.features.len();
+        let mut params = json!({"edges": [[1, 0, 20]], "height": 40, "angle": "45 deg", "then": [{"angle": "45 deg", "height": 80}]});
+        if let Some(name) = name {
+            params["name"] = json!(name);
+        }
+        let reply = run(&mut s, "sheet.flange", params);
+        let bends = &s.doc.features[start..];
+        assert_eq!(bends.len(), 2);
+        if returned_bend == 0 {
+            assert_eq!(bends[0].name, "Sides");
+        }
+        assert_eq!(reply["feature"], bends[returned_bend].id, "{name:?}");
+        assert_eq!(reply["name"], bends[returned_bend].name, "{name:?}");
+    }
+}
+
+#[test]
 fn further_bends_are_checked_before_anything_is_made() {
     let mut s = Session::default();
     wall_bracket(&mut s);
@@ -2965,7 +2986,7 @@ fn flat_dxf_preserves_exact_cutout_entities() {
         let mut sk = s.model.state().surface_sheets[0].clone();
         sk.sheet.panels[0].region.holes = vec![hole];
         sk.build().unwrap();
-        super::surface_dxf(s, &sk, &super::DxfOptions::default()).unwrap()
+        super::surface_dxf(s, &sk, &super::DxfOptions::default(), None).unwrap()
     };
     let dxf =
         with_hole(&s, Loop2 { segs: vec![Seg2::Arc { center: Vec2::new(40.0, -30.0), radius: 5.0, start: PI, sweep: 2.0 * PI }] }.ccw().reversed());

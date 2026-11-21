@@ -118,7 +118,11 @@ fn widget_near_centres(nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)
     if let Some(point) = nodes.iter().rev().filter(|(_, n)| n.label() == Some(near) && n.value() == Some(text)).find_map(|(_, n)| widget_centre(n)) {
         return Some(point);
     }
-    let [lx, ly] = widget_centres(nodes, near).into_iter().next()?;
+    let labels = widget_centres(nodes, near);
+    let &[_, ly] = labels.first()?;
+    // A field can carry its row's label too, and the accessibility tree's order doesn't say
+    // which of the two comes first: the label is the leftmost in its row.
+    let lx = labels.iter().filter(|[_, y]| (y - ly).abs() < 1.0).map(|[x, _]| *x).fold(f64::INFINITY, f64::min);
     widget_centres(nodes, text).into_iter().filter(|[x, _]| *x > lx).min_by(|a, b| {
         let d = |p: &[f64; 2]| (p[1] - ly).abs() * 4.0 + (p[0] - lx).abs();
         d(a).total_cmp(&d(b))

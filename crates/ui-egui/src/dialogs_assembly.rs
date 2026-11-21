@@ -2157,22 +2157,32 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
     let placed = cmds.iter().zip(&preview.replies).find(|((c, _), _)| c.starts_with("assembly.constraint.")).map(|(_, r)| r.clone());
     let plugin_view = cmds.iter().zip(&preview.replies).rev().find(|((c, _), _)| c == "plugin.run").and_then(|(_, reply)| reply.get("view")).cloned();
     let before = preview.before.clone();
-    // A moved component looks like itself (no new surface), with its old place as the ghost.
-    // A plugin can both move and make bodies: the builder distinguishes them per body.
-    let colors = if was_placed && !plugin { Colors { added: colors.body, new_body: colors.body, ..colors } } else { colors };
+    let shown_after: Vec<_> = preview.after.sketches.iter().filter(|sketch| preview.shown_sketches.contains(&sketch.feature)).cloned().collect();
+    // A Frame Member's tubes, for its dialog to pick (#15705).
+    let centrelines = crate::dialogs_frame::centrelines(&preview);
+    // A moved component looks like itself (no new surface), with its old place as the ghost; Ghost
+    // Frame Members' new tubes keep their see-through tint (`preview::colors`). A plugin can both
+    // move and make bodies: the builder distinguishes them per body.
+    let colors = if was_placed && !plugin {
+        let new_body = if colors.glass_new { colors.new_body } else { colors.body };
+        Colors { added: colors.body, new_body, ..colors }
+    } else {
+        colors
+    };
     Some(build_world_preview(preview, colors).map(|mut built| {
         built.stopped = stopped;
         built.placed = placed;
         built.plugin_view = plugin_view;
         if plugin {
-            // Sketch-only runs have no body bounds. Frame their preview geometry just as Fit
-            // frames sketches in the committed design, using the engine's same calculation.
-            built.bounds = built.sketches.iter().fold(built.bounds, |b, sketch| b.union(&solidcraft_engine::view::sketch_bounds(&sketch.sketch)));
+            // Match committed Fit with every sketch shown after the run, even unchanged ones.
+            // The preview diff separately retains changed geometry, including hidden sketches.
+            built.bounds = shown_after.iter().fold(built.bounds, |b, sketch| b.union(&solidcraft_engine::view::sketch_bounds(sketch)));
         }
         // Deleting the last body still draws its removed-material ghost.
         if plugin && built.bounds.is_empty() && !built.replaced.is_empty() {
             built.bounds = before.bodies.iter().fold(Aabb3::EMPTY, |b, body| b.union(&body.mesh().bounds()));
         }
+        built.centrelines = centrelines;
         built
     }))
 }
@@ -3040,22 +3050,31 @@ thread_local! {
     static ORIGINS: std::cell::RefCell<Option<(String, Vec<(String, solidcraft_engine::doc::Mat)>)>> = const { std::cell::RefCell::new(None) };
 }
 
+/// Where the view shows the occurrences moved from where the design has them (in their parents):
+/// moves not captured yet, and a joint drag's frame over them (#6325).
+fn shown_moves(s: &Session) -> std::collections::BTreeMap<u64, solidcraft_engine::doc::Mat> {
+    let mut moves = s.pending_moves.clone();
+    moves.extend(s.drag_moves().iter().map(|(o, m)| (*o, *m)));
+    moves
+}
+
 /// Named joint origins in the world: on their occurrence's component, so they move with it
-/// (joint drives, free moves not captured yet, Capture Position).
+/// (joint drives, free moves not captured yet, a joint drag's frame, Capture Position).
 pub fn origins_world(s: &Session) -> Vec<(String, solidcraft_engine::doc::Mat)> {
     if s.doc.assembly.origins.is_empty() {
         return Vec::new();
     }
-    let key = format!("{}:{:?}", s.revision, s.pending_moves);
+    let moves = shown_moves(s);
+    let key = format!("{}:{:?}", s.revision, moves);
     if let Some(v) = ORIGINS.with(|o| o.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, v)| v.clone())) {
         return v;
     }
-    let doc: std::borrow::Cow<solidcraft_engine::doc::Document> = if s.pending_moves.is_empty() {
+    let doc: std::borrow::Cow<solidcraft_engine::doc::Document> = if moves.is_empty() {
         std::borrow::Cow::Borrowed(&*s.doc)
     } else {
         let mut d = (*s.doc).clone();
         for o in &mut d.occurrences {
-            if let Some(m) = s.pending_moves.get(&o.id) {
+            if let Some(m) = moves.get(&o.id) {
                 o.transform = *m;
             }
         }
@@ -3114,16 +3133,17 @@ pub fn joint_frames_world(s: &Session) -> Vec<(u64, solidcraft_engine::doc::Mat)
     if s.doc.assembly.joints.is_empty() {
         return Vec::new();
     }
-    let key = format!("{}:{:?}", s.revision, s.pending_moves);
+    let moves = shown_moves(s);
+    let key = format!("{}:{:?}", s.revision, moves);
     if let Some(v) = JOINT_FRAMES.with(|o| o.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, v)| v.clone())) {
         return v;
     }
-    let doc: std::borrow::Cow<solidcraft_engine::doc::Document> = if s.pending_moves.is_empty() {
+    let doc: std::borrow::Cow<solidcraft_engine::doc::Document> = if moves.is_empty() {
         std::borrow::Cow::Borrowed(&*s.doc)
     } else {
         let mut d = (*s.doc).clone();
         for o in &mut d.occurrences {
-            if let Some(m) = s.pending_moves.get(&o.id) {
+            if let Some(m) = moves.get(&o.id) {
                 o.transform = *m;
             }
         }

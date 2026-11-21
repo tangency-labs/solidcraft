@@ -31,6 +31,7 @@ mod mouse3d;
 mod navbar;
 mod navigation;
 mod panel_layout;
+mod privacy;
 mod security;
 mod sketch;
 mod theme_picker;
@@ -331,7 +332,14 @@ impl TrackpadScroll {
     }
 }
 
+pub use solidcraft_engine::schema::ui_prefs::BrowserScrollWheel;
+
 impl Prefs {
+    /// Whether browser scrolling should bypass automatic wheel and trackpad detection.
+    pub fn browser_wheel_always_zooms(&self) -> bool {
+        self.browser_scroll_wheel == BrowserScrollWheel::AlwaysZoom
+    }
+
     /// Touchpad scroll zooms without overwriting the user's preference for other presets.
     pub fn trackpad_pans(&self) -> bool {
         self.nav != TOUCHPAD_NAV && self.trackpad_pan
@@ -379,6 +387,7 @@ pub const PAGES: &[&str] = &[
     "Shortcuts",
     "Assistant",
     "Plugins",
+    "Privacy",
 ];
 pub const PAGE_GENERAL: usize = 0;
 pub const PAGE_APPEARANCE: usize = 1;
@@ -393,6 +402,7 @@ pub const PAGE_MOUSE3D: usize = 9;
 pub const PAGE_SHORTCUTS: usize = 10;
 pub const PAGE_ASSISTANT: usize = 11;
 pub const PAGE_PLUGINS: usize = 12;
+pub const PAGE_PRIVACY: usize = 13;
 /// What Preferences accepts for `parameter_list_rows`: `parameters.complete` answers at most 200.
 pub const PARAMETER_LIST_ROWS: std::ops::RangeInclusive<u16> = 5..=200;
 const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
@@ -444,7 +454,8 @@ const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
     prefs_window::Page::Host(prefs_window::HostPage {
         icon: ui_kit::Icon::Kit("shield"),
         label: "prefs.security",
-        group: Some("prefs.structure.work"),
+        // Already in Work, after Design: a group here drew a second "Work" heading.
+        group: None,
         handle: "prefs:page:Security",
         scroll: true,
         draw: page_draw::<PAGE_SECURITY>,
@@ -512,6 +523,15 @@ const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
         scroll: true,
         draw: page_draw::<PAGE_PLUGINS>,
         defaults: page_defaults::<PAGE_PLUGINS>,
+    }),
+    prefs_window::Page::Host(prefs_window::HostPage {
+        icon: ui_kit::Icon::Kit("eye"),
+        label: "prefs.privacy",
+        group: None,
+        handle: "prefs:page:Privacy",
+        scroll: true,
+        draw: page_draw::<PAGE_PRIVACY>,
+        defaults: page_defaults::<PAGE_PRIVACY>,
     }),
 ];
 
@@ -1503,6 +1523,8 @@ preference_settings! {
     /// and entering a sketch or Render opens a view of its own, as in 0.43.0. Off: the tab looks as
     /// it did before design views, with no switcher until the user opens a second view.
     show_design_view_switcher: bool = false, PAGE_LAYOUT;
+    /// Use distinct tab treatments for the focused view, cards, hidden views, and pop-outs.
+    clear_view_tabs: bool = true, PAGE_LAYOUT;
     /// A drawing sheet opens as a view (a sub-tab) of its design.
     design_sub_tab_sheets: bool = true, PAGE_LAYOUT;
     /// Editing a sketch opens it as a view of its design; Finish Sketch returns to the previous view.
@@ -1622,6 +1644,10 @@ preference_settings! {
     zoom_stop_at_model: bool = false, PAGE_NAVIGATION => check_id("prefs.zoom_stop_at_model");
     /// Spread discrete wheel input across frames (off: apply each event immediately).
     smooth_wheel_zoom: bool = true, PAGE_NAVIGATION => check("Smooth wheel zoom", "Turn off to apply each wheel event immediately, without a smoothing tail");
+    /// Browser-only wheel classification; native platforms keep their scroll phases.
+    browser_scroll_wheel: BrowserScrollWheel = BrowserScrollWheel::Automatic, PAGE_NAVIGATION;
+    /// The browser's one-time question to make a smooth mouse wheel zoom was answered "don't ask again".
+    browser_wheel_hint_dismissed: bool = false, PAGE_NAVIGATION;
     /// The face under the pointer keeps its highlight while the view moves under it (#2130).
     keep_hover_while_navigating: bool = true, PAGE_NAVIGATION;
     /// Two-finger trackpad scroll pans (off: it zooms like the wheel); pinch always zooms.
@@ -1727,6 +1753,10 @@ preference_settings! {
     network_locations: bool = false, PAGE_GENERAL => check_tr("prefs.network_locations");
     /// The servers the files a design names may be on ("Always allow this server").
     network_hosts: Vec<String> = Vec::new(), PAGE_GENERAL;
+    /// Folders linked files are loaded from when a design opens, besides the design's own folder
+    /// (`link_folders_prompt`): those the user answered Load for. Kept in the user's settings,
+    /// never in a design.
+    linked_file_folders: Vec<String> = Vec::new(), PAGE_GENERAL;
     /// What a middle-button double-click in the view does: `home`, `fit` or `off`.
     middle_double_click: String = "home".into(), PAGE_NAVIGATION;
     /// A view chosen on the navigator (a face, corner or arrow, an axis tip) also frames the
@@ -1749,6 +1779,10 @@ preference_settings! {
     color_vision: solidcraft_theme::ColorVision = solidcraft_theme::ColorVision::Off, PAGE_APPEARANCE;
     /// Check for updates at start and once a day (docs/updates.md).
     check_updates: bool = true, 0;
+    /// Share anonymous usage statistics (docs/privacy.md, `usage_stats`): on unless the person,
+    /// the environment or the organization turns them off. A build without the `usage-stats`
+    /// feature keeps the value and does nothing with it.
+    usage_statistics: bool = true;
     /// When the last update check ran, and the versions skipped or put off (`update::Memo`).
     update: crate::update::Memo = crate::update::Memo::default();
     /// The variant last started in each split tool family (Rectangle, Circle, Arc, Slot, Polygon, Line,
@@ -2232,7 +2266,7 @@ pub struct Snapshot {
     shadow: bool,
     perspective: bool,
     style: u8,
-    pick_bodies: bool,
+    pick_mode: solidcraft_engine::PickMode,
     agent: crate::agent_cursor::Settings,
     autosave: f64,
     auto_project: bool,
@@ -2262,7 +2296,7 @@ impl Snapshot {
             shadow: app.ui.ground_shadow,
             perspective: app.ui.perspective,
             style: app.ui.visual_style,
-            pick_bodies: app.ui.pick_bodies,
+            pick_mode: app.ui.pick_mode,
             agent: app.ui.agent_cursor,
             autosave: app.autosave_minutes,
             auto_project: app.session.auto_project,
@@ -2304,7 +2338,7 @@ impl Snapshot {
         app.ui.ground_shadow = self.shadow;
         app.ui.perspective = self.perspective;
         app.ui.visual_style = self.style;
-        app.ui.pick_bodies = self.pick_bodies;
+        app.ui.pick_mode = self.pick_mode;
         app.ui.agent_cursor = self.agent;
         app.autosave_minutes = self.autosave;
         set_autosave(app);
@@ -2337,7 +2371,7 @@ impl Snapshot {
             shadow,
             perspective,
             style,
-            pick_bodies,
+            pick_mode,
             agent,
             autosave,
             auto_project,
@@ -2366,7 +2400,7 @@ impl Snapshot {
             && *shadow == app.ui.ground_shadow
             && *perspective == app.ui.perspective
             && *style == app.ui.visual_style
-            && *pick_bodies == app.ui.pick_bodies
+            && *pick_mode == app.ui.pick_mode
             && *agent == app.ui.agent_cursor
             && *autosave == app.autosave_minutes
             && *auto_project == app.session.auto_project
@@ -2411,7 +2445,7 @@ pub(crate) fn held_overlay(app: &SolveApp) -> Option<serde_json::Map<String, ser
         ("navigation_bar", serde_json::json!(s.navigation_bar)),
         ("tool_cursor", serde_json::json!(s.tool_cursor)),
         ("perspective", serde_json::json!(s.perspective)),
-        ("pick_bodies", serde_json::json!(s.pick_bodies)),
+        ("pick_mode", serde_json::json!(s.pick_mode)),
         ("auto_project", serde_json::json!(s.auto_project)),
         ("project_construction", serde_json::json!(s.project_construction)),
         ("visual_style", serde_json::json!(s.style)),
@@ -2627,7 +2661,10 @@ fn defaults(app: &mut SolveApp, page: usize) {
         PAGE_SKETCH => {
             app.session.auto_project = true;
             app.session.project_construction = false;
-            app.ui.pick_bodies = false;
+            // The page's Select bodies, off: as unticking it, and any other mode stays.
+            if app.ui.pick_mode == solidcraft_engine::PickMode::Bodies {
+                app.ui.pick_mode = solidcraft_engine::PickMode::Faces;
+            }
         }
         _ => {}
     }
@@ -3422,6 +3459,7 @@ fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
         }
         PAGE_DESIGN => design::show(app, ui),
         PAGE_SECURITY => security::show(app, ui),
+        PAGE_PRIVACY => privacy::show(app, ui),
         PAGE_NAVIGATION => navigation::show(app, ui, t),
         PAGE_GRAPHICS => graphics::show(app, ui),
         PAGE_SKETCH => sketch::show(app, ui),
@@ -5298,6 +5336,33 @@ mod tests {
     }
 
     #[test]
+    fn browser_scroll_wheel_roundtrips_validates_and_resets() {
+        assert_eq!(Prefs::default().browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        assert_eq!(lenient(&json!({})).browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let initial = control(&mut app, &json!({})).unwrap();
+        assert_eq!(initial["browser_scroll_wheel"], "automatic");
+        control(&mut app, &json!({"open":"Navigation", "browser_scroll_wheel":"always_zoom", "button":"apply"})).unwrap();
+        assert!(app.preferences.browser_wheel_always_zooms());
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert_eq!(restored.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysZoom);
+        for invalid in [json!("future"), json!(""), json!(42), json!(null)] {
+            assert!(set(&mut app, &json!({"browser_scroll_wheel": invalid})).is_err());
+            assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysZoom);
+            assert_eq!(lenient(&json!({"browser_scroll_wheel": invalid})).browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        }
+        control(&mut app, &json!({"open":"Navigation", "button":"defaults"})).unwrap();
+        assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        control(&mut app, &json!({"button":"cancel"})).unwrap();
+        assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysZoom);
+        set(&mut app, &json!({"browser_scroll_wheel":"always_pan"})).unwrap();
+        assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysPan);
+        set(&mut app, &json!({"browser_scroll_wheel":"automatic"})).unwrap();
+        assert!(!app.preferences.browser_wheel_always_zooms());
+    }
+
+    #[test]
     fn startup_choice_general_picker_obeys_cancel_and_ok() {
         use serde_json::json;
         let mut h = crate::scenario::Harness::new();
@@ -5573,6 +5638,14 @@ mod tests {
         navbar_click(&mut h, "prefs:navbar:slot:visual_style");
         navbar_click(&mut h, "prefs:navbar:shows:0");
         assert_eq!(h.app.preferences.navigation_bar.menu_display("visual_style"), MenuDisplay::IconAndValue);
+        // Every menu that holds a setting offers the choice, the selection mode's too (#4255).
+        h.call(
+            "ui.prefs",
+            json!({"open":"Interface/Navigation bar", "navigation_bar":{"slots":["fit","visual_style","selection_mode","display","spin"]}}),
+        );
+        navbar_click(&mut h, "prefs:navbar:slot:selection_mode");
+        navbar_click(&mut h, "prefs:navbar:shows:1");
+        assert_eq!(h.app.preferences.navigation_bar.menu_display("selection_mode"), MenuDisplay::IconOnly);
         navbar_click(&mut h, "prefs:navbar:anchor:0");
         assert_eq!(h.app.preferences.navigation_bar.position, Position::Left);
         assert_eq!(h.app.preferences.navigation_bar.edge, crate::ui_kit::NavigationEdge::Top);
@@ -7269,6 +7342,7 @@ mod tests {
             ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
             ("design_views_as_tabs", json!(false), PAGE_LAYOUT),
             ("show_design_view_switcher", json!(true), PAGE_LAYOUT),
+            ("clear_view_tabs", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_sheets", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_sketches", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_render", json!(false), PAGE_LAYOUT),
@@ -7348,6 +7422,7 @@ mod tests {
             ("signing_key", json!("0123456789ABCDEF0123456789ABCDEF01234567"), PAGE_SECURITY),
             ("trusted_signing_keys", json!("0123456789ABCDEF0123456789ABCDEF01234567"), PAGE_SECURITY),
             ("verify_opened_designs", json!(true), PAGE_SECURITY),
+            ("linked_file_folders", json!(["/work/parts"]), PAGE_GENERAL),
         ];
         let defaults = serde_json::to_value(Prefs::default()).unwrap();
         for (field, value, owner) in fields {
@@ -7372,19 +7447,19 @@ mod tests {
         assert_eq!(page_index("Shortcuts"), Some(PAGE_SHORTCUTS));
         let mut app = SolveApp::new(Default::default(), Default::default());
         app.ui.agent_cursor.show = false;
-        app.ui.pick_bodies = true;
+        app.ui.pick_mode = solidcraft_engine::PickMode::Bodies;
         app.session.auto_project = false;
         app.session.project_construction = true;
         defaults(&mut app, PAGE_GENERAL);
         assert!(!app.ui.agent_cursor.show);
-        assert!(app.ui.pick_bodies);
+        assert_eq!(app.ui.pick_mode, solidcraft_engine::PickMode::Bodies);
         assert!(!app.session.auto_project);
         assert!(app.session.project_construction);
         defaults(&mut app, PAGE_ASSISTANT);
         let expected = SolveApp::new(Default::default(), Default::default()).ui.agent_cursor.show;
         assert_eq!(app.ui.agent_cursor.show, expected);
         defaults(&mut app, PAGE_SKETCH);
-        assert!(!app.ui.pick_bodies);
+        assert_eq!(app.ui.pick_mode, solidcraft_engine::PickMode::Faces);
         assert!(app.session.auto_project);
         assert!(!app.session.project_construction, "off by default (#13142)");
     }
@@ -7407,16 +7482,14 @@ mod tests {
                 "3D mouse",
                 "Shortcuts",
                 "Assistant",
-                "Plugins"
+                "Plugins",
+                "Privacy"
             ]
         );
         assert_eq!(WINDOW_PAGES.len(), PAGES.len());
         let groups: Vec<_> =
             WINDOW_PAGES.iter().map(host_page).enumerate().filter_map(|(i, p)| p.group.map(|g| (i, solidcraft_ui_text::tr(g)))).collect();
-        assert_eq!(
-            groups,
-            [(PAGE_APPEARANCE, "Look"), (PAGE_DESIGN, "Work"), (PAGE_SECURITY, "Work"), (PAGE_NAVIGATION, "Input"), (PAGE_ASSISTANT, "Extend")]
-        );
+        assert_eq!(groups, [(PAGE_APPEARANCE, "Look"), (PAGE_DESIGN, "Work"), (PAGE_NAVIGATION, "Input"), (PAGE_ASSISTANT, "Extend")]);
         let mut fields = std::collections::BTreeSet::new();
         for (field, page) in FIELD_PAGES {
             assert!(fields.insert(field), "duplicate home for {field}");
@@ -7527,7 +7600,7 @@ mod tests {
             app.ui.ground_shadow = false;
             app.ui.perspective = true;
             app.session.auto_project = false;
-            app.ui.pick_bodies = true;
+            app.ui.pick_mode = solidcraft_engine::PickMode::Bodies;
             app.ui.agent_cursor.show = true;
             app.keymap.custom.insert("solid.extrude".into(), vec!["X".into()]);
             defaults(&mut app, page);
@@ -7542,9 +7615,13 @@ mod tests {
             assert_eq!(app.ui.ground_shadow, page == PAGE_GRAPHICS);
             assert_eq!(app.ui.perspective, page != PAGE_GRAPHICS);
             assert_eq!(app.session.auto_project, page == PAGE_SKETCH);
-            assert_eq!(app.ui.pick_bodies, page != PAGE_SKETCH);
+            assert_eq!(app.ui.pick_mode == solidcraft_engine::PickMode::Bodies, page != PAGE_SKETCH);
             assert_eq!(app.ui.agent_cursor.show, page != PAGE_ASSISTANT);
             assert_eq!(app.keymap.custom.is_empty(), page == PAGE_SHORTCUTS);
+            // Select bodies is the page's one pick setting: any other mode stays, as component picking did.
+            app.ui.pick_mode = solidcraft_engine::PickMode::Parts;
+            defaults(&mut app, page);
+            assert_eq!(app.ui.pick_mode, solidcraft_engine::PickMode::Parts, "page {page}");
         }
     }
 
@@ -8920,7 +8997,7 @@ mod tests {
             h.call("ui.prefs", json!({"language":"en","theme":theme}));
             h.call("ui.prefs", json!({"open":"Sketch"}));
             let original = h.app.preferences.clone();
-            let session = (h.app.session.auto_project, h.app.ui.pick_bodies);
+            let session = (h.app.session.auto_project, h.app.ui.pick_mode);
             let mut expected = serde_json::to_value(&original).unwrap();
             for (field, label) in [
                 ("sketch_tracking_points", "prefs.sketch.tracking_points"),
@@ -8965,7 +9042,7 @@ mod tests {
                 h.step(&json!({"click":{"handle":handle}})).unwrap();
                 expected[field] = json!(!expected[field].as_bool().unwrap());
                 assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "{theme}: {field}");
-                assert_eq!((h.app.session.auto_project, h.app.ui.pick_bodies), session, "{field} leaves session values alone");
+                assert_eq!((h.app.session.auto_project, h.app.ui.pick_mode), session, "{field} leaves session values alone");
             }
             h.call("ui.prefs", json!({"button":"cancel"}));
             assert_eq!(h.app.preferences, original);
@@ -8980,7 +9057,7 @@ mod tests {
             h.call("ui.prefs", json!({"language":"en","theme":theme,"quick_measure":true}));
             // Opening the page must retain a non-default session, too.
             h.app.session.auto_project = false;
-            h.app.ui.pick_bodies = true;
+            h.app.ui.pick_mode = solidcraft_engine::PickMode::Bodies;
             let original = Snapshot::take(&h.app);
             h.call("ui.prefs", json!({"open":"Sketch"}));
             assert!(original.matches(&h.app));
@@ -9010,13 +9087,17 @@ mod tests {
                 expected[key] = json!(false);
                 assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "{key} changes only its field");
             }
-            for (key, bodies) in [("faces_edges", false), ("bodies", true), ("faces_edges", false)] {
+            for (key, mode) in [
+                ("faces_edges", solidcraft_engine::PickMode::Faces),
+                ("bodies", solidcraft_engine::PickMode::Bodies),
+                ("faces_edges", solidcraft_engine::PickMode::Faces),
+            ] {
                 h.app.prefs_window.shell.filter = h.app.tr("prefs.sketch.click_selects").into();
                 h.frames(5);
                 let handle = format!("prefs:pick_bodies:{key}");
                 super::reveal_preference(&mut h, &handle);
                 h.step(&json!({"click":{"handle":handle}})).unwrap();
-                assert_eq!(h.app.ui.pick_bodies, bodies);
+                assert_eq!(h.app.ui.pick_mode, mode);
                 assert!(!h.app.session.auto_project);
                 assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected);
             }
@@ -9025,7 +9106,7 @@ mod tests {
             super::reveal_preference(&mut h, "prefs:auto_project");
             h.step(&json!({"click":{"handle":"prefs:auto_project"}})).unwrap();
             assert!(h.app.session.auto_project);
-            assert!(!h.app.ui.pick_bodies);
+            assert_eq!(h.app.ui.pick_mode, solidcraft_engine::PickMode::Faces);
             assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected);
             assert_eq!(saved_prefs(&h.app)["preferences"], serde_json::to_value(&original.prefs).unwrap(), "unapplied tile choices are held back");
             h.call("ui.prefs", json!({"button":"apply"}));
@@ -9044,14 +9125,14 @@ mod tests {
                     "{field}: only Sketch resets"
                 );
             }
-            assert_eq!((h.app.session.auto_project, h.app.ui.pick_bodies), (true, false));
+            assert_eq!((h.app.session.auto_project, h.app.ui.pick_mode), (true, solidcraft_engine::PickMode::Faces));
             h.call("ui.prefs", json!({"button":"cancel"}));
             assert!(applied.matches(&h.app), "Cancel after Defaults returns to Apply");
 
             // The session fields also roll back when the page was opened with the opposite values.
             original.clone().restore_other_preferences(&mut h.app).unwrap();
             h.call("ui.prefs", json!({"open":"Sketch","button":"defaults"}));
-            assert_eq!((h.app.session.auto_project, h.app.ui.pick_bodies), (true, false));
+            assert_eq!((h.app.session.auto_project, h.app.ui.pick_mode), (true, solidcraft_engine::PickMode::Faces));
             h.call("ui.prefs", json!({"button":"cancel"}));
             assert!(original.matches(&h.app));
         }
@@ -14177,7 +14258,7 @@ mod settings_search_tests {
             h.app.home.open = false;
             h.call("ui.resize", serde_json::json!({"width":1600,"height":1100}));
             h.call("ui.prefs", serde_json::json!({"language":"en","theme":theme}));
-            let original = (h.app.preferences.sketch_exit_view, h.app.ui.pick_bodies);
+            let original = (h.app.preferences.sketch_exit_view, h.app.ui.pick_mode);
             for (query, target, option) in [
                 ("When a sketch ends", "prefs:sketch_exit_view:choices", "Keep"),
                 ("Return to the view before", "prefs:sketch_exit_view:previous", "Return to the view before"),
@@ -14218,7 +14299,7 @@ mod settings_search_tests {
                     let group = crate::scenario::rect_of(&format!("dialog:row:{query}")).unwrap();
                     assert!((actual.left() - group.left()).abs() <= 1.0, "{theme}: {query} has no phantom label column beside its cards");
                 }
-                assert_eq!((h.app.preferences.sketch_exit_view, h.app.ui.pick_bodies), original, "navigation does not change a choice");
+                assert_eq!((h.app.preferences.sketch_exit_view, h.app.ui.pick_mode), original, "navigation does not change a choice");
             }
         }
     }

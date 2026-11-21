@@ -902,6 +902,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(action) = start_page::show(ui, page) {
         dispatch(app, ui.ctx(), action);
     }
+    // The first start usually opens on Home: the usage statistics notice shows here as in the view.
+    #[cfg(feature = "usage-stats")]
+    {
+        let t = solidcraft_theme::Tokens::get();
+        let _ = crate::usage_stats::notice_toast(app, ui, ui.max_rect().shrink(t.space_16));
+    }
 }
 
 /// SolidCraft's rail: Start, New, Open, Recover; the design's own entries; the app's.
@@ -1218,17 +1224,12 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
                 app.open_chosen_file(&path);
             }
         }),
-        FileAction::Import => app.pick_open_for(
-            &[
-                "step", "stp", "iges", "igs", "stl", "obj", "3mf", "gltf", "glb", "usd", "usda", "usdc", "usdz", "ply", "pcd", "e57", "xyz", "pts",
-                "asc",
-            ],
-            |app, path| {
-                if let Some(path) = path {
-                    app.open_path_async(&path);
-                }
-            },
-        ),
+        // Every foreign file Import takes, from the format registry (#7328).
+        FileAction::Import => app.pick_open_for(&solidcraft_engine::io::formats::import_extensions(true), |app, path| {
+            if let Some(path) = path {
+                app.open_path_async(&path);
+            }
+        }),
         FileAction::Save => {
             app.home.open = false;
             crate::toolbar::save(app);
@@ -1925,6 +1926,26 @@ mod tests {
             assert_eq!(h.app.session.doc.to_json(), original);
             assert_eq!(h.app.session.undo.len(), undo);
             assert_eq!(h.app.docs.count(), 1);
+        }
+    }
+
+    /// Start › Import asks the host's picker for every foreign file it takes, FreeCAD, Rhino and
+    /// KiCad among them (#7328).
+    #[test]
+    fn start_import_offers_every_file_kind_import_takes() {
+        let mut h = crate::scenario::Harness::new();
+        let asked: std::rc::Rc<std::cell::RefCell<Vec<Vec<String>>>> = Default::default();
+        let log = asked.clone();
+        h.app.services.pick_open = Some(Box::new(move |extensions| {
+            log.borrow_mut().push(extensions.iter().map(|e| e.to_string()).collect());
+            Box::pin(std::future::ready(None))
+        }));
+        h.app.home.show(0);
+        click_file(&mut h, "home:import");
+        let want: Vec<String> = solidcraft_engine::io::formats::import_extensions(true).iter().map(|e| e.to_string()).collect();
+        assert_eq!(asked.borrow().last(), Some(&want));
+        for e in ["fcstd", "3dm", "kicad_pcb", "step", "ply"] {
+            assert!(want.iter().any(|x| x == e), "{e} missing from {want:?}");
         }
     }
 
