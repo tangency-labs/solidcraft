@@ -201,7 +201,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 let i = st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
                 if let Some(mb) = st.bodies.get_mut(i) {
                     let nb = kernel::transform_matrix(&mb.body, m)?;
-                    *mb = ModelBody::new(mb.name.clone(), nb, mb.feature);
+                    // A rigid alignment keeps each face's identity. Carry the transform's
+                    // exact history, as Move does, instead of naming the result by overlap
+                    // with the body still at its old position (#20288).
+                    *mb = mb.remade(Traced::step(nb, &[&mb.traced()]));
                 }
             }
             Ok(())
