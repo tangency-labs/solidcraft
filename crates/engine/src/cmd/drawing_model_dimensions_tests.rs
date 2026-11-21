@@ -453,3 +453,29 @@ fn a_posed_view_takes_its_model_dimensions() {
     let reply = brought(&mut s, &view, json!({}));
     assert!(brought_the_plates_two(&mut s, &reply, &two), "{reply}");
 }
+
+/// The issue's primitives (#19885): a box, a fillet and a hole bring in their own dimensions, found
+/// on the exact body. Its 100 x 60 x 10 plate has its corners rounded 5 and a hole 10 across: on the
+/// top view the length and the width come in (100 and 60), the height can't be measured there, and
+/// on the front view the height does (10); the fillet's radius and the hole's diameter read 5 and 10.
+#[test]
+fn a_boxs_fillets_and_holes_sizes_come_in() {
+    let mut s = Session::default();
+    for (name, value) in [("L", "100 mm"), ("W", "60 mm"), ("T", "10 mm"), ("D", "10 mm")] {
+        run(&mut s, "parameters.change", json!({"name": name, "expression": value}));
+    }
+    run(&mut s, "solid.box", json!({"length": "L", "width": "W", "height": "T", "name": "Plaque", "body_name": "Plaque"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[0, 0, 5], [100, 0, 5], [0, 60, 5], [100, 60, 5]], "radius": 5}));
+    run(&mut s, "solid.hole", json!({"position": ["25 mm", "W/2", "T"], "diameter": "D"}));
+    let top = view(&mut s, json!("top"), [120.0, 180.0]);
+    let reply = brought(&mut s, &top, json!({}));
+    let read = added(&mut s, &reply);
+    let names: Vec<&str> = read.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["Length", "Width", "Radius", "Diameter"], "{reply}");
+    assert!(read.iter().zip([100.0, 60.0, 5.0, 10.0]).all(|((_, r), e)| near(*r, e)), "{read:?} {reply}");
+    assert_eq!(skipped_for(&reply, "unmeasurable"), ["Height"], "{reply}");
+    let front = view(&mut s, json!("front"), [300.0, 180.0]);
+    let second = brought(&mut s, &front, json!({}));
+    let read = added(&mut s, &second);
+    assert!(read.len() == 1 && read[0].0 == "Height" && near(read[0].1, 10.0), "{second}");
+}

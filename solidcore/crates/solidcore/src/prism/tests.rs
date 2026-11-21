@@ -11,7 +11,7 @@
 
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI, TAU};
 
-use super::extrude::extrude_region;
+use super::extrude::{extrude_region, symmetric_offset_intervals, symmetric_offset_probe_points};
 use super::measure::{equivalent, section};
 use super::placement::LoopPlacement;
 use super::profile::rational_curve;
@@ -2945,4 +2945,31 @@ mod path_export_regressions {
         assert!(!pts.contains(&Vec2::new(0.0, -1.0)));
         assert_eq!(pts.len(), 5);
     }
+}
+
+#[test]
+fn symmetric_offset_intervals_and_probes_are_symmetric_about_sketch_plane() {
+    assert_eq!(
+        symmetric_offset_intervals(3.0, 5.0),
+        [(3.0, 8.0), (-8.0, -3.0)]
+    );
+    assert_eq!(
+        symmetric_offset_intervals(-3.0, 5.0),
+        [(3.0, 8.0), (-8.0, -3.0)]
+    );
+
+    // `base` in auto-operation is already shifted by `start` along `n`.
+    let n = [0.0, 0.0, 1.0];
+    let pos_start_probes = symmetric_offset_probe_points([0.0, 0.0, 3.0], n, 3.0, 10.0, 0.5);
+    assert_eq!(
+        pos_start_probes,
+        [
+            [0.0, 0.0, 3.5],
+            [0.0, 0.0, 5.5],
+            [0.0, 0.0, -3.5],
+            [0.0, 0.0, -5.5],
+        ]
+    );
+    let neg_start_probes = symmetric_offset_probe_points([0.0, 0.0, -3.0], n, -3.0, 10.0, 0.5);
+    assert_eq!(neg_start_probes, pos_start_probes);
 }

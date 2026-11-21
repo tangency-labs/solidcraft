@@ -174,7 +174,7 @@ pub fn serial() -> u64 {
 }
 
 fn command_name(id: &str) -> String {
-    solidcraft_ui_text::tr_label(crate::command_label(id)).to_string()
+    crate::agent_label::name(id)
 }
 
 /// The operations under way, oldest first.

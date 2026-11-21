@@ -42,8 +42,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<BalloonResult>)
         .params(
             "view: a saved view's id; edge: the edge its arrow points at, a point on it [x, y, z] in the design's frame, {point} or \
-             {body, index}, with path: the occurrences its body is placed through, from the top (the part the balloon numbers; at \
-             least one); at: [x, y], the balloon's centre on paper in mm from the view's centre; parts_list?: the table it reads \
+             {body, index}, and `path` INSIDE it (not a top-level field), the occurrences its body is placed through, from the top (the part the \
+             balloon numbers; at least one; a design of one part has none, so place it as a component first), e.g. \
+             edge: {point: [40, 0, 0], path: [3]}; at: [x, y], the balloon's centre on paper in mm from the view's centre; parts_list?: the table it reads \
              (default its sheet's only parts list, else the drawing's) → what drawing.balloon.inspect \
              answers for it. Saved by the edge's name, never the point picked; one on a part its view doesn't draw (its hide or \n             source leaves it out) is refused. One undo step; no model is evaluated.",
         ),

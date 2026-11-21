@@ -76,8 +76,9 @@ solidcraft-cli run replay.json --in design.sc
 
 ## Network use
 
-SolidCraft talks to the ticket server only when the person sends a report (or Retry), or an
-agent asks for one. There is no telemetry and nothing in the background.
+The bug reporter talks to the ticket server only when the person sends a report (or Retry), or an
+agent asks for one; it sends nothing in the background. Anonymous usage statistics are separate:
+they go to their own service, never the ticket server ([Privacy](privacy.md)).
 
 ## The old behaviour
 

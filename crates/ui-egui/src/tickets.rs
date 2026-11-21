@@ -32,13 +32,13 @@ pub const SECRET_ID: &str = "tickets.solidcraft.io";
 pub struct Call(Receiver<Reply>);
 
 impl Call {
-    fn start(http: &Http, request: HttpRequest) -> Self {
+    pub(crate) fn start(http: &Http, request: HttpRequest) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         http(request, tx);
         Self(rx)
     }
     /// The answer once it came.
-    fn poll(&self) -> Option<Reply> {
+    pub(crate) fn poll(&self) -> Option<Reply> {
         match self.0.try_recv() {
             Ok(r) => Some(r),
             Err(TryRecvError::Empty) => None,

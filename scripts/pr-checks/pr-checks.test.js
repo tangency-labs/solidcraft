@@ -47,6 +47,36 @@ test('parseDefaults yes forms', () => {
   assert.equal(pc.parseDefaults('Changes a default: yes — x, old behaviour kept behind preference <name>').status, 'malformed');
 });
 
+test('parseDefaults approved by the owner', () => {
+  for (const sep of ['—', '–', '-']) {
+    const r = pc.parseDefaults(`Changes a default: yes ${sep} links ask once, Approved By The Owner`);
+    assert.equal(r.status, 'yes', sep);
+    assert.equal(r.approvedByOwner, true);
+    assert.equal(r.detail, 'links ask once');
+  }
+  assert.equal(pc.parseDefaults('Changes a default: yes — x, approved by the owner.').status, 'yes');
+  assert.equal(pc.parseDefaults('Changes a default: yes — approved by the owner').status, 'malformed');
+  assert.equal(pc.parseDefaults('Changes a default: yes — x, old behaviour kept behind preference p').approvedByOwner, undefined);
+});
+
+test('checkDefaults: approved by the owner needs the owner-approved label', async () => {
+  const body = 'Changes a default: yes — links ask once, approved by the owner';
+  const me = mk(20, 'alice', body, { created_at: '2026-10-25T00:00:00Z' });
+  const files = [{ filename: 'crates/a.rs' }];
+  let f = fakes(me, { files });
+  await pc.checkDefaults(f);
+  assert.equal(f.failures.length, 1);
+  assert.match(f.failures[0], /approved by the owner needs the owner-approved label/);
+
+  f = fakes({ ...me, labels: [{ name: 'owner-approved' }] }, { files });
+  await pc.checkDefaults(f);
+  assert.equal(f.failures.length, 0);
+
+  f = fakes({ ...me, body: 'Changes a default: yes — a, old behaviour kept behind preference p' }, { files });
+  await pc.checkDefaults(f);
+  assert.equal(f.failures.length, 0);
+});
+
 test('isBot and isDocsOnly', () => {
   assert.ok(pc.isBot({ login: 'dependabot[bot]', type: 'Bot' }));
   assert.ok(pc.isBot({ login: 'solidcraft-generated[bot]' }));

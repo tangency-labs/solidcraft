@@ -56,6 +56,8 @@ impl BarRig {
             ..Default::default()
         };
         let bar = AppBar {
+            items: None,
+            quick_ids: &[],
             mark: &|_, _| {},
             name: self.name,
             leading: None,
@@ -161,6 +163,8 @@ fn app_bar_old_show_golden() {
             let ctx = crate::test_support::context();
             let has = |bit| bits & (1 << bit) != 0;
             let bar = AppBar {
+                items: None,
+                quick_ids: &[],
                 mark: &|_, _| {},
                 name: if has(6) { "A Considerably Longer Application" } else { "App" },
                 leading: None,
@@ -291,6 +295,9 @@ const VIEWS: [ViewTab<'static>; 3] = [
         underline: egui::Color32::BLUE,
         state: ViewState::Normal,
         active: true,
+        on_screen: false,
+        window_name: None,
+        window_number: None,
         to_window: None,
         tip: "Model",
     },
@@ -301,6 +308,9 @@ const VIEWS: [ViewTab<'static>; 3] = [
         underline: egui::Color32::GREEN,
         state: ViewState::SourceChanged,
         active: false,
+        on_screen: false,
+        window_name: None,
+        window_number: None,
         to_window: None,
         tip: "Sketch 2",
     },
@@ -311,6 +321,9 @@ const VIEWS: [ViewTab<'static>; 3] = [
         underline: egui::Color32::RED,
         state: ViewState::Deleted,
         active: false,
+        on_screen: false,
+        window_name: None,
+        window_number: None,
         to_window: None,
         tip: "Sheet 1",
     },
@@ -329,6 +342,7 @@ struct TabsRig {
     single_view: bool,
     name: &'static str,
     detached: bool,
+    clear: bool,
     pop_out: bool,
     /// The + has a menu.
     plus: bool,
@@ -358,6 +372,7 @@ impl TabsRig {
             single_view: false,
             name: "One",
             detached: false,
+            clear: false,
             pop_out: false,
             plus,
             rename: rename.map(|(k, _)| k),
@@ -382,6 +397,8 @@ impl TabsRig {
         let mut views = VIEWS;
         if self.detached {
             views[1].to_window = Some(1);
+            views[1].window_name = Some("Window 2");
+            views[1].window_number = Some(2);
         }
         let views = if self.single_view || self.pop_out {
             &views[..1]
@@ -409,6 +426,7 @@ impl TabsRig {
             handles: TAB_HANDLES,
             views_as_tabs: self.views == Some(true),
             switcher_always: false,
+            clear_view_tabs: self.clear,
             view_text: ViewText {
                 close_view: "Close view",
                 close_design: "Close design",
@@ -418,6 +436,7 @@ impl TabsRig {
             },
             view_menu: &VIEW_MENU,
             view_right_row: "vright",
+            view_rename_row: "vrename",
             view_rename: self.rename.map(|k| (k, TabRename { text: &mut text, focused: &mut focused, max: 8 })),
             plus_menu: if self.plus { &PLUS_MENU } else { &[] },
             layout_menu: &[],
@@ -1201,6 +1220,8 @@ fn layout_is_deterministic() {
 fn app_bar_projected_pills_return_clicks_and_hide_clicks() {
     let ctx = crate::test_support::context();
     let bar = AppBar {
+        items: None,
+        quick_ids: &[],
         mark: &|_, _| {},
         name: "App",
         leading: Some(vec2(24.0, 24.0)),
@@ -1486,6 +1507,166 @@ fn app_bar_more_menu_returns_the_original_action_and_closes() {
     assert!(!rig.ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_appbar_overflow_open")).unwrap_or(false)));
 }
 
+mod app_bar_items {
+    use crate::app_bar_items::{ItemId, Layout, Placement, Zone};
+    use serde_json::json;
+
+    #[test]
+    fn defaults_match_the_actual_drawing_order() {
+        let layout = Layout::default_for(["solid.box", "solid.fillet"]);
+        let ids = |zone| layout.items.iter().filter(|p| p.zone == zone).map(|p| p.id.as_str()).collect::<Vec<_>>();
+        assert_eq!(ids(Zone::Start), ["home", "save", "undo", "redo", "quick:solid.box", "quick:solid.fillet"]);
+        assert_eq!(ids(Zone::End), ["donate", "discord", "assistant", "search", "settings", "help", "report", "version"]);
+        assert!(layout.items.iter().all(|p| p.shown));
+        for item in &layout.items {
+            assert_eq!(ItemId::parse(&item.id).unwrap().id(), item.id);
+        }
+        assert_eq!(Layout::default_for(["", "\0", &"x".repeat(95)]), Layout::default());
+    }
+
+    #[test]
+    fn sanitize_keeps_unknowns_and_first_placement_and_restores_missing_items() {
+        let defaults = Layout::default();
+        let mut layout = Layout {
+            items: vec![
+                Placement { id: "save".into(), zone: Zone::End, shown: false },
+                Placement { id: "future:item".into(), zone: Zone::Start, shown: true },
+                Placement { id: "save".into(), zone: Zone::Start, shown: true },
+            ],
+        };
+        layout.sanitize(&defaults);
+        assert_eq!(layout.items.iter().filter(|p| p.id == "save").count(), 1);
+        assert!(layout.items.iter().any(|p| p.id == "save" && p.zone == Zone::End && !p.shown));
+        assert!(layout.items.iter().any(|p| p.id == "future:item"));
+        assert!(defaults.items.iter().all(|d| layout.items.iter().any(|p| p.id == d.id)));
+        let once = layout.clone();
+        layout.sanitize(&defaults);
+        assert_eq!(layout, once);
+    }
+
+    #[test]
+    fn hostile_rows_are_bounded_without_starving_known_items() {
+        let defaults = Layout::default();
+        let mut layout = Layout { items: (0..10_000).map(|i| Placement { id: format!("future:{i}"), zone: Zone::Start, shown: true }).collect() };
+        layout.items.splice(
+            0..0,
+            ["".to_string(), "a".repeat(101), "\0home".to_string(), "🦀".repeat(100)].map(|id| Placement { id, zone: Zone::End, shown: true }),
+        );
+        layout.sanitize(&defaults);
+        assert_eq!(layout.items.len(), 64);
+        assert!(defaults.items.iter().all(|d| layout.items.iter().any(|p| p.id == d.id)));
+        assert!(layout.items.iter().any(|p| p.id == "🦀".repeat(100)));
+        assert!(layout.items.iter().all(|p| !p.id.is_empty() && p.id.chars().count() <= 100 && !p.id.chars().any(char::is_control)));
+    }
+
+    #[test]
+    fn json_round_trip_and_malformed_rows() {
+        let defaults = Layout::default_for(["solid.box"]);
+        let mut layout = defaults.clone();
+        layout.items.reverse();
+        layout.items[0].shown = false;
+        layout.items.push(Placement { id: "future".into(), zone: Zone::End, shown: false });
+        assert_eq!(Layout::from_value(&layout.to_value(), &defaults), layout);
+        for value in [
+            json!(null),
+            json!([]),
+            json!({"items":[7, {}, {"id":"save","zone":"centre","shown":true}, {"id":"update","zone":"start","shown":false}, {"id":"file","zone":"end","shown":false}]}),
+        ] {
+            assert_eq!(Layout::from_value(&value, &defaults), defaults);
+        }
+    }
+}
+
+#[test]
+fn app_bar_saved_defaults_use_the_unchanged_geometry_path() {
+    use crate::app_bar_layout::application::{spec, spec_with_items};
+    let quick = ["a", "b", "c", "d", "e"];
+    let defaults = crate::app_bar_items::Layout::default_for(quick);
+    for width in [200.0, 480.0, 640.0, 1280.0, 1920.0, 3840.0] {
+        assert_eq!(
+            spec(width, 0.0, 138.0, measured_bar()),
+            spec_with_items((width, 0.0, 138.0), measured_bar(), &defaults, &["save", "undo", "redo"], &quick, &["donate", "discord"])
+        );
+    }
+}
+
+#[test]
+fn app_bar_saved_items_move_hide_and_overflow_independently() {
+    use crate::app_bar_items::{Layout, Zone as SavedZone};
+    use crate::app_bar_layout::application::spec_with_items;
+    let quick = ["a", "b", "c", "d", "e"];
+    let mut saved = Layout::default_for(quick);
+    saved.items.iter_mut().find(|p| p.id == "version").unwrap().shown = false;
+    let minor = spec_with_items((3840.0, 0.0, 0.0), measured_bar(), &saved, &["save", "undo", "redo"], &quick, &["donate", "discord"]);
+    assert!(index_of(&minor, "home") < index_of(&minor, "file"));
+    assert!(index_of(&minor, "pill:1") < index_of(&minor, "offered"));
+    assert!(index_of(&minor, "offered") < index_of(&minor, "assistant"));
+    saved.items.reverse();
+    for p in &mut saved.items {
+        if p.id == "undo" {
+            p.shown = false;
+        }
+        if p.id == "quick:a" || p.id == "save" {
+            p.zone = SavedZone::End;
+        }
+    }
+    let spec = |width| spec_with_items((width, 0.0, 0.0), measured_bar(), &saved, &["save", "undo", "redo"], &quick, &["donate", "discord"]);
+    let wide = spec(3840.0);
+    let placed = layout(&wide);
+    let g = placed.application.as_ref().unwrap();
+    assert!(g.actions[1].is_none());
+    assert!(g.actions[0].unwrap() > g.tabs_end);
+    assert_eq!(g.quick_slots.len(), 5);
+    assert!(g.quick_slots.iter().find(|(i, _)| *i == 0).unwrap().1 > g.tabs_end);
+    assert!(g.quick_slots.iter().find(|(i, _)| *i == 4).unwrap().1 < g.quick_slots.iter().find(|(i, _)| *i == 3).unwrap().1);
+    let narrow = spec(300.0);
+    let placed = layout(&narrow);
+    assert!(!placed.overflow.is_empty());
+    assert!(!narrow.items.iter().any(|i| i.id == "action:1"));
+    assert!(!placed.overflow.iter().any(|i| i == "action:1"));
+    assert_sound(&narrow, &placed);
+}
+
+#[test]
+fn app_bar_random_sanitized_layouts_never_overlap() {
+    use crate::app_bar_items::{Layout, Placement, Zone as SavedZone};
+    use crate::app_bar_layout::application::spec_with_items;
+    let quick = ["a", "b", "c", "d", "e"];
+    let defaults = Layout::default_for(quick);
+    let mut seed = 0x19404_u64;
+    let mut random = || {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        seed >> 32
+    };
+    for _ in 0..16 {
+        let mut saved = defaults.clone();
+        for i in (1..saved.items.len()).rev() {
+            let j = random() as usize % (i + 1);
+            saved.items.swap(i, j);
+        }
+        for p in &mut saved.items {
+            p.zone = if random() & 1 == 0 { SavedZone::Start } else { SavedZone::End };
+            p.shown = !random().is_multiple_of(3);
+        }
+        saved.items.push(Placement { id: "future:item".into(), zone: SavedZone::End, shown: true });
+        saved.items.push(saved.items[0].clone());
+        saved.items.remove(random() as usize % saved.items.len());
+        saved.sanitize(&defaults);
+        for width in 200..=3840 {
+            let mut measurements = measured_bar();
+            measurements.managed = Some(130.0);
+            let spec = spec_with_items((width as f32, 78.0, 138.0), measurements, &saved, &["save", "undo", "redo"], &quick, &["donate", "discord"]);
+            let placed = layout(&spec);
+            assert_sound(&spec, &placed);
+            let g = placed.application.unwrap();
+            for (i, x) in &g.quick_slots {
+                let slot = placed.placements[index_of(&spec, &format!("quick:{i}"))].unwrap();
+                assert!(*x - 16.0 >= slot.x - EPS && *x + 16.0 <= slot.right() + EPS);
+            }
+        }
+    }
+}
+
 // Unchanged rows are literal old-show snapshots. Revised rows are derived from the old
 // measured label widths and packed 34-point actions, 124-point tabs and 32-point More,
 // conceding by priority. See app_bar_application_never_overlaps_at_any_width for the contract.
@@ -1614,3 +1795,54 @@ const OLD_BAR_ROWS: &[&[i32]] = &[
     &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1572844, 1000, 1604844, 33000, 2, 1588844, 17000, 4, 147500, 7000, 148500, 27000, 0, 4, 296781, 7000, 297781, 27000, 0, 4, 473781, 7000, 474781, 27000, 0, 0, 0, 4, 1606844, 4000, 1722000, 30000, 2, 1664422, 17000, 4, 1308000, 5000, 1378000, 29000, 2, 1343000, 17000, 4, 1378000, 9000, 1394000, 25000, 2, 1386000, 17000, 4, 1404000, 5000, 1475000, 29000, 2, 1439500, 17000, 4, 1475000, 9000, 1491000, 25000, 2, 1483000, 17000, 4, 1538844, 1000, 1570844, 33000, 2, 1554844, 17000, 0, 2, 1759797, 17000, 2, 314281, 34000, 4, 484281, 4000, 1496844, 30000, 1, 1, 2, 484281, 1306531, 0, 4, 1504844, 1000, 1536844, 33000, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 188
     &[4, 255750, 1000, 287750, 33000, 2, 271750, 17000, 4, 298750, 4000, 335031, 30000, 2, 316891, 17000, 4, 336031, 1000, 368031, 33000, 2, 352031, 17000, 4, 370031, 1000, 402031, 33000, 2, 386031, 17000, 4, 404031, 1000, 436031, 33000, 2, 420031, 17000, 4, 1656000, 1000, 1688000, 33000, 2, 1672000, 17000, 4, 295250, 7000, 296250, 27000, 0, 4, 444531, 7000, 445531, 27000, 0, 4, 621531, 7000, 622531, 27000, 0, 0, 0, 4, 1690000, 1000, 1722000, 33000, 2, 1706000, 17000, 4, 1391000, 5000, 1461000, 29000, 2, 1426000, 17000, 4, 1461000, 9000, 1477000, 25000, 2, 1469000, 17000, 4, 1487000, 5000, 1558000, 29000, 2, 1522500, 17000, 4, 1558000, 9000, 1574000, 25000, 2, 1566000, 17000, 4, 1622000, 1000, 1654000, 33000, 2, 1638000, 17000, 0, 2, 1759797, 17000, 2, 462031, 34000, 4, 632031, 1000, 1580000, 33000, 1, 1, 2, 632031, 1389688, 0, 4, 1588000, 1000, 1620000, 33000, 0, 4, 298750, 4000, 335031, 30000], // 1920 / 254
 ];
+
+#[test]
+fn clear_view_tabs_distinguish_the_four_placements() {
+    let ground = VIEWS[0];
+    let hidden = VIEWS[1];
+    let card = ViewTab { on_screen: true, ..hidden };
+    let elsewhere = ViewTab { to_window: Some(2), window_name: Some("Inspection"), window_number: Some(3), ..hidden };
+    assert_eq!(view_look(&ground), ViewLook::Ground);
+    assert_eq!(view_look(&card), ViewLook::Card);
+    assert_eq!(view_look(&hidden), ViewLook::Hidden);
+    assert_eq!(view_look(&elsewhere), ViewLook::Elsewhere);
+    assert_eq!(window_badge(&elsewhere, CollapseStage::Full), "Inspection");
+    assert_eq!(window_badge(&elsewhere, CollapseStage::LayoutGlyph), "Inspection");
+    assert_eq!(window_badge(&elsewhere, CollapseStage::WindowNumber), "3");
+}
+
+#[test]
+fn clear_view_tabs_collapse_in_order_with_and_without_another_window() {
+    for count in 2..=12 {
+        for elsewhere in [false, true] {
+            let focused = 120.0;
+            let icon_tabs = (count - 1) as f32 * 30.0;
+            let idle_names = (count - 1 - usize::from(elsewhere)) as f32 * 30.0;
+            let window_names = if elsewhere { 24.0 } else { 0.0 };
+            let icons = focused + icon_tabs + 24.0;
+            let window_number = icons + idle_names;
+            let glyph = window_number + window_names;
+            let full = glyph + 40.0;
+            let widths = [full, glyph, window_number, icons, focused + 28.0];
+            assert_eq!(collapse_stage(widths, full), CollapseStage::Full);
+            assert_eq!(collapse_stage(widths, full - 0.25), CollapseStage::LayoutGlyph);
+            assert_eq!(collapse_stage(widths, glyph - 0.25), if elsewhere { CollapseStage::WindowNumber } else { CollapseStage::Icons });
+            assert_eq!(collapse_stage(widths, icons - 0.25), CollapseStage::Overflow);
+        }
+    }
+}
+
+#[test]
+fn elsewhere_view_has_only_a_return_button_on_hover() {
+    let mut rig = TabsRig::with(Some(true));
+    rig.detached = true;
+    rig.clear = true;
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:vclose:0").is_some());
+    assert!(solidcraft_ui_registry::rect_of("t:vclose:1").is_none());
+    assert!(solidcraft_ui_registry::rect_of("t:view:1:return").is_none());
+    let elsewhere = rig.at("t:view:1");
+    rig.frame(vec![egui::Event::PointerMoved(elsewhere)]);
+    assert!(solidcraft_ui_registry::rect_of("t:vclose:1").is_none());
+    assert_eq!(rig.press(rig.at("t:view:1:return"), egui::PointerButton::Primary), vec![TabAction::ReturnView(1)]);
+}
