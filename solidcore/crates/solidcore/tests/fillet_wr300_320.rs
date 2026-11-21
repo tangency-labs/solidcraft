@@ -202,7 +202,14 @@ fn hole_rim_touching_the_outer_loop_is_refused_with_a_fit() {
             panic!("r{radius}: expected a typed fit refusal, got {result:?}");
         };
         assert_eq!(session.error_info().code, NO_ROOM, "r{radius}");
-        assert_eq!(reason, Some(NoRoomReason::RailLeavesFace), "r{radius}");
+        // At the contact the new rim check refuses; just past it the rail crosses the
+        // rim and the existing overflow refusal applies, with the same fit.
+        let want_reason = if offset > 0.0 {
+            NoRoomReason::OverflowKeepsNothing
+        } else {
+            NoRoomReason::RailLeavesFace
+        };
+        assert_eq!(reason, Some(want_reason), "r{radius}");
         assert_eq!(fit.kind, FitKind::Radius);
         assert_eq!(fit.edge, Some(rim));
         let want = 2.5 - 1000.0 * tolerance;
