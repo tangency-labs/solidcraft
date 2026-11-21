@@ -33,6 +33,8 @@
 //! | [`TopologyFailure::InnerLoopsOnBothSides`] | `SM_ERR` |
 //! | [`TopologyFailure::LaminaEdgeIsStrut`] | `SM_ERR` |
 //! | [`TopologyFailure::VertexHasEdges`] | `SM_ERR` |
+//! | [`TopologyFailure::RadialFaceWithoutSurface`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::RadialRimWithoutEdge`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::RadialSweepNeedsCones`] | `SM_ERR` |
 //! | [`TopologyFailure::RadialRimsNotEllipses`] | `SM_ERR` |
 //! | [`TopologyFailure::RadialRimsNotAnnulus`] | `SM_ERR` |
@@ -163,6 +165,11 @@ pub enum TopologyFailure {
     /// The vertex to delete still has edges; the caller deletes them first.
     /// [`ErrorKind::InvalidInput`].
     VertexHasEdges,
+    /// The face being drafted has no surface. [`ErrorKind::Missing`], status
+    /// `SM_ERR_NULL_POINTER`.
+    RadialFaceWithoutSurface,
+    /// A rim edge use has no edge. [`ErrorKind::Missing`], status `SM_ERR_NULL_POINTER`.
+    RadialRimWithoutEdge,
     /// A radial sweep between two supports was asked for supports that are not both cones
     /// (a cylinder is a cone). [`ErrorKind::Unsupported`], status `SM_ERR`.
     RadialSweepNeedsCones,
@@ -209,6 +216,8 @@ impl TopologyFailure {
             | Self::RadialRimsOffEndPlane
             | Self::RadialSweepNotOutward => SM_ERR,
             Self::Missing(_)
+            | Self::RadialFaceWithoutSurface
+            | Self::RadialRimWithoutEdge
             | Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
             | Self::CurveNotApproximated => SM_ERR_NULL_POINTER,
@@ -220,7 +229,8 @@ impl TopologyFailure {
     }
 
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::Missing`] for
-    /// [`TopologyFailure::Missing`], [`ErrorKind::InvalidInput`] for
+    /// [`TopologyFailure::Missing`], [`TopologyFailure::RadialFaceWithoutSurface`] and
+    /// [`TopologyFailure::RadialRimWithoutEdge`], [`ErrorKind::InvalidInput`] for
     /// [`TopologyFailure::InvalidValue`] and for a check of the caller's arguments, state or
     /// body, [`ErrorKind::Unsupported`] for a kind or configuration the routine does not
     /// handle, the drop status's kind for [`TopologyFailure::DropFailed`],
@@ -313,6 +323,8 @@ impl core::fmt::Display for TopologyFailure {
             }
             Self::LaminaEdgeIsStrut => f.write_str("the lamina edge to delete is a strut"),
             Self::VertexHasEdges => f.write_str("the vertex still has edges"),
+            Self::RadialFaceWithoutSurface => f.write_str("the drafted face has no surface"),
+            Self::RadialRimWithoutEdge => f.write_str("a rim edge use has no edge"),
             Self::RadialSweepNeedsCones => {
                 f.write_str("the radial sweep requires two conical supports")
             }
@@ -564,6 +576,16 @@ mod tests {
                 K::Failed,
             ),
             (
+                TopologyFailure::RadialFaceWithoutSurface,
+                SM_ERR_NULL_POINTER,
+                K::Missing,
+            ),
+            (
+                TopologyFailure::RadialRimWithoutEdge,
+                SM_ERR_NULL_POINTER,
+                K::Missing,
+            ),
+            (
                 TopologyFailure::RadialSweepNeedsCones,
                 SM_ERR,
                 K::Unsupported,
@@ -581,6 +603,14 @@ mod tests {
             assert_eq!(e.topology_failure(), Some(&failure));
             assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
         }
+        assert_eq!(
+            SolidError::topology(op, TopologyFailure::RadialFaceWithoutSurface).to_string(),
+            "topology::op: the drafted face has no surface"
+        );
+        assert_eq!(
+            SolidError::topology(op, TopologyFailure::RadialRimWithoutEdge).to_string(),
+            "topology::op: a rim edge use has no edge"
+        );
         // the approximation's failure stays its cause, and decides defect or refusal
         let why = "a step the kernel got wrong";
         let cause = SolidError::topology(op, TopologyFailure::Defect { why });

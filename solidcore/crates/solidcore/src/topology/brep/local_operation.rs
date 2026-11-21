@@ -92,7 +92,8 @@ pub(crate) fn contract_complete_cylinder(
     let ([f], [new]) = (faces, surfaces) else {
         return Ok(None);
     };
-    let old = face_ops::surface(b, *f)?.ok_or_else(|| null("the face's surface"))?;
+    let old = face_ops::surface(b, *f)?
+        .ok_or_else(|| SolidError::topology(OP, TopologyFailure::RadialFaceWithoutSurface))?;
     let (SurfaceKind::Cone(c), SurfaceKind::Cone(d)) = (old.kind(), new.kind()) else {
         return Ok(None);
     };
@@ -262,7 +263,8 @@ fn complete_cylinder_boundary(
             return Ok(false);
         }
         if side >= 2 {
-            let edge = eu::edge(b, u)?.ok_or_else(|| null("the rim's edge"))?;
+            let edge = eu::edge(b, u)?
+                .ok_or_else(|| SolidError::topology(OP, TopologyFailure::RadialRimWithoutEdge))?;
             for neighbor in crate::topology::edge::faces(b, edge, None)? {
                 if neighbor == f {
                     continue;
