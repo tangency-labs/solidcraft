@@ -31,6 +31,8 @@ solidcraft-doc = { path = "crates/doc" }
 # Versioned file formats: the format tag, the version registry and its upgrade, a newer file told
 solidcraft-format = { path = "crates/format" }
 solidcraft-io = { path = "crates/io" }
+# A saved design's picture and summary for file browsers, without the kernel (apps/solidcraft-quicklook)
+solidcraft-design-preview = { path = "crates/design-preview" }
 solidcraft-engine = { path = "crates/engine" }
 # Without its default features, so an app built with `--no-default-features` leaves out what
 # they bring (usage statistics); each app turns them on in its own defaults.
