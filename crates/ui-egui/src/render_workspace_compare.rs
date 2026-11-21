@@ -183,7 +183,7 @@ pub(super) fn summary(app: &SolveApp, ui: &mut egui::Ui) {
     let Some(view) = &app.render_workspace.view.compare else { return };
     let Some(reference) = app.render_workspace.view.retained.iter().find(|result| result.frame.job == view.reference) else { return };
     let stale = app.render_workspace.view.retained.iter().any(|result| [view.left, view.right].contains(&Some(result.frame.job)) && result.stale);
-    ui_kit::completion_text(ui, app.tr_by_id(if stale { "render.image_stale" } else { "render.result_current" }), !stale);
+    ui_kit::completion_text(ui, if stale { tr!(app, "render.image_stale") } else { tr!(app, "render.result_current") }, !stale);
     let summary = tr!(
         "render.compare_summary",
         shot = reference.shot.as_deref().unwrap_or_else(|| tr!("render.results_unnamed")),

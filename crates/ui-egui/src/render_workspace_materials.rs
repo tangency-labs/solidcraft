@@ -1513,7 +1513,7 @@ pub(super) fn confirmation(app: &mut SolveApp, ctx: &egui::Context) {
         app.set_status(tr!(app, "render.review_stale").to_owned(), true);
         return;
     }
-    let title = app.tr_by_id(if pending.coat { "render.coat_remove_title" } else { "render.appearance_editor.remove_title" }).to_owned();
+    let title = (if pending.coat { tr!(app, "render.coat_remove_title") } else { tr!(app, "render.appearance_editor.remove_title") }).to_owned();
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("render_remove_optics"), "delete", &title)
         .tone(ui_kit::Tone::Danger)
         .actions(tr!(app, "render.appearance_editor.remove"), tr!(app, "render.keep_editing"), None)

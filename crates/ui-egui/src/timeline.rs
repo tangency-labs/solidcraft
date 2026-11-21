@@ -146,11 +146,11 @@ fn transport_view(app: &SolveApp) -> crate::timeline_fold::View {
 /// component out of the bar — shows or hides those components' entries (#10393).
 pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
     let show = !app.preferences.history_play_button;
-    let label = solidcraft_ui_text::tr_by_id(if show { "ui.history_play_button_show" } else { "ui.history_play_button_hide" });
+    let label = if show { tr!("ui.history_play_button_show") } else { tr!("ui.history_play_button_hide") };
     let mut items = vec![crate::ui_kit::Item::action("ui.historyPlayButton", label, "timeline_play").with(json!({ "show": show }))];
     if app.session.doc.components.iter().any(|c| c.history_hidden) {
         let show_hidden = !app.tree.history_show_hidden;
-        let label = solidcraft_ui_text::tr_by_id(if show_hidden { "ui.history_show_hidden" } else { "ui.history_hide_hidden" });
+        let label = if show_hidden { tr!("ui.history_show_hidden") } else { tr!("ui.history_hide_hidden") };
         items.push(crate::ui_kit::Item::action("ui.historyShowHidden", label, "eye").with(json!({ "show": show_hidden })));
     }
     items
@@ -544,7 +544,7 @@ pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     }
     // Its own message, not a literal: no catalog held the literal, so the item stayed English
     // in every language (#8301).
-    let suppress = if feature.suppressed { "timeline.unsuppress_features" } else { "timeline.suppress_features" };
+    let suppress = if feature.suppressed { tr!("timeline.unsuppress_features") } else { tr!("timeline.suppress_features") };
     let targets = menu_targets(app, id);
     let parent = crate::timeline_folders::group_parent(&doc.timeline_groups, &targets);
     v.extend([
@@ -553,7 +553,7 @@ pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
         Item::action("ui.groupFeatures", "Group Features", "feature_group")
             .with(json!({ "features": targets, "parent": parent }))
             .off_because(app.session.group_refusal(&targets, parent)),
-        Item::action("timeline.suppress", solidcraft_ui_text::tr_by_id(suppress), "suppress").with(json!({ "feature": id })),
+        Item::action("timeline.suppress", suppress, "suppress").with(json!({ "feature": id })),
     ]);
     // An extra entry for the selection; the one above still acts on this feature alone.
     if let Some((label, params)) = suppress_selected(app, id) {
@@ -1212,8 +1212,8 @@ impl BarResults {
 /// The History Play control's names: SolidCraft's commands that play and stop History, and
 /// "Play from the start" while Play starts over (#10798).
 pub(crate) fn play_labels(app: &SolveApp) -> crate::ui_kit::PlayLabels<'static> {
-    let play = if play_starts_over(app) { "ui.history_play_from_start" } else { "cmd.timeline_play" };
-    crate::ui_kit::PlayLabels { play: solidcraft_ui_text::tr_by_id(play), stop: tr!("cmd.timeline_stop") }
+    let play = if play_starts_over(app) { tr!("ui.history_play_from_start") } else { tr!("cmd.timeline_play") };
+    crate::ui_kit::PlayLabels { play, stop: tr!("cmd.timeline_stop") }
 }
 
 /// The bar as SolidCraft describes it; the strip sets the marker's slot and the step count.

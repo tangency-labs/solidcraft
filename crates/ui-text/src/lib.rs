@@ -43,11 +43,23 @@ pub struct Catalog {
     label_ids: OnceLock<BTreeMap<&'static str, Vec<&'static str>>>,
     /// The ids, sorted: a message's place among them is its number in a table ([`numbered`]).
     ids: OnceLock<Vec<&'static str>>,
+    /// The [`numbered::fingerprint`] of [`Self::ids`].
+    ids_fingerprint: OnceLock<u32>,
 }
 
 impl Catalog {
     pub const fn new(id: &'static str, name: &'static str, source: &'static str) -> Self {
-        Self { id, name, source, table: &[], messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new(), ids: OnceLock::new() }
+        Self {
+            id,
+            name,
+            source,
+            table: &[],
+            messages: OnceLock::new(),
+            shown: OnceLock::new(),
+            label_ids: OnceLock::new(),
+            ids: OnceLock::new(),
+            ids_fingerprint: OnceLock::new(),
+        }
     }
 
     /// [`Catalog::new`] with the catalog's table of numbered texts ([`numbered::encode`], made by
@@ -55,7 +67,17 @@ impl Catalog {
     /// number, so only the English one needs its JSON too (for the ids, and for the labels that
     /// are found by their English text): the others may give an empty `source`.
     pub const fn numbered(id: &'static str, name: &'static str, source: &'static str, table: &'static [u8]) -> Self {
-        Self { id, name, source, table, messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new(), ids: OnceLock::new() }
+        Self {
+            id,
+            name,
+            source,
+            table,
+            messages: OnceLock::new(),
+            shown: OnceLock::new(),
+            label_ids: OnceLock::new(),
+            ids: OnceLock::new(),
+            ids_fingerprint: OnceLock::new(),
+        }
     }
 
     /// The messages in reading order, as the catalog holds them. An invalid catalog is logged and
@@ -101,6 +123,16 @@ impl Catalog {
     /// The ids, sorted by their bytes.
     pub(crate) fn ids(&'static self) -> &'static [&'static str] {
         self.ids.get_or_init(|| self.messages().keys().map(String::as_str).collect())
+    }
+
+    /// The [`numbered::fingerprint`] of the ids.
+    pub(crate) fn ids_fingerprint(&'static self) -> u32 {
+        *self.ids_fingerprint.get_or_init(|| numbered::fingerprint(self.ids().iter().copied()))
+    }
+
+    /// The id of `msg`, when it was numbered among this catalog's ids.
+    fn id_of(&'static self, msg: Msg) -> Option<&'static str> {
+        self.ids().get(msg.place_in(self.ids_fingerprint())?).copied()
     }
 
     /// The language's own name as the language list draws it.
@@ -306,10 +338,21 @@ impl Locale {
         filled.fill_in(self)
     }
 
-    /// The message `msg` in this language, then in English, then its id where the build kept it
-    /// (development and tests; a release build has no ids to show, and shows nothing).
+    /// The message `msg` in this language, then in English, then its id, as [`Self::text`] gives.
+    ///
+    /// A catalog with a table is read from it. One without (`Catalog::new`, another host's) is
+    /// read by the id, which the English catalog's ids give back from the place; so is a message
+    /// no table has, which reads as its id. Only a message numbered among other ids than the
+    /// installed English catalog's cannot be named that way: it reads as the id the build kept
+    /// (with debug assertions), or as nothing.
     pub fn message(self, msg: Msg) -> &'static str {
-        numbered::lookup(self.0.table, msg).or_else(|| numbered::lookup(english().table, msg)).unwrap_or(msg.unread())
+        if let Some(text) = numbered::lookup(self.0.table, msg).or_else(|| numbered::lookup(english().table, msg)) {
+            return text;
+        }
+        match english().id_of(msg) {
+            Some(id) => self.text(id),
+            None => msg.unread(),
+        }
     }
 }
 
@@ -482,6 +525,22 @@ mod tests {
         assert_eq!(Locale::for_language("de").text("ui.no_such_message"), "ui.no_such_message");
         assert_eq!(Locale::for_language("de").label("original unknown caption"), "original unknown caption");
         assert_eq!(tr_by_id("ui.no_such_message"), "ui.no_such_message");
+    }
+
+    /// Catalogs without tables (another host's, made with `Catalog::new`) answer a numbered
+    /// message as they answer its id.
+    #[test]
+    fn a_numbered_message_reads_from_catalogs_without_tables() {
+        installed();
+        let de = Locale::for_language("de");
+        let msg = |id| Msg::of(id).unwrap();
+        assert_eq!(de.tr(msg("ui.cancel")), "Abbrechen");
+        assert_eq!(de.tr(msg("ui.only_english")), "Only in English");
+        assert_eq!(de.fill(Filled::checked(msg("dialog.selected_count"), [("count", "2")])), "2 ausgewählt");
+        assert!(Msg::of("ui.no_such_message").is_none());
+        // Numbered among other ids: nothing says which message it is but the id the build kept.
+        assert_eq!(de.tr(Msg::checked(0, 1, "ui.kept")), "ui.kept");
+        assert_eq!(de.tr(Msg::checked(0, 1, "")), "");
     }
 
     #[test]

@@ -69,7 +69,7 @@ fn section(app: &mut SolveApp, rows: &mut Rows<'_>, key: &str) -> bool {
     let id = format!("render:tree:{key}");
     let open = browser::is_open(app, &id, true);
     let label = app.tr_by_id(&format!("render.tree_{key}")).to_string();
-    let add_label = app.tr_by_id(if key == "lights" { "render.tree_add_light" } else { "render.tree_add_shot" }).to_string();
+    let add_label = (if key == "lights" { tr!(app, "render.tree_add_light") } else { tr!(app, "render.tree_add_shot") }).to_string();
     let pending = tr!(app, "render.method_limit_raster").to_string();
     let actions = [ui_kit::TreeAction {
         icon: "plus",

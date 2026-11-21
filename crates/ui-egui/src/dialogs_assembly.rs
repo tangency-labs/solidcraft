@@ -1293,7 +1293,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             let kind = f.joint_kind();
             if kind != JointKind::Rigid {
                 form_row(ui, "Animate", |ui| {
-                    let label = solidcraft_ui_text::tr_by_id(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
+                    let label = if f.animate { tr!("ui.joint_stop") } else { tr!("ui.joint_play") };
                     if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
                         .backing_on_hover_text(solidcraft_ui_text::tr_label("Play the joint's motion in the view"))
                         .clicked()
@@ -1523,12 +1523,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                     return;
                 }
                 let stale = result.is_some() && *of != picked;
-                if crate::ui_kit::button(
-                    ui,
-                    solidcraft_ui_text::tr_by_id(if stale { "dialog.compute_again" } else { "dialog.compute" }),
-                    crate::ui_kit::Button::Normal,
-                )
-                .clicked()
+                if crate::ui_kit::button(ui, if stale { tr!("dialog.compute_again") } else { tr!("dialog.compute") }, crate::ui_kit::Button::Normal)
+                    .clicked()
                 {
                     (*result, *overlaps) = (None, Vec::new());
                     *check = Some(interference(app, &picked, clearance));

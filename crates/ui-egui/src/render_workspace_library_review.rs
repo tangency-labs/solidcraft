@@ -184,8 +184,8 @@ pub(in crate::render_workspace) fn dialog(app: &mut SolveApp, ctx: &egui::Contex
         app.tr_by_id(&format!("render.stage_panels.subtitle_{}", draft.variant)).to_string()
     };
     let replaces = app.tr_by_id(&format!("render.stage_panels.replaces_{}", draft.variant)).to_string();
-    let kept =
-        app.tr_by_id(if draft.variant == "quality" { "render.stage_panels.kept_quality" } else { "render.stage_panels.kept_fields" }).to_string();
+    let kept = (if draft.variant == "quality" { tr!(app, "render.stage_panels.kept_quality") } else { tr!(app, "render.stage_panels.kept_fields") })
+        .to_string();
     let acknowledgement = app
         .tr_by_id(match draft.variant {
             "studio" => "render.stage_panels.studio_ack",
@@ -338,9 +338,11 @@ pub(in crate::render_workspace) fn confirmation(app: &mut SolveApp, ctx: &egui::
         return;
     }
     let stage = pending.command == "render.stage.clear";
-    let title = app.tr_by_id(if stage { "render.stage_panels.remove_stage_title" } else { "render.stage_panels.remove_optics_title" }).to_string();
-    let message = app.tr_by_id(if stage { "render.stage_panels.remove_stage_help" } else { "render.stage_panels.remove_optics_help" }).to_string();
-    let label = app.tr_by_id(if stage { "render.stage_panels.remove_stage" } else { "render.stage_panels.remove_optics" }).to_string();
+    let title =
+        (if stage { tr!(app, "render.stage_panels.remove_stage_title") } else { tr!(app, "render.stage_panels.remove_optics_title") }).to_string();
+    let message =
+        (if stage { tr!(app, "render.stage_panels.remove_stage_help") } else { tr!(app, "render.stage_panels.remove_optics_help") }).to_string();
+    let label = (if stage { tr!(app, "render.stage_panels.remove_stage") } else { tr!(app, "render.stage_panels.remove_optics") }).to_string();
     let (closed, answer) = ui_kit::Confirm::new(egui::Id::unique("render_resource_removal"), "delete", &title)
         .tone(ui_kit::Tone::Danger)
         .actions(&label, tr!(app, "render.stage_panels.keep"), None)

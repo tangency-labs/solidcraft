@@ -440,7 +440,7 @@ fn fill_overflow_rows(app: &SolveApp, rows: &mut [app_bar::OverflowItem], shown:
                 row.icon = "zoom".to_string();
             }
             "leading" => {
-                row.label = app.tr_by_id(if app.preferences.show_document_browser { "library.hide" } else { "library.show" }).to_string();
+                row.label = (if app.preferences.show_document_browser { tr!(app, "library.hide") } else { tr!(app, "library.show") }).to_string();
                 row.icon = "document_browser".to_string();
             }
             _ => {

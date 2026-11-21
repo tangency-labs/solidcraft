@@ -191,11 +191,11 @@ pub(super) fn confirmation(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let removing = matches!(&pending.action, PendingAction::Remove(_));
-    let title = app.tr_by_id(if removing { "render.shot_remove_title" } else { "render.draft_confirm_title" }).to_string();
-    let keep = app.tr_by_id(if removing { "render.stage_panels.keep" } else { "render.keep_editing" }).to_string();
-    let primary = app.tr_by_id(if removing { "render.stage_panels.remove_shot" } else { "render.save_continue" }).to_string();
+    let title = (if removing { tr!(app, "render.shot_remove_title") } else { tr!(app, "render.draft_confirm_title") }).to_string();
+    let keep = (if removing { tr!(app, "render.stage_panels.keep") } else { tr!(app, "render.keep_editing") }).to_string();
+    let primary = (if removing { tr!(app, "render.stage_panels.remove_shot") } else { tr!(app, "render.save_continue") }).to_string();
     let discard = tr!(app, "render.discard_continue").to_string();
-    let message = app.tr_by_id(if removing { "render.shot_remove_help" } else { "render.draft_confirm_help" }).to_string();
+    let message = (if removing { tr!(app, "render.shot_remove_help") } else { tr!(app, "render.draft_confirm_help") }).to_string();
     let (closed, answer) = ui_kit::Confirm::new(egui::Id::unique("render_pending_shot"), if removing { "delete" } else { "save" }, &title)
         .tone(if removing { ui_kit::Tone::Danger } else { ui_kit::Tone::Warning })
         .actions(&primary, &keep, (!removing).then_some(discard.as_str()))
@@ -670,7 +670,8 @@ pub(super) fn sampling_editor(app: &mut SolveApp, ui: &mut egui::Ui) {
             (app.render_workspace.view.method == ImageMethod::Raster).then(|| tr!(app, "render.method_limit_raster").to_string())
         } else {
             (app.render_workspace.view.method != method).then(|| {
-                app.tr_by_id(if method == ImageMethod::GpuRaytrace { "render.effects_gpu_only" } else { "render.children.needs_cpu" }).to_string()
+                (if method == ImageMethod::GpuRaytrace { tr!(app, "render.effects_gpu_only") } else { tr!(app, "render.children.needs_cpu") })
+                    .to_string()
             })
         };
         ui_kit::method_section(
@@ -1028,7 +1029,7 @@ fn quality_summary(app: &SolveApp, width: u32, height: u32, samples: u32, depth:
         samples = &samples.to_string(),
         depth = &depth.to_string(),
         seed = &seed.to_string(),
-        denoise = app.tr_by_id(if denoise { "render.quality_denoise_on" } else { "render.quality_denoise_off" })
+        denoise = if denoise { tr!(app, "render.quality_denoise_on") } else { tr!(app, "render.quality_denoise_off") }
     )
 }
 

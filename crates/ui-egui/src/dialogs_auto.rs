@@ -49,13 +49,13 @@ impl Auto {
 
 /// The line over the form: that the method was chosen from the picks, or what to pick.
 pub(super) fn hint(a: &Auto) -> String {
-    solidcraft_ui_text::tr_by_id(if a.picks.is_empty() { "ui.construct_auto.pick" } else { "ui.construct_auto.chosen" }).to_owned()
+    (if a.picks.is_empty() { tr!("ui.construct_auto.pick") } else { tr!("ui.construct_auto.chosen") }).to_owned()
 }
 
 /// Why OK does nothing while no method takes the picks.
 pub(super) fn refusal(d: &Dialog) -> String {
     let none = d.auto.as_ref().is_none_or(|a| a.picks.is_empty());
-    solidcraft_ui_text::tr_by_id(if none { "ui.construct_auto.select" } else { "ui.construct_auto.no_fit" }).to_owned()
+    (if none { tr!("ui.construct_auto.select") } else { tr!("ui.construct_auto.no_fit") }).to_owned()
 }
 
 /// What a hit picks for the tool.

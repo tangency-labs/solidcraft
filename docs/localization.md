@@ -33,8 +33,15 @@ A message is read with `tr!`, which takes its id as written in the catalog:
 The id is checked when the crate compiles, against the English catalog (`en.json`, the shared
 `crates/ui-text/locales/en.json` and the pending files). An id no catalog has, a placeholder
 left without a value and a name the message does not have all stop the build at the call, the
-first with the nearest id. Only English is read then: another language lacking the message is
-still found by `cargo xtask i18n` and the catalogs' tests.
+first with the nearest id. So does a message that one of the catalogs kept complete (Arabic,
+Hebrew, Japanese, Vietnamese, Chinese) has no text for: the error names the languages, and the
+texts go beside the English one in your pending file. That is what `cargo xtask i18n --check`
+refuses too, found when the code compiles instead of in CI. A catalog that is not kept complete
+may lack the message, and reads English there.
+
+The UI kit (`crates/ui-kit`) is the exception: a shared crate cannot be checked against one
+app's catalog, so its few literal ids are read with `tr_by_id` and checked by the catalogs'
+tests.
 
 `tr` itself takes only what `msg!` made, so `app.tr("ui.preferences")` does not compile. An
 id that is built at run time (a command's label, a row of a table) is read with `tr_by_id`

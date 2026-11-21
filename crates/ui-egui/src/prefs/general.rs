@@ -44,7 +44,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_section(ui, "startup", tr!(app, "ui.on_startup"), |ui| {
             ui_kit::settings_form(ui, labels, |ui| {
                 ui_kit::row(ui, tr!(app, "ui.on_startup"), |ui| {
-                    let selected = app.tr_by_id(if app.preferences.show_home_on_startup { "ui.home" } else { "ui.new_design" }).to_string();
+                    let selected = (if app.preferences.show_home_on_startup { tr!(app, "ui.home") } else { tr!(app, "ui.new_design") }).to_string();
                     let choice = ui_kit::dropdown_menu(ui, "pref_startup", &selected, |ui| {
                         for (home, key) in [(true, "ui.home"), (false, "ui.new_design")] {
                             let response =

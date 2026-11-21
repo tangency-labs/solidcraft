@@ -2940,7 +2940,7 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
         tr!("document.save_changes", name = &name_display)
     };
     let detail = if grouped { String::new() } else { crate::design_view_ui::closing_detail(view_counts(app).get(i).copied().unwrap_or(1)) };
-    let save_label = solidcraft_ui_text::tr_by_id(if grouped { "document.save_selected" } else { "ui.save" });
+    let save_label = if grouped { tr!("document.save_selected") } else { tr!("ui.save") };
     let mut show_tab = None;
     let mut row_action = None;
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_close_prompt"), "status_warning", &title)

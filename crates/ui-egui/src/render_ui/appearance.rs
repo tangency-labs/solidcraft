@@ -454,7 +454,8 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
     }
     let mut draft = view.draft.clone().unwrap_or_else(|| from.clone());
     let name = if is_mixed { tr!(app, "render.tree_mixed").to_owned() } else { from.name.clone() };
-    let source = app.tr_by_id(if source_step == LookStep::Material { "render.inspector_material" } else { "render.library_in_design" }).to_owned();
+    let source =
+        (if source_step == LookStep::Material { tr!(app, "render.inspector_material") } else { tr!(app, "render.library_in_design") }).to_owned();
     let used = tr!("render.inspector_used_by", count = &count.to_string());
     let replacements = &view.replacements;
     let ids: Vec<_> = (0..replacements.len()).map(|index| index.to_string()).collect();

@@ -54,7 +54,7 @@ pub(super) fn mapping_rows(app: &SolveApp) -> Vec<(Vec<String>, String)> {
     gestures.extend([
         (
             vec![tr!(app, "prefs.wheel").to_owned()],
-            app.tr_by_id(if app.preferences.zoom_to_cursor { "prefs.zoom_toward_cursor" } else { "prefs.gesture_zoom" }).to_owned(),
+            (if app.preferences.zoom_to_cursor { tr!(app, "prefs.zoom_toward_cursor") } else { tr!(app, "prefs.gesture_zoom") }).to_owned(),
         ),
         (vec![tr!(app, "prefs.left_click").to_owned()], tr!(app, "prefs.select").to_owned()),
         (

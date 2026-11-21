@@ -544,7 +544,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                     );
                                     row.enabled = result.is_ok();
                                     row.highlighted = true;
-                                    let badge = solidcraft_ui_text::tr_by_id(if result.is_ok() { "search.valid" } else { "search.invalid" });
+                                    let badge = if result.is_ok() { tr!("search.valid") } else { tr!("search.invalid") };
                                     row.shortcut = badge;
                                     if row
                                         .search_row(

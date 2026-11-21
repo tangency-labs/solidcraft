@@ -1053,7 +1053,7 @@ fn held(d: &ParamsDialog, rows: &[Row]) -> serde_json::Map<String, Value> {
 
 /// The hint at the top of the dialog: when edits apply, as the check box under it says.
 fn hint(live: bool) -> &'static str {
-    solidcraft_ui_text::tr_by_id(if live { "manage.parameters_hint" } else { "parameters.held_hint" })
+    if live { tr!("manage.parameters_hint") } else { tr!("parameters.held_hint") }
 }
 
 /// The footer's note of the edits waiting for Apply, if any.

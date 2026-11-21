@@ -23,7 +23,8 @@ use serde_json::{Map, Value};
 const DIR: &str = "assets/locales";
 
 /// Catalogs delivered complete: a missing message here fails `--check`. English is the source
-/// catalog and is checked implicitly; keep this in step with `COMPLETE` in `ui-egui::i18n`.
+/// catalog and is checked implicitly; keep this in step with `COMPLETE` in `ui-egui::i18n` and in
+/// `crates/ui-text-macros`, which refuses a message one of them lacks when the code compiles.
 const COMPLETE: &[&str] = &["ar", "he", "ja", "vi", "zh"];
 
 /// What `run` found.

@@ -331,7 +331,7 @@ fn source(app: &mut SolveApp, ui: &mut egui::Ui) {
             let name = source_name(app, ui.ctx());
             ui_kit::banner(ui, ui_kit::AssistantTone::Neutral, |ui| {
                 ui_kit::text(ui, &name, ui_kit::Text::NameCell(true));
-                let kind = app.tr_by_id(if gpu { "render.environment.builtin" } else { "render.environment.hdr_file" });
+                let kind = if gpu { tr!(app, "render.environment.builtin") } else { tr!(app, "render.environment.hdr_file") };
                 let detail = hdr::metadata(app, target).map_or_else(|| kind.to_string(), |info| format!("{kind} · {} × {}", info.width, info.height));
                 ui_kit::text(ui, &detail, ui_kit::Text::Inline);
                 note(app, ui, "render.environment.embedded");

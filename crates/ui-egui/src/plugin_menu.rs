@@ -1592,7 +1592,8 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     // Just the command's own title ("Gears"): no plugin or menu name after it.
     let title = dialog.label.clone();
     let run_key = if dialog.opens.is_some() { "ui.plugin_dialog_choose_file" } else { "ui.plugin_dialog_run" };
-    let (run_label, close_label) = (app.tr_by_id(run_key).to_owned(), app.tr_by_id(if dialog.read { "ui.close" } else { "ui.cancel" }).to_owned());
+    let (run_label, close_label) =
+        (app.tr_by_id(run_key).to_owned(), (if dialog.read { tr!(app, "ui.close") } else { tr!(app, "ui.cancel") }).to_owned());
     let mut browse = None;
     // This dialog's picker, when the viewport picks into its fields: drawn here, then put back.
     let mut picker = if picking(app) == Some(dialog.id) { app.dialog.take() } else { None };

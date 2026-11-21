@@ -51,7 +51,7 @@ fn usage(app: &mut SolveApp, ui: &mut egui::Ui) {
             let text = tr!(app, "prefs.privacy.reset_done").to_string();
             app.set_status(text, false);
         }
-        let label = app.tr_by_id(if app.usage.show_report { "prefs.privacy.hide" } else { "prefs.privacy.show" }).to_string();
+        let label = (if app.usage.show_report { tr!(app, "prefs.privacy.hide") } else { tr!(app, "prefs.privacy.show") }).to_string();
         let show = ui_kit::button(ui, &label, ui_kit::Button::Normal);
         crate::scenario::publish_target("prefs:usage_statistics:show", show.rect);
         if show.clicked() {

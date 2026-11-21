@@ -666,7 +666,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
                     };
                     ui.set_min_width(200.0);
                     ui.set_max_width(240.0);
-                    ui.label(app.tr_by_id(if d.axis.angular { "joint_move.rotation" } else { "joint_move.distance" }));
+                    ui.label(if d.axis.angular { tr!(app, "joint_move.rotation") } else { tr!(app, "joint_move.distance") });
                     ui.label(egui::RichText::new(value).strong());
                     if d.axis.angular {
                         let step = if d.fine { app.preferences.joint_rotation_fine } else { app.preferences.joint_rotation_coarse };

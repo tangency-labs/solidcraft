@@ -35,8 +35,10 @@ pub struct Msg {
     /// The [`fingerprint`] of the ids the place was counted in.
     ids: u32,
     /// The id, in a build with debug assertions (development and tests), where a message no
-    /// catalog has reads as its id, as a message looked up by id does. Empty in a release build,
-    /// which is how the ids stay out of it (see [`debug_id`](crate::debug_id)).
+    /// table has is still named when it was counted in another list of ids than the installed
+    /// English catalog's (a test's own catalogs). Empty in a release build, which is how the ids
+    /// stay out of it (see [`debug_id`](crate::debug_id)): there the id is found from the place
+    /// (`Locale::message`).
     id: &'static str,
 }
 
@@ -73,9 +75,15 @@ impl Msg {
         Self { place, ids, id }
     }
 
-    /// What stands for the message when no catalog has it: its id where the build kept it.
+    /// What stands for the message when nothing can say which it is: its id where the build
+    /// kept it.
     pub(crate) const fn unread(self) -> &'static str {
         self.id
+    }
+
+    /// The place, when it was counted in the ids with the fingerprint `ids`.
+    pub(crate) fn place_in(self, ids: u32) -> Option<usize> {
+        (self.ids == ids).then_some(self.place as usize)
     }
 
     /// The message with the id `id`, for an id built at run time (a command's label): its place
@@ -84,7 +92,7 @@ impl Msg {
     pub fn of(id: &str) -> Option<Self> {
         let english = crate::english();
         let place = english.ids().binary_search(&id).ok()?;
-        Some(Self { place: u32::try_from(place).ok()?, ids: table_fingerprint(english.table), id: "" })
+        Some(Self { place: u32::try_from(place).ok()?, ids: english.ids_fingerprint(), id: "" })
     }
 
     /// The message in this thread's language (English where the language lacks it).

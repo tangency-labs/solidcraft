@@ -1067,16 +1067,16 @@ macro_rules! preference_settings {
             $(.backing_on_hover_text(solidcraft_ui_text::tr_label($help)))?
     };
     (@control $app:ident, $ui:ident, $field:ident, check_tr($label:literal)) => {
-        ui_kit::checkbox($ui, solidcraft_ui_text::tr_by_id($label), &mut $app.preferences.$field)
+        ui_kit::checkbox($ui, tr!($label), &mut $app.preferences.$field)
     };
     (@control $app:ident, $ui:ident, $field:ident, check_id($label:literal)) => {
-        ui_kit::checkbox($ui, $app.tr_by_id($label), &mut $app.preferences.$field)
+        ui_kit::checkbox($ui, tr!($app, $label), &mut $app.preferences.$field)
     };
     (@control $app:ident, $ui:ident, $field:ident, check_id_help($label:literal, $help:literal)) => {
-        ui_kit::checkbox($ui, $app.tr_by_id($label), &mut $app.preferences.$field).backing_on_hover_text($app.tr_by_id($help))
+        ui_kit::checkbox($ui, tr!($app, $label), &mut $app.preferences.$field).backing_on_hover_text(tr!($app, $help))
     };
     (@control $app:ident, $ui:ident, $field:ident, number($label:literal, $range:expr)) => {
-        ui_kit::row($ui, $app.tr_by_id($label), |ui| {
+        ui_kit::row($ui, tr!($app, $label), |ui| {
             ui_kit::number_field(ui, &mut $app.preferences.$field, $range, 1.0, "")
         })
     };
@@ -1088,7 +1088,7 @@ macro_rules! preference_settings {
         })
     };
     (@control $app:ident, $ui:ident, $field:ident, slider($label:literal, $range:expr, $step:expr, $format:expr, $rect:literal)) => {
-        ui_kit::row($ui, $app.tr_by_id($label), |ui| {
+        ui_kit::row($ui, tr!($app, $label), |ui| {
             let response = ui_kit::slider(ui, &mut $app.preferences.$field, $range, ui_kit::Slider { step: Some($step), format: $format, ..Default::default() });
             crate::scenario::publish_rect($rect, response.rect);
             response
@@ -2545,7 +2545,7 @@ fn follow_row(app: &mut SolveApp, ui: &mut egui::Ui) {
         if !path.is_empty() {
             let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
             ui_kit::settings_inline_note(ui, &name);
-            ui_kit::help_icon(ui, app.tr_by_id(if launch { "prefs.theme_follow_launch" } else { "prefs.theme_follow_note" }))
+            ui_kit::help_icon(ui, if launch { tr!(app, "prefs.theme_follow_launch") } else { tr!(app, "prefs.theme_follow_note") })
                 .backing_on_hover_text(&path);
         }
     });

@@ -1376,7 +1376,7 @@ pub(super) fn inspect(app: &mut SolveApp, ui: &mut egui::Ui) {
         let favorite = app.preferences.render_library_favorites.contains(&key);
         if ui_kit::button(
             ui,
-            app.tr_by_id(if favorite { "render.library_unfavorite" } else { "render.library_favorite" }),
+            if favorite { tr!(app, "render.library_unfavorite") } else { tr!(app, "render.library_favorite") },
             ui_kit::Button::Enabled(favorite || app.preferences.render_library_favorites.len() < 256),
         )
         .clicked()

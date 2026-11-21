@@ -211,7 +211,7 @@ fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
             for night in [false, true] {
                 let id = slot_id(&app.preferences, night);
                 let name = theme_choices(app).into_iter().find(|(i, _)| i == id).map(|(_, n)| n).unwrap_or_default();
-                let title = app.tr_by_id(if night { "prefs.picker.night" } else { "prefs.picker.day" });
+                let title = if night { tr!(app, "prefs.picker.night") } else { tr!(app, "prefs.picker.day") };
                 let aimed = state.night == night;
                 let response = ui_kit::theme_slot(
                     ui,
@@ -221,7 +221,7 @@ fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
                         aimed,
                         night,
                         width,
-                        hint: app.tr_by_id(if aimed { "prefs.picker.pick" } else { "prefs.picker.change" }),
+                        hint: if aimed { tr!(app, "prefs.picker.pick") } else { tr!(app, "prefs.picker.change") },
                         sample: ui_kit::ThemeSample::from_tokens(&palette(&app.preferences, id)),
                     },
                 );
@@ -318,7 +318,7 @@ fn row_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut chosen = None;
     let mut card = |ui: &mut egui::Ui, index: usize, width: f32| {
         let Some(e) = visible.get(index) else { return };
-        let source = app.tr_by_id(if e.imported { "prefs.imported_file" } else { "prefs.built_in" });
+        let source = if e.imported { tr!(app, "prefs.imported_file") } else { tr!(app, "prefs.built_in") };
         let note = if e.class.high { tr!("prefs.picker.high_note", source = source) } else { source.to_owned() };
         let day = system && slot_id(&app.preferences, false) == e.id;
         let night = system && slot_id(&app.preferences, true) == e.id;

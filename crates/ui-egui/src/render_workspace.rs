@@ -1605,7 +1605,8 @@ fn method_dropdown(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
                     ("seed", &sampling.seed.to_string()),
                 ],
             );
-            let short = app.tr_by_id(if volume_path { "render.cpu_volume_method_adopt" } else { "render.cpu_celestial_adopt_label" }).to_string();
+            let short =
+                (if volume_path { tr!(app, "render.cpu_volume_method_adopt") } else { tr!(app, "render.cpu_celestial_adopt_label") }).to_string();
             let action = crate::ui_kit::list_picker(ui, "render:method-cpu-indirect", &short, false).backing_on_hover_text(detail);
             crate::scenario::publish_handle("render:method-cpu-indirect", action.rect.center());
             if volume_path {
@@ -1903,7 +1904,7 @@ fn job_controls(app: &mut SolveApp, ui: &mut egui::Ui, compact: bool) {
         }
     });
     let message = state.as_ref().map_or_else(
-        || app.tr_by_id(if params.is_ok() { "render.studio_ready" } else { "render.studio_needs_review" }).to_string(),
+        || (if params.is_ok() { tr!(app, "render.studio_ready") } else { tr!(app, "render.studio_needs_review") }).to_string(),
         |status| {
             app.tr_by_id(match status["progress"]["phase"].as_str().unwrap_or("") {
                 "queued" => "render.image_queued",
@@ -2561,7 +2562,10 @@ fn result_header(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui.colored_label(t.warning, tr!(app, "render.result_reduced_display"));
     }
     let stale = info.scene_generation != app.session.revision;
-    ui.colored_label(if stale { t.warning } else { t.text_dim }, app.tr_by_id(if stale { "render.image_stale" } else { "render.result_current" }));
+    ui.colored_label(
+        if stale { t.warning } else { t.text_dim },
+        if stale { tr!(app, "render.image_stale") } else { tr!(app, "render.result_current") },
+    );
     if app.render_workspace.view.job.is_some_and(|job| job != info.job) {
         ui.small(tr!(app, "render.result_retained"));
     }

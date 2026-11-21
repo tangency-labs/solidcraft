@@ -964,7 +964,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                 tr!(app, "render.light_type_area").to_string(),
                 tr!(app, "render.light_type_point").to_string(),
                 tr!(app, "render.light_type_spot").to_string(),
-                app.tr_by_id(if finite_sun { "render.light_type_sun" } else { "render.tree_directional" }).to_string(),
+                (if finite_sun { tr!(app, "render.light_type_sun") } else { tr!(app, "render.tree_directional") }).to_string(),
             ];
             let kinds = ["area", "point", "spot", "directional"];
             let mut selected = kinds.iter().position(|value| *value == kind).unwrap_or(1);
@@ -1190,7 +1190,11 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                     )
                     .count();
                 if ui_kit::button(ui, tr!(app, "render.light_duplicate"), ui_kit::Button::Enabled(!blocked && !finite_sun && count < cap))
-                    .backing_on_hover_text(app.tr_by_id(if finite_sun { "render.directional_sun_limit" } else { "render.lighting_budget_help" }))
+                    .backing_on_hover_text(if finite_sun {
+                        tr!(app, "render.directional_sun_limit")
+                    } else {
+                        tr!(app, "render.lighting_budget_help")
+                    })
                     .clicked()
                 {
                     dispatch(app, "render.lights.duplicate", Some(id), None);

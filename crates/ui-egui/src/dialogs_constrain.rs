@@ -215,7 +215,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut ConstrainForm, inputs
             _ => {}
         }
         crate::ui_kit::options(ui, "constrain_options", &mut [(tr!("constrain.flip"), &mut f.flip)]);
-        let apply_label = solidcraft_ui_text::tr_by_id(if editing(f, inputs).is_some() { "constrain.change" } else { "constrain.apply" });
+        let apply_label = if editing(f, inputs).is_some() { tr!("constrain.change") } else { tr!("constrain.apply") };
         let r = crate::ui_kit::button(ui, apply_label, crate::ui_kit::Button::Normal);
         crate::scenario::publish_handle("dialog:Apply", r.rect.center());
         if r.clicked()
