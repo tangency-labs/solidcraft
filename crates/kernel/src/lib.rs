@@ -44,6 +44,7 @@ mod fair;
 mod fill;
 #[cfg(test)]
 mod fillet_setback_tests;
+mod form_cell;
 mod freeform;
 pub mod fuzz;
 mod heal;
@@ -174,15 +175,15 @@ pub use blend::{
 pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
 pub use body::{
-    Body, COLOUR_NAME_MAX, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, MESH_MIN_ANGLE, MeshSpec,
-    MeshTolerance, OUTLINE_TRIM_SAMPLES, Paint, PlanStats, PointClass, RayPick, Refusal, SurfaceKind, colour_name, lazy_moves_made, placed_mesh,
+    Body, COLOUR_NAME_MAX, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, KernelForms, MESH_MIN_ANGLE,
+    MeshSpec, MeshTolerance, OUTLINE_TRIM_SAMPLES, Paint, PlanStats, PointClass, RayPick, Refusal, SurfaceKind, colour_name, placed_mesh,
 };
 pub use boundary::{Boundary, boundary_patch};
 pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDGE_PICKS, boundary_join, boundary_surface};
 pub use bridge::{Frame, blend_between, bridge, chain, chain_closes, frames, frames_across, sample_grid};
 pub use build::{
     PathSeg, box_solid, canonical_revolve_axis, cylinder, extrude, extrude_tapered, extrude_tapered_between, extrude_whole_sides, loft, loft_regions,
-    loft_with_rails, path_polyline, planar_face_record, revolve, revolve_whole, sphere, sweep, sweep_with, torus,
+    loft_with_rails, offset_loop, path_polyline, planar_face_record, revolve, revolve_whole, sphere, sweep, sweep_with, torus,
 };
 pub use continuity::{
     ContinuityReport, ContinuityTolerances, DEFAULT_SAMPLES, EdgePick, MAX_SAMPLES, MIN_SAMPLES, SeamReport, SeamStation, SeamVerdict, SeamWorst,

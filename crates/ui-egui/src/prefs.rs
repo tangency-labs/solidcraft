@@ -31,6 +31,7 @@ mod mouse3d;
 mod navbar;
 mod navigation;
 mod panel_layout;
+mod privacy;
 mod security;
 mod sketch;
 mod theme_picker;
@@ -331,7 +332,14 @@ impl TrackpadScroll {
     }
 }
 
+pub use solidcraft_engine::schema::ui_prefs::BrowserScrollWheel;
+
 impl Prefs {
+    /// Whether browser scrolling should bypass automatic wheel and trackpad detection.
+    pub fn browser_wheel_always_zooms(&self) -> bool {
+        self.browser_scroll_wheel == BrowserScrollWheel::AlwaysZoom
+    }
+
     /// Touchpad scroll zooms without overwriting the user's preference for other presets.
     pub fn trackpad_pans(&self) -> bool {
         self.nav != TOUCHPAD_NAV && self.trackpad_pan
@@ -379,6 +387,7 @@ pub const PAGES: &[&str] = &[
     "Shortcuts",
     "Assistant",
     "Plugins",
+    "Privacy",
 ];
 pub const PAGE_GENERAL: usize = 0;
 pub const PAGE_APPEARANCE: usize = 1;
@@ -393,6 +402,7 @@ pub const PAGE_MOUSE3D: usize = 9;
 pub const PAGE_SHORTCUTS: usize = 10;
 pub const PAGE_ASSISTANT: usize = 11;
 pub const PAGE_PLUGINS: usize = 12;
+pub const PAGE_PRIVACY: usize = 13;
 /// What Preferences accepts for `parameter_list_rows`: `parameters.complete` answers at most 200.
 pub const PARAMETER_LIST_ROWS: std::ops::RangeInclusive<u16> = 5..=200;
 const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
@@ -444,7 +454,8 @@ const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
     prefs_window::Page::Host(prefs_window::HostPage {
         icon: ui_kit::Icon::Kit("shield"),
         label: "prefs.security",
-        group: Some("prefs.structure.work"),
+        // Already in Work, after Design: a group here drew a second "Work" heading.
+        group: None,
         handle: "prefs:page:Security",
         scroll: true,
         draw: page_draw::<PAGE_SECURITY>,
@@ -512,6 +523,15 @@ const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
         scroll: true,
         draw: page_draw::<PAGE_PLUGINS>,
         defaults: page_defaults::<PAGE_PLUGINS>,
+    }),
+    prefs_window::Page::Host(prefs_window::HostPage {
+        icon: ui_kit::Icon::Kit("eye"),
+        label: "prefs.privacy",
+        group: None,
+        handle: "prefs:page:Privacy",
+        scroll: true,
+        draw: page_draw::<PAGE_PRIVACY>,
+        defaults: page_defaults::<PAGE_PRIVACY>,
     }),
 ];
 
@@ -1622,6 +1642,10 @@ preference_settings! {
     zoom_stop_at_model: bool = false, PAGE_NAVIGATION => check_id("prefs.zoom_stop_at_model");
     /// Spread discrete wheel input across frames (off: apply each event immediately).
     smooth_wheel_zoom: bool = true, PAGE_NAVIGATION => check("Smooth wheel zoom", "Turn off to apply each wheel event immediately, without a smoothing tail");
+    /// Browser-only wheel classification; native platforms keep their scroll phases.
+    browser_scroll_wheel: BrowserScrollWheel = BrowserScrollWheel::Automatic, PAGE_NAVIGATION;
+    /// The browser's one-time question to make a smooth mouse wheel zoom was answered "don't ask again".
+    browser_wheel_hint_dismissed: bool = false, PAGE_NAVIGATION;
     /// The face under the pointer keeps its highlight while the view moves under it (#2130).
     keep_hover_while_navigating: bool = true, PAGE_NAVIGATION;
     /// Two-finger trackpad scroll pans (off: it zooms like the wheel); pinch always zooms.
@@ -1749,6 +1773,10 @@ preference_settings! {
     color_vision: solidcraft_theme::ColorVision = solidcraft_theme::ColorVision::Off, PAGE_APPEARANCE;
     /// Check for updates at start and once a day (docs/updates.md).
     check_updates: bool = true, 0;
+    /// Share anonymous usage statistics (docs/privacy.md, `usage_stats`): on unless the person,
+    /// the environment or the organization turns them off. A build without the `usage-stats`
+    /// feature keeps the value and does nothing with it.
+    usage_statistics: bool = true;
     /// When the last update check ran, and the versions skipped or put off (`update::Memo`).
     update: crate::update::Memo = crate::update::Memo::default();
     /// The variant last started in each split tool family (Rectangle, Circle, Arc, Slot, Polygon, Line,
@@ -3420,6 +3448,7 @@ fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
         }
         PAGE_DESIGN => design::show(app, ui),
         PAGE_SECURITY => security::show(app, ui),
+        PAGE_PRIVACY => privacy::show(app, ui),
         PAGE_NAVIGATION => navigation::show(app, ui, t),
         PAGE_GRAPHICS => graphics::show(app, ui),
         PAGE_SKETCH => sketch::show(app, ui),
@@ -5287,6 +5316,33 @@ mod tests {
         let mut restored = crate::SolveApp::new(Default::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
         assert!(restored.preferences.keep_unsaved_in_browser, "it is saved with the settings");
+    }
+
+    #[test]
+    fn browser_scroll_wheel_roundtrips_validates_and_resets() {
+        assert_eq!(Prefs::default().browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        assert_eq!(lenient(&json!({})).browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let initial = control(&mut app, &json!({})).unwrap();
+        assert_eq!(initial["browser_scroll_wheel"], "automatic");
+        control(&mut app, &json!({"open":"Navigation", "browser_scroll_wheel":"always_zoom", "button":"apply"})).unwrap();
+        assert!(app.preferences.browser_wheel_always_zooms());
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert_eq!(restored.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysZoom);
+        for invalid in [json!("future"), json!(""), json!(42), json!(null)] {
+            assert!(set(&mut app, &json!({"browser_scroll_wheel": invalid})).is_err());
+            assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysZoom);
+            assert_eq!(lenient(&json!({"browser_scroll_wheel": invalid})).browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        }
+        control(&mut app, &json!({"open":"Navigation", "button":"defaults"})).unwrap();
+        assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        control(&mut app, &json!({"button":"cancel"})).unwrap();
+        assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysZoom);
+        set(&mut app, &json!({"browser_scroll_wheel":"always_pan"})).unwrap();
+        assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysPan);
+        set(&mut app, &json!({"browser_scroll_wheel":"automatic"})).unwrap();
+        assert!(!app.preferences.browser_wheel_always_zooms());
     }
 
     #[test]
@@ -7399,16 +7455,14 @@ mod tests {
                 "3D mouse",
                 "Shortcuts",
                 "Assistant",
-                "Plugins"
+                "Plugins",
+                "Privacy"
             ]
         );
         assert_eq!(WINDOW_PAGES.len(), PAGES.len());
         let groups: Vec<_> =
             WINDOW_PAGES.iter().map(host_page).enumerate().filter_map(|(i, p)| p.group.map(|g| (i, solidcraft_ui_text::tr_by_id(g)))).collect();
-        assert_eq!(
-            groups,
-            [(PAGE_APPEARANCE, "Look"), (PAGE_DESIGN, "Work"), (PAGE_SECURITY, "Work"), (PAGE_NAVIGATION, "Input"), (PAGE_ASSISTANT, "Extend")]
-        );
+        assert_eq!(groups, [(PAGE_APPEARANCE, "Look"), (PAGE_DESIGN, "Work"), (PAGE_NAVIGATION, "Input"), (PAGE_ASSISTANT, "Extend")]);
         let mut fields = std::collections::BTreeSet::new();
         for (field, page) in FIELD_PAGES {
             assert!(fields.insert(field), "duplicate home for {field}");

@@ -97,6 +97,7 @@ pub fn point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec3, &'stati
                 }
             }
             Hit::Vertex { point, .. } => return Some((point, "Vertex")),
+            Hit::PointCloudPoint { point, .. } => return Some((point, "Cloud")),
             Hit::Edge { body, index, .. } => {
                 let ws = crate::open_meshing::session_world(&app.session);
                 let m = ws.body(&body)?.mesh();

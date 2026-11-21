@@ -151,15 +151,11 @@ pub fn library(app: &mut SolveApp) -> Vec<Look> {
     from_engine.unwrap_or_else(builtin)
 }
 
-/// "#rrggbb" or [r, g, b].
+/// "#rrggbb" (the `#` may be left out) or [r, g, b].
 pub fn parse_color(v: &Value) -> Option<[u8; 3]> {
     if let Some(s) = v.as_str() {
-        let h = s.trim().trim_start_matches('#');
-        if h.len() != 6 {
-            return None;
-        }
-        let byte = |i: usize| h.get(i..i + 2).and_then(|x| u8::from_str_radix(x, 16).ok());
-        return Some([byte(0)?, byte(2)?, byte(4)?]);
+        let s = s.trim();
+        return solidcraft_color::hex::parse_digits(s.strip_prefix('#').unwrap_or(s)).and_then(|(rgb, alpha)| alpha.is_none().then_some(rgb));
     }
     let a = v.as_array()?;
     let c = |i: usize| a.get(i).and_then(Value::as_u64).filter(|x| *x <= 255).map(|x| x as u8);
@@ -167,7 +163,7 @@ pub fn parse_color(v: &Value) -> Option<[u8; 3]> {
 }
 
 pub fn hex(c: [u8; 3]) -> String {
-    format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])
+    solidcraft_color::hex::format(c)
 }
 
 #[derive(Clone, Debug)]
@@ -641,6 +637,11 @@ mod tests {
         assert_eq!(parse_color(&json!([1, 2, 3])), Some([1, 2, 3]));
         assert_eq!(parse_color(&json!([1, 2, 300])), None);
         assert_eq!(parse_color(&json!("#12345")), None);
+        // The `#` may be left out (preference fields), but only one, and only hex digits follow.
+        assert_eq!(parse_color(&json!(" 0a1b2c ")), Some([10, 27, 44]));
+        assert_eq!(parse_color(&json!("##0a1b2c")), None);
+        assert_eq!(parse_color(&json!("#+a1b2c")), None);
+        assert_eq!(parse_color(&json!("#0a1b2c80")), None);
         assert_eq!(hex([10, 27, 44]), "#0a1b2c");
     }
 

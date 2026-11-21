@@ -664,6 +664,7 @@ pub fn switch(app: &mut SolveApp, i: usize) {
     // The design comes back as the app shows it: a Render view it was left in shows only if the
     // workspace came back too (`put_work`).
     sync_views(app);
+    crate::plugin_events::observe(app);
 }
 
 /// Show the next design tab (`forward`) or the previous one, going round from the last to the
@@ -1943,6 +1944,7 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         app.docs = Documents::default();
         app.edit_in_place = Default::default();
         app.home.open = app.preferences.show_home_on_startup;
+        crate::plugin_events::observe(app);
         return;
     }
     if i == app.docs.active {

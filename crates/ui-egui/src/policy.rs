@@ -1,13 +1,16 @@
 //! Settings an organization's administrator sets for the people who use this computer (#10260).
 //!
 //! On Windows the administrator writes values under `Software\Policies\SolidCraft`, with Group
-//! Policy or Intune (the templates are in `packaging/windows/policies/`). A value there is
-//! mandatory: it replaces the person's own preference and the control shows as set by the
-//! organization. The same value names under the `Recommended` subkey are defaults the person
-//! may change; they are read here and not applied yet.
+//! Policy or Intune (the templates are in `packaging/windows/policies/`). On macOS they are a
+//! managed preference of the app's domain ([`MACOS_DOMAIN`]), from a configuration profile or MDM.
+//! On Linux and FreeBSD they are the JSON file [`SYSTEM_FILE`]. A value there is mandatory: it
+//! replaces the person's own preference and the control shows as set by the organization. The
+//! same value names under `Recommended` are defaults the person may change; they are read here
+//! and not applied yet.
 //!
-//! The machine's key (`HKEY_LOCAL_MACHINE`) wins over the user's (`HKEY_CURRENT_USER`), value by
-//! value. A value of the wrong type or outside its range counts as not set. Nothing is written,
+//! The machine's value wins over the user's (`HKEY_LOCAL_MACHINE` over `HKEY_CURRENT_USER`, the
+//! computer's managed preferences over the user's), value by value. A value of the wrong type or
+//! outside its range counts as not set. Nothing is written,
 //! nothing is sent anywhere, and a computer without these values behaves as it always has.
 //! Policy is read once, when SolidCraft starts.
 //!
@@ -24,11 +27,26 @@ pub const RECOMMENDED: &str = "Recommended";
 /// 0: no update checks. 1: checks at start and once a day. Locks `check_updates`.
 pub const CHECK_FOR_UPDATES: &str = "CheckForUpdates";
 
+/// 0: no anonymous usage statistics, and the person cannot turn them on. 1: allowed, the person
+/// chooses. Locks `usage_statistics` when 0.
+pub const USAGE_STATISTICS: &str = "UsageStatistics";
+
 /// The organization's name, shown as "Managed by {name}". Mandatory only; it locks nothing.
 pub const ORGANIZATION_NAME: &str = "OrganizationName";
 
 /// The longest organization name shown, in characters; a longer one is cut.
 pub const MAX_NAME: usize = 64;
+
+/// The macOS preference domain of the managed values: the app's bundle identifier.
+pub const MACOS_DOMAIN: &str = "io.tangencylabs.solidcraft";
+
+/// Where macOS keeps the managed preferences a profile installs: the computer's in this folder,
+/// a user's in its subfolder named after the user.
+pub const MACOS_MANAGED: &str = "/Library/Managed Preferences";
+
+/// The policy file of Linux and FreeBSD: a JSON object like [`FILE_ENV`]'s. A file that anyone
+/// may write is not the administrator's and counts as no policy.
+pub const SYSTEM_FILE: &str = "/etc/solidcraft/policy.json";
 
 /// A policy file for tests and screenshots: a JSON object of the same value names, with the
 /// recommended ones in a `Recommended` object. A value the registry sets wins, so the variable
@@ -51,6 +69,8 @@ pub enum Value {
 pub struct Layer {
     /// [`CHECK_FOR_UPDATES`].
     pub check_for_updates: Option<bool>,
+    /// [`USAGE_STATISTICS`].
+    pub usage_statistics: Option<bool>,
     /// [`ORGANIZATION_NAME`], cleaned: one line, no control or direction characters, at most
     /// [`MAX_NAME`] characters, never empty.
     pub organization: Option<String>,
@@ -74,17 +94,21 @@ impl Layer {
                 None
             }
         };
-        Layer { check_for_updates: switch(CHECK_FOR_UPDATES), organization: text(ORGANIZATION_NAME) }
+        Layer { check_for_updates: switch(CHECK_FOR_UPDATES), usage_statistics: switch(USAGE_STATISTICS), organization: text(ORGANIZATION_NAME) }
     }
 
     /// Whether any value is set.
     fn any(&self) -> bool {
-        self.check_for_updates.is_some() || self.organization.is_some()
+        self.check_for_updates.is_some() || self.usage_statistics.is_some() || self.organization.is_some()
     }
 
     /// `self`, with `under` for the values `self` leaves unset.
     fn or(self, under: Layer) -> Layer {
-        Layer { check_for_updates: self.check_for_updates.or(under.check_for_updates), organization: self.organization.or(under.organization) }
+        Layer {
+            check_for_updates: self.check_for_updates.or(under.check_for_updates),
+            usage_statistics: self.usage_statistics.or(under.usage_statistics),
+            organization: self.organization.or(under.organization),
+        }
     }
 }
 
@@ -100,7 +124,10 @@ pub struct Policy {
 impl Policy {
     /// The preferences (by their `ui.prefs` names) a mandatory value replaces.
     pub fn locked(&self) -> Vec<&'static str> {
-        self.mandatory.check_for_updates.map(|_| "check_updates").into_iter().collect()
+        let updates = self.mandatory.check_for_updates.map(|_| "check_updates");
+        // Allowed (1) leaves the choice to the person; only off locks it.
+        let statistics = (self.mandatory.usage_statistics == Some(false)).then_some("usage_statistics");
+        updates.into_iter().chain(statistics).collect()
     }
 
     /// The administrator set a mandatory value: SolidCraft says it is managed.
@@ -193,16 +220,26 @@ pub fn note(app: &SolveApp, ui: &mut egui::Ui, handle: &str) {
     crate::scenario::publish_target(handle, line.response.rect);
 }
 
+/// Anonymous usage statistics are allowed: the organization did not turn them off. The person's
+/// choice still decides.
+pub fn usage_statistics_allowed(app: &SolveApp) -> bool {
+    app.policy.mandatory.usage_statistics != Some(false)
+}
+
 /// This computer's policy. The host reads it once at start; tests and the web app keep the default.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load() -> Policy {
+    let file = std::env::var_os(FILE_ENV).and_then(|path| json_file(std::path::Path::new(&path)));
+    system().or(file.unwrap_or_default())
+}
+
+/// The policy in the JSON file at `path`, at most [`MAX_FILE`] of it; None when it can't be read.
+#[cfg(not(target_arch = "wasm32"))]
+fn json_file(path: &std::path::Path) -> Option<Policy> {
     use std::io::Read;
-    let file = std::env::var_os(FILE_ENV).and_then(|path| {
-        let mut text = String::new();
-        std::fs::File::open(path).ok()?.take(MAX_FILE).read_to_string(&mut text).ok()?;
-        Some(Policy::from_json(&text))
-    });
-    registry().or(file.unwrap_or_default())
+    let mut text = String::new();
+    std::fs::File::open(path).ok()?.take(MAX_FILE).read_to_string(&mut text).ok()?;
+    Some(Policy::from_json(&text))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -211,7 +248,7 @@ pub fn load() -> Policy {
 }
 
 #[cfg(windows)]
-fn registry() -> Policy {
+fn system() -> Policy {
     use winreg::RegKey;
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
     let layer = |path: &str| {
@@ -230,8 +267,60 @@ fn registry() -> Policy {
     Policy { mandatory: layer(KEY), recommended: layer(&format!(r"{KEY}\{RECOMMENDED}")) }
 }
 
-#[cfg(all(not(windows), not(target_arch = "wasm32")))]
-fn registry() -> Policy {
+/// The managed preferences of [`MACOS_DOMAIN`]: the computer's, then the user's for the values
+/// it leaves unset. A profile writes them as a property list; `plutil` (part of macOS) turns one
+/// into JSON, so the app reads them without a parser of its own.
+#[cfg(target_os = "macos")]
+fn system() -> Policy {
+    let computer = std::path::PathBuf::from(MACOS_MANAGED).join(format!("{MACOS_DOMAIN}.plist"));
+    // The login name from the account database, not $USER: the environment is the person's to
+    // change and must not pick another user's (looser) policy.
+    let user = nix::unistd::User::from_uid(nix::unistd::getuid())
+        .ok()
+        .flatten()
+        .map(|user| std::path::PathBuf::from(MACOS_MANAGED).join(user.name).join(format!("{MACOS_DOMAIN}.plist")));
+    [Some(computer), user].into_iter().flatten().filter_map(|path| managed_plist(&path)).fold(Policy::default(), Policy::or)
+}
+
+/// One managed preferences file as a policy; None when there is none or it can't be read.
+#[cfg(target_os = "macos")]
+fn managed_plist(path: &std::path::Path) -> Option<Policy> {
+    if !path.is_file() {
+        return None;
+    }
+    let out = std::process::Command::new("/usr/bin/plutil")
+        .args(["-convert", "json", "-o", "-", "--"])
+        .arg(path)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() || out.stdout.len() as u64 > MAX_FILE {
+        log::warn!("policy: {} is not a readable property list; ignored", path.display());
+        return None;
+    }
+    Some(Policy::from_json(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// [`SYSTEM_FILE`], unless anyone may write it.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn system() -> Policy {
+    system_file(std::path::Path::new(SYSTEM_FILE))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn system_file(path: &std::path::Path) -> Policy {
+    use std::os::unix::fs::PermissionsExt as _;
+    let Ok(meta) = std::fs::metadata(path) else { return Policy::default() };
+    if meta.permissions().mode() & 0o002 != 0 {
+        log::warn!("policy: {} may be written by anyone; ignored", path.display());
+        return Policy::default();
+    }
+    json_file(path).unwrap_or_default()
+}
+
+#[cfg(not(any(windows, unix, target_arch = "wasm32")))]
+fn system() -> Policy {
     Policy::default()
 }
 
@@ -322,10 +411,60 @@ mod tests {
 
     #[test]
     fn the_registry_wins_over_the_policy_file_value_by_value() {
-        let registry = Policy { mandatory: Layer { check_for_updates: Some(false), organization: None }, recommended: Layer::default() };
+        let registry = Policy { mandatory: Layer { check_for_updates: Some(false), ..Layer::default() }, recommended: Layer::default() };
         let file = Policy::from_json(r#"{"CheckForUpdates": 1, "Recommended": {"CheckForUpdates": 1}}"#);
         let both = registry.or(file);
         assert_eq!(both.mandatory.check_for_updates, Some(false));
         assert_eq!(both.recommended.check_for_updates, Some(true));
+    }
+
+    #[test]
+    fn usage_statistics_off_locks_the_preference_and_allowed_leaves_the_choice() {
+        assert_eq!(layer(&[(USAGE_STATISTICS, Value::Number(0))]).usage_statistics, Some(false));
+        assert_eq!(layer(&[(USAGE_STATISTICS, Value::Number(1))]).usage_statistics, Some(true));
+        for hostile in [Value::Number(2), Value::Text("0".into())] {
+            assert_eq!(layer(&[(USAGE_STATISTICS, hostile)]).usage_statistics, None);
+        }
+        let off = Policy::from_json(r#"{"UsageStatistics": 0}"#);
+        assert!(off.locks("usage_statistics"));
+        assert!(off.managed());
+        let allowed = Policy::from_json(r#"{"UsageStatistics": 1}"#);
+        assert!(!allowed.locks("usage_statistics"), "allowed leaves the person's choice");
+        assert!(allowed.managed());
+        let both = Policy::from_json(r#"{"UsageStatistics": 0, "CheckForUpdates": 1}"#);
+        assert_eq!(both.locked(), ["check_updates", "usage_statistics"]);
+        assert!(!Policy::from_json(r#"{"Recommended": {"UsageStatistics": 0}}"#).locks("usage_statistics"));
+    }
+
+    #[test]
+    fn a_policy_file_anyone_may_write_is_no_policy() {
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let dir = std::env::temp_dir().join(format!("solidcraft-policy-file-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("policy.json");
+            std::fs::write(&path, r#"{"UsageStatistics": 0}"#).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+            assert!(system_file(&path).locks("usage_statistics"));
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).unwrap();
+            assert_eq!(system_file(&path), Policy::default());
+            assert_eq!(system_file(&dir.join("missing.json")), Policy::default());
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    #[test]
+    fn the_shipped_templates_name_the_values_the_app_reads() {
+        let linux = Policy::from_json(include_str!("../../../packaging/linux/policies/policy.json"));
+        assert_eq!(linux.locked(), ["check_updates", "usage_statistics"]);
+        assert_eq!(linux.organization(), Some("Example Corp"));
+        let admx = include_str!("../../../packaging/windows/policies/solidcraft.admx");
+        let mobileconfig = include_str!("../../../packaging/macos/policies/solidcraft.mobileconfig");
+        for name in [CHECK_FOR_UPDATES, USAGE_STATISTICS, ORGANIZATION_NAME] {
+            assert!(admx.contains(&format!("valueName=\"{name}\"")), "{name} in the ADMX");
+            assert!(mobileconfig.contains(&format!("<key>{name}</key>")), "{name} in the profile");
+        }
+        assert!(mobileconfig.contains(&format!("<string>{MACOS_DOMAIN}</string>")));
     }
 }

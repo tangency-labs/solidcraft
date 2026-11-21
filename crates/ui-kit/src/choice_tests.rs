@@ -5,6 +5,42 @@ use egui::Ui;
 use solidcraft_ui_registry as registry;
 
 #[test]
+fn swatch_picker_filters_titles_and_selects_original_option_indices() {
+    let ctx = context();
+    let texture = ctx.load_texture("synthetic", egui::ColorImage::filled([2, 2], egui::Color32::from_rgb(137, 61, 23)), Default::default());
+    let titles = vec!["Oak".into(), "Walnut".into(), "White oak".into()];
+    let textures = vec![Some(egui::load::SizedTexture::new(texture.id(), texture.size_vec2())); 3];
+    let mut chosen = None;
+    let mut draw = |ui: &mut Ui| {
+        row(ui, "Finish", |ui| {
+            swatch_picker(
+                ui,
+                "finish",
+                &mut chosen,
+                SwatchPicker { titles: &titles, textures: &textures, choose: "Choose…", search_hint: "Search finishes" },
+            )
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    let trigger = registry::handle_at("dialog:Finish").unwrap();
+    frame(&ctx, pointer(trigger, true), &mut draw);
+    frame(&ctx, pointer(trigger, false), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    let search = registry::handle_at("swatch:finish:search").unwrap();
+    frame(&ctx, pointer(search, true), &mut draw);
+    frame(&ctx, pointer(search, false), &mut draw);
+    frame(&ctx, vec![egui::Event::Text("OaK".into())], &mut draw);
+    registry::clear_handles();
+    frame(&ctx, vec![], &mut draw);
+    assert!(registry::handle_at("swatch:finish:option:0").is_some());
+    assert!(registry::handle_at("swatch:finish:option:1").is_none());
+    let oak = registry::handle_at("swatch:finish:option:2").unwrap();
+    frame(&ctx, pointer(oak, true), &mut draw);
+    frame(&ctx, pointer(oak, false), &mut draw);
+    assert_eq!(chosen, Some(2));
+}
+
+#[test]
 fn segmented_allocates_only_its_reserved_row() {
     for layout in [egui::Layout::top_down(egui::Align::Min), egui::Layout::left_to_right(egui::Align::Center)] {
         for width in [160.0, 320.0, 640.0] {
