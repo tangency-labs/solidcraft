@@ -390,15 +390,20 @@ fn read_library(dir: &str, listing: Listing, limits: &Limits) -> Library {
 }
 
 fn read_capped(path: &str, cap: Cap, limit: u64) -> Result<Vec<u8>, Reason> {
-    let limit_usize = usize::try_from(limit).unwrap_or(usize::MAX);
-    crate::vfs::read(path, limit_usize).map_err(|e| match e.kind() {
+    let reason = |e: std::io::Error| match e.kind() {
         ErrorKind::InvalidData => Reason::OverLimit { cap, limit },
         ErrorKind::NotFound => Reason::Missing,
         _ => Reason::Unreadable(e.to_string()),
-    })
+    };
+    // The size first, as `Catalog::read` does: in the browser a read copies the stored bytes before it checks them.
+    if crate::vfs::len(path).map_err(reason)? > limit {
+        return Err(Reason::OverLimit { cap, limit });
+    }
+    crate::vfs::read(path, usize::try_from(limit).unwrap_or(usize::MAX)).map_err(reason)
 }
 
-/// Two files with one entry id: neither is used, and each names the other.
+/// Two files with one entry id: neither is used, and each names the others by kind folder and file name
+/// (`materials/Common.json` and `appearances/Common.json` share a file name).
 fn refuse_duplicate_entries(entries: &mut [Listed]) {
     let mut seen: BTreeMap<String, Vec<usize>> = BTreeMap::new();
     for (i, listed) in entries.iter().enumerate() {
@@ -407,10 +412,11 @@ fn refuse_duplicate_entries(entries: &mut [Listed]) {
         }
     }
     for indices in seen.values().filter(|v| v.len() > 1) {
-        let labels: Vec<String> = indices.iter().filter_map(|&i| entries.get(i)).map(|l| l.label.clone()).collect();
-        for &i in indices {
+        let names: Vec<(usize, String)> =
+            indices.iter().filter_map(|&i| entries.get(i).map(|l| (i, format!("{}/{}", l.kind.folder(), l.label)))).collect();
+        for &(i, _) in &names {
+            let others = names.iter().filter(|(j, _)| *j != i).map(|(_, name)| name.as_str()).collect::<Vec<_>>().join(", ");
             if let Some(listed) = entries.get_mut(i) {
-                let others = labels.iter().filter(|l| **l != listed.label).cloned().collect::<Vec<_>>().join(", ");
                 listed.state = Err(Reason::DuplicateId { other: others });
             }
         }

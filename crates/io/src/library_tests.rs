@@ -229,6 +229,16 @@ fn limits_are_kept_at_their_boundaries() {
 
     let big_manifest = Limits { manifest_bytes: manifest - 1, ..small };
     assert_eq!(unavailable(read(&big_manifest).status()), Reason::OverLimit { cap: Cap::ManifestBytes, limit: manifest - 1 });
+    // The size is asked before the file is read: in the browser a read copies the stored bytes first.
+    let manifest_path = path(&lib.join("L.sclibrary.json"));
+    let calls = crate::vfs::file_calls();
+    assert_eq!(
+        read_capped(&manifest_path, Cap::ManifestBytes, manifest - 1),
+        Err(Reason::OverLimit { cap: Cap::ManifestBytes, limit: manifest - 1 })
+    );
+    assert_eq!(crate::vfs::file_calls() - calls, 1, "one size check, nothing opened");
+    assert_eq!(read_capped(&manifest_path, Cap::ManifestBytes, manifest).map(|b| b.len() as u64), Ok(manifest));
+    assert_eq!(read_capped(&path(&lib.join("gone.json")), Cap::EntryBytes, 10), Err(Reason::Missing));
 
     // Too many files beside the manifest: the place itself can't be listed.
     put(&lib.join("README.md"), b"a note");
@@ -290,9 +300,22 @@ fn the_set_keeps_both_names_and_flags_a_second_library_with_the_same_id() {
     // Two files with one entry id in one library: neither is used, and each names the other.
     put_json(&dir.path().join("two/materials/PLA again.json"), &material("user.two", "pla", "PLA", 1.24));
     let two = library_at(&dir.path().join("two"));
-    assert_eq!(refused(&two, "PLA.json"), &Reason::DuplicateId { other: "PLA again.json".into() });
-    assert_eq!(refused(&two, "PLA again.json"), &Reason::DuplicateId { other: "PLA.json".into() });
+    assert_eq!(refused(&two, "PLA.json"), &Reason::DuplicateId { other: "materials/PLA again.json".into() });
+    assert_eq!(refused(&two, "PLA again.json"), &Reason::DuplicateId { other: "materials/PLA.json".into() });
     assert!(Set::new(vec![scan(&places[1])]).get("user.two/pla").is_none());
+    // The same file name in both kind folders, with one id: each still names the other, by its folder.
+    put_json(&dir.path().join("two/materials/Common.json"), &material("user.two", "common", "Common", 1.0));
+    put_json(&dir.path().join("two/appearances/Common.json"), &look("user.two", "common", "Common"));
+    let two = library_at(&dir.path().join("two"));
+    let common: Vec<(Kind, &Reason)> =
+        two.entries().iter().filter(|l| l.label() == "Common.json").map(|l| (l.kind(), l.entry().expect_err("common"))).collect();
+    assert_eq!(
+        common,
+        vec![
+            (Kind::Material, &Reason::DuplicateId { other: "appearances/Common.json".into() }),
+            (Kind::Appearance, &Reason::DuplicateId { other: "materials/Common.json".into() }),
+        ]
+    );
 }
 
 /// Designs and library copies will point at these ids, so they never change once shipped: a built-in
@@ -324,10 +347,47 @@ fn the_built_in_library_has_fixed_ids_and_todays_values() {
         ],
         [14, solidcraft_doc::appearance::LIBRARY.len(), solidcraft_doc::appearance::OPAQUE_FINISHES.len(), 34]
     );
-    let starter: Vec<String> =
-        solidcraft_doc::appearance_pack::STARTER_PACK.iter().filter(|p| p.is_opaque()).map(|p| format!("{BUILT_IN_ID}/{}", p.id)).collect();
-    assert_eq!(starter.len(), 34);
-    assert_eq!(ids.get(40..).unwrap(), starter.iter().map(String::as_str).collect::<Vec<_>>(), "the starter presets keep their own ids");
+    // Written out, not read from the starter pack: renaming a preset there must fail here.
+    assert_eq!(
+        ids.get(40..).unwrap(),
+        [
+            "solidcraft.builtin/starter.wood.oak-honey",
+            "solidcraft.builtin/starter.wood.oak-smoked",
+            "solidcraft.builtin/starter.wood.walnut-dark",
+            "solidcraft.builtin/starter.wood.maple-light",
+            "solidcraft.builtin/starter.wood.cherry-warm",
+            "solidcraft.builtin/starter.wood.ash-pale",
+            "solidcraft.builtin/starter.wood.birch-cream",
+            "solidcraft.builtin/starter.wood.teak-golden",
+            "solidcraft.builtin/starter.metal.carbon-steel-polished",
+            "solidcraft.builtin/starter.metal.stainless-soft-satin",
+            "solidcraft.builtin/starter.metal.aluminum-bead-blast",
+            "solidcraft.builtin/starter.metal.aluminum-silver-polish",
+            "solidcraft.builtin/starter.metal.copper-aged-warm",
+            "solidcraft.builtin/starter.metal.brass-champagne",
+            "solidcraft.builtin/starter.metal.bronze-dark-cast",
+            "solidcraft.builtin/starter.metal.titanium-matte",
+            "solidcraft.builtin/starter.metal.gold-warm",
+            "solidcraft.builtin/starter.metal.silver-cool",
+            "solidcraft.builtin/starter.plastic.abs-charcoal",
+            "solidcraft.builtin/starter.plastic.abs-warm-white",
+            "solidcraft.builtin/starter.plastic.pla-coral",
+            "solidcraft.builtin/starter.plastic.petg-cyan-opaque",
+            "solidcraft.builtin/starter.plastic.nylon-ivory",
+            "solidcraft.builtin/starter.plastic.pc-graphite-opaque",
+            "solidcraft.builtin/starter.plastic.hdpe-natural-opaque",
+            "solidcraft.builtin/starter.plastic.pom-black",
+            "solidcraft.builtin/starter.plastic.tpu-matte-black",
+            "solidcraft.builtin/starter.plastic.peek-amber-opaque",
+            "solidcraft.builtin/starter.solar.mono-blue",
+            "solidcraft.builtin/starter.solar.thin-film-dark",
+            "solidcraft.builtin/starter.regolith.mare-charcoal",
+            "solidcraft.builtin/starter.regolith.highland-pale",
+            "solidcraft.builtin/starter.regolith.dust-neutral",
+            "solidcraft.builtin/starter.regolith.agglutinate-dark",
+        ],
+        "the starter presets keep their own ids"
+    );
     assert_eq!(
         ids.get(..40).unwrap(),
         [
