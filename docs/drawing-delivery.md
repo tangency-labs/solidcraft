@@ -590,15 +590,15 @@ redo, save and reopen give the same files byte for byte.
 
 **What it doesn't prove.** M2 isn't complete with this run alone:
 - The browser half (W23-4) is its own test, [#17648][w23-browser].
-- DXF and PDF aren't in the run. On `drawings`, a sheet's DXF export waits
-  for the shared DXF writer ([#5319][dxf-file]), and PDF has no writer yet.
+- DXF and PDF aren't in the run. Their sheet writers reached `main` after the
+  run was written ([#19770][sheet-dxf], [#19709][sheet-pdf]).
 - SVG and PNG draw text as filled outlines. So the run reads the sheet's text
   from `drawing.scene`, the scene both writers draw, not from the files.
 - The run is one part. The assembly sheet's recipes are [#11881][w23-assembly],
   and assemblies belong to M3.
 - `Bore1` at Ø12 (case 86) is in the W23-2 test, not in the ordered run.
 
-Its result goes in a dated checkpoint above once the run is on `drawings`,
+Its result goes in a dated checkpoint above once the run is on `main`,
 pinning that commit, as the 4 November checkpoint does.
 
 **Limits found, as proposed issues.** None has been raised yet:
@@ -809,3 +809,5 @@ study traceability from completion of this documentation child.
 [w23a]: ../tests/oracle/W23a-workshop-acceptance.md#exact-geometry-and-states
 [w23-browser]: https://github.com/tangency-labs/solidcraft/pull/17648
 [w23-assembly]: https://github.com/tangency-labs/solidcraft/pull/11881
+[sheet-dxf]: https://github.com/tangency-labs/solidcraft/pull/19770
+[sheet-pdf]: https://github.com/tangency-labs/solidcraft/pull/19709
