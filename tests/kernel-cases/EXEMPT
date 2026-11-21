@@ -45,6 +45,7 @@ canvas.straighten                 reference images, and sketches traced from the
 canvas.to_sketch                  reference images, and sketches traced from them (sketch only)
 component.break_link              component links
 component.copies                  a listing of identical copies
+component.create_skeleton         a reference component, no geometry; tested in crates/engine/src/cmd/occurrence_tests.rs
 component.cycle_color             component colours
 component.delete                  removes a component: no geometry built
 component.edit_in_place           component links
@@ -59,6 +60,7 @@ component.properties              component properties
 component.relink                  component links
 component.rename                  a component name
 component.replace_with_link       component links
+component.set_kind                changes a component's kind, no geometry; tested in crates/engine/src/cmd/occurrence_tests.rs
 component.show_history            the History bar: which features it lists
 component.unlock                  component locking
 component.update_links            component links
