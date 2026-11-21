@@ -169,6 +169,108 @@ fn deleting_the_edited_feature_closes_its_editor_and_undo_restores_the_design() 
     assert_eq!(crate::open_meshing::session_world(&h.app.session).body("Main").unwrap().mesh().bounds().max.z, 10.0);
 }
 
+/// Invert on the Extrude Profiles row selects every drawn profile when none was selected,
+/// swaps a partial selection with its complement, and clears a complete selection (#18704).
+/// It changes only dialog picks until OK is pressed.
+#[test]
+fn extrude_profiles_invert_selection_uses_one_sketch_and_preserves_the_design() {
+    use solidcraft_engine::Sel;
+
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Cuts"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[20,0],"p1":[30,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let original = h.app.session.doc.clone();
+    let undo = h.app.session.undo.len();
+    h.app.start("solid.extrude");
+    h.frames(7);
+    let count =
+        |h: &Harness| h.app.dialog.as_ref().expect("Extrude dialog").inputs[0].items.iter().filter(|x| matches!(x, Sel::Profile { .. })).count();
+    assert_eq!(count(&h), 0, "two disjoint profiles are not selected automatically");
+    assert!(crate::scenario::handle_at("dialog:invert_profiles").is_some(), "Invert appears next to Profiles");
+    h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
+    assert_eq!(count(&h), 2, "empty selection inverts to all drawn profiles");
+    let picks = h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
+    assert!(matches!(&picks[..], [Sel::Profile { sketch: a, .. }, Sel::Profile { sketch: b, .. }] if a == b));
+    h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
+    assert_eq!(count(&h), 0, "inverting all clears the selection");
+
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![picks[0].clone()];
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
+    assert_eq!(count(&h), 1, "a partial selection inverts to its complement");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![picks[1].clone()]);
+    assert_eq!(h.app.session.undo.len(), undo, "no command runs before OK");
+    assert_eq!(h.app.session.doc.to_json(), original.to_json(), "inversion changes no design geometry");
+}
+
+/// Clearing a complete profile selection must not jump to the newest sketch on the next
+/// inversion. A later explicit pick of another sketch replaces the retained context (#18704).
+#[test]
+fn profile_invert_retains_the_resolved_sketch_after_clearing_all() {
+    use solidcraft_engine::Sel;
+
+    let mut h = Harness::new();
+    for (name, x) in [("First", 0), ("Later", 30)] {
+        h.app.run("sketch.create", json!({"plane":"XY","name":name})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[x,0],"p1":[x+10,10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+    }
+    let first = h.app.session.doc.find_feature("First").unwrap().id;
+    let later = h.app.session.doc.find_feature("Later").unwrap().id;
+    assert!(h.app.session.active_sketch.is_none());
+    let before = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    h.app.start("solid.extrude");
+    h.frames(7);
+    assert!(crate::scenario::handle_at("dialog:invert_profiles").is_some());
+
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Profile { sketch: first, index: 0 }];
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
+    assert!(!h.app.dialog.as_ref().unwrap().inputs[0].items.iter().any(|x| matches!(x, Sel::Profile { .. })));
+    h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
+    assert_eq!(
+        h.app.dialog.as_ref().unwrap().inputs[0].items,
+        vec![Sel::Profile { sketch: first, index: 0 }],
+        "the next inversion reselects the original sketch, not the later one"
+    );
+
+    // Picking and deselecting B leaves no profile in the input. The next inversion must
+    // still use B, not the previously inverted A.
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, Sel::Profile { sketch: later, index: 0 });
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![Sel::Profile { sketch: later, index: 0 }]);
+    h.app.dialog.as_mut().unwrap().pick(&h.app.session, Sel::Profile { sketch: later, index: 0 });
+    assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty(), "the second pick deselects B");
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
+    assert_eq!(
+        h.app.dialog.as_ref().unwrap().inputs[0].items,
+        vec![Sel::Profile { sketch: later, index: 0 }],
+        "an explicit pick followed by deselection retains the new sketch for inversion"
+    );
+
+    // Browser and History use pick_sketch, not pick. Clearing the field after
+    // selecting B must still leave B as the next Invert target.
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Profile { sketch: first, index: 0 }];
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
+    assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty());
+    assert!(h.app.dialog.as_mut().unwrap().pick_sketch(&h.app.session, later));
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![Sel::Profile { sketch: later, index: 0 }]);
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
+    assert_eq!(
+        h.app.dialog.as_ref().unwrap().inputs[0].items,
+        vec![Sel::Profile { sketch: later, index: 0 }],
+        "Browser sketch selection remains the inversion context after clearing the field"
+    );
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert_eq!(h.app.session.undo.len(), undo);
+}
+
 #[test]
 fn unchanged_all_profiles_includes_profiles_added_after_edit() {
     let mut h = make(json!({}));
