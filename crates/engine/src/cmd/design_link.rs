@@ -17,7 +17,7 @@ use std::sync::Arc;
 use schemars::JsonSchema;
 use serde::Serialize;
 use solidcraft_doc::drawing::Drawing;
-use solidcraft_doc::{DesignLink, Document};
+use solidcraft_doc::{DesignLink, Document, GeometryCopy};
 
 /// The folder relative link paths are kept against: the design's own, once it has a file.
 fn base_dir(path: Option<&str>) -> Option<PathBuf> {
@@ -139,7 +139,7 @@ pub(super) fn filed(design: &mut Cow<'_, Document>, from: Option<&str>, to: &str
 /// here, and so does anything else that rewrites them (a pack's entry names).
 pub(crate) fn map_paths(design: &mut Cow<'_, Document>, map: impl Fn(&str) -> String) {
     let changed = mapped(design, &map);
-    if changed.0.is_some() || changed.1.is_some() {
+    if changed.0.is_some() || changed.1.is_some() || changed.2.is_some() {
         put(design.to_mut(), changed);
     }
 }
@@ -156,23 +156,27 @@ pub(crate) fn linked_files(doc: &Document, from: Option<&str>) -> Vec<PathBuf> {
 
 /// A design's component links and drawings after a map of its link paths, each `None` when none of
 /// its paths changed.
-type Mapped = (Option<BTreeMap<u64, DesignLink>>, Option<Vec<Arc<Drawing>>>);
+type Mapped = (Option<BTreeMap<u64, DesignLink>>, Option<Vec<Arc<Drawing>>>, Option<Vec<GeometryCopy>>);
 
 /// What `map` makes of `doc`'s link paths ([`map_paths`]): the one list of the kinds of link path.
 fn mapped(doc: &Document, map: &impl Fn(&str) -> String) -> Mapped {
     let links: BTreeMap<u64, DesignLink> = doc.links.iter().map(|(c, l)| (*c, DesignLink { path: map(&l.path), ..l.clone() })).collect();
     let mut drawings = doc.drawings.clone();
     let sources = sources_through(&mut drawings, map);
-    ((links != doc.links).then_some(links), sources.then_some(drawings))
+    let copies: Vec<GeometryCopy> = doc.geometry_copies.iter().map(|c| GeometryCopy { file: map(&c.file), ..c.clone() }).collect();
+    ((links != doc.links).then_some(links), sources.then_some(drawings), (copies != doc.geometry_copies).then_some(copies))
 }
 
-/// The links and drawings a map changed, put into `doc`.
-fn put(doc: &mut Document, (links, drawings): Mapped) {
+/// The links, drawings and geometry copies a map changed, put into `doc`.
+fn put(doc: &mut Document, (links, drawings, copies): Mapped) {
     if let Some(links) = links {
         doc.links = links;
     }
     if let Some(drawings) = drawings {
         doc.drawings = drawings;
+    }
+    if let Some(copies) = copies {
+        doc.geometry_copies = copies;
     }
 }
 

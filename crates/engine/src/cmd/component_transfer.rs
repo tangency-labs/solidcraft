@@ -52,6 +52,9 @@ fn body_names(s: &Session, p: &Value, cmd: &str, allow_boundary: bool) -> Result
 }
 
 fn transfer(s: &mut Session, name: &str, to: u64, frames: &UniqueFrames, cmd: &str) -> Result<u64> {
+    if s.doc.is_skeleton(to) {
+        return Err(bad(cmd, "not supported yet: a skeleton component holds no solid bodies"));
+    }
     let state = s.model.state();
     let body = state.body(name).ok_or_else(|| bad(cmd, "body is missing"))?;
     let from = s.doc.model_body_component(body);
