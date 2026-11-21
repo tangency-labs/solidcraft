@@ -145,7 +145,8 @@ pub fn k_factor_estimate(method: BendMethod, hardness: Hardness, r_over_t: f64) 
 }
 
 /// One rule of a pack: the rule's thickness and material, and its K-factor and radius when the
-/// row gives them (`given`); the gauge it is (`16 ga`, a label) and whose chart that is; the
+/// row gives them (`given`); the gauge it is (`16 ga`, a label, or a metric size such as `1.5 mm`)
+/// and whose chart that is; the
 /// material's hardness for the K-factor chart and its published minimum inside radius; and the
 /// ids of the sources of its values.
 #[derive(Clone, Debug, PartialEq)]
@@ -659,7 +660,7 @@ pub fn standard_materials() -> Vec<&'static str> {
     out
 }
 
-/// `16`, `16ga`, `16 ga` and `16 gauge` are one gauge.
+/// `16`, `16ga`, `16 ga` and `16 gauge` are one gauge, and `1.5 mm` and `1.5mm` one metric size.
 fn gauge_key(gauge: &str) -> String {
     let g: String = gauge.to_lowercase().chars().filter(|c| !c.is_whitespace()).collect();
     g.strip_suffix("gauge").or_else(|| g.strip_suffix("ga")).unwrap_or(&g).to_string()

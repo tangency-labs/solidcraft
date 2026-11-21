@@ -1352,6 +1352,10 @@ fn a_corner_round_whose_rail_ends_on_the_top_s_edge_builds() {
 /// -65 - r4 = -90 + sqrt 205.
 const CORNER_ROUND_REACHES_W: f64 = 25.0 - 14.317_821_063_276_353;
 
+/// Width of the certified volume enclosure asked of the round built next to W: asked for 1e-2,
+/// the enclosure stops at 0.16 there; the round adds 122.5.
+const NEXT_TO_W_ENCLOSURE: f64 = 0.2;
+
 /// The corner round `r4` on [`arm_boss_foot_only`] (or on `b`), with the corpus's fix set
 /// (`corpus`) or none, under [`Contract::Proved`]: its result, the fix set restored after.
 fn corner_round(b: &Body, r4: f64, corpus: bool) -> Result<(), Error> {
@@ -1369,23 +1373,97 @@ fn corner_round(b: &Body, r4: f64, corpus: bool) -> Result<(), Error> {
     result.map(|_| ())
 }
 
-/// Next to r4 = 25 - sqrt 205, where the rail meets z = 5 at W, main's outcome stands:
-/// - 1e-3 past it, R lies past W by 1e-3 but within the body's tolerance of the side's edge
-///   on the foot round, which leaves W tangent to the top's edge (the side's lobe is thinner
-///   than the tolerance there): R is not inside the side, the turned-back end is not taken,
-///   and the rounds are refused as crossing at R, as on main;
+/// Next to r4 = 25 - sqrt 205, where the rail meets z = 5 at W:
+/// - 1e-3 past it, R = (-36, -65 - r4, 5) lies past W by 1e-3, 6.2e-4 inside the contact
+///   circle, where the side's lobe under the foot round is 3.875e-8 thick (the torus on
+///   x = -36 at R is at z = 5 + (5 - sqrt(25 - (23 - rho)^2)), rho = sqrt(18^2 + (y + 90)^2)).
+///   The rail and the lobe's edge END there, 3.9e-8 apart: the rounds meet, they do not cross
+///   (the corner round's material is at x >= -36, z <= 5, the foot round's at x <= -36,
+///   z >= 5; they share only the side's segment from R to W on z = 5).
+///   - Without the corpus's fixes the round builds, as it does past W by more
+///     ([`a_corner_round_whose_rail_ends_past_the_top_under_the_foot_round_builds`]): valid at
+///     the full check, its rails on edges and its cap edge on z = 5 next to R, and the
+///     kernel's certified enclosure of its volume, at most [`NEXT_TO_W_ENCLOSURE`] wide, holds
+///     the closed form (the input's plus 5 r4^2 (1 - pi / 4)), as does the computed volume.
+///     (The round adds 122.5: an enclosure that narrow rules out a round lost, doubled or
+///     cut by more than that width.) Main refused it
+///     as the rounds crossing at R: the joint there is judged by the vertex, left at W (1e-3
+///     from R) under the vertex's tolerance, and the lobe's edge kept 4.6e-5 under a trim that
+///     upstream's corner fix (`sm_FixUVTrimCurves`) had moved 1e-3 off its curve, uncovered.
+///     Its tolerance now covers its trim (#18166), and the joint at R is seen.
+///   - With them it is still refused as crossing at R, as on main. By the geometry above that
+///     refusal is a false one (the rounds meet at R); it is pinned here as main's outcome so
+///     that a change to it is seen, not as the right answer.
 /// - 5e-6 past it, within the body's tolerance (1e-5), R is not past W: the rail ends on the
 ///   top's edge as on main, and the round builds valid (its volume, MEASURED, 1.4e-5 from the
 ///   closed form, which the end at W within the tolerance does not bound).
 #[test]
-fn a_corner_round_whose_rail_meets_the_top_next_to_w_keeps_main_s_outcome() {
+fn a_corner_round_whose_rail_meets_the_top_next_to_w_builds_where_the_rounds_meet() {
     let w = top_end_on_side();
     assert!((-65.0 - CORNER_ROUND_REACHES_W - w).abs() < 1e-12);
     for corpus in [true, false] {
         let r4 = CORNER_ROUND_REACHES_W + 1e-3;
-        match corner_round(&arm_boss_foot_only(), r4, corpus) {
-            Err(Error::RoundsCross { .. }) => {}
-            other => panic!("r4 {r4} corpus {corpus}: {other:?}"),
+        let b = arm_boss_foot_only();
+        let before = b.volume(1e-9).unwrap();
+        match (corpus, corner_round(&b, r4, corpus)) {
+            (true, Err(Error::RoundsCross { .. })) => {}
+            (false, Ok(())) => {
+                let report = b.check(CheckLevel::All).unwrap();
+                assert!(report.is_valid(), "r4 {r4} corpus {corpus}: {report}");
+                let expected = before + 5.0 * r4 * r4 * (1.0 - PI / 4.0);
+                let after = b.volume(1e-9).unwrap();
+                let ry = -65.0 - r4;
+                let (k, mut brep) = common::kernel_copy(&b);
+                let on_edge = |brep: &solidcore::Brep, p: [f64; 3], within: f64| {
+                    let q = solidcore::Vec3::new(p[0], p[1], p[2]);
+                    brep.edge_list().iter().any(|&e| {
+                        solidcore::query::api_queries::edge_closest_point(&k, brep, e, q)
+                            .unwrap()
+                            .closest
+                            .distance
+                            < within
+                    })
+                };
+                for (x, y) in [(-36.0 + r4, -65.0), (-36.0, ry)] {
+                    for z in [0.5, 2.5, 4.5] {
+                        assert!(
+                            on_edge(&brep, [x, y, z], 1e-7),
+                            "r4 {r4} corpus {corpus}: no rail through ({x}, {y}, {z})"
+                        );
+                    }
+                }
+                // The cap edge lies on z = 5 exactly (the top's plane). The foot round's contact
+                // edge on the side, which the round keeps (its material is at z >= 5), runs
+                // above it by (23 - rho)^2 / 10: 3.1e-8 a tenth of the way from R to W, so a
+                // point there within 1e-9 of an edge is on the cap edge, not on that one.
+                let near_r = ry + 0.1 * (w - ry);
+                assert!(
+                    on_edge(&brep, [-36.0, near_r, 5.0], 1e-9),
+                    "r4 {r4} corpus {corpus}: no cap edge through (-36, {near_r}, 5)"
+                );
+                let e =
+                    solidcore::mass::enclosure::enclose_volume(&k, &mut brep, NEXT_TO_W_ENCLOSURE)
+                        .unwrap();
+                assert!(
+                    e.hi - e.lo <= NEXT_TO_W_ENCLOSURE,
+                    "r4 {r4}: enclosure [{}, {}] wider than {NEXT_TO_W_ENCLOSURE}",
+                    e.lo,
+                    e.hi
+                );
+                assert!(
+                    e.lo <= expected && expected <= e.hi,
+                    "r4 {r4}: closed form {expected} outside [{}, {}]",
+                    e.lo,
+                    e.hi
+                );
+                assert!(
+                    e.lo <= after && after <= e.hi,
+                    "r4 {r4}: volume {after} outside [{}, {}]",
+                    e.lo,
+                    e.hi
+                );
+            }
+            (_, other) => panic!("r4 {r4} corpus {corpus}: {other:?}"),
         }
         let r4 = CORNER_ROUND_REACHES_W + 5e-6;
         let b = arm_boss_foot_only();
@@ -2886,4 +2964,618 @@ fn slot_roots_rolling_over_one_seam_from_both_sides_are_not_apart() {
             other => panic!("edges reversed {reversed}: {other:?}"),
         }
     }
+}
+
+/// #19242: the slots of [`slot_roots_beside_a_hole_s_seam_round_in_one_fillet`] and
+/// [`slot_roots_on_both_sides_of_a_hole_s_seam_build_apart_or_are_refused_overlapping`] with
+/// SolidCraft's fixes less `fillet_refuse_overlapping_bands`, as a solidcore caller that never
+/// turns it on runs them. The round that rolls over the seam is taken as apart although
+/// another round stands on the wall it rolls onto, so only the bands' check compares the two;
+/// it runs without its fix too. Where the bands overlap (the second slot's near side 8 or 9
+/// degrees past the seam) the fillet is refused as having no room, as with the fix on (with
+/// the check skipped, the overlap surfaced later as "no fillet B-rep edge matches the fillet
+/// edge"). Where they don't, the fillet builds, valid, the same volume as with the fix on to
+/// 1e-9.
+#[test]
+fn slot_roots_beside_a_hole_s_seam_have_their_bands_checked_without_the_bands_fix() {
+    let r = 0.5;
+    let with_fix_off = || {
+        let names = solidcraft_fixes::solidcraft_fix_names()
+            .into_iter()
+            .filter(|&name| name != "fillet_refuse_overlapping_bands");
+        session::set_thread_fixes(names).unwrap();
+    };
+    let one_slot = |deg: f64| (vec![deg], 2, true);
+    let two_slots = |past: f64| (vec![14.8, -(past + slot_half_angle())], 4, past > 10.0);
+    for (slots, n, builds) in [
+        one_slot(14.8),
+        one_slot(-14.8),
+        two_slots(8.0),
+        two_slots(9.0),
+        two_slots(12.0),
+        two_slots(20.0),
+    ] {
+        let run = |fix_on: bool| {
+            if fix_on {
+                fixes();
+            } else {
+                with_fix_off();
+            }
+            let b = slotted_hole(&slots);
+            let mut edges = Vec::new();
+            for &deg in &slots {
+                edges.extend(slot_roots(&b, deg));
+            }
+            blend(&b, Blend::Round, &edges, &vec![r; n], &[], Corners::Filled).map(|_| {
+                let report = b.check(CheckLevel::All).unwrap();
+                assert!(
+                    report.is_valid(),
+                    "slots {slots:?}, fix on {fix_on}: {report}"
+                );
+                b.volume(1e-9).unwrap()
+            })
+        };
+        let on = run(true);
+        let off = run(false);
+        match (on, off) {
+            (Err(Error::NoRoom), Err(Error::NoRoom)) if !builds => {}
+            (Ok(on), Ok(off)) if builds => assert!(
+                (on - off).abs() <= 1e-9 * on,
+                "slots {slots:?}: volume {off} with the fix off, {on} with it on"
+            ),
+            (on, off) => panic!("slots {slots:?}: fix on {on:?}, fix off {off:?}"),
+        }
+    }
+    fixes();
+}
+
+/// The tube's radius, the Root rounds' radius, the fin's thickness and the height of its top.
+const TUBE: f64 = 10.0;
+const ROOT: f64 = 1.0;
+const FIN: f64 = 0.62;
+const FIN_TOP: f64 = 55.0;
+
+/// #19476's part with its fin at `y0`: a tube of radius [`TUBE`] and height 75 about z (its seam
+/// the ruling x = 10, y = 0) with a fin 6 long, [`FIN`] thick and [`FIN_TOP`] high standing on it
+/// at x = 9..15, its sides the planes y = `y0` and y = `y0` + [`FIN`]. The fin's root, where its
+/// sides meet the tube, is rounded [`ROOT`]: two rounds the height of the fin, each tangent into
+/// the tube and into its side, ending flush with the fin's top.
+fn tube_with_fin(y0: f64) -> Body {
+    use solidcore_ops::make_cylinder;
+    let tube = make_cylinder([0.0, 0.0, 0.0], TUBE, 75.0).unwrap();
+    let fin = make_box([9.0, y0, 0.0], [6.0, FIN, FIN_TOP]).unwrap();
+    let b = boolean(tube, fin, BooleanOp::Union).unwrap().unwrap();
+    let on_tube = |y: f64| [(TUBE * TUBE - y * y).sqrt(), y, 30.0];
+    blend(
+        &b,
+        Blend::Round,
+        &[edge_at(&b, on_tube(y0 + FIN)), edge_at(&b, on_tube(y0))],
+        &[ROOT, ROOT],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    b
+}
+
+/// One side of the fin (the plane y = `y`, its Root round's axis at y = `yc`) under the fin top's
+/// round `r`: W, where the Root round's top arc meets the side's top edge (the Root round's axis
+/// moved onto the side); V, where that arc meets the tube; and W's distance from the tube's axis.
+fn fin_side(y: f64, yc: f64) -> ([f64; 2], [f64; 2], f64) {
+    let d = TUBE + ROOT;
+    let cx = (d * d - yc * yc).sqrt();
+    ([cx, y], [TUBE / d * cx, TUBE / d * yc], cx.hypot(y))
+}
+
+/// The volume the fin top's round `r` adds to [`tube_with_fin`]: the round is the torus the ball
+/// sweeps about the tube's axis (its centre [`TUBE`] + r from the axis, r above the fin's top),
+/// over the fin top's face, cut flush with the fin's sides and the Root rounds continued upward
+/// (docs/generic-blend.md 3.4). At distance p from the axis the torus stands
+/// r - sqrt(r^2 - (TUBE + r - p)^2) above the top, and the face spans the angle from one side to
+/// the other: on each side its boundary is the Root round's arc (the circle of radius [`ROOT`]
+/// about the Root ball's centre, [`TUBE`] + [`ROOT`] from the axis) up to W, then the side's
+/// line. With p = TUBE + r - r sin(phi) the integrand is smooth; Simpson's rule between the
+/// values of phi where a side's boundary passes W. For r up to 2 [`ROOT`] (the circle of radius
+/// p meets the Root rounds' circles) and a fin longer than r.
+fn fin_top_round_volume(y0: f64, r: f64) -> f64 {
+    let y1 = y0 + FIN;
+    let d = TUBE + ROOT;
+    let (_, _, wp) = fin_side(y1, y1 + ROOT);
+    let (_, _, wm) = fin_side(y0, y0 - ROOT);
+    let centre = |yc: f64| yc.atan2((d * d - yc * yc).sqrt());
+    let (ap, am) = (centre(y1 + ROOT), centre(y0 - ROOT));
+    let span = |p: f64| {
+        // the angle at the tube's axis between a Root ball's centre and where the circle of
+        // radius p meets that ball's circle
+        let delta = ((p * p + d * d - ROOT * ROOT) / (2.0 * d * p))
+            .min(1.0)
+            .acos();
+        let hi = if p < wp { ap - delta } else { (y1 / p).asin() };
+        let lo = if p < wm { am + delta } else { (y0 / p).asin() };
+        hi - lo
+    };
+    let f = |phi: f64| {
+        let p = TUBE + r - r * phi.sin();
+        r * (1.0 - phi.cos()) * p * span(p) * r * phi.cos()
+    };
+    let mut cuts = vec![0.0, PI / 2.0];
+    for w in [wp, wm] {
+        let s = (TUBE + r - w) / r;
+        if s > 0.0 && s < 1.0 {
+            cuts.push(s.asin());
+        }
+    }
+    cuts.sort_by(f64::total_cmp);
+    let simpson = |a: f64, b: f64| {
+        let n = 4000;
+        let h = (b - a) / f64::from(n);
+        let inner: f64 = (1..n)
+            .map(|i| f(a + h * f64::from(i)) * if i % 2 == 1 { 4.0 } else { 2.0 })
+            .sum();
+        (f(a) + f(b) + inner) * h / 3.0
+    };
+    cuts.windows(2).map(|w| simpson(w[0], w[1])).sum()
+}
+
+/// The edge of the fin's top against the tube that the fin top's round is asked on: the piece
+/// of the tube's circle at z = [`FIN_TOP`] through y = `y0` + 0.2.
+fn fin_top_edge(b: &Body, y0: f64) -> usize {
+    let y = y0 + 0.2;
+    edge_at(b, [(TUBE * TUBE - y * y).sqrt(), y, FIN_TOP])
+}
+
+/// The fin top's round `r` on [`tube_with_fin`]`(y0)`, checked: built, a valid closed solid, its
+/// volume the closed form's, its faces and edges where the torus, the tube, the fin's top, the
+/// fin's sides and the Root rounds continued upward put them. Returns the body's total face,
+/// edge and vertex counts (checked here against Euler's formula for a closed genus 0 solid).
+fn assert_fin_top_round_rolls_over(y0: f64, r: f64) -> (usize, usize, usize) {
+    use solidcore::query::api_queries::{brep_is_closed_manifold, face_internal_point};
+    let b = tube_with_fin(y0);
+    let before = b.volume(1e-9).unwrap();
+    blend(
+        &b,
+        Blend::Round,
+        &[fin_top_edge(&b, y0)],
+        &[r],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap_or_else(|err| panic!("y0 {y0} r {r}: {err:?}"));
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "y0 {y0} r {r}: {report}");
+    let added = b.volume(1e-9).unwrap() - before;
+    let want = fin_top_round_volume(y0, r);
+    // each volume is asked to 1e-9
+    assert!(
+        (added - want).abs() <= 2e-9,
+        "y0 {y0} r {r}: added {added}, the closed form {want}"
+    );
+
+    let (k, mut brep) = common::kernel_copy(&b);
+    assert!(
+        brep_is_closed_manifold(&brep).unwrap(),
+        "y0 {y0} r {r}: not closed"
+    );
+    let y1 = y0 + FIN;
+    let sides = [(y1, y1 + ROOT), (y0, y0 - ROOT)];
+    let torus = |p: &solidcore::Vec3| (p.x.hypot(p.y) - (TUBE + r)).hypot(p.z - (FIN_TOP + r)) - r;
+    // the distance from the Root round whose axis is at y = yc
+    let root = |p: &solidcore::Vec3, yc: f64| {
+        let ([cx, _], _, _) = fin_side(yc, yc);
+        (p.x - cx).hypot(p.y - yc) - ROOT
+    };
+    // on the fin's top face: between the sides, or beside one within its Root round's cap
+    let on_top = |p: &solidcore::Vec3, tol: f64| {
+        (p.y >= y0 - tol && p.y <= y1 + tol)
+            || sides.iter().any(|&(y, yc)| {
+                let (w, _, _) = fin_side(y, yc);
+                (p.y - y) * (yc - y) > 0.0 && p.x <= w[0] + tol && root(p, yc) >= -tol
+            })
+    };
+    let near = |p: &solidcore::Vec3, q: [f64; 3], tol: f64| {
+        (p.x - q[0]).abs() <= tol && (p.y - q[1]).abs() <= tol && (p.z - q[2]).abs() <= tol
+    };
+
+    // the edges on the torus, each within its own tolerance of it
+    let (mut tube_rail, mut top_rail) = (Vec::new(), 0);
+    let mut ribs = [0; 2];
+    let mut walls = [0; 2];
+    for &e in brep.edge_list() {
+        let edge = brep.edge(e).unwrap();
+        let curve = edge.curve.as_ref().unwrap();
+        let tol = solidcore::topology::edge::tolerance(&brep, e).unwrap();
+        let pts: Vec<_> = (0..=64)
+            .map(|i| {
+                curve
+                    .evaluate_point(&k, edge.interval.evaluate(f64::from(i) / 64.0))
+                    .unwrap()
+            })
+            .collect();
+        if !pts.iter().all(|p| torus(p).abs() <= tol) {
+            continue;
+        }
+        let (first, last) = (&pts[0], &pts[64]);
+        if pts.iter().all(|p| (p.x.hypot(p.y) - TUBE).abs() <= tol) {
+            // the rail on the tube: r above the fin's top
+            assert!(
+                pts.iter().all(|p| (p.z - FIN_TOP - r).abs() <= tol),
+                "y0 {y0} r {r}: {e:?}"
+            );
+            tube_rail.extend(pts.iter().map(|p| p.y.atan2(p.x)));
+        } else if pts.iter().all(|p| (p.z - FIN_TOP).abs() <= tol) {
+            // the rail on the fin's top: on that face all along
+            for p in &pts {
+                assert!(
+                    on_top(p, tol),
+                    "y0 {y0} r {r}: the rail on the fin's top leaves it at {p:?}"
+                );
+            }
+            top_rail += 1;
+        }
+        for (i, &(y, yc)) in sides.iter().enumerate() {
+            let (w, v, rho) = fin_side(y, yc);
+            // where the torus crosses the Root round's line through W: past W the round ends
+            // on the side, before it on the Root round's top arc
+            let past = rho < TUBE + r;
+            let h = ((rho - TUBE) * (TUBE + 2.0 * r - rho)).max(0.0).sqrt();
+            let s = [w[0], w[1], FIN_TOP + r - h];
+            let on_tube = [v[0], v[1], FIN_TOP + r];
+            if pts.iter().all(|p| root(p, yc).abs() <= tol)
+                && pts.iter().any(|p| p.z > FIN_TOP + tol)
+            {
+                // the rib on the Root round continued: from the tube rail's end down to S
+                let ends = |a: &solidcore::Vec3, z: &solidcore::Vec3| {
+                    near(a, on_tube, tol) && (!past || near(z, s, tol))
+                };
+                assert!(
+                    ends(first, last) || ends(last, first),
+                    "y0 {y0} r {r}: rib {first:?} {last:?}"
+                );
+                ribs[i] += 1;
+            }
+            if past
+                && pts.iter().all(|p| (p.y - y).abs() <= tol)
+                && pts.iter().any(|p| p.z > FIN_TOP + tol)
+            {
+                // the rib on the side continued: from S down to the rail's end on the side's edge
+                let rail_end = [((TUBE + r) * (TUBE + r) - y * y).sqrt(), y, FIN_TOP];
+                let ends = |a: &solidcore::Vec3, z: &solidcore::Vec3| {
+                    near(a, s, tol) && near(z, rail_end, tol)
+                };
+                assert!(
+                    ends(first, last) || ends(last, first),
+                    "y0 {y0} r {r}: wall {first:?} {last:?}"
+                );
+                walls[i] += 1;
+            }
+        }
+    }
+    assert!(top_rail > 0, "y0 {y0} r {r}: no rail on the fin's top");
+    // the rail on the tube runs from one Root round's tangent line to the other's
+    let (lo, hi) = tube_rail
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(lo, hi), &a| (lo.min(a), hi.max(a)));
+    let angle = |(y, yc): (f64, f64)| {
+        let (_, v, _) = fin_side(y, yc);
+        v[1].atan2(v[0])
+    };
+    assert!(
+        (hi - angle(sides[0])).abs() <= 1e-9 && (lo - angle(sides[1])).abs() <= 1e-9,
+        "y0 {y0} r {r}: the tube rail spans {lo} to {hi}"
+    );
+    for (i, &(y, yc)) in sides.iter().enumerate() {
+        let past = fin_side(y, yc).2 < TUBE + r;
+        assert_eq!(ribs[i], 1, "y0 {y0} r {r}: ribs on the Root round at y {y}");
+        assert_eq!(
+            walls[i],
+            usize::from(past),
+            "y0 {y0} r {r}: ribs on the side y {y}"
+        );
+    }
+
+    // the faces above the fin's top: the torus, the tube and its top, and the Root rounds and
+    // the sides continued upward; nothing else
+    let mut on_torus = 0;
+    for &f in &brep.face_list().to_vec() {
+        let p = face_internal_point(&k, &mut brep, f).unwrap();
+        let tol = brep.face(f).unwrap().tolerance.max(brep.tolerance());
+        if p.z <= FIN_TOP + tol {
+            continue;
+        }
+        if torus(&p).abs() <= tol {
+            on_torus += 1;
+            continue;
+        }
+        let known = (p.x.hypot(p.y) - TUBE).abs() <= tol
+            || (p.z - 75.0).abs() <= tol
+            || sides
+                .iter()
+                .any(|&(y, yc)| root(&p, yc).abs() <= tol || (p.y - y).abs() <= tol);
+        assert!(
+            known,
+            "y0 {y0} r {r}: a face above the fin's top through {p:?}"
+        );
+    }
+    assert!(on_torus > 0, "y0 {y0} r {r}: no face on the torus");
+    let counts = (
+        brep.face_list().len(),
+        brep.edge_list().len(),
+        brep.vertex_list().len(),
+    );
+    assert_eq!(
+        counts.2 + counts.0,
+        counts.1 + 2,
+        "y0 {y0} r {r}: V - E + F is not 2"
+    );
+    counts
+}
+
+/// The closed form of the fin top's round is the kernel's where the round already builds: below
+/// the radius at which its rail on the fin's top reaches a side's top edge (the ball over W,
+/// [`fin_side`]), with the fin on the seam's plane (#19476's part) and off it.
+#[test]
+fn a_fin_top_round_that_stays_on_the_root_rounds_adds_the_closed_form() {
+    fixes();
+    for (y0, r) in [(-0.62, 0.5), (-0.62, 0.85), (-0.31, 0.85)] {
+        let b = tube_with_fin(y0);
+        let before = b.volume(1e-9).unwrap();
+        blend(
+            &b,
+            Blend::Round,
+            &[fin_top_edge(&b, y0)],
+            &[r],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap_or_else(|err| panic!("y0 {y0} r {r}: {err:?}"));
+        assert!(
+            b.check(CheckLevel::All).unwrap().is_valid(),
+            "y0 {y0} r {r}"
+        );
+        let added = b.volume(1e-9).unwrap() - before;
+        let want = fin_top_round_volume(y0, r);
+        assert!(
+            (added - want).abs() <= 2e-9,
+            "y0 {y0} r {r}: added {added}, the closed form {want}"
+        );
+    }
+}
+
+/// #19476: the fin top's round at 1, past the radius at which its rail reaches the fin's sides'
+/// top edges (0.926 with the fin across the seam), is the Roll-over's concave chain asked on its
+/// own, the tube in the convex round's place: it rolls over the Root rounds and the fin's sides
+/// continued. The tube's seam splits the asked edge between the fin's sides, so the round runs
+/// on across the seam's vertex and has a cliff at each end.
+#[test]
+fn a_fin_top_round_past_the_fin_s_sides_rolls_over_the_root_rounds() {
+    fixes();
+    // 13 faces: the tube's side, top and bottom, the fin's end and two sides and top, the two Root
+    // rounds, their two continuations above the fin's top, and the torus, which the seam (the
+    // fin's sides straddle it) cuts in two. The edge and vertex totals follow from those faces'
+    // boundaries and are tied to them by V - E + F = 2 (21 - 32 + 13), which the helper asserts.
+    assert_eq!(
+        assert_fin_top_round_rolls_over(-0.31, 1.0),
+        (13, 32, 21),
+        "faces, edges, vertices"
+    );
+}
+
+/// #19476 with the fin clear of the tube's seam (y from 2 to 2.62): one edge, a cliff at each
+/// end. At the side y = 2.62 the rail passes W (0.713 from the tube) onto the side's top edge;
+/// at y = 2 it ends on the Root round's top arc (W is 1.136 from the tube).
+#[test]
+fn a_fin_top_round_on_a_tube_with_its_seam_elsewhere_rolls_over_the_root_rounds() {
+    fixes();
+    // 12 faces: the same as with the seam in the fin, but the torus is one face (the seam is
+    // clear of the fin), so one face, and with it the seam's two edges and one vertex on the
+    // torus, fewer. V - E + F = 2 holds: 19 - 29 + 12.
+    assert_eq!(
+        assert_fin_top_round_rolls_over(2.0, 1.0),
+        (12, 29, 19),
+        "faces, edges, vertices"
+    );
+}
+
+/// The kernel's decision: the fin top's edge, with the piece it runs on into across the seam's
+/// vertex, is the Roll-over's concave chain, a V at each Root round's tangent line.
+#[test]
+fn a_fin_top_edge_on_a_tube_is_the_roll_overs_concave_chain() {
+    use solidcore::blend::blend_corner::rollover::{concave_chain_ends, is_concave_chain};
+    fixes();
+    for y0 in [-0.62, -0.31, 2.0] {
+        let b = tube_with_fin(y0);
+        let pick = fin_top_edge(&b, y0);
+        let (k, mut brep) = common::kernel_copy(&b);
+        let edges = [brep.edge_list()[pick]];
+        assert!(is_concave_chain(&k, &mut brep, &edges).unwrap(), "y0 {y0}");
+        let ends = concave_chain_ends(&k, &mut brep, &edges).unwrap();
+        let mut at: Vec<[f64; 2]> = ends
+            .iter()
+            .map(|&v| {
+                let p = brep.vertex(v).unwrap().point;
+                assert!((p.z - FIN_TOP).abs() < 1e-9);
+                [p.x, p.y]
+            })
+            .collect();
+        at.sort_by(|a, b| a[1].total_cmp(&b[1]));
+        let y1 = y0 + FIN;
+        let want = [fin_side(y0, y0 - ROOT).1, fin_side(y1, y1 + ROOT).1];
+        assert_eq!(at.len(), 2, "y0 {y0}: {at:?}");
+        for (a, w) in at.iter().zip(&want) {
+            assert!(
+                (a[0] - w[0]).abs() < 1e-9 && (a[1] - w[1]).abs() < 1e-9,
+                "y0 {y0}: {a:?} {w:?}"
+            );
+        }
+    }
+}
+
+/// #19505, #19476's own part: the fin's side y = 0 lies in the plane of the tube's seam, so the
+/// seam's vertex on the asked edge is where the round's rail on the fin's top crosses the side's
+/// top edge, and the round has no whole section there for the two pieces to join at. The pass
+/// turns the tube's seam off the edge in its own copy, rolls over the Root rounds as on a tube
+/// whose seam is elsewhere, and puts the seam back.
+#[test]
+fn a_fin_top_round_whose_seam_lies_in_the_fin_s_side_rolls_over_the_root_rounds() {
+    fixes();
+    assert_fin_top_round_rolls_over(-0.62, 1.0);
+}
+
+/// The seam edges of `b` (both sides on one face), each as its two ends, the lower first.
+fn seams(b: &Body) -> Vec<[[f64; 3]; 2]> {
+    use solidcore::topology::edge;
+    let (k, mut brep) = common::kernel_copy(b);
+    let mut out = Vec::new();
+    for &e in &brep.edge_list().to_vec() {
+        if edge::faces(&brep, e, None).unwrap().len() != 1
+            || !edge::is_seam(&k, &mut brep, e).unwrap()
+        {
+            continue;
+        }
+        let (s, z) = edge::start_end_vertices(&brep, e).unwrap();
+        let p = brep.vertex(s.unwrap()).unwrap().point;
+        let q = brep.vertex(z.unwrap()).unwrap().point;
+        let (lo, hi) = if p.z <= q.z { (p, q) } else { (q, p) };
+        out.push([[lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]]);
+    }
+    out
+}
+
+fn assert_seam(b: &Body, from_z: f64, what: &str) {
+    let got = seams(b);
+    assert_eq!(got.len(), 1, "{what}: {got:?}");
+    let want = [[TUBE, 0.0, from_z], [TUBE, 0.0, 75.0]];
+    for (p, w) in got[0].iter().zip(&want) {
+        for (a, c) in p.iter().zip(w) {
+            assert!((a - c).abs() <= 1e-9, "{what}: {got:?}");
+        }
+    }
+}
+
+/// #19505: the round built with the tube's seam turned off its edge leaves the seam on the
+/// ruling it was on (x = 10, y = 0), from the tube's top down to the round's rail on the tube.
+#[test]
+fn a_fin_top_round_built_off_the_tube_s_seam_leaves_the_seam_on_its_ruling() {
+    fixes();
+    let b = tube_with_fin(-0.62);
+    assert_seam(&b, FIN_TOP, "the input");
+    blend(
+        &b,
+        Blend::Round,
+        &[fin_top_edge(&b, -0.62)],
+        &[1.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    assert_seam(&b, FIN_TOP + 1.0, "the result");
+}
+
+/// The kernel's decision (#19505): the chain is taken off a seam only where the round has no
+/// whole section at the seam's vertex. With the fin's side in the seam's plane the contact on
+/// the fin's top at the vertex is on the side's top edge at 1 (the seam is turned: the chain
+/// is one edge from V to V, the body has as many edges as before, the seam's edge and the
+/// vertex it split the fin top's edge at gone, the turned seam's edge and the vertex it splits
+/// the tube's bottom arc at made) and inside the fin's top at 0.9; with the fin across the
+/// seam it is inside at 1; with the fin elsewhere the chain has no seam's vertex.
+#[test]
+fn the_chain_is_taken_off_a_seam_only_where_the_round_has_no_whole_section_there() {
+    use solidcore::blend::blend_corner::rollover::chain_off_seams;
+    use solidcore::topology::edge;
+    fixes();
+    for (y0, r, turned) in [
+        (-0.62, 1.0, true),
+        (-0.62, 0.9, false),
+        (-0.31, 1.0, false),
+        (2.0, 1.0, false),
+    ] {
+        let b = tube_with_fin(y0);
+        let pick = fin_top_edge(&b, y0);
+        let (mut k, mut brep) = common::kernel_copy(&b);
+        let edges = [brep.edge_list()[pick]];
+        let before = brep.edge_list().len();
+        let off = chain_off_seams(&mut k, &mut brep, &edges, &[r]).unwrap();
+        assert_eq!(off.is_some(), turned, "y0 {y0} r {r}");
+        assert_eq!(brep.edge_list().len(), before, "y0 {y0} r {r}");
+        let Some(off) = off else {
+            continue;
+        };
+        assert_eq!(off.turned.len(), 1, "y0 {y0} r {r}");
+        assert_eq!(off.sizes, vec![r], "y0 {y0} r {r}");
+        let [chain] = off.edges.as_slice() else {
+            panic!("y0 {y0} r {r}: {:?}", off.edges);
+        };
+        let (s, z) = edge::start_end_vertices(&brep, *chain).unwrap();
+        let mut at: Vec<[f64; 2]> = [s, z]
+            .into_iter()
+            .map(|v| {
+                let p = brep.vertex(v.unwrap()).unwrap().point;
+                [p.x, p.y]
+            })
+            .collect();
+        at.sort_by(|a, b| a[1].total_cmp(&b[1]));
+        let y1 = y0 + FIN;
+        let want = [fin_side(y0, y0 - ROOT).1, fin_side(y1, y1 + ROOT).1];
+        for (a, w) in at.iter().zip(&want) {
+            assert!(
+                (a[0] - w[0]).abs() < 1e-9 && (a[1] - w[1]).abs() < 1e-9,
+                "y0 {y0} r {r}: {a:?} {w:?}"
+            );
+        }
+    }
+}
+
+/// #19505: a seam turned off the chain and put back leaves the body as it was: valid, its
+/// faces and edges as many, its volume the same, its seam on the same ruling between the
+/// same ends.
+#[test]
+fn a_seam_turned_off_the_chain_and_back_leaves_the_body_as_it_was() {
+    use solidcore::blend::blend_corner::rollover::{chain_off_seams, seams_back};
+    fixes();
+    let b = tube_with_fin(-0.62);
+    let volume = b.volume(1e-9).unwrap();
+    let pick = fin_top_edge(&b, -0.62);
+    let (mut k, mut brep) = common::kernel_copy(&b);
+    let edges = [brep.edge_list()[pick]];
+    let (faces, edge_count) = (brep.face_list().len(), brep.edge_list().len());
+    let off = chain_off_seams(&mut k, &mut brep, &edges, &[1.0])
+        .unwrap()
+        .unwrap();
+    seams_back(&mut k, &mut brep, &off.turned).unwrap();
+    assert_eq!(
+        (brep.face_list().len(), brep.edge_list().len()),
+        (faces, edge_count)
+    );
+    let back = common::built(|_| Ok(std::mem::take(&mut brep)));
+    let report = back.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    // each volume is asked to 1e-9
+    assert!((back.volume(1e-9).unwrap() - volume).abs() <= 2e-9);
+    assert_seam(&back, FIN_TOP, "turned and back");
+}
+
+/// #19505: the same part at 0.93 stays refused as on main. The seam's vertex on the chain has
+/// no whole section at this size either, but the round's rail leaves the fin's top at the
+/// seam's section (the decision's trigger, see `docs/generic-blend.md`), so the body is
+/// untouched and the refusal stands.
+#[test]
+fn a_fin_top_round_whose_seam_lies_in_the_fin_s_side_stays_refused_at_0_93() {
+    fixes();
+    let b = tube_with_fin(-0.62);
+    let before = b.volume(1e-9).unwrap();
+    match blend(
+        &b,
+        Blend::Round,
+        &[fin_top_edge(&b, -0.62)],
+        &[0.93],
+        &[],
+        Corners::Filled,
+    ) {
+        Err(Error::TooLarge {
+            why: Some(RoomReason::RailLeavesFace),
+            ..
+        }) => {}
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(b.volume(1e-9).unwrap().to_bits(), before.to_bits());
 }

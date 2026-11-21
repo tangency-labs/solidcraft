@@ -27,6 +27,9 @@ enum Request {
 struct PanelState {
     /// The material picked: its name, or empty for none.
     material: String,
+    /// Which sizes the thickness menu lists: gauges (0) or metric thicknesses (1); until picked,
+    /// the design's units decide.
+    series: Option<usize>,
     /// The gauge picked of it (its library rule's name), or empty.
     picked: String,
     /// The bend method the K-factor estimate is for (index into `BendMethod::ALL`).
@@ -44,7 +47,15 @@ fn panel_id() -> egui::Id {
 
 /// A gauge as its row in the menu reads: the gauge, whose chart it is, and its thickness.
 fn gauge_label(r: &PackRule) -> String {
-    format!("{}  {}", r.gauge_label(), r.rule.thickness)
+    let label = r.gauge_label();
+    if label == r.rule.thickness { label } else { format!("{label}  {}", r.rule.thickness) }
+}
+
+const SERIES_KEYS: [&str; 2] = ["sheet.library.series_gauge", "sheet.library.series_metric"];
+
+/// A row of the metric series (`1.5 mm`), not of a gauge chart.
+fn is_metric(r: &PackRule) -> bool {
+    r.gauge.ends_with(" mm")
 }
 
 fn slot<'a>(values: &'a mut [String], key: &str) -> Option<&'a mut String> {
@@ -172,7 +183,17 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, doc: &Document, can_export
             state.material.clone_from(material);
         }
         if !state.material.is_empty() {
-            let gauges = library::standard_gauges(&state.material);
+            // Gauges or metric thicknesses: an inch design lists gauges first, any other metric.
+            let inches = matches!(doc.units.trim(), "in" | "inch" | "ft");
+            let series = state.series.unwrap_or(if inches { 0 } else { 1 });
+            let names: Vec<String> = SERIES_KEYS.iter().map(|k| tr(k).to_string()).collect();
+            let mut chosen_series = None;
+            picker(ui, "sheet_library_series", "sheet.library.series", names.get(series).map_or("", String::as_str), &names, &mut chosen_series);
+            if let Some(index) = chosen_series {
+                state.series = Some(index);
+            }
+            let series = state.series.unwrap_or(series);
+            let gauges: Vec<&PackRule> = library::standard_gauges(&state.material).into_iter().filter(|r| is_metric(r) == (series == 1)).collect();
             let labels: Vec<String> = gauges.iter().map(|r| gauge_label(r)).collect();
             // The box shows the gauge alone; its menu gives each one's thickness too.
             let display =

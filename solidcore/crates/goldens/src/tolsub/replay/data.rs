@@ -7,6 +7,10 @@
 //! (each row's exact line from that build), and each moved entry is classified against its
 //! certified enclosure in `tests/mass_knot_line_moved_rows_are_classified.rs`. The
 //! substitutions are unchanged.
+//!
+//! `stubs4-delete-edge-bottle-e8-r0.1`'s main hash is of #18918's run: its near-knot rail
+//! trim (WR-664) moves a rail's cut onto the rail's nearby knot, which moves the row apart
+//! from the tolerances; its substitutions are unchanged.
 
 use super::Row;
 
@@ -99,24 +103,6 @@ pub(super) static DATA: &[Row] = &[
         &[
             (0, false, 0, 0x3f116f51cdf8887c, 0x3f0da07639b836bc),
             (0, true, 0, 0x3f116f51cdf8887c, 0x3f0da07639b836bc),
-        ],
-    ),
-    (
-        "blend.fillet_executive_p3",
-        "stubs4-delete-edge-bottle-e8-r0.1",
-        0x54ec49aee16198c0,
-        1,
-        &[
-            (0, false, 25, 0x3ef71d7309f3641b, 0x3ee942308b035f45),
-            (0, false, 28, 0x3ef78a7a6026f73d, 0x3eea1c3f376a8589),
-            (0, false, 33, 0x3ef6f2c419776966, 0x3ee8ecd2aa0b69db),
-            (0, false, 34, 0x3f13243fefa92b3a, 0x3f1085293e8cbe1c),
-            (0, false, 35, 0x3f118f3eaf63c737, 0x3f0de04ffc8eb432),
-            (0, false, 37, 0x3f19afab754eaebf, 0x3f171094c43241a1),
-            (0, true, 17, 0x3ef71d7309f3641b, 0x3ee942308b035f45),
-            (0, true, 18, 0x3f118f3eaf63c737, 0x3f0de04ffc8eb432),
-            (0, true, 19, 0x3f13243fefa92b3a, 0x3f1085293e8cbe1c),
-            (0, true, 22, 0x3f13243fefa92b3a, 0x3f1085293e8cbe1c),
         ],
     ),
     (
@@ -2087,21 +2073,6 @@ pub(super) static DATA: &[Row] = &[
             (0, true, 51, 0x3f03694fb1e3eebd, 0x3efc56449f562902),
             (0, true, 52, 0x3eed6690a2f383d5, 0x3ee4f8b588e368f1),
             (0, true, 53, 0x3eff278ca4642bb7, 0x3ef4ab31dff2773e),
-        ],
-    ),
-    (
-        "topology.brep_p10",
-        "gen0020",
-        0xa52b1960715135a8,
-        1,
-        &[
-            (0, false, 25, 0x3ef71d7309f33f5b, 0x3ee942308b0315c5),
-            (0, false, 28, 0x3ef78a7a6026b1b6, 0x3eea1c3f3769fa7b),
-            (0, false, 33, 0x3ef6f2c4197700b2, 0x3ee8ecd2aa0a9873),
-            (0, false, 34, 0x3f13243fefa92b3a, 0x3f1085293e8cbe1c),
-            (0, false, 37, 0x3f19afab754e5a87, 0x3f171094c431ed69),
-            (0, true, 17, 0x3ef71d7309f33f5b, 0x3ee942308b0315c5),
-            (0, true, 19, 0x3f13243fefa92b3a, 0x3f1085293e8cbe1c),
         ],
     ),
     (

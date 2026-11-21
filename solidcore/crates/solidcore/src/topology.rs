@@ -835,6 +835,36 @@ pub struct Brep {
     /// kernel's attributes on its faces, edges, ... (keyed by the B-rep-local
     /// [`loopuse::notify_ref`] identity of each entity). A clone copies them.
     attributes: AttributeStore,
+    /// (not upstream) The tolerances a read's kept-trim cover raised
+    /// ([`Brep::trim_cover_raises`]). A clone copies them.
+    trim_cover_raises: TrimCoverRaises,
+}
+
+/// (not upstream) The edge and vertex tolerances a read's kept-trim cover
+/// (`topology::brep::p2::cover_kept_uv_trim_curves`) raised, each as
+/// `(before, after)`: the tolerance the read had made and the one the cover set.
+///
+/// An edge's fit tolerance (`topology::edgeuse::p3::fit_tolerance`) is taken from its
+/// tolerance before the raise while the edge still holds the raised value, so a raise
+/// that covers a kept trim's distance does not loosen the geometry fitted along the edge,
+/// as a raise that covers an edge/face gap does not.
+///
+/// A clone and a copy (`topology::brep::p3::copy_brep`) carry the entries their entities
+/// still hold. A merge into another B-rep and a written file do not: a B-rep written with
+/// a raised tolerance stores it as its own tolerance, and a read of it fits at that value.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TrimCoverRaises {
+    /// The raised edges: `(before, after)` tolerance.
+    pub edges: std::collections::BTreeMap<EdgeId, (f64, f64)>,
+    /// The vertices the raised edges' tolerances cascaded to: `(before, after)`.
+    pub vertices: std::collections::BTreeMap<VertexId, (f64, f64)>,
+}
+
+impl TrimCoverRaises {
+    /// No edge and no vertex raised.
+    pub fn is_empty(&self) -> bool {
+        self.edges.is_empty() && self.vertices.is_empty()
+    }
 }
 
 /// A B-rep as it was ([`Brep::snapshot`]), to put back with [`Brep::restore`] in its
@@ -881,6 +911,7 @@ impl Brep {
             removals: self.removals.clone(),
             geometry_owner_keys: self.geometry_owner_keys.clone(),
             attributes: self.attributes.clone(),
+            trim_cover_raises: self.trim_cover_raises.clone(),
         }
     }
 }
@@ -919,6 +950,7 @@ impl Default for Brep {
             removals: topology::RemovalLog::default(),
             geometry_owner_keys: std::collections::BTreeMap::new(),
             attributes: AttributeStore::default(),
+            trim_cover_raises: TrimCoverRaises::default(),
         }
     }
 }
@@ -1825,6 +1857,17 @@ impl Brep {
     /// renames the objects while it runs).
     pub(crate) fn take_attributes(&mut self) -> AttributeStore {
         core::mem::take(&mut self.attributes)
+    }
+
+    /// (not upstream) The tolerances the read's kept-trim cover raised
+    /// ([`TrimCoverRaises`]); empty for a B-rep no read covered.
+    pub fn trim_cover_raises(&self) -> &TrimCoverRaises {
+        &self.trim_cover_raises
+    }
+
+    /// Sets [`Brep::trim_cover_raises`].
+    pub(crate) fn set_trim_cover_raises(&mut self, raises: TrimCoverRaises) {
+        self.trim_cover_raises = raises;
     }
 
     /// Replaces the attribute store (keyed by [`loopuse::notify_ref`]).

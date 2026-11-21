@@ -3118,8 +3118,7 @@ mod tests {
         eprintln!("crossing node: complete branches y=±x; enclosed residual {worst:e} <= {tol:e}");
     }
 
-    /// The curve types of the intersection of upstream's case `name`, with the tangent curve
-    /// tracer on.
+    /// The curve types of the intersection of upstream's case `name`.
     fn curve_types(name: &str) -> Vec<sp2::TsectCurveType> {
         let case = crate::case::regression_case(&Runner, name);
         let input: Inputs = case.parse().unwrap();
@@ -3135,8 +3134,7 @@ mod tests {
             panic!("intersection case");
         };
         let mut second = Surface::from(bss_of(&other).unwrap());
-        let mut k = Kernel::default();
-        k.fixes.ssi_tangent_curve_tracer = true;
+        let k = Kernel::default();
         if let Some(t) = translate {
             let mut ax = Axis2Placement::default();
             ax.translate(v3(t));
@@ -3158,7 +3156,7 @@ mod tests {
     }
 
     /// Two surfaces that coincide over a region touch there everywhere, not along a curve
-    /// (#18930). With the tangent curve tracer on, two of upstream's coincident pairs keep the
+    /// (#18930). With the tangent curve tracer, two of upstream's coincident pairs keep the
     /// curves the marcher finds: the boundaries of the coincident region (and, for the two
     /// surfaces of revolution, the crossing where they part), and no tangent curve. The
     /// tracer's seeds on these pairs lie on domain edges and corners, the ends of the
@@ -3176,7 +3174,7 @@ mod tests {
 
     /// Two spheres given in different parameters that coincide everywhere (#18930): the
     /// intersection is the four boundaries of the region the domains share, with the tangent
-    /// curve tracer on too. A seed at a pole of one sphere, where its parameters keep only the
+    /// curve tracer too. A seed at a pole of one sphere, where its parameters keep only the
     /// meridian's direction, found the contact in two opposite directions there, and the
     /// tracer traced the region's boundary as a tangent curve.
     #[test]

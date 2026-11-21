@@ -36,6 +36,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ASSISTANT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::AssistantResult>)
         .params("Show or hide Assistant in the app. Headless calls are refused without changing the design"),
+    CommandSpec::new("ui.appBarReset", "Reset App Bar", crate::checked!("ui.appBarReset", app_bar_reset))
+        .any_part()
+        .icon("restore")
+        .noundo()
+        .doc_only()
+        .contract(&APP_BAR_RESET_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::AppBarResetResult>)
+        .params("Reset the saved application bar layout in the connected app; returns {reset: true}. Headless sessions validate the request only; no dialog or design change"),
     CommandSpec::new("ui.palette", "Search Commands", crate::checked!("ui.palette", palette))
         .icon("zoom")
         .key("S")
@@ -316,6 +324,12 @@ fn assistant(_s: &mut Session, _p: &Value) -> Result<Value> {
     Err(EngineError::Other("ui.assistant shows or hides Assistant in the app; no assistant panel exists in a headless session".into()))
 }
 
+const APP_BAR_RESET_CONTRACT: crate::schema::TypedContract<crate::schema::edit::AppBarResetParams> = crate::schema::TypedContract::new();
+
+fn app_bar_reset(_s: &mut Session, _p: &Value) -> Result<Value> {
+    reply("ui.appBarReset", crate::schema::edit::AppBarResetResult { reset: true })
+}
+
 const PALETTE_CONTRACT: crate::schema::TypedContract<crate::schema::edit::PaletteParams> = crate::schema::TypedContract::new();
 
 /// Command search (#12190) is the app's: it opens in `SolveApp::start`, and its key can be moved
@@ -455,6 +469,8 @@ fn restore_checkpoint(s: &mut Session, p: &Value) -> Result<Value> {
 fn compute_all(s: &mut Session, _p: &Value) -> Result<Value> {
     let validation = s.validation();
     s.model = solidcraft_doc::Model::new();
+    // and nothing taken from the rows built before (`config.activate`)
+    s.row_models.clear();
     s.set_validation(validation);
     s.refresh();
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
@@ -1487,9 +1503,38 @@ fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
         omitted,
         inputs,
         error: r.and_then(|r| r.error.clone()),
+        error_code: r.and_then(|r| r.error_code.as_ref()).map(Into::into),
         warning: r.and_then(|r| r.warning.clone()),
     };
     reply(cmd, TimelineInspectResult { inspected: Inspected::Feature(Box::new(info)), param_warnings: Vec::new() })
+}
+
+/// A hole made with length expressions keeps them in `at`; its `position` is the point they
+/// evaluate to. `solid.hole` calls both `position`, so an expression given as `position` here goes
+/// to `at`, where it is read and followed (#19632). Numbers alone stay in `position`.
+fn hole_position_expressions(mut set: Value, kind: &FeatureKind) -> Value {
+    if !matches!(kind, FeatureKind::Hole { .. }) {
+        return set;
+    }
+    let Some(o) = set.as_object_mut() else { return set };
+    if !o.contains_key("at")
+        && o.get("position").and_then(Value::as_array).is_some_and(|a| a.iter().any(Value::is_string))
+        && let Some(position) = o.remove("position")
+    {
+        o.insert("at".into(), position);
+    }
+    set
+}
+
+/// A Rotate step turns one member: an edit (`timeline.edit` or `timeline.redefine`) changes its
+/// angle, never which member it turns.
+fn keeps_member(old: &FeatureKind, new: &FeatureKind, cmd: &str) -> Result<()> {
+    match (old, new) {
+        (FeatureKind::FrameMemberTurn { member: before, .. }, FeatureKind::FrameMemberTurn { member: after, .. }) if before != after => {
+            Err(bad(cmd, "A Rotate step keeps its member"))
+        }
+        _ => Ok(()),
+    }
 }
 
 fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1499,6 +1544,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let f = s.doc.feature(id).cloned().ok_or_else(|| bad(cmd, "feature"))?;
     let before = serde_json::to_value(&f).map_err(|e| EngineError::Other(e.to_string()))?;
     let set = expand_dotted(set, Some(&before), cmd, 0)?;
+    let set = hole_position_expressions(set, &f.kind);
     let set = &numbers_as_expressions(command_profiles(&set, cmd)?, &before);
     let mut v = before.clone();
     merge(&mut v, set, 0);
@@ -1518,6 +1564,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if std::mem::discriminant(&nf.kind) != std::mem::discriminant(&f.kind) {
         return Err(bad(cmd, "the feature type cannot change"));
     }
+    keeps_member(&f.kind, &nf.kind, cmd)?;
     // serde drops fields the definition doesn't have without a word: refuse them, or a typo
     // would report success and change nothing.
     let after = serde_json::to_value(&nf).map_err(|e| EngineError::Other(e.to_string()))?;
@@ -1577,6 +1624,9 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // Profiles picked by index or point are kept by their curves, as when the feature was made.
     if nf.kind.clone().profile_sels_mut() != f.kind.clone().profile_sels_mut() {
         super::features::stable_profiles(s, &mut nf.kind, false)?;
+    }
+    if nf.kind.constructor_profile_sketch() != f.kind.constructor_profile_sketch() {
+        nf.profile_frame = super::features::cross_component_profile_frame_for(s, nf.component, &nf.kind);
     }
     // A body Pattern's copy names move with the bodies they copy (#12114). Names the edit gives
     // are in the order the copies are made, as they always were: they are read that way, not
@@ -2296,13 +2346,16 @@ fn input_keys(kind: &FeatureKind, edge_names: &[String]) -> Vec<(String, solidcr
 /// An old design's From Object keeps starting at the face's level (`from_level`) through an edit
 /// that keeps its From face: the same pick, or a pick of a face on the same plane, found as the
 /// build finds it in the model before the feature. A From picked on another plane is a new
-/// choice, so it starts on that face, as a new extrude does. `after`'s face names and picked
-/// placements must already be its own.
+/// choice, so it starts on that face, as a new extrude does. So does an edit that takes To Object
+/// off: a design saved with From and To since format 58 is marked only because To used to keep
+/// its From at the face's level (#18825), and without To a new extrude starts on the face.
+/// `after`'s face names and picked placements must already be its own.
 fn keep_from_level_on_the_same_face(s: &Session, before: &Feature, after: &mut Feature) {
     let FeatureKind::Extrude { extent: was, .. } = &before.kind else {
         return;
     };
-    let keep = was.from_level && solidcraft_doc::same_extrude_from_face(&s.doc, &s.model.state_before(before.id), before, after);
+    let to_removed = was.to.is_some() && matches!(&after.kind, FeatureKind::Extrude { extent, .. } if extent.to.is_none());
+    let keep = was.from_level && !to_removed && solidcraft_doc::same_extrude_from_face(&s.doc, &s.model.state_before(before.id), before, after);
     if let FeatureKind::Extrude { extent, .. } = &mut after.kind {
         extent.from_level = keep;
     }
@@ -2339,6 +2392,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "plastic.snap_fit"
                 | "plastic.rest"
                 | "frame.end_cap"
+                | "frame.rotate_member"
                 | "frame.member"
         );
     if !constructor {
@@ -2505,6 +2559,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     if std::mem::discriminant(&new.kind) != std::mem::discriminant(&old.kind) && !(boundary(&new.kind) && boundary(&old.kind)) {
         return Err(bad(cmd, format!("{} is not a {} feature", old.name, cid)));
     }
+    keeps_member(&old.kind, &new.kind, cmd)?;
     // The trial still holds the old feature, so a plane offset from its own name was made there,
     // and once swapped in it would be built on itself (#3567).
     if new.kind.names_feature(old.id, &old.name) {
@@ -2646,6 +2701,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         slot.suppressed = old.suppressed;
         if let Some((names, _)) = cap_names {
             slot.body_names = names;
+        }
+        if old.kind.constructor_profile_sketch() != new.kind.constructor_profile_sketch() {
+            slot.profile_frame = new.profile_frame;
         }
         slot.kind = new.kind;
         slot.edge_refs = new.edge_refs;
