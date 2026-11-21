@@ -594,7 +594,8 @@ pub struct Preview {
 impl Preview {
     fn new(before: Arc<ModelState>, after: Arc<ModelState>, source: &Session, result: &Session, replies: Vec<Value>) -> Self {
         let shown_sketches = after.sketches.iter().filter(|sketch| view::sketch_shown(result, sketch.feature)).map(|sketch| sketch.feature).collect();
-        let joints = cmd::joints::posed_joints(source, result, &replies);
+        let driven = replies.iter().filter_map(|reply| reply.get("joint").and_then(Value::as_u64));
+        let joints = cmd::joints::posed_joints(&source.doc, &result.doc, driven);
         Self { before, after, shown_sketches, replies, joints, doc: result.doc.clone(), model: result.model.clone() }
     }
 

@@ -90,7 +90,7 @@ pub use file::use_import_cache_dir;
 pub(crate) use file::{GEOMETRY_MESSAGE, NAMES_MESSAGE, READER_MESSAGE, UP_MESSAGE, names_form, up_form, usable_path};
 pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};
-pub use joints::{MAX_REACH_JOINTS, reach_from, reach_preview};
+pub use joints::{MAX_REACH_JOINTS, posed_joints, reach_from, reach_preview};
 pub use parts::part_length_label;
 pub use sketch::dimension_roles;
 pub(crate) use sketch::face::face_pick_form;
