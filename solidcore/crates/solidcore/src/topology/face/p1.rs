@@ -2660,6 +2660,7 @@ pub fn complete_imported_face_seams(
             super::p4::HasSeamProblemOptions::default(),
         )?;
         let mut faces = vec![f];
+        let mut seams = Vec::new();
         if check.problem.crossed != SurfParamType::Neither
             || check.problem.missing != SurfParamType::Neither
         {
@@ -2677,6 +2678,7 @@ pub fn complete_imported_face_seams(
             )?;
             for e in split.edges {
                 store_imported_seam_curve(k, b, e, scope.env)?;
+                seams.push(e);
             }
             for face in split.faces {
                 if !faces.contains(&face) {
@@ -2711,6 +2713,35 @@ pub fn complete_imported_face_seams(
                     )?;
                 }
             }
+        }
+        // Insertion distributes seam copies against the lifted neighbours. Moving a
+        // boundary piece into the base period can change which copy it meets: e.g.
+        // [4, 4.5] becomes [0, 0.5] and needs the U=0 copy, while [3.5, 4] needs U=4.
+        // Redistribute only after every face's boundary pieces have been translated;
+        // the kernel swaps both mated pairs together, preserving the two seam sides.
+        for &face in &faces {
+            let domain = surface_deref(b, face)?.natural_uv_domain_with_nurb(k)?;
+            for eu in super::p4::upward_edgeuses(b, face, false, None)? {
+                let Some(e) = eu1::edge(b, eu)? else {
+                    continue;
+                };
+                if !seams.contains(&e) {
+                    continue;
+                }
+                let trim = get_or_create_uv_trim_curve(k, b, eu)?;
+                let direction = trim.is_domain_boundary(k, &domain, EFF_ZERO)?;
+                crate::topology::brep::p1::redistribute_seam_uv_trim_curves(
+                    k,
+                    b,
+                    e,
+                    Some(&trim),
+                    direction,
+                    &domain,
+                )?;
+                seams.retain(|&seam| seam != e);
+            }
+        }
+        for &face in &faces {
             let domain =
                 calculate_uv_domain_from_uv_trim_curves(k, b, face, true, false, false)?.domain;
             fp2::set_uv_domain(b, face, &domain)?;

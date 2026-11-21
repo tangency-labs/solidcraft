@@ -1073,6 +1073,13 @@ fn periodic_seam_completion_splits_real_boundaries_and_keeps_their_shell() {
     );
     crate::record_check::validate(&completed).unwrap();
     crate::record_check::agreement(&completed).unwrap();
+    // The two 45-degree patches occupy [3.5, 4] and [0, 0.5], respectively.
+    // A seam copy left on the opposite side would inflate a face's UV domain
+    // to a full period even though its 3D boundary still encloses only 45 degrees.
+    for face in &completed.faces {
+        assert!((face.domain[0][1] - face.domain[0][0] - 0.5).abs() < 1e-9);
+        assert!(face.domain[0][0] >= -1e-9 && face.domain[0][1] <= 4.0 + 1e-9);
+    }
     let seam = completed.edges.iter().find(|e| e.uses.len() == 2).unwrap();
     assert_ne!(seam.uses[0].face, seam.uses[1].face);
     // The inserted curve-on-surface must be stored as its exact iso B-spline,
