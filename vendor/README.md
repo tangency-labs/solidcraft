@@ -213,3 +213,31 @@ SolidCraft changes:
   `dark_mode.rs` passes the structure size to `RtlGetVersion`, as its documentation requires,
   since this choice depends on the build number it returns. eframe 0.37 requires
   winit 0.30, so this cannot come from a newer winit.
+
+## egui_glass 0.1.5 (MIT, © heonny, https://github.com/heonny/egui-glass)
+
+Glass surfaces (blur, refraction, tint, bevel) for glass themes, from commit
+`63b467e`. Changes:
+- `Cargo.toml`: depends on egui 0.37, egui-wgpu 0.37 and wgpu 30 directly (upstream uses its
+  workspace's 0.35 / 29); the `serde` feature is declared empty, the crate is built without it.
+- `src/live.rs`: egui 0.37 queues several texture deltas per texture; each is applied.
+- `src/widgets.rs`, `src/backdrop.rs`: `glass_shape_in` (the glass surface as a shape, for a
+  paint list) and `map_backdrop` (record the backdrop's mapping without drawing it), so the app
+  turns its own panel fills into glass.
+- `src/scene.rs` (new): `init_scene_backdrop` and `scene_backdrop_shape`, which copy a picture the
+  app already renders off screen (the 3D view) into a mip pyramid each frame and make it the live
+  backdrop, so glass over the view refracts the model. Every fourth copy a level at most 96 px
+  wide is read back (`SceneBrightness`, `SceneLuma`), so the app knows how bright the picture is
+  under its text.
+- `src/glass.wgsl`: the lens is a smooth ramp instead of a circular falloff (whose bend ended in a
+  sharp line at the rim), and the blur grows from 0.65× in the middle to 1.35× at the rim.
+- `src/style.rs`, `src/renderer.rs`, `src/glass.wgsl`: `GlassStyle::reach` (in the uniform's
+  spare `shadow_geo.z`): at 1 the rim shows the backdrop up to `refraction` past the edge, as
+  upstream; at 0 the shift shrinks with the distance to the edge, so the rim only magnifies what is
+  under the glass.
+- Tests: `vendor/` is outside the workspace, so nothing runs egui_glass's own tests by default.
+  To run them against the workspace's patched egui, narrow the root `Cargo.toml`'s `exclude` to
+  `["solidcore", "vendor/egui", "vendor/winit"]` (egui_glass then joins the workspace as a path
+  dependency) and run `cargo test -p egui_glass --lib`; don't commit that change. The three tests
+  that need a GPU adapter are `#[ignore]`d. `pollster` is a dev-dependency for them, and the tests
+  build their `RenderState` for egui-wgpu 0.37.

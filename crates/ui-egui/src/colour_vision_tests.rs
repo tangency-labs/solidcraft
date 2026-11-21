@@ -489,6 +489,7 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("paper_ink", "the drawing's one ink on a light sheet, as printed; no category is told by its colour"),
     ("paper_dark_ink", "the drawing's one ink on a dark sheet; no category is told by its colour"),
     ("library_highlights", "user-assigned named labels, not application status; menu/tooltip name each colour and library tests guard card contrast"),
+    ("glass", "the glass look's blur, refraction and see-through settings, not a colour that carries meaning"),
     ("figure_white", "neutral axis label and highlight ink; letters identify the axes"),
     ("figure_black", "neutral hatching and shadows; pattern and geometry carry the meaning"),
     ("pref_well", "neutral well behind a labelled control or illustration"),
