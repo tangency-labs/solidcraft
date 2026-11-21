@@ -1690,6 +1690,10 @@ preference_settings! {
     /// the number read in the design's unit ("2 in" = 50.8 mm) never fits the part (#12418). On: it
     /// opens at the number 2 read in the design's unit, as before.
     fillet_legacy_radius: bool = false, PAGE_TOOLS => check_id_help("prefs.fillet_legacy_radius", "prefs.fillet_legacy_radius.help");
+    /// A new Solid Fillet's Turns row starts at Auto: each corner swept where the swept turn can
+    /// be built round it, and mitred elsewhere. On: it starts at Mitre, as before this change, and
+    /// the fillet is built mitred.
+    fillet_legacy_turn: bool = false, PAGE_TOOLS => check_id_help("prefs.fillet_legacy_turn", "prefs.fillet_legacy_turn.help");
     /// Placing a Single hole snaps to the middle of the face and the centres of its round edges
     /// (`hole_place`). Off by default: a hole goes where it is clicked.
     hole_snaps: bool = false, PAGE_TOOLS => check("Snap to face and edge centres");
