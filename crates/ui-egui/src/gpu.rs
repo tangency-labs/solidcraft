@@ -778,6 +778,7 @@ fn offscreen(
         eye,
         ao_radius,
         ao_samples,
+        occlusion: false,
         ssaa,
         sky: [0.0; 4],
         hover_tint: [0.0; 3],

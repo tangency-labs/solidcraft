@@ -1,0 +1,713 @@
+//! The instanced placements in view, and the level of detail each is drawn from, chosen on the
+//! GPU each frame (`cull.wgsl`) in place of [`super::Batches::cull`]'s walk over every placement:
+//! a large assembly has tens of thousands, and the walk, and writing what it chose to the
+//! instance buffers, took tens of milliseconds of the window thread a frame.
+//!
+//! The placements of every instanced draw are uploaded once per scene. Each frame a compute pass
+//! picks, for every placement in view, its triangles' and its edges' level (as
+//! [`super::PlacedBox`] does on the CPU), counts each level's placements in its indirect draw
+//! arguments, turns the counts into where each level's placements start, and copies the
+//! placements there. The indirect draws ([`indirect`], [`edges`]) then draw from those buffers.
+//!
+//! See-through looks are drawn back to front, so their placements are still culled and sorted
+//! on the CPU and written at the end of the triangles' half of the buffer. The draw statistics
+//! (triangles and segments drawn) come back from the GPU a frame or two later.
+//!
+//! Only on a device that draws indirectly and binds four storage buffers to a compute shader
+//! (not WebGL2); elsewhere the CPU culls as before.
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
+
+use super::{EDGE_PX, INSTANCE_SIZE, InstanceLook, InstancedDraw, LOD_PX, edges, indirect};
+
+const SHADER: &str = include_str!("cull.wgsl");
+/// Words of a placement ([`INSTANCE_SIZE`] bytes).
+const PLACEMENT_WORDS: usize = INSTANCE_SIZE / 4;
+/// Words of a placement as the shader reads it: the placement, then its part.
+const SCENE_PLACEMENT_WORDS: usize = 16;
+const PART_WORDS: usize = 16;
+const LEVEL_WORDS: usize = 4;
+/// Words of one draw's arguments: indexed triangles, and edges.
+const TRI_ARGS_WORDS: usize = 5;
+const EDGE_ARGS_WORDS: usize = 4;
+/// Bytes of the shader's `View` uniform.
+const VIEW_SIZE: usize = 192;
+/// Placements a workgroup of `pick` and `place` takes.
+const GROUP: u32 = 64;
+
+/// The cull's pipelines on one device, made once and kept from scene to scene.
+pub(super) struct Kernel {
+    layout: wgpu::BindGroupLayout,
+    pick: wgpu::ComputePipeline,
+    scan: wgpu::ComputePipeline,
+    place: wgpu::ComputePipeline,
+}
+
+/// Whether `device` culls instanced placements on the GPU.
+pub(super) fn supported(device: &wgpu::Device) -> bool {
+    let limits = device.limits();
+    indirect::supported(device)
+        && limits.max_storage_buffers_per_shader_stage >= 4
+        && limits.max_compute_invocations_per_workgroup >= 256
+        && limits.max_compute_workgroup_size_x >= 256
+}
+
+impl Kernel {
+    /// The pipelines on `device`; `None` (logged) where it cannot build them, and the CPU culls.
+    pub(super) fn new(device: &wgpu::Device) -> Option<Kernel> {
+        if !supported(device) {
+            return None;
+        }
+        let scopes = [wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal, wgpu::ErrorFilter::Validation].map(|f| device.push_error_scope(f));
+        let module =
+            device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("sc_cull"), source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
+        let entry = |binding: u32, ty: wgpu::BufferBindingType| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer { ty, has_dynamic_offset: false, min_binding_size: None },
+            count: None,
+        };
+        let storage = |read_only| wgpu::BufferBindingType::Storage { read_only };
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("sc_cull"),
+            entries: &[
+                entry(0, wgpu::BufferBindingType::Uniform),
+                entry(1, storage(true)),
+                entry(2, storage(false)),
+                entry(3, storage(false)),
+                entry(4, storage(false)),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("sc_cull"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let pipeline = |entry_point: &str| {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("sc_cull"),
+                layout: Some(&pipeline_layout),
+                module: &module,
+                entry_point: Some(entry_point),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        };
+        let kernel = Kernel { pick: pipeline("pick"), scan: pipeline("scan"), place: pipeline("place"), layout };
+        let mut failed = None;
+        for scope in scopes.into_iter().rev() {
+            if let Some(e) = crate::popped(scope.pop()) {
+                failed.get_or_insert(e.to_string());
+            }
+        }
+        if let Some(e) = failed {
+            log::warn!("instanced placements are culled on the CPU: {e}");
+            return None;
+        }
+        Some(kernel)
+    }
+}
+
+/// Where the draw statistics are on their way back: nothing asked, copied in a frame not yet
+/// submitted, being mapped, mapped.
+const IDLE: u8 = 0;
+const COPIED: u8 = 1;
+const MAPPING: u8 = 2;
+const MAPPED: u8 = 3;
+
+/// One scene's instanced placements, culled on the GPU.
+#[derive(Clone)]
+pub(super) struct GpuCull {
+    kernel: Arc<Kernel>,
+    bind: wgpu::BindGroup,
+    /// The scene, arguments, placements and picks buffers, to bind again with another depth
+    /// pyramid.
+    buffers: [wgpu::Buffer; 4],
+    /// Bound in place of a depth pyramid while there is none.
+    placeholder: wgpu::TextureView,
+    /// The pyramid bound ([`super::hiz::Hiz::generation`]; 0: the placeholder).
+    bound_hiz: u64,
+    view: wgpu::Buffer,
+    args: wgpu::Buffer,
+    /// The arguments as each frame starts: every count the GPU makes at 0. The see-through
+    /// entries' counts and starts are filled in on the CPU.
+    args_reset: Vec<u8>,
+    /// The triangle entries culled on the CPU: (entry, draw, level), in entry order.
+    cpu_entries: Vec<(usize, usize, usize)>,
+    /// Where (placements) the see-through placements start in the triangles' half of the buffer.
+    cpu_from: u32,
+    /// Index counts of the triangle entries and segment counts of the edge entries (statistics).
+    tri_indices: Vec<u32>,
+    edge_segments: Vec<u32>,
+    /// The shader's `View` after its matrix and size.
+    words: [u32; 8],
+    /// The view the placements were last culled for.
+    culled_for: Option<([[f32; 4]; 4], [f32; 2], bool)>,
+    readback: wgpu::Buffer,
+    state: Arc<AtomicU8>,
+}
+
+impl GpuCull {
+    /// The cull of a scene's instanced `draws`, drawn by `indirect` (and their edges by `edges`),
+    /// which from now on draw from the buffers it fills. `None` where the scene does not suit it
+    /// (some draw is not drawn indirectly, or the buffers would be larger than the device binds):
+    /// the CPU culls it.
+    pub(super) fn new(
+        device: &wgpu::Device,
+        kernel: Arc<Kernel>,
+        draws: &[InstancedDraw],
+        indirect: &mut indirect::Indirect,
+        edges: Option<&mut edges::Edges>,
+    ) -> Option<GpuCull> {
+        let n: usize = draws.iter().map(|d| d.placements.len() / INSTANCE_SIZE).sum();
+        if n == 0 || (0..draws.len()).any(|i| !indirect.batches(i)) {
+            return None;
+        }
+        let tri_entries = indirect.entry_list();
+        // The opaque looks' entries come first ([`indirect`] groups them by look): they are
+        // culled here, the rest on the CPU.
+        let opaque = |draw: usize| draws.get(draw).is_some_and(|d| d.look == InstanceLook::Opaque);
+        let gpu_tri = tri_entries.iter().take_while(|e| opaque(e.0)).count();
+        if tri_entries.iter().skip(gpu_tri).any(|e| opaque(e.0)) {
+            return None;
+        }
+        let edge_entries = edges.as_deref().map(|e| e.entry_list()).unwrap_or_default();
+        // Each draw's part, levels and the entries that draw them.
+        let mut parts: Vec<u32> = Vec::with_capacity(draws.len() * PART_WORDS);
+        let mut levels: Vec<u32> = Vec::new();
+        let mut edge_part = 0usize;
+        for (i, d) in draws.iter().enumerate() {
+            let [lo, hi] = d.bounds;
+            let finite = lo.iter().chain(&hi).all(|x| x.is_finite());
+            parts.extend(lo.map(f32::to_bits));
+            parts.push(u32::from(!finite));
+            parts.extend(hi.map(f32::to_bits));
+            parts.push(0);
+            let first = u32::try_from(levels.len() / LEVEL_WORDS).ok()?;
+            let here = d.look == InstanceLook::Opaque;
+            for (k, l) in d.levels.iter().enumerate() {
+                let entry = tri_entries.iter().position(|e| e.0 == i && e.1 == k)?;
+                levels.extend([l.error.to_bits(), u32::try_from(entry).ok()?, 0, 0]);
+            }
+            parts.extend([first, u32::try_from(d.levels.len()).ok()?, u32::from(here), 0]);
+            let first = u32::try_from(levels.len() / LEVEL_WORDS).ok()?;
+            let mut count = 0u32;
+            if let (Some(e), true) = (&d.edges, edges.is_some()) {
+                for (n, entry) in edge_entries.iter().enumerate().filter(|(_, x)| x.0 == edge_part) {
+                    let tolerance = e.levels.get(entry.1).map_or(f32::INFINITY, |(_, t)| *t);
+                    levels.extend([tolerance.to_bits(), u32::try_from(n).ok()?, 0, 0]);
+                    count += 1;
+                }
+                edge_part += 1;
+            }
+            parts.extend([first, count, u32::from(count > 0), 0]);
+        }
+        let mut scene: Vec<u32> = Vec::with_capacity(n * SCENE_PLACEMENT_WORDS + parts.len() + levels.len());
+        for (i, d) in draws.iter().enumerate() {
+            for p in d.placements.as_chunks::<INSTANCE_SIZE>().0 {
+                scene.extend(p.as_chunks::<4>().0.iter().map(|w| u32::from_le_bytes(*w)));
+                scene.push(u32::try_from(i).ok()?);
+            }
+        }
+        let parts_at = u32::try_from(scene.len()).ok()?;
+        scene.extend(parts);
+        let levels_at = u32::try_from(scene.len()).ok()?;
+        scene.extend(levels);
+
+        // The arguments: the triangles' (each entry's placements from its start, every count 0),
+        // then the edges'.
+        let mut args: Vec<u32> = Vec::with_capacity(tri_entries.len() * TRI_ARGS_WORDS + edge_entries.len() * EDGE_ARGS_WORDS);
+        for (_, _, count, first_index, base_vertex) in &tri_entries {
+            args.extend([*count, 0, *first_index, base_vertex.cast_unsigned(), 0]);
+        }
+        let edge_args_at = u32::try_from(args.len()).ok()?;
+        for (_, _, first, count) in &edge_entries {
+            args.extend([count.saturating_mul(edges::VERTICES), 0, first.saturating_mul(edges::VERTICES), 0]);
+        }
+        // The see-through placements go at the end of the triangles' half.
+        let cpu_entries: Vec<(usize, usize, usize)> = tri_entries.iter().enumerate().skip(gpu_tri).map(|(e, x)| (e, x.0, x.1)).collect();
+        let mut cpu_draws: Vec<usize> = cpu_entries.iter().map(|e| e.1).collect();
+        cpu_draws.dedup();
+        let cpu_placements: usize = cpu_draws.iter().filter_map(|i| draws.get(*i)).map(|d| d.placements.len() / INSTANCE_SIZE).sum();
+        let cpu_from = u32::try_from(n - cpu_placements).ok()?;
+
+        let bytes = |words: &[u32]| -> Vec<u8> { words.iter().flat_map(|w| w.to_le_bytes()).collect() };
+        let half = u64::try_from(n * INSTANCE_SIZE).ok()?;
+        let limits = device.limits();
+        let largest = [scene.len() as u64 * 4, half * 2, n as u64 * 16];
+        if largest.iter().any(|b| *b > limits.max_storage_buffer_binding_size || *b > limits.max_buffer_size) {
+            return None;
+        }
+        let groups = u32::try_from(n).ok()?.div_ceil(GROUP);
+        if groups > limits.max_compute_workgroups_per_dimension.saturating_mul(limits.max_compute_workgroups_per_dimension) {
+            return None;
+        }
+        let storage = wgpu::BufferUsages::STORAGE;
+        let scene_buffer = super::buffer_init(device, "sc_cull_scene", &bytes(&scene), storage)?;
+        let args_reset = bytes(&args);
+        let args_buffer = super::buffer_init(
+            device,
+            "sc_cull_args",
+            &args_reset,
+            storage | wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+        )?;
+        let out = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("sc_cull_placements"),
+            size: half * 2,
+            usage: storage | wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let picks = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("sc_cull_picks"),
+            size: n as u64 * 16,
+            usage: storage,
+            mapped_at_creation: false,
+        });
+        let view = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("sc_cull_view"),
+            size: VIEW_SIZE as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("sc_cull_readback"),
+            size: args_reset.len() as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let placeholder = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("sc_cull_no_hiz"),
+                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R32Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&Default::default());
+        let buffers = [scene_buffer.clone(), args_buffer.clone(), out.clone(), picks.clone()];
+        let bind = Self::bind_with(device, &kernel, &view, &buffers, &placeholder);
+        let edge_out_at = u32::try_from(n * PLACEMENT_WORDS).ok()?;
+        indirect.cull_on_gpu(args_buffer.clone(), out.clone(), half);
+        if let Some(e) = edges {
+            e.cull_on_gpu(args_buffer.clone(), u64::from(edge_args_at) * 4, out.clone(), half);
+        }
+        let n = u32::try_from(n).ok()?;
+        let words = [n, parts_at, levels_at, u32::try_from(gpu_tri).ok()?, u32::try_from(edge_entries.len()).ok()?, edge_args_at, edge_out_at, 0];
+        Some(GpuCull {
+            kernel,
+            bind,
+            view,
+            args: args_buffer,
+            args_reset,
+            cpu_entries,
+            cpu_from,
+            tri_indices: tri_entries.iter().map(|e| e.2).collect(),
+            edge_segments: edge_entries.iter().map(|e| e.3).collect(),
+            words,
+            buffers,
+            placeholder,
+            bound_hiz: 0,
+            culled_for: None,
+            readback,
+            state: Arc::new(AtomicU8::new(IDLE)),
+        })
+    }
+
+    /// The bind group over `view`, the buffers `b` and the depth pyramid `hiz`.
+    fn bind_with(device: &wgpu::Device, kernel: &Kernel, view: &wgpu::Buffer, b: &[wgpu::Buffer; 4], hiz: &wgpu::TextureView) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("sc_cull"),
+            layout: &kernel.layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: view.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: b[0].as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: b[1].as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: b[2].as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: b[3].as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(hiz) },
+            ],
+        })
+    }
+
+    /// The pipelines, for the next scene's cull.
+    pub(super) fn kernel(&self) -> Arc<Kernel> {
+        self.kernel.clone()
+    }
+
+    /// Whether the triangles of the scene's instanced draw `draw` are culled here (else on the
+    /// CPU: see-through, drawn back to front).
+    pub(super) fn culls(&self, draw: &InstancedDraw) -> bool {
+        draw.look == InstanceLook::Opaque
+    }
+
+    /// Cull for the view `vp` of `size` pixels, in `encoder` (before the frame's passes):
+    /// again only when the view changed or `cpu_changed` (the see-through placements the CPU
+    /// culled, in `draws`' `shown`). With `hidden` (the last frame's depth pyramid, and whether
+    /// the depth buffer is 1 at the near plane), also leaves out the placements it hides. Takes
+    /// the statistics of an earlier cull that have come back into `indirect` and `edges`.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn run(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        vp: &[[f32; 4]; 4],
+        size: [f32; 2],
+        hidden: Option<(&super::hiz::Hiz, bool)>,
+        cpu_changed: bool,
+        draws: &[InstancedDraw],
+        indirect: &mut indirect::Indirect,
+        edges: Option<&mut edges::Edges>,
+    ) {
+        self.collect(indirect, edges);
+        // Against a pyramid, each frame (it changes with every frame drawn); without one, again
+        // only for another view, or after a cull that left out hidden placements.
+        let key = (*vp, size, hidden.is_some());
+        if !cpu_changed && hidden.is_none() && self.culled_for == Some(key) {
+            return;
+        }
+        self.culled_for = Some(key);
+        // The see-through placements, as the CPU culled and sorted them, from `cpu_from`.
+        let mut args = self.args_reset.clone();
+        let mut placements: Vec<u8> = Vec::new();
+        for (entry, draw, level) in &self.cpu_entries {
+            let first = self.cpu_from.saturating_add(u32::try_from(placements.len() / INSTANCE_SIZE).unwrap_or(u32::MAX));
+            if let Some(d) = draws.get(*draw)
+                && let Some(shown) = &d.shown
+            {
+                let level = u8::try_from(*level).unwrap_or(u8::MAX);
+                for (i, _) in shown.iter().filter(|(_, l)| *l == level) {
+                    if let Some(p) = d.placements.get(*i as usize * INSTANCE_SIZE..(*i as usize + 1) * INSTANCE_SIZE) {
+                        placements.extend_from_slice(p);
+                    }
+                }
+            }
+            let count = self.cpu_from.saturating_add(u32::try_from(placements.len() / INSTANCE_SIZE).unwrap_or(u32::MAX)).saturating_sub(first);
+            let at = entry * TRI_ARGS_WORDS * 4;
+            if let Some(words) = args.get_mut(at..at + TRI_ARGS_WORDS * 4) {
+                words[4..8].copy_from_slice(&count.to_le_bytes());
+                words[16..20].copy_from_slice(&first.to_le_bytes());
+            }
+        }
+        queue.write_buffer(&self.args, 0, &args);
+        if !placements.is_empty() {
+            // `out` is the buffer indirect draws from; its triangles' half starts at 0.
+            if let Some(out) = self.out_buffer(indirect) {
+                queue.write_buffer(&out, u64::from(self.cpu_from) * INSTANCE_SIZE as u64, &placements);
+            }
+        }
+        let mut view = Vec::with_capacity(VIEW_SIZE);
+        for column in vp {
+            view.extend(column.iter().flat_map(|x| x.to_le_bytes()));
+        }
+        for x in [size[0], size[1], LOD_PX, EDGE_PX] {
+            view.extend(x.to_le_bytes());
+        }
+        view.extend(self.words.iter().flat_map(|w| w.to_le_bytes()));
+        let generation = hidden.map_or(0, |(h, _)| h.generation);
+        if generation != self.bound_hiz {
+            self.bind = Self::bind_with(device, &self.kernel, &self.view, &self.buffers, hidden.map_or(&self.placeholder, |(h, _)| &h.view));
+            self.bound_hiz = generation;
+        }
+        // The view the pyramid was drawn with, its frame, levels and flags.
+        let pyramid = hidden.and_then(|(h, reversed)| h.vp.map(|vp| (h, vp, reversed)));
+        for column in pyramid.map_or(*vp, |(_, vp, _)| vp) {
+            view.extend(column.iter().flat_map(|x| x.to_le_bytes()));
+        }
+        let words = pyramid.map_or([1, 1, 1, 0], |(h, _, reversed)| [h.frame[0], h.frame[1], h.levels, 1 | if reversed { 2 } else { 0 }]);
+        view.extend(words.iter().flat_map(|w| w.to_le_bytes()));
+        queue.write_buffer(&self.view, 0, &view);
+
+        let n = self.words[0];
+        let groups = n.div_ceil(GROUP);
+        let x = groups.clamp(1, 65_535);
+        let y = groups.div_ceil(x).max(1);
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("sc_cull"), timestamp_writes: None });
+            pass.set_bind_group(0, &self.bind, &[]);
+            pass.set_pipeline(&self.kernel.pick);
+            pass.dispatch_workgroups(x, y, 1);
+            pass.set_pipeline(&self.kernel.scan);
+            pass.dispatch_workgroups(1, 1, 1);
+            pass.set_pipeline(&self.kernel.place);
+            pass.dispatch_workgroups(x, y, 1);
+        }
+        if self.state.load(Ordering::Acquire) == IDLE {
+            encoder.copy_buffer_to_buffer(&self.args, 0, &self.readback, 0, self.args_reset.len() as u64);
+            self.state.store(COPIED, Ordering::Release);
+        }
+    }
+
+    /// The buffer the triangles are drawn from (the one this cull fills).
+    fn out_buffer(&self, indirect: &indirect::Indirect) -> Option<wgpu::Buffer> {
+        indirect.instances()
+    }
+
+    /// Move the statistics' readback along: map what an earlier frame copied (that frame has
+    /// been submitted since), and read what is mapped into `indirect`'s and `edges`' counts.
+    fn collect(&mut self, indirect: &mut indirect::Indirect, edges: Option<&mut edges::Edges>) {
+        match self.state.load(Ordering::Acquire) {
+            COPIED => {
+                self.state.store(MAPPING, Ordering::Release);
+                let state = self.state.clone();
+                self.readback.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+                    state.store(if r.is_ok() { MAPPED } else { IDLE }, Ordering::Release);
+                });
+            }
+            MAPPED => {
+                let words: Vec<u32> = match self.readback.slice(..).get_mapped_range() {
+                    Ok(range) => range.as_chunks::<4>().0.iter().map(|w| u32::from_le_bytes(*w)).collect(),
+                    Err(_) => Vec::new(),
+                };
+                self.readback.unmap();
+                self.state.store(IDLE, Ordering::Release);
+                let tri: Vec<u32> = (0..self.tri_indices.len()).map(|e| words.get(e * TRI_ARGS_WORDS + 1).copied().unwrap_or(0)).collect();
+                indirect.counted(&tri);
+                let at = self.words[5] as usize;
+                if let Some(edges) = edges {
+                    let counts: Vec<u32> =
+                        (0..self.edge_segments.len()).map(|e| words.get(at + e * EDGE_ARGS_WORDS + 1).copied().unwrap_or(0)).collect();
+                    edges.counted(&counts);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The cull shader parses and validates (a bad shader would only fail at run time, and the
+    /// CPU would quietly cull instead).
+    #[test]
+    fn the_cull_shader_is_valid() {
+        let module = naga::front::wgsl::parse_str(super::SHADER).unwrap_or_else(|e| panic!("{}", e.emit_to_string(super::SHADER)));
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap();
+        for entry in ["pick", "scan", "place"] {
+            assert!(module.entry_points.iter().any(|e| e.name == entry), "{entry}");
+        }
+    }
+
+    /// The GPU culls a scene's placements as the CPU does: every level of every part draws the
+    /// same placements (in any order), triangles and edges alike, for a view with placements out
+    /// of it on every side, behind the eye, and near and far enough for each level.
+    #[test]
+    fn the_gpu_culls_the_placements_the_cpu_would() {
+        use super::super::{
+            Batches, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook, InstancedMesh, PaletteIndex, Renderer, SceneSlot, SharedEdges, SharedTris,
+        };
+        use solidcore_record::Vec3;
+        use std::sync::{Arc, Mutex};
+        let Ok((_, device, queue)) = crate::open_headless(crate::test_env::policy()) else { return };
+        if !super::supported(&device) {
+            return;
+        }
+        let target = GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: true };
+        let r = Renderer::new(&device, target, None);
+        let mesh = solidcore_tess::Mesh {
+            positions: vec![Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 0.0, 10.0)],
+            normals: vec![Vec3::Z; 4],
+            triangles: vec![[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]],
+            tri_face: vec![0; 4],
+            edges: vec![vec![Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0)], vec![Vec3::ZERO, Vec3::new(0.0, 0.0, 10.0)]],
+            edge_faces: vec![vec![0], vec![0]],
+            ..Default::default()
+        };
+        let coarse = vec![vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]]];
+        let scene = || {
+            let mut parts = Vec::new();
+            for (key, look) in [(1, InstanceLook::Opaque), (2, InstanceLook::Glass)] {
+                let mut m = InstancedMesh {
+                    key,
+                    tris: Arc::new(SharedTris::new(&mesh)),
+                    instances: Vec::new(),
+                    look,
+                    levels: vec![(Arc::new(SharedTris::new(&mesh)), 0.05), (Arc::new(SharedTris::new(&mesh)), 1.0)],
+                    closed: true,
+                    edges: Some(Arc::new(SharedEdges::new(&mesh, |_| true, vec![(0.05, coarse.clone()), (1.0, coarse.clone())]))),
+                };
+                for i in 0..400u32 {
+                    let (x, y) = ((i % 20) as f32 * 40.0 - 400.0, (i / 20) as f32 * 40.0 - 400.0);
+                    let z = -20.0 - (i % 7) as f32 * 300.0 + if i % 31 == 0 { 400.0 } else { 0.0 };
+                    let rows = [[1.0, 0.0, 0.0, x + key as f32], [0.0, 1.0, 0.0, y], [0.0, 0.0, 1.0, z]];
+                    m.place_edged(rows, PaletteIndex(i), PaletteIndex(1), PaletteIndex(2));
+                }
+                parts.push(m);
+            }
+            GpuScene { instanced: parts, ..GpuScene::default() }
+        };
+        let take = |cpu: bool| {
+            let mut b = Batches { cull_kernel_failed: cpu, ..Batches::default() };
+            let slot: SceneSlot = Arc::new(Mutex::new(Some(scene())));
+            b.take(&device, &queue, &r.uniform, &r.uniform_bgl, 1, &slot, None, false).unwrap();
+            b
+        };
+        let (mut gpu, mut cpu) = (take(false), take(true));
+        // Perspective down -z from the origin, 90 degrees across.
+        let vp = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, -1.0, -1.0], [0.0, 0.0, -1.0, 0.0]];
+        let size = [800.0, 600.0];
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, None);
+        cpu.cull(&device, &queue, &mut encoder, &vp, size, None);
+        queue.submit([encoder.finish()]);
+        assert!(cpu.gpu_cull.is_none());
+        let Some(g) = gpu.gpu_cull.as_ref() else { panic!("the GPU culls the scene") };
+        let read = |buffer: &wgpu::Buffer| -> Vec<u8> {
+            let staging = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: buffer.size(),
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            encoder.copy_buffer_to_buffer(buffer, 0, &staging, 0, buffer.size());
+            queue.submit([encoder.finish()]);
+            staging.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            staging.slice(..).get_mapped_range().unwrap().to_vec()
+        };
+        let word = |b: &[u8], i: usize| u32::from_le_bytes(b[i * 4..i * 4 + 4].try_into().unwrap());
+        let args = read(&g.args);
+        let out = read(&gpu.indirect.as_ref().unwrap().instances().unwrap());
+        let placements = |at: usize, first: u32, count: u32| -> Vec<Vec<u8>> {
+            let mut v: Vec<Vec<u8>> =
+                (first..first + count).map(|k| out[at + k as usize * INSTANCE_SIZE..at + (k as usize + 1) * INSTANCE_SIZE].to_vec()).collect();
+            v.sort();
+            v
+        };
+        let shown = |draw: usize, level: usize, edges: bool| -> Vec<Vec<u8>> {
+            let d = &cpu.instanced[draw];
+            let list = if edges { d.edges_shown.as_ref() } else { d.shown.as_ref() }.expect("culled on the CPU");
+            let mut v: Vec<Vec<u8>> = list
+                .iter()
+                .filter(|(_, l)| usize::from(*l) == level)
+                .map(|(i, _)| d.placements[*i as usize * INSTANCE_SIZE..(*i as usize + 1) * INSTANCE_SIZE].to_vec())
+                .collect();
+            v.sort();
+            v
+        };
+        let mut levels_drawn = [0usize; 3];
+        for (n, (draw, level, ..)) in gpu.indirect.as_ref().unwrap().entry_list().into_iter().enumerate() {
+            let (count, first) = (word(&args, n * 5 + 1), word(&args, n * 5 + 4));
+            let want = shown(draw, level, false);
+            assert_eq!(placements(0, first, count), want, "the triangles of part {draw}, level {level}");
+            levels_drawn[level] += usize::from(count > 0);
+        }
+        let edge_args_at = g.words[5] as usize;
+        let half = out.len() / 2;
+        for (n, (part, level, ..)) in gpu.edges.as_ref().unwrap().entry_list().into_iter().enumerate() {
+            let (count, first) = (word(&args, edge_args_at + n * 4 + 1), word(&args, edge_args_at + n * 4 + 3));
+            assert_eq!(placements(half, first, count), shown(part, level, true), "the edges of part {part}, level {level}");
+            levels_drawn[level] += usize::from(count > 0);
+        }
+        assert!(levels_drawn.iter().all(|n| *n > 0), "every level drawn: {levels_drawn:?}");
+    }
+
+    /// While the view moves, a placement lying wholly behind the depth the last frame drew is
+    /// left out, and one in front of it is drawn; without the last frame's depth both are.
+    #[test]
+    fn a_placement_behind_the_last_frames_depth_is_left_out_while_the_view_moves() {
+        use super::super::{Batches, GpuScene, GpuTarget, InstanceLook, InstancedMesh, PaletteIndex, Renderer, SceneSlot, SharedTris, hiz};
+        use solidcore_record::Vec3;
+        use std::sync::{Arc, Mutex};
+        let Ok((_, device, queue)) = crate::open_headless(crate::test_env::policy()) else { return };
+        if !super::supported(&device) {
+            return;
+        }
+        let Some(kernel) = hiz::Kernel::new(&device, 1) else { return };
+        let target = GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: false };
+        let r = Renderer::new(&device, target, None);
+        let mesh = solidcore_tess::Mesh {
+            positions: vec![Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 0.0, 10.0)],
+            normals: vec![Vec3::Z; 4],
+            triangles: vec![[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]],
+            tri_face: vec![0; 4],
+            ..Default::default()
+        };
+        // One part placed in front of a plane 100 mm from the eye (z from -30 to -20) and behind
+        // it (z from -210 to -200), both in the middle of the view.
+        let mut part = InstancedMesh {
+            key: 1,
+            tris: Arc::new(SharedTris::new(&mesh)),
+            instances: Vec::new(),
+            look: InstanceLook::Opaque,
+            levels: Vec::new(),
+            closed: true,
+            edges: None,
+        };
+        for z in [-30.0, -210.0] {
+            part.place([[1.0, 0.0, 0.0, -5.0], [0.0, 1.0, 0.0, -5.0], [0.0, 0.0, 1.0, z]], PaletteIndex(0));
+        }
+        let mut batches = Batches::default();
+        let slot: SceneSlot = Arc::new(Mutex::new(Some(GpuScene { instanced: vec![part], ..GpuScene::default() })));
+        batches.take(&device, &queue, &r.uniform, &r.uniform_bgl, 1, &slot, None, false).unwrap();
+        // Perspective down -z from the origin: a point at depth z (< -1) is at 1 + 1 / z.
+        let vp = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, -1.0, -1.0], [0.0, 0.0, -1.0, 0.0]];
+        let size = [64.0, 48.0];
+        // The last frame's depth: the plane at z = -100 everywhere.
+        let depth = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: 64, height: 48, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let depth_view = depth.create_view(&Default::default());
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        drop(encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &depth_view,
+                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0 - 1.0 / 100.0), store: wgpu::StoreOp::Store }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        }));
+        let mut pyramid = hiz::Hiz::new(&device, &kernel, &depth_view, [64, 48], 1);
+        pyramid.build(&queue, &kernel, &mut encoder, vp, false, 1);
+        queue.submit([encoder.finish()]);
+        let drawn = |batches: &mut Batches, hidden: Option<(&hiz::Hiz, bool)>| -> u32 {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            batches.cull(&device, &queue, &mut encoder, &vp, size, hidden);
+            queue.submit([encoder.finish()]);
+            let Some(g) = batches.gpu_cull.as_ref() else { panic!("the GPU culls the scene") };
+            let staging = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: g.args.size(),
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            encoder.copy_buffer_to_buffer(&g.args, 0, &staging, 0, g.args.size());
+            queue.submit([encoder.finish()]);
+            staging.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            let bytes = staging.slice(..).get_mapped_range().unwrap().to_vec();
+            let entries = batches.indirect.as_ref().unwrap().entry_list().len();
+            (0..entries).map(|n| u32::from_le_bytes(bytes[(n * 5 + 1) * 4..(n * 5 + 2) * 4].try_into().unwrap())).sum()
+        };
+        assert_eq!(drawn(&mut batches, None), 2, "a still view draws both");
+        assert_eq!(drawn(&mut batches, Some((&pyramid, false))), 1, "moving: the one behind the plane is left out");
+        assert_eq!(drawn(&mut batches, None), 2, "still again: both");
+    }
+}

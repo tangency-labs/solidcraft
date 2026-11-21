@@ -22,6 +22,8 @@ mod ao;
 pub use ao::GroundAo;
 mod clouds;
 mod edges;
+mod gpu_cull;
+mod hiz;
 mod indirect;
 pub use clouds::{CELL_SIZE, Cell, CloudFilter, CloudStyle, ColorMode, FILTERS, GpuCloud, cloud_cell};
 #[cfg(not(target_arch = "wasm32"))]
@@ -1427,6 +1429,10 @@ pub struct Frame {
     /// Occlusion samples per shaded pixel: [`AO_SAMPLES`] for a still picture,
     /// [`AO_SAMPLES_MOVING`] while the view moves (#7165).
     pub ao_samples: u32,
+    /// The view is moving: the GPU cull leaves out the placements the last frame's depth hides
+    /// ([`hiz`]). A part that comes into view may be missing for a frame; a still view (false)
+    /// draws every placement in view.
+    pub occlusion: bool,
     /// Supersampling (#1288): draw the frame this many times the viewport's pixels in each
     /// direction and filter it down (1: off). Under 1 the frame is drawn smaller and filtered up
     /// (the product preview past its pixel budget, #1464).
@@ -2317,6 +2323,13 @@ struct Batches {
     arena: Option<Arc<indirect::Arena>>,
     /// `instanced`'s edges, drawn from the parts' shared edges ([`edges`]).
     edges: Option<edges::Edges>,
+    /// `instanced` culled on the GPU ([`gpu_cull`]), where the device can: made at the first
+    /// cull after the scene changes (`gpu_cull_stale`), from the pipelines kept across scenes.
+    gpu_cull: Option<gpu_cull::GpuCull>,
+    gpu_cull_stale: bool,
+    cull_kernel: Option<Arc<gpu_cull::Kernel>>,
+    /// The device cannot build the pipelines: the CPU culls.
+    cull_kernel_failed: bool,
     /// [`GpuScene::instanced_hidden_edges`].
     hidden_edges: bool,
     /// [`GpuScene::lit_instanced_edges`] and [`GpuScene::lit_instanced_hidden`].
@@ -2468,6 +2481,11 @@ impl Batches {
             };
             let parts = edges::Part::of_draws(&self.instanced);
             self.edges = shared_edges(&parts, self.edges.as_ref());
+            // The new draws are culled on the GPU from the next cull, by a cull made for them.
+            if let Some(g) = self.gpu_cull.take() {
+                self.cull_kernel = Some(g.kernel());
+            }
+            self.gpu_cull_stale = true;
             let lit_from = self.edges.as_ref().or_else(|| model.and_then(|scene| scene.edges.as_ref()));
             let lit_parts = edges::Part::of_meshes(&sc.lit_instanced_edges);
             self.lit_shared_edges = shared_edges(&lit_parts, lit_from);
@@ -2697,13 +2715,56 @@ impl Batches {
     /// Each placement's level of detail is chosen here too: the coarsest whose error stays under
     /// [`LOD_PX`] where it is drawn ([`placement_scale`], [`level_for`]), in a view of `size`
     /// pixels.
-    fn cull(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, vp: &[[f32; 4]; 4], size: [f32; 2]) {
+    ///
+    /// Where the device can, the GPU culls instead ([`gpu_cull`]), in `encoder` before the
+    /// frame's passes: here only the see-through looks' placements are, to sort them.
+    fn cull(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        vp: &[[f32; 4]; 4],
+        size: [f32; 2],
+        hidden: Option<(&hiz::Hiz, bool)>,
+    ) {
         self.cull_blocks(vp);
+        if std::mem::take(&mut self.gpu_cull_stale) {
+            self.gpu_cull = None;
+            if self.cull_kernel.is_none() && !self.cull_kernel_failed && !self.instanced.is_empty() {
+                self.cull_kernel = gpu_cull::Kernel::new(device).map(Arc::new);
+                self.cull_kernel_failed = self.cull_kernel.is_none();
+            }
+            if let (Some(kernel), Some(indirect)) = (self.cull_kernel.clone(), self.indirect.as_mut()) {
+                self.gpu_cull = gpu_cull::GpuCull::new(device, kernel, &self.instanced, indirect, self.edges.as_mut());
+            }
+        }
+        let (changed, edges_changed) = self.cull_placements(queue, vp, size);
+        if let (Some(g), Some(indirect)) = (self.gpu_cull.as_mut(), self.indirect.as_mut()) {
+            g.run(device, queue, encoder, vp, size, hidden, changed, &self.instanced, indirect, self.edges.as_mut());
+            return;
+        }
+        if changed && let Some(indirect) = self.indirect.as_mut() {
+            indirect.write(device, queue, &self.instanced);
+        }
+        if edges_changed && let Some(edges) = self.edges.as_mut() {
+            edges.write(device, queue, &edges::Part::of_draws(&self.instanced));
+        }
+    }
+
+    /// [`Batches::cull`] on the CPU: the placements of each instanced draw in view, with their
+    /// levels (`shown`, `edges_shown`), those not drawn indirectly written to their levels'
+    /// buffers. With a GPU cull, only the draws it leaves (see-through), and no edges. Whether
+    /// the placements and the edges' placements changed.
+    fn cull_placements(&mut self, queue: &wgpu::Queue, vp: &[[f32; 4]; 4], size: [f32; 2]) -> (bool, bool) {
+        let gpu = self.gpu_cull.as_ref();
         let mut changed = false;
         let f = |b: &[u8], i: usize| b.get(i..i + 4).and_then(|x| x.try_into().ok()).map_or(0.0, f32::from_le_bytes);
         let mut edges_changed = false;
         for (n, d) in self.instanced.iter_mut().enumerate() {
-            let edge_levels = if self.edges.is_some() { d.edges.clone() } else { None };
+            if gpu.is_some_and(|g| g.culls(d)) {
+                continue;
+            }
+            let edge_levels = if self.edges.is_some() && gpu.is_none() { d.edges.clone() } else { None };
             let batched = self.indirect.as_ref().is_some_and(|x| x.batches(n));
             let errors: Vec<f32> = d.levels.iter().map(|l| l.error).collect();
             // Each placement's corners go through the view once, for whether it is in view and
@@ -2768,12 +2829,7 @@ impl Batches {
             }
             d.shown = Some(shown);
         }
-        if changed && let Some(indirect) = self.indirect.as_mut() {
-            indirect.write(device, queue, &self.instanced);
-        }
-        if edges_changed && let Some(edges) = self.edges.as_mut() {
-            edges.write(device, queue, &edges::Part::of_draws(&self.instanced));
-        }
+        (changed, edges_changed)
     }
 
     /// Draw the instanced placements of look `look` (only closed bodies' when `closed_only`):
@@ -3070,6 +3126,14 @@ pub struct Renderer {
     /// Most memory (bytes) an offscreen frame may take ([`frame_bytes`]): [`SS_BUDGET`], halved
     /// below each frame the device refused (out of video memory, #7296).
     frame_budget: u64,
+    /// The depth pyramid's pipelines (made the first time a frame can use them; `None` with
+    /// `hiz_failed` where the device cannot), the pyramid of the last frame drawn, how many
+    /// pyramids have been made, and how many frames drawn.
+    hiz_kernel: Option<hiz::Kernel>,
+    hiz_failed: bool,
+    hiz: Option<hiz::Hiz>,
+    hiz_generation: u64,
+    frames: u64,
     /// The device refused memory for a frame or its see-through targets ([`DrawStats::lowered`]).
     lowered: bool,
     /// Reversed depth drawn into the window's pass: egui clears its depth to 1, which is the near
@@ -3140,6 +3204,8 @@ struct Supersampled {
     /// The resolved colour (when `color` is multisampled).
     resolve: Option<wgpu::TextureView>,
     depth: Option<wgpu::TextureView>,
+    /// Its depth aspect, read by the depth pyramid ([`hiz`]).
+    depth_read: Option<wgpu::TextureView>,
     /// The single-sampled colour, for the filter.
     bind: wgpu::BindGroup,
 }
@@ -4135,6 +4201,11 @@ impl Renderer {
                 stats: DrawStatsHandle::default(),
                 no_cache: false,
                 frame_budget: SS_BUDGET,
+                hiz_kernel: None,
+                hiz_failed: false,
+                hiz: None,
+                hiz_generation: 0,
+                frames: 0,
                 lowered: false,
                 image: image.join(),
                 image_bgl,
@@ -4581,6 +4652,7 @@ pub fn frame_key(cb: &Frame) -> u64 {
     cb.ao_radius.to_bits().hash(&mut h);
     cb.ao_samples.hash(&mut h);
     cb.ssaa.to_bits().hash(&mut h);
+    cb.occlusion.hash(&mut h);
     // A drag's layer: the scene it holds and where it is drawn.
     match &cb.moving {
         Some(m) => {
@@ -4820,7 +4892,11 @@ impl Renderer {
         if !see_through {
             res.pic.model.sort_glass(queue, cb.back);
         }
-        res.pic.model.cull(device, queue, &cb.view_proj, cb.size_px);
+        // While the view moves, the placements the last frame drawn hid are left out: only with
+        // the pyramid that frame built (`frames` counts the frames drawn so far).
+        let reversed = res.target.reversed_depth();
+        let hidden = res.hiz.as_ref().filter(|h| cb.occlusion && h.vp.is_some() && h.built_in == res.frames).map(|h| (h, reversed));
+        res.pic.model.cull(device, queue, encoder, &cb.view_proj, cb.size_px, hidden);
         let ground_visible = res.pic.model.ground_input.is_some_and(|ground| ground.visible_from(cb.back));
 
         let ground_key = (cb.key, cb.pv_key, cb.pv_hide, cb.ao_radius.to_bits(), ground_visible);
@@ -4901,6 +4977,8 @@ impl Renderer {
         }
         res.clouds.prepare(device, queue, &res.cloud_pipes, &cb.clouds);
         res.pic.ss_ready = (isolated || cb.ssaa != 1.0 || see_through || res.window_differs()) && res.supersample(device, encoder, cb, see_through);
+        res.frames += 1;
+        res.build_depth_pyramid(device, queue, encoder, cb);
         res.pic.ss_key = (res.pic.ss_ready && res.refused_upload.is_none()).then_some(key);
     }
 
@@ -5501,6 +5579,32 @@ impl Renderer {
         self.pic.cached = Some(CachedPicture { _view: view, bind });
     }
 
+    /// Build the depth pyramid ([`hiz`]) from the frame just drawn into its own frame, for the
+    /// next frame's cull to leave out what it hides while the view moves: only for a model
+    /// culled on the GPU, and where the device builds the pyramid.
+    fn build_depth_pyramid(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, cb: &Frame) {
+        if !self.pic.ss_ready || cb.product || self.hiz_failed || self.pic.model.gpu_cull.is_none() {
+            return;
+        }
+        let Some((size, depth)) = self.pic.ss.as_ref().and_then(|ss| Some((ss.size, ss.depth_read.clone()?))) else { return };
+        let samples = self.target.samples.max(1);
+        if self.hiz_kernel.as_ref().is_none_or(|k| k.samples() != samples) {
+            self.hiz_kernel = hiz::Kernel::new(device, samples);
+            self.hiz_failed = self.hiz_kernel.is_none();
+            self.hiz = None;
+        }
+        let Some(kernel) = &self.hiz_kernel else { return };
+        // A pyramid per frame size; a new frame of the same size is a new depth texture.
+        if self.hiz.as_ref().is_none_or(|h| h.frame != size || !h.reads(&depth)) {
+            self.hiz_generation += 1;
+            self.hiz = Some(hiz::Hiz::new(device, kernel, &depth, size, self.hiz_generation));
+        }
+        let reversed = self.target.reversed_depth();
+        if let Some(h) = self.hiz.as_mut() {
+            h.build(queue, kernel, encoder, cb.view_proj, reversed, self.frames);
+        }
+    }
+
     /// Draw the frame supersampled (`cb.ssaa` times the viewport's pixels each way, within the
     /// device's texture limit and the memory budget) into textures of the viewport's kind.
     /// `false` when it cannot be (too small a gain, a zero-sized viewport): drawn as usual.
@@ -5584,7 +5688,8 @@ impl Renderer {
         let depth_format = self.target.depth;
         let stencil = depth_format.is_some_and(|f| f.has_stencil_aspect());
         // The depth is kept for the passes after the first when there are see-through surfaces.
-        let keep = if see_through { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard };
+        // And for the depth pyramid built from it ([`hiz`]).
+        let keep = if see_through || self.hiz_kernel.is_some() { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard };
         let pass = |encoder: &mut wgpu::CommandEncoder, first: bool| {
             let load = |clear| if first { wgpu::LoadOp::Clear(clear) } else { wgpu::LoadOp::Load };
             encoder
@@ -5670,7 +5775,23 @@ impl Renderer {
         } else {
             (texture("sc_ssaa", t.format, 1, sampled), None)
         };
-        let depth = t.depth.map(|f| texture("sc_ssaa_depth", f, samples, wgpu::TextureUsages::RENDER_ATTACHMENT));
+        // Its depth is read too, for the depth pyramid ([`hiz`]): through a view of its depth aspect.
+        let depth_texture = t.depth.map(|f| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("sc_ssaa_depth"),
+                size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: samples,
+                dimension: wgpu::TextureDimension::D2,
+                format: f,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+        });
+        let depth = depth_texture.as_ref().map(|d| d.create_view(&Default::default()));
+        let depth_read = depth_texture
+            .as_ref()
+            .map(|d| d.create_view(&wgpu::TextureViewDescriptor { aspect: wgpu::TextureAspect::DepthOnly, ..Default::default() }));
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("sc_ssaa"),
             layout: &self.ss_bgl,
@@ -5679,7 +5800,7 @@ impl Renderer {
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
             ],
         });
-        Supersampled { size, color, resolve, depth, bind }
+        Supersampled { size, color, resolve, depth, depth_read, bind }
     }
 }
 
@@ -6408,6 +6529,7 @@ mod tests {
             eye: [0.0; 4],
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
+            occlusion: false,
             sky: [0.0; 4],
             ssaa: 1.0,
         }
@@ -7004,6 +7126,7 @@ mod glass_tests {
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
+            occlusion: false,
             sky: [0.0; 4],
             ssaa: 1.0,
             hover_tint: [0.0; 3],
@@ -7209,6 +7332,7 @@ mod glass_tests {
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
+            occlusion: false,
             sky: [0.0; 4],
             ssaa,
         }
