@@ -80,7 +80,7 @@ pub use paper_text::{
     paper_text_with_flow_now,
 };
 pub use pattern::{PatternAlignment, PatternInstance, SketchPattern, SketchPatternKind};
-pub use periodic::periodic_beziers;
+pub use periodic::{periodic_beziers, validate_closed_control};
 pub use profiles::{
     CurvePick, ENDPOINT_JOIN_TOL, MAX_PROFILE_EDGES, Profile, ProfileSearch, distinct_curves, find_drawn_profiles, find_profiles,
     find_profiles_checked, merge_regions, profile_at_point, profile_by_curves, without_text_counters,

@@ -64,6 +64,10 @@ pub struct RecordBody {
     /// none for a copy.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub face_origin: Vec<u64>,
+    /// The body as triangles, for a part the file gives as triangles alone (an AP242 tessellated
+    /// part): a mesh body, as STL and 3MF bring in, in place of a record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh: Option<RecordMesh>,
     /// Another placement of an earlier body of the import (its index), as an assembly that uses
     /// one part twice places it twice: this body is that one's record, faces and sheet, placed by
     /// its own `placement`, and the same part to the design (its faces are that body's). Its own
@@ -74,6 +78,19 @@ pub struct RecordBody {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sheet: bool,
 }
+
+/// A mesh body's triangles: vertex positions (millimetres, in the body's own coordinates) and
+/// triangles of zero-based vertex indices, in the file's winding.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RecordMesh {
+    pub positions: Vec<[f64; 3]>,
+    pub triangles: Vec<[u32; 3]>,
+}
+
+/// Most vertices of a mesh kept as a record (as an AP242 tessellated part read from STEP text).
+const MAX_MESH_VERTICES: usize = 1_000_000;
+/// Most triangles of a mesh kept as a record.
+const MAX_MESH_TRIANGLES: usize = 2_000_000;
 
 /// The pcurves an importer gives the shared assembly stage for edge uses with no closed form:
 /// SMLib's own, as a STEP import's are. Readers outside the kernel (cadmpeg's neutral model, in
@@ -177,7 +194,8 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
         };
         // The body's colour too is from a file: kept in 0..1, as its faces' are.
         let color = r.color.map(|c| c.map(unit));
-        let body = body.with_color(color).with_face_sources(Some(Arc::new(sources)));
+        // A mesh body has no faces from the file to know.
+        let body = if sources.is_empty() { body.with_color(color) } else { body.with_color(color).with_face_sources(Some(Arc::new(sources))) };
         let body = match &r.paint {
             Some(paint) => body.with_paint(Some(body_paint(paint, &part.face_origin))),
             None => body,
@@ -330,6 +348,9 @@ fn unit(x: f32) -> f32 {
 
 /// The body SMLib makes of one record, checked first: a record from a file is hostile input.
 fn part_of(r: &RecordBody) -> std::result::Result<Part, String> {
+    if let (None, Some(mesh)) = (&r.brep, &r.mesh) {
+        return mesh_part(mesh);
+    }
     let brep = r.brep.as_ref().ok_or("no record")?;
     if r.face_origin.len() != brep.faces.len() {
         return Err(format!("{} face origins for {} faces", r.face_origin.len(), brep.faces.len()));
@@ -340,6 +361,29 @@ fn part_of(r: &RecordBody) -> std::result::Result<Part, String> {
     // infinite one's.
     let sheet = r.sheet || brep.regions.len() <= 1;
     record_part(brep, &r.face_origin, sheet).map_err(|f| f.msg)
+}
+
+/// The mesh body of a body kept as triangles, checked first: no more vertices and triangles than
+/// a STEP import reads of a tessellated part, every position finite and within 10⁹ mm, and every
+/// index a vertex.
+fn mesh_part(mesh: &RecordMesh) -> std::result::Result<Part, String> {
+    let (nv, nt) = (mesh.positions.len(), mesh.triangles.len());
+    if !(1..=MAX_MESH_VERTICES).contains(&nv) || !(1..=MAX_MESH_TRIANGLES).contains(&nt) {
+        return Err(format!("a mesh of {nv} vertices and {nt} triangles (at most {MAX_MESH_VERTICES} and {MAX_MESH_TRIANGLES})"));
+    }
+    let mut positions = Vec::with_capacity(nv);
+    for p in &mesh.positions {
+        if p.iter().any(|x| !(x.abs() < 1e9)) {
+            return Err("a mesh vertex that is not finite or is too far out".into());
+        }
+        positions.push(solidcore_record::Vec3::new(p[0], p[1], p[2]));
+    }
+    if mesh.triangles.iter().flatten().any(|&i| usize::try_from(i).map_or(true, |i| i >= nv)) {
+        return Err("a mesh triangle that names a vertex the mesh does not have".into());
+    }
+    let body = crate::mesh_body(&positions, &mesh.triangles).map_err(|e| e.to_string())?;
+    let closed = body.is_closed_mesh();
+    Ok(Part { body, closed, file_faces: 0, face_origin: Vec::new(), refused: None })
 }
 
 /// The part of body `k`, a copy of body `j`: `j`'s, which must be an earlier original that

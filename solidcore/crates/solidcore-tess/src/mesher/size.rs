@@ -10,7 +10,10 @@
 
 use solidcore::Vec3;
 use crate::vec::VecExt as _;
+use solidcore::eval::CurveEval;
 use solidcore::eval::plan::EvalSurface;
+use solidcore_convert as kernel;
+use solidcore_record::brep;
 
 use super::uv::Domain;
 
@@ -104,11 +107,22 @@ pub(crate) fn local(h: f64, at: Option<SizeAt<'_>>, p: Vec3) -> f64 {
     }
 }
 
-/// The body's extent: twice the largest distance of a vertex from the vertices' centroid. Unlike
+/// The body's extent: twice the largest distance of a point from the points' centroid, over its
+/// vertices and each edge's points at a quarter, a half and three quarters of its interval. Unlike
 /// a bounding box diagonal it does not change when the body is turned, so a placed copy meshes
-/// like the original.
-pub(crate) fn extent(points: impl Iterator<Item = Vec3>) -> f64 {
-    let points: Vec<Vec3> = points.filter(|p| p.is_finite()).collect();
+/// like the original. The edges count: a sphere or a torus is closed along seams, so its vertices
+/// alone can be two poles or two points a tube apart (a half torus 1000 mm across with a 1 mm
+/// tube came out 1 mm across, and its 3142 mm edges were split to a fifth of a millimetre, near
+/// [`super::edges::MAX_EDGE_NODES`]). An edge whose curve does not evaluate adds its vertices only.
+pub(crate) fn extent(b: &brep::Brep) -> f64 {
+    let mut points: Vec<Vec3> = b.vertices.iter().map(|v| Vec3::new(v.point[0], v.point[1], v.point[2])).collect();
+    for e in &b.edges {
+        let Ok(value) = kernel::curve(e.parameters()) else { continue };
+        let Ok(curve) = CurveEval::new(&value) else { continue };
+        let [t0, t1] = e.interval;
+        points.extend((1..4).filter_map(|i| curve.point(t0 + (t1 - t0) * f64::from(i) / 4.0)));
+    }
+    points.retain(|p| p.is_finite());
     if points.is_empty() {
         return 0.0;
     }

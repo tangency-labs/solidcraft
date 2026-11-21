@@ -154,8 +154,10 @@ the bindings by the version the component's imports and exports name, so plugins
 
 ## Per-design plugin data
 
-A design container reserves `plugins/<plugin-id>/` for files a plugin keeps with that design
-(`plugin_data` in the design, base64 by `<plugin-id>/<path>` in a plain JSON design). SolidCraft
+A design container reserves `plugins/<plugin-id>/` for files a plugin keeps with that design, one
+part each, held as their bytes while the design is open. A plain JSON design can't carry them:
+saving one that has plugin data as `.json` is refused, and an older JSON design's base64
+`plugin_data` is decoded as it opens and never written again. SolidCraft
 keeps those files and saves them back byte for byte whether or not the plugin is installed;
 opening a design never needs, loads or runs a plugin. A plugin with the `storage@0.1` capability
 reads and writes its own folder through the `storage.*` commands (see

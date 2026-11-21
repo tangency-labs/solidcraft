@@ -2155,12 +2155,25 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
         .map(|(_, r)| r.clone());
     // A constraint's reply: how free its part is with the constraint the preview shows.
     let placed = cmds.iter().zip(&preview.replies).find(|((c, _), _)| c.starts_with("assembly.constraint.")).map(|(_, r)| r.clone());
+    let plugin_view = cmds.iter().zip(&preview.replies).rev().find(|((c, _), _)| c == "plugin.run").and_then(|(_, reply)| reply.get("view")).cloned();
+    let before = preview.before.clone();
+    let shown_after: Vec<_> = preview.after.sketches.iter().filter(|sketch| preview.shown_sketches.contains(&sketch.feature)).cloned().collect();
     // A moved component looks like itself (no new surface), with its old place as the ghost.
-    // A plugin's run in a design with nothing placed keeps the colours of a new body.
-    let colors = if was_placed { Colors { added: colors.body, new_body: colors.body, ..colors } } else { colors };
+    // A plugin can both move and make bodies: the builder distinguishes them per body.
+    let colors = if was_placed && !plugin { Colors { added: colors.body, new_body: colors.body, ..colors } } else { colors };
     Some(build_world_preview(preview, colors).map(|mut built| {
         built.stopped = stopped;
         built.placed = placed;
+        built.plugin_view = plugin_view;
+        if plugin {
+            // Match committed Fit with every sketch shown after the run, even unchanged ones.
+            // The preview diff separately retains changed geometry, including hidden sketches.
+            built.bounds = shown_after.iter().fold(built.bounds, |b, sketch| b.union(&solidcraft_engine::view::sketch_bounds(sketch)));
+        }
+        // Deleting the last body still draws its removed-material ghost.
+        if plugin && built.bounds.is_empty() && !built.replaced.is_empty() {
+            built.bounds = before.bodies.iter().fold(Aabb3::EMPTY, |b, body| b.union(&body.mesh().bounds()));
+        }
         built
     }))
 }
@@ -2175,6 +2188,8 @@ pub(crate) fn build_world_preview(preview: solidcraft_engine::Preview, colors: C
                 b.scene.ghost.clear();
             }
             b.bounds = after.bodies.iter().fold(Aabb3::EMPTY, |acc, x| acc.union(&x.mesh().bounds()));
+            // The joints the preview posed: what a reader of the pose sees the preview show.
+            b.joints = preview.joints;
             Ok(b)
         }
         Err(_) => Err("the preview failed".into()),

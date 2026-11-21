@@ -1873,39 +1873,44 @@ fn thread_size_suggestion_follows_picks_without_overwriting_manual_sizes() {
     assert_eq!(apply_commands(&app, &d).unwrap()[0].1["designation"], "M8x1");
 }
 
-/// Explicitly adding faces keeps automatic sizing separate for different shaft diameters.
+/// Preselection and explicit additions keep automatic sizing separate for different shaft diameters.
 #[test]
 fn threads_on_different_selected_diameters_keep_each_faces_automatic_size() {
-    let mut app = app_with(json!([
-        {"command":"solid.cylinder","params":{"radius":4,"height":10}},
-        {"command":"solid.cylinder","params":{"base":[30,0,0],"radius":10,"height":10}}
-    ]));
-    let small = thread_face(&app, "Body1");
-    let large = thread_face(&app, "Body2");
-    let before = app.session.doc.to_json();
-    let mut d = start(&mut app, vec![small.clone(), large.clone()], "solid.thread");
-    assert!(!d.inputs[0].multi);
-    assert_eq!(d.inputs[0].items, vec![small.clone()]);
-    d.take_box(&app.session, vec![large.clone()], true);
-    assert!(d.inputs[0].multi);
-    assert_eq!(d.inputs[0].items, vec![small, large]);
-    assert!(matches!(&d.kind, Kind::Thread { designation, .. } if designation == "M8"));
-    assert_eq!(app.session.doc.to_json(), before, "suggesting a size is read-only");
-    let commands = apply_commands(&app, &d).unwrap();
-    assert_eq!(commands.len(), 1);
-    let (command, params) = &commands[0];
-    assert_eq!(command, "solid.thread");
-    assert_eq!(params["faces"].as_array().unwrap().len(), 2);
-    assert!(params.get("designation").is_none(), "each face must keep automatic sizing");
-    let reply = app.session.execute(command, params).unwrap();
-    let id = reply["feature"].as_u64().unwrap();
-    let state = app.session.model.state();
-    assert_eq!(state.threads.len(), 2);
-    for (thread, (body, expected)) in state.threads.iter().zip([("Body1", "M8"), ("Body2", "M20")]) {
-        assert_eq!(thread.body, body);
-        assert_eq!(thread.designation, expected);
-        assert!(!thread.internal);
-        assert_eq!(thread.feature, id, "different automatic sizes still belong to one feature");
+    for preselect_both in [false, true] {
+        let mut app = app_with(json!([
+            {"command":"solid.cylinder","params":{"radius":4,"height":10}},
+            {"command":"solid.cylinder","params":{"base":[30,0,0],"radius":10,"height":10}}
+        ]));
+        let small = thread_face(&app, "Body1");
+        let large = thread_face(&app, "Body2");
+        let before = app.session.doc.to_json();
+        let selection = if preselect_both { vec![small.clone(), large.clone()] } else { vec![small.clone()] };
+        let mut d = start(&mut app, selection, "solid.thread");
+        if !preselect_both {
+            assert!(!d.inputs[0].multi);
+            assert_eq!(d.inputs[0].items, vec![small.clone()]);
+            d.take_box(&app.session, vec![large.clone()], true);
+        }
+        assert!(d.inputs[0].multi);
+        assert_eq!(d.inputs[0].items, vec![small, large]);
+        assert!(matches!(&d.kind, Kind::Thread { designation, .. } if designation == "M8"));
+        assert_eq!(app.session.doc.to_json(), before, "suggesting a size is read-only");
+        let commands = apply_commands(&app, &d).unwrap();
+        assert_eq!(commands.len(), 1);
+        let (command, params) = &commands[0];
+        assert_eq!(command, "solid.thread");
+        assert_eq!(params["faces"].as_array().unwrap().len(), 2);
+        assert!(params.get("designation").is_none(), "each face must keep automatic sizing");
+        let reply = app.session.execute(command, params).unwrap();
+        let id = reply["feature"].as_u64().unwrap();
+        let state = app.session.model.state();
+        assert_eq!(state.threads.len(), 2);
+        for (thread, (body, expected)) in state.threads.iter().zip([("Body1", "M8"), ("Body2", "M20")]) {
+            assert_eq!(thread.body, body);
+            assert_eq!(thread.designation, expected);
+            assert!(!thread.internal);
+            assert_eq!(thread.feature, id, "different automatic sizes still belong to one feature");
+        }
     }
 }
 
@@ -4405,6 +4410,31 @@ fn model_bounds_are_kept_until_the_model_changes() {
     }
     let far = crate::viewport::model_bounds(&app);
     assert!((far.max.x - 505.0).abs() < 1e-6, "a new sketch grows the box: {far:?}");
+}
+
+/// What the refinement reads of each body whatever the view (its id, whether it may be refined,
+/// the ids of every body) is taken once per model, not each time the view rests: the same
+/// state gives the same record, and a new body makes a new one with it.
+#[test]
+fn the_refinements_record_of_the_bodies_is_kept_until_the_model_changes() {
+    let mut app = boxed();
+    let record = |app: &SolveApp| {
+        let st = crate::open_meshing::shown_world(app);
+        let bounds = crate::viewport::body_bounds(app, &st);
+        (st.clone(), crate::viewport::lod_bodies(app, &st, &bounds))
+    };
+    let (st, one) = record(&app);
+    assert_eq!(one.bodies.len(), 1);
+    assert_eq!(one.bodies[0], (crate::display_lod::body_id(&st.bodies[0]).0, true), "a solid may be refined");
+    assert!(one.live.contains(&one.bodies[0].0));
+    assert!(std::sync::Arc::ptr_eq(&one, &record(&app).1), "the same state gives the same record");
+    app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0], "operation": "new"})).unwrap();
+    let (st, two) = record(&app);
+    assert_eq!(two.bodies.len(), 2, "a new body makes a new record");
+    for (b, (id, refined)) in st.bodies.iter().zip(&two.bodies) {
+        assert_eq!(*id, crate::display_lod::body_id(b).0);
+        assert!(*refined && two.live.contains(id));
+    }
 }
 
 /// #2747: the Revolve window takes a planar body face as its profile, as the engine already

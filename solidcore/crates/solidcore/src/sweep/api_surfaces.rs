@@ -11,6 +11,7 @@
 //! | `copy_skin_primitive_curves` (private)       | `SmApiCopySkinPrimitiveCurves` (static)        |
 //! | [`create_skin_primitive`], [`SkinPrimitive`] | `SmApiCreateSkinPrimitive`                     |
 //! | [`create_skin_primitive_with_sources`], [`SkinSources`], [`NotTraced`] | (not upstream: #3139) |
+//! | [`create_skin_primitive_with_ends`] | (not upstream: the skin with [`SkinEnd`]s) |
 //! | [`create_skin_from_faces`], [`SkinFromFaces`] | `SmApiCreateSkinFromFaces`                    |
 //! | [`create_extrude`]                           | `SmApiCreateExtrude`                           |
 //! | [`create_sweep`]                             | `SmApiCreateSweep`                             |
@@ -60,6 +61,7 @@ use crate::primitive::primitive_creation::p3::skin_sources::SkinTrace;
 pub use crate::primitive::primitive_creation::p3::skin_sources::{NotTraced, SkinSources};
 use crate::primitive::primitive_creation::p3::RepeatedSweepOptions;
 use crate::surface::surface::Surface;
+use crate::sweep::skin_ends::SkinEnd;
 use crate::topology::{Brep, FaceId};
 
 const OP_SKIN_PRIMITIVE: &str = "sweep::api_surfaces::create_skin_primitive";
@@ -174,7 +176,45 @@ pub fn create_skin_primitive(
     degree: usize,
     cap_ends: bool,
 ) -> Result<SkinPrimitive> {
-    skin_primitive(k, curves_in_each_profile, curves_3d, degree, cap_ends, None)
+    skin_primitive(
+        k,
+        curves_in_each_profile,
+        curves_3d,
+        degree,
+        cap_ends,
+        [SkinEnd::Free; 2],
+        None,
+    )
+}
+
+/// [`create_skin_primitive`] with how the skin leaves its first profile and arrives at its
+/// last (not upstream). A [`SkinEnd::Square`] end leaves square to its profile's plane, on the
+/// side the next profile is on, each point with the end's weight times the speed of its
+/// straight way to the next profile ([`crate::sweep::skin_ends`]); with both ends
+/// [`SkinEnd::Free`] the skin is `create_skin_primitive`'s, bit for bit.
+///
+/// # Errors
+///
+/// Those of [`create_skin_primitive`]; for a square end, `InvalidInput` for profiles that
+/// are not closed planar loops, a weight that is not a number above 0, and an end whose
+/// neighbouring profile's centre lies in its plane (no side to leave to).
+pub fn create_skin_primitive_with_ends(
+    k: &mut Kernel,
+    curves_in_each_profile: &[usize],
+    curves_3d: &[Option<&Curve>],
+    degree: usize,
+    cap_ends: bool,
+    ends: [SkinEnd; 2],
+) -> Result<SkinPrimitive> {
+    skin_primitive(
+        k,
+        curves_in_each_profile,
+        curves_3d,
+        degree,
+        cap_ends,
+        ends,
+        None,
+    )
 }
 
 /// [`create_skin_primitive`], also returning which of `curves_3d` each side face was
@@ -190,9 +230,9 @@ pub fn create_skin_primitive(
 /// profile, and within a profile in the caller's order). The faces split at the
 /// skin's knots of continuity G1 or less, judged on the knots: each join of two curves
 /// is one, tangent or not (a rounded square's eight curves make eight walls), and a
-/// curve with a kink of its own spans several. [`SkinSources::NotTraced`] says why there is no answer: open
-/// profiles, or sections whose joined curves differ in degree or knots (the skin's
-/// compatibility step can then move a curve's ends; see [`NotTraced`]).
+/// curve with a kink of its own spans several. Open profiles trace as closed ones do,
+/// through the segments of each one's joined curve. [`SkinSources::NotTraced`] says why
+/// there is no answer (see [`NotTraced`]).
 ///
 /// # Errors
 ///
@@ -211,6 +251,7 @@ pub fn create_skin_primitive_with_sources(
         curves_3d,
         degree,
         cap_ends,
+        [SkinEnd::Free; 2],
         Some(&mut trace),
     )?;
     Ok((skin, trace.into_sources()))
@@ -223,6 +264,7 @@ fn skin_primitive(
     curves_3d: &[Option<&Curve>],
     degree: usize,
     cap_ends: bool,
+    ends: [SkinEnd; 2],
     trace: Option<&mut SkinTrace>,
 ) -> Result<SkinPrimitive> {
     validate_skin_primitive_inputs(curves_in_each_profile, curves_3d, degree)?;
@@ -235,7 +277,21 @@ fn skin_primitive(
         PrimitiveModel::build_new(k, |pc, model| {
             let (mut start, mut side, mut end) = (Vec::new(), Vec::new(), Vec::new());
             let mut transferred = Vec::new();
+            let free = ends == [SkinEnd::Free; 2];
             let status = match trace {
+                trace if !free => pc.create_skin_primitive_with_ends(
+                    model,
+                    PrimitiveModel::MAIN,
+                    curves_in_each_profile,
+                    &mut curves,
+                    0.0,
+                    degree,
+                    cap_ends,
+                    [&mut start, &mut side, &mut end],
+                    &mut transferred,
+                    ends,
+                    trace,
+                ),
                 None => pc.create_skin_primitive(
                     model,
                     PrimitiveModel::MAIN,

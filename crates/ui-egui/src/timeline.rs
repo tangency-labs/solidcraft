@@ -96,7 +96,7 @@ pub(crate) fn history_folder_items(app: &SolveApp) -> Vec<Item> {
                 _ => format!("timeline_{}", control.id()),
             };
             let effect = transport_effect(app, control);
-            Item::action("ui.historyTransport", control.label(playing, play_labels()), &icon)
+            Item::action("ui.historyTransport", control.label(playing, play_labels(app)), &icon)
                 .with(json!({ "control": control.id() }))
                 .on(effect.is_ok())
                 .off_because(effect.err().flatten())
@@ -160,9 +160,17 @@ pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
 /// as Edit Feature on a face finds it (the hole, not the plate it was cut into), else the feature
 /// that made the body.
 fn geometry_feature(app: &SolveApp, body: &str, face: Option<usize>) -> Option<u64> {
-    face.and_then(|index| crate::context_menu::face_feature(app, body, index))
-        .or_else(|| crate::open_meshing::session_world(&app.session).body(body).map(|b| b.feature))
-        .filter(|id| app.session.doc.feature(*id).is_some())
+    let world = crate::open_meshing::session_world(&app.session);
+    let model_body = world.body(body)?;
+    let owner = app.session.doc.feature(model_body.feature);
+    // An imported mesh can only highlight its import feature. Looking up a geometric face
+    // name here would scan the mesh on the UI thread the first time its face is hovered.
+    if model_body.body.triangle_mesh().is_some()
+        && owner.is_some_and(|feature| matches!(feature.kind, FeatureKind::Import { .. } | FeatureKind::MeshImport { .. }))
+    {
+        return Some(model_body.feature);
+    }
+    face.and_then(|index| crate::context_menu::face_feature(app, model_body, index)).or_else(|| owner.map(|feature| feature.id))
 }
 
 /// The feature of the face, edge or vertex under the pointer in the view.
@@ -218,6 +226,8 @@ impl TimelineKind {
         match kind {
             FeatureKind::Sketch { .. } => Self::Sketch,
             FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } | FeatureKind::Sweep { sketch, .. } => Self::Profile(*sketch),
+            // Sheet metal drawn from a sketch: the base flange's outline and the contour flange's chain.
+            FeatureKind::SheetBase { sketch, .. } | FeatureKind::SheetContour { sketch, .. } => Self::Profile(*sketch),
             _ => Self::Other,
         }
     }
@@ -295,6 +305,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Pipe { .. } => "pipe",
         FeatureKind::FrameEndCap { .. } => "end_cap",
         FeatureKind::FrameMember { .. } => "frame_member",
+        FeatureKind::FrameMemberTurn { .. } => "rotate_member",
         FeatureKind::Emboss { .. } => "emboss",
         FeatureKind::ReplaceFace { .. } => "replace_face",
         FeatureKind::Align { .. } => "align",
@@ -955,10 +966,17 @@ fn playback_ready(app: &SolveApp) -> Result<(), String> {
         return Err(solidcraft_ui_text::tr("ui.history_play_finish_action").into());
     }
     let n = app.session.doc.features.len();
-    if app.session.doc.marker.unwrap_or(n) >= n {
+    if app.session.doc.marker.unwrap_or(n) >= n && !play_starts_over(app) {
         return Err(solidcraft_ui_text::tr("ui.history_play_roll_back").into());
     }
     Ok(())
+}
+
+/// Whether Play History starts over: the marker is at the end of a History that has features
+/// (#10798).
+fn play_starts_over(app: &SolveApp) -> bool {
+    let n = app.session.doc.features.len();
+    n > 0 && app.session.doc.marker.unwrap_or(n) >= n
 }
 
 pub(crate) fn request_playback(app: &mut SolveApp, action: PlaybackAction) -> Result<(), String> {
@@ -970,6 +988,14 @@ pub(crate) fn request_playback(app: &mut SolveApp, action: PlaybackAction) -> Re
         return Ok(());
     }
     playback_ready(app)?;
+    if play_starts_over(app) {
+        // Back to the start first, shown like any step; the next step shows the first feature
+        // (#10798).
+        let revision = app.session.revision;
+        app.run_heavy("timeline.roll_to", json!({"position": 0}))?;
+        app.timeline_playback = Some(Playback { revision, position: 0, waiting: true, next_at: 0.0 });
+        return Ok(());
+    }
     let n = app.session.doc.features.len();
     let position = app.session.doc.marker.unwrap_or(n);
     app.timeline_playback = Some(Playback { revision: app.session.revision, position, waiting: false, next_at: 0.0 });
@@ -1183,9 +1209,11 @@ impl BarResults {
     }
 }
 
-/// The History Play control's names: SolidCraft's commands that play and stop History.
-pub(crate) fn play_labels() -> crate::ui_kit::PlayLabels<'static> {
-    crate::ui_kit::PlayLabels { play: solidcraft_ui_text::tr("cmd.timeline_play"), stop: solidcraft_ui_text::tr("cmd.timeline_stop") }
+/// The History Play control's names: SolidCraft's commands that play and stop History, and
+/// "Play from the start" while Play starts over (#10798).
+pub(crate) fn play_labels(app: &SolveApp) -> crate::ui_kit::PlayLabels<'static> {
+    let play = if play_starts_over(app) { "ui.history_play_from_start" } else { "cmd.timeline_play" };
+    crate::ui_kit::PlayLabels { play: solidcraft_ui_text::tr(play), stop: solidcraft_ui_text::tr("cmd.timeline_stop") }
 }
 
 /// The bar as SolidCraft describes it; the strip sets the marker's slot and the step count.
@@ -1765,7 +1793,7 @@ mod tests {
             cases.push((format!("construct.point.{id}"), FeatureKind::ConstructionPoint { def }));
         }
         for (id, plane) in [
-            ("midplane", PlaneRef::Midplane { a: reference(), b: reference() }),
+            ("midplane", PlaneRef::Midplane { a: reference(), b: reference(), old_frame: false }),
             ("axis_point", PlaneRef::AxisPoint { axis: reference(), point: reference() }),
             ("two_edges", PlaneRef::TwoEdges { a: reference(), b: reference() }),
             ("three_points", PlaneRef::ThreePoints { a: reference(), b: reference(), c: reference() }),
@@ -1859,10 +1887,12 @@ mod tests {
                 .collect()
         };
         let state = |pairs: [(&str, bool); 5]| pairs.map(|(c, on)| (c.to_owned(), on)).to_vec();
-        // At the end: only the steps back are on, and Play has nothing left to play.
-        assert_eq!(enabled(&h), state([("first", true), ("back", true), ("play", false), ("forward", false), ("last", false)]));
-        let play = crate::context_menu::items(&h.app, &folder).into_iter().find(|i| i.id == "ui.historyTransport" && i.label == "Play History");
-        assert_eq!(play.and_then(|i| i.tip).as_deref(), Some(solidcraft_ui_text::tr("ui.history_play_roll_back")), "Play says why it is off");
+        // At the end: only the steps back are on, and Play plays from the start (#10798).
+        assert_eq!(enabled(&h), state([("first", true), ("back", true), ("play", true), ("forward", false), ("last", false)]));
+        let play = |h: &Harness| {
+            crate::context_menu::items(&h.app, &folder).into_iter().find(|i| i.id == "ui.historyTransport" && i.icon == "timeline_play")
+        };
+        assert_eq!(play(&h).map(|i| i.label).as_deref(), Some(solidcraft_ui_text::tr("ui.history_play_from_start")));
         // The bar's controls menu follows a separator.
         let items = crate::context_menu::items(&h.app, &folder);
         assert!(items.iter().any(|i| i.is_sep()) && items.iter().any(|i| i.id == "ui.historyPlayButton"));
@@ -2027,17 +2057,49 @@ mod tests {
         assert_eq!(h.app.session.model.state().bodies.len(), 1);
     }
 
+    /// Play with the marker at the end goes back to the start, shows the design before its first
+    /// feature, then plays every feature at the usual pace (#10798).
     #[test]
-    fn playback_at_the_end_or_in_an_empty_design_leaves_history_unchanged() {
-        for mut h in [Harness::new(), two_boxes(false)] {
-            h.frames(2);
-            let revision = h.app.session.revision;
-            h.app.start("timeline.play");
-            h.frames(2);
-            h.frames(60);
-            assert_eq!(h.app.session.revision, revision);
-            assert!(h.app.timeline_playback.is_none());
-        }
+    fn playback_at_the_end_starts_over_from_the_first_feature() {
+        let mut h = two_boxes(false);
+        assert_eq!(h.app.session.doc.marker, None);
+        assert_eq!(super::play_labels(&h.app).play, solidcraft_ui_text::tr("ui.history_play_from_start"));
+        h.app.start("timeline.play");
+        h.frames(2);
+        assert_eq!(h.app.session.doc.marker, Some(0), "back to the start first");
+        assert_eq!(h.app.session.model.state().bodies.len(), 0);
+        assert!(h.app.timeline_playback.is_some());
+        assert_eq!(super::play_labels(&h.app).play, solidcraft_ui_text::tr("cmd.timeline_play"), "away from the end, Play is Play History again");
+        h.frames(10);
+        assert_eq!(h.app.session.doc.marker, Some(0), "leave time to see the start");
+        h.frames(40);
+        assert_eq!(h.app.session.doc.marker, Some(1));
+        assert_eq!(h.app.session.model.state().bodies.len(), 1);
+        h.frames(60);
+        assert_eq!(h.app.session.doc.marker, None, "played to the end");
+        assert_eq!(h.app.session.model.state().bodies.len(), 2);
+        assert!(h.app.timeline_playback.is_none());
+
+        // Escape stops a playback that started over where it is.
+        h.app.start("timeline.play");
+        h.frames(2);
+        assert_eq!(h.app.session.doc.marker, Some(0));
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.frames(80);
+        assert!(h.app.timeline_playback.is_none());
+        assert_eq!(h.app.session.doc.marker, Some(0), "stopped at the start");
+    }
+
+    #[test]
+    fn playback_in_an_empty_design_leaves_history_unchanged() {
+        let mut h = Harness::new();
+        h.frames(2);
+        let revision = h.app.session.revision;
+        h.app.start("timeline.play");
+        h.frames(2);
+        h.frames(60);
+        assert_eq!(h.app.session.revision, revision);
+        assert!(h.app.timeline_playback.is_none());
     }
 
     #[test]
@@ -2746,6 +2808,29 @@ mod tests {
             assert!(shown(&h), "left={left}: the pick scrolled the hole into the timeline");
             assert!(h.app.tree.timeline_reveal.is_none(), "left={left}: once, not on every frame");
         }
+    }
+
+    #[test]
+    fn an_imported_mesh_lights_its_import_feature_in_history() {
+        use solidcraft_engine::doc::{Document, MeshData};
+
+        let mut doc = Document::default();
+        let mesh = MeshData {
+            name: "Scan".into(),
+            positions: [0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0].into(),
+            triangles: [0, 1, 2].into(),
+            color: None,
+            corner_normals: Default::default(),
+        };
+        let imported = doc.add_feature(FeatureKind::MeshImport { file: "scan.stl".into(), meshes: vec![mesh] }, Some("Import Scan")).unwrap();
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::new(doc), crate::Services::default());
+        let world = crate::open_meshing::session_world(&app.session);
+        let body = world.bodies.first().unwrap().name.clone();
+        let point = solidcore_record::Vec3::new(0.25, 0.25, 0.0);
+        app.viewport.hover = Some(crate::viewport::Hit::Face { body: body.clone(), index: 0, point });
+        assert_eq!(super::hovered_feature(&app), Some(imported));
+        app.session.selection = vec![solidcraft_engine::Sel::Face { body, index: 0, point }];
+        assert_eq!(super::picked_feature(&app), Some(imported));
     }
 
     #[test]

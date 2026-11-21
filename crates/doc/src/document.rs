@@ -103,7 +103,15 @@ pub enum PlaneRef {
         about_y: bool,
     },
     /// Halfway between two planes (or planar faces); bisecting them when they meet at an angle.
-    Midplane { a: Box<GeoRef>, b: Box<GeoRef> },
+    Midplane {
+        a: Box<GeoRef>,
+        b: Box<GeoRef>,
+        /// The design was saved before the midplane took a world plane's frame (#18260): the
+        /// frame it was saved with (the first plane's own origin and axes) is kept, so the
+        /// sketch stays where it was saved.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        old_frame: bool,
+    },
     /// Through two straight edges (lines) that lie in one plane.
     TwoEdges { a: Box<GeoRef>, b: Box<GeoRef> },
     /// Through a line (axis) and a point not on that line.
@@ -125,6 +133,10 @@ pub enum PlaneRef {
     AlongPath { path: Box<GeoRef>, t: Expr },
     /// Through a straight edge (or line, axis) and square to a plane (or planar face).
     Perpendicular { plane: Box<GeoRef>, line: Box<GeoRef> },
+    /// Through a picked point, square to a straight edge (or line, axis): with the point on the
+    /// line, Plane Along Path at that position; with it off the line, the plane keeps the line's
+    /// direction and passes through the point.
+    SquareToLine { line: Box<GeoRef>, point: Box<GeoRef> },
     /// A planar body face. Certified attachments resolve only their exact source and report
     /// an error when it is lost; `plane` then supplies a repair guide. Legacy references without
     /// an anchor try the persistent `name`, then the nearest parallel face at `at`, and retain
@@ -243,13 +255,16 @@ impl Touching {
     }
 }
 
-/// What a cell grid does with its cells. Only `cut` is built so far.
+/// What a cell grid does with its cells.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CellGridMode {
     /// Cut the cells out of the targets.
     #[default]
     Cut,
+    /// Add the cells as material standing on the sketch plane, joined to the targets. A design
+    /// with this mode is written with the next format number.
+    Raised,
 }
 
 /// The smallest cell size and web of a cell grid, in mm.
@@ -1426,6 +1441,14 @@ pub enum FeatureKind {
         #[serde(default)]
         direction: crate::end_cap::Direction,
     },
+    /// Turns one frame member about its own line: the step's `angle` is added to the member's own
+    /// `angle` for that line, about the centre of the profile (`eval_frame::member_turns`, the
+    /// latest active step winning); the member is rebuilt turned.
+    FrameMemberTurn {
+        member: crate::end_cap::Member,
+        #[walk(angle = "Angle")]
+        angle: Expr,
+    },
     /// Structural members (#4003): one body per straight line of a frame sketch (2D sketch lines
     /// and 3D sketch lines), its cross-section the profile, square to the line from end to end.
     FrameMember {
@@ -1550,7 +1573,8 @@ pub enum FeatureKind {
     },
     /// A cell grid (#14044): the cells of one shape that fill the closed profiles of a sketch (an
     /// outer loop is the field, a loop inside it a keep-out), cut from the targets `depth` deep
-    /// (or through all) along the sketch normal. The cells are planned by solidcore
+    /// (or through all) along the sketch normal, or with `mode: raised` standing `depth` high
+    /// from the sketch plane and joined to the targets. The cells are planned by solidcore
     /// (`solidcore_ops::cell_grid`) and cut in one boolean.
     CellGrid {
         /// Feature id of the sketch.
@@ -1700,9 +1724,9 @@ pub enum FeatureKind {
         flip: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
-        /// The relief cut where two of this feature's bends meet at a corner of the base, in place
-        /// of the rule's: `corner_relief_shape` (notch | round | rectangular | tear) and
-        /// `corner_relief`, the size across. Either one left out follows the rule.
+        /// The relief cut where two of this feature's bends meet at a corner of the panel they
+        /// stand on, in place of the rule's: `corner_relief_shape` (notch | round | rectangular |
+        /// tear) and `corner_relief`, the size across. Either one left out follows the rule.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         corner_relief_shape: Option<String>,
         /// Walked last, after the edges' values, so the inputs before it keep their names.
@@ -1753,8 +1777,8 @@ pub enum FeatureKind {
         #[walk(profiles_of = sketch)]
         profiles: Option<ProfileSel>,
     },
-    /// Fold a sheet along a line on its base face: a sketch line (followed when the sketch
-    /// changes), else the points `a`, `b`.
+    /// Fold a sheet along a line on one of its flat faces: a sketch line (followed when the
+    /// sketch changes), else the points `a`, `b`.
     SheetFold {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sketch: Option<SketchId>,
@@ -1771,9 +1795,11 @@ pub enum FeatureKind {
         position: String,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         flip: bool,
-        /// The point the side that stays was picked by, kept as it was given: the fold made
-        /// with it stores that side in `stays` (and a design saved before `stays` gets it when
-        /// opened), so the point no longer decides; a point off the sheet is still said.
+        /// The point the side that stays is picked by, as it was given. The `sheet.fold` command
+        /// refuses a point off the sheet, decides the side by it once, stores that side in
+        /// `stays` and keeps no point. A fold it could not decide then keeps its point, and a fold
+        /// saved before `stays` keeps the point it was made with: its side is decided by it as
+        /// the design opens (see `Document::with_fold_sides`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fixed: Option<Position>,
         /// The side of the line that stays put (see [`FoldSide`]), decided once when the fold is
@@ -3123,6 +3149,17 @@ impl FeatureKind {
         )
     }
 
+    /// Profile sketch id for a constructor feature that captures `Feature::profile_frame`.
+    pub fn constructor_profile_sketch(&self) -> Option<u64> {
+        match self {
+            FeatureKind::Extrude { sketch, .. }
+            | FeatureKind::Revolve { sketch, .. }
+            | FeatureKind::SurfaceExtrude { sketch, .. }
+            | FeatureKind::SurfaceRevolve { sketch, .. } => Some(sketch.0),
+            _ => None,
+        }
+    }
+
     /// Short type name (timeline tooltip, `inspect`).
     pub fn type_name(&self) -> &'static str {
         match self {
@@ -3162,6 +3199,7 @@ impl FeatureKind {
             FeatureKind::BoundingSolid { .. } => "BoundingSolidFeature",
             FeatureKind::Pipe { .. } => "PipeFeature",
             FeatureKind::FrameEndCap { .. } => "EndCapFeature",
+            FeatureKind::FrameMemberTurn { .. } => "MemberTurnFeature",
             FeatureKind::FrameMember { .. } => "FrameMemberFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
             FeatureKind::Boss { .. } => "BossFeature",
@@ -3248,6 +3286,7 @@ impl FeatureKind {
             FeatureKind::BoundingSolid { .. } => "bounding_solid",
             FeatureKind::Pipe { .. } => "pipe",
             FeatureKind::FrameEndCap { .. } => "frame_end_cap",
+            FeatureKind::FrameMemberTurn { .. } => "frame_member_turn",
             FeatureKind::FrameMember { .. } => "frame_member",
             FeatureKind::Emboss { .. } => "emboss",
             FeatureKind::Rib { .. } => "rib",
@@ -3336,6 +3375,7 @@ impl FeatureKind {
             "BoundingSolidFeature" => "bounding_solid",
             "PipeFeature" => "pipe",
             "EndCapFeature" => "frame_end_cap",
+            "MemberTurnFeature" => "frame_member_turn",
             "FrameMemberFeature" => "frame_member",
             "EmbossFeature" => "emboss",
             "BossFeature" => "boss",
@@ -3423,6 +3463,7 @@ impl FeatureKind {
             FeatureKind::BoundingSolid { .. } => "BoundingSolid",
             FeatureKind::Pipe { .. } => "Pipe",
             FeatureKind::FrameEndCap { .. } => "EndCap",
+            FeatureKind::FrameMemberTurn { .. } => "Rotate",
             FeatureKind::FrameMember { .. } => "Member",
             FeatureKind::Emboss { .. } => "Emboss",
             FeatureKind::Boss { .. } => "Boss",
@@ -3544,6 +3585,13 @@ pub struct Feature {
     /// default), or every piece stays one body.
     #[serde(default, skip_serializing_if = "Touching::is_separate")]
     pub touching: Touching,
+    /// For a constructor feature (`Extrude`, `Revolve`, `SurfaceExtrude`, `SurfaceRevolve`) built
+    /// from a profile sketch owned by another component: the rigid transform of this feature's
+    /// component relative to the lowest common ancestor of both components at feature creation
+    /// time. Later moves or joints on this component then carry the built body rigidly with it,
+    /// while moves of the sketch's own component still propagate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_frame: Option<crate::Mat>,
     #[serde(flatten)]
     pub kind: FeatureKind,
 }
@@ -3882,11 +3930,12 @@ pub struct Document {
     /// each in its own entry.
     #[serde(skip_deserializing, skip_serializing_if = "Vec::is_empty")]
     pub drawings: Vec<std::sync::Arc<crate::drawing::Drawing>>,
-    /// Plugin data, by `<plugin-id>/<path>`, base64: kept and saved back untouched, plugin or no
-    /// plugin ([`crate::plugin_data`]). A container keeps each under `plugins/` beside the design.
-    /// Shared, so an edit that copies the design does not copy a plugin's large files.
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty", deserialize_with = "crate::plugin_data::deserialize")]
-    pub plugin_data: std::collections::BTreeMap<String, std::sync::Arc<str>>,
+    /// Plugin data, by `<plugin-id>/<path>`, as bytes: kept and saved back untouched, plugin or no
+    /// plugin ([`crate::plugin_data`]). A container keeps each under `plugins/` beside the design;
+    /// a plain JSON design can't hold it ([`Document::binary_data`]). Shared, so an edit that
+    /// copies the design does not copy a plugin's large files.
+    #[serde(default, skip_serializing, deserialize_with = "crate::plugin_data::deserialize")]
+    pub plugin_data: std::collections::BTreeMap<String, crate::blob::Blob>,
 }
 
 /// The browser's view of a design: items and folders hidden or shown, sketch profiles and
@@ -4670,13 +4719,39 @@ impl Document {
         }
         Ok(d)
     }
+    /// What this design holds that a plain JSON design can't carry: binary data, which only a
+    /// container keeps, as parts of their own. Empty when the design saves as JSON whole.
+    pub fn binary_data(&self) -> Vec<&'static str> {
+        let mut kinds = Vec::new();
+        if self.canvases.iter().any(|c| !c.data.is_empty()) {
+            kinds.push("images");
+        }
+        if self.drawings.iter().any(|d| d.images.iter().next().is_some()) {
+            kinds.push("drawing images");
+        }
+        if self.point_clouds.iter().any(|c| !c.points.is_empty()) {
+            kinds.push("point clouds");
+        }
+        if !self.render.resources.is_empty() || !self.render.texture_resources.is_empty() {
+            kinds.push("render environments and textures");
+        }
+        if !self.plugin_data.is_empty() {
+            kinds.push("plugin files");
+        }
+        kinds
+    }
+
+    /// The design as the text of a `.json` file. The same design always gives the same text, and a
+    /// short list of numbers such as a point stays on one line (the layout is in `json_layout.rs`).
     pub fn to_json(&self) -> String {
-        if self.newer_file.is_some() {
+        let compact = if self.newer_file.is_some() {
             let mut value = serde_json::to_value(self).unwrap_or_default();
             crate::newer_file::restore(self, &mut value);
-            return serde_json::to_string_pretty(&value).unwrap_or_default();
-        }
-        serde_json::to_string_pretty(self).unwrap_or_default()
+            serde_json::to_string(&value).unwrap_or_default()
+        } else {
+            serde_json::to_string(self).unwrap_or_default()
+        };
+        crate::json_layout::pretty(&compact)
     }
 
     pub fn feature(&self, id: u64) -> Option<&Feature> {
@@ -4833,6 +4908,7 @@ impl Document {
             link_faces: Vec::new(),
             link_threads: Vec::new(),
             touching: Touching::Separate,
+            profile_frame: None,
             kind,
         };
         self.place_feature(f);
@@ -5284,6 +5360,7 @@ impl Document {
             | PlaneRef::Tangent { .. }
             | PlaneRef::AlongPath { .. }
             | PlaneRef::Perpendicular { .. }
+            | PlaneRef::SquareToLine { .. }
             | PlaneRef::ThroughPoint { .. } => {
                 let st = st.ok_or_else(|| DocError::Invalid("this plane is built from the model: evaluate first".into()))?;
                 crate::construct::resolve_geo_plane(&crate::construct::Ctx { doc: self, vals, st, depth, component }, p)
@@ -5415,22 +5492,43 @@ impl Document {
     }
 
     /// Move the points placed by parameters to where their expressions come to (in place). Such
-    /// a point is fixed, so the solve keeps it there.
+    /// a point is fixed, so the solve keeps it there. A point's expression may read another
+    /// point's coordinate (`p1.x`), so the points are worked out in the order those names
+    /// allow (#19232).
     pub fn apply_point_values(&self, vals: &std::collections::BTreeMap<String, expr::Value>, sk: &mut Sketch) -> Result<()> {
-        use crate::eval::val;
-        for p in &mut sk.points {
-            let Some(exprs) = p.exprs.as_deref() else { continue };
-            let mut at = p.pos;
-            for (e, slot, what) in [(&exprs.x, &mut at.x, "X"), (&exprs.y, &mut at.y, "Y")] {
-                if let Some(e) = e {
-                    *slot = val(vals, e, Kind::Length).map_err(|error| DocError::Expr(format!("point {} {what}: {error}", p.id)))?;
-                }
+        use crate::eval::val_with;
+        use crate::point_expr;
+        let placed: Vec<usize> = sk.points.iter().enumerate().filter_map(|(i, p)| p.exprs.as_ref().map(|_| i)).collect();
+        if placed.is_empty() {
+            return Ok(());
+        }
+        // The points each point's expressions read: a point waits for them.
+        let names: Vec<Vec<String>> = placed.iter().map(|&i| point_expr::reads(sk, i)).collect();
+        let order = point_expr::order(&placed, &names, sk)?;
+        for i in order {
+            let (id, exprs, start) = match sk.points.get(i) {
+                Some(p) => (p.id.clone(), p.exprs.as_deref().map(|e| (e.x.clone(), e.y.clone())), p.pos),
+                None => continue,
+            };
+            let Some((ex, ey)) = exprs else { continue };
+            let (x, y) = {
+                let members = |point: &str, member: &str| point_expr::coordinate(sk, point, member);
+                let x = match &ex {
+                    Some(e) => val_with(vals, e, Kind::Length, Some(&members)).map_err(|error| DocError::Expr(format!("point {} X: {error}", id)))?,
+                    None => start.x,
+                };
+                let y = match &ey {
+                    Some(e) => val_with(vals, e, Kind::Length, Some(&members)).map_err(|error| DocError::Expr(format!("point {} Y: {error}", id)))?,
+                    None => start.y,
+                };
+                (x, y)
+            };
+            let pos = Vec2::new(x, y);
+            if !(pos.is_finite() && pos.x.abs() < solidcraft_sketch::MAX_COORD && pos.y.abs() < solidcraft_sketch::MAX_COORD) {
+                return Err(DocError::Invalid(format!("point {} is placed out of range", id)));
             }
-            if !(at.is_finite() && at.x.abs() < solidcraft_sketch::MAX_COORD && at.y.abs() < solidcraft_sketch::MAX_COORD) {
-                return Err(DocError::Invalid(format!("point {} is placed out of range", p.id)));
-            }
-            p.pos = at;
-            p.fixed = true;
+            sk.points[i].pos = pos;
+            sk.points[i].fixed = true;
         }
         Ok(())
     }

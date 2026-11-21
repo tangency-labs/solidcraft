@@ -86,7 +86,7 @@ pub fn native_cad_design(bytes: &[u8], file: &str) -> Result<NativeDesign, Strin
 /// [`traced_records`]'s records alone.
 #[cfg(test)]
 pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, system: &str, colours: bool) -> solidcraft_kernel::ImportRecords {
-    traced_records(ir, product, system, colours).0
+    traced_records(ir, product, system, colours, false).0
 }
 
 /// `ir`'s bodies as an import kept as records, written by `system`: each body region assembled
@@ -97,13 +97,15 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
 /// once for each use of its part ([`assembly`]); otherwise the bodies are one product called
 /// `product`. With `colours`, each body takes the colours the file gives it and its faces
 /// ([`Looks::paint_of`]). What could not be read (and what was repaired on the way) is in the
-/// warnings, each naming its body. Also returns where each record body came from ([`validation::Origin`]), for checking the file's own
+/// warnings, each naming its body; with `shown`, a body whose B-rep cannot be read comes in as the
+/// mesh the file shows it with, where it has one. Also returns where each record body came from ([`validation::Origin`]), for checking the file's own
 /// figures ([`validation::check`]).
 fn traced_records(
     ir: &cadmpeg_ir::document::CadIr,
     product: &str,
     system: &str,
     colours: bool,
+    shown: bool,
 ) -> (solidcraft_kernel::ImportRecords, Vec<validation::Origin>) {
     use solidcraft_kernel::{ImportRecords, RecordBody, StepNode};
     let _span = solidcraft_profile::span("import", "cadir.records");
@@ -113,28 +115,96 @@ fn traced_records(
     let mut warnings = Vec::new();
     let mut unplaced = Vec::with_capacity(read.read.len());
     let looks = colours.then(|| Looks::of(ir));
+    let layers = HiddenLayers::of(ir);
     for r in read.read {
         let body = by_id.get(r.body.as_str());
         let (color, paint) = looks.as_ref().map_or((None, None), |l| l.paint_of(ir, &r.body, &r.solid.face_origin));
         warnings.extend(r.solid.notes.iter().map(|n| format!("{}: {n}", label(&r.body))));
         let record = RecordBody {
-            name: body.and_then(|b| b.name.clone()).unwrap_or_default(),
+            name: body.and_then(|b| b.name.as_deref()).map(str::trim).unwrap_or_default().to_string(),
             path: vec![product.to_string()],
             instance: None,
             // Only where asked: a Rhino object's colour is often its layer's default (black),
             // which is not how Rhino shades it.
             color,
             paint,
-            hidden: body.is_some_and(|b| b.visible == Some(false)),
+            hidden: body.is_some_and(|b| b.visible == Some(false)) || layers.bodies.contains(r.body.as_str()),
             placement: r.placement,
             brep: Some(r.solid.brep),
             face_origin: r.solid.face_origin,
             sheet: r.solid.sheet,
             copy_of: None,
+            mesh: None,
         };
         unplaced.push(assembly::Unplaced { body: r.body, record });
     }
-    warnings.extend(read.failures.iter().map(|f| format!("{}: not imported: {}", label(&f.body), f.message)));
+    // With `shown`, a B-rep that cannot be read comes in as the mesh the file shows it with (an
+    // OpenUSD `BrepArray`'s fallback mesh, a tessellation of its body), rather than not at all.
+    let has_triangles =
+        |id: &str| ir.model.tessellations.iter().any(|t| t.body.as_ref().is_some_and(|b| b.as_str() == id) && !t.triangles().is_empty());
+    let fallen: std::collections::HashSet<&str> =
+        if shown { read.failures.iter().map(|f| f.body.as_str()).filter(|id| has_triangles(id)).collect() } else { Default::default() };
+    warnings.extend(read.failures.iter().map(|f| {
+        if fallen.contains(f.body.as_str()) {
+            format!("{}: its B-rep was not imported ({}): it came in as the mesh the file shows it with", label(&f.body), f.message)
+        } else {
+            format!("{}: not imported: {}", label(&f.body), f.message)
+        }
+    }));
+    // Parts the file gives as triangles alone (AP242 tessellated parts): a mesh body each, placed
+    // as any other part. A tessellation of a body that has a B-rep is how the file shows that
+    // body, not a part of its own: it is read only in place of a B-rep that could not be.
+    for t in &ir.model.tessellations {
+        // A tessellation the model ties to no body (cadmpeg reads a part given as triangles alone
+        // so) is a part of its own, where the file defines it, under the root of bodies no
+        // occurrence reaches; in an assembly that is not where the assembly puts it, which the
+        // warning says.
+        let (id, body) = match t.body.as_ref().map(|b| b.as_str()) {
+            Some(id) => match by_id.get(id) {
+                Some(body) if body.regions.is_empty() || fallen.contains(id) => (id, Some(*body)),
+                _ => continue,
+            },
+            None => (t.id.as_str(), None),
+        };
+        let name = body
+            .and_then(|b| b.name.clone())
+            .or_else(|| t.source_object.as_ref().and_then(|s| s.name.clone()))
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if body.is_none() && !ir.model.occurrences.is_empty() {
+            let named = if name.trim().is_empty() { format!("triangles {id}") } else { name.clone() };
+            warnings.push(format!("{named}: a part given as triangles comes in where the file defines it, not placed in the assembly: the file's reader does not say which part it is"));
+        }
+        let placement = match body.and_then(|b| b.transform) {
+            None => None,
+            Some(m) if m.is_proper_rigid() => Some(assembly::column_major(&m)),
+            Some(_) => {
+                warnings.push(format!("{}: not imported: not supported yet: a placement that mirrors or scales", label(id)));
+                continue;
+            }
+        };
+        let (color, paint) = looks.as_ref().map_or((None, None), |l| l.paint_of(ir, id, &[]));
+        let record = RecordBody {
+            name,
+            path: vec![product.to_string()],
+            instance: None,
+            color,
+            paint,
+            // On a hidden layer: its body, or the tessellation itself (a layer names it by its id).
+            hidden: body.is_some_and(|b| b.visible == Some(false)) || layers.bodies.contains(id) || layers.bodies.contains(t.id.as_str()),
+            placement,
+            brep: None,
+            face_origin: Vec::new(),
+            sheet: false,
+            copy_of: None,
+            mesh: Some(solidcraft_kernel::RecordMesh {
+                positions: t.vertices().iter().map(|p| p.coordinates().map(|c| c.get())).collect(),
+                triangles: t.triangles(),
+            }),
+        };
+        unplaced.push(assembly::Unplaced { body: id.to_string(), record });
+    }
     let (bodies, tree, origins) = if ir.model.occurrences.is_empty() {
         let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
         let origins = unplaced.iter().map(|u| validation::Origin { body: u.body.clone(), world: identity }).collect();
@@ -149,13 +219,92 @@ fn traced_records(
         }];
         (bodies, tree, origins)
     } else {
-        assembly::placed(ir, product, unplaced, &mut warnings)
+        assembly::placed(ir, product, unplaced, &layers, &mut warnings)
     };
     (ImportRecords { bodies, tree, warnings, system: system.to_string() }, origins)
 }
 
+/// `records` with each B-rep the kernel cannot build replaced by the mesh the file shows it with,
+/// where it has one: an OpenUSD `BrepArray`'s fallback mesh, which cadmpeg makes a tessellation of
+/// the B-rep's body. The body then comes in as a mesh body, with a warning saying why, rather
+/// than not at all, as the mesh import would have brought it. A B-rep that builds keeps its
+/// record and its mesh is not read. `origins` says which neutral-model body each record is.
+fn meshes_for_refused(
+    ir: &cadmpeg_ir::document::CadIr,
+    mut records: solidcraft_kernel::ImportRecords,
+    origins: &[validation::Origin],
+) -> solidcraft_kernel::ImportRecords {
+    let Ok(imp) = solidcraft_kernel::records_import_shared(&records) else { return records };
+    let refused: std::collections::BTreeMap<usize, String> = imp
+        .report
+        .issues
+        .iter()
+        .filter(|i| i.kind == solidcraft_kernel::IssueKind::NotImported)
+        .filter_map(|i| Some((usize::try_from(i.item?).ok()?, i.detail.clone())))
+        .collect();
+    for (k, why) in refused {
+        let (Some(r), Some(origin)) = (records.bodies.get_mut(k), origins.get(k)) else { continue };
+        if r.copy_of.is_some() || r.brep.is_none() {
+            continue;
+        }
+        let Some(t) = ir.model.tessellations.iter().find(|t| t.body.as_ref().is_some_and(|b| b.as_str() == origin.body)) else { continue };
+        let triangles = t.triangles();
+        if triangles.is_empty() {
+            continue;
+        }
+        r.mesh =
+            Some(solidcraft_kernel::RecordMesh { positions: t.vertices().iter().map(|p| p.coordinates().map(|c| c.get())).collect(), triangles });
+        r.brep = None;
+        r.face_origin = Vec::new();
+        r.sheet = false;
+        r.paint = r.paint.take().map(|p| solidcraft_kernel::Paint { faces: Vec::new(), ..p });
+        records.warnings.push(format!("{why}; it came in as the mesh the file shows it with"));
+    }
+    records
+}
+
 mod assembly;
 mod validation;
+
+/// What the file's hidden presentation layers hide (CADIR ids): bodies (with the bodies of the
+/// products on them, and the parts given as triangles on them), and the occurrences and products
+/// whose placements, with all they hold, start hidden.
+#[derive(Default)]
+pub(crate) struct HiddenLayers {
+    pub bodies: std::collections::HashSet<String>,
+    pub occurrences: std::collections::HashSet<String>,
+    pub definitions: std::collections::HashSet<String>,
+}
+
+impl HiddenLayers {
+    fn of(ir: &cadmpeg_ir::document::CadIr) -> Self {
+        use cadmpeg_ir::presentation::PresentationItem;
+        let mut out = HiddenLayers::default();
+        for layer in ir.model.presentation_layers.iter().filter(|l| l.visible == Some(false)) {
+            for item in &layer.items {
+                match item {
+                    PresentationItem::Body { body } => {
+                        out.bodies.insert(body.as_str().to_string());
+                    }
+                    PresentationItem::Tessellation { tessellation } => {
+                        out.bodies.insert(tessellation.clone());
+                    }
+                    PresentationItem::Occurrence { occurrence } => {
+                        out.occurrences.insert(occurrence.as_str().to_string());
+                    }
+                    PresentationItem::Product { product } => {
+                        out.definitions.insert(product.as_str().to_string());
+                        if let Some(d) = ir.model.product_definitions.iter().find(|d| d.id == *product) {
+                            out.bodies.extend(d.bodies.iter().map(|b| b.as_str().to_string()));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        out
+    }
+}
 
 /// A file's appearances by what they colour: whole bodies and single faces (CADIR ids).
 struct Looks<'a> {
@@ -169,17 +318,30 @@ impl<'a> Looks<'a> {
         let by_id: std::collections::HashMap<&str, &cadmpeg_ir::appearance::Appearance> =
             ir.model.appearances.iter().map(|a| (a.id.as_str(), a)).collect();
         let (mut bodies, mut faces) = (std::collections::HashMap::new(), std::collections::HashMap::new());
+        // A look bound to a body's triangles (an OpenUSD mesh's material) is the body's, unless
+        // the body has one of its own; triangles of no body are a part of their own, by their id.
+        let shown: std::collections::HashMap<&str, &str> =
+            ir.model.tessellations.iter().map(|t| (t.id.as_str(), t.body.as_ref().map_or(t.id.as_str(), |b| b.as_str()))).collect();
+        let mut by_triangles = Vec::new();
         for b in &ir.model.appearance_bindings {
             let Some(look) = by_id.get(b.appearance.as_str()).copied().filter(|a| a.base_color.is_some()) else { continue };
             match &b.target {
                 AppearanceTarget::Body(id) => {
                     bodies.insert(id.as_str(), look);
                 }
+                AppearanceTarget::Tessellation(id) => {
+                    if let Some(body) = shown.get(id.as_str()) {
+                        by_triangles.push((*body, look));
+                    }
+                }
                 AppearanceTarget::Face(id) => {
                     faces.insert(id.as_str(), look);
                 }
                 _ => {}
             }
+        }
+        for (body, look) in by_triangles {
+            bodies.entry(body).or_insert(look);
         }
         Looks { bodies, faces }
     }
@@ -225,6 +387,22 @@ pub fn usd_from_step(step: &[u8], file: &str) -> Result<(Vec<u8>, Vec<String>), 
             e => e.to_string(),
         },
     )
+}
+
+/// An OpenUSD file (`file` is its name) read for an import of its exact geometry, kept as records
+/// as a FreeCAD or Rhino file's are ([`native_cad_records`]): each B-rep (a `BrepArray`'s solids
+/// and shells) a B-rep record, each mesh with no B-rep beside it a mesh
+/// record, the prim tree the product tree, and the materials' colours (sRGB) the bodies'. A mesh
+/// that only shows a B-rep (its fallback) is read only in place of a B-rep that cannot be. Also returns what cadmpeg
+/// could not bring over, and whether the file says Y is up (OpenUSD's default when it says
+/// nothing). Panics inside cadmpeg or the reader become errors.
+pub fn usd_records(bytes: &[u8], file: &str) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
+    let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
+    solidcraft_kernel::guard("cadmpeg USD exact import", || convert::usd_records(&name, bytes).map_err(solidcraft_kernel::KernelError::Invalid))
+        .map_err(|e| match e {
+            solidcraft_kernel::KernelError::Invalid(m) => m,
+            e => e.to_string(),
+        })
 }
 
 /// An OpenUSD file (`file` is its name) read for a mesh import: each mesh a mesh body, the prim
@@ -447,8 +625,38 @@ mod convert {
     /// records.
     fn records_of(name: &str, ext: &str, bytes: &[u8], accepted: &[&str]) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
         let (format, decoded) = decode_at(name, ext, bytes, accepted, DecodeDepth::Full)?;
-        let policy = policy();
+        let (ir, report, _) = decoded.into_parts();
+        records_decoded(name, &format, ir, &report, bytes.len())
+    }
+
+    /// An OpenUSD file (`name`) read by cadmpeg's USD codec into an import kept as records: each
+    /// `BrepArray` B-rep a B-rep record (a `NurbsPatch` is refused: cadmpeg gives it no boundary), each mesh with no B-rep a mesh record,
+    /// and a mesh that only shows a B-rep (its fallback, which cadmpeg makes a tessellation of
+    /// that B-rep's body) not a second time. Also returns whether the file says Y is up
+    /// (OpenUSD's default when it says nothing).
+    pub(super) fn usd_records(name: &str, bytes: &[u8]) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
+        crate::limits::check(crate::limits::Kind::Step, bytes.len() as u64).map_err(|e| format!("{name}: {e}"))?;
+        let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+        // cadmpeg checks each layer's encoding from its first bytes; the extension only decides
+        // when they say nothing.
+        let ext = if ext == "usd" { String::from("usdc") } else { ext };
+        let (format, decoded) = decode_at(name, &ext, bytes, &["usd"], DecodeDepth::Full)?;
         let (mut ir, report, _) = decoded.into_parts();
+        let y_up = super::usd::says_y_up(&ir);
+        super::usd::colours_to_srgb(&mut ir);
+        let (records, warnings, _) = records_decoded(name, &format, ir, &report, bytes.len())?;
+        Ok((records, warnings, y_up))
+    }
+
+    /// A model cadmpeg decoded (`format`, from `len` bytes of file `name`) read into records.
+    fn records_decoded(
+        name: &str,
+        format: &str,
+        mut ir: CadIr,
+        report: &cadmpeg_ir::report::decode::DecodeReport,
+        len: usize,
+    ) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
+        let policy = policy();
         hide_body_members(&mut ir);
         if !report.geometry_transferred() {
             return Err(format!("{name}: no geometry could be read from this {format} file"));
@@ -457,7 +665,7 @@ mod convert {
 
         // Validate the neutral model, as cadmpeg's own conversion does.
         let arena = DecodeArena::new();
-        let ctx = DecodeContext::for_loaded_input(&arena, &policy, bytes.len() as u64).map_err(|e| e.to_string())?;
+        let ctx = DecodeContext::for_loaded_input(&arena, &policy, len as u64).map_err(|e| e.to_string())?;
         let validation = validate_neutral_for_decode(&ctx, &ir, Vec::new()).map_err(|e| e.to_string())?;
         ctx.finish_session().map_err(|e| e.to_string())?;
         warnings.extend(validation.findings.iter().map(|f| format!("{}: {}", f.severity, f.message)));
@@ -466,16 +674,22 @@ mod convert {
         }
 
         let product = std::path::Path::new(name).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| name.to_string());
-        let system = match format.as_str() {
+        let system = match format {
             "fcstd" => "FreeCAD",
             "rhino" => "Rhino",
+            "usd" => "OpenUSD",
             "step" => "",
             other => other,
         };
-        let (mut records, origins) = super::traced_records(&ir, &product, system, format == "step");
+        // A Rhino object's colour is often its layer's default (black), which is not how Rhino
+        // shades it; STEP's and OpenUSD's colours are how the part looks.
+        let (mut records, origins) = super::traced_records(&ir, &product, system, matches!(format, "step" | "usd"), format == "usd");
         if records.bodies.is_empty() {
             let why = records.warnings.first().map(|w| format!(" ({w})")).unwrap_or_default();
             return Err(format!("{name}: this {format} file has no solids that can be imported{why}"));
+        }
+        if format == "usd" {
+            records = super::meshes_for_refused(&ir, records, &origins);
         }
         // The file's own figures for its parts, checked against the bodies (built once: the
         // design's evaluation finds them in the recent imports). A part that differs is a warning

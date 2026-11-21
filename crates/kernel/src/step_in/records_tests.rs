@@ -27,6 +27,7 @@ fn kept(text: &str) -> ImportRecords {
             face_origin: s.face_origin,
             sheet: s.sheet,
             copy_of: None,
+            mesh: None,
         })
         .collect();
     let tree = vec![StepNode {
