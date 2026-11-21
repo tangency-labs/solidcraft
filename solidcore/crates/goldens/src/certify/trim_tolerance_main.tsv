@@ -1,4 +1,5 @@
 # main ee673a19bf
+# boolean.topology_intersector_p2: #18065 moves gen0433 (WR-305, two curved pieces certified on their edges; gen0433_puts_two_certified_curved_pieces_on_their_edges); the digest is the branch file
 # topology.brep_validation: main's file without the coincidence search (WR-798): its 43 search cases and the `pairs` key gone, and the 7 generated cases that drew the search checking their bodies' pointers instead
 # offset.offset_executive_p2: main's file with the offset-role attribute (#3138): the `attributes` key of its 30 cases that mark roles, the attribute-only rows
 # blend.feature_executive, blend.fillet_executive_p3, corpus.parity, topology.brep_p10, topology.face_p3: main's files with the rows #17739's healed vertex tolerances move (a vertex covers twice its gap, tangency-labs/solidcraft#18667)
@@ -35,7 +36,7 @@ boolean.merge_p3	0a6b36b7967dcf31
 boolean.merge_p4	bf8ba2db8a9be781
 boolean.merge_p5	bdfc40139f7e400b
 boolean.topology_intersector_p1	d480c2ec4731fa77
-boolean.topology_intersector_p2	a5adff2d8d1aa348
+boolean.topology_intersector_p2	35e1425fea2f8feb
 boolean.topology_intersector_p3	6047fab1fddd550d
 corpus.parity	8acf1f90618ef76c
 curve.composite_curve_p1	1b0a64a4a148983b
