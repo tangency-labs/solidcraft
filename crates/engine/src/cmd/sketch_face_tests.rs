@@ -997,8 +997,9 @@ fn top_of_a_block_with_a_modeled_thread_and_rounded_corners_keeps_its_attachment
     // the history that names the faces after it, and the top face can't be attached.
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length":20,"width":20,"height":20,"body_name":"Block","name":"BlockFeature"}));
-    run(&mut s, "solid.hole", json!({"position":[10,10,20],"diameter":5,"depth":20}));
-    run(&mut s, "solid.thread", json!({"face":[12.5,10,10],"designation":"M6","modeled":true}));
+    // 8 deep: any modelled thread's splitting planes reach the walls, however long.
+    run(&mut s, "solid.hole", json!({"position":[10,10,20],"diameter":5,"depth":8}));
+    run(&mut s, "solid.thread", json!({"face":[12.5,10,16],"designation":"M6","modeled":true}));
     run(&mut s, "solid.fillet", json!({"edges":[[0,0,10],[20,0,10],[0,20,10],[20,20,10]],"radius":2,"name":"Corners"}));
     let index = top_pick(&s, "Block")["index"].clone();
     let id =

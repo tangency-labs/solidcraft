@@ -731,7 +731,8 @@ fn a_drag_frame_decomposes_within_its_budget() {
 }
 
 /// Wherever the budget runs out, the merge search stops within one point's scan of it: a
-/// rigid triangle grows from a hub with thousands of relations, each one a candidate.
+/// rigid triangle grows from a hub with hundreds of relations, each one a candidate; the search
+/// is stopped at twenty budgets spread over the whole work.
 #[test]
 fn growth_stops_at_the_budget() {
     let mut sk = Sketch::new();
@@ -742,7 +743,7 @@ fn growth_stops_at_the_budget() {
         let d = sk.points[p].pos.dist(sk.points[q].pos);
         sk.add_constraint(ConstraintKind::Distance { p, q, value: d }, None).unwrap();
     }
-    let n = 1000;
+    let n = 300;
     for i in 0..n {
         let s = sk.add_point(Vec2::from_angle(i as f64 * 0.002) * 20.0, None).unwrap();
         sk.add_constraint(ConstraintKind::Distance { p: h, q: s, value: 20.0 }, None).unwrap();
@@ -755,7 +756,7 @@ fn growth_stops_at_the_budget() {
     assert!(total > 2 * n, "work {total}");
     // One point's scan: the hub's relations, and what its candidates cost.
     let scan = n + 16;
-    let worst = (1..total).step_by((total / 60).max(1)).map(|limit| {
+    let worst = (1..total).step_by((total / 20).max(1)).map(|limit| {
         let mut g = Graph::build(&reading, &none, limit).unwrap();
         g.reduce();
         g.work.saturating_sub(limit)

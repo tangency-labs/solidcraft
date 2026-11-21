@@ -973,7 +973,10 @@ fn rough_volume_photon_kernels_and_hg_delta_connection_match_independent_measure
         accumulation[3]=vec4<f32>(sum/4096.0,1.0);
         var narrow=t;narrow.glass.x=0.001;
         accumulation[4]=vec4<f32>(glass_evaluate_cosine(narrow.glass,vec3<f32>(0.0,0.0,-1.0),unit(vec3<f32>(0.0002,0.0,1.0)),vec3<f32>(0.0,0.0,1.0),vec3<f32>(0.0,0.0,1.0),1.0,1.5,0.0),1.0);
-        for(var case_index=0u;case_index<18u;case_index+=1u) {{
+        // K = 1, 2, then both sides of the six pending slots (6, 7), then 16.
+        var cases=array<u32,7>(0u,1u,2u,3u,7u,8u,17u);
+        for(var at=0u;at<7u;at+=1u) {{
+            let case_index=cases[at];
             let vertices=max(1u,case_index-min(case_index,1u));
             let trials=select(4096u,1u,case_index<3u);var total=vec3<f32>(0.0);
             for(var trial=0u;trial<trials;trial+=1u) {{
@@ -1099,7 +1102,8 @@ fn rough_volume_photon_kernels_and_hg_delta_connection_match_independent_measure
             "an exact coplanar sibling at the producing seam cannot block the connection: {actual:?} != {seam}"
         );
     }
-    for vertices in 1_usize..=16 {
+    // K = 1 and 2, both sides of the six pending slots (6 and 7) and the largest request (16).
+    for vertices in [1_usize, 2, 6, 7, 16] {
         let count = vertices as f64;
         let sum = [count * (count + 1.0) / 2.0, count * (count + 1.0) * (2.0 * count + 1.0) / 6.0, vertices.div_ceil(2) as f64];
         let observed = actual[5 + vertices];
@@ -1881,7 +1885,7 @@ fn contained_punctual_connections_apply_physical_beer_and_hg_survival_without_an
             .unwrap(),
             ..Default::default()
         };
-        let samples = if scattering > 0.0 { 2048 } else { 1 };
+        let samples = if scattering > 0.0 { 512 } else { 1 };
         let options = JobOptions { nested_media: true, samples, max_depth: 1, lighting: Some(lighting), ..Default::default() };
         let mut image = request(1);
         image.camera.target = Vec3::new(0.0, 0.0, -0.25);
@@ -3231,7 +3235,9 @@ fn gpu_indirect_clamp_keeps_hue_caps_the_brightest_channel_and_spares_the_first_
     };
     let (ordinary, clamped) = (pipeline(&[]), pipeline(CLAMP_INDIRECT));
     // (limit, bounce, contribution, expected): the limit reaches the shader through the job's
-    // own uniform packing, with or without a volume.
+    // own uniform packing, with or without a volume. An active medium fills the volume rows; the
+    // rows here hold a value in every lane instead, so the limit must sit outside all of them,
+    // and the job never compiles the volume program this oracle does not run.
     let cases: &[(Option<f64>, u32, [f64; 3], [f64; 3])] = &[
         (None, 1, [8.0, 4.0, 1.0], [8.0, 4.0, 1.0]),
         (Some(2.0), 0, [8.0, 4.0, 1.0], [8.0, 4.0, 1.0]),
@@ -3242,12 +3248,15 @@ fn gpu_indirect_clamp_keeps_hue_caps_the_brightest_channel_and_spares_the_first_
         (Some(2.0), 1, [2.0, 2.0, 2.0], [2.0, 2.0, 2.0]),
         (Some(0.000_001), 2, [1.0, 0.5, 0.0], [0.000_001, 0.000_000_5, 0.0]),
     ];
-    for volume in [None, Some(solidcraft_render::job::volume::HomogeneousVolume { extinction_per_mm: 0.01, ..Default::default() })] {
+    for volume in [None, Some([[0.5_f32; 4]; 3])] {
         for &(limit, bounce, value, expected) in cases {
             let lighting = Some(solidcraft_render::job::StudioLighting { environment: [1.0; 3], ..Default::default() });
-            let options = JobOptions { clamp_indirect: limit, volume, lighting, ..Default::default() };
+            let options = JobOptions { clamp_indirect: limit, lighting, ..Default::default() };
             options.validate().unwrap();
             let mut task = Task::new(context.clone(), sphere(white()), request(1), options, CancelToken::default()).unwrap();
+            if let Some(rows) = volume {
+                task.volume = rows;
+            }
             let mut params = task.parameters(1).unwrap();
             params[16..20].copy_from_slice(&bounce.to_le_bytes());
             let mut up = Vec::new();

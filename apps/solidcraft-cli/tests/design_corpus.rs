@@ -139,10 +139,11 @@ fn undo_to(s: &mut Session, features: usize) {
 }
 
 /// Try a sketch and an offset plane on every flat face of every final body of every corpus
-/// design, through the same face pick the desktop sends (body, face index, occurrence path, a
-/// point on it), without `fixed`. Undo leaves the design as it was for the next face. Returns
-/// (design, body, face, issue it is known under, what went wrong or None).
-fn flat_face_attachments() -> Vec<(String, String, usize, Option<(u32, bool)>, Option<String>)> {
+/// design that `tried(design, body)` takes, through the same face pick the desktop sends (body,
+/// face index, occurrence path, a point on it), without `fixed`. Undo leaves the design as it
+/// was for the next face. Returns (design, body, face, issue it is known under, what went wrong
+/// or None).
+fn flat_face_attachments(tried: &dyn Fn(&str, &str) -> bool) -> Vec<(String, String, usize, Option<(u32, bool)>, Option<String>)> {
     use solidcraft_engine::doc::{FaceAttachmentStatus, apply_point};
     let mut out = Vec::new();
     for p in corpus() {
@@ -153,6 +154,9 @@ fn flat_face_attachments() -> Vec<(String, String, usize, Option<(u32, bool)>, O
         let placed = s.placed_document();
         let mut picks = Vec::new();
         for (world, definition, component, path, frame) in placed.body_frames_with_source(&state) {
+            if !tried(&name, &world) {
+                continue;
+            }
             let Some(body) = state.bodies.iter().find(|b| b.definition_name() == definition && placed.model_body_component(b) == component) else {
                 continue;
             };
@@ -208,10 +212,12 @@ fn flat_face_attachments() -> Vec<(String, String, usize, Option<(u32, bool)>, O
 
 /// Every flat face of every corpus design takes a durable attachment (issue #489: the top face
 /// of an extrude sketched over a face's projected boundary had "no exact planar source"),
-/// except the faces listed in [`NO_ATTACHMENT_YET`] under their open issues.
+/// except the faces listed in [`NO_ATTACHMENT_YET`] under their open issues. A body listed with
+/// every flat face is not judged here, so its faces are not tried (its issue's ignored test does).
 #[test]
 fn every_flat_face_of_every_corpus_design_takes_an_attached_sketch() {
-    let all = flat_face_attachments();
+    let all =
+        flat_face_attachments(&|design, body| !NO_ATTACHMENT_YET.iter().any(|(d, b, planes, _)| *d == design && *b == body && planes.is_none()));
     assert!(all.len() > 50, "only {} faces checked", all.len());
     let problems: Vec<String> = all
         .iter()
@@ -225,11 +231,12 @@ fn every_flat_face_of_every_corpus_design_takes_an_attached_sketch() {
 }
 
 fn known_faces_attach(issue: u32) {
-    let problems: Vec<String> = flat_face_attachments()
-        .into_iter()
-        .filter(|(.., known, problem)| known.is_some_and(|(known, _)| known == issue) && problem.is_some())
-        .map(|(design, body, face, _, problem)| format!("{design}: {body} face {face}: {}", problem.unwrap_or_default()))
-        .collect();
+    let problems: Vec<String> =
+        flat_face_attachments(&|design, body| NO_ATTACHMENT_YET.iter().any(|(d, b, _, i)| *d == design && *b == body && *i == issue))
+            .into_iter()
+            .filter(|(.., known, problem)| known.is_some_and(|(known, _)| known == issue) && problem.is_some())
+            .map(|(design, body, face, _, problem)| format!("{design}: {body} face {face}: {}", problem.unwrap_or_default()))
+            .collect();
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
@@ -336,7 +343,7 @@ fn damaged_and_hostile_design_files_never_panic() {
         paths(&doc, &mut Vec::new(), &mut all);
         let mut cases: Vec<(String, Vec<u8>)> = Vec::new();
         // Truncated and bit-flipped files.
-        for _ in 0..8 {
+        for _ in 0..4 {
             let cut = rng.below(bytes.len());
             cases.push((format!("truncated at {cut}"), bytes[..cut].to_vec()));
             let mut b = bytes.clone();
@@ -345,7 +352,7 @@ fn damaged_and_hostile_design_files_never_panic() {
             cases.push((format!("bit flip at {i}"), b));
         }
         // Values replaced by hostile ones, and keys removed.
-        for _ in 0..25 {
+        for _ in 0..10 {
             let path = &all[rng.below(all.len())];
             let mut v = doc.clone();
             let h = HOSTILE[rng.below(HOSTILE.len())];

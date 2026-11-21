@@ -15,14 +15,23 @@ const APP_ELEMENTS: &[Element] = &[
     element!("history_names", |ui, _| history_example(ui, true)),
     element!("radial_menu", |ui, _| {
         let (r, _) = ui.allocate_exact_size(vec2(360.0, 360.0), egui::Sense::hover());
-        let mut app = crate::test_support::sample_app();
-        app.ui.tab = "SURFACE".into();
-        app.publish_tab_accent(ui.ctx());
-        radial_menu(ui, r.center(), &crate::context_menu::radial_items(&app), Some(3));
+        with_sample(
+            "radial_menu",
+            |app| app.ui.tab = "SURFACE".into(),
+            |app| {
+                app.publish_tab_accent(ui.ctx());
+                radial_menu(ui, r.center(), &crate::context_menu::radial_items(app), Some(3));
+            },
+        );
     }),
     element!("workspace_menu", |ui, _| {
-        let app = crate::test_support::sample_app();
-        crate::context_menu::workspace_menu(ui, &crate::context_menu::items(&app, &crate::context_menu::Target::Workspace), None, 550.0);
+        with_sample(
+            "workspace_menu",
+            |_| {},
+            |app| {
+                crate::context_menu::workspace_menu(ui, &crate::context_menu::items(app, &crate::context_menu::Target::Workspace), None, 550.0);
+            },
+        );
     }),
     element!("continuity_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, _| {
         let mut order = Continuity::G1;
@@ -102,20 +111,41 @@ fn visual_style_dropdown_specimen_selects_real_options_and_paints_their_icons() 
     solidcraft_theme::set_dark(previous);
 }
 
+/// Draws with the sample design `prepare`d for the specimen `name`. Building the design is the
+/// slow part, so it is built once per specimen and test thread and drawn again by every pass
+/// and theme, as a running app draws its one design frame after frame.
+fn with_sample(name: &'static str, prepare: fn(&mut crate::SolveApp), draw: impl FnOnce(&mut crate::SolveApp)) {
+    thread_local! {
+        static SAMPLES: std::cell::RefCell<std::collections::HashMap<&'static str, crate::SolveApp>> = Default::default();
+    }
+    SAMPLES.with(|samples| {
+        let mut samples = samples.borrow_mut();
+        let app = samples.entry(name).or_insert_with(|| {
+            let mut app = crate::test_support::sample_app();
+            prepare(&mut app);
+            app
+        });
+        draw(app);
+    });
+}
+
 #[cfg(test)]
 fn history_example(ui: &mut Ui, names: bool) {
-    let mut app = crate::test_support::sample_app();
-    app.preferences.timeline_left = true;
-    app.preferences.timeline_left_width = crate::ui_kit::history_width(names);
-    app.run("timeline.roll_to", serde_json::json!({"position":3})).unwrap();
-    let feature = app.session.doc.features.get(2).unwrap().id;
-    app.run("select.set", serde_json::json!({"items":[{"type":"feature","id":feature}]})).unwrap();
     let width = crate::ui_kit::history_width(names);
-    let rect = ui.allocate_space(vec2(width, 650.0)).1;
-    ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink(5.0)), |ui| {
-        let frame = Container::new(ui.ctx(), Surface::Panel).frame(ui.ctx(), Tokens::get().panel, crate::frame::Side::Left);
-        Container::paint_frame(ui.painter(), frame, rect);
-        crate::timeline_left::panel_contents(&mut app, ui);
+    let prepare = |app: &mut crate::SolveApp| {
+        app.preferences.timeline_left = true;
+        app.run("timeline.roll_to", serde_json::json!({"position":3})).unwrap();
+        let feature = app.session.doc.features.get(2).unwrap().id;
+        app.run("select.set", serde_json::json!({"items":[{"type":"feature","id":feature}]})).unwrap();
+    };
+    with_sample(if names { "history_names" } else { "history_icons" }, prepare, |app| {
+        app.preferences.timeline_left_width = width;
+        let rect = ui.allocate_space(vec2(width, 650.0)).1;
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect.shrink(5.0)), |ui| {
+            let frame = Container::new(ui.ctx(), Surface::Panel).frame(ui.ctx(), Tokens::get().panel, crate::frame::Side::Left);
+            Container::paint_frame(ui.painter(), frame, rect);
+            crate::timeline_left::panel_contents(app, ui);
+        });
     });
 }
 
@@ -162,17 +192,24 @@ fn menu_board_in_both_themes() {
     solidcraft_theme::set_dark(previous);
 }
 
-/// CPU raster of the actual popup in all five board states. No display or GPU required.
+/// CPU raster of the actual popup in all five board states. No display or GPU required. Its
+/// colour pairs keep their contrast in both themes; the board's geometry does not depend on the
+/// theme, so it is drawn in the light one, and in both when SOLIDCRAFT_SEARCH_EVIDENCE asks for
+/// the pictures.
 #[test]
 fn command_search_board_in_both_themes() {
     use crate::ui_kit::{test_raster as raster, test_textures_update as textures_update};
     use std::collections::HashMap;
     let previous = solidcraft_theme::is_dark();
+    let evidence = std::env::var("SOLIDCRAFT_SEARCH_EVIDENCE").ok();
     for dark in [false, true] {
         solidcraft_theme::set_dark(dark);
         let t = Tokens::get();
         assert!(solidcraft_theme::contrast_ratio(t.form_success, t.form_success_fill) >= 4.5);
         assert!(solidcraft_theme::contrast_ratio(t.selected_ink, t.accent_soft) >= 4.5);
+        if dark && evidence.is_none() {
+            continue;
+        }
         for (state, query) in [
             ("empty", ""),
             ("matches", "fillet"),
@@ -192,7 +229,7 @@ fn command_search_board_in_both_themes() {
             let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(570.0, 650.0));
             let mut textures = HashMap::new();
             let mut image = None;
-            for _ in 0..3 {
+            for pass in 0..3 {
                 solidcraft_ui_registry::clear_handles();
                 let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), focused: true, ..Default::default() }, |ui| {
                     ui.painter().rect_filled(bounds, 0.0, Tokens::get().panel);
@@ -200,7 +237,10 @@ fn command_search_board_in_both_themes() {
                 });
                 textures_update(&mut textures, &output.textures_delta);
                 output.textures_delta.clear();
-                image = Some(raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures));
+                // Only the last frame's picture is looked at.
+                if pass == 2 {
+                    image = Some(raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures));
+                }
             }
             let popup = solidcraft_ui_registry::rect_of("ribbon:search_popup").unwrap();
             let field = solidcraft_ui_registry::rect_of("shortcut:search").unwrap();
@@ -225,9 +265,9 @@ fn command_search_board_in_both_themes() {
             }
             let image = image.unwrap();
             assert!(image.pixels().any(|p| p.0[3] != 0));
-            if let Ok(dir) = std::env::var("SOLIDCRAFT_SEARCH_EVIDENCE") {
-                std::fs::create_dir_all(&dir).unwrap();
-                image.save(std::path::Path::new(&dir).join(format!("search-{state}-{}.png", if dark { "dark" } else { "light" }))).unwrap();
+            if let Some(dir) = &evidence {
+                std::fs::create_dir_all(dir).unwrap();
+                image.save(std::path::Path::new(dir).join(format!("search-{state}-{}.png", if dark { "dark" } else { "light" }))).unwrap();
             }
         }
     }

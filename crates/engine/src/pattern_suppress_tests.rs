@@ -40,9 +40,8 @@ fn enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs() {
     let mut s = Session::default();
     let script: Value = serde_json::from_str(include_str!("../../../examples/acceptance/sensor_enclosure.json")).unwrap();
     s.run_script(&script).unwrap();
-    for (name, expression) in [("wall", "2.5 mm"), ("height", "30 mm"), ("board_d", "50 mm")] {
-        run(&mut s, "parameters.change", json!({"name":name,"expression":expression}));
-    }
+    // The three changes at once (one evaluation of the enclosure, not three).
+    run(&mut s, "parameters.import", json!({"text": "name,expression\nwall,2.5 mm\nheight,30 mm\nboard_d,50 mm\n"}));
     assert!(s.model.results.iter().all(|result| result.error.is_none()));
     for (name, z) in [("PCB standoff", 2.5), ("Lid boss", 2.5), ("Lid lip", 30.), ("Lid screw", 34.)] {
         let feature =
@@ -100,9 +99,8 @@ fn enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen
     let mut s = Session::default();
     let script: Value = serde_json::from_str(include_str!("../../../examples/acceptance/sensor_enclosure.json")).unwrap();
     s.run_script(&script).unwrap();
-    for (name, expression) in [("height", "30 mm"), ("board_d", "50 mm"), ("wall", "3 mm")] {
-        run(&mut s, "parameters.change", json!({"name":name,"expression":expression}));
-    }
+    // The three changes at once (one evaluation of the enclosure, not three).
+    run(&mut s, "parameters.import", json!({"text": "name,expression\nheight,30 mm\nboard_d,50 mm\nwall,3 mm\n"}));
     let check = |session: &Session| {
         let errors = session.model.results.iter().filter_map(|r| r.error.as_ref().map(|e| (&r.name, e))).collect::<Vec<_>>();
         let warnings = session.model.results.iter().filter_map(|r| r.warning.as_ref().map(|e| (&r.name, e))).collect::<Vec<_>>();

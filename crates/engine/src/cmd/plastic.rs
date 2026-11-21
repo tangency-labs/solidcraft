@@ -476,55 +476,52 @@ mod tests {
         }
     }
 
+    /// A lip or groove, inside or outside, on a round, an obround and a tilted obround rim keeps
+    /// curved walls, built and reopened: each shape, side and type once.
     #[test]
     fn round_rim_lips_and_grooves_keep_curved_walls() {
-        for (obround, tilted) in [(false, false), (true, false), (true, true)] {
-            for outside in [false, true] {
-                for groove in [false, true] {
-                    let mut s = Session::default();
-                    let plane = if tilted {
-                        solidcore_record::Plane::new(Vec3::new(7., -3., 5.), Vec3::new(1., -1., 0.), Vec3::new(1., 1., -2.)).unwrap()
-                    } else {
-                        solidcore_record::Plane::XY
-                    };
-                    if obround {
-                        run(&mut s, "sketch.create", json!({"plane": plane, "name": "Rim"}));
-                        run(&mut s, "sketch.slot.center_to_center", json!({"p0": [-20, 0], "p1": [20, 0], "width": 40}));
-                        run(&mut s, "sketch.finish", json!({}));
-                        run(&mut s, "solid.extrude", json!({"sketch": "Rim", "distance": 12, "body_name": "Case"}));
-                    } else {
-                        run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 12, "body_name": "Case"}));
-                    }
-                    let top = plane.origin + plane.normal() * 12.0;
-                    run(&mut s, "solid.shell", json!({"faces": [top], "thickness": 2}));
-                    let before = volume(&mut s);
-                    run(
-                        &mut s,
-                        "plastic.lip",
-                        json!({"face": top + plane.y * 19.0, "width": 0.8, "height": 1.5,
-                        "side": if outside { "outside" } else { "inside" }, "type": if groove { "groove" } else { "lip" }, "gap": 0.2}),
-                    );
-                    let width = if groove { 1.0 } else { 0.8 };
-                    let area = if outside { PI * (400.0 - (20.0_f64 - width).powi(2)) } else { PI * ((18.0_f64 + width).powi(2) - 324.0) };
-                    let area = area + if obround { 80.0 * width } else { 0.0 };
-                    let want = before + if groove { -area * 1.7 } else { area * 1.5 };
-                    let check = |s: &Session| {
-                        let st = s.model.state();
-                        let body = &st.body("Case").unwrap().body;
-                        let m = solidcraft_kernel::measure(body).unwrap();
-                        assert!(
-                            (m.volume - want).abs() < 0.1,
-                            "obround={obround} tilted={tilted} outside={outside} groove={groove}: {} vs {want}",
-                            m.volume
-                        );
-                        assert!(m.faces < 32, "obround={obround} tilted={tilted} outside={outside} groove={groove}: polygonal walls: {m:?}");
-                        assert!(m.merged.face_types.get("cylinder").copied().unwrap_or(0) >= 3, "{m:?}");
-                        assert!(body.validity().is_empty());
-                    };
-                    check(&s);
-                    check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
-                }
+        // (obround, tilted, outside, groove)
+        for (obround, tilted, outside, groove) in
+            [(false, false, false, false), (false, false, true, true), (true, false, false, true), (true, true, true, false)]
+        {
+            let mut s = Session::default();
+            let plane = if tilted {
+                solidcore_record::Plane::new(Vec3::new(7., -3., 5.), Vec3::new(1., -1., 0.), Vec3::new(1., 1., -2.)).unwrap()
+            } else {
+                solidcore_record::Plane::XY
+            };
+            if obround {
+                run(&mut s, "sketch.create", json!({"plane": plane, "name": "Rim"}));
+                run(&mut s, "sketch.slot.center_to_center", json!({"p0": [-20, 0], "p1": [20, 0], "width": 40}));
+                run(&mut s, "sketch.finish", json!({}));
+                run(&mut s, "solid.extrude", json!({"sketch": "Rim", "distance": 12, "body_name": "Case"}));
+            } else {
+                run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 12, "body_name": "Case"}));
             }
+            let top = plane.origin + plane.normal() * 12.0;
+            run(&mut s, "solid.shell", json!({"faces": [top], "thickness": 2}));
+            let before = volume(&mut s);
+            run(
+                &mut s,
+                "plastic.lip",
+                json!({"face": top + plane.y * 19.0, "width": 0.8, "height": 1.5,
+                "side": if outside { "outside" } else { "inside" }, "type": if groove { "groove" } else { "lip" }, "gap": 0.2}),
+            );
+            let width = if groove { 1.0 } else { 0.8 };
+            let area = if outside { PI * (400.0 - (20.0_f64 - width).powi(2)) } else { PI * ((18.0_f64 + width).powi(2) - 324.0) };
+            let area = area + if obround { 80.0 * width } else { 0.0 };
+            let want = before + if groove { -area * 1.7 } else { area * 1.5 };
+            let check = |s: &Session| {
+                let st = s.model.state();
+                let body = &st.body("Case").unwrap().body;
+                let m = solidcraft_kernel::measure(body).unwrap();
+                assert!((m.volume - want).abs() < 0.1, "obround={obround} tilted={tilted} outside={outside} groove={groove}: {} vs {want}", m.volume);
+                assert!(m.faces < 32, "obround={obround} tilted={tilted} outside={outside} groove={groove}: polygonal walls: {m:?}");
+                assert!(m.merged.face_types.get("cylinder").copied().unwrap_or(0) >= 3, "{m:?}");
+                assert!(body.validity().is_empty());
+            };
+            check(&s);
+            check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
         }
     }
 

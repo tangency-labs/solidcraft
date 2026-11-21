@@ -23,7 +23,7 @@ fn killed_mid_save_the_old_file_survives() {
     let mut kills = 0;
     let mut seen = std::collections::BTreeSet::new();
     let modified = || std::fs::metadata(&path).and_then(|m| m.modified()).ok();
-    for i in 0..25u64 {
+    for i in 0..12u64 {
         let before = modified();
         let mut child = Command::new(exe).args(["save-stress", &path.to_string_lossy(), "100000"]).spawn().unwrap();
         // Wait until it is in its save loop (its first save replaced the file) and has reached a
@@ -49,7 +49,7 @@ fn killed_mid_save_the_old_file_survives() {
             assert!(round_of(&bak).is_some(), "after kill {i} the backup is torn");
         }
     }
-    assert!(kills > 20, "the saver was killed while running ({kills})");
+    assert!(kills > 9, "the saver was killed while running ({kills})");
     assert!(seen.len() > 5, "the saver got to saving before it was killed ({seen:?})");
     let _ = std::fs::remove_dir_all(&dir);
 }

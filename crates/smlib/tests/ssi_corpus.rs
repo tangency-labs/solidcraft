@@ -583,17 +583,15 @@ fn global_intersect_scores() -> Vec<Score> {
     use solidcraft_smlib::ssi::{Method, intersect};
     let t0 = std::time::Instant::now();
     let cases = all_cases();
-    // The kernel serialises its calls, so the cases run one after another; only the scoring is parallel.
-    let outcomes: Vec<Outcome> = cases
-        .iter()
-        .map(|case| {
-            let a = surface(&case.surfaces[0]).unwrap_or_else(|e| panic!("{} surface 1: {e}", case.id));
-            let b = surface(&case.surfaces[1]).unwrap_or_else(|e| panic!("{} surface 2: {e}", case.id));
-            let t = std::time::Instant::now();
-            let r = intersect(&a, &b, Method::Global, 1e-6);
-            runner_output(r, &a, &b, t.elapsed().as_secs_f64() * 1e3)
-        })
-        .collect();
+    // Each call runs on a kernel of its own, reset for it (its random rays, what it remembers), so
+    // the cases run side by side and answer as they would one after another.
+    let outcomes: Vec<Outcome> = par_map(&cases, |case| {
+        let a = surface(&case.surfaces[0]).unwrap_or_else(|e| panic!("{} surface 1: {e}", case.id));
+        let b = surface(&case.surfaces[1]).unwrap_or_else(|e| panic!("{} surface 2: {e}", case.id));
+        let t = std::time::Instant::now();
+        let r = intersect(&a, &b, Method::Global, 1e-6);
+        runner_output(r, &a, &b, t.elapsed().as_secs_f64() * 1e3)
+    });
     let ran = t0.elapsed();
     let pairs: Vec<(&Case, &Outcome)> = cases.iter().zip(&outcomes).collect();
     let scores = par_map(&pairs, |(case, out)| score_case(case, out, Tolerances::at(1e-6)));

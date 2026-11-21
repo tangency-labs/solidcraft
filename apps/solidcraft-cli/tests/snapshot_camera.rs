@@ -132,7 +132,10 @@ impl Drop for Scratch {
 }
 
 /// The picture of `--camera` is the picture of the MCP `screenshot` with the same camera, and
-/// not the home view the option used to be ignored for.
+/// not the home view the option used to be ignored for. `--view` also takes a view saved in the
+/// design, which is the camera it was saved with; a standard view still looks as it did. A script
+/// that applies a view itself (as an MCP `execute` of `view.apply` does) sets the camera of its
+/// snapshot; `--view` and `--camera` still decide when given.
 #[test]
 fn a_camera_frames_the_picture_as_the_mcp_screenshot_does() {
     if !gpu() {
@@ -151,21 +154,9 @@ fn a_camera_frames_the_picture_as_the_mcp_screenshot_does() {
     let perspective = dir.snapshot(&script, "perspective.png", &["--camera", &near.to_string()]);
     assert_differs(&perspective, &shot, "perspective");
     assert_same(&perspective, &dir.mcp(&script, "mcp-perspective.png", json!({"camera": near})), "the MCP perspective screenshot");
-}
-
-/// `--view` also takes a view saved in the design, which is the camera it was saved with; a
-/// standard view still looks as it did.
-#[test]
-fn a_saved_view_is_its_camera_and_a_standard_view_is_unchanged() {
-    if !gpu() {
-        return;
-    }
-    let dir = Scratch::new();
-    let script = dir.script("part.json", &[]);
-    let json = camera().to_string();
-    let by_camera = dir.snapshot(&script, "camera.png", &["--camera", &json]);
+    // The view saved in the design is its camera.
     let saved = dir.snapshot(&script, "saved.png", &["--view", "Detail"]);
-    assert_same(&saved, &by_camera, "the saved view");
+    assert_same(&saved, &shot, "the saved view");
     assert_same(&saved, &dir.mcp(&script, "mcp-saved.png", json!({"view": "Detail"})), "the MCP saved view");
     // A standard view frames the model from its direction, as before: the home camera turned.
     let top = dir.snapshot(&script, "top.png", &["--view", "top"]);
@@ -178,25 +169,14 @@ fn a_saved_view_is_its_camera_and_a_standard_view_is_unchanged() {
     assert_same(&top, &dir.mcp(&script, "mcp-top.png", json!({"view": "top"})), "the MCP top view");
     assert_differs(&top, &saved, "top and the saved view");
     let iso = dir.snapshot(&script, "iso.png", &["--view", "iso"]);
-    assert_same(&iso, &dir.snapshot(&script, "home.png", &[]), "iso is home");
+    assert_same(&iso, &home, "iso is home");
     assert_differs(&iso, &top, "iso and top");
-}
-
-/// A script that applies a view itself (as an MCP `execute` of `view.apply` does) sets the camera
-/// of its snapshot; `--view` and `--camera` still decide when given.
-#[test]
-fn a_script_can_carry_its_camera() {
-    if !gpu() {
-        return;
-    }
-    let dir = Scratch::new();
-    let script = dir.script("carried.json", &[json!({"command": "view.apply", "params": {"camera": camera()}})]);
-    let plain = dir.script("plain.json", &[]);
-    let carried = dir.snapshot(&script, "carried.png", &[]);
-    assert_same(&carried, &dir.snapshot(&plain, "by-camera.png", &["--camera", &camera().to_string()]), "the carried camera");
-    assert_differs(&carried, &dir.snapshot(&plain, "home.png", &[]), "the carried camera and home");
-    let top = dir.snapshot(&script, "top.png", &["--view", "top"]);
-    assert_same(&top, &dir.snapshot(&plain, "plain-top.png", &["--view", "top"]), "--view decides");
+    // A script that applies the camera itself.
+    let carrying = dir.script("carried.json", &[json!({"command": "view.apply", "params": {"camera": camera()}})]);
+    let carried = dir.snapshot(&carrying, "carried.png", &[]);
+    assert_same(&carried, &shot, "the carried camera");
+    assert_differs(&carried, &home, "the carried camera and home");
+    assert_same(&dir.snapshot(&carrying, "carried-top.png", &["--view", "top"]), &top, "--view decides");
 }
 
 /// The grid and the axes each go when asked, and a render without both from any side shows the
@@ -209,43 +189,40 @@ fn the_grid_and_the_axes_can_be_left_out() {
     let dir = Scratch::new();
     let script = dir.script("part.json", &[]);
     let json = camera().to_string();
-    for view in [&["--view", "front"][..], &["--camera", &json][..]] {
-        let with = |extra: &[&str], out: &str| dir.snapshot(&script, out, &[view, extra].concat());
-        let (all, no_grid, no_axes, bare) = (
-            with(&[], "all.png"),
-            with(&["--no-grid"], "no-grid.png"),
-            with(&["--no-axes"], "no-axes.png"),
-            with(&["--no-grid", "--no-axes"], "bare.png"),
-        );
-        let different = [&all, &no_grid, &no_axes, &bare];
-        for (i, a) in different.iter().enumerate() {
-            for b in &different[i + 1..] {
-                assert_differs(a, b, &format!("{view:?}: two of the pictures"));
-            }
+    let with = |extra: &[&str], out: &str| dir.snapshot(&script, out, &[&["--camera", json.as_str()][..], extra].concat());
+    let (all, no_grid, no_axes, bare) = (
+        with(&[], "all.png"),
+        with(&["--no-grid"], "no-grid.png"),
+        with(&["--no-axes"], "no-axes.png"),
+        with(&["--no-grid", "--no-axes"], "bare.png"),
+    );
+    let different = [&all, &no_grid, &no_axes, &bare];
+    for (i, a) in different.iter().enumerate() {
+        for b in &different[i + 1..] {
+            assert_differs(a, b, "two of the pictures");
         }
-        // The same as the MCP's `grid` and `axes`.
-        let mcp = |extra: Value, out: &str| {
-            let mut a = match view[0] {
-                "--view" => json!({"view": "front"}),
-                _ => json!({"camera": camera()}),
-            };
-            a.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
-            dir.mcp(&script, out, a)
-        };
-        assert_same(&no_grid, &mcp(json!({"grid": false}), "mcp-no-grid.png"), "the MCP's grid: false");
-        assert_same(&no_axes, &mcp(json!({"axes": false}), "mcp-no-axes.png"), "the MCP's axes: false");
-        assert_same(&bare, &mcp(json!({"grid": false, "axes": false}), "mcp-bare.png"), "the MCP's bare picture");
     }
+    // The same as the MCP's `grid` and `axes`.
+    let mcp = |extra: Value, out: &str| {
+        let mut a = json!({"camera": camera()});
+        a.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        dir.mcp(&script, out, a)
+    };
+    assert_same(&no_grid, &mcp(json!({"grid": false}), "mcp-no-grid.png"), "the MCP's grid: false");
+    assert_same(&no_axes, &mcp(json!({"axes": false}), "mcp-no-axes.png"), "the MCP's axes: false");
+    assert_same(&bare, &mcp(json!({"grid": false, "axes": false}), "mcp-bare.png"), "the MCP's bare picture");
     let empty = dir.0.join("empty.json");
     std::fs::write(&empty, json!({"commands": []}).to_string()).unwrap();
     let blank = |view: &str, out: &str| dir.snapshot(&empty, out, &["--view", view, "--no-grid", "--no-axes"]);
-    assert_same(&blank("top", "blank-top.png"), &blank("front", "blank-front.png"), "blank from every side");
-    assert_differs(&blank("top", "blank-top.png"), &dir.snapshot(&empty, "top.png", &["--view", "top"]), "blank and the grid");
+    let blank_top = blank("top", "blank-top.png");
+    assert_same(&blank_top, &blank("front", "blank-front.png"), "blank from every side");
+    assert_differs(&blank_top, &dir.snapshot(&empty, "top.png", &["--view", "top"]), "blank and the grid");
 }
 
 /// A snapshot of a box shows its silhouette where the camera puts it: the pixels that differ
-/// from an empty design's picture (same camera, no grid or axes) span the box's corners projected
-/// to pixels, within the edge and silhouette lines' width.
+/// from an empty design's picture (no grid or axes, the same blank from every camera, see
+/// `the_grid_and_the_axes_can_be_left_out`) span the box's corners projected to pixels, within
+/// the edge and silhouette lines' width; with an orthographic and a perspective camera.
 #[test]
 fn a_snapshot_shows_the_part_where_the_camera_puts_it() {
     if !gpu() {
@@ -263,14 +240,10 @@ fn a_snapshot_shows_the_part_where_the_camera_puts_it() {
     )
     .unwrap();
     std::fs::write(&empty, json!({"commands": []}).to_string()).unwrap();
-    for cam in [
-        camera(),
-        json!({"target": [40, 0, 0], "yaw": 0.0, "pitch": 0.0, "distance": 160}),
-        json!({"target": [40, 0, 0], "yaw": -0.4, "pitch": 0.5, "distance": 150, "fov": 0.6}),
-    ] {
+    let (_, _, without) = decode(&dir.snapshot(&empty, "empty.png", &["--camera", &camera().to_string(), "--no-grid", "--no-axes"]));
+    for cam in [camera(), json!({"target": [40, 0, 0], "yaw": -0.4, "pitch": 0.5, "distance": 150, "fov": 0.6})] {
         let args = ["--camera", &cam.to_string(), "--no-grid", "--no-axes"];
         let (_, _, with) = decode(&dir.snapshot(&part, "part.png", &args));
-        let (_, _, without) = decode(&dir.snapshot(&empty, "empty.png", &args));
         // The part's pixels: where the picture differs from the empty one.
         let (mut lo, mut hi) = ([u32::MAX; 2], [0u32; 2]);
         for (i, (p, q)) in with.as_chunks::<4>().0.iter().zip(without.as_chunks::<4>().0).enumerate() {

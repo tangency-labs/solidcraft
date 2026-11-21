@@ -1,7 +1,7 @@
-//! No English where a translation exists (#2544): the text a frame actually paints, in every
-//! language. A painter call that skips the label lookup (`ui.painter().text(.., c.label, ..)`)
-//! paints the English text even though the language has a translation; this sweep catches it
-//! wherever it happens on the surfaces it opens.
+//! No English where a translation exists (#2544): the text a frame actually paints, in languages
+//! that between them translate every text any language translates. A painter call that skips the
+//! label lookup (`ui.painter().text(.., c.label, ..)`) paints the English text even though the
+//! language has a translation; this sweep catches it wherever it happens on the surfaces it opens.
 
 use crate::i18n::LocaleNames as _;
 use std::collections::{BTreeMap, BTreeSet};
@@ -89,6 +89,32 @@ fn english_leaks(language: &str, texts: &BTreeSet<String>, english: &BTreeMap<St
         .collect()
 }
 
+/// The languages the sweep paints in. A painter call that skips the lookup paints its English
+/// in every language, so it is a leak in each language that translates that text; between them,
+/// these languages translate every English text that any language translates, so they see every
+/// leak that sweeping all of them would. Each is chosen as the one adding the most texts not yet
+/// covered, until none is left.
+fn covering_languages(english: &BTreeMap<String, Vec<String>>) -> Vec<&'static str> {
+    let all: BTreeSet<String> = english.keys().cloned().collect();
+    let detects: Vec<(&'static str, BTreeSet<String>)> = crate::i18n::LOCALES
+        .iter()
+        .filter(|c| c.id != "en")
+        .map(|c| (c.id, english_leaks(c.id, &all, english, &BTreeSet::new()).into_iter().collect()))
+        .collect();
+    let mut covered = BTreeSet::new();
+    let mut chosen = Vec::new();
+    loop {
+        let best = detects.iter().max_by_key(|(_, texts)| texts.difference(&covered).count());
+        match best {
+            Some((id, texts)) if !texts.is_subset(&covered) => {
+                chosen.push(*id);
+                covered.extend(texts.iter().cloned());
+            }
+            _ => return chosen,
+        }
+    }
+}
+
 fn sample() -> Harness {
     let mut h = Harness::new();
     let mut session = Session::default();
@@ -99,7 +125,7 @@ fn sample() -> Harness {
     h
 }
 
-/// The surfaces the sweep opens, each in every language: the window with the sample design; the
+/// The surfaces the sweep opens, each in every language of [`covering_languages`]: the window with the sample design; the
 /// S command search with nothing typed (the first rows of every command, by name) and with two
 /// queries; every Preferences page; and the right-click menus of the viewport, a body, the
 /// toolbar and the workspace.
@@ -153,12 +179,14 @@ fn no_english_is_painted_where_the_language_has_a_translation() {
     let mut h = sample();
     let names = design_names(&h.app);
     assert!(names.contains("Boss") && names.len() > 5, "{names:?}");
+    let languages = covering_languages(&english);
+    assert!(languages.len() >= 2 && languages.len() < crate::i18n::LOCALES.len(), "{languages:?}");
     let mut leaks = Vec::new();
-    for catalog in crate::i18n::LOCALES.iter().filter(|c| c.id != "en") {
-        for (surface, texts) in sweep(&mut h, catalog.id) {
-            assert!(texts.len() > 20, "{} {surface}: only {} texts painted", catalog.id, texts.len());
-            for text in english_leaks(catalog.id, &texts, &english, &names) {
-                leaks.push(format!("{} {surface}: {text:?}", catalog.id));
+    for language in languages {
+        for (surface, texts) in sweep(&mut h, language) {
+            assert!(texts.len() > 20, "{language} {surface}: only {} texts painted", texts.len());
+            for text in english_leaks(language, &texts, &english, &names) {
+                leaks.push(format!("{language} {surface}: {text:?}"));
             }
         }
     }

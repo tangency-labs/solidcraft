@@ -9,6 +9,7 @@ mod book;
 mod external_corpus;
 mod fast;
 mod features;
+mod heavy;
 mod i18n;
 mod icons;
 mod kernel_cases;
@@ -137,7 +138,9 @@ commands:
                   that no longer does (the list only shrinks)
   test [CARGO ARGS] [-- TEST ARGS]
                   build the tests with the ci profile, then run every test binary at once
-                  (and the doc tests alongside); SOLIDCRAFT_TEST_JOBS=N bounds concurrent test
+                  (and the doc tests alongside), leaving out the heavy tests pull requests skip
+                  (.config/nextest.toml; SOLIDCRAFT_TEST_HEAVY=1 runs them too, for test and
+                  ci; the merge queue always does); SOLIDCRAFT_TEST_JOBS=N bounds concurrent test
                   and side commands for test/ci and splits each binary's test threads and action
                   matrix workers across the binaries in flight; explicit RUST_TEST_THREADS and
                   ACTION_MATRIX_JOBS overrides still win

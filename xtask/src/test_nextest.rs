@@ -1,5 +1,6 @@
 //! Optional test-level scheduling for full local CI. Reuse the built binaries so the Wasm and
-//! doc-test jobs can use Cargo alongside the native run, without rebuilding native tests.
+//! doc-test jobs can use Cargo alongside the native run, without rebuilding native tests. The
+//! heavy tests stay out as with libtest (`crate::heavy`) unless SOLIDCRAFT_TEST_HEAVY=1.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -22,6 +23,8 @@ pub fn run_selected(side: Vec<(String, Command)>) -> Result<(), String> {
 pub struct Prepared {
     pub cargo_metadata: PathBuf,
     pub binaries_metadata: PathBuf,
+    /// Run the heavy tests too (the `ci` profile's default filter leaves them out).
+    pub heavy: bool,
 }
 
 impl Prepared {
@@ -35,17 +38,11 @@ impl Prepared {
 
     fn command_with_options(&self, threads: Option<OsString>, matrix_jobs: Option<OsString>, cpus: usize) -> Command {
         let mut c = cargo();
-        c.args(["nextest", "run", "--cargo-metadata"]).arg(&self.cargo_metadata).arg("--binaries-metadata").arg(&self.binaries_metadata).args([
-            "--profile",
-            "local-ci",
-            "--ignore-default-filter",
-            "--no-fail-fast",
-            "--retries",
-            "0",
-            "--no-tests",
-            "fail",
-            "--test-threads",
-        ]);
+        c.args(["nextest", "run", "--cargo-metadata"]).arg(&self.cargo_metadata).arg("--binaries-metadata").arg(&self.binaries_metadata);
+        if self.heavy {
+            c.arg("--ignore-default-filter");
+        }
+        c.args(["--profile", "local-ci", "--no-fail-fast", "--retries", "0", "--no-tests", "fail", "--test-threads"]);
         // One geometry test can also use Rayon. Bound the default; callers can explicitly
         // choose another nextest concurrency without changing libtest's per-binary setting.
         let threads = threads.unwrap_or_else(|| cpus.clamp(1, 4).to_string().into());
@@ -72,6 +69,7 @@ pub fn run(side: Vec<(String, Command)>) -> Result<(), String> {
 }
 
 pub fn prepare() -> Result<Prepared, String> {
+    let heavy = crate::heavy::opted_in()?;
     let mut version = cargo();
     version.args(["nextest", "--version"]);
     capture(version, "cargo nextest --version")
@@ -91,7 +89,7 @@ pub fn prepare() -> Result<Prepared, String> {
     let binaries_metadata = dir.join("binaries-metadata.json");
     // Retain both metadata files under target for diagnostics and reproducible listing.
     std::fs::write(&binaries_metadata, binaries_json).map_err(|e| format!("write {}: {e}", binaries_metadata.display()))?;
-    Ok(Prepared { cargo_metadata, binaries_metadata })
+    Ok(Prepared { cargo_metadata, binaries_metadata, heavy })
 }
 
 fn capture(mut c: Command, label: &str) -> Result<Vec<u8>, String> {
@@ -139,10 +137,13 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     #[test]
-    fn full_ci_does_not_drop_heavy_tests_stop_on_failure_or_retry_failures() {
-        let p = Prepared { cargo_metadata: "cargo.json".into(), binaries_metadata: "binaries.json".into() };
-        let c = p.command_with_options(Some("3".into()), None, 16);
-        let args: Vec<_> = c.get_args().map(|s| s.to_string_lossy().into_owned()).collect();
+    fn full_ci_runs_heavy_tests_on_request_and_never_stops_on_failure_or_retries_failures() {
+        let args_of = |heavy| {
+            let p = Prepared { cargo_metadata: "cargo.json".into(), binaries_metadata: "binaries.json".into(), heavy };
+            p.command_with_options(Some("3".into()), None, 16).get_args().map(|s| s.to_string_lossy().into_owned()).collect::<Vec<_>>()
+        };
+        assert!(!args_of(false).iter().any(|s| s == "--ignore-default-filter"), "the default filter leaves the heavy tests out");
+        let args = args_of(true);
         assert!(args.windows(2).any(|s| s == ["--profile", "local-ci"]));
         assert!(args.iter().any(|s| s == "--ignore-default-filter"));
         assert!(args.iter().any(|s| s == "--no-fail-fast"));
@@ -154,7 +155,7 @@ mod tests {
 
     #[test]
     fn matrix_workers_follow_the_effective_nextest_budget() {
-        let p = Prepared { cargo_metadata: "cargo.json".into(), binaries_metadata: "binaries.json".into() };
+        let p = Prepared { cargo_metadata: "cargo.json".into(), binaries_metadata: "binaries.json".into(), heavy: false };
         for (cpus, threads, expected) in [
             (16, None, "4"),
             (2, None, "2"),

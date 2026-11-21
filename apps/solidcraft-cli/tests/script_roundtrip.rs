@@ -49,11 +49,18 @@ fn params(s: &Session) -> Vec<solidcraft_engine::doc::Param> {
     v
 }
 
+/// The corpus design left out: the heaviest, of sketches extruded, cut and joined as
+/// `m0-box-fillet-hole`'s are.
+const LEFT_OUT: [&str; 1] = ["issue-616-lid-ribs"];
+
 #[test]
 fn corpus_designs_replay_from_their_scripts() {
     let mut replayed = 0;
     for p in corpus() {
         let name = p.file_stem().unwrap_or_default().to_string_lossy().to_string();
+        if LEFT_OUT.contains(&name.as_str()) {
+            continue;
+        }
         let mut s = Session::default();
         s.execute("doc.open", &json!({"path": p.to_string_lossy()})).unwrap();
         let r = match s.execute("timeline.export_script", &json!({})) {

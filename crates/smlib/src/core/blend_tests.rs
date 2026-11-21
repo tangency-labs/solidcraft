@@ -923,21 +923,21 @@ fn a_curvature_round_takes_its_wedges_equal_area_and_mixed_wedges_are_refused() 
     let v0 = volume(&chamfered, 1e-8).unwrap();
     assert!(rel(v0, 23500.0) < 1e-9, "{v0}");
     let (a, b) = ([20.0, 25.0, 20.0], [20.0, 0.0, 0.0]);
-    for (at, alpha) in [(a, 0.75 * PI), (b, 0.5 * PI)] {
-        let round = blend(&chamfered, Blend::Curvature, &[at], &[r], TOL, &[], &[], Corners::Filled).unwrap();
+    // The chamfer's top edge; the bottom front edge with the top front one (edges of one wedge
+    // go together).
+    for (picks, alpha) in [(vec![a], 0.75 * PI), (vec![b, [20.0, 0.0, 20.0]], 0.5 * PI)] {
+        let round = blend(&chamfered, Blend::Curvature, &picks, &[r], TOL, &[], &[], Corners::Filled).unwrap();
         let (rec, _) = native(&to_arrays(&round).unwrap()).unwrap();
         solidcore_ops::record_check::validate(&rec).unwrap();
         let removed = v0 - volume(&round, 1e-8).unwrap();
-        assert!(rel(removed, 40.0 * cut(alpha)) < 1e-6, "{removed} vs {}", 40.0 * cut(alpha));
+        let want = 40.0 * picks.len() as f64 * cut(alpha);
+        assert!(rel(removed, want) < 1e-6, "{removed} vs {want}");
     }
     for both in [[a, b], [b, a]] {
         let refused = blend(&chamfered, Blend::Curvature, &both, &[r], TOL, &[], &[], Corners::Filled).err();
         assert_eq!(refused, Some(Error::Unported(super::blend::CURVATURE_MIXED_WEDGES)));
         assert!(refused.is_some_and(|e| e.to_string().contains("issuecomment-6563419897")));
     }
-    // Edges of one wedge go together.
-    let two = blend(&chamfered, Blend::Curvature, &[b, [20.0, 0.0, 20.0]], &[r], TOL, &[], &[], Corners::Filled).unwrap();
-    assert!(rel(v0 - volume(&two, 1e-8).unwrap(), 80.0 * cut(0.5 * PI)) < 1e-6);
     // A pick that misses is still named first.
     assert_eq!(blend(&chamfered, Blend::Curvature, &[[90.0; 3]], &[r], TOL, &[], &[], Corners::Filled).err(), Some(Error::NoMatch { point: 0 }));
 }

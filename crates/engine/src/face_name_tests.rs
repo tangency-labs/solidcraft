@@ -466,8 +466,9 @@ fn a_thread_saved_under_a_numbered_side_piece_of_a_cylinder_is_found_at_its_pick
 fn a_modelled_thread_saved_under_a_numbered_bore_wall_is_found_at_its_pick() {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 40, "base": [40, 0, 0], "body_name": "Boss"}));
-    run(&mut s, "solid.hole", json!({"position": [40, 0, 40], "diameter": 8.5, "depth": 25, "body_name": "Boss"}));
-    run(&mut s, "solid.thread", json!({"face": [44.25, 0, 20], "designation": "M10", "modeled": true, "name": "Tapped"}));
+    // 6 deep: four turns of the M10's 1.5 mm pitch (the name's recovery does not depend on the length).
+    run(&mut s, "solid.hole", json!({"position": [40, 0, 40], "diameter": 8.5, "depth": 6, "body_name": "Boss"}));
+    run(&mut s, "solid.thread", json!({"face": [44.25, 0, 37], "designation": "M10", "modeled": true, "name": "Tapped"}));
     let thread = s.doc.features.iter().position(|f| f.name == "Tapped").unwrap();
     let whole = s.doc.features[thread].face_names.clone();
     assert!(whole[0].contains("bore:side"), "{whole:?}");

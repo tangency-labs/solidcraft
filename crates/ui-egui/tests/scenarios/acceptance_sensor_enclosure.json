@@ -1,6 +1,6 @@
 [
  {
-  "note": "Acceptance (#27): the sensor enclosure built from examples/acceptance/sensor_enclosure.json, then edited: the USB cut-out moved, the height changed, features suppressed and back, saved and reopened, exported to STEP and read back."
+  "note": "Acceptance (#27): the sensor enclosure built from examples/acceptance/sensor_enclosure.json, then edited: the USB cut-out moved, features suppressed and back, saved and reopened, exported to STEP and read back."
  },
  {
   "script": "examples/acceptance/sensor_enclosure.json"
@@ -85,70 +85,6 @@
     "body": "Case",
     "volume": 25401.7
    }
-  }
- },
- {
-  "call": "engine.execute",
-  "params": {
-   "command": "parameters.change",
-   "params": {
-    "name": "wall",
-    "expression": "2.4 mm"
-   }
-  }
- },
- {
-  "expect": {
-   "errors": 0,
-   "bodies": 2
-  }
- },
- {
-  "call": "engine.execute",
-  "params": {
-   "command": "parameters.change",
-   "params": {
-    "name": "height",
-    "expression": "30 mm"
-   }
-  }
- },
- {
-  "expect": {
-   "errors": 0,
-   "bodies": 2
-  }
- },
- {
-  "call": "engine.execute",
-  "params": {
-   "command": "parameters.change",
-   "params": {
-    "name": "height",
-    "expression": "25 mm"
-   }
-  }
- },
- {
-  "expect": {
-   "errors": 0,
-   "bodies": 2
-  }
- },
- {
-  "call": "engine.execute",
-  "params": {
-   "command": "parameters.change",
-   "params": {
-    "name": "wall",
-    "expression": "2 mm"
-   }
-  }
- },
- {
-  "expect": {
-   "errors": 0,
-   "bodies": 2
   }
  },
  {

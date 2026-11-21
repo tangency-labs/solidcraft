@@ -7,22 +7,24 @@ fn wedge_body() -> Body {
     crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0., 15.).unwrap().pop().unwrap()
 }
 
-fn wedge() -> Body {
+/// The wedge's top front edge rounded by the room's taper, closing to zero at the wedge's tip,
+/// given as a spline fillet (R16 itself is built over the wedge's cliffs, the blend-overflow
+/// decision, so a tapered fillet no longer tapers it), and that radius law along the edge.
+fn wedge() -> (Body, RadiusSpline) {
     let body = wedge_body();
     let at = Vec3::new(20., 0., 15.);
-    // The room's taper, closing to zero at the wedge's tip, given as a spline fillet: R16 itself
-    // is built over the wedge's cliffs (the blend-overflow decision), so a tapered fillet no
-    // longer tapers it.
     let t = taper(&body, at, 16.).unwrap();
-    fillet_variable_spline(&body, at, t.start, &t.spline).unwrap()
+    (fillet_variable_spline(&body, at, t.start, &t.spline).unwrap(), t.spline)
 }
 
 /// The wedge's variable round takes off the union of its balls (smlib#78, solidcore#2262):
-/// `removed_by_balls` along the 40 mm edge, about 754.28, on whichever kernel the test runs.
+/// `removed_by_balls` along the 40 mm edge, about 754.28, on whichever kernel the test runs. The
+/// round is a valid solid.
 #[test]
 fn the_wedge_round_keeps_its_volume() {
-    let v = crate::measure(&wedge()).unwrap().volume;
-    let law = taper(&wedge_body(), Vec3::new(20., 0., 15.), 16.).unwrap().spline;
+    let (round, law) = wedge();
+    assert!(round.validity().is_empty(), "{:?}", round.validity());
+    let v = crate::measure(&round).unwrap().volume;
     let want = 6000.0 - super::tests::removed_by_balls(40.0, &|u| law.eval(u), &|_, _| f64::INFINITY, &[]);
     assert!(((v - want) / want).abs() < 1e-4, "{v} vs {want}");
 }
@@ -33,7 +35,7 @@ fn the_wedge_round_keeps_its_volume() {
 /// the mesher is under test here; the taper's own law is `taper_follows_the_room_along_the_edge`'s.
 #[test]
 fn collapsed_taper_mesh_stays_accurate_as_tolerance_decreases() {
-    let body = wedge();
+    let (body, _) = wedge();
     let exact = crate::measure(&body).unwrap();
     for tol in [0.002, 0.001, 0.0005, 0.0002] {
         let mesh = body.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
