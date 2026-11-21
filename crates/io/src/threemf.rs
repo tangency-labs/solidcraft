@@ -701,13 +701,10 @@ impl Package {
     }
 }
 
+/// A `displaycolor` (`#RRGGBB` or `#RRGGBBAA`, sRGB) as 0–1 fractions; its alpha isn't read.
 fn color(s: &str) -> Option<[f32; 3]> {
-    let h = s.trim().strip_prefix('#')?;
-    if h.len() != 6 && h.len() != 8 {
-        return None;
-    }
-    let c = |i: usize| h.get(i..i + 2).and_then(|x| u8::from_str_radix(x, 16).ok()).map(|v| v as f32 / 255.0);
-    Some([c(0)?, c(2)?, c(4)?])
+    let (rgb, _) = solidcraft_color::hex::parse(s.trim())?;
+    Some(rgb.map(|v| f32::from(v) / 255.0))
 }
 
 fn unit_mm(u: &str) -> Option<f64> {
@@ -1225,6 +1222,17 @@ pub(crate) mod tests {
         assert!(model.contains("displaycolor=\"#2040BF80\""), "{model}");
         assert!(model.contains("displaycolor=\"#FF0000\""), "{model}");
         assert_eq!(model.matches("p1=\"1\"").count(), 1, "{model}");
+    }
+
+    /// A display colour reads as `#RRGGBB` or `#RRGGBBAA` with spaces around it, and nothing
+    /// else does: `from_str_radix` alone would read `+F` as 15.
+    #[test]
+    fn display_colours_read_only_hex_digits() {
+        assert_eq!(color(" #FF000080 "), Some([1.0, 0.0, 0.0]));
+        assert_eq!(color("#00ff00"), Some([0.0, 1.0, 0.0]));
+        for bad in ["#+F0000", "#0000+F", "FF0000", "#FF00", "#FF0000F"] {
+            assert_eq!(color(bad), None, "{bad}");
+        }
     }
 
     /// A package of these parts (name, contents).
