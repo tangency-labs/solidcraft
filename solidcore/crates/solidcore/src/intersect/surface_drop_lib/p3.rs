@@ -59,7 +59,8 @@
 //!   through the caller's context, its point-test-off variant) unless the caller's face
 //!   test replaces it. The
 //!   curve cache is built fresh (`make_curve_cache`); a failed build is
-//!   `SM_ERR_NULL_POINTER` (`NER`).
+//!   `SM_ERR_NULL_POINTER` (`NER`), an [`IntersectFailure::CurveCacheNotBuilt`] with the
+//!   build's error as its cause.
 //! - **Offset surface.** `SmOffsetSurface(1.0, *this, FALSE, lSingularities)` is a
 //!   [`DropOffset`]; its evaluations (unit `surface.offset_surface`) return
 //!   [`SolidError::Unported`], so every drop that reaches a non-degenerate curve tangent
@@ -99,7 +100,8 @@
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p5::make_curve_cache;
 use crate::curve::curve::Curve;
-use crate::error::{ignore_status, ignored, Result, SolidError, SM_ERR};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -347,11 +349,23 @@ fn sm_bool(b: bool) -> i32 {
     i32::from(b)
 }
 
+/// A solution index past the drop's solutions: its loops run over the solutions found, after
+/// the check that there is one (`SM_ERR`).
+fn no_such_solution() -> SolidError {
+    SolidError::intersect(
+        OP,
+        IntersectFailure::Defect {
+            why: "the drop read a solution past those it found, though its loops run over \
+                  the solutions found",
+        },
+    )
+}
+
 /// The start UV of solution `i` (`sSolutions[i].m_vStart[0..2]`).
 fn start_uv<O: SolutionObject>(sols: &SolutionArray<O>, i: usize) -> Result<Point2> {
     sols.get(i)
         .map(|s| Point2::new(s.start.parameters[0], s.start.parameters[1]))
-        .ok_or_else(|| SolidError::intersect_failed(OP, "the drop has no such solution"))
+        .ok_or_else(no_such_solution)
 }
 
 /// Sets parameter `p` of solution `i`'s start.
@@ -361,11 +375,15 @@ fn set_start_param<O: SolutionObject>(
     p: usize,
     value: f64,
 ) -> Result<()> {
-    let s = sols
-        .get_mut(i)
-        .ok_or_else(|| SolidError::intersect_failed(OP, "the drop has no such solution"))?;
+    let s = sols.get_mut(i).ok_or_else(no_such_solution)?;
     let slot = s.start.parameters.get_mut(p).ok_or_else(|| {
-        SolidError::intersect_failed(OP, "the drop solution has no such parameter")
+        SolidError::intersect(
+            OP,
+            IntersectFailure::Defect {
+                why: "a drop solution has no u or v start parameter, though a surface \
+                      solution's start holds both",
+            },
+        )
     })?;
     *slot = value;
     Ok(())
@@ -860,9 +878,9 @@ impl Surface {
                 CreateUvTrimCurvePathType::DegenSurfaceFail,
                 &early,
             );
-            return Err(SolidError::intersect_failed(
+            return Err(SolidError::intersect(
                 OP,
-                "the surface's uv domain is degenerate",
+                IntersectFailure::DegenerateDomain,
             ));
         }
 
@@ -875,9 +893,10 @@ impl Surface {
                 CreateUvTrimCurvePathType::DropDomainUncontainedFail,
                 &early,
             );
-            return Err(SolidError::intersect_failed(
+            // the caller's domain (rule 9)
+            return Err(SolidError::intersect(
                 OP,
-                "the uv domain does not fit within the surface's natural domain",
+                IntersectFailure::DomainOutsideSurface,
             ));
         }
 
@@ -1023,12 +1042,9 @@ impl Surface {
             )?
         };
 
-        // there should always be at least one solution
+        // there should always be at least one solution (none found: rule 7)
         if solutions.is_empty() {
-            return Err(SolidError::intersect_failed(
-                OP,
-                "dropping the curve's start onto the surface found no solution",
-            ));
+            return Err(SolidError::intersect(OP, IntersectFailure::NoFoot));
         }
 
         // Classify the 1st start DropSolution point (status ignored upstream)
@@ -1321,16 +1337,18 @@ impl Surface {
             let mut have_start_uv_tan = false;
             let mut fix_bc_change = false;
 
-            // the curve cache (made once)
-            if curve_cache.is_none() {
-                curve_cache = Some(match make_curve_cache::<()>(k, curve, None) {
+            // the curve cache (made once; the build's error stays the cause, rule 6)
+            let cache = match &mut curve_cache {
+                Some(c) => &*c,
+                slot => &*slot.insert(match make_curve_cache::<()>(k, curve, None) {
                     Ok(c) => c,
                     Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                    Err(_) => return Err(SolidError::intersect_missing(OP, "the curve cache")),
-                });
-            }
-            let Some(cache) = curve_cache.as_ref() else {
-                return Err(SolidError::intersect_missing(OP, "the curve cache"));
+                    Err(e) => {
+                        return Err(Failure::new(OP, IntersectFailure::CurveCacheNotBuilt)
+                            .caused_by(e)
+                            .into_error())
+                    }
+                }),
             };
             let span_count = cache.span_count();
 
@@ -1505,16 +1523,13 @@ impl Surface {
                 let mut stack = vec![(start.t, end)];
                 let mut stop_spans = false;
                 let mut span_failure_path = CreateUvTrimCurvePathType::DropStartPointFail;
-                while !stack.is_empty() {
+                while let Some(&(queued_start_t, saved_end)) = stack.last() {
                     // A pending endpoint was dropped relative to an earlier start. Its
                     // parameter and UV point and tangent are taken from the stack, as
                     // upstream. Only when the new span makes a closed-surface seam
                     // branch ambiguous is the endpoint dropped again from the actual
                     // start; a failed redrop falls back, once, to the saved point
                     // (the path of the initial endpoint), and never ends the trace.
-                    let (queued_start_t, saved_end) = *stack.last().ok_or_else(|| {
-                        SolidError::intersect_missing(OP, "the pending span endpoint")
-                    })?;
                     end.t = saved_end.t;
                     end.uv_pd = saved_end.uv_pd;
                     // (not upstream: with the knot lines its UV point is on)
@@ -1653,7 +1668,7 @@ impl Surface {
                         if let Some(b) = move_bound.as_mut() {
                             b.budget = approx_tol_3d - max_approx_dev;
                         }
-                        ignore_status(add_to_curve_bounded(
+                        let added = add_to_curve_bounded(
                             k,
                             this,
                             &s_uv_domain,
@@ -1667,13 +1682,19 @@ impl Surface {
                             &mut out.uv_curves,
                             &mut fix_bc_change,
                             move_bound.as_ref(),
-                        ))?;
+                        );
+                        // the fix-up's refusal, kept as the cause of the drop's stop (rule 6)
+                        let refusal = added.as_ref().err().cloned();
+                        ignore_status(added)?;
                         if let Some(b) = move_bound.as_ref() {
                             if b.refused() {
-                                return Err(SolidError::intersect_failed(
-                                    OP_REFUSED,
-                                    "the boundary fix-up refused the dropped curve",
-                                ));
+                                let stop =
+                                    Failure::new(OP_REFUSED, IntersectFailure::BoundaryFixRefused);
+                                return Err(match refusal {
+                                    Some(cause) => stop.caused_by(cause),
+                                    None => stop,
+                                }
+                                .into_error());
                             }
                             max_approx_dev += b.spent();
                         }

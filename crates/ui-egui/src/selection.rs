@@ -87,6 +87,8 @@ pub const SNAP_POINTS: Accept = 65536;
 /// Placements of components (a pattern of components): a pick in the view or the Browser takes
 /// the placement under the active component, as Align's Components do.
 pub const OCCURRENCES: Accept = 131072;
+/// Sampled points of a visible point cloud (#8933).
+pub const CLOUD_POINTS: Accept = 262144;
 /// What a 3D axis input takes (Revolve, Circular Pattern, Plane at Angle, Move's Rotate): an
 /// origin or construction axis, a straight sketch line, and an edge or face of the model that
 /// has an axis (a straight or circular edge, a cylinder, cone or torus face; the dialog takes
@@ -172,6 +174,9 @@ impl SelInput {
                 Some(Sel::Vertex { body: String::new(), point: *point })
             }
             Hit::Vertex { body, point } if !body.is_empty() && a & VERTICES != 0 => Some(Sel::Vertex { body: body.clone(), point: *point }),
+            Hit::PointCloudPoint { cloud, index, point, .. } if a & CLOUD_POINTS != 0 => {
+                Some(Sel::PointCloudPoint { cloud: *cloud, index: *index, point: *point })
+            }
             _ => None,
         }
     }
