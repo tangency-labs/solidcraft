@@ -1016,6 +1016,69 @@ fn patterns_and_mirrors_of_a_rib() {
     assert!(rel(volume(&mut s), before + 2.0 * rib) < 1e-6, "two ribs: {} vs {}", volume(&mut s), before + 2.0 * rib);
 }
 
+/// Acid-8 stage 3: the ring and its seed make five complete rings at 20 mm pitch.
+/// A nested pattern copies the ring's 23 added holes; its seed must be selected too.
+#[test]
+fn radial_cylinder_holes_form_five_rings() {
+    // Within each bore's radius-3 disk, the drum wall is at x = sqrt(50^2 - y^2)
+    // and its flat blind end is at x = 30. The removed volume is therefore between
+    // pi*3^2*(sqrt(50^2 - 3^2) - 30) and pi*3^2*20. These bounds are inside the
+    // acid test's [0.99, 1] times the full tool volume. Bores do not overlap:
+    // adjacent axes at their blind ends are 2*30*sin(pi/24) > 6 apart, rows 20 > 6.
+    let full_bore = PI * 9.0 * 20.0;
+    let minimum_bore = PI * 9.0 * (2491.0_f64.sqrt() - 30.0);
+    let drum = PI * 50.0 * 50.0 * 120.0;
+    let check_volume = |s: &mut Session, count: u32| {
+        let removed = drum - volume(s);
+        assert!((f64::from(count) * minimum_bore..=f64::from(count) * full_bore).contains(&removed), "{count} bores remove {removed} mm^3");
+    };
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":50,"height":120,"base":[0,0,0],"operation":"new","body_name":"Part"}));
+    assert!(rel(volume(&mut s), drum) < 1e-6);
+    run(
+        &mut s,
+        "solid.cylinder",
+        json!({"radius":3,"height":20,"base":[50,0,20],"operation":"cut","axis":[-1,0,0],"targets":["Part"],"name":"Hole1"}),
+    );
+    check_volume(&mut s, 1);
+    run(&mut s, "solid.pattern.circular", json!({"features":["Hole1"],"axis":"Z","count":24,"name":"Ring1"}));
+    check_volume(&mut s, 24);
+    let rows = run(&mut s, "solid.pattern.rectangular", json!({"features":["Ring1"],"dir1":[0,0,1],"count1":5,"spacing1":20}));
+    // Ring1 adds 23 holes. Four copies of those give 24 + 4*23 = 116, with
+    // material at the acid test's probe on the missing seed in the last row.
+    check_volume(&mut s, 116);
+    assert_eq!(
+        s.world_state().unwrap().bodies[0].body.classify_point(solidcore_record::Vec3::new(40.0, 0.0, 100.0)).unwrap(),
+        solidcraft_kernel::PointClass::Inside
+    );
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":rows["feature"],"command":"solid.pattern.rectangular","params":{
+            "features":["Hole1","Ring1"],"dir1":[0,0,1],"count1":5,"spacing1":20
+        }}),
+    );
+    check_volume(&mut s, 120);
+    let state = s.world_state().unwrap();
+    assert_eq!(state.bodies.len(), 1);
+    let body = &state.bodies[0].body;
+    let validity = solidcraft_kernel::validity(body);
+    assert!(matches!(&validity.smlib, Some(solidcraft_kernel::SmlibCheck::Valid)), "{validity:?}");
+    for row in 1..=5 {
+        for column in 0..24 {
+            let a = 2.0 * PI * f64::from(column) / 24.0;
+            for (r, z_offset, expected) in [
+                (40.0, 0.0, solidcraft_kernel::PointClass::Outside),
+                (29.0, 0.0, solidcraft_kernel::PointClass::Inside),
+                (40.0, 4.0, solidcraft_kernel::PointClass::Inside),
+            ] {
+                let p = solidcore_record::Vec3::new(r * a.cos(), r * a.sin(), 20.0 * f64::from(row) + z_offset);
+                assert_eq!(body.classify_point(p).unwrap(), expected, "row {row}, column {column}, {p:?}");
+            }
+        }
+    }
+}
+
 /// #395: a pattern or mirror of features takes a pattern or mirror of features as a source: it
 /// copies what that one made (its copies, not its source). The issue's design: a 40 × 30 × 20
 /// box with a hole `H` at (−15, −10) and `Pat`, two more holes along x at 10 mm steps.
