@@ -10,20 +10,20 @@ use super::topology_edgeuse_p1::BrepIn;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use solidcore::geom::assert_array::{AssertArray, ObjectKey as ReportKey};
-use solidcore::geom::attribute::ObjectKey;
-use solidcore::geom::object::ObjectRef;
-use solidcore::topology::brep::validation;
 use solidcore::curve::curve::Curve;
 use solidcore::curve::line::Line;
+use solidcore::geom::assert_array::{AssertArray, ObjectKey as ReportKey};
+use solidcore::geom::attribute::ObjectKey;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
+use solidcore::geom::object::ObjectRef;
 use solidcore::geom::vector2d::{Point2, Vec2};
 use solidcore::geom::vector3d::Vec3;
 use solidcore::math::Point3;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
+use solidcore::topology::brep::validation;
 use solidcore::topology::brep_cache::{arena_identity, CacheObject};
 use solidcore::topology::edgeuse::p1 as eu1p;
 use solidcore::topology::shell::{ShellMembers, ShellType};
@@ -456,8 +456,14 @@ impl UnitDiff for Runner {
         mutate(&mut b, &i)?;
         let kernel = Kernel::default();
         let mut reports = AssertArray::new();
-        let run =
-            validation::validate_pointers(&kernel, &mut b, Some(&mut reports), i.level, i.walk, &key);
+        let run = validation::validate_pointers(
+            &kernel,
+            &mut b,
+            Some(&mut reports),
+            i.level,
+            i.walk,
+            &key,
+        );
         let status = match run {
             Ok(x) => x,
             Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
@@ -490,11 +496,7 @@ impl UnitDiff for Runner {
                 lines: vec![[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1e-6]],
             },
         };
-        let mutation = if searched {
-            0
-        } else {
-            rng.below(11) as u8
-        };
+        let mutation = if searched { 0 } else { rng.below(11) as u8 };
         let value = if matches!(mutation, 4 | 5) {
             rng.below(3) as f64
         } else {
@@ -743,44 +745,44 @@ impl Constructor {
         }
         // connect edge and edge uses: the first edge use has the edge's orientation
         if existing_edge.is_none() {
-                if let Some(v) = start_vertex {
-                    post_insert_vertexuse(b, v, vu1)?;
-                }
-                if let Some(v) = end_vertex {
-                    post_insert_vertexuse(b, v, vu2)?;
-                }
-                let order = if b.edgeuse(eu1)?.orientation == OrientType::Same {
-                    [eu1, eu2]
-                } else {
-                    [eu2, eu1]
-                };
-                for eu in order {
-                    b.edge_mut(edge)?.edgeuses.push(eu);
-                    b.edgeuse_mut(eu)?.edge = Some(edge);
-                }
+            if let Some(v) = start_vertex {
+                post_insert_vertexuse(b, v, vu1)?;
+            }
+            if let Some(v) = end_vertex {
+                post_insert_vertexuse(b, v, vu2)?;
+            }
+            let order = if b.edgeuse(eu1)?.orientation == OrientType::Same {
+                [eu1, eu2]
+            } else {
+                [eu2, eu1]
+            };
+            for eu in order {
+                b.edge_mut(edge)?.edgeuses.push(eu);
+                b.edgeuse_mut(eu)?.edge = Some(edge);
+            }
         } else {
-                let eu = opt_err(eu1p::primary_edgeuse(b, edge)?, OP)?;
-                let eu_mate = opt_err(eu1p::mate(b, eu)?, OP)?;
-                let eu_vu = opt_err(b.edgeuse(eu)?.vertexuse, OP)?;
-                let mate_vu = opt_err(b.edgeuse(eu_mate)?.vertexuse, OP)?;
-                let (to_eu_vertex, to_mate_vertex) =
-                    if b.edgeuse(eu)?.orientation == b.edgeuse(eu1)?.orientation {
-                        (vu1, vu2)
-                    } else {
-                        (vu2, vu1)
-                    };
-                if let Some(v) = b.vertexuse(eu_vu)?.vertex {
-                    post_insert_vertexuse(b, v, to_eu_vertex)?;
-                }
-                if let Some(v) = b.vertexuse(mate_vu)?.vertex {
-                    post_insert_vertexuse(b, v, to_mate_vertex)?;
-                }
-                // the radial sector: the primary's mate of a lamina edge (the shim's
-                // shared edges join one face to another, never a third)
-                if !solidcore::topology::edge::is_lamina(b, edge)? {
-                    return Err(sm_err(OP));
-                }
-                solidcore::topology::edge::add_oriented_eu_pair(b, edge, eu1, eu2, Some(eu_mate))?;
+            let eu = opt_err(eu1p::primary_edgeuse(b, edge)?, OP)?;
+            let eu_mate = opt_err(eu1p::mate(b, eu)?, OP)?;
+            let eu_vu = opt_err(b.edgeuse(eu)?.vertexuse, OP)?;
+            let mate_vu = opt_err(b.edgeuse(eu_mate)?.vertexuse, OP)?;
+            let (to_eu_vertex, to_mate_vertex) =
+                if b.edgeuse(eu)?.orientation == b.edgeuse(eu1)?.orientation {
+                    (vu1, vu2)
+                } else {
+                    (vu2, vu1)
+                };
+            if let Some(v) = b.vertexuse(eu_vu)?.vertex {
+                post_insert_vertexuse(b, v, to_eu_vertex)?;
+            }
+            if let Some(v) = b.vertexuse(mate_vu)?.vertex {
+                post_insert_vertexuse(b, v, to_mate_vertex)?;
+            }
+            // the radial sector: the primary's mate of a lamina edge (the shim's
+            // shared edges join one face to another, never a third)
+            if !solidcore::topology::edge::is_lamina(b, edge)? {
+                return Err(sm_err(OP));
+            }
+            solidcore::topology::edge::add_oriented_eu_pair(b, edge, eu1, eu2, Some(eu_mate))?;
         }
         self.edge = Some(edge);
         self.edgeuse = Some(eu1);
@@ -868,20 +870,20 @@ impl Constructor {
                 let v = if let Some(v) = v {
                     v
                 } else {
-                        let tolerance = b.tolerance();
-                        let v = b.add_vertex_record(Vertex {
-                            tolerance,
-                            ..Vertex::default()
-                        })?;
-                        let edge = b.edge(e)?;
-                        let t = if b.edgeuse(eu)?.orientation == OrientType::Opposite {
-                            edge.interval.max()
-                        } else {
-                            edge.interval.min()
-                        };
-                        let p = opt_err(edge.curve.as_ref(), OP)?.evaluate_point(k, t)?;
-                        b.vertex_mut(v)?.point = p;
-                        v
+                    let tolerance = b.tolerance();
+                    let v = b.add_vertex_record(Vertex {
+                        tolerance,
+                        ..Vertex::default()
+                    })?;
+                    let edge = b.edge(e)?;
+                    let t = if b.edgeuse(eu)?.orientation == OrientType::Opposite {
+                        edge.interval.max()
+                    } else {
+                        edge.interval.min()
+                    };
+                    let p = opt_err(edge.curve.as_ref(), OP)?.evaluate_point(k, t)?;
+                    b.vertex_mut(v)?.point = p;
+                    v
                 };
                 post_insert_vertexuse(b, v, vu)?;
                 v
@@ -978,7 +980,8 @@ fn sheet_grid(k: &mut Kernel, b: &mut Brep, count: usize, shared: u8) -> Result<
                 }
                 _ => (None, None),
             };
-            let edge = builder.start_edge(b, if shared == 1 { original } else { None }, start, end)?;
+            let edge =
+                builder.start_edge(b, if shared == 1 { original } else { None }, start, end)?;
             if i == 0 {
                 if let Some(slot) = first_edges.get_mut(j) {
                     *slot = Some(edge);
@@ -1020,7 +1023,10 @@ mod tests {
     /// grid of 2^32 faces is refused instead of building faces until the allocator aborts.
     #[test]
     fn huge_sheet_grid_is_refused() {
-        let rust = Runner.run_rust(&grid_case(4_294_967_296)).unwrap_err().to_string();
+        let rust = Runner
+            .run_rust(&grid_case(4_294_967_296))
+            .unwrap_err()
+            .to_string();
         assert_eq!(rust, "invalid argument: invalid B-rep validation arguments");
     }
 
