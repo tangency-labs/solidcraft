@@ -80,7 +80,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::boolean::merge::p4::KernelManifoldIntersector;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::{ignore_status, EntityRef, Result, SolidError};
 use crate::geom::attribute::{ids, Attribute, Behavior};
 use crate::geom::context::{Context, MarkType};
 use crate::geom::extent1d::Extent1d;
