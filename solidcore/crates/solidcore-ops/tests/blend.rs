@@ -4838,6 +4838,51 @@ fn a_round_on_a_bar_swept_along_a_wide_arc_is_not_refused_as_cutting_the_part() 
     );
 }
 
+/// #17016's exact pre-fillet body: the public report's six superellipse fit-point sections,
+/// lofted and joined to its radius-6 cylinder by the first 20 script commands. The fixture
+/// is the final SCBREP05 cache slice saved by SolidCraft 0.44.1 (e151d5ea6866), preserving
+/// the cyclic C2 spline sections and the Boolean's intersection curves without refitting.
+#[test]
+fn a_cylinder_foot_round_rolls_across_the_reported_six_section_loft() {
+    // The shipped preset holds these two fixes back; every other fix is enabled.
+    solidcore_ops::session::set_thread_fixes(
+        solidcore::kernel::UpstreamFixes::NAMES
+            .iter()
+            .copied()
+            .filter(|name| {
+                !matches!(
+                    *name,
+                    "fillet_refuse_rounds_breaking_through" | "fillet_round_ends_on_outline"
+                )
+            }),
+    )
+    .unwrap();
+    let saved = solidcore_record::native::decode(include_bytes!(
+        "data/issue_17016_six_section_loft_boss.brep"
+    ))
+    .unwrap();
+    let (body, _) = Body::from_record(&saved.solid, true).unwrap();
+    assert_eq!(body.counts().unwrap()[0], 16);
+    let input = body.check(CheckLevel::All).unwrap();
+    assert!(input.is_valid(), "the pre-fillet body is invalid: {input}");
+    // The report's pick is near the foot, rather than exactly on its curved edge.
+    let foot = nearest_edge(&body, [6.0, 0.0, 33.0]);
+    let before = volume(&body);
+    let made = blend(&body, Blend::Round, &[foot], &[1.0], &[], Corners::Filled)
+        .unwrap_or_else(|error| panic!("the reported cylinder foot does not round: {error:?}"));
+    assert!(!made.made.is_empty(), "the round made no blend faces");
+    assert!(body.counts().unwrap()[0] > 16);
+    // A concave foot round fills the space between the boss and the loft.
+    assert!(volume(&body) > before, "the foot round added no material");
+    let report = body.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "the rounded body is invalid: {report}");
+    let (record, _) = body.to_record().unwrap();
+    let (reopened, _) = Body::from_record(&record, true)
+        .unwrap_or_else(|error| panic!("the rounded body does not reopen: {error:?}"));
+    let report = reopened.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "the reopened body is invalid: {report}");
+}
+
 /// #17016: the round at the foot of a cylinder boss (radius 6 about the z axis, from z = 25)
 /// standing through the top of a hull lofted through six elliptic sections, each the 12 fit
 /// pieces of [`fit_point_ellipse`] from 15 degrees, so no piece joint lies on the top. The

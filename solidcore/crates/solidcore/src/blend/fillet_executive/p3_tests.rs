@@ -191,7 +191,9 @@ impl ExecutiveAccess<Handle> for Access {
             touches_rim: false,
             rolls_over: false,
             into_material: false,
+            boundaries_into_material: false,
             left_across: Vec::new(),
+            return_across: Vec::new(),
             continued_cliffs: Vec::new(),
             wraps_past_both_ends: false,
         })
