@@ -102,11 +102,13 @@
 //!   [`BlendFailure::Defect`] whose reason (one of the named `const`s at the end of the
 //!   file) says why, built where it happens (its origin is that file and line) and keeping
 //!   upstream's status for the goldens: `SM_ERR_NULL_POINTER` for a `NER`, `SM_ERR`
-//!   otherwise. A kind of the body's geometry a construction is not built on is a refusal
-//!   at that face or edge ([`crate::error::ErrorKind::KindNotBuilt`]): a curved support at a
-//!   bevel's split end ([`BlendFailure::SplitEndSupportNotPlanar`]), an extended edge's face
-//!   whose surface has no B-spline form ([`BlendFailure::SurfaceKindNotBuilt`]), a tangent
-//!   seam whose curve is not of a B-spline class ([`BlendFailure::CurveKindNotBuilt`]). A
+//!   otherwise. A curved support at a bevel's split end, which is cut by a plane, is a
+//!   refusal at the face ([`BlendFailure::SplitEndSupportNotPlanar`],
+//!   [`crate::error::ErrorKind::SplitEndNotPlanar`]). A kind of the body's geometry the
+//!   routine cannot handle is an unsupported kind at that face or edge
+//!   ([`crate::error::ErrorKind::Unsupported`]): an extended edge's face whose surface has no
+//!   B-spline form ([`BlendFailure::SurfaceKindNotBuilt`]), a tangent seam whose curve is not
+//!   of a B-spline class ([`BlendFailure::CurveKindNotBuilt`]). A
 //!   split end's rail that misses the opposite fillet is an empty search
 //!   ([`BlendFailure::SplitEndRailMissesFillet`]). The constructions not built are named:
 //!   an N x 2 cross section on one geometry ([`BlendFailure::CrossSectionOnOneGeometry`]),
@@ -4137,7 +4139,7 @@ mod tests {
             Some(&BlendFailure::SplitEndSupportNotPlanar { face: curved }),
             "{err:?}"
         );
-        assert_eq!(err.kind(), crate::error::ErrorKind::KindNotBuilt);
+        assert_eq!(err.kind(), crate::error::ErrorKind::SplitEndNotPlanar);
         assert!(err.is_refusal() && !err.is_defect() && !err.sized());
         assert_eq!(err.upstream_status(), Some(SM_ERR));
         assert_eq!(err.entity(), Some(EntityRef::Face(curved)));
@@ -4212,10 +4214,10 @@ mod tests {
     }
 
     /// A tangent seam whose curve is not of a B-spline class (a Hermite curve here): the cap
-    /// edge, a trimmed B-spline copy of it, is not built on that kind. A refusal at the
-    /// seam naming the kind, keeping the `SM_ERR_NULL_POINTER` of the `NER` it replaces.
+    /// edge, a trimmed B-spline copy of it, is not built on that kind. An unsupported kind
+    /// at the seam naming the kind, keeping the `SM_ERR_NULL_POINTER` of the `NER` it replaces.
     #[test]
-    fn a_tangent_seam_of_a_kind_without_b_spline_is_refused_at_the_edge() {
+    fn a_tangent_seam_of_a_kind_without_b_spline_is_an_unsupported_kind() {
         let k = kernel();
         let mut target = Brep::new();
         let (p0, p1) = (Point3::ZERO, Point3::new(1.0, 0.0, 0.0));
@@ -4248,8 +4250,8 @@ mod tests {
             Some(&BlendFailure::CurveKindNotBuilt { edge: te, kind }),
             "{err:?}"
         );
-        assert_eq!(err.kind(), crate::error::ErrorKind::KindNotBuilt);
-        assert!(err.is_refusal() && !err.is_defect() && !err.sized());
+        assert_eq!(err.kind(), crate::error::ErrorKind::Unsupported);
+        assert!(!err.is_refusal() && !err.is_defect());
         assert_eq!(err.upstream_status(), Some(SM_ERR_NULL_POINTER));
         assert_eq!(err.entity(), Some(EntityRef::Edge(te)));
     }
