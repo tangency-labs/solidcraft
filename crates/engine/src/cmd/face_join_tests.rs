@@ -276,30 +276,126 @@ fn join_of_a_profile_sketched_on_a_face_leaves_a_neighbour_it_lies_on() {
     }
 }
 
-/// #6424: an extrude that runs to another body and joins it makes one body of the tool, the
-/// body it was sketched on and the body it runs to.
-#[test]
-fn join_extrude_to_another_body_joins_that_body() {
-    let mut s = Session::default();
-    run(&mut s, "solid.box", json!({"length":40,"width":40,"height":10,"body_name":"Base"}));
-    run(&mut s, "solid.box", json!({"corner":[0,0,40],"length":40,"width":40,"height":20,"body_name":"Target"}));
-    // A profile on the base's top face, extruded up to the target's bottom face.
-    let sketch = run(&mut s, "sketch.create", json!({"plane":{"face":[20,20,10]}}))["sketch"].as_u64().unwrap();
+/// A base, a target 30 mm above it, and a profile sketched on the base's top face, to extrude up
+/// to the target's bottom face at [20, 20, 40]: the sketch's id.
+fn base_and_target(s: &mut Session) -> u64 {
+    run(s, "solid.box", json!({"length":40,"width":40,"height":10,"body_name":"Base"}));
+    run(s, "solid.box", json!({"corner":[0,0,40],"length":40,"width":40,"height":20,"body_name":"Target"}));
+    let sketch = run(s, "sketch.create", json!({"plane":{"face":[20,20,10]}}))["sketch"].as_u64().unwrap();
     let plane = s.model.state().sketch(sketch).unwrap().plane;
     let at = |x: f64, y: f64| {
         let p = plane.to_local(Vec3::new(x, y, 10.0));
         json!([p.x, p.y])
     };
-    run(&mut s, "sketch.rectangle.two_point", json!({"p0": at(10.0,10.0), "p1": at(30.0,30.0)}));
-    run(&mut s, "sketch.finish", json!({}));
-    // The join names the body the profile was sketched on; the body it runs to joins too.
-    run(&mut s, "solid.extrude", json!({"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"]}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": at(10.0,10.0), "p1": at(30.0,30.0)}));
+    run(s, "sketch.finish", json!({}));
+    sketch
+}
+
+/// Whether the tool joined the target too: one body of 60 000 mm³ (the base's 16 000, the tool's
+/// 20 × 20 × 30 = 12 000 and the target's 32 000), else the base with the tool (28 000) and the
+/// target untouched (32 000).
+fn check_target_joined(s: &Session, joined: bool) {
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
     let state = s.model.state();
     let volume = |name: &str| solidcraft_kernel::measure(&state.body(name).unwrap().body).unwrap().volume;
-    assert_eq!(state.bodies.len(), 1, "the tool, the base and the target are one body");
-    assert!((volume("Base") - 60_000.0).abs() < 1e-6, "the target took the tool: {}", volume("Base"));
-    assert_eq!(state.body("Base").unwrap().body.lumps().map_or(1, |l| l.len()), 1, "one piece");
+    if joined {
+        assert_eq!(state.bodies.len(), 1, "the tool, the base and the target are one body");
+        assert!((volume("Base") - 60_000.0).abs() < 1e-6, "the target took the tool: {}", volume("Base"));
+        assert_eq!(state.body("Base").unwrap().body.lumps().map_or(1, |l| l.len()), 1, "one piece");
+    } else {
+        assert_eq!(state.bodies.len(), 2, "the body the extrude runs to stays its own body");
+        assert!((volume("Base") - 28_000.0).abs() < 1e-6, "the base took the tool: {}", volume("Base"));
+        assert!((volume("Target") - 32_000.0).abs() < 1e-6, "the target is untouched: {}", volume("Target"));
+    }
+}
+
+/// The extrude `id`'s targets and whether it keeps the body it runs to apart.
+fn join_scope(s: &Session, id: &Value) -> (Vec<String>, bool) {
+    let FeatureKind::Extrude { targets, extent, .. } = &s.doc.feature(id.as_u64().unwrap()).unwrap().kind else { panic!("an extrude") };
+    (targets.iter().map(|t| t.0.clone()).collect(), extent.to_body_apart)
+}
+
+/// #6424: an extrude that runs to another body and joins it, naming no targets, makes one body of
+/// the tool, the body it was sketched on and the body it runs to. The body it runs to is one of
+/// its stored targets, next to the face's body, so the Extrude window shows it.
+#[test]
+fn join_extrude_to_another_body_joins_that_body() {
+    let mut s = Session::default();
+    let sketch = base_and_target(&mut s);
+    let extrude = run(&mut s, "solid.extrude", json!({"sketch":sketch,"to":[20,20,40],"operation":"join"}))["feature"].clone();
+    check_target_joined(&s, true);
+    assert_eq!(join_scope(&s, &extrude), (vec!["Base".to_string(), "Target".to_string()], true));
+}
+
+/// #18428: a Join To Object with explicit targets joins those bodies only. The body it runs to
+/// sets where it ends, and stays its own body unless it is one of them.
+#[test]
+fn join_extrude_to_another_body_with_targets_joins_only_them() {
+    let mut s = Session::default();
+    let sketch = base_and_target(&mut s);
+    let extrude = run(&mut s, "solid.extrude", json!({"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"]}))["feature"].clone();
+    check_target_joined(&s, false);
+    assert_eq!(join_scope(&s, &extrude), (vec!["Base".to_string()], true));
+    check_target_joined(&Session::new(Document::from_json(&s.doc.to_json()).unwrap()), false);
+    // Naming the body it runs to joins it.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":extrude,"command":"solid.extrude","params":{"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base","Target"]}}),
+    );
+    check_target_joined(&s, true);
+}
+
+/// `all_bodies_touched` (the Extrude window's All) stores no targets and no participants: the
+/// Join takes every body the tool touches at each rebuild, a hidden one too, rather than the face's
+/// body as a default or the shown bodies (#2464). Without it, a hidden body is left alone.
+#[test]
+fn join_extrude_with_all_bodies_touched_takes_hidden_bodies_too() {
+    for all in [true, false] {
+        let mut s = Session::default();
+        let sketch = base_and_target(&mut s);
+        run(&mut s, "browser.visibility", json!({"items":["Target"],"visible":false}));
+        let extrude =
+            run(&mut s, "solid.extrude", json!({"sketch":sketch,"to":[20,20,40],"operation":"join","all_bodies_touched":all}))["feature"].clone();
+        check_target_joined(&s, all);
+        let f = s.doc.feature(extrude.as_u64().unwrap()).unwrap();
+        let FeatureKind::Extrude { targets, .. } = &f.kind else { panic!("an extrude") };
+        if all {
+            assert!(targets.is_empty() && f.participants.is_empty(), "{targets:?} {:?}", f.participants);
+        } else {
+            assert_eq!(targets.iter().map(|t| t.0.as_str()).collect::<Vec<_>>(), ["Base"], "the face's body, not the hidden one");
+        }
+    }
+}
+
+/// A Join To Object made before the body it runs to became one of its targets (format 40 up to
+/// this change: no `to_body_apart`) still joins that body whatever its targets say: on opening,
+/// and through an edit that doesn't say otherwise. The Extrude window's edit, which says
+/// `to_body_apart: true`, makes its targets alone decide.
+#[test]
+fn join_extrude_to_another_body_made_before_it_was_a_target_still_joins_it() {
+    let mut s = Session::default();
+    let sketch = base_and_target(&mut s);
+    let params = json!({"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"],"to_body_apart":false});
+    let extrude = run(&mut s, "solid.extrude", params.clone())["feature"].clone();
+    check_target_joined(&s, true);
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    assert!(saved["features"].as_array().unwrap().iter().all(|f| f["extent"].get("to_body_apart").is_none()), "saved as older designs are");
+    saved["format"] = json!("solidcraft/61");
+    saved.as_object_mut().unwrap().remove("format_pending");
+    let mut old = Session::new(solidcraft_doc::format::read(&saved.to_string()).unwrap());
+    check_target_joined(&old, true);
+    let mut unsaid = params.clone();
+    unsaid.as_object_mut().unwrap().remove("to_body_apart");
+    run(&mut old, "timeline.redefine", json!({"feature":extrude,"command":"solid.extrude","params":unsaid}));
+    check_target_joined(&old, true);
+    assert_eq!(join_scope(&old, &extrude), (vec!["Base".to_string()], false));
+    let mut apart = params;
+    apart["to_body_apart"] = json!(true);
+    run(&mut old, "timeline.redefine", json!({"feature":extrude,"command":"solid.extrude","params":apart}));
+    check_target_joined(&old, false);
+    assert!(old.execute("solid.extrude", &json!({"sketch":sketch,"to":[20,20,40],"operation":"join","to_body_apart":"no"})).is_err());
 }
 
 /// #8151: a design saved before a Join To Object also joined the body it runs to (format 39 and
@@ -308,18 +404,10 @@ fn join_extrude_to_another_body_joins_that_body() {
 #[test]
 fn join_extrude_to_another_body_saved_before_it_joined_keeps_that_body() {
     let mut s = Session::default();
-    run(&mut s, "solid.box", json!({"length":40,"width":40,"height":10,"body_name":"Base"}));
-    run(&mut s, "solid.box", json!({"corner":[0,0,40],"length":40,"width":40,"height":20,"body_name":"Target"}));
-    let sketch = run(&mut s, "sketch.create", json!({"plane":{"face":[20,20,10]}}))["sketch"].as_u64().unwrap();
-    let plane = s.model.state().sketch(sketch).unwrap().plane;
-    let at = |x: f64, y: f64| {
-        let p = plane.to_local(Vec3::new(x, y, 10.0));
-        json!([p.x, p.y])
-    };
-    run(&mut s, "sketch.rectangle.two_point", json!({"p0": at(10.0,10.0), "p1": at(30.0,30.0)}));
-    run(&mut s, "sketch.finish", json!({}));
+    let sketch = base_and_target(&mut s);
     // A feature after the extrude names the body it runs to, as the lid's sketch and moves did.
-    // Today's join leaves no such body to name, so the move is made first and put last below.
+    // A join that took that body in would leave no such body to name, so the move is made
+    // first and put last below.
     let moved = run(&mut s, "solid.move", json!({"bodies":["Target"],"translate":[0,0,5]}))["feature"].clone();
     let extrude = run(&mut s, "solid.extrude", json!({"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"]}))["feature"].clone();
     let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
@@ -330,14 +418,7 @@ fn join_extrude_to_another_body_saved_before_it_joined_keeps_that_body() {
     saved["format"] = json!("solidcraft/39");
     saved.as_object_mut().unwrap().remove("format_pending");
     let mut old = Session::new(solidcraft_doc::format::read(&saved.to_string()).unwrap());
-    let check = |s: &Session| {
-        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
-        let state = s.model.state();
-        let volume = |name: &str| solidcraft_kernel::measure(&state.body(name).unwrap().body).unwrap().volume;
-        assert_eq!(state.bodies.len(), 2, "the body the extrude runs to stays its own body");
-        assert!((volume("Base") - 28_000.0).abs() < 1e-6, "the base took the tool: {}", volume("Base"));
-        assert!((volume("Target") - 32_000.0).abs() < 1e-6, "the target is untouched: {}", volume("Target"));
-    };
+    let check = |s: &Session| check_target_joined(s, false);
     check(&old);
     run(
         &mut old,

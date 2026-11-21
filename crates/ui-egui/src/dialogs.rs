@@ -633,6 +633,42 @@ pub struct Dialog {
     /// shown while this dialog is open, as an edited feature's sketch does, so its profiles can
     /// be picked even when an earlier feature uses the sketch and hides it.
     pub(crate) started_from_sketch: Option<u64>,
+    /// What Extrude put in its Target Bodies by itself ([`sync_targets`]). UI state only.
+    pub(crate) auto_targets: AutoTargets,
+}
+
+/// Extrude's Target Bodies as the window fills them in ([`sync_targets`]): while the box holds
+/// only what the window put there, it follows the bodies OK would store; once they are changed by
+/// hand, only the To body still follows its pick; cleared, it stays Automatic.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct AutoTargets {
+    /// The bodies in the box were changed by hand, or are an edited feature's stored targets.
+    pub(crate) by_hand: bool,
+    /// The bodies the window put in the box, in order, while it follows the default.
+    pub(crate) added: Vec<String>,
+    /// What the default was last worked out from.
+    key: Option<TargetsKey>,
+    /// Once by hand: the To pick, and whether the operation was Join, the To body was last
+    /// worked out for.
+    pub(crate) to_key: Option<(Option<Sel>, bool)>,
+    /// The To body the window put in the box, and the pick it was put in for: taken out again
+    /// when the pick moves or the operation stops being Join.
+    to_added: Option<(Sel, String)>,
+    /// A To body taken out by hand, and its pick: it stays out while the pick does.
+    refused: Option<(Sel, String)>,
+    /// The box was cleared (or an edited feature stored no targets): it stays empty, Automatic,
+    /// until a body is picked into it, and OK leaves the choice to `solid.extrude`.
+    pub(crate) cleared: bool,
+}
+
+/// What Extrude's default targets depend on ([`default_targets`]).
+#[derive(Clone, Debug, PartialEq)]
+struct TargetsKey {
+    operation: usize,
+    first: Option<Sel>,
+    to: Option<Sel>,
+    shown: Option<Vec<String>>,
+    revision: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -908,6 +944,7 @@ impl Dialog {
             anchor_hint: None,
             started_from_sketch: None,
             auto: None,
+            auto_targets: AutoTargets::default(),
         }
     }
 
@@ -3658,7 +3695,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                     RichText::new(solidcraft_ui_text::tr("dialog.select")).color(t.text)
                 };
                 let selected_text = text.text().strip_prefix("↖ ").unwrap_or_else(|| text.text());
-                let prompt = if !filled && inp.label == "Edges" { tr("Select edges") } else { selected_text };
+                let prompt = if filled { selected_text } else { empty_field_prompt(d, inp).unwrap_or(selected_text) };
                 let chip = crate::ui_kit::selection_field(ui, prompt, crate::ui_kit::Selection { active, filled });
                 if matches!(d.kind, Kind::Shell { .. }) && i == 0 {
                     chip.widget_info(|| {
@@ -4229,8 +4266,10 @@ fn auto_operation(app: &SolveApp, d: &mut Dialog) {
     // cut: an empty `participants` would read as every body, hidden ones too (#9919).
     let mut params = params;
     let mut nothing_shown = false;
+    // Target Bodies' All (an empty `participants`) takes hidden bodies too once made; the choice
+    // still goes by what is shown.
     if let Some(shown) = shown
-        && params.get("participants").is_none()
+        && params.get("participants").and_then(Value::as_array).is_none_or(Vec::is_empty)
     {
         nothing_shown = shown.is_empty();
         params["participants"] = json!(shown);
@@ -4450,6 +4489,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     sync_reach(app, &mut d);
+    sync_targets(&app.session, &mut d);
     auto_operation(app, &mut d);
     crate::op_auto::update(app, &mut d, ctx);
     d.sync_thread(&app.session);
@@ -5277,25 +5317,189 @@ pub(crate) fn set_object_accepting(inputs: &mut Vec<SelInput>, active: &mut usiz
 /// Extrude's pick input for the bodies a Join joins or a Cut cuts.
 const EXTRUDE_TARGETS: &str = "Target Bodies";
 
-/// The Target Bodies input while an extrude's operation is Join or Cut; `None` otherwise.
+/// The Target Bodies input while an extrude's operation is Join, Cut or Intersect; `None` otherwise.
 fn extrude_targets(d: &Dialog) -> Option<&SelInput> {
-    matches!(d.kind, Kind::Extrude { operation: 1 | 2, .. }).then(|| d.inputs.iter().find(|i| i.label == EXTRUDE_TARGETS)).flatten()
+    matches!(d.kind, Kind::Extrude { operation: 1..=3, .. }).then(|| d.inputs.iter().find(|i| i.label == EXTRUDE_TARGETS)).flatten()
 }
 
-/// Show Extrude's Target Bodies input for Join and Cut, and remove it (with its picks) otherwise.
+/// Extrude's To Object pick while the operation is Join.
+fn join_to_pick(d: &Dialog) -> Option<&Sel> {
+    if !matches!(d.kind, Kind::Extrude { operation: 1, .. }) {
+        return None;
+    }
+    d.inputs.iter().find(|i| i.label == TO_OBJECT)?.items.first()
+}
+
+/// The body a To Object pick lies on, when a Join may take it by default
+/// ([`solidcraft_engine::joinable_body`]). An edited extrude's own To place carries no body: the
+/// engine finds it as the extrude does.
+fn to_pick_body(s: &Session, d: &Dialog, pick: &Sel) -> Option<String> {
+    match pick {
+        Sel::Face { body, .. } | Sel::Vertex { body, .. } | Sel::Edge { body, .. } if !body.is_empty() => {
+            solidcraft_engine::joinable_body(s, body).then(|| body.clone())
+        }
+        Sel::Vertex { point, .. } => {
+            let (id, _) = d.editing?;
+            let f = s.doc.feature(id)?;
+            let FeatureKind::Extrude { extent, .. } = &f.kind else { return None };
+            let stored = solidcraft_engine::doc::apply_point(&feature_frame(s, f.component), extent.to?.0);
+            (stored.dist(*point) < 1e-9).then(|| solidcraft_engine::feature_to_object_target(s, id)).flatten()
+        }
+        _ => None,
+    }
+}
+
+/// The body Extrude's profiles come from: the body of the face extruded, or of the face the
+/// profiles' sketch is on, while it is shown. None for a sketch on no body.
+fn profile_body(s: &Session, d: &Dialog) -> Option<String> {
+    let body = match d.inputs.first()?.items.first()? {
+        Sel::Face { body, .. } => Some(body.clone()),
+        Sel::Profile { sketch, .. } | Sel::SketchCurve { sketch: Some(sketch), .. } => solidcraft_engine::sketch_join_target(s, *sketch),
+        _ => None,
+    }?;
+    solidcraft_engine::joinable_body(s, &body).then_some(body)
+}
+
+/// The bodies Extrude's Target Bodies fill in with ([`sync_targets`]), and among them the To body.
+/// - Nothing picked to extrude yet: none (All), until a face or profile says which body.
+/// - A face or a sketch on a shown body's face: that body, for Join, Cut and Intersect alike;
+///   a Join To Object adds the body it runs to (#6424).
+/// - Otherwise none: All, every body the extrusion meets, hidden or not. Hidden bodies get no
+///   rule of their own: visibility is no part of the design.
+fn default_targets(s: &Session, d: &Dialog, operation: usize) -> (Vec<String>, Option<String>) {
+    if d.inputs.first().is_none_or(|i| i.items.is_empty()) {
+        return (Vec::new(), None);
+    }
+    // Bodies named as participants take part instead of any default.
+    let edited = d.editing.and_then(|(id, _)| s.doc.feature(id));
+    if edited.is_some_and(|f| !f.participants.is_empty()) || d.extra.get("participants").and_then(Value::as_array).is_some_and(|p| !p.is_empty()) {
+        return (Vec::new(), None);
+    }
+    if let Some(body) = profile_body(s, d) {
+        let to =
+            (operation == crate::op_auto::JOIN).then(|| join_to_pick(d).and_then(|pick| to_pick_body(s, d, pick))).flatten().filter(|to| *to != body);
+        return (std::iter::once(body).chain(to.clone()).collect(), to);
+    }
+    (Vec::new(), None)
+}
+
+/// Extrude's Target Bodies show the bodies OK stores, as soon as they are known: while the box
+/// holds only what the window put there, it follows [`default_targets`] as the profiles, the To
+/// pick, the operation and the shown bodies change. A body picked or taken out by hand (or an
+/// edited feature's stored targets) ends that; the To body then still follows its pick, put in
+/// when the pick lands on a body and taken out when it moves (#6424). Cleared, the box stays
+/// empty and says Automatic until a body is picked into it.
+pub(crate) fn sync_targets(s: &Session, d: &mut Dialog) {
+    let Kind::Extrude { operation, .. } = &d.kind else { return };
+    let operation = *operation;
+    let Some(at) = d.inputs.iter().position(|i| i.label == EXTRUDE_TARGETS).filter(|_| matches!(operation, 1..=3)) else {
+        // No Target Bodies (New Body): its picks went with it.
+        d.auto_targets = AutoTargets::default();
+        return;
+    };
+    let items = d.inputs.get(at).map(|i| i.items.body_names()).unwrap_or_default();
+    let to_pick = d.inputs.iter().find(|i| i.label == TO_OBJECT).and_then(|i| i.items.first()).cloned();
+    let join = operation == crate::op_auto::JOIN;
+    let auto = &mut d.auto_targets;
+    if items.is_empty() {
+        // Cleared (or stored empty): Automatic, and the window puts nothing back in.
+        if auto.by_hand || !auto.added.is_empty() {
+            auto.cleared = true;
+        }
+        auto.by_hand = false;
+        auto.added.clear();
+        auto.to_added = None;
+        if auto.cleared {
+            auto.key = None;
+            return;
+        }
+    } else if !auto.by_hand && items != auto.added {
+        auto.by_hand = true;
+        auto.cleared = false;
+        auto.to_key = Some((to_pick.clone(), join));
+    }
+    if !auto.by_hand {
+        let key = TargetsKey {
+            operation,
+            first: d.inputs.first().and_then(|i| i.items.first()).cloned(),
+            to: join_to_pick(d).cloned(),
+            shown: solidcraft_engine::shown_scope(s),
+            revision: s.revision,
+        };
+        if d.auto_targets.key.as_ref() == Some(&key) && items == d.auto_targets.added {
+            return;
+        }
+        let (wanted, to) = default_targets(s, d, operation);
+        if let Some(input) = d.inputs.get_mut(at) {
+            input.items = wanted.iter().map(|name| Sel::Body { name: name.clone() }).collect();
+        }
+        let auto = &mut d.auto_targets;
+        auto.added = wanted;
+        auto.to_added = to.zip(to_pick).map(|(body, pick)| (pick, body));
+        auto.key = Some(key);
+        return;
+    }
+    // By hand: the To body the window put in and that was taken out stays out for its pick.
+    if let Some((pick, body)) = auto.to_added.take() {
+        if items.contains(&body) {
+            auto.to_added = Some((pick, body));
+        } else {
+            auto.refused = Some((pick, body));
+        }
+    }
+    let key = (to_pick.clone(), join);
+    if auto.to_key.as_ref() == Some(&key) {
+        return;
+    }
+    auto.to_key = Some(key);
+    let old = auto.to_added.take();
+    let body = to_pick.as_ref().filter(|_| join).and_then(|pick| to_pick_body(s, d, pick));
+    let refused = d.auto_targets.refused.clone();
+    let Some(input) = d.inputs.get_mut(at) else { return };
+    input.items.retain(|x| !matches!((x, &old), (Sel::Body { name }, Some((_, old))) if name == old));
+    if let (Some(body), Some(pick)) = (body, to_pick)
+        && refused.as_ref() != Some(&(pick.clone(), body.clone()))
+        && !input.items.iter().any(|x| matches!(x, Sel::Body { name } if *name == body))
+    {
+        input.items.push(Sel::Body { name: body.clone() });
+        d.auto_targets.to_added = Some((pick, body));
+    }
+}
+
+/// What an empty pick field says instead of Select. Extrude fills its Target Bodies in as soon
+/// as they are known ([`sync_targets`]): left empty, they are every body the extrusion touches,
+/// at each rebuild.
+pub(crate) fn empty_field_prompt(d: &Dialog, inp: &SelInput) -> Option<&'static str> {
+    if inp.label == "Edges" {
+        Some(tr("Select edges"))
+    } else if inp.label == EXTRUDE_TARGETS && matches!(d.kind, Kind::Extrude { .. }) {
+        Some(solidcraft_ui_text::tr("dialog.targets_all"))
+    } else {
+        None
+    }
+}
+
+/// Whether Extrude's Target Bodies hold bodies chosen by hand, not what the window put there by
+/// itself ([`sync_targets`]): Extrude then stops choosing its operation.
+pub(crate) fn targets_picked_by_hand(inputs: &[SelInput], auto: &AutoTargets) -> bool {
+    auto.by_hand && inputs.iter().any(|i| i.label == EXTRUDE_TARGETS && !i.items.is_empty())
+}
+
+/// Show Extrude's Target Bodies input for Join, Cut and Intersect, and remove it (with its picks) otherwise.
 /// Showing it leaves the active input where it is, so the profiles stay the next pick.
 fn set_extrude_targets(inputs: &mut Vec<SelInput>, active: &mut usize, extra: &mut serde_json::Map<String, Value>, operation: usize) {
     let tip = match operation {
-        1 => Some("ui.extrude_join_targets_tip"),
-        2 => Some("ui.extrude_cut_targets_tip"),
+        1 => Some("dialog.targets_join_tip"),
+        2 => Some("dialog.targets_cut_tip"),
+        3 => Some("dialog.targets_intersect_tip"),
         _ => None,
     };
     let at = inputs.iter().position(|i| i.label == EXTRUDE_TARGETS);
     match (at, tip) {
         (None, Some(tip)) => {
             let mut input = SelInput::new(EXTRUDE_TARGETS, BODIES, true).tip(tip);
-            // An edited Intersect can have stored targets without a pick input. Moving to
-            // Join or Cut transfers them into the input, which now owns the selection.
+            // Stored targets kept aside while the operation had no Target Bodies move into the
+            // input, which now owns the selection.
             if let Some(Value::Array(targets)) = extra.remove("targets") {
                 input.items = targets.iter().filter_map(Value::as_str).map(|name| Sel::Body { name: name.into() }).collect();
             }
@@ -6220,17 +6424,27 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             if to_object_on(&d.inputs) {
                 common["to"] = to_object_point(&d.inputs).ok_or("select the object to extrude to")?;
                 put(&mut common, &[("to_offset", to_offset)]);
+                // The To body joins only from Target Bodies, where the window shows it: an edited
+                // older Join To Object, which joined it whatever its targets said, changes too.
+                if OPS.get(*operation) == Some(&"join") {
+                    common["to_body_apart"] = json!(true);
+                }
             }
             if object_on(&d.inputs, FROM_OBJECT) {
                 common["from"] = object_point(&d.inputs, FROM_OBJECT).ok_or("select the object to extrude from")?;
             }
-            // Join and Cut use the bodies picked in Target Bodies. None picked keeps the
-            // command's automatic choice, including the existing cut scope.
+            // Join, Cut and Intersect use the bodies picked in Target Bodies. None picked: every body the
+            // extrusion touches, with no default stored at OK (the box says so).
             let extrude_targets = extrude_targets(d);
-            if let Some(input) = extrude_targets
-                && !input.items.is_empty()
-            {
-                common["targets"] = json!(input.items.body_names());
+            if let Some(input) = extrude_targets {
+                // Target Bodies alone say which bodies take part: an edit drops participants
+                // stored before (the bodies shown when it was made, #2464).
+                common["participants"] = json!([]);
+                if input.items.is_empty() {
+                    common["all_bodies_touched"] = json!(true);
+                } else {
+                    common["targets"] = json!(input.items.body_names());
+                }
             }
             let with = |extra: Value| -> Value {
                 let mut p = common.clone();
@@ -8122,11 +8336,24 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     inp.items = items.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect();
                 }
             }
-            // Join and Cut show their stored target bodies so the picks can be edited.
-            if matches!(operation, Operation::Join | Operation::Cut) {
+            // Join, Cut and Intersect show their stored target bodies so the picks can be edited.
+            if matches!(operation, Operation::Join | Operation::Cut | Operation::Intersect) {
                 set_extrude_targets(&mut d.inputs, &mut d.active, &mut d.extra, op_index(operation));
                 if let Some(input) = d.inputs.iter_mut().find(|i| i.label == EXTRUDE_TARGETS) {
                     input.items = targets.iter().map(|name| Sel::Body { name: name.0.clone() }).collect();
+                    // No targets but participants (the bodies shown when it was made, #2464):
+                    // those are what it changes, so the box shows them. Every body (`*`) is All.
+                    if input.items.is_empty() && !f.participants.iter().any(|b| b == "*") {
+                        input.items = f.participants.iter().map(|name| Sel::Body { name: name.clone() }).collect();
+                    }
+                }
+                // Its stored targets are kept as chosen, and already say whether the To body
+                // joins. An older Join To Object, which joined it whatever they said, gets it put
+                // in instead ([`sync_targets`]). None stored shows All.
+                d.auto_targets.by_hand = true;
+                if extent.to_body_apart {
+                    let pick = d.inputs.iter().find(|i| i.label == TO_OBJECT).and_then(|i| i.items.first()).cloned();
+                    d.auto_targets.to_key = Some((pick, *operation == Operation::Join));
                 }
             } else if !targets.is_empty() {
                 d.extra.insert("targets".into(), json!(targets));

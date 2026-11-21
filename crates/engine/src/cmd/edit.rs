@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 use solidcraft_doc::drawing::{self, Drawing};
-use solidcraft_doc::{Document, Feature, FeatureKind};
+use solidcraft_doc::{Document, Feature, FeatureKind, Operation};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, name_or_id_values, num, str_};
@@ -2634,9 +2634,16 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         *sketch = Some(*before);
         *profiles = picked.clone();
     }
-    // An old design's Join To Object keeps the body it runs to apart through an edit (#8151).
-    if let (FeatureKind::Extrude { extent: before, .. }, FeatureKind::Extrude { extent: after, .. }) = (&old.kind, &mut new.kind)
+    // A Join To Object keeps its rule for the body it runs to through an edit that doesn't say:
+    // an older design's still joins that body whatever its targets say (#6424), and one from
+    // before #6424 still leaves it apart (#8151).
+    if let (
+        FeatureKind::Extrude { extent: before, operation: Operation::Join, .. },
+        FeatureKind::Extrude { extent: after, operation: Operation::Join, .. },
+    ) = (&old.kind, &mut new.kind)
+        && before.to.is_some()
         && after.to.is_some()
+        && params.get("to_body_apart").is_none()
     {
         after.to_body_apart = before.to_body_apart;
     }

@@ -75,7 +75,8 @@ pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
 pub use cmd::sketch_selection;
 pub use cmd::{
     Addition, CommandInfo, CommandSpec, FromSelection, LinkProblem, LinkState, OpenSteps, addition, auto_operation, command_specs, dimension_roles,
-    extrude_reach, find_command, normalize_command_id, resolve_design_links, shown_scope, standard_view, use_import_cache_dir,
+    extrude_reach, feature_to_object_target, find_command, joinable_body, normalize_command_id, resolve_design_links, shown_scope,
+    sketch_join_target, standard_view, use_import_cache_dir,
 };
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;

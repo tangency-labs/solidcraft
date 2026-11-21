@@ -41,6 +41,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<ExtrudeParams>(),
         &[
+            "all_bodies_touched",
             "body",
             "body_name",
             "body_names",
@@ -70,6 +71,7 @@ fn schemas_and_the_key_check_agree() {
             "thin",
             "through_all",
             "to",
+            "to_body_apart",
             "to_offset",
             "touching",
         ],

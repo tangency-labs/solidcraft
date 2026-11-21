@@ -13,7 +13,8 @@
 //! - With Preferences › Design › "Choose the operation automatically" off (`auto_operation`), no
 //!   window chooses: each keeps the operation it opens with, Extrude its own Join or Cut.
 //! - Only shown bodies take part: when some bodies are hidden, the window names the shown ones as
-//!   the feature's `targets` ([`scope_targets`]).
+//!   the feature's `targets` ([`scope_targets`]). Not Extrude, whose Target Bodies say what it
+//!   takes, hidden or not.
 
 use serde_json::Value;
 use solidcraft_engine::Addition;
@@ -178,13 +179,21 @@ impl OpCheck {
 
 /// The window's commands as the check runs them (New Body, Join or a Cut this window chose all
 /// run as a Join), with what tells them from other inputs.
-fn check_commands(cmds: &[(String, Value)], revision: u64) -> (Vec<(String, Value)>, u64) {
+fn check_commands(cmds: &[(String, Value)], revision: u64, shown: Option<Vec<String>>) -> (Vec<(String, Value)>, u64) {
     let mut out = cmds.to_vec();
     for (_, p) in &mut out {
         if let Some(op) = p.get_mut("operation")
             && op.as_str().is_some_and(|o| matches!(o, "new" | "join" | "cut"))
         {
             *op = Value::from("join");
+        }
+        // The choice goes by what is shown, as it does for every window, though Extrude's All
+        // takes hidden bodies too once made.
+        if let Some(shown) = &shown
+            && let Some(map) = p.as_object_mut()
+            && map.remove("all_bodies_touched").is_some()
+        {
+            map.insert("targets".into(), Value::from(shown.clone()));
         }
     }
     use std::hash::{Hash, Hasher};
@@ -241,7 +250,7 @@ pub fn update(app: &mut SolveApp, d: &mut Dialog, ctx: &egui::Context) {
         d.op_auto.set = Some(op);
         return;
     };
-    let (cmds, key) = check_commands(&cmds, app.session.revision);
+    let (cmds, key) = check_commands(&cmds, app.session.revision, solidcraft_engine::shown_scope(&app.session));
     let session = &app.session;
     let found = app.op_check.result(key, || session.ahead(), cmds, session.revision, rule.cut);
     let chosen = match found {
@@ -308,7 +317,8 @@ pub fn hold_ok(d: &mut Dialog, ok: bool, again: &mut bool, cancel: bool) -> bool
 /// when some bodies are hidden: a hidden body is left alone. With none shown, such a feature has
 /// nothing to change.
 pub fn scope_targets(app: &SolveApp, d: &Dialog, cmds: &mut [(String, Value)]) -> Result<(), String> {
-    if rule(&d.kind).is_none() || d.editing.is_some() {
+    // Extrude names its bodies in Target Bodies, All included.
+    if rule(&d.kind).is_none() || d.editing.is_some() || matches!(d.kind, Kind::Extrude { .. }) {
         return Ok(());
     }
     let Some(shown) = solidcraft_engine::shown_scope(&app.session) else { return Ok(()) };

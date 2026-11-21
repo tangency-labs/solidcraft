@@ -60,7 +60,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EXTRUDE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .from_selection(super::model_selection::profiles)
-        .params("distance: expr (or through_all: true); taper?: angle expr (positive: outward, so the far end is larger along the extrusion direction; negative: inward, so the far end is smaller); corner?: preserve_curvature|tangent|round (how a taper closes a sharp corner its offset opens: each wall continues as itself, a line's plane or an arc's cone, until it meets its neighbour; each continues straight along its end tangent; or an arc about the corner. Without it, each profile preserves curvature where every curve is a line or an arc and takes tangent where another curve has a corner, and the feature's warning says so; a corner rule given is kept, and refused where the kernel cannot build it); sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [{curves: [ids]}] (the profile whose outer loop is made of exactly these curves, or pieces of them; found again on every recompute, so it follows parameter changes; islands inside are its holes; an error when no profile or several match) | [{point:[x,y]}] (index and point picks are stored by their curves when that finds the same profile; a pick on a drawn profile that reference geometry, such as the projected outline of the face the sketch is on, cuts into regions takes the whole drawn profile); exact_regions?: bool (each index or point pick is exactly the region it names, as the dialogs send); default: every drawn profile, except that a loop inside another is its hole and a loop inside that hole is material again; face?: [x,y,z] (extrude a planar body face instead of a sketch profile); faces?: [[x,y,z],…] (coplanar faces of one body); face_body?: name (whose face, where faces of several bodies meet at the point); fixed?: true (with face or faces: start on the face's plane as a fixed plane, which won't follow later changes to the face; for a face whose history can't keep an attachment, such as a converted mesh's); direction?: positive|negative|symmetric (distance is total thickness, split evenly around the start plane); convention?: total_distance|legacy_per_side (how a symmetric distance is read; default total_distance, split evenly around the start plane; legacy_per_side: the distance on each side, as older symmetric extrudes keep); distance2?: expr (Two Sides: a second distance on the side direction leaves free, the first side may be through_all or to; with direction: negative the first side goes against the normal and distance2 along it; a negative distance only turns its own side over); start_offset?: expr (along the sketch normal, also with direction: negative); to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it); from?: [x,y,z] (From Object: start at that face or point; on a flat face at a slant the start follows the face, and a distance moves it along the extrusion); operation?: new|join|cut|intersect|auto (cut into a body, otherwise join existing solids; new in an empty component); touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); targets?: [body] (Join from a face, or from a sketch on a body's face, defaults to that face's body; explicit targets or participants override); name?; body_name?; thin?: true (Thin: a wall along sketch curves instead of the profiles) with curves?: [curve ids] (open chains and closed loops, joined where they meet end to end; default: every drawn curve of the sketch), thickness: expr, side?: center|inside|outside|two_sides (a closed loop's inside is the area it encloses, an open chain's the side it bends toward, a straight line's the left of its first curve as drawn; default center), thickness2?: expr (two_sides: the thickness outside); corners are mitred, crossing walls are one"),
+        .params("distance: expr (or through_all: true); taper?: angle expr (positive: outward, so the far end is larger along the extrusion direction; negative: inward, so the far end is smaller); corner?: preserve_curvature|tangent|round (how a taper closes a sharp corner its offset opens: each wall continues as itself, a line's plane or an arc's cone, until it meets its neighbour; each continues straight along its end tangent; or an arc about the corner. Without it, each profile preserves curvature where every curve is a line or an arc and takes tangent where another curve has a corner, and the feature's warning says so; a corner rule given is kept, and refused where the kernel cannot build it); sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [{curves: [ids]}] (the profile whose outer loop is made of exactly these curves, or pieces of them; found again on every recompute, so it follows parameter changes; islands inside are its holes; an error when no profile or several match) | [{point:[x,y]}] (index and point picks are stored by their curves when that finds the same profile; a pick on a drawn profile that reference geometry, such as the projected outline of the face the sketch is on, cuts into regions takes the whole drawn profile); exact_regions?: bool (each index or point pick is exactly the region it names, as the dialogs send); default: every drawn profile, except that a loop inside another is its hole and a loop inside that hole is material again; face?: [x,y,z] (extrude a planar body face instead of a sketch profile); faces?: [[x,y,z],…] (coplanar faces of one body); face_body?: name (whose face, where faces of several bodies meet at the point); fixed?: true (with face or faces: start on the face's plane as a fixed plane, which won't follow later changes to the face; for a face whose history can't keep an attachment, such as a converted mesh's); direction?: positive|negative|symmetric (distance is total thickness, split evenly around the start plane); convention?: total_distance|legacy_per_side (how a symmetric distance is read; default total_distance, split evenly around the start plane; legacy_per_side: the distance on each side, as older symmetric extrudes keep); distance2?: expr (Two Sides: a second distance on the side direction leaves free, the first side may be through_all or to; with direction: negative the first side goes against the normal and distance2 along it; a negative distance only turns its own side over); start_offset?: expr (along the sketch normal, also with direction: negative); to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it); to_body_apart?: bool (Join To Object: true, the default, joins the body `to` lies on only as one of the targets; false joins it whatever the targets say, as before; an edit that leaves it out keeps the extrude's own); from?: [x,y,z] (From Object: start at that face or point; on a flat face at a slant the start follows the face, and a distance moves it along the extrusion); operation?: new|join|cut|intersect|auto (cut into a body, otherwise join existing solids; new in an empty component); touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); targets?: [body] (Join from a face, or from a sketch on a body's face, defaults to that face's body and, To Object, the body `to` lies on; explicit targets or participants override); all_bodies_touched?: bool (true with no targets: every body it touches, at each rebuild, hidden or not, without that default or the shown bodies as participants); name?; body_name?; thin?: true (Thin: a wall along sketch curves instead of the profiles) with curves?: [curve ids] (open chains and closed loops, joined where they meet end to end; default: every drawn curve of the sketch), thickness: expr, side?: center|inside|outside|two_sides (a closed loop's inside is the area it encloses, an open chain's the side it bends toward, a straight line's the left of its first curve as drawn; default center), thickness2?: expr (two_sides: the thickness outside); corners are mitred, crossing walls are one"),
     CommandSpec::new("solid.revolve", "Revolve", crate::checked!("solid.revolve", revolve))
         .at("SOLID", "CREATE")
         .icon("revolve")
@@ -907,10 +907,12 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
     };
     // An extrude's Join, Cut or Intersect with no bodies picked changes the bodies of the active
     // component that are shown, never a hidden one (#2464). The shown ones are kept as its
-    // participants, so showing or hiding bodies later doesn't change the model.
+    // participants, so showing or hiding bodies later doesn't change the model. Not with
+    // `all_bodies_touched`, the Extrude window's All: every body, hidden or not.
+    let all_touched = p.get("all_bodies_touched").and_then(Value::as_bool) == Some(true);
     let participants = match &kind {
         FeatureKind::Extrude { operation: Operation::Join | Operation::Cut | Operation::Intersect, targets, .. }
-            if participants.is_empty() && targets.is_empty() =>
+            if participants.is_empty() && targets.is_empty() && !all_touched =>
         {
             let shown = shown_scope(s).unwrap_or_default();
             if shown.is_empty() && shown_scope(s).is_some() {
@@ -1145,9 +1147,25 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
         }
         _ => operation(p, cmd)?,
     };
+    let mut extent = extent;
+    // A Join To Object joins the body it runs to only as one of its targets, where the dialog
+    // shows it and it can be taken out (#6424). `to_body_apart: false` keeps the rule Joins To
+    // Object had before, which joined that body whatever the targets said.
+    if operation == Operation::Join && extent.to.is_some() {
+        extent.to_body_apart = match p.get("to_body_apart") {
+            None => true,
+            Some(Value::Bool(apart)) => *apart,
+            Some(_) => return Err(bad(cmd, "`to_body_apart` must be true or false")),
+        };
+    }
     let mut targets = string_list(cmd, p, "targets")?;
+    let all_touched = match p.get("all_bodies_touched") {
+        None => false,
+        Some(Value::Bool(all)) => *all,
+        Some(_) => return Err(bad(cmd, "`all_bodies_touched` must be true or false")),
+    };
     let mut p = std::borrow::Cow::Borrowed(p);
-    if operation == Operation::Join && targets.is_empty() && string_list(cmd, &p, "participants")?.is_empty() {
+    if operation == Operation::Join && targets.is_empty() && !all_touched && string_list(cmd, &p, "participants")?.is_empty() {
         // A face's outward extension joins that body, and so does a profile sketched on a body's
         // face. Assembly neighbours can touch only an edge of the tool: trying to join them
         // first fails, or absorbs unrelated parts (#226). A profile drawn past the face can lie
@@ -1158,6 +1176,15 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
             Some(body) => Some(body),
             None => face_body_reached(s, sketch)?,
         });
+        // To Object, the body it runs to joins too (#6424). With no face's body, the automatic
+        // scope already joins every body the tool meets, that one among them.
+        if extent.to_body_apart
+            && !targets.is_empty()
+            && let Some(body) = to_object_target(s, sketch, &extent)
+            && !targets.contains(&body)
+        {
+            targets.push(body);
+        }
     } else if let Some(parts) = cut_scope(s, &p, operation, sketch, face_body, cmd)? {
         p.to_mut()["participants"] = json!(parts);
     }
@@ -1175,6 +1202,53 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
         thin,
     };
     add_feature(s, &p, kind)
+}
+
+/// The body an extrude To Object from `sketch` runs to ([`solidcraft_doc::to_object_body`]),
+/// as a Join's default target: one of the active component's shown solid bodies, else none.
+/// `extent` is in world coordinates, as the command took it.
+pub(crate) fn to_object_target(s: &Session, sketch: u64, extent: &Extent) -> Option<String> {
+    extent.to?;
+    // The pick is put in the active component's frame as the feature will keep it.
+    let mut kind = FeatureKind::Extrude {
+        sketch: SketchId(sketch),
+        profiles: ProfileSel::All,
+        extent: extent.clone(),
+        operation: Operation::Join,
+        targets: Vec::new(),
+        thin: None,
+    };
+    super::component::to_active_frame(s, &mut kind);
+    let FeatureKind::Extrude { extent, .. } = &kind else { return None };
+    let name = solidcraft_doc::to_object_body(&s.doc, &s.model.state(), s.active_component, sketch, extent)?;
+    joinable_body(s, &name).then_some(name)
+}
+
+/// Whether `name` can be a Join's default target: one of the active component's shown solid
+/// bodies. A hidden body is left alone (#2464), a surface is no solid to join.
+pub fn joinable_body(s: &Session, name: &str) -> bool {
+    joinable_in(s, &s.model.state(), name)
+}
+
+/// [`joinable_body`] among the bodies of `st`.
+fn joinable_in(s: &Session, st: &solidcraft_doc::ModelState, name: &str) -> bool {
+    active_scope(s, st).into_iter().any(|b| b.name == name && !b.is_surface() && s.body_visible(&b.name))
+}
+
+/// The body the extrude `feature` runs To Object to, as its evaluation finds it in the model
+/// before it, when that body could be a Join's default target ([`joinable_body`]).
+pub fn feature_to_object_target(s: &Session, feature: u64) -> Option<String> {
+    let f = s.doc.feature(feature)?;
+    let FeatureKind::Extrude { sketch, extent, .. } = &f.kind else { return None };
+    let st = s.model.state_before(feature);
+    let name = solidcraft_doc::to_object_body(&s.doc, &st, f.component, sketch.0, extent)?;
+    joinable_in(s, &st, &name).then_some(name)
+}
+
+/// The target a Join from a profile of `sketch` takes when it names none: the body whose face
+/// the sketch is on ([`face_body_reached`]), else none (the automatic scope).
+pub fn sketch_join_target(s: &Session, sketch: u64) -> Option<String> {
+    face_body_reached(s, sketch).ok().flatten()
 }
 
 /// The bodies a cut or intersect from a profile on a body's face takes part in when it names
