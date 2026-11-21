@@ -25,13 +25,15 @@ use crate::*;
 /// direction, joins made of bodies that are all apart without running the kernel's union, the
 /// holes whose tools were built (not moved from another copy's), the imported files read for an
 /// import feature, the tight boxes the kernel was asked for, the flats of sheets made from
-/// surfaces laid out (their pieces cut), the blends the kernel was asked for, and the searches
-/// for the radius that fits.
+/// surfaces laid out (their pieces cut), the blends the kernel was asked for, the searches for
+/// the radius that fits, the meshes a cam's profile was read from, and the kernel's point
+/// classifications a pattern's copies were probed with.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(super) struct Counts {
+pub(crate) struct Counts {
     pub moved: usize,
     pub digested: usize,
     pub imports_read: usize,
+    pub cam_meshes: usize,
     pub mesh_digested: usize,
     pub joint_faces: usize,
     pub faces_at: usize,
@@ -56,6 +58,7 @@ pub(super) struct Counts {
     pub tight_boxes: usize,
     pub blends: usize,
     pub fit_searches: usize,
+    pub classifications: usize,
 }
 
 thread_local! {
@@ -64,6 +67,7 @@ thread_local! {
             moved: 0,
             digested: 0,
             imports_read: 0,
+            cam_meshes: 0,
             mesh_digested: 0,
             joint_faces: 0,
             faces_at: 0,
@@ -88,11 +92,12 @@ thread_local! {
             tight_boxes: 0,
             blends: 0,
             fit_searches: 0,
+            classifications: 0,
         })
     };
 }
 
-pub(super) fn count(f: impl FnOnce(&mut Counts)) {
+pub(crate) fn count(f: impl FnOnce(&mut Counts)) {
     COUNTS.with(|c| {
         let mut n = c.get();
         f(&mut n);
@@ -133,7 +138,7 @@ fn searched(f: impl FnOnce()) -> usize {
 }
 
 /// The work `f` does on this thread.
-pub(super) fn counted(f: impl FnOnce()) -> Counts {
+pub(crate) fn counted(f: impl FnOnce()) -> Counts {
     COUNTS.with(|c| c.set(Counts::default()));
     f();
     COUNTS.with(Cell::get)
@@ -522,6 +527,45 @@ fn evaluations_that_move_nothing_keep_the_frame_bodies() {
     assert_eq!(work.moved, 0, "the edit after idle evaluations must reuse the moved plate: {work:?}");
 }
 
+/// A Frame Member is built turned by the Rotate steps after it, so their turns (and the
+/// parameters their angles use) are in its fingerprint and the key its result is cached under;
+/// with none left, the keys are what they were before, and designs without turns keep theirs.
+#[test]
+fn a_frame_without_turns_keeps_its_fingerprint() {
+    let kind = |v: serde_json::Value| serde_json::from_value::<FeatureKind>(v).unwrap();
+    let mut doc = Document::new("frame");
+    doc.set_param("tilt", "20 deg", None, None).unwrap();
+    let frame = doc
+        .add_feature(
+            kind(serde_json::json!({"type": "frame_member", "path_sketch": 1,
+                "profile": {"source": "library", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}}})),
+            None,
+        )
+        .unwrap();
+    let key = |doc: &Document| {
+        let vals = super::evaluation_values(doc).0;
+        let f = doc.feature(frame).unwrap();
+        let steps = super::ImportDigests::default();
+        let fp = super::chain_fingerprint(doc, &vals, f, 0, false, &steps, None);
+        // And the key its result is cached under, which leaves the chain out.
+        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, &ModelState::default(), &steps, 0).whole)
+    };
+    let before = key(&doc);
+    let turn = doc
+        .add_feature(kind(serde_json::json!({"type": "frame_member_turn", "member": {"feature": frame, "line": "l1"}, "angle": "tilt"})), None)
+        .unwrap();
+    let turned = key(&doc);
+    assert!(turned.0 != before.0 && turned.1 != before.1, "the turn is in the keys");
+    doc.set_param("tilt", "40 deg", None, None).unwrap();
+    let tilted = key(&doc);
+    assert!(tilted.0 != turned.0 && tilted.1 != turned.1, "so is the value of the parameter its angle uses");
+    doc.features.iter_mut().filter(|f| f.id == turn).for_each(|f| f.suppressed = true);
+    assert_eq!(key(&doc), before, "a suppressed turn isn't");
+    doc.features.iter_mut().filter(|f| f.id == turn).for_each(|f| f.suppressed = false);
+    doc.delete_feature(turn).unwrap();
+    assert_eq!(key(&doc), before);
+}
+
 #[test]
 fn an_imported_file_is_fingerprinted_by_its_text() {
     let doc = placed_imports(2);
@@ -741,6 +785,61 @@ fn place(doc: &mut Document, comp: u64, m: Mat) {
 
 fn volume(model: &Model, body: &str) -> f64 {
     kernel::measure(&model.state().body(body).unwrap().body).unwrap().volume
+}
+
+/// A cam's profile is read from the cam's bodies, and their meshes are made once: a solve that
+/// moves the parts does not mesh them again. Every turn of the cam worked the profile out again,
+/// and the mesh of every body of the cam's component was the cost of it (#3389).
+#[test]
+fn a_cams_profile_is_meshed_once() {
+    use crate::joints::cam::CamProfile;
+    use crate::joints::{Joint, JointKind, JointOrigin, Snap};
+    let mut doc = Document::new("cam");
+    let comp = doc.add_component(Some("Cam"), 0).unwrap();
+    // The cam's body: a cylinder in the cam's own component.
+    let kind = FeatureKind::Cylinder {
+        base: point_expr(Vec3::ZERO),
+        axis: Dir(Vec3::Z),
+        radius: "5".into(),
+        height: "10".into(),
+        operation: Operation::NewBody,
+        references: Vec::new(),
+    };
+    let id = doc.add_feature(kind, None).unwrap();
+    doc.feature_mut(id).unwrap().component = comp;
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    let st = model.state();
+    let occurrence = doc.occurrences.iter().find(|o| o.component == comp).unwrap().id;
+    // The joint that turns the cam, and the profile picked on the cam's body.
+    let origin = |occ: u64| JointOrigin::new(occ, Snap::Point { point: Vec3::ZERO, z: None, x: None });
+    let joint = Joint {
+        id: 1,
+        name: "Cam".into(),
+        kind: JointKind::Revolute,
+        a: origin(0),
+        b: origin(occurrence),
+        values: Vec::new(),
+        limits: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        offset_xy: [0.0; 2],
+        captured: None,
+        constraint: None,
+    };
+    let profile = CamProfile::Edges { occurrence, picks: vec![Vec3::new(5.0, 0.0, 10.0)], names: Vec::new() };
+    let work = counted(|| {
+        crate::joints::cam::profile_points(&doc, &st, &profile, &joint, (&crate::IDENTITY, &crate::IDENTITY)).unwrap();
+    });
+    assert_eq!(work.cam_meshes, 1, "the cam's body is meshed once: {work:?}");
+    let work = counted(|| {
+        crate::joints::cam::profile_points(&doc, &st, &profile, &joint, (&crate::IDENTITY, &crate::IDENTITY)).unwrap();
+    });
+    assert_eq!(work.cam_meshes, 0, "the mesh of the cam's body is kept: {work:?}");
 }
 
 #[test]
@@ -1096,6 +1195,38 @@ fn shared_imported_mesh_inputs_keep_payload_identity_and_invalidate_replacements
         assert_eq!(actual.normals, expected.normals);
         assert!(!model.evaluate_shared(&doc));
     }
+}
+
+#[test]
+fn mesh_import_reuses_the_validated_body_only_for_its_input_arrays() {
+    let mesh = crate::MeshData {
+        name: "Triangle".into(),
+        positions: vec![0., 0., 0., 1., 0., 0., 0., 1., 0.].into(),
+        triangles: vec![0, 1, 2].into(),
+        corner_normals: Default::default(),
+        color: None,
+    };
+    let mut doc = Document::default();
+    let id = doc.add_feature(FeatureKind::MeshImport { file: "triangle.stl".into(), meshes: vec![mesh.clone()] }, None).unwrap();
+    let prepared = PreparedMeshImport::build(std::slice::from_ref(&mesh)).unwrap();
+    let built = prepared.body(0, &mesh).unwrap().clone();
+
+    let mut model = Model::default();
+    model.prime_mesh_import(id, prepared);
+    model.evaluate(&doc);
+    assert!(model.state().bodies[0].body.same_shape(&built));
+    assert!(model.prepared_meshes.is_none());
+
+    // A prepared body for the same feature cannot replace new shading data.
+    let prepared = PreparedMeshImport::build(&[mesh]).unwrap();
+    let FeatureKind::MeshImport { meshes, .. } = &mut doc.feature_mut(id).unwrap().kind else { panic!("mesh import") };
+    meshes[0].corner_normals = vec![0., 0., 1., 0., 0., 1., 0., 0., 1.].into();
+    model.prime_mesh_import(id, prepared);
+    model.evaluate(&doc);
+    let state = model.state();
+    let body = &state.bodies[0].body;
+    assert!(!body.same_shape(&built));
+    assert_eq!(body.triangle_corner_normals().unwrap().len(), 1);
 }
 
 #[test]
@@ -3336,6 +3467,39 @@ fn a_heal_the_next_read_finds_again_is_told_once() {
     assert_eq!(model.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>(), fingerprints);
 }
 
+/// #20133: a save while an import's SMLib check of its parts runs does not wait for it. The
+/// model is left out of the save (the design is rebuilt when it opens), since what the check
+/// finds is part of the model; once the check ends, the model is kept with what it found.
+#[test]
+fn a_save_while_an_import_is_checked_keeps_no_model_and_does_not_wait() {
+    let doc = placed_imports(1);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let import = doc.features[0].id;
+    let (checks, end) = kernel::ImportChecks::running_for_tests();
+    let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+    assert!(model.checking_imports());
+    // (were it to wait, this would never return: nothing else ends the check)
+    assert!(model.saved_if_checked(&doc).is_none(), "no model while the check runs");
+    let issue = kernel::ImportIssue {
+        kind: kernel::IssueKind::NeedsRepair,
+        item: Some(1),
+        part: String::new(),
+        paths: Vec::new(),
+        faces: 0,
+        times: 1,
+        detail: "fails SMLib's check".into(),
+    };
+    end(vec![issue]);
+    assert!(!model.checking_imports());
+    let saved = model.saved_if_checked(&doc).expect("the model once the check has ended");
+    let feature = &saved.records["features"][0];
+    assert_eq!(feature["warning"], serde_json::json!(crate::eval::import_warning(&["fails SMLib's check"])));
+    assert_eq!(feature["import_report"]["issues"][0]["detail"], "fails SMLib's check", "kept with what the check found");
+    assert_eq!(saved.records, model.saved(&doc).unwrap().records, "as a save that waited keeps it");
+}
+
 /// The tolerance heal preference is part of an import's and a Repair's fingerprint, and of no
 /// other feature's: turned off, the model is not current and evaluates both again (the import
 /// read as it is, the Repair without its heal); turned back on, it comes back to the first
@@ -3453,8 +3617,10 @@ fn a_cut_measures_the_tight_box_of_its_tool_only() {
     assert_eq!(work.cut, 1, "{work:?}");
     assert_eq!(model.state().bodies.len(), 1);
 
-    // A tool that reaches out of the body: the box can show it apart of the body, so
-    // it is measured.
+    // A tool that reaches out of the body but meets the box of its vertices: that box lies
+    // inside the body's exact box, so the exact box cannot show the tool apart of the body
+    // and is not measured either (a hole through a wall of a rounded spline body measured
+    // it for over a minute).
     let mut doc = Document::new("a cut through");
     block(&mut doc, "A", Vec3::ZERO, [20.0, 20.0, 20.0]);
     let kind = FeatureKind::Box {
@@ -3469,13 +3635,36 @@ fn a_cut_measures_the_tight_box_of_its_tool_only() {
     let mut model = Model::new();
     let work = counted(|| model.evaluate(&doc));
     assert!(model.result(cut).is_some_and(|r| r.error.is_none()), "{:?}", model.result(cut));
-    // The tool's tight box and the body's.
-    assert_eq!(work.tight_boxes, 2, "{work:?}");
+    // The tool's tight box, and no other.
+    assert_eq!(work.tight_boxes, 1, "{work:?}");
     assert_eq!(work.cut, 1, "{work:?}");
     let st = model.state();
     assert_eq!(st.bodies.len(), 1);
     // The tool crosses the top face: it takes 500 mm3 of the block with it.
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - (8000.0 - 500.0)).abs() < 1e-6);
+
+    // A tool clear of the box of the body's vertices: only the exact box can show it apart of
+    // the body, so it is measured, and the body is left as it was without a boolean.
+    let mut doc = Document::new("a cut beside");
+    block(&mut doc, "A", Vec3::ZERO, [20.0, 20.0, 20.0]);
+    let kind = FeatureKind::Box {
+        corner: point_expr(Vec3::new(30.0, 5.0, 5.0)),
+        length: "10".into(),
+        width: "10".into(),
+        height: "10".into(),
+        operation: Operation::Cut,
+        centred: false,
+    };
+    let cut = doc.add_feature(kind, None).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(cut).is_some(), "{:?}", model.result(cut));
+    // The tool's tight box and the body's.
+    assert_eq!(work.tight_boxes, 2, "{work:?}");
+    assert_eq!(work.cut, 0, "{work:?}");
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - 8000.0).abs() < 1e-6);
 }
 
 /// The design of #4282: a cube with a hole through it along each of the three axes, all of
@@ -3612,4 +3801,20 @@ fn a_round_refused_into_a_hollow_searches_for_the_largest_radius_that_fits() {
     assert!(error.contains("the largest radius that fits is 6.828 mm"), "{error}");
     assert_eq!(work.blends, 1, "{work:?}");
     assert_eq!(work.fit_searches, 1, "{work:?}");
+}
+
+/// A pattern's copies are probed with the kernel's point classifications, to know whether they
+/// take material without intersecting them with the body (#11257). The points of a line are
+/// classified in one call, not one call a point: the kernel makes the body's copy and its
+/// search structures once for all the points of a call, and again for every call a point makes
+/// on its own.
+#[test]
+fn a_pattern_probes_its_copies_with_one_classification_a_line() {
+    // The ten grooves of the pattern notch the same round bore: the probe's points lie on the
+    // bore's surface, where they are not inside the ring, so the probe tries every line it
+    // has before it finds the ring's material. It asked the kernel for 370 classifications,
+    // one a point, and asks for 36.
+    let (faces, work) = grooved_ring_faces();
+    assert_eq!(faces, 24, "the ring comes out as it did");
+    assert_eq!(work.classifications, 36, "{work:?}");
 }

@@ -131,11 +131,13 @@ the frozen truck-geometry PRs, a `kernel-paused` PR), for the report's coverage 
 
 Every area is a regression suite: each case is one small case of one issue, with its exact
 answer. `.github/workflows/kernel-rig.yml` runs them, and the ladder, on pull requests (not
-drafts). A plan job (`scripts/ci/kernel_rig_plan.py`) picks the areas from the changed files, one
-job builds `solidcraft-cli` (release) and the rig's runner, and a matrix of shards, one per
-selected area plus the ladder, runs them in parallel; the `kernel-rig` check passes when every
-selected shard does (and when none was selected). Pushes to main and develop, merge groups, the
-release gate (`release-gate.yml`) and a run by hand run every area. Each area's shard runs:
+drafts; once approved for CI) and merge groups: CI (`ci.yml`) calls it, and the required `ci`
+check fails when it does. A plan job (`scripts/ci/kernel_rig_plan.py`) picks the areas from the
+changed files, one job builds `solidcraft-cli` (release) and the rig's runner, and a matrix of
+shards, one per selected area plus the ladder, runs them in parallel; the rig's summary job
+(`Kernel rig / kernel-rig`) passes when every selected shard does (and when none was selected).
+Pushes to main and develop, the release gate (`release-gate.yml`) and a run by hand run every
+area. Each area's shard runs:
 
 ```sh
 cargo xtask kernel-cases --area <area> --cli target/release/solidcraft-cli \
@@ -176,9 +178,9 @@ target/release/solidcraft-cli --known-failing tests/kernel-cases/<area>/KNOWN_FA
 - The ladder spans every operation: it runs whenever any area does, and on a change under
   `ladder/`.
 
-The workflow's trigger paths are whole folders that hold every `PATHS` glob (a self-test,
-`scripts/ci/test_kernel_rig_plan.py`, checks it), so a pull request that touches none of them
-starts no job at all. To see what a change would run:
+The workflow's push trigger paths are whole folders that hold every `PATHS` glob (a self-test,
+`scripts/ci/test_kernel_rig_plan.py`, checks it), so a push to main that touches none of them
+starts no rig run; a pull request that reaches no area runs only the plan job and the summary. To see what a change would run:
 `git diff --name-only -z origin/develop... | python3 scripts/ci/kernel_rig_plan.py --paths -`.
 
 The plan finds the areas from the folders, so the workflow needs no edit when an area's `PATHS`

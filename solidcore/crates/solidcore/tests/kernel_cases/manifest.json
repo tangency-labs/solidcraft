@@ -104,23 +104,23 @@
       "ungraded": {}
     },
     "fillets": {
-      "cases": 315,
+      "cases": 320,
       "chain": {
-        "1": 11,
+        "1": 15,
         "13": 8,
         "14": 1,
         "17": 1,
         "2": 6,
         "21": 2,
         "26": 3,
-        "4": 258,
+        "4": 259,
         "5": 6,
         "7": 2,
         "8": 1
       },
-      "expressible": 92,
+      "expressible": 97,
       "not_expressible": 16,
-      "operation_expressible": 299,
+      "operation_expressible": 304,
       "reasons": {
         "SolidCraft has no command for it yet": 2,
         "refused or failed in SolidCraft, not in a kernel operation": 14
@@ -518,7 +518,6 @@
       "ungraded": {}
     }
   },
-  "held_back": "held_back.json",
   "not_expressible": [
     {
       "case": "assemblies/cov-browser-reparent-placement-and-body-into-a-turned-part",

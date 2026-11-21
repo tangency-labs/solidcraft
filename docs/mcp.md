@@ -353,7 +353,9 @@ and `options`. Each has a `plugin` field (`{id, name, version, entry, kind, effe
 plugin's own description reaches the agent between `<plugin-text>` markers, as plugin text. A
 call runs without the plugin's dialogs, under its existing grants, as one undo step; arguments are
 checked as strictly as a command's; a missing grant or a `read` entry's refused import is an error
-naming it, also as `structuredContent.plugin_error`. See [Plugins as tools for
+naming it, also as `structuredContent.plugin_error`. For revision-aware edits, use
+`execute` with the namespaced command's `expected_design` precondition
+([design revisions](plugins.md#design-revisions-and-notifications)). See [Plugins as tools for
 agents](plugins.md#plugins-as-tools-for-agents).
 
 Ordinary tool calls do not query plugin tools. A bridge queries `plugin.tools` only when the
@@ -385,7 +387,7 @@ builds it.
 | `set_parameter` | `name`, `value` or `expression` (number or expression), `unit?`, `comment?` | Create or change a user parameter and recompute. `expression` is another name for `value` (the one `parameters.change` uses): give one of them, or both only when they agree; neither, or two that differ, is an error. Reports `recomputed` (features rebuilt), `restored` (features whose earlier result for the same inputs was reused, e.g. a value set back) and features that now fail. An expression `new_name = expression` renames the parameter as it sets it; in any other tool's expression parameter it adds the user parameter `new_name` and the input uses it (`defined`, `definitions` in the reply). |
 | `check_parameters` | `set: {name: value}` (a number or an expression each, as `set_parameter`'s `value`), `report?` (`measure`, `cylinders`, `errors`; default all three), `bodies?` (a list of body names: only those are measured and their cylinders listed; default all), `summary?` (`measure` as the `measure` tool's `summary: true`; default false) | Try parameter values without keeping them: one `edit.checkpoint`, every value set in one `parameters.change {changes}` (one rebuild; an app without `changes` gets one change per name), the reports read, then `edit.restore_checkpoint`, so the design, its parameters and its undo history are exactly as before. The reply has `values` (each parameter's value with the tried expressions in), `recomputed`, `measure` (volume, bbox, bodies and faces per body, as the `measure` tool reports them), `errors` and `warnings` (the features that fail or warn: `{feature, name, error}`) with `parameter_errors` (the parameters that don't evaluate), `cylinders` (every cylindrical face of every body as `{body, radius, origin, axis, faces, name, area}`; the halves a kernel splits one cylinder into are one entry, `origin` is the axis point closest to the world origin and `axis` points so that its first non-zero component is positive) and `restored: true`. On a large design, `bodies` with the bodies a change touches and `summary: true` keep the reply small. A name the design has no parameter of, a value that is not a number or a string, an expression that does not evaluate, an unknown report item or a `bodies` that is not a list of names is an error, and nothing changes; a body name the design does not have after the change is an error after the design is put back. If the checkpoint cannot be restored the call is an error with `restored: false`, `restore_error` and a note that the tried values are still in the design: set them back before saving. Replaces the loop `set_parameter`, `measure`, `body_topology`, `set_parameter` back, which cost every agent session three to five calls and up to 16 s of rebuilds. Not a `batch` step. |
 | `screenshot` | `view?` (iso, top, front, back, bottom, left, right, home, fit, or a named view saved with `view.save`), `camera?` (`{target, yaw, pitch, distance, fov?}`, as `view.apply`), `path?`, `width?`, `height?`, `source?` (window, model), `grid?`, `axes?` | A PNG image content block. Headless: a render with the viewport's pipelines on a headless GPU device (see `solidcraft-cli gpu`; with no adapter, the CPU rasterizer, without analysis colours), fitted to the model, or from the named view or camera; the reply's `renderer` says which (`gpu`, `gpu-software`, `cpu`, with a `warning` for `cpu`). Bridged: the app window (default) or a model render with the app's camera; a named view or camera moves the app's viewport there first (`execute` `view.apply` does the same without a screenshot). `grid: false` and `axes: false` leave the ground grid (it lies on Z 0 and cuts through a part that straddles it) and the origin's axes out of a model render; axes hidden with `browser.visibility` stay out whatever `axes` says. Bridged, a screenshot that gives `grid` or `axes` is a model render, which follows the app's Grid and Origin switches for what it does not give; `source: "window"` with either is an error. A window that is minimised or on another macOS Space presents no frame: with no `source` the reply is a model render and says so (`fallback`); `source: "window"` is an error saying why, at once. Agents that don't need the app's chrome can ask for `source: "model"`. |
-| `compare_picture` | `reference`, `view?`, `camera?`, `bodies?`, `crop_px?`, `crop_fraction?`, `part_fills_crop?`, `fit?` (width, height, both; default width), `rows?` | Compare the model's outline with the part in a reference picture (a PNG or JPEG inside the server's folders, read through the same path rules as `screenshot`). The compare is outline only: holes are not compared — both the picture's and the model's holes are filled. The model's outline is `inspect.silhouette` seen from `view` (default front) or `camera`; the picture's part is found by growing the background in from the border through small colour steps, filling holes and keeping the largest piece, so a backdrop's shading stays background and labels on a board drop out; a part touching the border, a white part on a light grey backdrop, and a part on a transparent background all separate. `crop_px` (`[x, y, w, h]` in pixels) or `crop_fraction` (the same as fractions 0..1) takes one view off a board; with `part_fills_crop: true` the crop box is the part itself and no background search runs, for a crop that tightly frames the part; `fit` names the dimension the one uniform scale comes from, never stretched per axis (`both` scales by width and reports `aspect_mismatch`). Returns an image content block (the overlay PNG: model red, picture blue) and text: `overlap` (0..1) and the model's top, bottom, left and right edges against the picture's in mm at nine stations, positive where the model reaches past the picture, null where a station misses one of the two. As a `batch` step it runs `inspect.compare_picture` without the overlay. |
+| `compare_picture` | `reference`, `view?`, `camera?`, `bodies?`, `crop_px?`, `crop_fraction?`, `part_fills_crop?`, `fit?` (width, height, both; default width), `rows?` | Compare the model's outline with the part in a reference picture (a PNG or JPEG inside the server's folders, read through the same path rules as `screenshot`). A JPEG's EXIF orientation is applied, so a phone photo is measured as every viewer shows it (#19138). The compare is outline only: holes are not compared — both the picture's and the model's holes are filled. The model's outline is `inspect.silhouette` seen from `view` (default front) or `camera`; the picture's part is found by growing the background in from the border through small colour steps, filling holes and keeping the largest piece, so a backdrop's shading stays background and labels on a board drop out; a part touching the border, a white part on a light grey backdrop, and a part on a transparent background all separate. `crop_px` (`[x, y, w, h]` in pixels) or `crop_fraction` (the same as fractions 0..1) takes one view off a board; with `part_fills_crop: true` the crop box is the part itself and no background search runs, for a crop that tightly frames the part; `fit` names the dimension the one uniform scale comes from, never stretched per axis (`both` scales by width and reports `aspect_mismatch`). Returns an image content block (the overlay PNG: model red, picture blue) and text: `overlap` (0..1) and the model's top, bottom, left and right edges against the picture's in mm at nine stations, positive where the model reaches past the picture, null where a station misses one of the two. As a `batch` step it runs `inspect.compare_picture` without the overlay. |
 | `export` | `path`, `format?` (step, stp, iges, igs, 3mf, 3mf-tagged, stl, stla, obj, glb, urdf), `bodies?`, `mesh_prefix?`, `effort?`, `velocity?` | STEP, IGES, 3MF or mesh export; GLB writes binary glTF in metres with Y up, with each body's colours, metallic and roughness, and each occurrence a named node holding its part's bodies; URDF writes the whole assembly with its meshes next to it (`docs/urdf.md`). |
 | `undo`, `redo` | — | Undo / redo one change. |
 | `pending` | — | Bridged: the result of a request that was still running when its call returned (an error starting `still running:`), waiting up to 60 s for it; `done: false` while it runs (call again), `pending: null` when nothing runs. See [Long-running requests](#long-running-requests). |
@@ -429,9 +431,15 @@ To change a feature after it is made, read its definition with `execute` `timeli
 `{"extent": {"distance": "30"}}`). The fields per feature type are listed in the book's
 *Solid features* chapter.
 
-To tell whether the design changed since a call, without reading all of it again, `execute`
-`document.revision` answers `{document_id, revision}`: `revision` moves only when the design
-changes, and `document_id` names the open design (another one after `new_design` or `open`).
+To observe changes without reading the whole design again, `execute`
+`document.revision` answers `{document_id, revision}`. Its numeric observation revision
+also follows visibility and uncaptured positions. The document identity belongs to the
+open document's session; opening or importing a design creates a fresh identity,
+including when reopening the same file. Revision-aware plugin edits use the session's
+design-state token, whose revision is an opaque string. Saving preserves that token;
+each committed edit, undo and redo creates a fresh one. Neither token field is saved
+in authored document content or undo snapshots; see
+[design revisions](plugins.md#design-revisions-and-notifications).
 See [control-protocol.md](control-protocol.md#following-the-design).
 
 To compare design proposals with several parameter edits each, call `execute` with
@@ -559,18 +567,24 @@ off the surface, edges off the curve) are counted. Two or more lines of one kind
 that gives how many there were, the bounds or reasons that stopped the mesh, the worst of them and
 the bodies they are on, for example
 `3 faces short of the 25° asked (stopped by: Corner, Points); the sharpest: smallest angle 3.00°
-(Base: face 9); bodies: "Lid" (1), "Base" (2)`. A face past its chord tolerance is never counted with
+("Base": face 9); bodies: "Lid" (1), "Base" (2)`. A face past its chord tolerance is never counted with
 one within it, and a surface or curve summary gives the chord tolerance of the face or edge it
 names. Body names are quoted, and faces that no bound stopped are counted as "nothing stopped
-N faces". `warning_count` gives the number of lines that `verbose: true` lists. A line in a wording
-the compact reply doesn't know stays as it is.
+N faces". `warning_count` gives the number of lines that `verbose: true` lists, and is there only
+when some lines were counted together. An export with one warning, or with no two warnings of one
+kind, keeps its `warnings` list as it is and has no `warning_count`: the length of `warnings` is the
+count. A line in a wording the compact reply doesn't know stays as it is.
 
 A `warning` that is null is left out. A null `error` stays, so a client that reads `error` still
 finds it. A `display_value` the same as `value` (a new parameter in its own unit) is left out.
 
-`timeline.export_script` with a `path` writes the script and replies with `path` (the file
-written, as an absolute path), `bytes` (its size) and `steps`. The compact reply leaves the script
-itself out, as it is in the file. An older app that gives no `bytes` keeps the script in the reply.
+`timeline.export_script` with a `path` writes the script and replies with `path` (as given),
+`absolute_path` (the file written, in full: a relative `path` resolves against the folder the app
+runs in), `bytes` (its size) and `steps`. `absolute_path` is left out when it can't be worked out:
+in browser storage, or when the app's folder has a name that isn't valid UTF-8. On Linux and macOS
+a `..` stays in it, because removing it from the text alone would name another file when the folder
+before it is a symbolic link; Windows removes it, as Windows resolves the path that way itself. The compact reply leaves the script itself out, as it is in the file. An older app
+that gives no `bytes` keeps the script in the reply.
 
 All other fields and errors are unchanged;
 inspection commands still return their complete results. Compaction uses the

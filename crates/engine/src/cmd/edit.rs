@@ -36,6 +36,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ASSISTANT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::AssistantResult>)
         .params("Show or hide Assistant in the app. Headless calls are refused without changing the design"),
+    CommandSpec::new("ui.appBarReset", "Reset App Bar", crate::checked!("ui.appBarReset", app_bar_reset))
+        .any_part()
+        .icon("restore")
+        .noundo()
+        .doc_only()
+        .contract(&APP_BAR_RESET_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::AppBarResetResult>)
+        .params("Reset the saved application bar layout in the connected app; returns {reset: true}. Headless sessions validate the request only; no dialog or design change"),
     CommandSpec::new("ui.palette", "Search Commands", crate::checked!("ui.palette", palette))
         .icon("zoom")
         .key("S")
@@ -316,6 +324,12 @@ fn assistant(_s: &mut Session, _p: &Value) -> Result<Value> {
     Err(EngineError::Other("ui.assistant shows or hides Assistant in the app; no assistant panel exists in a headless session".into()))
 }
 
+const APP_BAR_RESET_CONTRACT: crate::schema::TypedContract<crate::schema::edit::AppBarResetParams> = crate::schema::TypedContract::new();
+
+fn app_bar_reset(_s: &mut Session, _p: &Value) -> Result<Value> {
+    reply("ui.appBarReset", crate::schema::edit::AppBarResetResult { reset: true })
+}
+
 const PALETTE_CONTRACT: crate::schema::TypedContract<crate::schema::edit::PaletteParams> = crate::schema::TypedContract::new();
 
 /// Command search (#12190) is the app's: it opens in `SolveApp::start`, and its key can be moved
@@ -413,7 +427,8 @@ fn drawing_from(doc: &Arc<Document>, step: &Document, id: u64) -> Arc<Document> 
     if let Some(then) = step.drawing(id)
         && !doc.drawing(id).is_some_and(|now| Arc::ptr_eq(then, now))
     {
-        Arc::make_mut(&mut doc).put_drawing(then.clone());
+        let doc = Arc::make_mut(&mut doc);
+        doc.put_drawing(then.clone());
     }
     doc
 }
@@ -429,7 +444,8 @@ fn drawings_from(mut step: Arc<Document>, now: &Document) -> Arc<Document> {
             }
         }
         drawing::sort(&mut drawings);
-        Arc::make_mut(&mut step).drawings = drawings;
+        let step = Arc::make_mut(&mut step);
+        step.drawings = drawings;
     }
     step
 }
@@ -455,6 +471,8 @@ fn restore_checkpoint(s: &mut Session, p: &Value) -> Result<Value> {
 fn compute_all(s: &mut Session, _p: &Value) -> Result<Value> {
     let validation = s.validation();
     s.model = solidcraft_doc::Model::new();
+    // and nothing taken from the rows built before (`config.activate`)
+    s.row_models.clear();
     s.set_validation(validation);
     s.refresh();
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
@@ -1487,9 +1505,38 @@ fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
         omitted,
         inputs,
         error: r.and_then(|r| r.error.clone()),
+        error_code: r.and_then(|r| r.error_code.as_ref()).map(Into::into),
         warning: r.and_then(|r| r.warning.clone()),
     };
     reply(cmd, TimelineInspectResult { inspected: Inspected::Feature(Box::new(info)), param_warnings: Vec::new() })
+}
+
+/// A hole made with length expressions keeps them in `at`; its `position` is the point they
+/// evaluate to. `solid.hole` calls both `position`, so an expression given as `position` here goes
+/// to `at`, where it is read and followed (#19632). Numbers alone stay in `position`.
+fn hole_position_expressions(mut set: Value, kind: &FeatureKind) -> Value {
+    if !matches!(kind, FeatureKind::Hole { .. }) {
+        return set;
+    }
+    let Some(o) = set.as_object_mut() else { return set };
+    if !o.contains_key("at")
+        && o.get("position").and_then(Value::as_array).is_some_and(|a| a.iter().any(Value::is_string))
+        && let Some(position) = o.remove("position")
+    {
+        o.insert("at".into(), position);
+    }
+    set
+}
+
+/// A Rotate step turns one member: an edit (`timeline.edit` or `timeline.redefine`) changes its
+/// angle, never which member it turns.
+fn keeps_member(old: &FeatureKind, new: &FeatureKind, cmd: &str) -> Result<()> {
+    match (old, new) {
+        (FeatureKind::FrameMemberTurn { member: before, .. }, FeatureKind::FrameMemberTurn { member: after, .. }) if before != after => {
+            Err(bad(cmd, "A Rotate step keeps its member"))
+        }
+        _ => Ok(()),
+    }
 }
 
 fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1499,12 +1546,33 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let f = s.doc.feature(id).cloned().ok_or_else(|| bad(cmd, "feature"))?;
     let before = serde_json::to_value(&f).map_err(|e| EngineError::Other(e.to_string()))?;
     let set = expand_dotted(set, Some(&before), cmd, 0)?;
-    let set = &numbers_as_expressions(command_profiles(&set, cmd)?, &before);
+    let set = hole_position_expressions(set, &f.kind);
+    let mut set = numbers_as_expressions(command_profiles(&set, cmd)?, &before);
+    // A Frame Member's corner entry may give a Flip, input only: saved as an order below, as `frame.member` saves it.
+    let mut flips = Vec::new();
+    if matches!(f.kind, FeatureKind::FrameMember { .. }) {
+        for c in set.get_mut("corners").and_then(Value::as_array_mut).into_iter().flatten() {
+            flips.push(match c.as_object_mut().and_then(|c| c.remove("flip")) {
+                None | Some(Value::Null) => None,
+                Some(flip) => Some(flip.as_bool().ok_or_else(|| bad(cmd, "`corners`: `flip` must be true or false"))?),
+            });
+        }
+    }
+    let set = &set;
     let mut v = before.clone();
     merge(&mut v, set, 0);
     resolve_feature_names(&mut v, &s.doc, cmd)?;
     let mut nf: Feature = serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("invalid feature: {e}")))?;
     nf.id = f.id;
+    // An older script's `coped_butt` is Butt with the frame's Coped ticked, as `frame.member` reads it. A corner's
+    // member of this frame itself is saved without the name; another frame's is refused.
+    if let FeatureKind::FrameMember { corner, corners, coped, .. } = &mut nf.kind {
+        solidcraft_doc::frame::read_coped(corner, corners, coped);
+        own_corner_members(corners, &f.name).map_err(|e| bad(cmd, e))?;
+        if flips.iter().any(Option::is_some) {
+            super::frame::flips_as_order(&s.doc, &s.model.state_before(id), &mut nf, &flips);
+        }
+    }
     // A one-sided extrude made symmetric takes the convention a new one would: its old marker
     // never read a symmetric distance.
     if let (FeatureKind::Extrude { extent: old, .. }, FeatureKind::Extrude { extent: new, .. })
@@ -1517,6 +1585,22 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if std::mem::discriminant(&nf.kind) != std::mem::discriminant(&f.kind) {
         return Err(bad(cmd, "the feature type cannot change"));
+    }
+    keeps_member(&f.kind, &nf.kind, cmd)?;
+
+    // A removed pair's id is never given again: `next_pair` can't go down, and every pair's id is
+    // a `pair<N>` below it, given once.
+    if let (FeatureKind::FrameMember { next_pair: was, .. }, FeatureKind::FrameMember { next_pair, pairs, .. }) = (&f.kind, &nf.kind) {
+        if next_pair < was {
+            return Err(bad(cmd, format!("`next_pair` can't go below {was}: a removed pair's id is never given again")));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(p) = pairs.iter().find(|p| !solidcraft_doc::frame::parse_pair_id(&p.id).is_some_and(|n| n < *next_pair && seen.insert(n))) {
+            return Err(bad(cmd, format!("pair id `{}` must be a pair<N> given once, below `next_pair` ({next_pair})", p.id)));
+        }
+        if let Some(p) = pairs.iter().find(|p| removed_pair_id(&f.kind, &p.id)) {
+            return Err(bad(cmd, removed_pair_message(&p.id)));
+        }
     }
     // serde drops fields the definition doesn't have without a word: refuse them, or a typo
     // would report success and change nothing.
@@ -1577,6 +1661,9 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // Profiles picked by index or point are kept by their curves, as when the feature was made.
     if nf.kind.clone().profile_sels_mut() != f.kind.clone().profile_sels_mut() {
         super::features::stable_profiles(s, &mut nf.kind, false)?;
+    }
+    if nf.kind.constructor_profile_sketch() != f.kind.constructor_profile_sketch() {
+        nf.profile_frame = super::features::cross_component_profile_frame_for(s, nf.component, &nf.kind);
     }
     // A body Pattern's copy names move with the bodies they copy (#12114). Names the edit gives
     // are in the order the copies are made, as they always were: they are read that way, not
@@ -2296,16 +2383,42 @@ fn input_keys(kind: &FeatureKind, edge_names: &[String]) -> Vec<(String, solidcr
 /// An old design's From Object keeps starting at the face's level (`from_level`) through an edit
 /// that keeps its From face: the same pick, or a pick of a face on the same plane, found as the
 /// build finds it in the model before the feature. A From picked on another plane is a new
-/// choice, so it starts on that face, as a new extrude does. `after`'s face names and picked
-/// placements must already be its own.
+/// choice, so it starts on that face, as a new extrude does. So does an edit that takes To Object
+/// off: a design saved with From and To since format 58 is marked only because To used to keep
+/// its From at the face's level (#18825), and without To a new extrude starts on the face.
+/// `after`'s face names and picked placements must already be its own.
 fn keep_from_level_on_the_same_face(s: &Session, before: &Feature, after: &mut Feature) {
     let FeatureKind::Extrude { extent: was, .. } = &before.kind else {
         return;
     };
-    let keep = was.from_level && solidcraft_doc::same_extrude_from_face(&s.doc, &s.model.state_before(before.id), before, after);
+    let to_removed = was.to.is_some() && matches!(&after.kind, FeatureKind::Extrude { extent, .. } if extent.to.is_none());
+    let keep = was.from_level && !to_removed && solidcraft_doc::same_extrude_from_face(&s.doc, &s.model.state_before(before.id), before, after);
     if let FeatureKind::Extrude { extent, .. } = &mut after.kind {
         extent.from_level = keep;
     }
+}
+
+/// Is `id` a pair id Frame Member `old` gave and has since taken out (below its `next_pair`, and
+/// none of its pairs' now)? Stored references to that tube must not find another one.
+fn removed_pair_id(old: &FeatureKind, id: &str) -> bool {
+    let FeatureKind::FrameMember { next_pair, pairs, .. } = old else { return false };
+    solidcraft_doc::frame::parse_pair_id(id).is_some_and(|n| n < *next_pair) && !pairs.iter().any(|p| p.id == id)
+}
+
+fn removed_pair_message(id: &str) -> String {
+    format!("pair id `{id}` was removed: a removed pair's id is never given again (leave `id` out for a new pair)")
+}
+
+/// `corners`' members named by the frame's own name (`own`) saved without it; one of another frame refused.
+fn own_corner_members(corners: &mut [solidcraft_doc::frame::CornerOverride], own: &str) -> std::result::Result<(), &'static str> {
+    for m in corners.iter_mut().flat_map(|c| &mut c.members) {
+        match &m.feature {
+            Some(n) if *n == own => m.feature = None,
+            Some(_) => return Err("`corners`: not supported yet: a corner with a member of another frame"),
+            None => {}
+        }
+    }
+    Ok(())
 }
 
 fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2339,6 +2452,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "plastic.snap_fit"
                 | "plastic.rest"
                 | "frame.end_cap"
+                | "frame.rotate_member"
                 | "frame.member"
         );
     if !constructor {
@@ -2398,13 +2512,42 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.insert("thread_class".into(), json!(class));
     }
-    // Members keep their names through an edit, unless it gives them another name.
-    if let FeatureKind::FrameMember { names, body_name, .. } = &old.kind
+    // Members keep their names through an edit, unless it gives them another name. A copy names
+    // its members by position: they are pinned to their members first, so a member taken out
+    // doesn't hand its name to the next. Pair ids are never reused, so `next_pair` never goes
+    // below the feature's own, nor to an id it has, whatever the edit says, and a removed pair's
+    // id is never named again.
+    if let FeatureKind::FrameMember { names, body_name, next_pair, pairs, .. } = &old.kind
         && cid == "frame.member"
         && let Some(parameters) = params.as_object_mut()
-        && parameters.get("body_name").and_then(Value::as_str) == body_name.as_deref()
     {
-        parameters.entry("names").or_insert_with(|| json!(names));
+        // A corner's member named by this frame's own name is its own: `frame.member` takes it without the name.
+        for m in
+            parameters.get_mut("corners").and_then(Value::as_array_mut).into_iter().flatten().filter_map(|c| c.get_mut("members")?.as_array_mut())
+        {
+            for m in m.iter_mut().filter_map(Value::as_object_mut) {
+                if m.get("feature").and_then(Value::as_str) == Some(old.name.as_str()) {
+                    m.remove("feature");
+                }
+            }
+        }
+        let mut named = parameters.get("pairs").and_then(Value::as_array).into_iter().flatten().filter_map(|p| p.get("id")?.as_str());
+        if let Some(id) = named.find(|id| removed_pair_id(&old.kind, id)) {
+            return Err(bad(cmd, removed_pair_message(id)));
+        }
+        let past_ids = pairs.iter().filter_map(|p| solidcraft_doc::frame::parse_pair_id(&p.id)).max().map_or(0, |n| n.saturating_add(1));
+        let given = match parameters.get("next_pair") {
+            None | Some(Value::Null) => Some(0),
+            // Anything else is `frame.member`'s to refuse.
+            Some(v) => v.as_u64().and_then(|n| u32::try_from(n).ok()),
+        };
+        if let Some(given) = given {
+            parameters.insert("next_pair".into(), json!(given.max(*next_pair).max(past_ids)));
+        }
+        if parameters.get("body_name").and_then(Value::as_str) == body_name.as_deref() {
+            let names = (!old.body_names.is_empty()).then(|| super::browser::member_pins(s, id)).flatten().unwrap_or_else(|| names.clone());
+            parameters.entry("names").or_insert_with(|| json!(names));
+        }
     }
     // A fold keeps the side that stays, decided when it was made, through an edit that names
     // neither a side nor a fixed point: the side is never decided again.
@@ -2505,6 +2648,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     if std::mem::discriminant(&new.kind) != std::mem::discriminant(&old.kind) && !(boundary(&new.kind) && boundary(&old.kind)) {
         return Err(bad(cmd, format!("{} is not a {} feature", old.name, cid)));
     }
+    keeps_member(&old.kind, &new.kind, cmd)?;
     // The trial still holds the old feature, so a plane offset from its own name was made there,
     // and once swapped in it would be built on itself (#3567).
     if new.kind.names_feature(old.id, &old.name) {
@@ -2646,6 +2790,13 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         slot.suppressed = old.suppressed;
         if let Some((names, _)) = cap_names {
             slot.body_names = names;
+        }
+        if old.kind.constructor_profile_sketch() != new.kind.constructor_profile_sketch() {
+            slot.profile_frame = new.profile_frame;
+        }
+        // A frame member names its members by their lines and pairs from now on (pinned above).
+        if matches!(new.kind, FeatureKind::FrameMember { .. }) {
+            slot.body_names.clear();
         }
         slot.kind = new.kind;
         slot.edge_refs = new.edge_refs;

@@ -16,7 +16,13 @@ use crate::{
 #[derive(Default)]
 pub(super) struct Draft {
     text: String,
+    /// The preview last drawn: for this text, with the pointer here, on this sheet. Drawn again only
+    /// when one of them changes.
+    shown: Option<(String, Vec2, u64, Option<crate::drawing_sheet_page::Marks>)>,
 }
+
+/// How finely a preview's letters are flattened, on paper.
+const PREVIEW_TOLERANCE_MM: f64 = 0.01;
 
 fn tr(key: &'static str) -> &'static str {
     solidcraft_ui_text::tr(key)
@@ -42,7 +48,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Option<u64
                     .collect::<Option<String>>()
             }),
         };
-        app.drawing_workspace.note = text.map(|text| Draft { text });
+        app.drawing_workspace.note = text.map(|text| Draft { text, shown: None });
     }
     let (cancel, save) = super::inset(ui, |ui| {
         let mut valid = false;
@@ -80,12 +86,26 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Option<u64
     }
 }
 
-pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, screen: egui::Pos2, point: Vec2, sheet: u64, clicked: bool) {
-    let Some(draft) = app.drawing_workspace.note.as_ref().filter(|draft| ready(&draft.text)) else { return };
-    let tokens = Tokens::get();
-    painter.text(screen, egui::Align2::LEFT_TOP, &draft.text, egui::FontId::proportional(tokens.font_small), tokens.accent);
+pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: crate::drawing_sheet_page::OnScreen, point: Vec2, sheet: u64, clicked: bool) {
+    if !app.drawing_workspace.note.as_ref().is_some_and(|draft| ready(&draft.text)) {
+        return;
+    }
+    let Some(mut draft) = app.drawing_workspace.note.take() else { return };
+    let params = json!({"anchor":{"sheet":ids::encode(sheet)}, "at":[point.x, point.y], "content":draft.text});
+    // The note as the sheet will draw it once placed: its own group, in the drawing's lettering, at
+    // its paper size, in the accent colour as every preview on the sheet is.
+    let fresh = draft.shown.as_ref().is_some_and(|(text, at, on, _)| *text == draft.text && *at == point && *on == sheet);
+    if !fresh {
+        let marks = solidcraft_engine::drawing_scene::note_preview_scene(&app.session, &params)
+            .ok()
+            .map(|scene| crate::drawing_sheet_page::Marks::of(&scene, 0, PREVIEW_TOLERANCE_MM));
+        draft.shown = Some((draft.text.clone(), point, sheet, marks));
+    }
+    if let Some((.., Some(marks))) = &draft.shown {
+        at.paint_preview(painter, marks, Vec2::ZERO, Tokens::get().accent);
+    }
+    app.drawing_workspace.note = Some(draft);
     if clicked {
-        let params = json!({"anchor":{"sheet":ids::encode(sheet)}, "at":[point.x, point.y], "content":draft.text});
         match app.run("drawing.note.add", params) {
             Ok(_) => {
                 close_panel(app);

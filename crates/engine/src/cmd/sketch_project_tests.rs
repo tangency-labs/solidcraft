@@ -657,6 +657,101 @@ fn intersect_cuts_a_body_with_the_sketch_plane() {
     assert_eq!(si["profiles"].as_array().unwrap().len(), 1);
 }
 
+/// The linked points of an Intersect with edge `at` of `body` on the plane through `origin`
+/// spanned by `x` and `y`, in that plane's coordinates.
+fn intersected_edge(s: &mut Session, body: &str, at: [f64; 3], (origin, x, y): ([f64; 3], [f64; 3], [f64; 3])) -> Vec<[f64; 2]> {
+    run(s, "sketch.create", json!({"plane":{"origin":origin,"x_dir":x,"y_dir":y}}));
+    run(s, "sketch.intersect", json!({"refs":[{"edge":at,"body":body}]}));
+    let si = inspect(s);
+    let points = si["points"].as_array().unwrap().iter().filter(|p| !p["link"].is_null());
+    let out = points.map(|p| [p["at"][0].as_f64().unwrap(), p["at"][1].as_f64().unwrap()]).collect();
+    run(s, "sketch.finish", json!({}));
+    out
+}
+
+/// Intersect put a curved edge's points where its display mesh crosses the plane, on a chord:
+/// 0.011 mm inside a radius-10 circle (#19867). A plane through the circle's seam still gives
+/// its two points once each.
+#[test]
+fn intersecting_a_circular_edge_puts_its_points_on_the_circle() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":10,"height":10,"body_name":"C"}));
+    // The plane X = 3 meets the top circle at Y = ±√(10² − 3²).
+    let mut got = intersected_edge(&mut s, "C", [0.0, 10.0, 10.0], ([3.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]));
+    got.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    assert_eq!(got.len(), 2, "{got:?}");
+    for (p, y) in got.iter().zip([-(91f64.sqrt()), 91f64.sqrt()]) {
+        assert!((p[0] - y).abs() < 1e-9 && (p[1] - 10.0).abs() < 1e-9, "{got:?}");
+    }
+    // The plane Y = 0 meets it at X = ±10, one of them where the closed edge starts and ends.
+    let mut got = intersected_edge(&mut s, "C", [0.0, 10.0, 10.0], ([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]));
+    got.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    assert_eq!(got.len(), 2, "{got:?}");
+    for (p, x) in got.iter().zip([-10.0, 10.0]) {
+        assert!((p[0] - x).abs() < 1e-9 && (p[1] - 10.0).abs() < 1e-9, "{got:?}");
+    }
+}
+
+/// An edge where two cylinders meet has no closed form: Intersect crosses the spline the kernel
+/// holds for it, so the points lie on both cylinders within the edge's tolerance.
+#[test]
+fn intersecting_where_two_cylinders_meet_puts_the_points_on_both() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":10,"height":40,"body_name":"C"}));
+    run(&mut s, "solid.cylinder", json!({"radius":5,"height":40,"base":[-20,0,20],"axis":"X","operation":"join","targets":["C"]}));
+    // The kernel holds each meeting curve as a spline within its edge's tolerance of both cylinders.
+    let state = s.model.state();
+    let meeting: Vec<f64> = state
+        .body("C")
+        .unwrap()
+        .body
+        .record()
+        .edges
+        .iter()
+        .filter(|e| matches!(e.curve, solidcore_record::brep::Curve::Spline { .. }))
+        .map(|e| e.tolerance)
+        .collect();
+    assert_eq!(meeting.len(), 2, "the cylinders meet along two splines");
+    let tol = meeting.iter().fold(0.0, |m: f64, t| m.max(*t));
+    drop(state);
+    // The plane Y = 3 meets the meeting curve on the +X side at X = √(10² − 3²), Z = 20 ± √(5² − 3²).
+    let mut got = intersected_edge(&mut s, "C", [91f64.sqrt(), 3.0, 24.0], ([0.0, 3.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]));
+    got.sort_by(|a, b| a[1].total_cmp(&b[1]));
+    assert_eq!(got.len(), 2, "{got:?}");
+    for (p, z) in got.iter().zip([16.0, 24.0]) {
+        let (on_upright, on_cross) = ((p[0].powi(2) + 9.0).sqrt() - 10.0, (9.0 + (p[1] - 20.0).powi(2)).sqrt() - 5.0);
+        assert!(on_upright.abs() <= tol && on_cross.abs() <= tol && (p[1] - z).abs() < 0.5, "{got:?}, edge tolerance {tol}");
+    }
+}
+
+/// An edge lying in the sketch plane meets it along its whole length: Intersect gives the edge
+/// itself (the old mesh section gave one end of a straight edge and every mesh vertex of a circle).
+#[test]
+fn intersecting_an_edge_lying_in_the_plane_gives_the_edge() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Post"}));
+    run(&mut s, "solid.cylinder", json!({"radius":10,"height":10,"base":[100,0,0],"body_name":"C"}));
+    for (body, at, height) in [("Post", [20.0, 0.0, 20.0], 20), ("C", [100.0, 10.0, 10.0], 10)] {
+        run(&mut s, "sketch.create", json!({"plane":"XY","offset":height}));
+        let r = run(&mut s, "sketch.intersect", json!({"refs":[{"edge":at,"body":body}]}));
+        let si = inspect(&mut s);
+        let curves = linked_curves(&si);
+        assert_eq!(curves.len(), 1, "{body}: {r} {si}");
+        let c = &curves[0];
+        if body == "Post" {
+            assert_eq!(c["type"], "line", "{c}");
+            let mut xs = [c["start_at"][0].as_f64().unwrap(), c["end_at"][0].as_f64().unwrap()];
+            xs.sort_by(f64::total_cmp);
+            assert!((xs[0]).abs() < 1e-9 && (xs[1] - 40.0).abs() < 1e-9, "{c}");
+            assert!(c["start_at"][1].as_f64().unwrap().abs() < 1e-9 && c["end_at"][1].as_f64().unwrap().abs() < 1e-9, "{c}");
+        } else {
+            assert_eq!(c["type"], "circle", "{c}");
+            assert!((c["radius"].as_f64().unwrap() - 10.0).abs() < 1e-9, "{c}");
+        }
+        run(&mut s, "sketch.finish", json!({}));
+    }
+}
+
 #[test]
 fn break_link_makes_normal_geometry() {
     let mut s = Session::default();
@@ -753,6 +848,7 @@ fn a_reference_whose_body_is_gone_fails_its_sketch_naming_the_lost_projection() 
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
     let boxf = s.doc.features.last().unwrap().id;
+    let box_name = s.doc.features.last().unwrap().name.clone();
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     run(&mut s, "sketch.project", json!({"refs": [{"edge": [5, 0, 10]}]}));
     run(&mut s, "sketch.finish", json!({}));
@@ -761,7 +857,9 @@ fn a_reference_whose_body_is_gone_fails_its_sketch_naming_the_lost_projection() 
     let r = s.model.results.last().unwrap();
     let error = r.error.as_deref().unwrap_or_default();
     let read = solidcraft_doc::lost_projection_parts(error).map(|t| (t.feature, t.count, t.listed));
-    assert_eq!(read, Some((r.name.as_str(), 1, "projected edge of Body1 (curve l1)")), "{r:?}");
+    // The suppressed box is still in the design: the message names it as where the edge came from.
+    let listed = format!("projected edge of Body1 (curve l1; made by {box_name})");
+    assert_eq!(read, Some((r.name.as_str(), 1, listed.as_str())), "{r:?}");
     assert!(!error.contains(&name), "{error}");
 }
 
@@ -2732,6 +2830,99 @@ fn a_thicker_angle_moves_the_projected_face_of_the_sketch_on_it() {
     check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
 }
 
+/// #18711: a panel leaning at the angle `A` (an 18 wide foot at the origin, sides 300 long),
+/// extruded 118, with a sketch on its top face and a circle on the projected top corner away
+/// from the origin. Returns the sketch and the circle.
+fn leaning_panel(s: &mut Session) -> (u64, String) {
+    run(s, "parameters.change", json!({"name": "A", "expression": "95 deg"}));
+    run(s, "sketch.create", json!({"plane": "XY"}));
+    run(s, "sketch.line", json!({"points": [[0, 0], [18, 0], [-8, 299], [-26, 299]], "closed": true, "ids": ["m1", "m2", "m3", "m4"]}));
+    run(s, "sketch.constraint.coincident", json!({"a": "m1.start", "b": "origin"}));
+    for (line, mode) in [("m1", "horizontal"), ("m3", "horizontal")] {
+        run(s, "sketch.constraint.horizontal_vertical", json!({"line": line, "mode": mode}));
+    }
+    run(s, "sketch.constraint.parallel", json!({"a": "m2", "b": "m4"}));
+    run(s, "sketch.dimension", json!({"entities": ["m1"], "value": 18}));
+    run(s, "sketch.dimension", json!({"entities": ["m4"], "value": 300}));
+    run(s, "sketch.dimension", json!({"entities": ["m1", "m4"], "value": "A"}));
+    assert_eq!(inspect(s)["dof"], 0);
+    run(s, "sketch.finish", json!({}));
+    run(s, "solid.extrude", json!({"distance": 118, "body_name": "Panel"}));
+    let sketch = run(s, "sketch.create", json!({"plane": {"face": [-4, 149, 118]}}))["sketch"].as_u64().unwrap();
+    let st = s.model.state();
+    let ss = st.sketch(sketch).unwrap();
+    let on_corner = ss.sketch.points.iter().find(|p| p.link.is_some() && ss.plane.to_world(p.pos).dist(panel_corner(95.)) < 1e-6).unwrap().id.clone();
+    let circle = ids(&run(s, "sketch.circle.center", json!({"center": [-6, 290], "radius": 5}))["curves"])[0].clone();
+    run(s, "sketch.constraint.coincident", json!({"a": format!("{circle}.center"), "b": on_corner}));
+    run(s, "sketch.dimension", json!({"entities": [circle], "value": 10}));
+    assert_eq!(inspect(s)["dof"], 0);
+    run(s, "sketch.finish", json!({}));
+    (sketch, circle)
+}
+
+/// The top corner of [`leaning_panel`]'s side away from the origin: the foot's end and a side of
+/// 300 at `degrees`.
+fn panel_corner(degrees: f64) -> solidcore_record::Vec3 {
+    let a = degrees.to_radians();
+    solidcore_record::Vec3::new(18. + 300. * a.cos(), 300. * a.sin(), 118.)
+}
+
+/// #18711: turning [`leaning_panel`] from 95 to 92, 90 or 85 degrees moves its corner past the
+/// foot: the face's edges, read in the order of where they lie, come back in another order, and
+/// the projection was rebuilt without the circle's constraint. The link's curves keep the names
+/// of the edges they stand for, which find them again: the circle stays on the corner.
+#[test]
+fn a_leaning_panel_turned_keeps_what_is_on_its_projected_face() {
+    let mut s = Session::default();
+    let (sketch, circle) = leaning_panel(&mut s);
+    for degrees in [92., 90., 85., 95.] {
+        run(&mut s, "parameters.change", json!({"name": "A", "expression": format!("{degrees} deg")}));
+        let warning = s.model.result(sketch).and_then(|r| r.warning.clone());
+        assert!(warning.is_none(), "{degrees}: {warning:?}");
+        let st = s.model.state();
+        let ss = st.sketch(sketch).unwrap();
+        assert!(ss.sketch.links.iter().all(|l| !l.lost), "{degrees}");
+        assert_eq!(ss.sketch.constraints.len(), 2, "{degrees}: the circle keeps its place and its size");
+        let center = ss.sketch.points.iter().find(|p| p.id == format!("{circle}.center")).unwrap();
+        assert!(ss.plane.to_world(center.pos).dist(panel_corner(degrees)) < 1e-6, "{degrees}: {:?}", ss.plane.to_world(center.pos));
+    }
+}
+
+/// #18711: the face's link saves the name of each of its curves' edges, one per curve, and a
+/// design saved with them reads them back. A design saved before them (the field taken out) opens
+/// and builds as it did: the same curves where they were, the circle on its corner.
+#[test]
+fn a_projected_face_saves_its_edge_names_and_a_design_without_them_builds_as_before() {
+    let mut s = Session::default();
+    let (sketch, circle) = leaning_panel(&mut s);
+    let saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let link = s.doc.sketch(sketch).unwrap().links.iter().find(|l| l.auto_face).unwrap().clone();
+    assert_eq!(link.curve_edges.len(), 4, "{link:?}");
+    assert!(link.curve_edges.iter().all(|n| n.contains('|')), "{:?}", link.curve_edges);
+    let reopened = solidcraft_doc::Document::from_json(&saved.to_string()).unwrap();
+    assert_eq!(reopened.sketch(sketch).unwrap().links.iter().find(|l| l.auto_face).unwrap().curve_edges, link.curve_edges);
+    fn strip(v: &mut Value) -> usize {
+        match v {
+            Value::Object(map) => usize::from(map.remove("curve_edges").is_some()) + map.values_mut().map(strip).sum::<usize>(),
+            Value::Array(items) => items.iter_mut().map(strip).sum(),
+            _ => 0,
+        }
+    }
+    let mut older = saved.clone();
+    assert_eq!(strip(&mut older), 1);
+    let older = Session::new(solidcraft_doc::Document::from_json(&older.to_string()).unwrap());
+    let (st, old_st) = (s.model.state(), older.model.state());
+    let (now, before) = (st.sketch(sketch).unwrap(), old_st.sketch(sketch).unwrap());
+    assert!(older.model.result(sketch).and_then(|r| r.warning.clone()).is_none());
+    let placed = |ss: &solidcraft_doc::SolvedSketch| ss.sketch.points.iter().map(|p| (p.id.clone(), ss.plane.to_world(p.pos))).collect::<Vec<_>>();
+    let (a, b) = (placed(now), placed(before));
+    assert_eq!(a.len(), b.len());
+    assert!(a.iter().zip(&b).all(|((i, p), (j, q))| i == j && p.dist(*q) < 1e-9), "{a:?} {b:?}");
+    assert_eq!(before.sketch.constraints.len(), 2);
+    let center = before.sketch.points.iter().find(|p| p.id == format!("{circle}.center")).unwrap();
+    assert!(before.plane.to_world(center.pos).dist(panel_corner(95.)) < 1e-6);
+}
+
 /// A sphere's outline from above is its equator: one circle and one profile. Flat triangles beside
 /// the equator can tip the other way from the sphere, and their edges must not join the outline.
 #[test]
@@ -2748,6 +2939,371 @@ fn a_spheres_silhouette_is_one_circle() {
     assert!((circle["radius"].as_f64().unwrap() - 8.0).abs() < 1e-6, "{circle}");
     let done = run(&mut s, "sketch.finish", json!({}));
     assert_eq!(done["profiles"], 1, "{done}");
+}
+
+/// The plate of a design whose whole-body projection on a tilted sketch went wrong: 80 x 50 x 8
+/// with its upright edges rounded at 6, a 4 mm hole, and a boss of 12 standing 14 on top with a
+/// 6 mm bore right through.
+fn bossed_plate() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 50, "height": 8, "body_name": "Plate"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[0, 0, 4], [80, 0, 4], [80, 50, 4], [0, 50, 4]], "radius": 6}));
+    run(&mut s, "solid.cylinder", json!({"base": [12, 25, 0], "radius": 4, "height": 8, "operation": "cut"}));
+    run(&mut s, "solid.cylinder", json!({"base": [40, 25, 8], "radius": 12, "height": 14, "operation": "join", "targets": ["Plate"]}));
+    run(&mut s, "solid.cylinder", json!({"base": [40, 25, 0], "radius": 6, "height": 22, "operation": "cut"}));
+    s
+}
+
+/// How the whole-body projection on `sketch` compares with the true outline: the farthest a point
+/// of it lies from the true projection, and the most it falls short of the body's extent in any of
+/// 16 directions (a missing stretch of outline falls short somewhere). The truth is every edge of
+/// the body but a round wall's seam, sampled finely on its exact curve, and each round wall's two
+/// outline lines (where the view runs along the wall) between the wall's own ends, in the sketch's
+/// coordinates.
+fn against_true_outline(s: &Session, sketch: u64) -> (f64, f64) {
+    let state = s.model.state();
+    let solved = state.sketch(sketch).unwrap();
+    let plane = solved.plane;
+    let body = state.body("Plate").unwrap();
+    let record = body.body.record();
+    let q = solidcore_ops::query::Query::new(record);
+    let mut truth: Vec<(solidcore_record::Vec2, solidcore_record::Vec2)> = Vec::new();
+    // Each face's edge points, for the axial reach of its round wall.
+    let mut on_face: Vec<Vec<solidcore_record::Vec3>> = vec![Vec::new(); record.faces.len()];
+    for e in 0..record.edges.len() {
+        let [t0, t1] = q.edge_interval(e).unwrap();
+        let world: Vec<_> = (0..=4000).map(|k| q.edge_at(e, t0 + (t1 - t0) * f64::from(k) / 4000.0).unwrap().0).collect();
+        let uses = q.edge_faces(e);
+        for f in &uses {
+            on_face[*f].extend(world.iter().copied());
+        }
+        // A round wall's seam is an edge but no outline: one face lies on both its sides.
+        if uses.len() == 2 && uses[0] == uses[1] {
+            continue;
+        }
+        let pts: Vec<_> = world.iter().map(|p| plane.to_local(*p)).collect();
+        truth.extend(pts.windows(2).map(|w| (w[0], w[1])));
+    }
+    let n = plane.normal();
+    for (f, edge_points) in on_face.iter().enumerate() {
+        if let Some(solidcraft_kernel::FaceSurface::Cylinder { origin, axis, radius }) = solidcraft_kernel::face_surface(&body.body, f) {
+            let a = axis.vec();
+            let m = a.cross(n).normalized().unwrap();
+            let (lo, hi) = edge_points.iter().map(|p| (*p - origin).dot(a)).fold((f64::MAX, f64::MIN), |(lo, hi), t| (lo.min(t), hi.max(t)));
+            for side in [1.0, -1.0] {
+                let p = origin + m * (radius * side);
+                truth.push((plane.to_local(p + a * lo), plane.to_local(p + a * hi)));
+            }
+        }
+    }
+    let to_segment = |p: solidcore_record::Vec2, (a, b): (solidcore_record::Vec2, solidcore_record::Vec2)| {
+        let d = b - a;
+        let t = ((p - a).dot(d) / d.len2().max(1e-300)).clamp(0.0, 1.0);
+        p.dist(a + d * t)
+    };
+    let sk = &solved.sketch;
+    let link = &sk.links[0].id;
+    let got: Vec<_> = sk.link_curves(link).into_iter().flat_map(|ci| sk.polyline(ci)).collect();
+    let off = got.iter().map(|p| truth.iter().map(|seg| to_segment(*p, *seg)).fold(f64::MAX, f64::min)).fold(0.0, f64::max);
+    let short = (0..16)
+        .map(|k| {
+            let u = solidcore_record::Vec2::new((f64::from(k) * std::f64::consts::PI / 8.0).cos(), (f64::from(k) * std::f64::consts::PI / 8.0).sin());
+            let reach = |pts: &mut dyn Iterator<Item = solidcore_record::Vec2>| pts.map(|p| p.dot(u)).fold(f64::MIN, f64::max);
+            reach(&mut truth.iter().flat_map(|(a, b)| [*a, *b])) - reach(&mut got.iter().copied())
+        })
+        .fold(0.0, f64::max);
+    (off, short)
+}
+
+/// A whole body projected on a sketch tilted to it (the 45 degree plane of the design it came from,
+/// and the plane square to the Home view) is its exact outline: every round of the plate is a
+/// circle about the vertical, which a slant shows as an ellipse, so the outline holds elliptical
+/// arcs and no circular one, and each curve lies on the true outline. The mesh's outline was
+/// fitted with lines and circular arcs instead: 164 lines and 2 arcs at 45 degrees, up to 0.056 mm
+/// off, some bulging the wrong way.
+#[test]
+fn a_tilted_whole_body_projection_is_the_exact_outline() {
+    use solidcraft_sketch::CurveKind;
+    let c = std::f64::consts::FRAC_1_SQRT_2;
+    let planes = [
+        ("45 degrees", json!({"origin": [0, 0, 8], "x_dir": [1, 0, 0], "y_dir": [0, c, c]})),
+        ("Home view", json!({"origin": [40, 25, 0], "x_dir": [c, c, 0], "y_dir": [-0.5, 0.5, c]})),
+    ];
+    for (name, plane) in planes {
+        let mut s = bossed_plate();
+        let sketch = run(&mut s, "sketch.create", json!({"plane": plane, "project_edges": false}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.project", json!({"refs": [{"body": "Plate"}]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let state = s.model.state();
+        let sk = &state.sketch(sketch).unwrap().sketch;
+        let curves: Vec<_> = sk.link_curves(&sk.links[0].id).into_iter().map(|ci| &sk.curves[ci].kind).collect();
+        assert!(
+            !curves.iter().any(|k| matches!(k, CurveKind::Arc { .. } | CurveKind::Circle { .. })),
+            "{name}: a circular arc at a slant: {curves:?}"
+        );
+        assert!(curves.iter().any(|k| matches!(k, CurveKind::Conic { .. })), "{name}: no elliptical arc: {curves:?}");
+        // Exact curves only: a conic per span of a round edge's stretch, and a line per stretch
+        // of a straight edge or outline line of a round wall. A circle's spline has four quarter
+        // spans, and a stretch over its seam is two stretches: at most five conics per round
+        // edge; at most one line per straight edge and two per round wall.
+        let record = state.body("Plate").unwrap().body.record();
+        let rounds = record.edges.iter().filter(|e| matches!(e.curve, solidcore_record::brep::Curve::Circle { .. })).count();
+        let straight = record.edges.iter().filter(|e| matches!(e.curve, solidcore_record::brep::Curve::Line { .. })).count();
+        let walls = (0..record.faces.len())
+            .filter(|f| {
+                matches!(
+                    solidcraft_kernel::face_surface(&state.body("Plate").unwrap().body, *f),
+                    Some(solidcraft_kernel::FaceSurface::Cylinder { .. })
+                )
+            })
+            .count();
+        let conics = curves.iter().filter(|k| matches!(k, CurveKind::Conic { .. })).count();
+        let lines = curves.iter().filter(|k| matches!(k, CurveKind::Line { .. })).count();
+        assert_eq!(conics + lines, curves.len(), "{name}: only conics and lines: {curves:?}");
+        assert!(conics <= 5 * rounds, "{name}: {conics} conics for {rounds} round edges");
+        assert!(lines <= straight + 2 * walls, "{name}: {lines} lines for {straight} straight edges and {walls} round walls");
+        let (off, short) = against_true_outline(&s, sketch);
+        // The truth's chords stand within 12 * (pi / 4000)^2 / 8 < 1e-5 mm of its curves. The
+        // sketch's points lie on its curves but its chords cut inside a round's extreme, so the
+        // reach is checked to 2e-3 mm: a missing stretch of outline falls short by millimetres.
+        assert!(off < 2e-5, "{name}: {off} mm off the true outline");
+        assert!(short < 2e-3, "{name}: the outline falls {short} mm short of the body's extent");
+    }
+}
+
+/// Synthetic saved trace for #20298: a diameter-20, height-30 cylinder projected onto the
+/// tilted plane from the report. Its outline is two half ellipses joined by two straight
+/// sides. Older builds stored a dense line trace, whose IDs the extrude saved as its profile.
+fn saved_traced_cylinder_projection() -> (Value, u64, f64) {
+    use solidcraft_sketch::{LinkGeom, LinkKind, LinkSource, Sketch};
+
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 30, "body_name": "Cylinder"}));
+    let sketch = run(
+        &mut s,
+        "sketch.create",
+        json!({"name": "Outline", "plane": {"origin": [0, 0, 40], "x_dir": [1, 0, 0], "y_dir": [0, 0.866, 0.5]}, "project_edges": false}),
+    )["sketch"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"body": "Cylinder"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"profiles": [0], "distance": 2, "name": "Pad", "body_name": "ProjectionPad"}));
+    assert!(s.doc.sketch(sketch).unwrap().links.iter().all(|link| link.profile_boundary.is_empty()), "new projections keep ordinary picks");
+
+    // Fixed old-style trace, generated once from the cylinder and input plane above.
+    // Its 130 segments include both straight sides; the repeated first point closes it.
+    let points = [
+        [10.000000000000, -5.000110003630],
+        [9.987954562052, -4.575174595273],
+        [9.951847266722, -4.151262893534],
+        [9.891765099648, -3.729396138834],
+        [9.807852804032, -3.310590645136],
+        [9.700312531945, -2.895855351556],
+        [9.569403357322, -2.486189391745],
+        [9.415440651830, -2.082579686880],
+        [9.238795325113, -1.685998568095],
+        [9.039892931234, -1.297401434039],
+        [8.819212643484, -0.917724449247],
+        [8.577286100003, -0.547882288830],
+        [8.314696123025, -0.188765934946],
+        [8.032075314806, 0.158759469651],
+        [7.730104533627, 0.493856705824],
+        [7.409511253550, 0.815718494979],
+        [7.071067811865, 1.123569443875],
+        [6.715589548470, 1.416667912611],
+        [6.343932841636, 1.694307801303],
+        [5.956993044924, 1.955820251141],
+        [5.555702330196, 2.200575255728],
+        [5.141027441932, 2.427983178820],
+        [4.713967368260, 2.637496174811],
+        [4.275550934303, 2.828609508543],
+        [3.826834323651, 3.000862771255],
+        [3.368898533922, 3.153840989750],
+        [2.902846772545, 3.287175626100],
+        [2.429801799033, 3.400545465488],
+        [1.950903220161, 3.493677390040],
+        [1.467304744554, 3.566347036793],
+        [0.980171403296, 3.618379338202],
+        [0.490676743274, 3.649648943897],
+        [0.000000000000, 3.660080522657],
+        [-0.490676743274, 3.649648943897],
+        [-0.980171403296, 3.618379338202],
+        [-1.467304744554, 3.566347036793],
+        [-1.950903220161, 3.493677390040],
+        [-2.429801799033, 3.400545465488],
+        [-2.902846772545, 3.287175626100],
+        [-3.368898533922, 3.153840989750],
+        [-3.826834323651, 3.000862771255],
+        [-4.275550934303, 2.828609508543],
+        [-4.713967368260, 2.637496174811],
+        [-5.141027441932, 2.427983178820],
+        [-5.555702330196, 2.200575255728],
+        [-5.956993044924, 1.955820251141],
+        [-6.343932841636, 1.694307801303],
+        [-6.715589548470, 1.416667912611],
+        [-7.071067811865, 1.123569443875],
+        [-7.409511253550, 0.815718494979],
+        [-7.730104533627, 0.493856705824],
+        [-8.032075314806, 0.158759469651],
+        [-8.314696123025, -0.188765934946],
+        [-8.577286100003, -0.547882288830],
+        [-8.819212643484, -0.917724449247],
+        [-9.039892931234, -1.297401434039],
+        [-9.238795325113, -1.685998568095],
+        [-9.415440651830, -2.082579686880],
+        [-9.569403357322, -2.486189391745],
+        [-9.700312531945, -2.895855351556],
+        [-9.807852804032, -3.310590645136],
+        [-9.891765099648, -3.729396138834],
+        [-9.951847266722, -4.151262893534],
+        [-9.987954562052, -4.575174595273],
+        [-10.000000000000, -5.000110003630],
+        [-10.000000000000, -20.000440014521],
+        [-9.987954562052, -20.425375422878],
+        [-9.951847266722, -20.849287124616],
+        [-9.891765099648, -21.271153879317],
+        [-9.807852804032, -21.689959373015],
+        [-9.700312531945, -22.104694666594],
+        [-9.569403357322, -22.514360626406],
+        [-9.415440651830, -22.917970331270],
+        [-9.238795325113, -23.314551450056],
+        [-9.039892931234, -23.703148584111],
+        [-8.819212643484, -24.082825568904],
+        [-8.577286100003, -24.452667729321],
+        [-8.314696123025, -24.811784083204],
+        [-8.032075314806, -25.159309487802],
+        [-7.730104533627, -25.494406723975],
+        [-7.409511253550, -25.816268513130],
+        [-7.071067811865, -26.124119462026],
+        [-6.715589548470, -26.417217930762],
+        [-6.343932841636, -26.694857819454],
+        [-5.956993044924, -26.956370269292],
+        [-5.555702330196, -27.201125273879],
+        [-5.141027441932, -27.428533196971],
+        [-4.713967368260, -27.638046192962],
+        [-4.275550934303, -27.829159526693],
+        [-3.826834323651, -28.001412789406],
+        [-3.368898533922, -28.154391007901],
+        [-2.902846772545, -28.287725644251],
+        [-2.429801799033, -28.401095483639],
+        [-1.950903220161, -28.494227408191],
+        [-1.467304744554, -28.566897054944],
+        [-0.980171403296, -28.618929356353],
+        [-0.490676743274, -28.650198962047],
+        [0.000000000000, -28.660630540808],
+        [0.490676743274, -28.650198962047],
+        [0.980171403296, -28.618929356353],
+        [1.467304744554, -28.566897054944],
+        [1.950903220161, -28.494227408191],
+        [2.429801799033, -28.401095483639],
+        [2.902846772545, -28.287725644251],
+        [3.368898533922, -28.154391007901],
+        [3.826834323651, -28.001412789406],
+        [4.275550934303, -27.829159526693],
+        [4.713967368260, -27.638046192962],
+        [5.141027441932, -27.428533196971],
+        [5.555702330196, -27.201125273879],
+        [5.956993044924, -26.956370269292],
+        [6.343932841636, -26.694857819454],
+        [6.715589548470, -26.417217930762],
+        [7.071067811865, -26.124119462026],
+        [7.409511253550, -25.816268513130],
+        [7.730104533627, -25.494406723975],
+        [8.032075314806, -25.159309487802],
+        [8.314696123025, -24.811784083204],
+        [8.577286100003, -24.452667729321],
+        [8.819212643484, -24.082825568904],
+        [9.039892931234, -23.703148584111],
+        [9.238795325113, -23.314551450056],
+        [9.415440651830, -22.917970331270],
+        [9.569403357322, -22.514360626406],
+        [9.700312531945, -22.104694666594],
+        [9.807852804032, -21.689959373015],
+        [9.891765099648, -21.271153879317],
+        [9.951847266722, -20.849287124616],
+        [9.987954562052, -20.425375422878],
+        [10.000000000000, -20.000440014521],
+        [10.000000000000, -5.000110003630],
+    ]
+    .map(|[x, y]| solidcore_record::Vec2::new(x, y));
+    let geometry: Vec<_> = points.windows(2).map(|pair| LinkGeom::Line(pair[0], pair[1])).collect();
+    let mut traced = Sketch::new();
+    let link = traced.add_link(LinkKind::Project, LinkSource::Body { body: "Cylinder".into() }, &geometry).unwrap();
+    let old_ids: Vec<_> = traced.link_curves(&link).iter().map(|i| traced.curves[*i].id.clone()).collect();
+    assert_eq!(old_ids.len(), 130);
+    assert!(old_ids.iter().all(|id| id.starts_with('l')));
+    assert_eq!(solidcraft_sketch::find_profiles(&traced).len(), 1);
+
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    for feature in saved["features"].as_array_mut().unwrap() {
+        if feature["id"] == sketch {
+            feature["sketch"] = serde_json::to_value(&traced).unwrap();
+        } else if feature["name"] == "Pad" {
+            feature["profiles"] = json!({"type": "curves", "loops": [old_ids]});
+        }
+    }
+    // A released format, so this remains a pre-migration file after the pending step is folded.
+    saved["format"] = json!("solidcraft/63");
+    saved.as_object_mut().unwrap().remove("format_pending");
+    // Let q = sqrt(0.866^2 + 0.5^2) normalize the specified plane's y direction.
+    // Projected area = ellipse pi*10^2*(0.866/q) + axial rectangle 20*30*(0.5/q).
+    // Extruding 2 mm gives 2*(pi*100*0.866 + 600*0.5)/q = 1144.149019157064 mm^3.
+    (saved, sketch, 1144.149019157064)
+}
+
+#[test]
+fn a_saved_traced_whole_body_profile_rebuilds_with_the_exact_projection() {
+    let (saved, sketch, expected) = saved_traced_cylinder_projection();
+    let mut s = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+    let assert_rebuilt = |s: &Session| {
+        for feature in &s.doc.features {
+            let result = s.model.result(feature.id).unwrap();
+            assert!(result.error.is_none(), "{}: {:?}", feature.name, result.error);
+        }
+        let state = s.model.state();
+        let ss = state.sketch(sketch).unwrap();
+        assert!(!ss.sketch.links[0].profile_boundary.is_empty());
+        assert!(ss.sketch.curves.iter().any(|curve| matches!(curve.kind, solidcraft_sketch::CurveKind::Conic { .. })));
+        let solidcraft_doc::FeatureKind::Extrude { profiles, .. } = &s.doc.find_feature("Pad").unwrap().kind else {
+            panic!("Pad must remain an extrude");
+        };
+        let solidcraft_doc::ProfileSel::Curves { loops } = profiles else { panic!("Pad must retain its saved curve IDs") };
+        assert_eq!(loops.len(), 1);
+        // The rebuilt sketch cannot resolve the saved IDs directly: the migrated reference
+        // must identify the exact outline, rather than extruding the unchanged old trace.
+        assert_eq!(solidcraft_sketch::profile_by_curves(&ss.profiles, &loops[0]), Err(solidcraft_sketch::CurvePick::Missing));
+        assert_eq!(solidcraft_doc::profile_selection_indices(ss, profiles).unwrap(), vec![0]);
+        let pad = state.body("ProjectionPad").unwrap();
+        let actual = solidcraft_kernel::measure(&pad.body).unwrap().volume;
+        assert!((actual - expected).abs() < 1e-6 * expected, "{actual} vs {expected}");
+    };
+    assert_rebuilt(&s);
+    // Evaluation refreshes a copy in model state. A no-op edit/finish does not write that
+    // copy into the document; check the rebuilt outline where evaluation keeps it.
+    run(&mut s, "sketch.edit", json!({"sketch": "Outline"}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert_rebuilt(&s);
+    // Opening the migrated save cold must preserve the reference and rebuild the exact outline.
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_rebuilt(&reopened);
+}
+
+#[test]
+fn a_saved_projection_profile_that_is_split_is_not_guessed() {
+    let (saved, sketch, _) = saved_traced_cylinder_projection();
+    let mut doc = solidcraft_doc::Document::from_json(&saved.to_string()).unwrap();
+    // Both halves use curves of the same source. Neither covers its complete boundary, so
+    // neither can stand for the old outline (nor may lenient curve matching choose their union).
+    let sk = doc.sketch_mut(sketch).unwrap();
+    assert!(!sk.links[0].profile_boundary.is_empty());
+    sk.add_line(solidcore_record::Vec2::new(-20., -12.5), solidcore_record::Vec2::new(20., -12.5), None, None, None).unwrap();
+    let s = Session::new(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap());
+    assert_eq!(s.model.state().sketch(sketch).unwrap().profiles.len(), 2);
+    let pad = s.doc.find_feature("Pad").unwrap();
+    let error = s.model.result(pad.id).unwrap().error.as_deref().unwrap();
+    assert!(error.contains("no profile of Outline is bounded by exactly the curves"), "{error}");
+    assert!(s.model.state().body("ProjectionPad").is_none());
 }
 
 /// The silhouette of a square with a conic round at each corner (rho 0.19, 0.4, 0.5 and 0.7) is
@@ -2791,6 +3347,38 @@ fn the_silhouette_of_conic_rounds_closes() {
     assert_eq!(profiles.len(), 1, "{}", si["profiles"]);
     let area = profiles[0]["area_mm2"].as_f64().unwrap();
     assert!((area - exact).abs() < exact * 2e-4, "area {area}, exact {exact}");
+}
+
+/// The silhouette of a letter-sized outline with small conic rounds, far from the origin, is one
+/// closed outline (#14987). A round projected as two fitted arcs (or a line and an arc) left
+/// their shared end 0.0003 to 0.001 mm apart, wider than profiles and Offset join ends, so the
+/// projected outline of an extruded letter made no profile and could not be offset.
+#[test]
+fn the_silhouette_of_small_conic_rounds_far_out_closes() {
+    for (rho, r, (cx, cz)) in [(0.5, 0.7, (-60., 250.)), (0.5, 0.4, (-140., 240.)), (0.45, 0.9, (90., -270.)), (0.5, 0.25, (200., 180.))] {
+        let mut s = Session::default();
+        let h = 6.0;
+        // A square of side 2h round (cx, cz), each corner a conic round of size r.
+        let corners = [
+            ([cx - h, cz + h - r], [cx - h, cz + h], [cx - h + r, cz + h]),
+            ([cx + h - r, cz + h], [cx + h, cz + h], [cx + h, cz + h - r]),
+            ([cx + h, cz - h + r], [cx + h, cz - h], [cx + h - r, cz - h]),
+            ([cx - h + r, cz - h], [cx - h, cz - h], [cx - h, cz - h + r]),
+        ];
+        run(&mut s, "sketch.create", json!({"plane": "YZ"}));
+        for (i, (start, apex, end)) in corners.iter().enumerate() {
+            run(&mut s, "sketch.conic", json!({"start": start, "apex": apex, "end": end, "rho": rho}));
+            let next = corners[(i + 1) % 4].0;
+            run(&mut s, "sketch.line", json!({"points": [end, next]}));
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 100, "body_name": "Letter"}));
+        run(&mut s, "sketch.create", json!({"plane": "YZ"}));
+        run(&mut s, "sketch.project", json!({"refs": [{"body": "Letter"}], "construction": false}));
+        let si = inspect(&mut s);
+        let profiles = si["profiles"].as_array().unwrap();
+        assert_eq!(profiles.len(), 1, "rho {rho}, round {r} at ({cx}, {cz}): {}", si["profiles"]);
+    }
 }
 
 /// A second placement's body is projected where that placement puts it (#9957): a sketch sees
@@ -3061,9 +3649,11 @@ fn a_sketch_whose_projected_face_lost_its_name_says_which_projection_and_how_to_
     let (mut s, outline, front, _) = part_with_outline();
     let name = redraw_front(&mut s, outline, &front);
     let curves = curves_named(&s, outline, &front);
+    // The extrude after Base made the face: the message names it as where to look.
+    let block = s.doc.features.iter().position(|f| f.name == "Base").and_then(|i| s.doc.features.get(i + 1)).map(|f| f.name.clone()).unwrap();
     assert_eq!(
         error_of(&s, "Outline").as_deref(),
-        Some(format!("Outline: projected face of Block ({curves}) is lost; delete the projection or project it again").as_str())
+        Some(format!("Outline: projected face of Block ({curves}; made by {block}) is lost; delete the projection or project it again").as_str())
     );
     assert!(!error_of(&s, "Outline").unwrap().contains(&name), "the persistent name is not shown");
     let lost = s.model.result(outline).and_then(|r| r.lost_projections.clone()).unwrap();

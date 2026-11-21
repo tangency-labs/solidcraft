@@ -5,6 +5,8 @@
 //! The tolerance-substitution replay (`tolsub::replay`, #18230) uses it to show
 //! that a golden row moved only through the tolerances a read set: with main's tolerance
 //! bits put back on the entities the read changed, the row is main's row bit for bit.
+//! The kept-trim cover's raises (tangency-labs/solidcraft#19295) are put back from each
+//! read's own record of them (`Brep::trim_cover_raises`) the same way.
 //!
 //! The seams are the readers the runners share ([`crate::own_reader`]), `corpus.parity`'s
 //! `read_breps` and `topology.brep_p10`'s `make_topology_from_data` cases. Each call is one
@@ -36,6 +38,39 @@ pub(crate) fn active() -> bool {
 
 #[cfg(test)]
 mod replay;
+
+/// Runs `f` with the kept-trim cover's raises (tangency-labs/solidcraft#19295) put back on
+/// every read it makes: each raised edge and vertex holds its tolerance before the cover,
+/// as on main. For the certificates recorded on the reads before the cover
+/// ([`crate::operand_trim_rows`]); the cover's own moves are proved by the replay.
+#[cfg(test)]
+pub(crate) fn with_trim_cover_put_back<T>(f: impl FnOnce() -> T) -> T {
+    // (the mode is removed even when `f` panics, so it cannot reach a later test)
+    struct Clear;
+    impl Drop for Clear {
+        fn drop(&mut self) {
+            if std::thread::panicking() {
+                state::set(None);
+            }
+        }
+    }
+    state::set(Some(state::Mode::Substitute {
+        subs: Vec::new(),
+        reads: 0,
+        applied: 0,
+        already: 0,
+        undone: 0,
+        failures: Vec::new(),
+    }));
+    let clear = Clear;
+    let out = f();
+    drop(clear);
+    let Some(state::Mode::Substitute { failures, .. }) = state::take() else {
+        panic!("tolsub mode lost");
+    };
+    assert!(failures.is_empty(), "{failures:?}");
+    out
+}
 
 #[cfg(test)]
 pub(crate) mod state {
@@ -74,6 +109,9 @@ pub(crate) mod state {
             applied: usize,
             /// Of `applied`, those that held `main` already.
             already: usize,
+            /// The edge and vertex tolerances put back from the reads' kept-trim cover
+            /// records (`Brep::trim_cover_raises`), before `subs` apply.
+            undone: usize,
             failures: Vec<String>,
         },
     }
@@ -106,10 +144,32 @@ pub(crate) mod state {
                 reads,
                 applied,
                 already,
+                undone,
                 failures,
             }) => {
                 let read = *reads;
                 *reads += 1;
+                // (the kept-trim cover's raises, made after the healer, put back first:
+                // each entity must still hold the raised value)
+                let raises = b.trim_cover_raises().clone();
+                for (e, (before, after)) in raises.edges {
+                    match b.edge_mut(e) {
+                        Ok(r) if r.tolerance.to_bits() == after.to_bits() => {
+                            r.tolerance = before;
+                            *undone += 1;
+                        }
+                        _ => failures.push(format!("read {read}: {e:?} lost its cover raise")),
+                    }
+                }
+                for (v, (before, after)) in raises.vertices {
+                    match b.vertex_mut(v) {
+                        Ok(r) if r.tolerance.to_bits() == after.to_bits() => {
+                            r.tolerance = before;
+                            *undone += 1;
+                        }
+                        _ => failures.push(format!("read {read}: {v:?} lost its cover raise")),
+                    }
+                }
                 for s in subs.iter().filter(|s| s.read == read) {
                     let slot = if s.vertex {
                         let id = b

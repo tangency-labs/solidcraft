@@ -175,7 +175,6 @@ pub(crate) fn manifest(dir: &Path, results: &[Value], golden: Option<&Value>) ->
         // A copy without git (synced to a build machine) names no commit: say so, never "".
         "solidcraft": Some(git(&["rev-parse", "HEAD"])).filter(|c| !c.is_empty()),
         "solidcore": solidcore_pin(),
-        "held_back": "held_back.json",
         "areas": areas,
         "not_expressible": not,
     });

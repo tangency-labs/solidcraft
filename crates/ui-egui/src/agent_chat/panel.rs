@@ -417,7 +417,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         refresh_gone(app);
         let view = PanelView::of(app, &ctx);
         let mut prefs = AgentPanelPrefs::read(&app.preferences);
-        window(&mut app.agent_chat, &view, &ctx, &mut prefs);
+        window(&mut app.agent_chat, &view, &ctx, &mut prefs, &mut app.blur);
         prefs.write(&mut app.preferences);
         hand_over(app, ui);
         light_hovered(app);
@@ -838,12 +838,14 @@ pub fn window_builder(document: &str, placed: bool, prefs: &AgentPanelPrefs) -> 
 /// go to another screen, or a window floating inside the app where the system can't open one.
 /// The system's close button closes the chat (it opens there again); Dock puts it back.
 #[cfg(not(target_arch = "wasm32"))]
-fn window(chat: &mut AgentChat, view: &PanelView, ctx: &egui::Context, prefs: &mut AgentPanelPrefs) {
+fn window(chat: &mut AgentChat, view: &PanelView, ctx: &egui::Context, prefs: &mut AgentPanelPrefs, blur: &mut crate::blur::State) {
     let builder = window_builder(&view.document, chat.window_placed, prefs);
     chat.window_placed = true;
     // The side panel isn't drawn: its place no longer counts as "in the chat".
     chat.panel_rect = None;
     ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("sc_agent_chat_window"), builder, |ui, class| {
+        // A window drawn inside the main one shares its frame; a native one begins its own.
+        let _blur = (class != egui::ViewportClass::EmbeddedWindow).then(|| blur.begin(ui.ctx()));
         // Root/embedded inputs are handled by SolveApp::logic. A native chat window owns
         // its input and must see the toggle before its text editor can consume the chord.
         // The window holds the panel, not the shared host, so the toggle works on the panel's
@@ -2153,40 +2155,50 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                 }
             }
             Item::Permission { title, options, answer: given, .. } => {
-                ui_kit::assistant_approval(ui, &trf("ui.agent_chat_permission", &[("title", title)]), |ui| match given {
-                    Some(a) => {
-                        ui.label(RichText::new(trf("ui.agent_chat_answered", &[("option", a)])).color(t.text_dim));
-                    }
-                    None => {
-                        ui_kit::assistant_actions(ui, |ui| {
-                            for o in options.iter().filter(|o| o.kind == "allow_once").chain(options.iter().filter(|o| o.kind == "allow_always")) {
-                                let r = if o.kind == "allow_once" {
-                                    ui_kit::primary_button(ui, &o.name)
-                                } else {
-                                    ui_kit::button(ui, &o.name, ui_kit::Button::Normal)
-                                };
-                                solidcraft_ui_registry::publish_handle(&format!("agent_chat:permission:{}", o.id), r.rect.center());
-                                if r.clicked() {
-                                    answer = Some((n, Some(o.id.clone())));
-                                }
-                            }
-                            ui.with_layout(Layout::left_to_right(Align::Center).with_main_wrap(true), |ui| {
-                                for o in options.iter().filter(|o| !matches!(o.kind.as_str(), "allow_once" | "allow_always")) {
-                                    let r = ui_kit::button(ui, &o.name, ui_kit::Button::Normal);
+                ui_kit::assistant_approval(
+                    ui,
+                    &trf("ui.agent_chat_permission", &[("title", &crate::agent_label::card_title(solidcraft_ui_text::locale(), title))]),
+                    |ui| match given {
+                        Some(a) => {
+                            ui.label(RichText::new(trf("ui.agent_chat_answered", &[("option", a)])).color(t.text_dim));
+                        }
+                        None => {
+                            ui_kit::assistant_actions(ui, |ui| {
+                                for o in options.iter().filter(|o| o.kind == "allow_once").chain(options.iter().filter(|o| o.kind == "allow_always"))
+                                {
+                                    let r = if o.kind == "allow_once" {
+                                        ui_kit::primary_button(ui, &o.name)
+                                    } else {
+                                        ui_kit::button(ui, &o.name, ui_kit::Button::Normal)
+                                    };
                                     solidcraft_ui_registry::publish_handle(&format!("agent_chat:permission:{}", o.id), r.rect.center());
                                     if r.clicked() {
                                         answer = Some((n, Some(o.id.clone())));
                                     }
                                 }
+                                ui.with_layout(Layout::left_to_right(Align::Center).with_main_wrap(true), |ui| {
+                                    for o in options.iter().filter(|o| !matches!(o.kind.as_str(), "allow_once" | "allow_always")) {
+                                        let r = ui_kit::button(ui, &o.name, ui_kit::Button::Normal);
+                                        solidcraft_ui_registry::publish_handle(&format!("agent_chat:permission:{}", o.id), r.rect.center());
+                                        if r.clicked() {
+                                            answer = Some((n, Some(o.id.clone())));
+                                        }
+                                    }
+                                });
                             });
-                        });
-                    }
-                });
+                        }
+                    },
+                );
             }
             Item::Approval { id, title, tool, answer: given } => {
                 ui_kit::assistant_approval(ui, tr("ui.agent_chat_approval"), |ui| {
                     ui_kit::assistant_tool_detail(ui, |ui| {
-                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(title).monospace().size(t.font_caption)).wrap(), false);
+                        super::markdown_view::selectable(
+                            ui,
+                            egui::Label::new(RichText::new(crate::agent_label::card_title(solidcraft_ui_text::locale(), title)).size(t.font_caption))
+                                .wrap(),
+                            false,
+                        );
                     });
                     match given {
                         Some(true) => {
@@ -2817,6 +2829,11 @@ fn tool_card(ui: &mut egui::Ui, n: usize, call: &ToolCall) {
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     let text = match call.summary {
                         Some(words) => RichText::new(words).size(t.font_caption).color(t.text),
+                        None if crate::agent_label::is_mcp_id(call.title.split_whitespace().next().unwrap_or_default()) => {
+                            RichText::new(crate::agent_label::name(call.title.split_whitespace().next().unwrap_or_default()))
+                                .size(t.font_caption)
+                                .color(t.text)
+                        }
                         None => RichText::new(summary::plain_title(call.title)).monospace().size(t.font_caption).color(t.text),
                     };
                     ui.add(egui::Label::new(text).truncate().selectable(false)).backing_on_hover_text(call.title);

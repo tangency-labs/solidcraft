@@ -55,7 +55,7 @@ original corpus's fix set, set `fillet_through_extended_rail_end` and
 `fillet_round_on_round_as_definition` to `false` in `crates/smlib/src/core.rs`
 before building. This is a local export configuration, not an application change.
 The export's fix set (the generated `fixes.json` of that time; `held_back.json`
-has replaced it since) must match the original corpus's flags at
+replaced it, and since #18937 every fix is on) must match the original corpus's flags at
 `04b4b2db6` exactly. Current main has since retired
 `fillet_nx1_tangent_side_edge_same_convexity` and `fillet_blend_corner`; its
 corpus fix list is kept as merged, rather than restoring obsolete flags.

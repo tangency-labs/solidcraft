@@ -8,6 +8,7 @@
 pub mod appearance;
 pub mod appearance_pack;
 mod assembly;
+pub mod blob;
 mod body_transfer;
 mod body_transfer_sheet;
 pub mod bom;
@@ -41,6 +42,9 @@ pub use face_anchor::{FaceAnchor, FaceAttachmentStatus};
 pub mod format;
 mod format_offsets;
 pub mod frame;
+pub mod frame_corners;
+pub mod frame_layout;
+mod frame_multi_trim;
 pub mod gpu_plan;
 mod history_names;
 pub mod hole_reference;
@@ -50,6 +54,7 @@ mod inline_params;
 pub use format_offsets::whole_profile_selection_from_value;
 pub use inline_params::Defined;
 pub mod joints;
+mod json_layout;
 mod lineage;
 pub mod metadata;
 pub use metadata::Metadata;
@@ -70,6 +75,7 @@ pub mod plugin_data;
 pub mod point_cloud;
 mod point_cloud_complex;
 pub mod point_cloud_distribution;
+mod point_expr;
 mod points;
 mod profile_refs;
 pub mod progress;
@@ -78,7 +84,9 @@ pub use thread_catalog::{
     DRILL_ALLOWANCE, TaperDrill, TappedThread, TappedThreadFamily, metric_tap_drill, parse_tapped_thread, tapped_thread_sizes, untabulated_taper_tap,
 };
 mod walk;
-pub use profile_refs::{capture_profile_selection, profile_fallback_notes, profile_selection_indices, profile_selection_indices_lenient};
+pub use profile_refs::{
+    WHOLE_PROFILE_TOO_MANY_CURVES, capture_profile_selection, profile_fallback_notes, profile_selection_indices, profile_selection_indices_lenient,
+};
 pub mod plastic;
 mod print_face;
 pub use print_face::PrintFace;
@@ -93,6 +101,7 @@ pub mod render_settings;
 pub mod render_surface;
 pub mod render_texture_resources;
 pub mod sheet;
+pub mod sheet_library;
 mod sheet_surface;
 mod sheet_surface_convert;
 mod sheet_surface_cuts;
@@ -118,13 +127,13 @@ pub use assembly::{
 pub use document::*;
 pub use eval::cell_grid::{MAX_CUT_CELLS, SLOW_CUT_CELLS};
 pub use eval::{
-    EdgeRef, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PendingChecks, PlacedBodies, RevolveExtent, SavedModel, SolvedSketch,
-    ThreadInfo, blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names, face_point_state,
-    from_slope_height, hole_direction_at, hole_on_surface, hole_start, import_body_names, join_pieces_added, keep_one_sided_direction, map_wire,
-    metric_thread_sizes, object_height, parse_metric_thread, pattern_matrices, revolve_extent, revolve_extent_for_handle,
-    revolve_extent_with_convention, same_extrude_from_face, select_profiles, sketch_hole_direction, sketch_line_plane, state_in_frame,
-    state_in_frame_at, suggested_thread, suggested_thread_in, tangent_face_chain, through_all_distance, with_placed_copies, world_state,
-    world_state_reusing,
+    EdgeRef, ExtrudeEnds, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PendingChecks, PlacedBodies, PreparedMeshImport, RevolveExtent,
+    SavedModel, SolvedSketch, ThreadInfo, blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names,
+    face_point_state, from_slope_height, hole_direction_at, hole_on_surface, hole_start, import_body_names, join_pieces_added,
+    keep_one_sided_direction, map_wire, metric_thread_sizes, object_height, parse_metric_thread, pattern_matrices, revolve_extent,
+    revolve_extent_for_handle, revolve_extent_with_convention, same_extrude_from_face, select_profiles, sketch_hole_direction, sketch_line_plane,
+    state_in_frame, state_in_frame_at, suggested_thread, suggested_thread_in, tangent_face_chain, through_all_distance, to_end_is_flat,
+    with_placed_copies, world_state, world_state_reusing,
 };
 pub use eval::{EvalCache, KeptResults};
 pub use expr::Expr;
@@ -176,19 +185,28 @@ pub struct LostProjection {
     pub points: Vec<String>,
     /// The persistent name that finds nothing, never shown.
     pub name: String,
+    /// The names of the features in the design that made the lost face, edge or vertex, as
+    /// `name` gives them, each once: where to look for the edit that lost it (#5048).
+    pub from: Vec<String>,
 }
 
 impl LostProjection {
-    /// `projected face of Tray (curve l1)`.
+    /// `projected face of Tray (curve l1; made by Extrude1, Fillet2)`.
     pub fn label(&self) -> String {
         const SHOWN: usize = 4;
         let (ids, one, several) = if self.curves.is_empty() { (&self.points, "point", "points") } else { (&self.curves, "curve", "curves") };
         let listed = ids.iter().take(SHOWN).map(String::as_str).collect::<Vec<_>>().join(", ");
-        match ids.len() {
-            0 => self.what.clone(),
-            1 => format!("{} ({one} {listed})", self.what),
-            n if n > SHOWN => format!("{} ({several} {listed}, …)", self.what),
-            _ => format!("{} ({several} {listed})", self.what),
+        let entities = match ids.len() {
+            0 => None,
+            1 => Some(format!("{one} {listed}")),
+            n if n > SHOWN => Some(format!("{several} {listed}, …")),
+            _ => Some(format!("{several} {listed}")),
+        };
+        let from = (!self.from.is_empty()).then(|| format!("made by {}", self.from.join(", ")));
+        match (entities, from) {
+            (Some(e), Some(f)) => format!("{} ({e}; {f})", self.what),
+            (Some(x), None) | (None, Some(x)) => format!("{} ({x})", self.what),
+            (None, None) => self.what.clone(),
         }
     }
 

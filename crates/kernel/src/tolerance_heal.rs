@@ -142,9 +142,10 @@ pub enum HealFailure {
 /// record's. A failure met while the token is stopped is [`HealFailure::Stopped`], whatever
 /// failed: as the import's check takes it.
 pub fn heal_tolerance_defects(body: &Body) -> Result<Option<(Body, ToleranceHeal)>> {
-    let Some((ops, order)) = body.ops_body() else {
+    let Some(form) = body.ops_body() else {
         return Ok(None);
     };
+    let (ops, order) = &*form;
     let heal = || solidcore_ops::heal::heal_tolerance_defects(ops, order);
     let healed = match solidcraft_smlib::stop::token() {
         Some(token) => solidcore_ops::cancel::within(&token, heal),
@@ -161,6 +162,12 @@ pub fn heal_tolerance_defects(body: &Body) -> Result<Option<(Body, ToleranceHeal
         log::debug!(target: "repair", "tolerance heal not kept: {:?}", report.why_not);
         return Ok(None);
     };
+    // A healed body comes with the check that decided it (solidcore-ops checks the body only
+    // when its heal proved an edit, and always then).
+    let Some(before) = report.before.as_ref() else {
+        log::debug!(target: "repair", "tolerance heal not kept: no check of the body decided it");
+        return Ok(None);
+    };
     // the healed part keeps the part's sticky veto on regularizing its faces
     let out = Body::from_record(healed.record)?.with_color(body.color()).inherit_regularization_protection(body);
     // The body kept is SMLib's of the healed record, not the body solidcore-ops checked: it
@@ -174,7 +181,7 @@ pub fn heal_tolerance_defects(body: &Body) -> Result<Option<(Body, ToleranceHeal
         _ if stopped() => KernelError::Heal(HealFailure::Stopped),
         e => KernelError::Heal(HealFailure::CouldNotRun(format!("SMLib's check of the healed body: {e}"))),
     })?;
-    if let Some(why) = worse(&report.before, check.as_ref()) {
+    if let Some(why) = worse(before, check.as_ref()) {
         log::debug!(target: "repair", "tolerance heal not kept: {why}");
         return Ok(None);
     }
@@ -197,7 +204,7 @@ pub fn heal_tolerance_defects(body: &Body) -> Result<Option<(Body, ToleranceHeal
         collapsed_faces: report.collapsed_faces,
         cut_pieces: report.cut_pieces,
         largest_bound: report.largest_bound,
-        failed: [report.before.failures, check.as_ref().map_or(0, |c| c.failures)],
+        failed: [before.failures, check.as_ref().map_or(0, |c| c.failures)],
         face_source: healed.face_source,
         check,
     };

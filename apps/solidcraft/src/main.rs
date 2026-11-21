@@ -43,10 +43,13 @@ mod native_menu;
 mod nav_bridge;
 #[cfg(target_os = "macos")]
 mod open_documents;
+mod open_with;
 mod single_instance;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 mod space_mouse;
 mod startup;
+#[cfg(unix)]
+mod system_quit;
 #[cfg(any(target_os = "windows", test))]
 mod window_fit;
 
@@ -247,6 +250,13 @@ impl eframe::App for App {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             }
         }
+        // The system asked the app to stop (shutdown, SIGTERM): close as a forced quit does,
+        // keeping unsaved changes for recovery, since nobody is there to answer "save changes?".
+        // Before the starting page returns, so a signal during the setup closes the app too.
+        #[cfg(unix)]
+        if system_quit::requested() {
+            self.solve.quit_requested = true;
+        }
         // The window shows with its first frame: the starting page, before the slow setup.
         let mut setup = std::mem::take(&mut self.setup);
         let starting = setup.logic(self, ctx);
@@ -262,7 +272,7 @@ impl eframe::App for App {
             {
                 startup::closed_while_starting(&dir, self.gpu.as_ref().is_none_or(|g| g.lost_at.is_none()));
             }
-            if self.solve.quit_requested {
+            if self.solve.ready_to_quit() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             return;
@@ -317,9 +327,11 @@ impl eframe::App for App {
         self.solve.session.crash_journal = solidcraft_engine::crash::enabled();
         // The OS closing the window (Alt+F4, Cmd+Q, the window manager): ask about unsaved
         // designs first; the window closes once they are answered (`quit_requested`).
-        if ctx.input(|i| i.viewport().close_requested()) && !self.solve.quit_requested {
+        if ctx.input(|i| i.viewport().close_requested()) && !self.solve.ready_to_quit() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            solidcraft_ui_egui::documents::request_quit(&mut self.solve);
+            if !self.solve.quit_requested {
+                solidcraft_ui_egui::documents::request_quit(&mut self.solve);
+            }
             // Closed from the taskbar or a window switcher while another app had the focus: the
             // "save changes?" prompt is only seen once the window comes forward.
             if !self.solve.quit_requested {
@@ -360,8 +372,10 @@ impl eframe::App for App {
         }
         // Every frame, so switching the bridge off reaches the reader while a picker is open too.
         self.nav_bridge.tick(&mut self.solve, ctx);
-        if self.solve.quit_requested {
+        if self.solve.ready_to_quit() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        } else if self.solve.quit_requested {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
     }
     /// Pointer motion over a still 3D view that lights up nothing new paints no frame: the view
@@ -415,7 +429,7 @@ impl eframe::App for App {
             return;
         }
         if let Some(window) = frame.winit_window() {
-            self.solve.refresh_panel_monitors(|| {
+            let monitors = || {
                 let primary = window.primary_monitor();
                 window
                     .available_monitors()
@@ -433,9 +447,14 @@ impl eframe::App for App {
                         }
                     })
                     .collect()
-            });
+            };
+            self.solve.refresh_panel_monitors(monitors);
+            solidcraft_ui_egui::view_windows::refresh_displays(&mut self.solve, monitors);
         }
+        solidcraft_ui_egui::view_windows::prepare(&mut self.solve, ui.ctx());
         content_ui(&mut self.solve, ui);
+        solidcraft_ui_egui::view_windows::show(&mut self.solve, ui.ctx(), frame.wgpu_render_state());
+        self.solve.retain_view_pictures(frame.wgpu_render_state());
         // After the frame's UI, so a setting changed in it (Preferences' OK) is written now.
         let now = std::time::Instant::now();
         if self.prefs_writer.due(ui.input(|i| i.events.iter().any(changes_settings)), now)
@@ -456,6 +475,8 @@ impl eframe::App for App {
         };
         storage.set_string(solidcraft_ui_egui::prefs::STORAGE_KEY, prefs.clone());
         self.prefs_writer.written = Some(prefs);
+        #[cfg(feature = "usage-stats")]
+        storage.set_string(solidcraft_ui_egui::usage_stats::STORAGE_KEY, self.solve.usage_stats_for_storage());
     }
     /// The app is closing: work still running beside the window ends first, then the session.
     fn on_exit(&mut self) {
@@ -670,7 +691,20 @@ struct DialogFolderState {
 impl DialogFolder {
     /// A file was chosen in a dialog: the next one opens in its folder.
     fn chosen(&self, file: &std::path::Path) {
-        if let (Some(folder), Ok(mut state)) = (file.parent().filter(|f| !f.as_os_str().is_empty()), self.0.lock()) {
+        if let Some(folder) = file.parent().filter(|f| !f.as_os_str().is_empty()) {
+            self.remember(folder);
+        }
+    }
+
+    /// A folder was chosen: the next dialog opens in that folder, not in its parent.
+    fn chosen_folder(&self, folder: &std::path::Path) {
+        if !folder.as_os_str().is_empty() {
+            self.remember(folder);
+        }
+    }
+
+    fn remember(&self, folder: &std::path::Path) {
+        if let Ok(mut state) = self.0.lock() {
             state.folder = Some(folder.to_path_buf());
         }
     }
@@ -692,6 +726,15 @@ impl DialogFolder {
     fn answer(&self, picked: Option<rfd::FileHandle>) -> Option<String> {
         let picked = picked?;
         self.chosen(picked.path());
+        Some(picked.path().to_string_lossy().into_owned())
+    }
+
+    /// A folder picker's answer as a path. The picked folder itself is remembered, so the next
+    /// dialog opens there. [`answer`] remembers a file's parent, which would open one level above
+    /// a folder the user just chose.
+    fn answer_folder(&self, picked: Option<rfd::FileHandle>) -> Option<String> {
+        let picked = picked?;
+        self.chosen_folder(picked.path());
         Some(picked.path().to_string_lossy().into_owned())
     }
 
@@ -778,7 +821,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
     let program_parent = parent.clone();
     let file_parent = parent.clone();
     let folder_parent = parent.clone();
-    let (open_folder, file_folder, save_folder) = (folder.clone(), folder.clone(), folder.clone());
+    let (open_folder, file_folder, save_folder, browse_folder) = (folder.clone(), folder.clone(), folder.clone(), folder.clone());
     Services {
         pick_open: Some(Box::new(move |first: &[&str]| {
             // The chooser that opens may not be the desktop's own (#10159).
@@ -795,7 +838,6 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             // a group of their own, named after the plugin.
             let plugins = io::formats::plugin_open_filters();
             let mut everything: Vec<&str> = io::formats::open_extensions(true);
-            everything.extend(["dxf", "svg"]);
             for (_, exts) in &plugins {
                 everything.extend(exts.iter().map(String::as_str).filter(|e| !io::formats::open_extensions(true).contains(e)));
             }
@@ -828,15 +870,16 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             let folder = file_folder.clone();
             Box::pin(async move { folder.answer(future.await) })
         })),
-        pick_folder: Some(Box::new(move || {
-            let future = folder_parent.clone().set_title("Choose a folder").pick_folder();
-            Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
-        })),
         pick_program: Some(Box::new(move || {
             let dialog = program_parent.clone().set_title("Choose your slicer");
             let dialog = if cfg!(target_os = "windows") { dialog.add_filter("Programs", &["exe"]) } else { dialog };
             let future = dialog.pick_file();
             Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
+        })),
+        pick_folder: Some(Box::new(move || {
+            let future = browse_folder.start(folder_parent.clone()).set_title("Choose a folder").pick_folder();
+            let folder = browse_folder.clone();
+            Box::pin(async move { folder.answer_folder(future.await) })
         })),
         pick_save: Some(Box::new(move |name: &str, exts: &[&str]| {
             let dialog = save_folder.start(parent.clone()).set_file_name(name);
@@ -887,6 +930,8 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         agent_http: Some(std::sync::Arc::new(agent_http)),
         secrets: Some(std::sync::Arc::new(Keychain("SolidCraft agent chat"))),
         tickets_http: Some(std::sync::Arc::new(tickets_http)),
+        #[cfg(feature = "usage-stats")]
+        usage_http: Some(std::sync::Arc::new(usage_http)),
         ticket_secrets: Some(std::sync::Arc::new(Keychain("SolidCraft tickets"))),
         show_in_folder: Some(Box::new(|path| {
             let folder = std::path::Path::new(path).parent().unwrap_or_else(|| std::path::Path::new("."));
@@ -905,6 +950,8 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             }
             let _ = command.spawn();
         })),
+        open_path: Some(Box::new(open_with::open_with_default_app)),
+        open_bytes: None,
     }
 }
 
@@ -1020,6 +1067,18 @@ fn tickets_http(r: solidcraft_ui_egui::agent_chat::backend::HttpRequest, done: s
     });
     // Without a worker the sender is dropped with the closure: the report sees no answer and
     // waits in the queue.
+    drop(spawned);
+}
+
+/// Sends a usage statistics request on a worker thread, to its endpoints only
+/// (`usage_stats::allowed_url`); anything else is refused. The answer comes on `done`.
+#[cfg(feature = "usage-stats")]
+fn usage_http(r: solidcraft_ui_egui::agent_chat::backend::HttpRequest, done: std::sync::mpsc::Sender<solidcraft_ui_egui::tickets::Reply>) {
+    let spawned = std::thread::Builder::new().name("usage-stats-http".into()).spawn(move || {
+        let reply =
+            if solidcraft_ui_egui::usage_stats::allowed_url(&r.url) { tickets_call(&r) } else { Err("not the usage statistics endpoint".into()) };
+        let _ = done.send(reply);
+    });
     drop(spawned);
 }
 
@@ -1621,6 +1680,8 @@ fn main() -> eframe::Result {
             }
             // The administrator's policy holds in safe mode too.
             app.policy = solidcraft_ui_egui::policy::load();
+            #[cfg(feature = "usage-stats")]
+            app.load_usage_stats(cc.storage.and_then(|s| s.get_string(solidcraft_ui_egui::usage_stats::STORAGE_KEY)).as_deref());
             if let Some(path) = &theme_file
                 && let Err(e) = solidcraft_ui_egui::prefs::follow_theme_file_for_run(&mut app, path)
             {
@@ -1716,6 +1777,14 @@ fn main() -> eframe::Result {
             } else {
                 files
             };
+            // A shutdown or restart closes the app cleanly instead of killing it (#7345).
+            #[cfg(unix)]
+            {
+                let ctx = cc.egui_ctx.clone();
+                if let Err(error) = system_quit::install(move || ctx.request_repaint()) {
+                    log::warn!("shutdown signals: {error}");
+                }
+            }
             let nav_bridge = nav_bridge::NavBridge::start(&cc.egui_ctx);
             // The rest is slow on some computers: it runs after the window shows, a step a frame,
             // behind the starting page (#1210).
@@ -2299,9 +2368,18 @@ mod tickets_http_tests {
         let port = listener.local_addr().unwrap().port();
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
+            // The whole request, body too: a connection closed with part of the request unread is
+            // reset, and the client then gets an error instead of the reply (os error 22 on macOS)
+            // whenever the body arrives after the headers were read.
             let mut request = Vec::new();
             let mut buf = [0u8; 4096];
-            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+            let whole = |request: &[u8]| {
+                let Some(head) = request.windows(4).position(|w| w == b"\r\n\r\n") else { return false };
+                let headers = String::from_utf8_lossy(&request[..head]).to_ascii_lowercase();
+                let length = headers.lines().find_map(|l| l.strip_prefix("content-length:")).and_then(|v| v.trim().parse::<usize>().ok());
+                request.len() >= head + 4 + length.unwrap_or(0)
+            };
+            while !whole(&request) {
                 let n = stream.read(&mut buf).unwrap();
                 assert!(n > 0, "the request ended early");
                 request.extend_from_slice(&buf[..n]);
@@ -2480,6 +2558,19 @@ mod dialog_folder_tests {
         // A bare file name has no folder to remember.
         folder.chosen(Path::new("bracket.step"));
         assert_eq!(folder.folder(), Some(PathBuf::from("/work/prints")));
+    }
+
+    /// A folder picker remembers the folder itself. Remembering its parent would open the next
+    /// dialog one level above the folder the user chose.
+    #[test]
+    fn a_folder_picker_remembers_the_picked_folder_itself() {
+        let folder = DialogFolder::default();
+        folder.chosen(Path::new("/work/project/assets"));
+        assert_eq!(folder.folder(), Some(PathBuf::from("/work/project")), "a file's parent");
+        folder.chosen_folder(Path::new("/work/project/assets"));
+        assert_eq!(folder.folder(), Some(PathBuf::from("/work/project/assets")));
+        folder.chosen_folder(Path::new(""));
+        assert_eq!(folder.folder(), Some(PathBuf::from("/work/project/assets")), "an empty path leaves the last folder");
     }
 
     /// Save As starts beside the open design (#7756), and a folder chosen since wins until another

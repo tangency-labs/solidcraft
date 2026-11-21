@@ -61,13 +61,17 @@ pub mod file;
 pub mod fit_projection;
 pub mod hatch;
 pub mod heal;
+pub mod history;
+pub mod hlr;
 pub mod import_geometry;
 pub mod joint_turn;
 pub mod label;
 pub mod measure;
+pub mod member_turn;
 pub mod network;
 pub mod offset;
 pub mod order;
+pub mod outline;
 pub mod path_export;
 pub mod pcurve;
 pub mod pick;
@@ -105,16 +109,16 @@ pub use boolean::BooleanOp;
 pub use check::{CheckLevel, CheckReport};
 pub use contact::Gap;
 pub use error::{
-    Error, FitKind, OffsetRefusal, RecordEntity, Result, RoomReason, SolidTest, Unblendable,
-    Unsoundness,
+    Error, FailureCode, FitKind, OffsetRefusal, RecordEntity, Result, RoomReason, SolidTest,
+    Unblendable, Unsoundness,
 };
 pub use measure::{
-    point_displacement, point_distance, point_set_summary, points_meet, Distance, EdgeCurve,
-    EdgePoint, EdgeRayPoint, FaceCentroid, FaceRayHit, GapSample, MassPropertiesEstimate,
-    MembersClosest, Normal, PointClass, PointSetSummary, RayEntity, RayHit, SquareFaceLevel,
-    EDGE_POINTS_MAX,
+    point_displacement, point_distance, point_set_summary, points_meet, ClassifiedPoint, Distance,
+    EdgeCurve, EdgePoint, EdgeRayPoint, FaceCentroid, FaceRayHit, GapSample,
+    MassPropertiesEstimate, MembersClosest, Normal, PointClass, PointNormalFace, PointSetSummary,
+    RayEntity, RayHit, SquareFaceLevel, EDGE_POINTS_MAX,
 };
-pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
+pub use offset::{draft, offset_faces, offset_sheet, offset_surface, shell, thicken};
 pub use order::Order;
 pub use step_assembly::{placed_bodies, PlacedBody};
 

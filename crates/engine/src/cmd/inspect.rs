@@ -2,16 +2,17 @@
 
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
-use std::hash::{BuildHasher, RandomState};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::{Arc, Weak};
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_sketch::CurveKind;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
-use crate::schema::inspect::{BodiesDetail, DocumentBodies, GeometryDefect, TimelineDetail, TimelineRow};
+use crate::schema::inspect::{
+    BodiesDetail, ClassifiedPoint, ClassifyPointsParams, ClassifyPointsResult, DocumentBodies, GeometryDefect, TimelineDetail, TimelineRow,
+};
 use crate::schema::inspect::{
     BodyFailure, BodyFeaturesParams, BodyFigures, BodyListParams, BodyMeasurement, BodyName, BodyNames, BodyOutcome, BoundingBox,
     ColoredComponentsParams, ColoredComponentsResult, CommandEntry, CommandsParams, CurveShape, DocumentBody, DocumentBodyDetail,
@@ -24,6 +25,7 @@ use crate::schema::inspect::{
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const CLASSIFY_POINTS_CONTRACT: TypedContract<ClassifyPointsParams> = TypedContract::new();
 const COLORED_COMPONENTS_CONTRACT: TypedContract<ColoredComponentsParams> = TypedContract::new();
 const BODY_LIST_CONTRACT: TypedContract<BodyListParams> = TypedContract::new();
 const THREADS_CONTRACT: TypedContract<ModelThreadsParams> = TypedContract::new();
@@ -46,6 +48,17 @@ pub(super) mod appearance_gestures;
 mod body_features;
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("inspect.classify_points", "Classify Points", crate::checked!("inspect.classify_points", classify_points))
+        .icon("inspect")
+        .noundo().read_only()
+        .contract(&CLASSIFY_POINTS_CONTRACT)
+        .output(output_schema_for::<ClassifyPointsResult>)
+        .params(
+            "body: name; points: 1–256 world-space [x,y,z] in mm; face?: face name or point on a face → results in input order: \
+             {class: inside|outside|on}; on also gives face (persistent name) and normal (outward unit vector). Exact trimmed geometry at the body's \
+             modelling tolerance; mesh bodies refused. At shared edges/vertices, face selects the normal, otherwise the first containing face \
+             in model.faces order",
+        ),
     CommandSpec::new("inspect.colored_components", "Component Colors", crate::checked!("inspect.colored_components", colored_components))
         .at("SOLID", "INSPECT")
         .icon("colored_components")
@@ -77,7 +90,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&DOCUMENT_REVISION_CONTRACT)
         .output(output_schema_for::<RevisionResult>)
         .params(
-        "→ document_id (this open design's id: kept while it stays open, another for each design started or opened), \
+        "→ document_id (the open design's identity, new on opening or starting a design), \
          revision (moves whenever the design, what is hidden or a component's uncaptured position changes, \
          never on a selection or a view; from one counter for the whole run, so it never repeats). Read-only",
     ),
@@ -101,9 +114,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<ModelFaces>)
         .params(
         "body: name → per face: index, name (what face.delete, sheet.convert `face`, solid.shell … take in place of a point), exact, area, centroid (not always on the face), \
-         plane_normal, point (a point on the face that picks it), cylinder? ({origin, axis, radius} of a cylindrical face), \
-         sheet_face? (a flat-model sheet's face: `sheet:<body>:<panel>:<side>`, side top | bottom | rim.<edge> | bend.inner | bend.outer; \
-         taken wherever a face name is; a sheet made from surfaces has none: its faces' names are the model's, after what made each)",
+         plane_normal, point (a point on the face that picks it), cylinder? ({origin, axis, radius} of a cylindrical face)",
     ),
     CommandSpec::new("model.threads", "List Threads", crate::checked!("model.threads", model_threads))
         .icon("inspect")
@@ -543,10 +554,8 @@ fn sketch_inspect(s: &mut Session, p: &Value) -> Result<Value> {
     typed_reply("sketch.inspect", inspected)
 }
 
-/// Revisions of every design of this run (#6646).
-static NEXT_REVISION: AtomicU64 = AtomicU64::new(1);
-
 /// The design as `document.revision` last saw it, which its revision names.
+#[derive(Clone)]
 pub(crate) struct Followed {
     /// Held weakly: a design something holds weakly is never changed in place (`Arc::make_mut`
     /// moves it), and its address can't go to another design meanwhile.
@@ -554,20 +563,6 @@ pub(crate) struct Followed {
     visibility: crate::Visibility,
     pending_moves: BTreeMap<u64, solidcraft_doc::Mat>,
     revision: u64,
-}
-
-/// A new design's id: one for this run, then a number, so no two designs of one run, or of two
-/// runs, have the same.
-pub(crate) fn new_document_id() -> String {
-    static RUN: OnceLock<u64> = OnceLock::new();
-    static NEXT: AtomicU64 = AtomicU64::new(1);
-    let run = RUN.get_or_init(|| {
-        let started = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-        // Hashed with this process's random keys (where the system has them), so two runs differ
-        // even with the clock set back.
-        RandomState::new().hash_one(started)
-    });
-    format!("{run:016x}-{}", NEXT.fetch_add(1, Ordering::Relaxed))
 }
 
 impl Session {
@@ -581,7 +576,7 @@ impl Session {
         match self.followed.as_ref().filter(|f| seen(f)) {
             Some(f) => f.revision,
             None => {
-                let revision = NEXT_REVISION.fetch_add(1, Ordering::Relaxed);
+                let revision = solidcraft_doc::ids::next_design_revision();
                 let (doc, visibility, pending_moves) = (Arc::downgrade(&self.doc), self.visibility.clone(), self.pending_moves.clone());
                 self.followed = Some(Followed { doc, visibility, pending_moves, revision });
                 revision
@@ -654,12 +649,14 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             .map(|(i, f)| {
                 let r = s.model.result(f.id);
                 let (error, warning) = (r.and_then(|r| r.error.clone()), r.and_then(|r| r.warning.clone()));
+                let error_code = r.and_then(|r| r.error_code.as_ref()).map(Into::into);
                 if timeline_detail == TimelineDetail::Summary {
                     return TimelineRow::Summary(TimelineSummary {
                         id: f.id,
                         name: f.name.clone(),
                         kind: f.kind.type_name().to_string(),
                         error,
+                        error_code,
                         warning,
                         suppressed: f.suppressed.then_some(true),
                         rolled_back: (i >= marker).then_some(true),
@@ -672,6 +669,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
                     suppressed: f.suppressed,
                     rolled_back: i >= marker,
                     error,
+                    error_code,
                     warning,
                     ms: r.map(|r| r.ms),
                 })
@@ -786,16 +784,55 @@ fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
+/// Read the existing exact classifier; face choice and normal evaluation also stay in the kernel.
+fn classify_points(s: &mut Session, p: &Value) -> Result<Value> {
+    use crate::schema::FaceRef;
+    use solidcore_ops::{ClassifiedPoint as KernelPoint, PointNormalFace};
+
+    let cmd = "inspect.classify_points";
+    let args: ClassifyPointsParams = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    if args.body.is_empty() || args.body.len() > 512 {
+        return Err(bad(cmd, "`body` must be a name of 1 to 512 bytes"));
+    }
+    let st = s.world_state()?;
+    let b = st.body(&args.body).ok_or_else(|| bad(cmd, format!("no body `{}`", args.body)))?;
+    if b.body.is_mesh() {
+        return Err(bad(cmd, "point classification requires an exact body; mesh bodies are not supported"));
+    }
+    let names = solidcraft_doc::naming::face_names(b);
+    let selected = match args.face {
+        Some(FaceRef::Name(name)) => {
+            let index = names.iter().position(|n| *n == name).ok_or_else(|| bad(cmd, format!("no face `{name}` on `{}`", b.name)))?;
+            Some(PointNormalFace::Index(index))
+        }
+        Some(FaceRef::Point(point)) => Some(PointNormalFace::Point(point.into())),
+        None => None,
+    };
+    let points: Vec<Vec3> = args.points.iter().map(|p| p.0).collect();
+    let classes = b.body.classify_points_with_normals(&points, selected).map_err(|e| match e {
+        solidcraft_kernel::KernelError::Invalid(message) => bad(cmd, message),
+        e => e.into(),
+    })?;
+    let results = classes
+        .into_iter()
+        .map(|class| match class {
+            KernelPoint::Inside => Ok(ClassifiedPoint::Inside),
+            KernelPoint::Outside => Ok(ClassifiedPoint::Outside),
+            KernelPoint::On { face: index, normal } => {
+                let face = names.get(index).filter(|n| !n.is_empty()).cloned().ok_or_else(|| bad(cmd, "the boundary face has no persistent name"))?;
+                Ok(ClassifiedPoint::On { face, normal: normal.value })
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
+    reply(cmd, ClassifyPointsResult { body: b.name.clone(), results, param_warnings: Vec::new() })
+}
+
 fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.world_state()?;
     let b = body_of(&st, p, "model.faces")?;
     let names = solidcraft_doc::naming::face_names(b);
     let tol = (b.body.size() * 2e-3).max(1e-3);
     let spots = solidcraft_doc::naming::face_spots(b);
-    // A folded sheet's faces also have the readable names its sheet gives them, worked out in
-    // the body's own coordinates.
-    let model = s.model.state();
-    let sheet_names = model.body(&b.name).map(|own| solidcraft_doc::sheet::body_sheet_face_names(&model, own)).unwrap_or_default();
     let faces = b
         .body
         .faces(tol)?
@@ -817,7 +854,6 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
                 plane_normal: f.plane_normal.map(Into::into),
                 point: spot.map(|x| x.point.into()),
                 cylinder,
-                sheet_face: sheet_names.get(f.index).and_then(|n| n.as_ref().map(|n| n.to_string())),
             }
         })
         .collect();

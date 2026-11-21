@@ -576,7 +576,6 @@ fn rounded_rim_with_boss(boss: fn(&mut Kernel) -> Result<Brep>) -> (f64, f64) {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
-    k.fixes.fillet_refuse_rounds_breaking_through = false;
     let block = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 10.0).unwrap();
     let feature = boss(&mut k).unwrap();
     let mut b = boolean_union(&mut k, block, feature).unwrap();
@@ -631,7 +630,6 @@ fn a_leaning_boss_on_a_rim_round_is_refused() {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
-    k.fixes.fillet_refuse_rounds_breaking_through = false;
     let block = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 10.0).unwrap();
     let boss = create_cone(&mut k, Point3::new(17.0, 0.0, 10.0), 2.0, 1.0, 4.0).unwrap();
     let mut b = boolean_union(&mut k, block, boss).unwrap();

@@ -2116,9 +2116,33 @@ fn c3_trace_start(
     // Check the last TsectPnt to see if it is degenerate (at a surf/surf tangency
     // point). If so, reverse the tracing to avoid its early termination.
     st.trace.reverse_tracing = false;
-    if let Some(&last) = st.tsect_pnts.last() {
-        if st.store.get(cx.fillets, last)?.point_type == IntersectionPointType::TangentPoint {
-            // sTsectPnts.ReverseArray(0, lTotalTsects)
+    let mut start_from = st.tsect_pnts.last();
+    if matches!(solver.fsg, Some(super::p1::FilletSurfaceGenerator::Linear)) {
+        if let [first, .., last] = st.tsect_pnts.as_slice() {
+            let tangent = |r| -> Result<bool> {
+                Ok(st.store.get(cx.fillets, r)?.point_type == IntersectionPointType::TangentPoint)
+            };
+            let first_tangent = tangent(*first)?;
+            if first_tangent != tangent(*last)? {
+                let tip = if first_tangent { first } else { last };
+                if let TsRef::Vertexuse(vu) = tip {
+                    let vertex = cx.fillets.brep().vertexuse(*vu)?.vertex;
+                    if let Some(vertex) = vertex {
+                        if cx.fillets.fillet_vertex(vertex)?.fillet_vertex_type()
+                            == crate::blend::fillet_geom::p1::FilletVertexType::OnVertex
+                        {
+                            // The rails meet at the original vertex. At this contact the
+                            // offsets admit multiple intersection directions. The regular
+                            // end and its edge tangent identify the intended branch.
+                            start_from = Some(first);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some(&end) = start_from {
+        if st.store.get(cx.fillets, end)?.point_type == IntersectionPointType::TangentPoint {
             st.tsect_pnts.reverse();
             st.trace.dir = -st.pv_end[1];
             st.trace.reverse_tracing = true;
@@ -3841,10 +3865,15 @@ mod tests_c5 {
         f.add_geom(FilletGeomType::Blends);
         let e = f.run().unwrap_err();
         assert_eq!(
-            e,
-            SolidError::blend_missing(
+            (
+                e.operation(),
+                e.kind() == crate::error::ErrorKind::StageFailed && e.is_defect(),
+                e.upstream_status()
+            ),
+            (
                 "blend::fillet_geom::p4::FilletBrep::calc_blending_geom",
-                "the geometry's fillet solver"
+                true,
+                Some(SM_ERR_NULL_POINTER)
             )
         );
 
@@ -3860,10 +3889,13 @@ mod tests_c5 {
         // a stage failure (#15034) that keeps SM_ERR_NULL_POINTER (#13790)
         let e = f.run().unwrap_err();
         assert_eq!(
-            (e.operation(), e.blend_failure()),
+            (
+                e.operation(),
+                e.kind() == crate::error::ErrorKind::StageFailed && e.is_defect()
+            ),
             (
                 "blend::fillet_geom::p5::FilletBrep::calc_cross_section",
-                Some(&crate::error::blend::BlendFailure::StageFailed)
+                true
             )
         );
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));

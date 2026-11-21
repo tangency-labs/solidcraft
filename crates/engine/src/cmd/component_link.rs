@@ -52,7 +52,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&INSERT_DESIGN_CONTRACT)
         .output(output_schema_for::<InsertDesignResult>)
         .params(
-        "path: a .sc design → a new component linked to it, holding its solid bodies as placed in that design and a copy of its design properties; \
+        "path: a .sc design → a new component linked to it, holding its solid bodies as placed in that design, its canvases and decals where the design shows them, and a copy of its design properties; \
          configuration?: a row name or id (null or omitted: the saved source state); name? (default: the design's name); parent?: component id or name (default: the active one); \
          translate?: [x,y,z] in mm from the destination parent's origin (default [0,0,0], also with reuse); \
          axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; \
@@ -156,6 +156,10 @@ pub fn resolve_design_links(doc: &mut Document, from: Option<&str>) {
 /// the design gives their faces (`Feature::link_faces`), with the source's design properties.
 type Linked = (String, solidcraft_io::StepFeature, Vec<Vec<String>>, solidcraft_doc::Metadata, Vec<SourceProperties>);
 
+/// A linked design's canvases and decals, each on a plane in the design's own coordinates (the
+/// frame its linked bodies come in), with what could not be carried as it is.
+type LinkedImages = (Vec<solidcraft_doc::canvas::Canvas>, Vec<String>);
+
 #[derive(Clone)]
 struct SourceProperties {
     material: String,
@@ -254,11 +258,14 @@ fn remember_read(
 /// The bytes of the design at `file`, which must not be the design saved at `own`.
 fn read_link(file: &Path, own: Option<&str>) -> Result<Vec<u8>> {
     let shown = file.display().to_string();
-    if own.is_some_and(|o| same_file(Path::new(o), file)) {
+    // A network location only when its server is allowed, a device never: judged from the text
+    // before anything is asked of the disk (on Windows, resolving or reading `\\host\share\x`
+    // connects to the host), so a refused path skips the self-link check, which resolves it, and
+    // `read_linked_file` says why it is refused.
+    let reachable = solidcraft_io::vfs::design_path_refusal(&shown, own).is_none();
+    if reachable && own.is_some_and(|o| same_file(Path::new(o), file)) {
         return Err(EngineError::Other(format!("{shown}: a design can't be linked into itself")));
     }
-    // A network location only when its server is allowed, a device never: judged from the text
-    // before anything is read (on Windows, reading `\\host\share\x` connects to the host).
     read_linked_file(file, own).map_err(|e| EngineError::Other(e.reason))
 }
 
@@ -308,14 +315,15 @@ pub(super) fn file_sha256(file: &Path, own: Option<&str>) -> Option<String> {
     Some(digest)
 }
 
-/// The solid bodies of `bytes`, the design at `file`, as an Import feature. The model the file
-/// keeps is its evaluation when this build saved it for exactly that design, as when it is opened.
+/// The solid bodies of `bytes`, the design at `file`, as an Import feature, and its canvases and
+/// decals ([`design_images`]). The model the file keeps is its evaluation when this build saved it
+/// for exactly that design, as when it is opened.
 fn design_bodies(
     file: &Path,
     bytes: &[u8],
     configuration: Option<SelectedConfiguration>,
     validation: solidcraft_kernel::Validation,
-) -> Result<Linked> {
+) -> Result<(Linked, LinkedImages)> {
     #[cfg(test)]
     EVALUATED.with(|n| n.set(n.get() + 1));
     let shown = file.display().to_string();
@@ -340,7 +348,58 @@ fn design_bodies(
     }
     let (name, feature, faces, metadata, properties) = session_bodies(&part, &shown)?;
     remember_read(file, configuration, digest(bytes), &feature, &faces, &properties, &metadata);
-    Ok((name, feature, faces, metadata, properties))
+    let images = design_images(&part, &shown);
+    Ok(((name, feature, faces, metadata, properties), images))
+}
+
+/// The canvases and decals of `part`, the design saved as `shown`, each where the design shows
+/// it, on a fixed plane in the design's own coordinates: the frame its linked bodies come in, so
+/// added to the linked component they sit on the bodies as in the design and move with each
+/// placement. One that follows sketch points comes in where they put it now and no longer
+/// follows them; one those points stretch keeps its image's own shape, and is named in the
+/// warnings. Hidden ones come in hidden.
+fn design_images(part: &Session, shown: &str) -> LinkedImages {
+    use solidcore_record::{Plane, Vec2};
+    let (vals, _) = part.doc.param_values();
+    let state = part.model.state();
+    let (mut images, mut warnings) = (Vec::new(), Vec::new());
+    for c in &part.doc.canvases {
+        let mut image = c.clone();
+        image.anchor = None;
+        image.component = 0;
+        match c.anchor.as_ref().and_then(|a| part.doc.canvas_anchor_corners(c, a, &state).ok()) {
+            Some(k) => {
+                // The frame unmirrored: a mirrored image's bottom-left corner is its bottom-right.
+                let (bl, br, tl) = if c.flip { (k[1], k[0], k[2]) } else { (k[0], k[1], k[3]) };
+                let [w, h] = c.pixels;
+                let aspect = if w == 0 { 1.0 } else { f64::from(h) / f64::from(w) };
+                let at = |p: solidcore_record::Vec3| [p.x, p.y, p.z];
+                let (Some(plane), Some((width, stretched))) =
+                    (Plane::new(bl, br - bl, tl - bl), solidcore_ops::affine::picture_fit(at(bl), at(br), at(tl), aspect))
+                else {
+                    warnings.push(format!("{shown}: image `{}` has no area where its sketch puts it: left out", c.name));
+                    continue;
+                };
+                image.plane = solidcraft_doc::PlaneRef::Custom { plane };
+                image.width = width;
+                image.angle = 0.0;
+                let height = image.height();
+                image.center = Vec2::new(image.width / 2.0, height / 2.0);
+                if stretched {
+                    warnings.push(format!("{shown}: image `{}` is stretched by its sketch there; it comes in with its image's own shape", c.name));
+                }
+            }
+            None => match part.doc.canvas_plane(&vals, c, &state) {
+                Ok(plane) => image.plane = solidcraft_doc::PlaneRef::Custom { plane },
+                Err(e) => {
+                    warnings.push(format!("{shown}: image `{}`: {e}: left out", c.name));
+                    continue;
+                }
+            },
+        }
+        images.push(image);
+    }
+    (images, warnings)
 }
 
 /// The solid bodies of `part`, the design saved as `shown`, as an Import feature.
@@ -791,7 +850,8 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         Some(bytes) => bytes,
         None => read_link(&file, s.path.as_deref())?,
     };
-    let (design_name, sf, faces, metadata, properties) = design_bodies(&file, &bytes, configuration, s.validation())?;
+    let ((design_name, mut sf, faces, metadata, properties), (images, image_warnings)) = design_bodies(&file, &bytes, configuration, s.validation())?;
+    sf.warnings.extend(image_warnings);
     let read = DesignLink::file_digest(&bytes);
     let name = str_(p, "name").filter(|n| !n.trim().is_empty()).map(str::to_string).unwrap_or(design_name);
     let mut create = json!({"name": name, "activate": false});
@@ -839,6 +899,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(EngineError::Other(e));
     }
     inherit_properties(s, comp, &properties)?;
+    add_design_images(s, comp, &name, images)?;
     s.refresh();
     let st = s.model.state();
     let bodies: Vec<String> = st.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
@@ -853,6 +914,27 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         warnings: sf.warnings,
     };
     reply(cmd, InsertDesignResult { inserted, param_warnings: Vec::new() })
+}
+
+/// The linked design's canvases and decals ([`design_images`]) added to its new component
+/// `comp`, so its images come into the assembly on its bodies. Each gets an id of this design and
+/// keeps its name, or takes `<name> (<component>)` when this design already has an image so named.
+fn add_design_images(s: &mut Session, comp: u64, component: &str, images: Vec<solidcraft_doc::canvas::Canvas>) -> Result<()> {
+    for mut image in images {
+        let doc = s.doc_mut();
+        image.id = doc.allocate_id()?;
+        image.component = comp;
+        let taken = |n: &str| doc.canvases.iter().any(|c| c.name == n);
+        if taken(&image.name) {
+            let base = format!("{} ({component})", image.name);
+            image.name = (1..=doc.canvases.len().saturating_add(1))
+                .map(|n| if n == 1 { base.clone() } else { format!("{base} {n}") })
+                .find(|n| !taken(n))
+                .unwrap_or(base);
+        }
+        doc.canvases.push(image);
+    }
+    Ok(())
 }
 
 fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
@@ -926,7 +1008,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             continue;
         }
         let (_, sf, faces, metadata, properties) = match design_bodies(&file, &bytes, selected_configuration(&link), s.validation()) {
-            Ok(read) => read,
+            Ok((read, _)) => read,
             Err(e) if go_on => {
                 // It keeps its bodies, so it has not taken this file in yet.
                 if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
@@ -1072,7 +1154,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Read/evaluate the candidate before changing anything. Session::execute owns the single
     // undo step and restores both the document and evaluated state on any later failure.
-    let (source_name, sf, faces, metadata, properties) =
+    let ((source_name, sf, faces, metadata, properties), _) =
         design_bodies(&file, &bytes, configuration, s.validation()).map_err(|e| bad(cmd, e.to_string()))?;
     let read = DesignLink::file_digest(&bytes);
     let source_names = sf.body_names.clone();
@@ -1474,7 +1556,7 @@ mod tests {
         drop(autosaver);
         let entry = crate::recovery::orphans(&recovery).pop().unwrap();
         // Older autosaves hold paths relative to the design, not the recovery folder.
-        std::fs::write(recovery.join(format!("{}.solidcraft", entry.id)), solidcraft_io::write_design(&s.design())).unwrap();
+        std::fs::write(recovery.join(format!("{}.solidcraft", entry.id)), solidcraft_io::write_design(&s.design()).unwrap()).unwrap();
         let mut recovered = Session::default();
         run(&mut recovered, "doc.recover", json!({"dir": recovery, "id": entry.id}));
         assert_eq!(run(&mut recovered, "component.links", json!({}))["links"][0]["found"], true);

@@ -31,11 +31,8 @@ const PITCH: f64 = 20.0;
 /// three edges for each hole, the exact volume) and returns the record visits of the
 /// merges that made the tools one operand.
 fn plate_cut_merge_record_visits(n: u32) -> u64 {
-    let mut fixes = UpstreamFixes::all();
-    fixes.fillet_refuse_rounds_breaking_through = false;
-    fixes.fillet_round_ends_on_outline = false;
     let mut k = Kernel {
-        fixes,
+        fixes: UpstreamFixes::all(),
         ..Kernel::default()
     };
     let (w, thick, radius) = (PITCH * f64::from(n), 12.0, 4.0);
