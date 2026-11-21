@@ -127,3 +127,22 @@ world importer-plugin {
     import evaluate;
     export importer;
 }
+
+// Optional, additive capability dialog@0.1. Existing worlds retain their exports.
+interface dialog-provider {
+    use types.{json, plugin-error};
+    // Values and reply are JSON objects. The host validates the entire reply before applying it.
+    update-fields: func(entry: string, values: json) -> result<json, plugin-error>;
+}
+world dialog-plugin {
+    import commands;
+    import log;
+    import control;
+    import files;
+    import clock;
+    export dialog-provider;
+}
+world command-dialog-plugin {
+    include command-plugin;
+    export dialog-provider;
+}
