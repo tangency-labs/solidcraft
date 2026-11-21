@@ -2377,6 +2377,24 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
         only: Option<O>,
     ) -> Result<Option<(f64, FitKind)>>;
 
+    /// Not the fork's (#20314): the radius at which the corner `corner` of the constant balls
+    /// of solvers `a` and `b`, which roll on one face, leaves that face
+    /// (`session::fit_size::corner_leaves_face`). `None` by default, and where no size is
+    /// found.
+    ///
+    /// # Errors
+    /// The sizing's own errors.
+    fn creation_corner_leaves_face(
+        &mut self,
+        k: &mut Kernel,
+        corner: O,
+        a: O,
+        b: O,
+    ) -> Result<Option<f64>> {
+        let _ = (k, corner, a, b);
+        Ok(None)
+    }
+
     /// `NoteFitOfPolygonsTakenWhole`'s per-face sizes (the fork's, 49f393d): for each face
     /// the blends of `solvers` (constant balls) roll on, in face order, where it is a
     /// polygon with every edge blended, the radius that leaves some of it, the first
@@ -3400,6 +3418,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             return Err(failure());
         }
         if overflow {
+            let corner_met = self.overflows_meet_at_a_corner(access, &overflowing)?;
             // A known cliff bounds the added material at its creases. A rail leaving its
             // support elsewhere still needs its own construction.
             let why = if wraps {
@@ -3416,7 +3435,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 Some((NoRoomReason::OverflowWithRollover, "Fillet Error: a rail leaves the face it rolls on while a rail rolls over a tangent edge (not supported together)"))
             } else if self.options.global_merge {
                 Some((NoRoomReason::OverflowWithGlobalMerge, "Fillet Error: a rail leaves the face it rolls on, and the fillet ends on more than one face (not supported together)"))
-            } else if self.overflows_meet_at_a_corner(access, &overflowing)? {
+            } else if corner_met.is_some() {
                 // not the fork's (#20314): the overflow is built round by round, trimmed at its
                 // crease; at a corner where two overflowing rounds meet, the corner's own
                 // contact leaves the face too, and that corner is not built yet
@@ -3424,6 +3443,22 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             } else {
                 None
             };
+            let by_corner = !wraps
+                && !concave_overflow
+                && !round_into_material
+                && !concave
+                && !rolls_over
+                && !self.options.global_merge;
+            if let (true, Some((reason, why)), Some((corner, a, b))) = (by_corner, why, corner_met)
+            {
+                // #20314: the largest radius at which the corner's own contact stays on the face
+                // the two rounds leave (the corner of the two balls placed on its boundary):
+                // open, so less the fit margin
+                if let Some(fit) = access.creation_corner_leaves_face(k, corner, a, b)? {
+                    self.note_open_fit(access, true, fit, FitKind::Radius, a)?;
+                }
+                return self.record_no_room(reason, why);
+            }
             if let Some((reason, why)) = why {
                 // the fork's 49f393d (WR-696): the largest radius at which the overflowing
                 // blends' rails stay on their faces (where a boundary of a face first meets a
@@ -3445,9 +3480,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         Ok(())
     }
 
-    /// Whether two of the `overflowing` blended edges meet at one of the executive's corners
-    /// (#20314): the cliff overflow trims each round at its crease, but where two overflowing
-    /// rounds meet, the corner's own contact with the face they leave leaves it too.
+    /// The first of the executive's corners where two of the `overflowing` blended edges meet,
+    /// with two of their solvers (#20314): the cliff overflow trims each round at its crease,
+    /// but where two overflowing rounds meet, the corner's own contact with the face they
+    /// leave leaves it too.
     ///
     /// # Errors
     /// Those of the corners' edge lookups.
@@ -3455,21 +3491,26 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         &self,
         access: &impl BrepCreationAccess<O>,
         overflowing: &[O],
-    ) -> Result<bool> {
+    ) -> Result<Option<(O, O, O)>> {
         let mut index = 0;
         while let Some(corner) = self.corners.get(index).copied() {
             index += 1;
             let blended = access.geometry_corner_blended_edges(corner)?;
-            if blended
-                .iter()
-                .filter(|edge| overflowing.contains(edge))
-                .count()
-                >= 2
-            {
-                return Ok(true);
+            let mut met = Vec::new();
+            let mut solver_index = 0;
+            while let Some(solver) = self.solvers.get(solver_index).copied() {
+                solver_index += 1;
+                if let Some(edge) = access.geometry_overflow_edge(solver)? {
+                    if overflowing.contains(&edge) && blended.contains(&edge) {
+                        met.push(solver);
+                    }
+                }
+            }
+            if let [first, second, ..] = met.as_slice() {
+                return Ok(Some((corner, *first, *second)));
             }
         }
-        Ok(false)
+        Ok(None)
     }
 
     /// Refuse blends that take the whole of a face they roll on, some meeting it at an angle

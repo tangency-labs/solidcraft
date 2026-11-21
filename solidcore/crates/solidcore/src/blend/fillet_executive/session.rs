@@ -4415,6 +4415,41 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
         fit_size::largest_size_on_its_faces(k, self.target, current, only)
     }
 
+    fn creation_corner_leaves_face(
+        &mut self,
+        k: &mut Kernel,
+        corner: FilletObject,
+        a: FilletObject,
+        b: FilletObject,
+    ) -> Result<Option<f64>> {
+        let (FilletObject::Corner(c), FilletObject::Solver(ia), FilletObject::Solver(ib)) =
+            (corner, a, b)
+        else {
+            return Err(invalid("the corner's fit takes a corner and two solvers"));
+        };
+        let vertex = self
+            .corners
+            .get(c.0 as usize)
+            .and_then(|c| c.vertex)
+            .ok_or_else(|| invalid("corner without its vertex"))?;
+        let (ia, ib) = (ia.0 as usize, ib.0 as usize);
+        if ia == ib {
+            return Ok(None);
+        }
+        let (lo, hi) = (ia.min(ib), ia.max(ib));
+        let (left, right) = self.solvers.split_at_mut(hi);
+        let low = left
+            .get_mut(lo)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
+        let high = right
+            .get_mut(0)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
+        let (sa, sb) = if ia < ib { (low, high) } else { (high, low) };
+        fit_size::corner_leaves_face(k, &*self.target, sa, sb, vertex)
+    }
+
     fn creation_polygons_taken_whole(
         &mut self,
         k: &mut Kernel,
@@ -9414,7 +9449,10 @@ mod tests {
                 }
             };
         for near in [low, high] {
-            for which in [&[XY, XTorus, YTorus][..], &[XTorus, YTorus][..]] {
+            // the x|torus + y|torus pair alone is another event: its rails are judged to fit
+            // their faces (no overflow), and the corner where the two rounds meet leaves the
+            // torus face; not this refusal's (see #20314)
+            for which in [&[XY, XTorus, YTorus][..]] {
                 if let Some(fit) = refused_or_built(near, which, 0.1) {
                     assert!(
                         matches!(
