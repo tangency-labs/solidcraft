@@ -142,18 +142,24 @@ impl Settle {
         let trans_sq: i64 = reading[0..3].iter().map(|&v| i64::from(v) * i64::from(v)).sum();
         let rot_sq: i64 = reading[3..6].iter().map(|&v| i64::from(v) * i64::from(v)).sum();
 
-        // While navigation is active on any axis (or a composite push exceeds the settle band),
-        // companion axes are kept alive so multi-axis motion does not lock to a single axis (#20256, #14273).
-        let any_active = reading
+        // Evaluate translation (0..3) and rotation (3..6) activity independently so multi-axis
+        // motion in one group stays fluid without single-axis locking (#20256, #14273), while a
+        // quiet or leaning companion group still settles cleanly.
+        let trans_active = reading[0..3]
             .iter()
             .enumerate()
             .any(|(axis, &value)| value != 0 && (i32::from(value).abs() > band || self.steady[axis] < SETTLE_AFTER_SECONDS))
-            || trans_sq > band_sq
-            || rot_sq > band_sq;
+            || trans_sq > band_sq;
+
+        let rot_active = reading[3..6].iter().enumerate().any(|(offset, &value)| {
+            let axis = 3 + offset;
+            value != 0 && (i32::from(value).abs() > band || self.steady[axis] < SETTLE_AFTER_SECONDS)
+        }) || rot_sq > band_sq;
 
         std::array::from_fn(|axis| {
             let value = reading[axis];
-            if !any_active && i32::from(value).abs() <= band && self.steady[axis] >= SETTLE_AFTER_SECONDS { 0 } else { value }
+            let active = if axis < 3 { trans_active } else { rot_active };
+            if !active && i32::from(value).abs() <= band && self.steady[axis] >= SETTLE_AFTER_SECONDS { 0 } else { value }
         })
     }
 }
@@ -2060,5 +2066,11 @@ mod tests {
         // 55^2 + 55^2 = 6050 > 4900 (70^2)
         let diag = frames(&mut settle, [55, 55, 0, 0, 0, 0], 1.0);
         assert_eq!((diag[0], diag[1]), (55, 55), "held diagonal push stays");
+
+        // An active push in translation (e.g. pan X = 200) with a slight hand lean on rotation (Yaw = 30)
+        // keeps translation active while letting the quiet rotation settle to 0.
+        let pushed_with_lean = frames(&mut settle, [200, 0, 0, 0, 30, 0], SETTLE_AFTER_SECONDS + 0.05);
+        assert_eq!(pushed_with_lean[0], 200, "pan remains active");
+        assert_eq!(pushed_with_lean[4], 0, "leaning rotation settles independently");
     }
 }
