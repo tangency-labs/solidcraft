@@ -13,6 +13,7 @@ use solidcraft_geom::prelude::*;
 
 use super::{CommandSpec, not_in_sketch};
 use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, str_, string_list, string_list_or_default, vec2, vec3};
+use crate::schema::face_edits::{DeleteFaceParams, OffsetFaceParams};
 use crate::schema::features::SweepParams;
 use crate::schema::features::{
     AppliedRadius, BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams,
@@ -47,6 +48,8 @@ const PATTERN_RECTANGULAR_CONTRACT: TypedContract<PatternRectangularParams> = Ty
 const PATTERN_PATH_CONTRACT: TypedContract<PatternPathParams> = TypedContract::new();
 const PRESS_PULL_CONTRACT: TypedContract<PressPullParams> = TypedContract::new();
 const MOVE_CONTRACT: TypedContract<MoveParams> = TypedContract::new();
+const DELETE_FACE_CONTRACT: TypedContract<DeleteFaceParams> = TypedContract::new();
+const OFFSET_FACE_CONTRACT: TypedContract<OffsetFaceParams> = TypedContract::new();
 const MIRROR_CONTRACT: TypedContract<MirrorParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -170,13 +173,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SCALE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("bodies: [names]; factor: expr | factors: [x, y, z] exprs; origin?: [x,y,z]"),
-    CommandSpec::new("face.delete", "Delete Face", delete_face)
+    CommandSpec::new("face.delete", "Delete Face", crate::checked!("face.delete", delete_face))
         .at("SOLID", "MODIFY")
         .icon("delete_face")
+        .contract(&DELETE_FACE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("faces: [[x,y,z] points on the faces, or face names from model.faces]; body?; heal?: bool (default true: the neighbouring planes close the gap, as when a rounded edge, hole or boss is taken off; false: the gap stays open and the faces left are a surface body)"),
-    CommandSpec::new("solid.offset_face", "Offset Face", offset_face)
+    CommandSpec::new("solid.offset_face", "Offset Face", crate::checked!("solid.offset_face", offset_face))
         .at("SOLID", "MODIFY")
         .icon("offset_face")
+        .contract(&OFFSET_FACE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("faces: [[x,y,z] points on faces (planar or curved), or face names from model.faces]; distance: expr (positive: outward); body?"),
     CommandSpec::new("solid.thread", "Thread", thread)
         .at("SOLID", "CREATE")
@@ -959,6 +966,13 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
             f.body_names = made;
         }
     }
+    feature_reply(s, id, &before, false)
+}
+
+/// The reply of a command that made or changed (`existing`) the feature `id`, evaluated now: the feature's
+/// error if it fails, else the bodies it made and the ones it changed or removed since `before`. An existing
+/// feature's bodies count as made only when they are new, and as changed when their geometry is.
+pub(super) fn feature_reply(s: &mut Session, id: u64, before: &solidcraft_doc::ModelState, existing: bool) -> Result<Value> {
     let r = s.model.result(id).cloned();
     if let Some(r) = &r
         && let Some(e) = r.error.clone()
@@ -985,10 +999,19 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
     let old: std::collections::HashMap<&str, &solidcraft_doc::kernel::Body> = before.bodies.iter().map(|b| (b.name.as_str(), &b.body)).collect();
     // The bodies this feature made, apart from the ones it changed or that were there (#374),
     // and the pieces a cut left of a body made earlier, which keep that body's feature.
-    let created: Vec<&str> = st.bodies.iter().filter(|b| b.feature == id || !old.contains_key(b.name.as_str())).map(|b| b.name.as_str()).collect();
+    let created: Vec<&str> =
+        st.bodies.iter().filter(|b| (b.feature == id && !existing) || !old.contains_key(b.name.as_str())).map(|b| b.name.as_str()).collect();
     let now: std::collections::HashSet<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();
-    let changed: Vec<&str> =
-        st.bodies.iter().filter(|b| b.feature != id && old.get(b.name.as_str()).is_some_and(|o| !o.same(&b.body))).map(|b| b.name.as_str()).collect();
+    // An existing feature builds its bodies again: one whose B-rep is as it was has not changed.
+    let differs = |o: &solidcraft_doc::kernel::Body, b: &solidcraft_doc::kernel::Body| {
+        !o.same(b) && !(existing && !o.is_mesh() && !b.is_mesh() && o.record() == b.record())
+    };
+    let changed: Vec<&str> = st
+        .bodies
+        .iter()
+        .filter(|b| (b.feature != id || existing) && old.get(b.name.as_str()).is_some_and(|o| differs(o, &b.body)))
+        .map(|b| b.name.as_str())
+        .collect();
     let removed: Vec<&str> = before.bodies.iter().map(|b| b.name.as_str()).filter(|n| !now.contains(n)).collect();
     let pieces: Vec<(String, String)> = st
         .bodies

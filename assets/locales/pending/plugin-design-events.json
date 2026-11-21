@@ -1,0 +1,42 @@
+{
+  "ar": {
+    "plugin_error.stale_revision": "تغيّر التصميم منذ حساب هذا التعديل (المتوقع {expected}؛ الحالي {actual}). أعد الحساب.",
+    "prefs.plugin_design_listener": "التحديث بعد تغييرات التصميم ({entry})؛ لا يمكنه التعديل أو كتابة الملفات أو بدء المهام",
+    "prefs.plugin_listener_failed": "تعذّر تحديث الإضافة بعد تغيير التصميم: {error}"
+  },
+  "de": {
+    "plugin_error.stale_revision": "Das Design wurde seit der Berechnung dieser Änderung geändert (erwartet {expected}; aktuell {actual}). Berechnen Sie erneut.",
+    "prefs.plugin_design_listener": "Nach Designänderungen aktualisieren ({entry}); darf keine Änderungen vornehmen, Dateien schreiben oder Aufträge starten",
+    "prefs.plugin_listener_failed": "Die Erweiterung konnte nach der Designänderung nicht aktualisiert werden: {error}"
+  },
+  "en": {
+    "plugin_error.stale_revision": "the design changed since this edit was calculated (expected {expected}; current {actual}). Run the calculation again.",
+    "prefs.plugin_design_listener": "Refresh after design changes ({entry}); cannot edit, write files or start jobs",
+    "prefs.plugin_listener_failed": "The plugin could not refresh after the design changed: {error}"
+  },
+  "he": {
+    "plugin_error.stale_revision": "התכנון השתנה מאז חישוב העריכה (צפוי {expected}; נוכחי {actual}). יש לבצע את החישוב שוב.",
+    "prefs.plugin_design_listener": "רענון לאחר שינויי תכנון ({entry}); ללא עריכה, כתיבת קבצים או הפעלת משימות",
+    "prefs.plugin_listener_failed": "התוסף לא הצליח להתעדכן לאחר שינוי התכנון: {error}"
+  },
+  "ja": {
+    "plugin_error.stale_revision": "この編集の計算後に設計が変更されました（想定 {expected}、現在 {actual}）。再計算してください。",
+    "prefs.plugin_design_listener": "設計変更後に更新（{entry}）。編集、ファイル書き込み、ジョブ開始はできません",
+    "prefs.plugin_listener_failed": "設計変更後にプラグインを更新できませんでした: {error}"
+  },
+  "ko": {
+    "plugin_error.stale_revision": "이 편집을 계산한 후 설계가 변경되었습니다(예상 {expected}, 현재 {actual}). 다시 계산하세요.",
+    "prefs.plugin_design_listener": "설계 변경 후 새로 고침({entry}); 편집, 파일 쓰기 또는 작업 시작 불가",
+    "prefs.plugin_listener_failed": "설계 변경 후 플러그인을 새로 고치지 못했습니다: {error}"
+  },
+  "vi": {
+    "plugin_error.stale_revision": "thiết kế đã thay đổi kể từ khi tính toán chỉnh sửa này (dự kiến {expected}; hiện tại {actual}). Hãy tính toán lại.",
+    "prefs.plugin_design_listener": "Làm mới sau khi thiết kế thay đổi ({entry}); không thể chỉnh sửa, ghi tệp hoặc bắt đầu tác vụ",
+    "prefs.plugin_listener_failed": "Không thể làm mới tiện ích sau khi thiết kế thay đổi: {error}"
+  },
+  "zh": {
+    "plugin_error.stale_revision": "计算此编辑后，设计已更改（预期 {expected}；当前 {actual}）。请重新计算。",
+    "prefs.plugin_design_listener": "设计更改后刷新（{entry}）；无法编辑、写入文件或启动作业",
+    "prefs.plugin_listener_failed": "设计更改后，插件无法刷新：{error}"
+  }
+}
