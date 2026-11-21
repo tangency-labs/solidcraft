@@ -121,6 +121,11 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
             lines.push(format("plugin_install.panel", &[("title", title)]));
         }
     }
+    for listener in plugin.get("listeners").and_then(Value::as_array).into_iter().flatten() {
+        if let Some(entry) = listener.get("entry").and_then(Value::as_str) {
+            lines.push(format("prefs.plugin_design_listener", &[("entry", entry)]));
+        }
+    }
     let commands = list(plugin.get("commands")).len();
     match commands {
         0 => {}
@@ -320,7 +325,7 @@ mod tests {
             {"name":"source","read":true,"write":false},
             {"name":"output","read":false,"write":true},
             {"name":"project","read":true,"write":true}
-        ]}});
+        ]},"listeners":[{"entry":"refresh","on":["design.changed"]}]});
         let lines = permission_lines(&plugin);
         assert_eq!(
             lines,
@@ -331,7 +336,8 @@ mod tests {
                 "Inspect, install, remove or run other plugins.",
                 "source (read)",
                 "output (write)",
-                "project (read and write)"
+                "project (read and write)",
+                "Refresh after design changes (refresh); cannot edit, write files or start jobs"
             ]
         );
     }

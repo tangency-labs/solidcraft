@@ -74,7 +74,7 @@ pub(super) fn describe(session: &Session, id: &str) -> Result<Option<Value>> {
             let inputs = craft_plugin::strict_input_schema(&entry.input_schema);
             let input = entry_input_schema(inputs.clone());
             json!({"id":id,"label":name,"kind":"command","plugin":plugin,
-                "params":"approval: the package hash (plugin.tools {name} or plugin.inspect), params: the entry's declared inputs, ui_event?: explicit panel action; as a tool, the inputs alone",
+                "params":"approval: the package hash (plugin.tools {name} or plugin.inspect), params: the entry's declared inputs, ui_event?: explicit panel action, expected_design?: token this edit was computed against; as a tool, the inputs alone",
                 "input":input,
                 "tool":{"name":id,"input":inputs},
                 "output":{},"effect":entry.effect,"slots":entry.slots})
@@ -94,7 +94,7 @@ pub(super) fn describe(session: &Session, id: &str) -> Result<Option<Value>> {
 fn entry_input_schema(inputs: Value) -> Value {
     let mut schema = crate::schema::input_schema_for::<RunParams>().to_value();
     if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
-        properties.retain(|name, _| matches!(name.as_str(), "approval" | "params" | "ui_event"));
+        properties.retain(|name, _| matches!(name.as_str(), "approval" | "params" | "ui_event" | "expected_design"));
         properties.insert("params".into(), inputs);
     }
     if let Some(object) = schema.as_object_mut() {
