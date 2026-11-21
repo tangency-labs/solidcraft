@@ -176,6 +176,43 @@ reopening. This library has no dependency on the pending render stack and does n
 the document format. User-visible evidence and actual native/wasm results are recorded in the PR;
 geometry/robustness checks remain separate and no reference baseline is weakened.
 
+## Library folders and places
+
+A library folder holds one `*.sclibrary.json` manifest (format `solidcraft-library-folder/1`:
+`id`, `name`, `provenance`) and one file per entry in `materials/` and `appearances/`. A place is
+where library folders are read from: the built-in library, My Library (the `my_library_folder`
+preference) and the user's places (`library_places`). A place is one library folder (`library`)
+or a folder whose subfolders are library folders (`folder`). Libraries are used in that order; a
+library whose id an earlier one has is listed as unavailable, naming the first.
+
+The app scans each place on a thread of its own: at start, when the list changes and on
+`library.places.refresh`. The window never waits for a scan. A library place follows the network
+rules a design's links follow. A scan reads at most:
+
+| What | At most |
+|---|---|
+| The manifest | 16 KiB |
+| One entry file | 256 KiB |
+| Entry files in `materials/`, and again in `appearances/` | 1,024 |
+| One library: the manifest and every entry file together | 4 MiB |
+| Files directly in a library folder (the manifest included), and again its subfolders | 64 |
+| Subfolders of a folder place | 64 |
+| Places in the list, My Library apart | 64 |
+
+A limit reached makes that library or place unavailable, with the reason; nothing is cut short
+quietly.
+
+```json
+{"command":"library.places.add","params":{"path":"/srv/shop-libraries","kind":"folder"}}
+{"command":"library.places.list","params":{}}
+```
+
+`list` answers from what the session holds and reads no files. `add`, `remove`, `set`
+(`read_only`, `at`) and `refresh` check a change and the app applies it; without the app (the
+CLI, a headless MCP server) nothing is saved. A network folder is read-only unless `read_only`
+says otherwise. The place commands are app settings: a plugin can't run them, and the in-app
+Assistant asks before a change.
+
 ## Scope
 
 The catalog carries the document's scalar/opaque `Look` and engineering-card values.
