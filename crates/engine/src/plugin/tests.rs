@@ -1145,8 +1145,7 @@ mod native {
         s.execute("edit.undo", &json!({})).unwrap();
         assert!(s.plugin_state.link_changes.is_empty(), "undo forgets observations of bytes the design no longer holds");
         let observations = s.plugin_state.link_changes.clone();
-        let redo = s.scratch().compute_commands(&[("edit.redo".into(), json!({}))], None).unwrap();
-        s.accept_commands(redo).unwrap();
+        s.execute("edit.redo", &json!({})).unwrap();
         assert!(std::sync::Arc::ptr_eq(&observations, &s.plugin_state.link_changes), "redo does not read a source file");
         let missing = f.0.join("missing.sc");
         assert!(s.execute("component.relink", &json!({"component":component,"path":missing})).is_err());
@@ -1282,7 +1281,7 @@ mod native {
         std::fs::write(&source, &original).unwrap();
         let held = s.scratch().compute_commands(&[("component.links".into(), json!({}))], None).unwrap();
         part.execute("document.metadata.set", &json!({"key":"description","value":"A third, newer observation of the source"})).unwrap();
-        part.execute("file.save", &json!({})).unwrap();
+        part.execute("file.save", &json!({"overwrite":true})).unwrap();
         s.execute("component.links", &json!({})).unwrap();
         let live = s.plugin_state.link_changes.clone();
         s.accept_commands(held).unwrap();
@@ -1307,7 +1306,7 @@ mod native {
             .collect();
         let digest = s.doc.links[&components[0]].file_sha256.clone();
         part.execute("document.metadata.set", &json!({"key":"description","value":"Changed source bytes"})).unwrap();
-        part.execute("file.save", &json!({})).unwrap();
+        part.execute("file.save", &json!({"overwrite":true})).unwrap();
         let newer = std::fs::read(&sources[0]).unwrap();
         for source in &sources {
             std::fs::write(source, &newer).unwrap();
@@ -1348,6 +1347,61 @@ mod native {
         assert!(s.plugin_state.link_changes[&components[0]].read, "no-op reads survive nested transaction acceptance");
         assert!(!s.plugin_state.link_changes[&components[1]].read);
         assert!(!s.plugin_state.link_changes[&components[2]].read);
+    }
+
+    #[test]
+    fn computed_noop_link_reads_preserve_newer_disk_observations() {
+        fn accept(s: &mut Session, prepared: crate::ComputedCommands, commands: bool) {
+            if commands {
+                s.accept_commands(prepared).unwrap();
+            } else {
+                s.accept_computed(prepared.computed);
+            }
+        }
+
+        for commands in [false, true] {
+            let f = Fixture::new("");
+            let source = f.0.join("part.sc");
+            let mut part = Session::default();
+            part.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+            part.execute("file.save", &json!({"path":source})).unwrap();
+            let original = std::fs::read(&source).unwrap();
+            let mut s = Session::default();
+            let component = s.execute("component.insert_design", &json!({"path":source})).unwrap()["component"].as_u64().unwrap();
+            let held = s.doc.links[&component].file_sha256.clone();
+            part.execute("document.metadata.set", &json!({"key":"description","value":"Changed source bytes"})).unwrap();
+            part.execute("file.save", &json!({})).unwrap();
+            let newer = std::fs::read(&source).unwrap();
+            let update = [("component.update_links".into(), json!({"component":component}))];
+
+            // The worker read A, then a live check observed B before that no-op was accepted.
+            std::fs::write(&source, &original).unwrap();
+            let prepared = s.scratch().compute_commands(&update, None).unwrap();
+            std::fs::write(&source, &newer).unwrap();
+            s.execute("component.links", &json!({})).unwrap();
+            let observed = s.plugin_state.link_changes.clone();
+            assert!(!observed[&component].read);
+            accept(&mut s, prepared, commands);
+            assert_eq!(s.doc.links[&component].file_sha256, held);
+            assert!(std::sync::Arc::ptr_eq(&observed, &s.plugin_state.link_changes), "a no-op read cannot overwrite a newer disk check");
+
+            // Without an intervening observation, the same no-op read is still published.
+            std::fs::write(&source, &original).unwrap();
+            let prepared = s.scratch().compute_commands(&update, None).unwrap();
+            accept(&mut s, prepared, commands);
+            assert!(s.plugin_state.link_changes[&component].read);
+            assert_eq!(Some(&s.plugin_state.link_changes[&component].digest), held.as_ref());
+
+            // Applying changed source bytes supersedes a check even when that check is newer.
+            std::fs::write(&source, &newer).unwrap();
+            let prepared = s.scratch().compute_commands(&update, None).unwrap();
+            s.execute("component.links", &json!({})).unwrap();
+            assert!(!s.plugin_state.link_changes[&component].read);
+            accept(&mut s, prepared, commands);
+            assert_ne!(s.doc.links[&component].file_sha256, held);
+            assert!(s.plugin_state.link_changes[&component].read);
+            assert_eq!(s.doc.links[&component].file_sha256.as_ref(), Some(&s.plugin_state.link_changes[&component].digest));
+        }
     }
 
     #[test]

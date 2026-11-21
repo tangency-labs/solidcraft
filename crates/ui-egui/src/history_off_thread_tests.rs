@@ -1427,8 +1427,8 @@ fn linked_file_notifications_retry_and_deliver_without_a_design_edit() {
         dir.join("plugin.json"),
         json!({
             "id":"sample","name":"Worker sample","version":"1","capabilities":["commands@0.1","design@0.1"],
-            "runtime":{"module":"plugin.wasm","entries":[{"name":"design_refresh","effect":"read"},{"name":"refresh","effect":"read"}],"commands":[],
-                "listeners":[{"entry":"design_refresh","on":["design.changed"]},{"entry":"refresh","on":["design.links_changed"]}],
+            "runtime":{"module":"plugin.wasm","entries":[{"name":"design-refresh","effect":"read"},{"name":"refresh","effect":"read"}],"commands":[],
+                "listeners":[{"entry":"design-refresh","on":["design.changed"]},{"entry":"refresh","on":["design.links_changed"]}],
                 "permissions":{"files":[{"name":"work","read":true,"write":false}]}}
         })
         .to_string(),
@@ -1506,7 +1506,7 @@ fn linked_file_notifications_retry_and_deliver_without_a_design_edit() {
         "a links-only listener retries at the latest design token"
     );
     assert_eq!(
-        h.app.session.plugin_state.listener_data["sample.design_refresh"],
+        h.app.session.plugin_state.listener_data["sample.design-refresh"],
         json!({"design":latest}),
         "merging the links retry preserves the pending design invalidation"
     );
