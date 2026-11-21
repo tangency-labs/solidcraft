@@ -91,6 +91,108 @@ fn component_for(version: &str, code: &str) -> Vec<u8> {
     assert!(template.contains(original));
     wat::parse_str(template.replacen(original, &format!("      {code}\n"), 1)).unwrap()
 }
+
+/// Add a guest that calls the query while instantiating and traps unless every returned byte
+/// matches. It uses the fixture's memory and allocator within the one-memory sandbox limit.
+fn with_capability_query(component: &str, expected: &[&str]) -> Vec<u8> {
+    let query = r#"
+  (import "craft:host/capabilities@0.1.0" (instance $host-query
+    (type $capability-list (list string))
+    (export "granted" (func (result $capability-list)))))
+  (alias export $host-query "granted" (func $granted))
+  (core func $granted-lowered (canon lower (func $granted)
+    (memory $memory) (realloc __REALLOC__) string-encoding=utf8))
+  (core module $query-probe
+    (import "query" "granted" (func $granted (param i32)))
+    (import "query" "memory" (memory 1))
+    (func $check
+      i32.const 128 call $granted
+      __ASSERTIONS__)
+    (start $check))
+  (core instance $query-imports
+    (export "granted" (func $granted-lowered))
+    (export "memory" (memory $memory)))
+  (core instance $query-probe (instantiate $query-probe
+    (with "query" (instance $query-imports))))
+"#;
+    let mut assertions = format!("i32.const 132 i32.load i32.const {} i32.ne if unreachable end\n", expected.len());
+    for (index, capability) in expected.iter().enumerate() {
+        let offset = index * 8;
+        assertions.push_str(&format!(
+            "i32.const 128 i32.load i32.const {} i32.add i32.load i32.const {} i32.ne if unreachable end\n",
+            offset + 4,
+            capability.len()
+        ));
+        for (at, byte) in capability.bytes().enumerate() {
+            assertions.push_str(&format!(
+                "i32.const 128 i32.load i32.const {offset} i32.add i32.load \
+                 i32.const {at} i32.add i32.load8_u i32.const {byte} i32.ne if unreachable end\n"
+            ));
+        }
+    }
+    let (package, version) = API.split_once('@').unwrap();
+    // Keep the fixture's chosen API version, including 0.1's smaller error variant.
+    let component = component.replace("__PACKAGE__", package).replace("__VERSION__", version);
+    let end = component.rfind(')').unwrap();
+    let realloc = if component.contains("(core func $cabi_realloc") { "$cabi_realloc" } else { "$realloc" };
+    let query = query.replace("__ASSERTIONS__", &assertions).replace("__REALLOC__", realloc);
+    let combined = format!("{}{}\n)", &component[..end], query);
+    wat::parse_str(combined).unwrap()
+}
+
+#[test]
+fn command_guests_query_only_requested_supported_capabilities_at_both_api_versions() {
+    for version in ["0.1.0", "0.2.0"] {
+        let mut manifest = manifest();
+        manifest.capabilities.push("host@0.1".into());
+        manifest.optional_capabilities = vec!["storage@0.1".into(), "forms@0.1".into(), "commands-new@0.1".into(), "dialog@0.1".into()];
+        manifest.runtime.as_mut().unwrap().data_format = Some(1);
+        let source = include_str!("../fixture.wat").replace("__VERSION__", version);
+        let source = if version == "0.1.0" { source.replace(r#" (case "unsupported" string)"#, "") } else { source };
+        let guest = with_capability_query(&source, &["commands@0.1", "host@0.1", "storage@0.1"]);
+        crate::check_component(&manifest, &guest).unwrap();
+        let mut app = App::default();
+        run(&mut app, &manifest, &guest, "make", &json!({})).unwrap();
+        assert_eq!((app.value, app.commits), (2, 1));
+        manifest.optional_capabilities.clear();
+        // A previously supported optional capability disappearing changes the reply.
+        assert!(run(&mut app, &manifest, &guest, "make", &json!({})).is_err());
+        manifest.capabilities.pop();
+        assert!(matches!(crate::check_component(&manifest, &guest), Err(HostError::InvalidInput { field, .. }) if field == "component"));
+    }
+}
+
+#[test]
+fn importer_guests_query_optional_capabilities_without_gaining_file_grants() {
+    let root = import_folder(&[("bracket.smp", b"design bytes"), ("assembly.smp", b"S"), ("part.bin", b"a part")]);
+    for version in ["0.1.0", "0.2.0"] {
+        let mut manifest = importer_manifest(false);
+        manifest.capabilities.push("host@0.1".into());
+        manifest.optional_capabilities = vec!["evaluate@0.1".into(), "evaluate-next@0.1".into(), "forms@0.1".into()];
+        let source = include_str!("../importer_fixture.wat").replace("__VERSION__", version);
+        let source = if version == "0.1.0" { source.replace(r#" (case "unsupported" string)"#, "") } else { source };
+        let guest = with_capability_query(&source, &["formats@0.1", "host@0.1", "evaluate@0.1"]);
+        crate::check_component(&manifest, &guest).unwrap();
+        let imported = import_with(&guest, &manifest, root.join("bracket.smp"), false).unwrap();
+        assert_eq!(imported.design, b"design bytes");
+        let failure = import_with(&guest, &manifest, root.join("assembly.smp"), true).unwrap_err();
+        assert!(matches!(failure, HostError::PermissionDenied { permission } if permission.contains("input_folder")));
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn capability_query_obeys_cancellation_and_host_call_limits() {
+    let mut state = state(App::default());
+    state.granted_capabilities = vec!["commands@0.1".into()];
+    assert_eq!(capabilities::Host::granted(&mut state), ["commands@0.1"]);
+    state.calls = MAX_CALLS;
+    assert!(capabilities::Host::granted(&mut state).is_empty());
+    assert_eq!(state.failed, Some(limit("host call count")));
+    let mut state = self::state(App { cancelled: true, ..App::default() });
+    assert!(capabilities::Host::granted(&mut state).is_empty());
+    assert_eq!(state.failed, Some(HostError::Cancelled));
+}
 #[test]
 fn edit_commands_commit_as_one_transaction_and_instances_are_fresh() {
     let mut app = App::default();
@@ -274,6 +376,7 @@ fn state<H: PluginHost>(app: H) -> State<H> {
         host: app,
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
+        granted_capabilities: Vec::new(),
         effect: Effect::Edit,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),

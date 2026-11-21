@@ -1374,6 +1374,7 @@ name = "craft-plugin"
 version = "0.45.0"
 dependencies = [
  "schemars",
+ "semver",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

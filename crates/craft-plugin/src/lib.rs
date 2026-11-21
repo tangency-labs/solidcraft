@@ -7,7 +7,7 @@ use std::path::{Component, Path, PathBuf};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 // The WIT package declaration is the sole source of the API identifier.
 include!(concat!(env!("OUT_DIR"), "/api.rs"));
@@ -110,7 +110,8 @@ fn exhausted(limit: &str, allowed: u64) -> String {
 /// The capabilities this host serves, as name and `major.minor`. Each is a set of WIT interfaces
 /// a plugin names in its manifest's `capabilities` list. While a major version is 0, a minor
 /// version may break the one before it, so 0.x matches only the same minor.
-pub const CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 2)), ("evaluate", (0, 2)), ("formats", (0, 2)), ("storage", (0, 1))];
+pub const CAPABILITIES: &[(&str, (u32, u32))] =
+    &[("commands", (0, 2)), ("evaluate", (0, 2)), ("formats", (0, 2)), ("host", (0, 1)), ("storage", (0, 1))];
 /// Older versions of [`CAPABILITIES`] the host still serves: plugins built against
 /// `craft:plugin@0.1.0` ([`WIT_0_1`]) run unchanged.
 pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1))];
@@ -136,18 +137,9 @@ fn capability_version(text: &str) -> Option<(u32, u32)> {
 /// Checks a manifest's `capabilities` against [`CAPABILITIES`]. `app` names the host in the
 /// refusal ("update SolidCraft or the plugin").
 pub fn check_capabilities(requested: &[String], app: &str) -> Result<()> {
-    if requested.len() > 16 {
-        return Err(invalid("capabilities", "at most 16 capabilities"));
-    }
-    let mut names = BTreeSet::new();
+    check_capability_declarations(requested, &[])?;
     for capability in requested {
-        let parsed = capability.split_once('@').and_then(|(name, version)| Some((name, capability_version(version)?)));
-        let Some((name, (major, minor))) = parsed.filter(|(name, _)| valid_id(name)) else {
-            return Err(invalid("capabilities", format!("`{capability}` is not name@major.minor, e.g. \"commands@0.1\"")));
-        };
-        if !names.insert(name) {
-            return Err(invalid("capabilities", format!("`{name}` is listed twice")));
-        }
+        let (name, (major, minor)) = parse_capability(capability, "capabilities")?;
         let unsupported = |reason: String| HostError::UnsupportedCapability { capability: capability.clone(), reason };
         let Some((_, (have_major, have_minor))) = CAPABILITIES.iter().find(|(known, _)| *known == name) else {
             return Err(unsupported(format!("needs {name} {major}.{minor}, which this version of {app} does not have; update {app} or the plugin")));
@@ -163,6 +155,30 @@ pub fn check_capabilities(requested: &[String], app: &str) -> Result<()> {
             return Err(unsupported(format!(
                 "was built for {name} {major}.{minor}, and this version of {app} runs {name} {have_major}.{have_minor}; update the plugin"
             )));
+        }
+    }
+    Ok(())
+}
+
+fn parse_capability<'a>(capability: &'a str, field: &str) -> Result<(&'a str, (u32, u32))> {
+    capability
+        .split_once('@')
+        .and_then(|(name, version)| Some((name, capability_version(version)?)))
+        .filter(|(name, _)| valid_id(name))
+        .ok_or_else(|| invalid(field, format!("`{capability}` is not name@major.minor, e.g. \"commands@0.1\"")))
+}
+
+fn check_capability_declarations(required: &[String], optional: &[String]) -> Result<()> {
+    let mut names = BTreeSet::new();
+    for (field, capabilities) in [("capabilities", required), ("optional_capabilities", optional)] {
+        if capabilities.len() > 16 {
+            return Err(invalid(field, "at most 16 capabilities"));
+        }
+        for capability in capabilities {
+            let (name, _) = parse_capability(capability, field)?;
+            if !names.insert(name) {
+                return Err(invalid(field, format!("`{name}` is listed twice")));
+            }
         }
     }
     Ok(())
@@ -475,14 +491,36 @@ pub struct Manifest {
     pub id: String,
     pub name: String,
     pub version: String,
+    /// The oldest supported host version, as a complete semantic version (`1.2.3`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_host_version: Option<String>,
     #[serde(default)]
     pub description: String,
     /// The host capabilities the plugin needs, as `name@major.minor` (`commands@0.1`). A runtime
     /// needs `commands`. The host refuses a capability it does not serve, before any code runs.
     #[serde(default)]
     pub capabilities: Vec<String>,
+    /// Capabilities the host grants when supported; the plugin must provide a fallback.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub optional_capabilities: Vec<String>,
+    /// Inert metadata reserved for future optional fields. Unknown keys are deliberately accepted.
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    #[schemars(with = "std::collections::BTreeMap<String, Value>")]
+    pub extensions: Map<String, Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<RuntimeManifest>,
+}
+
+impl Manifest {
+    /// Required capabilities followed by the optional capabilities this host supports, retaining
+    /// their declared strings and order. This describes API availability, not user permissions.
+    pub fn granted_capabilities(&self) -> Vec<String> {
+        self.capabilities
+            .iter()
+            .chain(self.optional_capabilities.iter().filter(|capability| check_capabilities(std::slice::from_ref(*capability), "the app").is_ok()))
+            .cloned()
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -692,7 +730,7 @@ fn plain(value: &str, max: usize) -> bool {
 /// A plugin that keeps data in designs asks for `storage@0.1` and says its data's format number;
 /// only a command plugin does: an importer makes a new design and keeps nothing in the open one.
 fn check_storage(manifest: &Manifest) -> Result<()> {
-    let storage = manifest.capabilities.iter().any(|capability| capability.starts_with("storage@"));
+    let storage = manifest.granted_capabilities().iter().any(|capability| capability.starts_with("storage@"));
     let runtime = manifest.runtime.as_ref();
     let format = runtime.and_then(|runtime| runtime.data_format);
     if !storage {
@@ -722,13 +760,28 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
 
 /// [`parse_manifest`], naming the host `app` in a capability refusal.
 pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manifest> {
+    parse_manifest_for_version(text, folder, app, env!("CARGO_PKG_VERSION"))
+}
+
+/// [`parse_manifest_for`], using an explicit host semantic version. The minimum host version is
+/// checked before unknown fields, legacy API declarations or capability support.
+pub fn parse_manifest_for_version(text: &[u8], folder: &str, app: &str, host_version: &str) -> Result<Manifest> {
     if text.len() > MAX_MANIFEST_BYTES {
         return Err(HostError::LimitExceeded { limit: "manifest size exceeds 64 KiB".into() });
     }
+    let value: Value = serde_json::from_slice(text).map_err(|error| invalid("manifest", error.to_string()))?;
+    if let Some(minimum) = value.get("min_host_version") {
+        let minimum = minimum.as_str().ok_or_else(|| invalid("min_host_version", "must be a semantic version string, e.g. \"1.2.3\""))?;
+        let required = semver::Version::parse(minimum)
+            .map_err(|_| invalid("min_host_version", "must be a complete semantic version, e.g. \"1.2.3\""))?;
+        let current = semver::Version::parse(host_version)
+            .map_err(|_| invalid("min_host_version", format!("{app} has an invalid host version `{host_version}`")))?;
+        if current.cmp_precedence(&required).is_lt() {
+            return Err(invalid("min_host_version", format!("needs {app} {minimum} or newer; this version of {app} is {host_version}; update {app}")));
+        }
+    }
     // A plugin from before capabilities names its API in `runtime.api`: say so plainly.
-    if let Ok(value) = serde_json::from_slice::<Value>(text)
-        && let Some(api) = value.get("runtime").and_then(|runtime| runtime.get("api"))
-    {
+    if let Some(api) = value.get("runtime").and_then(|runtime| runtime.get("api")) {
         let api = api.as_str().map(|api| api.chars().take(64).collect::<String>()).unwrap_or_else(|| "an older plugin API".into());
         return Err(HostError::UnsupportedCapability {
             capability: api.clone(),
@@ -760,13 +813,15 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
     if manifest.description.chars().count() > 240 || manifest.description.chars().any(char::is_control) {
         return Err(invalid("description", "requires at most 240 printable characters"));
     }
+    check_capability_declarations(&manifest.capabilities, &manifest.optional_capabilities)?;
     check_capabilities(&manifest.capabilities, app)?;
+    let granted = manifest.granted_capabilities();
     if let Some(runtime) = &manifest.runtime {
         if runtime.is_importer() {
             if !manifest.capabilities.iter().any(|capability| capability.starts_with("formats@")) {
                 return Err(invalid("capabilities", "an importer needs the formats capability: \"capabilities\": [\"formats@0.1\"]"));
             }
-        } else if manifest.capabilities.iter().any(|capability| capability.starts_with("evaluate@")) {
+        } else if granted.iter().any(|capability| capability.starts_with("evaluate@")) {
             return Err(invalid("capabilities", "evaluate checks an importer's result: only an importer (formats) asks for it"));
         } else if !manifest.capabilities.iter().any(|capability| capability.starts_with("commands@")) {
             return Err(invalid("capabilities", "a plugin with a runtime needs the commands capability: \"capabilities\": [\"commands@0.1\"]"));

@@ -125,8 +125,14 @@ impl<H: PluginHost> old_formats::evaluate::Host for State<H> {
 }
 
 /// Links a 0.1 component against its world without instantiating it (`plugin check`).
-pub(super) fn check_link<H: PluginHost + 'static>(engine: &Engine, component: &Component, importer: bool) -> wasmtime::Result<()> {
+pub(super) fn check_link<H: PluginHost + 'static>(
+    engine: &Engine,
+    component: &Component,
+    importer: bool,
+    granted: &[String],
+) -> wasmtime::Result<()> {
     let mut linker = Linker::<State<H>>::new(engine);
+    super::link_host_query(&mut linker, granted)?;
     if importer {
         importer_bindings::ImporterPlugin::add_to_linker::<_, HasSelf<_>>(&mut linker, |s| s)?;
         importer_bindings::ImporterPluginPre::new(linker.instantiate_pre(component)?)?;
@@ -146,6 +152,7 @@ pub(super) fn call_entry<H: PluginHost + 'static>(
     params: &str,
 ) -> wasmtime::Result<Result<String, HostError>> {
     let mut linker = Linker::new(engine);
+    super::link_host_query(&mut linker, &store.data().granted_capabilities)?;
     bindings::CommandPlugin::add_to_linker::<_, HasSelf<_>>(&mut linker, |s| s)?;
     let guest = bindings::CommandPlugin::instantiate(&mut *store, component, &linker)?;
     Ok(guest.craft_plugin_entry().call_execute(&mut *store, entry, &params.to_owned())?.map_err(newer))
@@ -161,6 +168,7 @@ pub(super) fn call_import<H: PluginHost + 'static>(
     options: &str,
 ) -> wasmtime::Result<Result<String, HostError>> {
     let mut linker = Linker::new(engine);
+    super::link_host_query(&mut linker, &store.data().granted_capabilities)?;
     importer_bindings::ImporterPlugin::add_to_linker::<_, HasSelf<_>>(&mut linker, |s| s)?;
     let guest = importer_bindings::ImporterPlugin::instantiate(&mut *store, component, &linker)?;
     let file = old_formats::source::FileInfo { name: file.name.clone(), size: file.size };

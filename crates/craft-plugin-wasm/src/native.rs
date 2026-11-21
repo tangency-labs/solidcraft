@@ -25,6 +25,19 @@ mod bindings {
 include!(concat!(env!("OUT_DIR"), "/aliases.rs"));
 include!(concat!(env!("OUT_DIR"), "/importer.rs"));
 
+// A separate package lets both frozen 0.1 and current 0.2 components negotiate capabilities.
+mod host_bindings {
+    wasmtime::component::bindgen!({ path: "../craft-plugin/wit-host", world: "host-query" });
+}
+use host_bindings::craft::host::capabilities;
+
+fn link_host_query<H: PluginHost + 'static>(linker: &mut Linker<State<H>>, granted: &[String]) -> wasmtime::Result<()> {
+    if granted.iter().any(|capability| capability.starts_with("host@")) {
+        host_bindings::HostQuery::add_to_linker::<_, wasmtime::component::HasSelf<_>>(linker, |s| s)?;
+    }
+    Ok(())
+}
+
 const MAX_CALLS: usize = 256;
 /// An importer streams its file in chunks and reports progress as it goes.
 const MAX_IMPORT_CALLS: usize = 1 << 20;
@@ -97,6 +110,7 @@ struct State<H> {
     commands: BTreeMap<String, CommandSchema>,
     /// Sensitive command groups both the manifest requests and the app grants.
     groups: BTreeSet<String>,
+    granted_capabilities: Vec<String>,
     effect: Effect,
     folders: BTreeMap<String, Folder>,
     staged: BTreeMap<(String, PathBuf), PendingWrite>,
@@ -178,6 +192,14 @@ impl<H: PluginHost> State<H> {
             })?;
         }
         Ok(())
+    }
+}
+impl<H: PluginHost> capabilities::Host for State<H> {
+    fn granted(&mut self) -> Vec<String> {
+        if self.check().is_err() {
+            return Vec::new();
+        }
+        self.granted_capabilities.clone()
     }
 }
 impl<H: PluginHost> types::Host for State<H> {}
@@ -703,7 +725,7 @@ pub(super) fn run<H: PluginHost + 'static>(
         Ok(prepared) => prepared,
         Err(error) => return (host, Err(error)),
     };
-    let (mut state, outcome) = execute(host, runtime, entry, params, compiled, commands, folders);
+    let (mut state, outcome) = execute(host, runtime, entry, params, compiled, commands, folders, manifest.granted_capabilities());
     let result = (|| match outcome {
         Ok(value) => match state.host.commit_transaction() {
             Ok(()) => state.publish_writes().map(|()| value),
@@ -730,12 +752,14 @@ fn execute<H: PluginHost + 'static>(
     (engine, component, stack): (Engine, Component, usize),
     (commands, groups): (BTreeMap<String, CommandSchema>, BTreeSet<String>),
     folders: BTreeMap<String, Folder>,
+    granted_capabilities: Vec<String>,
 ) -> (State<H>, Result<Value>) {
     let limits = &runtime.limits;
     let state = State {
         host,
         commands,
         groups,
+        granted_capabilities,
         effect: entry.effect,
         folders,
         staged: BTreeMap::new(),
@@ -756,6 +780,7 @@ fn execute<H: PluginHost + 'static>(
             Wit::V0_1 => v0_1::call_entry(&engine, &mut store, &component, &entry.name, &params),
             Wit::Current => {
                 let mut linker = Linker::new(&engine);
+                link_host_query(&mut linker, &store.data().granted_capabilities)?;
                 bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 let guest = bindings::CommandPlugin::instantiate(&mut store, &component, &linker)?;
                 Ok(call_entry!(guest, &mut store, &entry.name, &params)?.map_err(host_error))
@@ -906,9 +931,10 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
     let wit = check_imports(&engine, &component)?;
     let link = |e: wasmtime::Error| component_error(format!("{e:#}"));
     if wit == Wit::V0_1 {
-        return v0_1::check_link::<Inert>(&engine, &component, importer).map_err(link);
+        return v0_1::check_link::<Inert>(&engine, &component, importer, &manifest.granted_capabilities()).map_err(link);
     }
     let mut linker = Linker::<State<Inert>>::new(&engine);
+    link_host_query(&mut linker, &manifest.granted_capabilities()).map_err(link)?;
     if importer {
         importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         importer_bindings::ImporterPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
@@ -1061,7 +1087,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
             read_bytes: 0,
             files: BTreeSet::new(),
             design: Vec::new(),
-            evaluate: manifest.capabilities.iter().any(|capability| capability.starts_with("evaluate@")),
+            evaluate: manifest.granted_capabilities().iter().any(|capability| capability.starts_with("evaluate@")),
             scratch: Vec::new(),
             evaluating: false,
         };
@@ -1079,6 +1105,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         host,
         commands: BTreeMap::new(),
         groups: BTreeSet::new(),
+        granted_capabilities: manifest.granted_capabilities(),
         effect: Effect::Open,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
@@ -1100,6 +1127,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
             Wit::V0_1 => v0_1::call_import(&engine, &mut store, &component, &entry.name, &file, &options),
             Wit::Current => {
                 let mut linker = Linker::new(&engine);
+                link_host_query(&mut linker, &store.data().granted_capabilities)?;
                 importer_bindings::ImporterPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)?;
                 let guest = importer_bindings::ImporterPlugin::instantiate(&mut store, &component, &linker)?;
                 Ok(call_import!(guest, &mut store, &entry.name, &file, &options)?.map_err(host_error))
