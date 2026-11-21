@@ -926,8 +926,9 @@ impl Assembly<'_> {
     /// rest so: read as the patch turned over, the solid came in with both faces on the patch
     /// and no volume. Turning such a face over is still right where the file has its loop the
     /// wrong way round, so a face is completed only where a face it shares an edge with lies on
-    /// the same torus facing the same way: then the patch is that face's, and this one is the
-    /// rest. The face gets the torus's two seams (a circle round the axis and one round the
+    /// a torus or a sphere facing the same way: then the patch is that face's, and this one is
+    /// the rest. That face may be on another surface: two rings joined into one body are each
+    /// the torus less the disc of it inside the other (#20550). The face gets the torus's two seams (a circle round the axis and one round the
     /// tube, through a new vertex, in the middle of the widest stretches of longitude and tube
     /// angle its loops keep clear of, where its torus is turned to start) as its outer bound,
     /// and its loops become its holes. A face on a sphere is completed the same way
@@ -1014,17 +1015,10 @@ impl Assembly<'_> {
                     break;
                 }
             }
-            let tol = self.tol;
-            let same = |s: &BSurface| match s {
-                BSurface::Torus { frame, major_radius: major, minor_radius: minor, .. } => {
-                    let (go, gz) = (Vec3::from(frame.origin), Vec3::from(frame.x_axis).cross(Vec3::from(frame.y_axis)));
-                    go.dist(o) <= tol
-                        && gz.cross(z).len() * (major_radius + minor_radius) <= tol
-                        && (major_radius - major).abs() <= tol
-                        && (minor_radius - minor).abs() <= tol
-                }
-                _ => false,
-            };
+            // The patch is a face of a closed surface facing the same way: on this torus, or on
+            // another torus or a sphere (a union of two rings is the torus of each less the part
+            // inside the other, so each face's loop bounds a patch of the other's surface).
+            let same = |s: &BSurface| matches!(s, BSurface::Torus { .. } | BSurface::Sphere { .. });
             if !outside || !self.patch_beside(fi, &loops, &users, same) {
                 continue;
             }
