@@ -1088,6 +1088,13 @@ fn periodic_seam_completion_splits_real_boundaries_and_keeps_their_shell() {
         seam.nurbs.as_ref().unwrap_or(&seam.curve),
         Curve::Spline { .. } | Curve::RationalSpline { .. }
     ));
+    if let Curve::Spline { knots, .. } | Curve::RationalSpline { knots, .. } =
+        seam.nurbs.as_ref().unwrap_or(&seam.curve)
+    {
+        // This clamped ruling's form must retain the seam parameter, not height.
+        assert_eq!(knots.first(), Some(&seam.interval[0]));
+        assert_eq!(knots.last(), Some(&seam.interval[1]));
+    }
     assert_eq!(seam.interval, [0.0, 1.0]);
     for &v in &seam.vertices {
         let [x, y, z] = completed.vertices[v as usize].point;

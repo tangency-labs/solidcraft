@@ -2794,15 +2794,24 @@ fn store_imported_seam_curve(
     env: &mut crate::topology::edge::NotifyEnv<'_>,
 ) -> Result<()> {
     let interval = b.edge(e)?.interval;
-    let mut curve = crate::topology::brep::p5::exact_bspline_of_edge(k, b, e, interval, 0.0)?
-        .ok_or_else(|| {
-            SolidError::topology(
-                OP,
-                TopologyFailure::CurveNotBSpline {
-                    entity: Some(EntityRef::Edge(e)),
-                },
-            )
-        })?;
+    let no_form = || {
+        SolidError::topology(
+            OP,
+            TopologyFailure::CurveNotBSpline {
+                entity: Some(EntityRef::Edge(e)),
+            },
+        )
+    };
+    let curve = crate::topology::brep::p5::exact_bspline_of_edge(k, b, e, interval, 0.0)?
+        .ok_or_else(no_form)?;
+    // An exact iso curve may still be an analytic Line or Ellipse with a NURBS
+    // base. Store that base explicitly: exporting the analytic kind can omit the
+    // form (Line) or convert the edge interval to its analytic parameter.
+    let mut curve = Curve::from(
+        crate::curve::from_parameters::b_spline_part(k, &curve)?
+            .ok_or_else(no_form)?
+            .into_owned(),
+    );
     curve.edit_parameterization_exactly(k, &interval)?;
     let mut trims = Vec::new();
     for eu in crate::topology::edge::edgeuses(b, e, None, None)? {
