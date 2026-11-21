@@ -9204,6 +9204,46 @@ mod tests {
         assert_eq!(error.unsupported_corner_cause(), None);
     }
 
+    /// The pentagonal pyramid with three of its five apex edges rounded by 0.5:
+    /// `do_fillet`'s result and the error info after it.
+    fn pyramid_apex() -> (Result<()>, ErrorInfo<FilletObject>) {
+        let mut k = Kernel::default();
+        let mut body = pentagonal_pyramid(&mut k);
+        let apex = crate::topology::brep::p1::vertices(&body, None)
+            .unwrap()
+            .into_iter()
+            .find(|vertex| crate::topology::vertex::point(&body, *vertex).unwrap().z > 1.0)
+            .unwrap();
+        let side_edges = crate::topology::brep::p1::edges(&body, None)
+            .unwrap()
+            .into_iter()
+            .filter(|edge| {
+                crate::topology::edge::vertices(&body, *edge, None)
+                    .unwrap()
+                    .contains(&Some(apex))
+            })
+            .collect::<Vec<_>>();
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &side_edges[..3], 0.5, 1, 1, 1.0)
+            .unwrap();
+        let result = session.do_fillet(&mut k);
+        (result, session.error_info().clone())
+    }
+
+    /// #19803: the failure a missing corner produces is the one `do_fillet`'s chain keeps a
+    /// failed classification's error under (`finish::is_missing_corner`): the pyramid's apex,
+    /// unsupported by its kind, gives it as the root of the later failure. Its corner made
+    /// no classification, so nothing is kept under it and the chain is as before.
+    #[test]
+    fn the_missing_corner_is_the_root_a_classification_error_goes_under() {
+        let (result, error) = pyramid_apex();
+        let e = result.unwrap_err();
+        assert!(finish::is_missing_corner(e.root_cause()), "{e:?}");
+        assert_eq!(error.code, FilletErrorType::CornerUnsupported as i32);
+        assert_eq!(error.unsupported_corner_cause(), None);
+    }
+
     #[test]
     fn a_no_room_refusal_after_an_unsupported_corner_names_no_stale_site() {
         let mut k = Kernel::default();
