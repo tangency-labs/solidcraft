@@ -103,6 +103,34 @@ limited to 16 MiB in total. Exceeding either limit reports a typed limit error.
 Panel support from #19516 is not present here. The host keeps the handler's
 bounded JSON result through a plain function for a future panel adapter.
 
+## Classifying points and reading surface normals
+
+A plugin entry with `"effect": "read"` can call `inspect.classify_points` through
+the `commands.run` WIT import, without a command-group grant. MCP callers use the existing `execute`
+tool with the same command and parameters:
+
+```json
+{"body":"Block","points":[[5,5,5],[10,23,20]],"face":"F2:bore"}
+```
+
+`body` is the name used by `model.faces`, including a placed copy's name. `points`
+contains 1–256 world-space points in millimetres (each coordinate finite and less
+than 1e9 in magnitude). Omit `face` to find each boundary point's face automatically;
+when supplied it is a face name from `model.faces` or a point on that face.
+The example face name must be replaced with one from the inspected body.
+
+The reply is `{body, results}`, with one result per point in input order:
+`{"class":"inside"}`, `{"class":"outside"}`, or
+`{"class":"on","face":"…","normal":[nx,ny,nz]}`. Classification uses exact trimmed
+geometry at the body's modelling tolerance. Holes and cavities are outside material;
+a hole wall's unit normal points into the hole and a boss wall's points away from
+its axis. Face names use the persistent naming system shared with `model.faces`.
+At an edge or vertex, `face` selects which incident face supplies the normal;
+otherwise the first containing face in `model.faces` order is used. Every `on`
+point must lie on the selected face when one is supplied. Mesh bodies, invalid
+references and points where a normal is undefined return an error. This command
+leaves the design and undo history unchanged.
+
 ## Installing
 
 **Install plugin…** in **Preferences > Plugins** (desktop only) picks a plugin `.zip`.
