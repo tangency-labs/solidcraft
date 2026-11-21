@@ -151,18 +151,18 @@ fn smaller_angle(a: [Vec2; 2], b: [Vec2; 2]) -> Option<(Vec2, Vec2, f64)> {
 
 impl Picked {
     fn edge(&self) -> Value {
-        json!({"body": self.body, "index": self.index, "path": self.path.iter().copied().map(ids::encode).collect::<Vec<_>>()})
+        json!({"body": self.body, "index": self.index, "path": self.path})
     }
 
     fn centre(&self) -> Value {
-        json!({"centre": {"body": self.body, "index": self.index}, "path": self.path.iter().copied().map(ids::encode).collect::<Vec<_>>()})
+        json!({"centre": {"body": self.body, "index": self.index}, "path": self.path})
     }
 
     /// One end of a straight edge as a corner, by its point in the design's frame.
     fn end(&self, app: &SolveApp) -> Option<Value> {
         let pick = EdgePick::Index { body: self.body.clone(), index: self.index };
         let [start, _]: [Vec3; 2] = app.session.doc.edge_line(&app.session.model, &pick, &self.path).ok()?;
-        Some(json!({"point": [start.x, start.y, start.z], "path": self.path.iter().copied().map(ids::encode).collect::<Vec<_>>()}))
+        Some(json!({"point": [start.x, start.y, start.z], "path": self.path}))
     }
 }
 
