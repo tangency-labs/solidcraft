@@ -5610,3 +5610,66 @@ fn a_cap_whose_rim_is_one_closed_edge_measures_its_whole_volume() {
     // The hemisphere: 2 pi R^3 / 3.
     assert_closed_solid(&text, 2, 2.0 * std::f64::consts::PI * 100.0_f64.powi(3) / 3.0);
 }
+
+/// #20514: a thin tube (rings 0.1 mm wide) whose circles are each one closed edge, the inner top
+/// circle's vertex on the far side. The two circles of a ring are told apart by size, and a
+/// coarse polygon of the outer one came out smaller than one of the inner, so a ring was read as
+/// its own hole and its face turned over: the volume was right and the area short by both rings.
+#[test]
+fn a_thin_ring_with_a_far_side_vertex_keeps_both_rings_in_its_area() {
+    let (ro, ri, h) = (15.5_f64, 15.4_f64, 10.0_f64);
+    let mut w = Entities::default();
+    // One closed circle edge at height `z` of radius `r`, its one vertex at `x` on the x axis.
+    let circle = |w: &mut Entities, z: f64, r: f64, x: f64| {
+        let a = w.axis([0.0, 0.0, z], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        let c = w.add(format!("CIRCLE('',#{a},{r:?})"));
+        let v = w.vertex([x, 0.0, z]);
+        w.add(format!("EDGE_CURVE('',#{v},#{v},#{c},.T.)"))
+    };
+    let bottom_outer = circle(&mut w, 0.0, ro, ro);
+    let top_outer = circle(&mut w, h, ro, ro);
+    let bottom_inner = circle(&mut w, 0.0, ri, ri);
+    let top_inner = circle(&mut w, h, ri, -ri);
+    // A face of several bounds, each one edge: `(edge, orientation, outer)`.
+    let face = |w: &mut Entities, bounds: &[(usize, bool, bool)], surface: usize, same_sense: bool| {
+        let mut ids = Vec::new();
+        for &(e, o, outer) in bounds {
+            let oe = w.add(format!("ORIENTED_EDGE('',*,*,#{e},.{}.)", if o { "T" } else { "F" }));
+            let l = w.add(format!("EDGE_LOOP('',(#{oe}))"));
+            let kind = if outer { "FACE_OUTER_BOUND" } else { "FACE_BOUND" };
+            ids.push(format!("#{}", w.add(format!("{kind}('',#{l},.T.)"))));
+        }
+        w.add(format!("ADVANCED_FACE('',({}),#{surface},.{}.)", ids.join(","), if same_sense { "T" } else { "F" }))
+    };
+    let plane_top = {
+        let a = w.axis([0.0, 0.0, h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("PLANE('',#{a})"))
+    };
+    let plane_bottom = {
+        let a = w.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("PLANE('',#{a})"))
+    };
+    let cyl_outer = {
+        let a = w.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("CYLINDRICAL_SURFACE('',#{a},{ro:?})"))
+    };
+    let cyl_inner = {
+        let a = w.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+        w.add(format!("CYLINDRICAL_SURFACE('',#{a},{ri:?})"))
+    };
+    let top = face(&mut w, &[(top_outer, true, true), (top_inner, false, false)], plane_top, true);
+    let bottom = face(&mut w, &[(bottom_outer, false, true), (bottom_inner, true, false)], plane_bottom, false);
+    let outside = face(&mut w, &[(bottom_outer, true, false), (top_outer, false, false)], cyl_outer, true);
+    let inside = face(&mut w, &[(bottom_inner, false, false), (top_inner, true, false)], cyl_inner, false);
+    let text = w.solid(&[top, bottom, outside, inside]);
+    let pi = std::f64::consts::PI;
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(imp.bodies[0].closed && imp.bodies[0].refused.is_none(), "{:?}", imp.warnings);
+    assert!(!imp.warnings.iter().any(|w| w.contains("turned over")), "{:?}", imp.warnings);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert!(rel(m.volume, pi * (ro * ro - ri * ri) * h) < 1e-4, "volume {}", m.volume);
+    // The two walls, and a ring at each end.
+    let area = 2.0 * pi * (ro + ri) * h + 2.0 * pi * (ro * ro - ri * ri);
+    assert!(rel(m.area, area) < 1e-4, "area {} vs {area}", m.area);
+}

@@ -1569,7 +1569,14 @@ impl<'t> Assembly<'t> {
         let shapes: Vec<Option<f64>> = edge_loops.iter().zip(&pcs).map(|(l, pc)| loop_area(l, pc, periods)).collect();
         let face = self.faces.get_mut(fi).ok_or("face reference")?;
         let marked = face.outer.and_then(|o| positions.iter().position(|p| *p == o));
-        let largest = shapes.iter().enumerate().filter_map(|(i, a)| a.map(|a| (i, a.abs()))).max_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| i);
+        // Which loop is largest is decided on finer polygons than the loops' sides are: nested
+        // loops of nearly one size (a thin ring) must not swap places by sampling.
+        let sizes: Vec<Option<f64>> = if edge_loops.len() > 1 {
+            edge_loops.iter().zip(&pcs).zip(&shapes).map(|((l, pc), coarse)| coarse.and(loop_area_sampled(l, pc, periods, 256))).collect()
+        } else {
+            shapes.clone()
+        };
+        let largest = sizes.iter().enumerate().filter_map(|(i, a)| a.map(|a| (i, a.abs()))).max_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| i);
         let outer = match (marked, largest) {
             // A marked outer loop that closes in (u, v) but another encloses more: that one.
             (Some(m), Some(l)) if shapes.get(m).copied().flatten().is_some() => l,
@@ -1910,11 +1917,20 @@ fn natural_periods(s: &BSurface) -> [bool; 2] {
 /// The signed area a loop encloses in (u, v) (positive counter-clockwise), or `None` when it
 /// does not close there (it winds around a periodic direction) or is degenerate.
 fn loop_area(l: &[(u32, bool)], pcs: &[Curve2], periodic: [bool; 2]) -> Option<f64> {
+    loop_area_sampled(l, pcs, periodic, 16)
+}
+
+/// [`loop_area`] with `steps` chords on each edge. A rational arc sampled evenly in its parameter
+/// is not sampled evenly in its angle, so a coarse polygon of one circle can be a percent smaller
+/// than a polygon of another circle of nearly the same size; telling nested loops apart by their
+/// size takes a finer one.
+fn loop_area_sampled(l: &[(u32, bool)], pcs: &[Curve2], periodic: [bool; 2], steps: u32) -> Option<f64> {
+    let steps = steps.max(1);
     let mut pts: Vec<[f64; 2]> = Vec::new();
     for (&(_, forward), c) in l.iter().zip(pcs) {
         let [a, b] = c.interval()?;
-        for k in 0..=16 {
-            let s = f64::from(k) / 16.0;
+        for k in 0..=steps {
+            let s = f64::from(k) / f64::from(steps);
             let t = if forward { a + (b - a) * s } else { b - (b - a) * s };
             pts.push(solidcore_ops::pcurve::eval(c, t)?);
         }
