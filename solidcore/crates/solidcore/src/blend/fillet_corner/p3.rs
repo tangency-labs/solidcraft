@@ -2670,6 +2670,20 @@ fn mixed_corner_rails_cross(
 pub const FACE_CLOSES_TO_A_POINT: &str = "a face beside the blended edge narrows to a point here, \
      where the edge touches another edge of that face tangentially, so no blend of any size fits";
 
+/// An endpoint tangent for the face-closing test: an unevaluable tangent cannot match,
+/// but cancellation stops the walk.
+fn face_closing_tangent(
+    evaluated: Result<crate::topology::edgeuse::p3::NormalizedEval>,
+) -> Result<Option<Vec3>> {
+    match evaluated {
+        Ok(e) => Ok(e
+            .first_deriv
+            .filter(|d| d.length_squared() > crate::math::EFF_ZERO * crate::math::EFF_ZERO)),
+        Err(e) if e.is_cancelled() => Err(e),
+        Err(_) => Ok(None),
+    }
+}
+
 /// Not upstream (#16404): whether a face around the vertex closes to a cusp between a blended
 /// edge and an edge of the other convexity not blended there: in some face's loop the two edges
 /// leave the vertex along one tangent, within `tangency_tol_radians` and in the same sense, so
@@ -2690,7 +2704,8 @@ pub const FACE_CLOSES_TO_A_POINT: &str = "a face beside the blended edge narrows
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] for a walk that does not close or an edge use without a
-/// neighbour, radial partner or edge; those of the tangency and convexity tests.
+/// neighbour, radial partner or edge; [`SolidError::Cancelled`] from endpoint evaluation;
+/// those of the tangency and convexity tests.
 pub fn face_closes_to_a_point(
     k: &Kernel,
     b: &mut Brep,
@@ -2710,11 +2725,10 @@ pub fn face_closes_to_a_point(
         .map(|&eu| edge_of(b, eu))
         .collect::<Result<Vec<_>>>()?;
     // the edge use's tangent at its start (`at` 0) or end (`at` 1), along its own sense
-    let tangent = |b: &Brep, eu: EdgeuseId, at: f64| -> Option<Vec3> {
-        crate::topology::edgeuse::p3::normalized_evaluate_read_only(k, b, eu, at, false, true)
-            .ok()
-            .and_then(|e| e.first_deriv)
-            .filter(|d| d.length_squared() > crate::math::EFF_ZERO * crate::math::EFF_ZERO)
+    let tangent = |b: &Brep, eu: EdgeuseId, at: f64| -> Result<Option<Vec3>> {
+        face_closing_tangent(crate::topology::edgeuse::p3::normalized_evaluate_read_only(
+            k, b, eu, at, false, true,
+        ))
     };
     let mut eu = start_eu;
     let mut steps = 0usize;
@@ -2730,7 +2744,7 @@ pub fn face_closes_to_a_point(
         let (e0, e1) = (edge_of(b, leaving)?, edge_of(b, arriving)?);
         if e0 != e1 && blended.contains(&e0) != blended.contains(&e1) {
             // both pointing away from the vertex
-            let cusp = match (tangent(b, leaving, 0.0), tangent(b, arriving, 1.0)) {
+            let cusp = match (tangent(b, leaving, 0.0)?, tangent(b, arriving, 1.0)?) {
                 (Some(d0), Some(d1)) => {
                     ignored(d0.angle_between(-d1))?.is_some_and(|a| a < tangency_tol_radians)
                 }
@@ -2787,6 +2801,37 @@ fn check_nx1_degeneracy(k: &Kernel, b: &mut Brep, vertex: VertexId, eu: EdgeuseI
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn face_closing_tangents_propagate_cancellation_only() {
+        use crate::topology::edgeuse::p3::NormalizedEval;
+
+        let cancelled = SolidError::Cancelled {
+            operation: "test::endpoint_tangent",
+        };
+        let error = face_closing_tangent(Err(cancelled.clone())).unwrap_err();
+        assert_eq!(error, cancelled);
+        for error in [
+            SolidError::invalid_input(OP_CREATE, "unevaluable endpoint"),
+            SolidError::Unsupported {
+                operation: OP_CREATE,
+                reason: "unsupported endpoint",
+            },
+        ] {
+            assert_eq!(face_closing_tangent(Err(error)).unwrap(), None);
+        }
+        for (tangent, expected) in [
+            (None, None),
+            (Some(Vec3::ZERO), None),
+            (Some(Vec3::X), Some(Vec3::X)),
+        ] {
+            let evaluated = NormalizedEval {
+                point: Point3::ZERO,
+                first_deriv: tangent,
+            };
+            assert_eq!(face_closing_tangent(Ok(evaluated)).unwrap(), expected);
+        }
+    }
 
     #[test]
     fn filleted_edgeuses_other_than_two_are_typed_failures() {
