@@ -2116,7 +2116,8 @@ const BOTTLE_E8_MOVED_ENDS: [[f64; 3]; 3] = [
 /// fit error), their end vertices 26, 27 and 38 follow (4.07e-5, 4e-5, 4e-5 against main's
 /// 8.05e-5), and edge use 190's trim (face 16, a B-spline) is refit at that tolerance;
 /// nothing else of the result moves (same counts, status, vertex points and edge curves;
-/// Level 2 reports the same two lines as main). Proved here, on the result:
+/// Level 2 reported the same two lines as main before #17739 covered them). Proved here, on
+/// the result:
 /// - the two edges (found by their end points, [`BOTTLE_E8_MOVED_ENDS`], not by arena id)
 ///   are at 4e-5 and their trim on face 16 (a B-spline) is within it: `trim_image_gap_bound`,
 ///   a proved bound on the distance between the trim's image and the edge curve, is at most
@@ -2127,8 +2128,9 @@ const BOTTLE_E8_MOVED_ENDS: [[f64; 3]; 3] = [
 /// - the three end vertices (26, 38 and 27, at 4e-5, 4e-5 and 4.07e-5) each cover the end
 ///   of every edge curve that ends there, the distance's rounding (`gamma(8)` of the
 ///   coordinates' size, times sqrt 3) counted against the tolerance;
-/// - Level 2 reports exactly the two vertex/face gaps both kernels report (4.71e-5 against
-///   3.65e-5, unchanged by the raise) and nothing else;
+/// - Level 2 reports nothing: main's two vertex/face gaps (4.71e-5 against 3.65e-5, half of
+///   vertex 22's tolerance, unchanged by the raise) are covered by #17739's vertex step,
+///   which raises the read's vertex 22 to cover twice its gap;
 /// - the mass properties, now and before ([`BOTTLE_E8_BEFORE`]), are each within the case's
 ///   accuracy (1e-4 of its scale: the area, the volume, `R` the box's half diagonal for a
 ///   centroid coordinate, `V R^2` for a moment, or the value's own where larger) of the exact
@@ -2238,15 +2240,12 @@ fn bottle_e8_fillet_moved_by_the_lazy_raise_stays_within_its_proved_bounds() {
         "the lowered vertices"
     );
 
+    // (main reports vertex 22's two vertex/face gaps, offset 4.7135459e-5 against half its
+    // 7.30e-5; #17739's healer covers twice that gap, so the check is clean)
     let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
         .unwrap()
         .lines();
-    let gap = "Vertex/Face gap across Edgeuse {} larger than tol (offset=4.7135459e-05, \
-               tolerance=3.6509706e-05)";
-    assert_eq!(lines.len(), 2, "{lines:#?}");
-    for (line, end) in lines.iter().zip(["end", "start"]) {
-        assert!(line.contains(&gap.replace("{}", end)), "{lines:#?}");
-    }
+    assert!(lines.is_empty(), "{lines:#?}");
 
     let m = brep_mass_properties_default(&k, &mut b, ACCURACY, 1.0, Vec3::ZERO).unwrap();
     let mut now = vec![m.properties.area, m.properties.volume, m.properties.mass];
