@@ -1226,6 +1226,34 @@ impl Body {
         })
     }
 
+    /// The outward unit normal at `p` on trimmed record face `face`, within the body's
+    /// modelling tolerance, or `None` off that face. Uses the same tolerance as
+    /// [`Body::classify_points`] and the material-side sense of [`Body::face_normal_at_edge`].
+    ///
+    /// # Errors
+    /// [`Error::Argument`] for an invalid face index or non-finite point; those of
+    /// [`Body::face_normal_at_edge`] for an undefined normal or material side.
+    pub fn face_normal_at_point(
+        &self,
+        order: &Order,
+        face: usize,
+        p: [f64; 3],
+    ) -> Result<Option<Normal>> {
+        let (f, p) = (order::face(order, face)?, point(p)?);
+        let n = with_body("face_normal_at_point", self, |k, b| {
+            let fu = match outer_faceuse(b, f)? {
+                Ok(fu) => fu,
+                Err(e) => return Ok(Err(e)),
+            };
+            let tol = brep_zone_tol_3d(k, b, SmallTopoType::NormalSize);
+            q::face_normal_at_point(k, b, f, p, tol, fu).map(Ok)
+        })??;
+        Ok(n.map(|n| Normal {
+            value: array(n.value),
+            bound: n.bound,
+        }))
+    }
+
     /// The area of record face `face` (`SmApiFaceComputeArea`) at `relative_accuracy`, as the
     /// kernel's contract takes it (ops passes it on as given). **Estimated, not proved**
     /// ([`MassPropertiesEstimate`]).
@@ -1953,6 +1981,35 @@ pub(crate) mod tests {
                 }
             }
             assert_eq!((inner, outer), (24, 24), "turned {turned}");
+        }
+    }
+
+    /// The cavity wall at x=3 faces +X into void; the outside wall at x=0 faces -X.
+    /// This is independent of the surfaces' parameterisation and record face order.
+    #[test]
+    fn point_normals_face_out_of_material_in_record_order() {
+        all_fixes();
+        for turned in [false, true] {
+            let b = cavity(turned);
+            let mut order = kernel_order(&b);
+            order.faces.reverse();
+            for (p, want) in [([3., 5., 5.], [1., 0., 0.]), ([0., 5., 5.], [-1., 0., 0.])] {
+                let normals: Vec<_> = (0..order.faces.len())
+                    .filter_map(|f| b.face_normal_at_point(&order, f, p).unwrap())
+                    .collect();
+                assert_eq!(normals.len(), 1);
+                for n in normals {
+                    for (value, expected) in n.value.into_iter().zip(want) {
+                        assert!((value - expected).abs() < 1e-12, "{n:?}");
+                    }
+                }
+            }
+            assert!(b
+                .face_normal_at_point(&order, usize::MAX, [0., 0., 0.])
+                .is_err());
+            assert!(b
+                .face_normal_at_point(&order, 0, [f64::NAN, 0., 0.])
+                .is_err());
         }
     }
 

@@ -23,6 +23,7 @@
 //! | [`closest_to_members`], [`edge_curve_copy`] | not upstream: `ShapeCurveSolve`/`ShapePointSolve` minimum of a curve or point against faces and edges |
 //! | [`closest_between_faces`] | not upstream: selected-shape minimum on trimmed faces and their boundaries |
 //! | [`point_distance`], [`vertex_distance`], [`edge_face_gap_samples`], [`edgeuse_face_frame`] | not upstream: certified distances (the last on `SmCrvSrfGapFunction`'s samples) |
+//! | [`face_normal_at_point`] | not upstream: the normal at a point on a trimmed face, in its chosen use's sense |
 //! | [`box_max_distance_to_point`] | not upstream: [`Extent3d::max_distance_to_point`] of a box given by two corners |
 //! | `count_contained_samples`, `edge_piece_points`, `point_in_solid`, `target_curve_crossings` (private) | `sm_CountContainedSamples`, `sm_PointInSolid`, its `BrepCurveSolve` |
 //! | `solution_point` (private) | `SmSolution::GetPoint` |
@@ -1859,6 +1860,21 @@ pub fn edgeuse_face_frame(
 ) -> Result<EdgeuseFaceFrame> {
     let f = eu::face(brep, eu)?
         .ok_or_else(|| SolidError::invalid_input(OP, "edge use bounds no face"))?;
+    let at = evaluate_binormal(k, brep, eu, parameter, false, &BinormalOptions::default())?;
+    Ok(EdgeuseFaceFrame {
+        uv: at.uv,
+        normal: face_normal_at_uv(k, brep, f, at.uv, faceuse)?,
+    })
+}
+
+/// A face's normal at its surface parameters, in the explicitly chosen face use's sense.
+fn face_normal_at_uv(
+    k: &Kernel,
+    brep: &Brep,
+    f: FaceId,
+    uv: Point2,
+    faceuse: FaceuseId,
+) -> Result<UnitVector> {
     let use_ = brep.faceuse(faceuse)?;
     if use_.face != Some(f) {
         return Err(SolidError::invalid_input(OP, "a faceuse of another face"));
@@ -1873,21 +1889,67 @@ pub fn edgeuse_face_frame(
             });
         }
     };
-    let at = evaluate_binormal(k, brep, eu, parameter, false, &BinormalOptions::default())?;
     let surface = brep
         .face(f)?
         .surface
         .as_ref()
         .ok_or_else(|| SolidError::invalid_input(OP, "face without a surface"))?;
-    let n = qbrep::evaluate_surface_normal(k, Some(surface), at.uv)?;
+    let n = qbrep::evaluate_surface_normal(k, Some(surface), uv)?;
     let len = n.length();
     if !(len > 0.0 && len.is_finite()) {
         return Err(SolidError::invalid_input(OP, "zero normal"));
     }
-    Ok(EdgeuseFaceFrame {
-        uv: at.uv,
-        normal: certify_normal(k, surface, at.uv, n * (sign / len), sense)?,
-    })
+    certify_normal(k, surface, uv, n * (sign / len), sense)
+}
+
+/// The unit normal at `point` on the trimmed face `f`, within `tolerance`,
+/// in the sense of `faceuse`; `None` when the point is off that face. The existing
+/// point/face classifier supplies the surface parameters, including at edges.
+///
+/// # Errors
+///
+/// Those of [`crate::query::face::p1::point_3d_classify_at`] and
+/// [`edgeuse_face_frame`] (a singular normal or an unproved face-use sense).
+pub fn face_normal_at_point(
+    k: &Kernel,
+    brep: &mut Brep,
+    f: FaceId,
+    point: Point3,
+    tolerance: f64,
+    faceuse: FaceuseId,
+) -> Result<Option<UnitVector>> {
+    if point.is_undef() || !(tolerance.is_finite() && tolerance > 0.0) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "point and positive tolerance must be finite",
+        ));
+    }
+    let mut pc = PointClassification::new(tolerance);
+    let Some(uv) = crate::query::face::p1::point_3d_classify_at(
+        k,
+        brep,
+        f,
+        point,
+        tolerance,
+        true,
+        &mut pc,
+        crate::query::face::p1::Point3dClassifyOptions::default(),
+    )?
+    else {
+        return Ok(None);
+    };
+    if !matches!(
+        pc.point_class(),
+        PointClassType::Face | PointClassType::Edge | PointClassType::Vertex
+    ) {
+        return Ok(None);
+    }
+    let surface = face::surface(brep, f)?
+        .ok_or_else(|| SolidError::invalid_input(OP, "face without a surface"))?;
+    if point.distance(surface.evaluate_point(k, uv)?) > tolerance {
+        return Ok(None);
+    }
+    face_normal_at_uv(k, brep, f, uv, faceuse).map(Some)
 }
 
 /// [`edgeuse_face_frame`] of face `f`'s use of edge `e`, at the middle of the edge's
@@ -2514,6 +2576,41 @@ mod tests {
         assert!(surface_bound(&k, &s, p, Point2::new(0.5, 0.5))
             .unwrap()
             .is_some());
+    }
+
+    #[test]
+    fn point_normals_use_trim_and_the_chosen_face_sense() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let p = Point3::new(0.0, 1.0, 1.5);
+        let mut found = 0;
+        for f in get_faces(&b).unwrap() {
+            let (a, c) = face::faceuses(&b, f).unwrap();
+            let (a, c) = (a.unwrap(), c.unwrap());
+            if let Some(n) = face_normal_at_point(&k, &mut b, f, p, 1e-6, a).unwrap() {
+                let reversed = face_normal_at_point(&k, &mut b, f, p, 1e-6, c)
+                    .unwrap()
+                    .unwrap();
+                // The x=0 plane's unit normal has only an x component. Turning the
+                // chosen face use reverses it, regardless of the surface's parameters.
+                assert_eq!(n.value.x.abs(), 1.0);
+                assert_eq!((n.value.y, n.value.z), (0.0, 0.0));
+                assert_eq!(n.value, -reversed.value);
+                assert!(n.bound < 1e-12);
+                let off_trim = Point3::new(0.0, 3.0, 1.5);
+                assert_eq!(
+                    face_normal_at_point(&k, &mut b, f, off_trim, 1e-6, a).unwrap(),
+                    None
+                );
+                assert!(face_normal_at_point(&k, &mut b, f, p, -1.0, a).is_err());
+                let nonfinite = Point3::new(f64::NAN, 1.0, 1.5);
+                assert!(face_normal_at_point(&k, &mut b, f, nonfinite, 1e-6, a).is_err());
+                found += 1;
+            }
+        }
+        assert_eq!(found, 1);
     }
 
     #[test]

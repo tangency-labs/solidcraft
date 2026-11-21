@@ -9,7 +9,9 @@ use solidcraft_sketch::CurveKind;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
-use crate::schema::inspect::{BodiesDetail, DocumentBodies, GeometryDefect, TimelineDetail, TimelineRow};
+use crate::schema::inspect::{
+    BodiesDetail, ClassifiedPoint, ClassifyPointsParams, ClassifyPointsResult, DocumentBodies, GeometryDefect, TimelineDetail, TimelineRow,
+};
 use crate::schema::inspect::{
     BodyFailure, BodyFeaturesParams, BodyFigures, BodyListParams, BodyMeasurement, BodyName, BodyNames, BodyOutcome, BoundingBox,
     ColoredComponentsParams, ColoredComponentsResult, CommandEntry, CommandsParams, CurveShape, DocumentBody, DocumentBodyDetail,
@@ -22,6 +24,7 @@ use crate::schema::inspect::{
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const CLASSIFY_POINTS_CONTRACT: TypedContract<ClassifyPointsParams> = TypedContract::new();
 const COLORED_COMPONENTS_CONTRACT: TypedContract<ColoredComponentsParams> = TypedContract::new();
 const BODY_LIST_CONTRACT: TypedContract<BodyListParams> = TypedContract::new();
 const THREADS_CONTRACT: TypedContract<ModelThreadsParams> = TypedContract::new();
@@ -44,6 +47,17 @@ pub(super) mod appearance_gestures;
 mod body_features;
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("inspect.classify_points", "Classify Points", crate::checked!("inspect.classify_points", classify_points))
+        .icon("inspect")
+        .noundo().read_only()
+        .contract(&CLASSIFY_POINTS_CONTRACT)
+        .output(output_schema_for::<ClassifyPointsResult>)
+        .params(
+            "body: name; points: 1–256 world-space [x,y,z] in mm; face?: face name or point on a face → results in input order: \
+             {class: inside|outside|on}; on also gives face (persistent name) and normal (outward unit vector). Exact trimmed geometry at the body's \
+             modelling tolerance; mesh bodies refused. At shared edges/vertices, face selects the normal, otherwise the first containing face \
+             in model.faces order",
+        ),
     CommandSpec::new("inspect.colored_components", "Component Colors", crate::checked!("inspect.colored_components", colored_components))
         .at("SOLID", "INSPECT")
         .icon("colored_components")
@@ -767,6 +781,57 @@ fn model_edges(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// Read the existing exact classifier; face choice and normal evaluation also stay in the kernel.
+fn classify_points(s: &mut Session, p: &Value) -> Result<Value> {
+    use crate::schema::FaceRef;
+    use solidcraft_kernel::PointClass;
+
+    let cmd = "inspect.classify_points";
+    let args: ClassifyPointsParams = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    if args.body.is_empty() || args.body.len() > 512 {
+        return Err(bad(cmd, "`body` must be a name of 1 to 512 bytes"));
+    }
+    let st = s.world_state()?;
+    let b = st.body(&args.body).ok_or_else(|| bad(cmd, format!("no body `{}`", args.body)))?;
+    if b.body.is_mesh() {
+        return Err(bad(cmd, "point classification requires an exact body; mesh bodies are not supported"));
+    }
+    let names = solidcraft_doc::naming::face_names(b);
+    let face_at = |point: Vec3, selected: Option<usize>| -> Result<(usize, Vec3)> {
+        let candidates = selected.map_or(0..b.body.face_count(), |i| i..i + 1);
+        for index in candidates {
+            if let Some(normal) = b.body.face_normal_at_point(index, point)? {
+                return Ok((index, normal));
+            }
+        }
+        Err(bad(cmd, "the point must lie on the selected face, or on an exact boundary face when face is omitted"))
+    };
+    let selected = match args.face {
+        Some(FaceRef::Name(name)) => {
+            let index = names.iter().position(|n| *n == name).ok_or_else(|| bad(cmd, format!("no face `{name}` on `{}`", b.name)))?;
+            Some(index)
+        }
+        Some(FaceRef::Point(point)) => Some(face_at(point, None)?.0),
+        None => None,
+    };
+    let points: Vec<Vec3> = args.points.iter().map(|p| p.0).collect();
+    let classes = b.body.classify_points(&points)?;
+    let results = points
+        .into_iter()
+        .zip(classes)
+        .map(|(point, class)| match class {
+            PointClass::Inside => Ok(ClassifiedPoint::Inside),
+            PointClass::Outside => Ok(ClassifiedPoint::Outside),
+            PointClass::OnBoundary => {
+                let (index, normal) = face_at(point, selected)?;
+                let face = names.get(index).filter(|n| !n.is_empty()).cloned().ok_or_else(|| bad(cmd, "the boundary face has no persistent name"))?;
+                Ok(ClassifiedPoint::On { face, normal: normal.into() })
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
+    reply(cmd, ClassifyPointsResult { body: b.name.clone(), results, param_warnings: Vec::new() })
 }
 
 fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {

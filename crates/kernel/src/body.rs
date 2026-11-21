@@ -2011,6 +2011,17 @@ impl Body {
         }
     }
 
+    /// Outward unit normal at `point` on trimmed face `face_index`, within the body's
+    /// modelling tolerance. `None` off the face; no mesh or nearest-surface approximation.
+    pub fn face_normal_at_point(&self, face_index: usize, point: Vec3) -> Result<Option<Vec3>> {
+        let form = self.ops_body().ok_or_else(|| KernelError::Invalid("face normal needs an exact body".into()))?;
+        let (body, order) = &*form;
+        body.face_normal_at_point(order, face_index, point.into()).map(|n| n.map(|n| v3(n.value))).map_err(|e| match e {
+            solidcore_ops::Error::Internal(message) => KernelError::Internal(format!("face normal at point: {message}")),
+            e => KernelError::Failed(format!("face normal at point: {e}")),
+        })
+    }
+
     /// Where face `face_index` lies along `direction` when it is a plane square to it: its level
     /// from `origin` and the face's own tolerance ([`solidcore_ops::Body::face_square_level`]),
     /// exact, no mesh. `None` for a face that is not, a mesh body, an index out of range or a
