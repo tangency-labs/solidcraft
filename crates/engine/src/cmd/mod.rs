@@ -184,6 +184,7 @@ mod sketch_create;
 pub(crate) use sketch_create::{AT_MUST, MAX_TEXT_EDITS};
 mod sketch_divide;
 mod sketch_ends;
+mod sketch_merge_lines;
 mod sketch_equation;
 mod sketch_freeform;
 mod sketch_import;
@@ -478,6 +479,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_create::COMMANDS.iter());
     v.extend(sketch_construction::COMMANDS.iter());
     v.extend(sketch_divide::COMMANDS.iter());
+    v.extend(sketch_merge_lines::COMMANDS.iter());
     v.extend(sketch_equation::COMMANDS.iter());
     v.extend(sketch_constraints::COMMANDS.iter());
     v.extend(sketch_import::COMMANDS.iter());
