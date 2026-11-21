@@ -25,6 +25,7 @@ fn schemas_and_the_key_check_agree() {
         &[
             "bodies",
             "effort",
+            "exact_brep",
             "format",
             "images",
             "lay_on_print_faces",
@@ -33,7 +34,10 @@ fn schemas_and_the_key_check_agree() {
             "name",
             "objects",
             "path",
+            "physics",
+            "purpose",
             "quality",
+            "render_setup",
             "static",
             "velocity",
         ],
@@ -344,6 +348,11 @@ fn strict_keeps_todays_errors() {
         ("file.export", json!({"path": at("a.obj"), "lay_on_print_faces": true})),
         ("file.export", json!({"path": at("a.stl"), "lay_on_print_faces": "yes"})),
         ("file.export", json!({"path": at("a.3mf"), "lay_on_print_faces": 1})),
+        ("file.export", json!({"path": at("a.urdf"), "physics": true})),
+        ("file.export", json!({"path": at("a.sdf"), "physics": "yes"})),
+        ("file.export", json!({"path": at("a.step"), "physics": true})),
+        ("file.export", json!({"path": at("a.urdf"), "render_setup": "Studio"})),
+        ("file.export", json!({"path": at("a.sdf"), "render_setup": 5})),
         ("file.export_stl", json!({"path": at("a.stl"), "lay_on_print_faces": "yes"})),
         ("file.export_3mf", json!({"path": at("a.3mf"), "lay_on_print_faces": [true]})),
         ("doc.open", json!({"path": ""})),
@@ -396,6 +405,29 @@ fn the_export_type_reads_each_key_only_for_its_format() {
     }
     let e = read(json!({"path": "a.stl", "lay_on_print_faces": "yes"})).expect_err("a string");
     assert!(e.contains("must be true or false"), "{e}");
+}
+
+/// OpenUSD's `purpose` and `exact_brep` are refused for every other format, URDF, SDF and laid-out
+/// prints included, by the type and by the handler alike.
+#[test]
+fn openusd_only_options_are_refused_for_every_other_format() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    let calls = [
+        (json!({"path": "robot.urdf", "purpose": "distribution"}), "`purpose` is for OpenUSD"),
+        (json!({"path": "world.sdf", "purpose": "interchange"}), "`purpose` is for OpenUSD"),
+        (json!({"path": "robot.urdf", "exact_brep": true}), "`exact_brep` is for OpenUSD"),
+        (json!({"path": "part.step", "exact_brep": false}), "`exact_brep` is for OpenUSD"),
+        (json!({"path": "part.stl", "lay_on_print_faces": true, "exact_brep": false}), "`exact_brep` is for OpenUSD"),
+    ];
+    for (p, says) in calls {
+        let typed = serde_json::from_value::<ExportParams>(p.clone()).expect_err("the type refuses").to_string();
+        assert!(typed.contains(says), "{p}: {typed}");
+        let handled = s.execute("file.export", &p).expect_err("the handler refuses").to_string();
+        assert!(handled.contains(says), "{p}: {handled}");
+    }
+    // Absent or null, they are the defaults for any format.
+    assert!(serde_json::from_value::<ExportParams>(json!({"path": "robot.urdf", "purpose": null, "exact_brep": null})).is_ok());
 }
 
 /// (`conforms` does not read `oneOf`, so `quality` and `objects` values are checked by the type,
