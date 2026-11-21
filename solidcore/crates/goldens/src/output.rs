@@ -228,6 +228,19 @@ impl Topology {
     }
 }
 
+/// The status of an [`SolidError::Upstream`], or of a typed blend failure that replaced one
+/// (solidcore's `BlendFailure`, #13790), as the blend runners read a status: other errors,
+/// including other areas' typed failures, give `None`, as they did before the blend sites
+/// were converted, so a runner's rows stay as they were.
+#[must_use]
+pub fn blend_status(e: &SolidError) -> Option<i32> {
+    match e {
+        SolidError::Upstream { code, .. } => Some(*code),
+        e if e.blend_failure().is_some() => solidcore::error::upstream_status(e),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::float_bits;

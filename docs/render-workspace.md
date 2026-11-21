@@ -10,6 +10,9 @@ the asynchronous protocol, image limits, captured revisions and PNG export. The 
 `ui.render` snapshot remains a separate route.
 
 Choose **Render** in the workspace switcher after finishing a modelling operation.
+A running Inspect tool that only picks what an analysis shows (Isocurve, Curvature Comb,
+Minimum Radius, Mass Center, Continuity) does not lock the switcher: choosing Render ends
+the tool as Esc does. Isocurve's curves stay on.
 The current integrated GPU renderer shows a separate product scene. Return to Design
 restores its camera, projection preference and existing viewport drawing policy.
 New native setups select CPU ray tracing with progressive sampling when the installed
@@ -39,6 +42,12 @@ image uses the nearest bounded pixel dimensions and picking uses that captured
 aspect. Final output size and saved sampling settings are unchanged. Invalid
 authored dimensions/sampling are refused before constructing the small live copy. An older image is marked as updating and cannot
 be used to pick geometry against a different projection.
+
+**Pause live** freezes the current live image. **Close Render Image**
+(`render.result.close`) and returning to **Model Preview**
+(`render.result.view {view: "model"}`) stop automatic live rendering and show the
+fast model preview. **Resume live** restarts automatic rendering. Completed
+render images remain retained for viewing and export.
 
 Automatic images belong to an isolated scratch session. They do not enter retained
 results or replace the completed image selected for Copy, Export or Regrade. An
@@ -439,7 +448,7 @@ distance, yaw, pitch, roll, FOV and up axis as view state. It neither edits the 
 nor settles a stale model. The UI honours its up axis in Render; the Design camera
 is restored when returning. The camera moves exactly as in Design: the navigation preset,
 Orbit around, zoom to the cursor, the SpaceMouse, the middle double-click, F6 and the axis
-view or navigation cube all work and
+view or axes navigator all work and
 **Fit Product** frames visible product bodies without including sketches or selection.
 
 In the normal workflow, **Fit Product**, entry fit, product drawing, navigation,
@@ -490,18 +499,25 @@ reports that product viewport preview is unavailable, rather than silently using
 opaque CPU snapshot path to approximate transparent appearances.
 
 GPU product batches are separate from Design batches while sharing the installed
-device and pipelines. Model/visibility/appearance changes update the product scene;
-camera movement updates uniforms without rebuilding vertices. Selection and section
-state do not change the product buffers. On desktop the preview takes up to eight of
-the device's largest buffers of vertex geometry (2 GiB with the usual 256 MiB buffers,
-never more than 2 GiB); uploads are split into buffers within that size. The web keeps
-a 128 MiB budget. The budget is checked before allocation, and a refusal names the
-scene's geometry size, the limit and how to get under it (hide bodies in Design). The
-upload itself runs under its own GPU error scopes: an allocation the device refuses is
-shown in the preview instead of drawing, and nothing else in the app changes how GPU
-errors are handled. Messages sit on a theme panel card so they stay readable on any
-background colour. The separate CPU image job keeps its own memory and work limits.
-Malformed/non-finite triangles and invalid opacity fail.
+device and pipelines. The product scene is extracted again when the document, the
+world state or body visibility changes; selection, section and camera state do not
+extract it, and camera movement updates uniforms only. Its triangles are kept in blocks
+with a palette slot per body and face look, as the Design scene's are: a colour, opacity
+or PBR material edit rewrites palette and material rows, an opacity class change a
+block's runs, and only a geometry change builds a block again. Bodies that are placed
+copies of one shared mesh (`product_scene::placements`: a part placed by several
+occurrences) in one look are drawn as instances of it: its triangles once and a placement
+each, so an assembly's preview holds each part once however often it is placed. The
+`ProductScene` contract is unchanged; other renderers still read its world-space meshes.
+On desktop the preview takes up to eight of the device's largest buffers of vertex
+geometry (2 GiB with the usual 256 MiB buffers, never more than 2 GiB); uploads are split
+into buffers within that size. The web keeps a 128 MiB budget. The budget is checked
+before allocation, and a refusal names the scene's geometry size, the limit and how to
+get under it (hide bodies in Design). The upload itself runs under its own GPU error
+scopes: an allocation the device refuses is shown in the preview instead of drawing, and
+nothing else in the app changes how GPU errors are handled. Messages sit on a theme panel
+card so they stay readable on any background colour. The separate CPU image job keeps its
+own memory and work limits. Malformed/non-finite triangles and invalid opacity fail.
 Reinstalling the host invalidates product uploads. This is not a general device-loss,
 render-job or cancellation protocol; those ownership mechanisms belong to R4.
 

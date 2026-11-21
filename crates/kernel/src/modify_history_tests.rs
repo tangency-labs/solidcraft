@@ -457,7 +457,11 @@ fn mirrored_copy_keeps_every_face_and_edge() {
 /// The block with a face painted: an authored boundary, so the cuts leave the faces they split
 /// across their slabs in pieces (none of them joined on their common supports).
 fn painted_cube() -> Body {
-    cube().with_paint(Some(crate::Paint { opacity: 1., faces: vec![crate::FacePaint { face: 0, color: [1., 0., 0.], opacity: 1. }] }))
+    cube().with_paint(Some(crate::Paint {
+        opacity: 1.,
+        faces: vec![crate::FacePaint { face: 0, color: [1., 0., 0.], opacity: 1., name: None }],
+        name: None,
+    }))
 }
 
 /// The block `b` with box cuts of each common shape: a notch through the back, a pocket, a

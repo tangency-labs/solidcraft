@@ -4,7 +4,8 @@
 //! once, before the first frame (and in every test context that draws icons). Every painter here
 //! draws from that set, in the set's colour roles for the current theme, accent and colour vision;
 //! colours never come from arbitrary caller tints. A name the set does not know draws the set's
-//! placeholder master; with no set installed nothing is drawn.
+//! placeholder master; with no set installed nothing is drawn. A host that draws another host's
+//! icons plus a few of its own installs [`IconSet::extended`] over that host's data.
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -14,8 +15,8 @@ pub mod glyphs;
 mod svg;
 
 pub use svg::{
-    Doc, IconData, IconSet, Look, MAX_ACCENTS, MAX_ROLES, PLACEHOLDER, Palette, Resolved, audit, render, render_tinted, set_theme_palette,
-    theme_palette, theme_palette_state,
+    Doc, IconData, IconExtension, IconSet, Look, MAX_ACCENTS, MAX_ADDED, MAX_ADDED_BYTES, MAX_ROLES, PLACEHOLDER, Palette, Resolved, audit, render,
+    render_tinted, set_theme_palette, theme_palette, theme_palette_state,
 };
 
 static INSTALLED: OnceLock<&'static IconSet> = OnceLock::new();
@@ -47,6 +48,11 @@ pub fn resolve(name: &str) -> Resolved {
 /// [`IconSet::doc_for`] in the installed set.
 pub fn doc_for(master: &str, px: u32) -> Option<&'static Doc> {
     installed().doc_for(master, px)
+}
+
+/// [`IconSet::add`] to the installed set.
+pub fn add(name: &str, src: &str) -> Result<(), String> {
+    installed().add(name, src)
 }
 
 /// [`IconSet::accent_index`] in the installed set.
@@ -86,7 +92,7 @@ pub fn clear_texture_cache(ctx: &egui::Context) {
 #[derive(Default)]
 struct CacheEntries {
     palette: Option<Palette>,
-    textures: HashMap<(&'static str, Look, u32, Finish), TextureHandle>,
+    textures: HashMap<(&'static str, Look, u32, Finish, bool), TextureHandle>,
 }
 
 /// Draw palette-owned icon artwork with an explicit opacity (0 to 1).
@@ -103,6 +109,11 @@ pub fn paint_on(p: &Painter, r: Rect, name: &str, dark: Option<bool>, opacity: f
 /// Monochrome flat controls on the application bar use its text token exactly.
 pub fn paint_app_bar(p: &Painter, r: Rect, name: &str, opacity: f32) {
     paint_with_ink(p, r, name, Some(true), opacity, Some(solidcraft_theme::Tokens::get().app_bar_text), Mirror::None);
+}
+
+/// A window icon is relative to the window presenting it.
+pub const fn window_icon(current: bool) -> &'static str {
+    if current { "window_here" } else { "window_other" }
 }
 
 /// Paint a single-colour icon in `ink`.
@@ -170,9 +181,16 @@ fn paint_resolved(p: &Painter, r: Rect, resolved: Resolved, look: Look, opacity:
         entries.palette = palette;
     }
     let map = &mut entries.textures;
-    let key = (resolved.master, look, px, finish);
+    let window_small = matches!(resolved.master, "window_here" | "window_other") && side <= 12.0;
+    let key = (resolved.master, look, px, finish, window_small);
     if let std::collections::hash_map::Entry::Vacant(slot) = map.entry(key) {
-        let Some(doc) = doc_for(resolved.master, px) else { return };
+        // These two masters use their heavier artwork only in tight logical slots.
+        let artwork_size = match resolved.master {
+            "window_here" | "window_other" if side <= 12.0 => 12,
+            "window_here" | "window_other" => 25,
+            _ => px,
+        };
+        let Some(doc) = doc_for(resolved.master, artwork_size) else { return };
         let pm = if finish == Finish::Danger { render_tinted(doc, look, px) } else { render(doc, look, px) };
         let Some(pm) = pm else { return };
         let mut image = egui::ColorImage::from_rgba_premultiplied([px as usize, px as usize], pm.data());

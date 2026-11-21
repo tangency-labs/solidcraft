@@ -1,6 +1,6 @@
 //! The SolidCraft fork's tangency-labs/smlib@64e5632 and 8f145ee (#2273, smlib#79 step 7):
 //! a variable round whose balls exist over the variable radius solver's stations is its
-//! definition (`fillet_round_as_definition`, WR-698).
+//! definition (WR-698).
 //!
 //! The capi's `variable_round_on_a_cone_is_its_definition` and
 //! `variable_round_quadratic_law_is_its_definition`: the top back edge (y = 30, z = 20) of a
@@ -436,29 +436,26 @@ fn grade(k: &mut Kernel, law: &Law, size: f64, off: Option<&dyn Fn(Point3) -> f6
     g
 }
 
-/// The kernel SolidCraft runs: every fix on but `geometric_g2_continuity`.
+/// The kernel SolidCraft runs: every fix on.
 fn solidcraft_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
 }
 
 /// The fork's behaviour these cases reach, and no other fix: the round as its definition
-/// (`fillet_round_as_definition`) on the G^n section generator, whose circle is a definition
-/// only where it is the ball's exact circle (`fillet_exact_arc_sections`); and the trace and
+/// on the G^n section generator, whose circle is a definition
+/// only where it is the ball's exact circle (as every circular round's section is); and the
+/// trace and
 /// ends the fork's net is certified over, the variable round's spans tested against its law
 /// (`fillet_variable_span_follows_fillet`, the fork's 4438859), with the blend corner's End at
 /// each end of the edge.
 fn fork_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes.fillet_round_as_definition = true;
-    k.fixes.fillet_exact_arc_sections = true;
     k.fixes.fillet_variable_span_follows_fillet = true;
     k
 }
@@ -488,7 +485,9 @@ fn off_a_cone(x: Point3, apex: [f64; 3], slope: f64) -> f64 {
 /// What the fork's grade of a variable round by its definition holds, on one kernel: its
 /// net's `spans` exactly, and the definition's evaluations and station solves at most (the
 /// fork's counts, about 5% over those measured on Linux; each solve seeded within the bound,
-/// two Newton steps at most).
+/// two Newton steps at most). The spans are not the fork's since #14405: the arc's rows over
+/// a piece are bounded by Taylor models as well as by interval series, which take the rails
+/// and the centre (moving together) as independent ranges, so wider spans certify.
 fn assert_definition(
     k: &mut Kernel,
     law: &Law,
@@ -525,11 +524,12 @@ fn assert_definition(
 /// 64e5632 and 8f145ee: r = 3 + x/10 is its definition, the solver's stations running from
 /// x = -10 to 30, where r stays from 2 to 6. The volume removed, 69.8731836896940, is the area
 /// the cone's section in each plane x = const cuts off the corner, integrated over x (the
-/// fork's figure): V = 11930.1268163103.
+/// fork's figure): V = 11930.1268163103. The net is 2 spans (the fork's 16, #14405), on the
+/// cone to 1.2e-13 and the volume the closed form's to 4.2e-10.
 #[test]
 fn the_variable_round_on_a_cone_is_its_definition() {
     for mut k in [fork_kernel(), solidcraft_kernel()] {
-        let g = assert_definition(&mut k, &LINEAR, Some(&off_the_cone), 16, (9100, 5250));
+        let g = assert_definition(&mut k, &LINEAR, Some(&off_the_cone), 2, (9100, 5250));
         let want = 11_930.126_816_310_3;
         assert!(
             (g.volume - want).abs() <= 1e-7 * want,
@@ -540,11 +540,12 @@ fn the_variable_round_on_a_cone_is_its_definition() {
 }
 
 /// 64e5632: the quadratic law of radii 3, 4, 3 has no closed form, so the round is graded as
-/// its definition only, its net within its certified bound of it.
+/// its definition only, its net within its certified bound of it: 11 spans (the fork's 22,
+/// #14405), 9.4e-8 off the definition under the bound 2.8e-6.
 #[test]
 fn the_variable_round_of_a_quadratic_law_is_its_definition() {
     for mut k in [fork_kernel(), solidcraft_kernel()] {
-        assert_definition(&mut k, &QUADRATIC, None, 22, (9600, 5450));
+        assert_definition(&mut k, &QUADRATIC, None, 11, (9600, 5450));
     }
 }
 
@@ -584,18 +585,4 @@ fn a_variable_round_whose_law_reaches_zero_over_the_stations_is_not_its_definiti
             g.volume
         );
     }
-}
-
-/// Without `fillet_round_as_definition` the round on the cone is its net alone, a B-spline,
-/// as before 0d43b4c (the fork's tests failed there).
-#[test]
-fn without_the_definition_fix_the_round_on_the_cone_is_not_its_definition() {
-    let mut k = fork_kernel();
-    k.fixes.fillet_round_as_definition = false;
-    let g = grade(&mut k, &LINEAR, 3.0, Some(&off_the_cone));
-    println!("{g:?}, volume {:.13}", g.volume);
-    assert!(
-        !g.faces.is_empty() && g.faces.iter().all(|f| !f.definition),
-        "{g:?}"
-    );
 }

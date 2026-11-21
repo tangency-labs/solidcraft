@@ -1,9 +1,9 @@
-//! `--step-corpus`: imports real-world STEP files with the clean-room `step-import`
-//! crate and builds every B-rep body with solidcore.
+//! `--step-corpus`: imports real-world STEP files with `solidcore-record`'s
+//! Part 21 parser and `step-export`'s mapper, and builds every B-rep body with solidcore.
 //!
 //! The corpus is STEP Tools' AP203/AP214 sample set, fetched into `corpus/steptools/`
 //! by `scripts/fetch-steptools-corpus.sh` (All Rights Reserved; never committed). Each
-//! body is encoded ([`step_import::flat::encode`]) and decoded again, and built from the
+//! body is encoded ([`crate::flat::encode`]) and decoded again, and built from the
 //! decoded [`Body`] ([`build_rust`]): per face its surface and the bounded 3D curves of
 //! its edge loops into `CreateFacesWithCurves`, then `SmApiStitchIntoSolid`, counts,
 //! `SmApiBrepIsManifoldSolid`, area and volume, `SmApiHealBrep`, and counts, manifold
@@ -15,7 +15,7 @@
 //! part of CI (the files are not in the repository).
 //!
 //! With `--constructor` each body is built instead through `SmBrepConstructor`
-//! ([`step_import::script::from_body`], run by [`crate::constructor`]): shared edges
+//! ([`crate::script::from_body`], run by [`crate::constructor`]): shared edges
 //! joined by the importer, face orientations from the file, no stitching; the stages
 //! after construction are the same (`construct` replaces `faces` and `stitch`).
 
@@ -58,7 +58,7 @@ use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{Brep, FaceId};
 use solidcore::{EntityRef, SolidError};
 
-use step_import::model::{self as sm, Body, Bound};
+use solidcore_record::step::model::{self as sm, Body, Bound};
 
 use crate::ssi::{exit_detail, glob_match};
 use crate::HarnessError;
@@ -416,7 +416,7 @@ fn counts(k: &mut Kernel, b: &Brep) -> Result<Vec<f64>, SolidError> {
 /// Diagnostics: face `fi` of `body` built alone in its own B-rep by the stitch
 /// recipe's `CreateFacesWithCurves` (Rust port): the kernel, the B-rep and the faces
 /// made; `None` where a step fails. With `adjust_domain` the surface is first given the
-/// face's STEP parameter box ([`step_import::script::step_uv_domain`]) by
+/// face's STEP parameter box ([`crate::script::step_uv_domain`]) by
 /// `AdjustSTEPUVDomain`, as the constructor recipe does.
 pub fn build_face_alone(
     body: &Body,
@@ -433,7 +433,7 @@ pub fn build_face_alone(
     .ok()?;
     let mut srf = make_surface(&k, &face.surface).ok()?;
     if adjust_domain {
-        if let Some(d) = step_import::script::step_uv_domain(body, face) {
+        if let Some(d) = crate::script::step_uv_domain(body, face) {
             let d = solidcore::geom::extent2d::Extent2d::from_bounds(d[0], d[1], d[2], d[3]);
             srf.adjust_step_uv_domain(&k, &d).ok()?;
         }
@@ -479,8 +479,7 @@ pub fn face_areas(
 ) -> Vec<(Option<f64>, Option<f64>)> {
     use solidcore::mass::integrator::properties::face_area;
     let mut out = Vec::new();
-    let script =
-        step_import::script::from_body(body, step_import::script::FromBodyOptions::default());
+    let script = crate::script::from_body(body, crate::script::FromBodyOptions::default());
     let (k2, built, _) = crate::constructor::build_brep(&script);
     let mut built = built;
     let ctor_faces: Vec<FaceId> = built
@@ -701,8 +700,7 @@ fn constructor_record(out: &[f64]) -> Result<Record, String> {
 
 /// Builds `body` through the Rust `BrepConstructor`.
 pub fn build_rust_constructor(body: &Body) -> Record {
-    let script =
-        step_import::script::from_body(body, step_import::script::FromBodyOptions::default());
+    let script = crate::script::from_body(body, crate::script::FromBodyOptions::default());
     let mut notes = Vec::new();
     let (out, deferred) = crate::constructor::run(&script, 1, ACCURACY, &mut notes);
     let mut rec = constructor_record(&out).unwrap_or_else(|e| Record {
@@ -716,7 +714,7 @@ pub fn build_rust_constructor(body: &Body) -> Record {
 
 fn load_body(path: &Path, index: usize) -> Result<Body, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let model = step_import::import(&bytes, &step_import::Limits::default())
+    let model = step_export::import(&bytes, &step_export::Limits::default())
         .map_err(|e| format!("parse: {e}"))?;
     let body = model
         .bodies
@@ -724,7 +722,7 @@ fn load_body(path: &Path, index: usize) -> Result<Body, String> {
         .nth(index)
         .ok_or_else(|| format!("no body {index}"))?;
     // Built from the decoded encoding, so the build sees the encoding's numbers.
-    step_import::flat::decode(&step_import::flat::encode(&body))
+    crate::flat::decode(&crate::flat::encode(&body))
 }
 
 /// `--step-case <file> <body> <out.json>`: one body.
@@ -991,7 +989,7 @@ fn run_corpus_inner(root: &Path, opts: &CorpusOptions) -> Result<(), HarnessErro
     for (fi, f) in files.iter().enumerate() {
         let rel = corpus_rel(f, &dir);
         let bytes = std::fs::read(f).map_err(|e| HarnessError::new(format!("{rel}: {e}")))?;
-        match step_import::import(&bytes, &step_import::Limits::default()) {
+        match step_export::import(&bytes, &step_export::Limits::default()) {
             Err(e) => file_entries.push(json!({"file": rel, "parse": e.to_string(), "bodies": []})),
             Ok(m) => {
                 for s in &m.skipped {

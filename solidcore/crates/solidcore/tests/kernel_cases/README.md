@@ -7,6 +7,8 @@ This folder holds the kernel's operation-level cases as data, one entry each, by
 The runner that replays the entries is `crates/solidcore-ops/tests/kernel_cases.rs` (see [Running](#running)). The operations are SolidCraft's compositions of kernel calls (picks, per-edge fillet sessions, setbacks, the overflow retry, the stitch, error mapping), and their one home is `solidcore-ops` (`docs/layers.md`). `crates/solidcore-record/tests/kernel_cases_corpus.rs` checks the corpus itself:
 - every record reads as the record and passes its structural validation;
 - every operation's operands are given records or earlier outputs;
+- recorded volumes of passing cases without known-failure markers agree with independent
+  analytic expectations, as described below;
 - the manifest counts every entry;
 - no two nonempty traces contain exactly the same calls, operand import options and decoded
   operand records. Descriptions, expected values and gzip filenames do not make a replay
@@ -32,7 +34,6 @@ Each case runs as the rig runs it, with the kernel's operations traced at the bo
 - `<area>/<case>.json`: one entry. A ladder case's area is `ladder/<tier>`.
 - `<area>/<case>.bodies.json.gz`: the entry's operand records, `{"b<n>": record}`, gzip.
 - `<area>/<case>.jpg`: the case's render, where it has one: the site's case gallery shows it.
-- `fixes.json`: the `UpstreamFixes` flags turned on, the same for every entry (SolidCraft's `fixes()`).
 - `manifest.json`: the counts per area and every case that isn't expressible, with its reasons.
 - `known_failing.json`: the kernel cases that fail today, the one list: `case` (`<area>/<case>`), `issue` and `reason`. Seeded from the entries' `rig.known_failing`; an entry whose `issue` is `to file` has none yet.
 
@@ -42,6 +43,7 @@ Each case runs as the rig runs it, with the kernel's operations traced at the bo
 |---|---|
 | `case`, `area`, `sources`, `what` | The case, as SolidCraft's rig names it. |
 | `calls` | The operations in execution order: `op`, `inputs` (bodies `b<n>`), `params`, and `outputs` or `error`. Keep discarded tool construction and handled attempts too, even when their outputs do not reach the final bodies. |
+| `refused_as` | Optional string on a call with `error`: a part of the error's text the replay must give. Without it any error matches the traced refusal; with it a different failure (a blend that fails inside instead of being refused) does not. This holds for a handled refusal (`continued`) too: a different error fails the case before replay goes on to the later calls. |
 | `continued` | Optional boolean on a call with `error`. `true` means the application handled this refusal: replay must observe a refusal, continue to any later calls, and grade the final result. A handled refusal can be the last call when the application keeps an earlier body. Omitted or `false` keeps the terminal-refusal behavior. A marker after a terminal refusal is invalid. |
 | `bodies` | The operand bodies given as records: `trusted` and `keeping_splines` say how SolidCraft read each record into the kernel. |
 | `params` | The operation's arguments as SolidCraft passed them. A pick by points is `{kind, points, tolerance, picked}`: each point's pick is `{index, at}`, the entity's index in the body's list of its kind and where it is (an edge's ends, a vertex's point), or `{miss}`. |
@@ -56,6 +58,21 @@ Each case runs as the rig runs it, with the kernel's operations traced at the bo
 | `why_not` | Why the operation isn't the kernel's alone. |
 | `ungraded` | What SolidCraft grades that the kernel doesn't measure: `continuity`, `watertight`, `files`, `results`, `construction`, `flat_pattern`, counts that SolidCraft's merging across analytic surfaces changes, and a refusal graded on SolidCraft's wording of the kernel's error. |
 | `traced_ops` | Every operation the case's commands made, for reference. |
+
+### Analytic volume expectations
+
+When `expected.source` is `"analytic"`, `rig.status` is `"pass"`, and
+`rig.known_failing` is null or absent, the corpus checker compares
+`rig.measured.volume_mm3` with `expected.volume_mm3`, if both are present.
+Other statuses and non-null known-failure markers skip this comparison.
+Known-failing entries intentionally preserve SolidCraft's incorrect output.
+A scalar uses `expected.tolerance.abs_mm` as an absolute volume difference when given.
+Otherwise, the allowed difference is `expected.tolerance.rel * abs(expected.volume_mm3)`,
+with a default relative tolerance of `1e-3`, matching the replay runner.
+A two-number interval includes both endpoints and is not widened by the tolerance.
+Entries without a recorded volume, including hand-written cases, skip this comparison.
+Re-exporting a passing case without a known-failure marker must not hide a disagreement
+with its independent expected volume.
 
 ### Seam expectations
 
@@ -80,7 +97,7 @@ New kernel cases come here. A case about a command, the UI or a product rule sta
 
 To export a case from SolidCraft instead of writing it: draft it there as `tests/kernel-cases/<area>/<id>/recipe.json` and `expected.json`, run `cargo xtask kernel-cases --area <area> --cli target/release/solidcraft-cli --export DIR`, copy `DIR/<area>/<id>.json` and its `.bodies.json.gz` here, and delete the draft there.
 
-`cargo test -p solidcore-record --test kernel_cases_corpus` checks the structure (the three checks at the top).
+`cargo test -p solidcore-record --test kernel_cases_corpus` runs the corpus checks listed at the top.
 
 ## Running
 
@@ -88,7 +105,7 @@ To export a case from SolidCraft instead of writing it: draft it there as `tests
 cargo test --release -p solidcore-ops --test kernel_cases -- --ignored --nocapture
 ```
 
-replays every entry through `solidcore-ops`' public operations, with the fixes in `fixes.json`, and grades it against its `rig` values (a hand-written entry, against `expected`): the bodies' count, their face, edge and vertex counts against the records' (`outcome.raw_counts`; the rig's merge faces across analytic surfaces) exactly, the volume within `expected.tolerance` (the rig's relative 1e-3 where none is given), and every refusal where the rig's trace has one. It prints, per area, pass, fail, unsupported (not the kernel's alone, rated unsupported by the rig, or not carried by the conversion yet), unported (an operation `solidcore-ops` doesn't have yet, named) and known-failing, and fails on a case that fails, a listed case whose result moves from the rig's (fixed, or failing differently: shrink the list), or a hang. The test is `#[ignore]`d, so the workspace run skips it; run it with `--ignored`. Environment: `KERNEL_CASES_AREA` (comma-separated areas, `ladder` taking every tier: the CI shards), `KERNEL_CASES_CASE` (a substring of the case's path), `KERNEL_CASES_TIMEOUT_S` (180 by default), `KERNEL_CASES_REPORT` (a file for the table) and `KERNEL_CASES_REPORT_ONLY` (report without failing).
+replays every entry through `solidcore-ops`' public operations, with SolidCraft's fixes (every flag on, as SolidCraft's `fixes()`; built in tests by `tests/support/solidcraft_fixes.rs`), and grades it against its `rig` values (a hand-written entry, against `expected`): the bodies' count, their face, edge and vertex counts against the records' (`outcome.raw_counts`; the rig's merge faces across analytic surfaces) exactly, the volume within `expected.tolerance` (the rig's relative 1e-3 where none is given), and every refusal where the rig's trace has one. It prints, per area, pass, fail, unsupported (not the kernel's alone, rated unsupported by the rig, or not carried by the conversion yet), unported (an operation `solidcore-ops` doesn't have yet, named) and known-failing, and fails on a case that fails, a listed case whose result moves from the rig's (fixed, or failing differently: shrink the list), or a hang. The test is `#[ignore]`d, so the workspace run skips it; run it with `--ignored`. Environment: `KERNEL_CASES_AREA` (comma-separated areas, `ladder` taking every tier: the CI shards), `KERNEL_CASES_CASE` (a substring of the case's path), `KERNEL_CASES_TIMEOUT_S` (180 by default), `KERNEL_CASES_REPORT` (a file for the table) and `KERNEL_CASES_REPORT_ONLY` (report without failing).
 
 ## Updating
 

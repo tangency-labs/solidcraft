@@ -41,6 +41,25 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
         });
+        ui_kit::settings_section(ui, "startup", app.tr("ui.on_startup"), |ui| {
+            ui_kit::settings_form(ui, labels, |ui| {
+                ui_kit::row(ui, app.tr("ui.on_startup"), |ui| {
+                    let selected = app.tr(if app.preferences.show_home_on_startup { "ui.home" } else { "ui.new_design" }).to_string();
+                    let choice = ui_kit::dropdown_menu(ui, "pref_startup", &selected, |ui| {
+                        for (home, key) in [(true, "ui.home"), (false, "ui.new_design")] {
+                            let response = ui_kit::list_picker(ui, key, solidcraft_ui_text::tr(key), app.preferences.show_home_on_startup == home);
+                            crate::scenario::publish_rect(if home { "prefs:startup_home" } else { "prefs:startup_design" }, response.rect);
+                            if response.clicked() {
+                                app.preferences.show_home_on_startup = home;
+                                ui.close();
+                            }
+                        }
+                    });
+                    crate::scenario::publish_rect("prefs:startup", choice.rect);
+                });
+                ui_kit::text(ui, app.tr("ui.on_startup_note"), ui_kit::Text::Note("startup"));
+            });
+        });
         ui_kit::settings_section(ui, "saving", app.tr("prefs.saving"), |ui| {
             ui_kit::checkbox(ui, app.tr("Reopen the designs that were open when SolidCraft was last closed"), &mut app.preferences.reopen_designs);
             // Only the web app keeps designs in the browser (#10220).
@@ -112,6 +131,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.preferences.network_hosts.remove(i);
                 }
             }
+            link_folders(app, ui);
             ui.horizontal(|ui| {
                 let (single, tip) = (app.tr("ui.slicer_single_instance").to_string(), app.tr("ui.slicer_single_instance_tip").to_string());
                 let width = (ui.available_width() - t.space_16 - ui.spacing().item_spacing.x).max(0.0);
@@ -125,6 +145,15 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let width = (ui.available_width() - t.space_16 - ui.spacing().item_spacing.x).max(0.0);
                 ui.allocate_ui_with_layout(egui::vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui_kit::checkbox(ui, &only, &mut app.preferences.export_selects_only_body).backing_on_hover_text(&tip);
+                });
+                ui_kit::help_icon(ui, &tip);
+            });
+            ui.horizontal(|ui| {
+                let (keep, tip) = (app.tr("prefs.keep_print_faces").to_string(), app.tr("prefs.keep_print_faces_tip").to_string());
+                let width = (ui.available_width() - t.space_16 - ui.spacing().item_spacing.x).max(0.0);
+                ui.allocate_ui_with_layout(egui::vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    let response = ui_kit::checkbox(ui, &keep, &mut app.preferences.keep_print_faces).backing_on_hover_text(&tip);
+                    crate::scenario::publish_target("prefs:keep_print_faces", response.rect);
                 });
                 ui_kit::help_icon(ui, &tip);
             });
@@ -144,9 +173,24 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
         });
+        ui_kit::settings_section(ui, "freecad", app.tr("prefs.freecad_files"), |ui| {
+            setting::freecad_history(app, ui);
+        });
+        ui_kit::settings_section(ui, "cadmpeg", app.tr("prefs.cadmpeg_import"), |ui| {
+            let cadmpeg = setting::cadmpeg_import(app, ui);
+            crate::scenario::publish_target("prefs:cadmpeg_import", cadmpeg.rect);
+        });
         ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {
             let right_click = setting::right_click_confirms(app, ui);
             crate::scenario::publish_target("prefs:right_click_confirms", right_click.rect);
+            let first_letter = setting::dialog_first_letter_buttons(app, ui).backing_on_hover_text(app.tr("prefs.dialog_first_letter_buttons_help"));
+            crate::scenario::publish_target("prefs:dialog_first_letter_buttons", first_letter.rect);
+        });
+        ui_kit::settings_section(ui, "community", app.tr("prefs.community"), |ui| {
+            let donate = setting::show_donate_button(app, ui).backing_on_hover_text(app.tr("prefs.show_donate_button_help"));
+            crate::scenario::publish_target("prefs:show_donate_button", donate.rect);
+            let discord = setting::show_discord_button(app, ui).backing_on_hover_text(app.tr("prefs.show_discord_button_help"));
+            crate::scenario::publish_target("prefs:show_discord_button", discord.rect);
         });
         ui_kit::settings_section(ui, "updates", app.tr("prefs.updates"), |ui| {
             crate::update::prefs_rows(app, ui);
@@ -227,4 +271,37 @@ fn file_size_rows(app: &mut SolveApp, ui: &mut egui::Ui, labels: f32) {
             }
         });
     });
+}
+
+/// The folders linked files load from when a design opens (`linked_file_folders`): each can be
+/// removed, or all forgotten; a design in one of them that is removed asks again.
+fn link_folders(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = Tokens::get();
+    // Wrapped, so a narrow window keeps the notes inside the page.
+    ui.horizontal_wrapped(|ui| ui_kit::settings_inline_note(ui, app.tr("prefs.link_folders_note")));
+    if app.preferences.linked_file_folders.is_empty() {
+        ui.horizontal_wrapped(|ui| ui_kit::settings_inline_note(ui, app.tr("prefs.link_folders_none")));
+        return;
+    }
+    let mut remove = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(t.space_6, t.space_6);
+        for (i, folder) in app.preferences.linked_file_folders.iter().enumerate() {
+            let chip =
+                ui_kit::SettingsChip { key: Some(folder), monospace: true, remove: Some(app.tr("prefs.link_folders_remove")), ..Default::default() };
+            let button = ui_kit::settings_chip(ui, folder, chip);
+            crate::scenario::publish_target(&format!("prefs:link_folder:{i}:remove"), button.rect);
+            if button.clicked() {
+                remove = Some(i);
+            }
+        }
+    });
+    if let Some(i) = remove.filter(|i| *i < app.preferences.linked_file_folders.len()) {
+        app.preferences.linked_file_folders.remove(i);
+    }
+    let clear = ui_kit::button(ui, app.tr("prefs.link_folders_clear"), ui_kit::Button::Normal);
+    crate::scenario::publish_target("prefs:link_folders:clear", clear.rect);
+    if clear.clicked() {
+        app.preferences.linked_file_folders.clear();
+    }
 }

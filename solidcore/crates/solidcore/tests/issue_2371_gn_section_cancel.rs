@@ -219,6 +219,17 @@ fn cancel_boss_root_after(
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_token_fired_from_another_thread_stops_the_boss_root_round_soon() {
+    // How long the round takes here uncancelled: its sections are most of it, and the
+    // glue and finish after them its last part, whose own checks may end it instead
+    // (solidcore#3247; on a slower machine 4 s in can be there).
+    let full = {
+        let mut k = Kernel::default();
+        let mut b = boss_on_plate(&mut k).unwrap();
+        let e = pick(&k, &b, BOSS_ROOT);
+        let started = std::time::Instant::now();
+        let _ = fillet_edges(&mut k, &mut b, &[e], 2.0, 2, 2, 0.0);
+        started.elapsed()
+    };
     // 0 ms fires as soon as the call starts: the round cannot finish first, so this
     // case always cancels; the later ones are skipped when a faster build is done by then
     for ms in [0, 200, 1500, 4000, 10000] {
@@ -239,7 +250,8 @@ fn a_token_fired_from_another_thread_stops_the_boss_root_round_soon() {
         // past the set-up the round is building its sections (4 min in the difftest
         // profile): the check point there ends it, not one in a later loop after a
         // status-ignoring helper absorbed the cancel
-        if ms >= 1500 {
+        let in_sections = std::time::Duration::from_millis(ms) < full.mul_f64(0.75);
+        if ms >= 1500 && in_sections {
             assert!(
                 at.starts_with("blend::fillet_section::"),
                 "cancelled {ms} ms in, at {at}"

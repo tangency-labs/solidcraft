@@ -1,10 +1,21 @@
 //! Interactive file operations run off the window thread. The old design stays intact until
 //! the command and display meshes are ready; failures and cancelled jobs never replace it.
 //!
-//! While one runs, the window keeps drawing frames: the title bar still moves, resizes,
-//! minimizes and maximizes the window, and a light overlay over the design shows the file's
-//! progress with Cancel. The overlay takes the pointer, shortcuts and commands wait, and
-//! control-channel commands that change the design are held until the file is in. A control
+//! While one runs, the window keeps drawing frames, and the operation is a row of the operations
+//! panel ([`crate::operations`]) with its progress and Cancel; several wait their turn there. The
+//! design stays usable meanwhile, and a result lands after the person's edits:
+//! - A file opened (or recovered) lands as it always did when the person is not in the middle of
+//!   something; otherwise (a dialog, a tool or another sketch open, their own command computing)
+//!   it goes in a new tab behind the one shown, and the status says so.
+//! - An insert, an export and Update Links belong to the tab shown when they were asked for: one
+//!   finished while another tab is shown, or while the person is in the middle of something, waits
+//!   ("Ready") until they are done. One whose design changed meanwhile runs again for the design
+//!   as it is, with the file it read still cached, at most [`MAX_TRIES`] times.
+//!
+//! With Preferences > Layout > "Wait for files to open" on, it is as it always was: a light
+//! overlay over the design shows the file's progress with Cancel, the overlay takes the pointer,
+//! and shortcuts and commands wait. Either way, control-channel commands that change the design
+//! are held until the file is in (an agent's open and its edits go in that order), and a control
 //! (MCP) `doc.open` or import is answered when its file finishes loading.
 //!
 //! Update Links from the toolbar runs the same way (#5329): it reads every linked design again
@@ -28,6 +39,7 @@ use solidcraft_engine::{Session, doc::Document, doc::progress::Progress};
 
 use crate::SolveApp;
 use crate::control::ControlResponse;
+use crate::operations::Outcome;
 use crate::ui_kit;
 
 /// What a file operation does with its file.
@@ -44,11 +56,21 @@ pub enum Kind {
     Recover { id: String, dir: Option<String> },
     /// Export a snapshot of the current design without adopting the worker's session.
     ExportDxf,
+    /// Write a sheet of the open drawing to a file (`drawing.export` with a path), the same way.
+    ExportSheet,
     /// Read the active design's linked designs again (`component.update_links`, with the
     /// request's options: `component` or `components` reads only those links).
     UpdateLinks,
     /// Read a point cloud's file again (`pointcloud.reload`, with the request's `cloud`).
     ReloadCloud,
+}
+
+impl Kind {
+    /// An export: it runs on a copy of the design, never adopts the worker's session, and once it has
+    /// published its file it is finished, whatever a late Cancel says.
+    fn exports(&self) -> bool {
+        matches!(self, Kind::ExportDxf | Kind::ExportSheet)
+    }
 }
 
 pub struct Request {
@@ -72,11 +94,29 @@ pub struct Request {
     /// Insert the file as a mesh whatever its extension says: a PLY goes to `pointcloud.insert`
     /// unless the person chose Insert Mesh for it (then it needs its faces).
     pub mesh: bool,
+    /// Insert the board this file (a zip, or any file in its folder) belongs to: its Gerber and
+    /// Excellon files as one (`file.insert_gerber` with the file as its `set`).
+    pub gerber: bool,
     /// The level the caller's own `param_check` named and the warnings it found before the run:
     /// the reply says both (#9184).
     pub(crate) param_check: Option<(solidcraft_engine::schema::ParamCheck, Vec<String>)>,
     /// The status line once the file is in, in place of the usual one.
     pub note: Option<String>,
+    /// Which operation it is ([`crate::operations::serial`]).
+    pub serial: u64,
+    /// The tab whose design it works on (an insert, an export, Update Links), set when it is
+    /// queued: it starts and lands only while that tab is shown.
+    pub tab: Option<u64>,
+    /// How many times it ran again because the design changed while it ran.
+    pub tries: u8,
+    /// The Verify preference added `verify` to the options; unlike a caller's own option it must
+    /// not stop an already-open design from being reused. Its check then runs separately.
+    pub(crate) auto_verify: bool,
+    /// Open the file with an importer plugin (`file.import`) even when SolidCraft reads it too.
+    pub plugin_import: bool,
+    /// An export written to be printed: once written it opens in the system's PDF viewer
+    /// ([`crate::drawing_workspace::print::written`]).
+    pub print: bool,
 }
 
 impl Request {
@@ -91,8 +131,15 @@ impl Request {
             design: None,
             chat_turn: None,
             mesh: false,
+            gerber: false,
             param_check: None,
             note: None,
+            serial: crate::operations::serial(),
+            tab: None,
+            tries: 0,
+            auto_verify: false,
+            plugin_import: false,
+            print: false,
         }
     }
     /// It adds what it reads to the active design.
@@ -111,13 +158,22 @@ impl Request {
     }
     fn command(&self) -> (&'static str, Value) {
         match &self.kind {
+            Kind::Open if self.plugin_import => ("file.import", self.params()),
             Kind::Open => ("doc.open", self.params()),
+            Kind::Insert if self.gerber => {
+                let mut params = self.options.clone();
+                params.insert("set".into(), json!(self.path));
+                ("file.insert_gerber", Value::Object(params))
+            }
             Kind::Insert if self.mesh || solidcraft_engine::io::is_mesh_path(&self.path) => ("file.insert_mesh", self.params()),
             Kind::Insert if solidcraft_engine::io::is_point_cloud_path(&self.path) => ("pointcloud.insert", self.params()),
             Kind::Insert => (insert_command(&self.path), self.params()),
             Kind::InsertDesign => ("component.insert_design", self.params()),
             Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir})),
             Kind::ExportDxf => ("file.export_view_dxf", Value::Object(self.options.clone())),
+            // Printing writes the whole drawing's PDF that asks for actual size.
+            Kind::ExportSheet if self.print => ("drawing.print", Value::Object(self.options.clone())),
+            Kind::ExportSheet => ("drawing.export", Value::Object(self.options.clone())),
             Kind::UpdateLinks => ("component.update_links", Value::Object(self.options.clone())),
             Kind::ReloadCloud => ("pointcloud.reload", Value::Object(self.options.clone())),
         }
@@ -172,11 +228,15 @@ struct Running {
     built: Option<usize>,
     /// A STEP file read a piece per frame on this thread (the web app), instead of on a worker.
     staged: Option<Staged>,
+    /// Its result, once in, while it waits to land ([`Land::Wait`]).
+    ready: Option<Job>,
+    /// The sketch open when it started (an insert into it): still open, it doesn't keep it waiting.
+    sketch: Option<u64>,
 }
 
 impl Drop for Running {
     fn drop(&mut self) {
-        if self.request.kind == Kind::ExportDxf {
+        if self.request.kind.exports() {
             self.progress.cancel();
         }
     }
@@ -215,8 +275,8 @@ const STAGED_THUMBNAIL_TRIANGLES: usize = 1_000_000;
 /// How long a frame spends on a staged STEP import.
 const STAGED_FRAME_MS: f64 = 30.0;
 
-/// Files read in stages: STEP (not IGES, FreeCAD or Rhino, which are first restated as STEP) to
-/// insert or open, and designs to open (#10198).
+/// Files read in stages: STEP to insert or open (not IGES, FreeCAD or Rhino, which are first
+/// restated as STEP), by the reader the request names, and designs to open (#10198).
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn staged_kind(request: &Request) -> bool {
     let p = &request.path;
@@ -225,6 +285,15 @@ fn staged_kind(request: &Request) -> bool {
         && !solidcraft_engine::io::is_iges_path(p)
         && !solidcraft_engine::io::is_native_cad_path(p);
     step || (request.kind == Kind::Open && solidcraft_engine::io::is_design_path(p))
+}
+
+/// The request reads its STEP file with cadmpeg (`reader: cadmpeg`), which has no STEP text for
+/// SolidCraft's reader to read a piece per frame: staged, its command reads the file in one
+/// frame, after the overlay is shown and while Cancel can still stop it, and its bodies are
+/// meshed over frames after, as any staged import's are.
+fn cadmpeg_reads(request: &Request) -> bool {
+    request.options.get("reader").and_then(Value::as_str).and_then(solidcraft_engine::io::StepReader::parse)
+        == Some(solidcraft_engine::io::StepReader::Cadmpeg)
 }
 
 impl Running {
@@ -253,6 +322,17 @@ impl Running {
 pub struct FileLoad {
     queued: VecDeque<Request>,
     running: Option<Running>,
+    /// Results that are in and wait to land: their design's tab is not shown, or the person is in
+    /// the middle of something. They do not hold the worker, so the next request starts while
+    /// they wait, and they land as soon as they can.
+    waiting: Vec<Running>,
+    /// The result of an insert that runs again for the design as it is now, kept until it is in:
+    /// the file it read stays cached ([`solidcraft_engine::kernel::step_import_shared`]), so the
+    /// second run doesn't read it again.
+    warm: Option<(u64, Box<Session>)>,
+    /// Whether the card over the design is showing this frame: the file operation's progress and
+    /// Cancel when the operations panel cannot show its row (Home, Wait for files, off, or no room).
+    pub(crate) card_shown: bool,
     /// Tests: the next load waits before this feature until cancelled.
     #[cfg(test)]
     pub hold_at: Option<usize>,
@@ -276,24 +356,131 @@ impl FileLoad {
     }
     /// No active or queued request; cancelled import workers may still be unwinding.
     pub fn idle(&self) -> bool {
-        self.running.is_none() && self.queued.is_empty()
+        self.running.is_none() && self.waiting.is_empty() && self.queued.is_empty()
     }
     /// Signal cancellation, release the import slot and drop queued requests.
     pub fn cancel(&mut self) {
+        self.cancel_running();
+        for w in std::mem::take(&mut self.waiting) {
+            w.request.answer(Err("file operation cancelled".into()));
+        }
+        for q in std::mem::take(&mut self.queued) {
+            q.answer(Err("file operation cancelled".into()));
+        }
+        // Nothing is left to run again for.
+        self.warm = None;
+    }
+    /// Signal the running request's cancellation and release its slot; queued requests go on.
+    pub(crate) fn cancel_running(&mut self) {
         if let Some(r) = &self.running {
             r.progress.cancel();
+            if self.warm.as_ref().is_some_and(|(serial, _)| *serial == r.request.serial) {
+                self.warm = None;
+            }
         }
         // Imports only change a scratch session. Disconnect their result and preview channels
         // so a slow cancellation checkpoint cannot block the next file or apply a late result.
         // Exports publish a file: keep their reply until the worker reports whether it committed.
-        if self.running.as_ref().is_some_and(|r| r.request.kind != Kind::ExportDxf)
+        if self.running.as_ref().is_some_and(|r| !r.request.kind.exports())
             && let Some(r) = self.running.take()
         {
             r.request.answer(Err("file operation cancelled".into()));
         }
-        for q in self.queued.drain(..) {
+    }
+    /// Drop the `index`th queued request (from 0), answering it as cancelled.
+    pub(crate) fn cancel_queued(&mut self, index: usize) {
+        if let Some(q) = self.queued.remove(index) {
+            self.drop_warm(q.serial);
             q.answer(Err("file operation cancelled".into()));
         }
+    }
+    /// Forget a retry's cached session once its request is gone (cancelled, or its tab closed).
+    fn drop_warm(&mut self, serial: u64) {
+        if self.warm.as_ref().is_some_and(|(warm, _)| *warm == serial) {
+            self.warm = None;
+        }
+    }
+    /// The operations panel's view of the requests: the running one (if any), then the queued
+    /// ones in the order they will run. Each is its command, its file's name, how far it is
+    /// (`done` of `total`, when that is known) and whether it was cancelled.
+    pub(crate) fn operations(&self) -> Vec<FileOperation> {
+        let entry = |request: &Request| FileOperation {
+            serial: request.serial,
+            command: request.command().0,
+            name: match &request.kind {
+                Kind::Recover { .. } => request.path.clone(),
+                _ => std::path::Path::new(&request.path).file_name().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
+            },
+            steps: None,
+            percent: false,
+            queued: true,
+            cancelled: false,
+            waiting: false,
+        };
+        let running = self.running.as_ref().map(|r| FileOperation {
+            steps: steps(r),
+            percent: r.request.kind != Kind::UpdateLinks && work(r).is_some_and(|(stage, _, _)| crate::operations::bytes_stage(stage)),
+            queued: false,
+            cancelled: r.cancelled(),
+            waiting: r.ready.as_ref().is_some_and(Result::is_ok),
+            ..entry(&r.request)
+        });
+        let waiting = self.waiting.iter().map(|r| FileOperation {
+            steps: steps(r),
+            queued: false,
+            cancelled: r.cancelled(),
+            waiting: true,
+            ..entry(&r.request)
+        });
+        running.into_iter().chain(waiting).chain(self.queued.iter().map(entry)).collect()
+    }
+}
+
+/// A file operation as the operations panel shows it ([`FileLoad::operations`]).
+#[derive(Clone, Debug)]
+pub(crate) struct FileOperation {
+    pub serial: u64,
+    pub command: &'static str,
+    pub name: String,
+    pub steps: Option<(usize, usize)>,
+    /// The steps are bytes (the file being read).
+    pub percent: bool,
+    pub queued: bool,
+    pub cancelled: bool,
+    /// Done, and waiting to land ([`Land::Wait`]).
+    pub waiting: bool,
+}
+
+/// How far a running request is: the long work inside a feature (a large STEP file read), the
+/// linked designs read again, or the features rebuilt; `None` when that is not known yet.
+/// The long work inside one feature the running request is in (a large STEP file read), if any.
+fn work(r: &Running) -> Option<(&'static str, usize, usize)> {
+    let phase = r.phase.load(Ordering::Relaxed);
+    r.work().filter(|(_, d, t)| r.request.kind == Kind::ExportDxf || (phase == 0 && d < t))
+}
+
+fn steps(r: &Running) -> Option<(usize, usize)> {
+    if r.request.kind == Kind::UpdateLinks
+        && let Some((_, i, n)) = r.progress.item()
+    {
+        return Some((i, n));
+    }
+    // As the card reads them: in the web app a design opened a few features a frame counts them
+    // itself ([`Running::features`], [`Running::work`]).
+    let phase = r.phase.load(Ordering::Relaxed);
+    if let Some((_, d, t)) = work(r) {
+        return Some((d, t));
+    }
+    let (done, total) = r.features();
+    (total > 0).then_some(if phase == 0 { (done, total) } else { (total, total) })
+}
+
+impl SolveApp {
+    /// A file operation holds the design: with Preferences > Layout > "Wait for files to open"
+    /// on, the design waits (commands, shortcuts and edits) while one runs or waits its turn.
+    /// Off, the design stays usable: an operation's result lands after the person's edits.
+    pub fn file_load_holds(&self) -> bool {
+        self.preferences.file_operations_wait && self.file_load.busy()
     }
 }
 
@@ -302,7 +489,27 @@ pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
     if crate::mesh_units::ask(app, path, insert) {
         return;
     }
-    let _ = begin_request(app, Request::new(path, if insert { Kind::Insert } else { Kind::Open }));
+    let mut request = Request::new(path, if insert { Kind::Insert } else { Kind::Open });
+    if !insert && app.preferences.verify_opened_designs && solidcraft_engine::io::is_design_path(path) {
+        request.options.insert("verify".into(), json!(true));
+        request.auto_verify = true;
+    }
+    let _ = begin_request(app, request);
+}
+
+/// Insert PCB: insert the board the picked `path` belongs to, beside the window. On the `web`
+/// only a zip is taken: some browsers (iPhone, iPad) don't filter the picker, and one uploaded
+/// file would be read with whatever else was uploaded before.
+pub(crate) fn insert_board(app: &mut SolveApp, path: &str, web: bool) {
+    if web && !solidcraft_engine::io::is_zip_path(path) {
+        app.set_status(solidcraft_ui_text::tr("ui.insert_pcb.web_zip"), true);
+        return;
+    }
+    let mut request = Request::new(path, Kind::Insert);
+    request.gerber = true;
+    if let Err(e) = begin_request(app, request) {
+        app.set_status(e, true);
+    }
 }
 
 /// A STEP, IGES, FreeCAD or Rhino file the app opens or inserts gets a `Group #N` history folder
@@ -314,16 +521,58 @@ pub(crate) fn step_folder_option(app: &SolveApp, path: &str, options: &mut serde
     }
 }
 
+/// The preference's `reuse_import` default for an import-backed open only: a native design's
+/// request keeps empty options, so `reuse_open` can still switch to its open tab.
+fn default_reuse_import(app: &SolveApp, request: &mut Request) {
+    if request.kind == Kind::Open && !request.plugin_import && solidcraft_engine::io::is_step_path(&request.path) {
+        request.options.entry("reuse_import").or_insert(Value::Bool(app.preferences.reuse_imports));
+    }
+}
+
+/// Import options the preferences add for `path` (with `history: solids` a FreeCAD file brings
+/// only its solids, as before its history was rebuilt; with `reader: cadmpeg` a STEP, FreeCAD or
+/// Rhino file is read by cadmpeg straight into records).
+pub(crate) fn preferred_options(app: &SolveApp, path: &str) -> serde_json::Map<String, Value> {
+    let mut out = serde_json::Map::new();
+    let freecad = std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("fcstd"));
+    if freecad && !app.preferences.freecad_history {
+        out.insert("history".into(), json!("solids"));
+    }
+    let step = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("step") || e.eq_ignore_ascii_case("stp"));
+    if (step || solidcraft_engine::io::is_native_cad_path(path)) && app.preferences.cadmpeg_import {
+        out.insert("reader".into(), json!("cadmpeg"));
+    }
+    out
+}
+
 /// Queue a file operation; on the web (no threads) it runs now.
 pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), String> {
+    if request.kind == Kind::Open
+        && !request.plugin_import
+        && app.preferences.verify_opened_designs
+        && solidcraft_engine::io::is_design_path(&request.path)
+        && !request.options.contains_key("verify")
+    {
+        request.options.insert("verify".into(), json!(true));
+        request.auto_verify = true;
+    }
     if crate::control::chat_turn_cancelled(request.chat_turn.as_deref()) {
         request.answer(Err("the agent chat turn ended".into()));
         return Ok(());
     }
-    if app.file_load.idle() && reuse_open(app, &request) {
+    default_reuse_import(app, &mut request);
+    if !app.file_picker_busy() && app.file_load.idle() && reuse_open(app, &request) {
         return Ok(());
     }
-    if matches!(request.kind, Kind::Open | Kind::Insert) {
+    if matches!(request.kind, Kind::Open | Kind::Insert) && !request.plugin_import {
+        // After `reuse_open`: an already open tab is kept whatever the import preferences say,
+        // as the folder option is.
+        for (k, v) in preferred_options(app, &request.path) {
+            request.options.entry(k).or_insert(v);
+        }
         step_folder_option(app, &request.path, &mut request.options);
     }
     #[cfg(target_arch = "wasm32")]
@@ -334,15 +583,22 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
             return Ok(());
         }
         let r = match &request.kind {
-            Kind::Insert => {
-                app.insert_path_with(&request.path, &request.options, request.mesh);
-                Ok(Value::Null)
+            Kind::Insert if request.gerber => {
+                let (command, params) = request.command();
+                app.run(command, params)
             }
+            // A failed import is the request's answer, as a staged one's is.
+            Kind::Insert => app.insert_path_with(&request.path, &request.options, request.mesh).map(|()| Value::Null),
             Kind::InsertDesign => {
                 let (command, params) = request.command();
                 let r = solidcraft_engine::io::vfs::allowing_hosts(&request.allow_hosts, || app.run(command, params));
                 if r.is_ok() {
                     app.fit_view();
+                    if request.note.is_none()
+                        && let Some(note) = linked_signing_note(&request.path)
+                    {
+                        app.set_status(note, false);
+                    }
                     if let Some(note) = &request.note {
                         app.set_status(note.clone(), false);
                     }
@@ -350,10 +606,10 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
                 r
             }
             Kind::Open => {
-                app.open_path_with(&request.path, &request.options);
+                let r = app.open_path_with(&request.path, &request.options);
                 // Opened in place of the blank tab it made, with no switch to it.
                 crate::edit_in_place::attach(app);
-                Ok(Value::Null)
+                r.map(|()| Value::Null)
             }
             Kind::Recover { .. } => {
                 let (command, params) = request.command();
@@ -363,7 +619,7 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
                 }
                 r
             }
-            Kind::ExportDxf => {
+            Kind::ExportDxf | Kind::ExportSheet => {
                 let (command, params) = request.command();
                 let r = app.run(command, params);
                 if r.is_ok() && !request.path.is_empty() {
@@ -389,7 +645,12 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
 
 /// Queue a file operation and start it when nothing runs (the desktop app).
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn queue(app: &mut SolveApp, request: Request) -> Result<(), String> {
+pub(crate) fn queue(app: &mut SolveApp, mut request: Request) -> Result<(), String> {
+    // One for a given saved design (`design`) is dropped when that design isn't shown; the
+    // others wait for their tab.
+    if !matches!(request.kind, Kind::Open | Kind::Recover { .. }) && request.tab.is_none() && request.design.is_none() {
+        request.tab = Some(app.docs.active_tab());
+    }
     if app.file_load.queued.len() >= crate::documents::MAX_OPEN {
         let e = "too many queued files".to_string();
         app.set_status(e.clone(), true);
@@ -404,13 +665,16 @@ pub(crate) fn queue(app: &mut SolveApp, request: Request) -> Result<(), String> 
 /// Answer each ordinary open separately, including queued requests for the same file.
 /// Validate the caller's scope before looking at existing sessions or resolving paths.
 fn reuse_open(app: &mut SolveApp, request: &Request) -> bool {
-    if request.kind != Kind::Open {
+    if request.kind != Kind::Open || request.plugin_import {
         return false;
     }
     let reused = solidcraft_engine::io::vfs::scoped(request.scope.clone(), || {
         solidcraft_engine::io::vfs::check(&request.path).map_err(|e| e.to_string())?;
-        // Let the command validate import-specific options, even for an existing tab.
-        if !request.options.is_empty() {
+        // Let the command validate import-specific options, even for an existing tab. The
+        // caller's own `verify` is such an option; the Verify preference's automatic one is not.
+        let only_auto_verify =
+            request.auto_verify && request.options.len() == 1 && request.options.get("verify").and_then(Value::as_bool) == Some(true);
+        if !request.options.is_empty() && !only_auto_verify {
             return Ok(false);
         }
         crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| crate::documents::reuse_path(app, &request.path))
@@ -418,6 +682,11 @@ fn reuse_open(app: &mut SolveApp, request: &Request) -> bool {
     match reused {
         Ok(false) => false,
         Ok(true) => {
+            // The session is already open; its saved file still gets the check the preference
+            // asked for (on a worker, so a large design does not hold up this request).
+            if request.auto_verify {
+                crate::verify_job::start_after_reuse(app);
+            }
             let s = &app.session;
             request.answer(Ok(json!({"path": request.path, "features": s.doc.features.len(),
                 "errors": s.model.results.iter().filter(|r| r.error.is_some()).count(), "name": s.doc.name})));
@@ -444,9 +713,11 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         return Some(req);
     };
     let kind = match id {
-        "doc.open" => Kind::Open,
+        "doc.open" | "file.import" => Kind::Open,
         "file.insert_step" | "file.insert_mesh" | "pointcloud.insert" => Kind::Insert,
         "file.export_view_dxf" => Kind::ExportDxf,
+        // Without a path the reply holds the document, which is quick: it runs at once.
+        "drawing.export" => Kind::ExportSheet,
         "pointcloud.reload" => Kind::ReloadCloud,
         _ => return Some(req),
     };
@@ -485,7 +756,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
     // Everything but the path, as given: taking only `up` and `names` dropped an import's
     // `matrix` and `name`, so it landed at the origin with nothing said (#4676).
     let mut options = params.and_then(Value::as_object).cloned().unwrap_or_default();
-    if !matches!(kind, Kind::ExportDxf | Kind::ReloadCloud) {
+    if !(kind.exports() || kind == Kind::ReloadCloud) {
         options.remove("path");
         options.retain(|_, v| !v.is_null());
     }
@@ -499,11 +770,30 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         design: None,
         chat_turn: req.chat_turn,
         mesh: false,
+        gerber: false,
         param_check,
         note: None,
+        serial: crate::operations::serial(),
+        tab: None,
+        tries: 0,
+        auto_verify: false,
+        plugin_import: id == "file.import",
+        print: false,
     };
     let _ = begin_request(app, request);
     None
+}
+
+/// What to say once a linked design is inserted: whether its file carries a signature, without
+/// reading every payload to check it. `None` for an unsigned file (nothing to add to the usual
+/// "Inserted …" message).
+fn linked_signing_note(path: &str) -> Option<String> {
+    let summary = solidcraft_engine::io::read_design_provenance_summary_file(path)?;
+    let name = std::path::Path::new(path).file_name().map_or_else(|| path.to_string(), |name| name.to_string_lossy().into_owned());
+    Some(match &summary.signer {
+        Some(signer) => solidcraft_ui_text::format("ui.insert_signed", &[("name", &name), ("key", signer)]),
+        None => solidcraft_ui_text::format("ui.insert_signed_unknown", &[("name", &name)]),
+    })
 }
 
 /// An autosave that failed to load goes back in the recovery list, so it can be discarded (or
@@ -528,14 +818,43 @@ fn recovered(app: &mut SolveApp, request: &Request) {
     }
     app.set_status(format!("recovered {}: save it to keep it", request.path), false);
     app.say_newer_file();
+    app.say_plugin_data();
+}
+
+/// A recovered design that landed in a background tab: save it under that tab's own autosaver
+/// first, then discard the recovery entry it came from. [`recovered`] saves the shown design, so
+/// it cannot be used here; until this runs a crash would offer the old (stale) entry again.
+fn recovered_behind(app: &mut SolveApp, uid: u64, id: &str, dir: Option<&str>) {
+    let (autosave, docs) = (&mut app.autosave, &mut app.docs);
+    let Some(slot) = docs.background_slot_mut(uid) else { return };
+    let kept = autosave.as_mut().map(|a| a.save_background(slot));
+    if let Some(Ok(_)) = kept {
+        let _ = slot.session.execute("doc.recovery_discard", &json!({"id": id, "dir": dir}));
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn start(app: &mut SolveApp) {
-    if app.file_load.running.is_some() {
+    if app.file_load.running.is_some() || app.file_picker_busy() {
         return;
     }
-    let Some(request) = app.file_load.queued.pop_front() else { return };
+    // A request for a tab that was closed has nowhere to land: answer it so it does not wait for
+    // a tab number that will never match again and hold the queue.
+    let mut at = 0;
+    while at < app.file_load.queued.len() {
+        let orphan = app.file_load.queued[at].tab.is_some_and(|tab| !app.docs.tab_open(tab));
+        if orphan {
+            if let Some(request) = app.file_load.queued.remove(at) {
+                orphaned_request(app, request);
+            }
+        } else {
+            at += 1;
+        }
+    }
+    // The first that can start: one for a design in a tab not shown waits for it.
+    let shown = app.docs.active_tab();
+    let Some(next) = app.file_load.queued.iter().position(|r| r.tab.is_none_or(|tab| tab == shown)) else { return };
+    let Some(request) = app.file_load.queued.remove(next) else { return };
     if crate::control::chat_turn_cancelled(request.chat_turn.as_deref()) {
         request.answer(Err("the agent chat turn ended".into()));
         return;
@@ -544,6 +863,7 @@ fn start(app: &mut SolveApp) {
         return;
     }
     if request.design.as_deref().is_some_and(|d| !app.session.path.as_deref().is_some_and(|p| crate::documents::same_path(p, d))) {
+        crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed("the design it was for is no longer shown".into()));
         request.answer(Err("the design it was for is no longer shown".into()));
         return;
     }
@@ -552,6 +872,7 @@ fn start(app: &mut SolveApp) {
         && !crate::documents::active_is_blank(app)
     {
         let e = "too many open designs; close a tab before opening another";
+        crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed(e.into()));
         app.set_status(e, true);
         if let Kind::Recover { id, dir } = &request.kind {
             reoffer(app, id, dir.as_deref());
@@ -562,11 +883,23 @@ fn start(app: &mut SolveApp) {
     let insert = request.insert();
     let before = if insert { crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).collect() } else { Vec::new() };
     let update = request.reads_again();
-    let mut scratch = if insert || update || request.kind == Kind::ExportDxf { app.session.scratch() } else { Session::default() };
+    // An export writes the sheet as the session shows it.
+    let mut scratch = if request.kind.exports() {
+        app.session.scratch_as_shown()
+    } else if insert || update {
+        app.session.scratch()
+    } else {
+        Session::default()
+    };
     // A design opened or recovered here is run through the host's pre-command check too, and
     // evaluated under the user's validation mode.
     scratch.set_command_check(app.session.command_check());
     scratch.set_validation(app.preferences.validation);
+    // A file an importer plugin reads opens with the plugins the user installed and left on.
+    scratch.plugin_state = app.session.plugin_state.clone();
+    scratch.disabled_plugins = app.session.disabled_plugins.clone();
+    scratch.plugin_limits = app.session.plugin_limits;
+    crate::print_face_ui::sync(&mut scratch, &app.preferences);
     if insert {
         scratch.selection = app.session.selection.clone();
     }
@@ -590,6 +923,7 @@ fn start(app: &mut SolveApp) {
     let scope = request.scope.clone();
     let allow_hosts = request.allow_hosts.clone();
     let thumbnail = request.kind == Kind::Open;
+    let export = request.kind.exports();
     // While a design rebuilds, a picture of what is built so far (a large design takes a while).
     let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let partial_rx = (command == "doc.open" || command == "doc.recover").then(|| {
@@ -622,7 +956,10 @@ fn start(app: &mut SolveApp) {
     let worker_finished = finished;
     #[cfg(test)]
     let worker_gate = app.file_load.worker_gate.take();
+    // A plugin's failure is worded on the worker, in the window's language.
+    let language = app.preferences.language.clone();
     let spawned = std::thread::Builder::new().name("file-load".into()).spawn(move || {
+        let _language = solidcraft_ui_text::scope(&language);
         #[cfg(test)]
         if let Some((started, release)) = worker_gate {
             let _ = started.send(std::thread::current().id());
@@ -651,7 +988,7 @@ fn start(app: &mut SolveApp) {
         // Servers allowed once hold for this request only, on this worker thread.
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             solidcraft_engine::io::vfs::allowing_hosts(&allow_hosts, || {
-                compute(scratch, command, &params, scope, thumbnail, &worker_phase, &worker_progress)
+                compute(scratch, command, &params, scope, thumbnail, export, &worker_phase, &worker_progress)
             })
         }))
         .unwrap_or_else(|_| Err("the file operation failed; the current design is unchanged".into()));
@@ -673,10 +1010,13 @@ fn start(app: &mut SolveApp) {
                 partial_rx,
                 built: None,
                 staged: None,
+                ready: None,
+                sketch: app.session.active_sketch,
             })
         }
         Err(e) => {
             let e = format!("could not start file operation: {e}");
+            crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed(e.clone()));
             request.answer(Err(e.clone()));
             app.set_status(e, true);
         }
@@ -686,15 +1026,19 @@ fn start(app: &mut SolveApp) {
 /// Start the next queued STEP file as a [`Staged`] import (see [`step_staged`]).
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn start_staged(app: &mut SolveApp) {
-    if app.file_load.running.is_some() {
+    if app.file_load.running.is_some() || app.file_picker_busy() {
         return;
     }
-    let Some(request) = app.file_load.queued.pop_front() else { return };
+    // The first that can start: one for a design in a tab not shown waits for it.
+    let shown = app.docs.active_tab();
+    let Some(next) = app.file_load.queued.iter().position(|r| r.tab.is_none_or(|tab| tab == shown)) else { return };
+    let Some(request) = app.file_load.queued.remove(next) else { return };
     let insert = request.insert();
     let before = if insert { crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).collect() } else { Vec::new() };
     let mut session = if insert { app.session.scratch() } else { Session::default() };
     session.set_command_check(app.session.command_check());
     session.set_validation(app.preferences.validation);
+    crate::print_face_ui::sync(&mut session, &app.preferences);
     if insert {
         session.selection = app.session.selection.clone();
     }
@@ -730,13 +1074,16 @@ fn start_staged(app: &mut SolveApp) {
             triangles: 0,
             shown: false,
         }),
+        ready: None,
+        sketch: app.session.active_sketch,
         request,
     });
 }
 
 /// One frame of a staged STEP import: parse the file, or convert solids for a frame's worth of
 /// time, or, once every solid is in, run the command (which finds the file read) and hand its
-/// result to [`tick`] as a worker would.
+/// result to [`tick`] as a worker would. A file cadmpeg reads runs its command in one frame
+/// ([`cadmpeg_reads`]).
 fn step_staged(running: &mut Running) {
     let Some(staged) = running.staged.as_mut() else { return };
     let progress = running.progress.clone();
@@ -788,6 +1135,24 @@ fn step_staged(running: &mut Running) {
                 staged.ran = Some(result);
             }
             Some(Err(e)) => send(staged, Err(e)),
+        }
+        return;
+    }
+    if cadmpeg_reads(&running.request) {
+        let Some(mut session) = staged.session.take() else { return };
+        let (command, params) = (staged.command, staged.params.clone());
+        let result = solidcraft_engine::io::vfs::scoped(scope, || {
+            solidcraft_engine::doc::progress::watch(progress.clone(), || session.execute(command, &params))
+        });
+        match result {
+            _ if progress.is_cancelled() => send(staged, Err("file operation cancelled".into())),
+            Ok(result) => {
+                // Next frames: the meshes ("Preparing the view").
+                running.phase.store(1, Ordering::Relaxed);
+                staged.session = Some(session);
+                staged.ran = Some(result);
+            }
+            Err(e) => send(staged, Err(e.to_string())),
         }
         return;
     }
@@ -1041,6 +1406,7 @@ fn compute(
     params: &Value,
     scope: Option<solidcraft_engine::io::vfs::PathScope>,
     thumbnail: bool,
+    export: bool,
     phase: &AtomicU8,
     progress: &Arc<Progress>,
 ) -> Job {
@@ -1055,7 +1421,7 @@ fn compute(
     let result =
         solidcraft_engine::io::vfs::scoped(scope, || solidcraft_engine::doc::progress::watch(progress.clone(), || session.execute(command, params)))
             .map_err(|e| e.to_string())?;
-    if command == "file.export_view_dxf" {
+    if export {
         // A successful export has already published its complete file. A Cancel arriving
         // after that commit must not turn a completed save into a misleading cancellation.
         return Ok(Made { session, result, thumbnail: false });
@@ -1087,6 +1453,15 @@ fn compute(
     Ok(Made { session, result, thumbnail })
 }
 
+/// A sheet export's line on the card: the PNG's rows drawn so far, once its band loop reports them.
+fn sheet_progress_text(work: Option<(&str, usize, usize)>) -> String {
+    let label = solidcraft_ui_text::tr_label("drawing_export.progress.rows");
+    match work {
+        Some(("sheet_png", done, total)) => format!("{label}: {done}/{total}"),
+        _ => label.to_string(),
+    }
+}
+
 pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     // Stop must release the waiting slot even if the worker has not reached its next check.
     let chat_cancelled = app.file_load.running.as_ref().is_some_and(|r| crate::control::chat_turn_cancelled(r.request.chat_turn.as_deref()));
@@ -1095,7 +1470,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // As with FileLoad::cancel, a publishing export retains its worker until it reports back.
     if chat_cancelled
-        && app.file_load.running.as_ref().is_some_and(|r| r.request.kind != Kind::ExportDxf)
+        && app.file_load.running.as_ref().is_some_and(|r| !r.request.kind.exports())
         && let Some(running) = app.file_load.running.take()
     {
         running.request.answer(Err("the agent chat turn ended".into()));
@@ -1120,23 +1495,241 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
             running.preview = None;
         }
     }
-    let result = app.file_load.running.as_ref().and_then(|r| match r.rx.try_recv() {
-        Ok(job) => Some(job),
-        Err(TryRecvError::Empty) => None,
-        Err(TryRecvError::Disconnected) => Some(Err("the file operation stopped; the current design is unchanged".into())),
-    });
-    if let Some(job) = result
-        && let Some(running) = app.file_load.running.take()
+    if let Some(r) = app.file_load.running.as_mut()
+        && r.ready.is_none()
+    {
+        r.ready = match r.rx.try_recv() {
+            Ok(job) => Some(job),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => Some(Err("the file operation stopped; the current design is unchanged".into())),
+        };
+    }
+    // A ready result that cannot land yet (its design's tab is not shown, or the person is busy)
+    // leaves `running` for `waiting`: it stops holding the worker, so the next request starts
+    // while it waits, and it lands the moment it can.
+    if let Some(r) = app.file_load.running.as_ref()
+        && r.ready.is_some()
+    {
+        let land = landing(app, r);
+        match land {
+            Land::Wait => {
+                if let Some(running) = app.file_load.running.take() {
+                    app.file_load.waiting.push(running);
+                }
+            }
+            Land::Now => {
+                if let Some(running) = app.file_load.running.take() {
+                    land_now(app, running);
+                }
+            }
+            Land::Again => {
+                if let Some(running) = app.file_load.running.take() {
+                    again(app, running);
+                }
+            }
+            Land::Behind => {
+                if let Some(running) = app.file_load.running.take() {
+                    behind(app, running);
+                }
+            }
+            Land::Gone => {
+                if let Some(running) = app.file_load.running.take() {
+                    gone(app, running);
+                }
+            }
+        }
+    }
+    // Land each waiting result that can go now, oldest first.
+    let mut at = 0;
+    while at < app.file_load.waiting.len() {
+        let land = landing(app, &app.file_load.waiting[at]);
+        if land == Land::Wait {
+            at += 1;
+            continue;
+        }
+        let running = app.file_load.waiting.remove(at);
+        match land {
+            Land::Now => land_now(app, running),
+            Land::Again => again(app, running),
+            Land::Behind => behind(app, running),
+            Land::Gone => gone(app, running),
+            Land::Wait => {}
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    start(app);
+    #[cfg(target_arch = "wasm32")]
+    start_staged(app);
+    if app.file_load.busy() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
+    }
+}
+
+/// What a finished file operation does now.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Land {
+    /// Taken up now, as it always was.
+    Now,
+    /// Kept until the person is done with what they are doing, or its design's tab is shown.
+    Wait,
+    /// Its design changed while it ran: run again for the design as it is now.
+    Again,
+    /// A design opened while the person is busy: in a new tab behind the one shown.
+    Behind,
+    /// Its design's tab was closed (or replaced): nothing is left to land in.
+    Gone,
+}
+
+/// How many times an insert runs again for a design that keeps changing before it gives up.
+const MAX_TRIES: u8 = 3;
+
+/// The person isn't in the middle of something a design arriving would cut short: no dialog,
+/// tool or sketch open, nothing of theirs computing or being saved, no "save changes?" asked.
+fn quiet(app: &SolveApp, r: &Running) -> bool {
+    app.dialog.is_none()
+        && app.tool.is_none()
+        && app.session.active_sketch.is_none_or(|sketch| r.sketch == Some(sketch))
+        && app.applying.is_none()
+        && app.deferred.is_none()
+        && app.deferred_queue.is_empty()
+        && app.delete_check.is_none()
+        && app.pending_feature_edit.is_none()
+        && app.saving.is_none()
+        && app.file_picker.is_none()
+        && app.control_job.is_none()
+        && app.docs.closing.is_none()
+        && app.docs.quitting.is_none()
+        && app.docs.batch.is_none()
+}
+
+fn landing(app: &SolveApp, r: &Running) -> Land {
+    let Some(job) = r.ready.as_ref() else { return Land::Wait };
+    // As it always was: the design waited for it.
+    if app.preferences.file_operations_wait || r.cancelled() || job.is_err() || r.request.kind == Kind::ExportDxf {
+        return Land::Now;
+    }
+    // The tab list is being edited (a close prompt, a quit, Close Other/All Tabs): landing a
+    // design behind would insert a slot and shift the indices those hold. Wait until it is over.
+    if app.docs.closing.is_some() || app.docs.quitting.is_some() || app.docs.batch.is_some() {
+        return Land::Wait;
+    }
+    // Its design's tab was closed (or replaced): there is nothing left to land in.
+    if r.request.tab.is_some_and(|tab| !app.docs.tab_open(tab)) {
+        return Land::Gone;
+    }
+    match r.request.kind {
+        Kind::Open | Kind::Recover { .. } if quiet(app, r) => Land::Now,
+        Kind::Open | Kind::Recover { .. } => Land::Behind,
+        _ if r.request.tab.is_some_and(|tab| tab != app.docs.current_tab()) || !quiet(app, r) => Land::Wait,
+        _ if r.matches(&app.session) || r.request.tries >= MAX_TRIES => Land::Now,
+        _ => Land::Again,
+    }
+}
+
+/// Run an insert (or Update Links) again for the design as it is now, first in line; its first
+/// result is kept meanwhile, so the file it read is still cached.
+fn again(app: &mut SolveApp, mut running: Running) {
+    let mut request = std::mem::replace(&mut running.request, Request::new("", Kind::Open));
+    request.tries += 1;
+    if let Some(Ok(made)) = running.ready.take() {
+        app.file_load.warm = Some((request.serial, Box::new(made.session)));
+    }
+    app.file_load.queued.push_front(request);
+}
+
+/// A design opened while the person is busy goes in a new tab behind the one shown.
+fn behind(app: &mut SolveApp, mut running: Running) {
+    let Some(Ok(made)) = running.ready.take() else { return };
+    let request = &running.request;
+    let key = format!("file:{}", request.serial);
+    let uid = made.session.uid;
+    match crate::documents::open_tab_behind(app, made.session) {
+        Ok(()) => {
+            crate::operations::ended(app, &key, Outcome::Done);
+            if request.kind == Kind::Open {
+                app.home.add_recent(&request.path);
+                crate::documents::design_opened(app, &request.path);
+            }
+            // A recovered design takes its entry with it into the background tab: saved there
+            // first, so the old entry can go without the design being lost to a crash.
+            if let Kind::Recover { id, dir } = &request.kind {
+                recovered_behind(app, uid, id, dir.as_deref());
+            }
+            let name = std::path::Path::new(&request.path).file_name().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+            app.set_status(solidcraft_ui_text::format("file_load.opened_behind", &[("name", &name)]), false);
+            request.answer(Ok(made.result));
+        }
+        Err(e) => {
+            crate::operations::ended(app, &key, Outcome::Failed(e.clone()));
+            app.set_status(e.clone(), true);
+            request.answer(Err(e));
+        }
+    }
+    // The launch's reopen marker names this file until its open finishes. A background open
+    // finishes here too, or the next launch reports a stuck reopen and skips the saved tabs.
+    if request.kind == Kind::Open
+        && let Some(dir) = &app.reopen_guard_dir
+    {
+        solidcraft_engine::recovery::reopen_finished(dir, &request.path);
+    }
+}
+
+/// Answer a result whose design's tab was closed: nothing is left to land in.
+fn gone(app: &mut SolveApp, running: Running) {
+    app.file_load.drop_warm(running.request.serial);
+    let e = "the design it was for was closed";
+    crate::operations::ended(app, &format!("file:{}", running.request.serial), Outcome::Failed(e.into()));
+    app.set_status(e, false);
+    running.request.answer(Err(e.into()));
+}
+
+/// Answer a queued request whose design's tab was closed: it would wait for a number that never
+/// matches again, holding the queue.
+fn orphaned_request(app: &mut SolveApp, request: Request) {
+    app.file_load.drop_warm(request.serial);
+    let e = "the design it was for was closed";
+    crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed(e.into()));
+    app.set_status(e, false);
+    request.answer(Err(e.into()));
+}
+
+/// Cancel a result that is in and waits to land (its row's X in the operations panel).
+pub(crate) fn cancel_waiting(app: &mut SolveApp, serial: u64) {
+    let Some(at) = app.file_load.waiting.iter().position(|r| r.request.serial == serial) else { return };
+    let running = app.file_load.waiting.remove(at);
+    app.file_load.drop_warm(serial);
+    crate::operations::ended(app, &format!("file:{serial}"), Outcome::Cancelled);
+    app.set_status("file operation cancelled", false);
+    running.request.answer(Err("file operation cancelled".into()));
+}
+
+/// Take up a finished file operation now.
+fn land_now(app: &mut SolveApp, mut running: Running) {
+    let Some(job) = running.ready.take() else { return };
+    if app.file_load.warm.as_ref().is_some_and(|(serial, _)| *serial == running.request.serial) {
+        app.file_load.warm = None;
+    }
+    // Opened while the person kept working: it lands, whatever they changed in the design shown.
+    let opens = !app.preferences.file_operations_wait && matches!(running.request.kind, Kind::Open | Kind::Recover { .. });
+    let key = format!("file:{}", running.request.serial);
+    let mut outcome = Outcome::Done;
     {
         let request = &running.request;
         match job {
-            Ok(made) if request.kind == Kind::ExportDxf => {
+            Ok(made) if request.kind.exports() && request.print => {
+                crate::drawing_workspace::print::written(app, &request.path);
+                request.answer(Ok(made.result));
+            }
+            Ok(made) if request.kind.exports() => {
                 if !request.path.is_empty() {
                     app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &request.path)]), false);
                 }
                 request.answer(Ok(made.result));
             }
-            _ if running.cancelled() => request.answer(Err("file operation cancelled".into())),
+            _ if running.cancelled() => {
+                outcome = Outcome::Cancelled;
+                request.answer(Err("file operation cancelled".into()));
+            }
             Ok(made) if request.reads_again() && running.matches(&app.session) => {
                 let (id, _) = request.command();
                 app.session.accept_computed(made.session);
@@ -1168,7 +1761,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 request.answer(r);
             }
             Ok(_) if reuse_open(app, request) => {}
-            Ok(made) if running.matches(&app.session) => 'open: {
+            Ok(made) if opens || running.matches(&app.session) => 'open: {
                 // Not meshed yet: framing it while it goes in must not mesh it here.
                 app.open_meshing_next = true;
                 crate::frame_watch::step(app, "before the open");
@@ -1178,7 +1771,12 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                     app.big_operation = true;
                 } else {
                     // No tab left for it: `adopt` said why, and nothing else of the open happens.
-                    if !crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| crate::documents::adopt(app, made.session)) {
+                    // Opened by a program, not the user: nothing is asked about its links.
+                    app.docs.quiet_open = request.reply.is_some() || request.chat_turn.is_some();
+                    let adopted =
+                        crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| crate::documents::adopt(app, made.session));
+                    app.docs.quiet_open = false;
+                    if !adopted {
                         app.open_meshing_next = false;
                         // A design to recover stays offered, as when its read fails.
                         if let Kind::Recover { id, dir } = &request.kind {
@@ -1202,17 +1800,14 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                     crate::stand_up::offer(app, &request.path, &running.before, Some(&made.result));
                 }
                 crate::frame_watch::step(app, "stand-up offer");
-                let warnings = made.result.get("warnings").and_then(Value::as_array);
                 if let Kind::Recover { .. } = request.kind {
                     recovered(app, request);
                 } else {
                     app.set_status(
                         if made.result.get("read_only").and_then(Value::as_bool) == Some(true) {
                             solidcraft_ui_text::tr("document.opened_read_only").to_string()
-                        } else if let Some(summary) = crate::timeline::import_status(app, &made.result) {
+                        } else if let Some(summary) = crate::timeline::import_warning_status(app, &made.result) {
                             summary
-                        } else if let Some(w) = warnings.filter(|w| !w.is_empty()) {
-                            format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or(""))
                         } else {
                             // Built here, outside the window's language scope: in the language
                             // chosen, as the other statuses of this file are.
@@ -1242,19 +1837,36 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                     );
                     if !request.insert() {
                         app.say_newer_file();
+                        app.say_plugin_data();
+                        app.say_signature(&made.result);
+                    } else if request.note.is_none()
+                        && let Some(note) = linked_signing_note(&request.path)
+                    {
+                        app.set_status(note, false);
                     }
                     if let Some(note) = &request.note {
                         app.set_status(note.clone(), false);
                     }
+                    // A file an importer plugin opened: what it could not carry over. A program
+                    // that asked has it in the reply instead.
+                    if request.reply.is_none() {
+                        crate::import_report::offer(app, &made.result);
+                    }
+                }
+                if request.kind == Kind::Open {
+                    crate::documents::design_opened(app, &request.path);
                 }
                 request.answer(Ok(made.result));
             }
             Ok(_) => {
                 let e = "the active design changed while loading; the file operation was discarded";
+                outcome = Outcome::Failed(e.into());
                 request.answer(Err(e.into()));
                 app.set_status(e, true);
             }
             Err(e) => {
+                // A real cancel took the `running.cancelled()` arm above; this is a failure.
+                outcome = Outcome::Failed(e.clone());
                 request.answer(Err(e.clone()));
                 if request.reads_again() {
                     // Said as when the command ran here (the status line, the run's messages).
@@ -1275,13 +1887,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
             solidcraft_engine::recovery::reopen_finished(dir, &request.path);
         }
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    start(app);
-    #[cfg(target_arch = "wasm32")]
-    start_staged(app);
-    if app.file_load.busy() {
-        ctx.request_repaint_after(std::time::Duration::from_millis(16));
-    }
+    crate::operations::ended(app, &key, outcome);
 }
 
 /// The light overlay over everything under the title bar while a file loads. The title bar,
@@ -1332,7 +1938,16 @@ fn load_steps(
 }
 
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
-    let Some(r) = &app.file_load.running else { return };
+    // The operations panel shows the file operation as a row with its progress and Cancel; the
+    // card is the fallback where it cannot: Home, "Wait for files to open", the panel turned off,
+    // or no room for it in the view. The panel is laid out after this decision, so the last frame's
+    // `panel_drew` says whether it had room (true until the first frame: the default panel fits).
+    let panel_shows = !app.home.open && app.preferences.operations_panel && app.operations.panel_drew;
+    app.file_load.card_shown = app.preferences.file_operations_wait || !panel_shows;
+    if !app.file_load.card_shown {
+        return;
+    }
+    let Some(r) = app.file_load.running.as_ref().or_else(|| app.file_load.waiting.first()) else { return };
     let cancelled = r.cancelled();
     if cancelled && app.file_load.queued.is_empty() {
         return;
@@ -1353,7 +1968,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let phase = r.phase.load(Ordering::Relaxed);
     let (done, total) = r.features();
     // Long work inside one feature (a large STEP file) has progress of its own.
-    let export = r.request.kind == Kind::ExportDxf;
+    let export = r.request.kind.exports();
+    // What Cancel says once it has stopped the job.
+    let stopped = match r.request.kind {
+        Kind::ExportDxf => solidcraft_ui_text::tr_label("dxf.cancelled"),
+        Kind::ExportSheet => solidcraft_ui_text::tr_label("drawing_export.cancelled"),
+        _ => "file operation cancelled",
+    };
     let work = r.work().filter(|(_, d, t)| export || (phase == 0 && d < t));
     let screen = ctx.content_rect();
     // Leave the title bar to the window. The resize edges are a foreground layer above this.
@@ -1391,6 +2012,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             Kind::Open => "file_load.opening",
             Kind::Recover { .. } => "file_load.recovering",
             Kind::ExportDxf => "dxf.exporting",
+            Kind::ExportSheet => "drawing_export.exporting",
             Kind::UpdateLinks => "file_load.updating_links",
             Kind::ReloadCloud => "file_load.reloading_cloud",
         })
@@ -1399,7 +2021,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Kind::Insert | Kind::InsertDesign => "import",
         Kind::Open => "open",
         Kind::Recover { .. } => "restore",
-        Kind::ExportDxf => "export",
+        Kind::ExportDxf | Kind::ExportSheet => "export",
         Kind::UpdateLinks => "update",
         Kind::ReloadCloud => "import",
     };
@@ -1435,6 +2057,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 } else {
                     match (phase, work) {
                         (_, work) if r.request.kind == Kind::ExportDxf => crate::dialogs_view_dxf::progress_text(work),
+                        (_, work) if r.request.kind == Kind::ExportSheet => sheet_progress_text(work),
                         (_, Some(("reading", d, t))) => {
                             solidcraft_ui_text::format("file_load.reading_percent", &[("percent", &(d * 100 / t.max(1)).to_string())])
                         }
@@ -1479,14 +2102,30 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if cancel && !cancelled {
         // The worker stops at its next cancellation checkpoint; its scratch design and
         // result channels are isolated from any file operation started afterwards.
+        for op in app.file_load.operations() {
+            crate::operations::ended(app, &format!("file:{}", op.serial), Outcome::Cancelled);
+        }
         app.file_load.cancel();
-        app.set_status(if export { solidcraft_ui_text::tr_label("dxf.cancelled") } else { "file operation cancelled" }, false);
+        app.set_status(stopped, false);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Cancelling the queued retry forgets the session it read the file into: nothing runs again
+    /// for a request that is gone.
+    #[test]
+    fn cancelling_the_queued_retry_forgets_its_cached_session() {
+        let mut load = FileLoad::default();
+        let mut request = Request::new("part.step", Kind::Insert);
+        request.serial = 7;
+        load.queued.push_back(request);
+        load.warm = Some((7, Box::new(Session::default())));
+        load.cancel_queued(0);
+        assert!(load.warm.is_none(), "the cached session goes with its cancelled request");
+    }
 
     /// A STEP file goes through its three steps in order as the kernel reports them, and stays
     /// on the last once the parts are done; a design's steps follow its features.
@@ -1522,6 +2161,8 @@ mod tests {
             partial_rx: None,
             built: None,
             staged: None,
+            ready: None,
+            sketch: None,
         });
     }
 
@@ -1564,6 +2205,58 @@ mod tests {
         assert!(reply.try_recv().is_ok_and(|r| r["ok"] == json!(false)), "the caller hears it failed");
     }
 
+    /// Insert PCB inserts the board the picked file belongs to straight away, beside the window:
+    /// each file's layer is found from what it says, and one undo removes the board (#12797).
+    #[test]
+    fn insert_pcb_inserts_the_picked_files_board_in_one_undo_step() {
+        const OUTLINE: &str = "%FSLAX46Y46*%
+%MOMM*%
+%ADD10C,0.1*%
+D10*
+X0Y0D02*
+X30000000Y0D01*
+X30000000Y20000000D01*
+X0Y20000000D01*
+X0Y0D01*
+M02*
+";
+        const DRILLS: &str = "M48
+METRIC
+T1C3.0
+%
+T1
+X5.0Y5.0
+X25.0Y5.0
+M30
+";
+        let dir = std::env::temp_dir().join(format!("solidcraft-insert-pcb-{}", std::process::id())).join("Picked");
+        let _ = std::fs::create_dir_all(&dir);
+        for (file, text) in [("board.GKO", OUTLINE), ("board.DRL", DRILLS), ("notes.txt", "hello")] {
+            std::fs::write(dir.join(file), text).unwrap();
+        }
+        let picked = dir.join("board.DRL").to_string_lossy().into_owned();
+        let mut h = crate::scenario::Harness::new();
+        h.app.services.pick_open = Some(Box::new(move |_| Box::pin(std::future::ready(Some(picked.clone())))));
+        h.app.start("file.insert_gerber");
+        h.frames(3);
+        assert!(h.app.dialog.is_none(), "no window to fill in");
+        h.settle();
+        let c = h.app.session.doc.components.iter().find(|c| c.name == "Picked").unwrap_or_else(|| panic!("no board: {:?}", h.app.status));
+        assert_eq!(c.properties.get("pcb.outline").map(String::as_str), Some("board.GKO"));
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.settle();
+        assert!(!h.app.session.doc.components.iter().any(|c| c.name == "Picked"), "one undo removes the board");
+        // On the web a file that isn't the board's zip is refused, whatever else was uploaded.
+        let picked = dir.join("board.GKO").to_string_lossy().into_owned();
+        let components = h.app.session.doc.components.len();
+        insert_board(&mut h.app, &picked, true);
+        assert!(h.app.file_load.idle(), "no import starts");
+        h.settle();
+        assert_eq!(h.app.session.doc.components.len(), components);
+        assert!(h.app.status.as_ref().is_some_and(|(s, _, error)| *error && s.contains("zip")), "{:?}", h.app.status);
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap_or(&dir));
+    }
+
     #[test]
     fn a_ply_is_a_point_cloud_unless_inserted_as_a_mesh() {
         let mut request = Request::new("scan.ply", Kind::Insert);
@@ -1571,6 +2264,91 @@ mod tests {
         assert_eq!(Request::new("scan.ply", Kind::Open).command().0, "doc.open");
         request.mesh = true;
         assert_eq!(request.command().0, "file.insert_mesh");
+        // Insert PCB: the picked file is the board's set.
+        let mut request = Request::new("board.zip", Kind::Insert);
+        request.gerber = true;
+        assert_eq!(request.command(), ("file.insert_gerber", json!({"set": "board.zip"})));
+    }
+
+    /// A FreeCAD file comes in as its rebuilt features; with the preference off, as its solids in
+    /// one Import feature, as before.
+    #[test]
+    fn freecad_history_preference_keeps_the_solids_only_import() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../io/src/native_cad/fixtures/bracket.FCStd");
+        assert!(crate::prefs::Prefs::default().freecad_history, "on by default");
+        for (on, types) in [(true, vec!["Sketch", "ExtrudeFeature", "Sketch", "ExtrudeFeature", "FilletFeature"]), (false, vec!["BaseFeature"])] {
+            let mut app = SolveApp::new(Session::default(), Default::default());
+            app.preferences.freecad_history = on;
+            app.insert_path(path);
+            let got: Vec<&str> = app.session.doc.features.iter().map(|f| f.kind.type_name()).collect();
+            assert_eq!(got, types, "preference {on}");
+        }
+    }
+
+    /// A FreeCAD or Rhino file's solids come in through cadmpeg's STEP writer and SolidCraft's STEP
+    /// reader, the Import feature keeping that STEP text, as before; with "Import with cadmpeg" on,
+    /// read from cadmpeg's model straight into records, with no STEP text kept. Both bring the
+    /// same block.
+    #[test]
+    fn cadmpeg_import_preference_reads_freecad_and_rhino_into_records() {
+        assert!(!crate::prefs::Prefs::default().cadmpeg_import, "off by default");
+        for file in ["block.FCStd", "block.3dm"] {
+            let path = format!("{}/../io/src/native_cad/fixtures/{file}", env!("CARGO_MANIFEST_DIR"));
+            let mut volumes = Vec::new();
+            for on in [false, true] {
+                let mut app = SolveApp::new(Session::default(), Default::default());
+                app.preferences.freecad_history = false;
+                app.preferences.cadmpeg_import = on;
+                app.insert_path(&path);
+                let import = app.session.doc.features.iter().find_map(|f| match &f.kind {
+                    solidcraft_engine::doc::FeatureKind::Import { step, records, .. } => Some((step.is_empty(), records.is_some())),
+                    _ => None,
+                });
+                assert_eq!(import, Some((on, on)), "{file}: preference {on}");
+                let bodies = &app.session.model.state().bodies;
+                assert_eq!(bodies.len(), 1, "{file}: preference {on}");
+                volumes.push(solidcraft_engine::kernel::measure(&bodies[0].body).unwrap().volume);
+            }
+            assert!((volumes[0] - volumes[1]).abs() < 1e-6 * volumes[0], "{file}: {volumes:?}");
+        }
+    }
+
+    /// A STEP file is read by SolidCraft's own reader, which keeps the STEP text; with "Import
+    /// with cadmpeg" on, by cadmpeg into records, with no STEP text kept. Both bring the same
+    /// washer.
+    #[test]
+    fn cadmpeg_import_preference_reads_step_with_cadmpeg_into_records() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/step-conformance/washer.step");
+        assert!(!crate::prefs::Prefs::default().cadmpeg_import, "off by default");
+        let mut volumes = Vec::new();
+        for on in [false, true] {
+            let mut app = SolveApp::new(Session::default(), Default::default());
+            app.preferences.cadmpeg_import = on;
+            app.insert_path(path);
+            let import = app.session.doc.features.iter().find_map(|f| match &f.kind {
+                solidcraft_engine::doc::FeatureKind::Import { step, records, .. } => Some((step.is_empty(), records.is_some())),
+                _ => None,
+            });
+            assert_eq!(import, Some((on, on)), "preference {on}");
+            let bodies = &app.session.model.state().bodies;
+            assert_eq!(bodies.len(), 1, "preference {on}");
+            volumes.push(solidcraft_engine::kernel::measure(&bodies[0].body).unwrap().volume);
+        }
+        assert!((volumes[0] - volumes[1]).abs() < 1e-6 * volumes[0], "{volumes:?}");
+    }
+
+    #[test]
+    fn the_reuse_import_default_is_added_to_import_opens_only() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        for (path, expected) in [("part.step", Some(true)), ("part.IGS", Some(true)), ("design.sc", None), ("old.solidcraft", None)] {
+            let mut request = Request::new(path, Kind::Open);
+            default_reuse_import(&app, &mut request);
+            assert_eq!(request.options.get("reuse_import").and_then(Value::as_bool), expected, "{path}");
+        }
+        app.preferences.reuse_imports = false;
+        let mut request = Request::new("part.step", Kind::Open);
+        default_reuse_import(&app, &mut request);
+        assert_eq!(request.options.get("reuse_import").and_then(Value::as_bool), Some(false), "the old value restores the old behaviour");
     }
 
     #[test]
@@ -1607,6 +2385,22 @@ mod tests {
             assert_eq!(rx.try_recv().unwrap()["ok"], true);
             assert!(rx.try_recv().is_err());
         }
+    }
+
+    #[test]
+    fn automatic_verify_still_reuses_an_open_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let path = h.dir.join("Plate.solidcraft");
+        h.app.run("file.save_as", json!({"path": path.to_string_lossy()})).unwrap();
+        h.app.preferences.verify_opened_designs = true;
+        let tabs = h.app.docs.count();
+        let mut request = Request::new(&path.to_string_lossy(), Kind::Open);
+        request.options.insert("verify".into(), json!(true));
+        request.auto_verify = true;
+        begin_request(&mut h.app, request).unwrap();
+        assert_eq!(h.app.docs.count(), tabs, "the open design is reused, not opened again");
+        assert!(h.app.verifying.is_some(), "the automatic check runs separately");
     }
 
     #[test]
@@ -1717,80 +2511,170 @@ mod tests {
     }
 
     #[test]
-    fn dxf_export_progress_keeps_frames_alive_and_never_adopts_a_worker_document() {
-        let mut h = crate::scenario::Harness::new();
-        h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
-        h.frames(3);
-        let base = h.app.session.doc.clone();
-        let undo = h.app.session.undo.len();
-        let cam = h.app.cam;
-        let progress = Arc::new(Progress::default());
-        solidcraft_engine::doc::progress::watch(progress.clone(), || {
-            solidcraft_engine::kernel::watch::current().unwrap().progress("dxf_occlusion", 64, 128);
-        });
-        let (tx, rx) = std::sync::mpsc::channel();
-        h.app.file_load.running = Some(Running {
-            request: Request::new("drawing.dxf", Kind::ExportDxf),
-            base: base.clone(),
-            base_revision: h.app.session.revision,
-            before: Vec::new(),
-            rx,
-            phase: Arc::new(AtomicU8::new(0)),
-            progress: progress.clone(),
-            preview_rx: None,
-            preview: None,
-            partial_rx: None,
-            built: None,
-            staged: None,
-        });
-        // No worker result is available: drawing a frame must not wait for one.
-        h.frames(4);
-        assert!(h.app.file_load.busy());
-        let at = crate::scenario::handle_at("file_loading:cancel").unwrap();
-        let (request, _reply) = crate::control::ControlRequest::new("ui.click", json!({"x":at.x,"y":at.y}));
-        let _ = crate::control::handle(&mut h.app, &h.ctx, &request);
-        h.frames(4);
-        assert!(progress.is_cancelled());
-        tx.send(Err("DXF export cancelled".into())).unwrap();
-        h.frames(2);
-        assert!(h.app.file_load.idle());
-        assert!(Arc::ptr_eq(&base, &h.app.session.doc));
-        assert_eq!(h.app.session.undo.len(), undo);
-        assert_eq!(h.app.cam, cam);
+    fn an_export_keeps_frames_alive_and_never_adopts_a_worker_document() {
+        // The view DXF and a sheet written to a file go the same way.
+        for kind in [Kind::ExportDxf, Kind::ExportSheet] {
+            let mut h = crate::scenario::Harness::new();
+            // The card's Cancel (Preferences > Wait for files).
+            h.app.preferences.file_operations_wait = true;
+            h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+            h.frames(3);
+            let base = h.app.session.doc.clone();
+            let undo = h.app.session.undo.len();
+            let cam = h.app.cam;
+            let progress = Arc::new(Progress::default());
+            solidcraft_engine::doc::progress::watch(progress.clone(), || {
+                solidcraft_engine::kernel::watch::current().unwrap().progress("dxf_occlusion", 64, 128);
+            });
+            let (tx, rx) = std::sync::mpsc::channel();
+            h.app.file_load.running = Some(Running {
+                request: Request::new("drawing.dxf", kind.clone()),
+                base: base.clone(),
+                base_revision: h.app.session.revision,
+                before: Vec::new(),
+                rx,
+                phase: Arc::new(AtomicU8::new(0)),
+                progress: progress.clone(),
+                preview_rx: None,
+                preview: None,
+                partial_rx: None,
+                built: None,
+                staged: None,
+                ready: None,
+                sketch: None,
+            });
+            // No worker result is available: drawing a frame must not wait for one.
+            h.frames(4);
+            assert!(h.app.file_load.busy());
+            let at = crate::scenario::handle_at("file_loading:cancel").unwrap();
+            let (request, _reply) = crate::control::ControlRequest::new("ui.click", json!({"x":at.x,"y":at.y}));
+            let _ = crate::control::handle(&mut h.app, &h.ctx, &request);
+            h.frames(4);
+            assert!(progress.is_cancelled());
+            // Cancel says which export it stopped.
+            let said = if kind == Kind::ExportDxf { "DXF export" } else { "Sheet export" };
+            assert!(h.app.status.as_ref().is_some_and(|s| s.0.starts_with(said)), "{:?}", h.app.status);
+            tx.send(Err("DXF export cancelled".into())).unwrap();
+            h.frames(2);
+            assert!(h.app.file_load.idle());
+            assert!(Arc::ptr_eq(&base, &h.app.session.doc));
+            assert_eq!(h.app.session.undo.len(), undo);
+            assert_eq!(h.app.cam, cam);
 
-        // The success path is equally read-only, even if the worker has another session.
-        let mut other = Session::default();
-        other.execute("file.new", &json!({"name":"Worker must not replace the current design"})).unwrap();
-        let mut request = Request::new("drawing.dxf", Kind::ExportDxf);
-        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
-        request.reply = Some(reply_tx);
-        let (tx, rx) = std::sync::mpsc::channel();
-        h.app.file_load.running = Some(Running {
-            request,
-            base: base.clone(),
-            base_revision: h.app.session.revision,
-            before: Vec::new(),
-            rx,
-            phase: Arc::new(AtomicU8::new(0)),
-            progress: Arc::new(Progress::default()),
-            preview_rx: None,
-            preview: None,
-            partial_rx: None,
-            built: None,
-            staged: None,
-        });
-        tx.send(Ok(Made { session: other, result: json!({"visible":12}), thumbnail: false })).unwrap();
-        h.frames(2);
-        assert_eq!(reply_rx.try_recv().unwrap()["result"]["visible"], 12);
-        assert!(Arc::ptr_eq(&base, &h.app.session.doc));
-        assert_eq!(h.app.session.undo.len(), undo);
-        assert_eq!(h.app.cam, cam);
+            // The success path is equally read-only, even if the worker has another session.
+            let mut other = Session::default();
+            other.execute("file.new", &json!({"name":"Worker must not replace the current design"})).unwrap();
+            let mut request = Request::new("drawing.dxf", kind.clone());
+            let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+            request.reply = Some(reply_tx);
+            let (tx, rx) = std::sync::mpsc::channel();
+            h.app.file_load.running = Some(Running {
+                request,
+                base: base.clone(),
+                base_revision: h.app.session.revision,
+                before: Vec::new(),
+                rx,
+                phase: Arc::new(AtomicU8::new(0)),
+                progress: Arc::new(Progress::default()),
+                preview_rx: None,
+                preview: None,
+                partial_rx: None,
+                built: None,
+                staged: None,
+                ready: None,
+                sketch: None,
+            });
+            tx.send(Ok(Made { session: other, result: json!({"visible":12}), thumbnail: false })).unwrap();
+            h.frames(2);
+            assert_eq!(reply_rx.try_recv().unwrap()["result"]["visible"], 12);
+            assert!(Arc::ptr_eq(&base, &h.app.session.doc));
+            assert_eq!(h.app.session.undo.len(), undo);
+            assert_eq!(h.app.cam, cam);
+
+            // An export dropped while it runs (the window closing) stops its worker.
+            let progress = Arc::new(Progress::default());
+            drop(Running {
+                request: Request::new("drawing.dxf", kind.clone()),
+                base: base.clone(),
+                base_revision: h.app.session.revision,
+                before: Vec::new(),
+                rx: std::sync::mpsc::channel().1,
+                phase: Arc::new(AtomicU8::new(0)),
+                progress: progress.clone(),
+                preview_rx: None,
+                preview: None,
+                partial_rx: None,
+                built: None,
+                staged: None,
+                ready: None,
+                sketch: None,
+            });
+            assert!(progress.is_cancelled());
+        }
+    }
+
+    /// A control-channel sheet export to a file goes to the worker as an export, as the view DXF does,
+    /// with its path among its options; one without a path holds its document in the reply and runs at
+    /// once.
+    #[test]
+    fn a_sheet_export_to_a_file_runs_off_the_window_thread() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let request = |path: Value| json!({"command": "drawing.export", "params": {"sheet": "Sheet 1", "format": "png", "path": path}});
+        let (now, _now) = crate::control::ControlRequest::new("engine.execute", request(Value::Null));
+        assert!(control(&mut app, now).is_some());
+        assert!(app.file_load.idle());
+        let (later, _later) = crate::control::ControlRequest::new("engine.execute", request(json!("sheet.png")));
+        assert!(control(&mut app, later).is_none());
+        let running = app.file_load.running.as_ref().map(|r| (r.request.kind.clone(), r.request.options.get("path").cloned()));
+        assert_eq!(running, Some((Kind::ExportSheet, Some(json!("sheet.png")))));
+    }
+
+    /// A deferred drawing held since its last update (the model changed after it), written to a file
+    /// beside the window, is the sheet an export at once gives: its views' last lines, not a sheet
+    /// without them.
+    #[test]
+    fn a_held_deferred_sheet_written_beside_the_window_is_the_one_exported_at_once() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-held-sheet-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("sheet.svg").to_string_lossy().into_owned();
+        let ctx = crate::fonts::test_context();
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let run = |app: &mut SolveApp, id: &str, p: Value| app.session.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
+        run(&mut app, "solid.box", json!({"length": 100, "width": 50, "height": 20}));
+        let drawing = run(&mut app, "drawing.create", json!({}))["id"].clone();
+        let front = run(&mut app, "drawing.view.base", json!({"sheet": "Sheet 1", "view": "front", "scale": "1:2", "position_mm": [150, 150]}));
+        run(&mut app, "drawing.view.projected", json!({"parent": front["view"], "side": "above"}));
+        run(&mut app, "drawing.set", json!({"updates": "deferred"}));
+        run(&mut app, "drawing.update", json!({}));
+        let svg = json!({"sheet": "Sheet 1", "format": "svg"});
+        run(&mut app, "drawing.export", svg.clone());
+        run(&mut app, "drawing.close", json!({}));
+        let block = app.session.doc.features[0].id;
+        run(&mut app, "timeline.edit", json!({"feature": block.to_string(), "set": {"height": 40}}));
+        run(&mut app, "drawing.open", json!({"drawing": drawing}));
+        let at_once = run(&mut app, "drawing.export", svg);
+        assert_eq!(at_once["out_of_date"].as_array().map(Vec::len), Some(2), "held: {at_once}");
+        let request = json!({"command": "drawing.export", "params": {"sheet": "Sheet 1", "format": "svg", "path": path}});
+        let (request, _reply) = crate::control::ControlRequest::new("engine.execute", request);
+        assert!(control(&mut app, request).is_none(), "written beside the window");
+        for _ in 0..5000 {
+            if app.file_load.running.is_none() {
+                break;
+            }
+            tick(&mut app, &ctx);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(app.file_load.running.is_none(), "the export finished");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), at_once["svg"].as_str().unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn opening_result_and_preview_cannot_overwrite_a_newer_design() {
         for (insert, change_document) in [(false, true), (true, true), (false, false)] {
             let mut app = SolveApp::new(Session::default(), Default::default());
+            // As it always did with the design waiting for the file: a newer design isn't replaced.
+            app.preferences.file_operations_wait = true;
             let base = app.session.doc.clone();
             let (tx, rx) = std::sync::mpsc::channel();
             let (preview_tx, preview_rx) = std::sync::mpsc::channel();
@@ -1808,6 +2692,8 @@ mod tests {
                 partial_rx: None,
                 built: None,
                 staged: None,
+                ready: None,
+                sketch: None,
             });
             if change_document {
                 app.session.execute("file.new", &serde_json::json!({"name":"Newer design"})).unwrap();
@@ -1878,6 +2764,8 @@ mod tests {
             partial_rx: None,
             built: None,
             staged: None,
+            ready: None,
+            sketch: None,
         });
         tick(&mut app, &crate::fonts::test_context());
         assert!(Arc::ptr_eq(&app.session.doc, &old));
@@ -1907,6 +2795,8 @@ mod tests {
                 partial_rx: None,
                 built: None,
                 staged: None,
+                ready: None,
+                sketch: None,
             });
             let (queued_tx, queued_rx) = std::sync::mpsc::channel();
             let mut queued = Request::new("queued.step", Kind::Open);
@@ -1986,6 +2876,68 @@ mod tests {
         let junk = dir.join("junk.step").to_string_lossy().into_owned();
         std::fs::write(&junk, "not a step file").unwrap();
         app.file_load.queued.push_back(Request::new(&junk, Kind::Insert));
+        start_staged(&mut app);
+        for _ in 0..4 {
+            tick(&mut app, &ctx);
+        }
+        assert!(app.file_load.running.is_none());
+        assert!(app.status.as_ref().is_some_and(|s| s.2 && s.0.contains("junk.step")), "{:?}", app.status);
+        assert!(Arc::ptr_eq(&before, &app.session.doc));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The web app stages a STEP file by the reader its request names: one cadmpeg reads
+    /// (`reader: cadmpeg`, what "Import with cadmpeg" adds) is staged too, behind the same overlay
+    /// and Cancel, its command run in one frame after the overlay shows, not on the window's
+    /// event at once; it comes in as records with no STEP text kept, and SolidCraft's reader
+    /// never reads the file first. Cancelled before that frame, nothing comes in; a file that
+    /// is not STEP fails with its name in the status, as the other reader's does.
+    #[test]
+    fn a_step_file_cadmpeg_reads_is_staged_by_its_reader() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-staged-cadmpeg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/step-conformance/washer.step");
+        let request = |path: &str| {
+            let mut r = Request::new(path, Kind::Insert);
+            r.options.insert("reader".into(), serde_json::json!("cadmpeg"));
+            r
+        };
+        assert!(staged_kind(&request(path)) && cadmpeg_reads(&request(path)));
+        assert!(!cadmpeg_reads(&Request::new(path, Kind::Insert)));
+        let ctx = crate::fonts::test_context();
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let bodies = |app: &SolveApp| app.session.world_state().unwrap().bodies.len();
+        app.file_load.queued.push_back(request(path));
+        start_staged(&mut app);
+        tick(&mut app, &ctx);
+        assert!(app.file_load.busy() && bodies(&app) == 0, "the first frame only shows the overlay");
+        let reading = app.file_load.running.as_ref().and_then(|r| r.staged.as_ref()).is_some_and(|s| s.reading.is_some());
+        assert!(!reading, "SolidCraft's reader does not read the file");
+        let mut frames = 1;
+        while app.file_load.running.is_some() && frames < 1000 {
+            tick(&mut app, &ctx);
+            assert!(app.file_load.running.as_ref().and_then(|r| r.staged.as_ref()).is_none_or(|s| s.reading.is_none()));
+            frames += 1;
+        }
+        assert_eq!(bodies(&app), 1, "{:?}", app.status);
+        let import = app.session.doc.features.iter().find_map(|f| match &f.kind {
+            solidcraft_engine::doc::FeatureKind::Import { step, records, .. } => Some((step.is_empty(), records.is_some())),
+            _ => None,
+        });
+        assert_eq!(import, Some((true, true)), "read by cadmpeg into records");
+        // Cancelled once the overlay shows, before the frame that reads: nothing comes in.
+        let before = app.session.doc.clone();
+        app.file_load.queued.push_back(request(path));
+        start_staged(&mut app);
+        tick(&mut app, &ctx);
+        app.file_load.cancel();
+        tick(&mut app, &ctx);
+        assert!(app.file_load.running.is_none() && !app.file_load.busy());
+        assert!(Arc::ptr_eq(&before, &app.session.doc));
+        // A file that isn't STEP fails, named, and the design stays.
+        let junk = dir.join("junk.step").to_string_lossy().into_owned();
+        std::fs::write(&junk, "not a step file").unwrap();
+        app.file_load.queued.push_back(request(&junk));
         start_staged(&mut app);
         for _ in 0..4 {
             tick(&mut app, &ctx);

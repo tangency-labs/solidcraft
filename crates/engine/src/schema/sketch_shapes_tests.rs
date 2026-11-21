@@ -68,6 +68,8 @@ fn strict_keeps_todays_errors() {
         ("sketch.point", json!({"point": "mid:nope"})),
         ("sketch.point", json!({"point": {"vertex": "x"}})),
         ("sketch.point", json!({"point": "on:l1:x"})),
+        ("sketch.point", json!({"point": "x:l1:1,1"})),
+        ("sketch.point", json!({"point": "x:l1+l1:5,0"})),
         ("sketch.point", json!({"point": "vertex:1,2"})),
         ("sketch.point", json!({"point": [1, 2], "id": "a|b"})),
         ("sketch.circle.center", json!({"center": [0, 0]})),
@@ -122,7 +124,8 @@ fn strict_keeps_todays_errors() {
         ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5]})),
         ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": 0})),
         ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": -2})),
-        ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": "4"})),
+        ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": "nope"})),
+        ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": "0 mm"})),
         ("sketch.slot.center_to_center", json!({"p0": [0, 5], "p1": [10, 5], "width": 1e12})),
         ("sketch.slot.center_to_center", json!({"p0": [3, 5], "p1": [3, 5], "width": 4})),
         ("sketch.slot.overall", json!({"p0": [0, 5], "p1": [10, 5]})),
@@ -179,6 +182,7 @@ fn replies_match_the_output_schema_and_forms_are_accepted() {
         json!({"point": ["10 mm", 40], "connect": false}),
         json!({"point": "mid:l1"}),
         json!({"point": "on:l1:5,0"}),
+        json!({"point": "x:l1+l4:0,0"}),
     ];
     let mut s = session(ParamCheck::Warn);
     for (id, p) in &calls {
@@ -385,4 +389,32 @@ fn slot_replies_include_their_construction_middle() {
 
 fn sorted_keys(v: &Value) -> Option<Vec<&str>> {
     v.as_object().map(|m| m.keys().map(String::as_str).collect())
+}
+
+/// #18756: the corners of the 2-Point Rectangle and the centre and corner of the Center Rectangle
+/// take the snaps `sketch.point` takes. A malformed snap and a point's id are reported, and the
+/// Rounded Rectangle's corners stay coordinates.
+#[test]
+fn rectangle_corners_take_snaps() {
+    let two = |p0: Value| issues("sketch.rectangle.two_point", &json!({"p0": p0, "p1": [5, 5]}));
+    let center = |corner: Value| issues("sketch.rectangle.center", &json!({"center": [0, 0], "corner": corner}));
+    let snaps = [
+        json!("mid:l1"),
+        json!("on:l1:1,2"),
+        json!("x:l1+l2:1,2"),
+        json!("vertex:1,2,3"),
+        json!({"vertex": [1, 2, 3]}),
+        json!({"on_edge": [1, 2, 3]}),
+    ];
+    for good in snaps.iter().cloned().chain([json!([1, 2]), json!({"x": 1, "y": 2})]) {
+        assert!(two(good.clone()).is_empty(), "{good}: {:?}", two(good.clone()).first().map(|i| &i.message));
+        assert!(center(good.clone()).is_empty(), "{good}: {:?}", center(good.clone()).first().map(|i| &i.message));
+    }
+    for bad in [json!("on:l1:abc"), json!("on:l1"), json!("vertex:1,2"), json!({"vertex": [1, 2]}), json!("l1.end"), json!({"ref": "l1.end"})] {
+        assert_eq!(two(bad.clone()).len(), 1, "{bad}");
+        assert_eq!(center(bad.clone()).len(), 1, "{bad}");
+    }
+    for snap in snaps {
+        assert_eq!(issues("sketch.rectangle.rounded", &json!({"p0": snap, "p1": [5, 5], "radius": 1})).len(), 1, "{snap}");
+    }
 }

@@ -25,6 +25,7 @@
 //! | [`Surface::approx_eq`], [`Surface::base_eq`]      | `operator==` (virtual), `SmSurface::operator==`  |
 //! | [`Surface::set_owner`], [`Surface::face`]         | `SetOwner`, `GetFace`                            |
 //! | [`Surface::calculate_bounding_box`], [`SurfaceBoxes`] | `CalculateBoundingBox` (base body)           |
+//! | [`Surface::certified_bounding_box`] | not upstream: a box that bounds the surface over a domain and shrinks with it |
 //! | [`Surface::approximate_size`]                     | `ApproximateSize`                                |
 //! | [`validate_surface_cache`], [`make_surface_cache`], [`make_trim_srf_cache`], [`cache_tolerances`] | `CacheMakeOrValidate` |
 //! | [`make_trim_srf_cache_with_face`], [`get_surface_cache_with_face`] | `CacheMakeOrValidate(SM_OC_TRIMSRF)`, `smsurf_GetSurfaceCache` of a face's surface |
@@ -131,7 +132,7 @@ use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::iso_curve::IsoCurve;
 use crate::curve::line::Line;
-use crate::error::{checked_or_ignored, ignore_status, ignored, passed_on, Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::a_object::{CacheId, ObjectCacheType};
 use crate::geom::assert_array::labels::FACE_TYPE;
 use crate::geom::extent1d::Extent1d;
@@ -162,6 +163,7 @@ use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, 
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+use crate::nurbs::certificate::{axis_foot, meridian_collapse, on_circle, Collapse, OnCircle};
 use crate::nurbs::knots::Side;
 use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
 use crate::surface::plane::Plane;
@@ -184,6 +186,7 @@ const OP_STEP: &str = "surface::surface::p1::StepSurface";
 const OP_CACHE: &str = "surface::surface::p1::validate_surface_cache";
 const OP_IVL: &str = "surface::surface::p1::find_uv_curve_ivl_in_domain";
 const OP_BOX: &str = "surface::surface::p1::Surface::calculate_bounding_box";
+const OP_REV_COLLAPSE: &str = "surface::surface::p1::Surface::revolution_offset_collapses";
 
 /// Why a polar box of a curve-bounded or STEP surface is refused.
 pub(crate) const POLAR_RECURSION: &str = "SmSurface::CalculateBoundingBox of a polar box on a curve-bounded or STEP surface recurses without bound upstream (plan/upstream-issues.md UB-84)";
@@ -340,7 +343,10 @@ pub fn evaluate_directional_derivs<S: SurfaceEvaluate + ?Sized>(
     const OP: &str = "surface::surface::p1::evaluate_directional_derivs";
     // check state
     if highest_deriv > 3 {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::surface_failed(
+            OP,
+            "a derivative order above three was asked",
+        ));
     }
 
     // make the surface evaluation
@@ -984,7 +990,10 @@ pub fn validate_surface_cache(
         }
         // low work - use OldCache when its given
         ObjectCacheType::Surface => Ok(old),
-        _ => Err(SolidError::sm_err(OP_CACHE)),
+        _ => Err(SolidError::surface_failed(
+            OP_CACHE,
+            "the cache type has no surface cache",
+        )),
     }
 }
 
@@ -1863,22 +1872,16 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from the evaluation (its other failures are ignored);
-    /// those of [`vec_lin_comb_two_vectors`] (parallel first derivatives).
+    /// Those of the evaluation; those of [`vec_lin_comb_two_vectors`] (parallel first
+    /// derivatives).
     pub fn compute_param_direction(&self, k: &Kernel, uv: Point2, vec: Vec3) -> Result<Vec2> {
         // clamp input when outOfBounds evals are disabled (the clamped point is only
         // checked; it always lies in the domain)
         let _domain = self.natural_uv_domain_with_nurb(k)?;
 
-        // surface eval (status ignored; passed on with the opt-in fix, WR-663,
+        // surface eval (status ignored upstream; passed on as the fork does, WR-663,
         // tangency-labs/smlib 21dcf69)
-        let derivs = match ignored_surface_result(passed_on(
-            self.evaluate(k, uv, 1, 1, upper_flags(false)),
-            k.fixes.query_statuses_pass_on,
-        )?)? {
-            Some(m) => first_block(&m),
-            None => [[Vec3::ZERO; 2]; 2],
-        };
+        let derivs = first_block(&self.evaluate(k, uv, 1, 1, upper_flags(false))?);
 
         // decompose the projection of crVec onto the tangent plane into Du and Dv
         // components
@@ -2023,13 +2026,12 @@ impl Surface {
 
         // For each dimension
         {
-            // with the opt-in fix no domain can be shown continuous without the knots:
-            // an uninitialised domain (WR-663, tangency-labs/smlib 1612a7d)
+            // no domain can be shown continuous without the knots: an uninitialised
+            // domain, as the fork (WR-663, tangency-labs/smlib 1612a7d)
             let knots =
                 match ignored_surface_result(self.knots_with_nurb(k, SurfParamType::U, None))? {
                     Some(kn) => kn.0,
-                    None if k.fixes.query_statuses_pass_on => return Ok(Extent2d::new()),
-                    None => Vec::new(),
+                    None => return Ok(Extent2d::new()),
                 };
             let u_conts = cache.u_continuities();
             let n = u_conts.len();
@@ -2068,8 +2070,7 @@ impl Surface {
             let knots =
                 match ignored_surface_result(self.knots_with_nurb(k, SurfParamType::V, None))? {
                     Some(kn) => kn.0,
-                    None if k.fixes.query_statuses_pass_on => return Ok(Extent2d::new()),
-                    None => Vec::new(),
+                    None => return Ok(Extent2d::new()),
                 };
             let v_conts = cache.v_continuities();
             let n = v_conts.len();
@@ -2182,6 +2183,40 @@ impl Surface {
             None,
             None,
         )
+    }
+
+    /// A box that provably holds every point of the surface over `uv_domain`, or `None`
+    /// when none is known (not upstream; for clearance proofs, which split a domain until
+    /// its boxes are clear: the normal box of [`Surface::calculate_bounding_box`] is the
+    /// whole control net's, whatever the domain). It is the box of the control points of
+    /// the piece over `uv_domain` ([`BSplineSurface::piece_box`]) of the net the surface is
+    /// evaluated on: a B-spline's own, or the NURB of a cone, sphere, torus, surface of
+    /// revolution or surface of extrusion, made when missing. Every other kind has none
+    /// here: a plane is bounded by the corners of a cell, and the rest are not their
+    /// control net (an offset, a blend's approximation) or have only a base surface's.
+    ///
+    /// # Errors
+    ///
+    /// Those of making a missing NURB.
+    pub fn certified_bounding_box(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+    ) -> Result<Option<Extent3d>> {
+        Ok(match self.kind() {
+            SurfaceKind::BSpline(s) => s.piece_box(uv_domain),
+            SurfaceKind::Cone(_)
+            | SurfaceKind::Sphere(_)
+            | SurfaceKind::Torus(_)
+            | SurfaceKind::SurfOfRevolution(_) => {
+                self.analytic_base_with_nurb(k)?.piece_box(uv_domain)
+            }
+            SurfaceKind::SurfOfExtrusion(_) => {
+                self.extrusion_base_with_nurb(k)?.piece_box(uv_domain)
+            }
+            _ => None,
+        }
+        .filter(Extent3d::is_defined))
     }
 
     /// [`Surface::calculate_bounding_box`] with upstream's optional basis guesses
@@ -2435,7 +2470,7 @@ impl Surface {
         // get or create SurfaceCache with Subdivision Tree containing Bounding boxes
         // (smsurf_GetSurfaceCache returns NULL when no cache can be made: NER)
         let mut cache = ignored_surface_result(get_surface_cache::<()>(k, self, None))?
-            .ok_or(SolidError::null_pointer(OP_BOX))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_BOX, "the surface's cache"))?;
         let top = cache
             .get_tree(k)?
             .top_node()
@@ -2613,16 +2648,15 @@ impl Surface {
             SurfaceKind::Plane(p) => Ok(Some(Self::from(
                 p.create_offset_surface(k, signed_offset_distance)?,
             ))),
-            // `Kernel::fixes.revolution_round_offset_collapses` (WR-567): an offset that
-            // shrinks the generatrix arc onto its centre or past it is no surface
+            // (WR-567): an offset that shrinks the generatrix arc onto its centre or past
+            // it is no surface
             SurfaceKind::SurfOfRevolution(s)
-                if k.fixes.revolution_round_offset_collapses
-                    && self.revolution_offset_collapses(
-                        k,
-                        s,
-                        signed_offset_distance,
-                        approx_tol_3d,
-                    )? =>
+                if self.revolution_offset_collapses(
+                    k,
+                    s,
+                    signed_offset_distance,
+                    approx_tol_3d,
+                )? =>
             {
                 Ok(None)
             }
@@ -2662,10 +2696,9 @@ impl Surface {
 
     /// Not upstream (`SmSurface::OffsetCollapses`, WR-464): whether the offset by
     /// `signed_offset_distance` shrinks a cone, cylinder, sphere or torus onto its spine
-    /// (radius below `tol`), the only case where [`Self::create_offset_surface`] gives no
-    /// surface. With `Kernel::fixes.revolution_round_offset_collapses` (WR-567) also a
-    /// surface of revolution of one circular arc moved in past the arc's radius
-    /// (`revolution_offset_collapses`). `false` for every other surface.
+    /// (radius below `tol`), or a surface of revolution of one circular arc onto the arc's
+    /// centre or past it (`revolution_offset_collapses`, WR-567): the cases where
+    /// [`Self::create_offset_surface`] gives no surface. `false` for every other surface.
     ///
     /// # Errors
     ///
@@ -2696,7 +2729,7 @@ impl Surface {
             SurfaceKind::Torus(s) => s.offset_collapses(signed_offset_distance, tol),
             // the fork's SmBallPatch::OffsetCollapses (f8e6709)
             SurfaceKind::BallPatch(s) => s.offset_collapses(k, signed_offset_distance, tol),
-            SurfaceKind::SurfOfRevolution(s) if k.fixes.revolution_round_offset_collapses => {
+            SurfaceKind::SurfOfRevolution(s) => {
                 self.revolution_offset_collapses(k, s, signed_offset_distance, tol)?
             }
             _ => false,
@@ -2706,17 +2739,30 @@ impl Surface {
     /// Not upstream (the fork's `SmSurfOfRevolution::OffsetCollapses`, WR-567): whether
     /// the offset by `signed_offset_distance` shrinks this surface of revolution `s`
     /// onto its spine or past it. Its generatrix is one circular arc of radius `r`
-    /// (`IsArc(9, tol)`, `r > tol`; a fillet's round along a circular edge), and the
-    /// offset leaves a radius `r - d (N . k) r` below `tol`, with `k` the curvature
-    /// vector of the generatrix-direction iso-curve (the arc revolved: `|k| = 1/r`,
-    /// pointing at the arc's centre) and `N` the surface normal, both at the middle of
-    /// the natural UV domain. A failed arc test or evaluation, or a pole there, is
-    /// `false`.
+    /// (`IsArc(9, tol)` nominates the circle, `r > tol`; a fillet's round along a
+    /// circular edge), proved over the whole generatrix ([`generatrix_on_circle`]), and
+    /// the offset passes every point's centre of curvature: its radius of curvature less
+    /// `d sign(N . k)` is below `tol` all along ([`meridian_collapse`], which decides it on
+    /// the profile and also proves the profile keeps off the axis and bends to one side).
+    /// `k` is the profile's curvature vector (`profile_curvature`, from the
+    /// generatrix-direction iso-curve) and `N` the surface normal, both at the middle of
+    /// the natural UV domain, or a quarter or three quarters along the generatrix where the
+    /// middle is within `tol` of the axis: only the side is read there. A zero offset (the
+    /// surface itself, checked first), a failed arc test or evaluation, a generatrix point
+    /// proved off the circle, or a pole at the middle, is `false`.
     ///
     /// # Errors
     ///
     /// [`SolidError::Unported`] from the arc test or the evaluations; those of the
-    /// natural UV domain.
+    /// natural UV domain; `Unsupported` for a generatrix that is neither proved on the
+    /// circle its samples nominate nor off it (it comes to the tolerance's edge, or has no
+    /// exact NURB form to bound, its NURB not made yet, or more pieces than
+    /// [`on_circle`]'s bound), whose curvature where the side is read is not within half of
+    /// the circle's (NaN or zero included), or whose collapse [`meridian_collapse`] does not
+    /// prove either way (a generatrix crossing the axis, an inflection or a straight
+    /// profile, or a radius of curvature on both sides of the offset): the offset is
+    /// refused, not dropped;
+    /// [`SolidError::Cancelled`] from the certificates.
     fn revolution_offset_collapses(
         &self,
         k: &Kernel,
@@ -2724,41 +2770,146 @@ impl Surface {
         signed_offset_distance: f64,
         tol: f64,
     ) -> Result<bool> {
+        // A zero offset is the surface itself: no point moves, so none passes its centre of
+        // curvature, whatever the generatrix (first, so it is never refused)
+        if signed_offset_distance == 0.0 {
+            return Ok(false);
+        }
         // a failure upstream answers FALSE (except an unported call here)
         let Some(gen) = s.gen_curve() else {
             return Ok(false);
         };
-        let Some(Some((_, radius, _, _))) = ignored_surface_result(gen.is_arc(k, 9, tol))? else {
+        let Some(Some((frame, radius, _, _))) = ignored_surface_result(gen.is_arc(k, 9, tol))?
+        else {
             return Ok(false);
         };
         if radius <= tol {
             return Ok(false);
         }
-
-        // the curvature of the generatrix direction's iso-curve, at the middle of the domain
-        let uv = self.natural_uv_domain_with_nurb(k)?.mid();
-        let Some([_, du, dv, _, duu, dvv]) =
-            ignored_surface_result(self.evaluate_2nd_derivatives(k, uv, true, true))?
-        else {
-            return Ok(false);
-        };
-        let Some(normal) =
-            ignored_surface_result(self.evaluate_normal(k, uv, side(true), side(true)))?
-        else {
-            return Ok(false);
-        };
-        let (d1, d2) = if s.swap_uv() { (du, duu) } else { (dv, dvv) };
-        let speed_sq = d1.length_squared();
-        if speed_sq < EFF_ZERO_SQ {
-            // at a pole: no generatrix tangent to measure
-            return Ok(false);
+        // the samples only nominate the circle: the whole generatrix is proved on it, a
+        // point off it is a witness that it is no arc, and neither is a refusal (no face
+        // is dropped on a sampled arc, solidcraft#17790's review)
+        match generatrix_on_circle(k, gen, &frame, radius, tol)? {
+            OnCircle::Within => {}
+            OnCircle::Outside(_) => return Ok(false),
+            OnCircle::Unproved => {
+                return Err(SolidError::Unsupported {
+                    operation: OP_REV_COLLAPSE,
+                    reason: "the generatrix is neither proved on its circle nor off it",
+                })
+            }
         }
-        let curvature = (d2 - d1 * (d2.dot(d1) / speed_sq)) / speed_sq;
 
-        // radius r - d (N . k) r: N . k r is +1 where the normal points at the centre, -1
-        // away from it
+        // the profile's curvature, from the generatrix direction's iso-curve at the middle
+        // of the domain; where the middle is within `tol` of the axis (a horn torus's touch:
+        // no side to read there), at a quarter or three quarters along the generatrix. The
+        // certificate below proves the side the same everywhere, so any point off the axis
+        // reads it. At the middle a failed evaluation or a pole is `false` (as before);
+        // at the other two points it reads nothing, and with nothing read the side is
+        // refused below.
+        let domain = self.natural_uv_domain_with_nurb(k)?;
+        let mid = domain.mid();
+        let along_generatrix = |f: f64| {
+            if s.swap_uv() {
+                let i = domain.u_interval();
+                Point2::new(i.min() + (i.max() - i.min()) * f, mid.y)
+            } else {
+                let i = domain.v_interval();
+                Point2::new(mid.x, i.min() + (i.max() - i.min()) * f)
+            }
+        };
+        let axis = s.position();
+        let nan = Vec3::new(f64::NAN, f64::NAN, f64::NAN);
+        let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+        let (mut normal, mut curvature) = (nan, nan);
+        for (i, uv) in [mid, along_generatrix(0.25), along_generatrix(0.75)]
+            .into_iter()
+            .enumerate()
+        {
+            let first = i == 0;
+            let Some([point, du, dv, _, duu, dvv]) =
+                ignored_surface_result(self.evaluate_2nd_derivatives(k, uv, true, true))?
+            else {
+                if first {
+                    return Ok(false);
+                }
+                continue;
+            };
+            let (d1, d2) = if s.swap_uv() { (du, duu) } else { (dv, dvv) };
+            if d1.length_squared() < EFF_ZERO_SQ {
+                // at a pole: no generatrix tangent to measure
+                if first {
+                    return Ok(false);
+                }
+                continue;
+            }
+            let kappa = profile_curvature(axis.origin(), axis.z_axis(), point, d1, d2, tol);
+            if !finite(kappa) {
+                // within `tol` of the axis: no side to read here
+                continue;
+            }
+            let Some(n) =
+                ignored_surface_result(self.evaluate_normal(k, uv, side(true), side(true)))?
+            else {
+                if first {
+                    return Ok(false);
+                }
+                continue;
+            };
+            (normal, curvature) = (n, kappa);
+            break;
+        }
+
+        // N . k r is +1 where the normal points at the profile's centre of curvature, -1
+        // away from it: only its sign is taken from this one point, which side of the
+        // profile the offset moves to. The certificate below proves the profile bends to one
+        // side all along and keeps off the axis (the normal is a fixed sign times the
+        // profile's normal there, and flips where the generatrix crosses the axis), so that
+        // side holds at every point. The amount is decided there, over the whole generatrix.
         let towards_centre = normal.dot(curvature) * radius;
-        Ok(radius - signed_offset_distance * towards_centre < tol)
+        let sign = if towards_centre < 0.0 { -1.0 } else { 1.0 };
+        // The side is taken only where the generatrix bends clearly as its circle does:
+        // within half of `±1`. Any band below 1 fixes the sign; half keeps the local radius
+        // within [2r/3, 2r] of the circle's, a same-side bend by a factor-of-two margin,
+        // while an exact arc's rounding (far below it) passes. A NaN or zero `N . k` (a
+        // degenerate normal or derivative, or a generatrix that does not bend along the
+        // normal) is refused, a circle's too: no side is read from it.
+        #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+        if !((towards_centre - sign).abs() <= 0.5) {
+            return Err(SolidError::Unsupported {
+                operation: OP_REV_COLLAPSE,
+                reason: "the generatrix bends unlike its circle where its side is read",
+            });
+        }
+        // The collapse is decided over the whole generatrix, never from the circle's radius
+        // or one curvature sample (solidcraft#17907's second review): the profile must keep
+        // off the axis and bend to one side all along (so the side read here holds
+        // everywhere), and its radius of curvature less the offset must be below `tol` at
+        // every point, or at least `tol` at every point ([`meridian_collapse`]: a tilted
+        // circle's radius is not where its offset folds, its profile's is). Anything else is
+        // refused.
+        let Some(nurb) = gen.b_spline_base().and_then(|b| b.gw_nurb()) else {
+            return Err(SolidError::Unsupported {
+                operation: OP_REV_COLLAPSE,
+                reason: "the generatrix has no exact NURB form to bound its curvature",
+            });
+        };
+        match meridian_collapse(
+            k,
+            nurb,
+            axis.origin(),
+            axis.z_axis(),
+            frame.origin(),
+            signed_offset_distance * sign,
+            tol,
+        )? {
+            Collapse::Everywhere => Ok(true),
+            Collapse::Nowhere => Ok(false),
+            Collapse::Unproved => Err(SolidError::Unsupported {
+                operation: OP_REV_COLLAPSE,
+                reason: "the generatrix's profile is not proved off the axis, bending to one side, with its curvature on one side of the offset all along",
+            }),
+        }
     }
 
     /// The silhouette curves of the surface over `uv_domain` for a parallel
@@ -2845,7 +2996,10 @@ impl Surface {
             for (ii, curve) in curves_3d.iter_mut().enumerate() {
                 // SM_CAST_PTR(SmBSplineCurve, ..): NULL (then dereferenced) otherwise
                 if !matches!(curve.kind(), CurveKind::BSpline(_)) {
-                    return Err(SolidError::null_pointer(OP));
+                    return Err(SolidError::surface_missing(
+                        OP,
+                        "the B-spline form of the 3D curve",
+                    ));
                 }
 
                 // To add color attribute for curve from color of surface: not modelled
@@ -2879,38 +3033,30 @@ impl Surface {
                     let mut new_bsc = curve.clone();
                     let mut trim1 = Extent1d::from_min_max(param, ivl.max());
                     let mut trim2 = Extent1d::from_min_max(ivl.min(), param);
-                    // with the opt-in fix a split that cannot be trimmed fails (WR-663,
+                    // a split that cannot be trimmed fails, as the fork (WR-663,
                     // tangency-labs/smlib 21dcf69; the pieces are dropped with the error)
-                    let pass = k.fixes.query_statuses_pass_on;
                     // may snap sIvl by tol to existing knots
-                    ignore_status(passed_on(
-                        new_bsc.trim(k, &mut trim2, TrimMode::Notify),
-                        pass,
-                    )?)?;
+                    new_bsc.trim(k, &mut trim2, TrimMode::Notify)?;
 
                     new_curves.push(new_bsc);
                     // may snap sIvl by tol to existing knots
-                    ignore_status(passed_on(
-                        curve.trim(k, &mut trim1, TrimMode::Notify),
-                        pass,
-                    )?)?;
+                    curve.trim(k, &mut trim1, TrimMode::Notify)?;
 
-                    let uv_curve = curves_uv.get_mut(ii).ok_or(SolidError::null_pointer(OP))?;
+                    let uv_curve = curves_uv
+                        .get_mut(ii)
+                        .ok_or_else(|| SolidError::surface_missing(OP, "the UV curve"))?;
                     if !matches!(uv_curve.kind(), CurveKind::BSpline(_)) {
-                        return Err(SolidError::null_pointer(OP));
+                        return Err(SolidError::surface_missing(
+                            OP,
+                            "the B-spline form of the UV curve",
+                        ));
                     }
                     let mut new_uv_bsc = uv_curve.clone();
                     // may snap sIvl by tol to existing knots
-                    ignore_status(passed_on(
-                        new_uv_bsc.trim(k, &mut trim2, TrimMode::Notify),
-                        pass,
-                    )?)?;
+                    new_uv_bsc.trim(k, &mut trim2, TrimMode::Notify)?;
                     new_uv_curves.push(new_uv_bsc);
                     // may snap sIvl by tol to existing knots
-                    ignore_status(passed_on(
-                        uv_curve.trim(k, &mut trim1, TrimMode::Notify),
-                        pass,
-                    )?)?;
+                    uv_curve.trim(k, &mut trim1, TrimMode::Notify)?;
                     ivl = trim1;
                 }
             }
@@ -2928,15 +3074,14 @@ impl Surface {
     /// scaled zero) and tangent directions on both sides of the possible seam (to the
     /// angle tolerance, checked again unitised).
     ///
-    /// Upstream ignores the evaluation statuses: a failed evaluation leaves what it
-    /// wrote (for a collapsed B-spline, the raw derivatives its zero-tangent repair
-    /// could not fix) or, failing before writing, the previous sample's values
-    /// (initially undefined points), and the tests go on with those.
+    /// Upstream ignores the evaluation statuses and goes on with what a failed
+    /// evaluation left; here, as the fork (WR-663, tangency-labs/smlib 21dcf69), a
+    /// surface that cannot be evaluated at a sample is not shown periodic (`false`).
     ///
     /// # Errors
     ///
-    /// Those of [`Surface::evaluate_ignoring_status`]. A failing `Unitize` returns
-    /// `true`, as upstream's `SER` inside a boolean function.
+    /// [`SolidError::Unported`] and [`SolidError::Cancelled`] of the evaluation. A
+    /// failing `Unitize` returns `true`, as upstream's `SER` inside a boolean function.
     pub fn is_periodic(
         &self,
         k: &Kernel,
@@ -2947,8 +3092,6 @@ impl Surface {
 
         // locals
         let ang_tol_rad_sq = ANG_TOL_RAD * ANG_TOL_RAD;
-        let mut p_min = [[Vec3::UNDEF; 2]; 2];
-        let mut p_max = [[Vec3::UNDEF; 2]; 2];
 
         // for every internal sample points (don't do end points)
         for ii in 1..NUM_TEST_POINTS {
@@ -2966,30 +3109,17 @@ impl Surface {
                 uv_max.y = uv_domain.max().y;
             }
 
-            // surface evaluations on either side of the possible seam (statuses ignored;
-            // with the opt-in fix a surface that cannot be evaluated is not shown
-            // periodic, WR-663, tangency-labs/smlib 21dcf69)
-            if k.fixes.query_statuses_pass_on {
-                let Some(d) = ignored(self.evaluate(k, uv_min, 1, 1, upper_flags(true)))? else {
-                    return Ok(false);
-                };
-                p_min = first_block(&d);
-                let Some(d) = ignored(self.evaluate(k, uv_max, 1, 1, upper_flags(true)))? else {
-                    return Ok(false);
-                };
-                p_max = first_block(&d);
-            } else {
-                if let Some(d) =
-                    self.evaluate_ignoring_status(k, uv_min, 1, 1, upper_flags(true))?
-                {
-                    p_min = first_block(&d);
-                }
-                if let Some(d) =
-                    self.evaluate_ignoring_status(k, uv_max, 1, 1, upper_flags(true))?
-                {
-                    p_max = first_block(&d);
-                }
-            }
+            // surface evaluations on either side of the possible seam (a surface that
+            // cannot be evaluated is not shown periodic, as the fork, WR-663,
+            // tangency-labs/smlib 21dcf69)
+            let Some(d) = ignored(self.evaluate(k, uv_min, 1, 1, upper_flags(true)))? else {
+                return Ok(false);
+            };
+            let p_min = first_block(&d);
+            let Some(d) = ignored(self.evaluate(k, uv_max, 1, 1, upper_flags(true)))? else {
+                return Ok(false);
+            };
+            let p_max = first_block(&d);
 
             let scaled_zero = p_max[0][0].scaled_zero();
 
@@ -3134,13 +3264,9 @@ impl Surface {
     ///
     /// Those of the evaluation.
     pub fn is_flat_corner(&self, k: &Kernel, uv: Point2, angle_tol_deg: f64) -> Result<bool> {
-        // Surface Eval (with the opt-in fix a point that cannot be evaluated is not a
-        // flat corner, WR-663, tangency-labs/smlib 21dcf69)
-        let Some(d) = checked_or_ignored(
-            self.evaluate(k, uv, 1, 1, upper_flags(false)),
-            !k.fixes.query_statuses_pass_on,
-        )?
-        else {
+        // Surface Eval (a point that cannot be evaluated is not a flat corner, as the
+        // fork, WR-663, tangency-labs/smlib 21dcf69)
+        let Some(d) = ignored(self.evaluate(k, uv, 1, 1, upper_flags(false)))? else {
             return Ok(false);
         };
         let d = first_block(&d);
@@ -3323,7 +3449,7 @@ pub(crate) fn plane_bounding_box(
         .calculate_bounding_box(k, uv_domain, &base_req)?;
     if req.polar {
         let mut pb = PolarBox::new();
-        pb.add_vector_with_kernel(k, plane.evaluate_normal(), None);
+        pb.add_vector(plane.evaluate_normal(), None);
         r.polar = Some(pb);
     }
     Ok(r)
@@ -3396,14 +3522,10 @@ pub fn base_is_degenerate_point(
     let mut uv3 = Point2::new(uv1.x, uv0.y);
     let uv_size2 = uv_domain.max_dimension() * uv_domain.max_dimension();
 
-    // with the opt-in fix a surface that cannot be evaluated is not shown degenerate
+    // a surface that cannot be evaluated is not shown degenerate, as the fork
     // (WR-663, tangency-labs/smlib 21dcf69): `None`, and the test is `false`
-    let checked = !k.fixes.query_statuses_pass_on;
     let eval = |uv: Point2| -> Result<Option<[[Vec3; 2]; 2]>> {
-        Ok(
-            checked_or_ignored(surface.evaluate(k, uv, 1, 1, upper_flags(false)), checked)?
-                .map(|m| first_block(&m)),
-        )
+        Ok(ignored(surface.evaluate(k, uv, 1, 1, upper_flags(false)))?.map(|m| first_block(&m)))
     };
     let Some(pv0) = eval(uv0)? else {
         return Ok(false);
@@ -3545,14 +3667,10 @@ pub fn base_is_degenerate_curve(
     // center point
     let center = uv_domain.evaluate(0.5, 0.5);
 
-    // with the opt-in fix a surface that cannot be evaluated is not shown degenerate
+    // a surface that cannot be evaluated is not shown degenerate, as the fork
     // (WR-663, tangency-labs/smlib 21dcf69): `None`, and the test is `false`
-    let checked = !k.fixes.query_statuses_pass_on;
     let eval = |uv: Point2| -> Result<Option<[[Vec3; 2]; 2]>> {
-        Ok(
-            checked_or_ignored(surface.evaluate(k, uv, 1, 1, upper_flags(false)), checked)?
-                .map(|m| first_block(&m)),
-        )
+        Ok(ignored(surface.evaluate(k, uv, 1, 1, upper_flags(false)))?.map(|m| first_block(&m)))
     };
     let eval4 = |uvs: &[Point2; 4]| -> Result<Option<[[[Vec3; 2]; 2]; 4]>> {
         let mut out = [[[Vec3::UNDEF; 2]; 2]; 4];
@@ -3711,7 +3829,10 @@ pub fn find_uv_curve_ivl_in_domain<O: SolutionObject>(
     }
 
     // error: arrive here when no segments contain the input dParamInside value
-    Err(SolidError::sm_err(OP_IVL))
+    Err(SolidError::surface_failed(
+        OP_IVL,
+        "no segment contains the parameter",
+    ))
 }
 
 /// The normal section of a surface evaluation in `direction`
@@ -3788,8 +3909,8 @@ pub(crate) fn convert_domain_from_nurbs_to_step_with(
 /// The fraction of the domain, in `u` and in `v`, a step of `CoverCoincidentSurface`'s
 /// drops may cover before [`crossed_seam_or_pole`] calls it a crossing of a seam or a pole
 /// (`sdMaxStepRatio`, local to `sm_CrossedSeamOrPole` upstream; at file scope in the
-/// SolidCraft fork, tangency-labs/smlib@16bf1cb, so the seam-jump test of
-/// `Kernel::fixes.cover_wraps_across_closed_seam` reads the same limit).
+/// SolidCraft fork, tangency-labs/smlib@16bf1cb, so WR-599's seam-jump test reads the
+/// same limit).
 pub(crate) const MAX_STEP_RATIO: f64 = 0.4;
 
 /// Whether a step from `prev_uv` to `curr_uv` crossed a seam or a pole
@@ -4072,9 +4193,7 @@ impl AreaIntegrand<'_> {
     /// # Errors
     ///
     /// [`SolidError::Unported`] from the surface evaluator, plus numerical and
-    /// surface-evaluator failures when
-    /// [`crate::kernel::UpstreamFixes::integrator_propagates_failure`] is enabled
-    /// (WR-94; off by default, where scalar failures yield zero as upstream does).
+    /// surface-evaluator failures (WR-94; upstream yields zero for them).
     pub fn evaluate(&self, k: &Kernel, t: f64) -> Result<f64> {
         // set up the strip integral of [deltaX, IntervalY]
         let eval = IsoCurveLengthIntegrand::new(self.surface, t);
@@ -4152,16 +4271,16 @@ impl<'s> FindSingularParamWithGivenTangentDir<'s> {
             .surface
             .evaluate(k, uv_point, 3, 3, upper_flags(true))?;
 
-        // compute Unitized derivitaves of w (using w' and w") (status ignored; its
-        // SM_ERR is passed on with the opt-in fix, WR-663, tangency-labs/smlib 21dcf69)
+        // compute Unitized derivitaves of w (using w' and w") (status ignored upstream;
+        // its SM_ERR is passed on as the fork does, WR-663, tangency-labs/smlib 21dcf69)
         let derivs =
             at(&m, w.0, w.1).unitized_derivative2(at(&m, ws.0, ws.1), at(&m, wss.0, wss.1));
-        if derivs.is_err() && k.fixes.query_statuses_pass_on {
-            return Err(SolidError::sm_err(
+        let Ok([unit_t, unit_tt]) = derivs else {
+            return Err(SolidError::surface_failed(
                 "surface::surface::p1::FindSingularParamWithGivenTangentDir::evaluate",
+                "the unit derivatives of the singular direction are undefined",
             ));
-        }
-        let [unit_t, unit_tt] = derivs.unwrap_or_else(|d| d);
+        };
 
         // compute F(s) and F'(s)
         Ok((unit_t.dot(self.dir), unit_tt.dot(self.dir), false))
@@ -4798,6 +4917,86 @@ pub(super) fn ignored_surface_result<T>(r: Result<T>) -> Result<Option<T>> {
     ignored(r)
 }
 
+/// Whether `gen` is a circle: an ellipse of the circle class whose radii are equal (exactly:
+/// a circle-class ellipse whose radii differ is bounded as a NURB).
+fn is_exact_circle(gen: &Curve) -> bool {
+    matches!(gen.kind(), CurveKind::Ellipse(e) if e.is_circle_class() && e.x_radius() == e.y_radius())
+}
+
+/// The curvature vector, at `point`, of the profile of a surface of revolution about the
+/// axis through `axis_point` along `axis` (the curve its generatrix traces in the
+/// half-plane through the axis and `point`), from the generatrix's first and second
+/// derivatives `d1` and `d2` there. Not upstream (solidcraft#18018's review: the side was
+/// read from the generatrix's own curvature, which is not the profile's off a plane through
+/// the axis). With `Y = point - foot` (the foot as [`axis_foot`]), `z = a . Y`, the radial
+/// part `R = Y - a z` and `rho = |R|`: `rho' = e . d1` (`e = R / rho`), `rho'' = (R . d2 +
+/// |d1 - a z'|^2 - rho'^2) / rho`, `z' = a . d1`, `z'' = a . d2`, and the plane curve
+/// `(rho, z)`'s curvature vector mapped back along `e` and `a`. For a generatrix in a
+/// plane through the axis it is the generatrix's own. All NaN within `tol` of the axis
+/// (`rho <= tol`: no side to read there), for a zero tangent, or where the foot cannot be
+/// found: the caller reads elsewhere, or refuses a NaN side.
+fn profile_curvature(
+    axis_point: Point3,
+    axis: Vec3,
+    point: Point3,
+    d1: Vec3,
+    d2: Vec3,
+    tol: f64,
+) -> Vec3 {
+    let nan = Vec3::new(f64::NAN, f64::NAN, f64::NAN);
+    let a = axis / axis.length();
+    let Some((foot, _)) = axis_foot(axis_point, axis, point) else {
+        return nan;
+    };
+    let y = point - foot;
+    let radial = y - a * a.dot(y);
+    let rho = radial.length();
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+    if !(rho > tol && rho > 0.0) {
+        return nan;
+    }
+    let e = radial / rho;
+    let r1 = e.dot(d1);
+    let z1 = a.dot(d1);
+    let t1 = d1 - a * z1;
+    let r2 = (radial.dot(d2) + t1.dot(t1) - r1 * r1) / rho;
+    let z2 = a.dot(d2);
+    let speed_sq = r1 * r1 + z1 * z1;
+    let along = (r2 * r1 + z2 * z1) / speed_sq;
+    let kr = (r2 - r1 * along) / speed_sq;
+    let kz = (z2 - z1 * along) / speed_sq;
+    e * kr + a * kz
+}
+
+/// Whether the generatrix `gen` lies within `tol` of the circle its arc test nominated
+/// (`frame`'s origin and Z axis, `radius`).
+///
+/// A circle (an [`crate::curve::ellipse::Ellipse`] of the circle class whose two radii are
+/// equal) is its own arc by definition: its arc test returns its own placement and radius,
+/// not a circle fitted to samples ([`crate::curve::ellipse::Ellipse::is_arc`]), so it is
+/// [`OnCircle::Within`] at any `tol`; its NURB only represents that circle, to rounding.
+/// Any other curve is bounded over its whole NURB ([`on_circle`]), and a curve without an
+/// exact NURB form is [`OnCircle::Unproved`].
+///
+/// # Errors
+///
+/// Those of [`on_circle`].
+fn generatrix_on_circle(
+    k: &Kernel,
+    gen: &Curve,
+    frame: &crate::geom::axis2_placement::Axis2Placement,
+    radius: f64,
+    tol: f64,
+) -> Result<OnCircle> {
+    if is_exact_circle(gen) {
+        return Ok(OnCircle::Within);
+    }
+    match gen.b_spline_base().and_then(|b| b.gw_nurb()) {
+        Some(nurb) => on_circle(k, nurb, frame.origin(), frame.z_axis(), radius, tol),
+        None => Ok(OnCircle::Unproved),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4851,57 +5050,39 @@ mod tests {
         }
     }
 
-    fn issue_2009_kernels() -> (Kernel, Kernel) {
-        let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        (off, on)
-    }
-
     #[test]
     fn issue_2009_unevaluable_surface_is_not_shown_degenerate_or_a_flat_corner() {
         // tangency-labs/smlib 21dcf69 (IsDegeneratePoint, IsDegenerateCurve,
         // IsFlatCorner): a surface that cannot be evaluated is not shown degenerate or
-        // flat. Without the fix the port returns the evaluation's error (upstream reads
-        // the unset derivatives).
+        // flat (upstream reads the unset derivatives).
         let s = Surface::from(BSplineSurface::default());
         let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let uv = Point2::new(0.0, 0.0);
-        let (off, on) = issue_2009_kernels();
-        assert!(s.evaluate_point(&off, uv).is_err());
-        assert!(base_is_degenerate_point(&off, &s, 1e-6, Some(&dom)).is_err());
-        assert!(!base_is_degenerate_point(&on, &s, 1e-6, Some(&dom)).unwrap());
-        assert!(base_is_degenerate_curve(&off, &s, 1.0, Some(&dom), 0.0).is_err());
-        assert!(!base_is_degenerate_curve(&on, &s, 1.0, Some(&dom), 0.0).unwrap());
-        assert!(s.is_flat_corner(&off, uv, 1.0).is_err());
-        assert!(!s.is_flat_corner(&on, uv, 1.0).unwrap());
+        let k = Kernel::default();
+        assert!(s.evaluate_point(&k, uv).is_err());
+        assert!(!base_is_degenerate_point(&k, &s, 1e-6, Some(&dom)).unwrap());
+        assert!(!base_is_degenerate_curve(&k, &s, 1.0, Some(&dom), 0.0).unwrap());
+        assert!(!s.is_flat_corner(&k, uv, 1.0).unwrap());
     }
 
     #[test]
     fn issue_2009_unevaluable_surface_is_not_shown_periodic() {
         // tangency-labs/smlib 21dcf69 (IsPeriodic): a surface that cannot be evaluated
-        // is not shown periodic.
+        // is not shown periodic (upstream compares the unset samples, which agree).
         let s = Surface::from(BSplineSurface::default());
         let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
-        let (off, on) = issue_2009_kernels();
-        // upstream compares the unset samples, which agree
-        assert!(s.is_periodic(&off, &dom, SurfParamType::U).unwrap());
-        assert!(!s.is_periodic(&on, &dom, SurfParamType::U).unwrap());
+        let k = Kernel::default();
+        assert!(!s.is_periodic(&k, &dom, SurfParamType::U).unwrap());
     }
 
     #[test]
     fn issue_2009_unevaluable_param_direction_is_passed_on() {
         // tangency-labs/smlib 21dcf69 (ComputeParamDirection: SER on the evaluation).
-        // Coverage only: without the fix the decomposition of the cleared derivatives
-        // fails too.
         let s = Surface::from(BSplineSurface::default());
         let uv = Point2::new(0.5, 0.5);
-        let (off, on) = issue_2009_kernels();
+        let k = Kernel::default();
         assert!(s
-            .compute_param_direction(&off, uv, Vec3::new(1.0, 0.0, 0.0))
-            .is_err());
-        assert!(s
-            .compute_param_direction(&on, uv, Vec3::new(1.0, 0.0, 0.0))
+            .compute_param_direction(&k, uv, Vec3::new(1.0, 0.0, 0.0))
             .is_err());
     }
 
@@ -5062,11 +5243,13 @@ mod tests {
         }
     }
 
-    /// `IsPeriodic` ignores its evaluation statuses: on a bicubic surface collapsed to
-    /// one point the zero-tangent repair fails, the raw derivatives are compared and
-    /// both directions are periodic; the offset constructor that asks then succeeds.
+    /// `IsPeriodic` answers only from what it evaluated: on a bicubic surface collapsed
+    /// to one point the zero-tangent repair fails, so neither direction is shown
+    /// periodic, as the fork has it (`Evaluate(..) != SM_SUCCESS` returns `FALSE`,
+    /// tangency-labs/smlib 21dcf69; upstream ignored the status and compared the raw
+    /// derivatives); the offset constructor that asks then succeeds.
     #[test]
-    fn is_periodic_ignores_failed_tangent_repairs() {
+    fn is_periodic_is_false_after_failed_tangent_repairs() {
         use crate::nurbs::math::{CPoint, NOW};
         use crate::nurbs::srf_basic::Surface as NlSurface;
         let k = &Kernel::default();
@@ -5079,11 +5262,11 @@ mod tests {
         assert!(s
             .evaluate(k, Point2::new(0.5, 0.5), 1, 1, upper_flags(true))
             .is_err());
-        assert!(s.is_periodic(k, &dom, SurfParamType::U).unwrap());
-        assert!(s.is_periodic(k, &dom, SurfParamType::V).unwrap());
+        assert!(!s.is_periodic(k, &dom, SurfParamType::U).unwrap());
+        assert!(!s.is_periodic(k, &dom, SurfParamType::V).unwrap());
         let k = Kernel::default();
         let off = OffsetSurface::new(&k, 1.0, s, true, 0).unwrap();
-        assert_eq!(off.is_periodic(), [1, 1]);
+        assert_eq!(off.is_periodic(), [0, 0]);
     }
 
     /// A B-spline surface runs the base body: an owning `SmOffsetSurface`.

@@ -184,7 +184,7 @@ fn matching_overlays_apply_in_file_order_and_preserve_other_table_entries() {
 #[test]
 fn original_shipped_themes_keep_the_original_resolver_output_and_serialization() {
     crate::test_support::host_data();
-    assert_eq!(builtin().len(), crate::theme::BUILTIN.len());
+    assert_eq!(builtin().len(), solidcraft_look::themes::BUILTIN.len());
     for id in ORIGINAL_BUILTIN_IDS {
         let theme = find(id, &[]).unwrap();
         assert!(theme.tabs.is_empty(), "{}", theme.id);
@@ -205,7 +205,7 @@ fn original_shipped_themes_keep_the_original_resolver_output_and_serialization()
 #[test]
 fn shipped_theme_defaults_and_definition_roundtrips_preserve_all_tables() {
     crate::test_support::host_data();
-    assert_eq!(builtin().len(), crate::theme::BUILTIN.len());
+    assert_eq!(builtin().len(), solidcraft_look::themes::BUILTIN.len());
     for theme in builtin() {
         assert!(!theme.needs_newer(), "{}", theme.id);
         let (defaults, notices) = effective_values(theme, &BTreeMap::new());
@@ -316,7 +316,7 @@ fn icon_palette_import_export_is_bounded_and_keeps_legacy_defaults() {
 fn shipped_themes_have_readable_distinct_workspace_colours_and_icon_palettes() {
     crate::test_support::host_data();
     use solidcraft_theme::contrast_ratio;
-    assert_eq!(builtin().len(), crate::theme::BUILTIN.len(), "all shipped themes must be valid");
+    assert_eq!(builtin().len(), solidcraft_look::themes::BUILTIN.len(), "all shipped themes must be valid");
     for file in builtin() {
         let gruvbox = matches!(file.id.as_str(), "gruvbox-dark" | "gruvbox-light");
         let contrasts: &[&str] = if gruvbox { &["soft", "standard", "hard"] } else { &["standard"] };
@@ -659,16 +659,16 @@ fn surface_brightness_preserves_alpha_and_semantics_and_scales_authored_layers()
 #[test]
 fn builtin_order_preserves_the_existing_picker_sequence() {
     crate::test_support::host_data();
-    let themes = read_builtin(crate::theme::BUILTIN).unwrap();
+    let themes = read_builtin(solidcraft_look::themes::BUILTIN).unwrap();
     let retained: Vec<_> = themes.iter().map(|t| t.id.as_str()).filter(|id| ORIGINAL_BUILTIN_IDS.contains(id)).collect();
     assert_eq!(retained, ORIGINAL_BUILTIN_IDS);
-    assert!(crate::theme::BUILTIN.windows(2).all(|pair| pair[0].0 < pair[1].0), "source entries are sorted by id");
+    assert!(solidcraft_look::themes::BUILTIN.windows(2).all(|pair| pair[0].0 < pair[1].0), "source entries are sorted by id");
 }
 
 #[test]
 fn built_in_themes_read_and_differ_from_their_base() {
     crate::test_support::host_data();
-    assert_eq!(builtin().len(), crate::theme::BUILTIN.len(), "every built-in theme file reads");
+    assert_eq!(builtin().len(), solidcraft_look::themes::BUILTIN.len(), "every built-in theme file reads");
     for t in builtin() {
         let base = if t.base.is_dark() { Tokens::dark() } else { Tokens::light() };
         assert_ne!(resolve(t), base, "{}", t.id);
@@ -695,7 +695,7 @@ fn cga_uses_only_the_sixteen_cga_colours() {
             _ => {}
         }
     }
-    let text = crate::theme::BUILTIN.iter().find(|(id, _)| *id == "cga").map(|(_, text)| *text).unwrap();
+    let text = solidcraft_look::themes::BUILTIN.iter().find(|(id, _)| *id == "cga").map(|(_, text)| *text).unwrap();
     let file: Value = serde_json::from_str(text).unwrap();
     let mut found = Vec::new();
     colours(&file, &mut found);
@@ -855,10 +855,10 @@ fn one_bit_is_complete_opaque_black_and_white(file: &ThemeFile) {
         }
     }
     check(&exported);
-    for role in crate::icon_svg::ROLE_NAMES.iter().filter(|role| **role != "gap") {
+    for role in solidcraft_look::icons::ROLE_NAMES.iter().filter(|role| **role != "gap") {
         assert!(file.icon_palette.contains_key(*role), "{}: missing icon role {role}", file.id);
     }
-    for ramp in std::iter::once("solid").chain(crate::icon_svg::ACCENT_NAMES.iter().copied()) {
+    for ramp in std::iter::once("solid").chain(solidcraft_look::icons::ACCENT_NAMES.iter().copied()) {
         assert!(file.icon_palette.contains_key(ramp), "{}: missing icon ramp {ramp}", file.id);
     }
     assert_eq!(radius_values(t), [0; 6]);

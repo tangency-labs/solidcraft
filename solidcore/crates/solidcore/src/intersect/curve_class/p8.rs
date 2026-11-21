@@ -254,8 +254,12 @@ fn plane_intersections(
 fn pv(k: &Kernel, curve: &Curve, t: f64) -> Result<[Vec3; 2]> {
     let v = curve.evaluate(k, t, 1, true, true)?;
     Ok([
-        *v.first().ok_or_else(|| SolidError::sm_err(OP))?,
-        *v.get(1).ok_or_else(|| SolidError::sm_err(OP))?,
+        *v.first().ok_or_else(|| {
+            SolidError::intersect_failed(OP, "the curve's point was not evaluated")
+        })?,
+        *v.get(1).ok_or_else(|| {
+            SolidError::intersect_failed(OP, "the curve's first derivative was not evaluated")
+        })?,
     ])
 }
 
@@ -265,8 +269,12 @@ fn iso_curve(k: &Kernel, surface: &Surface, line: Line) -> Result<Curve> {
 
 fn ends(knots: &[f64]) -> Result<(f64, f64)> {
     Ok((
-        *knots.first().ok_or_else(|| SolidError::sm_err(OP))?,
-        *knots.last().ok_or_else(|| SolidError::sm_err(OP))?,
+        *knots
+            .first()
+            .ok_or_else(|| SolidError::intersect_failed(OP, "the knot vector is empty"))?,
+        *knots
+            .last()
+            .ok_or_else(|| SolidError::intersect_failed(OP, "the knot vector is empty"))?,
     ))
 }
 
@@ -381,8 +389,12 @@ impl<O: ClassObject> CurveClassification<O> {
             ];
             let mut b = Vec::new();
             for pair in corners.windows(2) {
-                let a = pair.first().ok_or_else(|| SolidError::sm_err(OP))?;
-                let z = pair.get(1).ok_or_else(|| SolidError::sm_err(OP))?;
+                let a = pair.first().ok_or_else(|| {
+                    SolidError::intersect_failed(OP, "a corner of the uv domain is missing")
+                })?;
+                let z = pair.get(1).ok_or_else(|| {
+                    SolidError::intersect_failed(OP, "a corner of the uv domain is missing")
+                })?;
                 b.push(Curve::from(Line::create_line_segment(
                     2,
                     Point3::new(a.x, a.y, 0.0),
@@ -394,7 +406,10 @@ impl<O: ClassObject> CurveClassification<O> {
         } else {
             let b = surface.create_natural_uv_trim_curves(k, &domain, SurfParamType::V, false)?;
             if b.curves_3d.len() != b.orients.len() {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::intersect_failed(
+                    OP,
+                    "the natural trim curves and their orientations differ in number",
+                ));
             }
             (b.curves_3d, b.orients)
         };
@@ -656,15 +671,17 @@ impl<O: ClassObject> CurveClassification<O> {
                 )?;
             }
             if let Some(s) = slot {
-                *solutions.get_mut(s).ok_or_else(|| SolidError::sm_err(OP))? = sols;
+                *solutions.get_mut(s).ok_or_else(|| {
+                    SolidError::intersect_failed(OP, "the boundary has no such solution slot")
+                })? = sols;
             }
         }
         let indices = [0, u.len() - 1, u.len(), u.len() + v.len() - 1];
         let mut classified = false;
         for (ii, (index, sols)) in indices.into_iter().zip(&solutions).enumerate() {
-            let boundary = boundaries
-                .get(index)
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+            let boundary = boundaries.get(index).ok_or_else(|| {
+                SolidError::intersect_failed(OP, "the boundary index is out of range")
+            })?;
             for sol in sols {
                 if sol.solution_type != SolutionType::SingleValue {
                     continue;
@@ -677,7 +694,10 @@ impl<O: ClassObject> CurveClassification<O> {
                     Vec3::Z
                 } else {
                     let CurveKind::CrvOnSurf(iso) = boundary.kind() else {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::intersect_failed(
+                            OP,
+                            "the boundary is not a curve on the surface",
+                        ));
                     };
                     iso.evaluate_surface_normal(k, bt, true)?.normal
                 };
@@ -754,7 +774,10 @@ impl<O: ClassObject> CurveClassification<O> {
     ) -> Result<()> {
         let curve = self.curve_geometry(geometry)?;
         if curve.dim() == 2 {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::intersect_failed(
+                OP,
+                "a 2D curve cannot be classified against a volume",
+            ));
         }
         let mut d = Discontinuities3d::new();
         if !volume.has_discontinuities(k, Some(&mut d), false)? {
@@ -787,7 +810,10 @@ impl<O: ClassObject> CurveClassification<O> {
         let domain = volume.natural_param_domain()?;
         // WR-156: native tests m_bUnalignedU three times instead of U/V/W.
         if d.u.unaligned || d.v.unaligned || d.w.unaligned {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::intersect_failed(
+                OP,
+                "the volume's discontinuities are not aligned with its parameter directions",
+            ));
         }
         let (umin, umax) = ends(&d.u.params)?;
         let (vmin, vmax) = ends(&d.v.params)?;
@@ -822,7 +848,12 @@ impl<O: ClassObject> CurveClassification<O> {
                         Point3::new(
                             umin,
                             vmin,
-                            *d.w.params.get(j).ok_or_else(|| SolidError::sm_err(OP))?,
+                            *d.w.params.get(j).ok_or_else(|| {
+                                SolidError::intersect_failed(
+                                    OP,
+                                    "the volume's w discontinuity is out of range",
+                                )
+                            })?,
                         ),
                         Vec3::X,
                         Vec3::Y,
@@ -882,7 +913,9 @@ impl<O: ClassObject> CurveClassification<O> {
                 if s == 5 {
                     // WR-155: slot 4 still borrows the shared buffer when it fits, so
                     // slot 5's (inserted) solutions overwrite its leading entries.
-                    let shared = solutions.get_mut(4).ok_or_else(|| SolidError::sm_err(OP))?;
+                    let shared = solutions.get_mut(4).ok_or_else(|| {
+                        SolidError::intersect_failed(OP, "the boundary has no such solution slot")
+                    })?;
                     if !shared.is_empty() && shared.len() <= BORROWED_SOLUTIONS {
                         if sols.len() > BORROWED_SOLUTIONS {
                             return Err(SolidError::invalid_input(
@@ -895,7 +928,9 @@ impl<O: ClassObject> CurveClassification<O> {
                         }
                     }
                 }
-                *solutions.get_mut(s).ok_or_else(|| SolidError::sm_err(OP))? = sols;
+                *solutions.get_mut(s).ok_or_else(|| {
+                    SolidError::intersect_failed(OP, "the boundary has no such solution slot")
+                })? = sols;
             }
         }
         let mut classified = false;
@@ -907,10 +942,15 @@ impl<O: ClassObject> CurveClassification<O> {
             {
                 let SurfaceKind::Plane(plane) = planes
                     .get(index)
-                    .ok_or_else(|| SolidError::sm_err(OP))?
+                    .ok_or_else(|| {
+                        SolidError::intersect_failed(OP, "the boundary index is out of range")
+                    })?
                     .kind()
                 else {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::intersect_failed(
+                        OP,
+                        "the volume's boundary is not a plane",
+                    ));
                 };
                 for sol in sols {
                     if sol.solution_type != SolutionType::SingleValue {

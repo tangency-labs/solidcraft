@@ -39,15 +39,17 @@ its own page." Tag: In profile. Source today: Navigation page (`prefs/navigation
 | Reverse trackpad orbit | Checkbox | `Prefs.orbit_reverse` | `false` | none | none | |
 | Stop zoom at the model | Checkbox | `Prefs.zoom_stop_at_model` | `false` | none | none | |
 | Wheel zoom speed | Slider, "1.00x" readout (44 px) | `Prefs.wheel_zoom_speed` (0.25 to 4.0) | `1.0` | none | none | aria-label "Wheel zoom speed". |
+| Scroll wheel in the browser | Dropdown: Automatic / Always zoom / Always pan | `Prefs.browser_scroll_wheel` (`BrowserScrollWheel`) | Automatic | Explains the automatic choice, which asks once about a smooth mouse wheel, and modifier-assisted two-finger pan | none | Browser only; desktop scroll phases remain authoritative. `browser_wheel_hint_dismissed` (the notice's "Don't ask again") has no control. |
 | Two-finger zoom while holding | Dropdown (180 wide, "Ctrl / Cmd") | `Prefs.trackpad_zoom_modifier` (`TrackpadZoomModifier`: Cmd, Alt, Ctrl, Off) | Off | none | none | |
 
 ## View
 
 | Label | Control | Edits | Default | Hover | Figure | Notes |
 |---|---|---|---|---|---|---|
-| View navigator: Axes (signed) / Cube (compact) | Two picture cards (190 x 149) | `Prefs.navigator_style` (`NavigatorStyle`: Axes, Cube) | Axes | none | `navigator-axes`, `navigator-cube` | The cards have no ground rectangle. The Axes figure draws a disc with signed axis labels; the Cube figure draws the view cube with TOP, FRONT, RIGHT faces. Paint from the `Tokens` in the app's navigator (`cube_face`, `cube_border`, `cube_text`, `axis_x`..`axis_z`). |
+| View navigator: Signed axes / Custom | Two picture cards (190 x 149) | `Prefs.navigator_style` (`NavigatorStyle`: Axes, Custom) | Axes | none | `navigator-axes` | The cards have no ground rectangle. The Axes figure draws a disc with signed axis labels. Paint from the `Tokens` in the app's navigator (`axis_x`..`axis_z`). |
 | Animate view changes | Checkbox | `Prefs.look_at_anim` | `true` | "Axis view, Look At, Home and Fit." | none | |
 | Animation speed | Slider, "1.00x" readout | `Prefs.look_at_speed` (0.25 to 4.0; slider 0.5 to 3.0) | `1.0` | none | none | Disabled while Animate view changes is off. |
+| Keep the highlight while the view moves | Checkbox | `Prefs.keep_hover_while_navigating` | `true` | "The face under the pointer keeps its highlight while the view moves under it (off: the highlight goes off while the view moves, as before, #2130)." | none | |
 
 ## Mismatches
 

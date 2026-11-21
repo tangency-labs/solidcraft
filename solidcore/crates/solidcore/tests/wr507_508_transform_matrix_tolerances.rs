@@ -2,7 +2,7 @@
 //! ([`transform_matrix`]), the overload SolidCraft calls: the fork's own regression
 //! tests (`TransformKeepsEdgeTolerance`, `ScaledBodyWithoutVertices` in
 //! tangency-labs/smlib#49 and #50, `capi/tests/flat_roundtrip.cpp`) on the port. Each
-//! test turns on one flag and fails with it off.
+//! fails on upstream's rule.
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
@@ -65,7 +65,6 @@ fn wr507_transform_matrix_keeps_or_scales_an_edge_tolerance() {
     ];
     for (name, m, scale) in moves {
         let mut k = Kernel::default();
-        k.fixes.transform_scales_each_tolerance = true;
         let mut b = api::create_box(&mut k, Point3::new(1.0, 2.0, 3.0), 10.0, 20.0, 30.0).unwrap();
         assert!(
             b.tolerance() < wide * 1e-1,
@@ -94,7 +93,7 @@ fn wr507_transform_matrix_keeps_or_scales_an_edge_tolerance() {
 
 /// WR-508 (tangency-labs/smlib#50): a lone torus (R 6, r 2 about (10, 5, 3)), which has
 /// no vertex spanning a size, scaled by 2 and by 0.5 through the 4x4. Upstream sizes it
-/// from its vertex box and gives it a zero tolerance; with the fix its tolerance is at
+/// from its vertex box and gives it a zero tolerance; the port's tolerance is at
 /// least that of the same torus made at the scaled size, and a ball of radius 1.5 (scaled
 /// alike) cuts out of its tube to the analytic volume. Without the fix the cut returns a
 /// body whose volume is the whole torus' (3790.07 for a scale of 2, 59.220 for 0.5; the
@@ -106,7 +105,6 @@ fn wr508_transform_matrix_sizes_a_lone_torus_from_its_box() {
     let c = Point3::new(10.0, 5.0, 3.0);
     for s in [2.0, 0.5] {
         let mut k = Kernel::default();
-        k.fixes.transform_model_size_from_body_box = true;
         let m = [
             [s, 0.0, 0.0, 0.0],
             [0.0, s, 0.0, 0.0],

@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    FairParams, OffsetParams, ReverseNormalParams, StitchParams, SurfaceExtendParams, SurfaceLoftParams, SurfaceTrimParams, ThickenParams,
-    UnstitchParams, UntrimParams,
+    FairParams, OffsetParams, PatchParams, PatchResult, ReverseNormalParams, StitchParams, SurfaceExtendParams, SurfaceLoftParams, SurfaceTrimParams,
+    ThickenParams, UnstitchParams, UntrimParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -78,6 +78,10 @@ fn schemas_and_the_key_check_agree() {
         keys
     };
     assert_keys(input_schema_for::<StitchParams>(), &with(&["bodies", "tolerance"]));
+    assert_keys(
+        input_schema_for::<PatchParams>(),
+        &["body", "body_name", "body_names", "continuity", "crown", "edges", "name", "participants", "points", "profiles", "profiles_3d", "sketch"],
+    );
     assert_keys(input_schema_for::<UnstitchParams>(), &with(&["body", "faces"]));
     assert_keys(input_schema_for::<ReverseNormalParams>(), &with(&["body", "faces"]));
     assert_keys(input_schema_for::<ThickenParams>(), &with(&["bodies", "operation", "symmetric", "targets", "thickness", "touching"]));
@@ -545,4 +549,63 @@ fn surface_loft_checks_its_keys() {
     // A good call has nothing to warn about.
     let r = two_lines(ParamCheck::Warn).execute("surface.loft", &loft(json!({}))).unwrap_or_else(|e| panic!("{e}"));
     assert!(r.get("param_warnings").is_none(), "{r}");
+}
+
+/// #741: `surface.patch` describes its keys, keeps today's errors, and every form's reply fits
+/// its output schema: a patch of a sketch's regions, and a fitted patch on a loop of a body's
+/// edges with continuity and crown.
+#[test]
+fn surface_patch_contract_and_reply() {
+    assert_strict_keeps_todays_errors(&[
+        ("surface.patch", json!({"crown": 5})),
+        ("surface.patch", json!({"crown": "0.5"})),
+        ("surface.patch", json!({"crown": null})),
+        ("surface.patch", json!({"points": points(65)})),
+        ("surface.patch", json!({"points": [[1, 2]]})),
+        ("surface.patch", json!({"continuity": 5})),
+        ("surface.patch", json!({"continuity": "g9"})),
+        ("surface.patch", json!({"continuity": [{"edge": [1, 2]}]})),
+        ("surface.patch", json!({"continuity": {"all": "g9"}})),
+        ("surface.patch", json!({"profiles_3d": "x"})),
+        ("surface.patch", json!({"profiles_3d": []})),
+        ("surface.patch", json!({"profiles_3d": [1.5]})),
+        ("surface.patch", json!({"sketch": null})),
+        ("surface.patch", json!({"profiles": null})),
+        ("surface.patch", json!({"edges": vec![[0, 0, 0]; 10_001]})),
+    ]);
+    let schema = output_schema_for::<PatchResult>();
+    let schema = schema.as_value();
+    let check = |s: &mut Session, p: Value| {
+        let r = s.execute("surface.patch", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{r}");
+        r
+    };
+    let mut s = sheet(ParamCheck::Warn);
+    let r = check(&mut s, json!({"sketch": "S", "body_name": "Sheet2"}));
+    assert_eq!(r["crown"], json!(0.0), "{r}");
+    assert_eq!(r["continuity"], json!({}), "every edge g0: {r}");
+    check(&mut s, json!({"sketch": "S", "profiles": 0, "body_name": "Sheet3"}));
+    // A fitted patch on the saddle's rim: the crown comes back in the reply.
+    let z = |x: f64| 50.0 - (1600.0 - x * x).sqrt();
+    let rim = json!([[14, 0, z(14.0)], [0, 14, z(0.0)], [-14, 0, z(-14.0)], [0, -14, z(0.0)]]);
+    let mut s = shell(ParamCheck::Warn);
+    let r = check(&mut s, json!({"edges": rim, "body": "Saddle", "body_name": "Lid", "crown": 0.5}));
+    assert_eq!(r["crown"], json!(0.5), "{r}");
+    assert_eq!(r["continuity"], json!({}), "every edge g0: {r}");
+}
+
+/// #741: keys of the wrong type that the patch handler ignores today (an `edges` that isn't a
+/// list, a `body` beside a sketch patch) are refused by the contract: in Warn the call still
+/// works, with a warning.
+#[test]
+fn surface_patch_checks_what_the_handler_ignores() {
+    for (p, key) in [(json!({"sketch": "S", "body_name": "P1", "edges": 5}), "edges"), (json!({"sketch": "S", "body_name": "P2", "body": 5}), "body")]
+    {
+        assert!(sheet(ParamCheck::Off).execute("surface.patch", &p).is_ok(), "{p} works today");
+        let warned = sheet(ParamCheck::Warn).execute("surface.patch", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(warned["param_warnings"].to_string().contains(key), "{warned}");
+        let error = sheet(ParamCheck::Strict).execute("surface.patch", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(error.contains(&format!("`{key}`")), "{p}: {error}");
+    }
 }

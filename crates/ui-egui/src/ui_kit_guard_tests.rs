@@ -791,7 +791,7 @@ fn all_disclosures_use_the_one_kit_chevron_without_allowances() {
     scan(&root.join("src"), &kit, &mut failures, &mut definitions);
     scan(&kit, &kit, &mut failures, &mut definitions);
     scan(&root.join("../../apps"), &kit, &mut failures, &mut definitions);
-    scan(&root.join("../../assets/icons/ui/source"), &kit, &mut failures, &mut definitions);
+    scan(&root.join("../look/src"), &kit, &mut failures, &mut definitions);
     assert!(failures.is_empty(), "Disclosures only through ui_kit::disclosure:\n{}", failures.join("\n"));
     assert_eq!(definitions, 1, "Exactly one disclosure painter, including inside ui_kit");
 }
@@ -1056,7 +1056,7 @@ mod checkbox_in_use {
                     };
                     appearance.pbr = Some(Default::default());
                     appearance.local.overwrite = true;
-                    app.ui.pick_bodies = true;
+                    app.ui.pick_mode = solidcraft_engine::PickMode::Bodies;
                     if name == "preferences" {
                         // Find the redesigned Layout checkbox by its current visible label.
                         crate::prefs::open_at(&mut app, crate::prefs::PAGE_LAYOUT);

@@ -16,8 +16,9 @@
 //! arena's identities, with the context the caller selected. Edge-use marks are read
 //! from the caller's mark source. The extension cache is keyed by the face's
 //! identity (upstream: the face surface's pointer); a new extension is copied into
-//! the adapter's store, where its handle resolves. The shared creator algorithm and
-//! concrete curve kinds are unchanged. No new recursion.
+//! the adapter's store, where its handle resolves. Successfully mated uses and selected
+//! periodic-boundary events pass to the native executive independently of traversal
+//! marks. Concrete curve kinds are unchanged. No new recursion.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -31,7 +32,7 @@ use crate::geom::object::ObjectRef;
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
 use crate::intersect::point_class::{ClassGeometry, ClassObject, ClassObjectKind};
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3};
+use crate::math::{Point2, Point3, Vec3};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::offset::offset_geometry_creation::{
     EdgeuseOffset, OffsetBrep, OffsetExecutive as CreatorExecutive, OffsetGeometryCreation,
@@ -420,7 +421,7 @@ pub(super) struct EdgeCap {
     pub(super) trim_curves: Vec<Curve>,
     /// `sTrimOrientations`.
     pub(super) trim_orientations: Vec<OrientType>,
-    /// Not upstream (`bClosingWall`, opt-in `Kernel::fixes.local_operation_step_walls`):
+    /// Not upstream (`bClosingWall`, the WR-530 addendum's step walls):
     /// the cap is a step wall, kept out of the face extensions.
     pub(super) closing_wall: bool,
 }
@@ -1101,17 +1102,24 @@ impl OffsetBrep<Handle> for EdgeBrep<'_> {
 
     fn edgeuse_set_uv_trim_curve(
         &mut self,
-        _k: &Kernel,
+        k: &Kernel,
         u: Handle,
         curve: Option<Handle>,
         max_dist: f64,
     ) -> Result<()> {
         let (arena, u) = u.edgeuse()?;
+        let mut raise_by = max_dist;
         let arg = match curve {
-            Some(h) => eu::UvTrimCurveArg::New(Box::new(self.cloned_curve(h)?)),
+            Some(h) => {
+                let c = self.cloned_curve(h)?;
+                // (not upstream, #18009: bounded by the trim's proved distance from the edge
+                // curve where it is enclosed, see the trait method)
+                raise_by = eu3::trim_raise_distance(k, self.brep_mut(arena), u, &c, max_dist)?;
+                eu::UvTrimCurveArg::New(Box::new(c))
+            }
             None => eu::UvTrimCurveArg::Null,
         };
-        eu::set_uv_trim_curve(self.brep_mut(arena), u, arg, max_dist, true, None)?;
+        eu::set_uv_trim_curve(self.brep_mut(arena), u, arg, raise_by, true, None)?;
         Ok(())
     }
 
@@ -1143,6 +1151,16 @@ impl OffsetBrep<Handle> for EdgeBrep<'_> {
                     .is_some_and(|record| record.is_marked(&k.context, mark)))
             }
         }
+    }
+
+    fn edgeuse_middle_binormal(&mut self, k: &Kernel, u: Handle) -> Result<Vec3> {
+        let (arena, u) = u.edgeuse()?;
+        let b = self.brep_mut(arena);
+        let e = eu::edge(b, u)?
+            .ok_or_else(|| SolidError::invalid_input(OP, "edge use without edge"))?;
+        let middle = edge::interval(b, e)?.evaluate(0.5);
+        let options = eu3::BinormalOptions::default();
+        Ok(eu3::evaluate_binormal(k, b, u, middle, false, &options)?.binormal)
     }
 
     fn edgeuse_normalized_evaluate(
@@ -1199,6 +1217,59 @@ struct Executive<'a> {
 }
 
 impl CreatorExecutive<Handle> for Executive<'_> {
+    fn has_mated_edgeuse(&self, original: Handle) -> bool {
+        match original.object {
+            Object::Topology(Arena::Original, EntityRef::Edgeuse(u)) => {
+                self.inner.mated_edgeuses.contains(&u)
+            }
+            _ => false,
+        }
+    }
+
+    fn note_mated_edgeuse(&mut self, original: Handle) -> Result<()> {
+        let Object::Topology(Arena::Original, EntityRef::Edgeuse(u)) = original.object else {
+            return Err(SolidError::port_invariant(
+                OP,
+                "mated edge use outside the source arena",
+            ));
+        };
+        self.inner.mated_edgeuses.insert(u);
+        Ok(())
+    }
+
+    fn note_periodic_boundary_end(
+        &mut self,
+        event: crate::offset::offset_geometry_creation::PeriodicBoundaryEnd<Handle>,
+    ) -> Result<()> {
+        let (
+            Object::Topology(Arena::Original, EntityRef::Edgeuse(edgeuse)),
+            Object::Topology(Arena::Original, EntityRef::Vertex(vertex)),
+            Object::Topology(Arena::Original, EntityRef::Edgeuse(seam)),
+            Object::Topology(Arena::Original, EntityRef::Edgeuse(across)),
+        ) = (
+            event.edgeuse.object,
+            event.vertex.object,
+            event.seam.object,
+            event.across.object,
+        )
+        else {
+            return Err(SolidError::port_invariant(
+                OP,
+                "periodic boundary event outside the source arena",
+            ));
+        };
+        self.inner
+            .periodic_boundary_ends
+            .push(super::periodic_boundary::BoundaryEnd {
+                edgeuse,
+                vertex,
+                seam,
+                across,
+                point: event.point,
+            });
+        Ok(())
+    }
+
     fn inset(&self) -> bool {
         self.inner.inset()
     }
@@ -1226,8 +1297,23 @@ impl CreatorExecutive<Handle> for Executive<'_> {
         }
     }
 
+    fn crosses_at(&self, original: Handle) -> bool {
+        match original.object {
+            Object::Topology(Arena::Original, EntityRef::Edgeuse(u)) => {
+                self.inner.crosses_at_edgeuse(u)
+            }
+            _ => false,
+        }
+    }
+
     fn has_collapsed_faces(&self) -> bool {
         !self.inner.collapsed_faces.is_empty()
+    }
+
+    fn note_inverted_face(&mut self, offset_face: Handle) {
+        if let Object::Topology(Arena::Offset, EntityRef::Face(f)) = offset_face.object {
+            self.inner.inverted_faces.insert(f);
+        }
     }
 
     fn is_collapsed_face(&self, face: Handle) -> bool {
@@ -1507,6 +1593,145 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.sm_status(), Some(1001));
+        Ok(())
+    }
+
+    /// Splitting a cylinder rim adds a vertex between the same two supports, not
+    /// a third material support. Moving its UV curve by whole periods changes no
+    /// 3D point, even when it no longer crosses either source seam chart line.
+    /// At zero offset, the ordinary endpoint candidates must keep the half rim.
+    #[test]
+    fn periodic_chart_miss_without_a_third_support_keeps_ordinary_trim() -> Result<()> {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::nurbs::b_spline_curve_n_lib::TrimMode;
+        use crate::nurbs::b_spline_surface::SurfParamType;
+        use crate::primitive::api_primitives::create_cylinder;
+        use crate::surface::surface::SurfaceKind;
+
+        let mut k = Kernel::default();
+        let mut original = create_cylinder(&mut k, Point3::ZERO, 5.0, 10.0)?;
+        let tolerance = original.tolerance();
+        let side = original
+            .faces()
+            .ids()
+            .find(|&f| {
+                matches!(
+                    original.face(f).unwrap().surface.as_ref().unwrap().kind(),
+                    SurfaceKind::Cone(_)
+                )
+            })
+            .unwrap();
+        let domain = original
+            .face(side)?
+            .surface
+            .as_ref()
+            .unwrap()
+            .natural_uv_domain_with_nurb(&k)?;
+        assert!(original.face(side)?.surface.as_ref().unwrap().is_periodic(
+            &k,
+            &domain,
+            SurfParamType::U
+        )?);
+        let period = domain.u_interval().length();
+        let rim = original
+            .edges()
+            .ids()
+            .find(|&e| edge::is_closed(&original, e).unwrap())
+            .unwrap();
+        let at = edge::interval(&original, rim)?.evaluate(0.5);
+        original.set_editing_enabled(true);
+        let (first, _, inserted) =
+            crate::heal::stitch::p1::make_vertex_split_edge(&mut k, &mut original, rim, at)?;
+        assert_eq!(vertex::edges(&original, inserted.unwrap(), None)?.len(), 2);
+        let first = first.unwrap();
+        let expected = edge::interval(&original, first)?;
+        let base = edge::upward_edgeuse_of_face(&original, first, Some(side))?.unwrap();
+        let other = eu::radial(&original, base)?.unwrap();
+        assert_ne!(eu::face(&original, base)?, eu::face(&original, other)?);
+        let neighbours = [
+            eu::cw_edgeuse(&original, base)?.unwrap(),
+            eu::ccw_edgeuse(&original, base)?.unwrap(),
+        ];
+        assert!(neighbours.into_iter().any(|u| {
+            let e = eu::edge(&original, u).unwrap().unwrap();
+            edge::is_seam_of_surface(&k, &mut original, e, side).unwrap()
+        }));
+
+        let mut curve = edge::curve(&original, first)?.unwrap().clone();
+        let mut interval = expected;
+        curve.trim(&k, &mut interval, TrimMode::Silent)?;
+        assert_eq!(interval, expected);
+        let mut uv = eu3::create_uv_trim_curve(&k, &mut original, base, false, None)?.curve;
+        let ordinary_uv = uv.copy(&k)?;
+        uv.transform(
+            &k,
+            &Axis2Placement::new(Point3::new(2.0 * period, 0.0, 0.0), Vec3::X, Vec3::Y),
+            None,
+        )?;
+        for t in [uv.natural_interval().min(), uv.natural_interval().max()] {
+            assert!(uv.evaluate_point(&k, t)?.x > domain.max().x);
+        }
+        // The native evaluator reads the natural chart. Identify the translated
+        // chart with it before evaluating the same lift at both ends and inside.
+        for t in [expected.min(), expected.evaluate(0.5), expected.max()] {
+            let shifted = uv.evaluate_point(&k, t)?;
+            let point = original
+                .face(side)?
+                .surface
+                .as_ref()
+                .unwrap()
+                .evaluate_point(&k, Point2::new(shifted.x - 2.0 * period, shifted.y))?;
+            assert!(point.distance(curve.evaluate_point(&k, t)?) <= tolerance);
+        }
+        let other_uv = eu3::create_uv_trim_curve(&k, &mut original, other, false, None)?.curve;
+        let mut offset = original.clone_standing_for_self()?;
+        let marked: BTreeSet<_> = original.edgeuses().ids().collect();
+        let mut inner = OffsetExecutive::new(OffsetOperation::SolidOffset, 0.0, tolerance);
+        for &u in &marked {
+            inner.relate_edgeuses(u, u);
+        }
+        let mut executive = Executive {
+            inner: &mut inner,
+            original_key_of: &dummy_key,
+            offset_key_of: &dummy_key,
+            made: BTreeMap::new(),
+        };
+        let mut records = NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let mut backend = EdgeBrep {
+            kernel: &k,
+            original: &mut original,
+            offset: &mut offset,
+            curves: Vec::new(),
+            surfaces: Vec::new(),
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            original_key_of: &dummy_key,
+            offset_key_of: &dummy_key,
+            marks: MarkSource::Set(&marked),
+        };
+        let curve = backend.insert_curve(curve).unwrap();
+        let ordinary_uv = backend.insert_curve(ordinary_uv).unwrap();
+        let uv = backend.insert_curve(uv).unwrap();
+        let other_uv = backend.insert_curve(other_uv).unwrap();
+        for uv in [ordinary_uv, uv] {
+            let trimmed = OffsetGeometryCreation::new(0.0, tolerance).trim_extended_edge(
+                &k,
+                &mut backend,
+                &mut executive,
+                Handle::topology(Arena::Original, EntityRef::Edgeuse(base)),
+                Some(Handle::topology(Arena::Original, EntityRef::Edgeuse(other))),
+                None,
+                None,
+                curve,
+                Some(uv),
+                Some(other_uv),
+                MarkType::Mark,
+            )?;
+            assert_eq!(trimmed, Some(expected));
+        }
+        assert!(inner.periodic_boundary_ends.is_empty());
         Ok(())
     }
 }

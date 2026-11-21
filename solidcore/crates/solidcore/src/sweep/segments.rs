@@ -27,7 +27,9 @@ use crate::sweep::api_brep::{create_linear_sweep, create_rotational_sweep};
 use crate::topology::brep::p1 as brep_p1;
 use crate::topology::brep::p2::ArenaNotifyState;
 use crate::topology::brep::p3::new_brep;
-use crate::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
+use crate::topology::brep::p5::{
+    stitch_and_orient, stitch_and_orient_open, StitchAndOrientOptions,
+};
 use crate::topology::brep::p7::copy_faces;
 use crate::topology::brep::p8::{create_planar_faces_with_3d_curves, FaceBuildEnv};
 use crate::topology::topology_traverser::Marks;
@@ -169,7 +171,10 @@ pub fn sweep_along_segments(
         let this_face = |f: FaceId| key_of(EntityRef::Face(f));
         let (_, copied) = copy_faces(k, &mut piece, &faces, &mut b, false, &this_face, &mut env)?;
         if !copied {
-            return Err(SolidError::sm_err("CopyFaces"));
+            return Err(SolidError::sweep_failed(
+                "CopyFaces",
+                "the segment pieces' faces could not be copied",
+            ));
         }
         m = carry(g, &m, 1.0);
     }
@@ -183,7 +188,12 @@ pub fn sweep_along_segments(
             })?;
         }
     }
-    stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default())?;
+    if cap {
+        stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default())?;
+    } else {
+        // the profile at both ends stays open: the walls are a sheet (WR-18515)
+        stitch_and_orient_open(k, &mut b, &StitchAndOrientOptions::default(), None)?;
+    }
     b.refresh_cached_topology();
     let mut half = 0.5 * total;
     let mut middle = m;
@@ -340,5 +350,56 @@ mod tests {
             },
         ];
         assert!(refused(&mut k, &apart));
+    }
+
+    #[test]
+    fn an_uncapped_profile_with_a_short_segment_keeps_every_wall() {
+        // #18515: a 1 x 1 loop in the plane x = 0 whose top side ends in a segment 1.7e-4
+        // long, swept with no caps along x for 4 and a quarter turn of radius 2. Each
+        // profile curve sweeps one wall per segment, so the sheet has 10 walls, the
+        // profile's 5 edges at each of the 3 sections, 5 side edges per segment, and a
+        // vertex per profile vertex at each section. The short curve's edge at every
+        // section is 1.7e-4 long: shorter than the stitch's second tolerance (4e-4).
+        use crate::curve::line::Line;
+        use crate::topology::brep::validation::{check_brep, CheckLevel};
+        use crate::topology::{edge, vertex};
+        let len = 1.7e-4;
+        let p = [
+            Point3::ZERO,
+            Point3::new(0.0, 1.0, 0.0),
+            Point3::new(0.0, 1.0, 1.0),
+            Point3::new(0.0, len, 1.0),
+            Point3::new(0.0, 0.0, 1.0),
+        ];
+        let profile: Vec<Curve> = (0..5)
+            .map(|i| Curve::from(Line::create_line_segment(3, p[i], p[(i + 1) % 5], None).unwrap()))
+            .collect();
+        let mut k = Kernel::default();
+        let (mut b, _) =
+            sweep_along_segments(&mut k, &profile, &bent(FRAC_PI_2), false, &TOL).unwrap();
+        assert_eq!(
+            (
+                b.face_list().len(),
+                b.edge_list().len(),
+                b.vertex_list().len()
+            ),
+            (10, 25, 15),
+            "faces, edges, vertices"
+        );
+        let short = b
+            .edge_list()
+            .iter()
+            .filter(|&&e| {
+                let s = edge::start_vertex(&b, e).unwrap().unwrap();
+                let o = edge::other_vertex(&b, e, Some(s)).unwrap().unwrap();
+                let d = vertex::point(&b, s)
+                    .unwrap()
+                    .distance(vertex::point(&b, o).unwrap());
+                (d - len).abs() <= 1e-12
+            })
+            .count();
+        assert_eq!(short, 3, "the short curve's edge at each section");
+        let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        assert!(check.is_valid(), "{:?}", check.lines());
     }
 }

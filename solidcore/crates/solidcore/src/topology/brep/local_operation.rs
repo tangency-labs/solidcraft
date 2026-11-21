@@ -20,10 +20,7 @@
 //! and the copy back gives them to the B-rep (SMLib's Copy handler), so each face keeps
 //! its attributes as upstream's do. `SmTemporaryChangeValue` of
 //! `m_bEditingEnabled` is a set and restore of the flag. The debug drawing code is omitted. No
-//! recursion is introduced here. Opt-in (WR-534,
-//! `Kernel::fixes.local_operation_box_holds_new_surfaces`, the fork's
-//! tangency-labs/smlib@a1ee273): the box that sizes the executive's offset distance also
-//! holds the replacement surfaces. (not upstream) The B-rep's cached topology fields are
+//! recursion is introduced here. (not upstream) The B-rep's cached topology fields are
 //! refreshed before the operation returns ([`Brep::refresh_cached_topology`]), as every
 //! public operation leaves them. (not upstream) A plane given to a lone lamina face
 //! that is exactly parallel and the same way round as the face's own plane takes the
@@ -33,7 +30,9 @@
 //! pointwise normal translation the move is, instead of turning the boundary by the
 //! given plane's frame. This holds for bare surfaces only (neither carries a procedural
 //! definition): a definition's net alone does not prove its plane, and moving the net
-//! would leave the definition behind.
+//! would leave the definition behind. (not upstream, WR-777) A given surface is turned by
+//! its normal where it passes nearest the old face's middle, not at its own domain's
+//! middle, which for a full cylinder given to a round lies across the axis.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -41,6 +40,7 @@ use crate::error::offset::OffsetFailure;
 use crate::error::{EntityRef, Failure, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::expansion as exact;
 use crate::kernel::Kernel;
 use crate::mass::enclosure::VolumeSign;
 use crate::math::Vec3;
@@ -52,6 +52,8 @@ use crate::offset::offset_executive::p2::OffsetNotifications;
 use crate::query::brep::{calculate_bounding_box, BoundingBoxOptions};
 use crate::surface::implicit::{self, AnalyticSupport};
 use crate::surface::plane::Plane;
+use crate::surface::surface::p4::NoObject;
+use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
 use crate::surface::surface::SurfaceKind;
 use crate::topology::brep::p1 as bp1;
@@ -66,8 +68,9 @@ pub use crate::offset::offset_executive::p2::local_operation_simple;
 
 const OP: &str = "topology::brep::local_operation::local_operation";
 
-fn null() -> SolidError {
-    SolidError::null_pointer(OP)
+/// `what` is missing (upstream `SM_ERR_NULL_POINTER`).
+fn null(what: &'static str) -> SolidError {
+    SolidError::topology_missing(OP, what)
 }
 
 /// `SmBrep::LocalOperation(rFaces, rNewSurfaces)`: `surfaces[i]` becomes the surface of
@@ -110,7 +113,7 @@ pub fn local_operation(
 ) -> Result<()> {
     use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
     if surfaces.len() < faces.len() {
-        return Err(null());
+        return Err(null("a surface for every face"));
     }
     // (not upstream) a refusal or a failure leaves `b` as it came in, the caches its
     // surfaces had included (the operation runs on its copy), and the caller's
@@ -155,8 +158,6 @@ fn local_operation_on(
     let all_faces = bp1::faces(b, None)?;
     let mut given: Vec<Option<Surface>> = surfaces.into_iter().map(Some).collect();
     let mut new_list = Vec::new();
-    // (WR-534) where each given surface went in the new list
-    let mut placed: Vec<Option<usize>> = vec![None; given.len()];
     // (not upstream) the faces whose surfaces move: a face given its own surface again keeps
     // a copy of its own surface, as the faces not given one do, and so keeps its edges
     let mut moved = Vec::new();
@@ -165,7 +166,7 @@ fn local_operation_on(
     let mut moving = Vec::new();
     for &face in &all_faces {
         let index = faces.iter().position(|&f| f == face);
-        let own = face_ops::surface(b, face)?.ok_or_else(null)?;
+        let own = face_ops::surface(b, face)?.ok_or_else(|| null("the face's surface"))?;
         if let Some(new) = index.and_then(|i| given.get(i)).and_then(Option::as_ref) {
             if !is_own_surface(own, new) {
                 moving.push(face);
@@ -175,19 +176,14 @@ fn local_operation_on(
     let mut continued = continued_planes(k, b, &all_faces, &moving)?;
     for &face in &all_faces {
         let index = faces.iter().position(|&f| f == face);
-        let own = face_ops::surface(b, face)?.ok_or_else(null)?;
+        let own = face_ops::surface(b, face)?.ok_or_else(|| null("the face's surface"))?;
         let replacement = match index {
-            Some(index) if moving.contains(&face) => {
-                if let Some(slot) = placed.get_mut(index) {
-                    *slot = Some(new_list.len());
-                }
-                Some(
-                    given
-                        .get_mut(index)
-                        .and_then(Option::take)
-                        .ok_or_else(null)?,
-                )
-            }
+            Some(index) if moving.contains(&face) => Some(
+                given
+                    .get_mut(index)
+                    .and_then(Option::take)
+                    .ok_or_else(|| null("the face's given surface"))?,
+            ),
             _ => continued.remove(&face),
         };
         let surface = if let Some(mut new) = replacement {
@@ -206,16 +202,33 @@ fn local_operation_on(
                 }
             }
             let domain = new.natural_uv_domain_if_built();
-            // (`EvaluateNormal(uv, TRUE, TRUE, ..)`: from the left)
-            let new_normal =
-                new.evaluate_normal(k, domain.evaluate(0.5, 0.5), Side::Left, Side::Left)?;
             let old = own;
-            let old_normal = old.evaluate_normal(
+            let old_uv = b.face(face)?.uv_domain.evaluate(0.5, 0.5);
+            // (not upstream, which takes the middle of the new surface's domain) the new
+            // normal where the new surface passes nearest the old face's middle: a full
+            // cylinder's domain middle is across the axis from a round's middle, so the
+            // two normals there oppose though the surfaces face the same way. Where there
+            // is no nearest point, or no normal at it (a cone's apex), upstream's point is
+            // kept: the new rule only replaces it where it applies.
+            // (`EvaluateNormal(uv, TRUE, TRUE, ..)`: from the left)
+            let nearest = match new.drop_point::<NoObject>(
                 k,
-                b.face(face)?.uv_domain.evaluate(0.5, 0.5),
-                Side::Left,
-                Side::Left,
-            )?;
+                old.evaluate_point(k, old_uv)?,
+                &domain,
+                &DropPointOptions::default(),
+            ) {
+                Ok(dropped) if dropped.success => {
+                    Some(new.evaluate_normal(k, dropped.result_uv, Side::Left, Side::Left))
+                }
+                Ok(_) => None,
+                Err(e) => Some(Err(e)),
+            };
+            let new_normal = match nearest {
+                Some(Ok(n)) => n,
+                Some(Err(e)) if e.is_unported_or_cancelled() => return Err(e),
+                _ => new.evaluate_normal(k, domain.evaluate(0.5, 0.5), Side::Left, Side::Left)?,
+            };
+            let old_normal = old.evaluate_normal(k, old_uv, Side::Left, Side::Left)?;
             // when surface normals oppose - reverse the input surface's orientation
             if old_normal.dot(new_normal) < 0.0 {
                 new.reverse(k, SurfParamType::U)?;
@@ -235,27 +248,7 @@ fn local_operation_on(
     }
 
     // the Brep's bounding sphere gives the executive an offset distance it does not use
-    let mut bbox = calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
-    // Not upstream (WR-534), opt-in `local_operation_box_holds_new_surfaces` (the fork's
-    // tangency-labs/smlib@a1ee273): the box also holds the replacement surfaces. Their
-    // faces' edges are found by extending the neighbouring surfaces to meet them, by a
-    // distance sized from this box: sized from the original body alone, a face moved
-    // further than about its size away left the extended neighbours short of it.
-    if k.fixes.local_operation_box_holds_new_surfaces {
-        for (j, slot) in placed.iter().enumerate() {
-            let surface = match (given.get(j).and_then(Option::as_ref), slot) {
-                (Some(surface), _) => surface,
-                (None, Some(at)) => new_list.get(*at).ok_or_else(null)?,
-                (None, None) => continue,
-            };
-            let domain = surface.natural_uv_domain_with_nurb(k)?;
-            let surf_box = surface
-                .calculate_bounding_box(k, &domain, [true, false, false], true)?
-                .normal_box
-                .ok_or_else(null)?;
-            bbox = bbox.union(&surf_box);
-        }
-    }
+    let bbox = calculate_bounding_box(k, &mut *b, BoundingBoxOptions::default())?;
     let radius = bbox.sphere_bound().radius;
     let tolerance = b.tolerance();
     let mut executive = OffsetExecutive::new(
@@ -322,6 +315,10 @@ fn local_operation_on(
     // (not upstream: the port's cached topology fields, true again for the caller)
     b.refresh_cached_topology();
     moved?;
+    // (not upstream, #18570) copying the faces in can split a cavity that touched the
+    // outside along a line (a notch's wall tangent to it) into a region of its own, made
+    // material: its void flag is read from the faces again (`p5::set_alternating_void_flags`)
+    p5::set_alternating_void_flags(b)?;
     refuse_unsound(k, b, &input)
 }
 
@@ -802,7 +799,7 @@ fn keeps_seams(k: &Kernel, b: &mut Brep, face: FaceId, surface: &Surface) -> Res
                     scratch = Some(b.clone_standing_for_self()?);
                 }
                 let Some(s) = scratch.as_mut() else {
-                    return Err(null());
+                    return Err(null("the scratch copy of the B-rep"));
                 };
                 let _ = get_or_create_uv_trim_curve(k, s, u, false, false, true)?;
                 match eu1::uv_trim_curve(s, u)?.0 {
@@ -1246,178 +1243,6 @@ fn moved_surface_on_own_frame(
     }
 }
 
-/// Error-free arithmetic on doubles: a value is an expansion, a sum of doubles whose
-/// components do not overlap (Shewchuk's grow-expansion), so sums and products of doubles
-/// are held without rounding and a value's sign is read off exactly (an expansion is zero
-/// exactly when every component is).
-///
-/// A sum (`two_sum`) is error-free at any magnitude short of overflow, which leaves an
-/// infinite or NaN component, never a zero. A product (`product`) is error-free only in
-/// range: a product that could underflow, or of a subnormal or non-finite factor, is
-/// `None`, and so is every value built from it. A caller reads `None` as not shown zero.
-mod exact {
-    use crate::math::Vec3;
-
-    /// `2^-968`: the least rounded product of two normal doubles whose rounding error
-    /// `fma(a, b, -a b)` is exact. The error is a multiple of `ulp(a) ulp(b) =
-    /// 2^(ea + eb - 104)` (`ea`, `eb` the exponents) of at most 53 bits, so exact when
-    /// that unit is not below the least subnormal `2^-1074`, `ea + eb >= -970`; a rounded
-    /// product of at least `2^-968` has `|a b| > 2^-969` and, as `|a b| < 2^(ea + eb + 2)`,
-    /// `ea + eb >= -970`.
-    const LEAST_EXACT_PRODUCT: f64 = f64::MIN_POSITIVE * 18_014_398_509_481_984.0;
-
-    /// `a + b` as `(s, e)`: `s = fl(a + b)` and its rounding error (Knuth's `TwoSum`).
-    fn two_sum(a: f64, b: f64) -> (f64, f64) {
-        let s = a + b;
-        let bb = s - a;
-        (s, (a - (s - bb)) + (b - bb))
-    }
-
-    /// `e + b` as an expansion (Grow-Expansion).
-    fn grow(e: &[f64], b: f64) -> Vec<f64> {
-        let mut q = b;
-        let mut out = Vec::new();
-        for &c in e {
-            let (s, err) = two_sum(q, c);
-            out.push(err);
-            q = s;
-        }
-        out.push(q);
-        out
-    }
-
-    /// `e + f` as an expansion.
-    fn add(e: &[f64], f: &[f64]) -> Vec<f64> {
-        f.iter().fold(e.to_vec(), |acc, &c| grow(&acc, c))
-    }
-
-    /// `e - f` as an expansion.
-    pub(super) fn sub(e: &[f64], f: &[f64]) -> Vec<f64> {
-        f.iter().fold(e.to_vec(), |acc, &c| grow(&acc, -c))
-    }
-
-    /// `a b` as an expansion: the product and its rounding error, `fma(a, b, -p)`; zero
-    /// exactly when `a` or `b` is. `None` out of range: `a` or `b` subnormal or not
-    /// finite, or the rounded product not finite or below [`LEAST_EXACT_PRODUCT`] (where
-    /// the error, or the product itself, could underflow).
-    fn product(a: f64, b: f64) -> Option<Vec<f64>> {
-        if a == 0.0 || b == 0.0 {
-            return (a.is_finite() && b.is_finite()).then(|| vec![0.0]);
-        }
-        let p = a * b;
-        let in_range =
-            a.is_normal() && b.is_normal() && p.is_finite() && p.abs() >= LEAST_EXACT_PRODUCT;
-        in_range.then(|| vec![a.mul_add(b, -p), p])
-    }
-
-    /// `e b` as an expansion: each component's product, summed.
-    pub(super) fn scale(e: &[f64], b: f64) -> Option<Vec<f64>> {
-        e.iter()
-            .try_fold(Vec::new(), |acc, &c| Some(add(&acc, &product(c, b)?)))
-    }
-
-    /// `u × v`, each component an expansion.
-    pub(super) fn cross(u: Vec3, v: Vec3) -> Option<[Vec<f64>; 3]> {
-        Some([
-            sub(&product(u.y, v.z)?, &product(u.z, v.y)?),
-            sub(&product(u.z, v.x)?, &product(u.x, v.z)?),
-            sub(&product(u.x, v.y)?, &product(u.y, v.x)?),
-        ])
-    }
-
-    /// `u · v` as an expansion.
-    pub(super) fn dot(u: Vec3, v: Vec3) -> Option<Vec<f64>> {
-        Some(add(
-            &add(&product(u.x, v.x)?, &product(u.y, v.y)?),
-            &product(u.z, v.z)?,
-        ))
-    }
-
-    /// `det(a, b, c) = (a × b) · c` as an expansion.
-    pub(super) fn det3(a: Vec3, b: Vec3, c: Vec3) -> Option<Vec<f64>> {
-        let [x, y, z] = cross(a, b)?;
-        Some(add(
-            &add(&scale(&x, c.x)?, &scale(&y, c.y)?),
-            &scale(&z, c.z)?,
-        ))
-    }
-
-    /// Whether the expansion is zero exactly.
-    pub(super) fn is_zero(e: &[f64]) -> bool {
-        e.iter().all(|&c| c == 0.0)
-    }
-
-    /// The expansion's exact sign: `-1`, `0` or `1`. The components do not overlap and
-    /// are stored least significant first, so the most significant non-zero one's sign
-    /// is the value's.
-    pub(super) fn sign(e: &[f64]) -> i32 {
-        match e.iter().rev().find(|&&c| c != 0.0) {
-            Some(c) if *c > 0.0 => 1,
-            Some(_) => -1,
-            None => 0,
-        }
-    }
-
-    /// The expansion's value as a double, rounded by summing its components from the most
-    /// significant down. Not correctly rounded and not canonical: a partial sum can
-    /// round, and a later component's contribution can then be lost (non-overlapping
-    /// components can straddle a tie). With `r` non-zero components and no intermediate
-    /// overflow the error is at most `gamma_(r-1) * sum |e|`, where
-    /// `gamma_j = j u / (1 - j u)` and `u = 2^-53`; adding a zero is exact, and an exact
-    /// sum of doubles is a multiple of the least subnormal, so the fold itself has no
-    /// subnormal underflow. Callers use it for a quotient or a displacement, a
-    /// rounding-level estimate, and read exactness from [`is_zero`] and [`sign`], never
-    /// from this value.
-    pub(super) fn to_f64(e: &[f64]) -> f64 {
-        e.iter().rev().fold(0.0, |sum, &c| sum + c)
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn a_rounded_sum_is_not_zero_but_its_exact_one_is() {
-            // 0.1 + 0.2 - 0.3 rounds to 5.6e-17; exactly it is that too (the doubles are
-            // not the decimals), while 1e16 + 1 - 1e16 is 1, not the 0 or 2 of rounding
-            assert!(!is_zero(&sub(&add(&[0.1], &[0.2]), &[0.3])));
-            assert_eq!(sub(&add(&[1e16], &[1.0]), &[1e16]).iter().sum::<f64>(), 1.0);
-            let (p, q) = (product(3.0, 0.1).unwrap(), product(0.1, 3.0).unwrap());
-            assert!(is_zero(&sub(&p, &q)));
-        }
-
-        #[test]
-        fn a_determinant_is_zero_exactly_only_for_dependent_vectors() {
-            let a = Vec3::new(0.1, 0.7, 0.3);
-            let b = Vec3::new(0.9, 0.2, 0.4);
-            assert!(is_zero(&det3(a, b, a).unwrap()));
-            let c = Vec3::new(0.1, 0.7, 0.3 + 1e-16 * 0.3);
-            assert!(!is_zero(&det3(a, b, c).unwrap()));
-        }
-
-        /// A product whose rounding error is not a double is out of range: one that
-        /// underflows (rounded to zero, its `fma` error zero too, so it read as zero), one
-        /// of a subnormal factor, one that overflows. A zero factor's product is zero, and
-        /// one just in range is exact.
-        #[test]
-        fn a_product_that_could_underflow_is_out_of_range() {
-            assert_eq!(LEAST_EXACT_PRODUCT, 2.0_f64.powi(-968));
-            assert!(product(1e-200, 1e-200).is_none());
-            assert!(product(1e-160, 1e-160).is_none());
-            assert!(product(1e-310, 1.0).is_none());
-            assert!(product(1.0, -5e-324).is_none());
-            assert!(product(f64::MAX, 2.0).is_none());
-            assert!(product(f64::NAN, 1.0).is_none());
-            assert_eq!(product(0.0, 1e-310), Some(vec![0.0]));
-            let h = 2.0_f64.powi(-484);
-            assert_eq!(product(h, h), Some(vec![0.0, LEAST_EXACT_PRODUCT]));
-            assert!(product(1e-140, 1e-140).is_some());
-            let z = Vec3::new(0.0, 0.0, 1e-310);
-            assert!(det3(Vec3::X, Vec3::Y, z).is_none());
-        }
-    }
-}
-
 /// `RemoveFaces(GetFaces)` of `b`, then `pNewBrep->CopyFaces(GetFaces, b)`.
 fn move_faces(k: &mut Kernel, b: &mut Brep, new_brep: &mut Brep) -> Result<()> {
     let old_faces = bp1::faces(b, None)?;
@@ -1456,6 +1281,7 @@ mod tests {
 
     use crate::geom::attribute::{AttributeStore, ObjectKey};
     use crate::geom::object::ObjectRef;
+    use crate::kernel::UpstreamFixes;
     use crate::topology::topology::Topology;
 
     #[test]
@@ -1779,7 +1605,15 @@ mod tests {
         let r = with_notifications(&mut b, |b, notes| {
             local_operation(&mut k, b, &[face], Vec::new(), notes)
         });
-        assert!(r.is_err());
+        let e = r.unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.operation(), OP);
+        assert_eq!(
+            e.topology_failure(),
+            Some(&crate::error::topology::TopologyFailure::Missing(
+                "a surface for every face"
+            ))
+        );
     }
 
     /// The top face of a 20 mm cube.
@@ -1839,11 +1673,11 @@ mod tests {
     }
 
     /// WR-534 (the fork's tangency-labs/smlib@a1ee273): a 20 mm cube's top moved up by
-    /// 60, further than the cube's size, is a sound 20 x 20 x 80 box with the opt-in.
+    /// 60, further than the cube's size, is a sound 20 x 20 x 80 box: the neighbours'
+    /// extension is derived from the moved surface (`local_extension_reach`).
     #[test]
     fn moves_the_top_of_a_box_further_than_its_size() {
         let mut k = Kernel::default();
-        k.fixes.local_operation_box_holds_new_surfaces = true;
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 20.0).unwrap();
         let top = box_top(&k, &b);
         let raised = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, 80.0), Vec3::Z));
@@ -1884,7 +1718,6 @@ mod tests {
     #[test]
     fn a_far_top_on_a_unit_square_plane_is_refused_as_not_sound() {
         let mut k = Kernel::default();
-        k.fixes.local_operation_box_holds_new_surfaces = true;
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 20.0).unwrap();
         let top = box_top(&k, &b);
         let raised = Surface::from(Plane::new(
@@ -2466,9 +2299,9 @@ mod tests {
     /// surfaces had built before the call included (none dropped, none added), and the
     /// caller's notification records and attributes. Refused while the offset's loop gaps
     /// are closed — the straight bridge that would join a gap is not established on the
-    /// face's own surface within the operation's tolerance — a cube's round given a wider
-    /// coaxial cylinder, and a side moved off its round (the edge between them apart:
-    /// `LocalReach::apart`, adding nothing to the reach); `b` carries an attribute of its
+    /// face's own surface within the operation's tolerance — a cube's round given a narrower
+    /// coaxial cylinder, and a split block's top piece turned and raised off its twin (no
+    /// step: their planes are not parallel); `b` carries an attribute of its
     /// own, lent to the offset, and the caller's store one of the caller's.
     #[test]
     fn a_refusal_leaves_the_input_its_caches_and_the_callers_stores_as_they_were() {
@@ -2479,15 +2312,42 @@ mod tests {
             // the round is the face whose offset loop's gap the bridge would join
             ("round", |k| {
                 let (b, round) = box_rounded_r2(k);
-                let s = ap::create_cylinder_surface(k, Point3::new(8.0, 8.0, -1.0), 2.3, 12.0);
+                let s = ap::create_cylinder_surface(k, Point3::new(8.0, 8.0, -1.0), 1.8, 12.0);
                 (b, round, Surface::from(s.unwrap()), round)
             }),
-            // the moved side is the face whose offset loop's gap the bridge would join
-            ("side", |k| {
-                let b = cube_rounded_r5(k);
-                let side = face_on_x(k, &b, 20.0);
-                let s = Plane::from_normal(Vec3::new(20.1, 0.0, 0.0), Vec3::X);
-                (b, side, Surface::from(s), side)
+            // the split block's piece x < 30 turned 0.02 rad about the split line and raised
+            // 1, on its own plane so moved: the gap the bridge would join is in the loop of
+            // its twin, the top piece x > 30
+            ("turned piece", |k| {
+                use crate::geom::axis2_placement::Axis2Placement;
+                let (b, piece) = split_block_piece(k);
+                let (c, sn) = (0.02_f64.cos(), 0.02_f64.sin());
+                let pivot = Point3::new(30.0, 0.0, 20.0);
+                let turned = Point3::new(
+                    c * pivot.x + sn * pivot.z,
+                    pivot.y,
+                    -sn * pivot.x + c * pivot.z,
+                );
+                let place = Axis2Placement::new(
+                    pivot + Vec3::new(0.0, 0.0, 1.0) - turned,
+                    Vec3::new(c, 0.0, -sn),
+                    Vec3::Y,
+                );
+                let mut s = face_ops::surface(&b, piece).unwrap().unwrap().clone();
+                s.transform(k, &place, None).unwrap();
+                let twin = bp1::faces(&b, None)
+                    .unwrap()
+                    .into_iter()
+                    .find(|&f| {
+                        let face = b.face(f).unwrap();
+                        let surface = face.surface.as_ref().unwrap();
+                        let p = surface
+                            .evaluate_point(k, face.uv_domain.evaluate(0.5, 0.5))
+                            .unwrap();
+                        (p.z - 20.0).abs() < 1e-9 && p.x > 30.0
+                    })
+                    .unwrap();
+                (b, piece, s, twin)
             }),
         ];
         for (name, make) in cases {
@@ -2835,26 +2695,25 @@ mod tests {
         );
     }
 
-    /// A 10 mm cube's vertical edge rounded r 2, the round given a coaxial cylinder
-    /// of another radius. For both wider and narrower replacements, the construction
-    /// cannot establish the gap's straight bridge on the round within tolerance.
-    /// It names the original round and refuses without changing the input.
+    /// A 10 mm cube's vertical edge rounded r 2, the round given the narrower coaxial
+    /// cylinder r 1.8. The sides x = 10 and y = 10 pass it 0.2 off, so their tangent edges
+    /// are apart, and the construction cannot establish the gap's straight bridge on the
+    /// round within tolerance. It names the original round and refuses without changing
+    /// the input. (A wider cylinder is met on the corner's side:
+    /// `tangent_edges_a_round_given_a_wider_coaxial_cylinder_meets_its_sides_on_the_corner_side`.)
     #[test]
-    fn a_round_given_a_coaxial_cylinder_is_refused_at_its_loop_gap() {
+    fn a_round_given_a_narrower_coaxial_cylinder_is_refused_at_its_loop_gap() {
         use crate::primitive::api_primitives as ap;
-        for radius in [2.3, 2.05, 1.8] {
-            let mut k = Kernel::default();
-            let (mut b, round) = box_rounded_r2(&mut k);
-            let s = Surface::from(
-                ap::create_cylinder_surface(&k, Point3::new(8.0, 8.0, -1.0), radius, 12.0).unwrap(),
-            );
-            let why = refused_unchanged_or_returned(&mut k, &mut b, &[round], vec![s]);
-            assert_eq!(
-                why,
-                Some(OffsetFailure::LoopGapUncertified { face: Some(round) }),
-                "{radius}"
-            );
-        }
+        let mut k = Kernel::default();
+        let (mut b, round) = box_rounded_r2(&mut k);
+        let s = Surface::from(
+            ap::create_cylinder_surface(&k, Point3::new(8.0, 8.0, -1.0), 1.8, 12.0).unwrap(),
+        );
+        let why = refused_unchanged_or_returned(&mut k, &mut b, &[round], vec![s]);
+        assert_eq!(
+            why,
+            Some(OffsetFailure::LoopGapUncertified { face: Some(round) })
+        );
     }
 
     /// The former flag-off refusal is no longer a default behaviour. With the same
@@ -2983,11 +2842,13 @@ mod tests {
     }
 
     /// The same cube, its top given a roof with a ridge: a degree-1 B-spline patch whose
-    /// interior knot is a crease. The roof has no exact class, so the reach of the moved
-    /// top has no certified bound: refused as `ReachUncertified` at the top, before any
-    /// body is built, the cube as it came in with the input's own failures.
+    /// interior knot is a crease. The roof is a bare net beside the sides, and the reach is
+    /// bounded where it meets them (across the crease too: the net is continuous there), so
+    /// a body is built; it fails more of the check than the cube did (the sides along the
+    /// ridge meet the roof in a kinked line), so the gate refuses it as `Unsound`, and the
+    /// cube is as it came in, with the input's own failures.
     #[test]
-    fn a_creased_roof_on_a_defective_input_is_refused_as_reach_uncertified() {
+    fn a_creased_roof_on_a_defective_input_is_refused_as_unsound() {
         use crate::nurbs::b_spline_surface::BSplineSurface;
         use crate::nurbs::math::{CPoint, NOW};
         use crate::nurbs::srf_basic::Surface as Net;
@@ -3008,7 +2869,15 @@ mod tests {
         .unwrap();
         let roof = Surface::from(BSplineSurface::from_gw_nurb(&roof));
         let why = refused_unchanged_or_returned(&mut k, &mut b, &[top], vec![roof]);
-        assert_eq!(why, Some(OffsetFailure::ReachUncertified { face: top }));
+        assert!(
+            matches!(
+                why,
+                Some(OffsetFailure::Unsound {
+                    what: crate::error::offset::Unsoundness::Check { .. }
+                })
+            ),
+            "{why:?}"
+        );
         assert_eq!(failure_classes(&mut k, &b), had);
     }
 
@@ -3097,10 +2966,18 @@ mod tests {
         0.5 * (u * (radius * radius - u * u).sqrt() + radius * radius * (u / radius).asin())
     }
 
-    /// The cube's round r 5 given the coaxial cylinder r 5.1 (moved out 0.1).
-    fn round_moved_out(k: &mut Kernel) -> (Brep, Option<OffsetFailure>) {
+    /// The fix sets the tangent-edge cases run with: none (the kernel's default) and every
+    /// one (as an application turns them on, `offset_analytic_mate_edges` among them).
+    fn tangent_edge_fixes() -> [UpstreamFixes; 2] {
+        [UpstreamFixes::default(), UpstreamFixes::all()]
+    }
+
+    /// The cube's round r 5 given the coaxial cylinder r 5.1 (moved out 0.1), the operation
+    /// run with `fixes`.
+    fn round_moved_out(k: &mut Kernel, fixes: UpstreamFixes) -> (Brep, Option<OffsetFailure>) {
         use crate::primitive::api_primitives as ap;
         let mut b = cube_rounded_r5(k);
+        k.fixes = fixes;
         let round = curved_face(&b);
         let wider = Surface::from(
             ap::create_cylinder_surface(k, Point3::new(15.0, 15.0, -1.0), 5.1, 22.0).unwrap(),
@@ -3109,120 +2986,169 @@ mod tests {
         (b, why)
     }
 
-    /// The cube's side x = 20, tangent to the round, moved into the body by 0.1.
-    fn side_moved_into_its_round(k: &mut Kernel) -> (Brep, Option<OffsetFailure>) {
+    /// The cube's side x = 20, tangent to the round, moved into the body by 0.1, the
+    /// operation run with `fixes`.
+    fn side_moved_into_its_round(
+        k: &mut Kernel,
+        fixes: UpstreamFixes,
+    ) -> (Brep, Option<OffsetFailure>) {
         let mut b = cube_rounded_r5(k);
+        k.fixes = fixes;
         let side = face_on_x(k, &b, 20.0);
         let moved = Surface::from(Plane::from_normal(Vec3::new(19.9, 0.0, 0.0), Vec3::X));
         let why = refused_unchanged_or_returned(k, &mut b, &[side], vec![moved]);
         (b, why)
     }
 
-    /// The round moved out. The side planes, tangent to the round, are
-    /// extended to meet it 1.005 past their old edges (`reach`'s tests), but the tangent
-    /// edge across from the moved face is extended and trimmed, not met again: it keeps
-    /// its old line, so the straight bridge that would join the round's offset loop's gap
-    /// is not established on the round's own surface within the operation's tolerance.
-    /// Refused before any body is checked (issue draft "a moved face next to a tangent
-    /// edge (a round) is refused as unsound"), the cube as it came in.
-    #[test]
-    fn a_round_moved_out_is_refused_before_its_gap_bridge_is_established() {
-        let mut k = Kernel::default();
-        let (b, why) = round_moved_out(&mut k);
-        // the refusal left the input as it came in, so its round is still its own
-        let round = curved_face(&b);
-        assert_eq!(
-            why,
-            Some(OffsetFailure::LoopGapUncertified { face: Some(round) })
-        );
+    /// Each of `wants` is a vertex of `b`, within the input's tolerance 1e-5 (the mated
+    /// edges are intersections of the extended surfaces, within the B-rep's tolerance; a
+    /// vertex's own tolerance grows with the fixes on, so it would let a stray vertex pass).
+    fn assert_vertices_at(b: &Brep, wants: &[Point3]) {
+        use crate::topology::vertex;
+        let points: Vec<Point3> = b
+            .vertices()
+            .ids()
+            .map(|v| vertex::point(b, v).unwrap())
+            .collect();
+        for want in wants {
+            assert!(
+                points.iter().any(|p| p.distance(*want) <= 1e-5),
+                "no vertex at {want:?} in {points:?}"
+            );
+        }
     }
 
-    /// The closed form the round moved out should have, once the tangent edges are met
-    /// again (issue draft "a moved face next to a tangent edge (a round) is refused as
-    /// unsound"): the cube with its corner cut by the r 5.1 circle, `20 (375 + A)`, `A`
-    /// the part of the corner square [15, 20]² inside the circle.
+    /// The round moved out. The side planes, tangent to the round, cut the r 5.1 cylinder
+    /// `w = √(5.1² − 5²) ≈ 1.005` either side of their old tangent lines; the tangent edges
+    /// are met on the round's side, at (20, 15 + w) and (15 + w, 20), and the arcs end
+    /// there. The body is the cube with its corner cut by the r 5.1 circle, `20 (375 + A)`,
+    /// `A` the part of the corner square [15, 20]² inside the circle.
     #[test]
-    #[ignore = "a moved face next to a tangent edge (a round) is refused as unsound \
-                (notes: issue-draft-tangent-edges.md)"]
     fn tangent_edges_a_round_moved_out_has_its_closed_form_volume() {
-        let mut k = Kernel::default();
-        let (mut b, why) = round_moved_out(&mut k);
-        assert_eq!(why, None);
-        let r = 5.1_f64;
-        let w = (r * r - 25.0).sqrt();
-        let inside = 5.0 * w + quarter_disc_area(r, 5.0) - quarter_disc_area(r, w);
-        let want = 20.0 * (375.0 + inside);
-        let (v, manifold) = volume_and_manifold(&k, &mut b);
-        assert!(manifold && (v - want).abs() <= 1e-9 * want, "{v} vs {want}");
+        for (set, fixes) in tangent_edge_fixes().into_iter().enumerate() {
+            let mut k = Kernel::default();
+            let (mut b, why) = round_moved_out(&mut k, fixes);
+            assert_eq!(why, None, "fix set {set}");
+            let r = 5.1_f64;
+            let w = (r * r - 25.0).sqrt();
+            let p = Point3::new;
+            let ends = [0.0, 20.0].map(|z| [p(20.0, 15.0 + w, z), p(15.0 + w, 20.0, z)]);
+            assert_vertices_at(&b, ends.as_flattened());
+            let inside = 5.0 * w + quarter_disc_area(r, 5.0) - quarter_disc_area(r, w);
+            let want = 20.0 * (375.0 + inside);
+            let (v, manifold) = volume_and_manifold(&k, &mut b);
+            assert!(
+                manifold && (v - want).abs() <= 1e-6 * want,
+                "fix set {set}: {v} vs {want}"
+            );
+        }
     }
 
-    /// The side moved into its round: it meets the round 1 from its old tangent edge
-    /// (`reach`'s tests), and the same tangent edges leave the offset loop's gap unbridged:
-    /// the straight bridge is not established on the side's own surface within the
-    /// operation's tolerance. Refused before any body is checked, the cube as it came in.
-    #[test]
-    fn a_side_moved_into_its_round_is_refused_before_its_gap_bridge_is_established() {
-        let mut k = Kernel::default();
-        let (b, why) = side_moved_into_its_round(&mut k);
-        // the moved side is the face whose offset loop's gap the bridge would join; the
-        // input is refused as it came in, so its side is still its own
-        let side = face_on_x(&k, &b, 20.0);
-        assert_eq!(
-            why,
-            Some(OffsetFailure::LoopGapUncertified { face: Some(side) })
-        );
-    }
-
-    /// The closed form the side moved into its round should have (issue draft "a moved
-    /// face next to a tangent edge (a round) is refused as unsound"):
+    /// The side moved into its round: the plane x = 19.9 cuts the round r 5 at
+    /// `y = 15 ± √0.99`; the tangent edge is met on the round's own face, at
+    /// (19.9, 15 + √0.99), and the round's arcs end there. The body:
     /// `20 (19.9 · 20 − 4.9 · 5 + ∫₀^4.9 √(25 − u²) du)`.
     #[test]
-    #[ignore = "a moved face next to a tangent edge (a round) is refused as unsound \
-                (notes: issue-draft-tangent-edges.md)"]
     fn tangent_edges_a_side_moved_into_its_round_has_its_closed_form_volume() {
-        let mut k = Kernel::default();
-        let (mut b, why) = side_moved_into_its_round(&mut k);
-        assert_eq!(why, None);
-        let want = 20.0 * (19.9 * 20.0 - 4.9 * 5.0 + quarter_disc_area(5.0, 4.9));
-        let (v, manifold) = volume_and_manifold(&k, &mut b);
-        assert!(manifold && (v - want).abs() <= 1e-9 * want, "{v} vs {want}");
+        for (set, fixes) in tangent_edge_fixes().into_iter().enumerate() {
+            let mut k = Kernel::default();
+            let (mut b, why) = side_moved_into_its_round(&mut k, fixes);
+            assert_eq!(why, None, "fix set {set}");
+            let y = 15.0 + 0.99_f64.sqrt();
+            assert_vertices_at(&b, &[0.0, 20.0].map(|z| Point3::new(19.9, y, z)));
+            let want = 20.0 * (19.9 * 20.0 - 4.9 * 5.0 + quarter_disc_area(5.0, 4.9));
+            let (v, manifold) = volume_and_manifold(&k, &mut b);
+            assert!(
+                manifold && (v - want).abs() <= 1e-6 * want,
+                "fix set {set}: {v} vs {want}"
+            );
+        }
+    }
+
+    /// The 10 mm cube's round r 2 about (8, 8) given a wider coaxial cylinder `R`. The sides
+    /// x = 10 and y = 10 cut it at 8 ± w, w = √(R² − 4); only 8 + w is on the corner's side
+    /// (the corner square [8, 10]²). The tangent edges are met there, at (10, 8 + w) and
+    /// (8 + w, 10), and the arcs that end the new round at the top and bottom end at those
+    /// vertices: ten vertices in all. The body is the cube with its corner cut by the
+    /// circle R: `10 (96 + A)`, `A` the part of the corner square inside the circle. The
+    /// new round faces out as the old one did, its outer loop running the surface's way:
+    /// the cylinder's domain middle is across the axis, where its normal opposes the old
+    /// round's (with every fix on, the face's UV trims are checked and its volume read on
+    /// them, so a round turned inside out is refused).
+    #[test]
+    fn tangent_edges_a_round_given_a_wider_coaxial_cylinder_meets_its_sides_on_the_corner_side() {
+        use crate::primitive::api_primitives as ap;
+        for (radius, fixes) in [2.3_f64, 2.05]
+            .into_iter()
+            .flat_map(|r| tangent_edge_fixes().map(|f| (r, f)))
+        {
+            let mut k = Kernel::default();
+            let (mut b, round) = box_rounded_r2(&mut k);
+            k.fixes = fixes;
+            let s = Surface::from(
+                ap::create_cylinder_surface(&k, Point3::new(8.0, 8.0, -1.0), radius, 12.0).unwrap(),
+            );
+            let why = refused_unchanged_or_returned(&mut k, &mut b, &[round], vec![s]);
+            assert_eq!(why, None, "{radius}");
+            let w = (radius * radius - 4.0).sqrt();
+            let p = Point3::new;
+            let ends = [0.0, 10.0].map(|z| [p(10.0, 8.0 + w, z), p(8.0 + w, 10.0, z)]);
+            assert_vertices_at(&b, ends.as_flattened());
+            assert_eq!(b.vertices().ids().count(), 10, "{radius}");
+            let inside = 2.0 * w + quarter_disc_area(radius, 2.0) - quarter_disc_area(radius, w);
+            let want = 10.0 * (96.0 + inside);
+            let (v, manifold) = volume_and_manifold(&k, &mut b);
+            assert!(
+                manifold && (v - want).abs() <= 1e-6 * want,
+                "{radius}: {v} vs {want}"
+            );
+            let round = curved_face(&b);
+            let outer = face_ops::loops(&b, round, false, None).unwrap()[0];
+            let along = crate::topology::face::p3::compute_loop_orientation(
+                &k, &mut b, round, outer, None, false,
+            );
+            let same = crate::nurbs::b_spline_surface_n_lib::p2::OrientType::Same;
+            assert_eq!(along.unwrap(), same, "{radius}");
+        }
     }
 
     /// The same side moved out by 0.1: the plane x = 20.1 passes the round, which bends
     /// away from it, so no extension makes them meet: their edge is apart
-    /// (`LocalReach::apart`, adding nothing to the reach), and the straight bridge that
-    /// would join the offset loop's gap is not established on the side's own surface
-    /// within the operation's tolerance: refused before any body is checked, the cube as
-    /// it came in.
+    /// (`LocalReach::apart`, adding nothing to the reach). The side and the round stay
+    /// parallel along their edge, 0.1 apart, so the step walls (the WR-530 addendum) build
+    /// the 0.1 wall between them: a sound solid that adds the side's 15 x 20 planar part
+    /// times 0.1 to the rounded cube, 8000 - 20 (25 - 25 pi / 4) + 30. (Before the step
+    /// walls were always on, the straight bridge across the offset loop's gap was not
+    /// established and the operation was refused.)
     #[test]
-    fn a_side_moved_off_its_round_is_refused_before_its_gap_bridge_is_established() {
+    fn a_side_moved_off_its_round_gets_a_step_wall() {
+        use crate::topology::brep::validation::{check_brep, CheckLevel};
         let mut k = Kernel::default();
         let mut b = cube_rounded_r5(&mut k);
         let side = face_on_x(&k, &b, 20.0);
-        // the moved side is the face whose offset loop's gap the bridge would join
         let moved = Surface::from(Plane::from_normal(Vec3::new(20.1, 0.0, 0.0), Vec3::X));
         let why = refused_unchanged_or_returned(&mut k, &mut b, &[side], vec![moved]);
-        assert_eq!(
-            why,
-            Some(OffsetFailure::LoopGapUncertified { face: Some(side) })
-        );
+        assert_eq!(why, None);
+        let (v, manifold) = volume_and_manifold(&k, &mut b);
+        let want = 8000.0 - 20.0 * (25.0 - 25.0 * crate::math::PI / 4.0) + 0.1 * 15.0 * 20.0;
+        assert!(manifold && (v - want).abs() <= 1e-9 * want, "{v} vs {want}");
+        // and the body built is clean at check level 2
+        b.use_arena_naming().unwrap();
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "{lines:?}");
     }
 
-    /// A tangent pair of equal curvature: a 60 x 40 x 20 block whose top is imprinted
-    /// along x = 30, the piece x < 30 raised 1. The two pieces' planes stay parallel and
-    /// 1 apart: they meet nowhere, so their edge is apart (`LocalReach::apart`, adding
-    /// nothing to the reach), and without the step walls, which build the wall between
-    /// them (`wr_530_local_operation_step_walls`), the body built is refused as not sound.
-    #[test]
-    fn a_coplanar_neighbour_raised_off_its_twin_is_refused_as_not_sound() {
+    /// A 60 x 40 x 20 block whose top is imprinted along x = 30, and its top piece x < 30.
+    fn split_block_piece(k: &mut Kernel) -> (Brep, FaceId) {
         use crate::boolean::api_brep::boolean_with_options;
         use crate::boolean::merge::MergeOptions;
         use crate::geom::a_object::BooleanOperation;
-        let mut k = Kernel::default();
-        let block = create_box(&mut k, Point3::ZERO, 60.0, 40.0, 20.0).unwrap();
-        let cutter = create_box(&mut k, Point3::new(30.0, -1.0, 10.0), 60.0, 42.0, 20.0).unwrap();
+        let block = create_box(k, Point3::ZERO, 60.0, 40.0, 20.0).unwrap();
+        let cutter = create_box(k, Point3::new(30.0, -1.0, 10.0), 60.0, 42.0, 20.0).unwrap();
         let mut b = boolean_with_options(
-            &mut k,
+            k,
             block,
             cutter,
             BooleanOperation::Imprint,
@@ -3238,11 +3164,25 @@ mod tests {
                 let face = b.face(f).unwrap();
                 let s = face.surface.as_ref().unwrap();
                 let p = s
-                    .evaluate_point(&k, face.uv_domain.evaluate(0.5, 0.5))
+                    .evaluate_point(k, face.uv_domain.evaluate(0.5, 0.5))
                     .unwrap();
                 matches!(s.kind(), SurfaceKind::Plane(_)) && (p.z - 20.0).abs() < 1e-9 && p.x < 30.0
             })
             .unwrap();
+        (b, piece)
+    }
+
+    /// A tangent pair of equal curvature: the split block's piece x < 30 raised 1. The two
+    /// pieces' planes stay parallel and 1 apart: they meet nowhere, so their edge is apart
+    /// (`LocalReach::apart`, adding nothing to the reach). The piece is given a plane
+    /// parametrised otherwise than its own (the local operation lifts its edges by their
+    /// UV), so the step walls, which build the wall from the piece's own plane offset
+    /// (`wr_530_local_operation_step_walls`), do not close the body: it is refused as not
+    /// sound.
+    #[test]
+    fn a_coplanar_neighbour_raised_off_its_twin_is_refused_as_not_sound() {
+        let mut k = Kernel::default();
+        let (mut b, piece) = split_block_piece(&mut k);
         let raised = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, 21.0), Vec3::Z));
         let why = refused_unchanged_or_returned(&mut k, &mut b, &[piece], vec![raised]);
         assert!(

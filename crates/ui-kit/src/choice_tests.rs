@@ -5,6 +5,42 @@ use egui::Ui;
 use solidcraft_ui_registry as registry;
 
 #[test]
+fn swatch_picker_filters_titles_and_selects_original_option_indices() {
+    let ctx = context();
+    let texture = ctx.load_texture("synthetic", egui::ColorImage::filled([2, 2], egui::Color32::from_rgb(137, 61, 23)), Default::default());
+    let titles = vec!["Oak".into(), "Walnut".into(), "White oak".into()];
+    let textures = vec![Some(egui::load::SizedTexture::new(texture.id(), texture.size_vec2())); 3];
+    let mut chosen = None;
+    let mut draw = |ui: &mut Ui| {
+        row(ui, "Finish", |ui| {
+            swatch_picker(
+                ui,
+                "finish",
+                &mut chosen,
+                SwatchPicker { titles: &titles, textures: &textures, choose: "Choose…", search_hint: "Search finishes" },
+            )
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    let trigger = registry::handle_at("dialog:Finish").unwrap();
+    frame(&ctx, pointer(trigger, true), &mut draw);
+    frame(&ctx, pointer(trigger, false), &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    let search = registry::handle_at("swatch:finish:search").unwrap();
+    frame(&ctx, pointer(search, true), &mut draw);
+    frame(&ctx, pointer(search, false), &mut draw);
+    frame(&ctx, vec![egui::Event::Text("OaK".into())], &mut draw);
+    registry::clear_handles();
+    frame(&ctx, vec![], &mut draw);
+    assert!(registry::handle_at("swatch:finish:option:0").is_some());
+    assert!(registry::handle_at("swatch:finish:option:1").is_none());
+    let oak = registry::handle_at("swatch:finish:option:2").unwrap();
+    frame(&ctx, pointer(oak, true), &mut draw);
+    frame(&ctx, pointer(oak, false), &mut draw);
+    assert_eq!(chosen, Some(2));
+}
+
+#[test]
 fn segmented_allocates_only_its_reserved_row() {
     for layout in [egui::Layout::top_down(egui::Align::Min), egui::Layout::left_to_right(egui::Align::Center)] {
         for width in [160.0, 320.0, 640.0] {
@@ -390,4 +426,22 @@ fn output_radio_rows_keep_titles_summaries_and_disabled_choices_in_both_themes()
             assert!(!clicked);
         }
     }
+}
+
+/// #11089: a checkbox grid keeps its columns while the labels fit them, and gives up columns, down
+/// to one, when the widest label would be cut ("..." in a translated dialog).
+#[test]
+fn a_checkbox_grid_gives_up_columns_for_labels_that_do_not_fit() {
+    // Two columns in 300 px with an 8 px gap are 146 px each; 20 px go to the box and gap.
+    let fits = |labels: &[f32], available: f32, wanted: usize| super::fitting_columns(labels, 20.0, available, 8.0, wanted);
+    assert_eq!(fits(&[100.0, 120.0], 300.0, 2), 2, "short labels keep both columns");
+    assert_eq!(fits(&[100.0, 126.0], 300.0, 2), 2, "a label that exactly fits its column keeps it");
+    assert_eq!(fits(&[100.0, 127.0], 300.0, 2), 1, "a label a pixel too wide for a column takes the full row");
+    assert_eq!(fits(&[100.0, 240.0], 300.0, 2), 1, "a long German label");
+    assert_eq!(fits(&[100.0, 400.0], 300.0, 2), 1, "one column is the least, even when nothing fits");
+    // Three columns step down to two before one.
+    assert_eq!(fits(&[50.0, 70.0, 60.0], 300.0, 3), 3);
+    assert_eq!(fits(&[50.0, 120.0, 60.0], 300.0, 3), 2);
+    assert_eq!(fits(&[50.0, 120.0, 60.0], 300.0, 1), 1, "a single column stays one");
+    assert_eq!(fits(&[], 300.0, 2), 2, "no labels, no change");
 }

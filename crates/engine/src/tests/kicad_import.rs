@@ -1,0 +1,166 @@
+//! A KiCad board opens through `doc.open`: the substrate as a solid, the copper and silkscreen
+//! chosen by the options, the board's own thickness unless overridden, and every option checked
+//! before the board is read.
+
+use serde_json::json;
+
+use super::{run, volume};
+use crate::*;
+
+fn board_file(tag: &str, thickness: f64) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("solidcraft-kicad-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("board.kicad_pcb");
+    std::fs::write(
+        &path,
+        format!(
+            r#"(kicad_pcb (general (thickness {thickness}))
+  (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+  (segment (start 1 2) (end 10 2) (width 0.3) (layer "F.Cu") (net 1)))"#
+        ),
+    )
+    .unwrap();
+    path
+}
+
+#[test]
+fn a_board_opens_as_a_solid_substrate() {
+    let path = board_file("solid", 2.0);
+    let mut s = Session::default();
+    let r = run(&mut s, "doc.open", json!({"path": path.to_string_lossy()}));
+    assert_eq!(r["board_solid"], json!(true), "{r}");
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert!(names.iter().any(|name| name == "board"), "{names:?}");
+    // The copper overlay is on by default: the 9 mm × 0.3 mm track is a flat face over the board,
+    // so it adds no volume, and the measure says so by counting it among the open bodies.
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(measured["total"]["open_bodies_skipped"], json!(1), "{measured}");
+    let got = volume(&mut s);
+    assert!((got - 400.0).abs() < 1e-6, "{got}");
+    let open = measured["bodies"].as_array().into_iter().flatten().filter(|b| b["name"] == json!("Copper F.Cu")).all(|b| b["closed"] == json!(false));
+    assert!(open, "{measured}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn the_options_choose_the_parts_and_override_the_thickness() {
+    let path = board_file("options", 2.0);
+    let mut s = Session::default();
+    let r = run(&mut s, "doc.open", json!({"path": path.to_string_lossy(), "copper": "mesh", "silkscreen": false, "thickness": 1.0}));
+    assert_eq!(r["board_solid"], json!(true), "{r}");
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert!(names.iter().any(|name| name == "Copper F.Cu"), "{names:?}");
+    // The solid substrate is 200 mm³ with the overriding 1 mm thickness, plus the 9 mm × 0.3 mm
+    // × 0.035 mm copper track.
+    let got = volume(&mut s);
+    assert!((got - (200.0 + 9.0 * 0.3 * 0.035)).abs() < 1e-3, "{got}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn the_board_stands_with_its_lower_left_corner_at_the_origin() {
+    // Drawn far from KiCad's origin, as a board on a project sheet usually is.
+    let dir = std::env::temp_dir().join(format!("solidcraft-kicad-origin-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("board.kicad_pcb");
+    std::fs::write(
+        &path,
+        r#"(kicad_pcb (general (thickness 2))
+  (gr_rect (start 100 50) (end 120 60) (layer "Edge.Cuts")))"#,
+    )
+    .unwrap();
+    let mut s = Session::default();
+    let r = run(&mut s, "doc.open", json!({"path": path.to_string_lossy()}));
+    assert_eq!(r["board_solid"], json!(true), "{r}");
+    let world = s.world_state().unwrap();
+    let bbox = world
+        .bodies
+        .iter()
+        .find(|b| b.name == "board")
+        .map(|b| solidcraft_kernel::measure(&b.body).map(|m| m.bbox))
+        .expect("no board body")
+        .expect("the board would not measure");
+    // KiCad's Y is negated, so the board covers Y -60..-50 and is moved up to -10..0.
+    assert!(bbox.min.x.abs() < 1e-6 && bbox.min.y.abs() < 1e-6, "{bbox:?}");
+    assert!((bbox.max.x - 20.0).abs() < 1e-6 && (bbox.max.y - 10.0).abs() < 1e-6, "{bbox:?}");
+    // The shift is flat: the board keeps its thickness and stands at the same height.
+    assert!((bbox.max.z - bbox.min.z - 2.0).abs() < 1e-6, "{bbox:?}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// A folder holding `board.kicad_pcb`, whose one footprint (U1) names `model`, and the model
+/// files given beside it.
+fn board_with_model_files(tag: &str, model: &str, files: &[(&str, Vec<u8>)]) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("solidcraft-kicad-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, bytes) in files {
+        std::fs::write(dir.join(name), bytes).unwrap();
+    }
+    let path = dir.join("board.kicad_pcb");
+    std::fs::write(
+        &path,
+        format!(
+            r#"(kicad_pcb (general (thickness 1.6))
+  (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+  (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+    (model "${{KIPRJMOD}}/{model}")))"#
+        ),
+    )
+    .unwrap();
+    path
+}
+
+/// KiCad 10's `….stpZ`: a zip archive holding one STEP file.
+fn stpz() -> Vec<u8> {
+    use std::io::Write;
+    let mut out = std::io::Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(&mut out);
+    zip.start_file("part.step", zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated)).unwrap();
+    zip.write_all(include_bytes!("../../../../tests/step-conformance/cylinder.step")).unwrap();
+    zip.finish().unwrap();
+    out.into_inner()
+}
+
+/// Open the board and check that U1's model came in with no warning about it.
+fn assert_the_model_comes_in(path: &std::path::Path) {
+    let mut s = Session::default();
+    let r = run(&mut s, "doc.open", json!({"path": path.to_string_lossy()}));
+    assert_eq!(r["subcomponents"], json!(1), "{r}");
+    let warnings = r["warnings"].as_array().cloned().unwrap_or_default();
+    assert!(warnings.iter().all(|w| !w.as_str().unwrap_or("").contains("part.")), "{r}");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// KiCad 10's 3D library has each model only as a zipped `….stpZ`, while a board drawn with older
+/// footprints names `….wrl` or `….step`: the reference is answered by the `….stpZ` beside it.
+#[test]
+fn a_model_named_in_another_format_is_read_from_the_stpz_beside_it() {
+    assert_the_model_comes_in(&board_with_model_files("stpz", "part.wrl", &[("part.stpZ", stpz())]));
+}
+
+/// A file system that tells `….stpZ` from `….stpz` still finds a lower-case `….stpz`.
+#[test]
+fn a_lower_case_stpz_answers_a_missing_model() {
+    assert_the_model_comes_in(&board_with_model_files("stpz-lower", "part.wrl", &[("part.stpz", stpz())]));
+}
+
+/// A missing `….step` is answered by the `….wrl` beside it before a `….stpZ`: a damaged `….stpZ`
+/// does not take a model away from a board that found its VRML model before.
+#[test]
+fn a_damaged_stpz_does_not_hide_the_wrl_beside_it() {
+    let wrl = b"#VRML V2.0 utf8\nShape { geometry Box { size 2 2 2 } }".to_vec();
+    assert_the_model_comes_in(&board_with_model_files("stpz-damaged", "part.step", &[("part.wrl", wrl), ("part.stpZ", b"not a zip".to_vec())]));
+}
+
+#[test]
+fn a_bad_option_is_refused_before_the_board_is_read() {
+    let path = board_file("bad", 2.0);
+    let mut s = Session::default();
+    let error = s.execute("doc.open", &json!({"path": path.to_string_lossy(), "copper": "brep"})).unwrap_err();
+    assert!(format!("{error}").contains("copper"), "{error}");
+    assert!(s.doc.features.is_empty(), "a refused option left a feature behind");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}

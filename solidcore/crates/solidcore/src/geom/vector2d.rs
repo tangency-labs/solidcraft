@@ -46,7 +46,7 @@
 //!   [`Vec2::UNDEF`] (both components `SM_UNDEF_DOUBLE`).
 //! - `operator[]` with an index other than 0 or 1 returns `0.0` (const) or
 //!   dereferences `NULL` (non-const) after logging `SM_ERR`; Rust returns
-//!   `SolidError::Upstream { code: 1001 }` (`SM_ERR`) for both.
+//!   a [`GeomFailure`](crate::error::geom::GeomFailure) with status 1001 (`SM_ERR`) for both.
 //! - `SM_ASSERT_BREAK` checks are compiled out upstream (release build) and omitted.
 //! - `sm_sqrt`, `sm_acos`, `sm_asin` (`SmMath.cpp`) come from [`crate::geom::vector3d`];
 //!   `SM_IS_ZERO_SQUARED` = `SmTol::InTol(a, SmTol::GetScaledZeroSq())` calls
@@ -58,9 +58,6 @@ use crate::error::{Result, SolidError};
 use crate::geom::tol;
 use crate::geom::vector3d::{acos as sm_acos, asin as sm_asin, sqrt as sm_sqrt};
 use crate::math::{Vec3, EFF_ZERO, EFF_ZERO_SQ, PI, UNDEF_DOUBLE};
-
-// Upstream `SM_ERR` (generic error status).
-use crate::error::SM_ERR;
 
 /// A 2D vector (`SmVector2d`), typically a surface parameter `(u, v)`.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -246,11 +243,10 @@ impl Vec2 {
     }
 
     fn bad_index() -> SolidError {
-        SolidError::Upstream {
-            operation: "geom::vector2d::Vec2::component",
-            code: SM_ERR,
-            entity: None,
-        }
+        SolidError::geom_failed(
+            "geom::vector2d::Vec2::component",
+            "the component index is out of range",
+        )
     }
 
     /// Angle between two vectors in radians, in `[0, PI]` (`AngleBetween`).

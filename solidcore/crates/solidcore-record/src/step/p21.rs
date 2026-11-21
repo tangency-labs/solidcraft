@@ -9,9 +9,8 @@
 //! capped, nothing is allocated from a count read out of the file (lists grow as their items are
 //! read), and every refusal is an [`Error`], never a panic.
 //!
-//! Origin: SolidCraft's `crates/step/src/p21.rs` at `a5b71ca2` (MIT OR Apache-2.0). With the STEP
-//! merge (#2577) this becomes solidcore's one Part 21 implementation; `step-import`'s `part21.rs`
-//! goes with #2585.
+//! Origin: SolidCraft's `crates/step/src/p21.rs` at `a5b71ca2` (MIT OR Apache-2.0). This is
+//! solidcore's one Part 21 implementation (`step-import`'s `part21.rs` is gone, #14123).
 //!
 //! Deviations from SolidCraft: [`Exchange::entities`] is a `BTreeMap` (was a `HashMap`), so
 //! iterating it is in id order on every platform; what is stored and which definition wins a
@@ -30,11 +29,14 @@
 //! in the raw text, so one inside a string in such a section ends the skip early and the rest is
 //! read as sections. No corpus file has these sections.
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 use std::num::IntErrorKind;
 
-/// Largest STEP text we parse.
+/// Largest STEP text [`parse`] and [`parse_with`] read. A caller whose user raised the limit
+/// passes its own to [`parse_with_max_bytes`] (SolidCraft's Preferences › General › Largest file
+/// to open, #13329).
 pub const MAX_BYTES: usize = 512 << 20;
 /// Most entity instances in one file, a repeated id counted each time.
 pub const MAX_ENTITIES: usize = 20_000_000;
@@ -59,20 +61,42 @@ pub const MAX_RECORDS: usize = 20_000_000;
 /// counting its separators) would reach it at about 110 MB; it holds under a million.
 pub const MAX_PARAMS: usize = 20_000_000;
 
-/// The counts a parse refuses beyond: [`MAX_ENTITIES`] and [`MAX_PARAMS`] for every caller,
-/// smaller in tests so a limit is reached with a short text.
-#[derive(Clone, Copy)]
+/// The text size and the counts a parse refuses beyond: [`MAX_BYTES`], [`MAX_ENTITIES`],
+/// [`MAX_RECORDS`] and [`MAX_PARAMS`] by default, all raised together when a caller raises the
+/// size ([`Limits::for_bytes`]), smaller in tests so a limit is reached with a short text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Limits {
+    bytes: usize,
     entities: usize,
     records: usize,
     params: usize,
 }
 
 const LIMITS: Limits = Limits {
+    bytes: MAX_BYTES,
     entities: MAX_ENTITIES,
     records: MAX_RECORDS,
     params: MAX_PARAMS,
 };
+
+impl Limits {
+    /// The limits for a text of up to `max_bytes` (never below the defaults). The counts grow in
+    /// proportion to the size, so a larger file of the same density as one the defaults read
+    /// is read too, and the memory they bound stays the same multiple of the text's size.
+    fn for_bytes(max_bytes: usize) -> Self {
+        let bytes = max_bytes.max(MAX_BYTES);
+        let scale = |count: usize| {
+            let scaled = count as u128 * bytes as u128 / MAX_BYTES as u128;
+            usize::try_from(scaled).unwrap_or(usize::MAX)
+        };
+        Self {
+            bytes,
+            entities: scale(MAX_ENTITIES),
+            records: scale(MAX_RECORDS),
+            params: scale(MAX_PARAMS),
+        }
+    }
+}
 
 /// A parameter value.
 #[derive(Clone, Debug, PartialEq)]
@@ -197,9 +221,34 @@ impl Entity {
     }
 }
 
+/// The HEADER section's file description and file name, as written.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Header {
+    /// `FILE_DESCRIPTION` lines.
+    pub descriptions: Vec<String>,
+    /// `FILE_DESCRIPTION` implementation level.
+    pub implementation_level: String,
+    /// `FILE_NAME` name.
+    pub file_name: String,
+    /// `FILE_NAME` time stamp.
+    pub time_stamp: String,
+    /// `FILE_NAME` authors.
+    pub authors: Vec<String>,
+    /// `FILE_NAME` organizations.
+    pub organizations: Vec<String>,
+    /// `FILE_NAME` preprocessor version.
+    pub preprocessor_version: String,
+    /// `FILE_NAME` originating system.
+    pub originating_system: String,
+    /// `FILE_NAME` authorization.
+    pub authorization: String,
+}
+
 /// A parsed exchange file.
 #[derive(Clone, Debug, Default)]
 pub struct Exchange {
+    /// The HEADER's description and file name, field by field.
+    pub header: Header,
     /// `FILE_SCHEMA` names.
     pub schemas: Vec<String>,
     /// `FILE_NAME` originating system.
@@ -232,17 +281,22 @@ struct Lexer<'a> {
     records: usize,
     /// The most records to read.
     max_records: usize,
+    /// The last place `line` counted to and the newlines before it, so errors met one after
+    /// another while skipping bad header records count each byte once.
+    counted: Cell<(usize, usize)>,
 }
 
 /// Why a text was refused. Its message is the one `parse` returned as a string before it had
 /// a type; `String::from` gives it back for callers that collect messages.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
-    /// The text is longer than [`MAX_BYTES`].
-    #[error("STEP file too large ({} MB, limit {} MB)", .bytes >> 20, MAX_BYTES >> 20)]
+    /// The text is longer than the limit ([`MAX_BYTES`] unless the caller raised it).
+    #[error("STEP file too large ({} MB, limit {} MB)", .bytes >> 20, .limit >> 20)]
     TooLarge {
         /// The text's length.
         bytes: usize,
+        /// The limit it is longer than, in bytes.
+        limit: usize,
     },
     /// The text does not start with `ISO-10303-21;`.
     #[error("not a STEP file (no ISO-10303-21 header)")]
@@ -289,9 +343,32 @@ impl From<Error> for String {
 
 impl Lexer<'_> {
     fn line(&self) -> usize {
-        self.s
-            .get(..self.i)
-            .map_or(0, |b| b.split(|c| *c == b'\n').count())
+        let (at, before) = self.counted.get();
+        let (from, before) = if self.i >= at { (at, before) } else { (0, 0) };
+        let Some(b) = self.s.get(from..self.i) else {
+            return 0;
+        };
+        #[allow(clippy::naive_bytecount)] // no bytecount dependency in the record
+        let newlines = before + b.iter().filter(|c| **c == b'\n').count();
+        self.counted.set((self.i, newlines));
+        newlines + 1
+    }
+    /// Where the next line after `from` that starts with a keyword begins.
+    fn next_header_line(&self, from: usize) -> Option<usize> {
+        let rest = self.s.get(from..)?;
+        let mut at = rest.iter().position(|&c| c == b'\n')? + 1;
+        loop {
+            let line = at
+                + rest
+                    .get(at..)?
+                    .iter()
+                    .take_while(|c| matches!(c, b' ' | b'\t' | b'\r'))
+                    .count();
+            if rest.get(line)?.is_ascii_uppercase() {
+                return Some(from + line);
+            }
+            at += rest.get(at..)?.iter().position(|&c| c == b'\n')? + 1;
+        }
     }
     fn fail<T>(&self, msg: &str) -> Result<T, Error> {
         Err(Error::Syntax {
@@ -519,12 +596,65 @@ impl Lexer<'_> {
             });
         }
         self.records += 1;
-        let name = self.keyword()?;
+        let name = long_name(self.keyword()?);
         self.expect(b'(')?;
         Ok(Record {
             name,
             params: self.list_rest(1)?,
         })
+    }
+}
+
+/// Part 21 short entity names (the short-name form ISO 10303-21 allows, which some AP203 writers
+/// use, STEP Tools' among them) of the entities a B-rep, its representation, product and units
+/// are read from, with their long names. Every pair is as ISO's short-names file gives it
+/// (<http://standards.iso.org/iso/10303/tech/short_names/short-names.txt>), checked entry by entry.
+/// `step-import`'s table (#2582) mapped `CMCRSG` to `COMPOSITE_CURVE`; it is
+/// `COMPOSITE_CURVE_SEGMENT`, and `COMPOSITE_CURVE` is `CMPCRV`.
+const SHORT_NAMES: [(&str, &str); 36] = [
+    ("A2PL3D", "AXIS2_PLACEMENT_3D"),
+    ("ADVFC", "ADVANCED_FACE"),
+    ("BSCWK", "B_SPLINE_CURVE_WITH_KNOTS"),
+    ("BSSWK", "B_SPLINE_SURFACE_WITH_KNOTS"),
+    ("CLSSHL", "CLOSED_SHELL"),
+    ("CMCRSG", "COMPOSITE_CURVE_SEGMENT"),
+    ("CMPCRV", "COMPOSITE_CURVE"),
+    ("CNBSUN", "CONVERSION_BASED_UNIT"),
+    ("CRTPNT", "CARTESIAN_POINT"),
+    ("DMNEXP", "DIMENSIONAL_EXPONENTS"),
+    ("DRCTN", "DIRECTION"),
+    ("EDGCRV", "EDGE_CURVE"),
+    ("EDGLP", "EDGE_LOOP"),
+    ("FBSR", "FACETED_BREP_SHAPE_REPRESENTATION"),
+    ("FCBND", "FACE_BOUND"),
+    ("FCOTBN", "FACE_OUTER_BOUND"),
+    ("FCSRF", "FACE_SURFACE"),
+    ("FCTBR", "FACETED_BREP"),
+    ("GMRPCN", "GEOMETRIC_REPRESENTATION_CONTEXT"),
+    ("GMTST", "GEOMETRIC_SET"),
+    ("LMWU", "LENGTH_MEASURE_WITH_UNIT"),
+    ("LNGUNT", "LENGTH_UNIT"),
+    ("MNSLBR", "MANIFOLD_SOLID_BREP"),
+    ("NMDUNT", "NAMED_UNIT"),
+    ("ORNEDG", "ORIENTED_EDGE"),
+    ("PAMWU", "PLANE_ANGLE_MEASURE_WITH_UNIT"),
+    ("PLYLP", "POLY_LOOP"),
+    ("PRDCT", "PRODUCT"),
+    ("PRDDFN", "PRODUCT_DEFINITION"),
+    ("PRDFSH", "PRODUCT_DEFINITION_SHAPE"),
+    ("SHDFRP", "SHAPE_DEFINITION_REPRESENTATION"),
+    ("SHPRPR", "SHAPE_REPRESENTATION"),
+    ("SHRPRL", "SHAPE_REPRESENTATION_RELATIONSHIP"),
+    ("TRMCRV", "TRIMMED_CURVE"),
+    ("UMWU", "UNCERTAINTY_MEASURE_WITH_UNIT"),
+    ("VRTPNT", "VERTEX_POINT"),
+];
+
+/// An entity name as its long form where it is one of [`SHORT_NAMES`].
+fn long_name(name: String) -> String {
+    match SHORT_NAMES.iter().find(|(short, _)| *short == name) {
+        Some((_, long)) => (*long).to_string(),
+        None => name,
     }
 }
 
@@ -644,14 +774,28 @@ pub fn parse_with(text: &str, watch: Option<&dyn Progress>) -> Result<Exchange, 
     parse_limited(text, watch, LIMITS)
 }
 
+/// [`parse_with`] reading a text of up to `max_bytes` (never less than [`MAX_BYTES`]); the
+/// entity, record and parameter limits grow in proportion. For a caller whose user raised the
+/// largest file to open (#13329).
+pub fn parse_with_max_bytes(
+    text: &str,
+    watch: Option<&dyn Progress>,
+    max_bytes: usize,
+) -> Result<Exchange, Error> {
+    parse_limited(text, watch, Limits::for_bytes(max_bytes))
+}
+
 /// [`parse_with`] with the counts it refuses beyond given.
 fn parse_limited(
     text: &str,
     watch: Option<&dyn Progress>,
     limits: Limits,
 ) -> Result<Exchange, Error> {
-    if text.len() > MAX_BYTES {
-        return Err(Error::TooLarge { bytes: text.len() });
+    if text.len() > limits.bytes {
+        return Err(Error::TooLarge {
+            bytes: text.len(),
+            limit: limits.bytes,
+        });
     }
     // Some writers start the file with a UTF-8 byte order mark.
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
@@ -662,6 +806,7 @@ fn parse_limited(
         max_params: limits.params,
         records: 0,
         max_records: limits.records,
+        counted: Cell::new((0, 0)),
     };
     let magic = lx.keyword()?;
     if magic != "ISO-10303-21" {
@@ -679,14 +824,38 @@ fn parse_limited(
             "HEADER" => {
                 lx.expect(b';')?;
                 loop {
-                    let k = lx.keyword()?;
-                    if k == "ENDSEC" {
-                        lx.expect(b';')?;
-                        break;
+                    // The header only describes the file, and other CAD systems read past a
+                    // record that does not parse (#11650): skip to the next line that starts
+                    // with a keyword. If there is none, the file is not readable.
+                    let start = lx.i;
+                    // A header without its `ENDSEC;` must not read the DATA section as
+                    // header records to skip.
+                    if lx.keyword().as_deref() == Ok("DATA") {
+                        return lx.fail("expected `ENDSEC;` before `DATA`");
                     }
-                    lx.expect(b'(')?;
-                    let params = lx.list_rest(1)?;
-                    lx.expect(b';')?;
+                    lx.i = start;
+                    let record = (|| {
+                        let k = lx.keyword()?;
+                        if k == "ENDSEC" {
+                            lx.expect(b';')?;
+                            return Ok(None);
+                        }
+                        lx.expect(b'(')?;
+                        let params = lx.list_rest(1)?;
+                        lx.expect(b';')?;
+                        Ok(Some((k, params)))
+                    })();
+                    let (k, params) = match record {
+                        Ok(Some(record)) => record,
+                        Ok(None) => break,
+                        Err(e) => {
+                            let Some(next) = lx.next_header_line(start) else {
+                                return Err(e);
+                            };
+                            lx.i = next;
+                            continue;
+                        }
+                    };
                     match k.as_str() {
                         "FILE_SCHEMA" => {
                             if let Some(Param::List(v)) = params.first() {
@@ -703,9 +872,39 @@ fn parse_limited(
                                     .filter_map(|p| p.as_str())
                                     .collect::<Vec<_>>()
                                     .join(" ");
+                                ex.header.descriptions = v
+                                    .iter()
+                                    .filter_map(|p| p.as_str().map(str::to_string))
+                                    .collect();
+                            }
+                            if let Some(level) = params.get(1).and_then(Param::as_str) {
+                                level.clone_into(&mut ex.header.implementation_level);
                             }
                         }
                         "FILE_NAME" => {
+                            let string = |i: usize| {
+                                params
+                                    .get(i)
+                                    .and_then(Param::as_str)
+                                    .unwrap_or("")
+                                    .to_string()
+                            };
+                            let strings = |i: usize| -> Vec<String> {
+                                params
+                                    .get(i)
+                                    .and_then(Param::as_list)
+                                    .unwrap_or(&[])
+                                    .iter()
+                                    .filter_map(|p| p.as_str().map(str::to_string))
+                                    .collect()
+                            };
+                            ex.header.file_name = string(0);
+                            ex.header.time_stamp = string(1);
+                            ex.header.authors = strings(2);
+                            ex.header.organizations = strings(3);
+                            ex.header.preprocessor_version = string(4);
+                            ex.header.originating_system = string(5);
+                            ex.header.authorization = string(6);
                             ex.preprocessor = params
                                 .get(4)
                                 .and_then(Param::as_str)
@@ -840,6 +1039,82 @@ mod tests {
         format!("ISO-10303-21;DATA;{data}ENDSEC;END-ISO-10303-21;")
     }
 
+    /// #11650: the header is metadata, so a malformed record in it must not stop the import.
+    #[test]
+    fn a_malformed_header_record_is_skipped() {
+        let t = "ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''), '2;1');1');
+
+FILE_NAME('','',(''),(''),'','sys','');
+
+FILE_SCHEMA (('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+DATA;
+#1=CARTESIAN_POINT('p',(0.,1.,2.));
+ENDSEC;
+END-ISO-10303-21;
+";
+        let ex = parse(t).unwrap();
+        // The records after the broken one are still read.
+        assert_eq!(ex.originating_system, "sys");
+        assert_eq!(ex.schemas, vec!["AUTOMOTIVE_DESIGN"]);
+        assert_eq!(ex.get(1).unwrap().name(), "CARTESIAN_POINT");
+        // A header with nothing after the junk to resume at is still an error.
+        assert!(
+            parse(
+                "ISO-10303-21;
+HEADER;
+FILE_NAME('a');junk').;ENDSEC;DATA;ENDSEC;END-ISO-10303-21;"
+            )
+            .is_err()
+        );
+    }
+
+    /// #11650: skipping bad header records stops at DATA when the header's `ENDSEC;` is
+    /// missing, so the entities are not skipped as header records and the file is an error.
+    #[test]
+    fn a_header_without_endsec_does_not_swallow_the_data_section() {
+        for data in ["DATA;", "DATA('d', ('AUTOMOTIVE_DESIGN'));"] {
+            let t = format!(
+                "ISO-10303-21;\nHEADER;\nBAD;\n{data}\n#1=A();\nENDSEC;\nEND-ISO-10303-21;\n"
+            );
+            let e = parse(&t).unwrap_err().to_string();
+            assert!(e.contains("line 4"), "{e}");
+        }
+    }
+
+    /// #11650: many bad header records in a row are skipped in time that grows with the file,
+    /// and the error after them still names the right line.
+    #[test]
+    fn many_bad_header_records_are_skipped_in_one_pass() {
+        let n = 100_000;
+        let bad = "BAD;\n".repeat(n);
+        let ok = format!(
+            "ISO-10303-21;\nHEADER;\n{bad}ENDSEC;\nDATA;\n#1=A();\nENDSEC;\nEND-ISO-10303-21;\n"
+        );
+        assert_eq!(parse(&ok).unwrap().get(1).unwrap().name(), "A");
+        let broken =
+            format!("ISO-10303-21;\nHEADER;\n{bad}DATA;\n#1=A();\nENDSEC;\nEND-ISO-10303-21;\n");
+        let e = parse(&broken).unwrap_err().to_string();
+        assert!(e.contains(&format!("line {}", n + 3)), "{e}");
+    }
+
+    #[test]
+    fn short_entity_names_read_as_their_long_names() {
+        let ex = parse(&data(
+            "#1=CRTPNT('',(0.,1.,2.));#2=PLYLP('',(#1));#3=SOME_SHRT('');#4=VRTPNT('',#1);#5=FCBND('',#2,.T.);",
+        ))
+        .unwrap();
+        let name = |id: u64| ex.get(id).map(|e| e.name().to_string());
+        assert_eq!(name(1).as_deref(), Some("CARTESIAN_POINT"));
+        assert_eq!(name(2).as_deref(), Some("POLY_LOOP"));
+        assert_eq!(name(4).as_deref(), Some("VERTEX_POINT"));
+        assert_eq!(name(5).as_deref(), Some("FACE_BOUND"));
+        // A name outside the table is kept as written.
+        assert_eq!(name(3).as_deref(), Some("SOME_SHRT"));
+    }
+
     #[test]
     fn hostile_text_is_an_error() {
         for t in [
@@ -968,6 +1243,51 @@ mod tests {
             )
             .unwrap_err(),
             Error::TooManyRecords { limit: 2 }
+        );
+    }
+
+    #[test]
+    fn a_raised_size_limit_reads_a_longer_text_and_raises_the_counts_with_it() {
+        let t = data("#1=A($);");
+        let small = Limits {
+            bytes: t.len() - 1,
+            ..LIMITS
+        };
+        assert_eq!(
+            parse_limited(&t, None, small).unwrap_err(),
+            Error::TooLarge {
+                bytes: t.len(),
+                limit: t.len() - 1
+            }
+        );
+        assert!(
+            parse_limited(
+                &t,
+                None,
+                Limits {
+                    bytes: t.len(),
+                    ..LIMITS
+                }
+            )
+            .is_ok()
+        );
+        // The message names the limit in force, not the default (#13329).
+        let e = Error::TooLarge {
+            bytes: 909 << 20,
+            limit: 2048 << 20,
+        };
+        assert_eq!(e.to_string(), "STEP file too large (909 MB, limit 2048 MB)");
+        // A raised size raises every count by the same factor; a lower one changes nothing.
+        assert_eq!(Limits::for_bytes(0), LIMITS);
+        assert_eq!(Limits::for_bytes(MAX_BYTES), LIMITS);
+        assert_eq!(
+            Limits::for_bytes(4 * MAX_BYTES),
+            Limits {
+                bytes: 4 * MAX_BYTES,
+                entities: 4 * MAX_ENTITIES,
+                records: 4 * MAX_RECORDS,
+                params: 4 * MAX_PARAMS,
+            }
         );
     }
 

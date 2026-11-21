@@ -179,7 +179,9 @@ impl Raw {
             // as given, so the chain stays exactly continuous.
             let mut path = vec![seg.point_at(1.0)];
             for p in [joint, next_start, next.point_at(0.0)] {
-                if path.last().is_some_and(|q: &Vec2| q.dist(p) > 1e-12) {
+                // A gap shorter than sketch coincidence (a few 1e-12 between two curves of a saved
+                // design) is no piece: a line that short has no tangent (#11597).
+                if path.last().is_some_and(|q: &Vec2| q.dist(p) > 1e-9) {
                     path.push(p);
                 }
             }
@@ -219,7 +221,9 @@ fn exact_pieces(seg: Seg2) -> Result<Vec<Seg2>> {
                 })
                 .collect())
         }
-        Seg2::Line { a, b } if a.dist(b) < 1e-12 => Ok(Vec::new()),
+        // A line shorter than sketch coincidence is the gap between two pieces that meet (a few 1e-12
+        // apart in a saved design), not a piece: it has no tangent (#11597).
+        Seg2::Line { a, b } if a.dist(b) < 1e-9 => Ok(Vec::new()),
         other => Ok(vec![other]),
     }
 }
@@ -1033,15 +1037,14 @@ impl Sketch {
 
     fn add_trimmed_offset(&mut self, raw: &Raw, us: &[f64], require_crossing: bool) -> std::result::Result<Vec<usize>, Trim> {
         let pts = us.iter().map(|u| raw.point(*u)).collect::<Result<Vec<_>>>()?;
-        let src = us.iter().map(|u| raw.source(*u)).collect::<Result<Vec<_>>>()?;
         let crossings = crossings(raw, us, &pts)?;
         if crossings.is_empty() && require_crossing {
             return Err(Trim::NothingToTrim);
         }
-        let arcs = kept_arcs(raw, &crossings, us, &src)?;
-        let mut work = MAX_OFFSET_WORK;
-        let fitted = arcs.iter().map(|arc| fit_arc(raw, arc, &crossings, &mut work)).collect::<Result<Vec<_>>>()?;
-        verify_trimmed(&fitted)?;
+        let fitted = match self.kept_curves(raw, us, &crossings) {
+            Ok(fitted) => fitted,
+            Err(error) => return Err(Trim::Failed(error)),
+        };
         let mut candidate = self.clone();
         let mut corners: Vec<Option<usize>> = vec![None; crossings.len()];
         let mut outputs = Vec::new();
@@ -1081,7 +1084,7 @@ impl Sketch {
                             pts.push(candidate.add_point(*p, None)?);
                         }
                         pts.push(end);
-                        CurveKind::Spline { pts, control: false, degree: 3, periodic: false, nurbs: None }
+                        CurveKind::Spline { pts, control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }
                     }
                     Out::Arc { center, sweep, .. } => {
                         let c = candidate.add_point(*center, None)?;
@@ -1102,6 +1105,127 @@ impl Sketch {
         *self = candidate;
         Ok(outputs)
     }
+
+    /// The curves the trimmed offset is made of: the runs of the plain offset that are kept
+    /// between its crossings, each fitted and certified.
+    fn kept_curves(&self, raw: &Raw, us: &[f64], crossings: &[Crossing]) -> Result<Vec<Fitted>> {
+        let src = us.iter().map(|u| raw.source(*u)).collect::<Result<Vec<_>>>()?;
+        let arcs = kept_arcs(raw, crossings, us, &src)?;
+        let mut work = MAX_OFFSET_WORK;
+        let fitted = arcs.iter().map(|arc| fit_arc(raw, arc, crossings, &mut work)).collect::<Result<Vec<_>>>()?;
+        verify_trimmed(&fitted)?;
+        Ok(fitted)
+    }
+
+    /// Rebuild a trimmed chain offset at its distance, keeping the curves it made: their ids
+    /// stay, so a profile that uses them still finds them after the rebuild (#12294).
+    pub(crate) fn rebuild_freeform_chain_offset(&mut self, record: &crate::freeform_offset::FreeformChainOffset) -> Result<()> {
+        let mut order = Vec::with_capacity(record.sources.len());
+        for (id, forward) in &record.sources {
+            let index = self.curve_index(id).ok_or_else(|| bad("an offset source vanished"))?;
+            order.push((index, *forward));
+        }
+        let raw = Raw::chain(self, &order, record.distance)?;
+        let us = samples(&raw);
+        let pts = us.iter().map(|u| raw.point(*u)).collect::<Result<Vec<_>>>()?;
+        let crossings = crossings(&raw, &us, &pts)?;
+        let fitted = self.kept_curves(&raw, &us, &crossings)?;
+        let count: usize = fitted.iter().map(|arc| arc.outs.len()).sum();
+        if count != record.outputs.len() {
+            return Err(bad("the offset's shape changed at this distance; break the offset and make it again"));
+        }
+        // The first curve's own start point is the chain's; every other start point is the
+        // previous curve's end point, which that curve set.
+        let mut first = true;
+        let mut index = 0usize;
+        for arc in &fitted {
+            let outs = arc.outs.len();
+            for (k, out) in arc.outs.iter().enumerate() {
+                let Some(id) = record.outputs.get(index) else {
+                    return Err(bad("an offset output vanished"));
+                };
+                index += 1;
+                let curve = self.curve_index(id).ok_or_else(|| bad("an offset output vanished"))?;
+                // A closed chain's last curve ends where its first one starts: that point is
+                // the first curve's, and the first curve set it.
+                let seam = k + 1 == outs && arc.end == End::Seam;
+                self.move_chain_output(curve, out, first, !seam)?;
+                first = false;
+            }
+        }
+        Ok(())
+    }
+
+    /// Move one curve of a trimmed offset to the geometry it has now: its points keep their
+    /// ids, so the curve keeps its place in the sketch. `set_start` and `set_end` say whether
+    /// this curve owns the point at each of its ends.
+    fn move_chain_output(&mut self, curve: usize, out: &Out, set_start: bool, set_end: bool) -> Result<()> {
+        let kind = self.curves.get(curve).ok_or_else(|| bad("an offset output vanished"))?.kind.clone();
+        match (kind, out) {
+            (CurveKind::Spline { pts, .. }, Out::Spline { nodes, .. }) => {
+                let (Some(first), Some(last)) = (pts.first().copied(), pts.last().copied()) else {
+                    return Err(bad("an offset output has no points"));
+                };
+                if nodes.len() < 2 {
+                    return Err(bad("an offset output has no nodes"));
+                }
+                // The fit's interior nodes: the curve keeps the points it has and takes new
+                // ones where the fit needs more.
+                let interior = nodes.len() - 2;
+                let mut points = Vec::with_capacity(interior + 2);
+                points.push(first);
+                for i in 0..interior {
+                    let index = match pts.get(1 + i) {
+                        Some(index) => *index,
+                        None => self.add_point(nodes[1 + i], None)?,
+                    };
+                    points.push(index);
+                }
+                points.push(last);
+                // The points the fit no longer uses are dropped, unless something else holds them.
+                let dropped: Vec<usize> = pts.iter().copied().filter(|p| !points.contains(p)).collect();
+                let orphans: Vec<usize> = dropped.into_iter().filter(|p| !self.point_used_by_curve(*p)).collect();
+                if !orphans.is_empty() {
+                    self.remove_points(&orphans);
+                }
+                if set_start {
+                    self.hold_point(first, nodes[0]);
+                }
+                for (i, index) in points.iter().enumerate().skip(1).take(interior) {
+                    self.hold_point(*index, nodes[i]);
+                }
+                if set_end {
+                    self.hold_point(last, nodes[nodes.len() - 1]);
+                }
+                if let Some(curve) = self.curves.get_mut(curve) {
+                    curve.kind = CurveKind::Spline { pts: points, control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() };
+                }
+                Ok(())
+            }
+            (CurveKind::Arc { c, a, b }, Out::Arc { center, start: start_at, end: end_at, sweep }) => {
+                // Sketch arcs run counter-clockwise from `a` to `b`: a positive sweep puts the
+                // run's start at `a` and a negative one at `b`.
+                let (from, to) = if *sweep >= 0.0 { (a, b) } else { (b, a) };
+                self.hold_point(c, *center);
+                if set_start {
+                    self.hold_point(from, *start_at);
+                }
+                if set_end {
+                    self.hold_point(to, *end_at);
+                }
+                Ok(())
+            }
+            _ => Err(bad("the offset's shape changed at this distance; break the offset and make it again")),
+        }
+    }
+
+    /// Hold a point of a rebuilt offset where the offset now runs.
+    fn hold_point(&mut self, index: usize, at: Vec2) {
+        if let Some(point) = self.points.get_mut(index) {
+            point.pos = at;
+            point.fixed = true;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1112,7 +1236,7 @@ mod tests {
     fn spline(coords: &[(f64, f64)], periodic: bool) -> (Sketch, usize) {
         let mut sk = Sketch::new();
         let pts = coords.iter().map(|(x, y)| sk.add_point(Vec2::new(*x, *y), None).unwrap()).collect();
-        let source = sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic, nurbs: None }, None).unwrap();
+        let source = sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic, nurbs: None, handles: Vec::new() }, None).unwrap();
         (sk, source)
     }
 
@@ -1212,7 +1336,17 @@ mod tests {
             let mid = [1, 2].map(|i| sk.add_point(Vec2::new(b[i].0, b[i].1), None).unwrap());
             let end = if k + 1 == beziers.len() { first } else { sk.add_point(Vec2::new(b[3].0, b[3].1), None).unwrap() };
             let c = sk
-                .add_curve(CurveKind::Spline { pts: vec![start, mid[0], mid[1], end], control: true, degree: 3, periodic: false, nurbs: None }, None)
+                .add_curve(
+                    CurveKind::Spline {
+                        pts: vec![start, mid[0], mid[1], end],
+                        control: true,
+                        degree: 3,
+                        periodic: false,
+                        nurbs: None,
+                        handles: Vec::new(),
+                    },
+                    None,
+                )
                 .unwrap();
             order.push((c, true));
             start = end;
@@ -1293,5 +1427,34 @@ mod tests {
             }
         }
         let _ = chain.clone().offset_freeform_chain(&[], 1.0);
+    }
+
+    /// A spline and the line that closes it: the chain of the report, offset as one.
+    fn spline_and_line() -> (Sketch, Vec<(usize, bool)>) {
+        let mut sk = Sketch::new();
+        let pts: Vec<usize> =
+            [(-20.0, 0.0), (-10.0, 15.0), (10.0, 15.0), (20.0, 0.0)].iter().map(|p| sk.add_point(Vec2::new(p.0, p.1), None).unwrap()).collect();
+        let spline = sk
+            .add_curve(CurveKind::Spline { pts: pts.clone(), control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None)
+            .unwrap();
+        let line = sk.add_line_pts(pts[3], pts[0], None).unwrap();
+        (sk, vec![(spline, true), (line, true)])
+    }
+
+    /// A trimmed chain offset is rebuilt from its sources when its distance changes, and the
+    /// curves it made keep their ids (#12294).
+    #[test]
+    fn a_trimmed_chain_offset_is_rebuilt_at_its_distance() {
+        let (mut sk, order) = spline_and_line();
+        let source: Vec<Seg2> = order.iter().flat_map(|(c, _)| sk.exact_pieces(*c)).collect();
+        let curves = sk.offset_freeform_chain(&order, 1.0).unwrap();
+        sk.record_freeform_chain_offset(&order, &curves, 1.0).unwrap();
+        let ids: Vec<String> = curves.iter().map(|c| sk.curves[*c].id.clone()).collect();
+        check_offset(&sk, &source, &curves, 1.0, true);
+        // The distance changes: the offset is rebuilt at the new distance, in place.
+        sk.freeform_chain_offsets[0].distance = 2.0;
+        sk.refresh_freeform_chain_offsets().unwrap();
+        assert!(ids.iter().all(|id| sk.curve_index(id).is_some()), "the offset keeps its curves");
+        check_offset(&sk, &source, &curves, 2.0, true);
     }
 }

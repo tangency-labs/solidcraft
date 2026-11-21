@@ -211,7 +211,7 @@ pub enum FaceCertificate {
     },
     /// A flat face known by its exact history name (the target's `name`, without piece
     /// numbers): what the kernel's face history says it came from, followed through every
-    /// feature since (a cut wall `F5:side:l1`, a chamfer `F7:blend:…`, a pattern copy
+    /// feature since (a cut wall `F5:side:l1`, a chamfer `F7:blend(…)`, a pattern copy
     /// `F4:top@F6.2`, a face a join merged from two features). Used where no construction
     /// certificate above names the face uniquely. Its plane is the face's exact current plane in
     /// the frame [`lineage_frame`] gives it. See docs/face-attachments.md.
@@ -807,11 +807,14 @@ fn same_oriented_plane(a: &solidcore_record::Plane, b: &solidcore_record::Plane,
 
 impl Document {
     /// The exact plane an anchor on face `index` of `body` is measured in: the construction
-    /// certificate's plane, or for a [`FaceCertificate::Lineage`] face its current exact plane in
-    /// the [`lineage_frame`].
+    /// certificate's plane, or for a [`FaceCertificate::Lineage`] face the frame what built the
+    /// body gives it (a sheet's panel's: the flat pattern's, see [`ModelBody::sketch_frame`]),
+    /// else its current exact plane in the [`lineage_frame`].
     pub fn anchor_face_plane(&self, body: &ModelBody, index: usize, certificate: Option<&FaceCertificate>) -> Option<solidcore_record::Plane> {
         match certificate {
-            Some(FaceCertificate::Lineage) => body.body.planar_face(index).and_then(|plane| lineage_frame(body, &plane)),
+            Some(FaceCertificate::Lineage) => {
+                body.sketch_frame(index).or_else(|| body.body.planar_face(index).and_then(|plane| lineage_frame(body, &plane)))
+            }
             _ => body.body.face_plane(index),
         }
     }
@@ -988,6 +991,7 @@ mod tests {
             sketch,
             report,
             profiles: Vec::new(),
+            profiles_3d: Vec::new(),
             ends: Default::default(),
         }
     }

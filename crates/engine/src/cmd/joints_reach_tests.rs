@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 
-use super::tests::{four_bar, meet, occ, part, pin, place, run};
+use super::tests::{cube_ring, four_bar, meet, occ, part, pin, place, run};
 use crate::Session;
 
 /// A planar arm about +Z on a grounded base: Shoulder at the origin, Upper 60 long, Elbow, Fore
@@ -144,6 +144,33 @@ fn a_limited_elbow_stops_the_reach_and_says_so() {
     let span = (60f64.powi(2) + 40f64.powi(2) + 2.0 * 60.0 * 40.0 * 30f64.to_radians().cos()).sqrt();
     assert!(r["error_mm"].as_f64().is_some_and(|e| (e - (100.0 - span)).abs() < 1e-4), "{r}");
     assert!((value(&mut s, "Elbow") - 30.0).abs() < 1e-12, "{r}");
+}
+
+/// #19760: the folding cube toy (`cube_ring`) with one pin of hinge 8 taken out, a plate dragged
+/// past where its pins' limits let it go. Each step pushed the pins at their limits and was cut
+/// back to them, so the reach crept along a limit in steps that each gained a little, until its
+/// work ran out: about half a second for every frame of a drag. Solved with those pins held at
+/// their limits, it settles in a few steps where the limits leave it closest, and reaching again
+/// for the same point gets no closer.
+#[test]
+fn a_reach_held_at_a_limit_settles_quickly() {
+    let mut s = cube_ring(&[30, 31]);
+    let plate = occ(&s, "H4");
+    let at = Vec3::new(-36.672, -2.706, 14.855);
+    for k in [1.0, 2.0] {
+        let to = Vec3::new(at.x, at.y + 2.0 * k, at.z + 1.5 * k);
+        let ask = solidcraft_doc::joints::Reach { occurrence: plate, point: at, to, axis: None, joints: None };
+        let st = s.model.state();
+        let first = solidcraft_doc::joints::reach(&s.doc, &st, &ask).unwrap_or_default();
+        // A tenth of the 200 000 placements one solve may spend; the crawl spent all of them.
+        assert!(first.work < 20_000, "frame {k}: {} placements", first.work);
+        let r = run(&mut s, "joint.reach", json!({"occurrence": "H4", "at": pt(at), "point": pt(to)}));
+        let miss = r["error_mm"].as_f64().unwrap_or(f64::NAN);
+        assert_eq!(r["reached"], false, "frame {k}: {r}");
+        let again = run(&mut s, "joint.reach", json!({"occurrence": "H4", "at": pt(at), "point": pt(to)}));
+        let closer = miss - again["error_mm"].as_f64().unwrap_or(f64::NAN);
+        assert!(closer < 1e-6, "frame {k}: a second reach got {closer} mm closer: {r} then {again}");
+    }
 }
 
 /// A linked elbow (elbow = −shoulder, so the forearm keeps pointing along +X) follows the
@@ -424,4 +451,63 @@ fn quarter_turn_reaches_keep_the_four_bar_closed_and_diagnostics_current() {
             assert_eq!(full.dof.get(&occ(&s, part)), Some(&1));
         }
     }
+}
+
+/// A grounded block A and a block B on a slider toward it, 10 mm clear, in one contact set:
+/// `contact` turns contact sets on or off. The slider stops 10 mm past the touch.
+fn blocks_on_a_rail(contact: bool) -> Session {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "component.activate", json!({"component": 0}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    let a = occ(&s, "A");
+    run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "name": "Rail"}));
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 10}));
+    run(&mut s, "joint.limits", json!({"joint": "Rail", "index": 0, "min": -10, "max": 100}));
+    run(&mut s, "contact.create", json!({"occurrences": ["A", "B"]}));
+    run(&mut s, "contact.enable_sets", json!({"enabled": contact}));
+    s
+}
+
+/// A drag (joint.reach) stops where a contact set says two parts touch, as joint.drive does, and
+/// says so, not the limit further on; with contact sets off it goes on to that limit (#14682).
+#[test]
+fn a_reach_stops_where_a_contact_set_touches() {
+    // B's near face, in its own coordinates; the drag pulls its centre 25 mm toward A, 15 mm past
+    // where B touches A.
+    let near_face = Vec3::new(20.0, 5.0, 5.0);
+    let pull = |s: &mut Session| {
+        let from = place(s, "B", Vec3::new(25.0, 5.0, 5.0));
+        let to = from - Vec3::new(25.0, 0.0, 0.0);
+        reach(s, "B", Vec3::new(25.0, 5.0, 5.0), json!({"point": pt(to)}))
+    };
+    let mut s = blocks_on_a_rail(true);
+    let start = place(&s, "B", near_face).x;
+    assert!((start - 20.0).abs() < 1e-6, "B starts 10 mm clear of A: {start}");
+    let r = pull(&mut s);
+    assert!(r["stopped_by_contact"].is_object(), "{r}");
+    assert!(r["stopped_by_limit"].is_null(), "the contact stopped it, not the limit: {r}");
+    assert_eq!(r["reached"], false, "{r}");
+    let x = place(&s, "B", near_face).x;
+    assert!((10.0 - 1e-6..10.0 + 1e-3).contains(&x), "B stops touching A, not through it: its face at x = {x}");
+    let collisions = run(&mut s, "contact.check", json!({}));
+    assert!(collisions["collisions"].as_array().is_some_and(Vec::is_empty), "{collisions}");
+    // Contact sets off: the same drag goes through A, to the slider's limit.
+    let mut s = blocks_on_a_rail(false);
+    let r = pull(&mut s);
+    assert!(r["stopped_by_contact"].is_null(), "{r}");
+    assert!(r["stopped_by_limit"].is_array(), "{r}");
+    let x = place(&s, "B", near_face).x;
+    assert!(x.abs() < 1e-6, "B's face at x = {x}, not at the limit, 0");
+}
+
+#[test]
+fn body_centre_uses_exact_body_bounds() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30}));
+    let c = super::body_centre(&s, 0);
+    assert!((c.x - 5.0).abs() < 1e-6 && (c.y - 10.0).abs() < 1e-6 && (c.z - 15.0).abs() < 1e-6, "got {c:?}");
 }

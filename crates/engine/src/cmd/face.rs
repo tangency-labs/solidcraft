@@ -391,7 +391,7 @@ pub(super) fn face_groups(s: &Session, points: &[Vec3], cmd: &str, face_body: Op
 
 /// Coplanar faces share one linked profile sketch and one Extrude feature. Resolve every
 /// pick before editing the document, so later picks never search an already modified body.
-pub(super) fn sketch_of_faces(s: &mut Session, points: &[Vec3], cmd: &str, face_body: Option<&str>) -> Result<(u64, Vec<Vec2>, String)> {
+pub(super) fn sketch_of_faces(s: &mut Session, points: &[Vec3], cmd: &str, face_body: Option<&str>, fixed: bool) -> Result<(u64, Vec<Vec2>, String)> {
     let first = points.first().copied().ok_or_else(|| bad(cmd, "faces must not be empty"))?;
     if points.len() > 1024 {
         return Err(bad(cmd, "faces exceed the 1024-face limit"));
@@ -433,7 +433,7 @@ pub(super) fn sketch_of_faces(s: &mut Session, points: &[Vec3], cmd: &str, face_
             .ok_or_else(|| bad(cmd, "degenerate face"))?;
         picked.push((index as usize, inside));
     }
-    let (id, first_inside, _) = sketch_of_face(s, first, cmd, face_body)?;
+    let (id, first_inside, _) = sketch_of_face(s, first, cmd, face_body, fixed)?;
     let (body, _) = common.ok_or_else(|| bad(cmd, "no faces selected"))?;
     let doc = s.placed_document();
     let source = state.body(&body).ok_or_else(|| bad(cmd, "source body disappeared"))?;
@@ -463,10 +463,28 @@ pub(super) fn sketch_of_faces(s: &mut Session, points: &[Vec3], cmd: &str, face_
     Ok((id, selected, body))
 }
 
+/// Most edges a face used as a profile may have. Each one goes into the sketch, and with
+/// thousands the result body's check alone takes minutes (#18061, #11574).
+const MAX_PROFILE_EDGES: usize = 5000;
+
+/// Whether a face with `edges` edges (seams left out) can be a profile. A face with too many is
+/// refused with its count and the limit, so the user knows what is wrong (#18061).
+fn profile_edge_count(cmd: &str, edges: usize) -> Result<()> {
+    if edges == 0 {
+        return Err(bad(cmd, "the face has no usable boundary"));
+    }
+    if edges > MAX_PROFILE_EDGES {
+        return Err(bad(cmd, format!("the face has {edges} edges; a face used as a profile can have at most {MAX_PROFILE_EDGES}")));
+    }
+    Ok(())
+}
+
 /// Start a sketch on the planar face at `point` holding a copy of the face boundary. Returns
 /// the sketch id, a point inside the face (sketch coordinates), and the picked body's name.
-/// The sketch is left active.
-pub(super) fn sketch_of_face(s: &mut Session, point: Vec3, cmd: &str, face_body: Option<&str>) -> Result<(u64, Vec2, String)> {
+/// The sketch is left active. `fixed` puts it on the face's plane as a fixed plane, which
+/// doesn't follow later changes to the face: for a face whose history can't keep an
+/// attachment (a converted mesh's, #6612), as the refusal of the attached sketch says.
+pub(super) fn sketch_of_face(s: &mut Session, point: Vec3, cmd: &str, face_body: Option<&str>, fixed: bool) -> Result<(u64, Vec2, String)> {
     let none = || match face_body {
         Some(b) => bad(cmd, format!("no face of `{b}` at `face`")),
         None => bad(cmd, "no body face at `face`"),
@@ -491,9 +509,7 @@ pub(super) fn sketch_of_face(s: &mut Session, point: Vec3, cmd: &str, face_body:
         .unwrap_or(point);
     let edges: Vec<Vec<Vec3>> =
         m.face_edges(f).into_iter().filter(|e| !m.seams.get(*e).copied().unwrap_or(false)).filter_map(|e| m.edges.get(e).cloned()).collect();
-    if edges.is_empty() || edges.len() > 5000 {
-        return Err(bad(cmd, "the face has no usable boundary"));
-    }
+    profile_edge_count(cmd, edges.len())?;
     let run = |s: &mut Session, id: &str, p: Value| -> Result<Value> {
         let spec = crate::find_command(id).ok_or_else(|| bad(cmd, id))?;
         (spec.run)(s, &p)
@@ -526,7 +542,7 @@ pub(super) fn sketch_of_face(s: &mut Session, point: Vec3, cmd: &str, face_body:
     drop(doc);
     let r = super::sketch::create_face_profile(
         s,
-        &json!({"plane": {"face": [world_inside.x, world_inside.y, world_inside.z], "body": world_body, "index": f, "path":path}, "project_edges": true}),
+        &json!({"plane": {"face": [world_inside.x, world_inside.y, world_inside.z], "body": world_body, "index": f, "path":path, "fixed": fixed}, "project_edges": true}),
         &body,
         f as usize,
     )?;

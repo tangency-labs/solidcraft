@@ -1,12 +1,12 @@
 //! #1570 (mirror case `mat0076`): a body flattened by a near-singular matrix transform
 //! leaves a bilinear face about 1e-10 wide along `v`. There the evaluator's zero-tangent
 //! correction fails, and upstream's `SmSurfaceEval::EvalNormal` ignores `Eval`'s status: it
-//! makes the normal from the matrix the failed evaluation wrote. The port returned the
-//! error and gave the local solve's first `Converged` test a stale normal. That test then
-//! failed, the solve stepped away from its (already converged) guess, and
-//! `GlobalPointSolve` landed on another `v` of the flat direction (-4.4668e-5 against the
-//! C++ -2.6622e-5). The brute-force UV trim drop of the mirrored body's edges uses these
-//! solves.
+//! makes the normal from the matrix the failed evaluation wrote. The fork passes that
+//! status on (tangency-labs/smlib 21dcf69), and so does the port: the local solve's first
+//! `Converged` test then fails, the solve steps away from its (already converged) guess,
+//! and `GlobalPointSolve` lands on another `v` of the flat direction (-4.4668e-5 against
+//! the C++ -2.6622e-5), the same point to rounding. The brute-force UV trim drop of the
+//! mirrored body's edges uses these solves.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -69,31 +69,49 @@ fn closest(k: &Kernel, s: &Surface, p: Vec3) -> (f64, f64) {
     (sol.start.param(0).unwrap(), sol.start.param(1).unwrap())
 }
 
+/// The pinned C++'s solution (upstream's `EvalNormal` ignores `Eval`'s status).
+const CPP_UV: (f64, f64) = (-6.217248937900877e-15, -2.6622142923926617e-05);
+
+/// The fork passes `Eval`'s status on (`SER( Eval() )` in `SmSurfaceEval::EvalNormal`,
+/// tangency-labs/smlib 21dcf69), so the first `Converged` test has no normal and the
+/// solve steps along the flat direction to another `v`. The patch is bilinear and its
+/// control points differ along `v` by under 1.3e-9 (each row's two points: at most
+/// 7.2e-10, 9.8e-10 and 2.2e-10 per coordinate) over 12.24 parameter units, so its `v`
+/// derivative is below 1.1e-10 everywhere and two solutions `|dv| < 5e-5` apart are the
+/// same point to 5.5e-15. The solution is checked as that: the same point and the same
+/// distance as C++'s, to 1e-14.
 #[test]
-fn global_point_solve_keeps_the_converged_guess_on_a_near_flat_patch() {
+fn global_point_solve_lands_on_the_flat_direction_of_a_near_flat_patch() {
     let k = Kernel::default();
     let s = flat_patch();
     // the brute-force drop's first sample point of the mirrored edge (C++ values)
     let p0 = Vec3::new(4.88235812709649, -0.19264343447977827, 14.765413029181282);
-    assert_eq!(
-        closest(&k, &s, p0),
-        (-6.217248937900877e-15, -2.6622142923926617e-05)
+    let (u, v) = closest(&k, &s, p0);
+    assert!(
+        u.abs() < 1e-13 && (v - CPP_UV.1).abs() < 5e-5,
+        "{u:e} {v:e}"
+    );
+    let at = |u: f64, v: f64| s.evaluate_point(&k, Point2::new(u, v)).unwrap();
+    let (ours, cpp) = (at(u, v), at(CPP_UV.0, CPP_UV.1));
+    assert!((ours - cpp).length() <= 1e-14, "{ours:?} {cpp:?}");
+    assert!(
+        ((ours - p0).length() - (cpp - p0).length()).abs() <= 1e-14,
+        "{ours:?} {cpp:?}"
     );
 }
 
 #[test]
-fn normal_after_a_failed_evaluation_uses_the_written_derivatives() {
+fn normal_after_a_failed_evaluation_is_the_evaluation_error() {
     let k = Kernel::default();
     let s = flat_patch();
-    let mut e = SurfaceEval::with_uv(
-        &k,
-        Some(&s),
-        -6.217248937900877e-15,
-        -2.6622142923926617e-05,
-    );
+    let mut e = SurfaceEval::with_uv(&k, Some(&s), CPP_UV.0, CPP_UV.1);
     // the zero-tangent correction fails at this point, upstream and in the port
     assert!(e.eval().is_err());
-    // ... but the normal is still made from the matrix (a unit vector, not an error)
-    let n = e.normal(&k).expect("EvalNormal ignores Eval's status");
-    assert!((n.length() - 1.0).abs() < 1e-12, "{n:?}");
+    // ... and the normal is that failure, as the fork's `SER( Eval() )` returns it
+    let err = e.normal(&k).unwrap_err();
+    assert_eq!(
+        err.operation(),
+        "surface::surface::p2::SurfaceEval::eval",
+        "{err:?}"
+    );
 }

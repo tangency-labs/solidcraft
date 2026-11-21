@@ -8,7 +8,6 @@ use syn::{Expr, Item, Lit};
 /// These `.size()` calls size spinner geometry, not text. No text sizes are exempt.
 const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("dialogs.rs", 2, "preview spinners: graphic diameter, not typography"),
-    ("viewport.rs", 1, "viewport status spinner: graphic diameter, not typography"),
     ("ui_kit/settings_search.rs", 2, "hidden off-screen areas that measure search matches: never drawn"),
 ];
 
@@ -161,7 +160,7 @@ fn font_sizes_and_dense_form_metrics_come_from_tokens() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut failures = Vec::new();
     scan(&root.join("src"), "", &mut failures);
-    scan(&root.join("../../assets/icons/ui/source"), "icons/", &mut failures);
+    scan(&root.join("../look/src"), "look/", &mut failures);
     // The UI kit and its components, under the names they had here.
     for (path, name) in crate::test_support::kit_files() {
         check(&path, &name, &mut failures);

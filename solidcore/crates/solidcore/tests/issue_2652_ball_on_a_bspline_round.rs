@@ -30,13 +30,15 @@
     clippy::indexing_slicing
 )] // test helpers
 
+#[path = "support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use solidcore::blend::fillet_executive::api::{create_face_from_surface, fillet_edges};
 use solidcore::blend::fillet_executive::{FitKind, NoRoomReason};
 use solidcore::curve::curve::Curve;
 use solidcore::error::EntityRef;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::tol;
-use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point2, Point3};
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
@@ -55,17 +57,10 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, vertex, EdgeId, FaceId};
 use solidcore::{Brep, Kernel, SolidError};
 
-/// SolidCraft's fix list (`tests/kernel_cases/fixes.json`).
+/// SolidCraft's fix list (`support/solidcraft_fixes.rs`).
 fn kernel() -> Kernel {
-    let names: Vec<String> = serde_json::from_str(include_str!("kernel_cases/fixes.json")).unwrap();
-    let mut f = UpstreamFixes::default();
-    for name in &names {
-        if let Some(flag) = f.flag_mut(name) {
-            *flag = true;
-        }
-    }
     Kernel {
-        fixes: f,
+        fixes: solidcraft_fixes::solidcraft_fixes(),
         ..Kernel::default()
     }
 }
@@ -312,7 +307,13 @@ fn the_round_over_a_bspline_round_of_its_radius_is_the_ball_s_piece() {
 }
 
 /// A ball smaller than the B-spline round (R1.5 against 2): it matches the face nowhere, so
-/// nothing collapses and the round is the one the exact cylinder's box gets.
+/// nothing collapses and the round is the one the exact cylinder's box gets. There that
+/// round is the exact torus (R 0.5 about the wall's axis, r 1.5); here the wall's top spans
+/// are the same quarter cylinder, and the round is its definition with a certified net: at
+/// every point the net is within its bound of the torus, and the volumes removed differ by
+/// at most the round's area times that bound, plus the integration's 1e-9. (Since #14405
+/// the net has 24 knots, not 57, and its bound is 1.05e-6, not 3.86e-6: the volumes moved
+/// from 1.6e-8 apart to 3.2e-7, the net from the torus to 1.03e-6.)
 #[test]
 fn a_ball_narrower_than_the_bspline_round_rolls_as_on_the_cylinder() {
     let mut k = kernel();
@@ -325,9 +326,39 @@ fn a_ball_narrower_than_the_bspline_round_rolls_as_on_the_cylinder() {
     let mut kr = kernel();
     let r = reference(&mut kr);
     let (want, _) = round_top_at(&mut kr, r, 1.5).unwrap();
+    let torus = |p: Point3| {
+        let rho = ((p.x - 8.0).powi(2) + (p.y - 8.0).powi(2)).sqrt();
+        (((rho - 0.5).powi(2) + (p.z + 1.5).powi(2)).sqrt() - 1.5).abs()
+    };
+    let mut slack = 0.0_f64;
+    let ids: Vec<FaceId> = b.faces().ids().collect();
+    for f in ids {
+        let s = b.face(f).unwrap().surface.as_ref().unwrap().clone();
+        let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+            continue;
+        };
+        let d = pb.net().natural_uv_domain();
+        for i in 0..=200 {
+            for j in 0..=20 {
+                let uv = Point2::new(
+                    d.min().x + (d.max().x - d.min().x) * f64::from(i) / 200.0,
+                    d.min().y + (d.max().y - d.min().y) * f64::from(j) / 20.0,
+                );
+                let off = torus(pb.net().evaluate_point(uv).unwrap());
+                assert!(
+                    off <= pb.bound(),
+                    "{off:e} off the torus, bound {:e}",
+                    pb.bound()
+                );
+            }
+        }
+        let area = solidcore::mass::integrator::properties::face_area(&k, &mut b, f, 1e-9);
+        slack += area.unwrap() * pb.bound();
+    }
+    assert!(slack > 0.0, "no round by its definition");
     assert!(
-        (removed - want).abs() <= 1e-9 * want,
-        "removed {removed}, the cylinder's {want}"
+        (removed - want).abs() <= slack + 1e-9 * want,
+        "removed {removed}, the cylinder's {want}, the nets' slack {slack:e}"
     );
 }
 
@@ -658,6 +689,39 @@ fn a_twisted_side_round_is_its_walls_round_between_sections() {
         assert!(judged > 1000, "{f:?} judged {judged}");
         assert!(worst <= 1e-6, "{f:?} worst {worst:e}");
     }
+}
+
+/// The twisted disc's top round at 1.10 (narrower than the side rounds it meets, which are
+/// only fitted): every edge of the result carries a stored tolerance at least its measured
+/// gap to its faces, and every vertex one whose half bounds its gap, so the level-2 check
+/// reports no edge-use gaps. Only the vertex/face gaps over the intersection tolerance that
+/// the side rounds' fit leaves remain (tangency-labs/solidcraft#13772).
+#[test]
+fn the_twisted_disc_s_top_round_keeps_tolerances_at_least_its_measured_gaps() {
+    let mut k = kernel();
+    let mut b = side_rounded_disc(&mut k, 2);
+    let top = top_edges(&b);
+    fillet_edges(&mut k, &mut b, &top, 1.10, 1, 1, 1.0).unwrap();
+    b.refresh_cached_topology();
+    for e in solidcore::topology::brep::p1::edges(&b, None).unwrap() {
+        let tol = edge::tolerance(&b, e).unwrap();
+        for eu in b.edge(e).unwrap().edgeuses.clone() {
+            if let Some(g) =
+                solidcore::topology::edgeuse::p1::max_edge_face_gap(&k, &mut b, eu, true).unwrap()
+            {
+                assert!(
+                    g.gap_3d <= tol,
+                    "edge {e:?}: tolerance {tol:e} under its gap {:e}",
+                    g.gap_3d
+                );
+            }
+        }
+    }
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    let edge_use: Vec<_> = lines.iter().filter(|l| l.contains("SmEdgeuse")).collect();
+    assert!(edge_use.is_empty(), "edge-use gaps: {edge_use:#?}");
 }
 
 // ---- helpers (as `issue_2648_twisted_disc_top_round.rs`'s) -----------------------------

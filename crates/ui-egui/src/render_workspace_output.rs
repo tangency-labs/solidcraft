@@ -1617,6 +1617,7 @@ fn gpu_status(app: &mut SolveApp, ui: &mut egui::Ui) {
         super::PathHost::Failed(error) => {
             ui_kit::text(ui, &format!("{}: {error}", app.tr("render.gpu_path_failed")), ui_kit::Text::Error("render.gpu_path_failed"));
             super::retry_crashed_setup(app, ui);
+            super::backend_recovery(app, ui);
         }
         super::PathHost::NotStarted if app.render_workspace.view.method == ImageMethod::GpuRaytrace => {
             ui_kit::text(ui, app.tr("render.gpu_path_not_started"), ui_kit::Text::Note("render.gpu_path_not_started"));

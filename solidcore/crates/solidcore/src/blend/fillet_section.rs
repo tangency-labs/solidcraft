@@ -51,6 +51,7 @@
 //! | [`section::GnSectionFsg::contact_order_at`] | `ContactOrderAt` |
 //! | [`section::ArcSection`], [`section::GnSectionFsg::circle`], [`section::GnSectionFsg::build_with_radius`] | `SmArcSection`, `SmGnSectionFSG(const SmArcSection &)` (3aae1c4), `Build`'s `dRadius` and its order 1 (cc08236) |
 //! | [`certificate::arc_rows`], [`certificate::arc_row_terms_over`] | `sm_ArcRows`, `sm_ArcRowTermsOver` (cc08236) |
+//! | [`taylor_model::Tm`], [`certificate::ArcTerms`], [`certificate::arc_terms_over`], [`certificate::centred_tm`] | — (not the fork's: the arc's row terms from Taylor models over a piece, #14405) |
 //! | [`definition::T2Of`], [`definition::TvOf`], [`definition::T2Scalar`] | `sm_T2Of`, `sm_TVT`, `sm_PositiveFinite`, `sm_PowOf` (c5b6bb7: `sm_T2` and `sm_TV` over `double` or `sm_Ivl`) |
 //! | [`certificate::SpanAt`], [`certificate::gn_enclose_over`], [`certificate::face_partials_over`] | `sm_GnSpanAt`, `sm_GnEncloseOver`, `sm_FacePartialsOver` (c5b6bb7) |
 //! | [`definition_box`] | `sm_GnDefPiece`, `sm_GnDefFace`, `sm_GnDefs`, `sm_DefinitionEnclosable`, `sm_GnDefFaceOf`, `sm_DefPieceAt`, `sm_BernTaylorOver`, `sm_DefinitionPartialsNaive`, `sm_DefinitionPartialsOverBox` (c5b6bb7) |
@@ -111,6 +112,7 @@ pub mod certificate;
 pub mod continuation;
 pub mod definition;
 pub mod definition_box;
+pub mod feet_tm;
 pub mod form;
 pub mod interval;
 pub mod offset_box;
@@ -121,3 +123,4 @@ pub mod smooth_interior;
 pub mod smooth_interior_plan;
 pub mod station;
 pub mod tay;
+pub mod taylor_model;

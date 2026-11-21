@@ -83,6 +83,15 @@ pub trait RailClassificationContext {
         face: crate::topology::FaceId,
         class: &mut CurveClassification<FilletClassObject>,
     ) -> Result<()>;
+    /// The planar cliff closing this rim at the blend's joined endpoint.
+    fn continued_cliff(
+        &self,
+        _vertex: crate::topology::VertexId,
+        _rim: EdgeId,
+    ) -> Option<crate::topology::FaceId> {
+        None
+    }
+
     /// Actual corner kind.
     ///
     /// # Errors
@@ -186,7 +195,7 @@ impl<C: RailClassificationContext> SplitCorners for ContextCorners<'_, C> {
         &mut self,
         _id: FilletCornerId,
     ) -> Result<&mut crate::blend::fillet_corner::p3::FilletCorner> {
-        Err(SolidError::null_pointer(OP))
+        Err(SolidError::blend_missing(OP, "a corner to change"))
     }
     fn corner_type(&self, id: FilletCornerId) -> Result<FilletCornerType> {
         self.0.corner_type(id)
@@ -341,9 +350,7 @@ impl FilletSolver {
                 fillets.with_rail_classification(rail, |pseudo, cc| {
                     context.classify(k, target, pseudo, face, cc)
                 })?;
-                if k.fixes.fillet_rail_rim_on_face {
-                    join_intervals_on_face(fillets, rail)?;
-                }
+                join_intervals_on_face(fillets, rail)?;
                 finish_classification(
                     solver,
                     k,
@@ -439,7 +446,7 @@ fn join_intervals_on_face(fillets: &mut FilletBrep, rail: EdgeId) -> Result<()> 
         .fillet_edge_mut(rail)?
         .curve_class
         .as_mut()
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve classification"))?;
     for index in (1..cc.size()).rev() {
         let this = cc.at(index)?.mid;
         let prev = cc.at(index - 1)?.mid;
@@ -470,7 +477,7 @@ trait ClassificationOps {
             .fillet_edge_mut(rail)?
             .curve_class
             .as_mut()
-            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve classification"))?
             .connect_intervals(
                 interval,
                 if at_end {
@@ -496,7 +503,7 @@ trait ClassificationOps {
             .fillet_edge_mut(rail)?
             .curve_class
             .take()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve classification"))?;
         let result = super::p3::refine_rail_curve_classification_scoped_with_ops(
             solver,
             k,
@@ -543,7 +550,7 @@ fn squeeze_rail(
     let count = fillets
         .fillet_edge(rail)?
         .curve_class()
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve classification"))?
         .size();
     let mut small = Vec::new();
     if count > 1 {
@@ -551,10 +558,10 @@ fn squeeze_rail(
             let interval = fillets
                 .fillet_edge(rail)?
                 .curve_class()
-                .ok_or_else(|| SolidError::null_pointer(OP))?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve classification"))?
                 .sub_interval(index)?;
-            let curve =
-                edge::curve(fillets.brep(), rail)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let curve = edge::curve(fillets.brep(), rail)?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve"))?;
             let start = curve.evaluate_point(k, interval.min())?;
             let end = curve.evaluate_point(k, interval.max())?;
             if start.distance(end) > 50.0 * tolerance {
@@ -718,6 +725,49 @@ mod tests {
                 "blend::fillet_solver::p3",
                 "solver without edge use",
             ))
+        );
+    }
+
+    /// A rail crossing a side edge that joins both ends of the filleted edge (a loop of two
+    /// edges) is judged at the end nearer the crossing only. The filleted edge runs along x
+    /// from 0 to 10; a rail beside it at y = 1 that leaves its face at x = 4 and comes back
+    /// at x = 6, heading +x, is past neither end, so its run off the face is judged.
+    #[test]
+    fn a_side_edge_crossing_on_a_loop_of_two_edges_is_judged_at_its_nearer_end() {
+        let jets = [(Vec3::ZERO, Vec3::X), (Vec3::new(10.0, 0.0, 0.0), Vec3::X)];
+        let both = [0, 1];
+        let at = |x: f64| Vec3::new(x, 1.0, 0.0);
+        // mid-edge: leaving near the start heading in, coming back near the end heading out
+        assert_eq!(
+            rails_fit::crossing_end(&both, jets, at(4.0), Vec3::X, true),
+            None
+        );
+        assert_eq!(
+            rails_fit::crossing_end(&both, jets, at(6.0), Vec3::X, false),
+            None
+        );
+        // near an end, heading past it: leaving out past the end, coming back in past the start
+        assert_eq!(
+            rails_fit::crossing_end(&both, jets, at(9.5), Vec3::X, true),
+            Some(1)
+        );
+        assert_eq!(
+            rails_fit::crossing_end(&both, jets, at(0.5), Vec3::X, false),
+            Some(0)
+        );
+        // a side edge at one end only: that end, by the heading alone (an end face sloping
+        // back over the face is crossed before the end's cross section)
+        assert_eq!(
+            rails_fit::crossing_end(&[1], jets, at(4.0), Vec3::X, true),
+            Some(1)
+        );
+        assert_eq!(
+            rails_fit::crossing_end(&[1], jets, at(4.0), -Vec3::X, true),
+            None
+        );
+        assert_eq!(
+            rails_fit::crossing_end(&[], jets, at(9.5), Vec3::X, true),
+            None
         );
     }
 }

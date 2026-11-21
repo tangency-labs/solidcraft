@@ -73,9 +73,6 @@ pub struct SweepGeometryCreation {
     pub make_analytics: bool,
     /// `m_dEps`: the tolerance of the base class.
     pub eps: f64,
-    /// `Kernel::fixes.sweep_statuses_pass_on` captured when the sweep is set up: the
-    /// creators' `SetCanonical` statuses are passed on (fork c8f6a31, WR-662).
-    pub statuses_pass_on: bool,
 }
 
 impl Default for SweepGeometryCreation {
@@ -92,7 +89,6 @@ impl SweepGeometryCreation {
         Self {
             make_analytics: true,
             eps,
-            statuses_pass_on: false,
         }
     }
 
@@ -275,7 +271,10 @@ impl TopologySweep {
         let from1 = self.get_from_same(first);
         let from2 = self.get_from_same(second);
         if to1.is_some() && to2.is_some() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::sweep_failed(
+                OP,
+                "both entities to merge already have a swept image",
+            ));
         }
         if to2.is_some() && to1.is_none() {
             if to2 == first {
@@ -297,7 +296,10 @@ impl TopologySweep {
             return Ok(());
         }
         if from1.is_some() && from2.is_some() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::sweep_failed(
+                OP,
+                "both entities to merge are already the image of a swept entity",
+            ));
         }
         if from1.is_none() && from2.is_some() {
             *keep_first = false;
@@ -311,7 +313,10 @@ impl TopologySweep {
         let lower1 = self.get_from_lower(first);
         let lower2 = self.get_from_lower(second);
         if lower1.is_some() && lower2.is_some() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::sweep_failed(
+                OP,
+                "both entities to merge already come from a lower-dimension sweep",
+            ));
         }
         if lower1.is_some() {
             *keep_first = true;
@@ -321,7 +326,10 @@ impl TopologySweep {
             let higher1 = self.get_to_higher(first);
             let higher2 = self.get_to_higher(second);
             if higher1.is_some() && higher2.is_some() {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::sweep_failed(
+                    OP,
+                    "both entities to merge already have a higher-dimension swept image",
+                ));
             }
             if higher1.is_some() {
                 *keep_first = true;

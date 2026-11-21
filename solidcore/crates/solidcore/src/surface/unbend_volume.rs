@@ -133,7 +133,7 @@ use crate::nurbs::knots::Side;
 use crate::surface::plane::p1::Plane;
 use crate::surface::surface::p2::Surface;
 use crate::surface::volume::p1::{
-    concat_evals_opt_in, is_kind_of as volume_is_kind_of, EvalOptions, Volume, VolumeKind,
+    concat_evals, is_kind_of as volume_is_kind_of, EvalOptions, Volume, VolumeKind,
 };
 use crate::surface::volume::p2::ignore_read;
 use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType};
@@ -451,12 +451,7 @@ impl UnbendVolume {
                 };
                 let next_derivs = next.map(position, n, &map_opts)?;
                 // Concatenate Evaluate(ParamPoint) = Next(Mid(ParamPoint))
-                concat_evals_opt_in(
-                    n,
-                    &d,
-                    &next_derivs,
-                    opts.fixes.volume_lift_third_derivative_terms,
-                )
+                concat_evals(n, &d, &next_derivs)
             }
             _ => Ok(d),
         }
@@ -773,12 +768,18 @@ impl UnbendVolume {
 
         // check - crProjPoint must be in a valid domain
         if !volume.is_point_in_param_domain(proj_point, true)? {
-            return Err(SolidError::sm_err(OP_GLOBAL));
+            return Err(SolidError::surface_failed(
+                OP_GLOBAL,
+                "the point is outside the volume's parameter domain",
+            ));
         }
 
         // check - crProjPoint must be in OptParamDomain
         if param_domain.is_some_and(|d| !d.contains_point(proj_point, EFF_ZERO)) {
-            return Err(SolidError::sm_err(OP_GLOBAL));
+            return Err(SolidError::surface_failed(
+                OP_GLOBAL,
+                "the point is outside the given parameter domain",
+            ));
         }
 
         // inverted ParamPoint

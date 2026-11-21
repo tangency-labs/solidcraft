@@ -79,6 +79,28 @@ fn pieces_nothing_tells_apart_are_numbered_and_unverified() {
     assert!(!names.verified(0) && !names.verified(1));
 }
 
+/// #7990, change 4: pieces nothing around them tells apart, whose feature says where each
+/// starts along its definition (a hole's wall's halves along its sketch circle), are numbered in
+/// that order, whatever order the faces come in, and the names are exact. Where two would share a
+/// place the order says nothing, and they are numbered as before.
+#[test]
+fn pieces_are_numbered_along_their_definition_where_the_feature_says() {
+    let ranked = |order: [usize; 2]| {
+        let mut faces = named(&["F3:side:c1", "F3:side:c1", "F1:top"]);
+        for (face, place) in faces.iter_mut().zip(order) {
+            face.ordinal = Some(place);
+        }
+        qualify(faces, &[(0, 2), (1, 2)])
+    };
+    let names = ranked([2, 1]);
+    assert_eq!((names.faces[0].as_str(), names.faces[1].as_str()), ("F3:side:c1#2", "F3:side:c1#1"));
+    assert!(names.verified(0) && names.verified(1));
+    let names = ranked([1, 2]);
+    assert_eq!((names.faces[0].as_str(), names.faces[1].as_str()), ("F3:side:c1#1", "F3:side:c1#2"));
+    let names = ranked([1, 1]);
+    assert!(!names.verified(0) && !names.verified(1));
+}
+
 /// #5860: a piece of a split face that is split again must not stack another qualifier on
 /// its name: the name grew with every split (728 characters after eleven splits).
 #[test]
@@ -109,6 +131,22 @@ fn a_piece_with_many_faces_around_it_keeps_a_name_that_can_be_used() {
     let names = qualify(named(&faces), &adjacent);
     assert!(names.faces.iter().all(|n| n.len() <= 512), "{:?}", names.faces);
     assert_ne!(names.faces[0], names.faces[1], "the pieces are still told apart");
+}
+
+/// A name saved in the older form (`F5:blend:F2:+x|F2:+z`) names the same face as today's
+/// `F5:blend(F2:+x|F2:+z)`, so a stored name still finds the face, its piece and its stem.
+#[test]
+fn a_name_in_the_older_form_still_finds_the_face_it_names() {
+    let names = qualify(named(&["F5:blend(F2:+x|F2:+z)#[F6:-y]", "F2:+x", "F2:+z"]), &[]);
+    // The face is a piece of the blend face the stored name names.
+    assert_eq!(matches(&names, 0, "F5:blend:F2:+x|F2:+z"), Some(Match::Piece), "the older form names the same face");
+    assert_eq!(matches(&names, 0, "F5:blend(F2:+x|F2:+z)"), Some(Match::Piece), "the current form as well");
+    // Another face of the design is not that face.
+    assert_eq!(matches(&names, 1, "F5:blend:F2:+x|F2:+z"), None);
+    // The inner face of an older design is found as well.
+    let names = qualify(named(&["F3:inner(F2:top)#[F4:-y]", "F2:top"]), &[]);
+    assert_eq!(matches(&names, 0, "F3:inner:F2:top"), Some(Match::Piece), "the older form names the same face");
+    assert_eq!(matches(&names, 1, "F3:inner:F2:top"), None);
 }
 
 #[test]
@@ -227,6 +265,20 @@ fn a_piece_of_a_blend_face_finds_it_once_it_is_one_face_again() {
     assert_eq!(matches(&copied, 0, "F3:blend:side#[start@F9.1]|start@F9.2"), None, "another copy");
 }
 
+/// A piece of a blend face is found by the name the blend is written in today as well: the
+/// qualifier that tells the piece apart sits inside the blend's name, on one of the edge's sides,
+/// and the face whole again since is the blend of the sides without their qualifiers.
+#[test]
+fn a_piece_of_a_blend_face_is_found_by_the_name_the_blend_is_written_in_today() {
+    let faces = named(&["F3:blend(side|start)", "side", "start"]);
+    let names = qualify(faces, &[(0, 1), (0, 2)]);
+    assert_eq!(names.faces[0], "F3:blend(side|start)");
+    assert_eq!(matches(&names, 0, "F3:blend(side#[start]|start)"), Some(Match::Piece));
+    assert_eq!(matches(&names, 0, "F3:blend(side#[side]|start)"), Some(Match::Piece));
+    // A face the blend no longer touches, inside its name: not its piece.
+    assert_eq!(matches(&names, 0, "F3:blend(side#[top]|start)"), None);
+}
+
 /// Two pieces of one face that a blend tells apart from the same face both answer to the stored
 /// name: one through the face itself, one through the blend that replaced its edge. The lookup
 /// chooses neither (#4325).
@@ -255,4 +307,31 @@ fn two_pieces_told_apart_by_one_blend_both_answer_to_a_stored_name() {
         (0..names.faces.len()).filter(|face| matches(&names, *face, stored).is_some_and(|level| level >= Match::Piece)).collect();
     assert_eq!(answering.len(), 2, "{:?}", names.faces);
     assert!(crate::name_lookup::locate_face_on_body(&state, Some("Body1"), stored, Vec3::new(5., 0., 4.)).is_none(), "two faces answer");
+}
+
+/// A face named only by its index (a thread's groove, `F7:face:12`, unverified) never tells its
+/// neighbours apart: the next evaluation can give that index to another face, so an exact piece
+/// qualified by it could change its name or take another's. Pieces only such faces tell apart
+/// are numbered and unverified, and a stored name qualified by an index finds no piece by its name
+/// alone (an edge saved with one is found only where its pick still lies beside such a face,
+/// #19455).
+#[test]
+fn a_face_named_by_its_index_never_qualifies_an_exact_piece() {
+    let groove = |name: &str| Named { name: name.to_string(), verified: false, ..Named::default() };
+    let mut faces = named(&["F2:side", "F2:side", "F2:end", "F2:start"]);
+    faces.extend([groove("F7:face:12"), groove("F7:face:13")]);
+    // Each piece touches one end of the part and a groove face of its own.
+    let names = qualify(faces, &[(0, 2), (0, 4), (1, 3), (1, 5)]);
+    assert_eq!(names.faces[0], "F2:side#[F2:end]");
+    assert_eq!(names.faces[1], "F2:side#[F2:start]");
+    assert!(names.verified(0) && names.verified(1));
+    assert!(names.info.iter().all(|i| !i.bounds.iter().any(|b| b.contains(":face:"))), "{:?}", names.info);
+    assert!(matches(&names, 0, "F2:side#[F7:face:12]").is_none_or(|m| m < Match::Piece), "an index never finds a piece");
+    // Told apart by nothing but groove faces: numbered, and no longer exact.
+    let mut faces = named(&["F2:side", "F2:side"]);
+    faces.extend([groove("F7:face:12"), groove("F7:face:13")]);
+    let names = qualify(faces, &[(0, 2), (1, 3)]);
+    assert!(names.faces.iter().take(2).all(|n| !n.contains(":face:")), "{:?}", names.faces);
+    assert_ne!(names.faces[0], names.faces[1]);
+    assert!(!names.verified(0) && !names.verified(1));
 }

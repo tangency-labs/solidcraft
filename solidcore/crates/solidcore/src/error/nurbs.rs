@@ -35,7 +35,15 @@
 //! built on those routines (`BSplineCurve`, `BSplineSurface`: fitting, skinning, Coons
 //! patches, trimming, evaluation); upstream they return an `SmStatus` (`SER(SM_ERR)`,
 //! `NER(...)`), which each records as its comparison status. A method whose NLib call
-//! fails keeps that call's failure as its cause ([`BSplineFailure::RoutineFailed`]).
+//! fails keeps that call's failure as its cause ([`BSplineFailure::RoutineFailed`]). A
+//! check that refuses builds a typed cause with its numbers ([`BSplineFailure::EndsApart`],
+//! ...); a stage that fails with no reason the kernel names is a
+//! [`BSplineFailure::StageFailed`], a defect ([`ErrorKind::StageFailed`], #15034), keeping
+//! the error of the call it made as its cause where it has one. That is the form not yet
+//! reviewed: a stage reviewed as the kernel's fault is a [`BSplineFailure::Defect`] with its
+//! reason, of the same class and status. [`BSplineFailure::Failed`] and
+//! [`BSplineFailure::Missing`] are sites not yet converted (the conversion guide:
+//! `docs/failure-codes-and-reproduction.md` §6).
 //!
 //! Deviations: not upstream. A failure of a routine that has the data (a degree, an
 //! index, a parameter and its domain) carries it; the others are unit variants, and the
@@ -168,8 +176,32 @@ pub enum BSplineFailure {
         /// The end of the domain.
         hi: f64,
     },
-    /// The method failed, as the phrase says (e.g. "the end tangent is not given").
+    /// The method failed, as the phrase says (e.g. "the end tangent is not given"): a site
+    /// not yet converted to a typed cause.
     Failed(&'static str),
+    /// The curve's ends coincide (it is closed), so no scaling takes one end to the other.
+    EndsCoincide,
+    /// The ends to join are `distance` apart, farther than the tolerance.
+    EndsApart {
+        /// The distance between the ends.
+        distance: f64,
+        /// The tolerance they must be within.
+        tolerance: f64,
+    },
+    /// A stage of the method failed with no reason the kernel names: a defect
+    /// ([`ErrorKind::StageFailed`]). The failure holds the operation, the status the C++
+    /// reports (for the goldens only), where it was built, and the error of the call it made
+    /// where it has one. The form not yet reviewed: new code builds
+    /// [`BSplineFailure::Defect`], a named cause or a refusal instead.
+    StageFailed,
+    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
+    /// `why` names the step that failed and why that is the kernel's fault, not the
+    /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
+    /// says otherwise.
+    Defect {
+        /// The step that failed, and why that is the kernel's fault.
+        why: &'static str,
+    },
 }
 
 impl BSplineFailure {
@@ -182,10 +214,15 @@ impl BSplineFailure {
         }
     }
 
-    /// The failure's stable [`ErrorKind`].
+    /// The failure's stable [`ErrorKind`]: [`ErrorKind::StageFailed`] for
+    /// [`BSplineFailure::StageFailed`] and [`BSplineFailure::Defect`], a defect; the kind of
+    /// its status otherwise.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
-        ErrorKind::of_status(self.comparison_status())
+        match self {
+            Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
+            _ => ErrorKind::of_status(self.comparison_status()),
+        }
     }
 }
 
@@ -206,6 +243,16 @@ impl core::fmt::Display for BSplineFailure {
                 )
             }
             Self::Failed(what) => f.write_str(what),
+            Self::EndsCoincide => f.write_str("the curve's ends coincide"),
+            Self::EndsApart {
+                distance,
+                tolerance,
+            } => write!(
+                f,
+                "the ends to join are {distance} apart, farther than the tolerance {tolerance}"
+            ),
+            Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
+            Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
         }
     }
 }
@@ -348,14 +395,14 @@ impl crate::SolidError {
     pub(crate) fn is_nurbs_failure(&self) -> bool {
         self.nurbs_failure()
             .is_some_and(|n| !matches!(n, NurbsFailure::BSpline(_)))
-            || matches!(self, Self::Nlib { .. })
     }
 
     /// [`crate::SolidError::Failed`] for a B-spline curve or surface method that fails
     /// with `failure`.
     #[must_use]
+    #[track_caller]
     pub(crate) fn b_spline(operation: &'static str, failure: BSplineFailure) -> Self {
-        Self::nurbs(operation, NurbsFailure::BSpline(failure))
+        Failure::new(operation, NurbsFailure::BSpline(failure)).into_error()
     }
 
     /// Maps the error of a failed NLib call inside a B-spline method (upstream
@@ -375,23 +422,6 @@ impl crate::SolidError {
             .into_error(),
         }
     }
-
-    /// The status of an error that answers with an `SmStatus` the way a
-    /// [`crate::SolidError::Upstream`] does: its `code`, or a [`BSplineFailure`]'s status
-    /// (those methods returned an `Upstream` before their failures were described).
-    /// The callers that branch on an upstream status use it so that they treat both
-    /// alike; it goes with `Upstream` in the last PR of the typed-errors work.
-    #[must_use]
-    pub(crate) fn upstream_status(&self) -> Option<i32> {
-        match self {
-            Self::Upstream { code, .. } => Some(*code),
-            Self::Failed(f) => match &f.reason {
-                Reason::Nurbs(NurbsFailure::BSpline(_)) => Some(f.status),
-                _ => None,
-            },
-            _ => None,
-        }
-    }
 }
 
 /// The `NL_*_ERR` number a NURBS failure stands for, when `error` is one.
@@ -405,19 +435,107 @@ pub fn nlib_number(error: &crate::SolidError) -> Option<i32> {
             Reason::Nurbs(n) => n.nlib_number(),
             _ => None,
         },
-        crate::SolidError::Nlib { code, .. } => Some(code.code()),
         _ => None,
     }
 }
 
-/// The status `error` answers with the way a [`crate::SolidError::Upstream`] does: an
-/// `Upstream`'s code, or a [`BSplineFailure`]'s status (those methods returned an
-/// `Upstream` before their failures were described).
-///
-/// For difftest's comparison only: it is removed with `Upstream` and `sm_status` in the
-/// last PR of the typed-errors work. Callers match [`crate::SolidError::kind`] and the
-/// [`Reason`].
-#[must_use]
-pub fn upstream_status(error: &crate::SolidError) -> Option<i32> {
-    error.upstream_status()
+/// [`super::upstream_status`], kept at the path the goldens runners first read it from.
+pub use super::upstream_status;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SolidError;
+
+    #[test]
+    fn a_stage_failure_is_a_defect_and_a_typed_cause_keeps_its_status() {
+        super::super::tests::assert_stage_failure(
+            &SolidError::b_spline("nurbs::op", BSplineFailure::StageFailed),
+            "nurbs::op",
+            SM_ERR,
+        );
+        for cause in [
+            BSplineFailure::EndsCoincide,
+            BSplineFailure::EndsApart {
+                distance: 0.5,
+                tolerance: 0.01,
+            },
+        ] {
+            let e = SolidError::b_spline("nurbs::op", cause);
+            assert_eq!(e.upstream_status(), Some(SM_ERR), "{cause:?}");
+            assert_eq!(e.kind(), ErrorKind::Failed, "{cause:?}");
+            assert!(!e.is_defect() && e.is_status_answer(), "{cause:?}");
+        }
+    }
+
+    /// A reviewed defect is of class 127 with the stage failure's status, and says why.
+    #[test]
+    fn a_reviewed_defect_is_class_127_with_its_reason() {
+        let why = "the knot vector the insertion just built does not rise, which insertion keeps";
+        let defect = BSplineFailure::Defect { why };
+        let e = SolidError::b_spline("nurbs::op", defect);
+        super::super::tests::assert_defect(
+            &e,
+            &SolidError::b_spline("nurbs::op", BSplineFailure::StageFailed),
+            "nurbs::op",
+            SM_ERR,
+            &format!("nurbs::op: stage_failed: {why}"),
+        );
+        assert_eq!(e.nurbs_failure(), Some(&NurbsFailure::BSpline(defect)));
+        assert_eq!(nlib_number(&e), None);
+        let missing = Failure::new("nurbs::op", NurbsFailure::BSpline(defect))
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error();
+        super::super::tests::assert_defect(
+            &missing,
+            &SolidError::b_spline("nurbs::op", BSplineFailure::Missing("x")),
+            "nurbs::op",
+            SM_ERR_NULL_POINTER,
+            &format!("nurbs::op: stage_failed: {why}"),
+        );
+    }
+
+    /// The NURBS routines describe their failures: their library code builds no bare
+    /// `Upstream` status, except the files listed (with the bare sites each may still hold)
+    /// whose conversion waits on other open work.
+    #[test]
+    fn the_nurbs_routines_build_no_bare_statuses() {
+        assert_eq!(
+            super::super::query::tests::bare_statuses_in("nurbs", 60),
+            [("nurbs/b_spline_curve/p1.rs".to_owned(), 23)]
+        );
+    }
+
+    /// The sites that build a B-spline phrase cause only fall:
+    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
+    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
+    /// files' counts here, and a file at 0 loses its line (the conversion guide:
+    /// `docs/failure-codes-and-reproduction.md` §6).
+    #[test]
+    fn the_bspline_phrase_cause_sites_only_shrink() {
+        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
+        const PHRASES: Scan = Scan {
+            builders: &[
+                Builder::Variant("BSplineFailure", "Failed"),
+                Builder::Variant("BSplineFailure", "Missing"),
+            ],
+            wrappers: Wrappers::Phrase,
+        };
+        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
+        const PINNED: &[(&str, usize)] = &[
+            ("solidcore/src/nurbs/b_spline_curve/p2.rs", 6),
+            ("solidcore/src/nurbs/b_spline_curve_n_lib.rs", 14),
+            ("solidcore/src/nurbs/b_spline_surface/p1.rs", 2),
+            ("solidcore/src/nurbs/b_spline_surface/p2.rs", 16),
+            ("solidcore/src/nurbs/b_spline_surface_n_lib/approx.rs", 3),
+            ("solidcore/src/nurbs/b_spline_surface_n_lib/p1.rs", 7),
+            ("solidcore/src/nurbs/b_spline_surface_n_lib/p2.rs", 33),
+            ("solidcore/src/nurbs/nurbs_crv.rs", 2),
+        ];
+        assert_pinned(
+            "B-spline phrase-cause sites",
+            &crate_sites(&PHRASES),
+            PINNED,
+        );
+    }
 }

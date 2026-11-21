@@ -101,8 +101,10 @@ impl Session {
     /// The operands, destination first.
     pub(super) fn operands(&self) -> Result<(BrepId, BrepId)> {
         Ok((
-            self.primary.ok_or_else(|| SolidError::null_pointer(OP))?,
-            self.other.ok_or_else(|| SolidError::null_pointer(OP))?,
+            self.primary
+                .ok_or_else(|| SolidError::primitive_missing(OP, "the merge's primary B-rep"))?,
+            self.other
+                .ok_or_else(|| SolidError::primitive_missing(OP, "the merge's other B-rep"))?,
         ))
     }
 
@@ -116,7 +118,7 @@ fn slot(breps: &[Option<Brep>], id: BrepId) -> Result<&Brep> {
     breps
         .get(id.index() as usize)
         .and_then(Option::as_ref)
-        .ok_or_else(|| SolidError::null_pointer(OP))
+        .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))
 }
 
 /// Two distinct B-reps of the model, mutably, in argument order.
@@ -128,7 +130,7 @@ fn pair_mut(breps: &mut [Option<Brep>], a: BrepId, b: BrepId) -> Result<(&mut Br
     }
     let (left, right) = breps
         .split_at_mut_checked(ai.max(bi))
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
     let (x, y) = if ai < bi {
         (left.get_mut(ai), right.first_mut())
     } else {
@@ -136,9 +138,9 @@ fn pair_mut(breps: &mut [Option<Brep>], a: BrepId, b: BrepId) -> Result<(&mut Br
     };
     Ok((
         x.and_then(Option::as_mut)
-            .ok_or_else(|| SolidError::null_pointer(OP))?,
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?,
         y.and_then(Option::as_mut)
-            .ok_or_else(|| SolidError::null_pointer(OP))?,
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?,
     ))
 }
 
@@ -446,12 +448,13 @@ impl Driver<'_> {
             None,
         );
         self.set_operands(primary, other);
-        result?.ok_or_else(|| SolidError::null_pointer(OP))
+        result?.ok_or_else(|| SolidError::primitive_missing(OP, "the merged B-rep"))
     }
 
     /// The operand (`primary`, `other`) owning `surface` (by surface identity).
     fn operand_face(&self, operand: Option<BrepId>, surface: ObjectRef) -> Result<FaceId> {
-        let b = self.brep(operand.ok_or_else(|| SolidError::null_pointer(OP))?)?;
+        let b = self
+            .brep(operand.ok_or_else(|| SolidError::primitive_missing(OP, "the operand B-rep"))?)?;
         for (face, record) in b.faces().iter() {
             if record.surface.is_some() && engine_surface_identity(b, face)? == surface {
                 return Ok(face);
@@ -477,7 +480,8 @@ impl BooleanDriver for Driver<'_> {
         angle: f64,
         options: Option<&MergeOptions>,
     ) -> Result<()> {
-        let id = primary.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let id = primary
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the merge's primary B-rep"))?;
         let source = other
             .map(|id| self.brep(id).map(|b| (b, MergeOperand::Other)))
             .transpose()?;
@@ -506,8 +510,10 @@ impl BooleanDriver for Driver<'_> {
         operation: BooleanOperation,
         lock: Option<&mut MarkLock>,
     ) -> Result<Option<BrepId>> {
-        let a = primary.ok_or_else(|| SolidError::null_pointer(OP))?;
-        let b = other.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let a = primary
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the merge's primary B-rep"))?;
+        let b =
+            other.ok_or_else(|| SolidError::primitive_missing(OP, "the merge's other B-rep"))?;
         if a == b {
             return Err(invalid("aliased merge operands"));
         }
@@ -515,7 +521,7 @@ impl BooleanDriver for Driver<'_> {
             breps
                 .get_mut(id.index() as usize)
                 .and_then(Option::take)
-                .ok_or_else(|| SolidError::null_pointer(OP))
+                .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))
         };
         let mut primary_body = take(self.breps, a)?;
         let mut other_body = match take(self.breps, b) {
@@ -761,7 +767,7 @@ impl PiecewiseAccess for Driver<'_> {
             .breps
             .get_mut(primary.index() as usize)
             .and_then(Option::as_mut)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
         let mut state = ArenaNotifyState::new(b);
         let mut env = state.env(Some(&mut k.context));
         crate::topology::brep::p2::notify(

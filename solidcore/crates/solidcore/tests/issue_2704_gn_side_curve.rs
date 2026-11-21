@@ -95,11 +95,13 @@ fn removed(from: f64, to: f64) -> f64 {
     6000.0 - brep_volume(&k, &mut b, 1e-7, &attrs).unwrap()
 }
 
-/// The issue's law, both ways round: one body, 22.596105 off (the union of its balls).
+/// The issue's law, both ways round: one body, 22.594877 off, the union of its balls (its
+/// slices' envelope integrated numerically: 22.5948765). With the arcs of its sections
+/// approximated it took 22.596105, 1.2e-3 too much; its exact circles (WR-708) take 22.594863.
 #[test]
 fn a_round_from_4_to_0_removes_what_0_to_4_removes() {
     let (down, up) = (removed(4.0, 0.0), removed(0.0, 4.0));
-    assert!((down - 22.596105).abs() <= 1e-4, "{down}");
+    assert!((down - 22.594877).abs() <= 1e-4, "{down}");
     assert!((down - up).abs() <= 1e-4, "{down} vs {up}");
 }
 

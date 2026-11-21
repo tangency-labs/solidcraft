@@ -3,9 +3,8 @@
 //! notch's top corner (10, 10, 10) rounded r 2: the concave vertical edge and the two
 //! convex top edges. The corner patch meets a concave and a convex round of different
 //! curvature; the bicubic Coons patch's mean twist left them at an angle along whole
-//! sides (14.7 degrees in the fork's L-shaped box). With
-//! `corner_blend_coons_patch_tangent_to_sides`, every seam between two curved faces is
-//! within 1 degree.
+//! sides (14.7 degrees in the fork's L-shaped box). In solidcore every seam between two
+//! curved faces is within 1 degree.
 
 #![allow(
     clippy::unwrap_used,
@@ -29,7 +28,6 @@ use solidcore::Kernel;
 #[test]
 fn wr_547_notch_corner_patch_is_tangent_to_its_rounds() {
     let mut k = Kernel::default();
-    k.fixes.corner_blend_coons_patch_tangent_to_sides = true;
     let block = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 10.0).unwrap();
     let notch = create_box(&mut k, Point3::new(10.0, 10.0, -1.0), 20.0, 20.0, 12.0).unwrap();
     let mut b = boolean_difference(&mut k, block, notch).unwrap();

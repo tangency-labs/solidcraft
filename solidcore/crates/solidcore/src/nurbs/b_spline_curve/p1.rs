@@ -542,6 +542,23 @@ impl BSplineCurve {
         }
     }
 
+    /// Not upstream: the same curve by definition. The dimension, the out-of-bounds
+    /// switch, the STEP knot type and form are equal, and both have no NURB or NURBs of
+    /// the same definition ([`Curve::same_definition`]): exact, unlike
+    /// [`approx_eq`](Self::approx_eq).
+    #[must_use]
+    pub fn same_definition(&self, other: &Self) -> bool {
+        self.dim == other.dim
+            && self.out_of_bounds_enabled == other.out_of_bounds_enabled
+            && self.knot_type == other.knot_type
+            && self.form == other.form
+            && match (&self.nurb, &other.nurb) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.same_definition(b),
+                _ => false,
+            }
+    }
+
     /// Upstream `operator==`: same dimension and either both without NURB or NURBs
     /// equal within `SM_EFF_ZERO` (`N_CrvsAreEqual`).
     #[must_use]
@@ -607,7 +624,7 @@ impl BSplineCurve {
 
     /// The NURB for read-only callers (`GetOrCreateGwNurbPointer` through a const
     /// cast), or `SM_ERR` without one (upstream dereferences `NULL`).
-    pub(super) fn nurb_ref(&self) -> Result<&Curve> {
+    pub(crate) fn nurb_ref(&self) -> Result<&Curve> {
         self.nurb
             .as_ref()
             .ok_or_else(|| SolidError::sm_err(OP_NURB))
@@ -822,6 +839,29 @@ impl BSplineCurve {
             start_weight: weight(first),
             end_weight: weight(last),
         })
+    }
+
+    /// The Euclidean control points whose convex hull holds the curve over `ivl`, each
+    /// with the error bound of its coordinates
+    /// ([`crv_hull_points`](crate::nurbs::nurbs_crv::crv_hull_points)); `None` without a
+    /// NURB or when no such hull is certain (a 2D curve, a weight not positive, `ivl`
+    /// outside the natural domain).
+    ///
+    /// Not upstream.
+    #[must_use]
+    pub(crate) fn hull_points_over(&self, ivl: &Extent1d) -> Option<Vec<(Vec3, f64)>> {
+        crate::nurbs::nurbs_crv::crv_hull_points(self.nurb_ref().ok()?, ivl)
+    }
+
+    /// The Euclidean control points of the piece over `ivl` alone, each with the error
+    /// bound of its coordinates; the first and last are the piece's end points
+    /// ([`crv_piece_hull_points`](crate::nurbs::nurbs_crv::crv_piece_hull_points)). `None`
+    /// without a NURB or when no such piece is certain.
+    ///
+    /// Not upstream.
+    #[must_use]
+    pub(crate) fn piece_hull_points(&self, ivl: &Extent1d) -> Option<Vec<(Vec3, f64)>> {
+        crate::nurbs::nurbs_crv::crv_piece_hull_points(self.nurb_ref().ok()?, ivl)
     }
 
     /// The unique knots and their multiplicities, optionally only those in `ivl`
@@ -1506,7 +1546,7 @@ impl BSplineCurve {
     /// [`BSplineCurve::create_circle_segment`] whose quadratic form is split into at
     /// least `min_arcs` equal arcs (at most four; `0` is upstream's count from the
     /// sweep). Not upstream: an exact circular fillet's sections take one arc count
-    /// along the rails (`fixes.fillet_exact_arc_spans`, WR-711).
+    /// along the rails (WR-711).
     ///
     /// # Errors
     ///

@@ -13,6 +13,8 @@
 
 use core::ops::{Add, Div, Mul, Sub};
 
+use crate::geom::certified::next_up;
+
 /// `std::min(a, b)`: `(b < a) ? b : a` (a NaN `a` is kept).
 #[inline]
 pub(crate) fn cmin(a: f64, b: f64) -> f64 {
@@ -258,6 +260,119 @@ impl Ivl {
     pub fn hull(self, b: Self) -> Self {
         Self::new(cmin(self.lo, b.lo), cmax(self.hi, b.hi))
     }
+
+    /// Both ends are finite and in order.
+    #[must_use]
+    pub fn is_finite(self) -> bool {
+        self.lo.is_finite() && self.hi.is_finite() && self.lo <= self.hi
+    }
+
+    /// `[lo, hi]` moved outward by one ulp at each end, or the whole line unless both
+    /// ends are finite and in order.
+    ///
+    /// Soundness: one ulp outward covers round-to-nearest for + - * /. A correctly
+    /// rounded operation returns the double nearest its exact result, so the exact
+    /// result lies between that double's neighbours (an overflow past the largest
+    /// double moves the end to infinity, and the result is the whole line).
+    ///
+    /// This is the tighter sibling of [`Ivl::checked`], whose relative `2.3e-16 |x|`
+    /// step can reach two ulps and widens exact zeros by `1e-300`. Proofs that must
+    /// close at an exactly attained bound use the `*_ulp` operations built on it.
+    #[must_use]
+    pub fn outward_ulp(lo: f64, hi: f64) -> Self {
+        if lo.is_finite() && hi.is_finite() && lo <= hi {
+            Self::new(-next_up(-lo), next_up(hi))
+        } else {
+            Self::whole()
+        }
+    }
+
+    /// `self + b` rounded one ulp outward ([`Ivl::outward_ulp`]). Adding an exact 0 is
+    /// exact in IEEE arithmetic and is returned unwidened. Not finite: the whole line.
+    #[must_use]
+    pub fn add_ulp(self, b: Self) -> Self {
+        if !self.is_finite() || !b.is_finite() {
+            Self::whole()
+        } else if self == Self::from(0.0) {
+            b
+        } else if b == Self::from(0.0) {
+            self
+        } else {
+            Self::outward_ulp(self.lo + b.lo, self.hi + b.hi)
+        }
+    }
+
+    /// `self - b` rounded one ulp outward. Subtracting an exact 0 is exact, and a point
+    /// interval `[x, x]` holds only the double `x`, so `[x, x] - [x, x]` is exactly 0
+    /// (IEEE `x - x == 0` for finite `x`). Not finite: the whole line.
+    #[must_use]
+    pub fn sub_ulp(self, b: Self) -> Self {
+        if !self.is_finite() || !b.is_finite() {
+            Self::whole()
+        } else if self.lo == self.hi && self == b {
+            Self::from(0.0)
+        } else if b == Self::from(0.0) {
+            self
+        } else {
+            Self::outward_ulp(self.lo - b.hi, self.hi - b.lo)
+        }
+    }
+
+    /// `self * b` rounded one ulp outward. A product with an exact 0 or 1 is exact and
+    /// is returned unwidened. Not finite: the whole line.
+    #[must_use]
+    pub fn mul_ulp(self, b: Self) -> Self {
+        if !self.is_finite() || !b.is_finite() {
+            return Self::whole();
+        }
+        if self == Self::from(0.0) || b == Self::from(0.0) {
+            return Self::from(0.0);
+        }
+        if self == Self::from(1.0) {
+            return b;
+        }
+        if b == Self::from(1.0) {
+            return self;
+        }
+        // Finite operands: a product overflows to infinity but is never NaN.
+        let products = [
+            self.lo * b.lo,
+            self.lo * b.hi,
+            self.hi * b.lo,
+            self.hi * b.hi,
+        ];
+        Self::outward_ulp(
+            products.into_iter().fold(f64::INFINITY, f64::min),
+            products.into_iter().fold(f64::NEG_INFINITY, f64::max),
+        )
+    }
+
+    /// `self / b` rounded one ulp outward, for a divisor that excludes 0 (otherwise the
+    /// whole line). Dividing by an exact 1, dividing an exact 0, and `[x, x] / [x, x]`
+    /// are exact and are returned unwidened. Not finite: the whole line.
+    #[must_use]
+    pub fn div_ulp(self, b: Self) -> Self {
+        let excludes_zero = b.lo > 0.0 || b.hi < 0.0;
+        if !self.is_finite() || !b.is_finite() || !excludes_zero {
+            return Self::whole();
+        }
+        if self == Self::from(0.0) || b == Self::from(1.0) {
+            return self;
+        }
+        if self.lo == self.hi && self == b {
+            return Self::from(1.0);
+        }
+        let quotients = [
+            self.lo / b.lo,
+            self.lo / b.hi,
+            self.hi / b.lo,
+            self.hi / b.hi,
+        ];
+        Self::outward_ulp(
+            quotients.into_iter().fold(f64::INFINITY, f64::min),
+            quotients.into_iter().fold(f64::NEG_INFINITY, f64::max),
+        )
+    }
 }
 
 impl Add for Ivl {
@@ -441,6 +556,41 @@ mod tests {
         assert_eq!(Ivl::from(f64::NAN) + Ivl::from(1.0), Ivl::whole());
         // a NaN in the first product is kept by std::min and caught by sm_Checked
         assert_eq!(Ivl::new(f64::NAN, 1.0) * Ivl::from(2.0), Ivl::whole());
+    }
+
+    #[test]
+    fn ulp_operations_enclose_one_ulp_outward_and_keep_exact_identities() {
+        // 0.1 + 0.2 rounds to 0.30000000000000004; the exact sum of the two doubles is
+        // within one ulp of it
+        let s = Ivl::from(0.1).add_ulp(Ivl::from(0.2));
+        let r: f64 = 0.1 + 0.2;
+        assert_eq!(s.hi, f64::from_bits(r.to_bits() + 1));
+        assert_eq!(s.lo, f64::from_bits(r.to_bits() - 1));
+        let q = Ivl::from(1.0).div_ulp(Ivl::from(3.0));
+        assert!(q.lo < 1.0 / 3.0 && q.hi > 1.0 / 3.0);
+        assert_eq!(Ivl::from(1.0).div_ulp(Ivl::new(-1.0, 1.0)), Ivl::whole());
+        let m = Ivl::new(1.0, 2.0).mul_ulp(Ivl::new(-3.0, 0.5));
+        assert!(m.lo < -6.0 && m.hi > 1.0 && m.lo > -6.0 - 1e-14 && m.hi < 1.0 + 1e-14);
+        // exact identities stay exact
+        let x = Ivl::new(0.3, 0.7);
+        assert_eq!(x.add_ulp(Ivl::from(0.0)), x);
+        assert_eq!(x.mul_ulp(Ivl::from(1.0)), x);
+        assert_eq!(x.mul_ulp(Ivl::from(0.0)), Ivl::from(0.0));
+        assert_eq!(x.div_ulp(Ivl::from(1.0)), x);
+        assert_eq!(Ivl::from(0.3).sub_ulp(Ivl::from(0.3)), Ivl::from(0.0));
+        assert_eq!(Ivl::from(0.3).div_ulp(Ivl::from(0.3)), Ivl::from(1.0));
+        // a wide interval minus itself holds every difference of its numbers
+        let d = x.sub_ulp(x);
+        assert!(d.lo < 0.3 - 0.7 && d.hi > 0.7 - 0.3);
+        // not finite: the whole line, even times an exact 0
+        assert_eq!(Ivl::whole().mul_ulp(Ivl::from(0.0)), Ivl::whole());
+        assert_eq!(
+            Ivl::from(f64::MAX).add_ulp(Ivl::from(f64::MAX)),
+            Ivl::whole()
+        );
+        assert_eq!(next_up(-0.0), f64::from_bits(1));
+        assert_eq!(next_up(-f64::from_bits(1)), -0.0);
+        assert_eq!(next_up(f64::MAX), f64::INFINITY);
     }
 
     #[test]

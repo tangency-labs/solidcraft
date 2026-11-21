@@ -100,6 +100,55 @@ fn dimension_text_is_stored_relative_to_the_dimension_and_follows_it() {
     assert!(s.execute("sketch.dimension_text", &json!({"dimension": param, "at": [f64::NAN, 0]})).is_err());
 }
 
+/// Two lines that meet at a corner divide the plane around it into four sectors (the lines
+/// taken as extended past their ends): the text placed in one dimensions that sector's angle,
+/// and the arc is drawn there, in either of the two sectors past the corner that measure the
+/// supplement, not only the one beside the longer line (#11800).
+#[test]
+fn an_angle_dimension_measures_and_draws_the_sector_its_text_is_in() {
+    use solidcore_record::Vec2;
+    use solidcraft_sketch::dim_frame_at;
+    // A 100 long base running left from the corner, a slanted line up and right from it: 135°
+    // inside, 45° to the base's extension past the corner.
+    let corner = |at: [f64; 2], value: Option<&str>| {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points": [[-100, 0], [0, 0], [30, 30]]}));
+        let mut p = json!({"entities": ["l1", "l2"], "text_at": at});
+        if let Some(v) = value {
+            p["value"] = json!(v);
+        }
+        let measured = run(&mut s, "sketch.dimension", p)["measured"].as_f64().unwrap_or(f64::NAN);
+        (measured, sketch(&s))
+    };
+    let tau = std::f64::consts::TAU;
+    let in_sector = |d0: Vec2, sweep: f64, t: Vec2| (t.angle() - d0.angle()).rem_euclid(tau) <= sweep;
+    for (at, expected) in [([-5.0, 20.0], 135.0), ([20.0, 5.0], 45.0), ([-20.0, -5.0], 45.0), ([5.0, -20.0], 135.0)] {
+        let (measured, sk) = corner(at, None);
+        assert!((measured - expected).abs() < 1e-6, "text at {at:?}: measured {measured}");
+        let c = sk.constraints.iter().find(|c| c.kind.is_angle()).expect("an angle dimension");
+        let Some(DimFrame::Angular { vertex, d0, sweep }) = dim_frame_at(&sk, &c.kind, c.text) else { panic!("an angular frame") };
+        let t = Vec2::new(at[0], at[1]) - vertex;
+        assert!(vertex.len() < 1e-9 && (sweep.to_degrees() - expected).abs() < 1e-6, "text at {at:?}: {vertex:?} {sweep}");
+        assert!(in_sector(d0, sweep, t), "text at {at:?}: the arc from {d0:?} by {sweep} is drawn away from it");
+        // Both rays lie along the lines.
+        let along = |u: Vec2| u.y.abs() < 1e-9 || (u.x - u.y).abs() < 1e-9;
+        assert!(along(d0) && along(Vec2::from_angle(d0.angle() + sweep)), "{d0:?} {sweep}");
+        let lay = dim_layout(&DimFrame::Angular { vertex, d0, sweep }, c.text, 0.1, Default::default());
+        assert!(lay.text.dist(Vec2::new(at[0], at[1])) < 1e-9);
+    }
+    // A value typed for the sector past the corner drives that angle, and the arc stays there.
+    let (_, sk) = corner([20.0, 5.0], Some("30 deg"));
+    let pt = |id: &str| sk.point(sk.resolve_point(id).expect("a point")).expect("its position");
+    let (base, slant) = (pt("l1.end") - pt("l1.start"), pt("l2.end") - pt("l2.start"));
+    assert!((base.cross(slant).atan2(base.dot(slant)).to_degrees() - 30.0).abs() < 1e-6, "{base:?} {slant:?}");
+    let c = sk.constraints.iter().find(|c| c.kind.is_angle()).expect("an angle dimension");
+    let Some(DimFrame::Angular { vertex, d0, sweep }) = dim_frame_at(&sk, &c.kind, c.text) else { panic!("an angular frame") };
+    assert!(in_sector(d0, sweep, Vec2::new(20.0, 5.0) - vertex), "{d0:?} {sweep}");
+    // Without a text the arc keeps to the rays that point at the lines.
+    let Some(DimFrame::Angular { d0: plain, .. }) = dim_frame_at(&sk, &c.kind, None) else { panic!("an angular frame") };
+    assert!(Some(DimFrame::Angular { vertex, d0: plain, sweep }) == solidcraft_sketch::dim_frame(&sk, &c.kind));
+}
+
 #[test]
 fn deleting_a_dimension_frees_its_parameter() {
     let mut s = new_sketch();
@@ -2244,6 +2293,61 @@ fn the_first_dimension_leaves_a_separate_shape_alone() {
     }
 }
 
+/// #11438: a lone circle has no proportions to keep, so its first dimension sizes it in place.
+/// Scaling the sketch about its origin would only move the circle's centre.
+#[test]
+fn the_first_dimension_of_a_lone_circle_keeps_its_centre() {
+    for ty in ["diameter", "radius"] {
+        let mut s = new_sketch();
+        let out = run(&mut s, "sketch.circle.center", json!({"center": [-9, 40.5], "radius": 5.852349955359813}));
+        let circle = out["curves"][0].as_str().unwrap().to_string();
+        let out = run(&mut s, "sketch.dimension", json!({"entities": [circle], "type": ty, "value": "6.5 mm", "scale_sketch": true}));
+        assert!(out.get("scaled").is_none(), "{ty}: {out}");
+        let sk = sketch(&s);
+        let c = sk.curves.iter().position(|c| c.id == circle).unwrap();
+        let centre = sk.center(c).unwrap();
+        assert!(centre.dist(solidcore_record::Vec2::new(-9.0, 40.5)) < 1e-6, "{ty}: the centre moved to {centre:?}");
+        let want = if ty == "diameter" { 3.25 } else { 6.5 };
+        assert!((sk.radius(c).unwrap() - want).abs() < 1e-6, "{ty}: radius {:?}", sk.radius(c));
+    }
+    // A size far below the drawn one is taken too, and the centre still stays where it is.
+    for (ty, value, want) in [("radius", "0.000003 mm", 0.000003), ("diameter", "0.000006 mm", 0.000003)] {
+        let mut s = new_sketch();
+        let out = run(&mut s, "sketch.circle.center", json!({"center": [12, -7], "radius": 2}));
+        let circle = out["curves"][0].as_str().unwrap().to_string();
+        let out = run(&mut s, "sketch.dimension", json!({"entities": [circle], "type": ty, "value": value, "scale_sketch": true}));
+        assert!(out.get("scaled").is_none(), "{ty}: {out}");
+        let sk = sketch(&s);
+        let c = sk.curves.iter().position(|c| c.id == circle).unwrap();
+        let centre = sk.center(c).unwrap();
+        assert!(centre.dist(solidcore_record::Vec2::new(12.0, -7.0)) < 1e-9, "{ty}: the centre moved to {centre:?}");
+        assert!((sk.radius(c).unwrap() - want).abs() < 1e-12, "{ty}: radius {:?}", sk.radius(c));
+    }
+    // A first distance from the origin to the centre still scales the lone circle (#1365).
+    let mut s = new_sketch();
+    let out = run(&mut s, "sketch.circle.center", json!({"center": [30, 40], "radius": 5}));
+    let circle = out["curves"][0].as_str().unwrap().to_string();
+    let out = run(&mut s, "sketch.dimension", json!({"entities": ["origin", format!("{circle}.center")], "value": "100 mm", "scale_sketch": true}));
+    assert!((out["scaled"].as_f64().unwrap() - 2.0).abs() < 1e-6, "{out}");
+    let sk = sketch(&s);
+    let c = sk.curves.iter().position(|c| c.id == circle).unwrap();
+    let centre = sk.center(c).unwrap();
+    assert!(centre.dist(solidcore_record::Vec2::new(60.0, 80.0)) < 1e-6, "the centre is at {centre:?}");
+    assert!((sk.radius(c).unwrap() - 10.0).abs() < 1e-6, "radius {:?}", sk.radius(c));
+    // A sketch axis the centre is held on is not a second curve: the diameter sizes the circle in place.
+    let mut s = new_sketch();
+    let out = run(&mut s, "sketch.circle.center", json!({"center": [0, 40], "radius": 5}));
+    let circle = out["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{circle}.center"), "b": "y"}));
+    let out = run(&mut s, "sketch.dimension", json!({"entities": [circle], "type": "diameter", "value": "20 mm", "scale_sketch": true}));
+    assert!(out.get("scaled").is_none(), "{out}");
+    let sk = sketch(&s);
+    let c = sk.curves.iter().position(|c| c.id == circle).unwrap();
+    let centre = sk.center(c).unwrap();
+    assert!(centre.dist(solidcore_record::Vec2::new(0.0, 40.0)) < 1e-6, "the centre moved to {centre:?}");
+    assert!((sk.radius(c).unwrap() - 10.0).abs() < 1e-6, "radius {:?}", sk.radius(c));
+}
+
 /// #1365 still holds for one drawing: shapes joined by a constraint scale together.
 #[test]
 fn the_first_dimension_scales_shapes_joined_by_a_constraint() {
@@ -2449,7 +2553,9 @@ fn editing_a_mid_timeline_sketch_rebuilds_later_features_once_at_finish() {
     run(&mut s, "sketch.edit", json!({"sketch": id, "restore_marker": false}));
     assert_eq!(s.doc.marker, None);
     run(&mut s, "sketch.line", json!({"points": [[0, 20], [10, 20]]}));
-    assert!(s.model.last_recomputed > 1, "in place, the later features are rebuilt");
+    // Rebuilt, or made again from what they changed when what they read is as it was (#6183).
+    let evaluated = s.model.last_recomputed + s.model.last_restored;
+    assert!(evaluated > 1, "in place, the later features are evaluated: {evaluated}");
     run(&mut s, "sketch.finish", json!({}));
     assert_eq!(s.doc.marker, None);
     assert!(s.execute("sketch.edit", &json!({"sketch": id, "restore_marker": true})).is_err());

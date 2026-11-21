@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="760" height="470" viewBox="0 0 760 470">
+  <title>Untitled-2</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="760" height="470" fill="#ffffff"/>
+    <line id="bisector" x1="360" y1="85" x2="360" y2="440" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <line id="chord" x1="462.6" y1="148.1" x2="257.4" y2="148.1" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <path id="arc" d="M462.6 148.1 C396.326 123.98 323.674 123.98 257.4 148.1" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <circle id="start" cx="462.6" cy="148.1" r="6" fill="#000000"/>
+    <circle id="end" cx="257.4" cy="148.1" r="6" fill="#000000"/>
+    <circle id="centre" cx="360" cy="430" r="6" fill="#000000"/>
+    <circle id="centre_along" data-name="centre along" cx="360" cy="380" r="6" fill="#555555"/>
+    <circle id="centre_across" data-name="centre across" cx="420" cy="430" r="6" fill="#555555"/>
+    <text transform="matrix(1 0 0 1 30 42)" x="0" y="0" xml:space="preserve" font-family="Helvetica-Bold, sans-serif" font-size="20" fill="#000000"><tspan x="0" y="0">A short arc fixes the line its centre lies on, not where on it</tspan></text>
+    <text transform="matrix(1 0 0 1 476 153)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">first point</tspan></text>
+    <text transform="matrix(1 0 0 1 244 153)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="end"><tspan x="0" y="0">last point</tspan></text>
+    <text transform="matrix(1 0 0 1 290 172)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">chord</tspan></text>
+    <text transform="matrix(1 0 0 1 370 260)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">the chord&apos;s perpendicular bisector</tspan></text>
+    <text transform="matrix(1 0 0 1 372 385)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">a centre off along it: the swept points move by the sweep squared</tspan></text>
+    <text transform="matrix(1 0 0 1 346 435)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="end"><tspan x="0" y="0">the axis</tspan></text>
+    <text transform="matrix(1 0 0 1 434 435)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">a centre off across it: they turn by the sweep</tspan></text>
+  </g>
+</svg>

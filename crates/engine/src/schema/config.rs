@@ -15,7 +15,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
-use solidcraft_doc::config::{MAX_COLUMNS, MAX_RULES};
+use solidcraft_doc::config::{MAX_COLUMNS, MAX_RULES, RowKey};
 
 use super::check::whole;
 use crate::params::{self, MAX_STRING_LIST, json_brief};
@@ -32,17 +32,55 @@ pub struct ConfigTableParams {}
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ConfigRowParams {
-    /// The row, by name.
+    /// The row, by name or by id.
     #[serde(deserialize_with = "row")]
-    pub row: String,
+    pub row: RowRef,
 }
 
-/// The row's name, with the handler's message for anything that isn't text.
-fn row<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
-    match Value::deserialize(d)? {
-        Value::String(s) => Ok(s),
-        _ => Err(D::Error::custom(whole("`row` is required"))),
+/// Take the design's current values into a configuration row: each of its cells becomes what the
+/// design has now for that column. Only the table's columns are taken; changes to features and
+/// parameters the table has no column for are listed, not added. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ConfigUpdateParams {
+    /// The row, by name or id; the active row when left out.
+    #[serde(default, deserialize_with = "some_row", skip_serializing_if = "Option::is_none")]
+    pub row: Option<RowRef>,
+}
+
+/// A configuration row, as the commands name one: its name (text) or its fixed id (a whole
+/// number, as `config.table` lists it). A row named `"17"` is not row 17.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RowRef {
+    Name(String),
+    Id(u64),
+}
+
+impl RowRef {
+    /// As the handlers read it: [`RowKey::read`], the one rule.
+    fn read(v: &Value) -> Option<Self> {
+        RowKey::read(v).map(|key| match key {
+            RowKey::Id(id) => RowRef::Id(id),
+            RowKey::Name(name) => RowRef::Name(name.to_string()),
+        })
     }
+}
+
+impl JsonSchema for RowRef {
+    fn schema_name() -> Cow<'static, str> {
+        "RowRef".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A configuration row: its name, or its id as `config.table` lists it.",
+            "anyOf": [{"type": "string"}, {"type": "integer", "minimum": 0}]
+        })
+    }
+}
+
+/// The row, by name or id, with the handler's message for anything else.
+fn row<'de, D: Deserializer<'de>>(d: D) -> Result<RowRef, D::Error> {
+    RowRef::read(&Value::deserialize(d)?).ok_or_else(|| D::Error::custom(whole("`row` is required")))
 }
 
 /// Add columns to the configuration table: parameters, feature suppressions, and bodies' and
@@ -119,15 +157,16 @@ pub struct ConfigColumnParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ConfigRowEditParams {
-    /// The row, by name: 1 to 128 bytes once spaces at either end are dropped. A name the table
-    /// doesn't have adds a row (at most 2000).
+    /// The row, by name (1 to 128 bytes once spaces at either end are dropped) or by id. A name the
+    /// table doesn't have adds a row (at most 2000); an id must be one of its rows.
     #[serde(deserialize_with = "row_name")]
-    #[schemars(length(min = 1, max = 128))]
-    pub name: String,
-    /// A row to copy the cells of, by name. Default: the row's own cells, or the design's current
-    /// values for a new row.
-    #[serde(default)]
-    pub from: Option<String>,
+    #[schemars(schema_with = "row_name_schema")]
+    pub name: RowRef,
+    /// A row to copy the cells of, by name or id. Default: the row's own cells, or the design's
+    /// current values for a new row.
+    #[serde(default, deserialize_with = "from_row", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<RowRef>")]
+    pub from: Option<RowRef>,
     #[serde(default, deserialize_with = "row_values", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "row_values_schema")]
     pub values: Option<Map<String, Value>>,
@@ -140,6 +179,12 @@ pub struct ConfigRowEditParams {
     /// be deleted while the table has rules. Default: false.
     #[serde(default)]
     pub delete: Option<bool>,
+    /// Move the row, which must exist, to this place in the table (0 is the first row); the other
+    /// rows keep their order. `from`, `values` and `rename` are then not used. Default: the row
+    /// stays where it is.
+    #[serde(default, deserialize_with = "rule_index", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "u64", range(min = 0))]
+    pub index: Option<u64>,
 }
 
 /// Add, replace, delete or move the configuration table's rules, which drive parameters and
@@ -349,12 +394,36 @@ fn exactly_one_target(schema: &mut Schema) {
     schema.insert("oneOf".into(), Value::Array(one));
 }
 
-/// A row's name as `config.row` reads `name`: text that, without spaces at either end, is 1 to
+/// A row as `config.row` reads `name`: an id, or text that, without spaces at either end, is 1 to
 /// 128 bytes, with the handler's message for anything else.
-fn row_name<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+fn row_name<'de, D: Deserializer<'de>>(d: D) -> Result<RowRef, D::Error> {
+    match RowRef::read(&Value::deserialize(d)?) {
+        Some(RowRef::Name(name)) if !is_row_name(&name) => Err(D::Error::custom(whole("`name` is required"))),
+        Some(row) => Ok(row),
+        None => Err(D::Error::custom(whole("`name` is required"))),
+    }
+}
+
+fn row_name_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "A row: its name, or its id as `config.table` lists it.",
+        "anyOf": [{"type": "string", "minLength": 1, "maxLength": 128}, {"type": "integer", "minimum": 0}]
+    })
+}
+
+/// `from`: a row by name or id; `null` is left out, as the handler reads it.
+fn from_row<'de, D: Deserializer<'de>>(d: D) -> Result<Option<RowRef>, D::Error> {
     match Value::deserialize(d)? {
-        Value::String(name) if is_row_name(&name) => Ok(name),
-        _ => Err(D::Error::custom(whole("`name` is required"))),
+        Value::Null => Ok(None),
+        v => RowRef::read(&v).map(Some).ok_or_else(|| D::Error::custom(whole("`from` must be a row's name or id"))),
+    }
+}
+
+/// An optional `row`: a row by name or id; `null` is left out, as the handler reads it.
+fn some_row<'de, D: Deserializer<'de>>(d: D) -> Result<Option<RowRef>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        v => RowRef::read(&v).map(Some).ok_or_else(|| D::Error::custom(whole("`row` must be a row's name or id"))),
     }
 }
 
@@ -534,6 +603,8 @@ pub struct ConfigTarget {
 /// One row of the table.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ConfigTableRow {
+    /// Its fixed id: a rename keeps it.
+    pub id: u64,
     pub name: String,
     /// Its cell for each column, by column key.
     pub values: BTreeMap<String, String>,
@@ -544,6 +615,27 @@ pub struct ConfigTableRow {
 pub struct ConfigTableReply {
     #[serde(flatten)]
     pub table: ConfigTable,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `config.update_from_design` returns: the table after the update, and what it took.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ConfigUpdate {
+    #[serde(flatten)]
+    pub table: ConfigTable,
+    /// The row that was updated, by name.
+    pub row: String,
+    /// The columns whose cell changed, by column key.
+    pub updated: Vec<String>,
+    /// Columns a configuration rule drives: the design's value comes from the rule, so the cell
+    /// keeps what it had.
+    pub driven_by_rule: Vec<String>,
+    /// Changes the table has no column for, since a row was last activated or updated in this
+    /// session (or else since the design was opened or saved), as the column key that would hold each (`suppress:<feature>`,
+    /// `param:<name>`). Every configuration shares them.
+    pub not_captured: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

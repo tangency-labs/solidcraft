@@ -3,6 +3,7 @@ use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 
 use crate::Session;
+use crate::tests::png_size;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     match s.execute(id, &p) {
@@ -84,6 +85,86 @@ fn default_names_skip_names_in_use() {
     run(&mut s, "selection.delete", json!({"occurrences": ["Arm:1"]}));
     run(&mut s, "occurrence.copy", json!({"occurrence": "Arm:3", "translate": [20, 0, 0]}));
     assert_eq!(names(&s), ["Arm:2", "Arm:3", "Arm:1"]);
+}
+
+#[test]
+fn ambiguous_motion_item_names_are_refused_without_changing_the_session() {
+    for (create, delete, key, kind, params) in [
+        ("contact.create", "contact.edit", "set", "contact set", json!({"occurrences": ["A", "B"]})),
+        ("motion.study", "motion.delete", "study", "motion study", json!({"steps": 10})),
+        ("explode.create", "explode.delete", "view", "exploded view", json!({"moves": [{"occurrence": "B", "translate": [20, 0, 0]}]})),
+    ] {
+        let mut s = Session::default();
+        for name in ["A", "B"] {
+            run(&mut s, "component.create", json!({"name": name, "activate": false}));
+        }
+        let mut params = params;
+        params["name"] = json!("Shared");
+        let first = run(&mut s, create, params.clone())[key].as_u64().unwrap();
+        let second = run(&mut s, create, params)[key].as_u64().unwrap();
+        // Old files can already contain duplicate names; opening them must remain possible.
+        let mut s = Session::opened(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), None);
+        run(&mut s, "component.create", json!({"name": "Temporary", "activate": false}));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(!s.redo.is_empty());
+        let mut deleting = deletion(delete, key, first);
+        deleting[key] = json!("Shared");
+        let (doc, undo, redo) = (s.doc.clone(), s.undo.len(), s.redo.len());
+        let error = s.execute(delete, &deleting).expect_err("an ambiguous name must not choose an item");
+        assert!(matches!(&error, crate::EngineError::BadParams { .. }), "{error}");
+        assert!(
+            error.to_string().contains(&format!("ambiguous {kind} `Shared`; matching IDs: {first}, {second}; use a numeric {kind} ID")),
+            "{error}"
+        );
+        assert_eq!(s.doc, doc, "{delete} changed the document");
+        assert_eq!((s.undo.len(), s.redo.len()), (undo, redo), "{delete} changed undo/redo");
+        run(&mut s, delete, deletion(delete, key, second));
+        // The remaining name is now unique, and still resolves normally.
+        run(&mut s, delete, deleting);
+    }
+}
+
+#[test]
+fn contact_and_exploded_view_ids_cannot_be_shadowed_by_names() {
+    for (create, delete, key, params) in [
+        ("contact.create", "contact.edit", "set", json!({"occurrences": ["A", "B"]})),
+        ("explode.create", "explode.delete", "view", json!({"moves": [{"occurrence": "B", "translate": [20, 0, 0]}]})),
+    ] {
+        let mut s = Session::default();
+        for name in ["A", "B"] {
+            run(&mut s, "component.create", json!({"name": name, "activate": false}));
+        }
+        let mut named = params.clone();
+        named["name"] = json!("6");
+        let first = run(&mut s, create, named)[key].as_u64().unwrap();
+        let second = run(&mut s, create, params)[key].as_u64().unwrap();
+        assert_eq!(second, 6);
+        let mut deleting = deletion(delete, key, second);
+        deleting[key] = json!("6");
+        let before = s.doc.clone();
+        let error = s.execute(delete, &deleting).unwrap_err();
+        assert!(error.to_string().contains(&format!("matching IDs: {first}, {second}")), "{error}");
+        assert_eq!(s.doc, before);
+        run(&mut s, delete, deletion(delete, key, second));
+        // The numeric ID selected the second item, leaving the first numeric name available.
+        run(&mut s, delete, deleting);
+    }
+}
+
+#[test]
+fn motion_studies_keep_number_and_text_precedence_when_names_repeat() {
+    let mut s = Session::default();
+    let first = run(&mut s, "motion.study", json!({"name": "3", "steps": 10}))["study"].as_u64().unwrap();
+    let second = run(&mut s, "motion.study", json!({"name": "3", "steps": 20}))["study"].as_u64().unwrap();
+    let third = run(&mut s, "motion.study", json!({"name": "Target", "steps": 30}))["study"].as_u64().unwrap();
+    assert_eq!(third, 3);
+    let error = s.execute("motion.study", &json!({"study": "3", "steps": 40})).unwrap_err();
+    assert!(error.to_string().contains("matching IDs: 1, 2"), "{error}");
+    assert_eq!(run(&mut s, "motion.study", json!({"study": third, "steps": 40}))["study"], third);
+    run(&mut s, "motion.delete", json!({"study": second}));
+    assert_eq!(run(&mut s, "motion.study", json!({"study": "3", "steps": 50}))["study"], first);
+    run(&mut s, "motion.delete", json!({"study": first}));
+    assert_eq!(run(&mut s, "motion.study", json!({"study": "3", "steps": 60}))["study"], third);
 }
 
 /// Where B's corner (20, 0, 0) is now.
@@ -867,12 +948,6 @@ fn gif_frames(gif: &[u8]) -> (usize, usize, usize) {
     }
 }
 
-/// A PNG's width and height (its IHDR).
-fn png_size(png: &[u8]) -> (u32, u32) {
-    let be = |i: usize| u32::from_be_bytes([png[i], png[i + 1], png[i + 2], png[i + 3]]);
-    (be(16), be(20))
-}
-
 #[test]
 fn an_animation_has_the_frames_and_the_size_asked_for() {
     let mut s = rail();
@@ -1549,4 +1624,18 @@ fn the_overlap_depth_of_pins_in_each_other_is_the_scan_of_every_triangle() {
     // The pins are in each other at every angle (seen at least one way round), and the plate
     // meets the block at some.
     assert!(overlapping > 9, "{overlapping}");
+}
+
+#[test]
+fn occurrence_centres_use_exact_body_bounds() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "component.from_bodies", json!({"bodies": ["Plate"]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Lid"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 0]}));
+    let c = super::centres(&s);
+    assert_eq!(c.len(), 2);
+    assert!((c[0].1.x - 5.0).abs() < 1e-4);
+    assert!((c[1].1.x - 35.0).abs() < 1e-4);
 }

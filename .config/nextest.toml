@@ -89,6 +89,7 @@ filter = """
     | test(=preselect_tests::variable_fillet_round_trip)
     | test(=dialogs::dense::tests::a_saved_smooth_patch_reopens_with_its_setback)
     | test(=dialogs::dense::tests::no_reachable_fillet_option_state_is_refused_for_its_options)
+    | binary(icon_audit)
 ))
 """
 priority = 99
@@ -147,5 +148,12 @@ max-threads = 1
 
 [[profile.local-ci.overrides]]
 platform = "cfg(windows)"
-filter = "package(solidcraft-gpu) | package(solidcraft) | (package(solidcraft-ui-egui) & test(/(offscreen|gpu)/))"
+# Viewport tests also open real devices when their names do not contain "gpu".
+filter = """
+package(solidcraft-gpu) | package(solidcraft) | (package(solidcraft-ui-egui) & (
+    test(/(offscreen|gpu)/)
+    | test(/^viewport::tests::/)
+    | test(=render_workspace::tests::progressive_image_controls_route_to_the_registered_host)
+))
+"""
 test-group = "windows-gpu"

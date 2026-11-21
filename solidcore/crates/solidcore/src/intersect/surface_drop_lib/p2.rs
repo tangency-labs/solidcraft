@@ -52,13 +52,26 @@
 //!   derivatives then stay `SM_UNDEF_DOUBLE` and the tangent drop tests bad.
 //! - **Unported callees.** The offset surface evaluations (`surface.offset_surface`)
 //!   return [`SolidError::Unported`].
+//! - **C0 knot lines.** Not upstream: the [`DropOffset`] also carries the drop surface's
+//!   `C0` knot lines ([`KnotLines`]). `SetProperties` puts a drop point within the
+//!   parameter zero of one on it, where the surface is smooth across the line
+//!   ([`KnotLines::settle`]; [`DropPt::on_knot_line`]), and, there, takes the side from
+//!   the sign of the UV tangent's component across the line. Upstream takes it from the sign of `Su . C'`
+//!   everywhere, which is that sign only where `Su` and `Sv` are perpendicular; off a
+//!   line that is kept, where the side changes no first derivative. On a line the
+//!   tangent is dropped onto the offset evaluated on the side asked for
+//!   ([`OffsetSurface::evaluate_on_sides`]): the offset's own `Evaluate` answers from its
+//!   base's default side whatever side is asked.
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks, the `SM_ASSERT`s and the
 //!   messages (`MSG` at 2000 control points).
 
 use crate::curve::curve::Curve;
-use crate::error::{ignored, Result, SolidError, SM_ERR};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{ignored, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::extent2d::Extent2d;
-use crate::geom::geom_utility::p1::{is_dog_leg, line_point_distance, vec_lin_comb_two_vectors};
+use crate::geom::geom_utility::p1::{
+    directional_derivs, is_dog_leg, line_point_distance, vec_lin_comb_two_vectors,
+};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::SolutionArray;
 use crate::geom::tol::scaled_zero2;
@@ -69,15 +82,18 @@ use crate::math::{max2, max3, rad_to_deg, EFF_ZERO, EFF_ZERO_SQ, PI};
 use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::SurfParamType;
+use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::surface::offset_surface::OffsetSurface;
 use crate::surface::surface::p1::{map_to_2d_dir, zone_tol_3d};
-use crate::surface::surface::p2::SurfaceKind;
+use crate::surface::surface::p2::{drop_vectors, SurfaceKind};
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p7::drop_vectors_at;
 use crate::surface::surface::Surface;
 use crate::topology::ObjectHandle;
 
+use super::boundary_moves::{fix_boundary_curves_bounded, MoveBound};
+use super::knot_lines::KnotLines;
 use super::p1::{fix_boundary_curves, DropPt, SM_ERR_OUTSIDE_OF_DOMAIN, SM_SUCCESS};
 
 /// `SM_ERR_INVALID_INPUT` (`SmMessages.h`).
@@ -128,6 +144,9 @@ pub struct DropOffset {
     pub singularities: u32,
     /// The offset surface, built at its first evaluation (see [`DropOffset::offset_of`]).
     surface: Option<Surface>,
+    /// Not upstream: the drop surface's `C0` knot lines ([`KnotLines`]); none until
+    /// [`DropOffset::set_knot_lines`].
+    knot_lines: KnotLines,
 }
 
 impl DropOffset {
@@ -138,7 +157,20 @@ impl DropOffset {
             offset_distance,
             singularities,
             surface: None,
+            knot_lines: KnotLines::none(),
         }
+    }
+
+    /// Not upstream: gives the drop surface's `C0` knot lines, which
+    /// [`DropPt::set_properties`] puts a drop point on ([`KnotLines::settle`]).
+    pub fn set_knot_lines(&mut self, knot_lines: KnotLines) {
+        self.knot_lines = knot_lines;
+    }
+
+    /// Not upstream: the drop surface's `C0` knot lines.
+    #[must_use]
+    pub const fn knot_lines(&self) -> &KnotLines {
+        &self.knot_lines
     }
 
     /// `SetOffsetDistance`.
@@ -185,12 +217,30 @@ impl DropOffset {
         from_left_u: bool,
         from_left_v: bool,
         vector: Vec3,
+        on_knot_line: bool,
     ) -> Result<Vec2> {
         let off = offset.offset_of(k, surface)?;
-        drop_vectors_at(k, off, uv, side(from_left_u), side(from_left_v), &[vector])?
-            .first()
-            .copied()
-            .ok_or_else(|| SolidError::sm_err(OP_SET))
+        let dropped = if on_knot_line {
+            // not upstream: on a C0 knot line the offset is that of the side asked for
+            let derivs = on_sides(k, off, uv, from_left_u, from_left_v, true)?;
+            match derivs.as_slice() {
+                [_, dv, du, ..] => drop_vectors(*du, *dv, &[vector])?,
+                _ => Vec::new(),
+            }
+        } else {
+            drop_vectors_at(k, off, uv, side(from_left_u), side(from_left_v), &[vector])?
+        };
+        dropped.first().copied().ok_or_else(|| {
+            SolidError::intersect(
+                OP_SET,
+                IntersectFailure::Defect {
+                    why: "the offset surface's first-order evaluation on the knot line's sides \
+                          returned fewer than three rows, though it returns the point and both \
+                          first derivatives (the vector drop returns one vector per vector \
+                          given)",
+                },
+            )
+        })
     }
 
     /// `rOffset.EvaluateDirectionalDerivs(uv, uv_dir, 1, pd, bFromLeftU, bFromLeftV)`
@@ -204,14 +254,66 @@ impl DropOffset {
         uv_dir: Vec2,
         from_left_u: bool,
         from_left_v: bool,
+        on_knot_line: bool,
     ) -> Result<[Point3; 2]> {
         let off = offset.offset_of(k, surface)?;
-        let d = off.evaluate_directional_derivs(k, uv, uv_dir, 1, from_left_u, from_left_v)?;
+        let d = if on_knot_line {
+            // not upstream: on a C0 knot line the offset is that of the side asked for
+            // (`SmSurface::EvaluateDirectionalDerivs`' body on that evaluation)
+            let derivs = on_sides(k, off, uv, from_left_u, from_left_v, false)?;
+            directional_derivs(uv_dir, 1, 1, &derivs)?
+        } else {
+            off.evaluate_directional_derivs(k, uv, uv_dir, 1, from_left_u, from_left_v)?
+        };
         match d.as_slice() {
             [p, d1, ..] => Ok([*p, *d1]),
-            _ => Err(SolidError::sm_err(OP_SET)),
+            _ => Err(SolidError::intersect(
+                OP_SET,
+                IntersectFailure::Defect {
+                    why: "the offset surface's directional evaluation to first order returned \
+                          fewer than two vectors, though it returns the point and the \
+                          derivative asked for",
+                },
+            )),
         }
     }
+}
+
+/// Not upstream: `Evaluate` of the drop's offset `off` at `uv` to first order, row by row
+/// (`[P, Dv, Du, Duv]`), with its base evaluated on the sides asked for
+/// ([`OffsetSurface::evaluate_on_sides`]). The drop reads it on a `C0` knot line of its
+/// surface, where the offset's own `Evaluate` answers from the base's default side
+/// whatever side is asked.
+fn on_sides(
+    k: &Kernel,
+    off: &Surface,
+    uv: Point2,
+    from_left_u: bool,
+    from_left_v: bool,
+    non_zero_tangents: bool,
+) -> Result<Vec<Vec3>> {
+    let SurfaceKind::OffsetSurface(offset) = off.kind() else {
+        return Err(Failure::new(
+            OP_SET,
+            IntersectFailure::Defect {
+                why: "the drop's stand-in surface is not an offset surface, though the drop \
+                      builds it as one",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error());
+    };
+    let flags = EvaluateFlags {
+        u_side: side(from_left_u),
+        v_side: side(from_left_v),
+        only_upper_half: true,
+        non_zero_tangents,
+    };
+    Ok(offset
+        .evaluate_on_sides(k, uv, 1, 1, flags)?
+        .into_iter()
+        .flatten()
+        .collect())
 }
 
 /// `SM_DEG2RAD(a)` = `a * (SM_PI / 180.0)`.
@@ -398,13 +500,36 @@ impl DropPt {
             )?;
         }
 
+        // not upstream: a drop point within the parameter zero of a C0 knot line across
+        // which the surface is smooth is on the line, where the evaluations below
+        // answer from the side asked
+        (self.uv_pd[0], self.on_knot_line) = offset.knot_lines.settle(k, surface, self.uv_pd[0])?;
+
         // Surface pos and Srf U and V Derivs
         let (mut p3d, mut srf_du, mut srf_dv) =
             surface.evaluate_1st_derivatives(k, self.uv_pd[0], true, true)?;
 
         // set m_bFromLeftU and m_bFromLeftV
-        let from_left_u = srf_du.dot(self.crv_pd[1]) >= 0.0;
-        let from_left_v = srf_dv.dot(self.crv_pd[1]) >= 0.0;
+        let mut from_left_u = srf_du.dot(self.crv_pd[1]) >= 0.0;
+        let mut from_left_v = srf_dv.dot(self.crv_pd[1]) >= 0.0;
+
+        // not upstream: on a C0 knot line the side is the one the UV curve runs to, the
+        // sign of its u' (or v'). The sign of Su . C' above is that sign only where Su
+        // and Sv are perpendicular.
+        let [on_u_line, on_v_line] = self.on_knot_line;
+        let on_knot_line = on_u_line || on_v_line;
+        if on_knot_line {
+            let uv_tangent = ignored(drop_vectors(srf_du, srf_dv, &[self.crv_pd[1]]))?
+                .and_then(|d| d.first().copied());
+            if let Some(uv_tangent) = uv_tangent {
+                if on_u_line {
+                    from_left_u = uv_tangent.x >= 0.0;
+                }
+                if on_v_line {
+                    from_left_v = uv_tangent.y >= 0.0;
+                }
+            }
+        }
         self.from_left_u = Some(from_left_u);
         self.from_left_v = Some(from_left_v);
         self.pd_3d[0] = p3d;
@@ -564,17 +689,30 @@ impl DropPt {
         if crv_speed < EFF_ZERO && self.degen_curve == Some(false) {
             // inform the public (when the drop was good) either way it is SM_ERR
             self.good_drop = Some(false);
-            return Err(SolidError::sm_err(OP_SET));
+            return Err(SolidError::intersect(
+                OP_SET,
+                IntersectFailure::DegenerateTangent,
+            ));
         }
 
         // when m_bDegenCurve != TRUE
         if self.degen_curve != Some(true) {
             // can't drop Crv1stDeriv vectors parallel to m_SrfNormal (degenerate case)
-            let srf_norm_crv_tan_ang_rad =
-                self.srf_normal.angle_between(self.crv_pd[1]).unwrap_or(0.0);
-            if rad_to_deg(srf_norm_crv_tan_ang_rad) < 3.0 {
+            // (no angle: a zero tangent or normal, which upstream reads as 0 degrees; the
+            // angle's error stays the cause, rule 6)
+            let stop = match self.srf_normal.angle_between(self.crv_pd[1]) {
+                Ok(rad) => Some(rad_to_deg(rad))
+                    .filter(|degrees| *degrees < 3.0)
+                    .map(|degrees| {
+                        Failure::new(OP_SET, IntersectFailure::TangentAlongNormal { degrees })
+                    }),
+                Err(e) => {
+                    Some(Failure::new(OP_SET, IntersectFailure::DegenerateTangent).caused_by(e))
+                }
+            };
+            if let Some(stop) = stop {
                 self.good_drop = Some(false);
-                return Err(SolidError::sm_err(OP_SET));
+                return Err(stop.into_error());
             }
         }
 
@@ -594,6 +732,7 @@ impl DropPt {
                 from_left_u,
                 from_left_v,
                 self.crv_pd[1],
+                on_knot_line,
             )?;
         }
 
@@ -621,6 +760,7 @@ impl DropPt {
                     self.uv_pd[1],
                     from_left_u,
                     from_left_v,
+                    on_knot_line,
                 ))?
                 .unwrap_or([Point3::UNDEF; 2]);
                 let uv_speed = self.uv_pd[1].length();
@@ -769,9 +909,9 @@ impl DropPt {
         let (found_answer, local_uv) =
             local_point_solve(k, surface, uv_domain, end.crv_pd[0], end.uv_pd[0])?;
 
-        // MINIMIZE should always find some solution.
+        // MINIMIZE should always find some solution (none found: rule 7).
         if !found_answer {
-            return Err(SolidError::sm_err(OP_NEXT));
+            return Err(SolidError::intersect(OP_NEXT, IntersectFailure::NoFoot));
         }
 
         // load SpanEnd[UV] from DropPoint(SpandEnd[CrvPt]) solution
@@ -854,10 +994,9 @@ impl DropPt {
             // A larger correction rejects this candidate without moving the endpoint.
             match start.check_seam_jump(k, surface, srf_closure, approx_tol_3d, end) {
                 Ok(()) => {}
-                Err(SolidError::Upstream {
-                    code: SM_ERR_OUTSIDE_OF_DOMAIN,
-                    ..
-                }) => return Ok(SM_ERR_OUTSIDE_OF_DOMAIN),
+                Err(e) if e.upstream_status() == Some(SM_ERR_OUTSIDE_OF_DOMAIN) => {
+                    return Ok(SM_ERR_OUTSIDE_OF_DOMAIN)
+                }
                 Err(e) => return Err(e),
             }
 
@@ -922,14 +1061,51 @@ pub fn flush_curve(
     curves: &mut Vec<BSplineCurve>,
     fix_bc_change: &mut bool,
 ) -> Result<()> {
+    flush_curve_bounded(
+        uv_domain,
+        ctrl_poly,
+        knots,
+        uv_tol_x,
+        uv_tol_y,
+        curves,
+        fix_bc_change,
+        None,
+    )
+}
+
+/// [`flush_curve`] with the polygon fixed up by
+/// [`super::boundary_moves::fix_boundary_curves_bounded`] where `bound` is given (not
+/// upstream: a B-spline surface's drop, with the kernel whose cancel token it polls), by
+/// [`fix_boundary_curves`] otherwise.
+///
+/// # Errors
+///
+/// As [`flush_curve`]; those of [`super::boundary_moves::fix_boundary_curves_bounded`].
+#[allow(clippy::too_many_arguments)] // `sm_FlushCrv` and the bound
+pub fn flush_curve_bounded(
+    uv_domain: &Extent2d,
+    ctrl_poly: &mut Vec<Point3>,
+    knots: &mut Vec<f64>,
+    uv_tol_x: f64,
+    uv_tol_y: f64,
+    curves: &mut Vec<BSplineCurve>,
+    fix_bc_change: &mut bool,
+    bound: Option<(&Kernel, &MoveBound)>,
+) -> Result<()> {
     // no work: no knots
     let num_knots = knots.len();
     if num_knots == 0 {
         return Ok(());
     }
 
-    // postprocess the curve
-    if fix_boundary_curves(ctrl_poly, uv_domain, uv_tol_x, uv_tol_y)? {
+    // postprocess the curve (not upstream: bounded moves where the surface allows it)
+    let fixed = match bound {
+        Some((k, b)) => {
+            fix_boundary_curves_bounded(k, ctrl_poly, knots, uv_domain, uv_tol_x, uv_tol_y, b)?
+        }
+        None => fix_boundary_curves(ctrl_poly, uv_domain, uv_tol_x, uv_tol_y)?,
+    };
+    if fixed {
         *fix_bc_change = true;
     }
 
@@ -942,7 +1118,8 @@ pub fn flush_curve(
         *m = 4;
     }
 
-    // create degree 3 piecewise C1 BSpline
+    // create degree 3 piecewise BSpline (C1 at a knot whose two spans share their
+    // tangent; a corner where they do not, on a C0 knot line of the surface)
     let new_bsp = BSplineCurve::create_canonical(&CanonicalData {
         dim: 2,
         degree: 3,
@@ -990,6 +1167,48 @@ pub fn add_to_curve(
     uv_tol_y: f64,
     curves: &mut Vec<BSplineCurve>,
     fix_bc_change: &mut bool,
+) -> Result<()> {
+    add_to_curve_bounded(
+        k,
+        surface,
+        uv_domain,
+        start,
+        end,
+        ctrl_poly,
+        knots,
+        approx_tol_3d,
+        uv_tol_x,
+        uv_tol_y,
+        curves,
+        fix_bc_change,
+        None,
+    )
+}
+
+/// [`add_to_curve`] whose flush fixes the polygon up as [`flush_curve_bounded`] does with
+/// `bound` (not upstream). The span's own pole straightening (a span starting or ending on
+/// a pole whose polygon is a dog-leg moves its pole end along the pole, upstream's code
+/// below) happens before the polygon is fixed up and is not bounded: `bound` covers only
+/// the boundary moves of [`super::boundary_moves::fix_boundary_curves_bounded`].
+///
+/// # Errors
+///
+/// As [`add_to_curve`].
+#[allow(clippy::too_many_arguments)] // `sm_AddToCurve` and the bound
+pub fn add_to_curve_bounded(
+    k: &Kernel,
+    surface: &Surface,
+    uv_domain: &Extent2d,
+    start: &DropPt,
+    end: &DropPt,
+    ctrl_poly: &mut Vec<Point3>,
+    knots: &mut Vec<f64>,
+    approx_tol_3d: f64,
+    uv_tol_x: f64,
+    uv_tol_y: f64,
+    curves: &mut Vec<BSplineCurve>,
+    fix_bc_change: &mut bool,
+    bound: Option<&MoveBound>,
 ) -> Result<()> {
     // locals for hermite curve segment
     let scale = end.t - start.t;
@@ -1050,7 +1269,7 @@ pub fn add_to_curve(
         {
             // span is notC0 or zeroLength - create current curve, restart lists, and
             // carry on.
-            flush_curve(
+            flush_curve_bounded(
                 uv_domain,
                 ctrl_poly,
                 knots,
@@ -1058,6 +1277,7 @@ pub fn add_to_curve(
                 uv_tol_y,
                 curves,
                 fix_bc_change,
+                bound.map(|b| (k, b)),
             )?;
         }
     } else if !knots.is_empty() {
@@ -1091,7 +1311,12 @@ pub fn add_to_curve(
 
     // return error for huge drop point counts
     if ctrl_poly.len() >= MAX_CTRL_POINTS {
-        return Err(SolidError::sm_err(OP_ADD));
+        return Err(SolidError::intersect(
+            OP_ADD,
+            IntersectFailure::TooManyControlPoints {
+                limit: MAX_CTRL_POINTS,
+            },
+        ));
     }
 
     // all done
@@ -1272,6 +1497,43 @@ mod tests {
         assert!(p
             .set_properties(&k, &s, &mut off, SS_NONE, 1e-6, &d, true)
             .is_err());
+        assert_eq!(p.good_drop, Some(false));
+    }
+
+    /// A zero tangent with the curve's degeneracy unknown has no angle to the normal: the
+    /// stop is a degenerate tangent (`SM_ERR`) that keeps the angle's error as its cause.
+    #[test]
+    fn set_properties_zero_tangent_keeps_the_angle_error() {
+        let k = Kernel::default();
+        let s = plane();
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let mut p = DropPt::new(0.0, None);
+        p.uv_pd = [Point2::new(0.5, 0.5), Vec2::new(0.0, 0.0)];
+        p.crv_pd = [
+            Vec3::new(0.5, 0.5, 0.0),
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 0.0),
+        ];
+        let mut off = DropOffset::new(1.0, SS_NONE);
+        let e = p
+            .set_properties(&k, &s, &mut off, SS_NONE, 1e-6, &d, true)
+            .unwrap_err();
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::DegenerateTangent)
+        );
+        assert_eq!(crate::error::upstream_status(&e), Some(SM_ERR));
+        assert!(
+            matches!(
+                e.cause(),
+                Some(SolidError::InvalidInput {
+                    operation: "geom::vector3d::Vec3::angle_between",
+                    ..
+                })
+            ),
+            "{:?}",
+            e.cause()
+        );
         assert_eq!(p.good_drop, Some(false));
     }
 }

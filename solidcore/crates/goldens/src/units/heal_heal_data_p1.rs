@@ -353,6 +353,61 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
 
+    /// WR-56 (#17467), the moved rows `gen0045` and `gen0317`: their moved edge-face gaps,
+    /// certified by the healer's gap certificate
+    /// ([`super::super::heal_heal_data_p2::certificates::moved_row`]); the histogram
+    /// counts that moved (`edge_face_gap_3d_histogram`) follow from the gaps.
+    #[test]
+    fn wr56_moved_edge_face_gaps_are_enclosed() {
+        use super::super::heal_heal_data_p2::certificates::moved_row;
+        moved_row(
+            &Runner,
+            "gen0045",
+            &[(5.903_216_513_378_185e-7, 3.186_438_432_275_808_6e-9)],
+        );
+        // the rows whose moves the golden's digest rounds away (raw values, #17467)
+        moved_row(&Runner, "gen0009", &[(9.48438735712286e-6, 2.755733536258961e-12)]);
+        moved_row(
+            &Runner,
+            "gen0088",
+            &[
+                (1.3408210366687173e-11, 6.542134276321347e-11),
+                (2.0397075596751674e-10, 1.61007308758266e-10),
+                (3.2909892772805683e-11, 6.881213628121432e-12),
+            ],
+        );
+        moved_row(
+            &Runner,
+            "gen0248",
+            &[
+                (4.2024043793169426e-12, 9.31277205119929e-13),
+                (2.2326390489584347e-10, 1.2519459646330334e-10),
+                (1.0871405056746442e-10, 8.578434181108478e-11),
+            ],
+        );
+        moved_row(&Runner, "gen0262", &[(2.012861335151245e-7, 3.0950249795364405e-11)]);
+        moved_row(
+            &Runner,
+            "gen0311",
+            &[
+                (7.760319149493465e-11, 1.2890010306769574e-10),
+                (1.1896801496248861e-11, 4.530918637348309e-13),
+                (1.6420119818263062e-10, 7.759767649831293e-11),
+                (2.1786674701485847e-10, 5.15297388527492e-13),
+            ],
+        );
+        moved_row(
+            &Runner,
+            "gen0317",
+            &[
+                (1.476_947_657_262_371_3e-12, 2.325_351_038_155_436e-12),
+                (3.182_541_958_765_899e-10, 3.392_163_521_706_605e-13),
+                (3.150_510_645_990_183_6e-10, 3.648_225_802_776_042_5e-11),
+                (4.334_168_808_080_147_3e-10, 2.725_191_286_921_962_3e-11),
+            ],
+        );
+    }
+
     #[test]
     fn inputs_round_trip() {
         let mut rng = Rng::new(7);

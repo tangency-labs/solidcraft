@@ -171,11 +171,45 @@ impl IconData {
     };
 }
 
-/// A host's icons: its [`IconData`] and the masters parsed from it on first use. Keep it in a `static`.
+/// A host's own masters over another host's [`IconData`] ([`IconSet::extended`]): drawn in that
+/// data's colour roles and accents. For a name both have, the extension's master, alias or
+/// default accent is the one drawn.
+#[derive(Clone, Copy)]
+pub struct IconExtension {
+    /// The host's masters, as [`IconData::masters`].
+    pub masters: &'static [(&'static str, &'static str, &'static str)],
+    /// The host's aliases, as [`IconData::aliases`]; they may name the data's masters too.
+    pub aliases: &'static [(&'static str, &'static str, &'static str)],
+    /// The host's default accents, as [`IconData::icon_accents`], by the data's accent names.
+    pub icon_accents: &'static [(&'static str, &'static str)],
+}
+
+impl IconExtension {
+    /// No masters of the host's own.
+    pub const NONE: IconExtension = IconExtension { masters: &[], aliases: &[], icon_accents: &[] };
+}
+
+/// A host's icons: its [`IconData`], any [`IconExtension`] over it, and the masters parsed from
+/// them on first use. Keep it in a `static`.
 pub struct IconSet {
     data: IconData,
+    extension: IconExtension,
     table: OnceLock<Table>,
+    /// Each icon id's master and accent once resolved: every icon drawn at every frame looked
+    /// its id up along the alias and accent lists.
+    resolved: OnceLock<std::sync::Mutex<HashMap<String, Resolved>>>,
+    /// Masters added while the app runs ([`IconSet::add`]): artwork a plugin package ships.
+    added: OnceLock<std::sync::Mutex<HashMap<&'static str, &'static Doc>>>,
 }
+
+/// The largest SVG source [`IconSet::add`] takes.
+pub const MAX_ADDED_BYTES: usize = 64 * 1024;
+
+/// The most masters [`IconSet::add`] keeps: each is kept for the life of the process.
+pub const MAX_ADDED: usize = 1024;
+
+/// The deepest nesting of groups, masks and clips a master may have.
+const MAX_DEPTH: usize = 32;
 
 /// The parsed masters: full size, and the small-slot variants.
 struct Table {
@@ -194,12 +228,23 @@ pub struct Resolved {
 impl IconSet {
     /// The set over `data`. Its masters are parsed the first time one is drawn.
     pub const fn new(data: IconData) -> Self {
-        Self { data, table: OnceLock::new() }
+        Self::extended(data, IconExtension::NONE)
     }
 
-    /// The set's data.
+    /// The set over `data` with a host's own masters, aliases and default accents, which take
+    /// precedence for a name both have. `data` is not copied: it is the same static tables.
+    pub const fn extended(data: IconData, extension: IconExtension) -> Self {
+        Self { data, extension, table: OnceLock::new(), resolved: OnceLock::new(), added: OnceLock::new() }
+    }
+
+    /// The set's data (without its extension).
     pub fn data(&self) -> &IconData {
         &self.data
+    }
+
+    /// The host's masters over [`IconSet::data`]; [`IconExtension::NONE`] for a plain set.
+    pub fn extension(&self) -> &IconExtension {
+        &self.extension
     }
 
     fn role(&self, name: &str) -> Option<usize> {
@@ -209,7 +254,8 @@ impl IconSet {
     fn table(&'static self) -> &'static Table {
         self.table.get_or_init(|| {
             let (mut big, mut small) = (HashMap::new(), HashMap::new());
-            for (id, fam, src) in self.data.masters {
+            // The extension's masters come first, so they win a name both have.
+            for (id, fam, src) in self.extension.masters.iter().chain(self.data.masters) {
                 match self.parse(src) {
                     Ok(doc) => {
                         let map = if *fam == "small" { &mut small } else { &mut big };
@@ -248,6 +294,9 @@ impl IconSet {
         let (mut mask_ids, mut clip_ids): (HashMap<String, usize>, HashMap<String, usize>) = (HashMap::new(), HashMap::new());
         let mut stack: Vec<Frame> = Vec::new();
         for t in tags(src)? {
+            if stack.len() >= MAX_DEPTH {
+                return Err("nested too deeply".into());
+            }
             match (t.name, t.close) {
                 ("svg" | "title", _) => {}
                 ("defs", false) => stack.push(Frame::Defs),
@@ -335,6 +384,47 @@ impl IconSet {
         Ok(doc)
     }
 
+    /// Add a master while the app runs, named `name`, from SVG source in this set's subset and
+    /// colour roles (the same check the built-in masters pass: no other elements, no colours of
+    /// its own, no references outside the file). It draws like any master, in the theme's roles.
+    /// A name the set already has is refused, so added artwork never replaces the app's. Adding
+    /// the same name again keeps the first. The source is at most [`MAX_ADDED_BYTES`], and at
+    /// most [`MAX_ADDED`] masters are added.
+    pub fn add(&'static self, name: &str, src: &str) -> Result<(), String> {
+        if src.len() > MAX_ADDED_BYTES {
+            return Err(format!("larger than {} KiB", MAX_ADDED_BYTES / 1024));
+        }
+        let added = self.added.get_or_init(Default::default);
+        if added.lock().map_err(|_| "unavailable")?.contains_key(name) {
+            return Ok(());
+        }
+        if name.is_empty() || name == PLACEHOLDER || !self.resolve_master(name).placeholder {
+            return Err(format!("the name {name} is taken"));
+        }
+        let doc = self.parse(src)?;
+        let mut added = added.lock().map_err(|_| "unavailable")?;
+        if added.len() >= MAX_ADDED {
+            return Err("too many added icons".into());
+        }
+        if !added.contains_key(name) {
+            added.insert(Box::leak(name.to_owned().into_boxed_str()), Box::leak(Box::new(doc)));
+        }
+        drop(added);
+        // A name drawn before it was added resolved to the placeholder.
+        if let Some(cache) = self.resolved.get()
+            && let Ok(mut cache) = cache.lock()
+        {
+            cache.remove(name);
+        }
+        Ok(())
+    }
+
+    /// An added master ([`IconSet::add`]) by name, with the name as kept.
+    fn added(&self, name: &str) -> Option<(&'static str, &'static Doc)> {
+        let added = self.added.get()?.lock().ok()?;
+        added.get_key_value(name).map(|(k, v)| (*k, *v))
+    }
+
     /// The index of the accent `name`, or `None` for the empty name (the base ramp) or an unknown one.
     pub fn accent_index(&self, name: &str) -> Option<usize> {
         if name.is_empty() { None } else { self.data.accent_names.iter().position(|a| *a == name) }
@@ -342,21 +432,37 @@ impl IconSet {
 
     /// A semantic default belongs to the requested id, never to the caller's current workspace.
     fn default_accent(&self, name: &str) -> Option<usize> {
-        self.data.icon_accents.iter().find(|(id, _)| *id == name).and_then(|(_, accent)| self.accent_index(accent))
+        let find = |accents: &'static [(&'static str, &'static str)]| accents.iter().find(|(id, _)| *id == name);
+        find(self.extension.icon_accents).or_else(|| find(self.data.icon_accents)).and_then(|(_, accent)| self.accent_index(accent))
     }
 
     /// The master and accent for an icon id: an alias (with its accent), a master of that name,
     /// or the placeholder.
     pub fn resolve(&'static self, name: &str) -> Resolved {
-        let resolved = self.resolve_master(name);
+        let cache = self.resolved.get_or_init(Default::default);
+        let known = cache.lock().ok().and_then(|c| c.get(name).copied());
+        let resolved = known.unwrap_or_else(|| {
+            let resolved = self.resolve_master(name);
+            if let Ok(mut c) = cache.lock() {
+                c.insert(name.to_owned(), resolved);
+            }
+            resolved
+        });
         audit::record(name, resolved);
         resolved
     }
 
     fn resolve_master(&'static self, name: &str) -> Resolved {
+        if let Some((master, _)) = self.added(name) {
+            return Resolved { master, accent: None, placeholder: false };
+        }
         let big = &self.table().big;
         let placeholder = Resolved { master: PLACEHOLDER, accent: None, placeholder: true };
-        if let Some((_, master, accent)) = self.data.aliases.iter().find(|(a, _, _)| *a == name) {
+        let find = |aliases: &'static [(&'static str, &'static str, &'static str)]| aliases.iter().find(|(a, _, _)| *a == name);
+        // The extension's names first: its alias, then its master, then the data's alias.
+        let extends = self.extension.masters.iter().any(|(id, fam, _)| *id == name && *fam != "small");
+        let alias = find(self.extension.aliases).or_else(|| if extends { None } else { find(self.data.aliases) });
+        if let Some((_, master, accent)) = alias {
             return match big.get_key_value(master) {
                 Some((k, _)) => Resolved { master: k, accent: self.accent_index(accent).or_else(|| self.default_accent(name)), placeholder: false },
                 None => placeholder,
@@ -371,6 +477,9 @@ impl IconSet {
     /// The master to draw at `px` pixels: the small-slot variant where one exists, the
     /// placeholder for an unknown master, `None` when the set has neither.
     pub fn doc_for(&'static self, master: &str, px: u32) -> Option<&'static Doc> {
+        if let Some((_, doc)) = self.added(master) {
+            return Some(doc);
+        }
         let Table { big, small } = self.table();
         if let Some(doc) = small.get(master).filter(|_| px <= 24) {
             return Some(doc);

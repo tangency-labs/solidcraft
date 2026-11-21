@@ -5,7 +5,7 @@
 //! | Rust                                   | Upstream                                  |
 //! |----------------------------------------|-------------------------------------------|
 //! | [`create_faces_with_curves`]           | `SmBrep::CreateFacesWithCurves`           |
-//! | [`create_planar_faces_with_3d_curves`] | `SmBrep::CreatePlanarFacesWith3DCurves`   |
+//! | [`create_planar_faces_with_3d_curves`], [`create_planar_faces_with_3d_curves_and_edges`] | `SmBrep::CreatePlanarFacesWith3DCurves` |
 //! | [`create_planar_face_with_3d_curves`]  | `SmBrep::CreatePlanarFaceWith3DCurves`    |
 //! | [`create_face_in_region_from_surface`] | `SmBrep::CreateFaceInRegionFromSurface`   |
 //! | [`create_face_from_surface`]           | `SmBrep::CreateFaceFromSurface`           |
@@ -25,6 +25,14 @@
 //! - **Notifications.** The Euler operators notify through the caller's [`NotifyEnv`];
 //!   the new face's surface owner is named by the caller's `this_face`, as in
 //!   [`p7::make_face_with_curves`].
+//! - **Exact natural trims (WR-722, opt-in `keep_exact_pcurves`).** Faces made on a
+//!   surface's parameter rectangle keep its given iso-line pcurves. Reprojecting a
+//!   closed section at a collapsed horn rail can choose a different singular parameter.
+//! - **Pole partitions.** After continuity splitting, a B-spline patch is also split
+//!   at interior knot iso curves whose positive-weight control points coincide within
+//!   the B-rep tolerance. A horn sweep's collapsed rail then lies on face boundaries,
+//!   independently of the closed profile's seam. A patch whose isos collapse at every
+//!   knot in a direction is thinner than the tolerance there and is not split.
 //! - **Dead code.** `CreateFaceInRegionFromSurface`'s "new algorithm" branch is not
 //!   ported: `sbUseOldAlgorithm` is a `static constexpr TRUE`, so it is unreachable.
 //! - **Null dereferences** upstream are [`SolidError::InvalidInput`]: a null surface
@@ -66,7 +74,7 @@
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError, SM_ERR_INVALID_INPUT};
+use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -83,7 +91,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::query::face::p1 as qf1;
 use crate::surface::surface::p5::DropPointOptions;
-use crate::surface::surface::Surface;
+use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p3::{self, DeleteFaceOptions};
 use crate::topology::brep::p5::{self, EdgeInFace};
 use crate::topology::brep::p7::{self, FaceCurvesInput};
@@ -131,6 +139,9 @@ pub struct NewFaces {
     pub shell: Option<ShellId>,
     /// `rResultingFaces` / `rNewFaces`.
     pub faces: Vec<FaceId>,
+    /// (not upstream; [`create_faces_with_curves`] only) The edge made from each curve,
+    /// in the order of the curves given.
+    pub curve_edges: Vec<Option<EdgeId>>,
 }
 
 fn invalid(reason: &'static str) -> SolidError {
@@ -152,12 +163,15 @@ fn with_editing<R>(b: &mut Brep, f: impl FnOnce(&mut Brep) -> Result<R>) -> Resu
     r
 }
 
-/// `SER(SM_ERR)` after a failed call: [`SolidError::Unported`] goes through.
-fn as_sm_err(e: SolidError) -> SolidError {
-    if e.is_unported_or_cancelled() {
-        e
-    } else {
-        SolidError::sm_err(OP)
+/// `SER(SM_ERR)` after a failed call: a failure saying `what` could not be done, with
+/// status `SM_ERR`; [`SolidError::Unported`] goes through.
+fn failed_as(what: &'static str) -> impl Fn(SolidError) -> SolidError {
+    move |e| {
+        if e.is_unported_or_cancelled() {
+            e
+        } else {
+            SolidError::topology_failed(OP, what)
+        }
     }
 }
 
@@ -167,7 +181,7 @@ fn as_sm_err(e: SolidError) -> SolidError {
 fn plane_failed(e: SolidError) -> SolidError {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => e,
-        other => as_sm_err(other),
+        other => failed_as("the plane through the curves could not be made")(other),
     }
 }
 
@@ -206,14 +220,17 @@ pub fn create_face_in_region_from_surface(
     fenv: &mut FaceBuildEnv<'_, '_>,
 ) -> Result<FaceInRegion> {
     // check inputs
-    let surface = surface.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let surface = surface.ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))?;
 
     // Check for region default.
     let region = region.or_else(|| b.infinite_region());
 
     // check input - crUVDomain contained within the pSurface->GetNaturalUVDomain()
     if !uv_domain.is_contained_by(&surface.natural_uv_domain_with_nurb(k)?, EFF_ZERO) {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the UV domain is not inside the surface's natural domain",
+        ));
     }
 
     with_editing(b, |b| {
@@ -226,10 +243,7 @@ pub fn create_face_in_region_from_surface(
         let mut uv_curves: Vec<Curve> = Vec::new();
         for (ii, mut uv) in natural.uv_curves.into_iter().enumerate() {
             let crv_domain = at(&natural.curves_3d, ii)?.natural_interval();
-            ignore_status(crate::error::passed_on(
-                uv.edit_parameterization(&crv_domain),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            uv.edit_parameterization(&crv_domain)?;
             uv_curves.push(Curve::from(uv));
         }
 
@@ -242,6 +256,7 @@ pub fn create_face_in_region_from_surface(
             orientations: natural.orients,
             loop_points: Vec::new(),
         };
+        let keep = k.fixes.keep_exact_pcurves.then_some(true);
         let made = p7::make_face_with_curves(
             k,
             b,
@@ -250,11 +265,13 @@ pub fn create_face_in_region_from_surface(
             surface,
             uv_domain,
             OrientType::Same,
-            None,
+            keep,
             fenv.this_face,
             fenv.env,
         )
-        .map_err(as_sm_err)?;
+        .map_err(failed_as(
+            "the face with a rectangular trim could not be made",
+        ))?;
 
         // set m_bRectangularTrim = TRUE
         let face = made
@@ -307,7 +324,7 @@ pub fn create_faces_from_surface(
     fenv: &mut FaceBuildEnv<'_, '_>,
 ) -> Result<Vec<FaceId>> {
     let _ = uv_domain; // SM_REF1(crUVDomain)
-    let surface = surface.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let surface = surface.ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))?;
     let mut new_faces = Vec::new();
 
     with_editing(b, |b| {
@@ -351,16 +368,84 @@ pub fn create_faces_from_surface(
             }
         }
 
-        // for every subpatch - create face
+        // A pole can be internal to an otherwise G1 patch. Keep that collapsed
+        // rail on a face boundary, even when the profile's seam is elsewhere.
         for srf in sub_patches {
-            let dom = srf.natural_uv_domain_with_nurb(k)?;
-            let region = b.infinite_region();
-            let made = create_face_in_region_from_surface(k, b, region, Some(srf), &dom, fenv)?;
-            new_faces.push(made.face);
+            for part in split_pole_lines(k, srf, b.tolerance())? {
+                let dom = part.natural_uv_domain_with_nurb(k)?;
+                let region = b.infinite_region();
+                let made =
+                    create_face_in_region_from_surface(k, b, region, Some(part), &dom, fenv)?;
+                new_faces.push(made.face);
+            }
         }
         Ok(())
     })?;
     Ok(new_faces)
+}
+
+/// Split collapsed interior knot iso curves after the ordinary continuity splits.
+/// On the whole sweep a rail may move along lines and collapse only at a bend.
+/// A patch whose iso curves collapse at every knot in a direction, its first and
+/// last included, is thinner than the tolerance across that direction: it has no
+/// pole there to keep on a boundary, and it is left whole.
+fn split_pole_lines(k: &Kernel, surface: Surface, tolerance: f64) -> Result<Vec<Surface>> {
+    let mut parts = vec![surface];
+    for direction in [SurfParamType::U, SurfParamType::V] {
+        let mut split = Vec::new();
+        for mut part in parts {
+            let mut poles = Vec::new();
+            if let SurfaceKind::BSpline(net) = part.kind() {
+                let (knots, _) = net.knots(direction, None)?;
+                let mut collapsed = Vec::new();
+                for &parameter in &knots {
+                    collapsed.push(iso_collapses(k, net, direction, parameter, tolerance)?);
+                }
+                if !collapsed.iter().all(|&c| c) {
+                    let last = knots.len().saturating_sub(1);
+                    for (index, (&parameter, &c)) in knots.iter().zip(&collapsed).enumerate() {
+                        if c && index > 0 && index < last {
+                            poles.push(parameter);
+                        }
+                    }
+                }
+            }
+            for parameter in poles {
+                let (left, right) = part.split_at(k, parameter, direction)?;
+                split.push(left);
+                part = right;
+            }
+            split.push(part);
+        }
+        parts = split;
+    }
+    Ok(parts)
+}
+
+/// Whether the iso curve of `net` at `parameter` in `direction` lies within `tolerance`
+/// of one point. Positive rational basis functions sum to one, so the control points
+/// bound the entire iso curve, including between knots.
+fn iso_collapses(
+    k: &Kernel,
+    net: &crate::nurbs::b_spline_surface::BSplineSurface,
+    direction: SurfParamType,
+    parameter: f64,
+    tolerance: f64,
+) -> Result<bool> {
+    use crate::nurbs::b_spline_surface::p2::IsoCurveOptions;
+
+    let iso = net
+        .create_iso_parametric_curve(k, direction, parameter, IsoCurveOptions::default())?
+        .curve
+        .canonical()?;
+    let Some(anchor) = iso.control_points.first() else {
+        return Ok(false);
+    };
+    Ok(iso.weights.iter().all(|w| w.is_finite() && *w > 0.0)
+        && iso.control_points.iter().all(|p| {
+            let gap = anchor.distance(*p);
+            gap.is_finite() && gap <= tolerance
+        }))
 }
 
 // ---- CreatePlanarFaceWith3DCurves -----------------------------------------------------
@@ -459,6 +544,31 @@ pub fn create_planar_faces_with_3d_curves(
     tol_3d: f64,
     fenv: &mut FaceBuildEnv<'_, '_>,
 ) -> Result<Vec<FaceId>> {
+    create_planar_faces_with_3d_curves_and_edges(k, b, region, curves, tol_3d, fenv)
+        .map(|(faces, _)| faces)
+}
+
+/// The faces [`create_planar_faces_with_3d_curves_and_edges`] makes, and the edge made
+/// from each curve with that curve's index.
+pub type PlanarFacesAndEdges = (Vec<FaceId>, Vec<(EdgeId, usize)>);
+
+/// [`create_planar_faces_with_3d_curves`], also returning the edge made from each
+/// curve with that curve's index in `curves` (not upstream: the skin's face sources,
+/// tangency-labs/solidcore#3139). The faces are those
+/// [`create_planar_faces_with_3d_curves`] makes.
+///
+/// # Errors
+///
+/// Those of [`create_planar_faces_with_3d_curves`]; the edges add none (a curve that
+/// made no edge is left out).
+pub fn create_planar_faces_with_3d_curves_and_edges(
+    k: &mut Kernel,
+    b: &mut Brep,
+    region: Option<RegionId>,
+    curves: &[Curve],
+    tol_3d: f64,
+    fenv: &mut FaceBuildEnv<'_, '_>,
+) -> Result<PlanarFacesAndEdges> {
     let _ = tol_3d; // SM_REF1(d3DToleranceArg)
 
     // Check for region default.
@@ -484,7 +594,19 @@ pub fn create_planar_faces_with_3d_curves(
         Some(plane.plane),
         fenv,
     )?;
-    Ok(made.faces)
+    // one entry per ordered curve, in order (create_faces_with_curves pushes one per curve);
+    // were a count ever to differ, no edge is recorded, so the trace says `EdgeUntraced`
+    // rather than give a wall another curve's index
+    let edges = if made.curve_edges.len() == plane.ordered_curves.len() {
+        made.curve_edges
+            .iter()
+            .zip(&plane.ordered_curves)
+            .filter_map(|(&e, &ci)| e.map(|e| (e, ci)))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    Ok((made.faces, edges))
 }
 
 // ---- CreateFacesWithCurves ------------------------------------------------------------
@@ -521,7 +643,8 @@ pub fn create_faces_with_curves(
 
     with_editing(b, |b| {
         let mut out = NewFaces::default();
-        let mut curves_3d = curves_3d.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let mut curves_3d =
+            curves_3d.ok_or_else(|| SolidError::topology_missing(OP, "the 3D curves"))?;
         let tol = b.tolerance();
 
         // First create the big face covering the whole surface.
@@ -536,7 +659,10 @@ pub fn create_faces_with_curves(
 
         let face_loops = face2::loops(b, new_face, false, None)?;
         if face_loops.len() != 1 {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the natural face does not have exactly one loop",
+            ));
         }
         // The loop we will have to delete
         let big_loop = *at(&face_loops, 0)?;
@@ -554,7 +680,8 @@ pub fn create_faces_with_curves(
                     .ok_or_else(|| invalid("loop counts exceed the curves"))?
                     .take();
                 let last_edge = jj + 1 == n_edges;
-                let curve = curve.ok_or_else(|| SolidError::null_pointer(OP))?;
+                let curve = curve
+                    .ok_or_else(|| SolidError::topology_missing(OP, "a 3D curve of the loop"))?;
 
                 let ivl = curve.natural_interval();
                 let (start_param, end_param, orient) =
@@ -572,7 +699,10 @@ pub fn create_faces_with_curves(
                 } else {
                     {
                         if v.is_some() {
-                            return Err(SolidError::sm_err(OP));
+                            return Err(SolidError::topology_failed(
+                                OP,
+                                "the loop has a vertex but no face",
+                            ));
                         }
                         let face = if faces.len() == 1 {
                             new_face
@@ -598,11 +728,9 @@ pub fn create_faces_with_curves(
                             // if face not found then use first "big" face
                             match found {
                                 Some(face) => face,
-                                None => faces
-                                    .first()
-                                    .copied()
-                                    .flatten()
-                                    .ok_or_else(|| SolidError::null_pointer(OP))?,
+                                None => faces.first().copied().flatten().ok_or_else(|| {
+                                    SolidError::topology_missing(OP, "the first new face")
+                                })?,
                             }
                         };
                         f = Some(face);
@@ -651,16 +779,23 @@ pub fn create_faces_with_curves(
                     &mut made,
                     Some(&mut *fenv.env),
                 )?;
+                out.curve_edges.push(made.edge);
 
                 // A new face must be created when the loop exhausts:
                 if last_edge && made.face.is_none() {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::topology_failed(
+                        OP,
+                        "the closed loop split off no new face",
+                    ));
                 }
                 // Register any new face created:
                 if let Some(nf) = made.face {
                     // new face must not be created before the loop is exhausted
                     if !last_edge {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::topology_failed(
+                            OP,
+                            "a new face was split off before its loop closed",
+                        ));
                     }
                     faces.push(Some(nf));
                 }
@@ -676,7 +811,8 @@ pub fn create_faces_with_curves(
         p1::mark_loops_to_delete(b, &mut loops_to_delete, big_loop, 0)?;
 
         for &l in &loops_to_delete {
-            let face = loopuse::loop_face(b, l)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let face = loopuse::loop_face(b, l)?
+                .ok_or_else(|| SolidError::topology_missing(OP, "the loop's face"))?;
             let loop_edges = loopuse::loop_edges(b, l)?;
             let loop_vertices = loopuse::loop_vertices(b, l)?;
 
@@ -694,23 +830,20 @@ pub fn create_faces_with_curves(
             )?;
 
             let Some(slot) = faces.iter_mut().find(|x| **x == Some(face)) else {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::topology_failed(
+                    OP,
+                    "the loop's face is not one of the new faces",
+                ));
             };
             *slot = None;
 
             // For the outermost loop, the edges and vertices need to be deleted too:
             if l == big_loop {
                 for e in loop_edges.into_iter().flatten() {
-                    ignore_status(crate::error::passed_on(
-                        delete_edge(k, b, fenv.env, e),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    delete_edge(k, b, fenv.env, e)?;
                 }
                 for v in loop_vertices.into_iter().flatten() {
-                    ignore_status(crate::error::passed_on(
-                        delete_vertex(k, b, fenv.env, v),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    delete_vertex(k, b, fenv.env, v)?;
                 }
             }
         }
@@ -820,11 +953,10 @@ pub fn make_faces_with_curves(
     };
     // check state - valid sCurveLoops data structure
     if !loops.is_valid() {
-        return Err(SolidError::Upstream {
-            operation: OP,
-            code: SM_ERR_INVALID_INPUT,
-            entity: None,
-        });
+        return Err(SolidError::topology_invalid_value(
+            OP,
+            "the curve loops are not valid",
+        ));
     }
 
     // Create iso curves at each discontinuity.
@@ -847,13 +979,10 @@ pub fn make_faces_with_curves(
             Curve::from(Line::from_points(lo, hi, 2))
         } else {
             // (status ignored upstream: a failed curve leaves a null pointer that is
-            // intersected next)
-            ignored(crate::error::passed_on(
-                surface.create_iso_parametric_curve(k, srf_dir, knot, 0.0, None, false),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?
-            .ok_or_else(|| invalid("iso curve failed (upstream dereferences null)"))?
-            .curve
+            // intersected next; fork 60a8a51 passes it on)
+            surface
+                .create_iso_parametric_curve(k, srf_dir, knot, 0.0, None, false)?
+                .curve
         };
         iso_keys.push(CurveKey(store.len()));
         store.push(iso);
@@ -881,18 +1010,14 @@ pub fn make_faces_with_curves(
                     .ok_or_else(|| invalid("curve store"))?;
                 let crv_domain = loop_curve.natural_interval();
                 // Intersect the curves (status ignored upstream).
-                let mut sols = ignored(crate::error::passed_on(
-                    iso.global_curve_intersect::<LoopObject>(
-                        k,
-                        &iso_domain,
-                        loop_curve,
-                        &crv_domain,
-                        xsect_tol,
-                        &CurveIntersectOptions::default(),
-                    ),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?
-                .unwrap_or_default();
+                let mut sols = iso.global_curve_intersect::<LoopObject>(
+                    k,
+                    &iso_domain,
+                    loop_curve,
+                    &crv_domain,
+                    xsect_tol,
+                    &CurveIntersectOptions::default(),
+                )?;
                 for ll in 0..sols.len() {
                     if let Some(s) = sols.get_mut(ll) {
                         s.objects[0] = Some(LoopObject::Curve(iso_key));
@@ -936,21 +1061,16 @@ pub fn make_faces_with_curves(
                     let c = store
                         .get_mut(loop_key.0)
                         .ok_or_else(|| invalid("curve store"))?;
-                    // (status ignored upstream: a null new curve then goes into the loops)
-                    ignored(crate::error::passed_on(
-                        c.create_by_split_curve(k, param),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?
-                    .ok_or_else(|| invalid("split failed (upstream inserts null)"))?
+                    // (status ignored upstream: a null new curve then goes into the loops;
+                    // fork 60a8a51 passes it on)
+                    c.create_by_split_curve(k, param)?
                 };
                 let new_key = CurveKey(store.len());
                 store.push(new_curve);
 
-                // insert the split LoopCurve children into the loops (status ignored)
-                ignore_status(crate::error::passed_on(
-                    loops.insert_into_loops(new_key, loop_key),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                // insert the split LoopCurve children into the loops (status ignored
+                // upstream; passed on here, WR-658)
+                loops.insert_into_loops(new_key, loop_key)?;
 
                 // add new Solution for the new curve to SolArray
                 let mut new_sol = sol;
@@ -1056,16 +1176,10 @@ pub fn make_faces_with_curves(
                     seg.end_enter = enter;
                     seg.end_leave = leave;
                     if iso_param1 > seg.interval.min() {
-                        ignore_status(crate::error::passed_on(
-                            seg.interval.set_max(iso_param1),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?;
+                        seg.interval.set_max(iso_param1)?;
                         seg.orient = OrientType::Same;
                     } else {
-                        ignore_status(crate::error::passed_on(
-                            seg.interval.set_min(iso_param1),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?;
+                        seg.interval.set_min(iso_param1)?;
                         seg.orient = OrientType::Opposite;
                     }
                     // the segment is complete - insert it into the loops
@@ -1080,10 +1194,7 @@ pub fn make_faces_with_curves(
                     };
                     seg.start_enter = enter;
                     seg.start_leave = leave;
-                    ignore_status(crate::error::passed_on(
-                        seg.interval.set_min_max(iso_param1, iso_param1),
-                        k.fixes.brep_edit_statuses_pass_on,
-                    )?)?;
+                    seg.interval.set_min_max(iso_param1, iso_param1)?;
                     in_segment = true;
                 }
             }
@@ -1116,7 +1227,6 @@ pub fn make_faces_with_curves(
     } else {
         Vec2::new(1.0, 0.0)
     };
-    let mut crv_pt: Option<Point3> = None;
     let mut loop_start = 0usize;
     for ii in 0..num_loops {
         let num_loop_curves = *at(&loops.loop_counts, ii)?;
@@ -1131,15 +1241,9 @@ pub fn make_faces_with_curves(
             let key = *at(&loops.curves, jj)?;
             let loop_curve = store.get(key.0).ok_or_else(|| invalid("curve store"))?;
             let crv_domain = loop_curve.natural_interval();
-            // near MidPt evaluation (status ignored: the previous point is kept)
-            if let Some(p) = ignored(crate::error::passed_on(
-                loop_curve.evaluate_point(k, crv_domain.evaluate(0.48)),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)? {
-                crv_pt = Some(p);
-            }
-            let pt = crv_pt
-                .ok_or_else(|| invalid("no curve point (upstream reads it uninitialised)"))?;
+            // near MidPt evaluation (status ignored upstream, which keeps the previous
+            // point; fork 60a8a51 passes it on: `SER`)
+            let pt = loop_curve.evaluate_point(k, crv_domain.evaluate(0.48))?;
             let mut pt_uv = Point2::new(pt.x, pt.y);
 
             for (kk, sub) in sub_patches.iter().enumerate() {
@@ -1201,10 +1305,7 @@ pub fn make_faces_with_curves(
         let mut patch_loops = CurveLoops::new();
         for (jj, &w) in which_sub_patch.iter().enumerate() {
             if w == ii {
-                ignore_status(crate::error::passed_on(
-                    patch_loops.append_loop(&loops, jj),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                patch_loops.append_loop(&loops, jj)?;
             }
         }
         if patch_loops.loop_counts.is_empty() {
@@ -1222,19 +1323,15 @@ pub fn make_faces_with_curves(
         }
 
         let mut ordered: Vec<usize> = patch_loops.curves.iter().map(|c| c.0).collect();
-        let outer_loop_counts = ignored(crate::error::passed_on(
-            find_outer_loops(
-                k,
-                &store,
-                &mut ordered,
-                &mut patch_loops.loop_counts,
-                &mut patch_loops.orients,
-                &mut norm,
-                zone_tol,
-            ),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?
-        .unwrap_or_default();
+        let outer_loop_counts = find_outer_loops(
+            k,
+            &store,
+            &mut ordered,
+            &mut patch_loops.loop_counts,
+            &mut patch_loops.orients,
+            &mut norm,
+            zone_tol,
+        )?;
         patch_loops.curves = ordered.into_iter().map(CurveKey).collect();
 
         // Create a Face for each outer loop group.
@@ -1243,10 +1340,7 @@ pub fn make_faces_with_curves(
         for &num_in_group in &outer_loop_counts {
             group.reset();
             for kk in 0..num_in_group {
-                ignore_status(crate::error::passed_on(
-                    group.append_loop(&patch_loops, group_start + kk),
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                group.append_loop(&patch_loops, group_start + kk)?;
             }
             group_start += num_in_group;
 
@@ -1339,10 +1433,7 @@ mod tests {
     use crate::surface::plane::Plane;
 
     fn code(e: &SolidError) -> Option<i32> {
-        match e {
-            SolidError::Upstream { code, .. } => Some(*code),
-            _ => None,
-        }
+        e.upstream_status()
     }
 
     /// Runs `f` on a new B-rep (`new SmBrep()`) with an arena-only notification store.
@@ -1391,6 +1482,54 @@ mod tests {
             )
             .unwrap(),
         )
+    }
+
+    #[test]
+    fn horn_faces_keep_the_internal_pole_on_the_boundary() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::nurbs::b_spline_curve::NurbCircleParam;
+        use crate::surface::procedural_sweep::ProceduralSweep;
+
+        with_brep(|k, b, fenv| {
+            k.fixes.keep_exact_pcurves = true;
+            let circle = |frame: Axis2Placement, start, end| {
+                BSplineCurve::create_circle_segment(
+                    3,
+                    &frame,
+                    2.0,
+                    start,
+                    end,
+                    NurbCircleParam::Quadratic,
+                )
+                .unwrap()
+            };
+            let profile = circle(
+                Axis2Placement::new(Vec3::ZERO, Vec3::Y, Vec3::Z),
+                -270.0,
+                90.0,
+            );
+            let path = circle(Axis2Placement::IDENTITY, -90.0, 0.0);
+            let (definition, net) =
+                ProceduralSweep::create_path_exact(&profile, &path, Vec3::Z).unwrap();
+            let domain = net.natural_uv_domain();
+            let mut surface = Surface::from(net);
+            surface.set_sweep_definition(definition);
+            let faces =
+                create_faces_from_surface(k, b, Some(surface), &domain, ContinuityType::G1, fenv)
+                    .unwrap();
+            assert_eq!(faces.len(), 2);
+            let mut area = 0.0;
+            for face in faces {
+                let wall = face2::surface(b, face).unwrap().unwrap();
+                assert!(wall
+                    .assert_valid(k, None, 0, crate::geom::assert_array::ObjectKey(0))
+                    .unwrap());
+                area += crate::mass::integrator::properties::face_area(k, b, face, 1e-6).unwrap();
+            }
+            let expected = 4.0 * std::f64::consts::PI.powi(2);
+            eprintln!("horn quarter area {area}, expected {expected}");
+            assert!((area - expected).abs() < 1e-3, "{area}");
+        });
     }
 
     #[test]

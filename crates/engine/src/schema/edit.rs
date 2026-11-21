@@ -9,6 +9,7 @@ use serde_json::{Map, Value, json};
 
 use super::check::{located, whole};
 use super::types::{not_blank_pattern, present};
+use crate::PickMode;
 
 /// Assistant visibility is UI-owned and takes no parameters.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -18,6 +19,17 @@ pub struct AssistantParams {}
 /// Headless sessions refuse Assistant display requests and produce no result.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct AssistantResult {}
+
+/// Reset the connected app's saved application bar. No design or parameters are needed.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AppBarResetParams {}
+
+/// Validated reset request; the connected app applies it to its toolbar preferences.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AppBarResetResult {
+    pub reset: bool,
+}
 
 /// Command search is UI-owned and takes no parameters.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -36,6 +48,15 @@ pub struct ToggleVisibilityParams {}
 /// Never produced: headless calls are refused, and the app acts on its own selection.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ToggleVisibilityResult {}
+
+/// `ui.dialog_ok` takes nothing: it runs OK in the app's open dialog.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DialogOkParams {}
+
+/// Never produced: headless calls are refused, and the app runs OK in its own dialog.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DialogOkResult {}
 
 /// `edit.repeat` takes no parameters: it starts the last tool with its defaults.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -142,13 +163,14 @@ impl JsonSchema for CheckpointId {
 }
 
 /// Go back to a checkpoint, undo history included; or, with `forget`, drop it without going
-/// back. Either uses it up and every later checkpoint with it: take a new one to go back again.
+/// back. Going back uses it up and every later checkpoint with it: take a new one to go back
+/// again. Forgetting drops only this one.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct RestoreCheckpointParams {
     /// The checkpoint, by the id `edit.checkpoint` returned.
     pub checkpoint: CheckpointId,
-    /// True to drop the checkpoint (and every later one) without going back. Default: false.
+    /// True to drop the checkpoint without going back; later checkpoints stay. Default: false.
     #[serde(default)]
     pub forget: Option<bool>,
 }
@@ -344,15 +366,15 @@ impl JsonSchema for FolderId {
     }
 }
 
-/// A feature's new name, as `timeline.rename` reads `name`: text that is 1 to 128 bytes long once
-/// the whitespace around it is trimmed.
+/// A feature's new name, as `timeline.rename` reads `name`: text that is 1 to 128 characters long
+/// once the whitespace around it is trimmed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NewName(pub String);
 
 impl<'de> Deserialize<'de> for NewName {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            Value::String(s) if !s.trim().is_empty() && s.trim().len() <= 128 => Ok(NewName(s)),
+            Value::String(s) if !s.trim().is_empty() && s.trim().chars().count() <= 128 => Ok(NewName(s)),
             _ => Err(D::Error::custom(whole("`name` must be 1…128 characters"))),
         }
     }
@@ -364,7 +386,7 @@ impl JsonSchema for NewName {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "Text with something in it besides whitespace, at most 128 bytes long once the whitespace around it is trimmed (the bytes of its UTF-8, so fewer characters when some are not ASCII).",
+            "description": "Text with something in it besides whitespace, at most 128 characters long once the whitespace around it is trimmed.",
             "type": "string",
             "pattern": not_blank_pattern()
         })
@@ -845,6 +867,9 @@ pub struct FeatureInfo {
     pub inputs: Vec<FeatureInput>,
     /// Why the feature fails to build; null when it doesn't.
     pub error: Option<String>,
+    /// The stable code of the kernel call it fails with; present only when it fails with one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<super::inspect::ErrorCodeReply>,
     /// A warning the feature built with; null when there is none.
     pub warning: Option<String>,
 }
@@ -988,14 +1013,14 @@ impl JsonSchema for JointList {
 }
 
 /// A new folder's name as `timeline.group` reads `name`: text, which once the whitespace around
-/// it is trimmed is at most 128 bytes long. Nothing left means the default name.
+/// it is trimmed is at most 128 characters long. Nothing left means the default name.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FolderName(pub String);
 
 impl<'de> Deserialize<'de> for FolderName {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            Value::String(s) if s.trim().len() > 128 => Err(D::Error::custom(whole("`name` must be 1…128 characters"))),
+            Value::String(s) if s.trim().chars().count() > 128 => Err(D::Error::custom(whole("`name` must be 1…128 characters"))),
             Value::String(s) => Ok(FolderName(s)),
             // The handler reads a name that isn't text as absent, so the folder gets the default
             // name: a call that works today, left alone here.
@@ -1010,7 +1035,7 @@ impl JsonSchema for FolderName {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "Text at most 128 bytes long once the whitespace around it is trimmed (the bytes of its UTF-8, so fewer characters when some are not ASCII). Blank text means the default name. Anything but text is read as no name.",
+            "description": "Text at most 128 characters long once the whitespace around it is trimmed. Blank text means the default name. Anything but text is read as no name.",
             "type": "string"
         })
     }
@@ -1152,7 +1177,7 @@ impl JsonSchema for CommandParams {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "The parameters of the feature's command, as `describe_command` shows them for it: the feature is rebuilt from them. Keys it takes that this leaves out take their defaults, except that some are kept from the feature being edited: an extrude's or revolve's `convention` and an extrude's run-to body, a feature's `participants`, a frame member's `names` (when `body_name` is unchanged), a thread's old size, a perforation's outline and an emboss's face. Any value is read here and passed on, and the command refuses what is not its parameters. `name` is ignored: the feature keeps its name.",
+            "description": "The parameters of the feature's command, as `describe_command` shows them for it: the feature is rebuilt from them. Keys it takes that this leaves out take their defaults, except that some are kept from the feature being edited: an extrude's or revolve's `convention` and an extrude's run-to body, a feature's `participants`, a frame member's `names` (when `body_name` is unchanged) and `next_pair`, a thread's old size, a perforation's outline and an emboss's face. Any value is read here and passed on, and the command refuses what is not its parameters. `name` is ignored: the feature keeps its name.",
             "type": "object"
         })
     }
@@ -1531,32 +1556,94 @@ pub struct TimelineRedefined {
     pub param_warnings: Vec<String>,
 }
 
+/// Choose what a click on the model picks while no dialog or tool takes the pick: faces, edges
+/// and vertices; the face's whole body; the feature that made it; the innermost placement or the
+/// top-level component holding it; or sketch geometry only. A window setting: the design, its
+/// history and the selection are untouched.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SelectModeParams {
+    /// The selection mode.
+    #[serde(deserialize_with = "pick_mode")]
+    #[schemars(schema_with = "pick_mode_schema")]
+    pub mode: PickMode,
+}
+
+/// A selection mode, read by the handler's own reader.
+fn pick_mode<'de, D: serde::Deserializer<'de>>(d: D) -> Result<PickMode, D::Error> {
+    crate::cmd::pick_mode(&Value::deserialize(d)?).map_err(|e| serde::de::Error::custom(whole(e)))
+}
+
+/// The modes' ids, as one string enum.
+fn pick_mode_schema(_: &mut SchemaGenerator) -> Schema {
+    let ids: Vec<Value> = PickMode::ALL.iter().filter_map(|m| serde_json::to_value(m).ok()).collect();
+    json_schema!({
+        "description": "faces (faces, edges and vertices), bodies, features, parts (the innermost placement), components (the top-level placement) or sketch (sketch curves, points and profiles).",
+        "type": "string",
+        "enum": ids
+    })
+}
+
+/// What `select.mode` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SelectModeResult {
+    /// The selection mode now on.
+    #[schemars(schema_with = "pick_mode_schema")]
+    pub mode: PickMode,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        AssistantParams, CheckpointParams, CheckpointResult, FeatureKeys, FeatureRef, FeatureSelection, FolderId, FolderIds, MarkerPosition, NewName,
-        PaletteParams, RedoParams, RedoResult, RepeatParams, RestoreCheckpointParams, SetFields, TimelineComputeAllParams, TimelineComputeAllResult,
-        TimelineDeleteParams, TimelineDeleteResult, TimelineDependentsParams, TimelineDependentsResult, TimelineEditParams, TimelineEditResult,
-        TimelineInspectParams, TimelineInspectResult, TimelineMarkerResult, TimelineRenameParams, TimelineRenameResult, TimelineRollToParams,
-        TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult, ToggleVisibilityParams, UndoParams, UndoResult,
+        AssistantParams, CheckpointParams, CheckpointResult, DialogOkParams, FeatureKeys, FeatureRef, FeatureSelection, FolderId, FolderIds,
+        MarkerPosition, NewName, PaletteParams, RedoParams, RedoResult, RepeatParams, RestoreCheckpointParams, SelectModeParams, SelectModeResult,
+        SetFields, TimelineComputeAllParams, TimelineComputeAllResult, TimelineDeleteParams, TimelineDeleteResult, TimelineDependentsParams,
+        TimelineDependentsResult, TimelineEditParams, TimelineEditResult, TimelineInspectParams, TimelineInspectResult, TimelineMarkerResult,
+        TimelineRenameParams, TimelineRenameResult, TimelineRollToParams, TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult,
+        ToggleVisibilityParams, UndoParams, UndoResult,
     };
     use super::{
         TimelineGroupMade, TimelineGroupParams, TimelineGroupRenamed, TimelineMoveManyParams, TimelineMoveToGroupParams, TimelineMoved,
         TimelineMovedToGroup, TimelineRedefineParams, TimelineRedefined, TimelineRenameGroupParams, TimelineReorderManyParams, TimelineReorderParams,
         TimelineReordered, TimelineReorderedMany, TimelineUngroupParams, TimelineUngrouped,
     };
-    use crate::Session;
     use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
     use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
+    use crate::{PickMode, Session};
+
+    #[test]
+    fn app_bar_reset_has_an_empty_contract_and_a_typed_reply() {
+        let spec = crate::find_command("ui.appBarReset").unwrap();
+        let contract = spec.contract.unwrap();
+        assert!(contract.allowed_keys().is_empty());
+        assert!(contract.check(&json!({})).is_empty());
+        for input in [json!({"reset":false}), json!([]), json!(false), json!(5), json!("reset")] {
+            assert!(!contract.check(&input).is_empty(), "{input}");
+        }
+        let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+        let error = s.execute(spec.id, &json!({"reset":false})).unwrap_err().to_string();
+        assert!(error.contains("unknown key `reset`"), "{error}");
+        let value = s.execute(spec.id, &json!({})).unwrap();
+        assert_eq!(value, json!({"reset":true}));
+        let output = spec.output.unwrap()();
+        assert_eq!(output.as_value().pointer("/properties/reset/type"), Some(&json!("boolean")));
+        assert_eq!(output.as_value().get("required"), Some(&json!(["reset"])));
+        assert!(conforms(output.as_value(), output.as_value(), &value));
+    }
 
     #[test]
     fn schemas_and_the_key_check_agree() {
+        assert_keys(input_schema_for::<super::AppBarResetParams>(), &[]);
         assert_keys(input_schema_for::<RepeatParams>(), &[]);
         assert_keys(input_schema_for::<AssistantParams>(), &[]);
         assert_keys(input_schema_for::<PaletteParams>(), &[]);
         assert_keys(input_schema_for::<ToggleVisibilityParams>(), &[]);
+        assert_keys(input_schema_for::<DialogOkParams>(), &[]);
         assert_keys(input_schema_for::<UndoParams>(), &[]);
         assert_keys(input_schema_for::<RedoParams>(), &[]);
         assert_keys(input_schema_for::<CheckpointParams>(), &[]);
@@ -1578,6 +1665,7 @@ mod tests {
         assert_keys(input_schema_for::<TimelineReorderParams>(), &["active", "allow_errors", "feature", "position"]);
         assert_keys(input_schema_for::<TimelineReorderManyParams>(), &["active", "allow_errors", "features", "position"]);
         assert_keys(input_schema_for::<TimelineRedefineParams>(), &["command", "feature", "params"]);
+        assert_keys(input_schema_for::<SelectModeParams>(), &["mode"]);
     }
 
     #[test]
@@ -1720,7 +1808,30 @@ mod tests {
             ("timeline.redefine", json!({"feature": true, "command": "solid.box"})),
             ("timeline.redefine", json!({"feature": 1, "command": "solid.nope"})),
             ("timeline.redefine", json!({"feature": 1, "command": "file.save"})),
+            ("select.mode", json!({"mode": "edges"})),
+            ("select.mode", json!({"mode": "Bodies"})),
+            ("select.mode", json!({"mode": 1})),
+            ("select.mode", json!({"mode": null})),
+            ("select.mode", json!({"mode": ["faces"]})),
         ]);
+    }
+
+    #[test]
+    fn select_mode_replies_match_its_output_schema() {
+        let schema = output_schema_for::<SelectModeResult>();
+        let schema = schema.as_value();
+        let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+        for mode in PickMode::ALL {
+            let r = s.execute("select.mode", &json!({"mode": mode})).unwrap_or_else(|e| panic!("{e}"));
+            assert!(r.get("param_warnings").is_none(), "{r}");
+            assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        }
+        let r = s.execute("select.mode", &json!({"mode": "parts", "modes": "bodies"})).unwrap_or_else(|e| panic!("{e}"));
+        assert!(r.get("param_warnings").is_some(), "{r}");
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        for bad in [json!({"mode": "edges"}), json!({"mode": 1}), json!({})] {
+            assert!(!conforms(schema, schema, &bad), "{bad}");
+        }
     }
 
     /// Undo, redo, a checkpoint, going back to it and forgetting one, in Warn: each reply matches

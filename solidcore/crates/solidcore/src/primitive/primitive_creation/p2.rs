@@ -41,20 +41,21 @@ pub use super::p1::PrimitiveCreation;
 pub use access::PrimitiveCreationAccess;
 pub use taper_walls::{CornerRefusal, TaperCornerRefusal};
 
-use crate::curve::curve::{Curve, CurveKind};
+use crate::curve::curve::Curve;
+use crate::error::Result;
+use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 
-/// The B-spline an `SmBSplineCurve` cast reads: B-splines and the analytic kinds
-/// built on one (`None` for the kinds upstream's cast would misread).
-fn as_bspline(curve: &Curve) -> Option<BSplineCurve> {
-    match curve.kind() {
-        CurveKind::BSpline(c) => Some(c.clone()),
-        CurveKind::Line(c) => Some(c.base().clone()),
-        CurveKind::Ellipse(c) => Some(c.base().clone()),
-        CurveKind::Parabola(c) => Some(c.base().clone()),
-        CurveKind::Hyperbola(c) => Some(c.base().clone()),
-        _ => None,
-    }
+/// The B-spline an `SmBSplineCurve` cast reaches: B-splines and the analytic kinds
+/// built on one, with the NURB upstream's `SmLine` and `SmEllipse` hold (#15938; the
+/// port builds theirs lazily, and a copy of the bare base refuses with 1001). `None`
+/// for the kinds upstream's cast would misread.
+///
+/// # Errors
+///
+/// `Unported` from `MakeNurb`.
+fn as_bspline(kernel: &Kernel, curve: &Curve) -> Result<Option<BSplineCurve>> {
+    super::p3::bspline_with_nurb(kernel, curve)
 }
 
 #[cfg(test)]
@@ -288,7 +289,7 @@ mod tests {
     }
     fn code<T>(result: &Result<T>) -> Option<i32> {
         match result {
-            Err(SolidError::Upstream { code, .. }) => Some(*code),
+            Err(e) if e.upstream_status().is_some() => e.upstream_status(),
             Err(SolidError::InvalidInput { .. }) => Some(1007),
             _ => None,
         }

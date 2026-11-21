@@ -17,25 +17,35 @@
 //!   unchanged.
 
 pub mod arc;
+pub mod arc_of;
+pub mod blend;
 pub mod composite_curve;
 pub mod conic;
+pub mod conic_projection;
 pub mod crv_in_volume;
 pub mod crv_on_surf;
 #[allow(clippy::module_inception)]
 pub mod curve;
 pub mod curve_cache;
 pub mod ellipse;
+pub mod fit_projection;
 pub mod from_parameters;
+pub mod geodesic_offset;
 pub mod hermite_curve;
 pub mod hyperbola;
 pub mod iso_curve;
+pub mod length_bound;
 pub mod line;
 pub(crate) mod native_affine;
 pub mod offset_curve;
 pub mod parabola;
 pub mod path;
+pub mod plane_of;
 pub mod projected_curve;
+pub mod proximity;
+pub mod spline_projection;
 pub mod step_edge;
+pub mod stretch;
 pub mod tangent_field;
 
 use crate::error::{Result, SolidError};

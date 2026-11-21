@@ -356,6 +356,7 @@ fn options_of(o: Option<[bool; 5]>) -> Option<SweepOptions> {
         orient_profile_perpendicular_to_path: d,
         move_to_profile: e,
         profile_at_path_start: false,
+        up: None,
     })
 }
 
@@ -363,7 +364,9 @@ fn options_of(o: Option<[bool; 5]>) -> Option<SweepOptions> {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -1556,6 +1559,44 @@ mod tests {
         );
         for key in ["linear_vertices", "linear_edge_samples", "linear_volume"] {
             assert_ne!(observations[0].values[key], observations[1].values[key]);
+        }
+    }
+}
+
+/// #14246 G1 (WR-662 retired): the sweeps whose success became a refusal (status 1001,
+/// pinned by the golden rows), each for a closed-form reason the requested solid does
+/// not exist. Main returned success with an empty body for the empty profile, two
+/// coincident discs and one edge for the zero-distance circle sweeps (a solid of no
+/// height), and one face for the 90-degree draft.
+#[cfg(test)]
+mod moved_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::*;
+
+    #[test]
+    fn each_moved_sweep_row_is_refused_for_its_reason() {
+        for name in [
+            "review_linear_empty",
+            "review_linear_circle_zero",
+            "review_linear_circle_neg_zero",
+            "review_draft_square_a90",
+        ] {
+            let i: Inputs = crate::case::regression_case(&Runner, name).parse().unwrap();
+            match &i {
+                // a capped sweep of no profile: there is nothing to sweep or cap
+                Inputs::Linear { curves, cap, .. } if name == "review_linear_empty" => {
+                    assert!(curves.is_empty() && *cap, "{name}");
+                }
+                // a sweep through distance zero (either sign): the caps coincide and the
+                // side face has no area
+                Inputs::Linear { dist, .. } => assert_eq!(*dist, 0.0, "{name}"),
+                // a 90-degree draft turns each side face into the profile's plane, so the
+                // swept body has no height
+                Inputs::Draft { angle_deg, .. } => assert_eq!(*angle_deg, 90.0, "{name}"),
+                _ => panic!("{name}"),
+            }
+            let output = rust(&i).unwrap();
+            assert_eq!(output.values["status"], [1001.0], "{name}");
         }
     }
 }
