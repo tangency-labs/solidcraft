@@ -153,6 +153,10 @@ pub(super) fn filed(design: &mut Cow<'_, Document>, from: Option<&str>, to: &str
 /// or spelled with `~` or `%VAR%`, or a design with no folder yet (the path then stays as typed).
 pub(super) fn whole_font(design: Option<&str>, font: &str) -> Option<String> {
     let name = font.trim();
+    // A `~` or `%VAR%` spelling stays as typed, even where it does not expand (an unset variable).
+    if name.starts_with('~') || name.contains('%') {
+        return None;
+    }
     let file = solidcraft_sketch::font_file_path(name)?;
     if file != Path::new(name) || !file.is_relative() {
         return None;
@@ -168,7 +172,11 @@ fn kept_font(base: Option<&Path>, font: &str) -> Option<String> {
     if !file.is_absolute() {
         return None;
     }
-    let inside = file.strip_prefix(base?).ok()?;
+    let base = base?;
+    // The path as typed, else where it leads through folder aliases, as `base` is resolved
+    // ([`link_target`]): a font typed through a linked folder is still inside the design's.
+    let target = link_target(file);
+    let inside = file.strip_prefix(base).or_else(|_| target.strip_prefix(base)).ok()?;
     Some(inside.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/"))
 }
 
