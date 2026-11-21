@@ -1265,7 +1265,7 @@ fn header_band(ui: &mut egui::Ui, header: &Header<'_>, state: &mut BrowserState)
         crate::disclosure(ui.painter(), pos2(right - t.form_section_icon_size / 2.0, band.center().y), !state.collapsed, t.text_dim);
         right -= t.form_section_icon_size + t.space_6;
         solidcraft_ui_registry::publish_handle("browser:header", fold.center());
-        let tip = if state.collapsed { solidcraft_ui_text::tr("ui.expand") } else { solidcraft_ui_text::tr("ui.collapse") };
+        let tip = if state.collapsed { solidcraft_ui_text::tr_by_id("ui.expand") } else { solidcraft_ui_text::tr_by_id("ui.collapse") };
         if response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(tip).clicked() {
             state.collapsed = !state.collapsed;
         }

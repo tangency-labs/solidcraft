@@ -352,7 +352,7 @@ pub fn reapply_cursor_on_return(ctx: &egui::Context, raw: &egui::RawInput) {
 
 /// The tooltip of caption button `c`, in the current language; `max` says the window is maximized.
 fn caption_tip(c: Caption, max: bool) -> &'static str {
-    solidcraft_ui_text::tr(match c {
+    solidcraft_ui_text::tr_by_id(match c {
         Caption::Minimize => "ui.window_minimize",
         Caption::Maximize if max => "ui.window_restore",
         Caption::Maximize => "ui.window_maximize",

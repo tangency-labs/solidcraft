@@ -10,7 +10,7 @@
 use solidcraft_engine::doc::Document;
 use solidcraft_engine::doc::expr;
 use solidcraft_engine::doc::sheet_library::{self as library, BendMethod, PackRule, RulePack};
-use solidcraft_ui_text::tr;
+use solidcraft_ui_text::tr_by_id;
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
@@ -123,10 +123,12 @@ fn estimate(values: &mut [String], entry: &PackRule, doc: &Document, method: Ben
             *slot = format!("{k:.2}");
         }
         notes.push((
-            tr("sheet.library.k_estimate")
-                .replace("{k}", &format!("{k:.2}"))
-                .replace("{method}", tr(METHOD_KEYS.get(method_index(method)).copied().unwrap_or("")))
-                .replace("{ratio}", &format!("{:.2}", r / thickness)),
+            tr!(
+                "sheet.library.k_estimate",
+                k = &format!("{k:.2}"),
+                method = tr_by_id(METHOD_KEYS.get(method_index(method)).copied().unwrap_or("")),
+                ratio = &format!("{:.2}", r / thickness)
+            ),
             false,
         ));
     }
@@ -134,7 +136,7 @@ fn estimate(values: &mut [String], entry: &PackRule, doc: &Document, method: Ben
         && r < min - 1e-9
     {
         let min = format!("{min:.2} mm");
-        notes.push((tr("sheet.library.under_minimum").replace("{material}", &entry.rule.material).replace("{min}", &min), true));
+        notes.push((tr!("sheet.library.under_minimum", material = &entry.rule.material, min = &min), true));
     }
     notes
 }
@@ -155,7 +157,7 @@ fn picker(ui: &mut egui::Ui, id: &str, key: &str, display: &str, options: &[Stri
             }
         });
         response.widget_info(|| {
-            let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), tr(key));
+            let mut info = egui::WidgetInfo::labeled(egui::Role::ComboBox, ui.is_enabled(), tr_by_id(key));
             info.current_text_value = Some(display.to_string());
             info
         });
@@ -168,9 +170,9 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, doc: &Document, can_export
     let id = panel_id();
     let mut state = if reset { PanelState::default() } else { ui.ctx().data_mut(|data| data.get_temp::<PanelState>(id)).unwrap_or_default() };
     ui_kit::section(ui, "sheet_rule_library", "sheet.library.title", false, |ui| {
-        ui_kit::text(ui, tr("sheet.library.scope"), Text::Report("sheet_library_scope", false));
+        ui_kit::text(ui, tr!("sheet.library.scope"), Text::Report("sheet_library_scope", false));
         let materials: Vec<String> = library::standard_materials().into_iter().map(str::to_string).collect();
-        let display = if state.material.is_empty() { tr("sheet.library.select_material").to_string() } else { state.material.clone() };
+        let display = if state.material.is_empty() { tr!("sheet.library.select_material").to_string() } else { state.material.clone() };
         let mut chosen = None;
         picker(ui, "sheet_library_material", "sheet.library.material", &display, &materials, &mut chosen);
         if let Some(material) = chosen.and_then(|index| materials.get(index)) {
@@ -186,7 +188,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, doc: &Document, can_export
             // Gauges or metric thicknesses: an inch design lists gauges first, any other metric.
             let inches = matches!(doc.units.trim(), "in" | "inch" | "ft");
             let series = state.series.unwrap_or(if inches { 0 } else { 1 });
-            let names: Vec<String> = SERIES_KEYS.iter().map(|k| tr(k).to_string()).collect();
+            let names: Vec<String> = SERIES_KEYS.iter().map(|k| tr_by_id(k).to_string()).collect();
             let mut chosen_series = None;
             picker(ui, "sheet_library_series", "sheet.library.series", names.get(series).map_or("", String::as_str), &names, &mut chosen_series);
             if let Some(index) = chosen_series {
@@ -196,8 +198,10 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, doc: &Document, can_export
             let gauges: Vec<&PackRule> = library::standard_gauges(&state.material).into_iter().filter(|r| is_metric(r) == (series == 1)).collect();
             let labels: Vec<String> = gauges.iter().map(|r| gauge_label(r)).collect();
             // The box shows the gauge alone; its menu gives each one's thickness too.
-            let display =
-                gauges.iter().find(|r| r.rule.name == state.picked).map_or_else(|| tr("sheet.library.select_gauge").to_string(), |r| r.gauge.clone());
+            let display = gauges
+                .iter()
+                .find(|r| r.rule.name == state.picked)
+                .map_or_else(|| tr!("sheet.library.select_gauge").to_string(), |r| r.gauge.clone());
             let mut chosen = None;
             picker(ui, "sheet_library_gauge", "sheet.library.gauge", &display, &labels, &mut chosen);
             let method = BendMethod::ALL.get(state.method).copied().unwrap_or_default();
@@ -205,7 +209,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, doc: &Document, can_export
                 state.picked.clone_from(&entry.rule.name);
                 state.notes = fill(sm, entry, doc, method);
             }
-            let methods: Vec<String> = METHOD_KEYS.iter().map(|k| tr(k).to_string()).collect();
+            let methods: Vec<String> = METHOD_KEYS.iter().map(|k| tr_by_id(k).to_string()).collect();
             let shown = methods.get(state.method).cloned().unwrap_or_default();
             let mut chosen = None;
             picker(ui, "sheet_library_method", "sheet.library.method", &shown, &methods, &mut chosen);
@@ -228,10 +232,10 @@ pub(crate) fn rows(ui: &mut egui::Ui, d: &mut Dialog, doc: &Document, can_export
                     state.request = Some(request);
                 }
             };
-            button(ui, "import", tr("sheet.library.import"), true, Request::Import);
-            button(ui, "export", tr("sheet.library.export"), can_export, Request::Export);
+            button(ui, "import", tr!("sheet.library.import"), true, Request::Import);
+            button(ui, "export", tr!("sheet.library.export"), can_export, Request::Export);
         });
-        ui_kit::text(ui, tr("sheet.library.pack_scope"), Text::Report("sheet_library_pack_scope", false));
+        ui_kit::text(ui, tr!("sheet.library.pack_scope"), Text::Report("sheet_library_pack_scope", false));
     });
     ui.ctx().data_mut(|data| data.insert_temp(id, state));
 }
@@ -242,7 +246,7 @@ pub(crate) fn run_request(ctx: &egui::Context, app: &mut SolveApp) {
     let id = panel_id();
     let Some(request) = ctx.data_mut(|data| data.get_temp_mut_or_default::<PanelState>(id).request.take()) else { return };
     match request {
-        Request::Import => app.pick_file(tr("sheet.library.pack_kind"), &["json", "csv"], |app, path| {
+        Request::Import => app.pick_file(tr!("sheet.library.pack_kind"), &["json", "csv"], |app, path| {
             if let Some(path) = path {
                 let (message, error) = import(app, &path);
                 app.set_status(message, error);
@@ -260,22 +264,22 @@ pub(crate) fn run_request(ctx: &egui::Context, app: &mut SolveApp) {
 fn import(app: &mut SolveApp, path: &str) -> (String, bool) {
     let bytes = match solidcraft_engine::io::vfs::read(path, library::MAX_PACK_BYTES) {
         Ok(bytes) => bytes,
-        Err(e) => return (format!("{}: {e}", tr("sheet.library.import_failed")), true),
+        Err(e) => return (format!("{}: {e}", tr!("sheet.library.import_failed")), true),
     };
     let read = match library::read(&bytes) {
         Ok(read) => read,
-        Err(e) => return (format!("{}: {e}", tr("sheet.library.import_failed")), true),
+        Err(e) => return (format!("{}: {e}", tr!("sheet.library.import_failed")), true),
     };
     let rules: Vec<_> = read.pack.rules.iter().map(|r| r.rule.clone()).collect();
     let (added, left_out) = app.preferences.personal_sheet_rules.import(&rules);
-    let mut message = tr("sheet.library.imported").replace("{count}", &added.to_string());
+    let mut message = tr!("sheet.library.imported", count = &added.to_string());
     if !left_out.is_empty() {
         message.push(' ');
-        message.push_str(&tr("sheet.library.left_out").replace("{names}", &left_out.join(", ")));
+        message.push_str(&tr!("sheet.library.left_out", names = &left_out.join(", ")));
     }
     if !read.skipped.is_empty() {
         message.push(' ');
-        message.push_str(&tr("sheet.library.skipped").replace("{fields}", &read.skipped.join(", ")));
+        message.push_str(&tr!("sheet.library.skipped", fields = &read.skipped.join(", ")));
     }
     (message, false)
 }
@@ -285,20 +289,20 @@ fn export(app: &mut SolveApp, path: &str) -> (String, bool) {
     let count = rules.len();
     if count == 0 {
         // Every personal rule has values a newer version saved: nothing this version can write.
-        return (tr("sheet.library.export_newer").replace("{names}", &left_out.join(", ")), true);
+        return (tr!("sheet.library.export_newer", names = &left_out.join(", ")), true);
     }
     let pack = RulePack { rules: rules.into_iter().map(PackRule::of).collect(), ..RulePack::default() };
     let text = if path.to_lowercase().ends_with(".csv") { library::write_csv(&pack) } else { library::write_json(&pack) };
     match solidcraft_engine::io::vfs::write(path, text.as_bytes()) {
         Ok(()) => {
-            let mut message = tr("sheet.library.exported").replace("{count}", &count.to_string());
+            let mut message = tr!("sheet.library.exported", count = &count.to_string());
             if !left_out.is_empty() {
                 message.push(' ');
-                message.push_str(&tr("sheet.library.export_newer").replace("{names}", &left_out.join(", ")));
+                message.push_str(&tr!("sheet.library.export_newer", names = &left_out.join(", ")));
             }
             (message, false)
         }
-        Err(e) => (format!("{}: {e}", tr("sheet.library.export_failed")), true),
+        Err(e) => (format!("{}: {e}", tr!("sheet.library.export_failed")), true),
     }
 }
 

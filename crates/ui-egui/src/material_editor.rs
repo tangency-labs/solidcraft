@@ -7,7 +7,7 @@ use solidcraft_engine::doc::physical_material::{
 use solidcraft_engine::doc::{Document, UserMaterial, appearance::Look};
 
 use crate::{SolveApp, ui_kit};
-use solidcraft_ui_text::tr;
+use solidcraft_ui_text::tr_by_id;
 
 const KINDS: [&str; 9] = [
     "density",
@@ -86,7 +86,7 @@ impl Editor {
     }
 
     pub(crate) fn save(&mut self, app: &mut SolveApp, index: &mut usize) -> Result<(), String> {
-        let draft = self.draft.as_ref().ok_or_else(|| tr("material.editor.no_draft").to_string())?;
+        let draft = self.draft.as_ref().ok_or_else(|| tr!("material.editor.no_draft").to_string())?;
         let name = draft.name.trim().to_string();
         if let Some((command, params)) = draft.command(&app.session.doc)? {
             app.run(command, params)?;
@@ -97,7 +97,7 @@ impl Editor {
         self.draft = None;
         self.error = None;
         self.refused = None;
-        self.note = Some(tr("material.editor.saved").to_string());
+        self.note = Some(tr!("material.editor.saved").to_string());
         Ok(())
     }
 }
@@ -117,7 +117,7 @@ impl Draft {
         let user = source.and_then(|name| doc.user_material(name)).cloned();
         let original = (!duplicate).then(|| user.clone()).flatten();
         let name = match source {
-            Some(name) if duplicate => solidcraft_ui_text::format("material.editor.copy_name", &[("name", name)]),
+            Some(name) if duplicate => tr!("material.editor.copy_name", name = name),
             Some(name) => name.to_string(),
             None => String::new(),
         };
@@ -136,16 +136,16 @@ impl Draft {
     pub(crate) fn command(&self, doc: &Document) -> Result<Option<(&'static str, Value)>, String> {
         let name = self.name.trim();
         if name.is_empty() || name.chars().count() > 128 {
-            return Err(tr("material.editor.name_required").to_string());
+            return Err(tr!("material.editor.name_required").to_string());
         }
         let density = number(&self.density, "density_g_cm3")?;
         if !solidcraft_engine::doc::valid_density(density) {
-            return Err(tr("material.editor.density_range").to_string());
+            return Err(tr!("material.editor.density_range").to_string());
         }
         let card = if self.card_enabled { Some(self.card.build()?) } else { None };
         if let Some(original) = &self.original {
             if doc.user_material(&original.name) != Some(original) {
-                return Err(tr("material.editor.stale").to_string());
+                return Err(tr!("material.editor.stale").to_string());
             }
             let mut params = json!({"material": original.name});
             if name != original.name {
@@ -294,7 +294,7 @@ impl PropertyDraft {
             "thermal_conductivity" => PropertyData::ThermalConductivity { w_m_k: vector(0)?, axes: self.axes },
             "thermal_expansion" => PropertyData::ThermalExpansion { per_k: vector(0)?, axes: self.axes },
             "specific_heat" => PropertyData::SpecificHeat { j_kg_k: n(0)? },
-            _ => return Err(tr("material.editor.invalid_property").to_string()),
+            _ => return Err(tr!("material.editor.invalid_property").to_string()),
         };
         let optional = |i: usize| -> Result<Option<f64>, String> {
             let text = self.conditions.get(i).map(String::as_str).unwrap_or("");
@@ -314,13 +314,13 @@ impl PropertyDraft {
 }
 
 fn number(value: &str, field: &str) -> Result<f64, String> {
-    crate::ui_kit::parse_number(value).ok_or_else(|| format!("{field}: {}", tr("material.editor.number_required")))
+    crate::ui_kit::parse_number(value).ok_or_else(|| format!("{field}: {}", tr!("material.editor.number_required")))
 }
 
 fn field(ui: &mut egui::Ui, label: &str, id: &str, value: &mut String, unit: &str) {
     let label = if unit.is_empty() { label.to_string() } else { format!("{label} ({unit})") };
     let response = ui_kit::row(ui, &label, |ui| {
-        ui_kit::cell_editor(ui, egui::Id::unique(("physical_editor", id)), value, tr("ui.material_review.unknown"), false)
+        ui_kit::cell_editor(ui, egui::Id::unique(("physical_editor", id)), value, tr!("ui.material_review.unknown"), false)
     });
     crate::scenario::publish_handle(&format!("material:field:{id}"), response.rect.center());
 }
@@ -335,7 +335,7 @@ fn optional_text(ui: &mut egui::Ui, label: &str, id: &str, value: &mut Option<St
 
 fn axes(ui: &mut egui::Ui, id: &str, axes: &mut MaterialAxes) {
     let mut index = usize::from(*axes == MaterialAxes::WoodLrt);
-    ui_kit::choice_row(ui, tr("material.editor.axes"), id, &mut index, &[tr("material.editor.axes_numeric"), tr("material.editor.axes_wood")]);
+    ui_kit::choice_row(ui, tr!("material.editor.axes"), id, &mut index, &[tr!("material.editor.axes_numeric"), tr!("material.editor.axes_wood")]);
     *axes = if index == 1 { MaterialAxes::WoodLrt } else { MaterialAxes::Material123 };
 }
 
@@ -345,10 +345,10 @@ fn property_rows(ui: &mut egui::Ui, property: &mut PropertyDraft, sources: &[Sou
         let mut index = usize::from(property.orthotropic);
         ui_kit::choice_row(
             ui,
-            tr("material.editor.symmetry"),
+            tr!("material.editor.symmetry"),
             &format!("{kind}:symmetry"),
             &mut index,
-            &[tr("material.editor.isotropic"), tr("material.editor.orthotropic")],
+            &[tr!("material.editor.isotropic"), tr!("material.editor.orthotropic")],
         );
         if (index == 1) != property.orthotropic {
             property.orthotropic = index == 1;
@@ -375,35 +375,35 @@ fn property_rows(ui: &mut egui::Ui, property: &mut PropertyDraft, sources: &[Sou
         field(ui, &label, &format!("{kind}:value:{i}"), value, unit);
     }
     let mut selected = sources.iter().position(|s| s.id == property.source_id).map_or(0, |i| i + 1);
-    let labels: Vec<_> = std::iter::once(tr("ui.material_review.unknown")).chain(sources.iter().map(|s| s.id.as_str())).collect();
+    let labels: Vec<_> = std::iter::once(tr!("ui.material_review.unknown")).chain(sources.iter().map(|s| s.id.as_str())).collect();
     let before = selected;
-    ui_kit::choice_row(ui, tr("ui.material_review.source"), &format!("{kind}:source"), &mut selected, &labels);
+    ui_kit::choice_row(ui, tr!("ui.material_review.source"), &format!("{kind}:source"), &mut selected, &labels);
     if selected != before {
         property.source_id = selected.checked_sub(1).and_then(|i| sources.get(i)).map(|s| s.id.clone()).unwrap_or_default();
     }
-    ui_kit::section(ui, format!("{kind}:conditions"), tr("ui.material_review.conditions"), false, |ui| {
+    ui_kit::section(ui, format!("{kind}:conditions"), tr!("ui.material_review.conditions"), false, |ui| {
         let labels = ["material.editor.temperature", "material.editor.moisture", "material.editor.strain_rate", "material.editor.state"];
         let units = ["K", "kg/kg", "s⁻¹", ""];
         for (i, value) in property.conditions.iter_mut().enumerate() {
-            field(ui, tr(labels.get(i).copied().unwrap_or("")), &format!("{kind}:condition:{i}"), value, units.get(i).copied().unwrap_or(""));
+            field(ui, tr_by_id(labels.get(i).copied().unwrap_or("")), &format!("{kind}:condition:{i}"), value, units.get(i).copied().unwrap_or(""));
         }
     });
 }
 
 fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
-    field(ui, tr("material.editor.designation"), "designation", &mut card.designation, "");
+    field(ui, tr!("material.editor.designation"), "designation", &mut card.designation, "");
     let mut family = FAMILIES.iter().position(|v| v == &card.family).unwrap_or(0);
     let labels =
-        ["material.editor.other", "material.editor.metal", "material.editor.polymer", "material.editor.wood", "material.editor.glass"].map(tr);
-    ui_kit::choice_row(ui, tr("material.editor.family"), "physical:family", &mut family, &labels);
+        ["material.editor.other", "material.editor.metal", "material.editor.polymer", "material.editor.wood", "material.editor.glass"].map(tr_by_id);
+    ui_kit::choice_row(ui, tr!("material.editor.family"), "physical:family", &mut family, &labels);
     card.family = FAMILIES.get(family).copied().unwrap_or(Family::Other);
-    ui_kit::section_count(ui, "physical:sources", tr("material.editor.sources"), false, Some(card.sources.len()), |ui| {
+    ui_kit::section_count(ui, "physical:sources", tr!("material.editor.sources"), false, Some(card.sources.len()), |ui| {
         let mut remove = None;
         for (i, source) in card.sources.iter_mut().enumerate() {
-            ui_kit::section(ui, format!("physical:source:{i}"), &format!("{} {}", tr("ui.material_review.source"), i + 1), true, |ui| {
+            ui_kit::section(ui, format!("physical:source:{i}"), &format!("{} {}", tr!("ui.material_review.source"), i + 1), true, |ui| {
                 // Stable local references remain intact while source claims are edited.
-                ui_kit::row(ui, tr("material.editor.source_id"), |ui| ui_kit::text(ui, &source.id, ui_kit::Text::MonoCell));
-                field(ui, tr("material.editor.source_title"), &format!("source:{i}:title"), &mut source.title, "");
+                ui_kit::row(ui, tr!("material.editor.source_id"), |ui| ui_kit::text(ui, &source.id, ui_kit::Text::MonoCell));
+                field(ui, tr!("material.editor.source_title"), &format!("source:{i}:title"), &mut source.title, "");
                 let mut selected = SOURCE_KINDS.iter().position(|k| k == &source.kind).unwrap_or(0);
                 let labels = [
                     "material.editor.user_supplied",
@@ -411,13 +411,13 @@ fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
                     "material.editor.public_reference",
                     "material.editor.illustrative",
                 ]
-                .map(tr);
-                ui_kit::choice_row(ui, tr("material.editor.source_kind"), &format!("source:{i}:kind"), &mut selected, &labels);
+                .map(tr_by_id);
+                ui_kit::choice_row(ui, tr!("material.editor.source_kind"), &format!("source:{i}:kind"), &mut selected, &labels);
                 source.kind = SOURCE_KINDS.get(selected).copied().unwrap_or(SourceKind::UserSupplied);
-                optional_text(ui, tr("ui.design_properties.license"), &format!("source:{i}:license"), &mut source.license);
-                optional_text(ui, tr("material.editor.reference"), &format!("source:{i}:reference"), &mut source.reference);
+                optional_text(ui, tr!("ui.design_properties.license"), &format!("source:{i}:license"), &mut source.license);
+                optional_text(ui, tr!("material.editor.reference"), &format!("source:{i}:reference"), &mut source.reference);
                 let used = card.properties.iter().any(|p| p.source_id == source.id);
-                if ui_kit::button(ui, tr("material.editor.remove"), ui_kit::Button::Enabled(!used)).clicked() {
+                if ui_kit::button(ui, tr!("material.editor.remove"), ui_kit::Button::Enabled(!used)).clicked() {
                     remove = Some(i);
                 }
             });
@@ -425,7 +425,7 @@ fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
         if let Some(i) = remove {
             card.sources.remove(i);
         }
-        if ui_kit::button(ui, tr("material.editor.add_source"), ui_kit::Button::Enabled(card.sources.len() < 32)).clicked() {
+        if ui_kit::button(ui, tr!("material.editor.add_source"), ui_kit::Button::Enabled(card.sources.len() < 32)).clicked() {
             let id = (1..=33).map(|i| format!("source-{i}")).find(|id| card.sources.iter().all(|s| &s.id != id)).unwrap_or_default();
             card.sources.push(Source { id, title: String::new(), kind: SourceKind::UserSupplied, license: None, reference: None });
         }
@@ -433,9 +433,9 @@ fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
     let mut remove = None;
     for (i, property) in card.properties.iter_mut().enumerate() {
         let label = format!("ui.material_review.{}", property.kind);
-        ui_kit::section(ui, format!("physical:property:{}", property.kind), tr(&label), false, |ui| {
+        ui_kit::section(ui, format!("physical:property:{}", property.kind), tr_by_id(&label), false, |ui| {
             property_rows(ui, property, &card.sources);
-            if ui_kit::button(ui, tr("material.editor.remove"), ui_kit::Button::Normal).clicked() {
+            if ui_kit::button(ui, tr!("material.editor.remove"), ui_kit::Button::Normal).clicked() {
                 remove = Some(i);
             }
         });
@@ -443,11 +443,11 @@ fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
     if let Some(i) = remove {
         card.properties.remove(i);
     }
-    let labels: Vec<_> = KINDS.iter().map(|kind| tr(&format!("ui.material_review.{kind}")).to_string()).collect();
+    let labels: Vec<_> = KINDS.iter().map(|kind| tr_by_id(&format!("ui.material_review.{kind}")).to_string()).collect();
     let refs: Vec<_> = labels.iter().map(String::as_str).collect();
-    ui_kit::choice_row(ui, tr("material.editor.add_property"), "physical:add_kind", &mut card.add_kind, &refs);
+    ui_kit::choice_row(ui, tr!("material.editor.add_property"), "physical:add_kind", &mut card.add_kind, &refs);
     let kind = KINDS.get(card.add_kind).copied().unwrap_or("density");
-    if ui_kit::button(ui, tr("Add"), ui_kit::Button::Enabled(card.properties.iter().all(|p| p.kind != kind))).clicked() {
+    if ui_kit::button(ui, tr!("Add"), ui_kit::Button::Enabled(card.properties.iter().all(|p| p.kind != kind))).clicked() {
         card.properties.push(PropertyDraft::empty(kind, card.sources.first().map(|s| s.id.clone()).unwrap_or_default()));
     }
 }
@@ -456,7 +456,7 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, index: &mut usize, edi
     let names = app.session.doc.material_names();
     if editor.draft.is_none() {
         let placeholder = if editor.mixed_materials { "material.selection.mixed" } else { "material.selection.choose" };
-        let current = names.get(*index).map(String::as_str).unwrap_or_else(|| tr(placeholder));
+        let current = names.get(*index).map(String::as_str).unwrap_or_else(|| tr_by_id(placeholder));
         ui_kit::row(ui, "Material", |ui| {
             ui_kit::dropdown_menu(ui, "mat", current, |ui| {
                 for (i, name) in names.iter().enumerate() {
@@ -473,18 +473,18 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, index: &mut usize, edi
         });
         let selected = names.get(*index).map(String::as_str);
         ui.horizontal_wrapped(|ui| {
-            let new = ui_kit::button(ui, tr("New"), ui_kit::Button::Normal);
+            let new = ui_kit::button(ui, tr!("New"), ui_kit::Button::Normal);
             crate::scenario::publish_handle("material:new", new.rect.center());
             if new.clicked() {
                 editor.begin(&app.session.doc, None, false);
             }
-            let duplicate = ui_kit::button(ui, tr("material.editor.duplicate"), ui_kit::Button::Enabled(selected.is_some()));
+            let duplicate = ui_kit::button(ui, tr!("material.editor.duplicate"), ui_kit::Button::Enabled(selected.is_some()));
             crate::scenario::publish_handle("material:duplicate", duplicate.rect.center());
             if duplicate.clicked() {
                 editor.begin(&app.session.doc, selected, true);
             }
             let edit =
-                ui_kit::button(ui, tr("Edit"), ui_kit::Button::Enabled(selected.and_then(|name| app.session.doc.user_material(name)).is_some()));
+                ui_kit::button(ui, tr!("Edit"), ui_kit::Button::Enabled(selected.and_then(|name| app.session.doc.user_material(name)).is_some()));
             crate::scenario::publish_handle("material:edit", edit.rect.center());
             if edit.clicked() {
                 editor.begin(&app.session.doc, selected, false);
@@ -499,13 +499,13 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, index: &mut usize, edi
     let mut save = false;
     let mut discard = false;
     if let Some(draft) = &mut editor.draft {
-        ui_kit::text(ui, tr("material.editor.scope"), ui_kit::Text::Hint("physical_edit"));
-        field(ui, tr("Name"), "name", &mut draft.name, "");
-        field(ui, tr("material.editor.assigned_density"), "density", &mut draft.density, "g/cm³");
+        ui_kit::text(ui, tr!("material.editor.scope"), ui_kit::Text::Hint("physical_edit"));
+        field(ui, tr!("Name"), "name", &mut draft.name, "");
+        field(ui, tr!("material.editor.assigned_density"), "density", &mut draft.density, "g/cm³");
         if let Some(look) = &draft.copied_appearance {
-            ui_kit::text(ui, &format!("{}: {}", tr("material.editor.preserved_appearance"), look.name), ui_kit::Text::Note("physical_appearance"));
+            ui_kit::text(ui, &format!("{}: {}", tr!("material.editor.preserved_appearance"), look.name), ui_kit::Text::Note("physical_appearance"));
         }
-        if ui_kit::checkbox(ui, tr("material.editor.engineering_card"), &mut draft.card_enabled).changed()
+        if ui_kit::checkbox(ui, tr!("material.editor.engineering_card"), &mut draft.card_enabled).changed()
             && draft.card_enabled
             && draft.card.designation.is_empty()
         {
@@ -513,9 +513,9 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, index: &mut usize, edi
         }
         if draft.card_enabled {
             card_rows(ui, &mut draft.card);
-            ui_kit::text(ui, tr("ui.material_review.claims"), ui_kit::Text::Note("physical_claims"));
+            ui_kit::text(ui, tr!("ui.material_review.claims"), ui_kit::Text::Note("physical_claims"));
         } else {
-            ui_kit::text(ui, tr("material.editor.unknown_card"), ui_kit::Text::Note("unknown_card"));
+            ui_kit::text(ui, tr!("material.editor.unknown_card"), ui_kit::Text::Note("unknown_card"));
         }
         let validation = draft.command(&app.session.doc);
         // A refused Save's message is about the command it ran and the design it ran on (#641):
@@ -532,10 +532,10 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, index: &mut usize, edi
             ui_kit::text(ui, error, ui_kit::Text::Report("physical_validation", true));
         }
         ui.horizontal_wrapped(|ui| {
-            let button = ui_kit::button(ui, tr("ui.save"), ui_kit::Button::Enabled(validation.is_ok()));
+            let button = ui_kit::button(ui, tr!("ui.save"), ui_kit::Button::Enabled(validation.is_ok()));
             crate::scenario::publish_handle("material:save", button.rect.center());
             save = button.clicked();
-            let button = ui_kit::button(ui, tr("Discard"), ui_kit::Button::Normal);
+            let button = ui_kit::button(ui, tr!("Discard"), ui_kit::Button::Normal);
             crate::scenario::publish_handle("material:discard", button.rect.center());
             discard = button.clicked();
         });

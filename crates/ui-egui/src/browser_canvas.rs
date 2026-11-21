@@ -37,11 +37,11 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let (pivot, at) = crate::shell::floating_editor_anchor(app, ctx);
     let (picks, straighten, name) = (m.picks_points(), m.straighten, c.id);
     let (ok, cancel) = if straighten {
-        (solidcraft_ui_text::tr("ui.straighten"), solidcraft_ui_text::tr("ui.cancel"))
+        (tr!("ui.straighten"), tr!("ui.cancel"))
     } else if picks {
-        (solidcraft_ui_text::tr_label("Calibrate"), solidcraft_ui_text::tr("ui.cancel"))
+        (solidcraft_ui_text::tr_label("Calibrate"), tr!("ui.cancel"))
     } else {
-        ("", solidcraft_ui_text::tr("ui.close"))
+        ("", tr!("ui.close"))
     };
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_canvas_panel"), "canvas", &title)
         .placed(pivot, at)
@@ -49,7 +49,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         .actions(ok, cancel, None)
         .show(ctx, true, |ui| {
             if picks {
-                ui_kit::text(ui, solidcraft_ui_text::tr(hint(&m)), ui_kit::Text::Note("calibrate_hint"));
+                ui_kit::text(ui, solidcraft_ui_text::tr_by_id(hint(&m)), ui_kit::Text::Note("calibrate_hint"));
                 for (label, p) in [("Point A", &mut m.a), ("Point B", &mut m.b)] {
                     ui_kit::row(ui, solidcraft_ui_text::tr_label(label), |ui| {
                         let [x, y] = p;
@@ -60,17 +60,13 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     });
                 }
                 if straighten {
-                    let options = [
-                        solidcraft_ui_text::tr("browser.straighten_horizontal"),
-                        solidcraft_ui_text::tr("browser.straighten_vertical"),
-                        solidcraft_ui_text::tr("ui.angle"),
-                    ];
+                    let options = [tr!("browser.straighten_horizontal"), tr!("browser.straighten_vertical"), tr!("ui.angle")];
                     let targets = ["straighten:horizontal", "straighten:vertical", "straighten:angle"];
-                    ui_kit::row(ui, solidcraft_ui_text::tr("browser.straighten_angle"), |ui| {
+                    ui_kit::row(ui, tr!("browser.straighten_angle"), |ui| {
                         ui_kit::segmented(ui, &mut m.direction, &options, ui_kit::Segments { targets: &targets, ..Default::default() })
                     });
                     if m.direction == 2 {
-                        ui_kit::row(ui, solidcraft_ui_text::tr("ui.angle"), |ui| ui_kit::angle_field(ui, &mut m.angle));
+                        ui_kit::row(ui, tr!("ui.angle"), |ui| ui_kit::angle_field(ui, &mut m.angle));
                         if !m.angle.is_finite() {
                             m.angle = 0.0;
                         }
@@ -81,11 +77,11 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     m.distance = m.distance.clamp(0.001, 1e6);
                 }
             } else if c.anchor.is_some() {
-                if ui_kit::checkbox_row(ui, "canvas_follow_frame", solidcraft_ui_text::tr("browser.canvas_follow_frame"), true) {
+                if ui_kit::checkbox_row(ui, "canvas_follow_frame", tr!("browser.canvas_follow_frame"), true) {
                     follow = Some(false);
                 }
                 // Its sketch's points place, turn and size it: only its look is edited here.
-                ui_kit::text(ui, solidcraft_ui_text::tr("browser.canvas_anchored"), ui_kit::Text::Note("canvas_anchored"));
+                ui_kit::text(ui, tr!("browser.canvas_anchored"), ui_kit::Text::Note("canvas_anchored"));
                 let (mut op, mut flip) = (c.opacity, c.flip);
                 let mut changed =
                     ui_kit::row(ui, solidcraft_ui_text::tr_label("Opacity"), |ui| ui_kit::slider(ui, &mut op, 0.0..=1.0, Default::default()))
@@ -98,7 +94,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     edit = Some(json!({ "canvas": name, "opacity": op, "flip": flip }));
                 }
             } else {
-                if ui_kit::checkbox_row(ui, "canvas_follow_frame", solidcraft_ui_text::tr("browser.canvas_follow_frame"), false) {
+                if ui_kit::checkbox_row(ui, "canvas_follow_frame", tr!("browser.canvas_follow_frame"), false) {
                     follow = Some(true);
                 }
                 let (mut x, mut y, mut w, mut ang, mut op, mut flip) = (c.center.x, c.center.y, c.width, c.angle.to_degrees(), c.opacity, c.flip);
@@ -202,7 +198,7 @@ pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
         panel.next = 0;
         panel.picked_both = true;
     }
-    app.set_status(solidcraft_ui_text::tr(hint(&panel)), false);
+    app.set_status(solidcraft_ui_text::tr_by_id(hint(&panel)), false);
     app.tree.canvas_panel = Some(panel);
     true
 }
@@ -344,11 +340,11 @@ mod tests {
         let status = |h: &crate::scenario::Harness| h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
         assert!(super::click(&mut h.app, &proj, screen(c.center.x - 15.0, c.center.y - 5.0)));
         assert_eq!(super::hint(h.app.tree.canvas_panel.as_ref().unwrap()), "browser.straighten_click_b");
-        assert_eq!(status(&h), crate::i18n::tr_diagnostic(solidcraft_ui_text::tr("browser.straighten_click_b")));
+        assert_eq!(status(&h), crate::i18n::tr_diagnostic(solidcraft_ui_text::tr_by_id("browser.straighten_click_b")));
         assert!(super::click(&mut h.app, &proj, screen(c.center.x + 15.0, c.center.y + 5.0)));
         // With both points picked, the card and the status line ask for the direction, not Point A.
         assert_eq!(super::hint(h.app.tree.canvas_panel.as_ref().unwrap()), "browser.straighten_choose");
-        assert_eq!(status(&h), crate::i18n::tr_diagnostic(solidcraft_ui_text::tr("browser.straighten_choose")));
+        assert_eq!(status(&h), crate::i18n::tr_diagnostic(solidcraft_ui_text::tr_by_id("browser.straighten_choose")));
         let picked = h.app.tree.canvas_panel.clone().unwrap();
         let rise = (picked.b[1] - picked.a[1]).atan2(picked.b[0] - picked.a[0]).to_degrees();
         assert!((rise - 18.43).abs() < 1.0, "{picked:?}");

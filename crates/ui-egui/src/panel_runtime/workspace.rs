@@ -965,7 +965,7 @@ impl WorkspacePanelHost {
             let name = if matches!(&control.target, HostPointerTarget::Collapse { instance }
                 if runtime.layout().layout().containing(instance).is_ok_and(|section| section.collapsed))
             {
-                locale.text("ui.panel_host.expand").to_owned()
+                tr!(locale, "ui.panel_host.expand").to_owned()
             } else {
                 chrome_label(&control.target, &control.accessible_name, &metadata, locale)
             };
@@ -1829,7 +1829,7 @@ impl WorkspacePanelHost {
         for (horizontal, bounds) in scroll_tracks(&frame.layout) {
             let target = HostControlTarget::Scroll { horizontal };
             let id = scoped_id(scope, window, None, &target);
-            let label = solidcraft_ui_text::tr(if horizontal { "ui.panel_host.scroll_horizontal" } else { "ui.panel_host.scroll_vertical" });
+            let label = solidcraft_ui_text::tr_by_id(if horizontal { "ui.panel_host.scroll_horizontal" } else { "ui.panel_host.scroll_vertical" });
             let (visible, total, offset) = if horizontal {
                 (frame.layout.capacity.size.width, frame.layout.extent.width, frame.layout.allocation_environment.scroll.x)
             } else {
@@ -2177,14 +2177,14 @@ fn chrome_label(
     locale: solidcraft_ui_text::Locale,
 ) -> String {
     match target {
-        HostPointerTarget::Menu { .. } => locale.text("ui.panel_host.menu").to_owned(),
+        HostPointerTarget::Menu { .. } => tr!(locale, "ui.panel_host.menu").to_owned(),
         HostPointerTarget::Collapse { .. } => locale.text(fallback).to_owned(),
-        HostPointerTarget::Close { .. } => locale.text("ui.panel_host.close").to_owned(),
+        HostPointerTarget::Close { .. } => tr!(locale, "ui.panel_host.close").to_owned(),
         HostPointerTarget::HeaderAction { instance, action } => metadata
             .get(instance)
             .and_then(|presentation| presentation.actions.iter().find(|binding| binding.id == *action))
             .map_or_else(|| locale.text(fallback).to_owned(), |binding| binding.label.clone()),
-        HostPointerTarget::TabOverflow { .. } => locale.text("ui.panel_host.tabs").to_owned(),
+        HostPointerTarget::TabOverflow { .. } => tr!(locale, "ui.panel_host.tabs").to_owned(),
         _ => pointer_instance(target)
             .and_then(|instance| metadata.get(instance))
             .map_or_else(|| locale.text(fallback).to_owned(), |presentation| presentation.title.clone()),
@@ -3414,12 +3414,12 @@ fn menu_instance(
     locale: solidcraft_ui_text::Locale,
 ) {
     let presentation = metadata.get(instance);
-    let label = presentation.map_or_else(|| locale.text("ui.panel_host.tab"), |value| value.title.as_str());
+    let label = presentation.map_or_else(|| tr!(locale, "ui.panel_host.tab"), |value| value.title.as_str());
     let icon = presentation.map_or("list", |value| value.icon.as_str());
     let target = HostControlTarget::Shared { instance: instance.clone(), action: HostSharedAction::Focus };
     let action = apply_action(runtime.layout().inspect().revision, vec![Mutation::Focus { instance: instance.clone() }]);
     let check = runtime.layout().prepare(action.clone());
-    let accessible = locale.format("ui.panel_host.focus_target", &[("title", label)]);
+    let accessible = tr!(locale, "ui.panel_host.focus_target", title = label);
     let response = menu_row(ui, control_id(runtime, owners, &target), &accessible, icon.into(), check.is_ok(), reveal);
     if response.enabled() {
         items.push(response.id);
@@ -3432,7 +3432,7 @@ fn menu_instance(
         response.backing_on_disabled_hover_text(locale.text(rule_key(reason.rule)));
     }
     let target = HostControlTarget::PanelMenu { instance: instance.clone() };
-    let actions_label = format!("{label} — {}", locale.text("ui.panel_host.menu"));
+    let actions_label = format!("{label} — {}", tr!(locale, "ui.panel_host.menu"));
     let response = menu_row(ui, control_id(runtime, owners, &target), &actions_label, "dots".into(), true, reveal);
     if response.enabled() {
         items.push(response.id);
@@ -3473,7 +3473,7 @@ fn shared_label(
     locale: solidcraft_ui_text::Locale,
 ) -> String {
     if *action == HostSharedAction::Collapse && runtime.layout().layout().containing(instance).is_ok_and(|section| section.collapsed) {
-        return locale.text("ui.panel_host.expand").to_owned();
+        return tr!(locale, "ui.panel_host.expand").to_owned();
     }
     if let HostSharedAction::Join(section) = action {
         let layout = runtime.layout();
@@ -3493,8 +3493,8 @@ fn shared_label(
                     Some(display)
                 }
             })
-            .unwrap_or_else(|| locale.text("ui.panel_host.tab"));
-        return locale.format("ui.panel_host.join_target", &[("title", title)]);
+            .unwrap_or_else(|| tr!(locale, "ui.panel_host.tab"));
+        return tr!(locale, "ui.panel_host.join_target", title = title);
     }
     // In a section with several tabs, moving takes only this tab, not the whole panel (#17217).
     let one_of_tabs = runtime.layout().layout().containing(instance).is_ok_and(|section| section.tabs.len() > 1);

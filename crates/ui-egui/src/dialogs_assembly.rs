@@ -849,9 +849,9 @@ pub(crate) fn face_normal_near(m: &Mesh, f: u32, p: Vec3) -> Option<Vec3> {
 /// The hover label tag: "Plane" or "Axis" when picking planes or axes, else the snap kind's name.
 pub(crate) fn snap_tag(s: &SnapPt) -> &'static str {
     if s.param.get("plane").is_some() {
-        solidcraft_ui_text::tr("ui.plane")
+        tr!("ui.plane")
     } else if s.param.get("axis").is_some() {
-        solidcraft_ui_text::tr("ui.axis")
+        tr!("ui.axis")
     } else {
         snap_name(s.kind)
     }
@@ -1232,8 +1232,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
     let problem = joint_problem(app, k, inputs);
     match k {
         Asm::FromBodies => {
-            ui.add(egui::Label::new(app.tr("ui.components_from_bodies_hint")).wrap());
-            if crate::ui_kit::button(ui, app.tr("ui.select_all"), crate::ui_kit::Button::Normal).clicked()
+            ui.add(egui::Label::new(tr!(app, "ui.components_from_bodies_hint")).wrap());
+            if crate::ui_kit::button(ui, tr!(app, "ui.select_all"), crate::ui_kit::Button::Normal).clicked()
                 && let Some(input) = inputs.first_mut()
             {
                 // Transfers take definition names, rather than the names of repeated placements.
@@ -1255,8 +1255,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 ui.vertical(|ui| {
                     crate::ui_kit::status_line(ui, &why, crate::ui_kit::StatusTone::Warning);
                     if !bodies.is_empty()
-                        && crate::ui_kit::button(ui, solidcraft_ui_text::tr("cmd.component_from_bodies"), crate::ui_kit::Button::Normal)
-                            .backing_on_hover_text(solidcraft_ui_text::tr("joint.from_bodies_hint"))
+                        && crate::ui_kit::button(ui, tr!("cmd.component_from_bodies"), crate::ui_kit::Button::Normal)
+                            .backing_on_hover_text(tr!("joint.from_bodies_hint"))
                             .clicked()
                     {
                         // A refusal shows on the status line; the picks stay either way.
@@ -1293,7 +1293,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             let kind = f.joint_kind();
             if kind != JointKind::Rigid {
                 form_row(ui, "Animate", |ui| {
-                    let label = solidcraft_ui_text::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
+                    let label = solidcraft_ui_text::tr_by_id(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
                     if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
                         .backing_on_hover_text(solidcraft_ui_text::tr_label("Play the joint's motion in the view"))
                         .clicked()
@@ -1351,7 +1351,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             if let Some((id, name)) = &rigid {
                 let mut edit = false;
                 ui.vertical(|ui| {
-                    let why = solidcraft_ui_text::format("drive.rigid", &[("joint", name.as_str())]);
+                    let why = tr!("drive.rigid", joint = name.as_str());
                     crate::ui_kit::status_line(ui, &why, crate::ui_kit::StatusTone::Warning);
                     let r = crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Edit Joint"), crate::ui_kit::Button::Normal);
                     crate::scenario::publish_handle("drive:edit_joint", r.rect.center());
@@ -1510,15 +1510,13 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                     ui.horizontal(|ui| {
                         let seconds = ((crate::now_ms() - started) / 1000.0).floor().max(0.0);
                         ui.add(egui::Spinner::new().size(t.font_small));
-                        ui.label(
-                            RichText::new(solidcraft_ui_text::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))])).color(t.text_dim),
-                        );
+                        ui.label(RichText::new(tr!("dialog.computing", seconds = &format!("{seconds:.0}"))).color(t.text_dim));
                     });
                 });
             }
             form_row(ui, "", |ui| {
                 if check.is_some() {
-                    if crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.cancel"), crate::ui_kit::Button::Normal).clicked() {
+                    if crate::ui_kit::button(ui, tr!("ui.cancel"), crate::ui_kit::Button::Normal).clicked() {
                         // Its thread finishes the check; the reply is left unread.
                         *check = None;
                     }
@@ -1527,7 +1525,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 let stale = result.is_some() && *of != picked;
                 if crate::ui_kit::button(
                     ui,
-                    solidcraft_ui_text::tr(if stale { "dialog.compute_again" } else { "dialog.compute" }),
+                    solidcraft_ui_text::tr_by_id(if stale { "dialog.compute_again" } else { "dialog.compute" }),
                     crate::ui_kit::Button::Normal,
                 )
                 .clicked()
@@ -1559,8 +1557,7 @@ fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id:
     let t = Tokens::get();
     if let Some(search) = &f.search {
         // A poisoned lock: the search's thread panicked.
-        let reply =
-            search.reply.lock().map(|mut r| r.take()).unwrap_or_else(|_| Some(Err(solidcraft_ui_text::tr("joint.find_limits_failed").to_string())));
+        let reply = search.reply.lock().map(|mut r| r.take()).unwrap_or_else(|_| Some(Err(tr!("joint.find_limits_failed").to_string())));
         match reply {
             Some(reply) => {
                 // Found for a design changed since (by a script, the control channel, undo), or
@@ -1571,7 +1568,7 @@ fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id:
                     f.searched = Some(searched);
                     fill_limits(&app.session.doc, f, reply);
                 } else {
-                    f.found_note = Some(solidcraft_ui_text::tr("joint.find_limits_stale").to_string());
+                    f.found_note = Some(tr!("joint.find_limits_stale").to_string());
                 }
                 // The rows above were drawn before this: once more, with what was found.
                 ui.ctx().request_repaint();
@@ -1587,20 +1584,20 @@ fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id:
     {
         f.searched = None;
         f.found.clear();
-        f.found_note = Some(solidcraft_ui_text::tr("joint.find_limits_stale").to_string());
+        f.found_note = Some(tr!("joint.find_limits_stale").to_string());
     }
     form_row(ui, "", |ui| {
         if f.search.is_some() {
             ui.horizontal(|ui| {
                 ui.add(egui::Spinner::new().size(t.font_small));
-                ui.label(RichText::new(solidcraft_ui_text::tr("joint.finding_limits")).color(t.text_dim));
-                if crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.cancel"), crate::ui_kit::Button::Normal).clicked() {
+                ui.label(RichText::new(tr!("joint.finding_limits")).color(t.text_dim));
+                if crate::ui_kit::button(ui, tr!("ui.cancel"), crate::ui_kit::Button::Normal).clicked() {
                     // Its thread finishes within its work budget; the reply is left unread.
                     f.search = None;
                 }
             });
-        } else if crate::ui_kit::button(ui, solidcraft_ui_text::tr("joint.find_limits"), crate::ui_kit::Button::Normal)
-            .backing_on_hover_text(solidcraft_ui_text::tr("joint.find_limits_hint"))
+        } else if crate::ui_kit::button(ui, tr!("joint.find_limits"), crate::ui_kit::Button::Normal)
+            .backing_on_hover_text(tr!("joint.find_limits_hint"))
             .clicked()
         {
             find_limits(app, f, id, inputs);
@@ -1705,17 +1702,17 @@ fn fill_limits(doc: &solidcraft_engine::doc::Document, f: &mut JointForm, reply:
             let which = solidcraft_ui_text::tr_label(label);
             let value = found.as_ref().map(|(_, shown)| shown.as_str()).unwrap_or_default();
             lines.push(match by.as_str() {
-                Some("loop") => solidcraft_ui_text::format("joint.limit_loop", &[("side", which), ("value", value)]),
-                Some("limit") => solidcraft_ui_text::format("joint.limit_limit", &[("side", which), ("value", value)]),
-                Some("turn") => solidcraft_ui_text::format("joint.limit_turn", &[("side", which), ("value", value)]),
+                Some("loop") => tr!("joint.limit_loop", side = which, value = value),
+                Some("limit") => tr!("joint.limit_limit", side = which, value = value),
+                Some("turn") => tr!("joint.limit_turn", side = which, value = value),
                 Some(_) => {
                     // Down to a tenth, so it never claims more than was searched.
                     let range = (v["range"].as_f64().filter(|x| x.is_finite()).unwrap_or(0.0) / scale * 10.0).floor() / 10.0;
-                    solidcraft_ui_text::format("joint.limit_range", &[("side", which), ("range", &num(range, &unit))])
+                    tr!("joint.limit_range", side = which, range = &num(range, &unit))
                 }
                 None => {
                     let (a, b) = (by["a"].as_str().unwrap_or_default(), by["b"].as_str().unwrap_or_default());
-                    solidcraft_ui_text::format("joint.limit_contact", &[("side", which), ("value", value), ("a", a), ("b", b)])
+                    tr!("joint.limit_contact", side = which, value = value, a = a, b = b)
                 }
             });
         }
@@ -1736,7 +1733,7 @@ fn fill_limits(doc: &solidcraft_engine::doc::Document, f: &mut JointForm, reply:
         .map(|o| format!("{} / {}", o["a"].as_str().unwrap_or_default(), o["b"].as_str().unwrap_or_default()))
         .collect();
     if !overlapping.is_empty() {
-        f.found_note = Some(solidcraft_ui_text::format("joint.limits_overlapping", &[("pairs", &overlapping.join(", "))]));
+        f.found_note = Some(tr!("joint.limits_overlapping", pairs = &overlapping.join(", ")));
     }
 }
 
@@ -1771,7 +1768,7 @@ fn interference(app: &SolveApp, picked: &[Sel], clearance: &str) -> Check {
             }
             check_now(app.session.ahead(), &crate::open_meshing::session_world(&app.session), p)
         }
-        _ => (json!({ "error": solidcraft_ui_text::tr("dialog.clearance_invalid") }), Vec::new()),
+        _ => (json!({ "error": tr!("dialog.clearance_invalid") }), Vec::new()),
     };
     if let Ok(mut slot) = check.reply.lock() {
         *slot = Some(reply);
@@ -1817,7 +1814,7 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
     }
     let hits = r["overlaps"].as_array().cloned().unwrap_or_default();
     form_row(ui, "Checked", |ui| {
-        ui.label(solidcraft_ui_text::format("dialog.bodies_count", &[("count", &r["bodies"].as_u64().unwrap_or(0).to_string())]));
+        ui.label(tr!("dialog.bodies_count", count = &r["bodies"].as_u64().unwrap_or(0).to_string()));
     });
     let unchecked = r["unchecked"].as_array().cloned().unwrap_or_default();
     let near = r["near"].as_array().cloned().unwrap_or_default();
@@ -1828,7 +1825,7 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
     // Pairs closer than the clearance, nearest first.
     if !near.is_empty() {
         form_row(ui, "Too close", |ui| {
-            ui.label(RichText::new(solidcraft_ui_text::tr("ui.distance")).semibold().color(solidcraft_theme::Tokens::get().text));
+            ui.label(RichText::new(tr!("ui.distance")).semibold().color(solidcraft_theme::Tokens::get().text));
         });
     }
     for h in &near {
@@ -1840,7 +1837,7 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
     let nearest = r["nearest"].as_object().cloned().unwrap_or_default();
     if !nearest.is_empty() {
         form_row(ui, "Nearest", |ui| {
-            ui.label(RichText::new(solidcraft_ui_text::tr("ui.distance")).semibold().color(solidcraft_theme::Tokens::get().text));
+            ui.label(RichText::new(tr!("ui.distance")).semibold().color(solidcraft_theme::Tokens::get().text));
         });
     }
     for (body, list) in &nearest {
@@ -1865,8 +1862,7 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
     // Pairs the check could not work out: not clear, not known to interfere.
     for u in unchecked {
         form_row(ui, &format!("{} · {}", u["a"].as_str().unwrap_or(""), u["b"].as_str().unwrap_or("")), |ui| {
-            ui.label(RichText::new(solidcraft_ui_text::tr("dialog.could_not_be_checked")).color(t.warning))
-                .backing_on_hover_text(u["reason"].as_str().unwrap_or(""));
+            ui.label(RichText::new(tr!("dialog.could_not_be_checked")).color(t.warning)).backing_on_hover_text(u["reason"].as_str().unwrap_or(""));
         });
     }
 }
@@ -1909,8 +1905,8 @@ fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String
     // another is still a two-part joint.
     if picks.iter().all(|p| body_of(p).is_some()) && occs.first().is_some_and(|first| first.is_some() && occs.iter().all(|o| o == first)) {
         return Some(match bodies.as_slice() {
-            [body] => (solidcraft_ui_text::format("joint.one_body", &[("body", body.as_str())]), Vec::new()),
-            _ => (solidcraft_ui_text::format("joint.one_component", &[("bodies", &bodies.join(", "))]), bodies),
+            [body] => (tr!("joint.one_body", body = body.as_str()), Vec::new()),
+            _ => (tr!("joint.one_component", bodies = &bodies.join(", ")), bodies),
         });
     }
     commands(app, k, inputs).err().map(|e| (e, Vec::new()))
@@ -1944,7 +1940,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
         Asm::FromBodies => {
             let bodies = sel_items(inputs, 0).body_names();
             if bodies.is_empty() {
-                return Err(solidcraft_ui_text::tr("ui.components_from_bodies_required").into());
+                return Err(tr!("ui.components_from_bodies_required").into());
             }
             cmd("component.from_bodies", json!({ "bodies": bodies }))
         }
@@ -2040,12 +2036,9 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             let occs = occurrences(s, items);
             if occs.len() < 2 {
                 if occs.len() == 1 && items.len() > 1 && items.iter().all(|x| matches!(x, Sel::Body { .. })) {
-                    return Err(solidcraft_ui_text::format(
-                        "joint.rigid_group_one_component",
-                        &[("count", &items.len().to_string()), ("command", solidcraft_ui_text::tr("cmd.component_from_bodies"))],
-                    ));
+                    return Err(tr!("joint.rigid_group_one_component", count = &items.len().to_string(), command = tr!("cmd.component_from_bodies")));
                 }
-                return Err(solidcraft_ui_text::tr("joint.rigid_group_select_components").into());
+                return Err(tr!("joint.rigid_group_select_components").into());
             }
             cmd("joint.rigid_group", json!({ "occurrences": occs }))
         }
@@ -2053,7 +2046,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             let j = s.doc.assembly.joints.get(*joint).ok_or("no joint that moves yet")?;
             // A rigid joint has nothing to drive: the dialog says why and offers Edit Joint (#6981).
             if j.kind == JointKind::Rigid {
-                return Err(solidcraft_ui_text::format("drive.rigid", &[("joint", &j.name)]));
+                return Err(tr!("drive.rigid", joint = &j.name));
             }
             cmd("joint.drive", json!({"joint": j.id, "values": values}))
         }
@@ -2210,7 +2203,7 @@ pub(crate) fn build_world_preview(preview: solidcraft_engine::Preview, colors: C
 /// joined to nothing grounded moves nothing, and says which part that is.
 pub fn drive_stop(reply: &Value) -> Option<String> {
     if let Some(part) = reply.get("unconnected").and_then(Value::as_str) {
-        return Some(solidcraft_ui_text::format("drive.unconnected", &[("part", part)]));
+        return Some(tr!("drive.unconnected", part = part));
     }
     // The values come as joint.list gives them: degrees and millimetres.
     let at: Vec<String> = reply
@@ -2224,10 +2217,10 @@ pub fn drive_stop(reply: &Value) -> Option<String> {
     let at = at.join(", ");
     let name = |v: &Value| v.as_str().unwrap_or_default().to_string();
     if let Some(l) = reply.get("stopped_by_loop").filter(|v| v.is_object()) {
-        return Some(solidcraft_ui_text::format("drive.stopped_by_loop", &[("value", &at), ("joint", &name(&l["joint"]))]));
+        return Some(tr!("drive.stopped_by_loop", value = &at, joint = &name(&l["joint"])));
     }
     let c = reply.get("stopped_by_contact").filter(|v| v.is_object())?;
-    Some(solidcraft_ui_text::format("drive.stopped_by_contact", &[("value", &at), ("a", &name(&c["a"])), ("b", &name(&c["b"]))]))
+    Some(tr!("drive.stopped_by_contact", value = &at, a = &name(&c["a"]), b = &name(&c["b"])))
 }
 
 // ---- overlay ----
@@ -2847,15 +2840,15 @@ fn link_tip(s: &Session, l: &solidcraft_engine::doc::joints::MotionLink) -> Opti
         }
     }
     if !min.is_finite() || !max.is_finite() {
-        return Some(solidcraft_ui_text::tr("browser.link.no_profile").to_string());
+        return Some(tr!("browser.link.no_profile").to_string());
     }
     let (min, max) = (show(min), show(max));
     Some(format!(
         "{} {}…{} {unit} ({} {})",
-        solidcraft_ui_text::tr("browser.link.lift"),
+        tr!("browser.link.lift"),
         crate::dialogs_coupling::trim(min),
         crate::dialogs_coupling::trim(max),
-        solidcraft_ui_text::tr("browser.link.rise"),
+        tr!("browser.link.rise"),
         crate::dialogs_coupling::trim(max - min)
     ))
 }
@@ -3283,7 +3276,7 @@ pub(crate) fn joint_glyph_at(plan: &[JointGlyph], pos: Pos2) -> Option<u64> {
 /// axis explain themselves (#6404).
 pub(crate) fn joint_glyph_tip(app: &SolveApp, id: u64) -> Option<String> {
     let j = app.session.doc.assembly.joints.iter().find(|j| j.id == id)?;
-    let kind = app.tr(kind_label(j.kind));
+    let kind = app.tr_by_id(kind_label(j.kind));
     // A name that already says the type ("Rigid 7") is enough on its own.
     Some(if j.name.to_lowercase().contains(&kind.to_lowercase()) { j.name.clone() } else { format!("{} ({kind})", j.name) })
 }

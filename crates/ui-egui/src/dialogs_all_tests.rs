@@ -1961,7 +1961,7 @@ fn pattern_says_why_a_clicked_sketch_is_not_taken() {
     assert!(crate::dialogs::missing_pick(crate::dialogs::SKETCH_NOT_OBJECT), "shown as what to pick, with no Create Issue");
     let _japanese = solidcraft_ui_text::scope("ja");
     assert!(!solidcraft_ui_text::tr_label(crate::dialogs::SKETCH_NOT_OBJECT).is_ascii(), "the hint reads in the user's language");
-    assert!(!solidcraft_ui_text::tr("ui.pattern_object_type_tip").is_ascii(), "so does the Object Type tooltip");
+    assert!(!solidcraft_ui_text::tr_by_id("ui.pattern_object_type_tip").is_ascii(), "so does the Object Type tooltip");
 }
 
 /// Features stored with bare numbers edit with their units written out, as the Plastic ones do

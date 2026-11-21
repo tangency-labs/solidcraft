@@ -510,7 +510,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
     if ui.memory(|m| m.has_focus(id)) {
         enter |= ui.input_mut(|i| !i.modifiers.shift && i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     }
-    let response = ui_kit::multiline_text_field(ui, "Text", id, &mut k.text).backing_on_hover_text(solidcraft_ui_text::tr("sketch_text.formula"));
+    let response = ui_kit::multiline_text_field(ui, "Text", id, &mut k.text).backing_on_hover_text(tr!("sketch_text.formula"));
     crate::scenario::publish_handle("dialog:Text", response.rect.center());
     if k.focus {
         response.request_focus();
@@ -525,11 +525,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
         k.style.bold = false;
     }
     ui_kit::row(ui, "Font", |ui| font_row(ui, k));
-    let emphasis = ui_kit::EmphasisLabels {
-        bold: solidcraft_ui_text::tr("sketch_text.bold"),
-        italic: solidcraft_ui_text::tr("sketch_text.italic"),
-        no_bold: solidcraft_ui_text::tr("sketch_text.no_bold"),
-    };
+    let emphasis = ui_kit::EmphasisLabels { bold: tr!("sketch_text.bold"), italic: tr!("sketch_text.italic"), no_bold: tr!("sketch_text.no_bold") };
     ui_kit::row(ui, "Style", |ui| ui_kit::text_emphasis(ui, &mut k.style.bold, &mut k.style.italic, font_has_bold, &emphasis));
     ui_kit::row(ui, "Alignment", |ui| {
         let mut selected = match k.style.align {
@@ -537,7 +533,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
             TextAlign::Center => 1,
             TextAlign::Right => 2,
         };
-        let labels = ["sketch_text.align_left", "sketch_text.align_center", "sketch_text.align_right"].map(solidcraft_ui_text::tr);
+        let labels = ["sketch_text.align_left", "sketch_text.align_center", "sketch_text.align_right"].map(solidcraft_ui_text::tr_by_id);
         ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { compact: true, glyphs: Some(&paragraph_glyph), ..Default::default() });
         k.style.align = match selected {
             1 => TextAlign::Center,
@@ -555,7 +551,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
             [TextVerticalAlign::Baseline, TextVerticalAlign::Top, TextVerticalAlign::Middle, TextVerticalAlign::Bottom];
         let mut selected = ORDER.iter().position(|v| *v == k.style.vertical_align).unwrap_or(0);
         let labels = ["sketch_text.valign_baseline", "sketch_text.valign_top", "sketch_text.valign_middle", "sketch_text.valign_bottom"]
-            .map(solidcraft_ui_text::tr);
+            .map(solidcraft_ui_text::tr_by_id);
         // Four worded segments do not fit the dialog's width: each shows "Ag" with a line where the anchor is.
         let glyph = |p: &egui::Painter, r: egui::Rect, i: usize, ink: egui::Color32| {
             vertical_glyph(p, r, ORDER.get(i).copied().unwrap_or_default(), ink);
@@ -577,7 +573,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
         let response = ui.add_enabled_ui(!on_path, |ui| ui_kit::value_pair(ui, "Position", [x, y], ["X", "Y"], None));
         enter |= response.inner;
         if on_path {
-            response.response.backing_on_disabled_hover_text(solidcraft_ui_text::tr("sketch_text.on_path"));
+            response.response.backing_on_disabled_hover_text(tr!("sketch_text.on_path"));
         }
     }
     for (i, (label, value)) in LABELS.iter().skip(2).zip(rest).enumerate() {
@@ -585,7 +581,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
         let response = ui.add_enabled_ui(!(on_path && index == ANGLE), |ui| ui_kit::row(ui, label, |ui| ui_kit::field(ui, value)));
         enter |= response.inner;
         if on_path && index == ANGLE {
-            response.response.backing_on_disabled_hover_text(solidcraft_ui_text::tr("sketch_text.on_path"));
+            response.response.backing_on_disabled_hover_text(tr!("sketch_text.on_path"));
         }
     }
     path_row(ui, k, inputs, active);
@@ -597,10 +593,9 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
 fn path_row(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], active: &mut usize) {
     ui_kit::row(ui, "Path", |ui| {
         let on = k.style.path.is_some();
-        let text =
-            if on { solidcraft_ui_text::format("dialog.selected_count", &[("count", "1")]) } else { solidcraft_ui_text::tr("dialog.select").into() };
+        let text = if on { tr!("dialog.selected_count", count = "1") } else { tr!("dialog.select").into() };
         let chip = ui_kit::selection_field(ui, &text, ui_kit::Selection { active: k.picking, filled: on })
-            .backing_on_hover_text(solidcraft_ui_text::tr("sketch_text.path_hint"));
+            .backing_on_hover_text(tr!("sketch_text.path_hint"));
         let chip_rect = chip.rect;
         crate::scenario::publish_handle("dialog:Path", chip.rect.center());
         if chip.clicked() {
@@ -701,14 +696,14 @@ fn vertical_glyph(p: &egui::Painter, r: egui::Rect, align: TextVerticalAlign, in
 }
 
 fn font_row(ui: &mut egui::Ui, k: &mut Tx) {
-    let builtin = solidcraft_ui_text::format("sketch_text.builtin_font", &[("family", solidcraft_engine::sketch::DEFAULT_FONT_FAMILY)]);
+    let builtin = tr!("sketch_text.builtin_font", family = solidcraft_engine::sketch::DEFAULT_FONT_FAMILY);
     let current = if k.font.trim().is_empty() { builtin.clone() } else { k.font.clone() };
     let families = families(ui.ctx());
     let mut options = vec![ui_kit::SearchOption { value: "", label: &builtin, handle: Some("dialog:Font built-in") }];
     if let Some(list) = &families {
         options.extend(list.iter().map(|family| ui_kit::SearchOption { value: family, label: family, handle: None }));
     }
-    let custom = is_font_file(&k.font_filter).then(|| solidcraft_ui_text::format("sketch_text.use_font_file", &[("path", k.font_filter.trim())]));
+    let custom = is_font_file(&k.font_filter).then(|| tr!("sketch_text.use_font_file", path = k.font_filter.trim()));
     if let Some(font) = ui_kit::searchable_dropdown(
         ui,
         "sketch_text_font",
@@ -716,7 +711,7 @@ fn font_row(ui: &mut egui::Ui, k: &mut Tx) {
         &mut k.font_filter,
         &options,
         custom.as_deref(),
-        families.is_none().then(|| solidcraft_ui_text::tr("sketch_text.loading_fonts")),
+        families.is_none().then(|| tr!("sketch_text.loading_fonts")),
     ) {
         k.font = font;
         k.font_filter.clear();

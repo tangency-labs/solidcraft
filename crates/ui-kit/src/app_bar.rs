@@ -613,7 +613,7 @@ pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Re
     }
     let overflow_button = placed.overflow_button.map(|(x, w)| Rect::from_center_size(pos2(r.left() + x + w / 2.0, r.center().y), vec2(w, 32.0)));
     if let Some(button) = overflow_button {
-        let more = solidcraft_ui_text::tr("ui.app_bar_more");
+        let more = solidcraft_ui_text::tr_by_id("ui.app_bar_more");
         let b = BarButton { id: "overflow", icon: "chevron", tip: more, enabled: true, narrow: false, wide_only: false };
         // Stable names independent of a host's handle prefixes.
         for handle in ["titlebar:overflow", "appbar:overflow"] {
@@ -1280,7 +1280,7 @@ fn window_badge<'a>(view: &ViewTab<'a>, stage: CollapseStage) -> std::borrow::Co
     {
         return number.to_string().into();
     }
-    view.window_name.unwrap_or(solidcraft_ui_text::tr("multi_window.window_mark")).into()
+    view.window_name.unwrap_or(solidcraft_ui_text::tr_by_id("multi_window.window_mark")).into()
 }
 
 fn clear_view_width(ui: &egui::Ui, view: &ViewTab, label: f32, stage: CollapseStage, editing: bool) -> f32 {
@@ -1522,7 +1522,7 @@ fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str, modern: bool, m
                 row.show(ui)
             })
             .inner
-            .backing_on_hover_text(solidcraft_ui_text::tr("multi_window.window_mark"))
+            .backing_on_hover_text(solidcraft_ui_text::tr_by_id("multi_window.window_mark"))
         } else {
             row.show(ui)
         };
@@ -1658,7 +1658,7 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
     solidcraft_ui_registry::publish_target(&format!("{}{k}", h.view), vr);
     resp.widget_info(|| {
         let name = if detached {
-            format!("{} — {}", view.name, solidcraft_ui_text::tr("multi_window.window_mark")).into()
+            format!("{} — {}", view.name, solidcraft_ui_text::tr_by_id("multi_window.window_mark")).into()
         } else {
             std::borrow::Cow::Borrowed(view.name)
         };
@@ -1788,10 +1788,10 @@ fn view_look(view: &ViewTab<'_>) -> ViewLook {
 
 fn view_status<'a>(view: &ViewTab<'a>) -> &'a str {
     match view_look(view) {
-        ViewLook::Ground => solidcraft_ui_text::tr("view_tab.showing"),
-        ViewLook::Card => solidcraft_ui_text::tr("view_tab.on_screen"),
-        ViewLook::Hidden => solidcraft_ui_text::tr("view_tab.hidden"),
-        ViewLook::Elsewhere => view.window_name.unwrap_or(solidcraft_ui_text::tr("multi_window.window_mark")),
+        ViewLook::Ground => solidcraft_ui_text::tr_by_id("view_tab.showing"),
+        ViewLook::Card => solidcraft_ui_text::tr_by_id("view_tab.on_screen"),
+        ViewLook::Hidden => solidcraft_ui_text::tr_by_id("view_tab.hidden"),
+        ViewLook::Elsewhere => view.window_name.unwrap_or(solidcraft_ui_text::tr_by_id("multi_window.window_mark")),
     }
 }
 
@@ -2354,7 +2354,7 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
                     if strip.clear_view_tabs
                         && let Some(tab) = strip.tabs.get(strip.selected)
                     {
-                        let caption = solidcraft_ui_text::tr("view_tab.views_in").replace("{design}", tab.name);
+                        let caption = solidcraft_ui_text::tr_by_id("view_tab.views_in").replace("{design}", tab.name);
                         crate::menu::Menu::heading(ui, &caption);
                     }
                     view_list(ui, views, &format!("{}:row:", h.view_more), strip.clear_view_tabs, &mut next_menu).map(TabAction::SelectView)
@@ -2933,7 +2933,7 @@ fn overflow_items(data: &AppBar, ids: &[String], anchor: f32) -> Vec<OverflowIte
                 }
                 "settings" => {
                     button = Some(data.settings);
-                    row.label = solidcraft_ui_text::tr("ui.preferences").to_string();
+                    row.label = solidcraft_ui_text::tr_by_id("ui.preferences").to_string();
                     row.action = BarAction::Button { id: data.settings.id.to_string() };
                 }
                 "help" => {
@@ -2960,7 +2960,7 @@ fn overflow_items(data: &AppBar, ids: &[String], anchor: f32) -> Vec<OverflowIte
                             "redo" => "ui.redo",
                             _ => "",
                         };
-                        row.label = if key.is_empty() { i.tip.to_string() } else { solidcraft_ui_text::tr(key).to_string() };
+                        row.label = if key.is_empty() { i.tip.to_string() } else { solidcraft_ui_text::tr_by_id(key).to_string() };
                         row.action = BarAction::Button { id: i.id.to_string() };
                     }
                     if let Some(p) = id.strip_prefix("pill:").and_then(|i| i.parse::<usize>().ok()).and_then(|i| data.pills.get(i)) {

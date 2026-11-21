@@ -239,16 +239,16 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let shown = design_shown(app) && idle;
             // The keys as the platform names them (Cmd on macOS); Redo has two (#12902).
             let tip = |id: &str, keys: &[&str]| {
-                let label = app.tr(id);
+                let label = app.tr_by_id(id);
                 let keys = keys.iter().map(|key| crate::ui_kit::chord_label(key)).collect::<Vec<_>>().join(", ");
                 if shown { format!("{label} ({keys})") } else { solidcraft_ui_text::format("ui.needs_design", &[("command", label)]) }
             };
             let (save_tip, undo_tip, redo_tip) =
                 (tip("ui.save", &["Ctrl+S"]), tip("ui.undo", &["Ctrl+Z"]), tip("ui.redo", &["Ctrl+Y", "Ctrl+Shift+Z"]));
             let prefs_tip = if cfg!(target_os = "macos") {
-                format!("{} (Cmd+,)", app.tr("ui.preferences"))
+                format!("{} (Cmd+,)", tr!(app, "ui.preferences"))
             } else {
-                format!("{} (Ctrl+,)", app.tr("ui.preferences"))
+                format!("{} (Ctrl+,)", tr!(app, "ui.preferences"))
             };
             let version = format!("v{}", crate::update::current_version());
             let url = crate::update::release_notes_url(crate::update::current_version(), crate::update::release_build());
@@ -264,8 +264,8 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 mark: &|painter, at| solidcraft_look::glyphs::brand_mark(painter, at),
                 name: "SolidCraft",
                 leading: (crate::library::available(app) && !app.home.open).then_some(vec2(26.0, 26.0)),
-                home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
-                file: app.tr("ui.file"),
+                home: app_bar::BarButton { id: "home", icon: "home", tip: tr!(app, "ui.start_page"), enabled: idle, narrow: false, wide_only: false },
+                file: tr!(app, "ui.file"),
                 file_open,
                 actions: vec![
                     action("save", "save", &save_tip, shown, false),
@@ -273,12 +273,12 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     action("redo", "redo", &redo_tip, shown, true),
                 ],
                 quick: quick_ids.len(),
-                help: app_bar::BarButton { id: "help", icon: "help", tip: app.tr("ui.help"), enabled: true, narrow: false, wide_only: false },
+                help: app_bar::BarButton { id: "help", icon: "help", tip: tr!(app, "ui.help"), enabled: true, narrow: false, wide_only: false },
                 settings: app_bar::BarButton { id: "settings", icon: "settings", tip: &prefs_tip, enabled: true, narrow: false, wide_only: false },
                 report: app_bar::Report {
-                    label: solidcraft_ui_text::tr("ui.report_a_bug"),
+                    label: tr!("ui.report_a_bug"),
                     tip: if crate::issue_report::ticket::enabled(app) {
-                        solidcraft_ui_text::tr("report.pill_tip")
+                        tr!("report.pill_tip")
                     } else {
                         solidcraft_ui_text::tr_label("Report a bug — review a screenshot and open a GitHub draft")
                     },
@@ -400,7 +400,7 @@ fn draw_bar_offers(app: &mut SolveApp, ui: &mut egui::Ui, out: &app_bar::BarOut)
     }
     let update = crate::update::offered(app).map(|r| r.version().to_string()).and_then(|version| {
         let full = solidcraft_ui_text::format("update.button_version", &[("version", &version)]);
-        let labels = [full.as_str(), solidcraft_ui_text::tr("update.button")];
+        let labels = [full.as_str(), tr!("update.button")];
         let (rect, response) = offer_pill(ui, out.offer, out.offer_labeled, &labels, 0.0, "update", "titlebar:update", false)?;
         if response.backing_on_hover_text(solidcraft_ui_text::format("update.available", &[("version", &version)])).clicked() {
             run_overflow_control(app, "offered");
@@ -408,9 +408,9 @@ fn draw_bar_offers(app: &mut SolveApp, ui: &mut egui::Ui, out: &app_bar::BarOut)
         Some(rect)
     });
     let badge = app.policy.managed_by().zip(out.managed).and_then(|(full, span)| {
-        let labels = [full.as_str(), solidcraft_ui_text::tr("policy.managed_short")];
+        let labels = [full.as_str(), tr!("policy.managed_short")];
         let (rect, response) = offer_pill(ui, span, out.managed_labeled, &labels, 0.0, "briefcase", "titlebar:managed", true)?;
-        if response.backing_on_hover_text(format!("{full}\n{}", solidcraft_ui_text::tr("policy.managed_tip"))).clicked() {
+        if response.backing_on_hover_text(format!("{full}\n{}", tr!("policy.managed_tip"))).clicked() {
             run_overflow_control(app, "managed");
         }
         Some(rect)
@@ -423,24 +423,24 @@ fn fill_overflow_rows(app: &SolveApp, rows: &mut [app_bar::OverflowItem], shown:
     for row in rows {
         match row.id.as_str() {
             "offered" => {
-                row.label = app.tr("update.button").to_string();
+                row.label = tr!(app, "update.button").to_string();
                 row.icon = "update".to_string();
                 row.enabled = crate::update::offered(app).is_some();
             }
             "managed" => {
-                row.label = app.policy.managed_by().unwrap_or_else(|| app.tr("policy.managed_short").to_string());
+                row.label = app.policy.managed_by().unwrap_or_else(|| tr!(app, "policy.managed_short").to_string());
                 row.icon = "briefcase".to_string();
             }
             "assistant" => {
-                row.label = app.tr("ui.assistant").to_string();
+                row.label = tr!(app, "ui.assistant").to_string();
                 row.icon = "assistant".to_string();
             }
             "search" => {
-                row.label = app.tr("cmd.ui.palette").to_string();
+                row.label = tr!(app, "cmd.ui.palette").to_string();
                 row.icon = "zoom".to_string();
             }
             "leading" => {
-                row.label = app.tr(if app.preferences.show_document_browser { "library.hide" } else { "library.show" }).to_string();
+                row.label = app.tr_by_id(if app.preferences.show_document_browser { "library.hide" } else { "library.show" }).to_string();
                 row.icon = "document_browser".to_string();
             }
             _ => {
@@ -642,10 +642,10 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     };
     // Insert, Save and Export act on the design, which Home hides.
     let shown = design_shown(app);
-    let mut rows = vec![row("new", app.tr("ui.new_design"), "Ctrl+N", "new", true)];
+    let mut rows = vec![row("new", tr!(app, "ui.new_design"), "Ctrl+N", "new", true)];
     // The icon `drawing.create` itself uses.
-    rows.push(row("new_drawing", app.tr("ui.new_drawing"), "", "new", FileAction::NewDrawing.enabled(app)));
-    rows.push(row("open", &format!("{}…", app.tr("ui.open")), "Ctrl+O", "open", true));
+    rows.push(row("new_drawing", tr!(app, "ui.new_drawing"), "", "new", FileAction::NewDrawing.enabled(app)));
+    rows.push(row("open", &format!("{}…", tr!(app, "ui.open")), "Ctrl+O", "open", true));
     let mut recent: Vec<FileRow> = app
         .home
         .recent
@@ -657,18 +657,18 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
         })
         .collect();
     recent.push(FileRow::Separator);
-    recent.push(button("clear_recent", app.tr("ui.clear_recent"), "delete", None));
-    rows.push(FileRow::Sub { label: app.tr("ui.open_recent").to_string(), rows: recent });
+    recent.push(button("clear_recent", tr!(app, "ui.clear_recent"), "delete", None));
+    rows.push(FileRow::Sub { label: tr!(app, "ui.open_recent").to_string(), rows: recent });
     rows.push(row("file.insert_step", &format!("{}…", app.tr_label("Insert STEP")), "", "import", shown));
     rows.push(row("file.insert_mesh", &format!("{}…", app.tr_label("Insert Mesh")), "", "import", shown));
     rows.push(row("pointcloud.insert", &format!("{}…", app.tr_label("Insert Point Cloud")), "", "import", shown));
     rows.push(row("component.insert_design", &format!("{}…", app.tr_label("Insert Design")), "", "component", shown));
-    rows.push(row("save", app.tr("ui.save"), "Ctrl+S", "save", shown));
+    rows.push(row("save", tr!(app, "ui.save"), "Ctrl+S", "save", shown));
     // Save As shows the shortcut of the command it runs, from the app's own registry.
     let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
-    rows.push(row("save_as", &format!("{}…", app.tr("ui.save_as")), &save_as_key, "save", shown));
+    rows.push(row("save_as", &format!("{}…", tr!(app, "ui.save_as")), &save_as_key, "save", shown));
     rows.push(row("save_json", app.tr_label("Save As JSON…"), "", "save", true));
-    rows.push(row("file.verify", app.tr("cmd.file.verify"), "", "shield", shown && app.session.path.is_some()));
+    rows.push(row("file.verify", tr!(app, "cmd.file.verify"), "", "shield", shown && app.session.path.is_some()));
     // The browser build: a copy as a downloaded file, whatever Save does.
     if app.services.download_design.is_some() {
         rows.push(row("download", app.tr_label("Download design"), "", "export", shown));
@@ -681,18 +681,18 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     let key = |id: &str| crate::keymap::effective(app, id).unwrap_or_default();
     rows.push(row("file.export_stl", app.tr_label("Export STL…"), &key("file.export_stl"), "mesh_export", shown));
     rows.push(row("file.export_3mf", app.tr_label("Export 3MF…"), &key("file.export_3mf"), "mesh_export", shown));
-    rows.push(row("file.send_to_slicer", app.tr("cmd.file_send_to_slicer"), "", "mesh_export", shown && crate::dialogs_save_mesh::available(app)));
+    rows.push(row("file.send_to_slicer", tr!(app, "cmd.file_send_to_slicer"), "", "mesh_export", shown && crate::dialogs_save_mesh::available(app)));
     rows.push(row("file.export_step", app.tr_label("Export STEP…"), &key("file.export_step"), "export", shown));
     rows.push(row("file.export_view_dxf", app.tr_label("Export Current View as DXF…"), "", "export", shown));
     rows.push(row("file.export_obj", app.tr_label("Export OBJ…"), &key("file.export_obj"), "export", shown));
-    rows.push(row("export_glb", &format!("{}…", app.tr("ui.export_glb")), "", "export", shown));
-    rows.push(row("export_usd", &format!("{}…", app.tr("ui.export_usd")), "", "export", shown));
+    rows.push(row("export_glb", &format!("{}…", tr!(app, "ui.export_glb")), "", "export", shown));
+    rows.push(row("export_usd", &format!("{}…", tr!(app, "ui.export_usd")), "", "export", shown));
     rows.push(row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown));
     rows.push(row("file.export_sdf", app.tr_label("Export SDF Model…"), &key("file.export_sdf"), "export", shown));
     rows.push(row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true));
     // Print the drawing shown: only in Drawing, where Ctrl+P does the same.
     if crate::drawing_workspace::active(app) && app.session.open_drawing.is_some() {
-        rows.push(row("drawing.print", &format!("{}…", app.tr("ui.drawing_print.menu")), &key("drawing.print"), "export", true));
+        rows.push(row("drawing.print", &format!("{}…", tr!(app, "ui.drawing_print.menu")), &key("drawing.print"), "export", true));
     }
     rows.push(FileRow::Separator);
     rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
@@ -700,16 +700,16 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     // Plugins… opens Preferences on the Plugins page: install, turn on or off, and remove plugins
     // there. The web build runs no plugins.
     if !cfg!(target_arch = "wasm32") {
-        rows.push(row("plugins.preferences", &format!("{}…", app.tr("ui.plugins")), "", "prefs_plugins", true));
+        rows.push(row("plugins.preferences", &format!("{}…", tr!(app, "ui.plugins")), "", "prefs_plugins", true));
         rows.push(FileRow::Separator);
     }
     // The browser can install SolidCraft as an app (`install`): only while it offers to.
     if crate::install::offered(app).is_some() {
-        rows.push(button("install", solidcraft_ui_text::tr("install.menu"), "new", Some(solidcraft_ui_text::tr("install.button_tip"))));
+        rows.push(button("install", tr!("install.menu"), "new", Some(tr!("install.button_tip"))));
     }
-    rows.push(row("settings", &format!("{}…", app.tr("ui.preferences")), "", "settings", true));
-    rows.push(row("shortcuts", &format!("{}…", app.tr("ui.keyboard_shortcuts")), "", "list", true));
-    rows.push(row("quit", app.tr("ui.quit"), "", "close", true));
+    rows.push(row("settings", &format!("{}…", tr!(app, "ui.preferences")), "", "settings", true));
+    rows.push(row("shortcuts", &format!("{}…", tr!(app, "ui.keyboard_shortcuts")), "", "list", true));
+    rows.push(row("quit", tr!(app, "ui.quit"), "", "close", true));
     let entries = crate::plugin_slots::items(app, crate::plugin_slots::Slot::Menu("File"));
     if !entries.is_empty() {
         rows.push(FileRow::Separator);
@@ -830,7 +830,7 @@ pub(crate) fn save_as(app: &mut SolveApp) {
 
 /// Save As offering a copy's name ("Bracket copy"), so the file it is a copy of is kept.
 pub(crate) fn save_copy(app: &mut SolveApp) {
-    let name = solidcraft_ui_text::format("document.copy_name", &[("name", &app.session.save_as_name())]);
+    let name = tr!("document.copy_name", name = &app.session.save_as_name());
     save_as_named(app, &name, solidcraft_engine::io::DESIGN_EXT);
 }
 
@@ -982,7 +982,7 @@ pub(crate) fn persistent_button_name(app: &SolveApp, command: &solidcraft_engine
 fn persistent_hint(app: &SolveApp, command: &solidcraft_engine::CommandSpec, enabled: bool) -> Option<String> {
     (enabled && command.id != COMPONENT_COLORS && persistent_pressed(app, command.id)).then(|| {
         let name = persistent_button_name(app, command);
-        solidcraft_ui_text::Locale::for_language(&app.preferences.language).format("ui.viewport_status_clear_hint", &[("name", &name)])
+        tr!(solidcraft_ui_text::Locale::for_language(&app.preferences.language), "ui.viewport_status_clear_hint", name = &name)
     })
 }
 
@@ -1079,7 +1079,7 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) -> Option<bool>
     } else {
         Vec::new()
     };
-    let add_tip = app.tr("prefs.toolbar_tabs").to_string();
+    let add_tip = tr!(app, "prefs.toolbar_tabs").to_string();
     let out = {
         let row_data = ribbon::Tabs {
             tabs: ids
@@ -1445,7 +1445,7 @@ impl RibbonPanels {
                 Panel {
                     panel,
                     key: format!("{tab}:{panel}"),
-                    label: if finish { app.tr("ui.ribbon_exit").to_string() } else { ribbon_label(app, panel) },
+                    label: if finish { tr!(app, "ui.ribbon_exit").to_string() } else { ribbon_label(app, panel) },
                     tip: format!("{} ({})", app.tr_label(panel), shown.len().max(cmds.len())),
                     popup_id,
                     commands: cmds.iter().map(|c| c.id).collect(),
@@ -1464,8 +1464,8 @@ impl RibbonPanels {
             && panels.last().is_some_and(|p| matches!(p.panel, "FINISH SKETCH" | "FINISH EDITING"));
         let buttons = if tab == "MODEL" { crate::plugin_menu::ribbon_buttons(app) } else { Vec::new() };
         let plugins = (!buttons.is_empty()).then(|| PluginGroup {
-            label: app.tr("ui.plugins").to_string(),
-            tip: format!("{} ({})", app.tr("ui.plugins"), buttons.len()),
+            label: tr!(app, "ui.plugins").to_string(),
+            tip: format!("{} ({})", tr!(app, "ui.plugins"), buttons.len()),
             sizes: buttons
                 .iter()
                 .map(|b| {
@@ -1653,13 +1653,13 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         let drawing = crate::drawing_workspace::active(app);
         let switcher = app_bar::Switcher {
             name: if render {
-                app.tr("ui.render")
+                tr!(app, "ui.render")
             } else if drawing {
                 app.tr_label("Drawing")
             } else {
-                app.tr("ui.design")
+                tr!(app, "ui.design")
             },
-            caption: app.tr("ui.ribbon_workspace"),
+            caption: tr!(app, "ui.ribbon_workspace"),
             icon: if render {
                 "ws_render"
             } else if drawing {
@@ -1667,7 +1667,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             } else {
                 "ws_design"
             },
-            tip: app.tr("ui.change_workspace"),
+            tip: tr!(app, "ui.change_workspace"),
             open: app.viewport.context_menu.is_some() && app.menu.target == crate::context_menu::Target::Workspace,
             floating,
             labels,
@@ -1756,7 +1756,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         if crate::workspace::visible_tabs(app).is_empty() {
             // Every tab is hidden: the ribbon says how to bring them back.
             let at = pos2((ribbon_left + right) / 2.0, top + group_height / 2.0);
-            ribbon::text(ui, at, app.tr("ui.toolbar_tabs_hidden"), t.font_body, t.text_dim, false);
+            ribbon::text(ui, at, tr!(app, "ui.toolbar_tabs_hidden"), t.font_body, t.text_dim, false);
             crate::scenario::publish_handle("ribbon:tabs_hidden", at);
         }
         if tab == "MODEL" {
@@ -1972,7 +1972,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                                 let row_w = dropdown_width(app, ui, &cmds);
                                 ui.set_width(row_w);
                                 sketch_create_menu(app, ui, &cmds, row_w, &mut menu, &mut toggle);
-                                ribbon::section_footer(ui, solidcraft_ui_text::tr("ui.ribbon_pin_footer"));
+                                ribbon::section_footer(ui, tr!("ui.ribbon_pin_footer"));
                                 return;
                             }
                             let grouped = if *panel == "CONSTRUCT" && !app.preferences.construct_menu_groups {
@@ -2034,7 +2034,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                                     }
                                 }
                             });
-                            ribbon::section_footer(ui, solidcraft_ui_text::tr("ui.ribbon_pin_footer"));
+                            ribbon::section_footer(ui, tr!("ui.ribbon_pin_footer"));
                         });
                     });
                 popup_rect = Some(area.response.rect);
@@ -2143,7 +2143,7 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, slots: &[(
             Some(key) if !key.is_empty() => format!("{label} ({key})"),
             _ => label.clone(),
         };
-        let tip = if shown { tip } else { solidcraft_ui_text::format("ui.needs_design", &[("command", &label)]) };
+        let tip = if shown { tip } else { tr!("ui.needs_design", command = &label) };
         if resp.backing_on_hover_text(tip).clicked() && enabled {
             start = Some((c.id, br));
         }
@@ -2242,7 +2242,7 @@ impl RowData {
         let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
         // A disabled row says why; a documented command also shows its help (#2758).
         let reason = if crate::drawing_workspace::active(app) && c.planned.is_some() {
-            coming_soon(app, c).then(|| app.tr("ui.drawing_ribbon.planned"))
+            coming_soon(app, c).then(|| tr!(app, "ui.drawing_ribbon.planned"))
         } else {
             info.disabled_reason.as_deref().filter(|_| !info.enabled).map(|reason| app.tr_label(reason))
         };
@@ -2426,16 +2426,16 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
             }
         });
         let description = match command.id {
-            "render.scene" => Some(app.tr("render.preview_help")),
-            "render.start" => Some(app.tr("render.image_help")),
+            "render.scene" => Some(tr!(app, "render.preview_help")),
+            "render.start" => Some(tr!(app, "render.image_help")),
             // Sending again replaces the file the slicer has open.
-            "file.send_to_slicer" => Some(app.tr("ui.slicer_resend_hint")),
-            "render.preset.resolve" | "render.preset.apply" => Some(app.tr("render.ribbon_studios_help")),
-            "render.library.appearance.apply" | "render.library.surface.bind" => Some(app.tr("render.ribbon_materials_help")),
-            "render.library.studio.prepare" | "render.library.studio.apply" => Some(app.tr("render.ribbon_lights_help")),
-            "render.library.environment.apply" | "render.stage.backdrop" => Some(app.tr("render.ribbon_environment_help")),
-            "render.preflight" => Some(app.tr("render.ribbon_check_help")),
-            "render.export" => Some(app.tr("render.output_format_status")),
+            "file.send_to_slicer" => Some(tr!(app, "ui.slicer_resend_hint")),
+            "render.preset.resolve" | "render.preset.apply" => Some(tr!(app, "render.ribbon_studios_help")),
+            "render.library.appearance.apply" | "render.library.surface.bind" => Some(tr!(app, "render.ribbon_materials_help")),
+            "render.library.studio.prepare" | "render.library.studio.apply" => Some(tr!(app, "render.ribbon_lights_help")),
+            "render.library.environment.apply" | "render.stage.backdrop" => Some(tr!(app, "render.ribbon_environment_help")),
+            "render.preflight" => Some(tr!(app, "render.ribbon_check_help")),
+            "render.export" => Some(tr!(app, "render.output_format_status")),
             _ => None,
         };
         if let Some(description) = description {
@@ -2446,7 +2446,7 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
             ui.add(egui::Label::new(egui::RichText::new(help).color(t.text_dim)).wrap());
         }
         let reason = if crate::drawing_workspace::active(app) && command.planned.is_some() {
-            coming_soon(app, command).then(|| app.tr("ui.drawing_ribbon.planned"))
+            coming_soon(app, command).then(|| tr!(app, "ui.drawing_ribbon.planned"))
         } else {
             disabled.map(|reason| app.tr_label(reason))
         };
@@ -2483,7 +2483,7 @@ fn reveal_tooltip(app: &SolveApp, ui: &egui::Ui, rect: Rect, command: &solidcraf
 
 /// A group heading's text: its name in the interface language, as written.
 fn group_heading_text(label: &str) -> String {
-    if label.starts_with("ui.") { solidcraft_ui_text::tr(label) } else { solidcraft_ui_text::tr_label(label) }.to_string()
+    if label.starts_with("ui.") { solidcraft_ui_text::tr_by_id(label) } else { solidcraft_ui_text::tr_label(label) }.to_string()
 }
 
 /// Take up what was done in a grid drop-down, as for a list row: start the command (and close
@@ -2594,7 +2594,7 @@ fn sketch_menu_rows(
 pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     ui.label(egui::RichText::new(solidcraft_ui_text::tr_label("Selection filter")).color(t.text_dim).size(t.font_small));
-    for (mode, label) in [("body", app.tr_label("Select bodies (a face picks its body)")), ("component", app.tr("ui.select_components_by_face"))] {
+    for (mode, label) in [("body", app.tr_label("Select bodies (a face picks its body)")), ("component", tr!(app, "ui.select_components_by_face"))] {
         let mut on = app.pick_mode() == mode;
         if ui_kit::checkbox(ui, label, &mut on).changed() {
             // The Faces checkbox below is independent. The standalone command enables faces.
@@ -2622,7 +2622,7 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     // The selection shape (#4376): a drag draws a freehand lasso instead of the rectangle.
-    let label = app.tr("ui.lasso_select").to_string();
+    let label = tr!(app, "ui.lasso_select").to_string();
     ui_kit::checkbox(ui, &label, &mut app.ui.lasso_select);
 }
 
@@ -3798,7 +3798,7 @@ mod header_report_tests {
         assert!(crate::scenario::handle_at("titlebar:version").is_some(), "the version is in the bar");
         h.step(&json!({"click":{"handle":"appbar:help"}})).unwrap();
         assert!(h.app.help.menu);
-        let version = solidcraft_ui_text::format("help.version", &[("version", crate::update::current_version())]);
+        let version = tr!("help.version", version = crate::update::current_version());
         assert!(h.widget("About SolidCraft").is_some());
         assert!(h.widget(&version).is_none(), "the Help menu has no version row");
     }
@@ -3837,7 +3837,7 @@ mod header_report_tests {
         // The version is a Help menu row, right after About.
         h.step(&json!({"click":{"handle":"appbar:help"}})).unwrap();
         assert!(h.app.help.menu);
-        let version = solidcraft_ui_text::format("help.version", &[("version", crate::update::current_version())]);
+        let version = tr!("help.version", version = crate::update::current_version());
         let [_, about] = h.widget("About SolidCraft").unwrap();
         let [_, row] = h.widget(&version).expect("the Help menu lists the version");
         let [_, shortcuts] = h.widget("Keyboard Shortcuts").unwrap();
@@ -5360,7 +5360,7 @@ mod ribbon_label_tests {
                     h.call("ui.prefs", json!({"language": language}));
                     h.frames(3);
                     let ws = crate::scenario::rect_of("workspace_switcher").unwrap();
-                    let caption = h.app.tr("ui.ribbon_workspace");
+                    let caption = tr!(h.app, "ui.ribbon_workspace");
                     let text = h
                         .shapes
                         .iter()
@@ -6002,7 +6002,7 @@ mod command_start_tab_tests {
         h.call("ui.start", json!({"command": "occurrence.ground"}));
         assert_eq!(h.app.ui.tab, "MODEL", "Ground started nothing: the ribbon stays on MODEL");
         let (status, _, _) = h.app.status.clone().expect("the refusal reaches the status line");
-        assert_eq!(status, h.app.tr("ui.ground_select_first"));
+        assert_eq!(status, tr!(h.app, "ui.ground_select_first"));
     }
 
     /// #14911: a placement selected in the Browser plus the ribbon's Ground grounds it, as the
@@ -6617,7 +6617,7 @@ mod persistent_ribbon_tests {
             h.call("ui.prefs", json!({"language":language}));
             let command = solidcraft_engine::find_command("inspect.zebra").unwrap();
             let name = h.app.tr_label(crate::workspace::ribbon_button_label(command));
-            let expected = solidcraft_ui_text::Locale::for_language(language).format("ui.viewport_status_clear_hint", &[("name", name)]);
+            let expected = tr!(solidcraft_ui_text::Locale::for_language(language), "ui.viewport_status_clear_hint", name = name);
             assert_eq!(persistent_hint(&h.app, command, true), Some(expected.clone()));
             let at = scenario::handle_at("button:inspect.zebra").unwrap();
             h.frame_with(vec![egui::Event::PointerMoved(at)]);

@@ -16,13 +16,9 @@ pub(crate) fn capture_prompt(app: &mut SolveApp, ctx: &egui::Context) {
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, -80.0))
         .actions("Capture Position", "Cancel", Some("Revert"))
         .show(ctx, true, |ui| {
-            let question = if n == 1 {
-                solidcraft_ui_text::tr("browser.capture_one").to_string()
-            } else {
-                solidcraft_ui_text::format("browser.capture_many", &[("count", &n.to_string())])
-            };
+            let question = if n == 1 { tr!("browser.capture_one").to_string() } else { tr!("browser.capture_many", count = &n.to_string()) };
             ui_kit::text(ui, &question, ui_kit::Text::Report("question", false));
-            ui_kit::text(ui, solidcraft_ui_text::tr("browser.capture_note"), ui_kit::Text::Note("capture"));
+            ui_kit::text(ui, tr!("browser.capture_note"), ui_kit::Text::Note("capture"));
         });
     let answer = match action {
         ui_kit::Action::Ok => Some("capture"),

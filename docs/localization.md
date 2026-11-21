@@ -17,10 +17,37 @@ words on every PC.
 
 `assets/locales/en.json` defines stable message IDs and English fallback text.
 Keep IDs when changing wording. Other catalogs use the same IDs; missing messages fall back
-to English. Use `app.tr("ui.preferences")` for static messages and
-`Locale::format` for full sentences with named placeholders. Translate the entire sentence,
-including punctuation, so a translator can reorder its arguments. Placeholder values are
-inserted literally, even if a document name contains braces.
+to English. Translate the entire sentence, including punctuation, so a translator can reorder
+its arguments. Placeholder values are inserted literally, even if a document name contains braces.
+
+A message is read with `tr!`, which takes its id as written in the catalog:
+
+| | |
+|---|---|
+| `tr!("ui.preferences")` | the text, in the language of the thread that draws |
+| `tr!(app, "ui.preferences")` | the text, in the app's language (or a `Locale`'s) |
+| `tr!("recovery.days_ago", count = &days)` | the text with its placeholders filled; with `app` first, in the app's language |
+| `template!("prefs.export_name_hint")` | the text unfilled, for the few places that want the template itself |
+| `msg!("ui.visible")` | the message, to keep and read later with `tr(msg)` |
+
+The id is checked when the crate compiles, against the English catalog (`en.json`, the shared
+`crates/ui-text/locales/en.json` and the pending files). An id no catalog has, a placeholder
+left without a value and a name the message does not have all stop the build at the call, the
+first with the nearest id. Only English is read then: another language lacking the message is
+still found by `cargo xtask i18n` and the catalogs' tests.
+
+`tr` itself takes only what `msg!` made, so `app.tr("ui.preferences")` does not compile. An
+id that is built at run time (a command's label, a row of a table) is read with `tr_by_id`
+(`Locale::text`), and with `Locale::format` for its placeholders; nothing checks such an id
+until it runs, so keep it for ids that cannot be written out.
+
+What the macros put in the program is not the id but its place among the English catalog's
+sorted ids (`solidcraft_ui_text::numbered`). The build packs each catalog as a table of its
+texts in that order, and every catalog but English is embedded as its table alone, without its
+JSON: the ids are in the program once, not once per language. A build with debug assertions
+keeps each id beside its place, so a message no catalog has still reads as its id in tests; a
+release build does not. The tests read every catalog's JSON, and one compares each table with
+it, message by message.
 
 The English-label adapter (`app.tr_label`) supports existing engine and UI tables. It maps
 display text to a message ID, then uses the same catalog lookup. New UI messages should use

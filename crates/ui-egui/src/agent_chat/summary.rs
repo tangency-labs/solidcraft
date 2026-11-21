@@ -8,7 +8,7 @@
 
 use serde_json::{Map, Value};
 
-use solidcraft_ui_text::{format as trf, tr, tr_label};
+use solidcraft_ui_text::{format as trf, tr_label};
 
 /// Steps of a batch named before "and N more".
 const MAX_STEPS: usize = 4;
@@ -70,7 +70,7 @@ fn tool_summary(tool: &str, a: Option<&Map<String, Value>>, result: Option<&Valu
         "export" => Some(words([Some(label("file.export")?.to_string()), s("path").and_then(file_name)])),
         "open" => Some(words([Some(label("doc.open")?.to_string()), s("path").and_then(file_name)])),
         // The control channel's own calls: the picture is the point, never where it was left.
-        "ui.screenshot" | "ui_screenshot" | "screenshot" => Some(tr("ui.ai_tool_sum_screenshot").to_string()),
+        "ui.screenshot" | "ui_screenshot" | "screenshot" => Some(tr!("ui.ai_tool_sum_screenshot").to_string()),
         "new_design" => Some(words([Some(label("file.new")?.to_string()), s("name").map(word)])),
         "set_parameter" => {
             let value = a.and_then(|a| a.get("value").or_else(|| a.get("expression"))).and_then(|v| length(v, u));

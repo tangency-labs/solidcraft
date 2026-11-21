@@ -115,7 +115,7 @@ pub(crate) fn placeholder_list() -> String {
     let own = [(DESIGN, "prefs.export_name.design"), (BODY, "prefs.export_name.body")];
     own.into_iter()
         .chain(keys(Owner::Design).map(|k| (k.name, k.label)))
-        .map(|(name, label)| format!("{{{name}}}  {}", solidcraft_ui_text::tr(label)))
+        .map(|(name, label)| format!("{{{name}}}  {}", solidcraft_ui_text::tr_by_id(label)))
         .collect::<Vec<_>>()
         .join("\n")
 }

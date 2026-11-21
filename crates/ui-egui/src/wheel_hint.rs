@@ -228,7 +228,7 @@ pub(crate) fn due(app: &mut SolveApp, ctx: &egui::Context) -> Option<String> {
         app.wheel_hint.hidden = true;
         return None;
     }
-    Some(solidcraft_ui_text::tr("ui.browser_wheel_hint").to_string())
+    Some(tr!("ui.browser_wheel_hint").to_string())
 }
 
 /// The share of the notice's time left, 1 to 0, for the ring around its close (x).
@@ -366,7 +366,7 @@ mod tests {
         assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::Automatic);
         let mut text = None;
         frame(&ctx, None, 0.2, |ctx| text = due(&mut app, ctx));
-        assert_eq!(text.as_deref(), Some(solidcraft_ui_text::tr("ui.browser_wheel_hint")));
+        assert_eq!(text.as_deref(), Some(tr!("ui.browser_wheel_hint")));
         // Make the wheel zoom: saved, and never asked again.
         act(&mut app, Action::Zoom);
         assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysZoom);

@@ -269,7 +269,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     };
     let mut edit: Option<Value> = None;
     let mut reload = false;
-    let title = solidcraft_ui_text::format("browser.edit_point_cloud_title", &[("name", &c.name)]);
+    let title = tr!("browser.edit_point_cloud_title", name = &c.name);
     let auto = if c.color_by == ColorBy::Height { m.auto_range(&c) } else { None };
     let dots = m.dots(&c);
     let now = ctx.input(|i| i.time);
@@ -301,7 +301,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_point_cloud_panel"), "point", &title)
         .placed(pivot, at)
         .fields()
-        .actions("", solidcraft_ui_text::tr("ui.close"), None)
+        .actions("", tr!("ui.close"), None)
         .show(ctx, true, |ui| {
             ui_kit::row(ui, solidcraft_ui_text::tr_label("Points"), |ui| ui.label(c.len().to_string()));
             // The dots' size, where some points are dots: those no segment or triangle ends on.
@@ -310,7 +310,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::row(ui, solidcraft_ui_text::tr_label("Dots"), |ui| ui.label(dots.to_string()));
                 }
                 let mut size = c.point_size;
-                if ui_kit::row(ui, solidcraft_ui_text::tr("ui.point_cloud_size"), |ui| ui_kit::slider(ui, &mut size, 0.5..=16.0, Default::default()))
+                if ui_kit::row(ui, tr!("ui.point_cloud_size"), |ui| ui_kit::slider(ui, &mut size, 0.5..=16.0, Default::default()))
                     .changed()
                 {
                     edit = Some(json!({ "cloud": c.id, "point_size": size }));
@@ -320,7 +320,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
             let was = units.iter().position(|u| *u == c.units).unwrap_or(0);
             let mut unit = was;
             // A dropdown's response doesn't report the pick: compare the index.
-            ui_kit::row(ui, solidcraft_ui_text::tr("ui.point_cloud_units"), |ui| ui_kit::dropdown(ui, "point_cloud_units", &mut unit, &units));
+            ui_kit::row(ui, tr!("ui.point_cloud_units"), |ui| ui_kit::dropdown(ui, "point_cloud_units", &mut unit, &units));
             if unit != was
                 && let Some(u) = units.get(unit)
             {
@@ -336,7 +336,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                 by => COLOR_BY.iter().position(|(b, _)| *b == by).unwrap_or(0),
             };
             let mut by = was;
-            ui_kit::row(ui, solidcraft_ui_text::tr("ui.point_cloud_color_by"), |ui| ui_kit::dropdown(ui, "point_cloud_color_by", &mut by, &labels));
+            ui_kit::row(ui, tr!("ui.point_cloud_color_by"), |ui| ui_kit::dropdown(ui, "point_cloud_color_by", &mut by, &labels));
             if by != was {
                 let name = COLOR_BY.get(by).map(|(b, _)| b.name()).or_else(|| properties.get(by - COLOR_BY.len()).copied());
                 if let Some(name) = name {
@@ -347,7 +347,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
             let legend_shown = colored.and_then(|n| label(&c, n));
             match c.color_by {
                 ColorBy::File if c.colors.is_empty() => {
-                    ui_kit::row(ui, "", |ui| ui.weak(solidcraft_ui_text::tr("ui.point_cloud_no_file_colors")));
+                    ui_kit::row(ui, "", |ui| ui.weak(tr!("ui.point_cloud_no_file_colors")));
                 }
                 ColorBy::File => {}
                 ColorBy::Single => {
@@ -368,7 +368,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     {
                         // A ramp over what is shown, unless its range is set.
                         let automatic = c.height_range.is_none();
-                        if ui_kit::checkbox_row(ui, "point_cloud_auto_range", solidcraft_ui_text::tr("ui.point_cloud_auto_range"), automatic) {
+                        if ui_kit::checkbox_row(ui, "point_cloud_auto_range", tr!("ui.point_cloud_auto_range"), automatic) {
                             edit = Some(json!({ "cloud": c.id, "color_range": if automatic { json!(crate::point_clouds::color_range(ui.ctx(), &live)) } else { Value::Null } }));
                         }
                         // The ramp's range is a range on a track of the property, over what the
@@ -542,7 +542,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
             if changed {
                 edit = Some(json!({ "cloud": c.id, "filters": filters_json(&filters) }));
             }
-            if !c.source.is_empty() && ui_kit::button(ui, solidcraft_ui_text::tr("ui.point_cloud_reload"), ui_kit::Button::Normal).clicked() {
+            if !c.source.is_empty() && ui_kit::button(ui, tr!("ui.point_cloud_reload"), ui_kit::Button::Normal).clicked() {
                 reload = true;
             }
         });
@@ -601,7 +601,7 @@ mod tests {
         }
         h.app.run("pointcloud.edit", json!({"cloud": id, "color_by": "height"})).unwrap();
         h.frames(2);
-        assert!(h.widget(solidcraft_ui_text::tr("ui.point_cloud_auto_range")).is_some());
+        assert!(h.widget(solidcraft_ui_text::tr_by_id("ui.point_cloud_auto_range")).is_some());
         h.step(&json!({"widget": "Close"})).unwrap();
         h.frames(2);
         assert!(h.app.tree.cloud_panel.is_none());

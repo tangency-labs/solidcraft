@@ -584,7 +584,7 @@ pub fn act(app: &mut SolveApp, action: NoticeAction) {
         NoticeAction::TurnOff => {
             app.preferences.usage_statistics = false;
             app.usage.store.days.clear();
-            let text = app.tr("usage.turned_off").to_string();
+            let text = tr!(app, "usage.turned_off").to_string();
             app.set_status(text, false);
         }
         NoticeAction::Details => crate::prefs::open_at(app, crate::prefs::PAGE_PRIVACY),
@@ -599,14 +599,14 @@ pub fn notice_toast(app: &mut SolveApp, ui: &egui::Ui, free: egui::Rect) -> Opti
         return None;
     }
     use crate::ui_kit::toast::Action;
-    let (off_label, details) = (app.tr("usage.turn_off").to_string(), app.tr("usage.details").to_string());
+    let (off_label, details) = (tr!(app, "usage.turn_off").to_string(), tr!(app, "usage.details").to_string());
     let actions = [(off_label.as_str(), Action::Secondary), (details.as_str(), Action::Primary)];
     let extras = crate::ui_kit::toast::Extras {
         close: Some("toast:usage_stats:close"),
         countdown: Some((notice_left(app, now), NOTICE_SECONDS)),
         ..Default::default()
     };
-    let text = app.tr("usage.notice").to_string();
+    let text = tr!(app, "usage.notice").to_string();
     let toast = crate::viewport::paint_toast_ext(ui, free, text, crate::ui_kit::toast::Lead::Dot(false), &actions, extras)?;
     crate::scenario::publish_rect("toast:usage_stats", toast.rect);
     for (index, button) in toast.buttons.iter().enumerate() {

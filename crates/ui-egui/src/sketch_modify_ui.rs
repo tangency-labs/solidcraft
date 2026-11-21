@@ -679,7 +679,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
         }
         Mod::Divide { count } => {
             enter |= quantity(ui, doc, "Segments", count, 2, DIVIDE_MAX);
-            ui_kit::text(ui, solidcraft_ui_text::tr("sketch.divide_hint"), ui_kit::Text::Note("divide"));
+            ui_kit::text(ui, tr!("sketch.divide_hint"), ui_kit::Text::Note("divide"));
         }
         Mod::Equation { form, x, y, start, end, tolerance, range_unit } => {
             ui_kit::choice_row(ui, "Form", "equation_form", form, &EQUATION_FORMS);
@@ -692,9 +692,9 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             enter |= number(ui, "Start", start);
             enter |= number(ui, "End", end);
             enter |= number(ui, "Tolerance", tolerance);
-            ui_kit::checkbox_grid(ui, &mut [(solidcraft_ui_text::tr("ui.equation_variable_unit"), range_unit)], 1);
+            ui_kit::checkbox_grid(ui, &mut [(tr!("ui.equation_variable_unit"), range_unit)], 1);
             let note = if *range_unit { "ui.equation_note_range" } else { "ui.equation_note" };
-            ui_kit::text(ui, solidcraft_ui_text::tr(note), ui_kit::Text::Note("equation"));
+            ui_kit::text(ui, solidcraft_ui_text::tr_by_id(note), ui_kit::Text::Note("equation"));
         }
         Mod::Corner { chamfer, ctype, size, distance2, angle, flip } => {
             if *chamfer {

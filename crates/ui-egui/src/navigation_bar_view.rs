@@ -167,15 +167,15 @@ fn activate(app: &mut SolveApp, slot: &Slot) {
 /// The slot's hover text: a hidden slot's reason, the current style, the sketch's lock, or its name.
 fn tip(app: &SolveApp, slot: &Slot, hidden: Option<&str>, key: bool) -> String {
     if let Some(hidden) = hidden {
-        app.tr(hidden).to_owned()
+        app.tr_by_id(hidden).to_owned()
     } else if slot.id == "visual_style" {
-        solidcraft_ui_text::format("navbar.value_tip", &[("name", app.tr(slot.label)), ("value", current_style(app))])
+        tr!("navbar.value_tip", name = app.tr_by_id(slot.label), value = current_style(app))
     } else if slot.id == "projection" && projection_locked(app) {
-        app.tr("nav.perspective.sketch").to_owned()
+        tr!(app, "nav.perspective.sketch").to_owned()
     } else if slot.id == "zoom" && key {
-        app.tr("navbar.zoom_hold_tip").to_owned()
+        tr!(app, "navbar.zoom_hold_tip").to_owned()
     } else {
-        app.tr(slot.label).to_owned()
+        app.tr_by_id(slot.label).to_owned()
     }
 }
 
@@ -192,7 +192,7 @@ fn slot_view(app: &SolveApp, bar: &BarLayout, slot: &'static Slot, index: usize,
         kind: slot.kind,
         icon: slot.current_icon(app.ui.visual_style),
         text: slot_text(app, slot).to_owned(),
-        name: app.tr(slot.label).to_owned(),
+        name: app.tr_by_id(slot.label).to_owned(),
         tip: tip(app, slot, hidden, key.is_some()),
         key,
         selected: editing.is_none() && selected(app, slot.id),
@@ -264,11 +264,11 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             .collect(),
         more: measured.more,
         labels: BarLabels {
-            more: app.tr("navbar.more").to_owned(),
-            customise: app.tr("navbar.custom.customise").to_owned(),
-            hide: app.tr("navbar.custom.hide").to_owned(),
-            reset: app.tr("navbar.custom.reset").to_owned(),
-            remove: app.tr("navbar.custom.remove_bar").to_owned(),
+            more: tr!(app, "navbar.more").to_owned(),
+            customise: tr!(app, "navbar.custom.customise").to_owned(),
+            hide: tr!(app, "navbar.custom.hide").to_owned(),
+            reset: tr!(app, "navbar.custom.reset").to_owned(),
+            remove: tr!(app, "navbar.custom.remove_bar").to_owned(),
         },
     };
     let zoom = crate::drawing_sheet_page::zoom_percent(app, ui.ctx());
@@ -323,7 +323,7 @@ fn run(app: &mut SolveApp, ctx: &egui::Context, action: NavAction) {
 }
 
 pub(crate) fn current_style(app: &SolveApp) -> &str {
-    app.tr(match app.ui.visual_style {
+    app.tr_by_id(match app.ui.visual_style {
         1 => "navbar.style.shaded",
         2 => "navbar.style.wireframe",
         3 => "navbar.style.shaded_with_hidden_edges",
@@ -335,7 +335,7 @@ pub(crate) fn slot_text<'a>(app: &'a SolveApp, slot: &Slot) -> &'a str {
     if slot.id == "visual_style" && app.preferences.navigation_bar.menu_display(slot.id) == MenuDisplay::IconAndValue {
         current_style(app)
     } else {
-        app.tr(slot.label)
+        app.tr_by_id(slot.label)
     }
 }
 
@@ -362,9 +362,9 @@ fn menu(app: &SolveApp, id: &str, zoom: f32) -> Menu {
     match id {
         SHEET_ZOOM => Menu {
             entries: vec![
-                MenuEntry::Percent { value: (zoom * 10.0).round() as u32, label: app.tr("ui.sheet_page.zoom").into(), target: "sheet:zoom".into() },
-                MenuEntry::Row(MenuRow::new("actual", app.tr("ui.sheet_page.actual_size"), "zoom", "sheet:actual_size")),
-                MenuEntry::Row(MenuRow::new("fit", app.tr("ui.sheet_page.fit"), "fit", "sheet:fit")),
+                MenuEntry::Percent { value: (zoom * 10.0).round() as u32, label: tr!(app, "ui.sheet_page.zoom").into(), target: "sheet:zoom".into() },
+                MenuEntry::Row(MenuRow::new("actual", tr!(app, "ui.sheet_page.actual_size"), "zoom", "sheet:actual_size")),
+                MenuEntry::Row(MenuRow::new("fit", tr!(app, "ui.sheet_page.fit"), "fit", "sheet:fit")),
             ],
             close_on_pick: true,
         },
@@ -382,7 +382,7 @@ fn style_menu(app: &SolveApp) -> Menu {
         .map(|(index, (style, _))| {
             let mut row = MenuRow::new(
                 *style,
-                app.tr(&format!("navbar.style.{style}")),
+                app.tr_by_id(&format!("navbar.style.{style}")),
                 crate::navigation_slots::visual_style_icon(index as u8),
                 format!("nav:style:{style}"),
             );
@@ -391,9 +391,9 @@ fn style_menu(app: &SolveApp) -> Menu {
         })
         .collect();
     entries.push(MenuEntry::Separator);
-    let mut later = MenuRow::new("translucent", app.tr("navbar.translucent"), "style_translucent", "");
+    let mut later = MenuRow::new("translucent", tr!(app, "navbar.translucent"), "style_translucent", "");
     later.enabled = false;
-    later.detail = Some(app.tr("navbar.later").to_owned());
+    later.detail = Some(tr!(app, "navbar.later").to_owned());
     entries.push(MenuEntry::Row(later));
     Menu { entries, close_on_pick: true }
 }
@@ -405,20 +405,20 @@ fn display_menu(app: &SolveApp) -> Menu {
         row.selected = selected;
         row
     };
-    let mut entries = vec![MenuEntry::Heading(app.tr("navbar.graphics").to_owned())];
+    let mut entries = vec![MenuEntry::Heading(tr!(app, "navbar.graphics").to_owned())];
     let current = crate::prefs::graphics_preset(&app.preferences);
-    let mut preset = MenuRow::new("preset", app.tr("navbar.preset"), "", "view:graphics_preset");
-    preset.detail = Some(app.tr(&format!("ui.graphics_{current}")).to_owned());
+    let mut preset = MenuRow::new("preset", tr!(app, "navbar.preset"), "", "view:graphics_preset");
+    preset.detail = Some(app.tr_by_id(&format!("ui.graphics_{current}")).to_owned());
     preset.submenu = [("performance", "ui.graphics_performance"), ("quality", "ui.graphics_quality")]
         .into_iter()
-        .map(|(id, label)| row(id, app.tr(label), "", &format!("view:graphics_preset:{id}"), current == id))
+        .map(|(id, label)| row(id, app.tr_by_id(label), "", &format!("view:graphics_preset:{id}"), current == id))
         .collect();
-    entries.extend([MenuEntry::Row(preset), MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.show").to_owned())]);
+    entries.extend([MenuEntry::Row(preset), MenuEntry::Separator, MenuEntry::Heading(tr!(app, "navbar.show").to_owned())]);
     for id in ["grid", "ground_shadow", "ambient_occlusion"] {
         let Some(slot) = navigation_bar::find(id) else { continue };
         entries.push(MenuEntry::Row(row(
             slot.id,
-            app.tr(slot.label),
+            app.tr_by_id(slot.label),
             slot.current_icon(app.ui.visual_style),
             &format!("view:{id}"),
             selected(app, slot.id),
@@ -426,24 +426,24 @@ fn display_menu(app: &SolveApp) -> Menu {
     }
     let mut axes = row(
         "origin_axes_across_view",
-        app.tr("prefs.origin_axes_across_view"),
+        tr!(app, "prefs.origin_axes_across_view"),
         "origin",
         "view:origin_axes_across_view",
         app.preferences.origin_axes_across_view,
     );
-    axes.tip = Some(app.tr("prefs.origin_axes_across_view_help").to_owned());
+    axes.tip = Some(tr!(app, "prefs.origin_axes_across_view_help").to_owned());
     entries.push(MenuEntry::Row(axes));
-    entries.extend([MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.projection_heading").to_owned())]);
+    entries.extend([MenuEntry::Separator, MenuEntry::Heading(tr!(app, "navbar.projection_heading").to_owned())]);
     for (perspective, key) in [(false, "navbar.orthographic"), (true, "navbar.perspective")] {
         let mut item = row(
             key,
-            app.tr(key),
+            app.tr_by_id(key),
             "perspective",
             if perspective { "view:projection" } else { "view:orthographic" },
             !app.ui.auto_ortho_faces && app.ui.perspective == perspective,
         );
         item.enabled = !projection_locked(app);
-        item.tip = projection_locked(app).then(|| app.tr("nav.perspective.sketch").to_owned());
+        item.tip = projection_locked(app).then(|| tr!(app, "nav.perspective.sketch").to_owned());
         entries.push(MenuEntry::Row(item));
     }
     entries.push(MenuEntry::Separator);
@@ -454,12 +454,12 @@ fn display_menu(app: &SolveApp) -> Menu {
         entries.push(MenuEntry::Row(row(id, solidcraft_ui_text::tr_label(label), "select", &format!("view:{id}"), on)));
     }
     // The View angles readout under the orientation gizmo (#6032).
-    let mut angles = row("view_angles", app.tr("ui.view_angles"), "select", "view:view_angles", app.preferences.show_view_angles);
-    angles.tip = Some(app.tr("ui.view_angles_help").to_owned());
-    entries.extend([MenuEntry::Row(angles), MenuEntry::Separator, MenuEntry::Heading(app.tr("navbar.assistant").to_owned())]);
-    entries.push(MenuEntry::Row(row("agent_cursor", app.tr("navbar.agent_cursor"), "select", "view:agent_cursor", app.ui.agent_cursor.show)));
+    let mut angles = row("view_angles", tr!(app, "ui.view_angles"), "select", "view:view_angles", app.preferences.show_view_angles);
+    angles.tip = Some(tr!(app, "ui.view_angles_help").to_owned());
+    entries.extend([MenuEntry::Row(angles), MenuEntry::Separator, MenuEntry::Heading(tr!(app, "navbar.assistant").to_owned())]);
+    entries.push(MenuEntry::Row(row("agent_cursor", tr!(app, "navbar.agent_cursor"), "select", "view:agent_cursor", app.ui.agent_cursor.show)));
     if crate::agent_chat::shown(app) {
-        entries.push(MenuEntry::Row(row("agent_chat", app.tr("navbar.agent_chat"), "agent_chat", "view:agent_chat", app.agent_chat.open)));
+        entries.push(MenuEntry::Row(row("agent_chat", tr!(app, "navbar.agent_chat"), "agent_chat", "view:agent_chat", app.agent_chat.open)));
     }
     Menu { entries, close_on_pick: false }
 }

@@ -51,7 +51,7 @@ use context::Context;
 
 use crate::{ControlRequest, SolveApp};
 use backend::{ChatBackend, Event, PermissionOption, PromptPart, ToolStatus};
-use solidcraft_ui_text::{format as trf, tr};
+use solidcraft_ui_text::{format as trf, tr_by_id};
 
 pub(crate) use panel::{finish_shared, owns_keyboard_input, prepare_shared, request_new_chat, shared_content, tool_space};
 pub use panel::{show, tip as panel_tip, toggle, toggle_shortcut};
@@ -98,7 +98,7 @@ impl State {
         }
     }
     pub(crate) fn label(self) -> &'static str {
-        tr(match self {
+        tr_by_id(match self {
             State::Off => "ui.agent_chat_state_off",
             State::Starting => "ui.agent_chat_state_starting",
             State::Ready => "ui.agent_chat_state_ready",
@@ -794,11 +794,11 @@ impl AgentChat {
     /// its tools did not start (an endpoint agent whose MCP start failed; the error is in the chat).
     pub(crate) fn no_design_hint(&self) -> &'static str {
         if self.tools_port.is_none() {
-            tr("ui.agent_chat_no_control")
+            tr!("ui.agent_chat_no_control")
         } else if self.tools_bridged {
-            tr("ui.agent_chat_tools_not_started")
+            tr!("ui.agent_chat_tools_not_started")
         } else {
-            tr("ui.agent_chat_no_design_hint")
+            tr!("ui.agent_chat_no_design_hint")
         }
     }
     #[cfg(test)]
@@ -873,7 +873,7 @@ impl AgentChat {
                 *a = Some(false);
             }
             if let Item::Permission { answer: a @ None, .. } = i {
-                *a = Some(tr("ui.agent_chat_cancel").to_string());
+                *a = Some(tr!("ui.agent_chat_cancel").to_string());
             }
         }
     }
@@ -885,7 +885,7 @@ impl AgentChat {
             return;
         }
         let label =
-            option.and_then(|o| options.iter().find(|x| x.id == o)).map_or_else(|| tr("ui.agent_chat_cancel").to_string(), |o| o.name.clone());
+            option.and_then(|o| options.iter().find(|x| x.id == o)).map_or_else(|| tr!("ui.agent_chat_cancel").to_string(), |o| o.name.clone());
         *answer = Some(label);
         let key = *key;
         if let Some(b) = self.backend.as_mut() {
@@ -1076,8 +1076,8 @@ impl AgentChat {
                 match reason.as_str() {
                     "" | "auth" | "error" => {}
                     // Not a missing tool: the answer ran out of room, or the model declined (#9495).
-                    "max_tokens" => self.notice(tr("ui.agent_chat_reply_cut_off").to_string(), false),
-                    "refusal" => self.notice(tr("ui.agent_chat_reply_declined").to_string(), false),
+                    "max_tokens" => self.notice(tr!("ui.agent_chat_reply_cut_off").to_string(), false),
+                    "refusal" => self.notice(tr!("ui.agent_chat_reply_declined").to_string(), false),
                     _ => self.notice(format!("({reason})"), false),
                 }
                 return Some(Outcome::TurnEnd);
@@ -1103,7 +1103,7 @@ impl AgentChat {
                 }
                 let last: Vec<String> = tail.into_iter().rev().take(6).collect::<Vec<_>>().into_iter().rev().collect();
                 let detail = if last.is_empty() { String::new() } else { format!("\n{}", last.join("\n")) };
-                self.notice(format!("{}{detail}", tr("ui.agent_chat_exited")), true);
+                self.notice(format!("{}{detail}", tr!("ui.agent_chat_exited")), true);
                 self.stop_backend(false);
                 return Some(Outcome::TurnEnd);
             }
@@ -1179,17 +1179,17 @@ pub(crate) fn assistant_mark(app: &SolveApp) -> AssistantMark {
 
 pub(crate) fn assistant_tip(app: &SolveApp, mark: AssistantMark) -> String {
     let state = match mark {
-        AssistantMark::Quiet => tr("ui.agent_chat_state_off").to_string(),
-        AssistantMark::Ready => tr("ui.agent_chat_state_ready").to_string(),
-        AssistantMark::Busy => tr("ui.agent_chat_state_busy").to_string(),
-        AssistantMark::NeedsAuth => tr("ui.agent_chat_state_auth").to_string(),
-        AssistantMark::Stopped => tr("ui.agent_chat_state_exited").to_string(),
+        AssistantMark::Quiet => tr!("ui.agent_chat_state_off").to_string(),
+        AssistantMark::Ready => tr!("ui.agent_chat_state_ready").to_string(),
+        AssistantMark::Busy => tr!("ui.agent_chat_state_busy").to_string(),
+        AssistantMark::NeedsAuth => tr!("ui.agent_chat_state_auth").to_string(),
+        AssistantMark::Stopped => tr!("ui.agent_chat_state_exited").to_string(),
         AssistantMark::Waiting(count) => trf("ui.assistant_waiting", &[("count", &count.to_string())]),
-        AssistantMark::NoDesign => tr("ui.agent_chat_state_no_design").to_string(),
+        AssistantMark::NoDesign => tr!("ui.agent_chat_state_no_design").to_string(),
     };
     let name = match crate::keymap::display_for(app, "ui.assistant") {
-        Some(key) => format!("{} ({key})", tr("ui.assistant")),
-        None => tr("ui.assistant").to_string(),
+        Some(key) => format!("{} ({key})", tr!("ui.assistant")),
+        None => tr!("ui.assistant").to_string(),
     };
     match mark {
         AssistantMark::NoDesign => format!("{name} — {state}\n{}", app.agent_chat.no_design_hint()),
@@ -1262,9 +1262,9 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let cli = find_cli();
     if chat.tools_port.is_none() {
-        chat.notice(tr("ui.agent_chat_no_control"), true);
+        chat.notice(tr!("ui.agent_chat_no_control"), true);
     } else if cli.is_none() {
-        chat.notice(tr("ui.agent_chat_no_cli"), true);
+        chat.notice(tr!("ui.agent_chat_no_cli"), true);
     }
     // Found, but it failed when asked its version (#9034): say why and how to reinstall it before
     // the system's own message arrives. It is still started, in case it only lacks `--version`.
@@ -1277,7 +1277,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     let wake = ctx.clone();
     let start = backend::StartContext { cwd: working_dir(), bridge, tools: chat.tools_tx.clone(), wake: Box::new(move || wake.request_repaint()) };
     let started: Result<Box<dyn ChatBackend>, String> = match entry.kind {
-        agents::Kind::Acp if entry.argv.is_empty() => Err(tr("ui.agent_chat_none_found").to_string()),
+        agents::Kind::Acp if entry.argv.is_empty() => Err(tr!("ui.agent_chat_none_found").to_string()),
         agents::Kind::Acp => acp_client::AcpBackend::start(&entry.argv, start).map(|b| Box::new(b) as Box<dyn ChatBackend>),
         kind @ (agents::Kind::Api | agents::Kind::Anthropic) => match http {
             Some(http) => {
@@ -1298,7 +1298,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
                 )
                 .map(|b| Box::new(b) as Box<dyn ChatBackend>)
             }
-            None => Err(tr("ui.ai_no_http").to_string()),
+            None => Err(tr!("ui.ai_no_http").to_string()),
         },
     };
     match started {
@@ -1724,7 +1724,7 @@ pub fn send(app: &mut SolveApp, ctx: &egui::Context, text: String) {
         if app.agent_chat.input.trim().is_empty() {
             app.agent_chat.input = text;
         }
-        app.agent_chat.notice(tr("ui.agent_chat_files_loading"), false);
+        app.agent_chat.notice(tr!("ui.agent_chat_files_loading"), false);
         return;
     }
     let text: String = text.chars().take(MAX_PROMPT).collect();
@@ -1739,7 +1739,7 @@ pub fn send(app: &mut SolveApp, ctx: &egui::Context, text: String) {
             app.agent_chat.input = text;
         }
         // The files stay on the chips for when there is room.
-        app.agent_chat.notice(tr("ui.agent_chat_queue_full"), false);
+        app.agent_chat.notice(tr!("ui.agent_chat_queue_full"), false);
         return;
     }
     let image = app.agent_chat.attach_view && app.agent_chat.images;
@@ -2049,7 +2049,7 @@ pub fn attach_rgba(app: &mut SolveApp, width: usize, height: usize, rgba: &[u8])
 /// Attach the picture on the clipboard, if it holds one.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn paste_picture(app: &mut SolveApp) -> std::result::Result<String, String> {
-    let image = arboard::Clipboard::new().and_then(|mut c| c.get_image()).map_err(|_| tr("ui.agent_chat_no_picture").to_string())?;
+    let image = arboard::Clipboard::new().and_then(|mut c| c.get_image()).map_err(|_| tr!("ui.agent_chat_no_picture").to_string())?;
     attach_rgba(app, image.width, image.height, &image.bytes)
 }
 
@@ -2101,7 +2101,7 @@ fn interrupt(app: &mut SolveApp) {
     }
     for i in &mut app.agent_chat.items {
         if let Item::Permission { answer: a @ None, .. } = i {
-            *a = Some(tr("ui.agent_chat_cancel").to_string());
+            *a = Some(tr!("ui.agent_chat_cancel").to_string());
         }
     }
 }
@@ -2171,7 +2171,7 @@ fn on_permission(app: &mut SolveApp, key: u64, title: String, kind: Option<&str>
             if let Some(b) = app.agent_chat.backend.as_mut() {
                 b.answer_permission(key, Some(&option));
             }
-            app.agent_chat.push(Item::Notice { text: trf("ui.ai_auto_allowed", &[("title", &title), ("why", tr(why))]), error: false });
+            app.agent_chat.push(Item::Notice { text: trf("ui.ai_auto_allowed", &[("title", &title), ("why", tr_by_id(why))]), error: false });
         }
         _ => app.agent_chat.push(Item::Permission { key, title, options, answer: None }),
     }
@@ -2237,7 +2237,7 @@ fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
         && turn.start.is(&session.doc)
         && (!turn.replied || turn.edit_requested)
     {
-        let warning = tr("ui.agent_chat_no_tool_call").to_string();
+        let warning = tr!("ui.agent_chat_no_tool_call").to_string();
         chat.turn_warning = Some(warning.clone());
         chat.notice(warning, false);
     }
@@ -2583,7 +2583,7 @@ pub fn custom_models_accepted(app: &SolveApp) -> bool {
 /// The model pickers' search hint: one that takes a typed model id says so (#14369), since
 /// the list holds only the models the agent reported.
 pub(crate) fn model_search_hint(custom: bool) -> &'static str {
-    tr(if custom { "ui.agent_chat_model_search_or_id" } else { "ui.agent_chat_model_search" })
+    tr_by_id(if custom { "ui.agent_chat_model_search_or_id" } else { "ui.agent_chat_model_search" })
 }
 
 /// A typed model (the pickers' custom row). A listed id goes the usual way, others by the agent's
@@ -2720,7 +2720,7 @@ pub fn model_rows(models: &[acp::ModelInfo]) -> Vec<(String, Option<String>, Str
 
 /// The provider a model is listed under: its own, or "Other" when the agent names none.
 fn provider_of(m: &acp::ModelInfo) -> String {
-    model_provider(m).map_or_else(|| tr("ui.agent_chat_provider_other").to_string(), |(p, _)| p)
+    model_provider(m).map_or_else(|| tr!("ui.agent_chat_provider_other").to_string(), |(p, _)| p)
 }
 
 /// The providers of the agent's models in the order the agent lists them, each with how many

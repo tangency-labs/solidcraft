@@ -12,7 +12,7 @@ use crate::ui_kit::StatusTip;
 /// `None` when the import noted none (or no import made it).
 pub(crate) fn body_tip(model: &Model, body: &ModelBody) -> Option<StatusTip> {
     let issues = import_defects::body_import_issues(model, body);
-    (!issues.is_empty()).then(|| tip(&body.name, solidcraft_ui_text::tr("browser.defect_body").to_string(), &issues))
+    (!issues.is_empty()).then(|| tip(&body.name, tr!("browser.defect_body").to_string(), &issues))
 }
 
 /// What each component's row says about the parts of it its import could not bring in, by
@@ -32,7 +32,7 @@ pub(crate) fn component_tips(doc: &Document, model: &Model) -> BTreeMap<u64, Sta
 
 /// The row's name, the sentence, then each note as the import words it.
 fn tip(head: &str, warning: String, issues: &[&ImportIssue]) -> StatusTip {
-    let mut tail = solidcraft_ui_text::tr("import_report.details").to_string();
+    let mut tail = tr!("import_report.details").to_string();
     for issue in issues {
         tail.push('\n');
         tail.push_str(&issue.detail);

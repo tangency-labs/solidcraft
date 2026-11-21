@@ -4,10 +4,10 @@ use super::*;
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     ui_kit::settings_page(ui, |ui| {
-        ui_kit::settings_heading(ui, app.tr("prefs.structure.tools"), app.tr("prefs.structure.tools_note"));
-        ui_kit::settings_section(ui, "create", app.tr("ui.create"), |ui| {
+        ui_kit::settings_heading(ui, tr!(app, "prefs.structure.tools"), tr!(app, "prefs.structure.tools_note"));
+        ui_kit::settings_section(ui, "create", tr!(app, "ui.create"), |ui| {
             create_card(ui, |ui| {
-                create_row(ui, app.tr("ui.hole"), None, &["hole"], true, |ui| {
+                create_row(ui, tr!(app, "ui.hole"), None, &["hole"], true, |ui| {
                     for (setting, help, key, legacy) in [
                         (
                             setting::hole_snaps as fn(&mut SolveApp, &mut egui::Ui) -> egui::Response,
@@ -20,11 +20,11 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         (setting::hole_group, "prefs.design_tools.hole_group_help", "hole_group", "Group holes made together"),
                     ] {
                         ui.horizontal_wrapped(|ui| {
-                            let response = setting(app, ui).backing_on_hover_text(app.tr(help));
+                            let response = setting(app, ui).backing_on_hover_text(app.tr_by_id(help));
                             crate::scenario::publish_target(&format!("prefs:{key}"), response.rect);
                             crate::scenario::publish_target(&format!("dialog:{legacy}"), response.rect);
                             if !crate::ui_kit::settings_search::suppress_chrome(ui) {
-                                ui_kit::help_icon(ui, app.tr(help));
+                                ui_kit::help_icon(ui, app.tr_by_id(help));
                             }
                         });
                     }
@@ -40,10 +40,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         (setting::extrude_arrow_face_stops, "prefs.extrude_arrow_face_stops_note", "extrude_arrow_face_stops"),
                     ] {
                         ui.horizontal_wrapped(|ui| {
-                            let response = setting(app, ui).backing_on_hover_text(app.tr(help));
+                            let response = setting(app, ui).backing_on_hover_text(app.tr_by_id(help));
                             crate::scenario::publish_target(&format!("prefs:{key}"), response.rect);
                             if !crate::ui_kit::settings_search::suppress_chrome(ui) {
-                                ui_kit::help_icon(ui, app.tr(help));
+                                ui_kit::help_icon(ui, app.tr_by_id(help));
                             }
                         });
                     }
@@ -58,13 +58,13 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     extrude_start(app, ui);
                 });
                 // Found by the name of every feature that has the marker, as well as by the label.
-                let placed = PLACED_FEATURES.iter().map(|key| app.tr(key)).collect::<Vec<_>>().join(" ");
-                create_row(ui, app.tr("prefs.design_tools.placement_group"), Some(&placed), &["rest", "boss", "snap_fit"], false, |ui| {
+                let placed = PLACED_FEATURES.iter().map(|key| app.tr_by_id(key)).collect::<Vec<_>>().join(" ");
+                create_row(ui, tr!(app, "prefs.design_tools.placement_group"), Some(&placed), &["rest", "boss", "snap_fit"], false, |ui| {
                     ui.horizontal_wrapped(|ui| {
-                        let response = setting::placement_handles(app, ui).backing_on_hover_text(app.tr("ui.placement_handles_tip"));
+                        let response = setting::placement_handles(app, ui).backing_on_hover_text(tr!(app, "ui.placement_handles_tip"));
                         crate::scenario::publish_target("prefs:placement_handles", response.rect);
                         if !crate::ui_kit::settings_search::suppress_chrome(ui) {
-                            ui_kit::help_icon(ui, app.tr("ui.placement_handles_tip"));
+                            ui_kit::help_icon(ui, tr!(app, "ui.placement_handles_tip"));
                         }
                     });
                     ui.horizontal_wrapped(|ui| {
@@ -74,45 +74,47 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
         });
-        ui_kit::settings_section(ui, "command_dialog_values", app.tr("prefs.command_dialog_values"), |ui| {
+        ui_kit::settings_section(ui, "command_dialog_values", tr!(app, "prefs.command_dialog_values"), |ui| {
             setting::remember_dialog_values(app, ui);
             setting::fillet_legacy_radius(app, ui);
         });
-        ui_kit::settings_section(ui, "joint_move", app.tr("joint_move.settings"), |ui| {
+        ui_kit::settings_section(ui, "joint_move", tr!(app, "joint_move.settings"), |ui| {
             tool_group(ui, "", ui_kit::paint_assembly_move, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    let response = setting::assembly_move_handles(app, ui).backing_on_hover_text(app.tr("joint_move.legacy_hint"));
+                    let response = setting::assembly_move_handles(app, ui).backing_on_hover_text(tr!(app, "joint_move.legacy_hint"));
                     crate::scenario::publish_target("prefs:assembly_move_handles", response.rect);
                     crate::scenario::publish_target("dialog:Use joint motion handles for assembly Move", response.rect);
                     if !crate::ui_kit::settings_search::suppress_chrome(ui) {
-                        ui_kit::help_icon(ui, app.tr("joint_move.legacy_hint"));
+                        ui_kit::help_icon(ui, tr!(app, "joint_move.legacy_hint"));
                     }
                 });
                 let response = setting::drive_joints_ghost(app, ui);
                 crate::scenario::publish_target("prefs:drive_joints_ghost", response.rect);
                 ui.horizontal_wrapped(|ui| {
-                    let tip = app.tr("prefs.move_drag_highlights_tip");
+                    let tip = tr!(app, "prefs.move_drag_highlights_tip");
                     let response = setting::move_drag_highlights(app, ui).backing_on_hover_text(tip);
                     crate::scenario::publish_target("prefs:move_drag_highlights", response.rect);
                     if !crate::ui_kit::settings_search::suppress_chrome(ui) {
                         ui_kit::help_icon(ui, tip);
                     }
                 });
-                let label_width =
-                    ["joint_move.coarse", "joint_move.fine"].into_iter().map(|id| ui_kit::ContentWidth::label(ui, app.tr(id))).fold(0.0, f32::max)
-                        + t.space_16
-                        + t.space_4;
+                let label_width = ["joint_move.coarse", "joint_move.fine"]
+                    .into_iter()
+                    .map(|id| ui_kit::ContentWidth::label(ui, app.tr_by_id(id)))
+                    .fold(0.0, f32::max)
+                    + t.space_16
+                    + t.space_4;
                 ui_kit::settings_form(ui, label_width, |ui| {
-                    ui_kit::settings_row_help(ui, app.tr("joint_move.coarse"), app.tr("joint_move.precision"), |ui| {
-                        let response = ui_kit::named_control(ui, app.tr("prefs.design_tools.degrees"), |ui| {
+                    ui_kit::settings_row_help(ui, tr!(app, "joint_move.coarse"), tr!(app, "joint_move.precision"), |ui| {
+                        let response = ui_kit::named_control(ui, tr!(app, "prefs.design_tools.degrees"), |ui| {
                             ui_kit::settings_number(ui, &mut app.preferences.joint_rotation_coarse, 0.001..=180.0, 0.1)
                         });
                         crate::scenario::publish_target("prefs:joint_rotation_coarse", response.rect);
                         crate::scenario::publish_target("dialog:Near-axis rotation step (°)", response.rect);
                         ui_kit::text(ui, "deg", ui_kit::Text::Inline);
                     });
-                    ui_kit::row(ui, app.tr("joint_move.fine"), |ui| {
-                        let response = ui_kit::named_control(ui, app.tr("prefs.design_tools.degrees"), |ui| {
+                    ui_kit::row(ui, tr!(app, "joint_move.fine"), |ui| {
+                        let response = ui_kit::named_control(ui, tr!(app, "prefs.design_tools.degrees"), |ui| {
                             ui_kit::settings_number(ui, &mut app.preferences.joint_rotation_fine, 0.001..=180.0, 0.01)
                         });
                         crate::scenario::publish_target("prefs:joint_rotation_fine", response.rect);
@@ -122,17 +124,17 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
         });
-        ui_kit::settings_section(ui, "measure_pointer", app.tr("prefs.structure.measure_pointer"), |ui| {
+        ui_kit::settings_section(ui, "measure_pointer", tr!(app, "prefs.structure.measure_pointer"), |ui| {
             let width = ((ui.available_width() - t.space_10 * 2.0) / 3.0).max(t.space_24 * 8.0 + t.space_16).min(ui.available_width());
             let tiles: [(_, _, _, fn(&egui::Painter, egui::Rect)); 3] = [
                 (
                     "measure_axis_distances",
-                    app.tr("settings.measure_axis_distances"),
+                    tr!(app, "settings.measure_axis_distances"),
                     app.preferences.measure_axis_distances,
                     ui_kit::paint_measure_axis_distances,
                 ),
                 ("tool_cursor", app.tr_label("Show tool at cursor"), app.ui.tool_cursor, ui_kit::paint_tool_cursor),
-                ("direct_interaction", app.tr("ui.direct_interaction"), app.preferences.direct_interaction, ui_kit::paint_direct_interaction),
+                ("direct_interaction", tr!(app, "ui.direct_interaction"), app.preferences.direct_interaction, ui_kit::paint_direct_interaction),
             ];
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(t.space_10, t.space_10);
@@ -281,9 +283,9 @@ fn create_row(ui: &mut egui::Ui, label: &str, hint: Option<&str>, icons: &[&str]
 /// Where a new Extrude starts its distance (`extrude_start`), with the length for Custom beside it.
 fn extrude_start(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
-    let help = app.tr("prefs.extrude_start_note");
+    let help = tr!(app, "prefs.extrude_start_note");
     ui.horizontal_wrapped(|ui| {
-        ui_kit::text(ui, app.tr("prefs.extrude_start"), ui_kit::Text::Inline);
+        ui_kit::text(ui, tr!(app, "prefs.extrude_start"), ui_kit::Text::Inline);
         if !crate::ui_kit::settings_search::suppress_chrome(ui) {
             ui_kit::help_icon(ui, help);
         }
@@ -291,7 +293,7 @@ fn extrude_start(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         ui_kit::settings_control_width(ui, t.space_24 * 6.0, |ui| {
             let mut selected = ExtrudeStart::ALL.iter().position(|v| *v == app.preferences.extrude_start).unwrap_or(0);
-            let options = ExtrudeStart::ALL.map(|choice| app.tr(choice.label_id()));
+            let options = ExtrudeStart::ALL.map(|choice| app.tr_by_id(choice.label_id()));
             let response = ui_kit::dropdown(ui, "pref_extrude_start", &mut selected, &options).backing_on_hover_text(help);
             crate::scenario::publish_target("prefs:extrude_start", response.rect);
             if let Some(choice) = ExtrudeStart::ALL.get(selected) {

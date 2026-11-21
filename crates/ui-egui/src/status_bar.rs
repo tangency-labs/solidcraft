@@ -55,9 +55,9 @@ impl SketchState {
 
     pub(crate) fn text(self) -> String {
         match self {
-            SketchState::Conflict => solidcraft_ui_text::tr("ui.constraints_conflict").to_string(),
-            SketchState::Empty => solidcraft_ui_text::tr("ui.no_geometry_yet").to_string(),
-            SketchState::Full => solidcraft_ui_text::tr("ui.fully_constrained").to_string(),
+            SketchState::Conflict => tr!("ui.constraints_conflict").to_string(),
+            SketchState::Empty => tr!("ui.no_geometry_yet").to_string(),
+            SketchState::Full => tr!("ui.fully_constrained").to_string(),
             SketchState::Under(dof) => solidcraft_ui_text::format(
                 if dof == 1 { "status.under_constrained_one" } else { "status.under_constrained" },
                 &[("count", &dof.to_string())],
@@ -103,7 +103,7 @@ pub(crate) fn contents(app: &SolveApp) -> Contents {
         .or(app.session.active_sketch)
         .and_then(|id| app.session.doc.feature(id).map(|f| f.name.clone()).or_else(|| st.sketch(id).map(|ss| ss.name.clone())));
     Contents {
-        editing: edited.map(|name| solidcraft_ui_text::format("status.editing", &[("name", &crate::i18n::tr_name(&name))])),
+        editing: edited.map(|name| tr!("status.editing", name = &crate::i18n::tr_name(&name))),
         sketch: sketch.map(SketchState::of),
         units: app.session.doc.units.clone(),
         navigation: crate::prefs::nav_preset(&app.preferences.nav).translated_label().to_string(),
@@ -139,10 +139,10 @@ fn paint(app: &mut SolveApp, ui: &mut egui::Ui, contents: &Contents) {
     let mut right = r.right() - t.space_6;
 
     // The units, then the mouse mapping: flat buttons that open their menus.
-    let units = solidcraft_ui_text::format("browser.units", &[("units", &contents.units)]);
-    let button = menu_button(app, ui, right, Target::Units, &contents.units, &units, solidcraft_ui_text::tr("status.units_tip"));
-    let navigation = solidcraft_ui_text::format("status.navigation", &[("mapping", &contents.navigation)]);
-    let tip = solidcraft_ui_text::tr("status.navigation_tip");
+    let units = tr!("browser.units", units = &contents.units);
+    let button = menu_button(app, ui, right, Target::Units, &contents.units, &units, tr!("status.units_tip"));
+    let navigation = tr!("status.navigation", mapping = &contents.navigation);
+    let tip = tr!("status.navigation_tip");
     let button = menu_button(app, ui, button.left() - t.space_4, Target::Navigation, &contents.navigation, &navigation, tip);
     right = button.left() - t.space_6;
 

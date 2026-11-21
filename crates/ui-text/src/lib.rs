@@ -14,6 +14,9 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 pub mod bidi;
+pub mod numbered;
+
+pub use numbered::{Filled, Msg};
 
 /// A catalog's messages: stable id → text.
 pub type Messages = BTreeMap<String, String>;
@@ -31,22 +34,34 @@ pub struct Catalog {
     pub name: &'static str,
     /// The catalog as JSON.
     pub source: &'static str,
+    /// The catalog as a table of numbered texts ([`numbered`]), or empty when the host has none.
+    table: &'static [u8],
     messages: OnceLock<Messages>,
     /// The messages in display order, for a catalog with right-to-left text (see [`bidi`]).
     shown: OnceLock<Option<Messages>>,
     /// English text → the ids with that text, for resolving a source label (see [`Locale::label`]).
     label_ids: OnceLock<BTreeMap<&'static str, Vec<&'static str>>>,
+    /// The ids, sorted: a message's place among them is its number in a table ([`numbered`]).
+    ids: OnceLock<Vec<&'static str>>,
 }
 
 impl Catalog {
     pub const fn new(id: &'static str, name: &'static str, source: &'static str) -> Self {
-        Self { id, name, source, messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new() }
+        Self { id, name, source, table: &[], messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new(), ids: OnceLock::new() }
+    }
+
+    /// [`Catalog::new`] with the catalog's table of numbered texts ([`numbered::encode`], made by
+    /// a build script of the same messages). A catalog with a table is read from it, by id as by
+    /// number, so only the English one needs its JSON too (for the ids, and for the labels that
+    /// are found by their English text): the others may give an empty `source`.
+    pub const fn numbered(id: &'static str, name: &'static str, source: &'static str, table: &'static [u8]) -> Self {
+        Self { id, name, source, table, messages: OnceLock::new(), shown: OnceLock::new(), label_ids: OnceLock::new(), ids: OnceLock::new() }
     }
 
     /// The messages in reading order, as the catalog holds them. An invalid catalog is logged and
     /// reads as empty.
     pub fn messages(&'static self) -> &'static Messages {
-        self.messages.get_or_init(|| match serde_json::from_str(self.source) {
+        self.messages.get_or_init(|| match serde_json::from_str(if self.source.is_empty() { "{}" } else { self.source }) {
             Ok(messages) => messages,
             Err(error) => {
                 log::error!("invalid embedded {} message catalog: {error}", self.id);
@@ -81,6 +96,11 @@ impl Catalog {
             }
             ids
         })
+    }
+
+    /// The ids, sorted by their bytes.
+    pub(crate) fn ids(&'static self) -> &'static [&'static str] {
+        self.ids.get_or_init(|| self.messages().keys().map(String::as_str).collect())
     }
 
     /// The language's own name as the language list draws it.
@@ -235,9 +255,19 @@ impl Locale {
         self.0.display_name()
     }
 
-    /// Stable message ID → translation → English → ID, in display order (see [`bidi`]).
+    /// This catalog's own text for `id`, as it is shown: from its table when it has one, else from
+    /// its JSON. No fall back to English.
+    fn own(self, id: &str) -> Option<&'static str> {
+        if self.0.table.is_empty() {
+            return self.0.shown().get(id).map(String::as_str);
+        }
+        numbered::lookup(self.0.table, Msg::of(id)?)
+    }
+
+    /// The message with the id `id`: in this language, then in English, then the id itself. For
+    /// an id built at run time; one written in the code is `tr!("id")`, which checks it.
     pub fn text(self, id: &str) -> &str {
-        self.0.shown().get(id).or_else(|| english().messages().get(id)).map_or(id, String::as_str)
+        self.own(id).or_else(|| english().messages().get(id).map(String::as_str)).unwrap_or(id)
     }
 
     /// Translate source labels from engine/UI tables, preserving unknown labels.
@@ -246,13 +276,13 @@ impl Locale {
         let english = english();
         // Stable IDs are authoritative. An untranslated legacy ID identical to its
         // English caption can still use another translated ID for that source label.
-        if english.messages().get(label).is_some_and(|text| text != label || self.0.messages().contains_key(label)) {
+        if english.messages().get(label).is_some_and(|text| text != label || self.own(label).is_some()) {
             return self.text(label);
         }
         if let Some(candidates) = english.label_ids().get(label) {
             // Preserve the old last-ID preference among available translations. A new
             // English-only alias must not hide a translation that already exists here.
-            if let Some(text) = candidates.iter().rev().find_map(|id| self.0.shown().get(*id)) {
+            if let Some(text) = candidates.iter().rev().find_map(|id| self.own(id)) {
                 return text;
             }
             if let Some(id) = candidates.last() {
@@ -265,11 +295,27 @@ impl Locale {
     pub fn format(self, id: &str, args: &[(&str, &str)]) -> String {
         interpolate(self.text(id), args)
     }
+
+    /// The message `msg` in this language: what `tr!(locale, "id")` calls.
+    pub fn tr(self, msg: Msg) -> &'static str {
+        self.message(msg)
+    }
+
+    /// A message with its placeholders' values (`msg!("id", name = value)`), in this language.
+    pub fn fill<const N: usize>(self, filled: Filled<'_, N>) -> String {
+        filled.fill_in(self)
+    }
+
+    /// The message `msg` in this language, then in English, then its id where the build kept it
+    /// (development and tests; a release build has no ids to show, and shows nothing).
+    pub fn message(self, msg: Msg) -> &'static str {
+        numbered::lookup(self.0.table, msg).or_else(|| numbered::lookup(english().table, msg)).unwrap_or(msg.unread())
+    }
 }
 
 /// One-pass substitution: argument values are literal, even when they contain braces.
 /// Missing arguments remain visible rather than crashing or silently removing text.
-fn interpolate(template: &str, args: &[(&str, &str)]) -> String {
+pub(crate) fn interpolate(template: &str, args: &[(&str, &str)]) -> String {
     let mut output = String::with_capacity(template.len());
     let mut remaining = template;
     while let Some((before, after)) = remaining.split_once('{') {
@@ -356,7 +402,14 @@ pub fn language() -> &'static str {
     locale().0.id
 }
 
-pub fn tr(id: &str) -> &str {
+/// The message `msg` (from `msg!`; `tr!("id")` says both) in this thread's language.
+pub fn tr(msg: Msg) -> &'static str {
+    locale().tr(msg)
+}
+
+/// The message with the id `id` in this thread's language, for an id built at run time. An id
+/// written in the code is `tr!("id")`, which checks it against the English catalog.
+pub fn tr_by_id(id: &str) -> &str {
     locale().text(id)
 }
 
@@ -428,7 +481,7 @@ mod tests {
         installed();
         assert_eq!(Locale::for_language("de").text("ui.no_such_message"), "ui.no_such_message");
         assert_eq!(Locale::for_language("de").label("original unknown caption"), "original unknown caption");
-        assert_eq!(tr("ui.no_such_message"), "ui.no_such_message");
+        assert_eq!(tr_by_id("ui.no_such_message"), "ui.no_such_message");
     }
 
     #[test]
@@ -463,12 +516,12 @@ mod tests {
         {
             let _de = scope("de");
             assert_eq!(language(), "de");
-            assert_eq!(tr("ui.cancel"), "Abbrechen");
+            assert_eq!(tr_by_id("ui.cancel"), "Abbrechen");
             assert_eq!(tr_label("Profile"), "Profil");
             {
                 let _labels = resolved_labels();
                 assert_eq!(tr_label("Profile"), "Profile");
-                assert_eq!(tr("ui.cancel"), "Abbrechen", "stable catalog messages remain translated");
+                assert_eq!(tr_by_id("ui.cancel"), "Abbrechen", "stable catalog messages remain translated");
             }
             assert_eq!(tr_label("Profile"), "Profil");
             {
@@ -479,7 +532,7 @@ mod tests {
             assert_eq!(format("dialog.selected_count", &[("count", "3")]), "3 ausgewählt");
         }
         assert_eq!(language(), "en");
-        assert_eq!(tr("ui.cancel"), "Cancel");
+        assert_eq!(tr_by_id("ui.cancel"), "Cancel");
     }
 
     #[test]

@@ -54,7 +54,7 @@ pub fn start(_: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut RotateMember, inputs: &mut [SelInput]) -> bool {
     sync(app, c, inputs);
-    expr_row(ui, app.tr("ui.rotate_member.angle"), &mut c.angle)
+    expr_row(ui, tr!(app, "ui.rotate_member.angle"), &mut c.angle)
 }
 
 /// Brings the Angle up to date with the picks: a newly picked member's current turn, and a newly
@@ -94,7 +94,7 @@ pub fn commands(
     extra: &Map<String, Value>,
     editing: bool,
 ) -> Result<Vec<(String, Value)>, String> {
-    let face = face_arg(inputs).ok_or_else(|| app.tr("Select a face of a frame member").to_string())?;
+    let face = face_arg(inputs).ok_or_else(|| tr!(app, "Select a face of a frame member").to_string())?;
     let mut args = json!({"face": face, "angle": c.angle});
     // The line goes with the angle it gave; an Angle edited since wins. Not worked out yet (or
     // refused): the command works it out, or says why not.

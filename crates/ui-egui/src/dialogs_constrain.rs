@@ -65,7 +65,7 @@ fn shape(s: &SnapPt) -> RefShape {
 
 /// A rule's name in the user's language.
 fn label(c: Constraint) -> &'static str {
-    solidcraft_ui_text::tr(match c {
+    solidcraft_ui_text::tr_by_id(match c {
         Constraint::Mate => "constrain.rule_mate",
         Constraint::Flush => "constrain.rule_flush",
         Constraint::Distance => "constrain.rule_distance",
@@ -141,13 +141,13 @@ fn freedom(doc: &Document, reply: &Value, occ: u64) -> (String, bool) {
     let conflict = reply["conflicts"].as_array().into_iter().flatten().find(|c| c["joint"].as_u64().is_some_and(mine));
     if let Some(c) = conflict {
         let other = c["name"].as_str().unwrap_or_default();
-        return (solidcraft_ui_text::format("constrain.conflicts", &[("part", &part), ("other", other)]), true);
+        return (tr!("constrain.conflicts", part = &part, other = other), true);
     }
     let dof = reply["dof"].as_array().into_iter().flatten().find(|d| d["occurrence"].as_u64() == Some(occ)).and_then(|d| d["dof"].as_u64());
     let text = match dof.unwrap_or(6) {
-        0 => solidcraft_ui_text::format("constrain.fixed", &[("part", &part)]),
-        1 => solidcraft_ui_text::format("constrain.dof_one", &[("part", &part)]),
-        n => solidcraft_ui_text::format("constrain.dof", &[("part", &part), ("count", &n.to_string())]),
+        0 => tr!("constrain.fixed", part = &part),
+        1 => tr!("constrain.dof_one", part = &part),
+        n => tr!("constrain.dof", part = &part, count = &n.to_string()),
     };
     (text, false)
 }
@@ -200,22 +200,22 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut ConstrainForm, inputs
     let now = refs(app, f, inputs);
     let fit = now.as_ref().map(|r| Constraint::fitting(r.shapes[0], r.shapes[1])).unwrap_or_default();
     if fit.is_empty() {
-        status_line(ui, solidcraft_ui_text::tr("constrain.pick_hint"), StatusTone::Dim);
+        status_line(ui, tr!("constrain.pick_hint"), StatusTone::Dim);
     } else {
         // The rule chosen, or the likeliest when the picks changed.
         let mut pos = f.rule.and_then(|r| fit.iter().position(|c| *c == r)).unwrap_or(0);
         let labels: Vec<&str> = fit.iter().map(|c| label(*c)).collect();
-        choice_row(ui, solidcraft_ui_text::tr("constrain.type"), "constrain_type", &mut pos, &labels);
+        choice_row(ui, tr!("constrain.type"), "constrain_type", &mut pos, &labels);
         f.rule = fit.get(pos).copied();
         match f.rule {
-            Some(Constraint::Angle) => enter |= expr_row(ui, solidcraft_ui_text::tr("constrain.angle"), &mut f.angle),
+            Some(Constraint::Angle) => enter |= expr_row(ui, tr!("constrain.angle"), &mut f.angle),
             Some(Constraint::Mate | Constraint::Flush | Constraint::Distance | Constraint::Tangent) => {
-                enter |= expr_row(ui, solidcraft_ui_text::tr("constrain.offset"), &mut f.offset)
+                enter |= expr_row(ui, tr!("constrain.offset"), &mut f.offset)
             }
             _ => {}
         }
-        crate::ui_kit::options(ui, "constrain_options", &mut [(solidcraft_ui_text::tr("constrain.flip"), &mut f.flip)]);
-        let apply_label = solidcraft_ui_text::tr(if editing(f, inputs).is_some() { "constrain.change" } else { "constrain.apply" });
+        crate::ui_kit::options(ui, "constrain_options", &mut [(tr!("constrain.flip"), &mut f.flip)]);
+        let apply_label = solidcraft_ui_text::tr_by_id(if editing(f, inputs).is_some() { "constrain.change" } else { "constrain.apply" });
         let r = crate::ui_kit::button(ui, apply_label, crate::ui_kit::Button::Normal);
         crate::scenario::publish_handle("dialog:Apply", r.rect.center());
         if r.clicked()
@@ -240,7 +240,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut ConstrainForm, inputs
     if let Some((a, b)) = parts {
         let rules = between(&app.session.doc, (a, b));
         if !rules.is_empty() {
-            ui.label(egui::RichText::new(solidcraft_ui_text::tr("constrain.between")).strong());
+            ui.label(egui::RichText::new(tr!("constrain.between")).strong());
         }
         let mut load_id = None;
         for (id, name, rule, suppressed) in rules {
@@ -288,11 +288,11 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut ConstrainForm, inputs
 
 /// The command OK (and Apply) runs: a new rule, or a change to the one loaded from the list.
 pub fn commands(app: &SolveApp, f: &ConstrainForm, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, String> {
-    let r = refs(app, f, inputs).ok_or_else(|| solidcraft_ui_text::tr("constrain.pick_hint").to_string())?;
+    let r = refs(app, f, inputs).ok_or_else(|| tr!("constrain.pick_hint").to_string())?;
     // The rule chosen, or the likeliest the picks fit (as the Type row shows before it is drawn).
     let fit = Constraint::fitting(r.shapes[0], r.shapes[1]);
     let rule = f.rule.filter(|c| fit.contains(c)).or(fit.first().copied());
-    let rule = rule.ok_or_else(|| solidcraft_ui_text::tr("constrain.none_fit").to_string())?;
+    let rule = rule.ok_or_else(|| tr!("constrain.none_fit").to_string())?;
     let mut p = match (editing(f, inputs), r.params) {
         // A changed rule names its type; an unchanged one doesn't, as a new type sets the facing
         // again from the rule (a flipped mate whose gap is edited stays flipped).
@@ -301,7 +301,7 @@ pub fn commands(app: &SolveApp, f: &ConstrainForm, inputs: &[SelInput]) -> Resul
             if was == Some(rule) { json!({"constraint": id}) } else { json!({"constraint": id, "type": rule.name()}) }
         }
         (None, Some([a, b])) => json!({"type": rule.name(), "a": a, "b": b}),
-        (None, None) => return Err(solidcraft_ui_text::tr("constrain.pick_hint").to_string()),
+        (None, None) => return Err(tr!("constrain.pick_hint").to_string()),
     };
     if f.flip {
         p["flip"] = json!(true);

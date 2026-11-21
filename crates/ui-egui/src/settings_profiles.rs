@@ -590,8 +590,8 @@ fn act(app: &mut SolveApp, id: &str, params: Value, done: &'static str) {
 /// General's saved profiles and row actions. All mutations still use settings.profile.*.
 pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = solidcraft_theme::Tokens::get();
-    let count = solidcraft_ui_text::format("prefs.reports_saved", &[("n", &app.settings_profiles.list.len().to_string())]);
-    ui_kit::settings_section_count(ui, "profiles", app.tr("ui.profiles"), Some(&count), |ui| {
+    let count = tr!("prefs.reports_saved", n = &app.settings_profiles.list.len().to_string());
+    ui_kit::settings_section_count(ui, "profiles", tr!(app, "ui.profiles"), Some(&count), |ui| {
         let names = app.settings_profiles.names();
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing.y = t.space_8;
@@ -602,11 +602,11 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let card = ui_kit::settings_row_card(ui, active, t.control_height + t.space_14, |ui| {
                         ui.spacing_mut().item_spacing.x = t.space_6;
                         let state_width = if active {
-                            ui_kit::ContentWidth::label(ui, app.tr("prefs.general.active"))
+                            ui_kit::ContentWidth::label(ui, tr!(app, "prefs.general.active"))
                                 + t.space_16
-                                + if edited { ui_kit::ContentWidth::label(ui, app.tr("prefs.general.edited")) + t.space_24 } else { 0.0 }
+                                + if edited { ui_kit::ContentWidth::label(ui, tr!(app, "prefs.general.edited")) + t.space_24 } else { 0.0 }
                         } else {
-                            ui_kit::ContentWidth::label(ui, app.tr("ui.apply")) + t.space_24
+                            ui_kit::ContentWidth::label(ui, tr!(app, "ui.apply")) + t.space_24
                         };
                         let name_width = (ui.available_width() - t.space_24 * 3.0 - t.space_6 * 4.0 - state_width).max(0.0);
                         ui.allocate_ui_with_layout(
@@ -620,22 +620,22 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
                             },
                         );
                         if edited {
-                            let badge = ui_kit::settings_state_badge(ui, app.tr("prefs.general.edited"), ui_kit::SettingsBadgeTone::Warning);
+                            let badge = ui_kit::settings_state_badge(ui, tr!(app, "prefs.general.edited"), ui_kit::SettingsBadgeTone::Warning);
                             crate::scenario::publish_rect(&format!("prefs:profile:{name}:edited"), badge.rect);
                         }
                         if active {
-                            let badge = ui_kit::settings_state_badge(ui, app.tr("prefs.general.active"), ui_kit::SettingsBadgeTone::Accent);
+                            let badge = ui_kit::settings_state_badge(ui, tr!(app, "prefs.general.active"), ui_kit::SettingsBadgeTone::Accent);
                             crate::scenario::publish_rect(&format!("prefs:profile:{name}:active"), badge.rect);
                         } else {
-                            let button = ui_kit::button(ui, app.tr("ui.apply"), ui_kit::Button::Small);
+                            let button = ui_kit::button(ui, tr!(app, "ui.apply"), ui_kit::Button::Small);
                             crate::scenario::publish_target(&format!("prefs:profile:{name}:apply"), button.rect);
                             if button.clicked() {
                                 act(app, "settings.profile.apply", json!({ "name": name }), "prefs.profile_applied");
                             }
                         }
                         for (action, icon, label) in [
-                            ("export", "export_tray", app.tr("prefs.profile_export")),
-                            ("rename", "edit", app.tr("prefs.profile_rename")),
+                            ("export", "export_tray", tr!(app, "prefs.profile_export")),
+                            ("rename", "edit", tr!(app, "prefs.profile_rename")),
                             ("delete", "delete", app.tr_label("Delete")),
                         ] {
                             let (target, _) = ui.allocate_exact_size(egui::vec2(t.space_24, t.space_24), egui::Sense::hover());
@@ -669,25 +669,25 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         // Searching for "profiles" must keep this entry on the results page; without a hit here the
         // whole section was dropped and the name field could not be reached with a query active.
-        let entry = [app.tr("prefs.general.profile_name"), app.tr("prefs.general.save_new"), app.tr("prefs.general.import")];
+        let entry = [tr!(app, "prefs.general.profile_name"), tr!(app, "prefs.general.save_new"), tr!(app, "prefs.general.import")];
         if crate::ui_kit::settings_search::visible(ui, &entry) {
             ui.horizontal_wrapped(|ui| {
                 let mut draft = std::mem::take(&mut app.settings_profiles.draft);
-                let enter = ui_kit::named_control(ui, app.tr("prefs.general.profile_name"), |ui| {
+                let enter = ui_kit::named_control(ui, tr!(app, "prefs.general.profile_name"), |ui| {
                     ui_kit::settings_control_width(ui, t.space_24 * 9.0 + t.space_4, |ui| {
-                        ui_kit::text_field(ui, &mut draft, app.tr("prefs.general.name_setup")).0
+                        ui_kit::text_field(ui, &mut draft, tr!(app, "prefs.general.name_setup")).0
                     })
                 });
                 app.settings_profiles.draft = draft;
                 let name = app.settings_profiles.draft.trim().to_string();
                 let valid = profile_name(&name).is_some();
-                let save = ui_kit::icon_label_action(ui, app.tr("prefs.general.save_new"), None, valid, true)
-                    .backing_on_hover_text(app.tr("prefs.profiles_note"));
+                let save = ui_kit::icon_label_action(ui, tr!(app, "prefs.general.save_new"), None, valid, true)
+                    .backing_on_hover_text(tr!(app, "prefs.profiles_note"));
                 crate::scenario::publish_target("prefs:profile:save", save.rect);
                 if valid && (enter || save.clicked()) {
                     act(app, "settings.profile.save", json!({ "name": name }), "prefs.profile_saved");
                 }
-                let import = ui_kit::icon_label_button(ui, app.tr("prefs.general.import"), "import_tray", true, false);
+                let import = ui_kit::icon_label_button(ui, tr!(app, "prefs.general.import"), "import_tray", true, false);
                 crate::scenario::publish_target("prefs:profile:import", import.rect);
                 if import.clicked() {
                     app.pick_open_for(&["json"], |app, path| {
@@ -702,7 +702,7 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.spacing_mut().item_spacing.y = t.space_8;
             for (label, chips, accent) in [
                 (
-                    app.tr("prefs.general.held"),
+                    tr!(app, "prefs.general.held"),
                     &[
                         ("prefs.structure.appearance", "prefs_appearance"),
                         ("prefs.structure.layout", "prefs_layout"),
@@ -714,7 +714,7 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
                     true,
                 ),
                 (
-                    app.tr("prefs.general.this_computer"),
+                    tr!(app, "prefs.general.this_computer"),
                     &[("prefs.structure.mouse3d", "lock"), ("ui.graphics", "lock"), ("prefs.assistant", "lock")][..],
                     false,
                 ),
@@ -729,8 +729,11 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(t.space_6, t.space_6);
                         for (index, (chip, icon)) in chips.iter().enumerate() {
-                            let response =
-                                ui_kit::settings_chip(ui, app.tr(chip), ui_kit::SettingsChip { icon: Some(icon), accent, ..Default::default() });
+                            let response = ui_kit::settings_chip(
+                                ui,
+                                app.tr_by_id(chip),
+                                ui_kit::SettingsChip { icon: Some(icon), accent, ..Default::default() },
+                            );
                             if index == 0 {
                                 crate::scenario::publish_rect(&format!("prefs:profiles:{key}:first_chip"), response.rect);
                             }
@@ -746,7 +749,7 @@ pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::text(ui, locale.text(id), ui_kit::Text::Note("profile_message"));
             }
             Some(Outcome::Skipped(n)) => {
-                let text = locale.format("prefs.profile_skipped", &[("n", &n.to_string())]);
+                let text = tr!(locale, "prefs.profile_skipped", n = &n.to_string());
                 ui_kit::text(ui, &text, ui_kit::Text::Error("profile_message"));
             }
             Some(Outcome::Failed(e)) => {
@@ -807,8 +810,8 @@ pub(crate) fn sidebar(ui: &mut egui::Ui, app: &mut SolveApp) {
     let names = app.settings_profiles.names();
     let mut apply = None;
     let mut save = false;
-    let label = app.tr("prefs.structure.profile");
-    let changed_hint = app.tr("prefs.structure.profile_edited");
+    let label = tr!(app, "prefs.structure.profile");
+    let changed_hint = tr!(app, "prefs.structure.profile_edited");
     let menu = ui
         .push_id("profile_sidebar", |ui| {
             ui_kit::Menu::button_with(
@@ -820,12 +823,12 @@ pub(crate) fn sidebar(ui: &mut egui::Ui, app: &mut SolveApp) {
                             apply = Some(name.clone());
                         }
                     }
-                    if active.is_some() && ui_kit::button(ui, app.tr("prefs.profile_save"), ui_kit::Button::Normal).clicked() {
+                    if active.is_some() && ui_kit::button(ui, tr!(app, "prefs.profile_save"), ui_kit::Button::Normal).clicked() {
                         save = true;
                         apply = None;
                         ui.close();
                     }
-                    if ui_kit::button(ui, app.tr("prefs.profiles"), ui_kit::Button::Normal).clicked() {
+                    if ui_kit::button(ui, tr!(app, "prefs.profiles"), ui_kit::Button::Normal).clicked() {
                         prefs::open_profiles(app);
                         ui.close();
                     }
@@ -849,9 +852,9 @@ pub(crate) fn sidebar(ui: &mut egui::Ui, app: &mut SolveApp) {
 pub(crate) fn tag(ui: &mut egui::Ui) {
     let response = ui_kit::settings_chip(
         ui,
-        solidcraft_ui_text::tr("prefs.structure.in_profile"),
+        tr!("prefs.structure.in_profile"),
         ui_kit::SettingsChip { icon: Some("settings_profile"), compact: true, ..Default::default() },
     )
-    .backing_on_hover_text(solidcraft_ui_text::tr("prefs.structure.profile_hover"));
+    .backing_on_hover_text(tr!("prefs.structure.profile_hover"));
     crate::scenario::publish_target("prefs:in_profile", response.rect);
 }

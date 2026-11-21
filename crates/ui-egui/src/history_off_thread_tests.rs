@@ -1657,7 +1657,7 @@ fn plugin_execution_is_off_thread_even_with_agent_off_thread_disabled() {
     assert_eq!(h.app.session.plugin_state.packages.get("sample"), Some(&path), "async inspection registers namespaced entries");
     assert_eq!(
         h.app.run("PLUGIN.RUN", json!({"path":path,"approval":inspected["approval"],"entry":"make"})).unwrap_err(),
-        h.app.tr("ui.plugin_standalone")
+        h.app.tr_by_id("ui.plugin_standalone")
     );
     let (release, gate) = std::sync::mpsc::channel();
     h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
@@ -1813,7 +1813,7 @@ fn plugin_commands_in_batches_and_scripts_are_refused_before_an_earlier_edit() {
             );
             let key = if command.eq_ignore_ascii_case("plugin.run") { "ui.plugin_standalone" } else { "ui.plugin_management_standalone" };
             assert_eq!(reply["ok"], false, "{method}: {reply}");
-            assert_eq!(reply["error"], h.app.tr(key), "{method}: {reply}");
+            assert_eq!(reply["error"], h.app.tr_by_id(key), "{method}: {reply}");
             assert_eq!(h.app.session.doc.to_json(), before, "{method}: {command}");
             assert!(h.app.session.undo.is_empty());
             assert_eq!(std::fs::read_to_string(package.join("keep.txt")).unwrap(), "removal must never reach this folder");
@@ -1834,7 +1834,7 @@ fn plugin_preflight_checks_namespaced_calls_after_ten_thousand_steps() {
     steps[0] = json!({"command":"solid.box","params":{"length":2,"width":3,"height":4}});
     steps.push(json!({"command":"sample.make","params":{"approval":inspected["approval"]}}));
     let (reply, _) = h.call_queued("engine.script", json!({"commands":steps}));
-    assert_eq!(reply["error"], h.app.tr("ui.plugin_standalone"), "{reply}");
+    assert_eq!(reply["error"], h.app.tr_by_id("ui.plugin_standalone"), "{reply}");
     assert_eq!(h.app.session.doc.to_json(), before);
     assert!(h.app.session.undo.is_empty());
     let _ = std::fs::remove_dir_all(root);
@@ -1869,7 +1869,7 @@ fn plugin_inspections_reject_another_session_and_older_results() {
         release.send(()).unwrap();
         let reply = reply_to(&mut h, &first);
         assert_eq!(reply["ok"], false, "{reply}");
-        assert_eq!(reply["error"], h.app.tr("ui.plugin_context_changed"));
+        assert_eq!(reply["error"], h.app.tr_by_id("ui.plugin_context_changed"));
         if let Some(newer_root) = newer_root {
             assert_eq!(h.app.session.plugin_state.packages["sample"], newer_root.join("sample").to_string_lossy());
             let _ = std::fs::remove_dir_all(newer_root);

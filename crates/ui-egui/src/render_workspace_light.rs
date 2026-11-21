@@ -164,7 +164,7 @@ pub(super) fn celestial_method(app: &SolveApp, next: &mut super::ViewState, meth
             })
         })
     {
-        return Err(app.tr("render.cpu_celestial_switch").into());
+        return Err(tr!(app, "render.cpu_celestial_switch").into());
     }
     match setup.job {
         Some(RenderJob::CpuRaytrace { options, .. }) => {
@@ -190,7 +190,7 @@ pub(super) fn celestial_method(app: &SolveApp, next: &mut super::ViewState, meth
                 }
             }
         }
-        _ => return Err(app.tr("render.cpu_celestial_switch").into()),
+        _ => return Err(tr!(app, "render.cpu_celestial_switch").into()),
     }
     Ok(())
 }
@@ -226,7 +226,7 @@ pub(super) fn rows(app: &SolveApp) -> Result<Vec<Light>, String> {
 
 pub(super) fn name(app: &SolveApp, light: &Light) -> String {
     if light.number <= 3 {
-        app.tr(&light.name_key).into()
+        app.tr_by_id(&light.name_key).into()
     } else {
         solidcraft_ui_text::format(&light.name_key, &[("number", &light.number.to_string())])
     }
@@ -273,7 +273,7 @@ pub(crate) fn validate_visibility(app: &SolveApp, params: &Value) -> Result<(), 
     if let Some(id) = params.get("id").and_then(Value::as_str)
         && !rows(app)?.iter().any(|light| light.id == id)
     {
-        return Err(app.tr("render.light_missing").into());
+        return Err(tr!(app, "render.light_missing").into());
     }
     Ok(())
 }
@@ -436,7 +436,7 @@ pub(crate) fn filter_request(app: &SolveApp, mut request: Value) -> Result<Value
     let mut setup = if let Some(inline) = request.get("settings").filter(|value| !value.is_null()) {
         serde_json::from_value::<RenderSetup>(inline.clone()).map_err(|e| e.to_string())?
     } else if let Some(name) = request.get("setup").and_then(Value::as_str) {
-        app.session.doc.render.setups.get(name).cloned().ok_or_else(|| app.tr("render.light_missing").to_string())?
+        app.session.doc.render.setups.get(name).cloned().ok_or_else(|| tr!(app, "render.light_missing").to_string())?
     } else {
         RenderSetup::default()
     };
@@ -597,15 +597,15 @@ pub(super) fn lighting(app: &mut SolveApp, ui: &mut egui::Ui) {
         note(app, ui, "render.method_limit_raster");
     }
     ui_kit::scope(ui, |ui| {
-        let title = app.tr("render.lighting_source_section").to_string();
+        let title = tr!(app, "render.lighting_source_section").to_string();
         ui_kit::section(ui, "render:lighting:source", &title, true, |ui| {
             let custom = if gpu { app.render_workspace.view.studio.lighting_enabled } else { app.render_workspace.view.raytrace.lights.is_some() };
             let mut chosen = usize::from(custom);
-            let labels = [app.tr("render.lighting_preset").to_string(), app.tr("render.lighting_custom").to_string()];
-            let reason = app.tr("render.lighting_preset_cpu").to_string();
+            let labels = [tr!(app, "render.lighting_preset").to_string(), tr!(app, "render.lighting_custom").to_string()];
+            let reason = tr!(app, "render.lighting_preset_cpu").to_string();
             let disabled = [(!cpu).then_some(reason.as_str()), None];
             ui.add_enabled_ui(!raster, |ui| {
-                let label = app.tr("render.lighting_source").to_string();
+                let label = tr!(app, "render.lighting_source").to_string();
                 ui_kit::row(ui, &label, |ui| {
                     if ui_kit::segmented(
                         ui,
@@ -645,12 +645,12 @@ pub(super) fn lighting(app: &mut SolveApp, ui: &mut egui::Ui) {
             let selected = app.render_workspace.view.raytrace.preset.unwrap_or(solidcraft_engine::render::job::LightingPreset::Neutral);
             let selected_label = presets.iter().find(|(p, _)| *p == selected).map(|(_, key)| *key).unwrap_or("render.cpu_neutral");
             ui.add_enabled_ui(cpu && !custom, |ui| {
-                let label = app.tr("render.lighting_preset_row").to_string();
+                let label = tr!(app, "render.lighting_preset_row").to_string();
                 ui_kit::row(ui, &label, |ui| {
-                    let selected_label = app.tr(selected_label).to_string();
+                    let selected_label = app.tr_by_id(selected_label).to_string();
                     ui_kit::dropdown_menu(ui, "render:lighting:presets", &selected_label, |ui| {
                         for (preset, key) in presets {
-                            if ui_kit::list_picker(ui, key, app.tr(key), preset == selected).clicked() {
+                            if ui_kit::list_picker(ui, key, app.tr_by_id(key), preset == selected).clicked() {
                                 review_preset(app, preset);
                                 ui.close();
                             }
@@ -664,11 +664,11 @@ pub(super) fn lighting(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             // RenderSetup has no saved rig identity. Do not invent a Rig row.
         });
-        let title = app.tr("render.lighting_shadows_section").to_string();
+        let title = tr!(app, "render.lighting_shadows_section").to_string();
         ui_kit::section(ui, "render:lighting:shadows", &title, true, |ui| {
             let mut shadows = if cpu { app.render_workspace.view.raytrace.shadows } else { true };
             ui.add_enabled_ui(cpu, |ui| {
-                if ui_kit::checkbox(ui, app.tr("render.lighting_shadows"), &mut shadows).changed() {
+                if ui_kit::checkbox(ui, tr!(app, "render.lighting_shadows"), &mut shadows).changed() {
                     update_cpu(app, |options| options.shadows = shadows);
                 }
             });
@@ -679,7 +679,7 @@ pub(super) fn lighting(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let enabled = app.render_workspace.view.raytrace.area_lights.as_ref().is_some_and(|l| !l.is_empty());
                 let mut samples = app.render_workspace.view.raytrace.area_samples.unwrap_or(16);
                 ui.add_enabled_ui(enabled, |ui| {
-                    let label = app.tr("render.lighting_area_samples").to_string();
+                    let label = tr!(app, "render.lighting_area_samples").to_string();
                     ui_kit::row(ui, &label, |ui| {
                         let response = ui_kit::number_field(ui, &mut samples, 1..=64, 1.0, "");
                         crate::scenario::publish_target("render:lighting:area-samples", response.rect);
@@ -689,7 +689,7 @@ pub(super) fn lighting(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     options.area_samples = Some(samples);
                                 });
                             } else {
-                                app.set_status(app.tr("render.lighting_samples_reason").to_string(), true);
+                                app.set_status(tr!(app, "render.lighting_samples_reason").to_string(), true);
                             }
                         }
                     });
@@ -699,7 +699,7 @@ pub(super) fn lighting(app: &mut SolveApp, ui: &mut egui::Ui) {
                 note(app, ui, "render.lighting_samples_cpu");
             }
         });
-        let title = app.tr("render.lighting_budget").to_string();
+        let title = tr!(app, "render.lighting_budget").to_string();
         ui_kit::section(ui, "render:lighting:budget", &title, true, |ui| {
             for (kind, key, limit) in
                 [("directional", "render.tree_directional", 8), ("area", "render.light_type_area", 4), ("point", "render.light_type_point", 8)]
@@ -709,7 +709,7 @@ pub(super) fn lighting(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .filter(|l| if kind == "point" { matches!(l.geometry.kind(), "point" | "spot") } else { l.geometry.kind() == kind })
                     .count();
                 let unsupported = raster;
-                let label = app.tr(key).to_string();
+                let label = app.tr_by_id(key).to_string();
                 ui.add_enabled_ui(!unsupported, |ui| {
                     ui_kit::row(ui, &label, |ui| {
                         ui.columns(2, |columns| {
@@ -726,12 +726,9 @@ pub(super) fn lighting(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     });
                                 } else {
                                     let readout = if unsupported {
-                                        app.tr("render.lighting_unsupported").to_string()
+                                        tr!(app, "render.lighting_unsupported").to_string()
                                     } else {
-                                        solidcraft_ui_text::format(
-                                            "render.lighting_used",
-                                            &[("used", &count.to_string()), ("limit", &limit.to_string())],
-                                        )
+                                        tr!("render.lighting_used", used = &count.to_string(), limit = &limit.to_string())
                                     };
                                     column.add_enabled_ui(!unsupported, |ui| ui_kit::text(ui, &readout, ui_kit::Text::Inline));
                                 }
@@ -750,7 +747,7 @@ pub(super) fn add_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
     let gpu = app.render_workspace.view.method == ImageMethod::GpuRaytrace;
     let raster = app.render_workspace.view.method == ImageMethod::Raster;
     let lights = rows(app).unwrap_or_default();
-    let label = app.tr("render.tree_add_light").to_string();
+    let label = tr!(app, "render.tree_add_light").to_string();
     ui.add_enabled_ui(!raster, |ui| {
         ui_kit::dropdown_menu(ui, "render:lighting:add", &label, |ui| {
             for (kind, key, cap) in [
@@ -766,9 +763,9 @@ pub(super) fn add_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
                     )
                     .count();
                 let enabled = count < cap;
-                let response = ui.add_enabled_ui(enabled, |ui| ui_kit::list_picker(ui, kind, app.tr(key), false)).inner;
+                let response = ui.add_enabled_ui(enabled, |ui| ui_kit::list_picker(ui, kind, app.tr_by_id(key), false)).inner;
                 crate::scenario::publish_target(&format!("render:lighting:add:{kind}"), response.rect);
-                if response.backing_on_hover_text(app.tr("render.lighting_budget_help")).clicked() {
+                if response.backing_on_hover_text(tr!(app, "render.lighting_budget_help")).clicked() {
                     dispatch(app, "render.lights.add", None, Some(json!({"kind":kind})));
                     ui.close();
                 }
@@ -779,12 +776,16 @@ pub(super) fn add_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let finite = lights.iter().any(|l| matches!(l.geometry, Geometry::Directional { angular_radius_rad: Some(_), .. }));
                 let response = ui
                     .add_enabled_ui(compatible && !finite && directional < 8, |ui| {
-                        ui_kit::list_picker(ui, "sun", app.tr("render.light_type_sun"), false)
+                        ui_kit::list_picker(ui, "sun", tr!(app, "render.light_type_sun"), false)
                     })
                     .inner;
                 crate::scenario::publish_target("render:lighting:add:sun", response.rect);
                 if response
-                    .backing_on_hover_text(app.tr(if compatible { "render.directional_sun_limit" } else { "render.cpu_celestial_path_required" }))
+                    .backing_on_hover_text(app.tr_by_id(if compatible {
+                        "render.directional_sun_limit"
+                    } else {
+                        "render.cpu_celestial_path_required"
+                    }))
                     .clicked()
                 {
                     let softness = (0.02 - 0.001) / (std::f64::consts::FRAC_PI_2 - 0.001);
@@ -844,18 +845,18 @@ pub(super) fn confirmation(app: &mut SolveApp, ctx: &egui::Context) {
         || setups::snapshot(app).ok().as_ref() != Some(&review.source)
         || !std::sync::Weak::ptr_eq(&review.document, &std::sync::Arc::downgrade(&app.session.doc))
     {
-        app.set_status(app.tr("render.review_stale").to_string(), true);
+        app.set_status(tr!(app, "render.review_stale").to_string(), true);
         return;
     }
-    let title = app.tr("render.lighting_review_title").to_string();
-    let apply = app.tr("render.lighting_apply").to_string();
-    let cancel = app.tr("render.keep_editing").to_string();
+    let title = tr!(app, "render.lighting_review_title").to_string();
+    let apply = tr!(app, "render.lighting_apply").to_string();
+    let cancel = tr!(app, "render.keep_editing").to_string();
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("render_lighting_review"), "render_scene", &title)
         .actions(&apply, &cancel, None)
         .selected(ui_kit::Action::Cancel)
         .show(ctx, review.consent, |ui| {
             note(app, ui, "render.lighting_review_help");
-            ui_kit::checkbox(ui, app.tr("render.lighting_consent"), &mut review.consent);
+            ui_kit::checkbox(ui, tr!(app, "render.lighting_consent"), &mut review.consent);
         });
     match action {
         ui_kit::Action::Ok if review.consent => {
@@ -953,21 +954,21 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
         });
     ui_kit::scope(ui, |ui| {
         ui_kit::row(ui, &name(app, light), |ui| {
-            ui.add_enabled_ui(false, |ui| ui_kit::choice_chip(ui, "render:light:badge", app.tr(type_key), true));
+            ui.add_enabled_ui(false, |ui| ui_kit::choice_chip(ui, "render:light:badge", app.tr_by_id(type_key), true));
         });
         if blocked {
             note(app, ui, "render.method_limit_raster");
         }
         ui.add_enabled_ui(!blocked, |ui| {
             let labels = [
-                app.tr("render.light_type_area").to_string(),
-                app.tr("render.light_type_point").to_string(),
-                app.tr("render.light_type_spot").to_string(),
-                app.tr(if finite_sun { "render.light_type_sun" } else { "render.tree_directional" }).to_string(),
+                tr!(app, "render.light_type_area").to_string(),
+                tr!(app, "render.light_type_point").to_string(),
+                tr!(app, "render.light_type_spot").to_string(),
+                app.tr_by_id(if finite_sun { "render.light_type_sun" } else { "render.tree_directional" }).to_string(),
             ];
             let kinds = ["area", "point", "spot", "directional"];
             let mut selected = kinds.iter().position(|value| *value == kind).unwrap_or(1);
-            let budget_reason = app.tr("render.lighting_budget_help").to_string();
+            let budget_reason = tr!(app, "render.lighting_budget_help").to_string();
             let areas = lights.iter().filter(|l| l.geometry.kind() == "area").count();
             let points = lights.iter().filter(|l| matches!(l.geometry.kind(), "point" | "spot")).count();
             let suns = lights.iter().filter(|l| l.geometry.kind() == "directional").count();
@@ -1028,11 +1029,11 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
             if !soft {
                 note(app, ui, "render.light_hard_shadow");
             }
-            let title = app.tr("render.light_position").to_string();
+            let title = tr!(app, "render.light_position").to_string();
             ui_kit::section(ui, "render:light:position", &title, true, |ui| {
                 field(app, ui, id, "render.light_azimuth", "azimuth_deg", &mut draft.azimuth, -360.0..=360.0, 1.0, "°", true);
                 field(app, ui, id, "render.light_elevation", "elevation_deg", &mut draft.elevation, -90.0..=90.0, 1.0, "°", true);
-                let distance_unit = app.tr("render.lighting_distance_unit").to_string();
+                let distance_unit = tr!(app, "render.lighting_distance_unit").to_string();
                 field(
                     app,
                     ui,
@@ -1049,15 +1050,16 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                     note(app, ui, "render.lighting_sun_distance");
                 }
                 ui.add_enabled_ui(!sun, |ui| {
-                    let label = app.tr("render.light_aim").to_string();
+                    let label = tr!(app, "render.light_aim").to_string();
                     ui_kit::row(ui, &label, |ui| {
-                        let label =
-                            app.tr(if aim == product_centre(app) { "render.light_product_centre" } else { "render.lighting_point" }).to_string();
+                        let label = app
+                            .tr_by_id(if aim == product_centre(app) { "render.light_product_centre" } else { "render.lighting_point" })
+                            .to_string();
                         ui_kit::dropdown_menu(ui, "render:light:aim", &label, |ui| {
                             let bounds = solidcraft_engine::view::bounds(&app.session).unwrap_or(solidcraft_engine::geom::Aabb3::EMPTY);
                             let mut targets = vec![
-                                (app.tr("render.light_product_centre").to_string(), product_centre(app)),
-                                (app.tr("render.light_world_origin").to_string(), [0.0; 3]),
+                                (tr!(app, "render.light_product_centre").to_string(), product_centre(app)),
+                                (tr!(app, "render.light_world_origin").to_string(), [0.0; 3]),
                             ];
                             if !bounds.is_empty() {
                                 for body in &crate::open_meshing::session_world(&app.session).bodies {
@@ -1076,9 +1078,9 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                     });
                     vector_field(app, ui, id, "render.lighting_aim_point", "aim_at", &mut draft.aim, -1e9..=1e9, " mm");
                 });
-                let response = ui_kit::button(ui, app.tr("render.light_place_highlight"), ui_kit::Button::Enabled(false));
+                let response = ui_kit::button(ui, tr!(app, "render.light_place_highlight"), ui_kit::Button::Enabled(false));
                 crate::scenario::publish_target("render:light:place-highlight", response.rect);
-                response.backing_on_hover_text(app.tr("render.light_place_pending"));
+                response.backing_on_hover_text(tr!(app, "render.light_place_pending"));
                 note(app, ui, "render.light_place_pending");
                 if sun {
                     note(app, ui, "render.lighting_direction_help");
@@ -1097,7 +1099,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                 }
             });
             if kind == "area" {
-                let title = app.tr("render.lighting_shape").to_string();
+                let title = tr!(app, "render.lighting_shape").to_string();
                 ui_kit::section(ui, "render:light:shape", &title, true, |ui| {
                     field(
                         app,
@@ -1129,7 +1131,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                 });
             }
             if kind == "spot" {
-                let title = app.tr("render.spot_cone").to_string();
+                let title = tr!(app, "render.spot_cone").to_string();
                 ui_kit::section(ui, "render:light:cone", &title, true, |ui| {
                     vector_field(app, ui, id, "render.spot_axis", "emitted_axis", &mut draft.emitted_axis, -1e9..=1e9, "");
                     field(app, ui, id, "render.spot_inner", "inner_half_angle_radians", &mut draft.inner_angle, 0.0..=90.0, 0.1, "°", true);
@@ -1138,7 +1140,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                 });
             }
             if matches!(kind, "point" | "spot") {
-                let title = app.tr("render.lighting_falloff").to_string();
+                let title = tr!(app, "render.lighting_falloff").to_string();
                 ui_kit::section(ui, "render:light:falloff", &title, true, |ui| {
                     field(
                         app,
@@ -1169,14 +1171,14 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
             }
         });
         app.render_workspace.view.lights.draft = Some(draft);
-        let title = app.tr("render.light_behaviour").to_string();
+        let title = tr!(app, "render.light_behaviour").to_string();
         ui_kit::section(ui, "render:light:behaviour", &title, true, |ui| {
             let mut solo = app.render_workspace.view.lights.visibility.solo.as_deref() == Some(id);
-            if ui_kit::checkbox(ui, app.tr("render.lighting_solo"), &mut solo).changed() {
+            if ui_kit::checkbox(ui, tr!(app, "render.lighting_solo"), &mut solo).changed() {
                 let _ = app.run("render.lights.solo", json!({"id":id,"solo":solo}));
             }
             let mut muted = app.render_workspace.view.lights.visibility.muted.contains(id);
-            if ui_kit::checkbox(ui, app.tr("render.lighting_mute"), &mut muted).changed() {
+            if ui_kit::checkbox(ui, tr!(app, "render.lighting_mute"), &mut muted).changed() {
                 let _ = app.run("render.lights.mute", json!({"id":id,"mute":muted}));
             }
             ui.horizontal(|ui| {
@@ -1187,13 +1189,13 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                         |l| if matches!(kind, "point" | "spot") { matches!(l.geometry.kind(), "point" | "spot") } else { l.geometry.kind() == kind },
                     )
                     .count();
-                if ui_kit::button(ui, app.tr("render.light_duplicate"), ui_kit::Button::Enabled(!blocked && !finite_sun && count < cap))
-                    .backing_on_hover_text(app.tr(if finite_sun { "render.directional_sun_limit" } else { "render.lighting_budget_help" }))
+                if ui_kit::button(ui, tr!(app, "render.light_duplicate"), ui_kit::Button::Enabled(!blocked && !finite_sun && count < cap))
+                    .backing_on_hover_text(app.tr_by_id(if finite_sun { "render.directional_sun_limit" } else { "render.lighting_budget_help" }))
                     .clicked()
                 {
                     dispatch(app, "render.lights.duplicate", Some(id), None);
                 }
-                if ui_kit::button(ui, app.tr("render.light_delete"), ui_kit::Button::Enabled(!blocked)).clicked() {
+                if ui_kit::button(ui, tr!(app, "render.light_delete"), ui_kit::Button::Enabled(!blocked)).clicked() {
                     dispatch(app, "render.lights.remove", Some(id), None);
                 }
             });
@@ -1212,7 +1214,7 @@ fn subject_size(app: &SolveApp) -> f64 {
     bounded(solidcraft_engine::view::bounds(&app.session).unwrap_or(solidcraft_engine::geom::Aabb3::EMPTY).diagonal(), 1.0, 1e6)
 }
 fn note(app: &SolveApp, ui: &mut egui::Ui, key: &'static str) {
-    ui_kit::text(ui, app.tr(key), ui_kit::Text::Note(key));
+    ui_kit::text(ui, app.tr_by_id(key), ui_kit::Text::Note(key));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1227,7 +1229,7 @@ fn slider_field(
     format: fn(f64) -> String,
     enabled: bool,
 ) {
-    let label = app.tr(label).to_string();
+    let label = app.tr_by_id(label).to_string();
     ui.add_enabled_ui(enabled, |ui| {
         ui_kit::row(ui, &label, |ui| {
             let response = ui_kit::slider(ui, value, range.clone(), ui_kit::Slider { format, ..Default::default() });
@@ -1255,7 +1257,7 @@ fn vector_field(
     range: std::ops::RangeInclusive<f64>,
     suffix: &str,
 ) {
-    let label = app.tr(label).to_string();
+    let label = app.tr_by_id(label).to_string();
     // Each coordinate needs the full control column: three content-sized
     // DragValues can extend beyond a narrow inspector as their text grows.
     // Separate axis rows retain the standard parser, focus and accessible label.
@@ -1293,7 +1295,7 @@ fn field(
     suffix: &str,
     enabled: bool,
 ) {
-    let label = app.tr(label).to_string();
+    let label = app.tr_by_id(label).to_string();
     ui.add_enabled_ui(enabled, |ui| {
         ui_kit::row(ui, &label, |ui| {
             let response = ui_kit::number_field(ui, value, range.clone(), speed, suffix);

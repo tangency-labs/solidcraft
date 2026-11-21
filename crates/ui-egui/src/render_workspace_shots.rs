@@ -38,15 +38,11 @@ pub(crate) fn shared_shots(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow, in
     let result_label = completed
         .as_ref()
         .map(|frame| {
-            solidcraft_ui_text::format(
-                "render.shots_result",
-                &[("number", &frame.job.serial.to_string()), ("width", &frame.width.to_string()), ("height", &frame.height.to_string())],
-            )
+            tr!("render.shots_result", number = &frame.job.serial.to_string(), width = &frame.width.to_string(), height = &frame.height.to_string())
         })
-        .unwrap_or_else(|| app.tr("render.shots_no_result").to_string());
+        .unwrap_or_else(|| tr!(app, "render.shots_no_result").to_string());
     let queue = app.session.render_queue_state();
-    let queue_label =
-        solidcraft_ui_text::format("render.batch_status", &[("running", &queue.running.to_string()), ("waiting", &queue.waiting.to_string())]);
+    let queue_label = tr!("render.batch_status", running = &queue.running.to_string(), waiting = &queue.waiting.to_string());
     let (mut hide, mut start, mut save, mut chosen, mut size) = (false, false, false, None, None);
     let mut visible = Vec::new();
     let controls = |ui: &mut egui::Ui| {
@@ -57,7 +53,7 @@ pub(crate) fn shared_shots(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow, in
         }
         let response = ui_kit::completion_text(ui, &queue_label, false);
         crate::scenario::publish_rect("render:shots:queue", response.rect);
-        let response = ui_kit::icon_label_action(ui, app.tr("cmd.render_start"), Some("play"), ready.is_ok(), true);
+        let response = ui_kit::icon_label_action(ui, tr!(app, "cmd.render_start"), Some("play"), ready.is_ok(), true);
         let response = if let Err(reason) = &ready { response.backing_on_disabled_hover_text(reason) } else { response };
         crate::panel_runtime::register_content_focus(ui.ctx(), &response);
         crate::scenario::publish_target("render:shots:render", response.rect);
@@ -82,7 +78,7 @@ pub(crate) fn shared_shots(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow, in
         crate::scenario::publish_rect("render:shots:status", response.rect);
     };
     let choices = |ui: &mut egui::Ui| {
-        let response = ui.add_enabled_ui(super::setups::snapshot(app).is_ok(), |ui| ui_kit::add_choice(ui, app.tr("render.shots_save"))).inner;
+        let response = ui.add_enabled_ui(super::setups::snapshot(app).is_ok(), |ui| ui_kit::add_choice(ui, tr!(app, "render.shots_save"))).inner;
         crate::panel_runtime::register_content_focus(ui.ctx(), &response);
         crate::scenario::publish_target("render:shots:save", response.rect);
         save = response.clicked();
@@ -151,12 +147,12 @@ pub(crate) fn shared_shots(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow, in
 pub(super) fn confirmation(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut name) = app.render_workspace.view.save_shot_name.take() else { return };
     let valid = RenderSettings::validate_name(name.trim()).is_ok() && !app.session.doc.render.setups.contains_key(name.trim());
-    let title = app.tr("render.shots_save").to_string();
-    let cancel = app.tr("ui.cancel").to_string();
+    let title = tr!(app, "render.shots_save").to_string();
+    let cancel = tr!(app, "ui.cancel").to_string();
     let (closed, answer) =
         ui_kit::Confirm::new(egui::Id::unique("render_save_shot"), "save", &title).actions(&title, &cancel, None).show(ctx, valid, |ui| {
-            ui_kit::text(ui, app.tr("render.shots_name_help"), ui_kit::Text::Note("render.shots_name_help"));
-            ui_kit::row(ui, app.tr("render.shot_new_name"), |ui| {
+            ui_kit::text(ui, tr!(app, "render.shots_name_help"), ui_kit::Text::Note("render.shots_name_help"));
+            ui_kit::row(ui, tr!(app, "render.shot_new_name"), |ui| {
                 ui_kit::focused_text_field(ui, &mut name, "");
             });
         });

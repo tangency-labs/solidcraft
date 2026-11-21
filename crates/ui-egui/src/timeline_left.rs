@@ -162,7 +162,7 @@ fn vertical_marker(app: &mut SolveApp, ui: &mut egui::Ui, drag: &mut Option<Drag
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
-    response.backing_on_hover_text(solidcraft_ui_text::tr("ui.history_marker_tip"));
+    response.backing_on_hover_text(tr!("ui.history_marker_tip"));
     rect.center().y
 }
 
@@ -339,10 +339,7 @@ fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft
         if !features.is_empty() || !selected_groups.is_empty() {
             ui.separator();
         }
-        if crate::ui_kit::menu::button(ui, "Delete Selected Folders", "delete")
-            .backing_on_hover_text(solidcraft_ui_text::tr("timeline.delete_folders_tip"))
-            .clicked()
-        {
+        if crate::ui_kit::menu::button(ui, "Delete Selected Folders", "delete").backing_on_hover_text(tr!("timeline.delete_folders_tip")).clicked() {
             let ids = app.tree.picked_timeline_groups.clone();
             let _ = app.run("timeline.ungroup", json!({"groups": ids}));
             app.tree.picked_timeline_groups.clear();
@@ -358,14 +355,14 @@ fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft
             && joints.iter().all(|id| app.session.doc.assembly.joints.iter().any(|joint| joint.id == *id && joint.suppressed));
         let label = if all_suppressed { "Unsuppress Selected Folders" } else { "Suppress Selected Folders" };
         if crate::ui_kit::menu::button_enabled(ui, label, "suppress", has_contents)
-            .backing_on_hover_text(solidcraft_ui_text::tr("timeline.suppress_folders_tip"))
+            .backing_on_hover_text(tr!("timeline.suppress_folders_tip"))
             .clicked()
         {
             let _ = app.run_heavy("timeline.suppress", json!({"groups": selected_groups, "suppressed": !all_suppressed}));
             ui.close();
         }
         if crate::ui_kit::menu::button(ui, "Delete Folders and Features…", "delete")
-            .backing_on_hover_text(solidcraft_ui_text::tr("timeline.delete_folders_with_features_tip"))
+            .backing_on_hover_text(tr!("timeline.delete_folders_with_features_tip"))
             .clicked()
         {
             crate::timeline::delete_folders(app, selected_groups.clone(), contents);
@@ -1228,7 +1225,7 @@ fn feature_row_body(
         crate::timeline::feature_tooltip(name, ty, app.session.model.result(id), rolled, sketch_state).show(ui);
         // Where the sketch is listed gets a row of its own, under the shared tooltip.
         if let Some(host) = listed_under.filter(|_| reference) {
-            let listed = solidcraft_ui_text::format("ui.history_sketch_listed_under", &[("feature", host)]);
+            let listed = tr!("ui.history_sketch_listed_under", feature = host);
             crate::ui_kit::text(ui, &listed, crate::ui_kit::Text::Value("history_listed_under", false));
         }
     });

@@ -283,7 +283,7 @@ fn design_rows(app: &mut SolveApp, query: &str) -> Vec<DesignRow> {
                 .unwrap_or_default();
             rows.push(DesignRow {
                 label: bounded(&feature.name),
-                detail: format!("{} · {value}", solidcraft_ui_text::tr("search.feature")),
+                detail: format!("{} · {value}", tr!("search.feature")),
                 icon: crate::timeline::icon_of(&feature.kind),
                 target: DesignTarget::Feature(feature.id),
             });
@@ -293,7 +293,7 @@ fn design_rows(app: &mut SolveApp, query: &str) -> Vec<DesignRow> {
             let value = p.display_value.or(p.value).filter(|v| v.is_finite()).map_or_else(|| bounded(&p.expression), |v| format!("{v} {}", p.unit));
             rows.push(DesignRow {
                 label: bounded(&p.name),
-                detail: format!("{} · {value}", solidcraft_ui_text::tr("search.parameter")),
+                detail: format!("{} · {value}", tr!("search.parameter")),
                 icon,
                 target: DesignTarget::Parameter(p.name.clone()),
             });
@@ -326,9 +326,9 @@ fn typed(line: &str) -> Option<(&str, Result<Value, String>)> {
     let id = line.get(..split).unwrap_or_default();
     let rest = line.get(split..).unwrap_or_default().trim();
     let result = if solidcraft_engine::find_command(id).is_none() {
-        Err(solidcraft_ui_text::format("shortcut.no_command", &[("id", id)]))
+        Err(tr!("shortcut.no_command", id = id))
     } else {
-        serde_json::from_str::<Value>(rest).map_err(|e| solidcraft_ui_text::format("shortcut.json_error", &[("error", &e.to_string())]))
+        serde_json::from_str::<Value>(rest).map_err(|e| tr!("shortcut.json_error", error = &e.to_string()))
     };
     Some((id, result))
 }
@@ -539,12 +539,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 if let Some((id, result)) = &mode {
                                     let mut row = ui_kit::MenuItem::new(
                                         "search:run",
-                                        solidcraft_ui_text::tr("search.run"),
+                                        tr!("search.run"),
                                         solidcraft_engine::find_command(id).map_or("", |c| c.icon),
                                     );
                                     row.enabled = result.is_ok();
                                     row.highlighted = true;
-                                    let badge = solidcraft_ui_text::tr(if result.is_ok() { "search.valid" } else { "search.invalid" });
+                                    let badge = solidcraft_ui_text::tr_by_id(if result.is_ok() { "search.valid" } else { "search.invalid" });
                                     row.shortcut = badge;
                                     if row
                                         .search_row(
@@ -614,7 +614,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                         let handle = format!("search:design:{index}");
                                         let mut item = ui_kit::MenuItem::new(&handle, &row.label, row.icon);
                                         item.highlighted = app.sbox.index == rows.len() + index;
-                                        let badge = solidcraft_ui_text::tr(match row.target {
+                                        let badge = solidcraft_ui_text::tr_by_id(match row.target {
                                             DesignTarget::Feature(_) => "search.feature",
                                             DesignTarget::Parameter(_) => "search.parameter",
                                         });
@@ -630,15 +630,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                     if rows.is_empty() && design.is_empty() {
                                         ui.add_space(t.space_16);
                                         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                                            ui_kit::text(
-                                                ui,
-                                                &solidcraft_ui_text::format("search.no_match", &[("query", &query)]),
-                                                ui_kit::Text::Heading("search_no_match"),
-                                            );
+                                            ui_kit::text(ui, &tr!("search.no_match", query = &query), ui_kit::Text::Heading("search_no_match"));
                                             if let Some(label) = closest(&query) {
                                                 ui_kit::text(
                                                     ui,
-                                                    &solidcraft_ui_text::format("search.suggest", &[("label", label)]),
+                                                    &tr!("search.suggest", label = label),
                                                     ui_kit::Text::Report("search_suggest", false),
                                                 );
                                             }
@@ -648,7 +644,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                     if empty {
                                         ui_kit::text(
                                             ui,
-                                            &solidcraft_ui_text::format("search.try", &[("example", r#"solid.extrude {"distance": 20}"#)]),
+                                            &tr!("search.try", example = r#"solid.extrude {"distance": 20}"#),
                                             ui_kit::Text::Note("search_try"),
                                         );
                                     }

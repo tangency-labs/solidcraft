@@ -183,7 +183,7 @@ fn refresh(app: &mut SolveApp, view: &mut View) -> Result<(), String> {
         view.next = None;
     } else {
         let reply = app.run("render.library.list", json!({"kind":view.kind,"query":view.query,"offset":view.offset,"limit":48,"availability":if view.kind=="physical_profiles" {"all"} else {&view.availability}}))?;
-        view.entries = reply["items"].as_array().cloned().ok_or_else(|| solidcraft_ui_text::tr("render.error_library_reply").to_string())?;
+        view.entries = reply["items"].as_array().cloned().ok_or_else(|| tr!("render.error_library_reply").to_string())?;
         // Capture authored optical parameters once per page; selection remains read-only.
         for entry in &mut view.entries {
             if let Some(id) = entry["id"].as_str() {
@@ -226,22 +226,22 @@ fn refresh_targets(app: &mut SolveApp, view: &mut View) -> Result<(), String> {
     Ok(())
 }
 fn target_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View) {
-    ui.label(app.tr("render.library_target"));
+    ui.label(tr!(app, "render.library_target"));
     let search = ui_kit::bounded_cell_editor(
         ui,
         ui.scope_id().with("render_library_target_search"),
         &mut view.target_query,
-        app.tr("render.material_filter"),
+        tr!(app, "render.material_filter"),
         false,
         128,
     );
     crate::panel_runtime::register_content_focus(ui.ctx(), &search);
-    if ui_kit::button(ui, app.tr("render.material_refresh"), ui_kit::Button::Normal).clicked()
+    if ui_kit::button(ui, tr!(app, "render.material_refresh"), ui_kit::Button::Normal).clicked()
         && let Err(e) = refresh_targets(app, view)
     {
         app.set_status(e, true);
     }
-    let label = view.target.as_ref().map_or_else(|| app.tr("render.material_choose_body").to_string(), |t| t.name.clone());
+    let label = view.target.as_ref().map_or_else(|| tr!(app, "render.material_choose_body").to_string(), |t| t.name.clone());
     ui_kit::dropdown_menu(ui, "render_library_target", &label, |ui| {
         egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
             for target in &view.targets {
@@ -255,7 +255,7 @@ fn target_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View) {
         });
     });
     if view.target.is_some() && !current_target(app, view) {
-        ui_kit::text(ui, app.tr("render.material_revalidate_needed"), ui_kit::Text::Note("render.material_revalidate_needed"));
+        ui_kit::text(ui, tr!(app, "render.material_revalidate_needed"), ui_kit::Text::Note("render.material_revalidate_needed"));
     }
 }
 fn patch(app: &SolveApp) -> Result<Value, String> {
@@ -489,7 +489,7 @@ pub(crate) fn library_title(app: &SolveApp) -> String {
     } else {
         stage_title(stage)
     };
-    app.tr(key).to_string()
+    app.tr_by_id(key).to_string()
 }
 
 pub(crate) fn library_mode(app: &SolveApp) -> Option<usize> {
@@ -592,8 +592,8 @@ fn light_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     let top = ui.cursor().top();
     let mut view = std::mem::take(&mut app.render_workspace.view.library);
     let previous = view.light_scope;
-    let labels: Vec<_> = LIGHT_SCOPES.iter().map(|(_, key)| app.tr(key)).collect();
-    ui_kit::choice_row(ui, app.tr("render.stage_panels.scope"), "render_light_scope", &mut view.light_scope, &labels);
+    let labels: Vec<_> = LIGHT_SCOPES.iter().map(|(_, key)| app.tr_by_id(key)).collect();
+    ui_kit::choice_row(ui, tr!(app, "render.stage_panels.scope"), "render_light_scope", &mut view.light_scope, &labels);
     let compatible = match view.light_scope {
         0 => view.kind == "native_scenes",
         1 => view.kind == "rigs",
@@ -612,17 +612,17 @@ fn light_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if view.light_scope == 4 {
         ui.add_enabled_ui(false, |ui| {
-            ui_kit::search_field(ui, ui.scope_id().with("render_mine_search"), &mut view.query, app.tr("render.stage_panels.search_studios"));
-            ui_kit::button(ui, app.tr("render.stage_panels.apply"), ui_kit::Button::Normal);
+            ui_kit::search_field(ui, ui.scope_id().with("render_mine_search"), &mut view.query, tr!(app, "render.stage_panels.search_studios"));
+            ui_kit::button(ui, tr!(app, "render.stage_panels.apply"), ui_kit::Button::Normal);
         });
-        ui_kit::text(ui, app.tr("render.stage_panels.mine_pending"), ui_kit::Text::Note("render:mine:reason"));
+        ui_kit::text(ui, tr!(app, "render.stage_panels.mine_pending"), ui_kit::Text::Note("render:mine:reason"));
         crate::panel_runtime::report_content_extent(ui, top, ui.cursor().top() - top, false);
         restore_view(app, view);
         return;
     }
     catalog_search(app, ui, &mut view, "render.stage_panels.search_studios");
     let reason =
-        if view.light_scope == 3 { Some(app.tr("render.library_specification_only").to_string()) } else { selected_light_reason(app, &view) };
+        if view.light_scope == 3 { Some(tr!(app, "render.library_specification_only").to_string()) } else { selected_light_reason(app, &view) };
     let layout = ui_kit::CatalogLayout::new(ui, "render:light:catalog", 0);
     let body_top = ui.cursor().top();
     let body_height = layout.body(ui, |ui| {
@@ -661,7 +661,7 @@ fn light_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
         if let Some(reason) = &reason {
             ui_kit::text(ui, reason, ui_kit::Text::Note("render:light:reason"));
         }
-        let apply = ui_kit::button(ui, app.tr("render.stage_panels.apply"), ui_kit::Button::Enabled(view.selected.is_some() && reason.is_none()));
+        let apply = ui_kit::button(ui, tr!(app, "render.stage_panels.apply"), ui_kit::Button::Enabled(view.selected.is_some() && reason.is_none()));
         crate::scenario::publish_target("render:light:review", apply.rect);
         if apply.clicked()
             && let Some(id) = view.selected.clone()
@@ -669,7 +669,7 @@ fn light_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             app.set_status(error, true);
         }
-        ui_kit::catalog_footer_with_tip(ui, app.tr("render.stage_layout.studio_note"), app.tr("render.stage_panels.studio_note"));
+        ui_kit::catalog_footer_with_tip(ui, tr!(app, "render.stage_layout.studio_note"), tr!(app, "render.stage_panels.studio_note"));
     });
     restore_view(app, view);
 }
@@ -687,7 +687,7 @@ fn catalog_footer(layout: &ui_kit::CatalogLayout, ui: &mut egui::Ui, body_top: f
 }
 
 fn catalog_search(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, hint: &str) {
-    let search = ui_kit::search_field(ui, ui.scope_id().with("render_stage_catalog_search"), &mut view.query, app.tr(hint));
+    let search = ui_kit::search_field(ui, ui.scope_id().with("render_stage_catalog_search"), &mut view.query, app.tr_by_id(hint));
     crate::panel_runtime::register_content_focus(ui.ctx(), &search);
     crate::scenario::publish_target("render:library-search", search.rect);
     let end = view.query.char_indices().nth(128).map_or(view.query.len(), |(at, _)| at);
@@ -708,11 +708,11 @@ fn catalog_search(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, hint: 
 fn catalog_pages(app: &SolveApp, ui: &mut egui::Ui, view: &mut View) {
     if view.offset > 0 || view.next.is_some() {
         ui.horizontal(|ui| {
-            if ui_kit::button(ui, app.tr("render.library_previous"), ui_kit::Button::Enabled(view.offset > 0)).clicked() {
+            if ui_kit::button(ui, tr!(app, "render.library_previous"), ui_kit::Button::Enabled(view.offset > 0)).clicked() {
                 view.offset = view.offset.saturating_sub(48);
                 view.loaded = false;
             }
-            if ui_kit::button(ui, app.tr("render.library_next"), ui_kit::Button::Enabled(view.next.is_some())).clicked() {
+            if ui_kit::button(ui, tr!(app, "render.library_next"), ui_kit::Button::Enabled(view.next.is_some())).clicked() {
                 view.offset = view.next.unwrap_or(view.offset);
                 view.loaded = false;
             }
@@ -726,7 +726,7 @@ fn surface_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     if ui_kit::segmented(
         ui,
         &mut scope,
-        &[app.tr("render.stage_panels.surfaces"), app.tr("render.stage_panels.references")],
+        &[tr!(app, "render.stage_panels.surfaces"), tr!(app, "render.stage_panels.references")],
         ui_kit::Segments { compact: true, proportional: true, targets: &["render:surfaces", "render:references"], ..Default::default() },
     ) {
         switch_kind(&mut view, if scope == 0 { "surfaces" } else { "physical_profiles" });
@@ -763,11 +763,11 @@ fn surface_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
         if let Some(id) = view.selected.clone() {
             if scope == 0 {
                 ui_kit::divider(ui, "surface:rule");
-                ui_kit::text(ui, app.tr("render.stage_panels.source_note"), ui_kit::Text::Note("surface:note"));
+                ui_kit::text(ui, tr!(app, "render.stage_panels.source_note"), ui_kit::Text::Note("surface:note"));
                 source_preview(app, ui, &mut view, &id);
                 surface_controls(app, ui, &mut view, &id);
                 if let Some(detail) = view.details.clone() {
-                    let title = app.tr("render.library_details").to_string();
+                    let title = tr!(app, "render.library_details").to_string();
                     ui_kit::section(ui, ("surface:inspect", &id), &title, false, |ui| {
                         if let Some(description) = detail["resource"]["description"].as_str() {
                             ui_kit::text(ui, description, ui_kit::Text::Note("surface:description"));
@@ -777,7 +777,7 @@ fn surface_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 ui.hyperlink_to(source["title"].as_str().unwrap_or(url), url);
                             }
                         }
-                        if ui_kit::button(ui, app.tr("render.copy_request"), ui_kit::Button::Normal).clicked() {
+                        if ui_kit::button(ui, tr!(app, "render.copy_request"), ui_kit::Button::Normal).clicked() {
                             ui.ctx().copy_text(serde_json::to_string_pretty(&detail).unwrap_or_default());
                         }
                     });
@@ -791,7 +791,7 @@ fn surface_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 fn light_reason(app: &SolveApp, _kind: &str) -> Option<String> {
     if app.render_workspace.view.method == ImageMethod::Raster {
-        return Some(app.tr("render.environment_tiles_require_raytrace").into());
+        return Some(tr!(app, "render.environment_tiles_require_raytrace").into());
     }
     patch(app).err()
 }
@@ -814,7 +814,7 @@ fn selected_light_reason(app: &SolveApp, view: &View) -> Option<String> {
             .filter_map(Value::as_f64)
             .fold(0.0, f64::max);
         if maximum > 64.0 {
-            return Some(solidcraft_ui_text::format("render.cpu_studio_radiance_limit", &[("radiance", &maximum.to_string())]));
+            return Some(tr!("render.cpu_studio_radiance_limit", radiance = &maximum.to_string()));
         }
     }
     None
@@ -849,8 +849,8 @@ fn surface_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id: 
         }
         view.picked_target = picked;
     }
-    let target_row = ui_kit::row(ui, app.tr("render.stage_panels.target"), |ui| {
-        let label = view.target.as_ref().map_or(app.tr("render.material_choose_body"), |target| target.name.as_str());
+    let target_row = ui_kit::row(ui, tr!(app, "render.stage_panels.target"), |ui| {
+        let label = view.target.as_ref().map_or(tr!(app, "render.material_choose_body"), |target| target.name.as_str());
         let label = label.to_string();
         ui_kit::dropdown_menu(ui, "render_surface_target", &label, |ui| {
             for target in &view.targets {
@@ -862,7 +862,7 @@ fn surface_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id: 
         })
     });
     crate::scenario::publish_target("render:surface:target", target_row.rect);
-    ui_kit::row(ui, app.tr("render.stage_panels.plane"), |ui| {
+    ui_kit::row(ui, tr!(app, "render.stage_panels.plane"), |ui| {
         ui_kit::segmented(
             ui,
             &mut view.mapping_plane,
@@ -870,11 +870,11 @@ fn surface_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id: 
             ui_kit::Segments { compact: true, targets: &["render:surface:xy", "render:surface:yz", "render:surface:zx"], ..Default::default() },
         );
     });
-    ui_kit::row(ui, app.tr("render.stage_panels.repeat"), |ui| {
+    ui_kit::row(ui, tr!(app, "render.stage_panels.repeat"), |ui| {
         let repeat = ui_kit::number_field(ui, &mut view.mapping_scale, 0.001..=1000.0, 0.01, " ×");
         crate::scenario::publish_target("render:surface:repeat", repeat.rect);
     });
-    ui_kit::row(ui, app.tr("render.stage_panels.grain_angle"), |ui| {
+    ui_kit::row(ui, tr!(app, "render.stage_panels.grain_angle"), |ui| {
         let angle = ui_kit::number_field(ui, &mut view.mapping_angle_deg, -180.0..=180.0, 1.0, "°");
         crate::scenario::publish_target("render:surface:grain-angle", angle.rect);
     });
@@ -888,27 +888,27 @@ fn surface_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id: 
     let cpu_maps = cpu && cpu_maps_supported(app, view);
     let mut requested = None;
     ui.horizontal(|ui| {
-        if ui_kit::button(ui, app.tr("render.stage_panels.use_uniform"), ui_kit::Button::Enabled(enabled)).clicked() {
+        if ui_kit::button(ui, tr!(app, "render.stage_panels.use_uniform"), ui_kit::Button::Enabled(enabled)).clicked() {
             requested = Some(0);
         }
-        if ui_kit::button(ui, app.tr("render.stage_panels.use_maps"), ui_kit::Button::Enabled(enabled && gpu)).clicked() {
+        if ui_kit::button(ui, tr!(app, "render.stage_panels.use_maps"), ui_kit::Button::Enabled(enabled && gpu)).clicked() {
             requested = Some(1);
         }
     });
     let raytrace = app.render_workspace.view.method != ImageMethod::Raster;
     let save =
-        ui_kit::button(ui, app.tr("render.stage_panels.save_maps"), ui_kit::Button::Enabled(enabled && (gpu || cpu_maps) && patch(app).is_ok()));
+        ui_kit::button(ui, tr!(app, "render.stage_panels.save_maps"), ui_kit::Button::Enabled(enabled && (gpu || cpu_maps) && patch(app).is_ok()));
     crate::scenario::publish_target("render:surface:save-maps", save.rect);
     if save.clicked() {
         requested = Some(2);
     }
     if !raytrace {
-        ui_kit::text(ui, app.tr("render.surface_import.raytrace_required"), ui_kit::Text::Note("surface:gpu:reason"));
+        ui_kit::text(ui, tr!(app, "render.surface_import.raytrace_required"), ui_kit::Text::Note("surface:gpu:reason"));
     } else if cpu {
-        ui_kit::text(ui, app.tr("render.cpu_maps_saved_help"), ui_kit::Text::Note("render.cpu_maps_saved_help"));
+        ui_kit::text(ui, tr!(app, "render.cpu_maps_saved_help"), ui_kit::Text::Note("render.cpu_maps_saved_help"));
     }
     if !supported {
-        ui_kit::text(ui, app.tr("render.library_specification_only"), ui_kit::Text::Note("surface:reference:reason"));
+        ui_kit::text(ui, tr!(app, "render.library_specification_only"), ui_kit::Text::Note("surface:reference:reason"));
     }
     if let (Some(mode), Some(target)) = (requested, view.target.clone()) {
         let result = (|| -> Result<(), String> {
@@ -1028,7 +1028,7 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
     } else {
         view.total
     };
-    let hint = solidcraft_ui_text::format("render.search_appearances", &[("count", &count.to_string())]);
+    let hint = tr!("render.search_appearances", count = &count.to_string());
     let query = if view.collection == 0 { &mut view.query } else { &mut view.collection_query };
     let search = ui_kit::search_field(ui, ui.scope_id().with("render_library_search"), query, &hint);
     crate::panel_runtime::register_content_focus(ui.ctx(), &search);
@@ -1039,9 +1039,9 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
         view.loaded = false;
     }
     let labels = [
-        app.tr("render.library_in_design").to_string(),
-        app.tr("render.browser_library").to_string(),
-        app.tr("render.library_recent").to_string(),
+        tr!(app, "render.library_in_design").to_string(),
+        tr!(app, "render.browser_library").to_string(),
+        tr!(app, "render.library_recent").to_string(),
         "★".to_string(),
     ];
     let mut scope = match view.collection {
@@ -1108,7 +1108,7 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
                 for (id, label) in
                     [("", "ui.all"), ("metal", "render.category_metal"), ("plastic", "render.category_plastic"), ("paint", "render.category_paint")]
                 {
-                    if ui_kit::choice_chip(ui, &format!("render-library-{id}"), app.tr(label), view.category == id).clicked() {
+                    if ui_kit::choice_chip(ui, &format!("render-library-{id}"), app.tr_by_id(label), view.category == id).clicked() {
                         view.category = id.into();
                     }
                 }
@@ -1140,16 +1140,16 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
             format!(
                 "{}\n{}\n{}: {} · {}: {}\n{}: {} · {}: {}\n{}: {} {}\n{}",
                 entry["name"].as_str().unwrap_or(id),
-                entry["category"].as_str().or_else(|| entry["family"].as_str()).unwrap_or(app.tr("render.library_in_design")),
-                app.tr("render.library_metallic"),
+                entry["category"].as_str().or_else(|| entry["family"].as_str()).unwrap_or(tr!(app, "render.library_in_design")),
+                tr!(app, "render.library_metallic"),
                 scalar(&p["pbr"]["metallic"]),
-                app.tr("render.library_roughness"),
+                tr!(app, "render.library_roughness"),
                 scalar(&p["pbr"]["roughness"]),
-                app.tr("render.library_ior"),
+                tr!(app, "render.library_ior"),
                 scalar(&p["pbr"]["dielectric_ior"]),
-                app.tr("render.library_opacity"),
+                tr!(app, "render.library_opacity"),
                 scalar(&p["opacity"]),
-                app.tr("render.library_users"),
+                tr!(app, "render.library_users"),
                 users,
                 names.join(", "),
                 availability_label(
@@ -1173,7 +1173,7 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
         .push_id((&view.kind, view.collection), |ui| {
             layout.body(ui, |ui| {
                 if entries.is_empty() {
-                    ui_kit::text(ui, app.tr("render.library_empty"), ui_kit::Text::Note("render.library_empty"));
+                    ui_kit::text(ui, tr!(app, "render.library_empty"), ui_kit::Text::Note("render.library_empty"));
                 }
                 if view.layout == 0 {
                     let tiles: Vec<_> = entries
@@ -1191,12 +1191,12 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
                         })
                         .collect();
                     if applicable_count > 0 {
-                        ui_kit::text(ui, app.tr("render.library_applicable"), ui_kit::Text::Inline);
+                        ui_kit::text(ui, tr!(app, "render.library_applicable"), ui_kit::Text::Inline);
                         (selected, dragged) = ui_kit::sphere_grid_drag(ui, tiles.get(..applicable_count).unwrap_or_default());
                     }
                     if applicable_count < tiles.len() {
                         if applicable_count > 0 {
-                            ui_kit::text(ui, app.tr("render.library_other"), ui_kit::Text::Inline);
+                            ui_kit::text(ui, tr!(app, "render.library_other"), ui_kit::Text::Inline);
                         }
                         let (other, other_drag) = ui_kit::sphere_grid_drag(ui, tiles.get(applicable_count..).unwrap_or_default());
                         selected = selected.or(other.map(|i| i + applicable_count));
@@ -1205,9 +1205,9 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
                 } else {
                     for (index, ((kind, id, entry), tip)) in entries.iter().zip(&tips).enumerate() {
                         if index == 0 && applicable_count > 0 {
-                            ui_kit::text(ui, app.tr("render.library_applicable"), ui_kit::Text::Inline);
+                            ui_kit::text(ui, tr!(app, "render.library_applicable"), ui_kit::Text::Inline);
                         } else if index == applicable_count && applicable_count > 0 {
-                            ui_kit::text(ui, app.tr("render.library_other"), ui_kit::Text::Inline);
+                            ui_kit::text(ui, tr!(app, "render.library_other"), ui_kit::Text::Inline);
                         }
                         let mut item = ui_kit::MenuItem::new(id, entry["name"].as_str().unwrap_or(id), "appearance");
                         item.highlighted = view.kind == *kind && view.selected.as_ref() == Some(id);
@@ -1216,7 +1216,7 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
                             query,
                             &format!(
                                 "{} / {}",
-                                if kind == "appearances" { entry["category"].as_str().unwrap_or(app.tr("render.library_in_design")) } else { id },
+                                if kind == "appearances" { entry["category"].as_str().unwrap_or(tr!(app, "render.library_in_design")) } else { id },
                                 short_availability(app, entry.pointer("/projection/status").and_then(Value::as_str))
                             ),
                             None,
@@ -1233,10 +1233,10 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
         .inner;
     catalog_footer(&layout, ui, body_top, body_height, |ui| {
         if !stage_card {
-            let menu = ui_kit::dropdown_menu(ui, "render_library_filters", app.tr("render.library_filters"), |ui| {
+            let menu = ui_kit::dropdown_menu(ui, "render_library_filters", tr!(app, "render.library_filters"), |ui| {
                 if view.collection == 0 {
                     for &(kind, key) in KINDS {
-                        let r = ui_kit::list_picker(ui, kind, app.tr(key), view.kind == kind);
+                        let r = ui_kit::list_picker(ui, kind, app.tr_by_id(key), view.kind == kind);
                         crate::scenario::publish_target(&format!("render:library-kind:{kind}"), r.rect);
                         if r.clicked() {
                             switch_kind(&mut view, kind);
@@ -1251,7 +1251,7 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
                     ("specification", "render.library_specs"),
                     ("blocked", "render.library_blocked"),
                 ] {
-                    if ui_kit::list_picker(ui, id, app.tr(key), view.availability == id).clicked() {
+                    if ui_kit::list_picker(ui, id, app.tr_by_id(key), view.availability == id).clicked() {
                         view.availability = id.into();
                         view.offset = 0;
                         view.loaded = false;
@@ -1262,11 +1262,11 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
             crate::scenario::publish_target("render:library-category", menu.rect);
             if view.collection == 0 && view.kind != "appearances" {
                 ui.horizontal(|ui| {
-                    if ui_kit::button(ui, app.tr("render.library_previous"), ui_kit::Button::Enabled(view.offset > 0)).clicked() {
+                    if ui_kit::button(ui, tr!(app, "render.library_previous"), ui_kit::Button::Enabled(view.offset > 0)).clicked() {
                         view.offset = view.offset.saturating_sub(48);
                         view.loaded = false;
                     }
-                    if ui_kit::button(ui, app.tr("render.library_next"), ui_kit::Button::Enabled(view.next.is_some())).clicked() {
+                    if ui_kit::button(ui, tr!(app, "render.library_next"), ui_kit::Button::Enabled(view.next.is_some())).clicked() {
                         view.offset = view.next.unwrap_or(view.offset);
                         view.loaded = false;
                     }
@@ -1281,7 +1281,7 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
                     }
                     if kind == "appearances" {
                         if entry["available"] == false {
-                            return Err(app.tr("render.library_blocked").to_string());
+                            return Err(tr!(app, "render.library_blocked").to_string());
                         }
                         let params = if let Some(id) = entry["id"].as_str() { json!({"appearance":id}) } else { preview_parameters(entry) };
                         return super::assign::tile(app, params, drag);
@@ -1309,7 +1309,7 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
                             );
                         }
                         if !app.session.selection.is_empty() {
-                            return Err(app.tr("render.material_choose_body").to_string());
+                            return Err(tr!(app, "render.material_choose_body").to_string());
                         }
                     }
                     Ok(())
@@ -1320,12 +1320,12 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
             }
         }
         if stage_card {
-            ui_kit::catalog_footer_with_tip(ui, app.tr("render.stage_layout.appearance_note"), app.tr("render.assign_help"));
+            ui_kit::catalog_footer_with_tip(ui, tr!(app, "render.stage_layout.appearance_note"), tr!(app, "render.assign_help"));
             if view.kind == "materials" {
-                ui_kit::text(ui, app.tr("render.library_specification_only"), ui_kit::Text::Note("appearance:reference:reason"));
+                ui_kit::text(ui, tr!(app, "render.library_specification_only"), ui_kit::Text::Note("appearance:reference:reason"));
             }
         } else {
-            ui_kit::text(ui, app.tr("render.library_inspect_only"), ui_kit::Text::Note("render.library_inspect_only"));
+            ui_kit::text(ui, tr!(app, "render.library_inspect_only"), ui_kit::Text::Note("render.library_inspect_only"));
         }
     });
     restore_view(app, view);
@@ -1342,7 +1342,7 @@ pub(super) fn inspect_kinds(app: &mut SolveApp, ui: &mut egui::Ui, kinds: &[&str
     {
         inspect(app, ui);
     } else {
-        ui_kit::text(ui, app.tr("render.library_select_hint"), ui_kit::Text::Note("render.library_select_hint"));
+        ui_kit::text(ui, tr!(app, "render.library_select_hint"), ui_kit::Text::Note("render.library_select_hint"));
     }
 }
 
@@ -1376,7 +1376,7 @@ pub(super) fn inspect(app: &mut SolveApp, ui: &mut egui::Ui) {
         let favorite = app.preferences.render_library_favorites.contains(&key);
         if ui_kit::button(
             ui,
-            app.tr(if favorite { "render.library_unfavorite" } else { "render.library_favorite" }),
+            app.tr_by_id(if favorite { "render.library_unfavorite" } else { "render.library_favorite" }),
             ui_kit::Button::Enabled(favorite || app.preferences.render_library_favorites.len() < 256),
         )
         .clicked()
@@ -1389,7 +1389,7 @@ pub(super) fn inspect(app: &mut SolveApp, ui: &mut egui::Ui) {
             view.loaded = false;
         }
         if let Some(detail) = &view.details {
-            ui.small(format!("{}: {}", app.tr("render.library_status"), availability_label(app, detail["projection"]["status"].as_str())));
+            ui.small(format!("{}: {}", tr!(app, "render.library_status"), availability_label(app, detail["projection"]["status"].as_str())));
             if let Some(description) = detail["resource"]["description"].as_str() {
                 ui.label(description);
             }
@@ -1398,11 +1398,7 @@ pub(super) fn inspect(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             if let Some(omitted) = detail["projection"]["omitted"].as_array() {
                 for item in omitted {
-                    ui.small(format!(
-                        "{}: {}",
-                        app.tr("render.library_omitted"),
-                        item.as_str().unwrap_or(solidcraft_ui_text::tr("render.property_unknown"))
-                    ));
+                    ui.small(format!("{}: {}", tr!(app, "render.library_omitted"), item.as_str().unwrap_or(tr!("render.property_unknown"))));
                 }
             }
         }
@@ -1413,10 +1409,10 @@ pub(super) fn inspect(app: &mut SolveApp, ui: &mut egui::Ui) {
             resource_controls(app, ui, &mut view, &id);
         }
         if let Some(detail) = &view.details {
-            let title = app.tr("render.library_details").to_string();
+            let title = tr!(app, "render.library_details").to_string();
             ui_kit::section(ui, ("render_library_detail", &id), &title, false, |ui| {
                 let text = serde_json::to_string_pretty(detail).unwrap_or_default();
-                if ui_kit::button(ui, app.tr("render.copy_request"), ui_kit::Button::Normal).clicked() {
+                if ui_kit::button(ui, tr!(app, "render.copy_request"), ui_kit::Button::Normal).clicked() {
                     ui.ctx().copy_text(text.clone());
                 }
                 egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
@@ -1425,7 +1421,7 @@ pub(super) fn inspect(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         }
     } else {
-        ui_kit::text(ui, app.tr("render.library_select_hint"), ui_kit::Text::Note("render.library_select_hint"));
+        ui_kit::text(ui, tr!(app, "render.library_select_hint"), ui_kit::Text::Note("render.library_select_hint"));
     }
     restore_view(app, view);
 }
@@ -1435,7 +1431,7 @@ fn source_preview(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id: &s
             let reply = app.run("render.library.preview", json!({"id":id}))?;
             let bytes: Vec<u8> = serde_json::from_value(reply["bytes"].clone()).map_err(|e| e.to_string())?;
             if bytes.len() > 2 * 1024 * 1024 {
-                return Err(solidcraft_ui_text::tr("render.error_source_preview").into());
+                return Err(tr!("render.error_source_preview").into());
             }
             let mut reader = image::ImageReader::with_format(std::io::Cursor::new(bytes), image::ImageFormat::Png);
             let mut limits = image::Limits::default();
@@ -1468,7 +1464,7 @@ fn source_preview(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id: &s
 pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     stage_controls(app, ui);
     saved_surface_controls(app, ui);
-    let title = app.tr("render.library_title").to_string();
+    let title = tr!(app, "render.library_title").to_string();
     ui_kit::section(ui, "render_resource_library", &title, false, |ui| {
         browse_contents(app, ui, false);
         inspect(app, ui);
@@ -1483,9 +1479,9 @@ fn resource_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id:
     }
     let mut linked_profile = None;
     if let Some(specifications) = detail["physical_references"]["specifications"].as_array() {
-        let title = app.tr("render.physical_associations").to_string();
+        let title = tr!(app, "render.physical_associations").to_string();
         ui_kit::section(ui, ("physical_associations", id), &title, false, |ui| {
-            ui_kit::text(ui, app.tr("render.physical_separate"), ui_kit::Text::Note("render.physical_separate"));
+            ui_kit::text(ui, tr!(app, "render.physical_separate"), ui_kit::Text::Note("render.physical_separate"));
             for spec in specifications {
                 ui.label(format!("{}: {}", spec["catalog_id"].as_str().unwrap_or(""), spec["physical_role"].as_str().unwrap_or("")));
                 ui.small(spec["reason"].as_str().unwrap_or(""));
@@ -1497,7 +1493,7 @@ fn resource_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id:
             }
             if let Some(profiles) = detail["physical_references"]["candidate_profiles"].as_array() {
                 if profiles.is_empty() {
-                    ui_kit::text(ui, app.tr("render.physical_unknown"), ui_kit::Text::Note("render.physical_unknown"));
+                    ui_kit::text(ui, tr!(app, "render.physical_unknown"), ui_kit::Text::Note("render.physical_unknown"));
                 }
                 for profile in profiles {
                     let profile_id = profile["id"].as_str().unwrap_or("");
@@ -1517,14 +1513,14 @@ fn resource_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id:
         return;
     }
     if view.kind != "appearances" {
-        ui_kit::text(ui, app.tr("render.library_authored_help"), ui_kit::Text::Note("render.library_authored_help"));
+        ui_kit::text(ui, tr!(app, "render.library_authored_help"), ui_kit::Text::Note("render.library_authored_help"));
     }
     match view.kind.as_str() {
         "appearances" => {
             target_controls(app, ui, view);
             if ui_kit::button(
                 ui,
-                app.tr("render.library_apply_appearance"),
+                tr!(app, "render.library_apply_appearance"),
                 ui_kit::Button::Enabled(current_target(app, view) && source["available"] != false),
             )
             .clicked()
@@ -1539,7 +1535,7 @@ fn resource_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id:
                     Ok(_) => {
                         view.target_revision = None;
                         view.loaded = false;
-                        app.set_status(app.tr("render.library_applied").to_string(), false);
+                        app.set_status(tr!(app, "render.library_applied").to_string(), false);
                     }
                     Err(error) => app.set_status(error, true),
                 }
@@ -1554,21 +1550,21 @@ fn resource_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id:
             if let Some(reason) = &reason {
                 ui_kit::text(ui, reason, ui_kit::Text::Note("render:light:reason"));
             }
-            if ui_kit::button(ui, app.tr("render.stage_panels.apply"), ui_kit::Button::Enabled(reason.is_none())).clicked()
+            if ui_kit::button(ui, tr!(app, "render.stage_panels.apply"), ui_kit::Button::Enabled(reason.is_none())).clicked()
                 && let Err(error) = review::light(app, view, id)
             {
                 app.set_status(error, true);
             }
         }
         _ => {
-            ui.colored_label(Tokens::get().warning, app.tr("render.library_specification_only"));
+            ui.colored_label(Tokens::get().warning, tr!(app, "render.library_specification_only"));
         }
     }
 }
 
 #[cfg(test)]
 pub(super) fn saved_surface_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let title = app.tr("render.saved_surfaces").to_string();
+    let title = tr!(app, "render.saved_surfaces").to_string();
     ui_kit::section(ui, "render_saved_surfaces", &title, false, |ui| saved_surface_content(app, ui, None));
 }
 
@@ -1588,20 +1584,20 @@ fn saved_surface_content(app: &mut SolveApp, ui: &mut egui::Ui, target: Option<&
         return;
     }
     {
-        ui_kit::text(ui, app.tr("render.saved_surfaces_help"), ui_kit::Text::Note("render.saved_surfaces_help"));
+        ui_kit::text(ui, tr!(app, "render.saved_surfaces_help"), ui_kit::Text::Note("render.saved_surfaces_help"));
         if !app.render_workspace.view.materials.bindings.is_empty() {
-            ui_kit::text(ui, app.tr("render.saved_maps_runtime_conflict"), ui_kit::Text::Note("render.saved_maps_runtime_conflict"));
+            ui_kit::text(ui, tr!(app, "render.saved_maps_runtime_conflict"), ui_kit::Text::Note("render.saved_maps_runtime_conflict"));
         }
         for (index, binding) in bindings.iter().enumerate().filter(|(_, b)| target.is_none_or(|t| t == &b.target)) {
             let source = match &binding.source {
                 solidcraft_engine::doc::render_surface::SurfaceSource::Builtin(source) => source.id.as_str(),
-                solidcraft_engine::doc::render_surface::SurfaceSource::Embedded(_) => app.tr("render.surface_import.embedded"),
+                solidcraft_engine::doc::render_surface::SurfaceSource::Embedded(_) => tr!(app, "render.surface_import.embedded"),
             };
             ui.label(format!("{} - {} ({}): {:?}", source, binding.target.definition, binding.target.feature, binding.target.occurrence_path));
-            if ui_kit::button(ui, app.tr("render.inspector_replace"), ui_kit::Button::Normal).clicked() {
+            if ui_kit::button(ui, tr!(app, "render.inspector_replace"), ui_kit::Button::Normal).clicked() {
                 open_category(app, "surfaces");
             }
-            let response = ui_kit::button(ui, app.tr("render.saved_surface_remove"), ui_kit::Button::Normal);
+            let response = ui_kit::button(ui, tr!(app, "render.saved_surface_remove"), ui_kit::Button::Normal);
             crate::scenario::publish_handle(&format!("render:saved-surface-remove:{index}"), response.rect.center());
             if response.clicked() {
                 let name = app.render_workspace.view.name.clone();
@@ -1618,19 +1614,19 @@ fn saved_surface_content(app: &mut SolveApp, ui: &mut egui::Ui, target: Option<&
 
 #[cfg(test)]
 pub(super) fn stage_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let title = app.tr("render.passive_stage").to_string();
+    let title = tr!(app, "render.passive_stage").to_string();
     ui_kit::section(ui, "render_passive_stage", &title, false, |ui| stage_content(app, ui));
 }
 #[cfg(test)]
 pub(super) fn stage_content(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui_kit::text(ui, app.tr("render.passive_stage_help"), ui_kit::Text::Note("render.passive_stage_help"));
+    ui_kit::text(ui, tr!(app, "render.passive_stage_help"), ui_kit::Text::Note("render.passive_stage_help"));
     let stage = &app.render_workspace.view.draft.stage;
-    ui.label(format!("{}: {}", app.tr("render.stage_panel_count"), stage.len()));
+    ui.label(format!("{}: {}", tr!(app, "render.stage_panel_count"), stage.len()));
     let empty = stage.is_empty();
     let candidate = patch(app);
     if ui_kit::button(
         ui,
-        app.tr("render.add_ground"),
+        tr!(app, "render.add_ground"),
         ui_kit::Button::Enabled(empty && candidate.is_ok() && app.render_workspace.view.method != ImageMethod::Raster),
     )
     .clicked()
@@ -1639,7 +1635,7 @@ pub(super) fn stage_content(app: &mut SolveApp, ui: &mut egui::Ui) {
         let name = app.render_workspace.view.name.clone();
         review::command(app, "render.stage.ground", json!({"name":name,"set":set,"replace_stage":true}));
     }
-    let clear = ui_kit::button(ui, app.tr("render.clear_stage"), ui_kit::Button::Enabled(!empty && patch(app).is_ok()));
+    let clear = ui_kit::button(ui, tr!(app, "render.clear_stage"), ui_kit::Button::Enabled(!empty && patch(app).is_ok()));
     crate::scenario::publish_target("render:stage-clear", clear.rect);
     if clear.clicked() {
         let name = app.render_workspace.view.name.clone();
@@ -1651,31 +1647,29 @@ pub(super) fn stage_content(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 fn physical_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id: &str, detail: &Value) {
-    ui_kit::text(ui, app.tr("render.physical_separate"), ui_kit::Text::Note("render.physical_separate"));
+    ui_kit::text(ui, tr!(app, "render.physical_separate"), ui_kit::Text::Note("render.physical_separate"));
     let resource = &detail["resource"];
     ui.strong(resource["designation"].as_str().unwrap_or(id));
     ui.small(resource["reference_state"].as_str().unwrap_or(""));
     if let Some(properties) = resource["properties"].as_array() {
         for (index, property) in properties.iter().enumerate() {
-            let name = property["quantity"].as_str().unwrap_or(solidcraft_ui_text::tr("render.property_fallback"));
+            let name = property["quantity"].as_str().unwrap_or(tr!("render.property_fallback"));
             let title = format!("{}: {} {}", name, property["value"], property["unit"].as_str().unwrap_or(""));
             ui_kit::section(ui, ("physical_property", id, index), &title, false, |ui| {
-                ui.small(solidcraft_ui_text::format(
+                ui.small(tr!(
                     "render.property_source",
-                    &[("id", property["source_id"].as_str().unwrap_or("")), ("locator", property["source_locator"].as_str().unwrap_or(""))],
+                    id = property["source_id"].as_str().unwrap_or(""),
+                    locator = property["source_locator"].as_str().unwrap_or("")
                 ));
-                ui.small(solidcraft_ui_text::format(
-                    "render.property_qualifier",
-                    &[("value", property["qualifier"].as_str().unwrap_or(solidcraft_ui_text::tr("render.property_unknown")))],
-                ));
-                ui.small(solidcraft_ui_text::format("render.property_conditions", &[("value", &property["conditions"].to_string())]));
-                ui.small(solidcraft_ui_text::format("render.property_uncertainty", &[("value", &property["uncertainty"].to_string())]));
+                ui.small(tr!("render.property_qualifier", value = property["qualifier"].as_str().unwrap_or(tr!("render.property_unknown"))));
+                ui.small(tr!("render.property_conditions", value = &property["conditions"].to_string()));
+                ui.small(tr!("render.property_uncertainty", value = &property["uncertainty"].to_string()));
                 ui.small(property["note"].as_str().unwrap_or(""));
             });
         }
     }
     if let Some(omissions) = detail["native_projection"]["not_projected"].as_array() {
-        let title = app.tr("render.physical_omissions").to_string();
+        let title = tr!(app, "render.physical_omissions").to_string();
         ui_kit::section(ui, ("physical_omissions", id), &title, false, |ui| {
             for item in omissions {
                 ui.small(format!("{}: {}", item["quantity"].as_str().unwrap_or(""), item["reason"].as_str().unwrap_or("")));
@@ -1689,10 +1683,10 @@ fn physical_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id:
             }
         }
     }
-    ui.label(app.tr("render.physical_material_name"));
+    ui.label(tr!(app, "render.physical_material_name"));
     let name = ui_kit::bounded_cell_editor(ui, ui.scope_id().with("physical_reference_name"), &mut view.physical_name, "", false, 128);
     crate::panel_runtime::register_content_focus(ui.ctx(), &name);
-    if ui_kit::button(ui, app.tr("render.stage_panels.prepare_plan"), ui_kit::Button::Normal).clicked() {
+    if ui_kit::button(ui, tr!(app, "render.stage_panels.prepare_plan"), ui_kit::Button::Normal).clicked() {
         let result =
             app.run("render.library.physical.prepare", json!({"id":id,"name":view.physical_name,"acknowledge_reference":true})).and_then(|plan| {
                 review::open(app, "physical", resource["designation"].as_str().unwrap_or(id).into(), plan.clone(), review::Apply::Physical(plan))
@@ -1704,7 +1698,7 @@ fn physical_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id:
 }
 
 fn short_availability<'a>(app: &'a SolveApp, status: Option<&str>) -> &'a str {
-    app.tr(match status {
+    app.tr_by_id(match status {
         Some("native_appearance") => "render.library_appearance_available",
         Some("native_composition") => "render.library_short_native",
         Some("implemented_pending_batch_validation") => "render.library_short_projection",
@@ -1715,7 +1709,7 @@ fn short_availability<'a>(app: &'a SolveApp, status: Option<&str>) -> &'a str {
 }
 
 fn tile_badge<'a>(app: &'a SolveApp, entry: &Value) -> &'a str {
-    app.tr(match entry.pointer("/projection/status").and_then(Value::as_str) {
+    app.tr_by_id(match entry.pointer("/projection/status").and_then(Value::as_str) {
         Some("native_appearance" | "native_composition") => "render.stage_panels.badge_native",
         Some("implemented_pending_batch_validation") => "render.stage_panels.badge_projection",
         Some("blocked") => "render.stage_panels.badge_blocked",
@@ -1726,7 +1720,7 @@ fn tile_badge<'a>(app: &'a SolveApp, entry: &Value) -> &'a str {
 }
 
 fn availability_label<'a>(app: &'a SolveApp, status: Option<&str>) -> &'a str {
-    app.tr(match status {
+    app.tr_by_id(match status {
         Some("native_appearance") => "render.library_appearance_available",
         Some("native_composition") => "render.availability_native",
         Some("implemented_pending_batch_validation") => "render.availability_projection",
@@ -2598,7 +2592,7 @@ mod studio_browser_tests {
             assert!(
                 controls.iter().any(|control| {
                     matches!(&control.target, HostControlTarget::Pointer(HostPointerTarget::Header { instance }) if *instance == library.instance)
-                        && control.accessible_name == h.app.tr(key)
+                        && control.accessible_name == h.app.tr_by_id(key)
                 }),
                 "missing library title for {stage}"
             );

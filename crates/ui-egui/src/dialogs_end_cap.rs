@@ -52,32 +52,32 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut EndCap, inputs: &[SelInpu
     if !c.unresolved.is_empty() && crate::selection::items(inputs, 0).is_empty() {
         crate::ui_kit::text(ui, &unresolved(app, c), crate::ui_kit::Text::Hint("end_cap_unresolved"));
     }
-    let mut enter = expr_row(ui, app.tr("ui.thickness"), &mut c.thickness);
+    let mut enter = expr_row(ui, tr!(app, "ui.thickness"), &mut c.thickness);
     // On top of the end, or set into it with the member cut back: the icons show which.
-    row(ui, app.tr("ui.end_cap.direction"), |ui| {
+    row(ui, tr!(app, "ui.end_cap.direction"), |ui| {
         let options = [
-            IconSegment { key: "outward", icon: "end_cap_outward", tip: app.tr("ui.end_cap.outward").to_string() },
-            IconSegment { key: "inward", icon: "end_cap_inward", tip: app.tr("ui.end_cap.inward").to_string() },
+            IconSegment { key: "outward", icon: "end_cap_outward", tip: tr!(app, "ui.end_cap.outward").to_string() },
+            IconSegment { key: "inward", icon: "end_cap_inward", tip: tr!(app, "ui.end_cap.inward").to_string() },
         ];
         segmented_icons(ui, &mut c.direction, &options, &[]);
     });
     // Off: the plate is flush with the outside of the profile.
-    row(ui, app.tr("ui.offset"), |ui| check(ui, &mut c.use_offset));
+    row(ui, tr!(app, "ui.offset"), |ui| check(ui, &mut c.use_offset));
     if c.use_offset {
         choice_row(
             ui,
-            app.tr("ui.end_cap.inset_kind"),
+            tr!(app, "ui.end_cap.inset_kind"),
             "end_cap_inset_kind",
             &mut c.inset_kind,
-            &[app.tr("ui.end_cap.ratio"), app.tr("ui.end_cap.length")],
+            &[tr!(app, "ui.end_cap.ratio"), tr!(app, "ui.end_cap.length")],
         );
         if c.inset_kind == 0 {
-            enter |= expr_row(ui, app.tr("ui.end_cap.inset_ratio"), &mut c.ratio);
+            enter |= expr_row(ui, tr!(app, "ui.end_cap.inset_ratio"), &mut c.ratio);
         } else {
-            enter |= expr_row(ui, app.tr("ui.end_cap.inset"), &mut c.offset);
+            enter |= expr_row(ui, tr!(app, "ui.end_cap.inset"), &mut c.offset);
         }
     }
-    enter |= expr_row(ui, app.tr("ui.end_cap.chamfer"), &mut c.chamfer);
+    enter |= expr_row(ui, tr!(app, "ui.end_cap.chamfer"), &mut c.chamfer);
     enter
 }
 
@@ -90,7 +90,7 @@ pub fn commands(app: &SolveApp, c: &EndCap, inputs: &[SelInput], extra: &Map<Str
         })
         .collect();
     if faces.is_empty() {
-        return Err(if c.unresolved.is_empty() { app.tr("error.end_cap_faces").into() } else { unresolved(app, c) });
+        return Err(if c.unresolved.is_empty() { tr!(app, "error.end_cap_faces").into() } else { unresolved(app, c) });
     }
     let direction = if c.direction == 1 { "inward" } else { "outward" };
     let mut args = json!({"faces": faces, "thickness": c.thickness, "direction": direction, "chamfer": c.chamfer});
@@ -157,5 +157,5 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
 /// Which saved ends could not be found, and what to do about it.
 fn unresolved(app: &SolveApp, c: &EndCap) -> String {
     let ends = c.unresolved.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
-    app.tr("error.end_cap_unresolved").replace("{ends}", &ends)
+    tr!(app, "error.end_cap_unresolved", ends = &ends)
 }

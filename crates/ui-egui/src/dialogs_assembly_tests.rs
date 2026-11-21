@@ -862,7 +862,7 @@ fn picks_on_one_component_say_why_and_offer_components() {
     let out = frame(&mut app, vec![]);
     let why = solidcraft_ui_text::format("joint.one_component", &[("bodies", "Body1, Body2")]);
     assert!(text_at(&out, &why).is_some(), "the dialog says why");
-    let at = text_at(&out, solidcraft_ui_text::tr("cmd.component_from_bodies")).expect("and offers the way out");
+    let at = text_at(&out, solidcraft_ui_text::tr_by_id("cmd.component_from_bodies")).expect("and offers the way out");
     let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
     frame(&mut app, vec![egui::Event::PointerMoved(at)]);
     frame(&mut app, vec![button(true)]);
@@ -1511,7 +1511,7 @@ fn components_from_bodies_dialog_select_all_cancel_and_ok() {
     assert!(matches!(d.kind, Kind::Assembly(Asm::FromBodies)));
     assert!(apply_commands(&h.app, d).is_err(), "OK requires at least one body");
     assert_eq!(h.app.session.doc, before);
-    h.step(&json!({"widget":solidcraft_ui_text::tr("ui.select_all")})).unwrap();
+    h.step(&json!({"widget":solidcraft_ui_text::tr_by_id("ui.select_all")})).unwrap();
     let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(commands, vec![("component.from_bodies".into(), json!({"bodies":names}))]);
     if let Ok(path) = std::env::var("SOLIDCRAFT_COMPONENTS_DIALOG_EVIDENCE") {
@@ -1538,7 +1538,7 @@ fn components_from_bodies_dialog_select_all_cancel_and_ok() {
     h.step(&json!({"start":"component.from_bodies"})).unwrap();
     let d = h.app.dialog.as_ref().unwrap();
     assert_eq!(d.inputs[0].items.body_names(), vec![names[0].clone()]);
-    h.step(&json!({"widget":solidcraft_ui_text::tr("ui.select_all")})).unwrap();
+    h.step(&json!({"widget":solidcraft_ui_text::tr_by_id("ui.select_all")})).unwrap();
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(h.app.dialog.is_none());
     for name in &names {
@@ -1593,7 +1593,7 @@ fn find_limits_fills_the_limits_from_where_the_door_meets_the_block() {
         frame(app, vec![button(false)]);
     };
     click(&mut app, &solidcraft_ui_text::tr_label("Limits").to_uppercase());
-    click(&mut app, solidcraft_ui_text::tr("joint.find_limits"));
+    click(&mut app, solidcraft_ui_text::tr_by_id("joint.find_limits"));
     assert_eq!(*app.session.doc, *before, "nothing changes until OK");
     let Some(Kind::Assembly(Asm::Joint(f))) = app.dialog.as_ref().map(|d| &d.kind) else { panic!("the dialog stays open") };
     // The door's face 4 mm off its hinge line meets the block's corner (80, 30) opening, and the

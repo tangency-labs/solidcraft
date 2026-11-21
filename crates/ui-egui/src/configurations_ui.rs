@@ -51,7 +51,7 @@ pub(super) fn configurations_rows(
         + gap
         + ui_kit::ContentWidth::button(ui, "Apply")
         + gap
-        + ui_kit::ContentWidth::button(ui, solidcraft_ui_text::tr("config.update")))
+        + ui_kit::ContentWidth::button(ui, tr!("config.update")))
     .max(ui_kit::ContentWidth::button(ui, "Activate"));
     // Widths the user dragged a column's header divider to, by column key, so a column keeps its
     // width when others are added or removed (T-693). The shared table stores them by index.
@@ -112,7 +112,7 @@ pub(super) fn configurations_rows(
         .horizontal(|ui| {
             column_menu(app, ui, error, &tb.columns, rule_editor);
             let mut swapped = ui.ctx().data_mut(|m| m.get_persisted::<bool>(swapped_id())).unwrap_or(false);
-            let toggle = ui_kit::checkbox(ui, solidcraft_ui_text::tr("config.as_columns"), &mut swapped);
+            let toggle = ui_kit::checkbox(ui, tr!("config.as_columns"), &mut swapped);
             crate::scenario::publish_handle("config:as_columns", toggle.rect.center());
             if toggle.changed() {
                 ui.ctx().data_mut(|m| m.insert_persisted(swapped_id(), swapped));
@@ -128,7 +128,7 @@ pub(super) fn configurations_rows(
     if swapped {
         swapped_table(app, ui, error, rule_editor, Shown { tb, v, labels: &labels, materials: &material_names });
     } else {
-        ui_kit::table_custom(ui, "configuration_table", &columns, solidcraft_ui_text::tr("manage.empty"), |ui, table| {
+        ui_kit::table_custom(ui, "configuration_table", &columns, tr!("manage.empty"), |ui, table| {
             table.headers_resizable(ui, widths_by_index(), |ui, index| {
                 if index == labels.len() - 1 {
                     true
@@ -329,11 +329,7 @@ pub(super) fn configurations_rows(
                 (_, name) => name.to_owned(),
             })
             .collect();
-        ui_kit::text(
-            ui,
-            &solidcraft_ui_text::format("config.not_captured", &[("names", &names.join(", "))]),
-            ui_kit::Text::Report("not_captured", false),
-        );
+        ui_kit::text(ui, &tr!("config.not_captured", names = &names.join(", ")), ui_kit::Text::Report("not_captured", false));
     }
     configuration_rules_ui::show(ui, app, error, rule_editor);
     if let Some(styles) = v["style_status"].as_array() {
@@ -509,7 +505,7 @@ fn column_menu(
         }
         let faces = query.is_empty() || face_appearance.to_lowercase().contains(&query);
         if matching.is_empty() && !faces {
-            ui_kit::text(ui, solidcraft_ui_text::tr("config.column_filter_empty"), ui_kit::Text::Note("column_filter_empty"));
+            ui_kit::text(ui, tr!("config.column_filter_empty"), ui_kit::Text::Note("column_filter_empty"));
         }
         // The popup remembers its size: once the filter has emptied the list, a list that fills
         // again would be clipped to that small height, so a list that scrolls takes the full one.
@@ -705,8 +701,7 @@ fn status_controls(
         *error = app.run_heavy("config.activate", json!({"row":name})).err();
     }
     // The other way round: the row takes the design's current values (T-686).
-    let update = ui_kit::button(ui, solidcraft_ui_text::tr("config.update"), ui_kit::Button::Small)
-        .backing_on_hover_text(solidcraft_ui_text::tr("config.update_tip"));
+    let update = ui_kit::button(ui, tr!("config.update"), ui_kit::Button::Small).backing_on_hover_text(tr!("config.update_tip"));
     crate::scenario::publish_handle(&format!("config:update:{name}"), update.rect.center());
     if update.clicked() {
         match app.run("config.update_from_design", json!({"row":name})) {
@@ -831,7 +826,7 @@ fn swapped_table(
         + gap
         + ui_kit::ContentWidth::button(ui, "Apply")
         + gap
-        + ui_kit::ContentWidth::button(ui, solidcraft_ui_text::tr("config.update")))
+        + ui_kit::ContentWidth::button(ui, tr!("config.update")))
     .max(ui_kit::ContentWidth::button(ui, "Activate"))
         + gap
         + t.control_height
@@ -865,7 +860,7 @@ fn swapped_table(
     };
     // A keyboard move may land in a row off screen: build every row until it has.
     let landing = names.iter().any(|name| ui_kit::landing_in_row(ui.ctx(), cells, name));
-    ui_kit::table_custom(ui, "configuration_table_swapped", &columns, solidcraft_ui_text::tr("manage.empty"), |ui, table| {
+    ui_kit::table_custom(ui, "configuration_table_swapped", &columns, tr!("manage.empty"), |ui, table| {
         table.headers_resizable(ui, widths_by_index(), |ui, index| {
             if let Some(name) = names.get(index.wrapping_sub(1)) {
                 ui_kit::text(ui, name, ui_kit::Text::NameCell(true));
@@ -878,7 +873,7 @@ fn swapped_table(
                 row.cell(|ui| {
                     let active = tb.active.as_deref() == Some(*name);
                     status_controls(app, ui, name, active, matches, error, rule_editor);
-                    if ui_kit::bin_button(ui, solidcraft_ui_text::tr("config.delete_configuration")).clicked() {
+                    if ui_kit::bin_button(ui, tr!("config.delete_configuration")).clicked() {
                         // Its cells are drawn after this one: an edit in one of them goes with it,
                         // rather than making the configuration again as the cell is left.
                         rule_editor.drafts.retain(|(row, _), _| row.as_str() != *name);

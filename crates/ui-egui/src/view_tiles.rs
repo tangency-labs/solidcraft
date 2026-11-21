@@ -360,12 +360,12 @@ fn zones_for_kind(views: &ViewSet, view: u64, kind: solidcraft_views::ViewKind, 
 }
 
 fn dock_label(views: &ViewSet, placement: Placement, shown: bool, blocked: bool) -> String {
-    use solidcraft_ui_text::{format, tr};
+    use solidcraft_ui_text::format;
     if blocked {
-        return tr("multi_window.drag_small").to_owned();
+        return tr!("multi_window.drag_small").to_owned();
     }
     let (target, key) = match placement {
-        Placement::Empty(_) => return tr("multi_window.drag_fill").to_owned(),
+        Placement::Empty(_) => return tr!("multi_window.drag_fill").to_owned(),
         Placement::Replace(target) => (target, if shown { "multi_window.drag_swap" } else { "multi_window.drag_replace" }),
         Placement::Split { target, edge } => (
             target,
@@ -417,7 +417,7 @@ pub(crate) fn placement_overlay(app: &mut SolveApp, ctx: &egui::Context) {
             .show(ctx, |ui| {
                 let rect = Rect::from_min_size(ui.next_widget_position(), size);
                 let response =
-                    crate::ui_kit::button_at(ui, "view_placement_zone", rect, solidcraft_ui_text::tr(label), crate::ui_kit::Button::Normal);
+                    crate::ui_kit::button_at(ui, "view_placement_zone", rect, solidcraft_ui_text::tr_by_id(label), crate::ui_kit::Button::Normal);
                 if response.hovered() || response.has_focus() {
                     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("view_tile_preview")));
                     paint_preview(&painter, zone.rect);
@@ -696,7 +696,7 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
             CardAction::Maximise => solidcraft_ui_text::tr_label("Maximise this view"),
             CardAction::Remove => solidcraft_ui_text::tr_label("Remove from this window"),
             CardAction::Close => solidcraft_ui_text::tr_label("Close view"),
-            CardAction::MoveToWindow(_) => solidcraft_ui_text::tr("multi_window.move_to_window"),
+            CardAction::MoveToWindow(_) => tr!("multi_window.move_to_window"),
         };
         let resp = resp.backing_on_hover_text(tip);
         if resp.hovered() {
@@ -737,21 +737,21 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
             |ui, _| {
                 let response = ui.interact(rect, ui.scope_id().with("pop_out"), Sense::click());
                 ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "⋯", egui::FontId::proportional(t.font_body), t.text_dim);
-                response.backing_on_hover_text(app.tr("multi_window.move_to_window"))
+                response.backing_on_hover_text(tr!(app, "multi_window.move_to_window"))
             },
             |ui| {
-                crate::ui_kit::Menu::text(ui, app.tr("multi_window.move_to_window"), |ui| {
+                crate::ui_kit::Menu::text(ui, tr!(app, "multi_window.move_to_window"), |ui| {
                     let mut chosen = None;
                     let enabled = crate::view_windows::can_create(app);
-                    let new = crate::ui_kit::menu::button_enabled(ui, app.tr("multi_window.new_window"), "window", enabled);
+                    let new = crate::ui_kit::menu::button_enabled(ui, tr!(app, "multi_window.new_window"), "window", enabled);
                     if !enabled {
-                        new.clone().backing_on_hover_text(app.tr("multi_window.too_many"));
+                        new.clone().backing_on_hover_text(tr!(app, "multi_window.too_many"));
                     }
                     if new.clicked() {
                         chosen = Some(CardAction::MoveToWindow(None));
                     }
                     crate::ui_kit::menu::list_row(ui, &crate::ui_kit::Item::sep());
-                    crate::ui_kit::menu::list_row(ui, &crate::ui_kit::Item::heading(app.tr("multi_window.open_windows")));
+                    crate::ui_kit::menu::list_row(ui, &crate::ui_kit::Item::heading(tr!(app, "multi_window.open_windows")));
                     for choice in crate::view_windows::window_choices(app).iter() {
                         let id = format!("view.window.{}", choice.id);
                         let mut item = crate::ui_kit::MenuItem::new(&id, &choice.label, "");

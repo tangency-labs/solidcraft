@@ -6492,6 +6492,7 @@ dependencies = [
  "solidcraft-ui-kit",
  "solidcraft-ui-registry",
  "solidcraft-ui-text",
+ "solidcraft-ui-text-macros",
  "solidcraft-viewport",
  "solidcraft-viewport-egui",
  "solidcraft-viewport-gpu",
@@ -6543,6 +6544,16 @@ dependencies = [
  "serde_json",
  "sys-locale",
  "unicode-bidi",
+]
+
+[[package]]
+name = "solidcraft-ui-text-macros"
+version = "0.45.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_json",
+ "syn 2.0.119",
 ]
 
 [[package]]

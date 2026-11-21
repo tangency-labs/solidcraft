@@ -87,7 +87,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut Ui) {
     {
         state.source_name = Some(entry.name.clone());
     }
-    ui_kit::settings_section(ui, "panel_layout", app.tr("ui.panel_layout.panel_layout"), |ui| {
+    ui_kit::settings_section(ui, "panel_layout", tr!(app, "ui.panel_layout.panel_layout"), |ui| {
         ui.spacing_mut().item_spacing.y = Tokens::get().space_16;
         workspace_selector(app, ui, &view);
         tiles(app, ui, &view, &mut state);
@@ -104,17 +104,17 @@ fn workspace_selector(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesV
     workspaces.sort_by_key(|workspace| {
         ["modelling", "sketch", "render", "review", "classic"].iter().position(|suffix| workspace.title_key.ends_with(*suffix)).unwrap_or(5)
     });
-    let labels: Vec<_> = workspaces.iter().map(|workspace| app.tr(&workspace.title_key).to_owned()).collect();
+    let labels: Vec<_> = workspaces.iter().map(|workspace| app.tr_by_id(&workspace.title_key).to_owned()).collect();
     let options: Vec<_> = labels.iter().map(String::as_str).collect();
     let current = workspaces.iter().position(|workspace| workspace.id == view.selected_workspace).unwrap_or(0);
     let mut selected = current;
     let mut reset = false;
-    let title = app.tr("ui.panel_layout.layout_workspace").to_owned();
+    let title = tr!(app, "ui.panel_layout.layout_workspace").to_owned();
     ui_kit::settings_form(ui, 0.0, |ui| {
         ui_kit::sized_row(ui, &title, t.control_height, |ui| {
             crate::ui_kit::settings_search::note_choices(ui, &options);
             ui.horizontal(|ui| {
-                let reset_label = app.tr("ui.panel_layout.reset_short");
+                let reset_label = tr!(app, "ui.panel_layout.reset_short");
                 let reset_width = ui_kit::ContentWidth::name(ui, reset_label) + t.space_24 + t.space_16;
                 let width = (ui.available_width() - reset_width - t.space_12).max(t.control_height);
                 ui.allocate_ui_with_layout(vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
@@ -161,7 +161,7 @@ fn workspace_selector(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesV
                 });
                 let response = reset_button(ui, reset_label, !view.default_matches);
                 let workspace = labels.get(current).map(String::as_str).unwrap_or_default();
-                let hint = solidcraft_ui_text::format("ui.panel_layout.reset_hint", &[("workspace", workspace)]);
+                let hint = tr!("ui.panel_layout.reset_hint", workspace = workspace);
                 response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, response.enabled(), &hint));
                 crate::scenario::publish_target("prefs:panel_layout:reset", response.rect);
                 reset = response.backing_on_hover_text(hint).clicked();
@@ -229,21 +229,21 @@ fn tiles(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state: &
     }
     let rows = items.len().div_ceil(columns);
     let height = (rows.min(3) as f32 * (TILE_HEIGHT + t.space_12) - t.space_12).max(TILE_HEIGHT);
-    let label = app.tr("ui.panel_layout.panel_layout").to_owned();
+    let label = tr!(app, "ui.panel_layout.panel_layout").to_owned();
     ui_kit::settings_form(ui, 0.0, |ui| {
         ui_kit::sized_row(ui, &label, height, |ui| {
             let names: Vec<_> = items
                 .iter()
                 .map(|item| match item {
-                    Tile::Custom => app.tr("ui.panel_layout.custom"),
+                    Tile::Custom => tr!(app, "ui.panel_layout.custom"),
                     Tile::Saved(entry) => preset_label(app, view, entry),
-                    Tile::Save => app.tr("ui.panel_layout.save_as_tile"),
+                    Tile::Save => tr!(app, "ui.panel_layout.save_as_tile"),
                 })
                 .collect();
             crate::ui_kit::settings_search::note_choices(ui, &names);
             crate::ui_kit::settings_search::note_choices(
                 ui,
-                &[app.tr("ui.panel_layout.save"), app.tr("ui.panel_layout.replace"), app.tr("ui.panel_layout.reset")],
+                &[tr!(app, "ui.panel_layout.save"), tr!(app, "ui.panel_layout.replace"), tr!(app, "ui.panel_layout.reset")],
             );
             let list_id = ui.make_persistent_id("panel_layout_list");
             state.list_focus = Some(list_id);
@@ -348,7 +348,7 @@ fn preset_label<'a>(app: &'a SolveApp, view: &'a LayoutPreferencesView, entry: &
     if !entry.user
         && let Some(workspace) = view.workspaces.iter().find(|workspace| workspace.id == entry.layout.workspace)
     {
-        return app.tr(&workspace.title_key);
+        return app.tr_by_id(&workspace.title_key);
     }
     &entry.name
 }
@@ -358,12 +358,12 @@ fn tile(app: &SolveApp, ui: &mut Ui, item: Tile<'_>, view: &LayoutPreferencesVie
     let (rect, response) = ui.allocate_exact_size(vec2(TILE_WIDTH, TILE_HEIGHT), Sense::CLICK);
     let thumb = Rect::from_min_size(rect.min, vec2(TILE_WIDTH, THUMB_HEIGHT));
     let (name, selected, fill, ink) = match item {
-        Tile::Custom => (app.tr("ui.panel_layout.custom"), true, t.pref_note_fill, t.form_ink),
+        Tile::Custom => (tr!(app, "ui.panel_layout.custom"), true, t.pref_note_fill, t.form_ink),
         Tile::Saved(entry) => {
             let selected = entry.matches && state.source_name.as_ref().map_or(entry.selected, |name| name == &entry.name);
             (preset_label(app, view, entry), selected, if selected { t.selected_bg } else { t.pref_well }, t.form_ink)
         }
-        Tile::Save => (app.tr("ui.panel_layout.save_as_tile"), false, t.pref_well, t.form_primary),
+        Tile::Save => (tr!(app, "ui.panel_layout.save_as_tile"), false, t.pref_well, t.form_primary),
     };
     let custom = matches!(item, Tile::Custom);
     let saved = matches!(item, Tile::Saved(_));
@@ -413,14 +413,14 @@ fn tile(app: &SolveApp, ui: &mut Ui, item: Tile<'_>, view: &LayoutPreferencesVie
     job.wrap.max_rows = 1;
     let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
     ui.painter().galley(text_rect.min, galley, ink);
-    let kind = if matches!(item, Tile::Saved(entry) if entry.user) { app.tr("ui.panel_layout.your_layout") } else { "" };
+    let kind = if matches!(item, Tile::Saved(entry) if entry.user) { tr!(app, "ui.panel_layout.your_layout") } else { "" };
     let hint = if custom {
-        let source = state.source_name.as_deref().unwrap_or(app.tr("ui.panel_layout.current"));
-        solidcraft_ui_text::format("ui.panel_layout.custom_hint", &[("name", source)])
+        let source = state.source_name.as_deref().unwrap_or(tr!(app, "ui.panel_layout.current"));
+        tr!("ui.panel_layout.custom_hint", name = source)
     } else {
         name.to_owned()
     };
-    let accessible = [name, kind, if custom { &hint } else { "" }, if selected { app.tr("ui.panel_layout.selected") } else { "" }]
+    let accessible = [name, kind, if custom { &hint } else { "" }, if selected { tr!(app, "ui.panel_layout.selected") } else { "" }]
         .into_iter()
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
@@ -459,12 +459,12 @@ fn tile_menu(app: &SolveApp, ui: &mut Ui, state: &mut State, tile: &Response, en
             for x in [-4.0, 0.0, 4.0] {
                 ui.painter().circle_filled(at.center() + vec2(x, 0.0), 1.0, t.form_dim);
             }
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), app.tr("ui.panel_layout.replace_current")));
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tr!(app, "ui.panel_layout.replace_current")));
             crate::scenario::publish_target(&format!("prefs:panel_layout:menu:{}", entry.name), at);
             response
         },
         |ui| {
-            let action = ui_kit::button(ui, app.tr("ui.panel_layout.replace_current"), ui_kit::Button::Ghost);
+            let action = ui_kit::button(ui, tr!(app, "ui.panel_layout.replace_current"), ui_kit::Button::Ghost);
             if keyboard {
                 action.request_focus();
             }
@@ -481,7 +481,7 @@ fn tile_menu(app: &SolveApp, ui: &mut Ui, state: &mut State, tile: &Response, en
 
 fn open_save(ctx: &egui::Context, state: &mut State, tile: &Response, view: &LayoutPreferencesView) {
     let name = (1..=2 * commands::MAX_USER_PRESETS + 1)
-        .map(|n| solidcraft_ui_text::format("ui.panel_layout.suggested_name", &[("n", &n.to_string())]))
+        .map(|n| tr!("ui.panel_layout.suggested_name", n = &n.to_string()))
         .find(|name| {
             !view.entries.iter().any(|entry| commands::preset_names_equal(&entry.name, name))
                 && !view.builtin_names.iter().any(|builtin| commands::preset_names_equal(builtin, name))
@@ -555,12 +555,12 @@ fn popover(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state:
                             let labels: Vec<_> = users.iter().map(|entry| entry.name.as_str()).collect();
                             let full_notice = full.then(|| validation_alert(app, ui, "ui.panel_layout.validation.full", t.pref_note));
                             let mut actions_width = if full {
-                                ui_kit::ContentWidth::button(ui, app.tr("ui.panel_layout.replace_short"))
+                                ui_kit::ContentWidth::button(ui, tr!(app, "ui.panel_layout.replace_short"))
                             } else {
-                                ui_kit::ContentWidth::button(ui, app.tr("ui.save")) + t.control_height + t.space_8
+                                ui_kit::ContentWidth::button(ui, tr!(app, "ui.save")) + t.control_height + t.space_8
                             };
                             if !full && validation(name, view).1.is_some() {
-                                actions_width += ui_kit::ContentWidth::button(ui, app.tr("ui.panel_layout.replace_short")) + t.space_8;
+                                actions_width += ui_kit::ContentWidth::button(ui, tr!(app, "ui.panel_layout.replace_short")) + t.space_8;
                             }
                             let inline = ui.available_width() >= actions_width + t.space_24 * 6.0;
                             let actions = if inline {
@@ -600,17 +600,17 @@ fn popover(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state:
                             }
                         }
                         PopoverKind::Replace { name } => {
-                            let question = solidcraft_ui_text::format("ui.panel_layout.confirm_replace", &[("name", name)]);
+                            let question = tr!("ui.panel_layout.confirm_replace", name = name);
                             ui.label(egui::RichText::new(question).size(t.font_label).color(t.form_ink));
                             ui.horizontal_wrapped(|ui| {
-                                let cancel = ui_kit::button(ui, app.tr("ui.panel_layout.cancel"), ui_kit::Button::Ghost);
+                                let cancel = ui_kit::button(ui, tr!(app, "ui.panel_layout.cancel"), ui_kit::Button::Ghost);
                                 focus_ids.push(cancel.id);
                                 crate::scenario::publish_target("prefs:panel_layout:replace_cancel", cancel.rect);
                                 if first {
                                     cancel.request_focus();
                                 }
                                 close |= cancel.clicked();
-                                let response = danger_button(ui, app.tr("ui.panel_layout.replace_short"));
+                                let response = danger_button(ui, tr!(app, "ui.panel_layout.replace_short"));
                                 focus_ids.push(response.id);
                                 crate::scenario::publish_target("prefs:panel_layout:replace_confirm", response.rect);
                                 if response.clicked() {
@@ -676,7 +676,7 @@ fn save_field(
         let (enter, response) = ui_kit::text_field_reserving(ui, name, "", t.space_24 * 2.0);
         ids.push(response.id);
         response.widget_info(|| {
-            let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), solidcraft_ui_text::tr("ui.panel_layout.save_as"));
+            let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), tr!("ui.panel_layout.save_as"));
             info.current_text_value = Some(name.clone());
             info
         });
@@ -720,7 +720,7 @@ fn save_actions(app: &SolveApp, ui: &mut Ui, name: &str, view: &LayoutPreference
     let (message, duplicate) = validation(name, view);
     let valid = message.is_none() && !full;
     if !full {
-        let save = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, app.tr("ui.save"), ui_kit::Button::Primary)).inner;
+        let save = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr!(app, "ui.save"), ui_kit::Button::Primary)).inner;
         if save.enabled() {
             ids.push(save.id);
         }
@@ -730,7 +730,7 @@ fn save_actions(app: &SolveApp, ui: &mut Ui, name: &str, view: &LayoutPreference
         }
     }
     if let Some(name) = duplicate {
-        let response = danger_button(ui, app.tr("ui.panel_layout.replace_short"));
+        let response = danger_button(ui, tr!(app, "ui.panel_layout.replace_short"));
         ids.push(response.id);
         crate::scenario::publish_target("prefs:panel_layout:replace", response.rect);
         if response.clicked() {
@@ -740,7 +740,7 @@ fn save_actions(app: &SolveApp, ui: &mut Ui, name: &str, view: &LayoutPreference
     if !full {
         let (rect, _) = ui.allocate_exact_size(vec2(t.control_height, t.control_height), Sense::hover());
         ui.painter().rect(rect, t.control_radius, t.control_fill, Stroke::new(1.0, t.control_border), egui::StrokeKind::Inside);
-        let close = ui_kit::icon_button_at(ui, rect, "close", app.tr("ui.close"));
+        let close = ui_kit::icon_button_at(ui, rect, "close", tr!(app, "ui.close"));
         crate::scenario::publish_target("prefs:panel_layout:save_close", close.rect);
         ids.push(close.id);
         actions.close = close.clicked();
@@ -754,10 +754,10 @@ fn validation_alert(app: &SolveApp, ui: &mut Ui, message: &str, color: egui::Col
         .horizontal(|ui| {
             let (rect, _) = ui.allocate_exact_size(vec2(t.space_14, t.space_14), Sense::hover());
             crate::icons::paint_ink(ui.painter(), rect, "status_warning", color);
-            ui.label(egui::RichText::new(app.tr(message)).size(t.font_caption).color(color))
+            ui.label(egui::RichText::new(app.tr_by_id(message)).size(t.font_caption).color(color))
         })
         .inner;
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Alert, true, app.tr(message)));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Alert, true, app.tr_by_id(message)));
     response
 }
 
@@ -787,9 +787,9 @@ fn run(app: &mut SolveApp, command: &str, params: serde_json::Value, applied: Op
                     .workspaces
                     .iter()
                     .find(|workspace| workspace.id == view.selected_workspace)
-                    .map(|workspace| app.tr(&workspace.title_key))
+                    .map(|workspace| app.tr_by_id(&workspace.title_key))
                     .unwrap_or_default();
-                app.set_status(solidcraft_ui_text::format("ui.panel_layout.applied", &[("name", name), ("workspace", workspace)]), false);
+                app.set_status(tr!("ui.panel_layout.applied", name = name, workspace = workspace), false);
             }
             true
         }

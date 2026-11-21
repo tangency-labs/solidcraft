@@ -190,7 +190,7 @@ pub(crate) fn item(app: &SolveApp, id: &str) -> Option<Item> {
                 "render.camera.fit" => "render.radial_fit",
                 _ => "render.radial_compare",
             };
-            Some(cmd(app, id, app.tr(key)))
+            Some(cmd(app, id, app.tr_by_id(key)))
         }
         _ => match ACTIONS.iter().find(|(i, _, _)| *i == id) {
             Some((i, label, icon)) => Some(act(i, label, icon)),

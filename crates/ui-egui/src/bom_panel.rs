@@ -158,7 +158,7 @@ fn cell<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> R) 
 
 /// The label of one of [`BOM_KEYS`].
 fn field_label(key: &str) -> &str {
-    metadata::key(key).map_or(key, |k| solidcraft_ui_text::tr(k.label))
+    metadata::key(key).map_or(key, |k| solidcraft_ui_text::tr_by_id(k.label))
 }
 
 /// Apply the picked row's fields to each of its definitions (one undo step each).
@@ -290,7 +290,7 @@ fn options(ui: &mut egui::Ui, d: &mut BomPanel) {
     });
     ui.scope(|ui| {
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-        let response = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("bom.group_children"), &mut d.group_children);
+        let response = crate::ui_kit::checkbox(ui, tr!("bom.group_children"), &mut d.group_children);
         crate::panel_runtime::register_content_focus(ui.ctx(), &response);
     });
     if was != (d.top, d.by_definition, d.group_children) {

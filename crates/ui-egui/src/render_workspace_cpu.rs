@@ -123,7 +123,7 @@ pub(super) fn profile_for_size(app: &SolveApp, width: u64, height: u64) -> Optio
 
 /// The translated name of a profile, as the profile selector shows it.
 pub(super) fn budget_name(app: &SolveApp, budget: CpuBudget) -> &str {
-    app.tr(budget_key(budget))
+    app.tr_by_id(budget_key(budget))
 }
 
 fn budget_key(budget: CpuBudget) -> &'static str {
@@ -137,7 +137,7 @@ fn budget_key(budget: CpuBudget) -> &'static str {
 fn budget_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let budgets = CpuBudget::ALL;
     let mut selected = budgets.iter().position(|b| *b == app.render_workspace.view.raytrace.budget).unwrap_or(0);
-    let labels = budgets.map(|b| app.tr(budget_key(b)).to_string());
+    let labels = budgets.map(|b| app.tr_by_id(budget_key(b)).to_string());
     let response = ui.scope(|ui| {
         ui_kit::segmented(
             ui,
@@ -160,15 +160,15 @@ fn budget_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let limits = app.render_workspace.view.raytrace.budget.limits();
     let note = format!(
         "{}: {:.2} GiB · {}: {} · {}: {} · {}: {}. {}",
-        app.tr("render.cpu_budget_memory"),
+        tr!(app, "render.cpu_budget_memory"),
         limits.max_job_bytes as f64 / 1_073_741_824.0,
-        app.tr("render.cpu_budget_triangles"),
+        tr!(app, "render.cpu_budget_triangles"),
         limits.max_triangles,
-        app.tr("render.cpu_budget_bodies"),
+        tr!(app, "render.cpu_budget_bodies"),
         limits.max_bodies,
-        app.tr("render.cpu_progressive_spp"),
+        tr!(app, "render.cpu_progressive_spp"),
         limits.max_samples_per_pixel,
-        app.tr("render.cpu_budget_not_guarantee")
+        tr!(app, "render.cpu_budget_not_guarantee")
     );
     ui_kit::text(ui, &note, ui_kit::Text::Note("render.cpu_budget_help"));
 }
@@ -191,8 +191,8 @@ pub(super) fn progressive_controls(app: &mut SolveApp, ui: &mut egui::Ui) -> boo
     let mut changed = false;
     let response = ui.scope(|ui| {
         if legacy {
-            let labels = [app.tr("render.children.single_image").to_string(), app.tr("render.cpu_progressive").to_string()];
-            ui_kit::row(ui, app.tr("render.children.sampling"), |ui| {
+            let labels = [tr!(app, "render.children.single_image").to_string(), tr!(app, "render.cpu_progressive").to_string()];
+            ui_kit::row(ui, tr!(app, "render.children.sampling"), |ui| {
                 changed = ui_kit::segmented(
                     ui,
                     &mut selected,
@@ -202,12 +202,12 @@ pub(super) fn progressive_controls(app: &mut SolveApp, ui: &mut egui::Ui) -> boo
             });
         } else {
             let key = if selected == 1 { "render.cpu_progressive_always" } else { "render.cpu_fixed_retained" };
-            ui_kit::row(ui, app.tr("render.children.sampling"), |ui| {
-                ui_kit::text(ui, app.tr(key), ui_kit::Text::Inline);
+            ui_kit::row(ui, tr!(app, "render.children.sampling"), |ui| {
+                ui_kit::text(ui, app.tr_by_id(key), ui_kit::Text::Inline);
             });
             if selected == 0 {
                 let reason = progressive_adoption_reason(app);
-                let button = ui_kit::button(ui, app.tr("render.cpu_progressive_adopt"), ui_kit::Button::Enabled(reason.is_none()));
+                let button = ui_kit::button(ui, tr!(app, "render.cpu_progressive_adopt"), ui_kit::Button::Enabled(reason.is_none()));
                 crate::scenario::publish_target("render:cpu-adopt-progressive", button.rect);
                 crate::scenario::publish_target("render:cpu-progressive", button.rect);
                 if button.clicked() {
@@ -217,7 +217,7 @@ pub(super) fn progressive_controls(app: &mut SolveApp, ui: &mut egui::Ui) -> boo
                 if let Some(reason) = reason {
                     ui_kit::text(ui, &reason, ui_kit::Text::Note("render.cpu_progressive_adopt_reason"));
                 }
-                ui_kit::text(ui, app.tr("render.cpu_progressive_adopt_help"), ui_kit::Text::Note("render.cpu_progressive_adopt_help"));
+                ui_kit::text(ui, tr!(app, "render.cpu_progressive_adopt_help"), ui_kit::Text::Note("render.cpu_progressive_adopt_help"));
             }
         }
     });
@@ -229,7 +229,7 @@ pub(super) fn progressive_controls(app: &mut SolveApp, ui: &mut egui::Ui) -> boo
     let enabled = app.render_workspace.view.raytrace.progressive.is_some();
     let mut options = app.render_workspace.view.raytrace.progressive.unwrap_or_default();
     if !enabled {
-        ui_kit::text(ui, app.tr("render.children.progressive_reason"), ui_kit::Text::Note("render.children.progressive_reason"));
+        ui_kit::text(ui, tr!(app, "render.children.progressive_reason"), ui_kit::Text::Note("render.children.progressive_reason"));
     }
     ui.add_enabled_ui(enabled, |ui| {
         let profile_maximum = app.render_workspace.view.raytrace.budget.limits().max_samples_per_pixel;
@@ -245,7 +245,7 @@ pub(super) fn progressive_controls(app: &mut SolveApp, ui: &mut egui::Ui) -> boo
                 (minimum <= cap).then_some(minimum..=cap)
             })
             .unwrap_or(1..=maximum);
-        let response = ui_kit::row(ui, app.tr("render.cpu_progressive_spp"), |ui| {
+        let response = ui_kit::row(ui, tr!(app, "render.cpu_progressive_spp"), |ui| {
             let field = ui_kit::number_field_preserving(ui, &mut options.samples_per_pixel, range.clone(), 1.0, "");
             crate::scenario::publish_target("render:cpu-spp-field", field.rect);
             field
@@ -254,7 +254,7 @@ pub(super) fn progressive_controls(app: &mut SolveApp, ui: &mut egui::Ui) -> boo
         crate::scenario::publish_target("render:cpu-spp", response.rect);
         app.render_workspace.view.dirty |= super::quality::sample_presets(ui, &mut options.samples_per_pixel, range, "render:cpu-samples-preset");
         super::quality::legacy_samples_note(app, ui, options.samples_per_pixel);
-        let response = ui_kit::row(ui, app.tr("render.cpu_progressive_seed"), |ui| {
+        let response = ui_kit::row(ui, tr!(app, "render.cpu_progressive_seed"), |ui| {
             let field = ui_kit::number_field(ui, &mut options.seed, 0..=u32::MAX, 1.0, "");
             crate::scenario::publish_target("render:cpu-seed-field", field.rect);
             field
@@ -265,14 +265,14 @@ pub(super) fn progressive_controls(app: &mut SolveApp, ui: &mut egui::Ui) -> boo
     if enabled {
         app.render_workspace.view.raytrace.progressive = Some(options);
     }
-    ui_kit::text(ui, app.tr("render.cpu_progressive_help"), ui_kit::Text::Note("render.cpu_progressive_help"));
+    ui_kit::text(ui, tr!(app, "render.cpu_progressive_help"), ui_kit::Text::Note("render.cpu_progressive_help"));
     enabled
 }
 /// Shared explicit adoption for Sampling and the CPU Glass transport entry point.
 pub(super) fn progressive_adoption_reason(app: &SolveApp) -> Option<String> {
     let options = &app.render_workspace.view.raytrace;
     if options.reflections.as_ref().is_some_and(|r| !r.bodies.is_empty() && r.samples != 1) {
-        Some(app.tr("render.cpu_progressive_reflection_adopt").into())
+        Some(tr!(app, "render.cpu_progressive_reflection_adopt").into())
     } else {
         let view = &app.render_workspace.view;
         trace_dimensions(view, view.draft.width, view.draft.height)
@@ -300,7 +300,7 @@ pub(super) fn path_reason(app: &SolveApp) -> Option<String> {
 fn path_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut enabled = app.render_workspace.view.raytrace.path.is_some();
     let reason = path_reason(app);
-    let label = app.tr("render.cpu_path_lighting").to_string();
+    let label = tr!(app, "render.cpu_path_lighting").to_string();
     let response = ui.add_enabled_ui(enabled || reason.is_none(), |ui| ui_kit::checkbox(ui, &label, &mut enabled));
     crate::scenario::publish_target("render:cpu-path", response.inner.rect);
     if response.inner.changed() {
@@ -311,7 +311,7 @@ fn path_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::text(ui, &reason, ui_kit::Text::Note("render.cpu_path_reason"));
     }
     if let Some(mut path) = app.render_workspace.view.raytrace.path {
-        let label = app.tr("render.cpu_path_depth").to_string();
+        let label = tr!(app, "render.cpu_path_depth").to_string();
         let response = ui_kit::row(ui, &label, |ui| {
             let field = ui_kit::number_field_preserving(ui, &mut path.max_depth, 1..=solidcraft_engine::render::job::MAX_PATH_DEPTH, 1.0, "");
             crate::scenario::publish_target("render:cpu-path-depth", field.rect);
@@ -320,7 +320,7 @@ fn path_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.render_workspace.view.dirty |= response.changed();
         app.render_workspace.view.raytrace.path = Some(path);
     }
-    ui_kit::text(ui, app.tr("render.cpu_path_help"), ui_kit::Text::Note("render.cpu_path_help"));
+    ui_kit::text(ui, tr!(app, "render.cpu_path_help"), ui_kit::Text::Note("render.cpu_path_help"));
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -423,9 +423,9 @@ fn binding_current(app: &SolveApp, name: &str) -> bool {
 }
 
 pub(super) fn revalidate(app: &mut SolveApp, name: &str) -> Result<(), String> {
-    let current = target(app, name).ok_or_else(|| app.tr("render.cpu_body_missing").to_string())?;
+    let current = target(app, name).ok_or_else(|| tr!(app, "render.cpu_body_missing").to_string())?;
     if app.render_workspace.view.cpu.bindings.get(name).is_none_or(|binding| binding.target != current) {
-        return Err(app.tr("render.cpu_body_missing").to_string());
+        return Err(tr!(app, "render.cpu_body_missing").to_string());
     }
     let revision = app.session.revision;
     let document = std::sync::Arc::downgrade(&app.session.doc);
@@ -457,7 +457,7 @@ pub(super) fn refresh_render_revision(app: &mut SolveApp) {
 
 /// A removed, hidden or ambiguous body never silently becomes a different target.
 pub(super) fn set_reflection(app: &mut SolveApp, name: &str, mode: Option<ReflectionMode>) -> Result<(), String> {
-    let selected = if mode.is_some() { Some(target(app, name).ok_or_else(|| app.tr("render.cpu_body_missing").to_string())?) } else { None };
+    let selected = if mode.is_some() { Some(target(app, name).ok_or_else(|| tr!(app, "render.cpu_body_missing").to_string())?) } else { None };
     // Changing the mode of an existing row is not a new body selection. Only an
     // explicit confirmation of the same target, or Off followed by Add, may
     // establish a fresh binding after the document or body identity changes.
@@ -465,9 +465,9 @@ pub(super) fn set_reflection(app: &mut SolveApp, name: &str, mode: Option<Reflec
         && app.render_workspace.view.raytrace.reflections.as_ref().is_some_and(|r| r.bodies.iter().any(|entry| entry.body == name))
         && !binding_current(app, name)
     {
-        return Err(app.tr("render.cpu_binding_stale").to_string());
+        return Err(tr!(app, "render.cpu_binding_stale").to_string());
     }
-    let message = app.tr("render.cpu_reflection_limit").to_string();
+    let message = tr!(app, "render.cpu_reflection_limit").to_string();
     let options = &mut app.render_workspace.view.raytrace;
     if let Some(mode) = mode {
         let mut reflections = options.reflections.clone().unwrap_or_else(|| {
@@ -520,13 +520,13 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
         || base.surface_effects.is_some()
         || base.emissions.is_some()
     {
-        return Err(app.tr("render.cpu_options_pending").to_string());
+        return Err(tr!(app, "render.cpu_options_pending").to_string());
     }
     if base.reflections.as_ref().is_some_and(|r| r.bodies.iter().any(|entry| !unique_visible_body(app, &entry.body))) {
-        return Err(app.tr("render.cpu_body_missing").to_string());
+        return Err(tr!(app, "render.cpu_body_missing").to_string());
     }
     if base.reflections.as_ref().is_some_and(|r| r.bodies.iter().any(|entry| !binding_current(app, &entry.body))) {
-        return Err(app.tr("render.cpu_binding_stale").to_string());
+        return Err(tr!(app, "render.cpu_binding_stale").to_string());
     }
     let view = &app.render_workspace.view.cpu;
     let mut options = base.clone();
@@ -547,7 +547,7 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
         lens.validate_camera(&app.cam).map_err(|error| error.to_string())?;
     }
     if options.area_samples.is_some_and(|n| !matches!(n, 1 | 4 | 16 | 64)) {
-        return Err(solidcraft_ui_text::tr("render.error_area_samples").into());
+        return Err(tr!("render.error_area_samples").into());
     }
     if options.area_lights.as_ref().is_none_or(Vec::is_empty) {
         options.area_samples = None;
@@ -560,7 +560,7 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
         let maximum = if view.environment == Environment::Sky { 100.0 } else { 64.0 };
         if !view.intensity.is_finite() || !(0.0..=maximum).contains(&view.intensity) {
             return Err(app
-                .tr(if view.environment == Environment::Sky { "render.cpu_sky_bounds" } else { "render.cpu_environment_bounds" })
+                .tr_by_id(if view.environment == Environment::Sky { "render.cpu_sky_bounds" } else { "render.cpu_environment_bounds" })
                 .to_string());
         }
         match view.environment {
@@ -574,7 +574,7 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
             }
             Environment::Hdr => {
                 if !view.rotation_rad.is_finite() || view.rotation_rad.abs() > 1e6 || !matches!(view.samples, 1 | 4 | 16 | 64) {
-                    return Err(app.tr("render.cpu_environment_bounds").to_string());
+                    return Err(tr!(app, "render.cpu_environment_bounds").to_string());
                 }
                 let mut environment = hdr::request(app, hdr::Target::Cpu)?;
                 environment["rotation_radians"] = json!(view.rotation_rad);
@@ -598,25 +598,25 @@ pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         ("render_cpu_environment", "render.cpu_environment", 1),
         ("render_cpu_lights", "render.cpu_lights", 2),
     ] {
-        let title = app.tr(key).to_string();
+        let title = app.tr_by_id(key).to_string();
         ui_kit::section(ui, id, &title, false, |ui| match section {
             0 => reflection_controls(app, ui),
             1 => environment_controls(app, ui),
             _ => light_controls(app, ui),
         });
     }
-    ui.small(app.tr("render.cpu_runtime_help"));
+    ui.small(tr!(app, "render.cpu_runtime_help"));
 }
 
 #[cfg(test)]
 pub(super) fn reflection_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui.small(app.tr("render.cpu_reflection_help"));
+    ui.small(tr!(app, "render.cpu_reflection_help"));
     let entries = app.render_workspace.view.raytrace.reflections.as_ref().map(|r| r.bodies.clone()).unwrap_or_default();
     for entry in entries {
         ui.label(&entry.body);
         if !binding_current(app, &entry.body) {
-            ui.small(app.tr("render.cpu_binding_stale"));
-            if ui_kit::button(ui, app.tr("render.cpu_binding_confirm"), ui_kit::Button::Normal).clicked()
+            ui.small(tr!(app, "render.cpu_binding_stale"));
+            if ui_kit::button(ui, tr!(app, "render.cpu_binding_confirm"), ui_kit::Button::Normal).clicked()
                 && let Err(error) = revalidate(app, &entry.body)
             {
                 app.set_status(error, true);
@@ -626,7 +626,7 @@ pub(super) fn reflection_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             ReflectionMode::Mirror => "render.cpu_reflection_mirror",
             ReflectionMode::RoughSpecular => "render.cpu_reflection_rough",
         };
-        let label = app.tr(selected).to_string();
+        let label = app.tr_by_id(selected).to_string();
         let mode_control = ui_kit::dropdown_menu(ui, ("cpu_reflection_mode", &entry.body), &label, |ui| {
             for (mode, key) in [
                 (None, "render.cpu_reflection_off"),
@@ -634,7 +634,7 @@ pub(super) fn reflection_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                 (Some(ReflectionMode::RoughSpecular), "render.cpu_reflection_rough"),
             ] {
                 let enabled = mode.is_none() || binding_current(app, &entry.body);
-                if ui.add_enabled_ui(enabled, |ui| ui_kit::list_picker(ui, key, app.tr(key), mode == Some(entry.mode))).inner.clicked() {
+                if ui.add_enabled_ui(enabled, |ui| ui_kit::list_picker(ui, key, app.tr_by_id(key), mode == Some(entry.mode))).inner.clicked() {
                     if let Err(error) = set_reflection(app, &entry.body, mode) {
                         app.set_status(error, true);
                     }
@@ -644,10 +644,10 @@ pub(super) fn reflection_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         crate::scenario::publish_handle(&format!("render:cpu-reflection-mode:{}", entry.body), mode_control.rect.center());
     }
-    let hint = app.tr("render.cpu_body_filter").to_string();
+    let hint = tr!(app, "render.cpu_body_filter").to_string();
     ui_kit::bounded_cell_editor(ui, ui.scope_id().with("cpu_body_filter"), &mut app.render_workspace.view.cpu.body_filter, &hint, false, 128);
     let selected = app.render_workspace.view.cpu.selected_body.clone();
-    let label = selected.clone().unwrap_or_else(|| app.tr("render.cpu_body_choose").to_string());
+    let label = selected.clone().unwrap_or_else(|| tr!(app, "render.cpu_body_choose").to_string());
     let world = crate::open_meshing::session_world(&app.session);
     let filter = app.render_workspace.view.cpu.body_filter.to_lowercase();
     let candidates: Vec<_> = world
@@ -661,7 +661,7 @@ pub(super) fn reflection_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
             for (shown, name) in candidates.iter().enumerate() {
                 if shown == 256 {
-                    ui.small(app.tr("render.cpu_body_filter_more"));
+                    ui.small(tr!(app, "render.cpu_body_filter_more"));
                     break;
                 }
                 let response =
@@ -676,7 +676,7 @@ pub(super) fn reflection_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::scenario::publish_handle("render:cpu-reflection-body", dropdown.rect.center());
     let can_add = selected.as_ref().is_some_and(|name| unique_visible_body(app, name))
         && app.render_workspace.view.raytrace.reflections.as_ref().is_none_or(|r| r.bodies.len() < 64);
-    let add = ui_kit::button(ui, app.tr("render.cpu_reflection_add"), ui_kit::Button::Enabled(can_add));
+    let add = ui_kit::button(ui, tr!(app, "render.cpu_reflection_add"), ui_kit::Button::Enabled(can_add));
     crate::scenario::publish_handle("render:cpu-reflection-add", add.rect.center());
     if add.clicked()
         && let Some(name) = selected
@@ -689,13 +689,13 @@ pub(super) fn reflection_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 /// Existing global reflection budget, shared during the Sampling-editor migration.
 pub(super) fn reflection_sampling_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let depth = app.tr("render.cpu_reflection_depth").to_string();
-    let samples = app.tr("render.cpu_reflection_samples").to_string();
+    let depth = tr!(app, "render.cpu_reflection_depth").to_string();
+    let samples = tr!(app, "render.cpu_reflection_samples").to_string();
     if let Some(reflections) = &mut app.render_workspace.view.raytrace.reflections {
         ui_kit::row(ui, &depth, |ui| ui_kit::number_field(ui, &mut reflections.max_bounces, 1..=8, 1.0, ""));
         ui_kit::row(ui, &samples, |ui| ui_kit::number_field(ui, &mut reflections.samples, 1..=64, 1.0, ""));
     } else {
-        ui.small(app.tr("render.cpu_reflection_empty"));
+        ui.small(tr!(app, "render.cpu_reflection_empty"));
     }
 }
 
@@ -708,7 +708,7 @@ pub(super) fn environment_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         Environment::Sky => "render.studio_sky",
         Environment::Hdr => "render.studio_hdr",
     };
-    let label = app.tr(key).to_string();
+    let label = app.tr_by_id(key).to_string();
     ui_kit::dropdown_menu(ui, "cpu_environment_kind", &label, |ui| {
         for (value, key) in [
             (Environment::None, "render.cpu_environment_none"),
@@ -716,7 +716,7 @@ pub(super) fn environment_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             (Environment::Sky, "render.studio_sky"),
             (Environment::Hdr, "render.studio_hdr"),
         ] {
-            if ui_kit::list_picker(ui, key, app.tr(key), value == selected).clicked() {
+            if ui_kit::list_picker(ui, key, app.tr_by_id(key), value == selected).clicked() {
                 app.render_workspace.view.cpu.environment = value;
                 ui.close();
             }
@@ -726,18 +726,18 @@ pub(super) fn environment_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     }
     if app.render_workspace.view.cpu.environment == Environment::Constant {
-        let color = app.tr("render.cpu_linear_color").to_string();
+        let color = tr!(app, "render.cpu_linear_color").to_string();
         vector(ui, &color, &mut app.render_workspace.view.cpu.color, 0.0..=1.0, 0.01, "");
-        ui.small(app.tr("render.cpu_constant_help"));
+        ui.small(tr!(app, "render.cpu_constant_help"));
     } else {
         hdr::controls(app, ui, hdr::Target::Cpu);
-        ui.small(app.tr("render.cpu_hdr_help"));
-        ui.label(app.tr("render.studio_rotation"));
+        ui.small(tr!(app, "render.cpu_hdr_help"));
+        ui.label(tr!(app, "render.studio_rotation"));
         let mut degrees = app.render_workspace.view.cpu.rotation_rad.to_degrees();
         if ui_kit::number_field(ui, &mut degrees, -1e6_f64.to_degrees()..=1e6_f64.to_degrees(), 1.0, "°").changed() {
             app.render_workspace.view.cpu.rotation_rad = degrees.to_radians();
         }
-        ui.label(app.tr("render.cpu_environment_samples"));
+        ui.label(tr!(app, "render.cpu_environment_samples"));
         let samples = app.render_workspace.view.cpu.samples;
         ui_kit::dropdown_menu(ui, "cpu_hdr_samples", &samples.to_string(), |ui| {
             for value in [1, 4, 16, 64] {
@@ -747,11 +747,11 @@ pub(super) fn environment_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         });
-        ui.small(app.tr("render.cpu_hdr_reflection_help"));
+        ui.small(tr!(app, "render.cpu_hdr_reflection_help"));
     }
-    ui.label(app.tr("render.studio_intensity"));
+    ui.label(tr!(app, "render.studio_intensity"));
     ui_kit::number_field(ui, &mut app.render_workspace.view.cpu.intensity, 0.0..=64.0, 0.1, "");
-    ui.small(app.tr("render.cpu_environment_background"));
+    ui.small(tr!(app, "render.cpu_environment_background"));
 }
 
 #[cfg(test)]
@@ -790,9 +790,9 @@ fn metadata(app: &SolveApp, ui: &mut egui::Ui, info: &Value) {
     let width = info["header"]["width"].as_u64().unwrap_or(0);
     let height = info["header"]["height"].as_u64().unwrap_or(0);
     ui.label(format!("{width} × {height} px"));
-    ui.label(format!("{}: {}", app.tr("render.cpu_environment_samples"), info["samples"].as_u64().unwrap_or(0)));
-    ui.label(format!("{}: {:.2}", app.tr("render.studio_intensity"), info["intensity"].as_f64().unwrap_or(0.0)));
-    ui.label(format!("{}: {:.1}°", app.tr("render.studio_rotation"), info["rotation_radians"].as_f64().unwrap_or(0.0).to_degrees()));
+    ui.label(format!("{}: {}", tr!(app, "render.cpu_environment_samples"), info["samples"].as_u64().unwrap_or(0)));
+    ui.label(format!("{}: {:.2}", tr!(app, "render.studio_intensity"), info["intensity"].as_f64().unwrap_or(0.0)));
+    ui.label(format!("{}: {:.1}°", tr!(app, "render.studio_rotation"), info["rotation_radians"].as_f64().unwrap_or(0.0).to_degrees()));
     ui.label(format!("SHA-256: {digest}"));
 }
 
@@ -801,23 +801,23 @@ pub(super) fn checked_status(app: &SolveApp, ui: &mut egui::Ui, params: Option<&
         return;
     }
     if let Some(checked) = &app.render_workspace.view.cpu.checked {
-        let title = app.tr("render.cpu_last_check").to_string();
+        let title = tr!(app, "render.cpu_last_check").to_string();
         ui_kit::section(ui, "cpu_last_check", &title, false, |ui| {
             if params != Some(&checked.request)
                 || checked.revision != app.session.revision
                 || !std::sync::Weak::ptr_eq(&checked.document, &std::sync::Arc::downgrade(&app.session.doc))
             {
-                ui.small(app.tr("render.cpu_check_changed"));
+                ui.small(tr!(app, "render.cpu_check_changed"));
             }
             metadata(app, ui, &checked.environment);
-            ui.small(app.tr("render.cpu_check_capture_help"));
+            ui.small(tr!(app, "render.cpu_check_capture_help"));
         });
     }
 }
 
 pub(super) fn captured_status(app: &SolveApp, ui: &mut egui::Ui, status: &Value) {
     if status["request"]["integrator"] == "raytrace" && status["environment"]["source_sha256"].is_array() {
-        let title = app.tr("render.cpu_captured_hdr").to_string();
+        let title = tr!(app, "render.cpu_captured_hdr").to_string();
         ui_kit::section(ui, "cpu_captured_hdr", &title, false, |ui| metadata(app, ui, &status["environment"]));
     }
 }

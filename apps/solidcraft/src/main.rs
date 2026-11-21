@@ -360,7 +360,7 @@ impl eframe::App for App {
         // The file chooser that opened is not the desktop's own: the user has to be told (#10159).
         #[cfg(target_os = "linux")]
         if let Some(reason) = desktop_chooser::take_reason() {
-            let text = self.solve.tr(reason).to_string();
+            let text = self.solve.tr_by_id(reason).to_string();
             self.solve.set_status(text, false);
         }
         self.dialog_folder.design(self.solve.session.path.as_deref());
@@ -841,7 +841,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             for (_, exts) in &plugins {
                 everything.extend(exts.iter().map(String::as_str).filter(|e| !io::formats::open_extensions(true).contains(e)));
             }
-            dialog = dialog.add_filter(solidcraft_ui_text::tr("file.open.drawing_filter"), &case_variants(&everything));
+            dialog = dialog.add_filter(solidcraft_ui_egui::tr!("file.open.drawing_filter"), &case_variants(&everything));
             for (label, exts) in io::formats::import_filters(true) {
                 dialog = dialog.add_filter(label, &case_variants(&exts));
             }

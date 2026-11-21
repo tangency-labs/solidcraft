@@ -438,7 +438,11 @@ fn the_sketch_page_switches_dimension_values_to_a_window() {
     let mut h = Harness::new();
     h.call("ui.prefs", json!({"open": "Sketch"}));
     h.frames(4);
-    let handle = format!("dialog:{}:{}", solidcraft_ui_text::tr("prefs.dimension_values"), solidcraft_ui_text::tr("prefs.dimension_values_window"));
+    let handle = format!(
+        "dialog:{}:{}",
+        solidcraft_ui_text::tr_by_id("prefs.dimension_values"),
+        solidcraft_ui_text::tr_by_id("prefs.dimension_values_window")
+    );
     crate::prefs::reveal_preference(&mut h, &handle);
     h.step(&json!({"click":{"handle": handle}})).unwrap();
     h.frames(2);

@@ -180,7 +180,7 @@ pub(crate) fn continuity_row_explained(
 
 /// The hover text of a continuity choice: each order's own line, which names its code.
 pub(crate) fn continuity_tip(allowed: &[Continuity]) -> String {
-    allowed.iter().map(|g| solidcraft_ui_text::tr(g.tip_id())).collect::<Vec<_>>().join("\n")
+    allowed.iter().map(|g| solidcraft_ui_text::tr_by_id(g.tip_id())).collect::<Vec<_>>().join("\n")
 }
 
 /// What each dialog's continuity rows offer: the orders its construction builds, from the
@@ -193,7 +193,7 @@ fn patch_orders() -> Vec<Continuity> {
 /// faces meet each other with different curvatures (tangent only: no surface smooth at the corner
 /// has both curvatures there).
 fn patch_continuity_tip() -> String {
-    format!("{}\n{}", continuity_tip(&patch_orders()), solidcraft_ui_text::tr("ui.patch_continuity_corner_tip"))
+    format!("{}\n{}", continuity_tip(&patch_orders()), tr!("ui.patch_continuity_corner_tip"))
 }
 
 fn blend_orders() -> Vec<Continuity> {
@@ -302,7 +302,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
             choice_row(ui, "Continuity", "match_order", order, &MATCH_CONTINUITY.map(|(label, _)| label));
         }
         Surf::Stitch { tolerance } => {
-            enter |= hint_row(ui, "Tolerance", tolerance, solidcraft_ui_text::tr("ui.stitch_tolerance_hint"));
+            enter |= hint_row(ui, "Tolerance", tolerance, tr!("ui.stitch_tolerance_hint"));
         }
         Surf::Thicken { thickness, symmetric, operation } => {
             enter |= expr_row(ui, "Thickness", thickness);

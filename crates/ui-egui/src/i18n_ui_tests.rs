@@ -13,7 +13,7 @@ fn japanese_dialog_keeps_english_scenario_handles() {
     assert!(h.widget("平面").is_some(), "the input label must be translated");
     assert!(h.widget("キャンセル").is_some(), "the close button must be translated");
     assert!(!scenario::handles("dialog:Plane").is_empty(), "scenario handles must retain source labels");
-    assert_eq!(solidcraft_ui_text::tr("ui.preferences"), "Preferences", "the render scope must restore English");
+    assert_eq!(solidcraft_ui_text::tr_by_id("ui.preferences"), "Preferences", "the render scope must restore English");
 
     h.app.preferences.language = "en".into();
     h.frames(3);
@@ -31,7 +31,7 @@ fn italian_dialog_keeps_english_scenario_handles() {
     assert!(h.widget("Piano").is_some());
     assert!(h.widget("Annulla").is_some());
     assert!(!scenario::handles("dialog:Plane").is_empty());
-    assert_eq!(solidcraft_ui_text::tr("ui.preferences"), "Preferences");
+    assert_eq!(solidcraft_ui_text::tr_by_id("ui.preferences"), "Preferences");
 
     h.app.preferences.language = "en".into();
     h.frames(3);
@@ -70,7 +70,7 @@ fn language_preference_cancel_restores_previous_locale() {
     assert_eq!(h.app.preferences.language, "ja");
     h.call("ui.prefs", json!({"button":"cancel"}));
     assert_eq!(h.app.preferences.language, "en");
-    assert_eq!(h.app.tr("ui.preferences"), "Preferences");
+    assert_eq!(h.app.tr_by_id("ui.preferences"), "Preferences");
 }
 
 /// A first start (no saved language) shows `System` as the interface language choice (#10138).
@@ -80,7 +80,7 @@ fn language_dropdown_defaults_to_system() {
     h.app.home.open = false;
     assert_eq!(h.app.preferences.language, "system");
     h.call("ui.prefs", json!({"open":"General"}));
-    let system = h.app.tr("prefs.language_system").to_owned();
+    let system = h.app.tr_by_id("prefs.language_system").to_owned();
     assert!(h.widget(&system).is_some(), "the language dropdown reads {system}");
 }
 
@@ -407,7 +407,7 @@ mod kit_translation {
                         content = ui.max_rect().intersect(ui.clip_rect());
                         ui.set_clip_rect(content);
                         scope(ui, |ui| {
-                            clicked = theme_option_notice(ui, "guard", NOTICE, solidcraft_ui_text::tr("prefs.theme_notice_dismiss"), can_undo);
+                            clicked = theme_option_notice(ui, "guard", NOTICE, solidcraft_ui_text::tr_by_id("prefs.theme_notice_dismiss"), can_undo);
                         });
                     });
                     for (target, present) in [("prefs:theme_notice_undo:guard", can_undo), ("prefs:theme_notice_dismiss:guard", true)] {
@@ -437,9 +437,9 @@ mod kit_translation {
                 let mut dismiss_width = 0.0;
                 let mut label_wrap_width = 0.0;
                 test_support::frame(&crate::fonts::test_context(), vec![], |ui| {
-                    undo_width = ContentWidth::button(ui, solidcraft_ui_text::tr("ui.undo"));
-                    dismiss_width = ContentWidth::button(ui, solidcraft_ui_text::tr("prefs.theme_notice_dismiss"));
-                    label_wrap_width = (ContentWidth::label(ui, solidcraft_ui_text::tr("prefs.theme_notice_dismiss")) / 3.0).ceil();
+                    undo_width = ContentWidth::button(ui, solidcraft_ui_text::tr_by_id("ui.undo"));
+                    dismiss_width = ContentWidth::button(ui, solidcraft_ui_text::tr_by_id("prefs.theme_notice_dismiss"));
+                    label_wrap_width = (ContentWidth::label(ui, solidcraft_ui_text::tr_by_id("prefs.theme_notice_dismiss")) / 3.0).ceil();
                 });
                 let actions_width = undo_width + dismiss_width + t.space_8 * 2.0;
                 let narrow_width = undo_width.max(dismiss_width);

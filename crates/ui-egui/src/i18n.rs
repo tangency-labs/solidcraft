@@ -4,44 +4,61 @@
 
 use solidcraft_ui_text::{Catalog, Locale};
 
-static ENGLISH: Catalog = Catalog::new("en", "English", include_str!(concat!(env!("OUT_DIR"), "/locales/en.json")));
-static ARABIC: Catalog = Catalog::new("ar", "العربية", include_str!(concat!(env!("OUT_DIR"), "/locales/ar.json")));
-static BULGARIAN: Catalog = Catalog::new("bg", "Български", include_str!(concat!(env!("OUT_DIR"), "/locales/bg.json")));
-static BOSNIAN: Catalog = Catalog::new("bs", "Bosanski", include_str!(concat!(env!("OUT_DIR"), "/locales/bs.json")));
-static CATALAN: Catalog = Catalog::new("ca", "Català", include_str!(concat!(env!("OUT_DIR"), "/locales/ca.json")));
-static CZECH: Catalog = Catalog::new("cs", "Čeština", include_str!(concat!(env!("OUT_DIR"), "/locales/cs.json")));
-static DANISH: Catalog = Catalog::new("da", "Dansk", include_str!(concat!(env!("OUT_DIR"), "/locales/da.json")));
-static GERMAN: Catalog = Catalog::new("de", "Deutsch", include_str!(concat!(env!("OUT_DIR"), "/locales/de.json")));
+/// A catalog's JSON, for the tests that read it (the catalogs' coverage and wording). The app
+/// reads every catalog but English from its table (`build.rs`, `numbered_tables`), so outside
+/// tests the JSON is left out of the program.
+macro_rules! json {
+    ($locale:literal) => {
+        if cfg!(test) { include_str!(concat!(env!("OUT_DIR"), "/locales/", $locale, ".json")) } else { "" }
+    };
+}
+
+static ENGLISH: Catalog = Catalog::numbered(
+    "en",
+    "English",
+    include_str!(concat!(env!("OUT_DIR"), "/locales/en.json")),
+    include_bytes!(concat!(env!("OUT_DIR"), "/locales/en.tbl")),
+);
+static ARABIC: Catalog = Catalog::numbered("ar", "العربية", json!("ar"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ar.tbl")));
+static BULGARIAN: Catalog = Catalog::numbered("bg", "Български", json!("bg"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/bg.tbl")));
+static BOSNIAN: Catalog = Catalog::numbered("bs", "Bosanski", json!("bs"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/bs.tbl")));
+static CATALAN: Catalog = Catalog::numbered("ca", "Català", json!("ca"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ca.tbl")));
+static CZECH: Catalog = Catalog::numbered("cs", "Čeština", json!("cs"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/cs.tbl")));
+static DANISH: Catalog = Catalog::numbered("da", "Dansk", json!("da"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/da.tbl")));
+static GERMAN: Catalog = Catalog::numbered("de", "Deutsch", json!("de"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/de.tbl")));
 /// English in UK spelling: only the messages whose spelling differs; the rest are English's.
-static ENGLISH_UK: Catalog = Catalog::new("en-GB", "English (UK)", include_str!(concat!(env!("OUT_DIR"), "/locales/en-GB.json")));
-static SPANISH: Catalog = Catalog::new("es", "Español (España)", include_str!(concat!(env!("OUT_DIR"), "/locales/es.json")));
-static BASQUE: Catalog = Catalog::new("eu", "Euskara", include_str!(concat!(env!("OUT_DIR"), "/locales/eu.json")));
-static FINNISH: Catalog = Catalog::new("fi", "Suomi", include_str!(concat!(env!("OUT_DIR"), "/locales/fi.json")));
-static FRENCH: Catalog = Catalog::new("fr", "Français", include_str!(concat!(env!("OUT_DIR"), "/locales/fr.json")));
-static GALICIAN: Catalog = Catalog::new("gl", "Galego", include_str!(concat!(env!("OUT_DIR"), "/locales/gl.json")));
-static HEBREW: Catalog = Catalog::new("he", "עברית", include_str!(concat!(env!("OUT_DIR"), "/locales/he.json")));
-static CROATIAN: Catalog = Catalog::new("hr", "Hrvatski", include_str!(concat!(env!("OUT_DIR"), "/locales/hr.json")));
-static HUNGARIAN: Catalog = Catalog::new("hu", "Magyar", include_str!(concat!(env!("OUT_DIR"), "/locales/hu.json")));
-static INDONESIAN: Catalog = Catalog::new("id", "Bahasa Indonesia", include_str!(concat!(env!("OUT_DIR"), "/locales/id.json")));
-static ITALIAN: Catalog = Catalog::new("it", "Italiano", include_str!(concat!(env!("OUT_DIR"), "/locales/it.json")));
-static JAPANESE: Catalog = Catalog::new("ja", "日本語", include_str!(concat!(env!("OUT_DIR"), "/locales/ja.json")));
-static GEORGIAN: Catalog = Catalog::new("ka", "ქართული", include_str!(concat!(env!("OUT_DIR"), "/locales/ka.json")));
-static KOREAN: Catalog = Catalog::new("ko", "한국어", include_str!(concat!(env!("OUT_DIR"), "/locales/ko.json")));
-static LATVIAN: Catalog = Catalog::new("lv", "Latviešu", include_str!(concat!(env!("OUT_DIR"), "/locales/lv.json")));
-static MALAY: Catalog = Catalog::new("ms", "Bahasa Melayu", include_str!(concat!(env!("OUT_DIR"), "/locales/ms.json")));
-static NORWEGIAN: Catalog = Catalog::new("nb", "Norsk bokmål", include_str!(concat!(env!("OUT_DIR"), "/locales/nb.json")));
-static DUTCH: Catalog = Catalog::new("nl", "Nederlands", include_str!(concat!(env!("OUT_DIR"), "/locales/nl.json")));
-static POLISH: Catalog = Catalog::new("pl", "Polski", include_str!(concat!(env!("OUT_DIR"), "/locales/pl.json")));
-static PORTUGUESE_BR: Catalog = Catalog::new("pt-BR", "Português (Brasil)", include_str!(concat!(env!("OUT_DIR"), "/locales/pt-BR.json")));
-static ROMANIAN: Catalog = Catalog::new("ro", "Română", include_str!(concat!(env!("OUT_DIR"), "/locales/ro.json")));
-static RUSSIAN: Catalog = Catalog::new("ru", "Русский", include_str!(concat!(env!("OUT_DIR"), "/locales/ru.json")));
-static SERBIAN: Catalog = Catalog::new("sr", "Српски", include_str!(concat!(env!("OUT_DIR"), "/locales/sr.json")));
-static SWEDISH: Catalog = Catalog::new("sv", "Svenska", include_str!(concat!(env!("OUT_DIR"), "/locales/sv.json")));
-static TURKISH: Catalog = Catalog::new("tr", "Türkçe", include_str!(concat!(env!("OUT_DIR"), "/locales/tr.json")));
-static UKRAINIAN: Catalog = Catalog::new("uk", "Українська", include_str!(concat!(env!("OUT_DIR"), "/locales/uk.json")));
-static VIETNAMESE: Catalog = Catalog::new("vi", "Tiếng Việt", include_str!(concat!(env!("OUT_DIR"), "/locales/vi.json")));
-static CHINESE: Catalog = Catalog::new("zh", "中文", include_str!(concat!(env!("OUT_DIR"), "/locales/zh.json")));
-static CHINESE_TRADITIONAL: Catalog = Catalog::new("zh-TW", "繁體中文", include_str!(concat!(env!("OUT_DIR"), "/locales/zh-TW.json")));
+static ENGLISH_UK: Catalog =
+    Catalog::numbered("en-GB", "English (UK)", json!("en-GB"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/en-GB.tbl")));
+static SPANISH: Catalog = Catalog::numbered("es", "Español (España)", json!("es"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/es.tbl")));
+static BASQUE: Catalog = Catalog::numbered("eu", "Euskara", json!("eu"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/eu.tbl")));
+static FINNISH: Catalog = Catalog::numbered("fi", "Suomi", json!("fi"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/fi.tbl")));
+static FRENCH: Catalog = Catalog::numbered("fr", "Français", json!("fr"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/fr.tbl")));
+static GALICIAN: Catalog = Catalog::numbered("gl", "Galego", json!("gl"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/gl.tbl")));
+static HEBREW: Catalog = Catalog::numbered("he", "עברית", json!("he"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/he.tbl")));
+static CROATIAN: Catalog = Catalog::numbered("hr", "Hrvatski", json!("hr"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/hr.tbl")));
+static HUNGARIAN: Catalog = Catalog::numbered("hu", "Magyar", json!("hu"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/hu.tbl")));
+static INDONESIAN: Catalog = Catalog::numbered("id", "Bahasa Indonesia", json!("id"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/id.tbl")));
+static ITALIAN: Catalog = Catalog::numbered("it", "Italiano", json!("it"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/it.tbl")));
+static JAPANESE: Catalog = Catalog::numbered("ja", "日本語", json!("ja"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ja.tbl")));
+static GEORGIAN: Catalog = Catalog::numbered("ka", "ქართული", json!("ka"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ka.tbl")));
+static KOREAN: Catalog = Catalog::numbered("ko", "한국어", json!("ko"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ko.tbl")));
+static LATVIAN: Catalog = Catalog::numbered("lv", "Latviešu", json!("lv"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/lv.tbl")));
+static MALAY: Catalog = Catalog::numbered("ms", "Bahasa Melayu", json!("ms"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ms.tbl")));
+static NORWEGIAN: Catalog = Catalog::numbered("nb", "Norsk bokmål", json!("nb"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/nb.tbl")));
+static DUTCH: Catalog = Catalog::numbered("nl", "Nederlands", json!("nl"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/nl.tbl")));
+static POLISH: Catalog = Catalog::numbered("pl", "Polski", json!("pl"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/pl.tbl")));
+static PORTUGUESE_BR: Catalog =
+    Catalog::numbered("pt-BR", "Português (Brasil)", json!("pt-BR"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/pt-BR.tbl")));
+static ROMANIAN: Catalog = Catalog::numbered("ro", "Română", json!("ro"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ro.tbl")));
+static RUSSIAN: Catalog = Catalog::numbered("ru", "Русский", json!("ru"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/ru.tbl")));
+static SERBIAN: Catalog = Catalog::numbered("sr", "Српски", json!("sr"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/sr.tbl")));
+static SWEDISH: Catalog = Catalog::numbered("sv", "Svenska", json!("sv"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/sv.tbl")));
+static TURKISH: Catalog = Catalog::numbered("tr", "Türkçe", json!("tr"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/tr.tbl")));
+static UKRAINIAN: Catalog = Catalog::numbered("uk", "Українська", json!("uk"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/uk.tbl")));
+static VIETNAMESE: Catalog = Catalog::numbered("vi", "Tiếng Việt", json!("vi"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/vi.tbl")));
+static CHINESE: Catalog = Catalog::numbered("zh", "中文", json!("zh"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/zh.tbl")));
+static CHINESE_TRADITIONAL: Catalog =
+    Catalog::numbered("zh-TW", "繁體中文", json!("zh-TW"), include_bytes!(concat!(env!("OUT_DIR"), "/locales/zh-TW.tbl")));
 /// English first (the fallback), then by language id, one per line so that adding a language
 /// doesn't edit a line another addition edits.
 #[rustfmt::skip]
@@ -122,7 +139,7 @@ pub trait LocaleNames {
 /// `Component3`), translated.
 fn default_name(locale: Locale, text: &str) -> Option<String> {
     if text == "Untitled" {
-        return Some(locale.text("ui.untitled").to_string());
+        return Some(tr!(locale, "ui.untitled").to_string());
     }
     for (prefix, id) in [("Sketch", "browser.sketch_name"), ("Body", "browser.body_name"), ("Component", "browser.component_name")] {
         if let Some(number) = text.strip_prefix(prefix)
@@ -142,7 +159,7 @@ impl LocaleNames for Locale {
 
     fn diagnostic(self, text: &str) -> String {
         if let Some((feature, reference)) = solidcraft_engine::doc::reselect_parts(text) {
-            return self.format("diagnostic.reselect_reference", &[("feature", &self.given_name(feature)), ("reference", reference)]);
+            return tr!(self, "diagnostic.reselect_reference", feature = &self.given_name(feature), reference = reference);
         }
         if let Some(lost) = solidcraft_engine::doc::lost_projection_parts(text) {
             let feature = self.given_name(lost.feature);
@@ -163,13 +180,13 @@ impl LocaleNames for Locale {
             && count.parse::<usize>().is_ok_and(|count| count > 0)
         {
             let body = self.given_name(body);
-            let message = self.format("diagnostic.stitch_open_edges", &[("body", &body), ("count", count)]);
+            let message = tr!(self, "diagnostic.stitch_open_edges", body = &body, count = count);
             return format!("{before}{message}{after}");
         }
         // A profile pick with more curves than a design keeps track of, after anything naming
         // the feature or command in front.
         if let Some(before) = text.strip_suffix(solidcraft_engine::doc::WHOLE_PROFILE_TOO_MANY_CURVES) {
-            return format!("{before}{}", self.text("diagnostic.whole_profile_too_many_curves"));
+            return format!("{before}{}", tr!(self, "diagnostic.whole_profile_too_many_curves"));
         }
         const PREFIX: &str = "there is no body to cut or intersect in component '";
         if let Some((before, detail)) = text.split_once(PREFIX)
@@ -178,7 +195,7 @@ impl LocaleNames for Locale {
             && let Some((other, after)) = detail.split_once("' — activate that component or pick the body as a target")
         {
             let (component, body, other) = (self.given_name(component), self.given_name(body), self.given_name(other));
-            let message = self.format("diagnostic.empty_boolean_component", &[("component", &component), ("body", &body), ("other", &other)]);
+            let message = tr!(self, "diagnostic.empty_boolean_component", component = &component, body = &body, other = &other);
             return format!("{before}{message}{after}");
         }
         text.to_string()
@@ -194,16 +211,16 @@ impl LocaleNames for Locale {
             }
         }
         if let Some(count) = text.strip_prefix("Parameters (").and_then(|s| s.strip_suffix(')')) {
-            return self.format("browser.parameters", &[("count", count)]);
+            return tr!(self, "browser.parameters", count = count);
         }
         if let Some(number) = text.strip_prefix("Section ").filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit())) {
-            return self.format("browser.section_plane", &[("number", number)]);
+            return tr!(self, "browser.section_plane", number = number);
         }
         if let Some(count) = text.strip_suffix(" degrees of freedom")
             && !count.is_empty()
             && count.chars().all(|c| c.is_ascii_digit())
         {
-            return self.format("sketch.degrees_of_freedom", &[("count", count)]);
+            return tr!(self, "sketch.degrees_of_freedom", count = count);
         }
         self.label(text).to_string()
     }
@@ -239,7 +256,7 @@ fn point_error_id<'a>(text: &'a str, reason: &str) -> Option<&'a str> {
 /// Translate known engine error messages using i18n keys.
 /// If the error message is not recognized, returns it unchanged.
 pub fn tr_engine_error(error: &str) -> String {
-    use solidcraft_ui_text::{format, tr};
+    use solidcraft_ui_text::{format, tr_by_id};
     // `EngineError::BadParams` carries `invalid parameters for `<command>`: ` in front.
     let text = error.strip_prefix("invalid parameters for `").and_then(|rest| rest.split_once("`: ")).map_or(error, |(_, text)| text);
     for (english, id) in [
@@ -248,7 +265,7 @@ pub fn tr_engine_error(error: &str) -> String {
         ("Boundary Fill did not produce a closed solid cell", "boundary_fill.error.open_cell"),
     ] {
         if text == english {
-            return tr(id).to_string();
+            return tr_by_id(id).to_string();
         }
     }
     if let Some((name, ids)) = text
@@ -256,7 +273,7 @@ pub fn tr_engine_error(error: &str) -> String {
         .and_then(|rest| rest.strip_suffix("; use a numeric component ID"))
         .and_then(|rest| rest.rsplit_once("`; matching IDs: "))
     {
-        return format("component.error.ambiguous_name", &[("name", name), ("ids", ids)]);
+        return tr!("component.error.ambiguous_name", name = name, ids = ids);
     }
     for (prefix, suffix, id) in [
         ("ambiguous contact set `", "; use a numeric contact set ID", "contact.error.ambiguous_name"),
@@ -271,38 +288,38 @@ pub fn tr_engine_error(error: &str) -> String {
         }
     }
     if text == "joint limit minimum must not exceed maximum" {
-        return tr("joint.error.limit_order").to_string();
+        return tr!("joint.error.limit_order").to_string();
     }
     if text == "nothing to break at there" {
-        return tr("sketch.error.nothing_to_break").to_string();
+        return tr!("sketch.error.nothing_to_break").to_string();
     }
     if let Some(name) = text.strip_prefix("sketch `").and_then(|rest| {
         rest.strip_suffix("` comes after this sketch in the timeline, so its geometry cannot be used here. Move the source sketch earlier if its dependencies allow, or use a sketch after it.")
     }) {
-        return format("sketch.error.source_later_in_timeline", &[("name", name)]);
+        return tr!("sketch.error.source_later_in_timeline", name = name);
     }
     if let Some(id) = offset_error_id(
         text,
         " is an offset, and its ends follow its source curves: ",
         " the source curves instead, or break the offset association first",
     ) {
-        return format("sketch.error.offset_trim", &[("id", id)]);
+        return tr!("sketch.error.offset_trim", id = id);
     }
     if let Some(id) = offset_error_id(
         text,
         " is an offset, and its corners follow its source curves: ",
         " the source corners before offsetting, or break the offset association first",
     ) {
-        return format("sketch.error.offset_fillet_chamfer", &[("id", id)]);
+        return tr!("sketch.error.offset_fillet_chamfer", id = id);
     }
     if text == "a closed curve needs two crossings to trim" {
-        return tr("sketch.error.closed_curve_two_crossings").to_string();
+        return tr!("sketch.error.closed_curve_two_crossings").to_string();
     }
     if let Some(id) = point_error_id(text, "projected") {
-        return format("sketch.error.point_is_projected", &[("id", id)]);
+        return tr!("sketch.error.point_is_projected", id = id);
     }
     if let Some(id) = point_error_id(text, "fixed") {
-        return format("sketch.error.point_is_fixed", &[("id", id)]);
+        return tr!("sketch.error.point_is_fixed", id = id);
     }
     error.to_string()
 }
@@ -510,7 +527,7 @@ mod tests {
             let _labels = resolved_labels();
             assert_eq!(tr_label("Profile"), "Profile");
             assert_eq!(tr_label("ui.cancel"), "ui.cancel");
-            assert_ne!(tr("ui.cancel"), "ui.cancel", "stable catalog messages remain translated");
+            assert_ne!(tr_by_id("ui.cancel"), "ui.cancel", "stable catalog messages remain translated");
             {
                 let _nested = resolved_labels();
                 assert_eq!(tr_label("Profile"), "Profile");
@@ -549,7 +566,7 @@ mod tests {
         assert_eq!(tr_name("לוח עליון קטן"), "קטן עליון לוח");
         assert_eq!(tr_name("לוח"), "לוח", "one word is shown as it is");
         assert_eq!(tr_name("Top plate"), "Top plate", "Latin is shown as it is");
-        assert_eq!(tr_name("Body2"), tr("browser.body_name").replace("{number}", "2"), "default names stay translated");
+        assert_eq!(tr_name("Body2"), tr_by_id("browser.body_name").replace("{number}", "2"), "default names stay translated");
         let _arabic = scope("ar");
         assert_eq!(tr_name("لوحة علوية صغيرة"), "صغيرة علوية لوحة");
     }
@@ -591,7 +608,7 @@ mod tests {
         assert_eq!(ENGLISH.messages().get(id).map(String::as_str), Some(english));
         for language in ["en", "ja", "zh", "de", "ko", "es"] {
             let _scope = scope(language);
-            let hint = tr(id);
+            let hint = tr_by_id(id);
             assert_eq!(hint, Locale::for_language(language).text(id));
             assert_ne!(hint, id);
             if ["ja", "zh", "de", "ko"].contains(&language) {
@@ -891,31 +908,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn direct_ui_message_ids_exist_in_english_catalog() {
-        install();
-        // Catch a misspelled key before it is shown verbatim in the UI. Engine-table labels
-        // deliberately use the separate label adapter and fall back to their source text.
-        for source in [
-            include_str!("toolbar.rs"),
-            include_str!("prefs.rs"),
-            include_str!("documents.rs"),
-            include_str!("dialogs.rs"),
-            include_str!("browser.rs"),
-            include_str!("browser_search.rs"),
-            include_str!("sketch_palette.rs"),
-            include_str!("design_properties.rs"),
-            include_str!("home.rs"),
-        ] {
-            for call in [".tr(\"", "i18n::tr(\"", "i18n::format(\"", "ui_text::tr(\"", "ui_text::format(\""] {
-                for tail in source.split(call).skip(1) {
-                    let id = tail.split('"').next().unwrap();
-                    assert!(ENGLISH.messages().contains_key(id), "missing English message: {id}");
-                }
-            }
-        }
-    }
-
     /// `label()` resolves a literal by its English text (or, failing that, an id); `text()` only
     /// by id. A literal neither reaches is shown verbatim in every locale and nothing fails, so
     /// every label and id literal the UI passes is read from the source and checked against the
@@ -959,6 +951,41 @@ mod tests {
         assert_eq!(de.label("Quantity"), "Anzahl");
         assert_eq!(de.label("motion.plot_quantity"), "Größe");
         assert_eq!(Locale::for_language("en").label("motion.plot_quantity"), "Quantity");
+    }
+
+    /// A catalog's table reads as its JSON does, in every language, whether a message is named
+    /// by its id or by its place: the text as it is shown (a right-to-left catalog's in display
+    /// order), and English where the language lacks it.
+    #[test]
+    fn a_table_reads_as_the_json_it_was_made_from_in_every_language() {
+        install();
+        let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
+        let mut read = 0;
+        for catalog in solidcraft_ui_text::locales() {
+            let json: Messages = serde_json::from_str(catalog.source).unwrap();
+            assert!(!json.is_empty(), "{}", catalog.id);
+            let right_to_left = json.values().any(|text| solidcraft_ui_text::bidi::has_rtl(text));
+            let locale = Locale::for_language(catalog.id);
+            for (id, source) in &english {
+                let own =
+                    json.get(id).map(|text| if right_to_left { solidcraft_ui_text::bidi::visual_template(text).into_owned() } else { text.clone() });
+                let expected = own.as_deref().unwrap_or(source);
+                assert_eq!(locale.text(id), expected, "{}: {id}", catalog.id);
+                assert_eq!(locale.message(solidcraft_ui_text::Msg::of(id).unwrap()), expected, "{}: {id}", catalog.id);
+                read += 1;
+            }
+        }
+        assert!(read > 200_000, "{read} messages read");
+        assert!(solidcraft_ui_text::Msg::of("ui.no_such_message").is_none());
+        // `msg!` names the same message, and fills it by the names, in any order.
+        let japanese = Locale::for_language("ja");
+        assert_eq!(japanese.message(msg!("ui.cancel")), japanese.text("ui.cancel"));
+        let _scope = solidcraft_ui_text::scope("ja");
+        assert_eq!(tr!("recovery.days_ago", count = "3"), solidcraft_ui_text::format("recovery.days_ago", &[("count", "3")]));
+        assert_eq!(
+            tr!("recovery.restore_row", when = "today", name = "Plate"),
+            solidcraft_ui_text::format("recovery.restore_row", &[("name", "Plate"), ("when", "today")])
+        );
     }
 
     #[test]
@@ -1155,7 +1182,7 @@ mod tests {
         let _scope = scope("ja");
         let message = "there is no sheet metal body: start one with Flange > Base, or turn a plate into sheet metal with Convert to Sheet Metal (pick its large flat face)";
         let error = format!("invalid parameters for `sheet.flange`: {message}");
-        let translated = tr("sheet.no_body");
+        let translated = tr_by_id("sheet.no_body");
         assert_ne!(translated, "sheet.no_body");
         assert_ne!(translated, message);
         assert_eq!(crate::friendly_error("sheet.flange", &error), format!("{}: {translated}", tr_label("Flange")));
@@ -1588,14 +1615,14 @@ mod tests {
         let _english = scope("en");
         {
             let _japanese = scope("ja");
-            assert_eq!(tr("ui.preferences"), "環境設定");
+            assert_eq!(tr_by_id("ui.preferences"), "環境設定");
             {
                 let _nested = scope("en");
-                assert_eq!(tr("ui.preferences"), "Preferences");
+                assert_eq!(tr_by_id("ui.preferences"), "Preferences");
             }
-            assert_eq!(tr("ui.preferences"), "環境設定");
+            assert_eq!(tr_by_id("ui.preferences"), "環境設定");
         }
-        assert_eq!(tr("ui.preferences"), "Preferences");
+        assert_eq!(tr_by_id("ui.preferences"), "Preferences");
     }
 
     /// Every `.rs` file under `dir` except test modules (`*_tests.rs`, `tests.rs`).
@@ -1898,7 +1925,7 @@ mod tests {
         let label_file = code.contains("fntr(text:&str)->&str")
             || code.contains("lettr=crate::i18n::tr_label;")
             || code.contains("lettr=solidcraft_ui_text::tr_label;");
-        let id_file = ["usecrate::i18n::tr;", "lettr=crate::i18n::tr;", "usesolidcraft_ui_text::tr;", "lettr=solidcraft_ui_text::tr;"]
+        let id_file = ["usecrate::i18n::tr;", "lettr=crate::i18n::tr;", "usesolidcraft_ui_text::tr;", "lettr=solidcraft_ui_text::tr_by_id;"]
             .iter()
             .any(|pattern| code.contains(pattern))
             || imports_i18n_tr(&code);

@@ -460,13 +460,17 @@ pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     solidcraft_ui_registry::publish_handle(&format!("row:{handle}"), r.center());
     let tip = match hover_on {
         0 if action_hover => row.action.map(|(_, tip)| solidcraft_ui_text::tr_label(tip)),
-        1 => Some(if row.fold == Some(true) { solidcraft_ui_text::tr("ui.collapse") } else { solidcraft_ui_text::tr("ui.expand") }),
-        2 => Some(if row.eye == Some(true) { solidcraft_ui_text::tr("ui.hide") } else { solidcraft_ui_text::tr("ui.show") }),
+        1 => Some(if row.fold == Some(true) { solidcraft_ui_text::tr_by_id("ui.collapse") } else { solidcraft_ui_text::tr_by_id("ui.expand") }),
+        2 => Some(if row.eye == Some(true) { solidcraft_ui_text::tr_by_id("ui.hide") } else { solidcraft_ui_text::tr_by_id("ui.show") }),
         3 if !row.radio_hint.is_empty() => Some(row.radio_hint),
-        3 => Some(if row.radio == Some(true) { solidcraft_ui_text::tr("ui.active_component") } else { solidcraft_ui_text::tr("ui.activate") }),
+        3 => Some(if row.radio == Some(true) {
+            solidcraft_ui_text::tr_by_id("ui.active_component")
+        } else {
+            solidcraft_ui_text::tr_by_id("ui.activate")
+        }),
         _ => None,
     };
-    let state = row.kind_tip.map(solidcraft_ui_text::tr).or(row.tip);
+    let state = row.kind_tip.map(solidcraft_ui_text::tr_by_id).or(row.tip);
     let resp = match (tip, state) {
         // The eye at the row's end shows its tip there, not under the name.
         (Some(t), _) if hover_on == 2 && eye_end => {

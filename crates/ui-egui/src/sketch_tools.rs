@@ -8,7 +8,6 @@ use crate::icons::markers::glyph_icon;
 use crate::icons::markers::glyph_letter;
 use crate::ui_kit::BackingTooltipExt as _;
 use solidcraft_engine::geom::prelude::*;
-use solidcraft_ui_text::tr;
 use std::cell::{Cell, RefCell};
 
 use egui::{Pos2, Stroke};
@@ -251,7 +250,7 @@ fn next_measure(order: Continuity) -> Option<(&'static str, &'static str, &'stat
 fn continuity_label(app: &SolveApp, seam: &Value) -> String {
     let deg = |key: &str| seam[key]["value"].as_f64().map(|x| format!("{x:.3}\u{b0}")).unwrap_or_default();
     let order = seam["order"].as_str().and_then(Continuity::parse);
-    let class = solidcraft_ui_text::tr(order_class(order));
+    let class = solidcraft_ui_text::tr_by_id(order_class(order));
     match order {
         None => format!("{class} {}", seam["gap_mm"]["value"].as_f64().map(|g| crate::prefs::show_mm(app, g, 1)).unwrap_or_default()),
         Some(g) => {
@@ -348,12 +347,15 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         let Ok(v) = app.run(id, json!({})) else { return false };
         let summary = &v["summary"];
         // Each class in the legend's words, best first.
-        let gaps = summary["gap"].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", solidcraft_ui_text::tr(order_class(None))));
+        let gaps = summary["gap"].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", solidcraft_ui_text::tr_by_id(order_class(None))));
         let counts: Vec<String> = Continuity::ALL
             .into_iter()
             .rev()
             .filter_map(|g| {
-                summary["orders"][g.as_str()].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", solidcraft_ui_text::tr(order_class(Some(g)))))
+                summary["orders"][g.as_str()]
+                    .as_u64()
+                    .filter(|n| *n > 0)
+                    .map(|n| format!("{n} {}", solidcraft_ui_text::tr_by_id(order_class(Some(g)))))
             })
             .chain(gaps)
             .collect();
@@ -490,7 +492,7 @@ fn comb_options_card(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
     let available = crate::shell::workspace_content(app, crate::shell::content_rect(app, proj.rect));
     let width = tk.form_card_width.min(available.width() - 2.0 * tk.space_16).max(0.0);
     let mut options = comb_options();
-    let (length_tip, teeth_tip) = (app.tr("ui.comb_length_tip").to_string(), app.tr("ui.comb_teeth_tip").to_string());
+    let (length_tip, teeth_tip) = (tr!(app, "ui.comb_length_tip").to_string(), tr!(app, "ui.comb_teeth_tip").to_string());
     let shown = crate::ui_kit::Container::new(ctx, crate::ui_kit::Surface::Canvas)
         .area(egui::Id::unique("sc_comb_options"))
         .fixed_pos(available.left_top() + egui::vec2(tk.space_16, tk.space_16))
@@ -1023,11 +1025,11 @@ pub fn hint(id: &str) -> Option<String> {
             "inspect.center_of_mass" => "Center of mass of all bodies; click a body for its own",
             "inspect.isocurve" => "Isocurves: click faces",
             "inspect.continuity" => "Continuity: click an edge for its numbers (the button again turns the colours off)",
-            "canvas.insert" => solidcraft_ui_text::tr("canvas.place_hint"),
-            "canvas.decal" => solidcraft_ui_text::tr("canvas.decal_place_hint"),
-            "sketch.trim" => tr("sketch.hint.trim"),
-            "sketch.extend" => tr("sketch.hint.extend"),
-            "sketch.break" => tr("sketch.hint.break"),
+            "canvas.insert" => tr!("canvas.place_hint"),
+            "canvas.decal" => tr!("canvas.decal_place_hint"),
+            "sketch.trim" => tr!("sketch.hint.trim"),
+            "sketch.extend" => tr!("sketch.hint.extend"),
+            "sketch.break" => tr!("sketch.hint.break"),
             "sketch.line.midpoint" => "Midpoint line: click the middle, then an end",
             "sketch.arc.tangent" => "Tangent arc: click the end of a line or arc, then the arc's end",
             "sketch.ellipse" => "Ellipse: click the centre, the end of the major axis, then a point on it",
@@ -1077,11 +1079,11 @@ fn project_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, hits: &[Hit]) {
     } else if let Some(r) = hits.iter().find_map(|h| model_ref(app, h)) {
         vec![r]
     } else {
-        app.set_status(app.tr("sketch.project.nothing_under_cursor").to_string(), true);
+        app.set_status(tr!(app, "sketch.project.nothing_under_cursor").to_string(), true);
         return;
     };
     if refs.is_empty() {
-        app.set_status(app.tr("sketch.project.nothing_under_cursor").to_string(), true);
+        app.set_status(tr!(app, "sketch.project.nothing_under_cursor").to_string(), true);
         return;
     }
     // A command failure is already reported by `SolveApp::run`. A refusal that returns
@@ -1486,7 +1488,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                         }
                         tool.picks.clear();
                     } else {
-                        app.set_status(app.tr("ui.intersection_curve_second_pick").to_string(), false);
+                        app.set_status(tr!(app, "ui.intersection_curve_second_pick").to_string(), false);
                     }
                 }
             }

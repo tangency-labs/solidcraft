@@ -660,7 +660,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             Recording::MultipleKeys => {
                 app.keymap.capturing = None;
-                app.keymap.message = Some(app.tr("ui.shortcut_multiple_keys").to_string());
+                app.keymap.message = Some(tr!(app, "ui.shortcut_multiple_keys").to_string());
             }
             Recording::Complete(name) => {
                 app.keymap.capturing = None;
@@ -686,13 +686,13 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::scope(ui, |ui| {
         if !filtering {
             let t = solidcraft_theme::Tokens::get();
-            let edit_label = if app.keymap.read_only { app.tr_label("Edit shortcuts") } else { app.tr("install.done") };
+            let edit_label = if app.keymap.read_only { app.tr_label("Edit shortcuts") } else { tr!(app, "install.done") };
             let actions_width = ui_kit::ContentWidth::button(ui, edit_label)
-                + ui_kit::icon_label_width(ui, app.tr("prefs.profile_export"), Some("export_tray"), false)
+                + ui_kit::icon_label_width(ui, tr!(app, "prefs.profile_export"), Some("export_tray"), false)
                 + if app.keymap.read_only {
                     0.0
                 } else {
-                    ui_kit::icon_label_width(ui, app.tr("prefs.shortcuts_import"), Some("import_tray"), false) + t.space_8
+                    ui_kit::icon_label_width(ui, tr!(app, "prefs.shortcuts_import"), Some("import_tray"), false) + t.space_8
                 }
                 + t.space_8 * 2.0;
             ui.horizontal_wrapped(|ui| {
@@ -720,20 +720,20 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                         app.keymap.read_only = false;
                     }
                 } else {
-                    let done = ui_kit::button(ui, app.tr("install.done"), ui_kit::Button::Primary);
+                    let done = ui_kit::button(ui, tr!(app, "install.done"), ui_kit::Button::Primary);
                     crate::scenario::publish_target("keymap:done", done.rect);
                     if done.clicked() {
                         action = Some((String::new(), "done"));
                     }
                 }
-                let export = ui_kit::icon_label_button(ui, app.tr("prefs.profile_export"), "export_tray", true, false)
+                let export = ui_kit::icon_label_button(ui, tr!(app, "prefs.profile_export"), "export_tray", true, false)
                     .backing_on_hover_text(app.tr_label("Keys, S box favorites and the toolbar, as a file"));
                 crate::scenario::publish_target("keymap:export", export.rect);
                 if export.clicked() {
                     action = Some((String::new(), "export"));
                 }
                 if !app.keymap.read_only {
-                    let import = ui_kit::icon_label_button(ui, app.tr("prefs.shortcuts_import"), "import_tray", true, false);
+                    let import = ui_kit::icon_label_button(ui, tr!(app, "prefs.shortcuts_import"), "import_tray", true, false);
                     crate::scenario::publish_target("keymap:import", import.rect);
                     if import.clicked() {
                         action = Some((String::new(), "import"));
@@ -743,14 +743,14 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             if app.keymap.read_only {
                 ui_kit::text(ui, app.tr_label("Read-only list: shortcuts can't be changed here."), ui_kit::Text::Note("shortcut_read_only"));
             }
-            ui_kit::checkbox(ui, app.tr("ui.sketch_keys_only"), &mut app.preferences.sketch_keys_only)
-                .backing_on_hover_text(app.tr("ui.sketch_keys_only_tip"));
+            ui_kit::checkbox(ui, tr!(app, "ui.sketch_keys_only"), &mut app.preferences.sketch_keys_only)
+                .backing_on_hover_text(tr!(app, "ui.sketch_keys_only_tip"));
             if let Some(chosen) = outcome(app, ui) {
                 action = Some((String::new(), chosen));
             }
             if app.keymap.capturing.is_some() {
                 let hint = ctx.input(|input| app.keymap.recorder.hint(input));
-                ui_kit::text(ui, app.tr(hint), ui_kit::Text::Hint("shortcut_capture_state"));
+                ui_kit::text(ui, app.tr_by_id(hint), ui_kit::Text::Hint("shortcut_capture_state"));
             }
         }
         let q = if filtering { app.prefs_window.shell.filter.trim().to_lowercase() } else { app.keymap.filter.to_lowercase() };
@@ -797,7 +797,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 groups.push((group, vec![(c, keys, label)]));
             }
         }
-        let shortcut_title = app.tr("prefs.shortcuts").to_string();
+        let shortcut_title = tr!(app, "prefs.shortcuts").to_string();
         let mut paint = |ui: &mut egui::Ui| {
             if filtering {
                 if let Some(chosen) = outcome(app, ui) {
@@ -805,11 +805,11 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 if app.keymap.capturing.is_some() {
                     let hint = ctx.input(|input| app.keymap.recorder.hint(input));
-                    ui_kit::text(ui, app.tr(hint), ui_kit::Text::Hint("shortcut_capture_state"));
+                    ui_kit::text(ui, app.tr_by_id(hint), ui_kit::Text::Hint("shortcut_capture_state"));
                 }
             }
             if count == 0 {
-                ui_kit::text(ui, app.tr("keymap.empty"), ui_kit::Text::Hint("shortcuts_empty"));
+                ui_kit::text(ui, tr!(app, "keymap.empty"), ui_kit::Text::Hint("shortcuts_empty"));
             }
             for (group, rows) in &groups {
                 ui_kit::section_heading(ui, group);
@@ -926,10 +926,10 @@ fn shortcut_row(
     }
     for (slot, text, _) in &mut slots {
         if capturing && *slot == app.keymap.slot {
-            *text = app.keymap.recorder.preview().unwrap_or_else(|| app.tr("prefs.shortcuts_press").to_owned());
+            *text = app.keymap.recorder.preview().unwrap_or_else(|| tr!(app, "prefs.shortcuts_press").to_owned());
         }
     }
-    let unassigned = solidcraft_ui_text::tr("prefs.shortcuts_not_assigned");
+    let unassigned = tr!("prefs.shortcuts_not_assigned");
     let widths: Vec<f32> = slots
         .iter()
         .map(|(slot, text, assigned)| {
@@ -1071,11 +1071,7 @@ fn outcome(app: &SolveApp, ui: &mut egui::Ui) -> Option<&'static str> {
     }
     if let Some((_, key, _, _)) = app.keymap.conflict.clone() {
         ui.horizontal_wrapped(|ui| {
-            let replace = ui_kit::button(
-                ui,
-                solidcraft_ui_text::format("keymap.use_anyway", &[("key", &crate::ui_kit::chord_label(&key))]),
-                ui_kit::Button::Normal,
-            );
+            let replace = ui_kit::button(ui, tr!("keymap.use_anyway", key = &crate::ui_kit::chord_label(&key)), ui_kit::Button::Normal);
             crate::scenario::publish_target("keymap:replace", replace.rect);
             if replace.clicked() {
                 chosen = Some("replace");
@@ -1413,7 +1409,7 @@ mod tests {
         h.call("ui.key", json!({"key":"SuperLeft","pressed":false,"shift":true}));
         assert!(h.widget("Shift+…").is_some(), "remove released modifiers before an ordinary key");
         h.call("ui.key", json!({"key":"ShiftLeft","pressed":false}));
-        assert!(h.widget(h.app.tr("prefs.shortcuts_press")).is_some(), "the empty recorder explains the next step");
+        assert!(h.widget(h.app.tr_by_id("prefs.shortcuts_press")).is_some(), "the empty recorder explains the next step");
         assert_eq!(effective(&h.app, "solid.chamfer"), None);
         h.call("ui.key", json!({"key":"ShiftRight","pressed":true,"shift":true}));
         h.call("ui.key", json!({"key":"C","pressed":true,"shift":true}));
@@ -1913,7 +1909,7 @@ mod tests {
         // Nothing was started yet: Repeat says so and starts nothing.
         h.step(&json!({"key": "R", "shift": true})).unwrap();
         assert!(h.app.dialog.is_none() && h.app.tool.is_none());
-        assert_eq!(h.app.status.as_ref().map(|s| s.0.as_str()), Some(h.app.tr("ui.repeat_nothing")));
+        assert_eq!(h.app.status.as_ref().map(|s| s.0.as_str()), Some(h.app.tr_by_id("ui.repeat_nothing")));
         h.step(&json!({"start": "solid.box"})).unwrap();
         h.frames(2);
         assert!(h.app.dialog.is_some(), "Box opens its dialog");

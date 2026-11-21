@@ -72,7 +72,7 @@ pub(crate) fn message(part: &RefusedPart, operation: Option<&str>) -> String {
         Some("intersect") => "refused.intersect",
         _ => "refused.change",
     };
-    format!("{} {}", solidcraft_ui_text::format(what, &[("body", &part.body)]), solidcraft_ui_text::tr(why_key(part)))
+    format!("{} {}", solidcraft_ui_text::format(what, &[("body", &part.body)]), solidcraft_ui_text::tr_by_id(why_key(part)))
 }
 
 /// What is wrong with the part, as a sentence id.

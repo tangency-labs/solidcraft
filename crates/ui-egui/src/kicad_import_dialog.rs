@@ -72,7 +72,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let (closed, action) = crate::ui_kit::Window::new(egui::Id::unique("sc_kicad_import"), "import", solidcraft_ui_text::tr_label("Open KiCad PCB"))
         .cards(2.0)
         .fields()
-        .actions(solidcraft_ui_text::tr("ui.open"), solidcraft_ui_text::tr("ui.cancel"), None)
+        .actions(tr!("ui.open"), tr!("ui.cancel"), None)
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
         .show(ctx, dialog.problem().is_none(), |ui| {
             ui.label(solidcraft_ui_text::tr_label("Import options"));

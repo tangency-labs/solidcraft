@@ -82,7 +82,7 @@ pub fn line_type_switch(ui: &mut egui::Ui, t: &mut Tool) {
     let Some(length_box) = ui.ctx().memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))) else { return };
     let tokens = solidcraft_theme::Tokens::get();
     let has_length = typed_length(t).is_some();
-    let reason = solidcraft_ui_text::tr("ui.construction.normal_needs_length");
+    let reason = tr!("ui.construction.normal_needs_length");
     let refused = [Some(reason), Some(reason)];
     // The Sketch Palette's own line type names, which `segmented` translates.
     let options = ["Construction", "Normal"];
@@ -201,7 +201,7 @@ pub fn hint(id: &str) -> String {
         "bisector" => "ui.construction.bisector_hint",
         _ => "ui.construction.point_hint",
     };
-    solidcraft_ui_text::tr(key).to_owned()
+    solidcraft_ui_text::tr_by_id(key).to_owned()
 }
 
 fn arg(point: &(Vec2, Option<String>), preview: bool) -> Value {
@@ -327,7 +327,7 @@ pub fn place_point(app: &mut SolveApp, t: &mut Tool, at: (Vec2, Option<String>))
     if (matches!(mode, "free" | "angle" | "tangent_external") || picks_side) && t.pts.is_empty() {
         t.pts.push(at);
         if picks_side {
-            app.set_status(solidcraft_ui_text::tr("ui.construction.side_hint").to_owned(), false);
+            app.set_status(tr!("ui.construction.side_hint").to_owned(), false);
         }
         return;
     }

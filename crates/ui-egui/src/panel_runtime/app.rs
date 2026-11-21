@@ -578,7 +578,7 @@ impl AppPanelRuntime {
                     Ok(false) => return Ok(()),
                     Err(reason) => {
                         self.recover_unopened_window(&app.session, host, &section)?;
-                        app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
+                        app.set_status(solidcraft_ui_text::tr_by_id(super::workspace::rule_key(reason.rule)).to_owned(), true);
                         return Err(reason);
                     }
                     Ok(true) => {
@@ -1209,7 +1209,7 @@ pub(super) fn ensure_production(app: &mut crate::SolveApp) -> PanelResult<()> {
 
 pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
     if let Err(reason) = ensure_production(app) {
-        app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
+        app.set_status(solidcraft_ui_text::tr_by_id(super::workspace::rule_key(reason.rule)).to_owned(), true);
         if let Some(integration) = &mut app.panel_runtime {
             integration.last_error = Some(reason);
         }
@@ -1269,7 +1269,7 @@ pub(crate) fn show_desktop_windows(app: &mut crate::SolveApp, ctx: &egui::Contex
     let Some(mut integration) = app.panel_runtime.take() else { return };
     let enabled = !crate::ui_kit::Container::modal_input_blocked(ctx);
     if let Err(reason) = integration.show_desktop_windows(app, ctx, enabled) {
-        app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
+        app.set_status(solidcraft_ui_text::tr_by_id(super::workspace::rule_key(reason.rule)).to_owned(), true);
         integration.last_error = Some(reason);
     }
     app.panel_runtime = Some(integration);

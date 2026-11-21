@@ -31,7 +31,7 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
     // An assembly reading its links for a part edited in place takes them up when the read is
     // done: a save before then would record a design that is about to change as saved.
     if let Some(name) = crate::edit_in_place::refreshing_assembly(app) {
-        app.set_status(solidcraft_ui_text::format("ui.edit_in_place_save_waits", &[("name", &name)]), true);
+        app.set_status(tr!("ui.edit_in_place_save_waits", name = &name), true);
         return false;
     }
     // A save keeps print faces only when the user keeps them (#11512).
@@ -104,7 +104,7 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
     if cancelled {
         // Not an error: the file is as it was, and the design still has its changes to save.
         let name = solidcraft_ui_text::tr_label(crate::command_label(command)).to_string();
-        app.set_status(solidcraft_ui_text::format("operations.cancelled", &[("name", &name)]), false);
+        app.set_status(tr!("operations.cancelled", name = &name), false);
     } else {
         app.finish_command(command, &r);
         offer_container(app, &r);
@@ -278,7 +278,7 @@ mod tests {
         let shown = |h: &crate::scenario::Harness| {
             h.app.operations.rows(crate::operations::frame_ms(&h.ctx)).find(|(r, _)| r.key == "save:file.save_as").and_then(|(r, _)| r.status())
         };
-        assert_eq!(shown(&h), Some(solidcraft_ui_text::tr("operations.cancelling").to_string()), "drawn while it stops");
+        assert_eq!(shown(&h), Some(solidcraft_ui_text::tr_by_id("operations.cancelling").to_string()), "drawn while it stops");
         // The worker stops before replacing the file: cancelled, not an error, still unsaved.
         finish.send((h.app.session.scratch(), Err(format!("{}: save cancelled", path.display())), true)).unwrap();
         super::tick(&mut h.app, false);
@@ -288,7 +288,7 @@ mod tests {
         assert_eq!(listed["finished"][0]["outcome"], "cancelled", "{listed}");
         // Its row fades out saying it was cancelled, not still cancelling.
         h.frame();
-        assert_eq!(shown(&h), Some(solidcraft_ui_text::tr("operations.stopped").to_string()));
+        assert_eq!(shown(&h), Some(solidcraft_ui_text::tr_by_id("operations.stopped").to_string()));
     }
 
     /// A design holding binary data (here a plugin's file) can't be a plain JSON design: Save As

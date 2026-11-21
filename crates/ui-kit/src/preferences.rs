@@ -46,10 +46,10 @@ pub fn theme_option_notice(ui: &mut Ui, id: &str, text: &str, dismiss_label: &st
         let t = Tokens::get();
         let actions = super::ContentWidth::button(ui, dismiss_label)
             + t.space_8
-            + if can_undo { super::ContentWidth::button(ui, solidcraft_ui_text::tr("ui.undo")) + t.space_8 } else { 0.0 };
+            + if can_undo { super::ContentWidth::button(ui, solidcraft_ui_text::tr_by_id("ui.undo")) + t.space_8 } else { 0.0 };
         let mut draw_actions = |ui: &mut Ui| {
             if can_undo {
-                let response = super::text_button(ui, solidcraft_ui_text::tr("ui.undo"), true);
+                let response = super::text_button(ui, solidcraft_ui_text::tr_by_id("ui.undo"), true);
                 solidcraft_ui_registry::publish_target("prefs:theme_notice_undo:guard", response.rect);
                 undo = response.clicked();
             }

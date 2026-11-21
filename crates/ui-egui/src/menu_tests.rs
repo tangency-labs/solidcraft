@@ -918,7 +918,7 @@ fn modify_delete_with_nothing_selected_asks_for_a_pick() {
     app.run("select.clear", json!({})).unwrap();
     app.start("timeline.delete");
     let (message, _, error) = app.status.clone().expect("a hint");
-    assert!(!error && message == app.tr("ui.delete_select_first"), "{message:?} error: {error}");
+    assert!(!error && message == app.tr_by_id("ui.delete_select_first"), "{message:?} error: {error}");
     assert!(!message.contains('`'), "no parameter names: {message}");
     assert_eq!(app.session.doc.features.len(), n, "nothing deleted");
     app.run("select.set", json!({"items": [{"type": "plane", "name": "Plane1"}]})).unwrap();
@@ -1220,7 +1220,7 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     let items = context_menu::items(&app, &t);
     for label in ["Edit Canvas", "Calibrate", "Straighten", "Delete"] {
         let item = find(&items, label);
-        assert!(!item.enabled && item.tip.as_deref() == Some(solidcraft_ui_text::tr("browser.canvas_locked")), "{label}: {item:?}");
+        assert!(!item.enabled && item.tip.as_deref() == Some(solidcraft_ui_text::tr_by_id("browser.canvas_locked")), "{label}: {item:?}");
     }
     assert!(find(&items, "Show/Hide").enabled && find(&items, "Rename").enabled);
     app.tree.picked_canvases = vec![id];

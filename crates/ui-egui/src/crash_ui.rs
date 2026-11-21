@@ -37,7 +37,7 @@ impl CrashUi {
 }
 
 fn kind_label(kind: &str) -> &'static str {
-    solidcraft_ui_text::tr(match kind {
+    solidcraft_ui_text::tr_by_id(match kind {
         "command_panic" => "crash.kind_command",
         "kernel_panic_recovered" => "crash.kind_kernel",
         "unclean_exit" => "crash.kind_unclean",
@@ -48,7 +48,7 @@ fn kind_label(kind: &str) -> &'static str {
 fn report_time(r: &Summary) -> String {
     let time = r.time.replace('T', " ");
     let time = time.trim_end_matches('Z');
-    if r.kind == "unclean_exit" { solidcraft_ui_text::format("crash.detected_time", &[("time", time)]) } else { format!("{time} UTC") }
+    if r.kind == "unclean_exit" { tr!("crash.detected_time", time = time) } else { format!("{time} UTC") }
 }
 
 fn report_heading(r: &Summary) -> String {
@@ -67,7 +67,7 @@ pub fn announce(app: &mut SolveApp, fresh: &[Summary]) {
     app.crashes.open = true;
     app.crashes.refresh();
     let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
-    app.set_status(locale.text("crash.previous_session"), true);
+    app.set_status(tr!(locale, "crash.previous_session"), true);
 }
 
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
@@ -78,15 +78,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut delete: Option<Option<String>> = None;
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_crash_reports"), "bug_report", solidcraft_ui_text::tr_label("Crash Reports"))
         .cards(2.0)
-        .actions("", solidcraft_ui_text::tr("ui.close"), None)
+        .actions("", tr!("ui.close"), None)
         .show(ctx, true, |ui| {
             ui.spacing_mut().item_spacing.y = solidcraft_theme::Tokens::get().space_10;
-            let intro = ui_kit::text(ui, solidcraft_ui_text::tr("crash.intro"), ui_kit::Text::Hint("intro"));
+            let intro = ui_kit::text(ui, tr!("crash.intro"), ui_kit::Text::Hint("intro"));
             crate::scenario::publish_rect("dialog:note:intro", intro.rect);
             if let Some(d) = app.crashes.dir.clone() {
                 // A long path is cut short (hover shows it all): it must not widen the card.
                 ui_kit::path_chip(ui, &d, |ui| {
-                    if ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("crash.copy_folder"), "copy", true, false).clicked() {
+                    if ui_kit::icon_label_button(ui, tr!("crash.copy_folder"), "copy", true, false).clicked() {
                         ctx.copy_text(d.clone());
                     }
                 });
@@ -112,31 +112,27 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 ui.spacing_mut().item_spacing.y = solidcraft_theme::Tokens::get().space_6;
                                 ui.add_space(solidcraft_theme::Tokens::get().space_10);
                                 ui_kit::report_header(ui, kind_label(&r.kind), r.count, &report_time(r), &title, |ui| {
-                                    if ui_kit::bin_button(ui, solidcraft_ui_text::tr("ui.delete")).clicked() {
+                                    if ui_kit::bin_button(ui, tr!("ui.delete")).clicked() {
                                         delete = Some(Some(r.id.clone()));
                                     }
-                                    ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("crash.copy_path"), "copy", true, false)
+                                    ui_kit::icon_label_button(ui, tr!("crash.copy_path"), "copy", true, false)
                                         .clicked()
                                         .then(|| ctx.copy_text(r.path.clone()));
-                                    if ui_kit::icon_label_button(ui, solidcraft_ui_text::tr("crash.report"), "bug_report", true, false).clicked() {
+                                    if ui_kit::icon_label_button(ui, tr!("crash.report"), "bug_report", true, false).clicked() {
                                         report = Some(r.id.clone());
                                     }
                                 });
                                 let mut detail = r.command.clone().unwrap_or_default();
                                 if r.replayable {
                                     let sep = if detail.is_empty() { "" } else { " · " };
-                                    detail = format!("{detail}{sep}{}", solidcraft_ui_text::tr("crash.replayable"));
+                                    detail = format!("{detail}{sep}{}", tr!("crash.replayable"));
                                 }
                                 if !detail.is_empty() {
                                     ui_kit::text(ui, &detail, ui_kit::Text::MonoNote(&format!("detail:{}", r.id)));
                                 }
                                 ui_kit::text(ui, &r.message, ui_kit::Text::Report(&format!("message:{}", r.id), false));
                                 if r.kind == "unclean_exit" {
-                                    ui_kit::text(
-                                        ui,
-                                        solidcraft_ui_text::tr("crash.unclean_explanation"),
-                                        ui_kit::Text::Note(&format!("unclean:{}", r.id)),
-                                    );
+                                    ui_kit::text(ui, tr!("crash.unclean_explanation"), ui_kit::Text::Note(&format!("unclean:{}", r.id)));
                                 }
                                 ui.add_space(solidcraft_theme::Tokens::get().space_6);
                                 if index != last {
@@ -167,7 +163,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         && let Some(dir) = app.crashes.dir_path()
     {
         let n = crash::clear(&dir, which.as_deref());
-        app.crashes.note = solidcraft_ui_text::format("crash.deleted", &[("count", &n.to_string())]);
+        app.crashes.note = tr!("crash.deleted", count = &n.to_string());
         app.crashes.refresh();
     }
 }
@@ -222,7 +218,7 @@ mod tests {
         assert!(status.contains("detected at startup"), "{status}");
         assert!(h.widget("Detected 2026-10-12 16:23:41 UTC  Closed unexpectedly  ×2").is_some());
         assert!(h.widget(report["message"].as_str().unwrap()).is_some(), "keep the original session start visible");
-        assert!(h.widget(solidcraft_ui_text::tr("crash.unclean_explanation")).is_some());
+        assert!(h.widget(solidcraft_ui_text::tr_by_id("crash.unclean_explanation")).is_some());
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -240,7 +236,7 @@ mod tests {
         h.frames(6);
         assert!(h.app.crashes.open);
         assert!(h.widget("2026-10-12 16:23:41 UTC  Internal error in a command  ×2").is_some());
-        assert!(h.widget(solidcraft_ui_text::tr("crash.unclean_explanation")).is_none());
+        assert!(h.widget(solidcraft_ui_text::tr_by_id("crash.unclean_explanation")).is_none());
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -340,7 +336,7 @@ mod tests {
                     .unwrap()
                     .nodes
                     .iter()
-                    .filter(|(_, node)| node.role() == egui::accesskit::Role::Button && node.label() == Some(h.app.tr("prefs.crash_reports")))
+                    .filter(|(_, node)| node.role() == egui::accesskit::Role::Button && node.label() == Some(h.app.tr_by_id("prefs.crash_reports")))
                     .collect();
                 assert_eq!(buttons.len(), 1);
                 assert!(!buttons[0].1.is_disabled(), "opening reports stays available even at zero");

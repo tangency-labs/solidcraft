@@ -208,7 +208,7 @@ pub(super) fn ring_overlay(app: &mut SolveApp, ui: &mut egui::Ui, viewport: egui
         egui::Id::unique("render_environment_rotation"),
         ring.center + egui::vec2(0.0, ring.radius - t.control_height - t.space_8),
         egui::Align2::CENTER_BOTTOM,
-        |ui| ui_kit::text(ui, &format!("{angle:.0}°"), ui_kit::Text::Inline).backing_on_hover_text(app.tr("render.env_ring_help")),
+        |ui| ui_kit::text(ui, &format!("{angle:.0}°"), ui_kit::Text::Inline).backing_on_hover_text(tr!(app, "render.env_ring_help")),
     );
     crate::scenario::publish_target("render:environment:ring-degrees", chip.response.rect);
 }
@@ -216,7 +216,7 @@ pub(super) fn ring_overlay(app: &mut SolveApp, ui: &mut egui::Ui, viewport: egui
 pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::scope(ui, |ui| {
         source(app, ui);
-        let title = app.tr("render.environment.orientation").to_string();
+        let title = tr!(app, "render.environment.orientation").to_string();
         ui_kit::section(ui, "render_environment_orientation", &title, true, |ui| {
             let snapshot = setups::snapshot(app);
             let controls = environment_values(app);
@@ -224,7 +224,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui) {
             let (rotation, intensity, maximum, rotates) = controls.unwrap_or((0.0, 1.0, 100.0, false));
             ui.add_enabled_ui(valid, |ui| {
                 let mut request = None;
-                ui_kit::row(ui, app.tr("render.env_rotate"), |ui| {
+                ui_kit::row(ui, tr!(app, "render.env_rotate"), |ui| {
                     ui.add_enabled_ui(rotates, |ui| {
                         if let Some(value) = edit(app, ui, "rotation-slider", rotation, |ui, value| {
                             let response =
@@ -237,7 +237,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui) {
                         }
                     });
                 });
-                ui_kit::row(ui, app.tr("render.env_intensity"), |ui| {
+                ui_kit::row(ui, tr!(app, "render.env_intensity"), |ui| {
                     if let Some(value) = edit(app, ui, "intensity", intensity, |ui, value| {
                         let response =
                             ui_kit::slider(ui, value, 0.0..=maximum, ui_kit::Slider { format: |v| format!("{v:.2}"), ..Default::default() });
@@ -257,7 +257,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui) {
                 note(app, ui, "render.environment.rotation_hdr");
             }
             if !valid {
-                let reason = snapshot.err().unwrap_or_else(|| app.tr("render.env_choose_source").into());
+                let reason = snapshot.err().unwrap_or_else(|| tr!(app, "render.env_choose_source").into());
                 ui_kit::text(ui, &reason, ui_kit::Text::Note("render:environment:unavailable"));
             }
         });
@@ -275,7 +275,7 @@ pub(super) fn open_sources(app: &mut SolveApp) {
 }
 
 fn note(app: &SolveApp, ui: &mut egui::Ui, key: &str) {
-    ui_kit::text(ui, app.tr(key), ui_kit::Text::Note(key));
+    ui_kit::text(ui, app.tr_by_id(key), ui_kit::Text::Note(key));
 }
 
 pub(super) fn persist(app: &mut SolveApp) {
@@ -297,7 +297,7 @@ pub(super) fn persist(app: &mut SolveApp) {
 }
 
 fn source(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let title = app.tr("render.env_source").to_string();
+    let title = tr!(app, "render.env_source").to_string();
     ui_kit::section(ui, "render_environment_source", &title, true, |ui| {
         let method = app.render_workspace.view.method;
         let gpu = method == ImageMethod::GpuRaytrace;
@@ -331,29 +331,32 @@ fn source(app: &mut SolveApp, ui: &mut egui::Ui) {
             let name = source_name(app, ui.ctx());
             ui_kit::banner(ui, ui_kit::AssistantTone::Neutral, |ui| {
                 ui_kit::text(ui, &name, ui_kit::Text::NameCell(true));
-                let kind = app.tr(if gpu { "render.environment.builtin" } else { "render.environment.hdr_file" });
+                let kind = app.tr_by_id(if gpu { "render.environment.builtin" } else { "render.environment.hdr_file" });
                 let detail = hdr::metadata(app, target).map_or_else(|| kind.to_string(), |info| format!("{kind} · {} × {}", info.width, info.height));
                 ui_kit::text(ui, &detail, ui_kit::Text::Inline);
                 note(app, ui, "render.environment.embedded");
             });
         }
         let mut changed = false;
-        ui_kit::row(ui, app.tr("render.env_source"), |ui| {
+        ui_kit::row(ui, tr!(app, "render.env_source"), |ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let change = ui_kit::button(ui, app.tr("render.env_change"), ui_kit::Button::Normal);
+                let change = ui_kit::button(ui, tr!(app, "render.env_change"), ui_kit::Button::Normal);
                 crate::scenario::publish_target("render:environment:change", change.rect);
                 if change.clicked() {
                     open_sources(app);
                 }
 
                 ui.add_enabled_ui(method != ImageMethod::Raster, |ui| {
-                    let picker =
-                        ui_kit::dropdown_menu(ui, "render_environment_source_kind", app.tr(keys.get(selected).copied().unwrap_or(keys[0])), |ui| {
+                    let picker = ui_kit::dropdown_menu(
+                        ui,
+                        "render_environment_source_kind",
+                        app.tr_by_id(keys.get(selected).copied().unwrap_or(keys[0])),
+                        |ui| {
                             for (index, key) in keys.iter().enumerate() {
                                 let allowed = gpu || index != 4 || app.render_workspace.view.raytrace.path.is_some();
-                                let item = ui.add_enabled_ui(allowed, |ui| ui_kit::list_picker(ui, key, app.tr(key), index == selected)).inner;
+                                let item = ui.add_enabled_ui(allowed, |ui| ui_kit::list_picker(ui, key, app.tr_by_id(key), index == selected)).inner;
                                 crate::scenario::publish_target(&format!("render:environment:source:{index}"), item.rect);
-                                let item = if allowed { item } else { item.backing_on_hover_text(app.tr("render.cpu_celestial_path_required")) };
+                                let item = if allowed { item } else { item.backing_on_hover_text(tr!(app, "render.cpu_celestial_path_required")) };
                                 if item.clicked() {
                                     if index == 3 {
                                         open_sources(app);
@@ -383,7 +386,8 @@ fn source(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     ui.close();
                                 }
                             }
-                        });
+                        },
+                    );
                     crate::scenario::publish_target("render:environment:source", picker.rect);
                 });
             });
@@ -400,7 +404,7 @@ fn source(app: &mut SolveApp, ui: &mut egui::Ui) {
                     _ => gradient.ground,
                 }
                 .map(f64::from);
-                if ui_kit::row(ui, app.tr(key), |ui| ui_kit::linear_color_field(ui, &mut value, 1e6)).changed() {
+                if ui_kit::row(ui, app.tr_by_id(key), |ui| ui_kit::linear_color_field(ui, &mut value, 1e6)).changed() {
                     let gradient = if gpu { &mut app.render_workspace.view.studio.gradient } else { &mut app.render_workspace.view.cpu.gradient };
                     let field = match index {
                         0 => &mut gradient.zenith,
@@ -414,22 +418,20 @@ fn source(app: &mut SolveApp, ui: &mut egui::Ui) {
             note(app, ui, "render.environment.sky_note");
         } else if selected == 1 {
             let mut color = app.render_workspace.view.cpu.color;
-            if ui_kit::row(ui, app.tr("render.env_colour"), |ui| ui_kit::linear_color_field(ui, &mut color, 1.0)).changed() {
+            if ui_kit::row(ui, tr!(app, "render.env_colour"), |ui| ui_kit::linear_color_field(ui, &mut color, 1.0)).changed() {
                 app.render_workspace.view.cpu.color = color;
                 changed = true;
             }
             if method == ImageMethod::CpuRaytrace && app.render_workspace.view.raytrace.path.is_none() {
                 note(app, ui, "render.cpu_constant_direct_help");
                 let sampling = app.render_workspace.view.raytrace.progressive.unwrap_or_default();
-                let detail = solidcraft_ui_text::format(
+                let detail = tr!(
                     "render.cpu_constant_enable_indirect_plan",
-                    &[
-                        ("depth", &solidcraft_engine::render::job::CpuPathOptions::default().max_depth.to_string()),
-                        ("spp", &sampling.samples_per_pixel.to_string()),
-                        ("seed", &sampling.seed.to_string()),
-                    ],
+                    depth = &solidcraft_engine::render::job::CpuPathOptions::default().max_depth.to_string(),
+                    spp = &sampling.samples_per_pixel.to_string(),
+                    seed = &sampling.seed.to_string()
                 );
-                let action = ui_kit::button(ui, app.tr("render.cpu_volume_enable_path"), ui_kit::Button::Normal).backing_on_hover_text(detail);
+                let action = ui_kit::button(ui, tr!(app, "render.cpu_volume_enable_path"), ui_kit::Button::Normal).backing_on_hover_text(detail);
                 crate::scenario::publish_target("render:environment:enable-indirect", action.rect);
                 if action.clicked()
                     && let Err(error) = enable_indirect_lighting(app)
@@ -441,7 +443,7 @@ fn source(app: &mut SolveApp, ui: &mut egui::Ui) {
             let before = hdr::input(app, target).clone();
             hdr::controls(app, ui, target);
             changed |= &before != hdr::input(app, target);
-            let label = app.tr("render.environment.primaries").to_string();
+            let label = tr!(app, "render.environment.primaries").to_string();
             ui.add_enabled_ui(gpu, |ui| {
                 changed |= ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.assume_linear_srgb).changed();
             });
@@ -450,7 +452,7 @@ fn source(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             ui.add_enabled_ui(!gpu, |ui| {
                 let samples = app.render_workspace.view.cpu.samples;
-                ui_kit::row(ui, app.tr("render.environment.lighting_samples"), |ui| {
+                ui_kit::row(ui, tr!(app, "render.environment.lighting_samples"), |ui| {
                     ui_kit::dropdown_menu(ui, "render_environment_lighting_samples", &samples.to_string(), |ui| {
                         for count in [1, 4, 16, 64] {
                             if ui_kit::list_picker(ui, &count.to_string(), &count.to_string(), count == samples).clicked() {
@@ -534,7 +536,7 @@ fn wrapped_degrees(radians: f64) -> f64 {
 }
 
 pub(super) fn commit_environment(app: &mut SolveApp, mut request: Value) -> Result<(), String> {
-    let fields = request.as_object_mut().ok_or_else(|| app.tr("render.env_invalid_edit").to_string())?;
+    let fields = request.as_object_mut().ok_or_else(|| tr!(app, "render.env_invalid_edit").to_string())?;
     fields.insert("name".into(), json!(app.render_workspace.view.name));
     let mut setup = serde_json::to_value(setups::snapshot(app)?).map_err(|error| error.to_string())?;
     if let Some(fields) = setup.as_object_mut() {
@@ -612,7 +614,7 @@ fn edit<T: Clone + PartialEq + Send + Sync + 'static>(
 
 fn backdrop(app: &mut SolveApp, ui: &mut egui::Ui) {
     use solidcraft_engine::render::job::finishing::BackdropMode;
-    let title = app.tr("render.env_backdrop").to_string();
+    let title = tr!(app, "render.env_backdrop").to_string();
     ui_kit::section(ui, "render_environment_backdrop", &title, true, |ui| {
         let raytrace = app.render_workspace.view.method != ImageMethod::Raster;
         let mut mode = if app.render_workspace.view.transparent {
@@ -626,7 +628,12 @@ fn backdrop(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::segmented(
             ui,
             &mut mode,
-            &[app.tr("render.environment.world"), app.tr("render.env_colour"), app.tr("render.environment.gradient"), app.tr("render.env_clear")],
+            &[
+                tr!(app, "render.environment.world"),
+                tr!(app, "render.env_colour"),
+                tr!(app, "render.environment.gradient"),
+                tr!(app, "render.env_clear"),
+            ],
             ui_kit::Segments {
                 enabled: &[false, true, raytrace && !app.render_workspace.view.transparent, true],
                 targets: &["render:environment:world", "render:environment:colour", "render:environment:gradient", "render:environment:clear"],
@@ -634,7 +641,7 @@ fn backdrop(app: &mut SolveApp, ui: &mut egui::Ui) {
             },
         );
         if mode == 2 && !raytrace {
-            app.set_status(app.tr("render.output_raytrace_only").to_string(), true);
+            app.set_status(tr!(app, "render.output_raytrace_only").to_string(), true);
             mode = before_mode;
         }
         if mode != before_mode {
@@ -649,7 +656,7 @@ fn backdrop(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         if mode == 1 {
             let color = edit(app, ui, "backdrop-colour", app.render_workspace.view.draft.background, |ui, value| {
-                ui_kit::row(ui, app.tr("render.env_colour"), |ui| {
+                ui_kit::row(ui, tr!(app, "render.env_colour"), |ui| {
                     let response = ui_kit::color_field(ui, value);
                     crate::scenario::publish_target("render:environment:backdrop-colour", response.rect);
                     response
@@ -670,11 +677,11 @@ fn backdrop(app: &mut SolveApp, ui: &mut egui::Ui) {
                     BackdropMode::Horizontal => 1,
                     BackdropMode::Radial => 2,
                 };
-                changed |= ui_kit::row(ui, app.tr("render.environment.mode"), |ui| {
+                changed |= ui_kit::row(ui, tr!(app, "render.environment.mode"), |ui| {
                     ui_kit::segmented(
                         ui,
                         &mut mode,
-                        &[app.tr("render.environment.vertical"), app.tr("render.environment.horizontal"), app.tr("render.environment.radial")],
+                        &[tr!(app, "render.environment.vertical"), tr!(app, "render.environment.horizontal"), tr!(app, "render.environment.radial")],
                         Default::default(),
                     )
                 });
@@ -684,7 +691,9 @@ fn backdrop(app: &mut SolveApp, ui: &mut egui::Ui) {
                     _ => BackdropMode::Vertical,
                 };
                 for (key, value) in [("render.environment.start", &mut gradient.first_srgb), ("render.environment.end", &mut gradient.second_srgb)] {
-                    if let Some(color) = edit(app, ui, key, *value, |ui, value| ui_kit::row(ui, app.tr(key), |ui| ui_kit::color_field(ui, value))) {
+                    if let Some(color) =
+                        edit(app, ui, key, *value, |ui, value| ui_kit::row(ui, app.tr_by_id(key), |ui| ui_kit::color_field(ui, value)))
+                    {
                         *value = color;
                         changed = true;
                     }
@@ -693,7 +702,7 @@ fn backdrop(app: &mut SolveApp, ui: &mut egui::Ui) {
                     for (index, key) in [(0, "render.backdrop_x"), (1, "render.backdrop_y")] {
                         if let Some(value) = gradient.center.get_mut(index)
                             && let Some(number) = edit(app, ui, key, *value, |ui, value| {
-                                ui_kit::row(ui, app.tr(key), |ui| ui_kit::number_field(ui, value, 0.0..=1.0, 0.01, ""))
+                                ui_kit::row(ui, app.tr_by_id(key), |ui| ui_kit::number_field(ui, value, 0.0..=1.0, 0.01, ""))
                             })
                         {
                             *value = number;
@@ -701,7 +710,7 @@ fn backdrop(app: &mut SolveApp, ui: &mut egui::Ui) {
                         }
                     }
                     if let Some(number) = edit(app, ui, "gradient-radius", gradient.radius, |ui, value| {
-                        ui_kit::row(ui, app.tr("render.backdrop_radius"), |ui| ui_kit::number_field(ui, value, 0.05..=4.0, 0.01, ""))
+                        ui_kit::row(ui, tr!(app, "render.backdrop_radius"), |ui| ui_kit::number_field(ui, value, 0.05..=4.0, 0.01, ""))
                     }) {
                         gradient.radius = number;
                         changed = true;
@@ -716,7 +725,7 @@ fn backdrop(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
         ui.add_enabled_ui(false, |ui| {
-            ui_kit::row(ui, app.tr("render.env_blur"), |ui| {
+            ui_kit::row(ui, tr!(app, "render.env_blur"), |ui| {
                 ui_kit::slider(ui, &mut 0.0, 0.0..=100.0, ui_kit::Slider { format: |v| format!("{v:.0} %"), ..Default::default() })
             });
         });
@@ -740,7 +749,7 @@ pub(super) fn commit_gradient(
         Some(RenderJob::CpuRaytrace { options, .. }) => {
             options.output.get_or_insert_with(Box::default).backdrop = enabled.then_some(gradient);
         }
-        _ => return Err(app.tr("render.output_raytrace_only").into()),
+        _ => return Err(tr!(app, "render.output_raytrace_only").into()),
     }
     save(app, setup)
 }
@@ -822,11 +831,11 @@ pub(super) fn stage_confirmation(app: &mut SolveApp, ctx: &egui::Context) {
         ctx.data_mut(|data| data.remove::<StageRemoval>(id));
         return;
     }
-    let title = app.tr("render.environment.remove_confirm").to_string();
-    let remove = app.tr("render.environment.remove").to_string();
-    let cancel = app.tr("render.environment.keep").to_string();
+    let title = tr!(app, "render.environment.remove_confirm").to_string();
+    let remove = tr!(app, "render.environment.remove").to_string();
+    let cancel = tr!(app, "render.environment.keep").to_string();
     let detail = solidcraft_ui_text::Locale::for_language(&app.preferences.language)
-        .format("render.environment.remove_note", &[("count", &pending.set.stage.len().to_string())]);
+        .fill(msg!("render.environment.remove_note", count = &pending.set.stage.len().to_string()));
     let (closed, action) =
         ui_kit::Confirm::new(id, "delete", &title).tone(ui_kit::Tone::Danger).actions(&remove, &cancel, None).show(ctx, true, |ui| {
             ui_kit::text(ui, &detail, ui_kit::Text::Note("render.environment.remove_note"));
@@ -843,7 +852,7 @@ pub(super) fn stage_confirmation(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 fn ground(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let title = app.tr("render.environment.ground").to_string();
+    let title = tr!(app, "render.environment.ground").to_string();
     ui_kit::section(ui, "render_environment_ground", &title, true, |ui| {
         let snapshot = setups::snapshot(app);
         let id = ui.scope_id().with(("ground-form", Arc::as_ptr(&app.session.doc), app.session.revision, &app.render_workspace.view.name));
@@ -857,15 +866,15 @@ fn ground(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ("render.environment.margin", &mut form.value.margin, 0.0..=10.0, 0.05, "×"),
                 ("render.environment.gap", &mut form.value.gap, 0.0001..=1000.0, 0.01, " mm"),
             ] {
-                ui_kit::row(ui, app.tr(key), |ui| ui_kit::number_field(ui, value, range, speed, unit));
+                ui_kit::row(ui, app.tr_by_id(key), |ui| ui_kit::number_field(ui, value, range, speed, unit));
             }
-            vector_row(ui, app.tr("render.environment.reflectance"), &mut form.value.color, 0.0..=1.0, 0.01, "");
-            ui_kit::checkbox(ui, app.tr("render.environment.replace"), &mut form.replace);
+            vector_row(ui, tr!(app, "render.environment.reflectance"), &mut form.value.color, 0.0..=1.0, 0.01, "");
+            ui_kit::checkbox(ui, tr!(app, "render.environment.replace"), &mut form.replace);
             let ready = snapshot.as_ref().is_ok_and(|set| set.stage.is_empty() || form.replace);
             let fit = ui
                 .add_enabled_ui(ready, |ui| {
                     ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
-                        ui_kit::button(ui, app.tr("render.environment.fit"), ui_kit::Button::Primary)
+                        ui_kit::button(ui, tr!(app, "render.environment.fit"), ui_kit::Button::Primary)
                     })
                     .inner
                 })
@@ -878,7 +887,7 @@ fn ground(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             ui.horizontal(|ui| {
                 for (kind, key) in [("floor_wall", "render.environment.floor_wall"), ("cyclorama", "render.environment.cyclorama")] {
-                    if ui_kit::button(ui, app.tr(key), ui_kit::Button::Enabled(ready)).clicked()
+                    if ui_kit::button(ui, app.tr_by_id(key), ui_kit::Button::Enabled(ready)).clicked()
                         && let Ok(set) = &snapshot
                     {
                         let request = json!({"name":app.render_workspace.view.name,"set":set,"kind":kind,"expected_revision":app.session.revision,
@@ -899,10 +908,10 @@ fn ground(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui_kit::text(
                 ui,
                 &solidcraft_ui_text::Locale::for_language(&app.preferences.language)
-                    .format("render.environment.saved_panels", &[("count", &count.to_string())]),
+                    .fill(msg!("render.environment.saved_panels", count = &count.to_string())),
                 ui_kit::Text::Inline,
             );
-            let remove = ui_kit::icon_label_button(ui, app.tr("render.environment.remove"), "delete", count > 0 && snapshot.is_ok(), true);
+            let remove = ui_kit::icon_label_button(ui, tr!(app, "render.environment.remove"), "delete", count > 0 && snapshot.is_ok(), true);
             crate::scenario::publish_target("render:stage-clear", remove.rect);
             if remove.clicked() {
                 request_stage_removal(app, ui.ctx());
@@ -943,29 +952,29 @@ fn validate_volume_value(app: &SolveApp, value: Option<solidcraft_engine::render
     let Some(volume) = value else { return Ok(()) };
     volume.validate().map_err(|error| error.to_string())?;
     if view.method == ImageMethod::Raster {
-        return Err(app.tr("render.output_raytrace_only").into());
+        return Err(tr!(app, "render.output_raytrace_only").into());
     }
     if !volume.active() {
         return Ok(());
     }
     if view.method == ImageMethod::CpuRaytrace && view.raytrace.path.is_none() {
-        return Err(app.tr("render.cpu_volume_path_required").into());
+        return Err(tr!(app, "render.cpu_volume_path_required").into());
     }
     if view.studio.denoise {
-        return Err(app.tr("render.volume_denoise_required").into());
+        return Err(tr!(app, "render.volume_denoise_required").into());
     }
     if !view.draft.optics.is_empty()
         || (view.method == ImageMethod::CpuRaytrace && !view.raytrace.dielectrics.is_empty())
         || (view.materials.enabled && view.materials.bindings.iter().any(|binding| binding.enabled && binding.glass_enabled))
     {
-        return Err(app.tr("render.volume_glass_required").into());
+        return Err(tr!(app, "render.volume_glass_required").into());
     }
     if view.method == ImageMethod::GpuRaytrace {
         if view.studio.transmission_samples != 1 {
-            return Err(app.tr("render.volume_single_stratum_required").into());
+            return Err(tr!(app, "render.volume_single_stratum_required").into());
         }
         if !view.studio.lighting_enabled && view.studio.environment == studio::Environment::None {
-            return Err(app.tr("render.volume_lighting_required").into());
+            return Err(tr!(app, "render.volume_lighting_required").into());
         }
         volume.relative_bounds([app.cam.target.x, app.cam.target.y, app.cam.target.z]).map_err(|error| error.to_string())?;
     }
@@ -976,10 +985,10 @@ fn validate_volume_value(app: &SolveApp, value: Option<solidcraft_engine::render
 /// Corrective removal never needs an invalid previous volume to validate.
 pub(super) fn commit_atmosphere(app: &mut SolveApp, volume: Option<solidcraft_engine::render::job::volume::HomogeneousVolume>) -> Result<(), String> {
     if app.render_workspace.view.method == ImageMethod::Raster {
-        return Err(app.tr("render.output_raytrace_only").into());
+        return Err(tr!(app, "render.output_raytrace_only").into());
     }
     if setups::has_unportable_bindings(app) {
-        return Err(app.tr("render.setup_runtime_unsupported").into());
+        return Err(tr!(app, "render.setup_runtime_unsupported").into());
     }
     let before = setups::draft(app)?;
     let source = Arc::downgrade(&app.session.doc.render);
@@ -999,10 +1008,10 @@ pub(super) fn commit_atmosphere(app: &mut SolveApp, volume: Option<solidcraft_en
 /// Every authored field is retained unless this action names its transport change.
 pub(super) fn enable_indirect_lighting(app: &mut SolveApp) -> Result<(), String> {
     if app.render_workspace.view.method != ImageMethod::CpuRaytrace {
-        return Err(app.tr("render.cpu_indirect_method_required").into());
+        return Err(tr!(app, "render.cpu_indirect_method_required").into());
     }
     if setups::has_unportable_bindings(app) {
-        return Err(app.tr("render.setup_runtime_unsupported").into());
+        return Err(tr!(app, "render.setup_runtime_unsupported").into());
     }
     let before = setups::draft(app)?;
     let source = Arc::downgrade(&app.session.doc.render);
@@ -1040,7 +1049,7 @@ fn volume_vector_row(
 ) -> Option<[f64; 3]> {
     let mut value = current;
     let mut changed = false;
-    ui_kit::row(ui, app.tr(key), |ui| {
+    ui_kit::row(ui, app.tr_by_id(key), |ui| {
         ui.columns(3, |columns| {
             for (index, (ui, component)) in columns.iter_mut().zip(current).enumerate() {
                 let width = ui.available_width().max(0.0);
@@ -1063,7 +1072,7 @@ fn volume_vector_row(
 
 /// One common authoring surface; CPU/GPU preserve the same world-mm box intent.
 pub(super) fn atmosphere(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let title = app.tr("render.environment.atmosphere").to_string();
+    let title = tr!(app, "render.environment.atmosphere").to_string();
     ui_kit::section_method(ui, "render_environment_atmosphere", &title, true, "CPU / GPU", |ui| {
         let method = app.render_workspace.view.method;
         let before = app.render_workspace.view.studio.volume;
@@ -1077,7 +1086,7 @@ pub(super) fn atmosphere(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui.add_enabled_ui(supported, |ui| {
             let toggle = ui
                 .add_enabled_ui(before.is_some() || prospective_reason.is_none(), |ui| {
-                    ui_kit::checkbox(ui, app.tr("render.environment.medium"), &mut enabled)
+                    ui_kit::checkbox(ui, tr!(app, "render.environment.medium"), &mut enabled)
                 })
                 .inner;
             let toggle = if let Some(reason) = &prospective_reason { toggle.backing_on_disabled_hover_text(reason) } else { toggle };
@@ -1093,7 +1102,7 @@ pub(super) fn atmosphere(app: &mut SolveApp, ui: &mut egui::Ui) {
                     changed = true;
                 }
                 if let Some(value) = edit(app, ui, "volume-extinction", volume.extinction_per_mm, |ui, value| {
-                    ui_kit::row(ui, app.tr("render.environment.extinction"), |ui| {
+                    ui_kit::row(ui, tr!(app, "render.environment.extinction"), |ui| {
                         let response = ui_kit::number_field_preserving(ui, value, 0.0..=1000.0, 0.0001, " /mm");
                         crate::scenario::publish_target("render:volume:extinction", response.rect);
                         response
@@ -1107,7 +1116,7 @@ pub(super) fn atmosphere(app: &mut SolveApp, ui: &mut egui::Ui) {
                     changed = true;
                 }
                 if let Some(value) = edit(app, ui, "volume-anisotropy", volume.anisotropy, |ui, value| {
-                    ui_kit::row(ui, app.tr("render.environment.phase"), |ui| {
+                    ui_kit::row(ui, tr!(app, "render.environment.phase"), |ui| {
                         let response = ui_kit::number_field_preserving(ui, value, -0.95..=0.95, 0.01, "");
                         crate::scenario::publish_target("render:volume:anisotropy", response.rect);
                         response
@@ -1125,15 +1134,13 @@ pub(super) fn atmosphere(app: &mut SolveApp, ui: &mut egui::Ui) {
             note(app, ui, "render.cpu_volume_help");
             if !path {
                 let sampling = app.render_workspace.view.raytrace.progressive.unwrap_or_default();
-                let detail = solidcraft_ui_text::format(
+                let detail = tr!(
                     "render.cpu_volume_enable_path_plan",
-                    &[
-                        ("depth", &solidcraft_engine::render::job::CpuPathOptions::default().max_depth.to_string()),
-                        ("spp", &sampling.samples_per_pixel.to_string()),
-                        ("seed", &sampling.seed.to_string()),
-                    ],
+                    depth = &solidcraft_engine::render::job::CpuPathOptions::default().max_depth.to_string(),
+                    spp = &sampling.samples_per_pixel.to_string(),
+                    seed = &sampling.seed.to_string()
                 );
-                let action = ui_kit::button(ui, app.tr("render.cpu_volume_enable_path"), ui_kit::Button::Normal).backing_on_hover_text(detail);
+                let action = ui_kit::button(ui, tr!(app, "render.cpu_volume_enable_path"), ui_kit::Button::Normal).backing_on_hover_text(detail);
                 crate::scenario::publish_target("render:volume-enable-path", action.rect);
                 if action.clicked()
                     && let Err(error) = enable_indirect_lighting(app)

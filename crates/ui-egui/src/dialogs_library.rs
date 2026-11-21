@@ -267,7 +267,7 @@ fn import_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &[SelI
         {
             ui_kit::text(
                 ui,
-                &format!("{}: {} g/cm³", solidcraft_ui_text::tr("material.editor.assigned_density"), material.density_g_cm3),
+                &format!("{}: {} g/cm³", tr!("material.editor.assigned_density"), material.density_g_cm3),
                 ui_kit::Text::Report("library_material_density", false),
             );
             if let Some(card) = &material.physical_card {

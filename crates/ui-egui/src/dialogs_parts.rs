@@ -58,7 +58,7 @@ pub fn families(v: &Value) -> Vec<Family> {
 /// name for a family the catalogs don't know.
 pub(crate) fn family_name(f: &Family) -> String {
     let id = format!("parts.family.{}", f.id);
-    match solidcraft_ui_text::tr(&id) {
+    match solidcraft_ui_text::tr_by_id(&id) {
         shown if shown == id => f.name.clone(),
         shown => shown.to_string(),
     }
@@ -226,7 +226,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
             k.length = Some(i);
         });
     }
-    text_row(ui, "Name", &mut k.name, solidcraft_ui_text::tr("parts.automatic_name"));
+    text_row(ui, "Name", &mut k.name, tr!("parts.automatic_name"));
     // The part, and its table values.
     let key = (k.family, k.size, k.length);
     let tex_id = egui::Id::unique("sc_part_picture");
@@ -268,7 +268,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
     }
     if inputs.first().is_some_and(|i| i.items.is_empty()) {
         ui.vertical(|ui| {
-            crate::ui_kit::text(ui, solidcraft_ui_text::tr("parts.placement_hint"), crate::ui_kit::Text::Note("parts_placement"));
+            crate::ui_kit::text(ui, tr!("parts.placement_hint"), crate::ui_kit::Text::Note("parts_placement"));
         });
     }
     false
@@ -421,7 +421,7 @@ mod tests {
         for f in &l {
             for (size, row) in &f.sizes {
                 for key in row.as_object().into_iter().flat_map(|o| o.keys()).filter(|k| !matches!(k.as_str(), "size" | "default_length")) {
-                    let label = dimension_label(key).map(solidcraft_ui_text::tr);
+                    let label = dimension_label(key).map(solidcraft_ui_text::tr_by_id);
                     assert!(
                         label.is_some_and(|l| l.starts_with(char::is_uppercase) && !l.contains('_') && !l.starts_with("parts.")),
                         "{} {size}: {key} is labelled {label:?}",

@@ -46,6 +46,9 @@ pub const TABLE: &[(&str, Class)] = &[
     ("space-mouse", Class::Layer(0)),
     // the derive macros (proc-macro, no workspace dependencies)
     ("derive", Class::Standalone),
+    // `msg!`: message ids checked against the English catalog at compile time (proc-macro, no
+    // workspace dependencies)
+    ("ui-text-macros", Class::Standalone),
     // the 3Dconnexion driver's client API on macOS (no workspace dependencies)
     ("3dx-client", Class::Standalone),
     // the profiler: timed spans for every layer, the kernel's calls to commands (no workspace dependencies)

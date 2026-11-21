@@ -143,8 +143,8 @@ impl Policy {
     /// "Managed by {name}", or "Managed by your organization" without a name; None when unmanaged.
     pub fn managed_by(&self) -> Option<String> {
         self.managed().then(|| match self.organization() {
-            Some(name) => solidcraft_ui_text::format("policy.managed_by", &[("name", name)]),
-            None => solidcraft_ui_text::tr("policy.managed").to_string(),
+            Some(name) => tr!("policy.managed_by", name = name),
+            None => tr!("policy.managed").to_string(),
         })
     }
 
@@ -198,9 +198,9 @@ const TAB_ROOM: f32 = 140.0;
 pub fn badge(app: &mut SolveApp, ui: &mut egui::Ui, span: egui::Rect, labeled: bool) -> Option<egui::Rect> {
     use crate::ui_kit::BackingTooltipExt as _;
     let full = app.policy.managed_by()?;
-    let labels = [full.as_str(), solidcraft_ui_text::tr("policy.managed_short")];
+    let labels = [full.as_str(), tr!("policy.managed_short")];
     let (rect, response) = crate::toolbar::offer_pill(ui, span, labeled, &labels, TAB_ROOM, "briefcase", "titlebar:managed", true)?;
-    let tip = format!("{full}\n{}", solidcraft_ui_text::tr("policy.managed_tip"));
+    let tip = format!("{full}\n{}", tr!("policy.managed_tip"));
     if response.backing_on_hover_text(tip).clicked() {
         crate::prefs::open_at(app, 0);
     }

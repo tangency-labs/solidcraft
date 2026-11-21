@@ -1696,7 +1696,7 @@ pub(crate) fn open_tab_behind(app: &mut SolveApp, session: Session) -> Result<()
 /// Open `session` in a new tab after the active one and switch to it (`fit`: frame its model).
 pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
     if app.docs.group.is_some() {
-        return Err(app.tr("document.finish_save_prompt").to_owned());
+        return Err(tr!(app, "document.finish_save_prompt").to_owned());
     }
     if app.docs.slots.is_empty() {
         app.docs.slots.push(None);
@@ -2232,7 +2232,7 @@ fn tab_place(path: Option<&str>, dirty: bool, security: Option<&str>) -> String 
     let mut place = path.map_or_else(|| solidcraft_ui_text::tr_label("Not saved yet").to_string(), crate::home::friendly_path);
     if dirty && path.is_some() {
         place.push('\n');
-        place.push_str(solidcraft_ui_text::tr("document.tab_unsaved_changes"));
+        place.push_str(tr!("document.tab_unsaved_changes"));
     }
     if let Some(security) = security {
         place.push('\n');
@@ -2260,13 +2260,13 @@ fn tab_security(app: &SolveApp) -> Vec<Option<String>> {
         .map(|session| {
             if let Some(report) = &session.provenance {
                 if session.is_dirty() {
-                    return Some(solidcraft_ui_text::tr("ui.open_signature_changed").to_string());
+                    return Some(tr!("ui.open_signature_changed").to_string());
                 }
                 let trusted = report.newest().is_some_and(|record| signer_trusted(app, record));
                 return Some(signature_line(report, trusted));
             }
             let signed = session.provenance_chain.as_ref().is_some_and(|chain| !chain.records.is_empty());
-            signed.then(|| solidcraft_ui_text::tr("ui.open_signature_unverified").to_string())
+            signed.then(|| tr!("ui.open_signature_unverified").to_string())
         })
         .collect()
 }
@@ -2328,17 +2328,17 @@ pub(crate) fn signature_line(report: &solidcraft_engine::io::ProvenanceReport, t
         solidcraft_engine::io::ProvenanceStatus::Valid => match (trusted, report.newest()) {
             (true, Some(record)) => {
                 let key = signer_name(record);
-                solidcraft_ui_text::format("ui.open_signature_valid", &[("key", &key)])
+                tr!("ui.open_signature_valid", key = &key)
             }
             (_, Some(record)) => {
                 let fingerprint = record.signer.fingerprint();
-                solidcraft_ui_text::format("ui.open_signature_valid_untrusted", &[("key", &fingerprint)])
+                tr!("ui.open_signature_valid_untrusted", key = &fingerprint)
             }
-            _ => solidcraft_ui_text::tr("ui.open_signature_unverified").to_string(),
+            _ => tr!("ui.open_signature_unverified").to_string(),
         },
-        solidcraft_engine::io::ProvenanceStatus::NotCovered => solidcraft_ui_text::tr("ui.open_signature_not_covered").to_string(),
-        solidcraft_engine::io::ProvenanceStatus::Invalid(why) => solidcraft_ui_text::format("ui.open_signature_invalid", &[("reason", why)]),
-        solidcraft_engine::io::ProvenanceStatus::Unsupported(_) => solidcraft_ui_text::tr("ui.open_signature_unsupported").to_string(),
+        solidcraft_engine::io::ProvenanceStatus::NotCovered => tr!("ui.open_signature_not_covered").to_string(),
+        solidcraft_engine::io::ProvenanceStatus::Invalid(why) => tr!("ui.open_signature_invalid", reason = why),
+        solidcraft_engine::io::ProvenanceStatus::Unsupported(_) => tr!("ui.open_signature_unsupported").to_string(),
     }
 }
 
@@ -2529,7 +2529,7 @@ fn kind_word(kind: ViewKind) -> &'static str {
 
 /// A view's hover text: "Sketch 2 · Design workspace · Alt+2" (the key for the first nine views).
 fn view_tip(view: &DesignView, place: usize) -> String {
-    let workspace = solidcraft_ui_text::tr(match view.kind {
+    let workspace = solidcraft_ui_text::tr_by_id(match view.kind {
         ViewKind::Model | ViewKind::Sketch => "tab_strip.workspace_design",
         ViewKind::Sheet => "tab_strip.workspace_drawing",
         ViewKind::Render => "tab_strip.workspace_render",
@@ -2605,7 +2605,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let mut rename = app.menu.rename.take();
     let renaming = renaming_tab_state(rename.as_ref());
     crate::view_windows::remember_strip_order(app);
-    let new_tip = app.tr("ui.start_page").to_string();
+    let new_tip = tr!(app, "ui.start_page").to_string();
     let views_as_tabs = child || DesignTabPrefs::from(&app.preferences).views_as_tabs || !app.docs.views.windows().is_empty();
     let current_window = app.view_windows.current_window();
     let design_views: Vec<Vec<_>> = (0..n)
@@ -2642,7 +2642,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                     if let Some(other) = other.filter(|_| app.preferences.clear_view_tabs) {
                         locale.format("view_tab.elsewhere", &[("view", &view.name), ("window", &other.name)])
                     } else if window.is_some() {
-                        format!("{} · {}", view.name, app.tr("multi_window.window_mark"))
+                        format!("{} · {}", view.name, tr!(app, "multi_window.window_mark"))
                     } else {
                         let tip = view_tip(view, local_place);
                         local_place += 1;
@@ -2666,7 +2666,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 .collect()
         })
         .collect();
-    let more_text = solidcraft_ui_text::tr("tab_strip.more");
+    let more_text = template!("tab_strip.more");
     let plus_menu = crate::design_view_ui::plus_menu(solidcraft_theme::is_dark());
     let window_entries = crate::design_view_ui::window_menu_entries(app);
     let window_rows = crate::design_view_ui::window_menu_rows(app, &window_entries);
@@ -2716,7 +2716,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 max: MAX_DESIGN_NAME,
             }),
             menu: &TAB_MENU,
-            close_name: solidcraft_ui_text::tr("ui.close_tab"),
+            close_name: tr!("ui.close_tab"),
             close_tip: "Close",
             more_tip: solidcraft_ui_text::tr_label("All open designs"),
             new_tip: &new_tip,
@@ -2731,7 +2731,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 close_design: solidcraft_ui_text::tr_label("Close design"),
                 new_view: solidcraft_ui_text::tr_label("Open another view"),
                 more: more_text,
-                switch_view: solidcraft_ui_text::tr("tab_strip.switch_view"),
+                switch_view: tr!("tab_strip.switch_view"),
             },
             view_menu: &view_menu,
             view_right_row: crate::design_view_ui::VIEW_CLOSE_RIGHT,
@@ -2795,7 +2795,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         // selected, as the tab does; a blank one gives up, as it does for the tab.
         (Some(true), Some(mut done)) => {
             if !done.text.trim().is_empty() && !view_rename(app, done.view, &done.text) {
-                let why = app.tr("tab_strip.view_name_refused").to_string();
+                let why = tr!(app, "tab_strip.view_name_refused").to_string();
                 app.set_status(why, true);
                 done.focused = false;
                 app.docs.view_rename = Some(done);
@@ -2935,17 +2935,17 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let grouped = app.docs.group.is_some();
     let title = if let Some(group) = &app.docs.group {
-        solidcraft_ui_text::format("document.save_many", &[("n", &group.rows.len().to_string())])
+        tr!("document.save_many", n = &group.rows.len().to_string())
     } else {
-        solidcraft_ui_text::format("document.save_changes", &[("name", &name_display)])
+        tr!("document.save_changes", name = &name_display)
     };
     let detail = if grouped { String::new() } else { crate::design_view_ui::closing_detail(view_counts(app).get(i).copied().unwrap_or(1)) };
-    let save_label = solidcraft_ui_text::tr(if grouped { "document.save_selected" } else { "ui.save" });
+    let save_label = solidcraft_ui_text::tr_by_id(if grouped { "document.save_selected" } else { "ui.save" });
     let mut show_tab = None;
     let mut row_action = None;
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_close_prompt"), "status_warning", &title)
         .tone(ui_kit::Tone::Warning)
-        .actions(save_label, solidcraft_ui_text::tr("ui.cancel"), Some(solidcraft_ui_text::tr("ui.don_t_save")))
+        .actions(save_label, tr!("ui.cancel"), Some(tr!("ui.don_t_save")))
         .secondary_left()
         .detail(&detail)
         .selected(match choice {
@@ -2972,7 +2972,7 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                                         ui.spacing_mut().item_spacing.x = t.space_8;
                                         for (key, save) in [("document.discard_row", false), ("document.save_row", true)] {
-                                            let button = ui_kit::button(ui, solidcraft_ui_text::tr(key), ui_kit::Button::Small);
+                                            let button = ui_kit::button(ui, solidcraft_ui_text::tr_by_id(key), ui_kit::Button::Small);
                                             let action = if save { "save" } else { "discard" };
                                             crate::scenario::publish_target(&format!("save_many:{action}:{index}"), button.rect);
                                             if button.clicked() {
@@ -3000,7 +3000,7 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
                                                 }
                                                 let path = ui_kit::text(
                                                     ui,
-                                                    session.path.as_deref().unwrap_or(solidcraft_ui_text::tr("document.not_saved_yet")),
+                                                    session.path.as_deref().unwrap_or(tr!("document.not_saved_yet")),
                                                     ui_kit::Text::Note("save_path"),
                                                 );
                                                 crate::scenario::publish_rect(&format!("save_many:path:{index}"), path.rect);
@@ -3015,11 +3015,7 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
                 });
                 crate::scenario::publish_rect("save_many:list", list.inner_rect);
             } else {
-                ui_kit::text(
-                    ui,
-                    &solidcraft_ui_text::format("document.unsaved_changes", &[("name", &name_display)]),
-                    ui_kit::Text::Report("unsaved", false),
-                );
+                ui_kit::text(ui, &tr!("document.unsaved_changes", name = &name_display), ui_kit::Text::Report("unsaved", false));
             }
         });
     if let Some((index, save)) = row_action {

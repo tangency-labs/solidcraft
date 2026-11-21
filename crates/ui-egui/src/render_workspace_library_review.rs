@@ -62,7 +62,7 @@ pub(in crate::render_workspace) fn open(app: &mut SolveApp, variant: &'static st
 
 pub(in crate::render_workspace) fn quality(app: &mut SolveApp, id: &str) -> Result<(), String> {
     if app.render_workspace.view.method != ImageMethod::GpuRaytrace {
-        return Err(app.tr("render.stage_panels.gpu_required").into());
+        return Err(tr!(app, "render.stage_panels.gpu_required").into());
     }
     let plan = app.run("render.quality.prepare", json!({"id":id,"variant":"fixed_samples_png","acknowledge_omissions":true}))?;
     open(app, "quality", plan["name"].as_str().unwrap_or(id).into(), plan.clone(), Apply::Quality(plan))
@@ -127,13 +127,13 @@ pub(in crate::render_workspace) fn light(app: &mut SolveApp, view: &View, id: &s
             }
             Ok(())
         }
-        _ => Err(app.tr("render.library_specification_only").into()),
+        _ => Err(tr!(app, "render.library_specification_only").into()),
     }
 }
 
 #[cfg(test)]
 pub(in crate::render_workspace) fn command(app: &mut SolveApp, id: &str, params: Value) {
-    let result = open(app, "stage", app.tr("render.passive_stage").into(), Value::Null, Apply::Command { id: id.into(), params });
+    let result = open(app, "stage", tr!(app, "render.passive_stage").into(), Value::Null, Apply::Command { id: id.into(), params });
     if let Err(error) = result {
         app.set_status(error, true);
     }
@@ -141,7 +141,7 @@ pub(in crate::render_workspace) fn command(app: &mut SolveApp, id: &str, params:
 
 fn apply(app: &mut SolveApp, draft: &mut Draft) -> Result<(), String> {
     if !draft.current(app) || !draft.acknowledged {
-        return Err(app.tr("render.review_stale").into());
+        return Err(tr!(app, "render.review_stale").into());
     }
     match &mut draft.action {
         Apply::Command { id, params } => {
@@ -175,18 +175,19 @@ fn apply(app: &mut SolveApp, draft: &mut Draft) -> Result<(), String> {
 pub(in crate::render_workspace) fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut draft) = app.render_workspace.view.library.review.take() else { return };
     let current = draft.current(app);
-    let title = app.tr(&format!("render.stage_panels.review_{}", draft.variant)).to_string();
+    let title = app.tr_by_id(&format!("render.stage_panels.review_{}", draft.variant)).to_string();
     let subtitle = if draft.variant == "rig" {
         let emitters = draft.plan["lighting"]["area_lights"].as_array().map_or(0, Vec::len) + usize::from(!draft.plan["lighting"]["sun"].is_null());
         let cards = draft.plan["stage"].as_array().map_or(0, Vec::len);
-        solidcraft_ui_text::format("render.stage_panels.rig_summary", &[("emitters", &emitters.to_string()), ("cards", &cards.to_string())])
+        tr!("render.stage_panels.rig_summary", emitters = &emitters.to_string(), cards = &cards.to_string())
     } else {
-        app.tr(&format!("render.stage_panels.subtitle_{}", draft.variant)).to_string()
+        app.tr_by_id(&format!("render.stage_panels.subtitle_{}", draft.variant)).to_string()
     };
-    let replaces = app.tr(&format!("render.stage_panels.replaces_{}", draft.variant)).to_string();
-    let kept = app.tr(if draft.variant == "quality" { "render.stage_panels.kept_quality" } else { "render.stage_panels.kept_fields" }).to_string();
+    let replaces = app.tr_by_id(&format!("render.stage_panels.replaces_{}", draft.variant)).to_string();
+    let kept =
+        app.tr_by_id(if draft.variant == "quality" { "render.stage_panels.kept_quality" } else { "render.stage_panels.kept_fields" }).to_string();
     let acknowledgement = app
-        .tr(match draft.variant {
+        .tr_by_id(match draft.variant {
             "studio" => "render.stage_panels.studio_ack",
             "rig" => "render.library_replace_studio",
             "physical" => "render.physical_acknowledge",
@@ -197,7 +198,7 @@ pub(in crate::render_workspace) fn dialog(app: &mut SolveApp, ctx: &egui::Contex
         .to_string();
     let needs_indirect = draft.plan["requires_indirect"] == true;
     let apply_label = app
-        .tr(if needs_indirect {
+        .tr_by_id(if needs_indirect {
             "render.cpu_studio_enable_apply"
         } else {
             match draft.variant {
@@ -209,35 +210,35 @@ pub(in crate::render_workspace) fn dialog(app: &mut SolveApp, ctx: &egui::Contex
             }
         })
         .to_string();
-    let physical_notice = app.tr("render.physical_plan_only").to_string();
+    let physical_notice = tr!(app, "render.physical_plan_only").to_string();
     let review = ui_kit::ReviewAndApply {
         title: &title,
         name: &draft.name,
         subtitle: &subtitle,
-        replaces_label: solidcraft_ui_text::tr("render.stage_panels.replaces"),
+        replaces_label: tr!("render.stage_panels.replaces"),
         replaces: &replaces,
-        kept_label: solidcraft_ui_text::tr("render.stage_panels.kept"),
+        kept_label: tr!("render.stage_panels.kept"),
         kept: &kept,
         acknowledgement: &acknowledgement,
         acknowledge_handle: "render:review:acknowledge",
         apply: &apply_label,
-        secondary: (draft.variant == "physical").then(|| solidcraft_ui_text::tr("render.physical_copy_plan")),
+        secondary: (draft.variant == "physical").then(|| tr!("render.physical_copy_plan")),
         notice: (draft.variant == "physical").then_some(physical_notice.as_str()),
     };
     let can_apply = current && (!needs_indirect || draft.enable_indirect);
     let (closed, answer) = review.show(ctx, can_apply, &mut draft.acknowledged, |ui| {
         if !current {
-            ui_kit::text(ui, app.tr("render.review_stale"), ui_kit::Text::Error("review:stale"));
+            ui_kit::text(ui, tr!(app, "render.review_stale"), ui_kit::Text::Error("review:stale"));
         }
         if needs_indirect {
-            ui_kit::text(ui, app.tr("render.cpu_studio_indirect_help"), ui_kit::Text::Note("review:cpu-indirect"));
-            let response = ui_kit::checkbox(ui, app.tr("render.cpu_studio_enable"), &mut draft.enable_indirect);
+            ui_kit::text(ui, tr!(app, "render.cpu_studio_indirect_help"), ui_kit::Text::Note("review:cpu-indirect"));
+            let response = ui_kit::checkbox(ui, tr!(app, "render.cpu_studio_enable"), &mut draft.enable_indirect);
             crate::scenario::publish_target("render:review:enable-indirect", response.rect);
         }
         match draft.variant {
             "rig" => {
                 let mut changed = false;
-                ui_kit::row(ui, app.tr("render.stage_panels.centre"), |ui| {
+                ui_kit::row(ui, tr!(app, "render.stage_panels.centre"), |ui| {
                     ui.horizontal(|ui| {
                         for (axis, coordinate) in draft.center.iter_mut().enumerate() {
                             let field = ui_kit::number_field(ui, coordinate, -1e12..=1e12, 1.0, " mm");
@@ -246,12 +247,12 @@ pub(in crate::render_workspace) fn dialog(app: &mut SolveApp, ctx: &egui::Contex
                         }
                     });
                 });
-                ui_kit::row(ui, app.tr("render.stage_panels.extent"), |ui| {
+                ui_kit::row(ui, tr!(app, "render.stage_panels.extent"), |ui| {
                     let field = ui_kit::number_field(ui, &mut draft.extent, 0.001..=1e6, 1.0, " mm");
                     changed |= field.changed();
                     crate::scenario::publish_target("render:review:extent", field.rect);
                 });
-                let bounds = ui_kit::checkbox(ui, app.tr("render.stage_panels.captured_bounds"), &mut draft.bounds);
+                let bounds = ui_kit::checkbox(ui, tr!(app, "render.stage_panels.captured_bounds"), &mut draft.bounds);
                 crate::scenario::publish_target("render:review:bounds", bounds.rect);
                 if bounds.changed() && draft.bounds {
                     let mut targets = View::default();
@@ -264,12 +265,12 @@ pub(in crate::render_workspace) fn dialog(app: &mut SolveApp, ctx: &egui::Contex
                 if changed {
                     draft.bounds = false;
                 }
-                let omit = ui_kit::checkbox(ui, app.tr("render.library_emitters_only_ack"), &mut draft.emitters_only);
+                let omit = ui_kit::checkbox(ui, tr!(app, "render.library_emitters_only_ack"), &mut draft.emitters_only);
                 crate::scenario::publish_target("render:review:emitters-only", omit.rect);
             }
             "quality" => {
-                ui_kit::text(ui, app.tr("render.quality_projection_help"), ui_kit::Text::Note("review:quality"));
-                ui_kit::row(ui, app.tr("render.stage_panels.projects"), |ui| {
+                ui_kit::text(ui, tr!(app, "render.quality_projection_help"), ui_kit::Text::Note("review:quality"));
+                ui_kit::row(ui, tr!(app, "render.stage_panels.projects"), |ui| {
                     ui_kit::text(
                         ui,
                         &format!(
@@ -277,28 +278,28 @@ pub(in crate::render_workspace) fn dialog(app: &mut SolveApp, ctx: &egui::Contex
                             draft.plan["settings"]["width"],
                             draft.plan["settings"]["height"],
                             draft.plan["gpu_options"]["samples"],
-                            app.tr("render.stage_panels.depth"),
+                            tr!(app, "render.stage_panels.depth"),
                             draft.plan["gpu_options"]["max_depth"]
                         ),
                         ui_kit::Text::Inline,
                     );
                 });
-                ui_kit::row(ui, app.tr("render.children.seed"), |ui| {
+                ui_kit::row(ui, tr!(app, "render.children.seed"), |ui| {
                     ui_kit::text(ui, &draft.plan["gpu_options"]["seed"].to_string(), ui_kit::Text::Inline);
                 });
                 let denoise = if draft.plan["gpu_options"]["denoise"] == true { "render.quality_denoise_on" } else { "render.quality_denoise_off" };
-                ui_kit::text(ui, app.tr(denoise), ui_kit::Text::Inline);
-                ui_kit::text(ui, app.tr("render.stage_panels.omits"), ui_kit::Text::Note("review:omits"));
-                ui_kit::text(ui, app.tr("render.stage_panels.quality_omissions"), ui_kit::Text::Note("review:omissions"));
+                ui_kit::text(ui, app.tr_by_id(denoise), ui_kit::Text::Inline);
+                ui_kit::text(ui, tr!(app, "render.stage_panels.omits"), ui_kit::Text::Note("review:omits"));
+                ui_kit::text(ui, tr!(app, "render.stage_panels.quality_omissions"), ui_kit::Text::Note("review:omissions"));
             }
             "physical" => {
-                ui_kit::row(ui, app.tr("render.stage_panels.reference"), |ui| {
+                ui_kit::row(ui, tr!(app, "render.stage_panels.reference"), |ui| {
                     ui_kit::text(ui, &draft.name, ui_kit::Text::Inline);
                 });
                 let count = draft.plan["extended_profile"]["properties"].as_array().map_or(0, Vec::len);
-                let candidates = solidcraft_ui_text::format("render.stage_panels.candidate_summary", &[("count", &count.to_string())]);
+                let candidates = tr!("render.stage_panels.candidate_summary", count = &count.to_string());
                 ui_kit::text(ui, &candidates, ui_kit::Text::Note("review:candidates"));
-                ui_kit::text(ui, app.tr("render.stage_panels.partial_reference"), ui_kit::Text::Note("review:partial"));
+                ui_kit::text(ui, tr!(app, "render.stage_panels.partial_reference"), ui_kit::Text::Note("review:partial"));
             }
             _ => {}
         }
@@ -337,12 +338,12 @@ pub(in crate::render_workspace) fn confirmation(app: &mut SolveApp, ctx: &egui::
         return;
     }
     let stage = pending.command == "render.stage.clear";
-    let title = app.tr(if stage { "render.stage_panels.remove_stage_title" } else { "render.stage_panels.remove_optics_title" }).to_string();
-    let message = app.tr(if stage { "render.stage_panels.remove_stage_help" } else { "render.stage_panels.remove_optics_help" }).to_string();
-    let label = app.tr(if stage { "render.stage_panels.remove_stage" } else { "render.stage_panels.remove_optics" }).to_string();
+    let title = app.tr_by_id(if stage { "render.stage_panels.remove_stage_title" } else { "render.stage_panels.remove_optics_title" }).to_string();
+    let message = app.tr_by_id(if stage { "render.stage_panels.remove_stage_help" } else { "render.stage_panels.remove_optics_help" }).to_string();
+    let label = app.tr_by_id(if stage { "render.stage_panels.remove_stage" } else { "render.stage_panels.remove_optics" }).to_string();
     let (closed, answer) = ui_kit::Confirm::new(egui::Id::unique("render_resource_removal"), "delete", &title)
         .tone(ui_kit::Tone::Danger)
-        .actions(&label, app.tr("render.stage_panels.keep"), None)
+        .actions(&label, tr!(app, "render.stage_panels.keep"), None)
         .show(ctx, true, |ui| {
             ui_kit::text(ui, &message, ui_kit::Text::Note("remove:message"));
         });
