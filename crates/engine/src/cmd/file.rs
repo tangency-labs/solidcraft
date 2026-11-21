@@ -3384,7 +3384,14 @@ fn export_cadmpeg(
         solidcraft_io::cadmpeg_export(&doc, &s.model.state(), &world, bodies, &options, path, quality, format).map_err(EngineError::Other)?;
     warnings.extend(written);
     warnings.extend(held.iter().map(|name| held_warning(name)));
-    let label = if format == Format::Usd { "OpenUSD" } else { "Rhino" };
+    let label = match format {
+        Format::Usd => "OpenUSD",
+        Format::Rhino => "Rhino",
+        Format::Step => "STEP",
+        Format::Iges => "IGES",
+        Format::FreeCad => "FreeCAD",
+        _ => "this",
+    };
     let chosen = |b: &str| bodies.is_empty() || bodies.iter().any(|x| x == b);
     // The chosen setup's images and optics are written (or what is not is a warning already).
     if setup.is_none() {

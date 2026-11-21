@@ -412,13 +412,15 @@ impl<'a> Builder<'a> {
 
     /// The render setup's textures of model body `b` of component `component`, with the matrix
     /// from its definition frame to its mesh's, when every shown placement (`shown`) has them
-    /// alike; else none, with a warning when some placement has them.
-    fn surface(&mut self, b: &ModelBody, component: u64, shown: &[Vec<u64>]) -> Option<(&'a crate::SurfacePlan, Mat)> {
+    /// alike; else none, with a warning when some placement has them. `glass` leaves the metallic
+    /// map out of the comparison, as it is left out of the file.
+    fn surface(&mut self, b: &ModelBody, component: u64, shown: &[Vec<u64>], glass: bool) -> Option<(&'a crate::SurfacePlan, Mat)> {
         let surfaces = self.surfaces;
         let bound: Vec<&crate::SurfacePlan> = surfaces.iter().filter(|p| p.definition == b.definition_name() && p.component == component).collect();
         // The reference is a shown placement's: a hidden one's images do not count.
         let first = *bound.iter().find(|p| shown.contains(&p.path)).or(bound.first())?;
-        let covered = !shown.is_empty() && shown.iter().all(|path| bound.iter().any(|p| &p.path == path && super::cadir_textures::same(p, first)));
+        let covered =
+            !shown.is_empty() && shown.iter().all(|path| bound.iter().any(|p| &p.path == path && super::cadir_textures::same(p, first, glass)));
         if !covered {
             self.warnings.push(format!(
                 "{}: render setup `{}` gives its placements different images (or some none): written with its look, as the file gives a component's body one mesh",
@@ -728,8 +730,8 @@ impl<'a> Builder<'a> {
                 _ => None,
             };
             let placements = shown.get(&owner).map(Vec::as_slice).unwrap_or_default();
-            let surface = self.surface(b, owner, placements);
             let optics = self.optics_of(b, owner, placements);
+            let surface = self.surface(b, owner, placements, optics.is_some());
             if let Some(id) = self.body(b, framed.as_ref().unwrap_or(&b.body), b.definition_name(), surface, optics)?
                 && let Some(list) = owned.get_mut(key)
             {
@@ -928,10 +930,12 @@ impl<'a> Builder<'a> {
             }
         };
         let has_brep = brep.is_some();
-        let id = match brep {
-            Some(id) => Some(id),
+        // The body record just appended, so a look does not scan the list for its id.
+        let (id, pushed) = match brep {
+            Some(id) => (Some(id), None),
             None if self.writes.bound_meshes => {
                 let id: BodyId = BodyId::try_from(format!("{prefix}:body#0")).map_err(|_| format!("{prefix}: not a CADIR identity"))?;
+                let index = self.ir.model.bodies.len();
                 self.ir.model.bodies.push(Body {
                     id: id.clone(),
                     kind: BodyKind::General,
@@ -941,9 +945,9 @@ impl<'a> Builder<'a> {
                     color: None,
                     visible: None,
                 });
-                Some(id)
+                (Some(id), Some(index))
             }
-            None => None,
+            None => (None, None),
         };
         // Looks: the body's, else its colour; and each face's own.
         let doc = self.doc;
@@ -964,9 +968,13 @@ impl<'a> Builder<'a> {
                         self.bind(AppearanceTarget::Body(id.clone()), a)?;
                     }
                     None => {
-                        self.set_colour(id, b);
+                        self.set_colour(id, b, pushed);
                         if let Some(o) = optics {
-                            let colour = self.ir.model.bodies.iter().find(|x| x.id == *id).and_then(|x| x.color);
+                            let colour = pushed
+                                .and_then(|i| self.ir.model.bodies.get(i))
+                                .filter(|x| x.id == *id)
+                                .or_else(|| self.ir.model.bodies.iter().find(|x| x.id == *id))
+                                .and_then(|x| x.color);
                             let a = self.with_optics(None, colour, o)?;
                             own = Some(a.clone());
                             self.bind(AppearanceTarget::Body(id.clone()), a)?;
@@ -995,11 +1003,17 @@ impl<'a> Builder<'a> {
                 let linear = self.writes.linear;
                 match &look {
                     Some(look) => {
-                        if let Some(body) = self.ir.model.bodies.iter_mut().find(|x| x.id == *id) {
-                            body.color = colour(look.color, look.opacity, linear);
+                        let color = colour(look.color, look.opacity, linear);
+                        match pushed.and_then(|i| self.ir.model.bodies.get_mut(i)) {
+                            Some(body) => body.color = color,
+                            None => {
+                                if let Some(body) = self.ir.model.bodies.iter_mut().find(|x| x.id == *id) {
+                                    body.color = color;
+                                }
+                            }
                         }
                     }
-                    None => self.set_colour(id, b),
+                    None => self.set_colour(id, b, pushed),
                 }
                 if !faces.is_empty() {
                     self.warnings
@@ -1085,13 +1099,18 @@ impl<'a> Builder<'a> {
         Ok(id)
     }
 
-    /// A body with no look but a colour (an imported one) carries that colour.
-    fn set_colour(&mut self, id: &BodyId, b: &ModelBody) {
+    /// A body with no look but a colour (an imported one) carries that colour. `pushed` is its
+    /// record's index when this call appended it.
+    fn set_colour(&mut self, id: &BodyId, b: &ModelBody, pushed: Option<usize>) {
         let doc = self.doc;
         if let Some(c) = doc.body_color(b) {
             let to8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
             let color = colour(c.map(to8), doc.model_body_opacity(b), self.writes.linear);
-            if let Some(body) = self.ir.model.bodies.iter_mut().find(|x| x.id == *id) {
+            let body = match pushed {
+                Some(i) => self.ir.model.bodies.get_mut(i).filter(|x| x.id == *id),
+                None => self.ir.model.bodies.iter_mut().find(|x| x.id == *id),
+            };
+            if let Some(body) = body {
                 body.color = color;
             }
         }
@@ -1124,6 +1143,9 @@ impl<'a> Builder<'a> {
     /// `geometry`'s mesh at the export's quality, within the file's size cap.
     fn mesh(&mut self, geometry: &solidcraft_kernel::Body, shown: &str) -> Result<solidcraft_geom::Mesh, Unmeshed> {
         let mesh = crate::display_mesh_at(geometry, self.quality).map_err(|e| Unmeshed::Failed(format!("could not be meshed: {e}")))?;
+        if mesh.triangles.is_empty() {
+            return Err(Unmeshed::Failed("could not be meshed: no face gave triangles".into()));
+        }
         self.charge(mesh.positions.len(), mesh.triangles.len()).ok_or_else(|| {
             Unmeshed::TooLarge(format!(
                 "{shown}: the meshes are too large for the file (at most {} MiB); export fewer bodies or use standard quality",
@@ -1259,6 +1281,35 @@ pub(crate) fn kept_without_mesh(
     }
 }
 
+/// Each pcurve of `ir` states the parameter range its one use runs over, and each use that says
+/// nothing states it is not declared isoparametric (the flag is only a hint to a reader)
+/// ([`Writes::stated_pcurves`]). A pcurve used by more than one coedge, or with no range on its
+/// use, is left as it is.
+fn with_stated_pcurves(ir: &mut CadIr) {
+    use cadmpeg_ir::geometry::pcurve::PcurveMetadata;
+    use cadmpeg_ir::units::FiniteVector;
+    let mut ranges: HashMap<String, Option<[f64; 2]>> = HashMap::new();
+    for u in ir.model.coedges.iter_mut().flat_map(|c| c.pcurves.iter_mut()) {
+        if u.isoparametric.is_none() {
+            u.isoparametric = Some(false);
+        }
+        let range = u.parameter_range.map(|r| {
+            let [a, b] = r.endpoints();
+            [a.min(b), a.max(b)]
+        });
+        // A second use makes the pcurve's own range ambiguous.
+        ranges.entry(u.pcurve.as_str().to_string()).and_modify(|r| *r = None).or_insert(range);
+    }
+    for p in &mut ir.model.pcurves {
+        if p.metadata != PcurveMetadata::default() {
+            continue;
+        }
+        if let Some(range) = ranges.get(p.id.as_str()).copied().flatten().and_then(FiniteVector::new) {
+            p.metadata = PcurveMetadata::general(None, Some(range), None);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1296,34 +1347,5 @@ mod tests {
         assert!(b.tessellation("solidcraft:body-000000000", None, &mesh, &BTreeMap::new(), None).is_err());
         b.refund(mesh.positions.len(), mesh.triangles.len());
         assert_eq!(b.bytes, 0);
-    }
-}
-
-/// Each pcurve of `ir` states the parameter range its one use runs over, and each use that says
-/// nothing states it is not declared isoparametric (the flag is only a hint to a reader)
-/// ([`Writes::stated_pcurves`]). A pcurve used by more than one coedge, or with no range on its
-/// use, is left as it is.
-fn with_stated_pcurves(ir: &mut CadIr) {
-    use cadmpeg_ir::geometry::pcurve::PcurveMetadata;
-    use cadmpeg_ir::units::FiniteVector;
-    let mut ranges: HashMap<String, Option<[f64; 2]>> = HashMap::new();
-    for u in ir.model.coedges.iter_mut().flat_map(|c| c.pcurves.iter_mut()) {
-        if u.isoparametric.is_none() {
-            u.isoparametric = Some(false);
-        }
-        let range = u.parameter_range.map(|r| {
-            let [a, b] = r.endpoints();
-            [a.min(b), a.max(b)]
-        });
-        // A second use makes the pcurve's own range ambiguous.
-        ranges.entry(u.pcurve.as_str().to_string()).and_modify(|r| *r = None).or_insert(range);
-    }
-    for p in &mut ir.model.pcurves {
-        if p.metadata != PcurveMetadata::default() {
-            continue;
-        }
-        if let Some(range) = ranges.get(p.id.as_str()).copied().flatten().and_then(FiniteVector::new) {
-            p.metadata = PcurveMetadata::general(None, Some(range), None);
-        }
     }
 }

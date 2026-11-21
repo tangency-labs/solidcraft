@@ -1334,6 +1334,12 @@ fn solid(volume: f64, bb: [f64; 6]) -> (i64, [i64; 6]) {
     ((volume * 1e3).round() as i64, bb.map(|v| (v * 1e3).round() as i64))
 }
 
+/// An imported body's box, in micrometres.
+fn body_box(b: &solidcraft_kernel::ImportedBody) -> [i64; 6] {
+    let bb = solidcraft_kernel::measure(&b.body).unwrap().bbox;
+    [bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z].map(|v| (v * 1e3).round() as i64)
+}
+
 /// A Rhino file as cadmpeg reads it back.
 fn rhino_model(bytes: &[u8]) -> cadmpeg_ir::document::CadIr {
     let (format, decoded) = convert::decode_at("x.3dm", "3dm", bytes, &["rhino"], cadmpeg_core::decode::DecodeDepth::Full).unwrap();
@@ -1583,20 +1589,29 @@ fn cadmpeg_writes_step_and_iges_that_both_readers_read_back() {
                 _ => iges_by_cadmpeg(&bytes),
             };
             assert_eq!(solids(&theirs), want, "{label} {file}: cadmpeg's reader");
-            let theirs: Vec<_> = theirs.import.bodies.iter().map(|b| (colour_of(b), b.path.clone())).collect();
+            let theirs: Vec<_> = theirs.import.bodies.iter().map(|b| (colour_of(b), b.path.clone(), body_box(b))).collect();
             if format == crate::Format::Step {
                 assert!(ours.import.schema.contains("AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF"), "{}", ours.import.schema);
             }
-            let ours: Vec<_> = ours.import.bodies.iter().map(|b| (colour_of(b), b.path.clone())).collect();
+            let ours: Vec<_> = ours.import.bodies.iter().map(|b| (colour_of(b), b.path.clone(), body_box(b))).collect();
             for (reader, bodies) in [("SolidCraft", ours), ("cadmpeg", theirs)] {
                 if !assembly {
-                    let coloured: Vec<[f32; 3]> = bodies.iter().filter_map(|(c, _)| *c).collect();
-                    assert_eq!(coloured.len(), 1, "{label} {file} {reader}: only the cylinder is coloured: {bodies:?}");
-                    for (got, want) in coloured[0].iter().zip(blue) {
-                        assert!((f64::from(*got) - want).abs() < 1e-3, "{label} {file} {reader}: {coloured:?}");
+                    // Names need not survive a writer: the cylinder is the body with its box.
+                    let cylinder = bodies
+                        .iter()
+                        .find(|(_, _, bb)| *bb == [74_000, -6_000, 0, 86_000, 6_000, 15_000])
+                        .unwrap_or_else(|| panic!("{label} {file} {reader}: no cylinder body: {bodies:?}"));
+                    let colour = cylinder.0.unwrap_or_else(|| panic!("{label} {file} {reader}: the cylinder is not coloured"));
+                    for (got, want) in colour.iter().zip(blue) {
+                        assert!((f64::from(*got) - want).abs() < 1e-3, "{label} {file} {reader}: the cylinder's colour: {colour:?}");
                     }
+                    assert_eq!(
+                        bodies.iter().filter(|(c, _, _)| c.is_some()).count(),
+                        1,
+                        "{label} {file} {reader}: only the cylinder is coloured: {bodies:?}"
+                    );
                 } else if format == crate::Format::Step {
-                    let needles = bodies.iter().filter(|(_, p)| p.iter().map(String::as_str).eq(["Galvanometer", "Frame", "Needle"])).count();
+                    let needles = bodies.iter().filter(|(_, p, _)| p.iter().map(String::as_str).eq(["Galvanometer", "Frame", "Needle"])).count();
                     assert_eq!(needles, 2, "{label} {file} {reader}: {bodies:?}");
                 }
             }

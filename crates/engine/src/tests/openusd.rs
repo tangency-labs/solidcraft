@@ -8,17 +8,54 @@ use serde_json::json;
 use super::run;
 use crate::*;
 
-fn temp_dir(tag: &str) -> std::path::PathBuf {
+/// A test's temporary directory, removed when dropped, so a failed assertion cleans up too.
+struct TempDir(std::path::PathBuf);
+
+impl AsRef<std::path::Path> for TempDir {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for TempDir {
+    type Target = std::path::Path;
+
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn temp_dir(tag: &str) -> TempDir {
     let dir = std::env::temp_dir().join(format!("solidcraft-usd-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    TempDir(dir)
 }
 
-/// Image `bytes` in a file of their own, as `canvas.decal` and `canvas.insert` take an image.
-fn picture_file(bytes: &[u8]) -> String {
-    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    let dir = temp_dir(&format!("picture-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+/// The members of a `.usdz` package, by name.
+fn usdz_members(bytes: &[u8]) -> std::collections::BTreeMap<String, Vec<u8>> {
+    use std::io::Read as _;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("a .usdz package is a ZIP archive");
+    let mut members = std::collections::BTreeMap::new();
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).unwrap();
+        let name = entry.name().unwrap().into_owned();
+        let mut data = Vec::new();
+        entry.read_to_end(&mut data).unwrap();
+        members.insert(name, data);
+    }
+    members
+}
+
+/// Image `bytes` in a file of their own in the caller's directory, as `canvas.decal` and
+/// `canvas.insert` take an image.
+fn picture_file(dir: &std::path::Path, bytes: &[u8]) -> String {
     let path = dir.join("picture.png");
     std::fs::write(&path, bytes).unwrap();
     path.to_string_lossy().into_owned()
@@ -672,15 +709,15 @@ fn a_render_setups_builtin_surface_is_packaged() {
     // The reply leaves out an empty list of warnings.
     let warnings: Vec<String> = serde_json::from_value(reply["warnings"].clone()).unwrap_or_default();
     assert!(warnings.is_empty(), "{warnings:?}");
-    // A package's member names are plain bytes in its headers.
+    // A package is a ZIP archive: its texture members are entries with image bytes.
     let bytes = std::fs::read(&path).unwrap();
-    let mut names = std::collections::BTreeSet::new();
-    for at in (0..bytes.len()).filter(|i| bytes[*i..].starts_with(b"textures/")) {
-        if let Some(end) = bytes[at..].windows(4).position(|w| w == b".png") {
-            names.insert(String::from_utf8_lossy(&bytes[at..at + end + 4]).to_string());
-        }
+    let members = usdz_members(&bytes);
+    let textures: Vec<&String> = members.keys().filter(|name| name.starts_with("textures/")).collect();
+    assert_eq!(textures.len(), 4, "{textures:?}");
+    for name in textures {
+        let image = &members[name];
+        assert!(image.starts_with(b"\x89PNG") || image.starts_with(&[0xFF, 0xD8]), "{name}: no image bytes");
     }
-    assert_eq!(names.len(), 4, "{names:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -726,7 +763,7 @@ fn images_write_the_shown_pictures_into_a_package() {
     run(&mut s, "component.activate", json!({"component": "B"}));
     let mut png = Vec::new();
     image::codecs::png::PngEncoder::new(&mut png).write_image(&[200u8; 4 * 8], 4, 2, image::ExtendedColorType::Rgba8).unwrap();
-    let file = picture_file(&png);
+    let file = picture_file(&dir, &png);
     run(&mut s, "canvas.decal", json!({"path": file, "face": [25, 5, 10], "width": 8, "name": "Logo"}));
     run(&mut s, "canvas.insert", json!({"path": file, "plane": "XY", "width": 8, "name": "Hidden"}));
     run(&mut s, "canvas.edit", json!({"canvas": "Hidden", "visible": false}));
@@ -735,11 +772,12 @@ fn images_write_the_shown_pictures_into_a_package() {
     let reply = run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "images": true}));
     let warnings: Vec<String> = serde_json::from_value(reply["warnings"].clone()).unwrap_or_default();
     assert!(warnings.is_empty(), "{warnings:?}");
-    // A package stores its members uncompressed, so its layer and member names read as bytes.
+    // A package is a ZIP archive: the layer is an entry, and the picture is a member with bytes.
     let bytes = std::fs::read(&path).unwrap();
-    let text = String::from_utf8_lossy(&bytes).to_string();
+    let members = usdz_members(&bytes);
+    let text = String::from_utf8(members["root.usda"].clone()).unwrap();
     let image = format!("textures/{}.png", solidcraft_doc::render_resources::HdrId::of(&png));
-    assert!(text.contains(&image), "no {image} member");
+    assert!(members.get(&image).is_some_and(|data| !data.is_empty()), "no {image} member");
     assert!(!text.contains("\"Hidden\""), "the hidden picture is written");
     // Worked out by hand: B is placed where it was built. The decal is 8 x 4 mm (the image is 2:1)
     // about (25, 5) on B's top face at z = 10, along the face's axes either way round; the front
@@ -812,7 +850,7 @@ fn render_setup_optics_are_written_as_transmission() {
 }
 
 /// A design with a picture on a 10 mm cube in component B, and a loose cube at the root.
-fn pictured() -> Session {
+fn pictured(dir: &std::path::Path) -> Session {
     use image::ImageEncoder;
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-30, 0, 0], "body_name": "Loose"}));
@@ -820,7 +858,7 @@ fn pictured() -> Session {
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]}));
     let mut png = Vec::new();
     image::codecs::png::PngEncoder::new(&mut png).write_image(&[200u8; 4 * 8], 4, 2, image::ExtendedColorType::Rgba8).unwrap();
-    run(&mut s, "canvas.decal", json!({"path": picture_file(&png), "face": [25, 5, 10], "width": 8, "name": "Logo"}));
+    run(&mut s, "canvas.decal", json!({"path": picture_file(dir, &png), "face": [25, 5, 10], "width": 8, "name": "Logo"}));
     run(&mut s, "component.activate", json!({"component": "root"}));
     s
 }
@@ -831,7 +869,7 @@ fn pictured() -> Session {
 #[test]
 fn a_distribution_export_is_meshes_with_pictures() {
     let dir = temp_dir("purpose");
-    let mut s = pictured();
+    let mut s = pictured(&dir);
     let export = |s: &mut Session, name: &str, extra: Value| {
         let path = dir.join(name);
         let mut p = json!({"path": path.to_string_lossy()});
@@ -861,7 +899,7 @@ fn a_distribution_export_is_meshes_with_pictures() {
 #[test]
 fn openusd_exports_pass_openusd_validators() {
     let dir = temp_dir("validate");
-    let mut s = pictured();
+    let mut s = pictured(&dir);
     let b = s.doc.occurrence_of(s.doc.find_component("B").unwrap()).unwrap().id;
     run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
     run(&mut s, "browser.visibility", json!({"items": ["Loose"], "visible": false}));

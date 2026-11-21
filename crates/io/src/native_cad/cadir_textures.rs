@@ -239,12 +239,14 @@ fn written_normal(plan: &SurfacePlan) -> Option<&crate::SurfaceMap> {
 }
 
 /// Whether `a` and `b` texture a body alike: the same projection and the same images written (a
-/// normal map left out of both does not tell them apart).
-pub(super) fn same(a: &SurfacePlan, b: &SurfacePlan) -> bool {
+/// normal map left out of both does not tell them apart). A glass body's metallic map is not
+/// written either (`glass`), so it does not tell two placements apart.
+pub(super) fn same(a: &SurfacePlan, b: &SurfacePlan, glass: bool) -> bool {
     let sha = |m: Option<&crate::SurfaceMap>| m.map(|m| m.sha256.clone());
+    let metallic = |p: &SurfacePlan| if glass { None } else { sha(p.metallic.as_ref()) };
     (a.origin, a.u, a.v, a.flip_v) == (b.origin, b.u, b.v, b.flip_v)
-        && [sha(a.base_color.as_ref()), sha(written_normal(a)), sha(a.roughness.as_ref()), sha(a.metallic.as_ref())]
-            == [sha(b.base_color.as_ref()), sha(written_normal(b)), sha(b.roughness.as_ref()), sha(b.metallic.as_ref())]
+        && [sha(a.base_color.as_ref()), sha(written_normal(a)), sha(a.roughness.as_ref()), metallic(a)]
+            == [sha(b.base_color.as_ref()), sha(written_normal(b)), sha(b.roughness.as_ref()), metallic(b)]
 }
 
 #[cfg(test)]

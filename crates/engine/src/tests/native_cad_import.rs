@@ -347,6 +347,9 @@ fn um(b: [f64; 6]) -> [i64; 6] {
     b.map(|v| (v * 1e3).round() as i64)
 }
 
+/// The cylinder's exact volume, π · 6² · 15 = 540π mm³.
+const CYLINDER_VOLUME_MM3: f64 = 1_696.460_032_938_488;
+
 /// A loose 10 mm cube, a coloured cylinder (radius 6 mm, 15 mm high, at x = 80 mm), and a
 /// `Bracket` component (a 20 × 20 × 10 mm base and a 10 × 10 × 10 mm block on it) placed twice,
 /// the second copy 40 mm along Y.
@@ -411,12 +414,12 @@ fn file_export_writes_rhino_and_it_reads_back() {
                 }
                 want.push(bb.map(|v| (v * 1e3).round() as i64));
                 want.sort();
-                // The cylinder's volume is π r² h = π · 6² · 15 mm³. Its mesh is a prism on a
+                // The cylinder's volume is π r² h = 540π mm³. Its mesh is a prism on a
                 // polygon inscribed in the circle, at a chord tolerance of at most 2e-4 of the
                 // body's size (its 22.6 mm diagonal: a sagitta s ≤ 0.0046 mm), so short of it by
                 // less than (4/3) s / r ≈ 0.1%; 1% allows that, and the file's single-precision
                 // points (≈1e-6 relative) cannot take it past π r² h by 1e-4.
-                let exact = std::f64::consts::PI * 36.0 * 15.0;
+                let exact = CYLINDER_VOLUME_MM3;
                 assert!(
                     m.volume > 0.99 * exact && m.volume < exact * (1.0 + 1e-4),
                     "{name}: the cylinder's mesh holds {} mm³, not {exact}",
@@ -495,7 +498,7 @@ fn all_boxes() -> Vec<[i64; 6]> {
 fn file_export_writes_step_and_iges_with_either_writer() {
     let (dir, _) = file("step-writer", "unused", b"");
     let mut s = parts();
-    let volume_want = 1000.0 + 2.0 * (4000.0 + 1000.0) + std::f64::consts::PI * 36.0 * 15.0;
+    let volume_want = 1000.0 + 2.0 * (4000.0 + 1000.0) + CYLINDER_VOLUME_MM3;
     let blue = [0.0, 64.0 / 255.0, 1.0];
     for ext in ["step", "igs"] {
         let mut texts = Vec::new();
@@ -518,10 +521,28 @@ fn file_export_writes_step_and_iges_with_either_writer() {
                 assert_eq!(shown_boxes(&back), all_boxes(), "{ext} {writer:?} {reader}");
                 assert!((volume(&mut back) - volume_want).abs() < 1e-3, "{ext} {writer:?} {reader}");
                 let world = back.world_state().unwrap();
-                let coloured: Vec<[f32; 3]> = world.bodies.iter().filter_map(|b| colour_of(&b.body)).collect();
-                assert!(
-                    coloured.iter().any(|c| c.iter().zip(blue).all(|(g, w)| (f64::from(*g) - w).abs() < 1e-3)),
-                    "{ext} {writer:?} {reader}: the cylinder's colour: {coloured:?}"
+                // Names need not survive every writer: the cylinder is the body with its box.
+                let cylinder = world
+                    .bodies
+                    .iter()
+                    .find(|b| {
+                        let bb = solidcraft_kernel::measure(&b.body).unwrap().bbox;
+                        [bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z].map(|v| (v * 1e3).round() as i64)
+                            == um([74.0, -6.0, 0.0, 86.0, 6.0, 15.0])
+                    })
+                    .unwrap_or_else(|| panic!("{ext} {writer:?} {reader}: no cylinder body"));
+                let colour = colour_of(&cylinder.body).unwrap_or_else(|| panic!("{ext} {writer:?} {reader}: the cylinder is not coloured"));
+                for (got, want) in colour.iter().zip(blue) {
+                    assert!((f64::from(*got) - want).abs() < 1e-3, "{ext} {writer:?} {reader}: the cylinder's colour: {colour:?}");
+                }
+                assert_eq!(
+                    world
+                        .bodies
+                        .iter()
+                        .filter(|b| colour_of(&b.body).is_some_and(|c| c.iter().zip(blue).all(|(g, w)| (f64::from(*g) - w).abs() < 1e-3)))
+                        .count(),
+                    1,
+                    "{ext} {writer:?} {reader}: only the cylinder is blue"
                 );
             }
         }
