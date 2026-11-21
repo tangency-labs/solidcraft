@@ -1693,13 +1693,12 @@ mod tests {
                         );
                     } else {
                         assert_eq!(
-                            e,
-                            crate::SolidError::topology_failed(
-                                "topology::brep::p8",
-                                "the face with a rectangular trim could not be made"
-                            ),
+                            e.topology_failure(),
+                            Some(&crate::error::topology::TopologyFailure::FaceNotMade),
                             "box {s:e}"
                         );
+                        assert_eq!(e.operation(), "topology::brep::p8", "box {s:e}");
+                        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "box {s:e}");
                         assert_eq!(e.kind(), crate::error::ErrorKind::Failed, "box {s:e}");
                     }
                 }
