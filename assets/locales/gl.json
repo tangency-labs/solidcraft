@@ -3786,7 +3786,6 @@
   "sketch_panel.plane_offset": "{plane}, desprazado {distance}",
   "sketch_panel.plane_origin": "O plano {plane}",
   "sketch_panel.redefine_title": "{command}: {name}",
-  "sketch_panel.sheet_attachment": "Ligado a unha cara plana dun corpo de chapa; segue ese panel cando cambia a chapa.",
   "sketch_panel.text_hint": "Edite o texto e a súa posición e prema Aceptar.",
   "sketch_panel.use_plane": "Usar plano {plane}",
   "sketch_text.align_center": "Centro",

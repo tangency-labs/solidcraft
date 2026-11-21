@@ -20,6 +20,7 @@ mod raster;
 mod scene;
 pub mod surface;
 pub mod vec;
+mod view_spec;
 
 pub use analysis::{AnalysisMode, SceneAnalysis};
 pub use camera::{Camera, CameraAnim, Mat4, Quat, StandardView, UpAxis, ViewAngles, ease_in_out};
@@ -29,3 +30,4 @@ pub use scene::{
     MAX_SECTION_PLANES, MIN_ALPHA, Rgb, SECTION_CAP, SECTION_HATCH, SECTION_HATCH_ANGLES, SEE_THROUGH, Scene, SceneLine, SceneMesh, png,
     section_hatch, section_hatch_line, section_hatch_of, section_plane_frame,
 };
+pub use view_spec::ViewSpec;

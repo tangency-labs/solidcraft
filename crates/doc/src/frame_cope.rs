@@ -265,7 +265,7 @@ impl ModelBody {
     /// operations. Equality of bounds or face counts is deliberately insufficient.
     pub fn round_member(&self) -> Result<&RoundMember> {
         let record = self.round_member.as_ref().filter(|r| !self.transferred && r.shape.same_shape(&self.body));
-        let data = &record.ok_or_else(|| invalid("not supported yet: select an unmodified round-tube frame member or a retained cope result"))?.data;
+        let data = &record.ok_or_else(|| invalid("not supported yet: select an unmodified round-tube frame member with corner None and no finishing options, or a retained cope result"))?.data;
         data.validate()?;
         Ok(data)
     }
@@ -273,4 +273,11 @@ impl ModelBody {
     pub(crate) fn certify_round_member(&mut self, data: RoundMember) {
         self.round_member = Some(std::sync::Arc::new(CertifiedMember { shape: self.body.clone(), data }));
     }
+}
+
+/// Only a frame with no finishing route can certify its emitted bodies as pristine stock.
+/// Auto/cornered/fitted frames still build normally, but cannot supply nominal cope datums.
+pub(crate) fn stock_eligible(kind: &crate::FeatureKind) -> bool {
+    matches!(kind, crate::FeatureKind::FrameMember { corner, corners, fit_ends, coped, flip, gap, .. }
+        if corner.is_none() && corners.is_empty() && !*fit_ends && !*coped && !*flip && gap.is_none())
 }

@@ -295,9 +295,9 @@ a separate app.
 ## Large files
 
 SolidCraft opens STEP, IGES and the other CAD files it imports up to **512 MB**, and design files
-up to **256 MB**. Mesh files (3MF, STL, OBJ, PLY) and point cloud files (PLY, PCD, XYZ, PTS, ASC)
-follow the limit for import files: a point cloud file is read up to 1 GB, and more when that limit
-is raised.
+up to **256 MB**. Mesh files (3MF, STL, OBJ, PLY) and point cloud files (PLY, PCD, E57, XYZ, PTS,
+ASC) follow the limit for import files: a point cloud file is read up to 1 GB, and more when that
+limit is raised.
 A larger file is refused before it is read, and the message says how to raise the limit. In the
 desktop app you can raise both:
 

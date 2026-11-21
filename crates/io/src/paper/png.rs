@@ -49,7 +49,7 @@ pub const MAX_PICTURE_DPI: f64 = 1200.0;
 /// The resolutions a picture may be embedded at (SVG, PDF), in dots per inch.
 pub const PICTURE_DPI: RangeInclusive<f64> = *DPI.start()..=MAX_PICTURE_DPI;
 /// The pixels drawn at a time, as RGBA bytes.
-const BAND_BYTES: usize = 16 << 20;
+pub(super) const BAND_BYTES: usize = 16 << 20;
 /// Rows drawn above and below each band and not written: tiny-skia starts an edge a little
 /// differently where a clip cuts it, so no written row sits on a cut (the edge below the cut can
 /// still cover a pixel one sixteenth differently: the module's notes).
@@ -254,7 +254,7 @@ fn encoder<W: Write>(out: W, pixels: [u32; 2], format: (png::ColorType, png::Bit
 
 /// Picture `source`'s pixels in `window` of `grid`, from `pictures`, refused unless they are
 /// exactly the size asked for.
-fn ask(pictures: &dyn Pictures, source: u64, grid: &PixelGrid, window: GridWindow) -> Result<Vec<u8>> {
+pub(super) fn ask(pictures: &dyn Pictures, source: u64, grid: &PixelGrid, window: GridWindow) -> Result<Vec<u8>> {
     let rgba = pictures.rows(source, grid, window).map_err(|e| IoError::Invalid(format!("picture {source}: {e}")))?;
     let expected = window.x1.saturating_sub(window.x0) as usize * window.y1.saturating_sub(window.y0) as usize * 4;
     if rgba.len() != expected {

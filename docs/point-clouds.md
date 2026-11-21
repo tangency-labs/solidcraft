@@ -11,14 +11,15 @@ depends on it.
 |-----------|--------------|
 | `.ply` | ASCII, binary little-endian and binary big-endian PLY: the `vertex` element's `x`, `y`, `z` (any numeric type) and its `red`, `green`, `blue` when present (bytes, 16-bit or 0…1 floats). Every other scalar vertex property (intensity, a class, a time…) is kept, by its name in the file, to colour and filter the cloud by; it is whole-numbered when its type is an integer. The `edge` element (`vertex1`, `vertex2`) and the `face` element (`vertex_indices`, a face as a fan of triangles) become segments and triangles between the points, with their own properties. Other elements are passed over. |
 | `.pcd` | The Point Cloud Library's PCD, with its points stored as text (`DATA ascii`), as binary rows (`binary`) or as an LZF-compressed block (`binary_compressed`): the fields `x`, `y`, `z` (any numeric type) and the packed `rgb` or `rgba` field when present (its alpha is passed over). Every other field with one value a point (intensity, a label, a normal's parts…) is kept, by its name in the file, to colour and filter the cloud by; it is whole-numbered when its `TYPE` is `I` or `U`. A field with several values a point (a descriptor) and the padding fields named `_` are passed over. A grid of points (`WIDTH` by `HEIGHT`) is read as its points in order, and the points it marks as missing (`nan`) are left out with a warning. `VIEWPOINT`, where the scanner stood, is not applied: the points keep the file's coordinates. |
+| `.e57` | The open file for 3D scans (ASTM E2807), as laser scanners and their software write it. Every scan in the file is read into one cloud, each moved by the position and rotation the file gives it (its `pose`). A point's position is `cartesianX`, `cartesianY`, `cartesianZ`, or `sphericalRange`, `sphericalAzimuth`, `sphericalElevation` turned into them; the values may be floats or scaled whole numbers. `colorRed`, `colorGreen`, `colorBlue` are the colours, over the range the scan's `colorLimits` gives, and `intensity` is kept to colour and filter the cloud by. The points the file marks as having no position (`cartesianInvalidState` or `sphericalInvalidState`) are left out with a warning. The pictures an E57 file can hold, and fields other than these, are passed over. Every page's checksum is checked, and a damaged file is refused. |
 | `.xyz`, `.pts`, `.asc` | Text, a point per line: `x y z`, optionally followed by `r g b` (six numbers) or by an intensity and `r g b` (seven or more, as PTS files write it). Spaces, tabs, commas or semicolons separate the numbers; `#` and `//` start comments; a PTS file's first line (its count) is skipped. An `.asc` file that is an ESRI grid of heights (it starts with `ncols`) is refused: it holds rows of heights, not points. |
 
 A PLY file with faces can also be inserted as a mesh body with **Insert Mesh**
 (`file.insert_mesh`), which makes it solid geometry rather than a reference.
 
-Point cloud files say nothing about their length unit. `units` (`mm`, `cm`, `m`, `in`, `ft`)
-says what it is; the default is millimetres, as for every other import. Lidar and SLAM maps are
-usually in metres. The unit can be changed afterwards (Browser › Point Clouds › Edit Point Cloud,
+Point cloud files say nothing about their length unit, except E57 files, which are always in
+metres. `units` (`mm`, `cm`, `m`, `in`, `ft`) says what it is; the default is millimetres, as for
+every other import, and metres for an E57 file. Lidar and SLAM maps are usually in metres. The unit can be changed afterwards (Browser › Point Clouds › Edit Point Cloud,
 or `pointcloud.edit` with `units`): the points are scaled from the unit they came in as.
 
 ## Reloading

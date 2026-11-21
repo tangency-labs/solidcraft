@@ -414,6 +414,19 @@ impl Model {
         pending.settle(&mut saved).then_some(saved)
     }
 
+    /// [`Self::saved`] when no import's SMLib check of its parts is still running
+    /// ([`Self::checking_imports`]); `None` while one is, without waiting for it (#20133). A
+    /// check can take many times as long as the import's read, and what it finds (a warning, a
+    /// healed part) is part of the model a design keeps: a model kept before the check ends
+    /// would open without it. A design saved meanwhile keeps no model, and is rebuilt when it
+    /// opens, as a design saved without the cache is; a save once the check has ended keeps it.
+    pub fn saved_if_checked(&self, doc: &Document) -> Option<SavedModel> {
+        if self.checking_imports() {
+            return None;
+        }
+        self.saved(doc)
+    }
+
     /// [`Self::saved`] without waiting for the imports' checks: the records hold what each import
     /// found before its check, and [`PendingChecks::settle`] adds what the check finds.
     pub fn saved_now(&self, doc: &Document) -> Option<(SavedModel, PendingChecks)> {
@@ -1067,6 +1080,15 @@ impl Model {
             return Err(bad("saved model: member records need reevaluation"));
         }
         let mut states = saved.states()?;
+        // A saved/thinned stock marker proves only record presence, not eligibility. Inspect
+        // the originating feature before any retained certificate can be used for an export.
+        if states
+            .iter()
+            .flat_map(|state| &state.bodies)
+            .any(|body| body.round_member.is_some() && !doc.feature(body.feature).is_some_and(|f| crate::frame_cope::stock_eligible(&f.kind)))
+        {
+            return Err(bad("saved model: finished frame stock records need reevaluation"));
+        }
         let frame_bodies = Arc::new(std::sync::Mutex::new(FrameBodies::default()));
         for state in &mut states {
             Arc::make_mut(state).frame_bodies = Arc::downgrade(&frame_bodies);
@@ -1132,6 +1154,7 @@ impl Model {
                 id: f.id,
                 name: f.name.clone(),
                 error: None,
+                error_code: None,
                 internal: false,
                 warning: r.get("warning").map(|w| text(Some(w))).transpose()?,
                 import_report: r
@@ -1188,6 +1211,7 @@ impl Model {
                     cache_key(f, r.fingerprint, local, ctx, &before),
                     CachedEval {
                         error: None,
+                        error_code: None,
                         warning: r.warning.clone(),
                         import_report: r.import_report.clone(),
                         repair: r.repair.clone(),
