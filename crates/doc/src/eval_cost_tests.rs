@@ -26,7 +26,8 @@ use crate::*;
 /// holes whose tools were built (not moved from another copy's), the imported files read for an
 /// import feature, the tight boxes the kernel was asked for, the flats of sheets made from
 /// surfaces laid out (their pieces cut), the blends the kernel was asked for, the searches for
-/// the radius that fits, and the meshes a cam's profile was read from.
+/// the radius that fits, the meshes a cam's profile was read from, and the kernel's point
+/// classifications a pattern's copies were probed with.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Counts {
     pub moved: usize,
@@ -57,6 +58,7 @@ pub(crate) struct Counts {
     pub tight_boxes: usize,
     pub blends: usize,
     pub fit_searches: usize,
+    pub classifications: usize,
 }
 
 thread_local! {
@@ -90,6 +92,7 @@ thread_local! {
             tight_boxes: 0,
             blends: 0,
             fit_searches: 0,
+            classifications: 0,
         })
     };
 }
@@ -522,6 +525,45 @@ fn evaluations_that_move_nothing_keep_the_frame_bodies() {
     let work = counted(|| model.evaluate(&doc));
     assert_eq!(model.last_recomputed, 1);
     assert_eq!(work.moved, 0, "the edit after idle evaluations must reuse the moved plate: {work:?}");
+}
+
+/// A Frame Member is built turned by the Rotate steps after it, so their turns (and the
+/// parameters their angles use) are in its fingerprint and the key its result is cached under;
+/// with none left, the keys are what they were before, and designs without turns keep theirs.
+#[test]
+fn a_frame_without_turns_keeps_its_fingerprint() {
+    let kind = |v: serde_json::Value| serde_json::from_value::<FeatureKind>(v).unwrap();
+    let mut doc = Document::new("frame");
+    doc.set_param("tilt", "20 deg", None, None).unwrap();
+    let frame = doc
+        .add_feature(
+            kind(serde_json::json!({"type": "frame_member", "path_sketch": 1,
+                "profile": {"source": "library", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}}})),
+            None,
+        )
+        .unwrap();
+    let key = |doc: &Document| {
+        let vals = super::evaluation_values(doc).0;
+        let f = doc.feature(frame).unwrap();
+        let steps = super::ImportDigests::default();
+        let fp = super::chain_fingerprint(doc, &vals, f, 0, false, &steps, None);
+        // And the key its result is cached under, which leaves the chain out.
+        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, &ModelState::default(), &steps, 0).whole)
+    };
+    let before = key(&doc);
+    let turn = doc
+        .add_feature(kind(serde_json::json!({"type": "frame_member_turn", "member": {"feature": frame, "line": "l1"}, "angle": "tilt"})), None)
+        .unwrap();
+    let turned = key(&doc);
+    assert!(turned.0 != before.0 && turned.1 != before.1, "the turn is in the keys");
+    doc.set_param("tilt", "40 deg", None, None).unwrap();
+    let tilted = key(&doc);
+    assert!(tilted.0 != turned.0 && tilted.1 != turned.1, "so is the value of the parameter its angle uses");
+    doc.features.iter_mut().filter(|f| f.id == turn).for_each(|f| f.suppressed = true);
+    assert_eq!(key(&doc), before, "a suppressed turn isn't");
+    doc.features.iter_mut().filter(|f| f.id == turn).for_each(|f| f.suppressed = false);
+    doc.delete_feature(turn).unwrap();
+    assert_eq!(key(&doc), before);
 }
 
 #[test]
@@ -1153,6 +1195,38 @@ fn shared_imported_mesh_inputs_keep_payload_identity_and_invalidate_replacements
         assert_eq!(actual.normals, expected.normals);
         assert!(!model.evaluate_shared(&doc));
     }
+}
+
+#[test]
+fn mesh_import_reuses_the_validated_body_only_for_its_input_arrays() {
+    let mesh = crate::MeshData {
+        name: "Triangle".into(),
+        positions: vec![0., 0., 0., 1., 0., 0., 0., 1., 0.].into(),
+        triangles: vec![0, 1, 2].into(),
+        corner_normals: Default::default(),
+        color: None,
+    };
+    let mut doc = Document::default();
+    let id = doc.add_feature(FeatureKind::MeshImport { file: "triangle.stl".into(), meshes: vec![mesh.clone()] }, None).unwrap();
+    let prepared = PreparedMeshImport::build(std::slice::from_ref(&mesh)).unwrap();
+    let built = prepared.body(0, &mesh).unwrap().clone();
+
+    let mut model = Model::default();
+    model.prime_mesh_import(id, prepared);
+    model.evaluate(&doc);
+    assert!(model.state().bodies[0].body.same_shape(&built));
+    assert!(model.prepared_meshes.is_none());
+
+    // A prepared body for the same feature cannot replace new shading data.
+    let prepared = PreparedMeshImport::build(&[mesh]).unwrap();
+    let FeatureKind::MeshImport { meshes, .. } = &mut doc.feature_mut(id).unwrap().kind else { panic!("mesh import") };
+    meshes[0].corner_normals = vec![0., 0., 1., 0., 0., 1., 0., 0., 1.].into();
+    model.prime_mesh_import(id, prepared);
+    model.evaluate(&doc);
+    let state = model.state();
+    let body = &state.bodies[0].body;
+    assert!(!body.same_shape(&built));
+    assert_eq!(body.triangle_corner_normals().unwrap().len(), 1);
 }
 
 #[test]
@@ -3669,4 +3743,20 @@ fn a_round_refused_into_a_hollow_searches_for_the_largest_radius_that_fits() {
     assert!(error.contains("the largest radius that fits is 6.828 mm"), "{error}");
     assert_eq!(work.blends, 1, "{work:?}");
     assert_eq!(work.fit_searches, 1, "{work:?}");
+}
+
+/// A pattern's copies are probed with the kernel's point classifications, to know whether they
+/// take material without intersecting them with the body (#11257). The points of a line are
+/// classified in one call, not one call a point: the kernel makes the body's copy and its
+/// search structures once for all the points of a call, and again for every call a point makes
+/// on its own.
+#[test]
+fn a_pattern_probes_its_copies_with_one_classification_a_line() {
+    // The ten grooves of the pattern notch the same round bore: the probe's points lie on the
+    // bore's surface, where they are not inside the ring, so the probe tries every line it
+    // has before it finds the ring's material. It asked the kernel for 370 classifications,
+    // one a point, and asks for 36.
+    let (faces, work) = grooved_ring_faces();
+    assert_eq!(faces, 24, "the ring comes out as it did");
+    assert_eq!(work.classifications, 36, "{work:?}");
 }

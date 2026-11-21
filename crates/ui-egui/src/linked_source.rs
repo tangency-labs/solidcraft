@@ -227,7 +227,10 @@ pub(crate) fn update_changed(app: &mut SolveApp) {
 }
 
 /// Whether `link`, as the design saved at `design` keeps it, names a file in the design's own
-/// folder or below it, judged from the text alone (`..` is followed, nothing is asked of the disk).
+/// folder or below it, judged from the link's text (`..` is followed, the link itself is not
+/// asked of the disk). The folder counts both as the design's path names it and as the disk
+/// resolves it: a link is kept with its symlinks resolved, so a design opened through a symlink
+/// (`/var` → `/private/var` on macOS, a linked home folder) still finds its own links inside.
 /// An unsaved design has no folder.
 fn inside_design_folder(design: Option<&str>, link: &str) -> bool {
     use std::path::{Component, Path, PathBuf};
@@ -247,7 +250,8 @@ fn inside_design_folder(design: Option<&str>, link: &str) -> bool {
     };
     let Ok(dir) = std::path::absolute(dir) else { return false };
     let dir = lexical(&dir);
-    lexical(&dir.join(link)).starts_with(&dir)
+    let target = lexical(&dir.join(link));
+    target.starts_with(&dir) || std::fs::canonicalize(&dir).is_ok_and(|real| target.starts_with(real))
 }
 
 /// Update Links (`options` as it was asked) read the shown design's links again: those it read
@@ -791,6 +795,17 @@ mod tests {
         assert!(inside_design_folder(Some(&base), "part.sc") && inside_design_folder(Some(&base), "sub/../parts/a.sc"));
         assert!(!inside_design_folder(Some(&base), "../housing.solidcraft") && !inside_design_folder(Some(&base), "parts/../../x.sc"));
         assert!(!inside_design_folder(Some(&base), &outside.to_string_lossy()) && !inside_design_folder(None, "part.sc"));
+        // A design opened through a symlinked folder: its links, kept with symlinks resolved, are
+        // still inside; one out of the real folder is still out.
+        #[cfg(unix)]
+        {
+            let alias = folder.join("alias");
+            std::os::unix::fs::symlink(folder.join("received"), &alias).unwrap();
+            let through = alias.join("case.solidcraft").to_string_lossy().into_owned();
+            let real = folder.join("received").canonicalize().unwrap();
+            assert!(inside_design_folder(Some(&through), &real.join("part.sc").to_string_lossy()));
+            assert!(!inside_design_folder(Some(&through), &real.join("../housing.solidcraft").to_string_lossy()));
+        }
         let _ = std::fs::remove_dir_all(folder);
     }
 

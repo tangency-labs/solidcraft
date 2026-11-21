@@ -71,13 +71,13 @@
 //!   pass through after the tangent nodes are added (`super::singular_splits`); the
 //!   SolidCraft fork's tangency-labs/smlib@3c9d1d3. Always on (once the opt-in
 //!   `ssi_split_curves_at_singular_points`).
-//! - **Tangential curves (WR-75, #395; opt-in `ssi_tangent_curve_tracer`).** After the
-//!   interior curves, the SolidCraft fork's tangential curve pass traces the curves along
-//!   which the surfaces touch and the crossing branches through their contact points
-//!   (`super::tangent_curves`). Not in a self intersection whose two domains overlap or touch
-//!   (#18930, `AdvSurfaceIntersector::trivial_solution_in_both_domains`), where the surface
-//!   touches itself everywhere at equal parameters; a self tangency at two different
-//!   parameters there is left to the marcher, as without the flag. A self intersection also
+//! - **Tangential curves (WR-75, #395).** After the interior curves, the SolidCraft fork's
+//!   tangential curve pass traces the curves along which the surfaces touch and the crossing
+//!   branches through their contact points (`super::tangent_curves`); always on (once the
+//!   opt-in `ssi_tangent_curve_tracer`). Not in a self intersection whose two domains overlap
+//!   or touch (#18930, `AdvSurfaceIntersector::trivial_solution_in_both_domains`), where the
+//!   surface touches itself everywhere at equal parameters; a self tangency at two different
+//!   parameters there is left to the marcher. A self intersection also
 //!   skips the boundary start point search, the tangential contact point search (WR-74) and
 //!   the singular point splits (WR-77).
 //! - **Empty trace (WR-80).** A curve is traced back the other way
@@ -801,7 +801,7 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         };
         self.find_interior_curves(k, &mut interior)?;
 
-        // not upstream (WR-75, opt-in; the fork's FindTangentCurves): trace the
+        // not upstream (WR-75; the fork's FindTangentCurves): trace the
         // tangential curves the marcher above cannot follow. Not in a self intersection
         // whose two domains overlap or touch (#18930): there every point of the surface solves
         // the tracer's equations with itself at equal parameters (S(x) - S(x) = 0, n = n),
@@ -809,7 +809,7 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         // the surface against itself.
         let mut tangent_nodes = Vec::new();
         let seeds = core::mem::take(&mut self.tangent_curve_seeds);
-        if k.fixes.ssi_tangent_curve_tracer && !self.trivial_solution_in_both_domains() {
+        if !self.trivial_solution_in_both_domains() {
             let size = crate::math::min2(root1.size().length(), root2.size().length());
             let mut curves = TsectCurves {
                 curves_3d: core::mem::take(&mut interior.curves_3d),
@@ -875,20 +875,18 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         curve_types = found_types;
         deviations = found_deviations;
 
-        // not upstream (WR-75, opt-in; the fork's AddTangentNodes): report the singular
-        // points where crossing branches meet
-        if k.fixes.ssi_tangent_curve_tracer {
-            super::tangent_curves::add_tangent_nodes(
-                k,
-                &self.base,
-                &tangent_nodes,
-                &mut curves_3d,
-                &mut surface1_uv_curves,
-                &mut surface2_uv_curves,
-                &mut curve_types,
-                &mut deviations,
-            )?;
-        }
+        // not upstream (WR-75; the fork's AddTangentNodes): report the singular points
+        // where crossing branches meet
+        super::tangent_curves::add_tangent_nodes(
+            k,
+            &self.base,
+            &tangent_nodes,
+            &mut curves_3d,
+            &mut surface1_uv_curves,
+            &mut surface2_uv_curves,
+            &mut curve_types,
+            &mut deviations,
+        )?;
 
         // not upstream (WR-77; the fork's sm_SplitCurvesAtSingularPoints): split crossing
         // curves at singular points (parallel normals) they pass through
@@ -1743,44 +1741,37 @@ mod tests {
 
     /// A surface folded back on itself (#18930): the swallowtail ribbon's self intersection is
     /// the one vertical line where it crosses itself, at (0, 2.5), over the ribbon's height
-    /// 0..2, with the tangential curve pass (`ssi_tangent_curve_tracer`) as without it. With the
-    /// pass, a self intersection also returned six tangent curves: seeded beside the two cusp
-    /// lines, where the ribbon turns back and its sheets meet at equal parameters, the pass
-    /// traced the surface against itself.
+    /// 0..2. A self intersection once also returned six tangent curves: seeded beside the two
+    /// cusp lines, where the ribbon turns back and its sheets meet at equal parameters, the
+    /// tangential curve pass traced the surface against itself.
     #[test]
     fn a_folded_ribbon_crosses_itself_once_with_the_tangent_curve_tracer() {
         let ribbon = swallowtail_ribbon();
-        for tracer in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.ssi_tangent_curve_tracer = tracer;
-            let dom = ribbon.natural_uv_domain_with_nurb(&k).unwrap();
-            let x = ribbon
-                .global_surface_intersect(&k, &dom, &ribbon, &dom, [false, false], None, None)
-                .unwrap();
-            assert_eq!(x.curve_types, [TsectCurveType::Crossing], "{tracer}");
-            let c = x.curves_3d.first().unwrap();
-            let iv = c.natural_interval();
-            let mut z = Vec::new();
-            for f in [0.0, 0.25, 0.5, 0.75, 1.0] {
-                let p = c.evaluate_point(&k, iv.evaluate(f)).unwrap();
-                assert!(
-                    p.x.abs() < 1e-3 && (p.y - 2.5).abs() < 1e-3,
-                    "{tracer} {f}: {p:?}"
-                );
-                z.push(p.z);
-            }
-            // end to end over the height, monotone
-            let (z0, z1) = (*z.first().unwrap(), *z.last().unwrap());
-            assert!(
-                z0.min(z1).abs() < 1e-4 && (z0.max(z1) - 2.0).abs() < 1e-4,
-                "{tracer}: {z:?}"
-            );
-            assert!(
-                z.windows(2)
-                    .all(|w| matches!(w, [a, b] if (b - a) * (z1 - z0) > 0.0)),
-                "{tracer}: {z:?}"
-            );
+        let k = Kernel::default();
+        let dom = ribbon.natural_uv_domain_with_nurb(&k).unwrap();
+        let x = ribbon
+            .global_surface_intersect(&k, &dom, &ribbon, &dom, [false, false], None, None)
+            .unwrap();
+        assert_eq!(x.curve_types, [TsectCurveType::Crossing]);
+        let c = x.curves_3d.first().unwrap();
+        let iv = c.natural_interval();
+        let mut z = Vec::new();
+        for f in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let p = c.evaluate_point(&k, iv.evaluate(f)).unwrap();
+            assert!(p.x.abs() < 1e-3 && (p.y - 2.5).abs() < 1e-3, "{f}: {p:?}");
+            z.push(p.z);
         }
+        // end to end over the height, monotone
+        let (z0, z1) = (*z.first().unwrap(), *z.last().unwrap());
+        assert!(
+            z0.min(z1).abs() < 1e-4 && (z0.max(z1) - 2.0).abs() < 1e-4,
+            "{z:?}"
+        );
+        assert!(
+            z.windows(2)
+                .all(|w| matches!(w, [a, b] if (b - a) * (z1 - z0) > 0.0)),
+            "{z:?}"
+        );
     }
 
     /// Where a self intersection's trivial solution lies (#18930): two domains of one surface

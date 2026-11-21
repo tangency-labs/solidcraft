@@ -299,7 +299,9 @@ pub struct PeriodicBoundaryEnd<O> {
 
 enum BoundaryRoot {
     NoCut,
-    One(f64, Point3),
+    /// The root's curve parameter, its point, and its (u, v) on the boundary's displaced,
+    /// extended support.
+    One(f64, Point3, Point2),
     Unresolved,
 }
 
@@ -3929,7 +3931,7 @@ impl OffsetGeometryCreation {
         let roots = surface_global_curve_intersect(
             k, brep, extended, &domain, curve, &interval, tolerance,
         )?;
-        let mut root: Option<(f64, Point3)> = None;
+        let mut root: Option<(f64, Point3, Point2)> = None;
         for solution in roots.as_slice() {
             if solution.solution_type == SolutionType::RangeOfValues {
                 return Ok(BoundaryRoot::Unresolved);
@@ -3943,7 +3945,7 @@ impl OffsetGeometryCreation {
             {
                 return Ok(BoundaryRoot::Unresolved);
             }
-            if let Some((previous_parameter, _)) = root {
+            if let Some((previous_parameter, _, _)) = root {
                 // The solver preserves reports across chart seams and closed
                 // curve ends. Only identical parameters identify the same point
                 // of this curve; spatial proximity cannot merge material roots.
@@ -3951,11 +3953,12 @@ impl OffsetGeometryCreation {
                     return Ok(BoundaryRoot::Unresolved);
                 }
             } else {
-                root = Some((parameter, point));
+                let uv = Point2::new(solution.start.param(1)?, solution.start.param(2)?);
+                root = Some((parameter, point, uv));
             }
         }
         Ok(match root {
-            Some((t, point)) => BoundaryRoot::One(t, point),
+            Some((t, point, uv)) => BoundaryRoot::One(t, point, uv),
             None => BoundaryRoot::NoCut,
         })
     }
@@ -4011,11 +4014,111 @@ impl OffsetGeometryCreation {
         Ok(Some(gap.is_finite() && gap <= tolerance))
     }
 
+    /// Whether the candidate interval of `curve`, from its root `far_parameter` on the far
+    /// support beyond `across` toward its rim root `parameter`, leaves that support to the
+    /// side the original edge of `edgeuse` leaves it at its far vertex (the end that is not
+    /// `vertex`). The edge's side is the sign of its tangent there, directed toward `vertex`,
+    /// along the third face's surface normal; the candidate's is the sign of its tangent at
+    /// the far root, directed toward the rim root, along the normal of that face's
+    /// displaced, extended surface at the root's `far_uv`. A regular offset keeps its
+    /// base's parameters and orientation, so the two normals have one sense. `None` where
+    /// either tangent lies in its support's tangent plane or a value is not finite: no side
+    /// is established.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for missing topology; those of the evaluations.
+    #[allow(clippy::too_many_arguments)]
+    fn leaves_far_support_as_edge<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        executive: &mut impl OffsetExecutive<O>,
+        edgeuse: O,
+        vertex: O,
+        curve: O,
+        across: O,
+        far_parameter: f64,
+        parameter: f64,
+        far_uv: Point2,
+    ) -> Result<Option<bool>> {
+        let base = brep
+            .edgeuse_edge(edgeuse)?
+            .ok_or(dangling("edge use without edge"))?;
+        let base_curve = brep
+            .edge_curve(base)?
+            .ok_or(dangling("edge without curve"))?;
+        let interval = brep.edge_interval(base)?;
+        // A use along its edge starts at the interval's lower end.
+        let at_start = brep.edgeuse_vertex(edgeuse)? == Some(vertex);
+        let along = brep.edgeuse_orientation(edgeuse)? != OrientType::Opposite;
+        let (far_at, toward_vertex) = if at_start == along {
+            (interval.max(), -1.0)
+        } else {
+            (interval.min(), 1.0)
+        };
+        let edge_tangent = curve_of(brep, base_curve)?
+            .evaluate(k, far_at, 1, true, true)?
+            .get(1)
+            .copied()
+            .ok_or(dangling("tangent missing"))?
+            * toward_vertex;
+        let radial = brep
+            .edgeuse_radial(across)?
+            .ok_or(dangling("boundary without radial"))?;
+        let third = brep
+            .edgeuse_face(radial)?
+            .ok_or(dangling("boundary without face"))?;
+        let third_surface = brep
+            .face_surface(third)?
+            .ok_or(dangling("face without surface"))?;
+        let far = brep
+            .edge_other_vertex(base, vertex)?
+            .ok_or(dangling("edge without other vertex"))?;
+        let radial_end = if brep.edgeuse_vertex(radial)? == Some(far) {
+            0.0
+        } else {
+            1.0
+        };
+        let uv = edgeuse_normalized_evaluate(k, brep, radial, radial_end, true, false, true)?;
+        let before = edge_tangent.dot(surface_of(brep, third_surface)?.evaluate_normal(
+            k,
+            Point2::new(uv.x, uv.y),
+            Side::Left,
+            Side::Left,
+        )?);
+        let offset = executive
+            .offset_edgeuse(radial)
+            .ok_or(dangling("boundary without offset"))?;
+        let face = brep
+            .edgeuse_face(offset)?
+            .ok_or(dangling("offset boundary without face"))?;
+        let surface = brep
+            .face_surface(face)?
+            .ok_or(dangling("face without surface"))?;
+        let (extended, _) = executive.get_create_extended_surface(k, brep, surface)?;
+        let normal =
+            surface_of(brep, extended)?.evaluate_normal(k, far_uv, Side::Left, Side::Left)?;
+        let run = if parameter > far_parameter { 1.0 } else { -1.0 };
+        let after = curve_of(brep, curve)?
+            .evaluate(k, far_parameter, 1, true, true)?
+            .get(1)
+            .copied()
+            .ok_or(dangling("tangent missing"))?
+            .dot(normal)
+            * run;
+        if !(before.is_finite() && after.is_finite()) || before == 0.0 || after == 0.0 {
+            return Ok(None);
+        }
+        Ok(Some((before > 0.0) == (after > 0.0)))
+    }
+
     /// A disappearing chart seam is not a material constraint. The genuine
     /// supports at the opposite end and beyond the seam bound the active SSI
     /// interval. Chart crossings outside this interval do not retain the seam.
-    /// Without genuine supports on both sides, a chart miss does not establish
-    /// seam removal: ordinary endpoint trimming still supplies the constraint.
+    /// The active interval must leave each far support as the edge does; a rim root
+    /// behind the far end keeps the ordinary trim. Without genuine supports on both
+    /// sides, a chart miss does not establish seam removal: ordinary endpoint trimming
+    /// still supplies the constraint.
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     fn periodic_boundary_end<O: ClassObject + SolutionObject>(
         k: &Kernel,
@@ -4074,7 +4177,7 @@ impl OffsetGeometryCreation {
                 let candidate =
                     match Self::unique_boundary_root(k, brep, executive, curve, across, tolerance)?
                     {
-                        BoundaryRoot::One(t, p) => (t, p),
+                        BoundaryRoot::One(t, p, _) => (t, p),
                         BoundaryRoot::NoCut => {
                             // This component never meets the rim support. It cannot
                             // undergo the seam/rim incidence change considered here;
@@ -4104,13 +4207,13 @@ impl OffsetGeometryCreation {
             let mut far_root: Option<(f64, Point3)> = None;
             let mut far_boundary_roots = Vec::new();
             for across in opposite {
-                let BoundaryRoot::One(t, p) =
+                let BoundaryRoot::One(t, p, far_uv) =
                     Self::unique_boundary_root(k, brep, executive, curve, across, tolerance)?
                 else {
                     return Ok(PeriodicEnd::Unresolved);
                 };
                 let candidate = (t, p);
-                far_boundary_roots.push((across, p));
+                far_boundary_roots.push((across, p, far_uv));
                 if let Some((previous_parameter, _)) = far_root {
                     if candidate.0 != previous_parameter {
                         return Ok(PeriodicEnd::Unresolved);
@@ -4122,13 +4225,40 @@ impl OffsetGeometryCreation {
             let Some((far_parameter, _)) = far_root else {
                 return Ok(PeriodicEnd::Unresolved);
             };
+            // The interval from the far root to the rim root is the edge's image only if it
+            // leaves every far support to the side the edge does. A rim root behind the far
+            // end bounds no part of this edge: the seam is not removed by it, and the
+            // ordinary trim supplies the constraint (#19714).
+            let mut leaves_as_edge = true;
+            for &(across, _, far_uv) in &far_boundary_roots {
+                match Self::leaves_far_support_as_edge(
+                    k,
+                    brep,
+                    executive,
+                    edgeuse,
+                    vertex,
+                    curve,
+                    across,
+                    far_parameter,
+                    parameter,
+                    far_uv,
+                )? {
+                    Some(true) => {}
+                    Some(false) => leaves_as_edge = false,
+                    None => return Ok(PeriodicEnd::Unresolved),
+                }
+            }
+            if !leaves_as_edge {
+                ordinary_end = true;
+                continue;
+            }
             let active = Extent1d::from_min_max(parameter, far_parameter);
             if Self::intersects_periodic_chart(k, brep, executive, seam, uv, &active)? {
                 ordinary_end = true;
                 continue;
             }
             let mut owned_branch = false;
-            for (across, point) in far_boundary_roots {
+            for (across, point, _) in far_boundary_roots {
                 match Self::root_on_mated_boundary(k, brep, executive, across, point, tolerance)? {
                     Some(true) => owned_branch = true,
                     Some(false) => return Ok(PeriodicEnd::Unresolved),

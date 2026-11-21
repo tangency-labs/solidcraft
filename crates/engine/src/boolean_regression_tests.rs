@@ -2347,3 +2347,57 @@ fn a_notch_beside_an_extruded_splines_closing_point_is_cut() {
     }
     assert!(cut.iter().all(|r| (r - cut[0]).abs() < 1e-3), "{cut:?}");
 }
+
+/// #19695: the upper half of a torus (centre circle Ø1000, tube Ø1) with a Ø0.12 notch on the
+/// flat face's outer rim 0.0001 clear of the 0° seam and a Ø0.2 cross cylinder along Y 0.05
+/// above the flat face; the next cut, a Ø0.1 × 0.2 hole in the flat face, failed in 0.45.0 with
+/// "flat arrays: a circle NURBS SMLib's circle test rejects". The hole and its two pattern
+/// copies are cut, and the volume is the half torus less exactly what each tool takes: the cross
+/// cylinder's part above the flat face over its 0.8 length, the three holes whole, and the notch
+/// (integrated over its disc against the tube's height).
+#[test]
+fn a_hole_in_a_notched_cross_cut_large_half_torus_is_cut() {
+    let script = json!({"commands": [
+        {"command": "solid.torus", "params": {"center": [0.0, 0.0, 0.0], "major": 500.0, "minor": 0.5, "operation": "new", "body_name": "Part"}},
+        {"command": "solid.box", "params": {"length": 1003.0, "width": 1003.0, "height": 1.5, "corner": [-501.5, -501.5, -1.5], "operation": "cut", "targets": ["Part"]}},
+        {"command": "solid.cylinder", "params": {"radius": 0.06, "height": 0.25, "base": [500.4999963915984, 0.060099999855567805, 0.0], "axis": "Z", "operation": "cut", "targets": ["Part"]}},
+        {"command": "solid.cylinder", "params": {"radius": 0.1, "height": 0.8, "base": [500.0, -0.4, 0.05], "axis": "Y", "operation": "cut", "targets": ["Part"]}},
+        {"command": "solid.cylinder", "params": {"radius": 0.05, "height": 0.2, "base": [499.6, -0.15, 0.0], "axis": "Z", "operation": "cut", "targets": ["Part"], "name": "Hole1"}},
+        {"command": "solid.pattern.rectangular", "params": {"features": ["Hole1"], "dir1": [0.0, 1.0, 0.0], "count1": 3, "spacing1": 0.15}}
+    ]});
+    let s = replay(&script.to_string());
+    let bodies = &s.model.state().bodies;
+    assert_eq!(bodies.len(), 1);
+    let body = &bodies[0].body;
+    assert!(body.validity().is_empty() && body.shell_count() == 1, "{:?}, {} shells", body.validity(), body.shell_count());
+    use solidcraft_kernel::PointClass::{Inside, Outside};
+    let class = |x: f64, y: f64, z: f64| body.classify_point(solidcore_record::Vec3::new(x, y, z)).unwrap();
+    for y in [-0.15, 0.0, 0.15] {
+        assert_eq!(class(499.6, y, 0.1), Outside, "the hole at y {y} is cut");
+        assert_eq!(class(499.6, y, 0.25), Inside, "the hole at y {y} stops at 0.2");
+    }
+    assert_eq!(class(499.6, 0.075, 0.1), Inside, "between the holes");
+    assert_eq!(class(500.0, 0.0, 0.1), Outside, "the cross cut");
+    assert_eq!(class(500.47, 0.0601, 0.05), Outside, "the notch");
+    let pi = std::f64::consts::PI;
+    let half_torus = pi * pi * 500.0 * 0.25;
+    // The cross cylinder (r 0.1, axis 0.05 above the face) less its segment below the face.
+    let (r, theta) = (0.1, 2.0 * (0.5f64).acos());
+    let cross = (pi * r * r - r * r / 2.0 * (theta - theta.sin())) * 0.8;
+    let holes = 3.0 * pi * 0.05 * 0.05 * 0.2;
+    let (cx, cy, cr, n) = (500.4999963915984, 0.060099999855567805, 0.06, 2000);
+    let cell = 2.0 * cr / n as f64;
+    let mut notch = 0.0;
+    for i in 0..n {
+        for j in 0..n {
+            let (x, y) = (cx - cr + (i as f64 + 0.5) * cell, cy - cr + (j as f64 + 0.5) * cell);
+            let h = 0.25 - (x.hypot(y) - 500.0).powi(2);
+            if (x - cx).hypot(y - cy) <= cr && h > 0.0 {
+                notch += h.sqrt().min(0.25) * cell * cell;
+            }
+        }
+    }
+    let want = half_torus - cross - holes - notch;
+    let got = volume(&s, "Part");
+    assert!((got - want).abs() < 5e-5, "volume {got}, want {want} (notch {notch}, cross {cross}, holes {holes})");
+}

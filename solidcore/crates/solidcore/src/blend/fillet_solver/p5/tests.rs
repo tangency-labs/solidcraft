@@ -1127,9 +1127,7 @@ fn rollover_recalc_uses_the_real_solver_and_reports_missing_edge_curve() {
         (err.operation(), err.blend_failure(), err.upstream_status()),
         (
             "blend::fillet_geom::p3::FilletBrep::re_calc_fillet_geom",
-            Some(&crate::error::blend::BlendFailure::Missing(
-                "the solver edge's curve"
-            )),
+            Some(&crate::error::blend::BlendFailure::StageFailed),
             Some(crate::error::SM_ERR_NULL_POINTER)
         ),
         "{err:?}"

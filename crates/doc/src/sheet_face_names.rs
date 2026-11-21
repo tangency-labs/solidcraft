@@ -13,15 +13,7 @@ use solidcraft_develop::{CornerRelief, Development, JointKind, Sheet, Surface};
 use crate::sheet_surface::Piece;
 use crate::sheet_surface_convert::{HoleRecord, PanelMade, RimEdge, SheetFace, SheetPart};
 
-use crate::{ModelBody, ModelState, SurfaceSheet};
-
-/// The readable sheet names of a body's faces (by B-rep face index), as
-/// [`sheet_face_name`](super::sheet_face_name)s: `None` for every face. No sheet in `_st` names
-/// its faces so: a sheet made from surfaces reports what each face was made for, and the model
-/// names its faces (#7990).
-pub fn body_sheet_face_names(_st: &ModelState, b: &ModelBody) -> Vec<Option<String>> {
-    vec![None; b.body.face_count()]
-}
+use crate::SurfaceSheet;
 
 /// What the builder of a folded sheet made from surfaces sews a face for (see
 /// `sheet_surface_fold::solid`): one of a piece's two caps, on the sheet's surface or the other
@@ -343,63 +335,6 @@ pub(crate) fn carried<T: Clone>(before: &[Option<T>], body: &solidcraft_kernel::
             _ => None,
         })
         .collect()
-}
-
-/// Each straight rim of the flat panels of `sheet`, developed as `dev` into `pieces`: the panel,
-/// its edge in the panel's chart and its name there (see [`FaceNamer`]). `curves` are the sketch
-/// lines that made panels' edges (see [`SurfaceSheet::sketch_curves`]).
-pub(crate) fn rims(
-    sheet: &Sheet,
-    dev: &Development,
-    pieces: &[(Piece, Region2)],
-    curves: &[(String, String, Vec2, Vec2)],
-    recipes: &[(String, PanelMade)],
-) -> Vec<(usize, Vec2, Vec2, String)> {
-    let mut out = Vec::new();
-    for (i, panel) in sheet.panels.iter().enumerate() {
-        let (Surface::Plane, Some(Some(at))) = (&panel.surface, dev.placements.get(i)) else { continue };
-        let back = at.inverse();
-        let own: Vec<Region2> = pieces.iter().filter(|(p, _)| matches!(p, Piece::Panel(k) if *k == i)).map(|(_, r)| back.region(r)).collect();
-        let zones: Vec<Region2> = dev.zones.iter().map(|z| back.region(&z.region)).collect();
-        out.extend(rim_names(sheet, i, &own, &zones, curves, recipes).into_iter().map(|(a, b, name, _)| (i, a, b, name)));
-    }
-    out
-}
-
-/// The straight edges of the outlines `own` of panel `i`'s material (in its chart), with what
-/// made each (see [`rim_edges`]) and the name of its rim (see [`FaceNamer`]); a name two edges
-/// would share takes the edge's place too. `far`, `side0`, `side1`, `ext0` and `ext1` on a panel a
-/// bend makes, the sketch line's id on one a sketch made, `edge3` (its place in the outline) where
-/// nothing says what made the edge.
-fn rim_names(
-    sheet: &Sheet,
-    i: usize,
-    own: &[Region2],
-    zones: &[Region2],
-    curves: &[(String, String, Vec2, Vec2)],
-    recipes: &[(String, PanelMade)],
-) -> Vec<(Vec2, Vec2, String, Option<RimEdge>)> {
-    let edges = rim_edges(sheet, i, own, zones, curves, recipes);
-    let mut out: Vec<(Vec2, Vec2, String, Option<RimEdge>)> = edges
-        .into_iter()
-        .map(|(a, b, edge, k)| {
-            let name = match &edge {
-                Some(RimEdge::Sketch { curve }) => curve.clone(),
-                Some(RimEdge::Far) => "far".into(),
-                Some(RimEdge::End { at_origin }) => if *at_origin { "side1" } else { "side0" }.into(),
-                Some(RimEdge::Past { at_origin }) => if *at_origin { "ext1" } else { "ext0" }.into(),
-                None => format!("edge{k}"),
-            };
-            (a, b, name, edge)
-        })
-        .collect();
-    let names: Vec<String> = out.iter().map(|x| x.2.clone()).collect();
-    for (k, x) in out.iter_mut().enumerate() {
-        if names.iter().filter(|n| **n == x.2).count() > 1 {
-            x.2 = format!("{}{k}", x.2);
-        }
-    }
-    out
 }
 
 /// What made each straight edge of the outlines `own` of panel `i`'s material (in its chart), and

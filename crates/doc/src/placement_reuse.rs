@@ -228,6 +228,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         inserted,
         link_faces,
         link_threads,
+        profile_frame,
         kind,
     } = a;
     *id == b.id
@@ -241,6 +242,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         && *face_names == b.face_names
         && *participants == b.participants
         && *touching == b.touching
+        && *profile_frame == b.profile_frame
         && *shell_piece_order == b.shell_piece_order
         && *kernel_piece_order == b.kernel_piece_order
         && *pattern_names_in_order == b.pattern_names_in_order

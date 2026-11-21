@@ -42,6 +42,9 @@ pub struct ParamsDialog {
     /// parameter had before the first, and the one the design listed right after the last, read
     /// before anything else can change it. Cancel and Escape put the first back.
     applied: std::collections::BTreeMap<String, (String, String)>,
+    /// Expressions applied and still computing off the window thread, by parameter name: their
+    /// rows show them until the change is in.
+    pub(crate) applying: std::collections::BTreeMap<String, String>,
     /// Comments being edited, by parameter name.
     pub comments: std::collections::BTreeMap<String, String>,
     /// A parameter being renamed: (old name, new name).
@@ -250,6 +253,18 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let Some(mut d) = app.params.take() else { return };
     forget_refused_add(app, &mut d);
+    if !d.applying.is_empty() && app.computing_since().is_none() && app.deferred_queue.is_empty() {
+        // A live edit computed off the window thread (#6777) is in now; what the design lists for
+        // it is what Cancel later checks is still there (#15377), as `apply_grid` read it too early.
+        let listed = rows(app);
+        for name in std::mem::take(&mut d.applying).into_keys() {
+            if let Some(entry) = d.applied.get_mut(&name)
+                && let Some(now) = listed.iter().find(|l| l.name == name)
+            {
+                entry.1 = now.expression.clone();
+            }
+        }
+    }
     d.sort = ctx.data_mut(|m| m.get_persisted(sort_id())).unwrap_or_default();
     let sort = d.sort;
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
@@ -277,8 +292,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     .reset_scroll(d.reset_scroll);
     // A width or body height the user dragged the card to replaces that default; each axis stays
     // automatic until the user drags it (review of #13422).
-    let chosen_width: Option<f32> = ctx.data_mut(|m| m.get_persisted(width_id())).filter(|w: &f32| w.is_finite());
-    let chosen_height: Option<f32> = ctx.data_mut(|m| m.get_persisted(height_id())).filter(|h: &f32| h.is_finite());
+    let (chosen_width, chosen_height) = (SIZE.width(ctx), SIZE.height(ctx));
     let width = chosen_width.map_or(solidcraft_theme::Tokens::get().form_card_width * 3.0, |w| w.max(crate::frame::DIALOG_MIN_W));
     let panel = panel.body_height(chosen_height);
     let panel = panel.width(width.min((docked.x - drag_bounds.left()).max(crate::frame::DIALOG_MIN_W)));
@@ -293,7 +307,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut outcome = (false, ui_kit::Action::None);
     let live = app.preferences.parameters_apply_live;
     let held_status = if live { None } else { held_status(held(&d, &all).len()) };
-    let mut resize = Resize::None;
+    let mut resize = crate::card_resize::Resize::None;
     d.previewing = false;
     let shown = panel.window(ctx).show(ctx, |ui| {
         outcome = panel.feature(
@@ -380,39 +394,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::ComputeStatus { text: held_status, busy: false, applying: false }
             },
         );
-        resize = resize_edges(ui, side, panel.last_body_scrollbar(ui.ctx()));
+        resize = SIZE.edges(ui, side, panel.last_body_scrollbar(ui.ctx()));
         d.reset_scroll = false;
     });
-    match resize {
-        Resize::None => {}
-        Resize::Reset(axes) => ctx.data_mut(|m| {
-            if axes.width {
-                m.remove::<f32>(width_id());
-            }
-            if axes.height {
-                m.remove::<f32>(height_id());
-            }
-        }),
-        Resize::By(axes, delta) => {
-            let t = solidcraft_theme::Tokens::get();
-            if axes.width
-                && let Some(card) = shown.as_ref().map(|r| r.response.rect)
-            {
-                let w = (card.width() + delta.x).clamp(crate::frame::DIALOG_MIN_W, viewport.width().max(crate::frame::DIALOG_MIN_W));
-                if w.is_finite() {
-                    ctx.data_mut(|m| m.insert_persisted(width_id(), w));
-                }
-            }
-            if axes.height
-                && let Some(body) = panel.last_body_height(ctx)
-            {
-                let h = (body + delta.y).clamp(t.control_height * 2.0, viewport.height().max(t.control_height * 2.0));
-                if h.is_finite() {
-                    ctx.data_mut(|m| m.insert_persisted(height_id(), h));
-                }
-            }
-        }
-    }
+    SIZE.apply(ctx, resize, shown.as_ref().map(|r| r.response.rect), panel.last_body_height(ctx), viewport);
     // Held edits (#9279) are set by Apply and OK; Cancel, the close button and Escape drop them.
     // Cancel and Escape also put back what was applied live (#15377); the close button keeps it,
     // as closing the window the usual way never loses an edit.
@@ -449,97 +434,12 @@ fn sort_id() -> egui::Id {
     egui::Id::unique("sc_params_sort")
 }
 
-/// Where the outer width the user dragged the card to is kept; absent while the width is automatic.
-fn width_id() -> egui::Id {
-    egui::Id::unique("sc_params_width")
-}
-
-/// Where the body height the user dragged the card to is kept; absent while the height is automatic.
-fn height_id() -> egui::Id {
-    egui::Id::unique("sc_params_height")
-}
+/// Where the card's dragged width and body height are kept, and the names its edges publish.
+const SIZE: crate::card_resize::CardSize = crate::card_resize::CardSize { width: "sc_params_width", height: "sc_params_height", handle: "params" };
 
 /// Where the column widths the user dragged are kept, shared by every section's table.
 fn columns_id() -> egui::Id {
     egui::Id::unique("sc_params_columns")
-}
-
-/// Which of the card's two sizes a resize edge changes: the side edge its width, the bottom edge
-/// its body height, the corner both. The other axis keeps its automatic size.
-#[derive(Clone, Copy)]
-struct Axes {
-    width: bool,
-    height: bool,
-}
-
-/// What the card's resize edges asked for this frame.
-enum Resize {
-    None,
-    /// Grow the card by this much on these axes: x widens it, y lengthens its body.
-    By(Axes, egui::Vec2),
-    /// A double-click on an edge returns these axes to their automatic size.
-    Reset(Axes),
-}
-
-/// Drag areas on the card's free side edge (the one away from its dock side), its bottom edge
-/// and the corner between them. The header stays the title drag area. When the free edge is the
-/// right one and the body scrolls, `scrollbar` is the body viewport whose right edge carries the
-/// scrollbar: the side grip skips that span so scrollbar drags still scroll (#13422 review).
-fn resize_edges(ui: &mut egui::Ui, side: crate::frame::Side, scrollbar: Option<egui::Rect>) -> Resize {
-    let t = solidcraft_theme::Tokens::get();
-    let card = ui.min_rect();
-    let grip = t.space_6;
-    if !card.is_finite() || card.width() < grip * 4.0 || card.height() < t.form_header_height + grip * 2.0 {
-        return Resize::None;
-    }
-    // A card docked right is held by its right edge, so it grows from its left edge.
-    let free_left = side == crate::frame::Side::Right;
-    let x_edge = if free_left { card.left()..=card.left() + grip } else { card.right() - grip..=card.right() };
-    let corner_x = if free_left { card.left()..=card.left() + grip * 2.0 } else { card.right() - grip * 2.0..=card.right() };
-    // The scrollbar sits on the body's right edge, so only a right-hand grip can cover it.
-    let side_top = match scrollbar {
-        Some(body) if !free_left && body.is_finite() => body.bottom().max(card.top() + t.form_header_height),
-        _ => card.top() + t.form_header_height,
-    };
-    let mut edges = vec![(
-        "bottom",
-        egui::Rect::from_x_y_ranges(card.left() + grip * 2.0..=card.right() - grip * 2.0, card.bottom() - grip..=card.bottom()),
-        egui::CursorIcon::ResizeVertical,
-        Axes { width: false, height: true },
-    )];
-    if side_top < card.bottom() - grip * 2.0 {
-        edges.push((
-            "side",
-            egui::Rect::from_x_y_ranges(x_edge, side_top..=card.bottom() - grip * 2.0),
-            egui::CursorIcon::ResizeHorizontal,
-            Axes { width: true, height: false },
-        ));
-    }
-    edges.push((
-        "corner",
-        egui::Rect::from_x_y_ranges(corner_x, card.bottom() - grip * 2.0..=card.bottom()),
-        if free_left { egui::CursorIcon::ResizeNeSw } else { egui::CursorIcon::ResizeNwSe },
-        Axes { width: true, height: true },
-    ));
-    let mut out = Resize::None;
-    for (name, rect, cursor, axes) in edges {
-        let response = ui.interact(rect, ui.make_persistent_id(("params_resize", name)), egui::Sense::click_and_drag()).on_hover_cursor(cursor);
-        crate::scenario::publish_target(&format!("params:resize:{name}"), rect);
-        if response.dragged() {
-            ui.ctx().set_cursor_icon(cursor);
-        }
-        if response.double_clicked() {
-            out = Resize::Reset(axes);
-        } else if response.dragged() {
-            let delta = response.drag_delta();
-            let delta =
-                egui::vec2(if axes.width { if free_left { -delta.x } else { delta.x } } else { 0.0 }, if axes.height { delta.y } else { 0.0 });
-            if delta.is_finite() && delta != egui::Vec2::ZERO {
-                out = Resize::By(axes, delta);
-            }
-        }
-    }
-    out
 }
 
 /// The dialog's sections, each in the chosen order.
@@ -661,9 +561,10 @@ impl ParamGrid<'_> {
         self.rows.get(row).copied()
     }
 
-    /// The expression a row shows: an edit held for Apply or being typed, else the design's.
+    /// The expression a row shows: an edit held for Apply or being typed, else one still being
+    /// applied, else the design's.
     fn expression<'r>(&'r self, r: &'r Row) -> &'r str {
-        self.d.editing.get(&r.name).map_or(r.expression.as_str(), String::as_str)
+        self.d.editing.get(&r.name).or_else(|| self.d.applying.get(&r.name)).map_or(r.expression.as_str(), String::as_str)
     }
 
     /// What the cell being typed in holds until its edit commits: the draft it had before (an edit
@@ -1057,7 +958,11 @@ fn apply_grid(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, row
         d.error = held_error;
         return;
     }
-    match run_as_one(app, &all) {
+    let ran = match all.as_slice() {
+        [("parameters.change", params)] => change(app, d, params.clone()),
+        _ => run_as_one(app, &all),
+    };
+    match ran {
         Ok(()) => {
             d.error = held_error;
             // Listed once, right after the edit, before anything else can change it (#15377).
@@ -1082,6 +987,25 @@ fn apply_grid(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, row
             ui_kit::Grid::refuse(ctx, grid_state(d, salt), &error);
         }
     }
+}
+
+/// Run a `parameters.change` as the timeline's commands run (#6777): a rebuild that takes a while
+/// computes off the window thread, which goes on drawing meanwhile, and its rows show the
+/// expressions being applied until the change is in.
+fn change(app: &mut SolveApp, d: &mut ParamsDialog, params: Value) -> Result<(), String> {
+    let applying: Vec<(String, String)> = match (params.get("name").and_then(Value::as_str), params.get("expression").and_then(Value::as_str)) {
+        (Some(name), Some(expression)) => vec![(name.to_owned(), expression.to_owned())],
+        _ => params
+            .get("changes")
+            .and_then(Value::as_object)
+            .map(|changes| changes.iter().filter_map(|(name, e)| Some((name.clone(), e.as_str()?.to_owned()))).collect())
+            .unwrap_or_default(),
+    };
+    app.run_heavy("parameters.change", params)?;
+    if app.computing_since().is_some() || !app.deferred_queue.is_empty() {
+        d.applying.extend(applying);
+    }
+    Ok(())
 }
 
 /// Run `steps` as one gesture: all of them or none, and one undo step for all. A refused step
@@ -1159,7 +1083,7 @@ fn apply_held(app: &mut SolveApp, d: &mut ParamsDialog, rows: &[Row]) -> bool {
         Some((name, expression)) if changes.len() == 1 => json!({"name": name, "expression": expression}),
         Some(_) => json!({"changes": changes}),
     };
-    d.error = app.run("parameters.change", params).err();
+    d.error = change(app, d, params).err();
     if d.error.is_some() {
         return false;
     }
@@ -1173,6 +1097,8 @@ fn apply_held(app: &mut SolveApp, d: &mut ParamsDialog, rows: &[Row]) -> bool {
 /// `parameters.change`, so the design rebuilds once and one undo (or redo) covers them. A
 /// parameter changed since by something else (an agent, an undo) or gone (renamed, deleted) is
 /// left as it is. False, with the error shown, when the put-back is refused; what to put back is kept for the next try.
+/// An edit still computing off the window thread (#6777) is not in the design yet: its put-back
+/// waits its turn behind it.
 fn revert_applied(app: &mut SolveApp, d: &mut ParamsDialog) -> bool {
     if d.applied.is_empty() {
         return true;
@@ -1183,11 +1109,12 @@ fn revert_applied(app: &mut SolveApp, d: &mut ParamsDialog) -> bool {
         .iter()
         .filter_map(|(name, (before, listed))| {
             let current = &now.iter().find(|r| r.name == *name)?.expression;
-            (listed == current && current != before).then(|| (name.clone(), json!(before)))
+            (d.applying.contains_key(name) || (listed == current && current != before)).then(|| (name.clone(), json!(before)))
         })
         .collect();
     if !changes.is_empty() {
-        d.error = app.run("parameters.change", json!({"changes": changes})).err();
+        let params = json!({"changes": changes});
+        d.error = if d.applying.is_empty() { app.run("parameters.change", params) } else { app.run_heavy("parameters.change", params) }.err();
         if d.error.is_some() {
             return false;
         }
