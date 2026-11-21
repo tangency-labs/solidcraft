@@ -208,3 +208,32 @@ fn a_drawing_from_a_template_has_ids_of_its_own() {
     let refusal = instantiate(&plate(), "Copy", &taken, &mut IdSource::seeded(9)).unwrap_err().to_string();
     assert!(refusal.starts_with("a template draws no design"), "{refusal}");
 }
+
+/// Saving a reusable sheet format must not leave annotations referring to the views it removes.
+#[test]
+fn a_template_drops_centre_annotations_with_their_views() {
+    use crate::drawing::centre_line::CentreLine;
+    use crate::drawing::centre_mark::CentreMark;
+    use crate::drawing::dimension::{ModelEdge, ModelPoint};
+
+    let mut d = plate();
+    let view = d.views[0].id;
+    let mut ids = IdSource::seeded(9419);
+    let edge = ModelEdge { body: "Part".into(), origin_feature: 1, name: "rim".into(), path: Vec::new() };
+    let mark = d.allocate_id(&mut ids).unwrap();
+    d.add_centre_marks([Arc::new(CentreMark { id: mark, view, edge, overshoot_mm: 2.0 })]);
+    let point = |name: &str| ModelPoint { body: "Part".into(), origin_feature: 1, edges: vec![name.into()], centre: true, path: Vec::new() };
+    let line = d.allocate_id(&mut ids).unwrap();
+    d.add_centre_lines([Arc::new(CentreLine { id: line, view, a: point("a"), b: point("b"), overshoot_mm: 2.0 })]);
+    d.validate().unwrap();
+    let refusal = check(&d).unwrap_err().to_string();
+    assert!(refusal.contains("centre marks") && refusal.contains("centre lines"), "{refusal}");
+    let template = from_drawing(&d).unwrap();
+    let reopened = read(&template.to_json().unwrap()).unwrap();
+    let created = instantiate(&reopened, "New part", &BTreeSet::new(), &mut IdSource::seeded(9421)).unwrap();
+    for drawing in [&template, &reopened, &created] {
+        assert!(drawing.views.is_empty() && drawing.centre_marks.is_empty() && drawing.centre_lines.is_empty());
+        check(drawing).unwrap();
+    }
+    assert_eq!((d.centre_marks.len(), d.centre_lines.len()), (1, 1), "the source drawing is unchanged");
+}

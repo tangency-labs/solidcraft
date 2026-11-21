@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use solidcraft_doc::drawing::view::ResolvedView;
 
-use super::{Annotation, Drawn, DrawnDimension, DrawnFill, DrawnSketch, Lettering, Pixels, SketchContext, SourceInputs, SourceKey};
+use super::{Annotation, Drawn, DrawnDimension, DrawnFill, DrawnSketch, Lettering, Mark, Pixels, SketchContext, SourceInputs, SourceKey};
 
 /// Each closed drawing's last lines, by drawing.
 #[derive(Default)]
@@ -47,6 +47,8 @@ pub(super) struct KeptView {
     pub(super) view: ResolvedView,
     pub(super) drawn: Drawn,
     pub(super) shows: Option<Arc<SourceKey>>,
+    /// Centre annotations last shown with this view, in view-local paper coordinates.
+    pub(super) marks: Vec<Mark>,
     pub(super) pixels: BTreeMap<u64, Pixels>,
 }
 
