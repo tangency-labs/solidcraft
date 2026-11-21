@@ -209,6 +209,77 @@ fn declared_inputs_effects_and_slots_are_readable() {
 }
 
 #[test]
+fn design_listeners_require_a_read_entry_and_design_capability() {
+    let mut value = manifest();
+    value["capabilities"] = json!(["commands@0.1", "design@0.1"]);
+    value["runtime"]["entries"] = json!([{"name":"refresh","effect":"read"}]);
+    value["runtime"]["listeners"] = json!([{"entry":"refresh","on":["design.changed"]}]);
+    let runtime = parse(&value).unwrap().runtime.unwrap();
+    assert_eq!(runtime.listeners[0].entry, "refresh");
+    assert_eq!(runtime.listeners[0].on, ["design.changed"]);
+    for change in [
+        |v: &mut Value| v["capabilities"] = json!(["commands@0.1"]),
+        |v: &mut Value| v["runtime"]["entries"][0]["effect"] = json!("edit"),
+        |v: &mut Value| v["runtime"]["listeners"][0]["entry"] = json!("missing"),
+        |v: &mut Value| v["runtime"]["listeners"][0]["on"] = json!(["unknown"]),
+        |v: &mut Value| v["runtime"]["listeners"][0]["on"] = json!([]),
+        |v: &mut Value| {
+            v["runtime"]["listeners"] = json!([
+            {"entry":"refresh","on":["design.changed"]}, {"entry":"refresh","on":["design.changed"]}])
+        },
+    ] {
+        let mut invalid = value.clone();
+        change(&mut invalid);
+        assert!(matches!(parse(&invalid), Err(HostError::InvalidManifest { .. })));
+    }
+    assert!(parse(&manifest()).unwrap().runtime.unwrap().listeners.is_empty());
+}
+
+#[test]
+fn stale_revision_is_a_typed_error_naming_both_tokens() {
+    let expected = DesignToken { document_id: "design-one".into(), revision: "0123456789abcdef0123456789abcdef:3".into() };
+    let actual = DesignToken { document_id: "design-one".into(), revision: "0123456789abcdef0123456789abcdef:4".into() };
+    let error = HostError::StaleRevision { expected: expected.clone(), actual: actual.clone() };
+    assert_eq!(serde_json::to_value(&error).unwrap(), json!({"kind":"stale_revision","expected":expected,"actual":actual}));
+    assert!(error.to_string().contains("design-one@0123456789abcdef0123456789abcdef:3"));
+    assert!(error.to_string().contains("design-one@0123456789abcdef0123456789abcdef:4"));
+}
+
+#[test]
+fn design_tokens_bound_hostile_document_identities() {
+    for identity in [String::new(), "x".repeat(129), "line\nbreak".into(), "tab\t".into(), "nul\0".into(), "delete\u{7f}".into(), "café".into()] {
+        let wire = json!({"document_id":identity,"revision":"0123456789abcdef0123456789abcdef:7"});
+        assert!(serde_json::from_value::<DesignToken>(wire).is_err(), "{identity:?}");
+    }
+    for identity in ["design-one".to_string(), "x".repeat(128), " !~".into()] {
+        let wire = json!({"document_id":identity,"revision":"0123456789abcdef0123456789abcdef:7"});
+        let token: DesignToken = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(token).unwrap(), wire);
+    }
+    let schema = schemars::schema_for!(DesignToken).to_value();
+    assert_eq!(schema["properties"]["document_id"]["minLength"], 1);
+    assert_eq!(schema["properties"]["document_id"]["maxLength"], 128);
+}
+
+#[test]
+fn design_tokens_bound_hostile_revisions() {
+    for revision in [String::new(), "x".repeat(129), "line\nbreak".into(), "tab\t".into(), "nul\0".into(), "delete\u{7f}".into(), "café".into()] {
+        let wire = json!({"document_id":"design-one","revision":revision});
+        assert!(serde_json::from_value::<DesignToken>(wire).is_err(), "{revision:?}");
+    }
+    assert!(serde_json::from_value::<DesignToken>(json!({"document_id":"design-one","revision":7})).is_err());
+    for revision in ["0123456789abcdef0123456789abcdef:7".to_string(), "x".repeat(128), " !~".into()] {
+        let wire = json!({"document_id":"design-one","revision":revision});
+        let token: DesignToken = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(token).unwrap(), wire);
+    }
+    let schema = schemars::schema_for!(DesignToken).to_value();
+    assert_eq!(schema["properties"]["revision"]["type"], "string");
+    assert_eq!(schema["properties"]["revision"]["minLength"], 1);
+    assert_eq!(schema["properties"]["revision"]["maxLength"], 128);
+}
+
+#[test]
 fn schema_properties_must_be_objects_even_in_nested_inputs() {
     for schema in [
         json!({"type":"object","properties":[]}),

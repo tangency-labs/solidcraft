@@ -830,6 +830,7 @@ impl SolveApp {
                 let _ = job.req.reply.send(stopped_reply(&job.label, true));
                 return;
             }
+            let mut stale_revision = None;
             let result = if self.file_load_holds()
                 || self.file_picker.is_some()
                 || disabled != &self.preferences.disabled_plugins
@@ -856,7 +857,14 @@ impl SolveApp {
                         } else {
                             self.session.redo = redo;
                         }
-                        replies.map_err(|_| self.tr("ui.plugin_context_changed").to_string())
+                        replies.map_err(|error| {
+                            if let Some(solidcraft_engine::plugin::HostError::StaleRevision { expected, actual }) = error.host_error() {
+                                stale_revision = Some((expected.clone(), actual.clone()));
+                                error.to_string()
+                            } else {
+                                self.tr("ui.plugin_context_changed").to_string()
+                            }
+                        })
                     })
                     .and_then(|replies| replies.into_iter().last().map(|(_, reply)| reply).ok_or_else(|| self.tr("ui.plugin_no_result").to_string()))
             };
@@ -876,7 +884,15 @@ impl SolveApp {
             let result = self.command_completed("plugin.run", result);
             let mut reply = match result {
                 Ok(result) => json!({"ok":true,"result":result}),
-                Err(error) => json!({"ok":false,"error":error}),
+                Err(error) => {
+                    let mut reply = json!({"ok":false,"error":error});
+                    if let Some((expected, actual)) = stale_revision {
+                        reply["kind"] = json!("stale_revision");
+                        reply["expected"] = json!(expected);
+                        reply["actual"] = json!(actual);
+                    }
+                    reply
+                }
             };
             if let Some(reason) = reply.get("error").and_then(Value::as_str).and_then(solidcraft_engine::plugin::structured_tool_error) {
                 reply["plugin_error"] = reason;
