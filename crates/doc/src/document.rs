@@ -5353,6 +5353,12 @@ impl Document {
         for p in &self.params {
             used.extend(expr::references(&p.expr));
         }
+        // What a link passes to its design by expression (`width = d1`).
+        for link in self.links.values() {
+            for e in link.parameters.values() {
+                used.extend(expr::references(e));
+            }
+        }
         used
     }
 

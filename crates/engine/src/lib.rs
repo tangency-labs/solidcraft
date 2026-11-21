@@ -2983,6 +2983,12 @@ impl Session {
             }
             value => value,
         };
+        // Cancelled while the links followed, after the check above: no result either, and the
+        // design goes back as it was.
+        let r = match r {
+            Ok(_) if solidcraft_doc::progress::cancelled() && self.replacements == replacements => Err(EngineError::Cancelled(spec.id.to_string())),
+            r => r,
+        };
         // A parameter error that did not name the command names it here: the engine knows which
         // command ran, and the reader of the parameters may not (#6651).
         let r = match r {

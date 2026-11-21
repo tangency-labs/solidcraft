@@ -1127,6 +1127,13 @@ impl Document {
             if user && link.parameters_by_name && link.parameter_values.contains_key(old) && !link.parameters.contains_key(old) {
                 link.parameters.insert(old.to_string(), new.to_string());
                 n += 1;
+                // The new name may be one the linked design has too. This parameter already
+                // goes to the one it went to, so that other one keeps its own value (the link's
+                // Keep its own) rather than take it by name as well. A rename of a parameter the
+                // link did not pass is a new match, and is passed (`new_match` in the engine).
+                if link.parameter_units.contains_key(new) && !link.parameters.contains_key(new) && !link.parameter_values.contains_key(new) {
+                    link.parameters_kept.insert(new.to_string());
+                }
             }
         }
         if let Some(c) = self.param_comments.remove(old) {

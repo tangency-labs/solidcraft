@@ -43,9 +43,9 @@ fn read(app: &mut SolveApp) {
     let outcome = reading.done.recv_timeout(std::time::Duration::from_secs(120)).expect("the read finishes");
     assert_eq!(reading.tab, app.docs.active_tab());
     if reading.refresh {
-        refreshed(app, &reading.target, reading.tab, outcome);
+        refreshed(app, &reading.target, reading.tab, reading.source, outcome);
     } else {
-        finish(app, reading.target, reading.tab, outcome);
+        finish(app, reading.target, reading.tab, reading.source, outcome);
     }
 }
 
@@ -257,6 +257,70 @@ fn the_dialog_stays_with_its_design_when_the_tab_changes() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A Link Parameters dialog, and a read on its way to one, belong to the design the link read
+/// when they started. After Relink Source the old design's rows and what was typed in them are
+/// never set on the new design: the dialog reads the link again (review of #20542).
+#[test]
+fn a_relink_reads_the_dialog_again_and_drops_the_old_designs_draft() {
+    let dir = folder("relinked");
+    let (part, other) = (dir.join("block.sc"), dir.join("other.sc"));
+    save_block(&part);
+    let mut wide = Session::default();
+    wide.execute("parameters.add", &json!({"name": "h", "expression": "7 mm"})).unwrap();
+    wide.execute("solid.box", &json!({"length": 10, "width": 30, "height": "h", "body_name": "Block"})).unwrap();
+    wide.execute("file.save", &json!({"path": other})).unwrap();
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    let component = app.run("component.insert_design", json!({"path": part, "name": "Block"})).unwrap()["component"].as_u64().unwrap();
+
+    // The dialog is open with a draft when the link is given another design.
+    open_link(&mut app, component);
+    read(&mut app);
+    row(app.link_parameters.as_mut().unwrap(), "h").expression = "42 mm".into();
+    let draft = app.link_parameters.clone().unwrap();
+    app.run("component.relink", json!({"component": component, "path": other})).unwrap();
+    assert_eq!(apply(&mut app, &draft), Ok(()), "OK on the old rows sets nothing");
+    assert!(app.session.doc.links.get(&component).unwrap().parameters.is_empty());
+    follow_source(&mut app);
+    assert!(app.link_parameters.is_none(), "the old design's rows are gone");
+    read(&mut app);
+    let form = app.link_parameters.clone().unwrap();
+    assert!(form.file.ends_with("other.sc"), "{}", form.file);
+    assert_eq!(form.rows.iter().map(|r| (r.name.as_str(), r.expression.as_str())).collect::<Vec<_>>(), [("h", "")]);
+    assert_eq!(apply(&mut app, &form), Ok(()));
+
+    // A read that was still going when the link changed opens nothing of the old design.
+    open_link(&mut app, component);
+    app.run("component.relink", json!({"component": component, "path": part})).unwrap();
+    follow_source(&mut app);
+    read(&mut app);
+    let form = app.link_parameters.clone().unwrap();
+    assert!(form.file.ends_with("block.sc"), "{}", form.file);
+    assert_eq!(form.rows.len(), 2, "the block's `h` and `w`");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A link by name that matches no name passes nothing, so the Browser shows no badge for it; a
+/// design that replaces the shown one takes none of the old one's dialogs (review of #20542).
+#[test]
+fn nothing_passed_shows_no_badge_and_a_replaced_design_keeps_no_dialog() {
+    let dir = folder("nothing-passed");
+    let part = dir.join("block.sc");
+    save_block(&part);
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    let component =
+        app.run("component.insert_design", json!({"path": part, "name": "Block", "by_name": true})).unwrap()["component"].as_u64().unwrap();
+    assert_eq!(tooltip(&app.session.doc, component), None, "no name matches");
+    app.run("parameters.add", json!({"name": "h", "expression": "9 mm"})).unwrap();
+    assert!(tooltip(&app.session.doc, component).is_some_and(|t| t.contains("h = 9 mm")));
+
+    open_link(&mut app, component);
+    read(&mut app);
+    open_link(&mut app, component);
+    design_replaced(&mut app);
+    assert!(app.link_parameters.is_none() && app.link_parameters_reading.is_none() && app.link_parameters_waiting.is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// What the last value edit could not pass belongs to that design and is old news after any
 /// later change (review of PR #1).
 #[test]
@@ -391,7 +455,7 @@ fn a_second_dialog_waits_until_the_first_ok_is_done() {
     ask_insert(&mut app, &other.to_string_lossy(), None);
     assert!(app.link_parameters_reading.is_none(), "Insert Design waits too");
     let outcome = early.done.recv_timeout(std::time::Duration::from_secs(120)).unwrap();
-    finish(&mut app, early.target, early.tab, outcome);
+    finish(&mut app, early.target, early.tab, early.source, outcome);
     assert!(app.link_parameters.is_none(), "a read already going opens nothing");
     assert!(
         app.status.as_ref().is_some_and(|s| format!("{s:?}").contains(&solidcraft_ui_text::tr("ui.link_parameters.busy").to_string())),
@@ -465,7 +529,7 @@ fn a_late_read_never_replaces_a_refused_draft() {
 
     // B's read finishes now: A stays.
     let outcome = late.done.recv_timeout(std::time::Duration::from_secs(120)).unwrap();
-    finish(&mut app, late.target, late.tab, outcome);
+    finish(&mut app, late.target, late.tab, late.source, outcome);
     assert_eq!(shown(&app), refused, "a late read does not take A's place");
     assert!(app.status.as_ref().is_some_and(|s| s.0 == solidcraft_ui_text::tr("ui.link_parameters.open_already")), "{:?}", app.status);
     // Nor does a new one start while A is open: the only read is A's own, reading its changed

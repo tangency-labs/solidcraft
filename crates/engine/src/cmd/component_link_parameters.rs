@@ -131,6 +131,14 @@ thread_local! {
     static RECORD_READS: Cell<usize> = const { Cell::new(0) };
 }
 
+thread_local! {
+    /// The next drive on this thread also gives the design's images as it leaves them
+    /// ([`link_bodies_with_images`]); the drive takes the flag, so a design inside does not.
+    static WANT_IMAGES: Cell<bool> = const { Cell::new(false) };
+    /// Those images, from the evaluation that made the bodies.
+    static DRIVEN_IMAGES: RefCell<Option<super::LinkedImages>> = const { RefCell::new(None) };
+}
+
 /// The components the value edits on this thread drove since the last call, and the warnings
 /// of those that kept their bodies; both are cleared.
 pub(crate) fn take_drive_report() -> (Vec<String>, Vec<String>) {
@@ -271,6 +279,23 @@ impl Host {
             .map(|v| value_text(v, unit))
             .map_err(|err| err.to_string().trim_start_matches("expression: ").to_string())
     }
+
+    /// This design's parameter `name` as a value of `kind`, for a link that takes it by name.
+    /// The two must be of one kind: a number here does not set a length or an angle there,
+    /// where an expression's unit-less result is read in the parameter's unit ([`Host::value`]).
+    fn named(&self, name: &str, kind: Kind, unit: &str) -> std::result::Result<String, String> {
+        if let Some(v) = self.values.get(name)
+            && v.kind() != Some(kind)
+        {
+            let wanted = match kind {
+                Kind::Length => "a length",
+                Kind::Angle => "an angle",
+                Kind::Unitless => "a number",
+            };
+            return Err(format!("expected {wanted}, got {}", v.describe()));
+        }
+        self.value(name, kind, unit)
+    }
 }
 
 /// Counts one more linked design being evaluated on this thread for as long as it lives.
@@ -364,6 +389,7 @@ fn driven_bodies(
     host: &Host,
     validation: solidcraft_kernel::Validation,
 ) -> Result<Drove> {
+    let images = WANT_IMAGES.with(|w| w.replace(false));
     let _nested = Nested::enter()?;
     let file = super::absolute(file);
     let shown = file.display().to_string();
@@ -376,6 +402,11 @@ fn driven_bodies(
     // A design whose links could not follow its values is left half driven: it is not kept, so
     // the next drive starts again from the file (and finds whether the links can follow now).
     if matches!(result, Ok(Drove::Bodies(..))) {
+        // The images of this evaluation, before the design goes back where another drive of the
+        // same file can take it and give it other values.
+        if images {
+            DRIVEN_IMAGES.with(|i| *i.borrow_mut() = Some(super::design_images(&source.session, &shown)));
+        }
         put_source(source);
     }
     result
@@ -457,7 +488,8 @@ fn drive_source(source: &mut Source, shown: &str, link: &DesignLink, strict: boo
         if solidcraft_doc::text_params::is_text_unit(&param.unit) || doc.text_param(&name).is_some() {
             return Err(EngineError::Other(format!("`{name}` in {shown} is a text parameter: a link sets number parameters only")));
         }
-        let text = match host.value(&e, param.kind(), &param.unit) {
+        let value = if named { host.named(&e, param.kind(), &param.unit) } else { host.value(&e, param.kind(), &param.unit) };
+        let text = match value {
             Ok(text) => text,
             // A parameter that only shares a name keeps its own value when the two don't agree
             // (an angle here, a length there).
@@ -680,19 +712,13 @@ pub(super) fn link_bodies_with_images(
     let host = Host::of(s);
     // A command that sets the values refuses them when a design inside can't follow: the
     // bodies it would take don't have them.
-    match with_own_report(|| driven_bodies(file, bytes, configuration, link, strict, &host, s.validation()))? {
+    WANT_IMAGES.with(|w| w.set(true));
+    let drove = with_own_report(|| driven_bodies(file, bytes, configuration, link, strict, &host, s.validation()));
+    WANT_IMAGES.with(|w| w.set(false));
+    let images = DRIVEN_IMAGES.with(|i| i.borrow_mut().take()).unwrap_or_default();
+    match drove? {
         Drove::Bodies(driven) => {
             let (linked, applied, units) = *driven;
-            // The design is still open as the drive left it, with these values.
-            let file = super::absolute(file);
-            let images = match take_source(&file, digest(bytes), configuration, s.validation()) {
-                Some(source) => {
-                    let images = super::design_images(&source.session, &file.display().to_string());
-                    put_source(source);
-                    images
-                }
-                None => super::LinkedImages::default(),
-            };
             Ok((linked, images, applied, units))
         }
         Drove::Kept(kept) => Err(EngineError::Other(format!("{} can't take these values: {}", file.display(), kept.join("; ")))),
@@ -827,7 +853,7 @@ fn new_match(s: &Session, comp: u64, link: &DesignLink, host: &Host) -> bool {
                     && !link.parameters.contains_key(name)
                     && !link.parameters_kept.contains(name)
                     && !link.parameter_values.contains_key(name)
-                    && host.value(name, *kind, unit).is_ok()
+                    && host.named(name, *kind, unit).is_ok()
             })
         })
 }
@@ -1293,7 +1319,7 @@ pub(super) fn design_parameters(s: &mut Session, p: &Value) -> Result<Value> {
         .map(|r| {
             // What taking it by name would give: this design's parameter of that name, as a
             // value of this one's kind.
-            let here = host.user.contains(&r.name).then(|| host.value(&r.name, Kind::from_unit(&r.unit), &r.unit).ok()).flatten();
+            let here = host.user.contains(&r.name).then(|| host.named(&r.name, Kind::from_unit(&r.unit), &r.unit).ok()).flatten();
             DesignParameter {
                 here: here.as_deref().and_then(reported),
                 name: r.name,

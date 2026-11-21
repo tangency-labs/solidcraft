@@ -236,6 +236,59 @@ fn a_driven_links_cosmetic_threads_follow_the_values_it_passes() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// A dimension's parameter that only a link's expression uses stays when the unused ones are
+/// dropped, so the link goes on working its value out (review of #20542).
+#[test]
+fn a_dimension_parameter_a_link_passes_is_kept() {
+    let dir = folder("link-uses-model-parameter");
+    let part = dir.join("plate.sc");
+    save_plate(&part);
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "other", "expression": "1 mm"}));
+    let dimension =
+        |name: &str| solidcraft_doc::Param { name: name.into(), expr: "8 mm".into(), unit: "mm".into(), comment: String::new(), model: true };
+    s.doc_mut().params.extend([dimension("d901"), dimension("d902")]);
+    run(&mut s, "component.insert_design", json!({"path": part, "name": "Plate", "parameters": {"h": "d901"}}));
+    assert!((volume(&mut s) - 1600.0).abs() < 1e-6, "{}", volume(&mut s));
+
+    s.doc_mut().prune_model_params();
+    assert!(s.doc.param("d901").is_some(), "the link's expression uses it");
+    assert!(s.doc.param("d902").is_none(), "nothing uses this one");
+    run(&mut s, "parameters.change", json!({"name": "other", "expression": "2 mm"}));
+    assert!((volume(&mut s) - 1600.0).abs() < 1e-6, "{}", volume(&mut s));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A number here does not set a length there by name: `h = 8` without a unit leaves the plate's
+/// `h = 5 mm` alone, with a warning, and is not offered as the value this design would give. An
+/// expression still reads a unit-less result in the parameter's unit (review of #20542).
+#[test]
+fn a_number_taken_by_name_does_not_set_a_length() {
+    let dir = folder("by-name-number");
+    let part = dir.join("plate.sc");
+    save_plate(&part);
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "8", "unit": ""}));
+    let listed = run(&mut s, "component.design_parameters", json!({"path": part}));
+    let row = listed["parameters"].as_array().into_iter().flatten().find(|r| r["name"] == "h").cloned().unwrap_or_default();
+    assert!(row.get("here").is_none_or(Value::is_null), "nothing to take by name: {listed}");
+
+    let inserted = run(&mut s, "component.insert_design", json!({"path": part, "name": "Plate", "by_name": true}));
+    assert!(
+        inserted["warnings"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|w| w.as_str().is_some_and(|w| w.contains("`h`") && w.contains("keeps its own value"))),
+        "insert: {inserted}"
+    );
+    assert!((volume(&mut s) - 1000.0).abs() < 1e-6, "the plate keeps its own 5 mm: {}", volume(&mut s));
+
+    run(&mut s, "component.link_parameters", json!({"component": "Plate", "set": {"h": "h"}}));
+    assert!((volume(&mut s) - 1600.0).abs() < 1e-6, "an expression reads the number in mm: {}", volume(&mut s));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// A parameter that only shares a name, an angle here and a length there, keeps the linked
 /// design's own value, and the command that set the link going says so: Insert Design, Link
 /// Parameters and Update Links each in their own reply (review of PR #1).
@@ -536,6 +589,37 @@ fn renaming_a_parameter_carries_the_links_that_use_it() {
     run(&mut named, "edit.undo", json!({}));
     run(&mut named, "edit.undo", json!({}));
     assert!(named.doc.links.values().next().unwrap().parameters.is_empty(), "Undo takes the rename back from the link too");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Renaming a parameter to a name the linked design has too changes no linked part: the link
+/// goes on passing the old one under its new name, and the linked design's parameter of the
+/// new name keeps its own value, as the link's Keep its own (review of #20542).
+#[test]
+fn renaming_a_parameter_to_a_name_the_linked_design_has_changes_no_linked_part() {
+    let dir = folder("rename-onto");
+    let path = dir.join("plate.sc");
+    let mut part = Session::default();
+    run(&mut part, "parameters.add", json!({"name": "h", "expression": "5 mm"}));
+    run(&mut part, "parameters.add", json!({"name": "w", "expression": "20 mm"}));
+    run(&mut part, "solid.box", json!({"length": 10, "width": "w", "height": "h", "body_name": "Plate"}));
+    run(&mut part, "file.save", json!({"path": path}));
+
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "11 mm"}));
+    run(&mut s, "component.insert_design", json!({"path": path, "name": "Plate", "by_name": true}));
+    assert!((volume(&mut s) - 2200.0).abs() < 1e-6, "{}", volume(&mut s));
+    run(&mut s, "parameters.rename", json!({"name": "h", "new_name": "w"}));
+    let link = s.doc.links.values().next().unwrap();
+    assert_eq!(link.parameters.get("h").map(String::as_str), Some("w"));
+    assert!(link.parameters_kept.contains("w"), "the plate's own `w` is kept");
+    assert!((volume(&mut s) - 2200.0).abs() < 1e-6, "renamed: {}", volume(&mut s));
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "12 mm"}));
+    assert!((volume(&mut s) - 2400.0).abs() < 1e-6, "the plate's `h` follows, its `w` stays 20 mm: {}", volume(&mut s));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    let link = s.doc.links.values().next().unwrap();
+    assert!(link.parameters.is_empty() && link.parameters_kept.is_empty(), "Undo takes the rename back from the link too");
     let _ = std::fs::remove_dir_all(dir);
 }
 

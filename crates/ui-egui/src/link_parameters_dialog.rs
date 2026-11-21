@@ -78,6 +78,9 @@ pub struct Form {
     pub gone: Vec<String>,
     /// Why the last OK was refused.
     pub error: Option<String>,
+    /// Link Parameters…: what the link read its design from when these rows were read
+    /// ([`link_source`]). A link that reads another design since is read again ([`follow_source`]).
+    pub source: Option<String>,
 }
 
 impl Form {
@@ -115,6 +118,7 @@ impl Form {
             update: false,
             gone,
             error: None,
+            source: None,
         }
     }
 
@@ -152,7 +156,7 @@ impl Form {
                 gone.push(old.name.clone());
             }
         }
-        Form { rows, gone, changed: fresh.changed, file: fresh.file, ..self }
+        Form { rows, gone, changed: fresh.changed, file: fresh.file, source: fresh.source, ..self }
     }
 
     fn keep(&self) -> Vec<&str> {
@@ -181,6 +185,47 @@ pub struct Reading {
     /// Read again for the dialog that is open, after its OK was refused ([`refused`]): it
     /// refreshes that dialog's rows, keeping what was typed, instead of opening one.
     refresh: bool,
+    /// What the link read its design from when the read started ([`link_source`]).
+    source: Option<String>,
+}
+
+/// What the link of `target` reads its design from, as a dialog and its read remember it: the
+/// file's name, its bytes as this design last read them, and the configuration row. `None` for
+/// Insert Design and for a component that is no longer linked. The folder is left out: saving
+/// this design rewrites it relative to the design, which changes no source.
+fn link_source(app: &SolveApp, target: &Target) -> Option<String> {
+    let Target::Link { component } = target else { return None };
+    let link = app.session.doc.links.get(component)?;
+    let name = link.path.rsplit('/').next().unwrap_or_default();
+    Some(format!("{name}\n{}\n{:?}", link.file_sha256.as_deref().unwrap_or_default(), link.configuration))
+}
+
+/// A Link Parameters dialog, or the read that opens one, whose link reads another design since
+/// (Relink Source, Update Links, an undo of either) or is gone: its rows and what was typed in
+/// them are the old design's, so they are dropped and the link is read again as it is now. They
+/// are never set on another design than the one they were read from.
+fn follow_source(app: &mut SolveApp) {
+    let tab = app.docs.active_tab();
+    let mut again = None;
+    if let Some(form) = app.link_parameters.take_if(|f| f.tab == tab && matches!(f.target, Target::Link { .. })) {
+        if link_source(app, &form.target) == form.source {
+            app.link_parameters = Some(form);
+        } else {
+            again = Some(form.target);
+        }
+    }
+    if let Some(reading) = app.link_parameters_reading.take_if(|r| r.tab == tab && matches!(r.target, Target::Link { .. })) {
+        if link_source(app, &reading.target) == reading.source {
+            app.link_parameters_reading = Some(reading);
+        } else if !reading.refresh {
+            again = Some(reading.target);
+        }
+    }
+    if let Some(Target::Link { component }) = again
+        && app.session.doc.links.contains_key(&component)
+    {
+        open_link(app, component);
+    }
 }
 
 /// How long a read goes unseen before the window says it is reading (ms).
@@ -272,7 +317,8 @@ fn read_beside(app: &mut SolveApp, target: Target, params: Value, hosts: Vec<Str
         read();
     }
     let tab = app.docs.active_tab();
-    app.link_parameters_reading = Some(Reading { done, target, tab, started: crate::now_ms(), refresh });
+    let source = link_source(app, &target);
+    app.link_parameters_reading = Some(Reading { done, target, tab, started: crate::now_ms(), refresh, source });
 }
 
 /// Insert Design picked the design at `path`: its parameters are read beside the window. When
@@ -308,10 +354,10 @@ pub(crate) fn poll(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     if reading.refresh {
-        refreshed(app, &reading.target, reading.tab, outcome);
+        refreshed(app, &reading.target, reading.tab, reading.source, outcome);
         return;
     }
-    finish(app, reading.target, reading.tab, outcome);
+    finish(app, reading.target, reading.tab, reading.source, outcome);
 }
 
 /// OK was refused: the dialog opens again with what was typed and why. A Link Parameters dialog
@@ -331,13 +377,13 @@ pub(crate) fn refused(app: &mut SolveApp, mut form: Form, error: String) {
 /// keeping what was typed in it, and what the link set that the design no longer has is said
 /// to go. Nothing when the dialog was closed or is another one by then, or the read failed (the
 /// dialog keeps the reason it was refused).
-fn refreshed(app: &mut SolveApp, target: &Target, tab: u64, outcome: Result<Value, String>) {
+fn refreshed(app: &mut SolveApp, target: &Target, tab: u64, source: Option<String>, outcome: Result<Value, String>) {
     let Ok(reply) = outcome else { return };
     let Some(form) = app.link_parameters.take_if(|f| f.target == *target && f.tab == tab) else { return };
-    app.link_parameters = Some(form.merged(Form::from_reply(target.clone(), tab, &reply)));
+    app.link_parameters = Some(form.merged(Form { source, ..Form::from_reply(target.clone(), tab, &reply) }));
 }
 
-fn finish(app: &mut SolveApp, target: Target, tab: u64, outcome: Result<Value, String>) {
+fn finish(app: &mut SolveApp, target: Target, tab: u64, source: Option<String>, outcome: Result<Value, String>) {
     // A read that started before the last OK, finished while that computes, or once a dialog is
     // open (a refused draft brought back): nothing opens in its place.
     if busy(app) || open_already(app) {
@@ -355,7 +401,7 @@ fn finish(app: &mut SolveApp, target: Target, tab: u64, outcome: Result<Value, S
             app.link_parameters = Some(form);
         }
         (Target::Insert { path, note, .. }, Err(_)) => app.insert_design_async(&path, note),
-        (target @ Target::Link { .. }, Ok(reply)) => app.link_parameters = Some(Form::from_reply(target, tab, &reply)),
+        (target @ Target::Link { .. }, Ok(reply)) => app.link_parameters = Some(Form { source, ..Form::from_reply(target, tab, &reply) }),
         (Target::Link { .. }, Err(e)) if !e.is_empty() => app.set_status(e, true),
         (Target::Link { .. }, Err(_)) => {}
     }
@@ -395,6 +441,17 @@ pub(crate) fn heavy_ended(app: &mut SolveApp, serial: u64, error: Option<&String
     }
 }
 
+/// The design in the shown tab was replaced (New, Open): the dialogs, reads and waiting drafts of
+/// the design it replaced go with it, so none of them is set on, or inserts into, the new one.
+pub(crate) fn design_replaced(app: &mut SolveApp) {
+    let tab = app.docs.active_tab();
+    app.link_parameters.take_if(|f| f.tab == tab);
+    app.link_parameters_reading.take_if(|r| r.tab == tab);
+    app.link_parameters_waiting.take_if(|(_, f)| f.tab == tab);
+    app.link_parameters_inserting.retain(|(_, f)| f.tab != tab);
+    app.link_parameters_back.retain(|f| f.tab != tab);
+}
+
 /// A dialog waiting for its OK whose command is no longer under way and never ended (Stop
 /// dropped it): it opens again as it was.
 fn stopped(app: &mut SolveApp) {
@@ -410,6 +467,7 @@ fn stopped(app: &mut SolveApp) {
 
 /// The dialog, while it is open.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
+    follow_source(app);
     poll(app, ctx);
     stopped(app);
     bring_back(app);
@@ -573,6 +631,11 @@ fn apply(app: &mut SolveApp, form: &Form) -> Result<(), String> {
         // A long rebuild computes beside the window; its outcome then shows as any history
         // command's does, and the draft waits for it ([`heavy_ended`]).
         Target::Link { component } => {
+            // Rows read from another design than the link reads now are never set on it: the
+            // dialog reads the link again ([`follow_source`]).
+            if link_source(app, &form.target) != form.source {
+                return Ok(());
+            }
             let mut params = json!({"component": component, "set": form.set(), "by_name": form.by_name, "keep": form.keep()});
             if form.changed && form.update {
                 params["update"] = json!(true);
@@ -629,6 +692,10 @@ const TOOLTIP_VALUES: usize = 8;
 /// link's own expressions first, then the values it takes by name, then what it keeps.
 pub fn tooltip(doc: &solidcraft_engine::doc::Document, component: u64) -> Option<String> {
     let link = doc.links.get(&component).filter(|l| l.parameters_by_name || !l.parameters.is_empty())?;
+    // A link by name that matches no name passes nothing: no badge and no empty list.
+    if link.parameter_values.is_empty() && link.parameters_kept.is_empty() {
+        return None;
+    }
     let mut lines: Vec<String> = Vec::new();
     let (own, named): (Vec<_>, Vec<_>) = link.parameter_values.iter().partition(|(name, _)| link.parameters.contains_key(*name));
     for (parameter, value) in own.into_iter().chain(named) {

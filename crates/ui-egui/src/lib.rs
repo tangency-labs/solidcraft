@@ -2208,6 +2208,7 @@ impl SolveApp {
                     self.pre_edit_component = None;
                     // So does what it had computing: none of it may land in the new design.
                     self.cancel_computing();
+                    link_parameters_dialog::design_replaced(self);
                     self.tool = None;
                     self.preview.reset();
                     self.cam = Camera::default();

@@ -364,9 +364,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     table(app, ui, &mut d, &users, "user", name_floor);
                 });
                 // What the links pass to their designs, and what the last edit could not pass.
+                // (a component's name may hold letters beyond ASCII: both sides fold the same way)
+                let wanted = d.filter.to_lowercase();
                 let passed: Vec<String> = crate::link_parameters_dialog::passed(app)
                     .into_iter()
-                    .filter(|l| filter.is_empty() || l.to_lowercase().contains(&filter))
+                    .filter(|l| wanted.is_empty() || l.to_lowercase().contains(&wanted))
                     .collect();
                 let refused = app.link_warnings.clone();
                 if !passed.is_empty() || !refused.is_empty() {
