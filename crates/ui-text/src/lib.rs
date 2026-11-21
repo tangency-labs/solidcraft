@@ -133,7 +133,22 @@ fn english() -> &'static Catalog {
 }
 
 pub fn is_supported(id: &str) -> bool {
-    locales().iter().any(|catalog| catalog.id == id)
+    let id = normalize_legacy_id(id.trim());
+    locales().iter().any(|catalog| catalog.id.eq_ignore_ascii_case(&id))
+}
+
+/// Normalizes legacy ISO 639-1 Hebrew codes (`iw`, `iw-IL`, `iw_IL`) to modern `he` tags.
+fn normalize_legacy_id(tag: &str) -> Cow<'_, str> {
+    if tag.eq_ignore_ascii_case("iw") {
+        Cow::Borrowed("he")
+    } else if tag.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("iw"))
+        && tag.as_bytes().get(2).is_some_and(|b| matches!(b, b'-' | b'_'))
+        && let Some(rest) = tag.get(2..)
+    {
+        Cow::Owned(format!("he{rest}"))
+    } else {
+        Cow::Borrowed(tag)
+    }
 }
 
 /// The `language` preference value that follows the system (#10138). Not a catalog id: it
@@ -142,11 +157,12 @@ pub const SYSTEM: &str = "system";
 
 /// Match the system's preferred locale tags against the catalogs: the exact tag first
 /// (`zh-TW`, `pt-BR`, `en-GB`), then the tag's base language (`zh-CN` → `zh`, `de-AT` → `de`),
-/// then English. A Chinese tag goes by its script or region instead ([`chinese_catalog`]).
-/// Tags come in the system's order of preference; the first one that matches wins.
+/// then English. Legacy `iw` tags resolve as Hebrew (`he`), and a Chinese tag goes by its script
+/// or region instead ([`chinese_catalog`]). Tags come in the system's order of preference; the
+/// first one that matches wins.
 pub fn match_system_tags(tags: &[String]) -> &'static str {
     for tag in tags {
-        let tag = tag.replace('_', "-");
+        let tag = normalize_legacy_id(tag.trim()).replace('_', "-");
         if let Some(catalog) = chinese_catalog(&tag) {
             return catalog;
         }
@@ -217,8 +233,8 @@ impl Locale {
     }
 
     pub fn for_language(id: &str) -> Self {
-        let id = if id == SYSTEM { system_language() } else { id };
-        Self(locales().iter().copied().find(|catalog| catalog.id == id).unwrap_or_else(english))
+        let id = if id == SYSTEM { system_language().to_string() } else { normalize_legacy_id(id.trim()).replace('_', "-") };
+        Self(locales().iter().copied().find(|catalog| catalog.id.eq_ignore_ascii_case(&id)).unwrap_or_else(english))
     }
 
     /// The catalog this locale reads.
@@ -497,7 +513,14 @@ mod tests {
         assert_eq!(match_system_tags(&tags(&["zh-Hant-TW"])), "zh-TW");
         assert_eq!(match_system_tags(&tags(&["zh-CN"])), "zh");
         assert_eq!(match_system_tags(&tags(&["xx-YY", "ja"])), "ja");
+        assert_eq!(match_system_tags(&tags(&["iw"])), "he");
+        assert_eq!(match_system_tags(&tags(&["iw-IL"])), "he");
+        assert_eq!(match_system_tags(&tags(&["iw_IL"])), "he");
         assert_eq!(match_system_tags(&tags(&["fr-FR"])), "en", "no catalog: English");
+        assert!(is_supported("he"));
+        assert!(is_supported("iw"));
+        assert_eq!(Locale::for_language("iw").catalog().id, "he");
+        assert_eq!(Locale::for_language("iw_IL").catalog().id, "en");
     }
 
     #[test]

@@ -25,7 +25,7 @@ fn app_with_server(status: Option<u16>) -> (SolveApp, Requests) {
     });
     let services = crate::Services { usage_http: Some(http), ..Default::default() };
     let mut app = SolveApp::new(Session::default(), services);
-    app.usage = UsageStats::default();
+    app.usage = UsageStats { hosted: true, ..UsageStats::default() };
     app.usage.store.notice_shown = true;
     let _ = solidcraft_engine::usage::take();
     (app, requests)
@@ -65,7 +65,8 @@ fn a_finished_day_is_sent_once_to_the_endpoint_with_exactly_the_reported_fields(
     assert_eq!((request.method, request.url.as_str()), ("POST", ENDPOINT));
     let body: serde_json::Value = serde_json::from_slice(request.body.as_deref().unwrap()).unwrap();
     let keys: Vec<&str> = body.as_object().unwrap().keys().map(String::as_str).collect();
-    let mut allowed = ["v", "install_id", "day", "version", "os", "arch", "platform", "active_minutes", "operations", "tools"];
+    let mut allowed =
+        ["v", "install_id", "day", "version", "os", "arch", "platform", "active_minutes", "operations", "tools", "failed", "compute_ms", "dialog_s"];
     allowed.sort_unstable();
     assert_eq!(keys, allowed, "these fields and nothing else");
     assert_eq!(body["v"], SCHEMA);
@@ -261,10 +262,81 @@ fn a_tool_started_from_the_ui_counts_even_when_cancelled() {
     let (mut app, _) = app_with_server(Some(200));
     tick_at(&mut app, T0, 0.0, false);
     app.start("solid.box");
+    tick_at(&mut app, T0, 1.0, false);
     crate::dialogs::cancel(&mut app);
-    tick_at(&mut app, T0, 0.0, false);
+    tick_at(&mut app, T0, 40.0, false);
     assert_eq!(counts(&app, "2023-11-14", true, "ui"), Some(&[("solid.box".to_string(), 1)].into()));
     assert!(counts(&app, "2023-11-14", false, "ui").is_none(), "a cancelled tool changed nothing");
+    let timed = &app.usage.store.days["2023-11-14"].dialog_s;
+    assert_eq!(timed["solid.box"]["cancelled"], [("30s-2m".to_string(), 1)].into(), "open for 39 s, then cancelled: {timed:?}");
+}
+
+#[test]
+fn a_tool_applied_is_timed_as_applied() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _ = solidcraft_engine::usage::take();
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.usage = UsageStats { hosted: true, ..UsageStats::default() };
+    h.app.usage.store.notice_shown = true;
+    h.frames(2);
+    h.app.start("solid.box");
+    h.frames(3);
+    assert!(h.app.dialog.is_some(), "Box opens its dialog");
+    crate::dialogs::confirm(&mut h.app);
+    // The apply may run off the window thread: the dialog counts as open until its result is in.
+    for _ in 0..200 {
+        h.frames(1);
+        if h.app.applying.is_none() && h.app.dialog.is_none() && h.app.usage.open_tool.is_none() {
+            break;
+        }
+    }
+    let timed: Vec<&Dialogs> = h.app.usage.store.days.values().map(|day| &day.dialog_s).collect();
+    let applied = timed.iter().find_map(|d| d.get("solid.box")).expect("Box was timed");
+    assert_eq!(applied.get("applied").map(|b| b.values().sum::<u32>()), Some(1), "{applied:?}");
+    assert!(!applied.contains_key("cancelled"));
+    for (bucket, expected) in [(0.0, "0-5s"), (4.99, "0-5s"), (5.0, "5-30s"), (29.9, "5-30s"), (30.0, "30s-2m"), (119.0, "30s-2m"), (120.0, "2m+")] {
+        assert_eq!(dialog_bucket(bucket), expected, "{bucket}");
+    }
+}
+
+#[test]
+fn failures_count_the_kind_of_error_only_and_operations_their_time() {
+    use solidcraft_engine::usage::{compute_bucket, error_kind};
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut app, _) = app_with_server(Some(200));
+    tick_at(&mut app, T0, 0.0, false);
+    make_box(&mut app);
+    let secret = "Secret Bracket C:\\Users\\someone";
+    // Whichever of these fails first (each refers to what isn't there); its parameters carry
+    // words that must never reach a report.
+    let tries = [
+        ("solid.fillet", json!({"edges": [secret], "radius": 1})),
+        ("body.delete", json!({"bodies": [secret]})),
+        ("solid.extrude", json!({"profile": secret, "distance": 5})),
+    ];
+    let (failed_id, error) =
+        tries.iter().find_map(|(id, params)| app.session.execute(id, params).err().map(|e| (*id, e))).expect("one of them fails");
+    tick_at(&mut app, T0, 0.0, false);
+    let day = &app.usage.store.days["2023-11-14"];
+    let kinds = &day.failed["ui"][failed_id];
+    assert_eq!(kinds.values().sum::<u32>(), 1, "{kinds:?}");
+    let kind = kinds.keys().next().unwrap();
+    assert_eq!(Some(kind.clone()), error_kind(&error));
+    assert!(kind.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.'), "{kind}");
+    let all = serde_json::to_string(&report(&app.usage.store, "2023-11-14", day)).unwrap();
+    assert!(!all.contains("Secret") && !all.contains("Users"), "no message, no parameter: {all}");
+    assert_eq!(day.compute_ms["solid.box"].values().sum::<u32>(), 1, "the operation is timed: {:?}", day.compute_ms);
+    assert_eq!(day.compute_ms[failed_id].values().sum::<u32>(), 1, "and the failure: {:?}", day.compute_ms);
+    for (ms, expected) in [(0.0, "0-100ms"), (99.9, "0-100ms"), (100.0, "100ms-1s"), (999.0, "100ms-1s"), (1000.0, "1s-10s"), (10_000.0, "10s+")] {
+        assert_eq!(compute_bucket(ms), expected, "{ms}");
+    }
+    assert_eq!(error_kind(&solidcraft_engine::EngineError::Cancelled("x".into())), None, "a cancel is no failure");
+    let feature = solidcraft_engine::EngineError::Feature(Box::new(solidcraft_engine::FeatureFailure {
+        error: "the fillet radius is too large for the Secret Bracket".into(),
+        code: solidcraft_engine::kernel::ErrorCode { call: "Blend".into(), kind: 7, operation: "smlib::blend::rolling".into() },
+    }));
+    assert_eq!(error_kind(&feature).as_deref(), Some("kernel.blend.7"), "the call and the kernel's number only");
 }
 
 #[test]
@@ -311,9 +383,9 @@ fn show_whats_sent_is_the_next_report() {
 
 #[test]
 fn a_stored_store_comes_back_and_a_hostile_one_is_a_new_one() {
-    let mut store = Store { install_id: new_id().unwrap(), notice_shown: true, days: BTreeMap::new() };
+    let mut store = Store { install_id: new_id().unwrap(), notice_shown: true, ..Store::default() };
     let ui: Counts = [("ui".to_string(), [("solid.box".to_string(), 2)].into())].into();
-    store.days.insert("2023-11-14".into(), Day { active_minutes: 5, operations: ui.clone(), tools: ui });
+    store.days.insert("2023-11-14".into(), Day { active_minutes: 5, operations: ui.clone(), tools: ui, ..Day::default() });
     assert_eq!(Store::from_stored(Some(&store.to_stored())), store);
     for hostile in ["", "[]", "null", "{", r#"{"install_id": 7}"#] {
         assert_eq!(Store::from_stored(Some(hostile)), Store::default(), "{hostile}");
@@ -344,4 +416,207 @@ fn ids_are_random_version_4_uuids() {
     assert!(valid_id(&a) && valid_id(&b));
     assert!(!valid_id("00000000-0000-0000-0000-000000000000"));
     assert!(!valid_id("ABCDEF00-0000-4000-8000-000000000000"));
+}
+
+#[test]
+fn the_notice_shows_once_and_counting_starts_with_it() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut app, _) = app_with_server(Some(200));
+    app.usage.store.notice_shown = false;
+    assert!(notice_pending(&app));
+    assert!(notice(&mut app, 0.0), "the first start shows it");
+    assert!(app.usage.store.notice_shown, "and from then on counting runs");
+    assert!(notice(&mut app, NOTICE_SECONDS - 1.0));
+    assert!(!notice(&mut app, NOTICE_SECONDS + 1.0), "it goes by itself");
+    // The next start keeps the store: no second notice.
+    let store = app.usage.store.clone();
+    let (mut again, _) = app_with_server(Some(200));
+    again.usage.store = store;
+    assert!(!notice(&mut again, 0.0));
+    assert!(!notice_pending(&again));
+}
+
+#[test]
+fn no_notice_when_the_organization_or_the_environment_turned_statistics_off() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    for policy in [true, false] {
+        let (mut app, _) = app_with_server(Some(200));
+        app.usage.store.notice_shown = false;
+        if policy {
+            app.policy = crate::policy::Policy::from_json(r#"{"UsageStatistics": 0}"#);
+        } else {
+            app.usage.env_off = true;
+        }
+        assert!(!notice_pending(&app));
+        assert!(!notice(&mut app, 0.0));
+        assert!(!app.usage.store.notice_shown, "nothing starts counting");
+    }
+}
+
+#[test]
+fn turn_off_on_the_notice_turns_statistics_off_and_details_opens_privacy() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut app, requests) = app_with_server(Some(200));
+    app.usage.store.notice_shown = false;
+    assert!(notice(&mut app, 0.0));
+    use_app(&mut app, T0, 0.0);
+    act(&mut app, NoticeAction::TurnOff);
+    assert!(!app.preferences.usage_statistics);
+    assert!(app.usage.store.days.is_empty(), "what was counted is deleted");
+    assert!(!notice(&mut app, 1.0));
+    use_app(&mut app, T0 + DAY, 1.0e6);
+    assert!(requests.lock().unwrap().is_empty());
+    let (mut app, _) = app_with_server(Some(200));
+    app.usage.store.notice_shown = false;
+    assert!(notice(&mut app, 0.0));
+    act(&mut app, NoticeAction::Details);
+    assert!(app.prefs_window.shell.open);
+    assert_eq!(app.prefs_window.shell.section, crate::prefs::PAGE_PRIVACY);
+    assert!(app.preferences.usage_statistics, "Details changes nothing");
+}
+
+#[test]
+fn the_privacy_page_shows_the_organizations_choice_locked() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.usage.hosted = true;
+    h.app.usage.store.notice_shown = true;
+    h.app.policy = crate::policy::Policy::from_json(r#"{"UsageStatistics": 0}"#);
+    crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_PRIVACY);
+    h.frames(3);
+    assert!(h.widget("Set by your organization").is_some());
+    h.step(&json!({"click":{"handle":"prefs:usage_statistics"}})).unwrap();
+    h.frames(1);
+    assert!(h.app.preferences.usage_statistics, "the person's own choice is kept and can't be changed here");
+    assert_eq!(off(&h.app), Some(Off::Policy));
+    h.step(&json!({"click":{"handle":"prefs:usage_statistics:show"}})).unwrap();
+    h.frames(2);
+    assert!(h.widget("Nothing is sent while usage statistics are off.").is_some());
+}
+
+#[test]
+fn the_privacy_page_turns_statistics_off_and_shows_the_next_report() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.usage.hosted = true;
+    h.app.usage.store.notice_shown = true;
+    crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_PRIVACY);
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"prefs:usage_statistics:show"}})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::rect_of("prefs:usage_statistics:report").is_some(), "the next report's JSON is shown");
+    h.step(&json!({"click":{"handle":"prefs:usage_statistics"}})).unwrap();
+    h.frames(2);
+    assert!(!h.app.preferences.usage_statistics);
+    assert!(h.app.usage.store.days.is_empty());
+}
+
+#[test]
+fn the_notice_shows_on_a_real_first_start_and_never_in_an_app_that_keeps_nothing() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    // Tests, scenarios and hosts that keep nothing between runs: no notice, nothing counted.
+    let mut kept_nothing = SolveApp::new(Session::default(), crate::Services::default());
+    assert!(!notice_pending(&kept_nothing));
+    assert!(!notice(&mut kept_nothing, 0.0));
+    tick_at(&mut kept_nothing, T0, 0.0, true);
+    assert!(!kept_nothing.session.count_usage);
+    assert!(kept_nothing.usage.store.days.is_empty());
+    let mut h = crate::scenario::Harness::new();
+    h.frames(5);
+    assert!(crate::scenario::rect_of("toast:usage_stats").is_none(), "the harness never shows it");
+    // The app's first start: the host loads what it kept, which is nothing yet.
+    let mut first = SolveApp::new(Session::default(), crate::Services::default());
+    first.load_usage_stats(None);
+    assert!(notice_pending(&first), "the first start shows the notice");
+    assert!(notice(&mut first, 0.0));
+    // The next start loads what this one kept: no second notice.
+    let kept = first.usage_stats_for_storage();
+    let mut next = SolveApp::new(Session::default(), crate::Services::default());
+    next.load_usage_stats(Some(&kept));
+    assert!(!notice_pending(&next));
+    // And the real first start shows it as the shared toast.
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.load_usage_stats(None);
+    h.frames(5);
+    assert!(crate::scenario::rect_of("toast:usage_stats").is_some(), "the toast is drawn on a real first start");
+}
+
+#[test]
+fn delete_my_data_asks_the_server_to_delete_the_old_id_and_uses_a_new_one() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut app, requests) = app_with_server(Some(204));
+    use_app(&mut app, T0, 0.0);
+    let old = app.usage.store.install_id.clone();
+    // With statistics turned off it still goes: what was sent earlier stays until deleted.
+    app.preferences.usage_statistics = false;
+    assert!(delete_my_data(&mut app));
+    assert_ne!(app.usage.store.install_id, old);
+    assert!(app.usage.store.days.is_empty());
+    tick_at(&mut app, T0, 1.0, false);
+    tick_at(&mut app, T0, 2.0, false);
+    let sent = requests.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1);
+    assert_eq!((sent[0].method, sent[0].url.as_str()), ("DELETE", format!("{INSTALL_ENDPOINT}{old}").as_str()));
+    assert!(sent[0].body.is_none(), "nothing but the id");
+    assert!(app.usage.store.forget.is_empty(), "done once the server answered");
+    // Nothing more goes, however many frames follow.
+    for frame in 0..100 {
+        tick_at(&mut app, T0, 3.0 + f64::from(frame), false);
+    }
+    assert_eq!(requests.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn a_deletion_the_server_didnt_take_waits_an_hour_and_survives_a_restart() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut app, requests) = app_with_server(None);
+    use_app(&mut app, T0, 0.0);
+    let old = app.usage.store.install_id.clone();
+    assert!(delete_my_data(&mut app));
+    for second in 0..600 {
+        tick_at(&mut app, T0, 1.0 + f64::from(second), false);
+    }
+    assert_eq!(requests.lock().unwrap().len(), 1, "one try, no storm");
+    assert_eq!(app.usage.store.forget, std::slice::from_ref(&old));
+    let kept = Store::from_stored(Some(&app.usage.store.to_stored()));
+    assert_eq!(kept.forget, [old], "it waits across starts");
+    tick_at(&mut app, T0, 3700.0, false);
+    assert_eq!(requests.lock().unwrap().len(), 2, "tried again an hour later");
+}
+
+#[test]
+fn no_deletion_goes_when_the_organization_or_the_environment_turned_statistics_off() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    for policy in [true, false] {
+        let (mut app, requests) = app_with_server(Some(204));
+        use_app(&mut app, T0, 0.0);
+        if policy {
+            app.policy = crate::policy::Policy::from_json(r#"{"UsageStatistics": 0}"#);
+        } else {
+            app.usage.env_off = true;
+        }
+        assert!(!delete_my_data(&mut app));
+        tick_at(&mut app, T0, 1.0, false);
+        assert!(requests.lock().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn the_host_reaches_only_the_report_and_delete_addresses() {
+    let id = new_id().unwrap();
+    assert!(allowed_url(ENDPOINT));
+    assert!(allowed_url(&format!("{INSTALL_ENDPOINT}{id}")));
+    for not in [
+        format!("{INSTALL_ENDPOINT}{id}/x"),
+        format!("{INSTALL_ENDPOINT}../report"),
+        INSTALL_ENDPOINT.to_string(),
+        "https://metrics.solidcraft.io/v1/summary".to_string(),
+        "https://example.com/v1/report".to_string(),
+        format!("{ENDPOINT}?x=1"),
+    ] {
+        assert!(!allowed_url(&not), "{not}");
+    }
 }

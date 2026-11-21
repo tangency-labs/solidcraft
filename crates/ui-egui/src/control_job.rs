@@ -266,8 +266,7 @@ impl ControlJob {
 pub(crate) const MAX_NEXT_SHOWN: usize = 12;
 
 fn label(app: &SolveApp, command: &str) -> String {
-    let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
-    language.label(solidcraft_engine::find_command(command).map_or(command, |c| c.label)).to_string()
+    crate::agent_label::name_in(solidcraft_ui_text::Locale::for_language(&app.preferences.language), command)
 }
 
 /// Run `f` on a worker thread (with the request's folder scope, stopping early once `progress`
@@ -529,6 +528,19 @@ impl SolveApp {
                 "engine.execute" | "command" => executed(&r.params).map(|(c, _)| c),
                 _ => r.params.get("commands").and_then(Value::as_array).and_then(|s| s.first()).and_then(crate::control::batch_step_command),
             };
+            let is_batch = matches!(r.method.as_str(), "engine.batch" | "engine.script");
+            let steps: Vec<String> = if is_batch {
+                let all = r.params.get("commands").and_then(Value::as_array);
+                all.into_iter().flatten().take(4).filter_map(crate::control::batch_step_command).map(|c| label(self, c)).collect()
+            } else {
+                Vec::new()
+            };
+            if steps.len() > 1 {
+                let count = r.params.get("commands").and_then(Value::as_array).map_or(0, Vec::len);
+                let names = if count > steps.len() { steps[..3.min(steps.len())].iter().cloned().chain(["…".into()]).collect() } else { steps };
+                let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);
+                return (r.serial, crate::agent_label::batch_in(language, &names));
+            }
             (r.serial, label(self, first.unwrap_or(&r.method)))
         })
         .collect()
@@ -599,6 +611,7 @@ impl SolveApp {
                 return Some(req);
             }
             let mut copy = self.session.scratch();
+            copy.plugin_forms_interactive = crate::plugin_menu::take_interactive_run(self, req.serial);
             if let Some(level) = level {
                 copy.param_check = level;
             }
@@ -829,6 +842,7 @@ impl SolveApp {
                 let _ = job.req.reply.send(stopped_reply(&job.label, true));
                 return;
             }
+            let mut stale_revision = None;
             let result = if self.file_load_holds()
                 || self.file_picker.is_some()
                 || disabled != &self.preferences.disabled_plugins
@@ -855,7 +869,14 @@ impl SolveApp {
                         } else {
                             self.session.redo = redo;
                         }
-                        replies.map_err(|_| self.tr("ui.plugin_context_changed").to_string())
+                        replies.map_err(|error| {
+                            if let Some(solidcraft_engine::plugin::HostError::StaleRevision { expected, actual }) = error.host_error() {
+                                stale_revision = Some((expected.clone(), actual.clone()));
+                                error.to_string()
+                            } else {
+                                self.tr("ui.plugin_context_changed").to_string()
+                            }
+                        })
                     })
                     .and_then(|replies| replies.into_iter().last().map(|(_, reply)| reply).ok_or_else(|| self.tr("ui.plugin_no_result").to_string()))
             };
@@ -875,8 +896,19 @@ impl SolveApp {
             let result = self.command_completed("plugin.run", result);
             let mut reply = match result {
                 Ok(result) => json!({"ok":true,"result":result}),
-                Err(error) => json!({"ok":false,"error":error}),
+                Err(error) => {
+                    let mut reply = json!({"ok":false,"error":error});
+                    if let Some((expected, actual)) = stale_revision {
+                        reply["kind"] = json!("stale_revision");
+                        reply["expected"] = json!(expected);
+                        reply["actual"] = json!(actual);
+                    }
+                    reply
+                }
             };
+            if let Some(reason) = reply.get("error").and_then(Value::as_str).and_then(solidcraft_engine::plugin::structured_tool_error) {
+                reply["plugin_error"] = reason;
+            }
             if let Some(level) = level {
                 reply["param_check"] = json!(level.name());
             }
