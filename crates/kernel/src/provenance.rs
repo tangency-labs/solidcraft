@@ -188,24 +188,21 @@ fn nearest_segment(segs: &[Seg2], pts: &[Vec2]) -> Option<usize> {
 /// caps on the start and end planes, sides by the profile segment they sweep.
 pub fn extrude_origins(tool: &Body, plane: &Plane, regions: &[Region2]) -> Result<Vec<FaceOrigin>> {
     let size = tool.size().max(1e-9);
-    let m = tool.mesh(&crate::MeshTolerance::chord(size * 2e-4))?;
-    let faces = face_tris(&m);
+    let faces = tool.faces((size * 1e-3).max(1e-3))?;
     let n = plane.normal();
     let segs = segments(regions);
-    let heights: Vec<f64> = m.positions.iter().map(|p| (*p - plane.origin).dot(n)).collect();
-    let (lo, hi) = heights.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), h| (a.min(*h), b.max(*h)));
+    let (lo, hi) =
+        faces.iter().map(|f| (f.centroid - plane.origin).dot(n)).fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), h| (a.min(h), b.max(h)));
     let mut out = Vec::with_capacity(faces.len());
     for f in &faces {
-        let samples = face_samples(f);
-        let cap = samples.iter().all(|(_, fn_)| fn_.dot(n).abs() > 1.0 - 1e-6);
-        if cap {
-            let h = samples.first().map(|(p, _)| (*p - plane.origin).dot(n)).unwrap_or(lo);
+        if f.plane_normal.is_some_and(|fn_| fn_.dot(n).abs() > 1.0 - 1e-6) {
+            let h = (f.centroid - plane.origin).dot(n);
             // The start cap is the one at the low end along the plane's normal.
             out.push(FaceOrigin::Cap { end: (h - lo).abs() > (h - hi).abs() });
             continue;
         }
-        let pts: Vec<Vec2> = samples.iter().map(|(p, _)| plane.to_local(*p - n * (*p - plane.origin).dot(n))).collect();
-        match nearest_segment(&segs, &pts) {
+        let pt = plane.to_local(f.centroid - n * (f.centroid - plane.origin).dot(n));
+        match nearest_segment(&segs, &[pt]) {
             Some(k) => out.push(FaceOrigin::Profile { segment: k }),
             None => out.push(FaceOrigin::Cap { end: false }),
         }
