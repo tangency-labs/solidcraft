@@ -41,6 +41,9 @@ pub struct LayoutText {
     pub equal: String,
     pub reset: String,
     pub clean: String,
+    pub save: String,
+    pub saved: String,
+    pub manage: String,
 }
 
 pub struct LayoutMenu {
@@ -302,7 +305,7 @@ fn detach_action(ui: &mut Ui, data: &LayoutMenu, focus_first: bool) -> Option<St
 }
 
 fn saved_action(ui: &mut Ui, data: &LayoutMenu, focus_first: bool) -> Option<String> {
-    Menu::heading(ui, tr("view_layout.saved"));
+    Menu::heading(ui, &data.text.saved);
     let mut picked = None;
     for (index, name) in data.saved.iter().enumerate() {
         let id = format!("layout.saved.{name}");
@@ -316,7 +319,7 @@ fn saved_action(ui: &mut Ui, data: &LayoutMenu, focus_first: bool) -> Option<Str
         }
     }
     Menu::separator(ui);
-    if action(ui, "layout.manage", tr("view_layout.manage"), "", "", None).clicked() {
+    if action(ui, "layout.manage", &data.text.manage, "", "", None).clicked() {
         picked = Some("layout.manage".into());
     }
     picked
@@ -367,10 +370,10 @@ pub(crate) fn show(ui: &mut Ui, strip: &TabStrip, data: &LayoutMenu, opened: u64
     Menu::separator(ui);
     let glyph = |p: &egui::Painter, rect, opacity| paint_view_glyph(p, rect, "tiles", Tokens::get().text_dim.gamma_multiply(opacity));
     let icon = crate::Icon::Paint(&glyph);
-    if action(ui, "layout.save", tr("view_layout.save"), icon, "", None).clicked() {
+    if action(ui, "layout.save", &data.text.save, icon, "", None).clicked() {
         picked = Some("layout.save".into());
     }
-    let saved_row = (!data.saved.is_empty()).then(|| flyout_row(ui, "layout.saved", tr("view_layout.saved"), icon, "", Flyout::Saved, &mut open));
+    let saved_row = (!data.saved.is_empty()).then(|| flyout_row(ui, "layout.saved", &data.text.saved, icon, "", Flyout::Saved, &mut open));
     let mut submenu = None;
     if let Some((flyout, anchor)) = open.and_then(|flyout| match flyout {
         Flyout::Fill => Some((flyout, &fill_row)),
