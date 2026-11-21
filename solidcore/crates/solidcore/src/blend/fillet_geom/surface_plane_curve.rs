@@ -23,7 +23,14 @@
 //! still miss the exact curve when refining would pass it can't be fitted (`SM_ERR`), as when
 //! its 20 passes run out. Each pass splits every span that misses, so without the bound a
 //! curve that never fits doubles its stations each pass (the goldens' generated
-//! `blend.fillet_geom_p2` case `gen0014` ran out of memory).
+//! `blend.fillet_geom_p2` case `gen0014` ran out of memory). Not the fork's: a span off the
+//! exact curve is split at the crossing's point on the plane bisecting its chord, not at the
+//! uv cubic's middle put back on the plane. Where the surface's speed varies steeply along the
+//! crossing (a chamfer's ruled surface between rails whose weights differ 58-fold, #19967), a
+//! station's uv rate is large, the uv cubic leaves the span, and its middle put back on the
+//! plane lies outside the span: every pass split the same spans again until the passes ran
+//! out. A span whose bisection finds a candidate off the plane can't be split, and the fit stops
+//! there as at its cap.
 //!
 //! Failures (#15034): three reviewed defects report a successful evaluation missing its
 //! promised first derivatives, a non-positive plane Gram determinant after its axes' cross
@@ -198,6 +205,49 @@ impl Tracer<'_> {
         Ok((t, Point2::new(a, b)))
     }
 
+    /// The crossing's point between two stations, where the plane through the middle of their
+    /// chord normal to it meets the crossing: bisection on `l` in [0, 1] of the crossing's
+    /// point [`Tracer::onto_plane`] reaches from `(1 - l) a + l b` in uv, by the side of that
+    /// plane it lies on (behind it at `a`, past it at `b`). The candidates start inside the
+    /// stations' uv box, where the curve between them runs, so no step starts past the
+    /// surface's domain. `None` where a candidate is not on the plane or its side is not a
+    /// number.
+    fn between(&self, a: &Station, b: &Station) -> Result<Option<Point2>> {
+        let chord = b.x - a.x;
+        let mid = a.x + chord * 0.5;
+        let half = 0.5 * chord.dot(chord);
+        if !(half > 0.0) {
+            return Ok(None);
+        }
+        let (mut behind, mut past) = (0.0_f64, 1.0_f64);
+        let mut found = None;
+        // 52 halvings take `l` to the last bit of its unit interval
+        for _ in 0..52 {
+            let l = 0.5 * (behind + past);
+            let mut uv = Point2::new(
+                (1.0 - l) * a.uv.x + l * b.uv.x,
+                (1.0 - l) * a.uv.y + l * b.uv.y,
+            );
+            if !self.onto_plane(&mut uv)? {
+                return Ok(None);
+            }
+            let side = (self.eval(uv)?.0 - mid).dot(chord);
+            if !side.is_finite() {
+                return Ok(None);
+            }
+            found = Some(uv);
+            if side.abs() <= 1.0e-12 * half {
+                break;
+            }
+            if side < 0.0 {
+                behind = l;
+            } else {
+                past = l;
+            }
+        }
+        Ok(found)
+    }
+
     /// `UVRate`: the uv rate of station `rate` per unit 3D length.
     fn uv_rate_per_length(&self, uv: Point2, rate: Point2) -> Result<Vec3> {
         let (_, su, sv, _) = self.eval(uv)?;
@@ -240,7 +290,8 @@ fn hermite(dim: u64, control: &[Point3], mult: &[usize], knots: &[f64]) -> Resul
 /// Each station is the surface's point nearest the predicted one on `g = 0`, the step along
 /// the level line cut to keep the turn of its 3D tangent under `ang_tol`. The three curves are
 /// cubic Hermite interpolants of the stations, a span split where a quarter point is off the
-/// exact curve by more than a tenth of `tol`.
+/// exact curve by more than a tenth of `tol`, at the crossing's point on the plane bisecting
+/// the span's chord.
 ///
 /// `start_dir`: the way the curve leaves `start`; `None`: towards `end`.
 ///
@@ -473,11 +524,16 @@ pub fn surface_plane_curve(
         let uv_plane = hermite(2, &cp_pl, &mult, &s)?;
 
         // each span at its quarters against the exact curve there, to a tenth of the tolerance;
-        // a span off is split at its middle
+        // a span off is split at the crossing's point between its stations
         let mut off: Vec<(usize, Point2)> = Vec::new();
-        for (j, (&sa, &sb)) in s.iter().zip(s.iter().skip(1)).enumerate() {
+        let mut unsplit = false;
+        for (j, ((&sa, &sb), (a, b))) in s
+            .iter()
+            .zip(s.iter().skip(1))
+            .zip(st.iter().zip(st.iter().skip(1)))
+            .enumerate()
+        {
             let mut span_ok = true;
-            let mut mid_uv = Point2::new(0.0, 0.0);
             for q in 1..=3 {
                 let at = sa + 0.25 * f64::from(q) * (sb - sa);
                 let m = c3d.evaluate_point(k, at)?;
@@ -486,16 +542,25 @@ pub fn surface_plane_curve(
                 let ok = tr.onto_plane(&mut on_uv)?;
                 let exact = surf.evaluate_point(k, on_uv)?;
                 let on_surface = surf.evaluate_point(k, Point2::new(w.x, w.y))?;
-                if q == 2 {
-                    mid_uv = on_uv;
-                }
                 if !ok || m.distance(exact) > 0.1 * tol || on_surface.distance(exact) > 0.1 * tol {
                     span_ok = false;
                 }
             }
             if !span_ok {
-                off.push((j, mid_uv));
+                match tr.between(a, b)? {
+                    Some(mid_uv) => off.push((j, mid_uv)),
+                    None => unsplit = true,
+                }
             }
+        }
+        if unsplit {
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::PlaneCurveFitCap {
+                    stations: st.len(),
+                    passes: pass + 1,
+                },
+            ));
         }
         if off.is_empty() {
             return Ok(SurfacePlaneCurves {
