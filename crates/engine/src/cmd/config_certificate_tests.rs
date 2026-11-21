@@ -292,3 +292,81 @@ fn certified_import_payload_binding_roundtrip_clone_and_replacement_refusal() {
     assert_eq!(s.doc, before);
     assert_eq!(s.undo.len(), history);
 }
+
+/// `step` with its first face's plane turned over and the face used against it: the same solid.
+fn with_first_face_reversed(step: &str) -> String {
+    let line = |id: &str| step.lines().find(|l| l.starts_with(&format!("{id}="))).unwrap_or_else(|| panic!("no {id}"));
+    let args = |l: &str| l[l.find('(').unwrap() + 1..l.rfind(')').unwrap()].split(',').map(str::to_string).collect::<Vec<_>>();
+    let face = step.lines().find(|l| l.contains("=ADVANCED_FACE(") && l.ends_with(",.T.);")).unwrap();
+    let surface = args(face).into_iter().rev().nth(1).unwrap();
+    let placement = args(line(&surface))[1].clone();
+    let placed = line(&placement);
+    let axis = args(placed)[2].clone();
+    let direction = line(&axis);
+    let xyz: Vec<f64> =
+        direction[direction.rfind('(').unwrap() + 1..direction.find(')').unwrap()].split(',').map(|v| v.trim().parse().unwrap()).collect();
+    let next = step.lines().filter_map(|l| l.strip_prefix('#')?.split('=').next()?.parse::<u64>().ok()).max().unwrap() + 1;
+    let turned = format!("#{next}=DIRECTION('',({:?},{:?},{:?}));", -xyz[0], -xyz[1], -xyz[2]);
+    let out = step.replacen(face, &face.replace(",.T.);", ",.F.);"), 1).replacen(
+        placed,
+        &placed.replacen(&format!(",{axis},"), &format!(",#{next},"), 1),
+        1,
+    );
+    let data = out.find("DATA;").unwrap();
+    let end = data + out[data..].find("ENDSEC;").unwrap();
+    format!("{}{turned}\n{}", &out[..end], &out[end..])
+}
+
+/// A sketch 0.30.1 put on a reversed plane face of an imported body opens where it was drawn (#15891).
+#[test]
+fn a_sketch_saved_by_0_30_1_on_a_reversed_imported_face_opens_where_it_was_drawn() {
+    let mut s = Session::default();
+    let block = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(30., 20., 10.)).unwrap();
+    let step = with_first_face_reversed(&solidcraft_kernel::step_export(&[&block], "reversed face").unwrap());
+    imported(&mut s, step, "Block");
+    let reversed: Vec<u64> = s
+        .model
+        .state()
+        .body("Block")
+        .unwrap()
+        .body
+        .record()
+        .shells
+        .iter()
+        .filter_map(|shell| match shell {
+            solidcore_record::brep::Shell::Faces { faces, .. } => Some(faces),
+            _ => None,
+        })
+        .flatten()
+        .filter(|face| !face.forward)
+        .map(|face| u64::from(face.face))
+        .collect();
+    let faces = run(&mut s, "model.faces", json!({"body":"Block"}));
+    let faces = faces.get("faces").unwrap_or(&faces).as_array().unwrap().clone();
+    let face = faces
+        .iter()
+        .find(|face| face["index"].as_u64().is_some_and(|index| reversed.contains(&index)) && !face["plane_normal"].is_null())
+        .unwrap_or_else(|| panic!("no reversed plane face among {faces:?}"));
+    let sketch =
+        run(&mut s, "sketch.create", json!({"plane":{"face":face["point"]},"name":"OnFace","project_edges":false}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[1,2],"p1":[4,3]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let drawn = s.model.state().sketch(sketch).unwrap().plane;
+
+    // As 0.30.1 saved it: format 48, the anchor in that kernel's frame, today's (x, y) as (-y, x).
+    let mut old: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    assert!(!s.doc.to_json().contains("old_kernel_frame"), "a design saved now has no old-frame mark");
+    old["format"] = json!("solidcraft/48");
+    old.as_object_mut().unwrap().remove("format_pending");
+    let feature = old["features"].as_array_mut().unwrap().iter_mut().find(|f| f["id"] == json!(sketch)).unwrap();
+    let anchor = &mut feature["plane"]["anchor"];
+    assert_eq!(anchor["target"]["certificate"]["kind"], "imported", "{anchor}");
+    for key in ["coordinates", "x_axis"] {
+        let [a, b] = [anchor[key][0].as_f64().unwrap(), anchor[key][1].as_f64().unwrap()];
+        anchor[key] = json!([-b, a]);
+    }
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&old.to_string()).unwrap());
+    let plane = reopened.model.state().sketch(sketch).unwrap().plane;
+    assert!(plane.origin.dist(drawn.origin) < 1e-9, "origin {:?}, drawn at {:?}", plane.origin, drawn.origin);
+    assert!(plane.x.dist(drawn.x) < 1e-9 && plane.y.dist(drawn.y) < 1e-9, "axes {:?} {:?}, drawn {:?} {:?}", plane.x, plane.y, drawn.x, drawn.y);
+}
