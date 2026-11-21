@@ -235,7 +235,7 @@ mod tests {
         assert_eq!(shared_design_name("/tmp/Bracket.solidcraft.ZIP"), format!("Bracket.{}", crate::DESIGN_EXT));
         assert_eq!(shared_design_name("a/b:c.zip"), format!("bc.{}", crate::DESIGN_EXT));
         // With the folder and the macOS resource forks an archiver adds; a JSON design too.
-        let json = crate::write_design(&doc);
+        let json = crate::write_design(&doc).unwrap();
         let made = zip_of(&[("__MACOSX/", b""), ("__MACOSX/._Bracket.solidcraft", b"junk"), ("parts/Bracket.solidcraft", &design)]);
         let made_json = zip_of(&[("Bracket.json", &json)]);
         assert_eq!(crate::read_design(&made).unwrap().to_json(), doc.to_json());
@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn a_zip_without_exactly_one_safe_design_is_refused() {
-        let json = crate::write_design(&solidcraft_doc::Document::new("A"));
+        let json = crate::write_design(&solidcraft_doc::Document::new("A")).unwrap();
         for (zip, expected) in [
             (zip_of(&[("a.solidcraft", &json), ("b.json", &json)]), "holds 2"),
             (zip_of(&[("notes.txt", b"hello")]), "holds 0"),
