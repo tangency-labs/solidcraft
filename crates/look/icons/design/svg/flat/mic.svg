@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Dictate</title>
+  <path d="M24 16A8 8 0 0 1 40 16L40 29A8 8 0 0 1 24 29Z" fill="currentColor"/>
+  <path d="M15.5 29A16.5 16.5 0 0 0 48.5 29M32 45.5L32 56M23 56L41 56" fill="none" stroke="currentColor" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -537,7 +537,7 @@ pub struct Services {
     /// Open dialog.
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
     /// Open a dialog asking for a program (a slicer); `None` when the host has no such dialog.
-    pub pick_program: Option<Box<dyn Fn() -> FilePickerFuture>>,
+    pub pick_program: Option<Box<dyn Fn(&str) -> FilePickerFuture>>,
     /// Open a dialog asking for a folder. `None` on the web build and when the host has no
     /// folder picker: a plugin field shows no Browse button and the text field still accepts
     /// a pasted path, and the document library cannot choose a folder.
@@ -587,6 +587,9 @@ pub struct Services {
     pub agent_http: Option<agent_chat::backend::HttpFn>,
     /// The system keychain, for API agents' keys; None: keys can't be stored.
     pub secrets: Option<std::sync::Arc<dyn agent_chat::backend::Secrets>>,
+    /// The microphone, for dictating a message in the Assistant (#10883); None: no microphone
+    /// button (the browser build).
+    pub recorder: Option<std::sync::Arc<dyn agent_chat::dictation::Recorder>>,
     /// Upload a model to EasyPrint (Printables' slicer in the browser) and answer with the address
     /// to open (`easyprint_ui`); None: this host can't, and the menu doesn't offer it.
     pub easyprint_upload: Option<easyprint_ui::Upload>,

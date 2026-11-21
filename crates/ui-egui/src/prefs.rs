@@ -1886,6 +1886,22 @@ preference_settings! {
     /// `inspect_design` summarises sketches and tool JSON is not pretty-printed. Off: as always.
     /// The server asks once per agent session (`mcp.options`), so a change applies to the next one.
     mcp_compact: bool = false, PAGE_ASSISTANT;
+    /// Dictation in the Assistant (#10883): the speech-to-text endpoint's base URL
+    /// (OpenAI-compatible `…/v1`, as whisper.cpp's server, Speaches or LocalAI serve it). Empty, the
+    /// default: no microphone button. Its key, if any, is in the system keychain (`dictation_key`).
+    dictation_url: String = String::new();
+    /// The model the endpoint transcribes with (`whisper-1` for OpenAI; local servers ignore it).
+    dictation_model: String = "whisper-1".into();
+    /// The spoken language as an ISO-639-1 code (`en`, `it`); empty: the app's own language;
+    /// `auto`: the endpoint detects it.
+    dictation_language: String = String::new();
+    /// A key for the dictation endpoint is stored in the system keychain.
+    dictation_key: bool = false;
+    /// whisper.cpp's `whisper-server` program, which the app starts on this computer when dictation
+    /// needs it and stops when it quits. Empty, the default: the app starts nothing.
+    dictation_server: String = String::new();
+    /// The model file the server loads; empty: `ggml-small.bin` found next to the server.
+    dictation_server_model: String = String::new();
 
     // ---- Sketch / selection modifier bindings (classic defaults; alternate mapping is opt-in) ----
     /// Modifier that suppresses sketch auto-snap while drawing or dragging a sketch point.

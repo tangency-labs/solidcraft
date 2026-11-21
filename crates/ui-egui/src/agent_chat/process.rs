@@ -45,6 +45,20 @@ impl ProcessHandle {
     pub fn pid(&self) -> Option<u32> {
         self.0.lock().ok().and_then(|c| c.as_ref().map(Child::id))
     }
+    /// It was started and has not ended.
+    pub fn running(&self) -> bool {
+        self.0.lock().ok().is_some_and(|mut c| c.as_mut().is_some_and(|c| matches!(c.try_wait(), Ok(None))))
+    }
+    /// Stop a [`Service`] and everything it started: it reads no input, so it is asked to stop
+    /// at once, then stopped. `wait`: block until done (at most about a second).
+    pub fn stop_service(&self, wait: bool) {
+        let Some(child) = self.0.lock().ok().and_then(|mut c| c.take()) else { return };
+        if wait {
+            end_service(child);
+        } else {
+            std::thread::spawn(move || end_service(child));
+        }
+    }
     /// End it and everything it started; `wait`: block until done.
     pub fn shutdown(&self, wait: bool) {
         let Some(child) = self.0.lock().ok().and_then(|mut c| c.take()) else { return };
@@ -141,6 +155,83 @@ fn end_tree(mut child: Child) {
     let _ = (pid, ended);
     let _ = child.kill();
     let _ = child.wait();
+}
+
+/// End a service and everything it started: asked to stop, then stopped.
+fn end_service(mut child: Child) {
+    let pid = child.id();
+    #[cfg(unix)]
+    {
+        signal_group(pid, "TERM");
+        if !wait_for(&mut child, GRACE) {
+            signal_group(pid, "KILL");
+        }
+    }
+    #[cfg(windows)]
+    kill_tree(pid);
+    #[cfg(not(any(unix, windows)))]
+    let _ = pid;
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// A program that serves the app in the background (dictation's speech-to-text server): no
+/// input, its output read so it never blocks on a full pipe, its last lines kept to explain a
+/// failure. It runs in a process group of its own, like an agent, and is stopped with
+/// [`ProcessHandle::stop_service`].
+pub struct Service {
+    pub handle: ProcessHandle,
+    tail: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<String>>>,
+}
+
+impl Service {
+    /// Start `argv` (program first) in `cwd`.
+    pub fn spawn(argv: &[String], cwd: &std::path::Path) -> Result<Service, String> {
+        let Some((program, args)) = argv.split_first() else { return Err("no program".into()) };
+        let mut cmd = Command::new(program);
+        cmd.args(args).current_dir(cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        detach_group(&mut cmd);
+        let mut child = cmd.spawn().map_err(|e| format!("{program}: {e}"))?;
+        let tail = std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::<String>::new()));
+        let pipes: [Option<Box<dyn Read + Send>>; 2] =
+            [child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>), child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>)];
+        for pipe in pipes.into_iter().flatten() {
+            let tail = tail.clone();
+            std::thread::spawn(move || {
+                for line in BufReader::new(pipe).lines().map_while(Result::ok) {
+                    if let Ok(mut t) = tail.lock() {
+                        if t.len() >= STDERR_LINES {
+                            t.pop_front();
+                        }
+                        t.push_back(line.chars().take(400).collect());
+                    }
+                }
+            });
+        }
+        Ok(Service { handle: ProcessHandle(std::sync::Arc::new(std::sync::Mutex::new(Some(child)))), tail })
+    }
+
+    /// What another thread needs to wait for it: whether it still runs, and its last lines.
+    pub fn watch(&self) -> ServiceWatch {
+        ServiceWatch { handle: self.handle.clone(), tail: self.tail.clone() }
+    }
+}
+
+/// A [`Service`] seen from another thread.
+#[derive(Clone)]
+pub struct ServiceWatch {
+    handle: ProcessHandle,
+    tail: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<String>>>,
+}
+
+impl ServiceWatch {
+    pub fn running(&self) -> bool {
+        self.handle.running()
+    }
+    /// Its last line of output that says something.
+    pub fn last_line(&self) -> Option<String> {
+        self.tail.lock().ok().and_then(|t| t.iter().rev().find(|l| !l.trim().is_empty()).cloned())
+    }
 }
 
 impl AgentProcess {

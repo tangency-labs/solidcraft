@@ -133,6 +133,10 @@ pub struct State {
     /// An agent card's picker asked for this listing (with the agent whose key goes along).
     #[cfg(not(target_arch = "wasm32"))]
     card_listing: Option<(ListingKey, String)>,
+    /// The dictation endpoint's key as typed, until it goes into the keychain (#10883).
+    dictation_key: String,
+    /// Why the dictation key could not be stored or removed.
+    dictation_key_error: Option<String>,
 }
 
 /// Forget requests queued with an endpoint's revoked permission, without touching a started listing.
@@ -527,12 +531,176 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             instructions_section(app, ui);
             panel_section(app, ui);
+            dictation_section(app, ui);
             connecting_section(app, ui);
         });
         ui.add_enabled_ui(app.preferences.ai_features, |ui| pointer_section(app, ui));
         // Agents through MCP don't use the chat, so this stays on with AI features off.
         mcp_section(app, ui);
     });
+}
+
+/// A field's id: fixed where it is shown, so its focus survives a search, and of its own place in
+/// the unseen copy Preferences search lays out first (#15902).
+fn field_id(ui: &egui::Ui, name: &str) -> egui::Id {
+    if ui.is_visible() { egui::Id::unique(name) } else { ui.scope_id().with(name) }
+}
+
+/// Dictation (#10883): the speech-to-text endpoint the Assistant's microphone button sends to.
+/// No address, no button.
+fn dictation_section(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = solidcraft_theme::Tokens::get();
+    ui_kit::settings_section(ui, "dictation", tr("ui.dictation"), |ui| {
+        let label_width = [tr("ui.ai_base_url"), tr("ui.ai_model"), tr("ui.dictation_language"), tr("ui.ai_key")]
+            .iter()
+            .map(|label| ui_kit::ContentWidth::label(ui, label) + t.space_4)
+            .fold(0.0, f32::max);
+        let has_keychain = app.services.secrets.is_some();
+        ui_kit::settings_form(ui, label_width, |ui| {
+            ui_kit::row(ui, tr("ui.ai_base_url"), |ui| {
+                let p = &mut app.preferences;
+                let invalid = !p.dictation_url.trim().is_empty() && agents::normalize_url(&p.dictation_url).is_err();
+                let r = ui_kit::cell_editor(ui, field_id(ui, "sc_dictation_url"), &mut p.dictation_url, tr("ui.dictation_url_hint"), invalid);
+                solidcraft_ui_registry::publish_target("prefs:dictation_url", r.rect);
+            });
+            ui_kit::row(ui, tr("ui.ai_model"), |ui| {
+                ui_kit::text_field(ui, &mut app.preferences.dictation_model, "whisper-1");
+            });
+            ui_kit::row(ui, tr("ui.dictation_language"), |ui| {
+                ui_kit::text_field_tip(
+                    ui,
+                    &mut app.preferences.dictation_language,
+                    tr("ui.dictation_language_hint"),
+                    tr("ui.dictation_language_tip"),
+                );
+            });
+            ui_kit::row(ui, tr("ui.ai_key"), |ui| {
+                ui.add_enabled_ui(has_keychain, |ui| {
+                    let hint = tr(if app.preferences.dictation_key { "ui.ai_key_keep_hint" } else { "ui.ai_key_hint" });
+                    let state = &mut app.agent_chat.settings;
+                    let r = ui_kit::password_field(ui, field_id(ui, "sc_dictation_key"), &mut state.dictation_key, hint);
+                    solidcraft_ui_registry::publish_target("prefs:dictation_key", r.rect);
+                    if r.lost_focus() && !state.dictation_key.trim().is_empty() {
+                        let key = std::mem::take(&mut state.dictation_key);
+                        match app.services.secrets.as_deref().map(|store| store.set(super::dictation::KEY_ID, key.trim())) {
+                            Some(Ok(())) => {
+                                app.preferences.dictation_key = true;
+                                app.agent_chat.settings.dictation_key_error = None;
+                            }
+                            Some(Err(e)) => app.agent_chat.settings.dictation_key_error = Some(trf("ui.ai_keychain_error", &[("error", &e)])),
+                            None => app.agent_chat.settings.dictation_key_error = Some(tr("ui.ai_no_keychain").to_string()),
+                        }
+                    }
+                    if app.preferences.dictation_key && ui_kit::button(ui, tr("ui.dictation_remove_key"), ui_kit::Button::Enabled(true)).clicked() {
+                        match app.services.secrets.as_deref().map(|store| store.delete(super::dictation::KEY_ID)) {
+                            Some(Ok(())) | None => {
+                                app.preferences.dictation_key = false;
+                                app.agent_chat.settings.dictation_key_error = None;
+                            }
+                            Some(Err(e)) => app.agent_chat.settings.dictation_key_error = Some(trf("ui.ai_keychain_error", &[("error", &e)])),
+                        }
+                    }
+                });
+            });
+        });
+        if let Some(e) = &app.agent_chat.settings.dictation_key_error {
+            ui_kit::text(ui, e, ui_kit::Text::Error("dictation_key"));
+        }
+        ui_kit::text(ui, tr("ui.dictation_note"), ui_kit::Text::Hint("dictation_note"));
+        // How to run a server on this computer, for this system: each step with its command to
+        // copy; then the server to start for dictation (the app starts and stops it), or the
+        // command to start it by hand; then a button that puts its address in Base URL.
+        ui_kit::section(ui, "sc_dictation_setup", tr("ui.dictation_setup"), app.preferences.dictation_url.trim().is_empty(), |ui| {
+            ui_kit::text(ui, tr("ui.dictation_setup_intro"), ui_kit::Text::Note("dictation_setup"));
+            let steps = super::dictation::setup_steps();
+            let mut n = 0;
+            for (i, step) in steps.iter().enumerate().filter(|(_, s)| s.text != "ui.dictation_setup_run") {
+                n += 1;
+                ui_kit::text(ui, &format!("{n}. {}", tr(step.text)), ui_kit::Text::Note(step.text));
+                setup_command(ui, i, step);
+            }
+            // The browser build starts no programs.
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                n += 1;
+                ui_kit::text(ui, &format!("{n}. {}", tr("ui.dictation_setup_server")), ui_kit::Text::Note("dictation_setup_server"));
+                server_fields(app, ui);
+            }
+            for (i, step) in steps.iter().enumerate().filter(|(_, s)| s.text == "ui.dictation_setup_run") {
+                ui_kit::text(ui, tr(step.text), ui_kit::Text::Note(step.text));
+                setup_command(ui, i, step);
+            }
+            ui_kit::text(ui, &format!("{}. {}", n + 1, tr("ui.dictation_setup_address")), ui_kit::Text::Note("dictation_setup_address"));
+            let use_it = ui_kit::button(ui, trf("ui.dictation_setup_use", &[("url", super::dictation::LOCAL_URL)]), ui_kit::Button::Small);
+            solidcraft_ui_registry::publish_handle("prefs:dictation_setup:use", use_it.rect.center());
+            if use_it.clicked() {
+                app.preferences.dictation_url = super::dictation::LOCAL_URL.to_string();
+            }
+        });
+    });
+}
+
+/// A setup step's command, with its Copy button (handle `prefs:dictation_setup:{i}`).
+fn setup_command(ui: &mut egui::Ui, i: usize, step: &super::dictation::SetupStep) {
+    let Some(command) = step.command else { return };
+    let copy = ui_kit::button(ui, tr("ui.agent_chat_copy"), ui_kit::Button::Small).backing_on_hover_text(command);
+    solidcraft_ui_registry::publish_handle(&format!("prefs:dictation_setup:{i}"), copy.rect.center());
+    if copy.clicked() {
+        ui.ctx().copy_text(command.to_string());
+    }
+    // In the terminal's typeface, so it reads as something to paste as it is.
+    ui_kit::text(ui, command, ui_kit::Text::MonoNote(&format!("{}:command", step.text)));
+}
+
+/// The server program the app starts for dictation, and its model, each typed or chosen.
+/// Choosing the server also fills Base URL with its address when that is empty.
+#[cfg(not(target_arch = "wasm32"))]
+fn server_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = solidcraft_theme::Tokens::get();
+    let label_width = [tr("ui.dictation_server"), tr("ui.dictation_server_model")]
+        .iter()
+        .map(|label| ui_kit::ContentWidth::label(ui, label) + t.space_4)
+        .fold(0.0, f32::max);
+    let choose = solidcraft_ui_text::tr_label("Choose…");
+    let mut pick_server = false;
+    let mut pick_model = false;
+    // Choose… first, from the right, so the field takes the width left and the row stays inside
+    // the page.
+    let path_row = |ui: &mut egui::Ui, name: &str, value: &mut String, hint: &str| -> bool {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let b = ui_kit::button(ui, choose, ui_kit::Button::Small);
+            solidcraft_ui_registry::publish_handle(&format!("prefs:{name}:choose"), b.rect.center());
+            let r = ui_kit::cell_editor(ui, field_id(ui, &format!("sc_{name}")), value, hint, false);
+            solidcraft_ui_registry::publish_target(&format!("prefs:{name}"), r.rect);
+            b.clicked()
+        })
+        .inner
+    };
+    ui_kit::settings_form(ui, label_width, |ui| {
+        ui_kit::row(ui, tr("ui.dictation_server"), |ui| {
+            pick_server = path_row(ui, "dictation_server", &mut app.preferences.dictation_server, tr("ui.dictation_server_hint"));
+        });
+        ui_kit::row(ui, tr("ui.dictation_server_model"), |ui| {
+            pick_model = path_row(ui, "dictation_server_model", &mut app.preferences.dictation_server_model, tr("ui.dictation_server_model_hint"));
+        });
+    });
+    if pick_server {
+        app.pick_program(tr("ui.dictation_server_title"), |app, path| {
+            if let Some(path) = path {
+                app.preferences.dictation_server = path;
+                if app.preferences.dictation_url.trim().is_empty() {
+                    app.preferences.dictation_url = super::dictation::LOCAL_URL.to_string();
+                }
+            }
+        });
+    }
+    if pick_model {
+        app.pick_file(tr("ui.dictation_server_model"), &["bin"], |app, path| {
+            if let Some(path) = path {
+                app.preferences.dictation_server_model = path;
+            }
+        });
+    }
 }
 
 fn connecting_section(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -1560,7 +1728,9 @@ mod card_tests {
             assert!(scope_visible, "the full localized permission scope remains visible without hovering, including with AI off");
             assert!(privacy_visible, "the localized privacy note remains visible without hovering, including with AI off");
             let mut previous: Option<f32> = None;
-            for key in ["assistant_availability", "permissions", "agents", "instructions", "panel", "assistant_connecting", "agent_pointer"] {
+            for key in
+                ["assistant_availability", "permissions", "agents", "instructions", "panel", "dictation", "assistant_connecting", "agent_pointer"]
+            {
                 let section = solidcraft_ui_registry::rect_of(&format!("prefs:section:{key}")).unwrap();
                 assert!((section.left() - body.left()).abs() <= 1.0 && (section.right() - body.right()).abs() <= 1.0);
                 assert!((section.height() - (solidcraft_theme::Tokens::get().control_height + solidcraft_theme::Tokens::get().space_2)).abs() <= 1.0);

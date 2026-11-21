@@ -373,6 +373,43 @@ pub fn assistant_send(ui: &mut Ui, enabled: bool, busy: bool, label: &str) -> Re
     .inner
 }
 
+/// The Assistant's microphone button (#10883), beside Send and as large: an outlined circle with
+/// the microphone; filled in the error colour while it records, a spinner while the recording is
+/// being turned into text (then it can't be pressed).
+#[cfg(any(not(target_arch = "wasm32"), test))]
+pub fn assistant_mic(ui: &mut Ui, recording: bool, transcribing: bool, label: &str) -> Response {
+    let t = Tokens::get();
+    ui.add_enabled_ui(!transcribing, |ui| {
+        let size = t.control_height + t.space_2;
+        let (rect, response) = ui.allocate_exact_size(vec2(size, size), egui::Sense::click());
+        let ink = if recording {
+            let fill = if response.hovered() { t.form_error.gamma_multiply(0.9) } else { t.form_error };
+            ui.painter().circle_filled(rect.center(), size / 2.0, fill);
+            if solidcraft_theme::contrast_ratio(t.on_accent, fill) >= 4.5 { t.on_accent } else { t.tab_on_fill_dark }
+        } else {
+            if response.hovered() {
+                ui.painter().circle_filled(rect.center(), size / 2.0, t.form_soft);
+            }
+            ui.painter().circle_stroke(rect.center(), size / 2.0 - 0.5, egui::Stroke::new(1.0, t.border));
+            t.form_ink
+        };
+        if transcribing {
+            egui::Spinner::new().size(t.space_14).color(t.form_ink).paint_at(ui, rect.shrink(t.space_6));
+        } else {
+            crate::icons::paint_ink(ui.painter(), rect.shrink(t.space_6), "mic", ink);
+        }
+        if response.has_focus() {
+            ui.painter().circle_stroke(rect.center(), size / 2.0 + t.space_2, egui::Stroke::new(1.0, t.form_primary));
+        }
+        if response.hovered() && !transcribing {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
+        response.backing_on_hover_text(label)
+    })
+    .inner
+}
+
 /// Pinned composer footer. The enclosing shell retains ownership of scrolling and sizing.
 #[cfg(any(not(target_arch = "wasm32"), test))]
 pub fn assistant_composer_footer<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {

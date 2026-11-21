@@ -39,6 +39,8 @@
   <true/>
   <key>NSSupportsAutomaticGraphicsSwitching</key>
   <true/>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>SolidCraft records your voice only while you dictate a message to the Assistant.</string>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>
