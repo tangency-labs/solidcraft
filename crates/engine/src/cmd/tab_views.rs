@@ -8,9 +8,10 @@ use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::TypedContract;
 use crate::schema::output_schema_for;
+use crate::schema::tab_views::ViewCompassParams;
 use crate::schema::tab_views::{
-    MAX_NAME, TabViewActivateParams, TabViewBesideParams, TabViewEdge, TabViewIdParams, TabViewLayoutParams, TabViewLinkParams, TabViewMoveParams,
-    TabViewNoParams, TabViewOpenParams, TabViewRenameParams, TabViewReply, TabViewWindowParams,
+    MAX_NAME, TabViewActivateParams, TabViewBesideParams, TabViewCloseGroupParams, TabViewEdge, TabViewIdParams, TabViewLayoutParams,
+    TabViewLinkParams, TabViewMoveParams, TabViewNoParams, TabViewOpenParams, TabViewRenameParams, TabViewReply, TabViewWindowParams,
 };
 use crate::schema::tab_windows::{
     TabViewMoveToWindowParams, TabWindowCleanParams, TabWindowCloseReply, TabWindowIdParams, TabWindowListParams, TabWindowListReply,
@@ -18,8 +19,10 @@ use crate::schema::tab_windows::{
 };
 use crate::{Result, Session};
 
+const COMPASS_CONTRACT: TypedContract<ViewCompassParams> = TypedContract::new();
 const OPEN_CONTRACT: TypedContract<TabViewOpenParams> = TypedContract::new();
 const ID_CONTRACT: TypedContract<TabViewIdParams> = TypedContract::new();
+const CLOSE_GROUP_CONTRACT: TypedContract<TabViewCloseGroupParams> = TypedContract::new();
 const ACTIVATE_CONTRACT: TypedContract<TabViewActivateParams> = TypedContract::new();
 const RENAME_CONTRACT: TypedContract<TabViewRenameParams> = TypedContract::new();
 const MOVE_CONTRACT: TypedContract<TabViewMoveParams> = TypedContract::new();
@@ -34,12 +37,21 @@ const WINDOW_ID_CONTRACT: TypedContract<TabWindowIdParams> = TypedContract::new(
 const WINDOW_LIST_CONTRACT: TypedContract<TabWindowListParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("view.set_compass", "Set View Compass", crate::checked!("view.set_compass", set_compass))
+        .icon("orbit").noundo().doc_only().contract(&COMPASS_CONTRACT).output(output_schema_for::<ViewCompassParams>)
+        .params("view: the id of an open 3D view; on: whether its compass is visible → view, on"),
     CommandSpec::new("tab.view.open", "Open Another View", crate::checked!("tab.view.open", open))
         .icon("new").noundo().doc_only().key("Ctrl+T").contract(&OPEN_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("kind?: model|sketch|sheet|render|animation (default: the active view's kind); subject?: the sketch or sheet id; reuse?: bool (default: true with a subject); window?: id (default: last focused) → the request, id: the view now shown; the window opens a sub-tab of the shown design; never edits the design or opens a dialog"),
     CommandSpec::new("tab.view.close", "Close View", crate::checked!("tab.view.close", close))
         .icon("close").noundo().doc_only().contract(&ID_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("id?: the view (default: the active one) → id; closes it, which Reopen Closed View undoes; the last view of a design never closes (an error); never opens a dialog"),
+    CommandSpec::new("tab.view.close_others", "Close Other Views", crate::checked!("tab.view.close_others", close_others))
+        .icon("close").noundo().doc_only().contract(&CLOSE_GROUP_CONTRACT).output(output_schema_for::<TabViewReply>)
+        .params("id?: the view to keep (default: active); window?: id (default: the named view's window or last focused) → id, window; closes the other views in that window"),
+    CommandSpec::new("tab.view.close_right", "Close Views to the Right", crate::checked!("tab.view.close_right", close_right))
+        .icon("close").noundo().doc_only().contract(&CLOSE_GROUP_CONTRACT).output(output_schema_for::<TabViewReply>)
+        .params("id?: the view to keep (default: active); window?: id (default: the named view's window or last focused) → id, window; closes the views to the right of that view in that window"),
     CommandSpec::new("tab.view.pop_out", "Open View in New Window", crate::checked!("tab.view.pop_out", pop_out))
         .icon("panel_popout").noundo().doc_only().key("Ctrl+Alt+O").contract(&ID_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("id?: the view (default: the active view) → id; moves the view to another desktop window of the live design; never opens a dialog"),
@@ -93,6 +105,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("no parameters → views: [{id, kind, name, subject?, active}] of the shown design in tab order; read-only")];
 
 /// `p` as the contract type `P`; no parameters at all (`null`) is the empty object.
+fn set_compass(_session: &mut Session, p: &Value) -> Result<Value> {
+    let options = parse::<ViewCompassParams>("view.set_compass", p)?;
+    serde_json::to_value(options).map_err(|error| bad("view.set_compass", error.to_string()))
+}
+
 fn parse<P: DeserializeOwned>(cmd: &str, p: &Value) -> Result<P> {
     let p = if p.is_null() { Value::Object(Default::default()) } else { p.clone() };
     serde_json::from_value(p).map_err(|e| bad(cmd, e.to_string()))
@@ -116,6 +133,19 @@ fn open(_s: &mut Session, p: &Value) -> Result<Value> {
 fn close(_s: &mut Session, p: &Value) -> Result<Value> {
     let request: TabViewIdParams = parse("tab.view.close", p)?;
     reply("tab.view.close", TabViewReply { id: request.id, ..Default::default() })
+}
+
+fn close_others(_s: &mut Session, p: &Value) -> Result<Value> {
+    close_group("tab.view.close_others", p)
+}
+
+fn close_right(_s: &mut Session, p: &Value) -> Result<Value> {
+    close_group("tab.view.close_right", p)
+}
+
+fn close_group(cmd: &str, p: &Value) -> Result<Value> {
+    let request: TabViewCloseGroupParams = parse(cmd, p)?;
+    reply(cmd, TabViewReply { id: request.id, window: request.window, ..Default::default() })
 }
 
 fn pop_out(_s: &mut Session, p: &Value) -> Result<Value> {
