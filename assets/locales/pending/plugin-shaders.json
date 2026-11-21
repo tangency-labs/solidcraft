@@ -1,0 +1,58 @@
+{
+  "en": {
+    "plugin_install.shaders": "Background effects for the 3D view: {names}",
+    "prefs.background_shader": "Background effect",
+    "prefs.background_shader_failed": "Couldn't draw the background effect",
+    "prefs.background_shader_missing": "its plugin is not installed or is turned off",
+    "prefs.background_shader_after_loss": "The background effect {name} was turned off in case it caused the reset; turn it on again in Preferences > Plugins."
+  },
+  "ar": {
+    "plugin_install.shaders": "تأثيرات خلفية للعرض ثلاثي الأبعاد: {names}",
+    "prefs.background_shader": "تأثير الخلفية",
+    "prefs.background_shader_failed": "تعذّر رسم تأثير الخلفية",
+    "prefs.background_shader_missing": "الإضافة الخاصة به غير مثبتة أو معطّلة",
+    "prefs.background_shader_after_loss": "أُوقف تأثير الخلفية {name} احتياطًا لأنه قد يكون سبب إعادة الضبط؛ أعد تشغيله من التفضيلات > الإضافات."
+  },
+  "he": {
+    "plugin_install.shaders": "אפקטי רקע לתצוגת התלת־ממד: {names}",
+    "prefs.background_shader": "אפקט רקע",
+    "prefs.background_shader_failed": "לא ניתן היה לצייר את אפקט הרקע",
+    "prefs.background_shader_missing": "התוסף שלו אינו מותקן או כבוי",
+    "prefs.background_shader_after_loss": "אפקט הרקע {name} כובה למקרה שהוא גרם לאיפוס; אפשר להפעיל אותו שוב בהעדפות > תוספים."
+  },
+  "ja": {
+    "plugin_install.shaders": "3D ビューの背景エフェクト: {names}",
+    "prefs.background_shader": "背景エフェクト",
+    "prefs.background_shader_failed": "背景エフェクトを描画できませんでした",
+    "prefs.background_shader_missing": "そのプラグインがインストールされていないか、オフになっています",
+    "prefs.background_shader_after_loss": "背景エフェクト {name} がリセットの原因だった可能性があるため、オフにしました。環境設定 > プラグイン で再びオンにできます。"
+  },
+  "vi": {
+    "plugin_install.shaders": "Hiệu ứng nền cho khung nhìn 3D: {names}",
+    "prefs.background_shader": "Hiệu ứng nền",
+    "prefs.background_shader_failed": "Không thể vẽ hiệu ứng nền",
+    "prefs.background_shader_missing": "plugin của nó chưa được cài đặt hoặc đang tắt",
+    "prefs.background_shader_after_loss": "Hiệu ứng nền {name} đã được tắt phòng khi nó gây ra lần đặt lại; bật lại trong Tùy chọn cài đặt > Plugin."
+  },
+  "zh": {
+    "plugin_install.shaders": "三维视图的背景效果：{names}",
+    "prefs.background_shader": "背景效果",
+    "prefs.background_shader_failed": "无法绘制背景效果",
+    "prefs.background_shader_missing": "其插件未安装或已关闭",
+    "prefs.background_shader_after_loss": "背景效果 {name} 可能导致了重置，已将其关闭；可在 首选项 > 插件 中重新开启。"
+  },
+  "de": {
+    "plugin_install.shaders": "Hintergrundeffekte für die 3D-Ansicht: {names}",
+    "prefs.background_shader": "Hintergrundeffekt",
+    "prefs.background_shader_failed": "Der Hintergrundeffekt konnte nicht gezeichnet werden",
+    "prefs.background_shader_missing": "sein Plugin ist nicht installiert oder ausgeschaltet",
+    "prefs.background_shader_after_loss": "Der Hintergrundeffekt {name} wurde ausgeschaltet, falls er das Zurücksetzen verursacht hat. Unter Einstellungen > Plugins lässt er sich wieder einschalten."
+  },
+  "ko": {
+    "plugin_install.shaders": "3D 뷰의 배경 효과: {names}",
+    "prefs.background_shader": "배경 효과",
+    "prefs.background_shader_failed": "배경 효과를 그리지 못했습니다",
+    "prefs.background_shader_missing": "해당 플러그인이 설치되어 있지 않거나 꺼져 있습니다",
+    "prefs.background_shader_after_loss": "배경 효과 {name}이(가) 재설정의 원인일 수 있어 꺼 두었습니다. 환경 설정 > 플러그인에서 다시 켤 수 있습니다."
+  }
+}
