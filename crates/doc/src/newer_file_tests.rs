@@ -170,6 +170,32 @@ fn a_section_that_doesnt_read_is_left_out_named_and_kept() {
 }
 
 #[test]
+fn unknown_future_denoiser_intent_warns_and_survives_newer_file_salvage() {
+    use crate::render_settings::{RenderJob, RenderSetup};
+
+    for method in ["cpu_raytrace", "gpu_path"] {
+        let mut original = Document::new("Denoiser compatibility");
+        let job: RenderJob = serde_json::from_value(json!({"method":method})).unwrap();
+        std::sync::Arc::make_mut(&mut original.render).setups.insert("Studio".into(), RenderSetup { job: Some(job), ..Default::default() });
+        let mut file = saved(&original);
+        file["format"] = json!(newer());
+        file["format_pending"] = json!(["future-denoiser"]);
+        file["render"]["setups"]["Studio"]["job"]["options"]["denoise_settings"] =
+            json!({"method":"future_filter","oidn_quality":"future_quality","passes":2,"strength":0.25,"optical_filter":false});
+        let opened = Document::from_json(&file.to_string()).unwrap();
+        let report = opened.newer_file.as_ref().unwrap();
+        assert!(report.notice().starts_with("Saved by a newer SolidCraft"));
+        assert!(report.not_understood.iter().any(|what| what.contains("render")), "{:?}", report.not_understood);
+        let again = saved(&opened);
+        assert_eq!(again["format"], file["format"]);
+        assert_eq!(again["format_pending"], file["format_pending"]);
+        assert_eq!(again["render"], file["render"], "the unreadable render intent is retained as a whole");
+        assert!(crate::newer_file::not_kept(&opened).is_empty());
+        assert_eq!(Document::from_json(&opened.to_json()).unwrap(), opened);
+    }
+}
+
+#[test]
 fn a_parameter_that_doesnt_read_is_left_out_named_and_kept() {
     let mut file = saved(&design());
     file["format"] = json!(newer());

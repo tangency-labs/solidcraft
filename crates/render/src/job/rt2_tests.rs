@@ -276,6 +276,233 @@ fn quality_controls_preserve_authored_values_and_validate_finite_envelopes() {
 }
 
 #[test]
+fn denoiser_serde_keeps_legacy_defaults_and_explicit_method_quality_intent() {
+    let defaults = DenoiseSettings::default();
+    assert_eq!(defaults.method, DenoiseMethod::Spatial);
+    assert_eq!(defaults.oidn_quality, OidnQuality::High);
+    assert_eq!((defaults.passes, defaults.strength, defaults.firefly_suppression, defaults.optical_filter), (3, 1.0, false, true));
+    for old in [serde_json::json!({}), serde_json::json!({"passes":3,"strength":1.0,"firefly_suppression":false,"optical_filter":true})] {
+        assert_eq!(serde_json::from_value::<DenoiseSettings>(old.clone()).unwrap(), defaults);
+        let wire = serde_json::json!({"denoise":true,"denoise_settings":old});
+        assert_eq!(serde_json::from_value::<RaytraceOptions>(wire.clone()).unwrap().denoise_settings, defaults);
+        assert_eq!(serde_json::from_value::<JobOptions>(wire).unwrap().denoise_settings, defaults);
+    }
+    let legacy: DenoiseSettings = serde_json::from_value(serde_json::json!({
+        "passes":2,"strength":0.25,"firefly_suppression":true,"optical_filter":false
+    }))
+    .unwrap();
+    assert_eq!(legacy, DenoiseSettings { passes: 2, strength: 0.25, firefly_suppression: true, optical_filter: false, ..defaults });
+    assert_eq!(
+        serde_json::to_value(legacy).unwrap(),
+        serde_json::json!({"passes":2,"strength":0.25,"firefly_suppression":true,"optical_filter":false}),
+        "legacy Spatial replies do not gain default method or unused quality fields",
+    );
+    let method_only: DenoiseSettings = serde_json::from_value(serde_json::json!({"method":"oidn"})).unwrap();
+    assert_eq!(method_only, DenoiseSettings { method: DenoiseMethod::Oidn, ..defaults });
+    let quality_only: DenoiseSettings = serde_json::from_value(serde_json::json!({"oidn_quality":"fast"})).unwrap();
+    assert_eq!(quality_only, DenoiseSettings { oidn_quality: OidnQuality::Fast, ..defaults });
+
+    for (method, method_name) in [(DenoiseMethod::Spatial, "spatial"), (DenoiseMethod::Oidn, "oidn")] {
+        for (quality, quality_name) in [(OidnQuality::Fast, "fast"), (OidnQuality::Balanced, "balanced"), (OidnQuality::High, "high")] {
+            let settings = DenoiseSettings { method, oidn_quality: quality, ..legacy };
+            settings.validate().unwrap();
+            let wire = serde_json::to_value(settings).unwrap();
+            assert_eq!(wire.get("method"), (method != DenoiseMethod::Spatial).then(|| serde_json::json!(method_name)).as_ref());
+            assert_eq!(wire.get("oidn_quality"), (quality != OidnQuality::High).then(|| serde_json::json!(quality_name)).as_ref());
+            assert_eq!(serde_json::from_value::<DenoiseSettings>(wire).unwrap(), settings);
+            // Disabled filtering still retains a future method/quality choice, even without OIDN.
+            for denoise in [false, true] {
+                let cpu = RaytraceOptions { denoise, denoise_settings: settings, ..Default::default() };
+                let gpu = JobOptions { denoise, denoise_settings: settings, ..Default::default() };
+                cpu.validate().unwrap();
+                gpu.validate().unwrap();
+                assert_eq!(serde_json::from_value::<RaytraceOptions>(serde_json::to_value(&cpu).unwrap()).unwrap(), cpu);
+                assert_eq!(serde_json::from_value::<JobOptions>(serde_json::to_value(gpu).unwrap()).unwrap(), gpu);
+            }
+        }
+    }
+}
+
+#[test]
+fn denoiser_serde_rejects_unknown_variants_types_and_fields_without_fallback() {
+    for (field, invalid) in [
+        ("method", serde_json::json!("unknown")),
+        ("method", serde_json::json!("Oidn")),
+        ("method", serde_json::json!(null)),
+        ("method", serde_json::json!(false)),
+        ("method", serde_json::json!(0)),
+        ("oidn_quality", serde_json::json!("unknown")),
+        ("oidn_quality", serde_json::json!("High")),
+        ("oidn_quality", serde_json::json!(null)),
+        ("oidn_quality", serde_json::json!(false)),
+        ("oidn_quality", serde_json::json!(0)),
+        ("unknown", serde_json::json!(true)),
+    ] {
+        let mut settings = serde_json::json!({});
+        settings[field] = invalid;
+        assert!(serde_json::from_value::<DenoiseSettings>(settings.clone()).is_err(), "{settings}");
+        let wire = serde_json::json!({"denoise_settings":settings});
+        assert!(serde_json::from_value::<RaytraceOptions>(wire.clone()).is_err(), "{wire}");
+        assert!(serde_json::from_value::<JobOptions>(wire.clone()).is_err(), "{wire}");
+    }
+}
+
+#[test]
+fn oidn_admission_bounds_and_supersampling_bytes_are_checked_without_allocations() {
+    for (width, height) in [(0, 1), (1, 0), (MAX_TRACE_DIMENSION + 1, 1), (MAX_TRACE_DIMENSION, MAX_TRACE_DIMENSION), (u32::MAX, u32::MAX)] {
+        assert!(denoise_oidn::required_bytes(width, height).is_err(), "{width}x{height}");
+    }
+    let native = denoise_oidn::required_bytes(8, 4).unwrap();
+    let (width, height) = supersampled_dimensions(8, 4, 2).unwrap();
+    let doubled = denoise_oidn::required_bytes(width, height).unwrap();
+    assert!(native > 8 * 4 * 24, "native workspace is charged in addition to RGB planes");
+    assert_eq!(doubled - native, (16 * 8 - 8 * 4) * 24, "X2 charges four trace pixels per output pixel");
+    assert!(denoise_oidn::required_bytes(MAX_TRACE_DIMENSION, MAX_TRACE_DIMENSION / 2).is_ok());
+    assert_eq!(denoise_oidn::available(), cfg!(all(feature = "denoise-oidn", not(target_arch = "wasm32"))));
+    assert_eq!(
+        denoise_oidn::validate_request(1, 1, true, false).unwrap_err().code,
+        if denoise_oidn::available() { ErrorCode::InvalidRequest } else { ErrorCode::HostUnavailable },
+    );
+}
+
+fn not_native(failure: denoise_oidn::OidnFailure) -> JobError {
+    let mut native_failed = true;
+    let error = failure.record(&mut native_failed);
+    assert!(!native_failed, "preflight, bad source data or cancellation cannot authorize raw recovery");
+    error
+}
+
+#[cfg(not(all(feature = "denoise-oidn", not(target_arch = "wasm32"))))]
+#[test]
+fn unavailable_oidn_refuses_execution_without_rewriting_parseable_intent() {
+    let settings: DenoiseSettings = serde_json::from_value(serde_json::json!({"method":"oidn","oidn_quality":"balanced"})).unwrap();
+    settings.validate().unwrap();
+    assert_eq!(denoise_oidn::validate_request(1, 1, false, false).unwrap_err().code, ErrorCode::HostUnavailable);
+    let error = denoise_oidn::OidnTask::new(1, 1, vec![[0.5, 0.25, 0.1, 1.0]], settings, CancelToken::default()).err().map(not_native).unwrap();
+    assert_eq!(error.code, ErrorCode::HostUnavailable);
+    assert_eq!(settings.method, DenoiseMethod::Oidn, "unavailable OIDN never silently runs Spatial");
+    assert_eq!(settings.oidn_quality, OidnQuality::Balanced);
+}
+
+#[cfg(all(feature = "denoise-oidn", not(target_arch = "wasm32")))]
+#[test]
+fn oidn_cancelled_poll_keeps_active_worker_pending_until_retirement() {
+    let (release, wait) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        wait.recv().unwrap();
+        Ok(vec![[1.0, 2.0, 3.0, 1.0]])
+    });
+    let cancel = CancelToken::default();
+    let mut task = denoise_oidn::OidnTask::from_worker_for_test(worker, cancel.clone());
+    cancel.cancel();
+    let first = task.poll();
+    // Release before asserting so the old early-error implementation cannot leave
+    // the deliberately blocked worker joined by Drop during assertion unwinding.
+    release.send(()).unwrap();
+    assert!(matches!(first, Ok(None)), "cancellation cannot return an error while native work is active: {first:?}");
+    assert_eq!(not_native(task.wait().unwrap_err()).code, ErrorCode::Cancelled);
+}
+
+#[cfg(all(feature = "denoise-oidn", not(target_arch = "wasm32")))]
+#[test]
+fn oidn_adapter_filters_noisy_rgb_and_keeps_internal_coverage_bits_without_mutating_source() {
+    // Partial/zero coverage is possible internally even with opaque final output.
+    // This tests buffer ownership/coverage only, not transparent-export image quality.
+    let source: Vec<[f32; 4]> = (0..32 * 32)
+        .map(|index| {
+            let x = index % 32;
+            let y = index / 32;
+            let alpha = match x {
+                0 => 0.0,
+                1 => 0.25,
+                2 => 0.5,
+                3 => 0.75,
+                _ => 1.0,
+            };
+            let checker = if (x + y) % 2 == 0 { 0.1 } else { 1.5 };
+            [alpha * checker, alpha * (0.2 + checker * 0.3), alpha * (0.4 + checker * 0.2), alpha]
+        })
+        .collect();
+    let before: Vec<_> = source.iter().map(|pixel| pixel.map(f32::to_bits)).collect();
+    let mut task = denoise_oidn::OidnTask::new(
+        32,
+        32,
+        source.clone(),
+        DenoiseSettings { method: DenoiseMethod::Oidn, ..Default::default() },
+        CancelToken::default(),
+    )
+    .unwrap();
+    let filtered = task.wait().unwrap();
+    assert_eq!(filtered.len(), 32 * 32);
+    assert!(filtered.iter().flatten().all(|value| value.is_finite() && *value >= 0.0));
+    assert!(filtered.iter().zip(&source).all(|(filtered, original)| filtered[3].to_bits() == original[3].to_bits()));
+    assert!(filtered.iter().filter(|pixel| pixel[3] == 0.0).all(|pixel| pixel[..3] == [0.0; 3]));
+    assert!(
+        filtered.iter().zip(&source).any(|(filtered, original)| filtered[..3] != original[..3]),
+        "the native filter must run, not return raw RGB"
+    );
+    assert_eq!(source.iter().map(|pixel| pixel.map(f32::to_bits)).collect::<Vec<_>>(), before, "the caller's raw image is unchanged");
+    assert!(task.poll().is_err(), "a completed task must not return a second output");
+}
+
+#[cfg(all(feature = "denoise-oidn", not(target_arch = "wasm32")))]
+#[test]
+fn oidn_adapter_rejects_invalid_radiance_and_coverage_without_output() {
+    for pixel in [
+        [f32::NAN, 0.0, 0.0, 1.0],
+        [0.0, f32::INFINITY, 0.0, 1.0],
+        [-0.1, 0.0, 0.0, 1.0],
+        [0.0, 0.0, 0.0, -0.1],
+        [0.0, 0.0, 0.0, 1.1],
+        [0.0, 0.0, 0.0, f32::NAN],
+        [0.1, 0.0, 0.0, 0.0],
+    ] {
+        let mut task = denoise_oidn::OidnTask::new(
+            1,
+            1,
+            vec![pixel],
+            DenoiseSettings { method: DenoiseMethod::Oidn, ..Default::default() },
+            CancelToken::default(),
+        )
+        .unwrap();
+        let error = not_native(task.wait().unwrap_err());
+        assert_eq!(error.code, ErrorCode::InvalidRequest, "{pixel:?}: {error}");
+        assert!(error.message.contains("invalid radiance or coverage"), "{error}");
+        assert!(task.poll().is_err(), "invalid input cannot later produce output");
+    }
+}
+
+#[cfg(all(feature = "denoise-oidn", not(target_arch = "wasm32")))]
+#[test]
+fn oidn_adapter_refuses_bad_shape_and_already_cancelled_work_before_starting() {
+    let settings = DenoiseSettings { method: DenoiseMethod::Oidn, ..Default::default() };
+    let error = denoise_oidn::OidnTask::new(3, 1, vec![[0.0; 4]; 2], settings, CancelToken::default()).err().map(not_native).unwrap();
+    assert_eq!(error.code, ErrorCode::InvalidRequest);
+    assert!(error.message.contains("trace grid"));
+    let cancel = CancelToken::default();
+    cancel.cancel();
+    let error = denoise_oidn::OidnTask::new(1, 1, vec![[0.5, 0.25, 0.1, 1.0]], settings, cancel).err().map(not_native).unwrap();
+    assert_eq!(error.code, ErrorCode::Cancelled);
+}
+
+#[test]
+fn cooperative_cpu_oidn_refuses_before_any_work_reservation() {
+    let host = CpuHost::cooperative();
+    let scene = || ProductScene { meshes: Vec::new(), bounds: Aabb3::EMPTY };
+    let mut image = request(Integrator::Raytrace);
+    image.raytrace = Some(RaytraceOptions {
+        denoise: true,
+        denoise_settings: DenoiseSettings { method: DenoiseMethod::Oidn, ..Default::default() },
+        ..Default::default()
+    });
+    let error = host.submit(JobId { session: 16902, serial: 1, generation: 1 }, 1, scene(), image).err().unwrap();
+    assert_eq!(error.code, ErrorCode::HostUnavailable);
+    assert!(error.message.contains("background image host"), "{error}");
+    assert_eq!(host.admitted_bytes(), 0);
+    assert!(!host.pump(1).unwrap());
+}
+
+#[test]
 fn output_and_internal_sampling_bounds_are_checked_without_allocating_images() {
     assert_eq!(supersampled_dimensions(7680, 4320, 2).unwrap(), (15360, 8640));
     assert_eq!(supersampled_dimensions(8192, 4096, 2).unwrap(), (16384, 8192));

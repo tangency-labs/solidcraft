@@ -1569,6 +1569,60 @@ fn cpu_alpha_refuses_opaque_only_output_before_hdr_io_or_scene_capture() {
     }
 }
 
+#[test]
+fn oidn_preflight_metadata_names_actual_cpu_filter_not_spatial_guides() {
+    let settings = solidcraft_render::job::DenoiseSettings {
+        method: solidcraft_render::job::DenoiseMethod::Oidn,
+        oidn_quality: solidcraft_render::job::OidnQuality::Balanced,
+        ..Default::default()
+    };
+    for cpu in [true, false] {
+        let reply = serde_json::to_value(jobs::denoising_reply("render.preflight", &settings, false, cpu).unwrap()).unwrap();
+        assert_eq!(reply["method"], "open_image_denoise");
+        assert_eq!(reply["backend"], "native_cpu");
+        assert_eq!(reply["passes"], 1);
+        assert_eq!(reply["steps"], json!([]));
+        assert_eq!(reply["guides"], "none");
+        assert_eq!(reply["settings"]["oidn_quality"], "balanced");
+        assert_eq!(reply["raw_linear_exr_preserved"], true);
+    }
+}
+
+#[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
+#[test]
+fn oidn_capability_refuses_before_source_io_without_losing_saved_choice() {
+    let mut session = Session::default();
+    session.set_render_job_host(Some(CpuHost::for_platform().unwrap())).unwrap();
+    session
+        .execute(
+            "render.settings.set",
+            &json!({"name":"OIDN", "set":{"width":8,"height":8,
+        "job":{"method":"cpu_raytrace", "options":{"budget":"studio","denoise":true,"denoise_settings":{"method":"oidn"}}}}}),
+        )
+        .unwrap();
+    let saved = session.doc.clone();
+    let error_params = if solidcraft_render::job::denoise_oidn::available() {
+        json!({"integrator":"raytrace","transparent_background":true,"settings":{"width":8,"height":8},
+            "raytrace":{"denoise":true,"denoise_settings":{"method":"oidn"}},
+            "environment":{"path":"oidn-must-not-read.hdr"}})
+    } else {
+        json!({"setup":"OIDN"})
+    };
+    for command in ["render.preflight", "render.start"] {
+        let error = session.execute(command, &error_params).unwrap_err().to_string();
+        assert!(error.contains(if solidcraft_render::job::denoise_oidn::available() { "opaque output" } else { "not built into" }), "{error}");
+        assert!(!error.contains("oidn-must-not-read.hdr"), "capability must refuse before file IO: {error}");
+        assert!(Arc::ptr_eq(&saved, &session.doc));
+        let diagnostics = json!({"integrator":"raytrace","settings":{"width":8,"height":8},
+            "raytrace":{"denoise":true,"denoise_settings":{"method":"oidn"},"denoise_diagnostics":true},
+            "environment":{"path":"oidn-must-not-read.hdr"}});
+        let error = session.execute(command, &diagnostics).unwrap_err().to_string();
+        assert!(error.contains(if solidcraft_render::job::denoise_oidn::available() { "Spatial" } else { "not built into" }), "{error}");
+        assert!(!error.contains("oidn-must-not-read.hdr"), "incompatible diagnostics must refuse before file IO: {error}");
+        assert!(Arc::ptr_eq(&saved, &session.doc));
+    }
+}
+
 #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
 #[test]
 fn saved_cpu_denoise_reports_its_actual_native_request_and_keeps_regrade_raw() {

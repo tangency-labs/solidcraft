@@ -23,6 +23,7 @@ mod cpu_sky;
 #[cfg(feature = "raytrace-cpu")]
 pub(crate) mod denoise;
 mod denoise_diagnostics;
+pub mod denoise_oidn;
 pub(crate) mod encoding;
 pub mod finishing;
 mod host;
@@ -59,8 +60,8 @@ pub use denoise_diagnostics::{DenoiseDiagnostics, DenoiseGuideClass, resolve_den
 pub(crate) use host::FRAME_METADATA_BYTES;
 pub(crate) use host::Reservation;
 pub use host::{
-    CaptureLease, CaptureProfile, CpuHost, DenoiseMaskInfo, HostKind, ImageHost, JobEnvironmentInfo, JobHandle, JobStatus, LinearAlphaConvention,
-    LinearColourEncoding, LinearMasterInfo, PreparedSubmission, PreviewInfo, RenderFrame, RenderPreview, RetainedMetadata,
+    CaptureLease, CaptureProfile, CpuHost, DenoiseMaskInfo, FailedLinearMaster, HostKind, ImageHost, JobEnvironmentInfo, JobHandle, JobStatus,
+    LinearAlphaConvention, LinearColourEncoding, LinearMasterInfo, PreparedSubmission, PreviewInfo, RenderFrame, RenderPreview, RetainedMetadata,
 };
 pub use host_memory::{HostMemoryAdmission, HostMemorySource, NativeMemoryPolicy};
 pub use image::{
@@ -73,8 +74,8 @@ pub use png::PngTask;
 pub use presentation::OutputOptions;
 pub use punctual::{MAX_PUNCTUAL_LIGHTS, MIN_GPU_SPOT_COSINE_GAP, PunctualDiagnostics, PunctualLightOptions, PunctualLights, SpotConeOptions};
 pub use quality::{
-    DenoiseSettings, MAX_CPU_THREADS, MAX_OUTPUT_DIMENSION, MAX_OUTPUT_PIXELS, MAX_TRACE_DIMENSION, MAX_TRACE_PIXELS, MAX_UI_SAMPLES,
-    resolve_supersampling, single_supersample, supersampled_dimensions,
+    DenoiseMethod, DenoiseSettings, MAX_CPU_THREADS, MAX_OUTPUT_DIMENSION, MAX_OUTPUT_PIXELS, MAX_TRACE_DIMENSION, MAX_TRACE_PIXELS, MAX_UI_SAMPLES,
+    OidnQuality, resolve_supersampling, single_supersample, supersampled_dimensions,
 };
 
 /// Native path-tracing ceilings, further restricted by the actual device.
@@ -316,6 +317,11 @@ pub trait ImageWork: Send {
     /// Optional raw linear companion, moved exactly once after PNG completion.
     /// The host validates intent, bounds, hashes and retains its memory lease.
     fn take_linear_exr(&mut self) -> Option<Vec<u8>> {
+        None
+    }
+    /// Called only after a failed step, never for provisional results. The executor
+    /// may hand off its already encoded final master only for a native OIDN failure.
+    fn take_failed_linear_exr(&mut self) -> Option<Vec<u8>> {
         None
     }
     fn step(&mut self, units: usize) -> Result<TaskPoll>;

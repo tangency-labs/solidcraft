@@ -562,7 +562,7 @@ fn portable_quality_controls_preserve_explicit_values_and_legacy_defaults() {
     ] {
         assert_eq!(wire["denoise_settings"]["optical_filter"], false);
     }
-    let filter = DenoiseSettings { passes: 2, strength: 0.35, firefly_suppression: false, optical_filter: false };
+    let filter = DenoiseSettings { passes: 2, strength: 0.35, firefly_suppression: false, optical_filter: false, ..Default::default() };
     let cpu = CpuJob { threads: 4, supersampling: 2, denoise: true, denoise_settings: filter, denoise_diagnostics: true, ..Default::default() };
     let gpu = GpuJob { samples: 128, supersampling: 2, denoise: true, denoise_settings: filter, denoise_diagnostics: true, ..Default::default() };
     let cpu_reopened: CpuJob = serde_json::from_value(serde_json::to_value(&cpu).unwrap()).unwrap();
@@ -581,4 +581,77 @@ fn portable_quality_controls_preserve_explicit_values_and_legacy_defaults() {
     assert!(GpuJob { supersampling: 3, ..gpu.clone() }.validate(0.0).is_err());
     assert!(CpuJob { denoise_settings: DenoiseSettings { strength: f64::NAN, ..filter }, ..cpu }.validate(0.0).is_err());
     assert!(GpuJob { denoise_settings: DenoiseSettings { passes: 4, ..filter }, ..gpu }.validate(0.0).is_err());
+}
+
+#[cfg(test)]
+#[test]
+fn portable_denoiser_intent_roundtrips_and_lowers_without_optional_backend_support() {
+    use solidcraft_render::job::{DenoiseMethod, OidnQuality};
+
+    for method in ["cpu_raytrace", "gpu_path"] {
+        for options in [
+            serde_json::json!({"denoise":true}),
+            serde_json::json!({"denoise":true,"denoise_settings":{}}),
+            serde_json::json!({"denoise":true,"denoise_settings":{"passes":2,"strength":0.25,"optical_filter":false}}),
+        ] {
+            let job: RenderJob = serde_json::from_value(serde_json::json!({"method":method,"options":options})).unwrap();
+            let settings = match &job {
+                RenderJob::CpuRaytrace { options, .. } => options.to_runtime(0.0).unwrap().denoise_settings,
+                RenderJob::GpuPath { options, .. } => options.to_runtime(0.0).unwrap().denoise_settings,
+                RenderJob::Raster { .. } => panic!("expected raytraced fixture"),
+            };
+            assert_eq!(settings.method, DenoiseMethod::Spatial);
+            assert_eq!(settings.oidn_quality, OidnQuality::High);
+            if let Some(old) = options.get("denoise_settings").filter(|old| old.get("passes").is_some()) {
+                assert_eq!(settings.passes, old["passes"].as_u64().unwrap() as u32);
+                assert_eq!(settings.strength, 0.25);
+                assert!(!settings.optical_filter);
+            }
+        }
+        let defaults: RenderJob = serde_json::from_value(serde_json::json!({"method":method})).unwrap();
+        assert!(serde_json::to_value(defaults).unwrap()["options"].get("denoise_settings").is_none());
+        for denoise in [false, true] {
+            for quality in ["fast", "balanced", "high"] {
+                let wire = serde_json::json!({"method":method,"options":{
+                    "denoise":denoise,"denoise_settings":{"method":"oidn","oidn_quality":quality,
+                        "passes":2,"strength":0.25,"firefly_suppression":true,"optical_filter":false}
+                }});
+                let job: RenderJob = serde_json::from_value(wire).unwrap();
+                job.validate(&Camera::default(), 0.0).unwrap();
+                let saved = serde_json::to_value(&job).unwrap();
+                let settings = &saved["options"]["denoise_settings"];
+                assert_eq!(settings["method"], "oidn");
+                assert_eq!(settings.get("oidn_quality"), (quality != "high").then(|| serde_json::json!(quality)).as_ref());
+                assert_eq!(settings["passes"], 2);
+                assert_eq!(settings["strength"], 0.25);
+                assert_eq!(settings["firefly_suppression"], true);
+                assert_eq!(settings["optical_filter"], false);
+                assert_eq!(serde_json::from_value::<RenderJob>(saved.clone()).unwrap(), job);
+                let runtime_settings = match &job {
+                    RenderJob::CpuRaytrace { options, .. } => {
+                        let runtime = options.to_runtime(0.0).unwrap();
+                        assert_eq!(runtime.denoise, denoise);
+                        runtime.denoise_settings
+                    }
+                    RenderJob::GpuPath { options, .. } => {
+                        let runtime = options.to_runtime(0.0).unwrap();
+                        assert_eq!(runtime.denoise, denoise);
+                        runtime.denoise_settings
+                    }
+                    RenderJob::Raster { .. } => panic!("expected raytraced fixture"),
+                };
+                assert_eq!(serde_json::to_value(runtime_settings).unwrap(), *settings);
+            }
+        }
+        for settings in [
+            serde_json::json!({"method":"future"}),
+            serde_json::json!({"method":null}),
+            serde_json::json!({"oidn_quality":"ultra"}),
+            serde_json::json!({"oidn_quality":1}),
+            serde_json::json!({"method":"oidn","typo":true}),
+        ] {
+            let wire = serde_json::json!({"method":method,"options":{"denoise_settings":settings}});
+            assert!(serde_json::from_value::<RenderJob>(wire.clone()).is_err(), "{wire}");
+        }
+    }
 }

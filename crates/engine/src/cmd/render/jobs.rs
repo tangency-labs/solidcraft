@@ -1,6 +1,6 @@
 use crate::schema::render_jobs::{
-    ExportFormat, ImageCopied, ImageExported, Job, JobProgressReply, JobState, PreparationCancelled, QueueReply, RenderCancelled, RenderProgress,
-    ResultPinned,
+    ExportFormat, FailedMasterExported, ImageCopied, ImageExported, Job, JobProgressReply, JobState, PreparationCancelled, QueueReply,
+    RenderCancelled, RenderExported, RenderProgress, ResultPinned,
 };
 use crate::schema::render_start::{Checked, Denoising, GpuChecked, IndirectClamp, RenderChecked, RenderStarted, RuntimeChecked};
 use crate::{Result, Session, params::bad, render_jobs::job_error};
@@ -413,7 +413,16 @@ pub(crate) fn prepare_with_metadata(
             solidcraft_render::job::supersampled_dimensions(dimensions.0, dimensions.1, options.supersampling).map_err(job_error)?
         };
         options.budget.validate_image(trace_dimensions.0, trace_dimensions.1, options.camera_sampling().map_err(job_error)?).map_err(job_error)?;
-        if options.denoise || options.denoise_diagnostics {
+        if options.denoise && options.denoise_settings.method == solidcraft_render::job::DenoiseMethod::Oidn {
+            solidcraft_render::job::denoise_oidn::validate_request(
+                trace_dimensions.0,
+                trace_dimensions.1,
+                input.transparent_background,
+                options.denoise_diagnostics,
+            )
+            .map_err(job_error)?;
+        }
+        if (options.denoise && options.denoise_settings.method == solidcraft_render::job::DenoiseMethod::Spatial) || options.denoise_diagnostics {
             solidcraft_render::job::validate_cpu_denoise_image(trace_dimensions.0, trace_dimensions.1).map_err(job_error)?;
         }
         if let Some(lens) = options.lens {
@@ -816,7 +825,12 @@ fn prepare_progressive(
     options.adaptive = input.adaptive;
     options.transmission_samples = input.transmission_samples.unwrap_or(1);
     options.validate().map_err(job_error)?;
-    solidcraft_render::job::supersampled_dimensions(settings.width, settings.height, options.supersampling).map_err(job_error)?;
+    let (trace_width, trace_height) =
+        solidcraft_render::job::supersampled_dimensions(settings.width, settings.height, options.supersampling).map_err(job_error)?;
+    if options.denoise && options.denoise_settings.method == solidcraft_render::job::DenoiseMethod::Oidn {
+        solidcraft_render::job::denoise_oidn::validate_request(trace_width, trace_height, input.transparent_background, options.denoise_diagnostics)
+            .map_err(job_error)?;
+    }
     if let Some(super::environment::Input::BuiltinHdr { id, .. }) = &input.environment
         && options.lighting.as_ref().is_some_and(|lighting| lighting.sun.is_some())
         && super::library::owns_sun(id, command)?
@@ -967,7 +981,27 @@ fn ignored_controls(settings: &RenderSetup) -> Vec<&'static str> {
 }
 
 /// How the denoising filter of a CPU ray tracing or GPU request works, for its preflight reply.
-fn denoising_reply(command: &str, settings: &solidcraft_render::job::DenoiseSettings, diagnostics: bool, cpu: bool) -> Result<Denoising> {
+pub(super) fn denoising_reply(command: &str, settings: &solidcraft_render::job::DenoiseSettings, diagnostics: bool, cpu: bool) -> Result<Denoising> {
+    if settings.method == solidcraft_render::job::DenoiseMethod::Oidn {
+        return Ok(Denoising {
+            method: "open_image_denoise",
+            backend: Some("native_cpu"),
+            passes: 1,
+            steps: Vec::new(),
+            settings: retyped(command, settings)?,
+            diagnostics_requested: diagnostics,
+            outlier_policy: "disabled",
+            optical_policy: "color-only RT model; no optical correspondence guides",
+            guides: "none",
+            bypass: "original coverage is preserved; transparent output is unsupported",
+            limitation: "experimental color-only spatial neural filter; native cancellation and workspace controls are not yet qualified",
+            raw_linear_accumulator_preserved: true,
+            raw_linear_exr_preserved: Some(true),
+            output_stage: "linear_before_tone_map",
+            work_units: Some("one trace-grid pixel visit plus native inference on a background worker; workspace is estimated separately"),
+            checkpoints: Some("every complete published pass uses Open Image Denoise; live-preview qualification is pending"),
+        });
+    }
     Ok(Denoising {
         method: "edge_aware_atrous",
         backend: cpu.then_some("native_cpu"),
@@ -1158,49 +1192,61 @@ pub(super) fn export(s: &mut Session, params: &Value) -> Result<Value> {
     // Atomic native writers are also used for the app's own files and do not
     // apply a request's path scope. Check the caller's destination explicitly.
     solidcraft_io::vfs::check(&input.path).map_err(|e| bad("render.export", e.to_string()))?;
-    let job = result_source(s, input.job, "render.export")?;
-    let frame = s.render_jobs.frame(job).map_err(job_error)?;
+    let cmd = "render.export";
+    let job = result_source(s, input.job, cmd)?;
+    // A successful export says what was written, never that a failed job completed.
+    // Serialize the receipt before touching disk. Keep the owner alive while borrowing
+    // its bytes; neither this handoff nor the writer needs a second image buffer.
+    let write = |bytes: &[u8], receipt: RenderExported| -> Result<Value> {
+        let reply = super::typed_reply(cmd, receipt)?;
+        let result =
+            if input.overwrite { solidcraft_io::write_atomic(path, bytes, false) } else { solidcraft_io::safe_write::create_atomic(path, bytes) };
+        result.map_err(|e| bad(cmd, format!("could not export {}: {e}", input.format.extension())))?;
+        Ok(reply)
+    };
+    if input.job.is_some()
+        && input.format == ExportFormat::Exr
+        && let Some((master, error)) = s.render_jobs.failed_master(job).map_err(job_error)?
+    {
+        let receipt = FailedMasterExported {
+            phase: crate::schema::render_jobs::JobPhase::Failed,
+            job: Job(job),
+            path: input.path.clone(),
+            bytes: master.bytes().len(),
+            format: input.format,
+            encoding: input.format.encoding(),
+            alpha: input.format.alpha(),
+            frame: (),
+            linear_master: retyped(cmd, master.info())?,
+            error: retyped(cmd, error)?,
+            param_warnings: Vec::new(),
+        };
+        return write(master.bytes(), RenderExported::FailedMaster(receipt));
+    }
+    let frame = s.render_jobs.collected_frame(job).map_err(job_error)?;
     let bytes = match input.format {
         ExportFormat::Png => frame.png(),
-        ExportFormat::DenoiseMask => frame
-            .denoise_mask_png()
-            .ok_or_else(|| bad("render.export", "this completed job has no guide mask; enable denoising diagnostics before rendering"))?,
-        ExportFormat::Exr => frame
-            .linear_exr()
-            .ok_or_else(|| bad("render.export", "this completed job has no raw linear master; enable retention before rendering"))?,
+        ExportFormat::DenoiseMask => {
+            frame.denoise_mask_png().ok_or_else(|| bad(cmd, "this completed job has no guide mask; enable denoising diagnostics before rendering"))?
+        }
+        ExportFormat::Exr => {
+            frame.linear_exr().ok_or_else(|| bad(cmd, "this completed job has no raw linear master; enable retention before rendering"))?
+        }
     };
-    // Typed before the write: a conversion that fails then leaves no file behind.
-    let frame_info = retyped("render.export", &frame.info)?;
-    let linear_master = frame.linear_master_info().map(|info| retyped("render.export", info)).transpose()?;
-    let presentation = frame.presentation().map(|info| retyped("render.export", info)).transpose()?;
-    let denoise_mask = frame.denoise_mask_info().map(|info| retyped("render.export", info)).transpose()?;
-    // Replace atomically without reading an arbitrarily large previous target into memory.
-    // Design saves retain their independent backup policy.
-    let result =
-        if input.overwrite { solidcraft_io::write_atomic(path, bytes, false) } else { solidcraft_io::safe_write::create_atomic(path, bytes) };
-    result.map_err(|e| bad("render.export", format!("could not export completed {}: {e}", input.format.extension())))?;
-    let reply = ImageExported {
+    let receipt = ImageExported {
         job: Job(job),
+        path: input.path.clone(),
         bytes: bytes.len(),
-        path: input.path,
         format: input.format,
-        encoding: match input.format {
-            ExportFormat::Png => "srgb",
-            ExportFormat::Exr => "scene_linear_srgb_d65",
-            ExportFormat::DenoiseMask => "categorical_srgb",
-        },
-        alpha: match input.format {
-            ExportFormat::Png => "straight",
-            ExportFormat::Exr => "coverage_premultiplied",
-            ExportFormat::DenoiseMask => "opaque",
-        },
-        frame: frame_info,
-        linear_master,
-        presentation,
-        denoise_mask,
+        encoding: input.format.encoding(),
+        alpha: input.format.alpha(),
+        frame: retyped(cmd, &frame.info)?,
+        linear_master: frame.linear_master_info().map(|info| retyped(cmd, info)).transpose()?,
+        presentation: frame.presentation().map(|info| retyped(cmd, info)).transpose()?,
+        denoise_mask: frame.denoise_mask_info().map(|info| retyped(cmd, info)).transpose()?,
         param_warnings: Vec::new(),
     };
-    super::typed_reply("render.export", reply)
+    write(bytes, RenderExported::Completed(receipt))
 }
 
 fn denoise_steps(passes: u32) -> Vec<u32> {

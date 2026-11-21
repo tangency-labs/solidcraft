@@ -11,7 +11,7 @@
 //! theirs, with their own messages.
 //!
 //! The render crate has no `JsonSchema`. A job's id, progress, error and frame are typed here;
-//! its other sections (the request, what it resolved to, its options, the linear master) are
+//! its other sections (the request, what it resolved to and its options) are
 //! published as JSON objects, for reading.
 
 use std::borrow::Cow;
@@ -209,13 +209,30 @@ impl ExportFormat {
             Self::Exr => "exr",
         }
     }
+
+    pub(crate) fn encoding(self) -> &'static str {
+        match self {
+            Self::Png => "srgb",
+            Self::Exr => "scene_linear_srgb_d65",
+            Self::DenoiseMask => "categorical_srgb",
+        }
+    }
+
+    pub(crate) fn alpha(self) -> &'static str {
+        match self {
+            Self::Png => "straight",
+            Self::Exr => "coverage_premultiplied",
+            Self::DenoiseMask => "opaque",
+        }
+    }
 }
 
 /// Export Render Image (`render.export`).
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ExportParams {
-    /// The finished job whose image to write. Without it, or with `null`: the selected result.
+    /// Without a job, or with `null`: the selected completed result. To recover a retained raw
+    /// master after an OIDN failure, give that failed job's exact id and `format: "exr"`.
     #[serde(default, deserialize_with = "as_handler", skip_serializing_if = "Option::is_none")]
     pub job: Option<Job>,
     /// The file to write. At most 4096 bytes, with no control characters, ending in the
@@ -266,6 +283,15 @@ pub struct JobFailure {
     pub message: String,
 }
 
+/// Identity of the retained raw EXR, independent of any display image.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct RawMaster {
+    pub encoding: String,
+    pub alpha: String,
+    pub bytes: u64,
+    pub sha256: String,
+}
+
 /// A finished image.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Frame {
@@ -301,6 +327,10 @@ pub struct JobState {
     pub error: Option<JobFailure>,
     /// Its finished image, or `null` until it completes.
     pub frame: Option<Frame>,
+    /// When present, the job retained this raw EXR. A failed job can report a master without
+    /// a frame; use its exact job id and `format: "exr"` while that status remains in history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linear_master: Option<RawMaster>,
     /// The image request it runs, as the render crate gives it.
     pub request: Map<String, Value>,
     /// The backend and executor the request resolved to, and their limits.
@@ -314,7 +344,7 @@ pub struct JobState {
     pub preview_retention_skips: u32,
     /// The sections that apply to this job, each an object as the render crate gives it:
     /// `preview` and `preview_unavailable_reason`, `presentation` (for a regraded image),
-    /// `linear_master`, `sampling`, `environment` and `punctual_diagnostics`.
+    /// `sampling`, `environment` and `punctual_diagnostics`.
     #[serde(flatten)]
     pub sections: Map<String, Value>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
@@ -390,7 +420,38 @@ pub struct ImageCopied {
     pub param_warnings: Vec<String>,
 }
 
-/// What `render.export` returns.
+/// What `render.export` returns. A failed job has no parent PNG: exporting its retained
+/// EXR is a file-write success, not a change in the job's terminal state.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum RenderExported {
+    Completed(ImageExported),
+    FailedMaster(FailedMasterExported),
+}
+
+/// Receipt for the raw EXR that survived a final OIDN failure.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct FailedMasterExported {
+    /// Still `failed` after this file was successfully written.
+    #[schemars(extend("const" = "failed"))]
+    pub phase: JobPhase,
+    pub job: Job,
+    pub path: String,
+    pub bytes: usize,
+    /// Always `exr` for a failed master. No display image was produced.
+    #[schemars(extend("const" = "exr"))]
+    pub format: ExportFormat,
+    pub encoding: &'static str,
+    pub alpha: &'static str,
+    /// Always null; a failed master is not a completed frame.
+    pub frame: (),
+    pub linear_master: RawMaster,
+    pub error: JobFailure,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// The unchanged receipt for exporting a completed image or its companions.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ImageExported {
     pub job: Job,
@@ -409,7 +470,7 @@ pub struct ImageExported {
     /// is exported. The separate mask metadata describes the exported mask bytes.
     pub frame: Frame,
     /// The linear master the job kept, as the render crate describes it, or `null`.
-    pub linear_master: Option<Map<String, Value>>,
+    pub linear_master: Option<RawMaster>,
     /// How a regraded image was presented, as the render crate describes it, or `null` for an
     /// image rendered directly.
     pub presentation: Option<Map<String, Value>>,

@@ -6142,6 +6142,147 @@ fn complete_linear_fixture(context: Arc<Context>, options: JobOptions) -> (Vec<u
     panic!("bounded linear-output fixture did not finish")
 }
 #[test]
+fn oidn_gpu_admission_checks_capability_and_preserves_disabled_intent() {
+    let options = JobOptions {
+        denoise_settings: solidcraft_render::job::DenoiseSettings { method: DenoiseMethod::Oidn, ..Default::default() },
+        ..Default::default()
+    };
+    let scene = sphere(white());
+    assert!(admission(&scene, &request(16), options).is_ok());
+    let diagnostics = JobOptions { denoise_diagnostics: true, ..options };
+    assert!(admission(&scene, &request(16), diagnostics).is_ok(), "inactive OIDN permits independent Spatial guide inspection");
+    let error = admission(&scene, &request(16), JobOptions { denoise: true, ..diagnostics }).unwrap_err();
+    assert_eq!(error.code, if solidcraft_render::job::denoise_oidn::available() { ErrorCode::InvalidRequest } else { ErrorCode::HostUnavailable });
+    assert!(
+        error.message.contains(if solidcraft_render::job::denoise_oidn::available() { "Spatial" } else { "not built into" }),
+        "{}",
+        error.message
+    );
+    let options = JobOptions { denoise: true, ..options };
+    if !solidcraft_render::job::denoise_oidn::available() {
+        assert_eq!(admission(&scene, &request(16), options).unwrap_err().code, ErrorCode::HostUnavailable);
+    } else {
+        let transparent = ImageRequest { transparent_background: true, ..request(16) };
+        assert!(admission(&scene, &transparent, options).unwrap_err().message.contains("opaque output"));
+        let base = admission(&scene, &request(16), JobOptions { denoise: false, ..options }).unwrap();
+        let filtered = admission(&scene, &request(16), options).unwrap();
+        assert_eq!(filtered.pixel_scratch_bytes - base.pixel_scratch_bytes, solidcraft_render::job::denoise_oidn::required_bytes(16, 16).unwrap());
+    }
+}
+
+#[test]
+fn oidn_gpu_executes_on_raw_trace_grid_and_preserves_accumulator_at_x2() {
+    if !solidcraft_render::job::denoise_oidn::available() {
+        return;
+    }
+    let Some(executor) = executor() else { return };
+    let options = JobOptions {
+        samples: 4,
+        max_depth: 3,
+        seed: 17,
+        supersampling: 2,
+        linear_exr: true,
+        denoise: true,
+        denoise_settings: solidcraft_render::job::DenoiseSettings { method: DenoiseMethod::Oidn, ..Default::default() },
+        ..Default::default()
+    };
+    let image = request(32);
+    let mut task = Task::new(executor.context.clone(), sphere(white()), image, options, CancelToken::default()).unwrap();
+    assert!(task.denoiser.is_none(), "color-only OIDN needs no Spatial GPU resources");
+    assert_eq!((task.request.width, task.request.height), (64, 64));
+    for _ in 0..4 {
+        task.complete_sample().unwrap();
+    }
+    let raw = task.read_linear().unwrap();
+    let mut expected =
+        solidcraft_render::job::denoise_oidn::OidnTask::new(64, 64, raw.clone(), options.denoise_settings, CancelToken::default()).unwrap();
+    let resolved_raw = task.resolve_output(raw.clone()).unwrap();
+    let mut exr = solidcraft_render::job::linear_exr::ExrTask::new(32, 32, resolved_raw, CancelToken::default()).unwrap();
+    while !exr.step(4).unwrap() {}
+    let expected_exr = exr.finish().unwrap().0;
+    while task.oidn_work.is_none() {
+        assert!(matches!(task.step(16384).unwrap(), TaskPoll::Pending(_)));
+    }
+    assert_eq!(task.exr.as_ref().unwrap(), &expected_exr, "GPU raw EXR is encoded before any OIDN processing");
+    // Finish the first worker before starting an independent output invocation.
+    // A live worker cannot be detached from this task's admission lifetime.
+    drop(task.oidn_work.take().unwrap().wait().unwrap());
+    // Deliberately unrelated resolved pixels prove the filter reacquires the full
+    // trace grid rather than denoising the already resolved argument.
+    assert!(matches!(task.finish_output(vec![[99.0, 99.0, 99.0, 1.0]; 32 * 32]).unwrap(), TaskPoll::Pending(_)));
+    let actual = task.oidn_work.take().unwrap().wait().unwrap();
+    let expected = expected.wait().unwrap();
+    assert_eq!(actual, expected, "GPU integration must use the raw 64x64 source");
+    assert_eq!(task.read_linear().unwrap(), raw, "OIDN never writes GPU accumulation");
+    let resolved = task.resolve_output(actual).unwrap();
+    assert_eq!(resolved.len(), 32 * 32);
+    assert!(matches!(task.finish_filtered_output(resolved).unwrap(), TaskPoll::Pending(_)));
+}
+
+#[test]
+fn oidn_gpu_adaptive_preview_filters_normalized_pilot_and_production_trace_grids() {
+    use solidcraft_render::job::{adaptive::AdaptiveSampling, denoise_oidn::OidnTask};
+
+    if !solidcraft_render::job::denoise_oidn::available() {
+        return;
+    }
+    let Some(executor) = executor() else { return };
+    let options = JobOptions {
+        samples: 32,
+        max_depth: 3,
+        seed: 17,
+        supersampling: 2,
+        linear_exr: true,
+        denoise: true,
+        denoise_settings: solidcraft_render::job::DenoiseSettings { method: DenoiseMethod::Oidn, ..Default::default() },
+        adaptive: Some(AdaptiveSampling { pilot_samples: 16, min_samples: 16, ..Default::default() }),
+        ..Default::default()
+    };
+    let mut task = Task::new(executor.context.clone(), sphere(white()), request(16), options, CancelToken::default()).unwrap();
+    assert_eq!((task.request.width, task.request.height), (32, 32));
+    for completed in [16, 18] {
+        while task.sample < completed {
+            task.complete_sample().unwrap();
+        }
+        assert!(completed < task.target_samples());
+        let raw = task.read_linear().unwrap();
+        let checkpoint = task.read_checkpoint().unwrap();
+        assert!(checkpoint.iter().any(|pixel| pixel[..3].iter().any(|value| *value > 0.0)));
+        assert_ne!(checkpoint, raw, "the fixture must distinguish checkpoint input from final readback at iteration {completed}");
+        if completed == 16 {
+            assert!(raw.iter().all(|pixel| *pixel == [0.0; 4]), "the last pilot resets production, but its mean remains in the pilot plane");
+        } else {
+            // Two production samples are below every allowed budget (at least 16).
+            // The final readback is still a sum; the checkpoint is their physical mean.
+            assert!(raw.iter().zip(&checkpoint).all(|(sum, mean)| sum.iter().zip(mean).all(|(sum, mean)| *sum == *mean * 2.0)));
+        }
+        let mut expected = OidnTask::new(32, 32, checkpoint.clone(), options.denoise_settings, CancelToken::default()).unwrap();
+        let expected = expected.wait().unwrap();
+        task.encoding_preview = true;
+        assert!(matches!(task.finish_output(vec![[99.0, 99.0, 99.0, 1.0]; 16 * 16]).unwrap(), TaskPoll::Pending(_)));
+        let actual = task.oidn_work.take().unwrap().wait().unwrap();
+        assert_eq!(actual, expected, "OIDN preview must filter the normalized trace-grid checkpoint at iteration {completed}");
+        let resolved = task.resolve_output(actual).unwrap();
+        assert_eq!(resolved.len(), 16 * 16);
+        assert!(matches!(task.finish_filtered_output(resolved).unwrap(), TaskPoll::Pending(_)));
+        let mut preview = None;
+        for _ in 0..1000 {
+            assert!(matches!(task.step(16384).unwrap(), TaskPoll::Pending(_)));
+            if let Some(image) = task.take_preview() {
+                preview = Some(image);
+                break;
+            }
+        }
+        let preview = preview.expect("bounded preview encoding must publish this checkpoint");
+        assert_eq!(preview.samples_per_pixel, completed);
+        assert_eq!(image::load_from_memory(&preview.png).unwrap().into_rgba8().dimensions(), (16, 16));
+        assert!(task.take_linear_exr().is_none(), "adaptive previews do not publish raw masters");
+        assert_eq!(task.read_linear().unwrap(), raw, "OIDN preview cannot write production accumulation");
+        assert_eq!(task.read_checkpoint().unwrap(), checkpoint, "OIDN preview cannot change normalized pilot or production values");
+    }
+}
+
+#[test]
 fn gpu_raw_master_keeps_hdr_samples_before_denoise_gain_tone_and_camera_backdrop() {
     use solidcraft_render::job::finishing::{Backdrop, Finishing};
     let Some(executor) = executor() else {
@@ -7929,7 +8070,7 @@ fn maximum_paged_image_options(adaptive_photons: bool) -> JobOptions {
         texture_filtering: true,
         metal_energy_compensation: true,
         denoise: true,
-        denoise_settings: DenoiseSettings { passes: 3, strength: 1.0, firefly_suppression: true, optical_filter: true },
+        denoise_settings: DenoiseSettings { passes: 3, strength: 1.0, firefly_suppression: true, optical_filter: true, ..Default::default() },
         denoise_diagnostics: true,
         linear_exr: true,
         adaptive: adaptive_photons.then_some(AdaptiveSampling { pilot_samples: MAX_PILOT_SAMPLES, min_samples: 16_384, ..Default::default() }),
@@ -8115,7 +8256,7 @@ fn gpu_paged_optical_scratch_and_refreshed_photons_keep_global_sample_identity()
         transmission_samples: 2,
         seed: 17,
         denoise: true,
-        denoise_settings: DenoiseSettings { passes: 3, strength: 1.0, firefly_suppression: true, optical_filter: true },
+        denoise_settings: DenoiseSettings { passes: 3, strength: 1.0, firefly_suppression: true, optical_filter: true, ..Default::default() },
         denoise_diagnostics: true,
         lighting: Some(StudioLighting {
             directional_lights: DirectionalLights::new(&[DirectionalLightOptions { direction: [0.0, 0.0, 1.0], color: [1.0; 3], intensity: 1.0 }])

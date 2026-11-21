@@ -45,10 +45,11 @@ and pending jobs before submitting the new request. A cancelled generation canno
 publish late. A successful older generation never replaces a newer successful result.
 
 Each document retains at most two live jobs, four recent terminal status records and
-one last successful image. Cancellation/failure preserves that image. A new successful
-image releases the previous image; old terminal metadata can still report completion,
-but it does not promise that its bytes remain exportable. Export requires an explicit
-retained completed job ID; it never silently exports a different/newer job.
+eight completed images. Cancellation or failure does not replace the selected successful
+image. Without a job ID, `render.export` uses that selection; with an ID it never
+substitutes another job. One narrow exception to completed-image export is a final
+OIDN failure with an explicitly retained raw EXR: use that failed job's ID while its
+terminal status record is retained. It has no display frame and is never selected.
 
 Native CPU raytracing can separately enable
 [progressive camera sampling](render-cpu-progressive.md). A status may then include
@@ -98,7 +99,7 @@ dimensions or visible geometry.
 The worker retains its bounded preparation check. Encoded PNG bytes have an additional
 `8 * output_pixels + 65536` cap. Allocator and codec internals are estimates, not an
 operating-system memory quota. Limits fail with errors rather than allocating unbounded
-buffers. Completed frames keep their memory reservation while bytes are retained.
+buffers. Completed frames and recoverable EXRs keep their memory reservation while their bytes are retained.
 
 The CPU path shades in linear light, blends sorted triangle alpha approximately, then
 encodes 8-bit sRGB with straight alpha and an sRGB PNG chunk. Transparent shared edges
@@ -111,14 +112,18 @@ render dependency. No external render engine or third-party art is introduced.
 
 ## Export and automation
 
-`render.export` takes `job`, `path` ending in `.png`, and `overwrite` (default false).
+`render.export` writes the selected result or the specified `job`. The `path` must
+match the format: `.png` by default, or `.exr` for a retained raw linear master
+(`format: "exr"`). A failed final OIDN pass can also have an [exportable raw
+master](render-denoise.md#experimental-open-image-denoise); give its full job ID,
+not the previous selected image. `overwrite` defaults to false.
 The destination is checked against the caller's existing file-access scope before
-reading the retained frame or calling either native writer. Disallowed folders and
+reading the retained bytes or calling either native writer. Disallowed folders and
 traversal are refused in both overwrite modes. Native no-clobber export writes/syncs a temporary beside the target and publishes it
 with an atomic hard link; an existing destination wins even in a race. Filesystems
 without that operation return an error. Explicit overwrite uses the existing atomic
-writer without reading or backing up the previous target. Failed writes preserve the completed
-image and CAD state. Browser export uses the existing virtual file/download service;
+writer without reading or backing up the previous target. Failed writes preserve the retained
+bytes and CAD state. Browser export uses the existing virtual file/download service;
 image-export paths or frame payloads are not persisted in the design. Saved HDR
 input resources use their separate [document contract](render-hdr-resources.md).
 

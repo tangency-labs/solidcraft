@@ -1,7 +1,7 @@
 //! Shared quality controls. Edits retain the selected output size and saved shot intent.
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, ui_kit};
-use solidcraft_engine::render::job::{DenoiseGuideClass, MAX_CPU_THREADS};
+use solidcraft_engine::render::job::{DenoiseGuideClass, DenoiseMethod, MAX_CPU_THREADS, OidnQuality};
 
 /// New selections are bounded without rewriting larger legacy jobs on paint or load.
 pub(super) const MAX_UI_SAMPLES: u32 = solidcraft_engine::render::job::MAX_UI_SAMPLES;
@@ -146,37 +146,115 @@ pub(super) fn denoise_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     publish_target("render:gpu-denoise", response.rect);
     let enabled = app.render_workspace.view.studio.denoise;
     ui.add_enabled_ui(enabled, |ui| {
-        let label = app.tr("render.denoise_passes").to_string();
-        ui_kit::row(ui, &label, |ui| {
-            let response = ui_kit::number_field_preserving(ui, &mut app.render_workspace.view.studio.denoise_settings.passes, 1..=3, 1.0, "");
-            publish_target("render:denoise-passes", response.rect);
-            response
+        let label = app.tr("render.denoise_method").to_string();
+        let spatial = app.tr("render.denoise_method_spatial").to_string();
+        let oidn = app.tr("render.denoise_method_oidn").to_string();
+        let unavailable = app.tr("render.denoise_oidn_unavailable").to_string();
+        let oidn_available = solidcraft_engine::render::job::denoise_oidn::available();
+        let mut selected = usize::from(app.render_workspace.view.studio.denoise_settings.method == DenoiseMethod::Oidn);
+        let response = ui_kit::row(ui, &label, |ui| {
+            ui.scope(|ui| {
+                if ui_kit::segmented(
+                    ui,
+                    &mut selected,
+                    &[&spatial, &oidn],
+                    ui_kit::Segments {
+                        compact: true,
+                        disabled_reasons: &[None, (!oidn_available).then_some(unavailable.as_str())],
+                        targets: if publish_controls { &["render:denoise-method:spatial", "render:denoise-method:oidn"] } else { &[] },
+                        ..Default::default()
+                    },
+                ) {
+                    app.render_workspace.view.studio.denoise_settings.method =
+                        if selected == 1 { DenoiseMethod::Oidn } else { DenoiseMethod::Spatial };
+                }
+                ui.response()
+            })
         });
-        let label = app.tr("render.denoise_strength").to_string();
-        ui_kit::row(ui, &label, |ui| {
-            let response = ui_kit::slider(
-                ui,
-                &mut app.render_workspace.view.studio.denoise_settings.strength,
-                0.0..=1.0,
-                ui_kit::Slider { step: Some(0.05), format: |value| format!("{:.0}%", value * 100.0), ..Default::default() },
-            );
-            publish_target("render:denoise-strength", response.rect);
-            response
-        });
-        let label = app.tr("render.denoise_firefly").to_string();
-        let response = ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.denoise_settings.firefly_suppression);
-        publish_target("render:denoise-firefly", response.rect);
-        let label = app.tr("render.denoise_optical_filter").to_string();
-        let response = ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.denoise_settings.optical_filter);
-        publish_target("render:denoise-optical-filter", response.rect);
-        response.backing_on_hover_text(app.tr("render.denoise_optical_filter_help"));
+        publish_target("render:denoise-method", response.inner.rect);
+        let method = app.render_workspace.view.studio.denoise_settings.method;
+        if method == DenoiseMethod::Oidn {
+            let label = app.tr("render.denoise_oidn_quality").to_string();
+            let fast = app.tr("render.denoise_oidn_quality_fast").to_string();
+            let balanced = app.tr("render.denoise_oidn_quality_balanced").to_string();
+            let high = app.tr("render.denoise_oidn_quality_high").to_string();
+            let current = app.render_workspace.view.studio.denoise_settings.oidn_quality;
+            let mut quality = match current {
+                OidnQuality::Fast => 0,
+                OidnQuality::Balanced => 1,
+                OidnQuality::High => 2,
+            };
+            ui.add_enabled_ui(oidn_available, |ui| {
+                let response = ui_kit::row(ui, &label, |ui| {
+                    ui.scope(|ui| {
+                        if ui_kit::segmented(
+                            ui,
+                            &mut quality,
+                            &[&fast, &balanced, &high],
+                            ui_kit::Segments {
+                                compact: true,
+                                targets: if publish_controls {
+                                    &["render:denoise-oidn-quality:fast", "render:denoise-oidn-quality:balanced", "render:denoise-oidn-quality:high"]
+                                } else {
+                                    &[]
+                                },
+                                ..Default::default()
+                            },
+                        ) {
+                            app.render_workspace.view.studio.denoise_settings.oidn_quality = match quality {
+                                0 => OidnQuality::Fast,
+                                1 => OidnQuality::Balanced,
+                                _ => OidnQuality::High,
+                            };
+                        }
+                        ui.response()
+                    })
+                });
+                publish_target("render:denoise-oidn-quality", response.inner.rect);
+            });
+        } else {
+            let label = app.tr("render.denoise_passes").to_string();
+            ui_kit::row(ui, &label, |ui| {
+                let response = ui_kit::number_field_preserving(ui, &mut app.render_workspace.view.studio.denoise_settings.passes, 1..=3, 1.0, "");
+                publish_target("render:denoise-passes", response.rect);
+                response
+            });
+            let label = app.tr("render.denoise_strength").to_string();
+            ui_kit::row(ui, &label, |ui| {
+                let response = ui_kit::slider(
+                    ui,
+                    &mut app.render_workspace.view.studio.denoise_settings.strength,
+                    0.0..=1.0,
+                    ui_kit::Slider { step: Some(0.05), format: |value| format!("{:.0}%", value * 100.0), ..Default::default() },
+                );
+                publish_target("render:denoise-strength", response.rect);
+                response
+            });
+            let label = app.tr("render.denoise_firefly").to_string();
+            let response = ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.denoise_settings.firefly_suppression);
+            publish_target("render:denoise-firefly", response.rect);
+            let label = app.tr("render.denoise_optical_filter").to_string();
+            let response = ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.denoise_settings.optical_filter);
+            publish_target("render:denoise-optical-filter", response.rect);
+            response.backing_on_hover_text(app.tr("render.denoise_optical_filter_help"));
+        }
     });
-    ui_kit::text(ui, app.tr("render.denoise_settings_help"), ui_kit::Text::Note("render.denoise_settings_help"));
+    let help = match app.render_workspace.view.studio.denoise_settings.method {
+        DenoiseMethod::Spatial => "render.denoise_settings_help",
+        DenoiseMethod::Oidn if !solidcraft_engine::render::job::denoise_oidn::available() => "render.denoise_oidn_unavailable",
+        DenoiseMethod::Oidn => "render.denoise_oidn_help",
+    };
+    ui_kit::text(ui, app.tr(help), ui_kit::Text::Note(help));
     let label = app.tr("render.denoise_diagnostics_enable").to_string();
     let response = ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.denoise_diagnostics);
     publish_target("render:denoise-diagnostics", response.rect);
     if app.render_workspace.view.studio.denoise_diagnostics {
-        ui_kit::text(ui, app.tr("render.denoise_diagnostics_help"), ui_kit::Text::Note("render.denoise_diagnostics_help"));
+        let help = if enabled && app.render_workspace.view.studio.denoise_settings.method == DenoiseMethod::Oidn {
+            "render.denoise_oidn_diagnostics_unavailable"
+        } else {
+            "render.denoise_diagnostics_help"
+        };
+        ui_kit::text(ui, app.tr(help), ui_kit::Text::Note(help));
     }
     let after = &app.render_workspace.view.studio;
     app.render_workspace.view.dirty |= before != (after.denoise, after.denoise_settings, after.denoise_diagnostics);

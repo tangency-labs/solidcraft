@@ -243,7 +243,12 @@ fn admit_layout_with_workers(scene: &ProductScene, request: &ImageRequest, optio
     if let Some(lens) = options.lens {
         lens.validate_camera(&request.camera)?;
     }
-    if options.denoise || options.denoise_diagnostics {
+    let spatial_denoise = options.denoise && options.denoise_settings.method == job::DenoiseMethod::Spatial;
+    let oidn = options.denoise && options.denoise_settings.method == job::DenoiseMethod::Oidn;
+    if oidn {
+        job::denoise_oidn::validate_request(width, height, request.transparent_background, options.denoise_diagnostics)?;
+    }
+    if spatial_denoise || options.denoise_diagnostics {
         job::validate_cpu_denoise_image(width, height)?;
     }
     super::aging::validate_scene(scene, options)?;
@@ -407,7 +412,7 @@ fn admit_layout_with_workers(scene: &ProductScene, request: &ImageRequest, optio
     let output_pixels = u64::from(request.width).checked_mul(u64::from(request.height)).ok_or_else(|| error(TraceError::MemoryLimit))?;
     let plane_bytes = |count: u64, stride: u64| count.checked_mul(stride).ok_or_else(|| error(TraceError::MemoryLimit));
     let output_already_paid = options.output.as_deref().is_some_and(|output| !output.identity_display() || output.linear_exr);
-    let mut denoise_bytes = if options.denoise || options.denoise_diagnostics {
+    let mut denoise_bytes = if spatial_denoise || options.denoise_diagnostics {
         if options.denoise_diagnostics {
             super::denoise::Guides::required_bytes_with_diagnostics(width, height, true)?
         } else {
@@ -419,7 +424,13 @@ fn admit_layout_with_workers(scene: &ProductScene, request: &ImageRequest, optio
     if linear_required {
         let converted = if output_already_paid { pixels.checked_sub(output_pixels).ok_or_else(|| error(TraceError::MemoryLimit))? } else { pixels };
         let converted_bytes = plane_bytes(converted, 16)?;
-        let filter_bytes = if options.denoise { plane_bytes(pixels, 16)? } else { 0 };
+        let filter_bytes = if oidn {
+            job::denoise_oidn::required_bytes(width, height)?
+        } else if spatial_denoise {
+            plane_bytes(pixels, 16)?
+        } else {
+            0
+        };
         let resolve_bytes = if options.supersampling == 2 { plane_bytes(output_pixels, 17)? } else { 0 };
         denoise_bytes = denoise_bytes
             .checked_add(converted_bytes)
@@ -757,6 +768,11 @@ pub enum ImagePoll {
 }
 
 impl ImageTask {
+    #[cfg(all(test, feature = "denoise-oidn", not(target_arch = "wasm32")))]
+    pub(crate) fn output_stage_for_test(&self) -> Option<&'static str> {
+        self.output.first().map(job::output::OutputTask::stage_name)
+    }
+
     pub fn denoise_diagnostics(&self) -> Option<job::DenoiseDiagnostics> {
         self.denoise_diagnostics
     }
@@ -949,7 +965,7 @@ impl ImageTask {
             path.push(indirect_image::State::default());
         }
         let mut denoise = Vec::new();
-        if options.denoise || options.denoise_diagnostics {
+        if (options.denoise && options.denoise_settings.method == job::DenoiseMethod::Spatial) || options.denoise_diagnostics {
             denoise.try_reserve_exact(1).map_err(|_| error(TraceError::AllocationFailed))?;
             if denoise.capacity() != 1 {
                 return Err(error(TraceError::MemoryLimit));
@@ -1171,6 +1187,9 @@ impl ImageTask {
     /// Move the final native raw companion once. Provisional passes never populate it.
     pub fn take_linear_exr(&mut self) -> Option<Vec<u8>> {
         self.linear_exr.take()
+    }
+    pub(crate) fn take_failed_linear_exr(&mut self) -> Option<Vec<u8>> {
+        self.output.first_mut()?.take_failed_linear_exr()
     }
     fn preserves_display(&self) -> bool {
         !self.options.denoise && self.options.supersampling == 1 && self.options.output.as_deref().is_none_or(|o| o.identity_display())

@@ -2000,6 +2000,91 @@ fn denoised_plane(samples: u32, denoise: bool, output: Option<job::OutputOptions
     request.raytrace = Some(options.clone());
     ImageTask::new(scene, request, CancelToken::default(), options).unwrap()
 }
+#[test]
+fn oidn_execution_checks_capability_before_admission_but_keeps_disabled_intent() {
+    let (scene, mut request, _) = emission_fixture(false);
+    let mut options = RaytraceOptions {
+        threads: 1,
+        denoise_settings: job::DenoiseSettings { method: job::DenoiseMethod::Oidn, ..Default::default() },
+        ..Default::default()
+    };
+    request.raytrace = Some(options.clone());
+    assert!(admit(&scene, &request, &options).is_ok(), "disabled denoising retains portable OIDN intent");
+    options.denoise_diagnostics = true;
+    request.raytrace = Some(options.clone());
+    assert!(admit(&scene, &request, &options).is_ok(), "inactive OIDN intent does not prevent independent Spatial guide inspection");
+    options.denoise = true;
+    request.raytrace = Some(options.clone());
+    let error = admit(&scene, &request, &options).unwrap_err();
+    assert_eq!(error.code, if job::denoise_oidn::available() { ErrorCode::InvalidRequest } else { ErrorCode::HostUnavailable });
+    assert!(error.message.contains(if job::denoise_oidn::available() { "Spatial" } else { "not built into" }), "{}", error.message);
+    options.denoise_diagnostics = false;
+    request.raytrace = Some(options.clone());
+    if !job::denoise_oidn::available() {
+        let error = admit(&scene, &request, &options).unwrap_err();
+        assert_eq!(error.code, ErrorCode::HostUnavailable);
+        assert!(error.message.contains("spatial filter"));
+    } else {
+        request.transparent_background = true;
+        let error = admit(&scene, &request, &options).unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidRequest);
+        assert!(error.message.contains("opaque output"));
+    }
+}
+
+#[cfg(all(feature = "denoise-oidn", not(target_arch = "wasm32")))]
+#[test]
+fn oidn_cpu_completed_passes_preserve_raw_exr_at_both_trace_scales() {
+    use job::{CpuHost, DenoiseMethod, DenoiseSettings, JobId};
+    let host = CpuHost::for_platform().unwrap();
+    let base = denoised_plane(2, false, Some(job::OutputOptions { linear_exr: true, ..Default::default() }));
+    let render = |host: &CpuHost, scale, denoise, serial| {
+        let options = RaytraceOptions {
+            budget: job::CpuBudget::Studio,
+            supersampling: scale,
+            denoise,
+            denoise_settings: DenoiseSettings { method: DenoiseMethod::Oidn, ..Default::default() },
+            ..base.options.clone()
+        };
+        let request = ImageRequest { raytrace: Some(options), ..base.request.clone() };
+        let handle = host.submit(JobId { session: 1, serial, generation: 1 }, 1, base.scene.clone(), request).unwrap();
+        let status = handle.wait_timeout(std::time::Duration::from_secs(30)).unwrap();
+        assert_eq!(status.progress.phase, Phase::Completed, "{:?}", status.error);
+        let frame = handle.frame().unwrap().unwrap();
+        (frame.png().to_vec(), frame.linear_exr().unwrap().to_vec())
+    };
+    for scale in [1, 2] {
+        let raw = render(&host, scale, false, u64::from(scale * 2));
+        let filtered = render(&host, scale, true, u64::from(scale * 2 + 1));
+        assert_eq!(raw.1, filtered.1, "OIDN never changes raw EXR, including X2");
+        assert_ne!(raw.0, filtered.0, "a real CPU output must execute OIDN");
+        let image = ::image::load_from_memory(&filtered.0).unwrap().to_rgba8();
+        assert_eq!(image.dimensions(), (13, 13));
+        assert!(image.pixels().all(|pixel| pixel.0[3] == 255));
+    }
+}
+
+#[cfg(all(feature = "denoise-oidn", not(target_arch = "wasm32")))]
+#[test]
+fn oidn_cpu_admission_uses_rgb_workspace_not_spatial_guides() {
+    let base = denoised_plane(2, false, Some(job::OutputOptions { linear_exr: true, ..Default::default() }));
+    for scale in [1, 2] {
+        let options = RaytraceOptions { budget: job::CpuBudget::Studio, supersampling: scale, ..base.options.clone() };
+        let request = ImageRequest { raytrace: Some(options.clone()), ..base.request.clone() };
+        let plain = admit(&base.scene, &request, &options).unwrap();
+        let options = RaytraceOptions {
+            denoise: true,
+            denoise_settings: job::DenoiseSettings { method: job::DenoiseMethod::Oidn, ..Default::default() },
+            ..options
+        };
+        let request = ImageRequest { raytrace: Some(options.clone()), ..request };
+        let filtered = admit(&base.scene, &request, &options).unwrap();
+        assert_eq!(filtered.estimated_total_bytes - plain.estimated_total_bytes, job::denoise_oidn::required_bytes(13 * scale, 13 * scale).unwrap());
+        let task = ImageTask::new(base.scene.clone(), request, CancelToken::default(), options).unwrap();
+        assert!(task.denoise.is_empty(), "color-only OIDN must not allocate or trace Spatial guides");
+    }
+}
+
 type DenoisedImageOutput = (Vec<(u32, Vec<u8>)>, Vec<u8>, Option<Vec<u8>>, u64);
 fn finish_denoise_image(mut task: ImageTask, units: usize) -> DenoisedImageOutput {
     let mut previews = Vec::new();

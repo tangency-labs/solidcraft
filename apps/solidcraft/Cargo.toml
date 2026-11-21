@@ -14,6 +14,9 @@ default = ["raytrace-cpu", "bundled-render-library", "profile", "usage-stats"]
 usage-stats = ["solidcraft-ui-egui/usage-stats"]
 bundled-render-library = ["solidcraft-engine/bundled-render-library"]
 raytrace-cpu = ["solidcraft-engine/raytrace-cpu"]
+# Open Image Denoise beside the spatial filter; not default until packaging decides
+# how the native library ships (#16902).
+denoise-oidn = ["solidcraft-engine/denoise-oidn"]
 # The profiler, compiled in so any build can say where its time goes (the Profile operations
 # preference, SOLIDCRAFT_PROFILE=1, diagnostics.profile); it records nothing until asked.
 profile = ["solidcraft-engine/profile"]
