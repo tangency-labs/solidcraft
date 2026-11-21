@@ -1,12 +1,15 @@
 # main ee673a19bf
-blend.feature_executive	9ca7c0200e1392d9
+# topology.brep_validation: main's file without the coincidence search (WR-798): its 43 search cases and the `pairs` key gone, and the 7 generated cases that drew the search checking their bodies' pointers instead
+# offset.offset_executive_p2: main's file with the offset-role attribute (#3138): the `attributes` key of its 30 cases that mark roles, the attribute-only rows
+# blend.feature_executive, blend.fillet_executive_p3, corpus.parity, topology.brep_p10, topology.face_p3: main's files with the rows #17739's healed vertex tolerances move (a vertex covers twice its gap, tangency-labs/solidcraft#18667)
+blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
 blend.fillet_corner_p3	41ff3e1d687449c4
 blend.fillet_custom_solver	d5a7b6227772dc0a
 blend.fillet_executive_p1	86854330a700f392
 blend.fillet_executive_p2	68a6e765f600c883
-blend.fillet_executive_p3	ec9b6ecdf818171d
+blend.fillet_executive_p3	725b8b03137f8b54
 blend.fillet_geom_p1	82c1f975f967a59d
 blend.fillet_geom_p2	b536f37946629dc4
 blend.fillet_geom_p3	15646cd3bfb41d7e
@@ -33,7 +36,7 @@ boolean.merge_p5	bdfc40139f7e400b
 boolean.topology_intersector_p1	d480c2ec4731fa77
 boolean.topology_intersector_p2	a5adff2d8d1aa348
 boolean.topology_intersector_p3	6047fab1fddd550d
-corpus.parity	446a9aa2553dd78d
+corpus.parity	8acf1f90618ef76c
 curve.composite_curve_p1	1b0a64a4a148983b
 curve.composite_curve_p2	4fa0f15e4b4a048b
 curve.conic	4955fffee7af9409
@@ -172,7 +175,7 @@ nurbs.b_spline_surface_p2	f6eae99ab71257f5
 nurbs.nurbs_crv	c78af304772ea823
 nurbs.nurbs_srf	5ea987b73e360223
 offset.offset_executive_p1	369d6f853189d32e
-offset.offset_executive_p2	3ee81ec7a8343bef
+offset.offset_executive_p2	b91d8c7ba88fdca3
 offset.offset_geometry_creation	4d4f0c63c3072eb9
 primitive.api_curve_ops	631989d29fe6f1dc
 primitive.api_curves	b384f5e70c20e9db
@@ -251,7 +254,7 @@ topology.brep_data	cd9a3471ed924772
 topology.brep_local_operation	00c1f7e94a38480a
 topology.brep_mirror	718965df3039bddd
 topology.brep_p1	5f0dfd9dc7c0575b
-topology.brep_p10	4def5cf0011e24f6
+topology.brep_p10	f99cdbfd5bb734b6
 topology.brep_p2	3243a0a3d5597f36
 topology.brep_p3	55661c22ae62a97f
 topology.brep_p4	2b2814e782d110c9
@@ -261,7 +264,7 @@ topology.brep_p7	96f18aab926bd38b
 topology.brep_p8	48612bd9ea9202ed
 topology.brep_p9	d9233137f377380a
 topology.brep_planar_section	a976f4fa434ae901
-topology.brep_validation	f18d2a8577796970
+topology.brep_validation	29cd4704562201a9
 topology.database_io	262a4cfd7e00c533
 topology.edge	90c4e2112d651d63
 topology.edgeuse_p1	8d285f9e2eb6f32d
@@ -269,7 +272,7 @@ topology.edgeuse_p2	4b628e0b414efcc0
 topology.edgeuse_p3	2fa671be5fe983ba
 topology.face_p1	eae7279ae1704f4d
 topology.face_p2	3d9f19f33644771c
-topology.face_p3	7567416bb65167f9
+topology.face_p3	100eae05c5608203
 topology.face_p4	539b264456215c71
 topology.loopuse	a5205f3ad278e686
 topology.part_file	059f0c49211cb6c3

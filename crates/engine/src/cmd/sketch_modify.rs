@@ -160,7 +160,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_move")
         .enabled(in_sketch)
-        .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool, z?: mm along the sketch's normal (3D sketches: the moved lines and fit-point splines become drawn 3D curves that far off the plane); rotate_constraints?: bool (default true; false keeps constraints unchanged); a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text; copy also accepts drawn 3D curves, preserving exact arcs and height above the sketch plane; a turned rectangle keeps its shape: parallel and perpendicular relations replace the horizontal and vertical ones lost; returns `released`: the constraints tying the moved geometry to what stays that the move let go, as {id, kind}, and `added`: the relations put in their place, as {id, kind}", created_doc!())),
+        .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool, z?: mm along the sketch's normal (3D sketches: the moved lines and fit-point splines become drawn 3D curves that far off the plane, and drawn picks move that far along it); rotate_constraints?: bool (default true; false keeps constraints unchanged); a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text; copy also accepts drawn 3D curves, preserving exact arcs and height above the sketch plane; a turned rectangle keeps its shape: parallel and perpendicular relations replace the horizontal and vertical ones lost; `wire@index` picks a drawn 3D point, a drawn curve's id the whole curve: they move with the rest, along the plane and by `z` along its normal; returns `released`: the constraints tying the moved geometry to what stays that the move let go, as {id, kind}, and `added`: the relations put in their place, as {id, kind}", created_doc!())),
     CommandSpec::new("sketch.mirror", "Mirror", crate::checked!("sketch.mirror", mirror))
         .in_sketch_part()
         .contract(&MIRROR_CONTRACT)
@@ -4443,6 +4443,52 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
         Some(v) => v.as_f64().filter(|z| z.is_finite() && z.abs() <= 1e6).ok_or_else(|| bad(cmd, "`z` must be a distance in mm"))?,
     };
     let rotate_constraints = bool_(p, "rotate_constraints").unwrap_or(true);
+    let state = if s.sheet_sketching() {
+        None
+    } else {
+        let sketch = sketch_store::target(s, p, cmd)?;
+        s.model.state().sketch(sketch).map(|ss| ss.sketch.clone())
+    };
+    let wires: Vec<String> = state.as_ref().map(|sk| sk.wires.iter().map(|w| w.id.clone()).collect()).unwrap_or_default();
+    let (mut moved_drawn, mut plane_picks) = (Vec::new(), Vec::new());
+    for e in string_list(cmd, p, "entities")? {
+        match e.split_once('@') {
+            Some((w, i)) if wires.iter().any(|x| x == w) => {
+                moved_drawn.push((w.to_string(), Some(i.parse::<usize>().map_err(|_| bad(cmd, format!("`{e}`: no such drawn point")))?)))
+            }
+            None if wires.contains(&e) => moved_drawn.push((e, None)),
+            _ => plane_picks.push(e),
+        }
+    }
+    if copy && moved_drawn.iter().any(|(_, index)| index.is_some()) {
+        return Err(bad(cmd, "not supported yet: copying drawn 3D points"));
+    }
+    let mut p = p.clone();
+    if let (false, Some(o)) = (copy, p.as_object_mut()) {
+        o.insert("entities".into(), json!(plane_picks));
+    }
+    let p = &p;
+    let mut moved_ids: Vec<String> = Vec::new();
+    for (w, _) in moved_drawn.iter().filter(|_| !copy) {
+        if !moved_ids.contains(w) {
+            moved_ids.push(w.clone());
+        }
+    }
+    if !copy && !moved_drawn.is_empty() {
+        let c = match (p.get("center"), &state) {
+            (Some(_), Some(sk)) => point_or_ref(sk, p, "center", cmd)?,
+            _ => Vec2::ZERO,
+        };
+        let rot = rotate(c, ang);
+        let (_, info) = super::sketch_3d::move_drawn(s, p, cmd, &moved_drawn, z, &|q: Vec2| rot(q) + t)?;
+        if plane_picks.is_empty() {
+            let curves = moved_ids;
+            return reply(
+                cmd,
+                MoveResult { curves, released: Vec::new(), added: Vec::new(), sketch: info, created: None, param_warnings: Vec::new() },
+            );
+        }
+    }
     let selection = string_list(cmd, p, "entities")?;
     let (planar, drawn) = if copy { drawn_copy_selection(s, p, selection)? } else { (selection, Vec::new()) };
     // Only drawn 3D curves name the sketch they join in; a drawing's sheet sketch has none.
@@ -4513,9 +4559,10 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
         let n = s.world_state()?.sketch(id).map(|ss| ss.plane.normal()).ok_or_else(|| bad(cmd, "the sketch has no plane"))?;
         let (mut wires, info) = super::sketch_3d::lift(s, p, cmd, &out, &moved_points, n * z)?;
         wires.extend(drawn_copies);
+        wires.extend(moved_ids);
         return reply(cmd, MoveResult { curves: wires, released, added, sketch: info, created: None, param_warnings: Vec::new() });
     }
-    let curves: Vec<String> = out.into_iter().chain(drawn_copies).collect();
+    let curves: Vec<String> = out.into_iter().chain(drawn_copies).chain(moved_ids).collect();
     reply(cmd, MoveResult { curves, released, added, sketch: info, created: None, param_warnings: Vec::new() })
 }
 

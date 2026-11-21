@@ -367,6 +367,8 @@ pub(crate) fn view_frame(
         selection_tint: [0.4, 0.6, 0.9],
         hatch: Default::default(),
         moving: None,
+        motions: Default::default(),
+        ground: None,
     }
 }
 
