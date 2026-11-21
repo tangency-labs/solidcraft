@@ -4326,9 +4326,12 @@ mod tests {
         assert_eq!(plane_gap_bound(&cn, &net, [range[1], range[0]]), None);
     }
 
+    /// A face's surface, its edge's curve, the edge use's trim and the edge's interval.
+    type EdgeTrim = (Surface, Curve, Curve, [f64; 2]);
+
     /// The UV trims of a cylinder of radius 12.5 (a round tube's profile, #20373): each held
     /// trim with its surface, its edge's curve and the edge's interval.
-    fn cylinder_trims() -> (Kernel, Vec<(Surface, Curve, Curve, [f64; 2])>) {
+    fn cylinder_trims() -> (Kernel, Vec<EdgeTrim>) {
         let mut k = Kernel::default();
         let b = crate::primitive::api_primitives::create_cylinder(&mut k, Point3::ZERO, 12.5, 50.0)
             .unwrap();
@@ -4554,7 +4557,7 @@ mod tests {
         let g = structured_trim_gap_bound(&cn, &half, &probed, [0.0, 1.0]).unwrap();
         assert!(g >= 25.0, "{g:e}");
         let mut heavy = wn.clone();
-        for x in heavy.pw.iter_mut() {
+        for x in &mut heavy.pw {
             *x *= 2.0;
         }
         assert_eq!(
