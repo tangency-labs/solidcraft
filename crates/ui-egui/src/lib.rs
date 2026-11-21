@@ -835,6 +835,10 @@ pub struct SolveApp {
     /// When Esc was last pressed (input time): a second press soon after finishes the sketch.
     pub last_escape: Option<f64>,
     pub status: Option<(String, f64, bool)>,
+    /// The frame clock (`ctx.input(|i| i.time)`, seconds) the status toast started at, armed when
+    /// it first draws and reset by [`Self::set_status`]: its six seconds are spent by drawn frames
+    /// only, as the stand-up note's ten and the 3D mouse offer's thirty are.
+    pub(crate) status_since: Option<f64>,
     /// The status message offers Undo (a click on it undoes the last step), as after an automatic stand-up.
     pub status_undo: bool,
     /// The status message is a refused JSON save of a design with binary data in it, and offers
@@ -1161,6 +1165,7 @@ impl SolveApp {
             escape_owner: None,
             last_escape: None,
             status: None,
+            status_since: None,
             status_undo: false,
             status_save_sc: false,
             quit_requested: false,
@@ -3366,6 +3371,8 @@ impl SolveApp {
         let (text, at) = (i18n::tr_diagnostic(&s.into()), now_ms());
         self.messages.push(&text, error, at);
         self.status = Some((text, at, error));
+        // The stamp is the messages' (wall clock); the toast's clock arms when it next draws.
+        self.status_since = None;
         self.status_undo = false;
         self.status_save_sc = false;
     }
