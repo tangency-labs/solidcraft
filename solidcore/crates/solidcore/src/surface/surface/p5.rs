@@ -2686,7 +2686,9 @@ mod tests {
         let basis = BSplineSurface::from_data(2, 1, 1, 1, 4, 3, &pw, &u, &v).unwrap();
         let s = Surface::from(StepSurface::new(Surface::from(basis), true).unwrap());
         let k = Kernel::default();
-        // (a domain that holds the iso line: its `v` range contains `v = 0`)
+        // (a domain that holds the iso line: its `v` range contains `v = 0`; outside it this
+        // body answers where the B-spline override refuses, see
+        // plan/findings/surface.surface_p5--generic-iso-body-ignores-the-domain-in-the-iso-direction.md)
         let domain = Extent2d::from_bounds(0.2, 0.0, 0.9, 0.7);
         for (dom, ivl) in [(None, (0.0, 1.0)), (Some(&domain), (0.2, 0.9))] {
             let iso = s

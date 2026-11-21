@@ -52,9 +52,6 @@
 //!   [`SolidError::InvalidInput`] from [`GapFunction::build_sample_set`]. No recursion.
 //! - B-spline samples cover the requested interval's knot spans and exact endpoints,
 //!   rather than remapping the first spans from the whole knot range (WR-89).
-//! - A B-spline surface's sample domain that spans no knot interval in U or V (a
-//!   zero-length interval) is sampled by even stride, as other geometry is; upstream
-//!   asserts (`SM_ERR_ASSERT_FAILURE`, #20163). A curve's keeps the refusal.
 //! - Interior V samples for non-B-spline surfaces are normalized by
 //!   `(jj - cu) / (cv - 1)`, keeping them in `[0.0, 1.0]` (WR-88).
 //! - `GapArray::append` maintains the longest-gap index, unlike upstream (WR-90).
@@ -2220,8 +2217,11 @@ impl<'a> GapFunction<'a> {
             Ok(n)
         };
 
-        // even stride sampling over the sample counts as given
-        let even_stride = |cu: usize, cv: usize| -> Result<Vec<f64>> {
+        // When ThisGeometry is BSpline geometry adjust sample counts and sample UV
+        // values to make sure the ends and center of every knot span are sampled
+        if !is_bspline {
+            // This Geometry is not a BSpline - even stride sampling
+            let (cu, cv) = (self.sample_cnt_u, self.sample_cnt_v);
             let mut vals = vec![0.0; cnt(cu, cv)?];
 
             // boundary values - set to avoid numerical tolerances
@@ -2244,14 +2244,7 @@ impl<'a> GapFunction<'a> {
             for jj in cu + 1..(cu + cv).saturating_sub(1) {
                 set_at(&mut vals, jj, (jj - cu) as f64 / (cv - 1) as f64)?;
             }
-            Ok(vals)
-        };
-
-        // When ThisGeometry is BSpline geometry adjust sample counts and sample UV
-        // values to make sure the ends and center of every knot span are sampled
-        if !is_bspline {
-            // This Geometry is not a BSpline - even stride sampling
-            return even_stride(self.sample_cnt_u, self.sample_cnt_v);
+            return Ok(vals);
         }
 
         // Get Spline U (and V) Knots
@@ -2273,16 +2266,8 @@ impl<'a> GapFunction<'a> {
             end_v = add_unique_get_ordered_index(&mut knots_v, self.sample_ivl_v.max());
         }
 
-        // There should always be 1 or more intervals. Not upstream (#20163): a surface's
-        // sample domain that spans no knot interval in U or V (a zero-length interval: the
-        // samples of one iso line or one point) is sampled by even stride over the counts
-        // as given, as non-B-spline geometry is, where upstream asserts
-        // (`SM_ERR_ASSERT_FAILURE`, "an unhandled degenerate case"). A curve's keeps
-        // upstream's refusal.
+        // There should always be 1 or more intervals
         if !(end_u > start_u && (this_surface.is_none() || end_v > start_v)) {
-            if this_surface.is_some() {
-                return even_stride(self.sample_cnt_u, self.sample_cnt_v);
-            }
             return Err(SolidError::heal(
                 OP_GF,
                 HealFailure::Inconsistent("the sample domain has no intervals"),
@@ -2337,8 +2322,8 @@ impl<'a> GapFunction<'a> {
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] for a zero sample count or more than
-    /// [`MAX_SAMPLES`] samples; `SM_ERR_ASSERT_FAILURE` when the sample interval of a
-    /// B-spline curve spans no knot interval; [`SolidError::Unported`] from
+    /// [`MAX_SAMPLES`] samples; `SM_ERR_ASSERT_FAILURE` when the sample interval of
+    /// B-spline geometry spans no knot interval; [`SolidError::Unported`] from
     /// [`GapFunction::evaluate`].
     pub fn build_sample_set(&mut self, k: &Kernel, stop_after_big_gap: bool) -> Result<()> {
         // no work - samples already set or already have a gap bigger than tol
@@ -2908,49 +2893,6 @@ mod tests {
                 "v mismatch: sample={sample:?} expected_v={v}"
             );
         }
-    }
-
-    /// A B-spline surface's sample domain of one iso line (`u = 0.5`: no knot interval in
-    /// U) is sampled by even stride over the counts as given, as a non-B-spline surface
-    /// over the same geometry is, where upstream asserts (#20163). A curve-bounded surface
-    /// over it samples the same.
-    #[test]
-    fn a_b_spline_surface_samples_one_iso_line_by_even_stride() {
-        let basis = || match wr88_non_bspline_surface(0.5).kind() {
-            SurfaceKind::Step(st) => st.surface().unwrap().clone(),
-            _ => unreachable!(),
-        };
-        let bss = basis();
-        assert!(bss.is_kind_of(B_SPLINE_SURFACE_TYPE).unwrap());
-        let bounded = Surface::from(
-            crate::surface::curve_bounded_surface::CurveBoundedSurface::new(
-                basis(),
-                Vec::new(),
-                Vec::new(),
-                true,
-            )
-            .unwrap(),
-        );
-        let step = wr88_non_bspline_surface(0.5);
-        let domain = Extent2d::from_bounds(0.5, 0.0, 0.5, 1.0);
-        let k = Kernel::default();
-        let samples = |s: &Surface| {
-            let mut f = GapFunction::srf_pt(1.0, s, &domain, Point3::new(0.2, 0.3, 1.0), 4);
-            f.set_sample_cnt(4, 3);
-            f.build_sample_set(&k, false).unwrap();
-            assert_eq!((f.sample_cnt_u(), f.sample_cnt_v()), (4, 3));
-            f.samples()
-                .iter()
-                .map(|x| (x.this_param, x.length()))
-                .collect::<Vec<_>>()
-        };
-        let want = samples(&step);
-        assert_eq!(want.len(), 12);
-        for (uv, _) in &want {
-            assert_eq!(uv.x, 0.5);
-        }
-        assert_eq!(samples(&bss), want);
-        assert_eq!(samples(&bounded), want);
     }
 
     #[test]

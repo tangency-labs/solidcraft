@@ -1434,7 +1434,7 @@ mod tests {
                     .collect();
                 format!("{:?} {ivl:?} {pts:?}", iso.max_gap_3d)
             }
-            Err(e) => format!("{e:?}"),
+            Err(e) => format!("Err({e:?})"),
         }
     }
 
@@ -1552,14 +1552,51 @@ mod tests {
                     let opts = crate::surface::surface::p5::DropPointOptions::default();
                     match s.drop_point::<crate::surface::surface::p4::NoObject>(k, p, dom, &opts) {
                         Ok(d) => format!("{} {:?}", d.success, d.result_uv),
-                        Err(e) => format!("{e:?}"),
+                        Err(e) => format!("Err({e:?})"),
                     }
                 }
-                Err(e) => format!("{e:?}"),
+                Err(e) => format!("Err({e:?})"),
             }
         }),
         ("evaluate_point", |k, s, dom| {
             format!("{:?}", s.evaluate_point(k, mid(dom)))
+        }),
+        ("is_closed", |k, s, dom| {
+            format!(
+                "{:?} {:?}",
+                s.is_closed(k, dom, SurfParamType::U, None, true),
+                s.is_closed(k, dom, SurfParamType::V, None, true)
+            )
+        }),
+        ("intersect_with_plane", |k, s, dom| {
+            let at = match s.evaluate_point(k, mid(dom)) {
+                Ok(p) => p,
+                Err(e) => return format!("Err({e:?})"),
+            };
+            let plane = crate::surface::plane::Plane::from_normal(at, Vec3::new(1.0, 0.3, 0.2));
+            let plane_dom = match Surface::from(plane.clone()).natural_uv_domain_with_nurb(k) {
+                Ok(d) => d,
+                Err(e) => return format!("Err({e:?})"),
+            };
+            match s.intersect_with_plane(k, dom, &plane, &plane_dom, [false, false], None, None) {
+                Ok((more, x, warning)) => {
+                    let pts: Vec<_> = x
+                        .curves_3d
+                        .iter()
+                        .map(|c| {
+                            let ivl = c.natural_interval();
+                            (0..=4)
+                                .map(|i| c.evaluate_point(k, ivl.evaluate(f64::from(i) / 4.0)))
+                                .collect::<Vec<_>>()
+                        })
+                        .collect();
+                    format!(
+                        "{more} {:?} {:?} {warning:?} {pts:?}",
+                        x.curve_types, x.deviations
+                    )
+                }
+                Err(e) => format!("Err({e:?})"),
+            }
         }),
         ("out_of_bounds_enabled", |_, s, _| {
             format!(
@@ -1571,9 +1608,17 @@ mod tests {
 
     /// Every geometry query a curve-bounded surface passes to its basis answers what the
     /// basis answers, for a creased B-spline, a plane, a cylinder (whose NURB the query
-    /// makes) and a curve-bounded surface nested in two more.
+    /// makes) and a curve-bounded surface nested in two more. Every row answers (two
+    /// refusals would compare equal), except the plane section of a B-spline basis, which
+    /// is the base class's refusal for the basis as for the surface.
     #[test]
     fn geometry_queries_answer_the_basis_s() {
+        // (base, query) pairs whose answer is a refusal, the basis's as the surface's
+        // (a B-spline's IntersectWithPlane is the base class's SM_ERR)
+        const REFUSALS: &[(&str, &str)] = &[
+            ("creased B-spline", "intersect_with_plane"),
+            ("nested", "intersect_with_plane"),
+        ];
         let k = &Kernel::default();
         let bases: [(&str, MakeSurface); 4] = [
             ("creased B-spline", || Surface::from(creased())),
@@ -1610,6 +1655,9 @@ mod tests {
                 let want = ask(k, basis().geometry(), &dom);
                 let got = ask(k, &bounded(basis()), &dom);
                 assert_eq!(got, want, "{name}: {query}");
+                // two refusals would compare equal: every row answers, but those listed
+                let refuses = REFUSALS.contains(&(name, *query));
+                assert_eq!(got.contains("Err("), refuses, "{name}: {query}: {got}");
             }
         }
     }

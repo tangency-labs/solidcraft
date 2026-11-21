@@ -1311,3 +1311,40 @@ impl UnitDiff for Runner {
         rust(&case.parse()?)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The `GetDomainWithContinuity` rows on a curve-bounded surface after a cache history
+    /// that stay blessed answer what the bare basis answers made fresh (no history,
+    /// outside a Boolean operation), each start point on the natural domain. The other
+    /// changed rows are known failing: `domhist0070` (history 1: the cache has no tree,
+    /// so the continuities are empty and the answer is the whole domain), `domhist0052`
+    /// and `domhist0079` (start points off the domain).
+    #[test]
+    fn curve_bounded_domhist_rows_answer_as_the_fresh_basis() {
+        for name in ["domhist0017", "domhist0074", "domhist0075"] {
+            let case = crate::case::regression_case(&Runner, name);
+            let inputs: Inputs = case.parse().expect("inputs");
+            let got = rust(&inputs).expect("rust");
+            let mut v = serde_json::to_value(&inputs).expect("json");
+            assert_ne!(v["history"], serde_json::json!(0), "{name}: history");
+            let basis = v["surf"]["curve_bounded"].clone();
+            assert!(!basis.is_null(), "{name}: not curve-bounded");
+            v["surf"] = serde_json::json!({ "bspline": basis });
+            v["history"] = serde_json::json!(0);
+            let fresh: Inputs = serde_json::from_value(v.clone()).expect("fresh");
+            let s = wrapped_of(false, &fresh.surf).expect("surface");
+            let dom = s
+                .natural_uv_domain_with_nurb(&Kernel::default())
+                .expect("domain");
+            let uv = Point2::new(
+                v["uv"][0].as_f64().expect("u"),
+                v["uv"][1].as_f64().expect("v"),
+            );
+            assert!(dom.contains_point(uv, 0.0), "{name}: {uv:?} off {dom:?}");
+            assert_eq!(got.values, rust(&fresh).expect("fresh").values, "{name}");
+        }
+    }
+}

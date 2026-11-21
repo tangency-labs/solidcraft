@@ -6806,8 +6806,8 @@ mod tests {
     /// not override: the base class's `SM_ERR`), before
     /// anything is written to the body, which is left as it was. `CopyBrep` does not act
     /// on `MergeBrep`'s status (upstream's `SE`), so the copy is returned holding only the
-    /// faces merged before that face. When the copy refuses instead, the last assertion
-    /// changes.
+    /// faces merged before that face. The last assertion pins that defect
+    /// (tangency-labs/solidcraft#20353): its fix has to change it.
     #[test]
     fn a_body_with_a_curve_bounded_face_is_left_as_it_was_by_a_refused_copy() {
         use crate::surface::curve_bounded_surface::CurveBoundedSurface;
@@ -6835,7 +6835,8 @@ mod tests {
             .is_err());
         let copy = brep_copy(&mut k, &b).unwrap();
         assert_eq!(format!("{b:?}"), before);
-        // the faces merged before the curve-bounded one
+        // pins the defect of tangency-labs/solidcraft#20353: a partial copy (the faces
+        // merged before the curve-bounded one) returned as a success
         assert_eq!((copy.face_list().len(), b.face_list().len()), (2, 6));
     }
 }
