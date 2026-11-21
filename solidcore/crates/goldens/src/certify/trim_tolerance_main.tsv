@@ -1,6 +1,8 @@
 # main ee673a19bf
 # boolean.topology_intersector_p2: #18065 moves gen0433 (WR-305, two curved pieces certified on their edges; gen0433_puts_two_certified_curved_pieces_on_their_edges); the digest is the branch file
 # topology.brep_validation: main's file without the coincidence search (WR-798): its 43 search cases and the `pairs` key gone, and the 7 generated cases that drew the search checking their bodies' pointers instead
+# offset.offset_geometry_creation: continuity reads make no surface cache (#20054): gen0152, gen0266, gen0462, gen0678 and gen0760 are this branch's lines. Tolerances they move against this main: gen0266's extended edge 8.102267117225637e-3 -> 4.0511335586128185e-3 (its ExtendTrimEdges now refuses and keeps its input); gen0462's edge 1.0661352728003874 -> 2e-5 (0.9939759047276184 after #18166) and gen0760's 1.0842329970128302 -> 1e-5, where ExtendTrimEdges refuses on both kernels and no longer leaves the lift's trim and raise on its input; none in gen0152 and gen0678. gen0462's row is removed: its output now changes outside its tolerances
+# surface.surface_p1: continuity answers no longer depend on the cache history, and a curve-bounded surface answers for its basis (#20054): 8 cases are this branch's lines (domhist0017, 0052, 0070, 0074, 0075, 0078, 0083 and gen0471; 0052, 0074 and 0075 are failed-history markers followed by their query's record), and 30 DomCont cases shown wrong are known failing with no line (#20239: 12 this branch changes, 18 unchanged from main); no tolerance moves
 # offset.offset_executive_p2: main's file with the offset-role attribute (#3138): the `attributes` key of its 30 cases that mark roles, the attribute-only rows
 # blend.feature_executive, blend.fillet_executive_p3, corpus.parity, topology.brep_p10, topology.face_p3: main's files with the rows #17739's healed vertex tolerances move (a vertex covers twice its gap, tangency-labs/solidcraft#18667)
 # blend.fillet_executive_p3: main's file with the halved span's early stop (#13692): sweep5-nurb_box1-all-r0.5's edge [0, 18.0943] listed 24th instead of 1st, the topology and geometry blocks that follow it, and four mass-properties entries an ulp or two off (summation order)
@@ -178,7 +180,7 @@ nurbs.nurbs_crv	c78af304772ea823
 nurbs.nurbs_srf	5ea987b73e360223
 offset.offset_executive_p1	369d6f853189d32e
 offset.offset_executive_p2	b91d8c7ba88fdca3
-offset.offset_geometry_creation	4d4f0c63c3072eb9
+offset.offset_geometry_creation	2c440b64ff708928
 primitive.api_curve_ops	631989d29fe6f1dc
 primitive.api_curves	b384f5e70c20e9db
 primitive.api_primitives	eeb3268ad6487712
@@ -221,7 +223,7 @@ surface.surface_assert_valid	d9eaf9799f02d1ab
 surface.surface_cache_p1	36658877fe9eeb92
 surface.surface_cache_p2	d1495af52c276267
 surface.surface_cache_p3	c8c671adf2960218
-surface.surface_p1	18393fbdd3f836ba
+surface.surface_p1	eff5ae65d43de6d5
 surface.surface_p10	4c4881a050a1ae8a
 surface.surface_p11	4813228760084e49
 surface.surface_p2	be0e87faaf6b9c35

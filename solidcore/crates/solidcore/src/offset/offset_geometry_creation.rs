@@ -1166,7 +1166,7 @@ impl<O: ClassObject, B: OffsetBrep<O>> SurfaceSolveContext<O> for OffsetSurfaceS
         self.0.prepare_surface_solve_cache(k, surface, handle)
     }
 
-    fn surface_cache_state(
+    fn surface_cache_without_get_tree(
         &mut self,
         k: &Kernel,
         surface: &Surface,
@@ -5763,15 +5763,13 @@ impl OffsetGeometryCreation {
         let edge_tol = brep.edge_tolerance(edge)?;
         let ext_surface = surface_of(brep, ext_surf_h)?.clone_for_evaluation()?;
         let lifted = ext_surface
-            .lift_curve_with_context(
+            .lift_curve(
                 k,
                 &ext_domain,
                 &Curve::from(uv_curve_extended.clone()),
                 &ext_ivl,
                 edge_tol / 3.0,
                 false,
-                &mut OffsetSurfaceSolveContext(brep),
-                Some(ext_surf_h),
             )?
             .curve;
         let lifted_curve = lifted;

@@ -184,7 +184,7 @@ use crate::surface::surface::p1::{
     get_surface_cache_with_face, get_trim_surface_cache, make_surface_cache, make_trim_srf_cache,
     make_trim_srf_cache_with_face,
 };
-use crate::surface::surface::{CacheTreeState, Surface, SurfaceKind, TrimCacheSlot};
+use crate::surface::surface::{Surface, SurfaceKind, TrimCacheSlot};
 use crate::surface::surface_cache::p1::{FaceContainment, SurfaceCache};
 use crate::surface::trim_srf_cache::{CacheFace, TrimSrfCache};
 use crate::topology::brep::validation::spatial::SpatialIndex;
@@ -489,7 +489,8 @@ pub fn solve_surface_cache_of_face<O: Copy + PartialEq>(
 /// trimmed cache as `smsurf_GetSurfaceCache` hands it to a reader of its state bits
 /// only (`GlobalPointSolve`'s fast-drop face test). A kept cache is handed out as it
 /// is; a new one has its tree only when its factory builds it (not during a Boolean
-/// operation), unless the surface's cache slot says upstream's cache is built.
+/// operation). Upstream also reuses a cache an earlier call built, with the built
+/// tree's bits; the port keeps no record of that.
 /// Deviation: a cache left without tree gets the face's missing UV trim curves made
 /// now, which upstream's classification makes when it first needs them.
 ///
@@ -505,9 +506,7 @@ pub fn surface_cache_state_of_face<O: Copy + PartialEq>(
     handle: Option<O>,
     map: impl Fn(EntityRef) -> Result<O>,
 ) -> Result<Option<SurfaceCache<O>>> {
-    // upstream reuses a cache whose tree is built, with the built tree's state bits
-    let get_tree = surface.cache_tree_state() == CacheTreeState::Built;
-    surface_cache_copy_of_face(k, b, f, owner, surface, handle, map, get_tree)
+    surface_cache_copy_of_face(k, b, f, owner, surface, handle, map, false)
 }
 
 #[allow(clippy::too_many_arguments)]
