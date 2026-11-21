@@ -287,6 +287,17 @@ const PLUS_MENU: [TabMenuRow<'static>; 4] = [
 ];
 const SWITCHER_MENU: [TabMenuRow<'static>; 1] = [TabMenuRow::new("as_tabs", "Show views as tabs", "")];
 
+const LAYOUT_MENU: [TabMenuRow<'static>; 8] = [
+    TabMenuRow::new("layout.single", "Single view", ""),
+    TabMenuRow::new("layout.side_by_side", "Two side by side", ""),
+    TabMenuRow::new("layout.stacked", "Two stacked", ""),
+    TabMenuRow::new("layout.large_and_two", "One large and two small", ""),
+    TabMenuRow::new("layout.grid", "Two by two", ""),
+    TabMenuRow::new("fill.angle", "A new angle of this view", ""),
+    TabMenuRow::new("fill.standard", "Standard angles", ""),
+    TabMenuRow::new("fill.ask", "A choice in each empty cell", ""),
+];
+
 const VIEWS: [ViewTab<'static>; 3] = [
     ViewTab {
         name: "Model",
@@ -295,6 +306,9 @@ const VIEWS: [ViewTab<'static>; 3] = [
         underline: egui::Color32::BLUE,
         state: ViewState::Normal,
         active: true,
+        on_screen: false,
+        window_name: None,
+        window_number: None,
         to_window: None,
         tip: "Model",
     },
@@ -305,6 +319,9 @@ const VIEWS: [ViewTab<'static>; 3] = [
         underline: egui::Color32::GREEN,
         state: ViewState::SourceChanged,
         active: false,
+        on_screen: false,
+        window_name: None,
+        window_number: None,
         to_window: None,
         tip: "Sketch 2",
     },
@@ -315,6 +332,9 @@ const VIEWS: [ViewTab<'static>; 3] = [
         underline: egui::Color32::RED,
         state: ViewState::Deleted,
         active: false,
+        on_screen: false,
+        window_name: None,
+        window_number: None,
         to_window: None,
         tip: "Sheet 1",
     },
@@ -326,6 +346,7 @@ const TAB_MENU: [TabMenuRow<'static>; 2] = [TabMenuRow::new("close", "Close", ""
 struct TabsRig {
     ctx: egui::Context,
     time: std::cell::Cell<f64>,
+    screen_height: f32,
     /// The first design has the three [`VIEWS`], shown as sub-tabs (`Some(true)`) or behind a
     /// switcher (`Some(false)`); the strip then has more room.
     views: Option<bool>,
@@ -333,6 +354,8 @@ struct TabsRig {
     single_view: bool,
     name: &'static str,
     detached: bool,
+    clear: bool,
+    layout: Option<(usize, usize)>,
     pop_out: bool,
     /// The + has a menu.
     plus: bool,
@@ -357,11 +380,14 @@ impl TabsRig {
         let rig = TabsRig {
             ctx: crate::test_support::context(),
             time: std::cell::Cell::new(0.0),
+            screen_height: 400.0,
             views,
             room: None,
             single_view: false,
             name: "One",
             detached: false,
+            clear: false,
+            layout: None,
             pop_out: false,
             plus,
             rename: rename.map(|(k, _)| k),
@@ -376,7 +402,7 @@ impl TabsRig {
         solidcraft_ui_registry::clear_handles();
         self.time.set(self.time.get() + 1.0 / 60.0);
         let input = egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 400.0))),
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, self.screen_height))),
             time: Some(self.time.get()),
             events,
             focused: true,
@@ -386,6 +412,8 @@ impl TabsRig {
         let mut views = VIEWS;
         if self.detached {
             views[1].to_window = Some(1);
+            views[1].window_name = Some("Window 2");
+            views[1].window_number = Some(2);
         }
         let views = if self.single_view || self.pop_out {
             &views[..1]
@@ -395,6 +423,7 @@ impl TabsRig {
             &[]
         };
         let first = DocTab { views, ..tab(self.name) };
+        let layout = self.layout.map(|(visible, window_count)| layout_test_data(visible, window_count));
         let (mut text, mut focused) = (self.text.borrow().clone(), self.focused.get());
         let mut strip = TabStrip {
             tabs: if self.pop_out { vec![first] } else { vec![first, tab("Two"), tab("Three")] },
@@ -413,6 +442,7 @@ impl TabsRig {
             handles: TAB_HANDLES,
             views_as_tabs: self.views == Some(true),
             switcher_always: false,
+            clear_view_tabs: self.clear,
             view_text: ViewText {
                 close_view: "Close view",
                 close_design: "Close design",
@@ -422,12 +452,14 @@ impl TabsRig {
             },
             view_menu: &VIEW_MENU,
             view_right_row: "vright",
+            view_rename_row: "vrename",
             view_rename: self.rename.map(|k| (k, TabRename { text: &mut text, focused: &mut focused, max: 8 })),
             plus_menu: if self.plus { &PLUS_MENU } else { &[] },
-            layout_menu: &[],
-            layout_current: "",
+            layout_menu: if layout.is_some() { &LAYOUT_MENU } else { &[] },
+            view_layout: layout.as_ref(),
+            layout_current: "layout.single",
             layout_tip: "Layout",
-            layout_fill: "",
+            layout_fill: "fill.angle",
             layout_fill_heading: "",
             switcher_menu: &SWITCHER_MENU,
             tear_off_below: 40.0,
@@ -830,7 +862,7 @@ fn menu_row_builders_and_glyphs() {
     assert!(head.heading && head.id == "H" && head.label == "H");
     let row = plain.separated().needing_others().with_icon("close", None);
     assert!(row.separator_before && row.needs_others && row.icon == "close");
-    for glyph in ["model", "sketch", "sheet", "render", "animation", "rename", "window", "close", "duplicate", "tiles", "reopen"] {
+    for glyph in ["model", "sketch", "sheet", "render", "animation", "rename", "close", "duplicate", "tiles", "reopen"] {
         assert!(!glyph_lines(glyph).is_empty(), "{glyph} has strokes");
     }
 }
@@ -1780,3 +1812,143 @@ const OLD_BAR_ROWS: &[&[i32]] = &[
     &[4, 108000, 1000, 140000, 33000, 2, 124000, 17000, 4, 151000, 4000, 187281, 30000, 2, 169141, 17000, 4, 188281, 1000, 220281, 33000, 2, 204281, 17000, 4, 222281, 1000, 254281, 33000, 2, 238281, 17000, 4, 256281, 1000, 288281, 33000, 2, 272281, 17000, 4, 1572844, 1000, 1604844, 33000, 2, 1588844, 17000, 4, 147500, 7000, 148500, 27000, 0, 4, 296781, 7000, 297781, 27000, 0, 4, 473781, 7000, 474781, 27000, 0, 0, 0, 4, 1606844, 4000, 1722000, 30000, 2, 1664422, 17000, 4, 1308000, 5000, 1378000, 29000, 2, 1343000, 17000, 4, 1378000, 9000, 1394000, 25000, 2, 1386000, 17000, 4, 1404000, 5000, 1475000, 29000, 2, 1439500, 17000, 4, 1475000, 9000, 1491000, 25000, 2, 1483000, 17000, 4, 1538844, 1000, 1570844, 33000, 2, 1554844, 17000, 0, 2, 1759797, 17000, 2, 314281, 34000, 4, 484281, 4000, 1496844, 30000, 1, 1, 2, 484281, 1306531, 0, 4, 1504844, 1000, 1536844, 33000, 0, 4, 151000, 4000, 187281, 30000], // 1920 / 188
     &[4, 255750, 1000, 287750, 33000, 2, 271750, 17000, 4, 298750, 4000, 335031, 30000, 2, 316891, 17000, 4, 336031, 1000, 368031, 33000, 2, 352031, 17000, 4, 370031, 1000, 402031, 33000, 2, 386031, 17000, 4, 404031, 1000, 436031, 33000, 2, 420031, 17000, 4, 1656000, 1000, 1688000, 33000, 2, 1672000, 17000, 4, 295250, 7000, 296250, 27000, 0, 4, 444531, 7000, 445531, 27000, 0, 4, 621531, 7000, 622531, 27000, 0, 0, 0, 4, 1690000, 1000, 1722000, 33000, 2, 1706000, 17000, 4, 1391000, 5000, 1461000, 29000, 2, 1426000, 17000, 4, 1461000, 9000, 1477000, 25000, 2, 1469000, 17000, 4, 1487000, 5000, 1558000, 29000, 2, 1522500, 17000, 4, 1558000, 9000, 1574000, 25000, 2, 1566000, 17000, 4, 1622000, 1000, 1654000, 33000, 2, 1638000, 17000, 0, 2, 1759797, 17000, 2, 462031, 34000, 4, 632031, 1000, 1580000, 33000, 1, 1, 2, 632031, 1389688, 0, 4, 1588000, 1000, 1620000, 33000, 0, 4, 298750, 4000, 335031, 30000], // 1920 / 254
 ];
+
+#[test]
+fn clear_view_tabs_distinguish_the_four_placements() {
+    let ground = VIEWS[0];
+    let hidden = VIEWS[1];
+    let card = ViewTab { on_screen: true, ..hidden };
+    let elsewhere = ViewTab { to_window: Some(2), window_name: Some("Inspection"), window_number: Some(3), ..hidden };
+    assert_eq!(view_look(&ground), ViewLook::Ground);
+    assert_eq!(view_look(&card), ViewLook::Card);
+    assert_eq!(view_look(&hidden), ViewLook::Hidden);
+    assert_eq!(view_look(&elsewhere), ViewLook::Elsewhere);
+    assert_eq!(window_badge(&elsewhere, CollapseStage::Full), "Inspection");
+    assert_eq!(window_badge(&elsewhere, CollapseStage::LayoutGlyph), "Inspection");
+    assert_eq!(window_badge(&elsewhere, CollapseStage::WindowNumber), "3");
+}
+
+#[test]
+fn clear_view_tabs_collapse_in_order_with_and_without_another_window() {
+    for count in 2..=12 {
+        for elsewhere in [false, true] {
+            let focused = 120.0;
+            let icon_tabs = (count - 1) as f32 * 30.0;
+            let idle_names = (count - 1 - usize::from(elsewhere)) as f32 * 30.0;
+            let window_names = if elsewhere { 24.0 } else { 0.0 };
+            let icons = focused + icon_tabs + 24.0;
+            let window_number = icons + idle_names;
+            let glyph = window_number + window_names;
+            let full = glyph + 40.0;
+            let widths = [full, glyph, window_number, icons, focused + 28.0];
+            assert_eq!(collapse_stage(widths, full), CollapseStage::Full);
+            assert_eq!(collapse_stage(widths, full - 0.25), CollapseStage::LayoutGlyph);
+            assert_eq!(collapse_stage(widths, glyph - 0.25), if elsewhere { CollapseStage::WindowNumber } else { CollapseStage::Icons });
+            assert_eq!(collapse_stage(widths, icons - 0.25), CollapseStage::Overflow);
+        }
+    }
+}
+
+#[test]
+fn elsewhere_view_has_only_a_return_button_on_hover() {
+    let mut rig = TabsRig::with(Some(true));
+    rig.detached = true;
+    rig.clear = true;
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:vclose:0").is_some());
+    assert!(solidcraft_ui_registry::rect_of("t:vclose:1").is_none());
+    assert!(solidcraft_ui_registry::rect_of("t:view:1:return").is_none());
+    let elsewhere = rig.at("t:view:1");
+    rig.frame(vec![egui::Event::PointerMoved(elsewhere)]);
+    assert!(solidcraft_ui_registry::rect_of("t:vclose:1").is_none());
+    assert_eq!(rig.press(rig.at("t:view:1:return"), egui::PointerButton::Primary), vec![TabAction::ReturnView(1)]);
+}
+
+fn layout_test_data(visible: usize, window_count: usize) -> crate::view_layout_menu::LayoutMenu {
+    use crate::view_layout_menu::{LayoutMenu, LayoutText, LayoutView, LayoutWindow};
+    LayoutMenu {
+        text: LayoutText::default(),
+        design: "One".into(),
+        window: 0,
+        native: true,
+        visible,
+        link: "off".into(),
+        can_link: true,
+        clean: false,
+        windows: (0..window_count as u32)
+            .map(|id| LayoutWindow {
+                id,
+                name: format!("Window {}", id + 1),
+                display: None,
+                views: vec![LayoutView { id: u64::from(id) + 10, name: "Model".into(), kind: "model".into(), accent: egui::Color32::BLUE }],
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn layout_glyph_has_a_ground_and_cells_for_each_preset() {
+    let interior = Rect::from_min_size(Pos2::ZERO, vec2(14.0, 14.0));
+    for (key, count) in [("single", 1), ("side_by_side", 2), ("stacked", 2), ("large_and_two", 3), ("grid", 4)] {
+        let cells = layout_cells(interior, 1.0, key);
+        assert_eq!(cells.len(), count);
+        assert_eq!(cells[0].left_top(), interior.left_top());
+        assert!(cells.iter().all(|cell| cell.is_positive() && interior.contains_rect(*cell)));
+        for i in 0..cells.len() {
+            assert!(cells.iter().skip(i + 1).all(|other| !cells[i].intersects(*other)));
+        }
+    }
+    assert_eq!(layout_cells(interior, 1.0, "side_by_side")[1].top(), interior.top());
+    assert_eq!(layout_cells(interior, 1.0, "stacked")[1].left(), interior.left());
+}
+
+#[test]
+fn layout_menu_shows_sections_for_current_window_and_views() {
+    use crate::view_layout_menu::{Sections, sections};
+    assert_eq!(sections(&layout_test_data(1, 1)), Sections { equal: false, windows: false, link: false, detach: true });
+    assert_eq!(sections(&layout_test_data(2, 1)), Sections { equal: true, windows: false, link: true, detach: true });
+    assert_eq!(sections(&layout_test_data(1, 2)), Sections { equal: false, windows: true, link: false, detach: false });
+    assert_eq!(sections(&layout_test_data(2, 2)), Sections { equal: true, windows: true, link: true, detach: false });
+    let mut web = layout_test_data(1, 1);
+    web.native = false;
+    assert!(!sections(&web).detach);
+}
+
+#[test]
+fn adding_a_window_expands_the_layout_menu_to_its_extra_rows() {
+    let mut rig = TabsRig::with(Some(true));
+    rig.clear = true;
+    rig.layout = Some((1, 1));
+    rig.screen_height = 900.0;
+    rig.frame(Vec::new());
+    rig.press(rig.at("view:layout"), egui::PointerButton::Primary);
+    rig.frame(Vec::new());
+
+    rig.layout = Some((2, 2));
+    rig.frame(Vec::new());
+    rig.frame(Vec::new());
+    let reset = rig.at("menu:layout.reset_cameras");
+    assert_eq!(rig.press(reset, egui::PointerButton::Primary), vec![TabAction::LayoutMenu { id: "layout.reset_cameras".into() }]);
+}
+
+#[test]
+fn layout_menu_keeps_glyph_choices_open_and_escape_restores_the_button() {
+    let mut rig = TabsRig::with(Some(true));
+    rig.clear = true;
+    rig.layout = Some((2, 1));
+    rig.frame(Vec::new());
+    let button = rig.at("view:layout");
+    assert!(rig.press(button, egui::PointerButton::Primary).is_empty());
+    rig.frame(Vec::new());
+    let key = |key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+    assert_eq!(rig.frame(vec![key(egui::Key::Enter)]), vec![TabAction::LayoutMenu { id: "layout.single".into() }]);
+    let side_by_side = rig.at("layout.side_by_side");
+    assert_eq!(rig.press(side_by_side, egui::PointerButton::Primary), vec![TabAction::LayoutMenu { id: "layout.side_by_side".into() }]);
+    assert!(solidcraft_ui_registry::rect_of("layout.side_by_side").is_some());
+    rig.frame(vec![key(egui::Key::Escape)]);
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("layout.side_by_side").is_none());
+    assert!(rig.frame(vec![key(egui::Key::Enter)]).is_empty());
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("layout.side_by_side").is_some());
+}

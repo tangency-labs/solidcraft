@@ -2594,15 +2594,10 @@ fn sketch_menu_rows(
 pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     ui.label(egui::RichText::new(solidcraft_ui_text::tr_label("Selection filter")).color(t.text_dim).size(t.font_small));
-    for (mode, label) in [("body", app.tr_label("Select bodies (a face picks its body)")), ("component", app.tr("ui.select_components_by_face"))] {
-        let mut on = app.pick_mode() == mode;
-        if ui_kit::checkbox(ui, label, &mut on).changed() {
-            // The Faces checkbox below is independent. The standalone command enables faces.
-            let filters = std::mem::take(&mut app.ui.pick_off);
-            let _ = app.run("select.filter", json!({"mode": if on { mode } else { "face" }}));
-            app.ui.pick_off = filters;
-        }
-    }
+    let bodies = app.tr_label("Select bodies (a face picks its body)");
+    crate::selection_mode::checkbox(app, ui, solidcraft_engine::PickMode::Bodies, bodies);
+    let components = app.tr("ui.select_components_by_face");
+    crate::selection_mode::checkbox(app, ui, solidcraft_engine::PickMode::Parts, components);
     for (k, label) in [
         ("faces", "Faces"),
         ("edges", "Edges"),
@@ -2689,6 +2684,11 @@ pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
 /// Global keyboard shortcuts (when no text field has focus).
 pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     if crate::view_window_drag::keyboard_active(app, ctx) {
+        return;
+    }
+    if crate::view_windows::is_clean(app) && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        let window = app.view_windows.current_window();
+        drop(app.run("tab.window.clean", json!({"window": window, "on": false})));
         return;
     }
     crate::viewport_status::reconcile(app, ctx);

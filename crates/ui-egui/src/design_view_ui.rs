@@ -37,9 +37,9 @@ pub const SWITCHER_REOPEN: &str = "switcher.reopen";
 pub const SWITCHER_AS_TABS: &str = "switcher.as_tabs";
 
 pub const MOVE_TO_WINDOW_MENU: TabMenuRow<'static> = TabMenuRow::new(VIEW_MOVE_TO_WINDOW, "multi_window.move_to_window", "")
-    .with_icon("window", None)
+    .with_icon(solidcraft_ui_kit::icons::window_icon(false), None)
     .for_local_view()
-    .with_children(&[TabMenuRow::new(VIEW_NEW_WINDOW, "multi_window.new_window", "").with_icon("window", None)]);
+    .with_children(&[TabMenuRow::new(VIEW_NEW_WINDOW, "multi_window.new_window", "").with_icon(solidcraft_ui_kit::icons::window_icon(false), None)]);
 
 /// A view's right-click menu in three groups set apart by lines: rename, copy and move; close
 /// views; close the design.
@@ -67,7 +67,11 @@ pub(crate) fn window_menu_rows<'a>(app: &SolveApp, entries: &'a [(String, String
     }
     [new, TabMenuRow::heading(app.tr("multi_window.open_windows")).separated()]
         .into_iter()
-        .chain(entries.iter().map(|(id, label)| TabMenuRow { checked: window_menu_target(id) == Some(current), ..TabMenuRow::new(id, label, "") }))
+        .chain(entries.iter().map(|(id, label)| {
+            let here = window_menu_target(id) == Some(current);
+            let label = if here { app.tr("view_layout.this_window") } else { label };
+            TabMenuRow { checked: here, ..TabMenuRow::new(id, label, "").with_icon(solidcraft_ui_kit::icons::window_icon(here), None) }
+        }))
         .collect()
 }
 
@@ -129,6 +133,12 @@ pub fn handle(app: &mut SolveApp, _ctx: &egui::Context, action: TabAction) -> bo
                 documents::view_activate(app, id);
             }
         }
+        TabAction::ReturnView(i) => {
+            if let Some(id) = view_id(app, i) {
+                let window = app.view_windows.current_window();
+                move_to_window(app, id, serde_json::json!(window));
+            }
+        }
         TabAction::CloseView(i) => {
             if let Some(id) = view_id(app, i) {
                 documents::view_close(app, id);
@@ -137,9 +147,18 @@ pub fn handle(app: &mut SolveApp, _ctx: &egui::Context, action: TabAction) -> bo
         TabAction::NewView => {
             documents::view_open(app, ViewKind::Model, None, false);
         }
-        TabAction::ReorderView { from, to } => documents::view_move(app, from, to),
+        TabAction::ReorderView { from, to } => {
+            let local_index = |i| {
+                let id = view_id(app, i)?;
+                app.docs.views.views().iter().position(|view| view.id == id)
+            };
+            if let Some((from, to)) = local_index(from).zip(local_index(to)) {
+                documents::view_move(app, from, to);
+            }
+        }
         TabAction::ViewMenu { view, id } => return view_menu(app, view, &id),
-        TabAction::PlusMenu { id } | TabAction::LayoutMenu { id } => return plus_row(app, &id),
+        TabAction::PlusMenu { id } => return plus_row(app, &id),
+        TabAction::LayoutMenu { id } => return layout_action(app, &id),
         TabAction::SwitcherMenu { id } => return switcher_menu(app, &id),
         TabAction::TearOff(i) => {
             if !app.file_picker_busy() {
@@ -173,12 +192,107 @@ fn view_menu(app: &mut SolveApp, index: usize, id: &str) -> bool {
         VIEW_NEW_WINDOW => move_to_window(app, view, serde_json::json!("new")),
         id if let Some(window) = window_menu_target(id) => move_to_window(app, view, serde_json::json!(window)),
         VIEW_CLOSE => {
-            documents::view_close(app, view);
+            if !crate::view_windows::defer_close_view(app, view) {
+                documents::view_close(app, view);
+            }
         }
         VIEW_CLOSE_OTHERS => documents::view_close_others(app, view),
         VIEW_CLOSE_RIGHT => documents::view_close_right_of(app, view),
         DESIGN_CLOSE => documents::close(app, app.docs.active, false),
         _ => return false,
+    }
+    true
+}
+
+pub(crate) fn window_layout(app: &SolveApp) -> solidcraft_ui_kit::view_layout_menu::LayoutMenu {
+    use solidcraft_ui_kit::view_layout_menu::{LayoutMenu, LayoutText, LayoutView, LayoutWindow};
+    use solidcraft_ui_text::tr;
+    use solidcraft_views::CameraLinkMode;
+
+    let choices = crate::view_windows::window_choices(app);
+    let views = crate::view_windows::layout_views(app);
+    let windows = choices
+        .iter()
+        .map(|choice| LayoutWindow {
+            id: choice.id,
+            name: choice.name.clone(),
+            display: choice.display_label.clone(),
+            views: views
+                .iter()
+                .filter(|(owner, _)| *owner == choice.id)
+                .map(|(_, view)| LayoutView {
+                    id: view.id,
+                    name: crate::i18n::tr_name(&view.name),
+                    kind: view.kind.key().to_owned(),
+                    accent: crate::workspace::view_icon_colour(documents::kind_word(view.kind), solidcraft_theme::is_dark()),
+                })
+                .collect(),
+        })
+        .collect();
+    let visible = documents::visible_view_ids(app);
+    let models = visible.iter().filter(|id| app.docs.views.get(**id).is_some_and(|view| view.kind == ViewKind::Model)).count();
+    let link = match app.docs.views.camera_link() {
+        CameraLinkMode::Off => "off",
+        CameraLinkMode::Orientation => "orientation",
+        CameraLinkMode::Zoom => "zoom",
+        CameraLinkMode::Both => "both",
+    };
+    LayoutMenu {
+        text: LayoutText {
+            heading: tr("view_layout.heading").to_owned(),
+            summary_single: tr("view_layout.summary_single").to_owned(),
+            summary: tr("view_layout.summary").to_owned(),
+            this_window: tr("view_layout.this_window").to_owned(),
+            show: tr("view_layout.show").to_owned(),
+            bring: tr("view_layout.bring").to_owned(),
+            windows: tr("view_layout.windows").to_owned(),
+            link: tr("view_layout.link").to_owned(),
+            off: tr("view_layout.off").to_owned(),
+            orientation: tr("view_layout.orientation").to_owned(),
+            zoom: tr("view_layout.zoom").to_owned(),
+            both: tr("view_layout.both").to_owned(),
+            new_cells: tr("view_layout.new_cells").to_owned(),
+            detach: tr("view_layout.detach").to_owned(),
+            equal: tr("view_layout.equal").to_owned(),
+            reset: tr("view_layout.reset").to_owned(),
+            clean: tr("view_layout.clean").to_owned(),
+        },
+        design: crate::i18n::tr_name(&documents::tab_name(app, &app.session)),
+        window: app.view_windows.current_window(),
+        native: crate::view_windows::supports_pop_out(app) && crate::view_windows::can_create(app),
+        visible: visible.len(),
+        link: link.to_owned(),
+        can_link: models >= 2,
+        clean: crate::view_windows::is_clean(app),
+        windows,
+    }
+}
+
+fn layout_action(app: &mut SolveApp, id: &str) -> bool {
+    use serde_json::json;
+    let window = app.view_windows.current_window();
+    let (command, args) = match id {
+        "layout.equal" => ("tab.view.equal_sizes", json!({"window": window})),
+        "layout.reset_cameras" => ("tab.view.reset_cameras", json!({"window": window})),
+        "layout.clean" => ("tab.window.clean", json!({"window": window})),
+        _ if let Some(mode) = id.strip_prefix("layout.link.") => ("tab.view.link", json!({"window": window, "mode": mode})),
+        _ if let Some(target) = id.strip_prefix("win.focus.").and_then(|value| value.parse::<u32>().ok()) => {
+            ("tab.window.focus", json!({"window": target}))
+        }
+        _ if let Some(source) = id.strip_prefix("win.bring.").and_then(|value| value.parse::<u32>().ok()) => {
+            if let Err(reason) = crate::view_windows::bring_views(app, source) {
+                show_move_error(app, reason);
+            }
+            return true;
+        }
+        _ if let Some(view) = id.strip_prefix("win.detach.").and_then(|value| value.parse::<u64>().ok()) => {
+            move_to_window(app, view, json!("new"));
+            return true;
+        }
+        _ => return plus_row(app, id),
+    };
+    if let Err(reason) = app.run(command, args) {
+        show_move_error(app, reason);
     }
     true
 }
@@ -196,7 +310,10 @@ fn plus_row(app: &mut SolveApp, id: &str) -> bool {
         return true;
     }
     if let Some(preset) = id.strip_prefix(LAYOUT_PREFIX).and_then(solidcraft_views::Preset::from_key) {
-        documents::view_layout(app, preset);
+        let window = app.view_windows.current_window();
+        if let Err(reason) = app.run("tab.view.layout", serde_json::json!({"layout": preset.key(), "window": window})) {
+            show_move_error(app, reason);
+        }
         return true;
     }
     match id {

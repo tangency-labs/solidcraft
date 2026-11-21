@@ -185,19 +185,28 @@ pub struct LostProjection {
     pub points: Vec<String>,
     /// The persistent name that finds nothing, never shown.
     pub name: String,
+    /// The names of the features in the design that made the lost face, edge or vertex, as
+    /// `name` gives them, each once: where to look for the edit that lost it (#5048).
+    pub from: Vec<String>,
 }
 
 impl LostProjection {
-    /// `projected face of Tray (curve l1)`.
+    /// `projected face of Tray (curve l1; made by Extrude1, Fillet2)`.
     pub fn label(&self) -> String {
         const SHOWN: usize = 4;
         let (ids, one, several) = if self.curves.is_empty() { (&self.points, "point", "points") } else { (&self.curves, "curve", "curves") };
         let listed = ids.iter().take(SHOWN).map(String::as_str).collect::<Vec<_>>().join(", ");
-        match ids.len() {
-            0 => self.what.clone(),
-            1 => format!("{} ({one} {listed})", self.what),
-            n if n > SHOWN => format!("{} ({several} {listed}, …)", self.what),
-            _ => format!("{} ({several} {listed})", self.what),
+        let entities = match ids.len() {
+            0 => None,
+            1 => Some(format!("{one} {listed}")),
+            n if n > SHOWN => Some(format!("{several} {listed}, …")),
+            _ => Some(format!("{several} {listed}")),
+        };
+        let from = (!self.from.is_empty()).then(|| format!("made by {}", self.from.join(", ")));
+        match (entities, from) {
+            (Some(e), Some(f)) => format!("{} ({e}; {f})", self.what),
+            (Some(x), None) | (None, Some(x)) => format!("{} ({x})", self.what),
+            (None, None) => self.what.clone(),
         }
     }
 

@@ -891,3 +891,28 @@ fn a_counterbore_into_a_slanted_face_opens_the_whole_face() {
         assert!(!solid_at(&s, x, 20.0, face + 0.5), "material over the slanted face at x = {x}");
     }
 }
+
+/// #20245: a hole drilled from a sketch point on a plane turned about a ring's axis cuts through.
+#[test]
+fn a_hole_drilled_from_a_sketch_on_a_turned_plane_cuts_through() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Ring sketch"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 150}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 146}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "Ring sketch", "profiles": [{"point": [148, 0]}], "distance": "20 mm", "operation": "new", "body_name": "Ring"}),
+    );
+    run(&mut s, "construct.plane.at_angle", json!({"base": "YZ", "axis": "Z", "angle": "60 deg", "name": "Turned plane"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "Turned plane", "offset": "150 mm", "name": "Tangent plane"}));
+    run(&mut s, "sketch.create", json!({"plane": "Tangent plane", "name": "Hole sketch"}));
+    run(&mut s, "sketch.point", json!({"point": [0, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Hole sketch", "diameter": "6 mm", "depth": "7 mm", "targets": ["Ring"], "name": "Hole"}));
+    let vol = volume(&mut s);
+    assert!((vol - 74279.81).abs() < 0.1, "volume {vol} should match ring minus hole without skin");
+    let faces = run(&mut s, "model.faces", json!({"body": "Ring"}))["faces"].as_array().cloned().unwrap();
+    assert_eq!(faces.len(), 5, "expected 5 faces, got {}", faces.len());
+}

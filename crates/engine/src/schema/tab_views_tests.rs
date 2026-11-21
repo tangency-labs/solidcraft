@@ -1,12 +1,13 @@
 use serde_json::{Value, json};
 
 use super::{
-    TabViewActivateParams, TabViewBesideParams, TabViewIdParams, TabViewLayoutParams, TabViewMoveParams, TabViewNoParams, TabViewOpenParams,
-    TabViewRenameParams, TabViewReply,
+    TabViewActivateParams, TabViewBesideParams, TabViewIdParams, TabViewLayoutParams, TabViewLinkParams, TabViewMoveParams, TabViewNoParams,
+    TabViewOpenParams, TabViewRenameParams, TabViewReply, TabViewWindowParams,
 };
 use crate::Session;
 use crate::schema::tab_windows::{
-    TabViewMoveToWindowParams, TabWindowCloseReply, TabWindowIdParams, TabWindowListParams, TabWindowListReply, TabWindowMoveReply,
+    TabViewMoveToWindowParams, TabWindowCleanParams, TabWindowCloseReply, TabWindowIdParams, TabWindowListParams, TabWindowListReply,
+    TabWindowMoveReply,
 };
 use crate::schema::tests::{assert_keys, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -117,6 +118,9 @@ fn window_commands_check_and_echo_requests_without_editing_the_design() {
     assert_keys(input_schema_for::<TabViewMoveToWindowParams>(), &["display", "h", "index", "level", "placement", "view", "w", "window", "x", "y"]);
     assert_keys(input_schema_for::<TabWindowIdParams>(), &["window"]);
     assert_keys(input_schema_for::<TabWindowListParams>(), &[]);
+    assert_keys(input_schema_for::<TabViewWindowParams>(), &["window"]);
+    assert_keys(input_schema_for::<TabViewLinkParams>(), &["mode", "window"]);
+    assert_keys(input_schema_for::<TabWindowCleanParams>(), &["on", "window"]);
 
     let mut session = Session { param_check: ParamCheck::Strict, ..Session::default() };
     let before = session.doc.to_json();
@@ -147,6 +151,12 @@ fn window_commands_check_and_echo_requests_without_editing_the_design() {
             json!({"view": 2, "window": 0, "index": 3}),
             output_schema_for::<TabWindowMoveReply>(),
         ),
+        ("tab.view.equal_sizes", json!({"window": 0}), json!({"window": 0}), output_schema_for::<TabViewReply>()),
+        ("tab.view.reset_cameras", Value::Null, json!({}), output_schema_for::<TabViewReply>()),
+        ("tab.view.link", json!({"mode": "orientation"}), json!({"mode": "orientation"}), output_schema_for::<TabViewLinkParams>()),
+        ("tab.view.link", json!({"window": 1, "mode": "both"}), json!({"window": 1, "mode": "both"}), output_schema_for::<TabViewLinkParams>()),
+        ("tab.window.clean", Value::Null, json!({}), output_schema_for::<TabWindowCleanParams>()),
+        ("tab.window.clean", json!({"window": 1, "on": false}), json!({"window": 1, "on": false}), output_schema_for::<TabWindowCleanParams>()),
         ("tab.window.list", Value::Null, json!({}), output_schema_for::<TabWindowListReply>()),
         ("tab.window.focus", json!({"window": 0}), json!({"window": 0}), output_schema_for::<TabWindowIdParams>()),
         ("tab.window.close", json!({"window": 1}), json!({"window": 1}), output_schema_for::<TabWindowCloseReply>()),
@@ -202,6 +212,13 @@ fn window_commands_refuse_malformed_requests() {
         ("tab.view.move_to_window", json!({"view": 2, "x": 1e100})),
         ("tab.view.move_to_window", json!({"view": 2, "y": -1e100})),
         ("tab.view.move_to_window", json!({"view": 2, "h": 1e100})),
+        ("tab.view.equal_sizes", json!({"window": -1})),
+        ("tab.view.reset_cameras", json!({"window": "main"})),
+        ("tab.view.link", json!({})),
+        ("tab.view.link", json!({"mode": "position"})),
+        ("tab.view.link", json!({"mode": "zoom", "window": 4_294_967_296_u64})),
+        ("tab.window.clean", json!({"on": "yes"})),
+        ("tab.window.clean", json!({"window": 1, "unknown": true})),
         ("tab.window.list", json!({"window": 1})),
         ("tab.window.focus", json!({})),
         ("tab.window.focus", json!({"window": 4_294_967_296_u64})),
@@ -227,6 +244,7 @@ fn the_view_shortcuts_are_the_defaults() {
         ("tab.view.list", None),
         ("tab.view.pop_out", Some("Ctrl+Alt+O")),
         ("tab.view.move_to_window", Some("Ctrl+Alt+W")),
+        ("tab.window.clean", Some("F11")),
     ] {
         assert_eq!(crate::find_command(id).map(|c| c.shortcut), Some(key), "{id}");
     }

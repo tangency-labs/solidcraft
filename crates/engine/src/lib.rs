@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod agent_setup;
+pub mod agent_tools;
 pub mod batch_params;
 pub mod batch_preflight;
 pub mod browser_find;
@@ -213,6 +214,35 @@ impl std::fmt::Display for Undrawn {
             Undrawn::NoSource => f.write_str("the drawing has no such source"),
             Undrawn::Linked => f.write_str("not supported yet: reading a linked design (#3890)"),
         }
+    }
+}
+
+/// What a click on the model picks while no dialog or tool takes the pick: the window's selection
+/// mode (#4255, `select.mode`). The selection filter narrows it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PickMode {
+    /// Faces, edges and vertices.
+    #[default]
+    Faces,
+    /// The body of the face clicked.
+    Bodies,
+    /// The feature that made the face clicked.
+    Features,
+    /// The innermost placement holding the body clicked.
+    Parts,
+    /// The top-level placement holding the body clicked.
+    Components,
+    /// Sketch curves, points and profiles only.
+    Sketch,
+}
+
+impl PickMode {
+    pub const ALL: [PickMode; 6] = [PickMode::Faces, PickMode::Bodies, PickMode::Features, PickMode::Parts, PickMode::Components, PickMode::Sketch];
+
+    /// A click on a face picks a whole object (its body, feature or placement).
+    pub fn whole(self) -> bool {
+        matches!(self, PickMode::Bodies | PickMode::Features | PickMode::Parts | PickMode::Components)
     }
 }
 
@@ -761,6 +791,8 @@ pub struct Session {
     pub plugin_limits: plugin::HostLimits,
     /// Trusted package locations and folder grants, kept outside the design.
     pub plugin_state: plugin::AppState,
+    /// Trusted UI invocation context; never a command parameter or a saved preference.
+    pub plugin_forms_interactive: bool,
     /// How calls that break a command's parameter contract are treated (off by default). It
     /// belongs to the session, not the design, so it survives opening and starting designs.
     pub param_check: schema::ParamCheck,
@@ -1256,6 +1288,7 @@ impl Session {
             disabled_plugins: Default::default(),
             plugin_limits: plugin::default_host_limits(),
             plugin_state: plugin::AppState::for_process(),
+            plugin_forms_interactive: false,
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             keep_print_faces: true,
@@ -1369,6 +1402,9 @@ impl Session {
         self.disabled_plugins = disabled_plugins;
         self.plugin_limits = plugin_limits;
         self.plugin_state = plugin_state;
+        self.plugin_state.link_changes = Default::default();
+        self.plugin_state.link_reads = Default::default();
+        self.plugin_state.link_read_source = Default::default();
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
         self.keep_print_faces = keep_print_faces;
@@ -2535,6 +2571,10 @@ impl Session {
             }),
             ..Snapshot::of(self, spec.label)
         };
+        let link_read_before = (spec.id == "component.relink").then(|| before.doc.clone());
+        let link_observations_before = self.plugin_state.link_changes.clone();
+        let link_reads_before = self.plugin_state.link_reads.clone();
+        let link_read_source_before = self.plugin_state.link_read_source.clone();
         let ids = self.ids.clone();
         let design_before = self.design_revision.clone();
         let identity_before = self.document_id.clone();
@@ -2751,6 +2791,9 @@ impl Session {
             Err(e) => {
                 // A failed command draws no ids, so a replay of what succeeded draws the same.
                 self.ids = ids;
+                self.plugin_state.link_changes = link_observations_before;
+                self.plugin_state.link_reads = link_reads_before;
+                self.plugin_state.link_read_source = link_read_source_before;
                 self.design_revision = design_before;
                 self.document_id = identity_before;
                 self.redo_watch = redo_watch_before;
@@ -2803,6 +2846,12 @@ impl Session {
             if let Some(kind) = failure {
                 usage::note_failure(spec.id, kind);
             }
+        }
+        if result.is_ok() {
+            if let Some(before) = link_read_before {
+                plugin::record_changed_link_reads(self, &before);
+            }
+            self.plugin_state.prune_link_changes(&self.doc);
         }
         result
     }
@@ -2975,12 +3024,18 @@ impl Session {
             document_id: self.document_id.clone(),
             design_revision: self.design_revision.clone(),
             design_state: self.design_state.clone(),
-            followed: None,
+            followed: self.followed.clone(),
             auto_project: self.auto_project,
             project_construction: self.project_construction,
             disabled_plugins: self.disabled_plugins.clone(),
             plugin_limits: self.plugin_limits,
-            plugin_state: self.plugin_state.clone(),
+            plugin_state: {
+                let mut state = self.plugin_state.clone();
+                state.link_reads = Default::default();
+                state.link_read_source = state.link_changes.clone();
+                state
+            },
+            plugin_forms_interactive: self.plugin_forms_interactive,
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
             keep_print_faces: self.keep_print_faces,
@@ -3209,8 +3264,26 @@ impl Session {
                 }
             }
         }
+        // Disk checks and no-op source reads may finish after a newer live observation.
+        // Merge only entries whose source observation is still current in the live session.
+        let observations: Vec<_> = prepared
+            .computed
+            .plugin_state
+            .link_changes
+            .values()
+            .filter(|change| {
+                let source = prepared.source.plugin_state.link_changes.get(&change.component);
+                source != Some(*change) && self.plugin_state.link_changes.get(&change.component) == source
+            })
+            .cloned()
+            .collect();
         let replies = prepared.steps.into_iter().map(|step| (step.id, step.reply)).collect();
         self.accept_computed(prepared.computed);
+        for change in observations {
+            if self.doc.links.get(&change.component).is_some_and(|link| link.path == change.path) {
+                plugin::record_link_change(self, change.component, change.path, change.digest, change.read);
+            }
+        }
         Ok(replies)
     }
 
@@ -3355,7 +3428,38 @@ impl Session {
         computed.remap_hidden_bodies(&self.doc, &self.model.state(), rename.as_ref().map(|(old, new, _)| (old.as_str(), new.as_str())));
         self.visibility.hidden_bodies = std::mem::take(&mut computed.visibility.hidden_bodies);
         self.body_renames = computed.body_renames;
+        // Only committed source reads cross back from the worker. A no-op read must not
+        // replace a disk observation made since this evaluation began; changed source bytes
+        // being committed still describe a new design state and publish their read observation.
+        let link_reads: Vec<_> = computed
+            .plugin_state
+            .link_changes
+            .values()
+            .filter(|change| {
+                let source_changed = self
+                    .doc
+                    .links
+                    .get(&change.component)
+                    .is_none_or(|link| link.path != change.path || link.file_sha256.as_ref() != Some(&change.digest));
+                let observed = self.plugin_state.link_changes.get(&change.component);
+                let started = computed.plugin_state.link_read_source.get(&change.component);
+                change.read
+                    && computed.plugin_state.link_reads.contains(&change.component)
+                    && computed
+                        .doc
+                        .links
+                        .get(&change.component)
+                        .is_some_and(|link| link.path == change.path && link.file_sha256.as_ref() == Some(&change.digest))
+                    && (source_changed || observed == started)
+            })
+            .cloned()
+            .collect();
         self.doc = computed.doc;
+        for change in link_reads {
+            Arc::make_mut(&mut self.plugin_state.link_reads).insert(change.component);
+            plugin::record_link_change(self, change.component, change.path, change.digest, true);
+        }
+        self.plugin_state.prune_link_changes(&self.doc);
         self.design_state = computed.design_state;
         self.design_revision = computed.design_revision;
         self.ids = computed.ids;

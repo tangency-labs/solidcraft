@@ -531,6 +531,96 @@ fn predecessor(b: &ModelBody) -> Option<&ModelBody> {
     o.before.body(&b.name)
 }
 
+/// The input of a non-copy rigid transform whose exact history keeps every face and edge
+/// one-to-one. Compatibility names may cross these steps, never a copy or a topology edit.
+pub(crate) fn rigid_predecessor(b: &ModelBody) -> Option<&ModelBody> {
+    use solidcraft_kernel::history::{EdgeOrigin, FaceOrigin};
+
+    let origin = b.names.origin.as_ref()?;
+    let bodies = match &origin.feature.kind {
+        FeatureKind::Move { bodies, copy: false, .. } | FeatureKind::Align { bodies, .. } => bodies,
+        _ => return None,
+    };
+    if !bodies.iter().any(|name| *name == b.name) {
+        return None;
+    }
+    let lineage = b.names.lineage.as_ref()?;
+    let [operand] = lineage.operands.as_slice() else { return None };
+    let crate::lineage::Operand::Body(name) = operand.as_ref() else { return None };
+    let source = origin.before.body(name)?;
+    let history = &lineage.history;
+    if history.operands != 1 || history.faces.len() != b.body.face_count() || history.edges.len() != b.body.edge_count() {
+        return None;
+    }
+    fn permutation(indices: impl Iterator<Item = Option<usize>>, count: usize) -> bool {
+        let mut seen = vec![false; count];
+        for index in indices {
+            let Some(slot) = index.and_then(|i| seen.get_mut(i)) else { return false };
+            if std::mem::replace(slot, true) {
+                return false;
+            }
+        }
+        seen.into_iter().all(|found| found)
+    }
+    let faces = history.faces.iter().map(|face| match face.origins.as_slice() {
+        [FaceOrigin::Face { operand: 0, face }] => Some(*face),
+        _ => None,
+    });
+    let edges = history.edges.iter().map(|edge| match edge.origins.as_slice() {
+        [EdgeOrigin::Edge { operand: 0, edge }] => Some(*edge),
+        _ => None,
+    });
+    (permutation(faces, source.body.face_count()) && permutation(edges, source.body.edge_count())).then_some(source)
+}
+
+/// An edge's direct source through a non-copy rigid transform or join. Like exact naming,
+/// follow only Body and intermediate Stage operands, never Copy, Inner or newly made geometry.
+pub(crate) fn inherited_edge_predecessor(b: &ModelBody, edge: usize) -> Option<(&ModelBody, usize)> {
+    use crate::Operation;
+    use crate::lineage::Operand;
+    use solidcraft_kernel::history::EdgeOrigin;
+
+    let origin = b.names.origin.as_ref()?;
+    match &origin.feature.kind {
+        FeatureKind::Move { copy: false, .. } | FeatureKind::Align { .. } => {
+            rigid_predecessor(b)?;
+        }
+        FeatureKind::Combine { operation: Operation::Join | Operation::NewBody, .. }
+        | FeatureKind::Box { operation: Operation::Join, .. }
+        | FeatureKind::Cylinder { operation: Operation::Join, .. }
+        | FeatureKind::Cone { operation: Operation::Join, .. }
+        | FeatureKind::Sphere { operation: Operation::Join, .. }
+        | FeatureKind::Torus { operation: Operation::Join, .. }
+        | FeatureKind::Extrude { operation: Operation::Join, .. }
+        | FeatureKind::Revolve { operation: Operation::Join, .. }
+        | FeatureKind::Sweep { operation: Operation::Join, .. }
+        | FeatureKind::Loft { operation: Operation::Join, .. }
+        | FeatureKind::Pipe { operation: Operation::Join, .. }
+        | FeatureKind::Coil { operation: Operation::Join, .. }
+        | FeatureKind::BoundaryFill { operation: Operation::Join, .. }
+        | FeatureKind::Thicken { operation: Operation::Join, .. }
+        | FeatureKind::SurfaceNetwork { operation: Operation::Join, .. } => {}
+        _ => return None,
+    }
+    let mut lineage = b.names.lineage.as_deref()?;
+    let mut edge = edge;
+    for _ in 0..MAX_DEPTH {
+        let [EdgeOrigin::Edge { operand, edge: source_edge }] = lineage.history.edges.get(edge)?.origins.as_slice() else { return None };
+        match lineage.operands.get(*operand)?.as_ref() {
+            Operand::Body(name) => {
+                let source = origin.before.body(name)?;
+                return (*source_edge < source.body.edge_count()).then_some((source, *source_edge));
+            }
+            Operand::Stage(stage) => {
+                edge = *source_edge;
+                lineage = &stage.lineage;
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
 /// Work out the names of the earlier versions of `b` that are not known yet, oldest first and
 /// every [`WARM_STEP`]th, so that naming `b` never recurses through more than that many of them.
 /// A body's names are found from the names of the body it was made from, which are found the
@@ -1355,6 +1445,41 @@ mod tests {
     fn same_hit(a: &FaceHit, b: &FaceHit) {
         assert_eq!((a.body, a.face, a.point), (b.body, b.face, b.point));
         assert_eq!((a.verified, a.on_point), (b.verified, b.on_point));
+    }
+
+    #[test]
+    fn rigid_predecessor_requires_a_non_copy_transform_and_bijective_history() {
+        use crate::lineage::Operand;
+        let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(4., 2., 1.)).unwrap();
+        let source = ModelBody::new("Box".into(), body.clone(), 1);
+        let before = Arc::new(ModelState::default().with_bodies(vec![source.clone()]));
+        let feature: Feature = serde_json::from_value(serde_json::json!({
+            "id": 2, "name": "Move", "type": "move", "bodies": ["Box"], "translate": ["0 mm", "0 mm", "0 mm"]
+        }))
+        .unwrap();
+        let mut lineage = Lineage::of(&body, Operand::Body("Box".into()));
+        // A rigid transform is allowed to reorder entities: the map must be bijective,
+        // rather than requiring that every index remain at its old position.
+        lineage.history.faces.swap(0, 1);
+        lineage.history.edges.swap(0, 1);
+        let made = |feature: Feature, lineage: Option<Lineage>| {
+            let mut moved = source.clone();
+            let origin = Arc::new(NamingOrigin { feature, before: before.clone(), depth: 1, mats: Vec::new() });
+            moved.names = NameCell::traced(Some(origin), lineage.map(Arc::new));
+            moved
+        };
+        assert!(rigid_predecessor(&made(feature.clone(), Some(lineage.clone()))).is_some());
+        assert!(rigid_predecessor(&made(feature.clone(), None)).is_none(), "no history is no proof");
+        let mut copied = feature.clone();
+        let FeatureKind::Move { copy, .. } = &mut copied.kind else { panic!("Move") };
+        *copy = true;
+        assert!(rigid_predecessor(&made(copied, Some(lineage.clone()))).is_none(), "a copy has its own names");
+        let mut duplicate = lineage.clone();
+        duplicate.history.faces[1].origins = duplicate.history.faces[0].origins.clone();
+        assert!(rigid_predecessor(&made(feature.clone(), Some(duplicate))).is_none(), "two faces from one source are not a rigid move");
+        let mut missing = lineage.clone();
+        missing.history.edges[0].origins.clear();
+        assert!(rigid_predecessor(&made(feature, Some(missing))).is_none(), "an edge with no source is not a rigid move");
     }
 
     #[test]
