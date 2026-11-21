@@ -212,18 +212,10 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         return Err(KernelError::Invalid("offset distance".into()));
     }
     let healed = crate::boolean_record::healed(b)?.with_split_lines(b.splits.clone());
-    let size = healed.size();
-    let mesh = healed.mesh(&crate::MeshTolerance::chord((size * 1e-3).max(1e-3)))?;
     let mut chosen: Vec<usize> = Vec::new();
     for p in at {
-        let near = mesh
-            .triangles
-            .iter()
-            .zip(&mesh.tri_face)
-            .filter_map(|(t, f)| mesh.tri(t).map(|[x, y, z]| (solidcraft_geom::compare::closest_on_triangle(*p, x, y, z).dist(*p), *f as usize)))
-            .min_by(|a, c| a.0.total_cmp(&c.0));
-        match near {
-            Some((d, f)) if d < size * 1e-3 + 1e-6 => {
+        match healed.face_at_point(*p)? {
+            Some(f) => {
                 if !chosen.contains(&f) {
                     chosen.push(f);
                 }

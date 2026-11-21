@@ -1177,14 +1177,14 @@ pub(crate) fn vertex_index_at(b: &ModelBody, at: Vec3) -> Option<usize> {
         .map(|(_, i)| i)
 }
 
-/// Names of the faces holding each point (any body; empty when none does).
+/// Names of the faces holding each point within modelling tolerance (any body; empty when none
+/// does). Resolve against the exact trimmed faces: a display chord can put a point near a round
+/// rim nearer the adjacent wall and save that wall's name instead.
 pub fn face_names_at(st: &ModelState, pts: &[Vec3]) -> Vec<String> {
     pts.iter()
         .map(|p| {
             for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
-                let tol = (b.body.size() * 1e-3).max(1e-3);
-                let idx = FaceIndex::new(&b.mesh(), face_count(b));
-                if let Some(f) = idx.face_at(*p, tol) {
+                if let Some(f) = b.body.face_at_point(*p).ok().flatten() {
                     return face_names(b).get(f).cloned().unwrap_or_default();
                 }
             }

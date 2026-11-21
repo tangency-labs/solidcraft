@@ -59,7 +59,6 @@ crates/doc/src/naming.rs:edge_names_from names edges from their faces by the dis
 crates/doc/src/naming.rs:face_centres takes face centres from mesh triangles
 crates/doc/src/naming.rs:face_count counts faces by the display mesh
 crates/doc/src/naming.rs:face_name_at_body names a face at a point by the display mesh
-crates/doc/src/naming.rs:face_names_at names the faces holding points by the display mesh
 crates/doc/src/naming.rs:face_spot finds where a face is by the display mesh
 crates/doc/src/naming.rs:face_spots finds where faces are by the display mesh
 crates/doc/src/naming.rs:geometric_names names faces from sample points on the display mesh
@@ -129,7 +128,6 @@ crates/kernel/src/lip.rs:face_at picks the planar face at a point by a mesh
 crates/kernel/src/offset_backend.rs:face_points takes a point per face from mesh triangles
 crates/kernel/src/offset_backend.rs:faces_under picks the face under each point by the nearest mesh triangle
 crates/kernel/src/offset_backend.rs:with_offsets tags offset faces by a mesh
-crates/kernel/src/polyhedron.rs:offset_faces picks the faces to offset by a mesh
 crates/kernel/src/provenance.rs:blend_origins traces blend faces by meshes
 crates/kernel/src/provenance.rs:extrude_origins traces extrusion faces by meshes
 crates/kernel/src/provenance.rs:face_tris reads face triangles for provenance

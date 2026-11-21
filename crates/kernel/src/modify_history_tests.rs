@@ -326,6 +326,47 @@ fn offset_moves_a_face() {
     assert!(e.to_string().contains("no room"), "{e}");
 }
 
+/// A narrow annular end must be picked on its exact trims, independently of the body's length
+/// (and hence the chord tolerance of the old picking mesh).
+#[test]
+fn offset_an_annular_end_near_either_circular_rim() {
+    let boss = cylinder(Vec3::ZERO, Vec3::Z, 3.5, 200.0).unwrap();
+    let bore = cylinder(Vec3::new(0.0, 0.0, -1.0), Vec3::Z, 1.75, 202.0).unwrap();
+    let b = boolean(&boss, &bore, BoolOp::Cut).unwrap().unwrap();
+    let centre = Vec3::new(2.625, 0.0, 200.0);
+    let end = b.face_at_point(centre).unwrap().unwrap();
+    let expected = crate::offset_faces(&b, &[centre], 4.0).unwrap();
+    // The bore and outer wall keep their radii; only the length grows, from 200 to 204 mm.
+    let want = std::f64::consts::PI * (3.5_f64.powi(2) - 1.75_f64.powi(2)) * 204.0;
+    assert!((volume(&expected) - want).abs() < want * 1e-7);
+    for angle in [0.3_f64, 1.0, 2.0] {
+        let (sin, cos) = angle.sin_cos();
+        for radius in [3.45, 1.8] {
+            let p = Vec3::new(radius * cos, radius * sin, 200.0);
+            let holders: Vec<usize> =
+                (0..b.face_count()).filter(|&f| b.point_lies_on_face(f, p, b.record().tolerance).unwrap().is_some()).collect();
+            assert_eq!(holders, [end], "only the annular face holds {p:?}");
+            assert_eq!(b.face_at_point(p).unwrap(), Some(end), "{p:?}");
+            let moved = crate::offset_faces(&b, &[p], 4.0).unwrap();
+            assert_eq!(moved.record(), expected.record(), "{p:?}");
+        }
+    }
+    let tolerance = b.record().tolerance;
+    let within = centre + Vec3::Z * (tolerance * 0.5);
+    assert_eq!(b.face_at_point(within).unwrap(), Some(end));
+    assert_eq!(crate::offset_faces(&b, &[within], 4.0).unwrap().record(), expected.record());
+    for p in [
+        centre + Vec3::Z * (tolerance * 4.0),
+        Vec3::new(0.0, 0.0, 200.0),
+        Vec3::new(3.5 + tolerance * 4.0, 0.0, 200.0),
+        Vec3::new(1.75 - tolerance * 4.0, 0.0, 200.0),
+    ] {
+        assert_eq!(b.face_at_point(p).unwrap(), None, "{p:?}");
+        let e = crate::offset_faces(&b, &[p], 4.0).unwrap_err();
+        assert!(e.to_string().contains("no face at"), "{p:?}: {e}");
+    }
+}
+
 #[test]
 fn split_a_face() {
     let b = cube();
