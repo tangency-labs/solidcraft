@@ -78,6 +78,11 @@
 //!   rejected point is never retried, so subdivision cannot loop on it.
 //!   An unresolved closed-direction seam jump cannot use
 //!   the inaccurate-short-span escape: subdivision must resolve its branch.
+//! - **A span proved off the curve fails.** On an analytic sphere a span that passes the
+//!   sampled test, or the short-span escape, fails when its UV image is proved farther
+//!   than the tolerance from the 3D Hermite span of the curve's drop (`span_proved_off`,
+//!   the certificate of `surface_intersector::sphere_span`), and is subdivided: near a
+//!   pole the clamped samples missed a span 5e-4 off its circle. Upstream accepts it.
 //! - **Bounded subdivision.** The span stack of the subdivision loop is at most
 //!   [`MAX_SPAN_DEPTH`] drop points deep (upstream fixtures reach about 15: a span
 //!   passes once shorter than `1/8000` of the interval; upstream is unbounded,
@@ -110,10 +115,12 @@ use crate::geom::solution_array::{SolutionArray, SolutionObject};
 use crate::geom::tol::{approx_tol3d, scaled_zero_of_curve};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::intersect::surface_intersector::sphere_span;
 use crate::kernel::Kernel;
 use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_PARAM};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::SurfParamType;
+use crate::nurbs::knots::Side;
 use crate::surface::plane::PlaneDropCurve;
 use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::{
@@ -529,6 +536,85 @@ fn uv_curve_gap(
         None,
     ))?;
     Ok(gap.map_or((0.0, 0.0), |g| (g.max_dist, g.max_dev)))
+}
+
+/// Not upstream: whether, on an analytic sphere, the surface image of the UV Hermite span
+/// [`DropPt::test_span_accuracy`] builds from `start` to `end` is proved farther than
+/// `approx_tol_3d` from the 3D Hermite span of the curve's drop at some parameter
+/// ([`sphere_span::sphere_span_image`] refuses with [`sphere_span::Refusal::Off`]): the
+/// Hermite runs between the surface points of the span's two UV ends with the derivatives
+/// of the radial drop there (`curve`'s tangents projected into the surface's tangent planes
+/// and scaled by `R / |C - c|`), so a curve that lies off the surface, within the drop's own
+/// tests or by an offset, is compared with its drop, not with itself (at a span shrunk to a
+/// point the two ends agree and nothing is proved off).
+/// `false` on any other surface kind, and where the distance is not proved over the
+/// tolerance (certified, or not decided).
+///
+/// The span test samples three interior points, clamped into the domain, and a span shorter
+/// than 1/8000 of the interval passes whatever its samples say. Near a sphere's pole the UV
+/// span turns through much of the domain within a short stretch of the curve: a circle 3e-5
+/// from a unit sphere's pole had a first span 1/8192 of the circle long whose UV cubic reached
+/// u = 1.42 of a `[0, 1]` domain and whose image missed the circle by 5e-4 against a 1e-5
+/// tolerance; the trim curve made from it jumped across the seam and its face failed the
+/// check. Such a span is subdivided, as the samples would have it subdivided had they seen
+/// the miss.
+///
+/// # Errors
+///
+/// Those of the curve evaluations.
+fn span_proved_off(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    start: &DropPt,
+    end: &DropPt,
+    approx_tol_3d: f64,
+) -> Result<bool> {
+    let SurfaceKind::Sphere(sphere) = surface.kind() else {
+        return Ok(false);
+    };
+    let centre = sphere.base().position().origin();
+    let radius = sphere.radius();
+    let delta_t = end.t - start.t;
+    // the drop of the curve at `t`: the surface point at `uv` and the derivative of the
+    // radial drop `c + R (C - c) / |C - c|`, the curve's tangent in the surface's tangent
+    // plane there times `R / |C - c|`, scaled to the span (a curve off the sphere moves its
+    // drop slower or faster than itself; unscaled, every span of an offset circle was
+    // proved off down to the shortest)
+    let at = |t: f64, uv: Point2| -> Result<Option<(Vec3, Vec3)>> {
+        let pd = curve.evaluate(k, t, 1, true, true)?;
+        let (Some(&c), Some(&d)) = (pd.first(), pd.get(1)) else {
+            return Err(SolidError::intersect(
+                OP,
+                IntersectFailure::Defect {
+                    why: "the curve's evaluation at a parameter of its own span, asked for the                           point and the first derivative, returned fewer than two vectors;                           the evaluator builds both for every parameter of the curve",
+                },
+            ));
+        };
+        let dist = (c - centre).length();
+        if !(dist.is_finite() && dist > EFF_ZERO) {
+            return Ok(None);
+        }
+        let p = surface.evaluate_point(k, uv)?;
+        let n = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
+        Ok(Some((p, d.project_to_plane(n) * (radius / dist * delta_t))))
+    };
+    // a curve point at the centre has no drop: nothing is proved
+    let (Some((p0, d0)), Some((p1, d1))) = (at(start.t, start.uv_pd[0])?, at(end.t, end.uv_pd[0])?)
+    else {
+        return Ok(false);
+    };
+    let lift = |p: Point2| Vec3::new(p.x, p.y, 0.0);
+    let uv = [
+        lift(start.uv_pd[0]),
+        lift(start.uv_pd[1]) * delta_t,
+        lift(end.uv_pd[0]),
+        lift(end.uv_pd[1]) * delta_t,
+    ];
+    Ok(matches!(
+        sphere_span::sphere_span_image(surface, uv, [p0, d0, p1, d1], approx_tol_3d),
+        sphere_span::SpanImage::NotCertified(sphere_span::Refusal::Off)
+    ))
 }
 
 impl Surface {
@@ -1649,6 +1735,12 @@ impl Surface {
                         && (end.t - start.t).abs() < s_interval.length() / 8000.0
                     {
                         span_passes = true;
+                    }
+                    // (not upstream: a span whose image is proved off the curve fails,
+                    // however short, see `span_proved_off`)
+                    if span_passes && span_proved_off(k, this, curve, &start, &end, approx_tol_3d)?
+                    {
+                        span_passes = false;
                     }
 
                     if span_passes {
