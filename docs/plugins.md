@@ -91,6 +91,46 @@ or `{"design":null}` without an active design. Closing the window's last tab
 creates a blank design, so that notification names the new active design.
 Events carry no file contents and are not an edit log.
 
+A listener can also opt in to linked-file observations:
+
+```json
+"listeners": [{"entry": "refresh", "on": ["design.changed", "design.links_changed"]}]
+```
+
+`on` must be a nonempty list of distinct events from `design.changed` and
+`design.links_changed`; either event can be declared alone. Both use the existing
+`design@0.1` capability and read-only command entries. No WIT world or interface
+changes are needed. The separate event preserves the exact payload and delivery
+conditions of existing `design.changed` listeners.
+
+When a declared `design.links_changed` event is pending, the entry receives:
+
+```json
+{
+  "design": {"document_id": "…", "revision": "0123456789abcdef0123456789abcdef:42"},
+  "links": [{"component": 7, "name": "Bracket", "path": "/parts/bracket.sc", "read": false}]
+}
+```
+
+`design` is the active design's token, or `null` without an active design.
+Each link names the numeric component id, its name (`null` if absent) and absolute
+source path. `read: false` means a `component.links` check found a file differing
+from the version the design has read. `read: true` means the design already read that version, including after
+Update Links (`component.update_links`) or Relink Source (`component.relink`)
+successfully read the changed source into the design. A disk-only observation does
+not advance the design token or trigger `design.changed`.
+Unread (`read: false`) entries require a source inside the plugin's approved read folders; `read: true` entries remain visible without that grant.
+
+The host observes files only when it already checks links, including the window's
+focus check, and after Update Links; it adds no filesystem watcher. A burst retains
+the latest observation per component, so this is an invalidation, not a history of
+every disk change. A listener declaring both events gets one invocation for the
+coalesced state, including `links` only when a linked-file observation is pending.
+A design-only invalidation still has exactly the `{"design":…}` payload. A listener
+declaring only `design.links_changed` receives no design-only invalidations, and a
+listener declaring only `design.changed` never receives `links` or disk-only
+notifications.
+
 Handlers run on the command worker, away from the window thread, with their own
 budget: at most 1,000,000 fuel, 16 MiB memory, 512 KiB stack and 100 ms execution time, further
 limited by their requested budgets. They may refresh caches or panel data.

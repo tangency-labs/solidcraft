@@ -65,8 +65,16 @@ pub struct Grants {
 pub struct AppState {
     /// Listener failures are application state, displayed in Preferences, never design data.
     pub listener_failures: BTreeMap<String, String>,
+    /// Diagnostics by package and listener entry. A different entry's success cannot clear them.
+    pub listener_entry_failures: BTreeMap<String, BTreeMap<String, String>>,
     /// Last successful listener result; the future panel adapter may consume this data.
     pub listener_data: std::sync::Arc<BTreeMap<String, Value>>,
+    /// Latest linked-file observations, outside saved designs and undo snapshots.
+    pub link_changes: std::sync::Arc<BTreeMap<u64, LinkChange>>,
+    /// Successful source reads performed in this evaluation; scratch sessions start empty.
+    pub(crate) link_reads: std::sync::Arc<BTreeSet<u64>>,
+    /// Observations at the start of this evaluation, before any source reads or disk checks.
+    pub(crate) link_read_source: std::sync::Arc<BTreeMap<u64, LinkChange>>,
     /// Host-only authority marker and event payload for a listener invocation.
     pub(crate) listener_design: Option<Option<DesignToken>>,
     pub packages: BTreeMap<String, String>,
@@ -88,6 +96,22 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// History restores authored links, not observations of a different source or version.
+    pub(crate) fn prune_link_changes(&mut self, doc: &solidcraft_doc::Document) {
+        let current = |component: &u64, change: &LinkChange| {
+            doc.links
+                .get(component)
+                .is_some_and(|link| link.path == change.path && change.read == (link.file_sha256.as_ref() == Some(&change.digest)))
+        };
+        if self.link_changes.iter().any(|(component, change)| !current(component, change)) {
+            std::sync::Arc::make_mut(&mut self.link_changes).retain(|component, change| current(component, change));
+        }
+        let read = |component: &u64| self.link_changes.get(component).is_some_and(|change| change.read);
+        if self.link_reads.iter().any(|component| !read(component)) {
+            std::sync::Arc::make_mut(&mut self.link_reads).retain(read);
+        }
+    }
+
     /// Background cache/panel updates do not revoke an in-flight command's authority.
     pub(crate) fn same_execution_context(&self, other: &Self) -> bool {
         self.packages == other.packages
@@ -471,6 +495,8 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
         {
             session.accept_computed(host.session);
         } else {
+            session.plugin_state.link_changes = host.session.plugin_state.link_changes;
+            std::sync::Arc::make_mut(&mut session.plugin_state.link_reads).extend(host.session.plugin_state.link_reads.iter().copied());
             for message in host.session.log {
                 session.echo(message);
             }
@@ -493,7 +519,8 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
 
 pub mod check;
 mod events;
-pub use events::design_changed;
+pub use events::{LinkChange, design_changed, design_notifications};
+pub(crate) use events::{record_changed_link_reads, record_link_change, record_link_reads};
 mod form;
 pub mod grant_store;
 pub use form::form_errors;
@@ -668,6 +695,8 @@ impl PluginHost for SolidCraftHost {
         {
             self.session.accept_computed(computed);
         } else {
+            self.session.plugin_state.link_changes = computed.plugin_state.link_changes;
+            std::sync::Arc::make_mut(&mut self.session.plugin_state.link_reads).extend(computed.plugin_state.link_reads.iter().copied());
             for message in computed.log {
                 self.session.echo(message);
             }
