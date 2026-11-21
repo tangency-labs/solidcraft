@@ -192,12 +192,22 @@ fn steps(kind: JointKind) -> Option<Vec<(Step, Vec3, usize)>> {
 }
 
 /// `raw` with every character but `[A-Za-z0-9_]` replaced by `_`, so it is a valid name in URDF,
-/// SDFormat and XML. A file name also keeps `-` and any Unicode letter or digit, so parts named
-/// in another script keep distinct, readable mesh files (#20409).
+/// SDFormat and XML. A file name is taken in Unicode NFC and also keeps `-`, any Unicode letter or
+/// digit and combining marks, so parts named in another script keep distinct, readable mesh files
+/// (#20409).
 fn sanitise(raw: &str, file: bool) -> String {
+    use unicode_normalization::{UnicodeNormalization as _, char::is_combining_mark};
+    let keep = |c: char| c.is_ascii_alphanumeric() || c == '_' || (file && (c == '-' || c.is_alphanumeric() || is_combining_mark(c)));
     let s: String =
-        raw.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || (file && (c == '-' || c.is_alphanumeric())) { c } else { '_' }).collect();
+        if file { raw.nfc().map(|c| if keep(c) { c } else { '_' }).collect() } else { raw.chars().map(|c| if keep(c) { c } else { '_' }).collect() };
     if s.is_empty() { "part".into() } else { s }
+}
+
+/// A file name as file systems compare it: lower case, then NFC, as macOS treats a name in its
+/// composed and decomposed Unicode forms as one file.
+fn file_key(name: &str) -> String {
+    use unicode_normalization::UnicodeNormalization as _;
+    name.to_lowercase().nfc().collect()
 }
 
 /// Unique names over links, joints and files (SDFormat refuses a joint named like a link).
@@ -225,7 +235,7 @@ impl Names {
         let base = sanitise(raw, true);
         let mut name = format!("{base}.{ext}");
         let mut k = 2;
-        while !self.taken.insert(name.to_lowercase()) {
+        while !self.taken.insert(file_key(&name)) {
             name = format!("{base}_{k}.{ext}");
             k += 1;
         }
@@ -238,7 +248,7 @@ impl Names {
     /// `fold`). Names are never given back, so every suffix below the one kept for `base` is
     /// taken, and the search starts there.
     fn free(&mut self, base: String, fold: bool) -> String {
-        let key = |n: &str| if fold { n.to_lowercase() } else { n.to_string() };
+        let key = |n: &str| if fold { file_key(n) } else { n.to_string() };
         if self.taken.insert(key(&base)) {
             return base;
         }
@@ -1213,6 +1223,11 @@ mod tests {
         assert_eq!(n.file("Ärm"), "Ärm.stl");
         assert_eq!(n.file("ärm"), "ärm_2.stl", "case is folded beyond ASCII too");
         assert_eq!(n.take("红块"), "__");
+        // One name in its composed and decomposed forms is one file; a combining accent is kept.
+        assert_eq!(n.file("café"), "café.stl");
+        assert_eq!(n.file("cafe\u{301}"), "café_2.stl");
+        assert_eq!(n.file("\u{1100}\u{1161}"), "\u{ac00}.stl");
+        assert_eq!(n.file("\u{ac00}"), "\u{ac00}_2.stl");
     }
 
     #[test]
