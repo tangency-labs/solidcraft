@@ -33,7 +33,7 @@ pub static COMMANDS: &[CommandSpec] =
              on all its faces, refused for any other); worst? (0 to 1000, default 10); per_point?: bool → cloud, body, faces, signed, sign_convention, \
              tolerance_mm, cloud_points, sample_step, sampled, measured, failed, mean_abs_mm, mean_signed_mm, rms_mm, max_abs_mm, within_tolerance, \
              within_tolerance_fraction, outside, inside, on_boundary, worst: [{index, point, closest, distance_mm}], failures: [{index, reason}], \
-             distances (with per_point), body_tolerance_mm, point_precision_mm, warnings. Distances are measured on the exact faces, edges and vertices \
+             distances and closest (with per_point), body_tolerance_mm, point_precision_mm, warnings. Distances are measured on the exact faces, edges and vertices \
              of the body as placed now, from the cloud as placed now; nothing changes. Statistics count each measured point once and are null when no \
              point was measured. The maximum is a sampled maximum, and points far from a part of the body say nothing about that part",
         )];
@@ -213,7 +213,13 @@ fn deviation(s: &mut Session, p: &Value) -> Result<Value> {
     let magnitude = cloud.points.bounds().map(|(lo, hi)| lo.iter().chain(hi.iter()).fold(0.0_f64, |m, v| m.max(f64::from(*v).abs()))).unwrap_or(0.0);
     let point_precision_mm = f32_precision(magnitude);
 
+    // Cancel reaches the worker threads through the progress watching this one: a point not yet
+    // measured is skipped, and the command then answers that it was cancelled.
+    let progress = solidcraft_doc::progress::current();
     let outcomes: Vec<Outcome> = solidcraft_kernel::map_on_threads(&indices, THREADS, |&i| {
+        if progress.as_ref().is_some_and(|p| p.is_cancelled()) {
+            return Outcome::Failed("cancelled".to_string());
+        }
         let Some(point) = cloud.world_point(i) else { return Outcome::Failed("the point is missing from the cloud".to_string()) };
         if !(point.x.is_finite() && point.y.is_finite() && point.z.is_finite()) {
             return Outcome::Failed("the point's coordinates are not finite".to_string());
@@ -247,7 +253,12 @@ fn deviation(s: &mut Session, p: &Value) -> Result<Value> {
         None
     };
 
+    if solidcraft_doc::progress::cancelled() {
+        return Err(EngineError::Cancelled(cmd.to_string()));
+    }
+
     let mut distances: Vec<Option<f64>> = Vec::with_capacity(outcomes.len());
+    let mut closest_points: Vec<Option<[f64; 3]>> = Vec::with_capacity(if per_point { outcomes.len() } else { 0 });
     let mut listed: Vec<DeviationPoint> = Vec::new();
     let mut failures: Vec<DeviationFailure> = Vec::new();
     let (mut failed, mut within, mut sum_abs, mut sum_signed, mut sum_sq) = (0usize, 0usize, 0.0_f64, 0.0_f64, 0.0_f64);
@@ -259,6 +270,9 @@ fn deviation(s: &mut Session, p: &Value) -> Result<Value> {
             Outcome::Failed(reason) => {
                 failed += 1;
                 distances.push(None);
+                if per_point {
+                    closest_points.push(None);
+                }
                 if failures.len() < MAX_FAILURES {
                     failures.push(DeviationFailure { index, reason: reason.clone() });
                 }
@@ -290,6 +304,9 @@ fn deviation(s: &mut Session, p: &Value) -> Result<Value> {
                 }
                 max_abs = Some(max_abs.map_or(a, |m: f64| m.max(a)));
                 distances.push(Some(value));
+                if per_point {
+                    closest_points.push(Some((*closest).into()));
+                }
                 listed.push(DeviationPoint { index, point: (*point).into(), closest: (*closest).into(), distance_mm: value });
             }
         }
@@ -329,6 +346,7 @@ fn deviation(s: &mut Session, p: &Value) -> Result<Value> {
         worst: listed,
         failures,
         distances: per_point.then_some(distances),
+        closest: per_point.then_some(closest_points),
         body_tolerance_mm: body.record().tolerance,
         point_precision_mm,
         warnings,
@@ -397,6 +415,13 @@ mod tests {
         assert!(close(f(&r, "rms_mm"), ((0.05f64.powi(2) + 0.01 + 0.09 + 0.04) / 4.0).sqrt()));
         assert!(close(f(&r, "max_abs_mm"), 0.3));
         assert_eq!((r["outside"].as_u64(), r["inside"].as_u64()), (Some(3), Some(1)));
+        // Each point's closest point on the body: straight below or above it on the top face.
+        let closest = r["closest"].as_array().unwrap();
+        assert_eq!(closest.len(), 4);
+        for (c, p) in closest.iter().zip(pts) {
+            let c: Vec<f64> = c.as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
+            assert!(close(c[0], f64::from(p[0])) && close(c[1], f64::from(p[1])) && close(c[2], 10.0), "closest {c:?} to {p:?}");
+        }
         assert_eq!(r["worst"][0]["index"], json!(2));
         let c = &r["worst"][0]["closest"];
         assert!(close(c[0].as_f64().unwrap(), 15.0) && close(c[1].as_f64().unwrap(), 5.0) && close(c[2].as_f64().unwrap(), 10.0));
@@ -520,5 +545,18 @@ mod tests {
         ] {
             assert!(s.execute("pointcloud.deviation", &p).is_err(), "{p} should be refused");
         }
+    }
+
+    #[test]
+    fn a_cancelled_run_answers_cancelled_and_publishes_no_result() {
+        let mut s = box_and_cloud("cancel", &[[5.0, 5.0, 10.5], [15.0, 15.0, 11.0]]);
+        let progress = std::sync::Arc::new(solidcraft_doc::progress::Progress::default());
+        progress.cancel();
+        let r = solidcraft_doc::progress::watch(progress, || s.execute("pointcloud.deviation", &json!({"cloud": "scan", "body": "Box"})));
+        assert!(matches!(r, Err(crate::EngineError::Cancelled(_))), "{r:?}");
+        // Without a cancel, the same call measures both points.
+        let r = s.execute("pointcloud.deviation", &json!({"cloud": "scan", "body": "Box"})).unwrap();
+        assert_eq!(r["measured"].as_u64(), Some(2));
+        assert!(r.get("closest").is_none() && r.get("distances").is_none());
     }
 }

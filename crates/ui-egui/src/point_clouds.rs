@@ -241,6 +241,8 @@ pub fn gpu_clouds(app: &SolveApp, ctx: &egui::Context) -> Vec<GpuCloud> {
         m.retain(|id, _| doc.point_clouds.iter().any(|c| c.id == *id));
         solidcraft_engine::view::shown_point_clouds(&app.session)
             .map(|c| {
+                // Coloured by its distances while the Point Cloud Deviation card shows them.
+                let c = &*crate::point_cloud_deviation::drawn(app, c);
                 let key = Key::of(c);
                 let (version, [dots, segments, triangles]) = match m.get(&c.id) {
                     Some((k, version, records)) if *k == key => (*version, records.clone()),
@@ -262,18 +264,25 @@ pub fn gpu_clouds(app: &SolveApp, ctx: &egui::Context) -> Vec<GpuCloud> {
 }
 
 /// CPU viewport only: some of each shown cloud's points over the rendered model.
+/// Without the GPU, every `stride`th point of each shown cloud is drawn, so that all of them
+/// together come to no more than [`MAX_CPU_POINTS`].
+pub(crate) fn cpu_stride(app: &SolveApp) -> usize {
+    let total: usize = solidcraft_engine::view::shown_point_clouds(&app.session).map(|c| c.len()).sum();
+    total.div_ceil(MAX_CPU_POINTS).max(1)
+}
+
 pub fn show(app: &SolveApp, painter: &Painter, proj: &Proj) {
     if app.viewport.gpu.is_some() {
         return;
     }
     let clouds: Vec<&PointCloud> = solidcraft_engine::view::shown_point_clouds(&app.session).collect();
-    let total: usize = clouds.iter().map(|c| c.len()).sum();
-    if total == 0 {
+    if clouds.iter().all(|c| c.is_empty()) {
         return;
     }
-    let stride = total.div_ceil(MAX_CPU_POINTS).max(1);
+    let stride = cpu_stride(app);
     let mut shapes = Vec::new();
     for c in clouds {
+        let c = &*crate::point_cloud_deviation::drawn(app, c);
         let r = (c.point_size as f32 / painter.ctx().pixels_per_point() * 0.5).max(0.5);
         let shade = c.shade(color_range(painter.ctx(), c));
         for i in (0..c.len()).step_by(stride) {
