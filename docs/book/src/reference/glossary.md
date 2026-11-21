@@ -758,7 +758,9 @@ straight edge square to them.
 - **In SolidCraft:** the `turn` parameter of `solid.fillet` and its design-file key: `auto` (the
   default for a new fillet, "Auto": swept where the swept turn is built, mitred
   elsewhere), `mitre` (a fillet saved without the key, as older designs are) or `swept`; the
-  Fillet dialog's Turns row.
+  Fillet dialog's Turns row. A fillet at per-edge radii (`radii`) is the exception: it is
+  mitred when it names no turn, since a swept turn takes one radius, so a caller that wants
+  Auto there says `turn: auto`.
 - **Don't use:** corner (that is what fills a corner where three rounded edges meet, `corner`).
 - **Elsewhere:** mitred corner, swept corner, corner sweep.
 - **For translators:** "Mitre" and "Swept" name the two shapes, not a direction of travel;
