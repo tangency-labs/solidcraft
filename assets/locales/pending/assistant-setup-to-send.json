@@ -1,0 +1,10 @@
+{
+  "en": {"ui.agent_chat_setup_to_send": "Add an agent before sending a message."},
+  "ar": {"ui.agent_chat_setup_to_send": "أضف وكيلاً قبل إرسال رسالة."},
+  "de": {"ui.agent_chat_setup_to_send": "Fügen Sie vor dem Senden einer Nachricht einen Agenten hinzu."},
+  "he": {"ui.agent_chat_setup_to_send": "יש להוסיף סוכן לפני שליחת הודעה."},
+  "ja": {"ui.agent_chat_setup_to_send": "メッセージを送信する前にエージェントを追加してください。"},
+  "ko": {"ui.agent_chat_setup_to_send": "메시지를 보내기 전에 에이전트를 추가하세요."},
+  "vi": {"ui.agent_chat_setup_to_send": "Hãy thêm tác nhân trước khi gửi tin nhắn."},
+  "zh": {"ui.agent_chat_setup_to_send": "发送消息前请先添加代理。"}
+}
