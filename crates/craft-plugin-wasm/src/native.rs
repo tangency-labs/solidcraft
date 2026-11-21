@@ -71,6 +71,9 @@ fn trap(reason: impl Into<String>) -> HostError {
 }
 fn wit_error(error: HostError) -> PluginError {
     match error {
+        error @ HostError::StaleRevision { .. } => {
+            PluginError::CommandFailed(types::CommandFailure { command: "plugin.run".into(), reason: error.to_string() })
+        }
         HostError::PermissionDenied { permission } => PluginError::PermissionDenied(permission),
         HostError::CommandFailed { command, reason } => PluginError::CommandFailed(types::CommandFailure { command, reason }),
         HostError::LimitExceeded { limit } => PluginError::LimitExceeded(limit),
@@ -112,6 +115,7 @@ struct State<H> {
     groups: BTreeSet<String>,
     granted_capabilities: Vec<String>,
     effect: Effect,
+    design_tokens: bool,
     folders: BTreeMap<String, Folder>,
     staged: BTreeMap<(String, PathBuf), PendingWrite>,
     clock: bool,
@@ -226,6 +230,20 @@ impl<H: PluginHost> commands::Host for State<H> {
         let text = serde_json::to_string(&result).map_err(|e| self.fail(trap(e.to_string())))?;
         if text.len() > MAX_JSON_BYTES {
             return Err(self.fail(limit("command result size")));
+        }
+        Ok(text)
+    }
+}
+impl<H: PluginHost> design_state::Host for State<H> {
+    fn get_token(&mut self) -> std::result::Result<String, PluginError> {
+        self.check()?;
+        if !self.design_tokens {
+            return Err(self.fail(HostError::PermissionDenied { permission: "design@0.1 capability is required".into() }));
+        }
+        let token = self.host.design_token().map_err(|error| self.fail(error))?;
+        let text = serde_json::to_string(&token).map_err(|error| self.fail(trap(error.to_string())))?;
+        if text.len() > MAX_JSON_BYTES {
+            return Err(self.fail(limit("design token JSON size")));
         }
         Ok(text)
     }
@@ -680,6 +698,12 @@ pub(super) fn run<H: PluginHost + 'static>(
     options: RuntimeOptions,
 ) -> (H, Result<Value>) {
     let prepared = (|| {
+        // A direct runtime caller may not have used parse_manifest. Validate only this new
+        // capability here, preserving older imports' existing validated-manifest contract.
+        let design_capabilities: Vec<String> =
+            manifest.capabilities.iter().filter(|capability| capability.split('@').next() == Some("design")).take(17).cloned().collect();
+        craft_plugin::check_capabilities(&design_capabilities, "the host")?;
+        let design_tokens = manifest.granted_capabilities().iter().any(|capability| capability.starts_with("design@"));
         let runtime = manifest
             .runtime
             .as_ref()
@@ -719,7 +743,7 @@ pub(super) fn run<H: PluginHost + 'static>(
             return Err(HostError::Cancelled);
         }
         host.begin_transaction()?;
-        Ok((runtime, entry, params, (engine, component, stack), (commands, groups), folders))
+        Ok((runtime, entry, params, (engine, component, stack), (commands, groups, design_tokens), folders))
     })();
     let (runtime, entry, params, compiled, commands, folders) = match prepared {
         Ok(prepared) => prepared,
@@ -750,7 +774,7 @@ fn execute<H: PluginHost + 'static>(
     entry: &craft_plugin::Entry,
     params: String,
     (engine, component, stack): (Engine, Component, usize),
-    (commands, groups): (BTreeMap<String, CommandSchema>, BTreeSet<String>),
+    (commands, groups, design_tokens): (BTreeMap<String, CommandSchema>, BTreeSet<String>, bool),
     folders: BTreeMap<String, Folder>,
     granted_capabilities: Vec<String>,
 ) -> (State<H>, Result<Value>) {
@@ -761,6 +785,7 @@ fn execute<H: PluginHost + 'static>(
         groups,
         granted_capabilities,
         effect: entry.effect,
+        design_tokens,
         folders,
         staged: BTreeMap::new(),
         clock: runtime.permissions.clock,
@@ -1107,6 +1132,7 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         groups: BTreeSet::new(),
         granted_capabilities: manifest.granted_capabilities(),
         effect: Effect::Open,
+        design_tokens: false,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
         clock: runtime.permissions.clock,

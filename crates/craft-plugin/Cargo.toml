@@ -9,6 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+image = { workspace = true, features = ["jpeg"] }
 schemars = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true }

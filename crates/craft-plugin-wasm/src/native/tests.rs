@@ -13,6 +13,7 @@ struct App {
     rollbacks: usize,
     grants: Vec<FileGrant>,
     cancelled: bool,
+    no_design: bool,
     fail_commit: bool,
     unchanged_at_commit: Option<PathBuf>,
     /// The sensitive group `app.write` is in, and the groups the user granted.
@@ -20,6 +21,10 @@ struct App {
     groups: BTreeSet<String>,
 }
 impl PluginHost for App {
+    fn design_token(&self) -> Result<Option<craft_plugin::DesignToken>> {
+        Ok((!self.no_design)
+            .then(|| craft_plugin::DesignToken { document_id: "design-one".into(), revision: "0123456789abcdef0123456789abcdef:7".into() }))
+    }
     fn command_catalog(&self) -> Vec<CommandSchema> {
         vec![CommandSchema {
             name: "app.write".into(),
@@ -253,6 +258,61 @@ fn linker_has_no_socket_or_http_imports() {
     }
 }
 #[test]
+fn design_token_import_requires_its_capability_and_returns_identity_and_revision() {
+    let mut manifest = manifest();
+    manifest.runtime.as_mut().unwrap().entries[0].effect = Effect::Read;
+    let component = design_token_component();
+    let (_, result) = crate::run(App::default(), &manifest, &component, "make", &json!({}));
+    assert!(matches!(result, Err(HostError::PermissionDenied { permission }) if permission.contains("design@0.1")));
+    for capability in ["design@99.0", "design@bogus"] {
+        manifest.capabilities = vec!["commands@0.1".into(), capability.into()];
+        let (app, result) = crate::run(App::default(), &manifest, &component, "make", &json!({}));
+        assert!(matches!(
+            (capability, result),
+            ("design@99.0", Err(HostError::UnsupportedCapability { .. })) | ("design@bogus", Err(HostError::InvalidManifest { .. }))
+        ));
+        assert_eq!(app.begins, 0);
+    }
+    for capability in ["design@0.1", "design@0.1.3"] {
+        manifest.capabilities = vec!["commands@0.1".into(), capability.into()];
+        let (_, result) = crate::run(App::default(), &manifest, &component, "make", &json!({}));
+        assert_eq!(result.unwrap(), json!({"document_id":"design-one","revision":"0123456789abcdef0123456789abcdef:7"}));
+    }
+    let (_, result) = crate::run(App { no_design: true, ..Default::default() }, &manifest, &component, "make", &json!({}));
+    assert_eq!(result.unwrap(), Value::Null);
+}
+
+#[test]
+fn capability_query_and_design_token_import_agree_on_optional_design_support() {
+    for (capability, supported) in [("design@0.1", true), ("design@0.1.3", true), ("design@99.0", false)] {
+        let mut manifest = manifest();
+        manifest.capabilities.push("host@0.1".into());
+        manifest.optional_capabilities = vec![capability.into(), "future@0.1".into()];
+        manifest.runtime.as_mut().unwrap().entries[0].effect = Effect::Read;
+        let mut expected = vec!["commands@0.1", "host@0.1"];
+        if supported {
+            expected.push(capability);
+        }
+        let component = with_capability_query(include_str!("../design_fixture.wat"), &expected);
+        crate::check_component(&manifest, &component).unwrap();
+        let (app, result) = crate::run(App::default(), &manifest, &component, "make", &json!({}));
+        if supported {
+            assert_eq!(result.unwrap(), json!({"document_id":"design-one","revision":"0123456789abcdef0123456789abcdef:7"}));
+            assert_eq!((app.commits, app.rollbacks), (1, 0));
+        } else {
+            assert!(matches!(result, Err(HostError::PermissionDenied { permission }) if permission.contains("design@0.1")));
+            assert_eq!((app.commits, app.rollbacks), (0, 1));
+        }
+    }
+}
+
+fn design_token_component() -> Vec<u8> {
+    let (package, version) = API.split_once('@').unwrap();
+    let source = include_str!("../design_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version);
+    wat::parse_str(source).unwrap()
+}
+
+#[test]
 fn read_entries_cannot_edit_even_when_manifest_grants_the_command() {
     let mut manifest = manifest();
     manifest.runtime.as_mut().unwrap().entries[0].effect = Effect::Read;
@@ -378,6 +438,7 @@ fn state<H: PluginHost>(app: H) -> State<H> {
         groups: BTreeSet::new(),
         granted_capabilities: Vec::new(),
         effect: Effect::Edit,
+        design_tokens: false,
         folders: BTreeMap::new(),
         staged: BTreeMap::new(),
         clock: false,
