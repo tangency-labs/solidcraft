@@ -5938,16 +5938,17 @@ fn a_full_round_whose_rails_meet_along_part_of_one_of_them() {
     }
 }
 
-/// SolidCraft #19967, case 1: the 12 x 24 x 9 block inside the cylinder of radius R = 81.25
-/// about the line x = R, y = 4; the cylinder's edge on the floor (z = 0) chamfered 2, which
+/// SolidCraft #19967, case 1: the 13 x 24 x 9 block from x = -1 inside the cylinder of radius
+/// R = 81.25 about the line x = R, y = 4, which alone bounds it towards x = 0 (no face of the
+/// block touches it); the cylinder's edge on the floor (z = 0) chamfered 2, which
 /// makes a cone of half-angle 45 degrees, rho = R - 2 + z about that line, then the edge
 /// between the end wall y = 24 and that cone chamfered 0.5. The second chamfer's ruled surface
 /// is exact but very uneven in speed across its rulings (its rails' weights differ about
 /// 58-fold), and the crossing of its end with the floor was not fitted (`sm_SurfacePlaneCurve`
 /// ran out of its 20 passes).
 ///
-/// Expected: a valid body; the chamfered edge runs between two vertices where three faces
-/// meet, so the chamfer adds a face, three edges and two vertices: (8, 18, 12) after
+/// Expected: a valid body and one face made; the chamfered edge runs between two vertices where
+/// three faces meet, so the chamfer adds a face, three edges and two vertices: (8, 18, 12) after
 /// (7, 15, 10). The volume it takes off is its cross-section, the triangle of legs d = 0.5 at
 /// the dihedral angle alpha between the wall and the cone, times the length of the edge, the
 /// hyperbola x = R - sqrt((R - 2 + z)^2 - 400) on y = 24 for z in [0, 2]. The cone's
@@ -5965,8 +5966,8 @@ fn a_chamfer_between_a_wall_and_a_cone_an_earlier_chamfer_made_builds() {
     let b = built(|k| {
         let block = create_box(
             k,
-            solidcore::math::Point3::new(0.0, 0.0, 0.0),
-            12.0,
+            solidcore::math::Point3::new(-1.0, 0.0, 0.0),
+            13.0,
             24.0,
             9.0,
         )?;
@@ -5988,7 +5989,7 @@ fn a_chamfer_between_a_wall_and_a_cone_an_earlier_chamfer_made_builds() {
     let before = b.volume(1e-10).unwrap();
     // on the wall y = 24, the cone at z = 1 (rho = R - 1)
     let wall_edge = edge_at(&b, [r - ((r - 1.0).powi(2) - 400.0).sqrt(), 24.0, 1.0]);
-    blend(
+    let made = blend(
         &b,
         Blend::Chamfer,
         &[wall_edge],
@@ -5997,6 +5998,7 @@ fn a_chamfer_between_a_wall_and_a_cone_an_earlier_chamfer_made_builds() {
         Corners::Filled,
     )
     .unwrap();
+    assert_eq!(made.made.len(), 1);
     let report = b.check(CheckLevel::All).unwrap();
     assert!(report.is_valid(), "{report}");
     assert_eq!(b.counts().unwrap(), [8, 18, 12]);
