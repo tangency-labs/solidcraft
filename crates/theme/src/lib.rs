@@ -1647,6 +1647,28 @@ pub fn panel_motion_ease(progress: f32) -> f32 {
 mod tests {
     use super::*;
 
+    /// #17239: dark-mode shaded bodies and their hover should be less bright while retaining
+    /// sufficient body/background contrast; the light palette is unchanged.
+    #[test]
+    fn dark_viewport_body_and_hover_have_subdued_contrast() {
+        let dark = Tokens::dark();
+        let light = Tokens::light();
+        assert_eq!(dark.body, Color32::from_rgb(136, 140, 148));
+        assert_eq!(dark.hover_face_lift, 24);
+        assert_eq!(light.body, Color32::from_rgb(176, 186, 198));
+        assert_eq!(light.hover_face_lift, 40);
+        assert!(contrast_ratio(dark.body, dark.viewport_top) >= 3.0, "body must remain readable against the viewport");
+        assert!(contrast_ratio(dark.body, dark.isoparm) >= 1.5, "isoparms must remain visible");
+        for (body, hovered) in [
+            (dark.body.r(), dark.body.r().saturating_add(dark.hover_face_lift)),
+            (dark.body.g(), dark.body.g().saturating_add(dark.hover_face_lift)),
+            (dark.body.b(), dark.body.b().saturating_add(dark.hover_face_lift)),
+        ] {
+            assert!(hovered > body + 12, "hover must still be distinguishable");
+            assert!(hovered < 180, "the hovered surface must stay subdued");
+        }
+    }
+
     /// A surface's isoparms show on its faces less than its edges do, and stay visible against the
     /// view's background (seen at the sheet's silhouette), on both bases.
     #[test]

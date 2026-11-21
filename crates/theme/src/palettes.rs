@@ -446,7 +446,10 @@ impl Tokens {
         t.viewport_bottom = Color32::from_rgb(46, 52, 64);
         t.grid = Color32::from_rgb(59, 65, 76);
         t.grid_major = Color32::from_rgb(73, 79, 90);
-        t.body = Color32::from_rgb(152, 156, 162);
+        // Subdued shaded faces help sketch lines remain legible over a top-down solid (#17239).
+        t.body = Color32::from_rgb(136, 140, 148);
+        // Hover remains visible without washing out the face in dark mode.
+        t.hover_face_lift = 24;
         t.body_edge = Color32::from_rgb(16, 16, 18);
         t.isoparm = Color32::from_rgb(84, 86, 90);
         t.sketch = Color32::from_rgb(92, 150, 255);
