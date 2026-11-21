@@ -133,6 +133,7 @@ use crate::blend::fillet_section::station::{span, Nurbs};
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::curve::native_affine::{exact_four_products_zero, of_line};
+use crate::error::intersect::IntersectFailure;
 use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::expansion;
 use crate::geom::extent1d::Extent1d;
@@ -157,8 +158,9 @@ use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, VertexId};
 
 use super::p1::{
-    get_curve_curve_angle, src_zone_tol_3d_of, xsect_tol_2d_or_3d_for_classify_pair,
-    CurveClassification, CurveInterval, IntervalPosition, TouchData,
+    get_curve_curve_angle, missing_defect, src_zone_tol_3d_of,
+    xsect_tol_2d_or_3d_for_classify_pair, CurveClassification, CurveInterval, IntervalPosition,
+    TouchData, PC_NO_OBJECT,
 };
 
 const OP_INDEX: &str = "intersect::curve_class::p7::point_class_by_index";
@@ -368,17 +370,20 @@ impl<O: ClassObject> CurveClassification<O> {
     ) -> Result<()> {
         // check input - lInterval index is valid
         if index >= self.size() {
-            return Err(SolidError::intersect_failed(
+            return Err(SolidError::intersect(
                 OP_COLLAPSE,
-                "the interval index is past the end of the classification",
+                IntersectFailure::IntervalIndexPastEnd {
+                    index,
+                    size: self.size(),
+                },
             ));
         }
 
         // Do not squeeze out the only interval.  [B232]
         if self.size() < 2 {
-            return Err(SolidError::intersect_failed(
+            return Err(SolidError::intersect(
                 OP_COLLAPSE,
-                "the only interval of the classification is not squeezed out",
+                IntersectFailure::OnlyInterval,
             ));
         }
 
@@ -401,9 +406,9 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // no work and an error - CurveClassification interval is not degenerate
         if !curve_is_degenerate(k, Some(curve), &ivl.interval, xsect_tol_2d_or_3d)? {
-            return Err(SolidError::intersect_failed(
+            return Err(SolidError::intersect(
                 OP_COLLAPSE,
-                "the interval to collapse is not degenerate",
+                IntersectFailure::IntervalNotDegenerate,
             ));
         }
 
@@ -1647,12 +1652,14 @@ fn set_do_filleting_geometry_with<O: ClassObject>(
         {
             return Ok(());
         }
-        let this_v = this_ivl.start.vertex_object().ok_or_else(|| {
-            SolidError::intersect_missing(OP_FILLET, "the vertex at this interval's start")
-        })?;
-        let other_v = other_ivl.start.vertex_object().ok_or_else(|| {
-            SolidError::intersect_missing(OP_FILLET, "the vertex at the other interval's start")
-        })?;
+        let this_v = this_ivl
+            .start
+            .vertex_object()
+            .ok_or_else(|| missing_defect(OP_FILLET, PC_NO_OBJECT))?;
+        let other_v = other_ivl
+            .start
+            .vertex_object()
+            .ok_or_else(|| missing_defect(OP_FILLET, PC_NO_OBJECT))?;
         let point = vertex_point(access.geometry(), other_v)?;
         access.set_vertex_point(this_v, point)?;
     }
@@ -1664,12 +1671,14 @@ fn set_do_filleting_geometry_with<O: ClassObject>(
         {
             return Ok(());
         }
-        let this_v = this_ivl.end.vertex_object().ok_or_else(|| {
-            SolidError::intersect_missing(OP_FILLET, "the vertex at this interval's end")
-        })?;
-        let other_v = other_ivl.end.vertex_object().ok_or_else(|| {
-            SolidError::intersect_missing(OP_FILLET, "the vertex at the other interval's end")
-        })?;
+        let this_v = this_ivl
+            .end
+            .vertex_object()
+            .ok_or_else(|| missing_defect(OP_FILLET, PC_NO_OBJECT))?;
+        let other_v = other_ivl
+            .end
+            .vertex_object()
+            .ok_or_else(|| missing_defect(OP_FILLET, PC_NO_OBJECT))?;
         let point = vertex_point(access.geometry(), other_v)?;
         access.set_vertex_point(this_v, point)?;
     }
@@ -1683,16 +1692,18 @@ fn set_do_filleting_geometry_with<O: ClassObject>(
         }
 
         // this mid edge
-        let this_edge = this_ivl.mid.edge_object().ok_or_else(|| {
-            SolidError::intersect_missing(OP_FILLET, "the edge of this interval's middle")
-        })?;
+        let this_edge = this_ivl
+            .mid
+            .edge_object()
+            .ok_or_else(|| missing_defect(OP_FILLET, PC_NO_OBJECT))?;
         let this_edge_curve = edge_curve(access.geometry(), this_edge)?;
         let this_edge_ivl = edge_interval(access.geometry(), Some(this_edge))?;
 
         // other mid edge
-        let other_edge = other_ivl.mid.edge_object().ok_or_else(|| {
-            SolidError::intersect_missing(OP_FILLET, "the edge of the other interval's middle")
-        })?;
+        let other_edge = other_ivl
+            .mid
+            .edge_object()
+            .ok_or_else(|| missing_defect(OP_FILLET, PC_NO_OBJECT))?;
         let other_edge_curve = edge_curve(access.geometry(), other_edge)?;
         let other_edge_ivl = edge_interval(access.geometry(), Some(other_edge))?;
 
@@ -1899,9 +1910,10 @@ fn classify_face_interval_on<O: ClassObject>(
     match ivl.start.point_class() {
         PointClassType::Vertex => {
             did_min = true;
-            let v = ivl.start.object().ok_or_else(|| {
-                SolidError::intersect_missing(OP_FACE, "the vertex at the interval's start")
-            })?;
+            let v = ivl
+                .start
+                .object()
+                .ok_or_else(|| missing_defect(OP_FACE, PC_NO_OBJECT))?;
             let (curve, uv_curve) = context_curves(access.geometry(), ctx)?;
             min = access.find_vertex_sector(
                 k,
@@ -1918,9 +1930,10 @@ fn classify_face_interval_on<O: ClassObject>(
         }
         PointClassType::Edge => {
             did_min = true;
-            let e = ivl.start.object().ok_or_else(|| {
-                SolidError::intersect_missing(OP_FACE, "the edge at the interval's start")
-            })?;
+            let e = ivl
+                .start
+                .object()
+                .ok_or_else(|| missing_defect(OP_FACE, PC_NO_OBJECT))?;
             let curve = context_curve(access.geometry(), ctx)?.clone();
             min = access.edge_curve_on_classify(
                 k,
@@ -1942,9 +1955,10 @@ fn classify_face_interval_on<O: ClassObject>(
     match ivl.end.point_class() {
         PointClassType::Vertex => {
             did_max = true;
-            let v = ivl.end.object().ok_or_else(|| {
-                SolidError::intersect_missing(OP_FACE, "the vertex at the interval's end")
-            })?;
+            let v = ivl
+                .end
+                .object()
+                .ok_or_else(|| missing_defect(OP_FACE, PC_NO_OBJECT))?;
             let (curve, uv_curve) = context_curves(access.geometry(), ctx)?;
             max = access.find_vertex_sector(
                 k,
@@ -1961,9 +1975,10 @@ fn classify_face_interval_on<O: ClassObject>(
         }
         PointClassType::Edge => {
             did_max = true;
-            let e = ivl.end.object().ok_or_else(|| {
-                SolidError::intersect_missing(OP_FACE, "the edge at the interval's end")
-            })?;
+            let e = ivl
+                .end
+                .object()
+                .ok_or_else(|| missing_defect(OP_FACE, PC_NO_OBJECT))?;
             let curve = context_curve(access.geometry(), ctx)?.clone();
             max = access.edge_curve_on_classify(
                 k,
@@ -2189,12 +2204,12 @@ fn partial_coincidence<O: ClassObject>(
     o_mid: &PointClassification<O>,
     check: CoinCheck,
 ) -> Result<Option<PartialCoincidence>> {
-    let edge = mid.object().ok_or_else(|| {
-        SolidError::intersect_missing(OP_PARTIAL, "the edge of the interval's middle")
-    })?;
-    let o_edge = o_mid.object().ok_or_else(|| {
-        SolidError::intersect_missing(OP_PARTIAL, "the edge of the other interval's middle")
-    })?;
+    let edge = mid
+        .object()
+        .ok_or_else(|| missing_defect(OP_PARTIAL, PC_NO_OBJECT))?;
+    let o_edge = o_mid
+        .object()
+        .ok_or_else(|| missing_defect(OP_PARTIAL, PC_NO_OBJECT))?;
     let curve = edge_curve(geometry, edge)?;
     let o_curve = edge_curve(geometry, o_edge)?;
     let edge_ivl = edge_interval(geometry, Some(edge))?;
@@ -2394,7 +2409,8 @@ fn connect_target<O: ClassObject>(
 /// `SmEdge::GetCurve`; a `NULL` curve is dereferenced by every caller.
 fn edge_curve<O: ClassObject>(geometry: &impl ClassGeometry<O>, edge: O) -> Result<&Curve> {
     let (b, e) = edge_of(geometry, edge, "SmEdge::GetCurve")?;
-    edge::curve(b, e)?.ok_or_else(|| SolidError::intersect_missing(OP_GEOM, "the edge's curve"))
+    edge::curve(b, e)?
+        .ok_or_else(|| SolidError::intersect(OP_GEOM, IntersectFailure::EdgeWithoutCurve))
 }
 
 /// `SmEdge::GetInterval` (of the edge object of a classification; a `NULL` edge is
@@ -2403,8 +2419,8 @@ fn edge_interval<O: ClassObject>(
     geometry: &impl ClassGeometry<O>,
     edge: Option<O>,
 ) -> Result<Extent1d> {
-    let edge =
-        edge.ok_or_else(|| SolidError::intersect_missing(OP_GEOM, "the classification's edge"))?;
+    // every caller passes the object of a point classified to an edge
+    let edge = edge.ok_or_else(|| missing_defect(OP_GEOM, PC_NO_OBJECT))?;
     let (b, e) = edge_of(geometry, edge, "SmEdge::GetInterval")?;
     edge::interval(b, e)
 }
@@ -4161,11 +4177,25 @@ mod tests {
         let geo = Geo {
             curves: vec![line([0.0; 3], [1.0, 0.0, 0.0])],
         };
+        let cause = |r: Result<()>| r.unwrap_err().intersect_failure().copied();
         let mut cc = classification(&k, &[0.0, 0.5, 0.5, 1.0]);
-        assert!(cc.collapse_interval(&k, &geo, 0).is_err());
+        assert_eq!(
+            cause(cc.collapse_interval(&k, &geo, 0)),
+            Some(IntersectFailure::IntervalNotDegenerate)
+        );
         cc.collapse_interval(&k, &geo, 1).unwrap();
         assert_eq!(cc.size(), 2);
-        assert!(cc.collapse_interval(&k, &geo, 5).is_err());
+        let e = cc.collapse_interval(&k, &geo, 5).unwrap_err();
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::IntervalIndexPastEnd { index: 5, size: 2 })
+        );
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        let mut only = classification(&k, &[0.0, 1.0]);
+        assert_eq!(
+            cause(only.collapse_interval(&k, &geo, 0)),
+            Some(IntersectFailure::OnlyInterval)
+        );
     }
 
     #[test]
