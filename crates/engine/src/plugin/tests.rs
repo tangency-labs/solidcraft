@@ -3775,6 +3775,7 @@ fn user_storage_persists_across_sessions_and_designs_and_is_private_and_undo_fre
     host.user_storage_set("hinge", &json!({"type":"concealed"})).unwrap();
     assert_eq!(host.user_storage_get("hinge").unwrap(), Some(json!({"type":"concealed"})));
     host.commit_transaction().unwrap();
+    host.publish_committed().unwrap();
     assert!(std::sync::Arc::ptr_eq(&original, &host.session.doc));
     assert!(host.session.undo.is_empty() && host.session.doc.plugin_data.is_empty());
     let mut reopened = user_storage_host(&root, "gears");
@@ -3788,11 +3789,13 @@ fn user_storage_persists_across_sessions_and_designs_and_is_private_and_undo_fre
     assert_eq!(other.user_storage_get("hinge").unwrap(), None);
     other.user_storage_set("hinge", &json!(17)).unwrap();
     other.commit_transaction().unwrap();
+    other.publish_committed().unwrap();
     reopened.begin_transaction().unwrap();
     assert_eq!(reopened.user_storage_get("hinge").unwrap(), Some(json!({"type":"concealed"})));
     assert!(reopened.user_storage_remove("hinge").unwrap());
     assert!(!reopened.user_storage_remove("hinge").unwrap());
     reopened.commit_transaction().unwrap();
+    reopened.publish_committed().unwrap();
     assert_eq!(user_storage::load(&root, "other").unwrap()["hinge"], json!(17));
     host.session.plugin_state.user_storage_caller = None;
     host.begin_transaction().unwrap();
@@ -3821,7 +3824,9 @@ fn user_storage_stale_commits_conflict_without_losing_keys_and_can_be_retried() 
         let original = second.session.doc.clone();
         second.transaction.as_mut().unwrap().doc_mut().name = "Uncommitted".into();
         first.commit_transaction().unwrap();
+        first.publish_committed().unwrap();
         reader.commit_transaction().unwrap();
+        reader.publish_committed().unwrap();
         let committed = user_storage::load(&root, "gears").unwrap();
         let error = second.commit_transaction().unwrap_err();
         assert_eq!(error, HostError::UserStorageConflict { plugin: "gears".into() });
@@ -3837,6 +3842,7 @@ fn user_storage_stale_commits_conflict_without_losing_keys_and_can_be_retried() 
         assert_eq!(second.user_storage_get("first").unwrap(), Some(json!(1)));
         second.user_storage_set("second", &json!(2)).unwrap();
         second.commit_transaction().unwrap();
+        second.publish_committed().unwrap();
         let mut expected = initial.unwrap_or_default();
         expected.extend([("first".into(), json!(1)), ("second".into(), json!(2))]);
         assert_eq!(user_storage::load(&root, "gears").unwrap(), expected);
@@ -3885,6 +3891,7 @@ fn user_storage_bounds_hostile_files_and_keys_before_writing() {
         HostError::LimitExceeded { limit: "user-storage total bytes (65536)".into() }
     );
     host.commit_transaction().unwrap();
+    host.publish_committed().unwrap();
     let path = root.join("plugin-user-data/gears.json");
     std::fs::write(&path, vec![b' '; craft_plugin::MAX_USER_STORAGE_BYTES + 1]).unwrap();
     assert!(matches!(user_storage::load(&root, "gears"), Err(HostError::LimitExceeded { .. })));
@@ -4245,6 +4252,8 @@ fn annotated_folders_need_bound_ui_consent_or_a_current_read_approval() {
 #[test]
 fn a_settings_batch_conflict_publishes_none_of_its_records() {
     let root = solidcraft_io::vfs::temp_dir().join(format!("sc-settings-batch-{}", std::process::id()));
+    // An earlier failed or interrupted run may have left records that would become the base.
+    let _ = std::fs::remove_dir_all(&root);
     let mut state = AppState::default();
     for id in ["first", "last"] {
         let mut data = user_storage::Pending::load(&root, id).unwrap();
@@ -4255,5 +4264,75 @@ fn a_settings_batch_conflict_publishes_none_of_its_records() {
     assert!(matches!(state.publish_user_settings(), Err(HostError::UserStorageConflict { .. })));
     assert!(user_storage::load(&root, "first").unwrap().is_empty());
     assert_eq!(user_storage::load(&root, "last").unwrap(), BTreeMap::from([("external".into(), json!(true))]));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_failed_settings_save_in_a_batch_restores_the_records_already_replaced() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-settings-batch-io-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let before = BTreeMap::from([("keep".into(), json!(1))]);
+    user_storage::save(&root, "first", &before).unwrap();
+    let mut state = AppState::default();
+    for id in ["first", "last"] {
+        let mut data = user_storage::Pending::load(&root, id).unwrap();
+        data.set("candidate", &json!(true)).unwrap();
+        state.pending_user_settings.insert(id.into(), (root.clone(), data));
+    }
+    // "first" saves, then the save of "last" fails.
+    user_storage::fail_batch_save_at(Some(1));
+    assert!(state.publish_user_settings().is_err());
+    user_storage::fail_batch_save_at(None);
+    assert_eq!(user_storage::load(&root, "first").unwrap(), before, "the first record is put back");
+    assert!(user_storage::load(&root, "last").unwrap().is_empty());
+    // The same pending batch can be retried and now publishes both.
+    state.publish_user_settings().unwrap();
+    assert_eq!(user_storage::load(&root, "first").unwrap()["candidate"], json!(true));
+    assert_eq!(user_storage::load(&root, "last").unwrap()["candidate"], json!(true));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn user_settings_are_published_only_after_the_files_and_a_failed_publication_leaves_them() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-settings-after-files-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let mut host = user_storage_host(&root, "gears");
+    host.begin_transaction().unwrap();
+    host.user_storage_set("hinge", &json!(1)).unwrap();
+    host.commit_transaction().unwrap();
+    assert!(user_storage::load(&root, "gears").unwrap().is_empty(), "committing the run does not yet publish settings");
+    // The file publication fails: the caller rolls back instead of publishing.
+    host.rollback_transaction().unwrap();
+    host.publish_committed().unwrap();
+    assert!(user_storage::load(&root, "gears").unwrap().is_empty(), "a failed publication leaves the stored setting unchanged");
+    host.begin_transaction().unwrap();
+    host.user_storage_set("hinge", &json!(1)).unwrap();
+    host.commit_transaction().unwrap();
+    host.publish_committed().unwrap();
+    assert_eq!(user_storage::load(&root, "gears").unwrap()["hinge"], json!(1));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn settings_staged_by_a_nested_import_survive_the_outer_commit() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-settings-nested-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let mut host = user_storage_host(&root, "gears");
+    host.session.plugin_state.defer_user_settings = true;
+    host.begin_transaction().unwrap();
+    host.user_storage_set("outer", &json!(1)).unwrap();
+    // A `doc.open` through an importer with user-storage stages its settings in the transaction.
+    let transaction = host.transaction.as_mut().unwrap();
+    for (id, key) in [("nested", "inner"), ("gears", "inner")] {
+        let mut data = user_storage::Pending::load(&root, id).unwrap();
+        data.set(key, &json!(2)).unwrap();
+        transaction.plugin_state.pending_user_settings.insert(id.into(), (root.clone(), data));
+    }
+    host.commit_transaction().unwrap();
+    assert!(user_storage::load(&root, "nested").unwrap().is_empty(), "deferred until the outer run is accepted");
+    host.session.plugin_state.publish_user_settings().unwrap();
+    assert_eq!(user_storage::load(&root, "nested").unwrap(), BTreeMap::from([("inner".into(), json!(2))]));
+    // An id staged by both: the later, inner stage wins.
+    assert_eq!(user_storage::load(&root, "gears").unwrap(), BTreeMap::from([("inner".into(), json!(2))]));
     std::fs::remove_dir_all(root).unwrap();
 }

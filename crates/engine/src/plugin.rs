@@ -796,18 +796,38 @@ impl PluginHost for SolidCraftHost {
         if self.transaction.is_none() {
             return Err(HostError::InvalidInput { field: "transaction".into(), reason: "not active".into() });
         }
+        // What the outer session had staged before this run; anything the transaction holds beyond
+        // it was staged by a nested import (`doc.open`) and must survive the commit.
+        let base = self.session.plugin_state.pending_user_settings.clone();
+        let mut keep_for_publication = false;
         if let Some(data) = &self.user_data {
             let (settings, id) = self.user_storage_identity()?;
             if self.session.plugin_state.defer_user_settings {
                 self.session.plugin_state.pending_user_settings.insert(id, (settings, data.clone()));
             } else {
-                data.publish(&settings, &id)?;
+                // A stale record refuses the run now; the write waits for `publish_committed`, which
+                // runs only after the approved files are in place.
+                data.check(&settings, &id)?;
+                keep_for_publication = true;
             }
         }
-        self.user_data = None;
+        if !keep_for_publication {
+            self.user_data = None;
+        }
         let mut computed =
             self.transaction.take().ok_or_else(|| HostError::InvalidInput { field: "transaction".into(), reason: "not active".into() })?;
-        computed.plugin_state.pending_user_settings = self.session.plugin_state.pending_user_settings.clone();
+        // Merge, never replace: the transaction's own staged entries (a nested import's) join the
+        // outer session's. An id staged by both is resolved in favour of the later, inner (nested)
+        // stage; an inner entry identical to what it started from is not a stage and never wins.
+        let inner = std::mem::take(&mut computed.plugin_state.pending_user_settings);
+        let mut merged = self.session.plugin_state.pending_user_settings.clone();
+        for (id, entry) in inner {
+            if base.get(&id) != Some(&entry) {
+                merged.insert(id, entry);
+            }
+        }
+        self.session.plugin_state.pending_user_settings = merged.clone();
+        computed.plugin_state.pending_user_settings = merged;
         computed.undo.clear();
         computed.redo.clear();
         // Session::execute(plugin.run) owns the one outer undo step.
@@ -822,6 +842,13 @@ impl PluginHost for SolidCraftHost {
             for message in computed.log {
                 self.session.echo(message);
             }
+        }
+        Ok(())
+    }
+    fn publish_committed(&mut self) -> craft_plugin::Result<()> {
+        if let Some(data) = self.user_data.take() {
+            let (settings, id) = self.user_storage_identity()?;
+            data.publish(&settings, &id)?;
         }
         Ok(())
     }

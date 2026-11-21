@@ -236,6 +236,7 @@ fn convert(
         }
         if user_storage {
             host.commit_transaction()?;
+            host.publish_committed()?;
             session.plugin_state.pending_user_settings = host.session.plugin_state.pending_user_settings;
         }
         session.replace_design(fresh);

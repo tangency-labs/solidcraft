@@ -965,7 +965,14 @@ fn run_mode<H: PluginHost + 'static>(
         execute(host, runtime, entry, params, compiled, commands, (folders, input_folders), granted_capabilities, forms, user_storage, dialog);
     let result = (|| match outcome {
         Ok(value) => match state.host.commit_transaction() {
-            Ok(()) => state.publish_writes().map(|()| value),
+            Ok(()) => match state.publish_writes() {
+                Ok(()) => state.host.publish_committed().map(|()| value),
+                Err(error) => {
+                    // Files may have changed, but the settings stay as they were.
+                    let _ = state.host.rollback_transaction();
+                    Err(error)
+                }
+            },
             Err(error) => {
                 state.host.rollback_transaction()?;
                 Err(error)

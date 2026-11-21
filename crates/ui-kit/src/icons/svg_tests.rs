@@ -268,7 +268,7 @@ fn cyclic_masks_are_rejected_before_rendering_and_acyclic_reuse_still_draws() {
     let valid = "<svg><defs><mask id='a'><path d='M8 8L56 8L56 56Z' fill='white'/></mask><mask id='b'><path d='M8 8L56 8L56 56Z' fill='white' mask='url(#a)'/></mask></defs><path d='M8 8L56 8L56 56Z' fill='currentColor' mask='url(#b)'/><path d='M8 8L56 8L56 56Z' fill='currentColor' mask='url(#a)'/></svg>";
     let doc = TEST_SET.parse(valid).unwrap();
     let image = render(&doc, Look::themed(false, None, solidcraft_theme::ColorVision::Off), 64).unwrap();
-    assert!(image.data().chunks_exact(4).any(|pixel| pixel[3] != 0));
+    assert!(image.data().as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 0));
 }
 
 #[test]

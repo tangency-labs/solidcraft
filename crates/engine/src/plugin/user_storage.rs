@@ -164,6 +164,14 @@ impl Pending {
         self.dirty |= removed;
         removed
     }
+    /// Fail now, without writing, if the record changed since it was loaded.
+    pub fn check(&self, settings: &Path, id: &str) -> Result<()> {
+        if !self.dirty {
+            return Ok(());
+        }
+        let _lock = lock_record(settings, id)?;
+        if load_snapshot(settings, id)?.1 != self.loaded_hash { Err(conflict(id)) } else { Ok(()) }
+    }
     pub fn publish(&self, settings: &Path, id: &str) -> Result<()> {
         if !self.dirty {
             return Ok(());
@@ -176,18 +184,53 @@ impl Pending {
     }
 }
 
-/// Check every candidate under its record lock before writing any of them. In particular, a
-/// conflict in a later command in a worker batch must not publish an earlier command's settings.
+#[cfg(test)]
+thread_local! {
+    /// Test seam: fail the save of the record at this position in a batch, as a full disk would.
+    static FAIL_BATCH_SAVE_AT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+#[cfg(test)]
+pub(crate) fn fail_batch_save_at(position: Option<usize>) {
+    FAIL_BATCH_SAVE_AT.with(|c| c.set(position));
+}
+fn batch_save(position: usize, settings: &Path, id: &str, data: &Data) -> Result<()> {
+    #[cfg(test)]
+    if FAIL_BATCH_SAVE_AT.with(|c| c.get()) == Some(position) {
+        return Err(invalid("injected save failure"));
+    }
+    let _ = position;
+    save_locked(settings, id, data)
+}
+
+/// Publish a batch all or nothing. Every candidate is checked under its record lock first (a
+/// conflict in a later command must not publish an earlier one's settings). The prior record of
+/// each is kept as it is replaced; if any save fails, every record already replaced is put back
+/// (or removed, if it did not exist), still under the locks, and the failure is returned.
 pub(crate) fn publish_all(pending: &BTreeMap<String, (PathBuf, Pending)>) -> Result<()> {
     let mut locks = Vec::new();
+    let mut previous: Vec<(&String, &Path, Option<Data>)> = Vec::new();
     for (id, (settings, data)) in pending.iter().filter(|(_, (_, data))| data.dirty) {
         locks.push(lock_record(settings, id)?);
-        if load_snapshot(settings, id)?.1 != data.loaded_hash {
+        let (old, hash) = load_snapshot(settings, id)?;
+        if hash != data.loaded_hash {
             return Err(conflict(id));
         }
+        previous.push((id, settings, hash.map(|_| old)));
     }
-    for (id, (settings, data)) in pending.iter().filter(|(_, (_, data))| data.dirty) {
-        save_locked(settings, id, &data.data)?;
+    for (position, (id, (settings, data))) in pending.iter().filter(|(_, (_, data))| data.dirty).enumerate() {
+        if let Err(error) = batch_save(position, settings, id, &data.data) {
+            // Best effort, newest first: the original failure is the one reported.
+            for (id, settings, old) in previous.iter().take(position + 1).rev() {
+                let _ = match old {
+                    Some(old) => save_locked(settings, id, old),
+                    None => path(settings, id).and_then(|p| match std::fs::remove_file(p) {
+                        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(invalid(e)),
+                        _ => Ok(()),
+                    }),
+                };
+            }
+            return Err(error);
+        }
     }
     drop(locks);
     Ok(())

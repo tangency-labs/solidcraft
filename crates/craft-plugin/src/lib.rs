@@ -338,6 +338,11 @@ pub trait PluginHost {
     fn run_command(&mut self, name: &str, args: &Value) -> Result<Value>;
     fn begin_transaction(&mut self) -> Result<()>;
     fn commit_transaction(&mut self) -> Result<()>;
+    /// Called after the approved file writes are in place; anything that must not outlive a failed
+    /// publication (per-user settings) is made permanent here. Nothing to do by default.
+    fn publish_committed(&mut self) -> Result<()> {
+        Ok(())
+    }
     fn rollback_transaction(&mut self) -> Result<()>;
     fn granted_folders(&self) -> Vec<FileGrant>;
     /// Read-only roots for annotated entry fields, already authorised by the app for this call.
