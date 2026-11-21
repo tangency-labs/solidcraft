@@ -3288,6 +3288,15 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         while let Some(solver) = self.solvers.get(index).copied() {
             index += 1;
             let judged = access.geometry_rails_fit_judged(k, solver, self)?;
+            if judged.touches_rim {
+                // At the open fit bound a closed rail touches the rim without leaving
+                // its face (#20282). The two loops cannot be kept and stitched together.
+                self.note_fit_on_its_faces(k, access, solver)?;
+                return self.record_no_room(
+                    NoRoomReason::RailLeavesFace,
+                    "Fillet Error: a closed rail touches the boundary of the face it rolls on (the blend is as large as the faces allow)",
+                );
+            }
             let continued = !judged.continued_cliffs.is_empty();
             if continued {
                 self.continued_cliffs

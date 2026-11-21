@@ -8,6 +8,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::blend::fillet_executive::p3::NoRoomReason;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_geom::p1::FilletErrorType;
@@ -22,7 +23,7 @@ use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::edge;
 use solidcore::topology::EdgeId;
-use solidcore::{Brep, CancelToken, Kernel};
+use solidcore::{Brep, CancelToken, Kernel, SolidError};
 
 fn kernel(set: impl FnOnce(&mut UpstreamFixes)) -> Kernel {
     let mut k = Kernel::default();
@@ -154,6 +155,73 @@ fn rail_clear_of_the_rim_builds_to_the_closed_form() {
             "xsect {xsect}: {volume}"
         );
     }
+}
+
+/// A 10 mm cube with a centred diameter 5 mm through hole, and its top circular edge.
+fn cube_with_round_hole(k: &mut Kernel) -> (Brep, EdgeId) {
+    let b = create_box(k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
+    let hole = create_cylinder(k, Point3::new(5.0, 5.0, -1.0), 2.5, 12.0).unwrap();
+    let b = boolean_difference(k, b, hole).unwrap();
+    let rim = b
+        .edges()
+        .ids()
+        .find(|&e| {
+            if !edge::is_closed(&b, e).unwrap() {
+                return false;
+            }
+            let curve = edge::curve(&b, e).unwrap().unwrap();
+            let p = curve
+                .evaluate_point(k, edge::interval(&b, e).unwrap().evaluate(0.5))
+                .unwrap();
+            (p.z - 10.0).abs() < 1e-9 && ((p.x - 5.0).hypot(p.y - 5.0) - 2.5).abs() < 1e-9
+        })
+        .unwrap();
+    (b, rim)
+}
+
+/// The top rail's radius is 2.5 + r. At r = 2.5 it touches the top square's outer
+/// loop at four points: two loops that cannot bound a face. The open fit is 2.5 less
+/// the existing fit margin, including when the contact is within modelling tolerance.
+#[test]
+fn hole_rim_touching_the_outer_loop_is_refused_with_a_fit() {
+    use solidcore::blend::fillet_executive::FitKind;
+
+    for (offset, tolerances) in [(0.0, 0.0), (0.0, -0.5), (0.0, 0.5), (0.001, 0.0)] {
+        let mut k = kernel(|f| *f = UpstreamFixes::all());
+        let (mut b, rim) = cube_with_round_hole(&mut k);
+        let tolerance = edge::tolerance(&b, rim).unwrap();
+        let radius = 2.5 + offset + tolerances * tolerance;
+        let mut session = FilletSession::new(&mut k, &mut b).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &[rim], radius, 1, 1, 1.0)
+            .unwrap();
+        let result = session.do_fillet(&mut k);
+        let Err(SolidError::FilletRefused { reason, fit, .. }) = result else {
+            panic!("r{radius}: expected a typed fit refusal, got {result:?}");
+        };
+        assert_eq!(session.error_info().code, NO_ROOM, "r{radius}");
+        assert_eq!(reason, Some(NoRoomReason::RailLeavesFace), "r{radius}");
+        assert_eq!(fit.kind, FitKind::Radius);
+        assert_eq!(fit.edge, Some(rim));
+        let want = 2.5 - 1000.0 * tolerance;
+        assert!(
+            (fit.size - want).abs() < 1e-8,
+            "r{radius}: {fit:?}, want {want}"
+        );
+    }
+}
+
+/// R2.499 leaves 0.001 mm between the top rail and each side of the square.
+#[test]
+fn hole_rim_just_below_the_contact_builds_a_valid_solid() {
+    let mut k = kernel(|f| *f = UpstreamFixes::all());
+    let (mut b, rim) = cube_with_round_hole(&mut k);
+    fillet_edges(&mut k, &mut b, &[rim], 2.499, 1, 1, 1.0).unwrap();
+    assert!(is_manifold_solid(&b).unwrap());
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
 }
 
 // ---- WR-303: the end of a round that crosses more than one face at a three-edge vertex ----
