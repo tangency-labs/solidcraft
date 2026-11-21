@@ -1,5 +1,5 @@
 //! A drawing's notes on paper (#4896 W19i): one group for each note, its text starting at, centred on
-//! or ending at its place by its alignment ([`Align`], #20122), each line of several the same way,
+//! or ending at its place by its alignment ([`Align`], #20122), the lines of a left or right note starting or ending there together,
 //! at its own cap height or a dimension's, set in the drawing's lettering by the dimension's text
 //! rule ([`Text::set`]), with its own line breaks only. A note that points at the model has a leader
 //! from where each thing it points at is now to its text, ending in a dimension's arrowhead, with a
@@ -60,11 +60,13 @@ fn box_centre(note: &Note, half: Vec2) -> Vec2 {
     Vec2::new(note.at[0] + reach, note.at[1])
 }
 
-/// `runs` with each of their lines moved along as `align` stands it in a box `width` wide: lines are the
+/// `runs` with each of their lines moved as `align` stands it in a box `width` wide: for right, each
+/// line ends at the box's right edge. Left lines start at the box's left edge, and so do a centred
+/// note's, as every note's did before alignments (the block is centred, not each line). Lines are the
 /// runs that share a baseline, which a text's own breaks make (a line set in more than one font is
 /// several runs).
 fn justified(mut runs: Vec<TextRun>, align: Align, width: f64) -> Vec<TextRun> {
-    if align == Align::Left {
+    if align != Align::Right {
         return runs;
     }
     let mut lines: Vec<(f64, f64)> = Vec::new();
@@ -77,7 +79,7 @@ fn justified(mut runs: Vec<TextRun>, align: Align, width: f64) -> Vec<TextRun> {
     }
     for run in &mut runs {
         if let Some((_, line)) = lines.iter().find(|(y, _)| (*y - run.origin.y).abs() < 1e-9) {
-            run.origin.x += align.indent(width, *line);
+            run.origin.x += (width - line).max(0.0);
         }
     }
     runs

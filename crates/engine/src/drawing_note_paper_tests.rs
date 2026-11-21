@@ -95,13 +95,32 @@ fn a_note_saved_before_alignments_is_still_centred() {
     assert!(close(texts[0].origin.x + width(text, TEXT_MM) / 2.0, 15.0), "{:?}", texts[0].origin);
 }
 
-/// Each line of a note with several stands as the note does: starting at the place, centred on it or
-/// ending at it, the shorter line against the longer, in the same block whatever the alignment.
+/// A multi-line note saved before alignments draws as it did on main: the block of lines centred on its
+/// place, every line starting at the block's left edge. Derived from the old layout, not from this one:
+/// the block is as wide as its longest line, and main set each line from the block's left edge.
+#[test]
+fn a_multi_line_note_saved_before_alignments_draws_as_it_did() {
+    let (long, short) = ("TAPPED M8 THROUGH ALL", "M8");
+    let old = serde_json::json!({"id": "0000000000009", "anchor": {"sheet": "0000000000001"}, "at": [100.0, 60.0], "content": [{"text": format!("{long}\n{short}")}]});
+    let note: Note = serde_json::from_value(old).unwrap();
+    let on = drawn(&note, &format!("{long}\n{short}"), None);
+    let lines = runs(&on.group);
+    assert_eq!(lines.len(), 2);
+    let left_edge = 100.0 - width(long, TEXT_MM) / 2.0;
+    for line in lines {
+        assert!(close(line.origin.x, left_edge), "{:?} wants x {left_edge}", line.origin);
+    }
+}
+
+/// Each line of a note with several starts at the place for left and ends at it for right. A centred note
+/// keeps the layout every note had: its block is centred on the place and its lines start at the block's
+/// left edge (the longer line's, not each line centred).
 #[test]
 fn each_line_of_a_note_stands_as_the_note_does() {
     let (long, short) = ("TAPPED M8 THROUGH", "M8");
     let text = format!("{long}\n{short}");
     let (wl, ws) = (width(long, TEXT_MM), width(short, TEXT_MM));
+    assert!(ws < wl);
     let line = |align: Align| {
         let on = drawn(&aligned([100.0, 60.0], align), &text, None);
         let mut lines: Vec<(f64, f64)> = runs(&on.group).iter().map(|run| (run.origin.y, run.origin.x)).collect();
@@ -112,7 +131,7 @@ fn each_line_of_a_note_stands_as_the_note_does() {
     let (l_long, l_short) = line(Align::Left);
     assert!(close(l_long, 100.0) && close(l_short, 100.0), "{l_long} {l_short}");
     let (c_long, c_short) = line(Align::Centre);
-    assert!(close(c_long, 100.0 - wl / 2.0) && close(c_short, 100.0 - ws / 2.0), "{c_long} {c_short}");
+    assert!(close(c_long, 100.0 - wl / 2.0) && close(c_short, 100.0 - wl / 2.0), "{c_long} {c_short}");
     let (r_long, r_short) = line(Align::Right);
     assert!(close(r_long + wl, 100.0) && close(r_short + ws, 100.0), "{r_long} {r_short}");
 }

@@ -75,7 +75,7 @@ impl JsonSchema for ContentParam {
 pub enum AlignParam {
     /// The text starts at the place, each line too.
     Left,
-    /// The text is centred on the place, each line too.
+    /// The text is centred on the place as a block: its lines start at the block's left edge, as a note's always did.
     #[serde(alias = "center")]
     Centre,
     /// The text ends at the place, each line too.
@@ -145,7 +145,7 @@ pub struct AddParams {
     #[schemars(with = "f64")]
     pub cap_mm: Option<f64>,
     /// Which end of its text sits at its place: `left` (the default: the note starts where it is placed), `centre` or `right`.
-    /// Each line of a note with several stands the same way.
+    /// For `left` and `right`, each line of a note with several stands the same way; `centre` centres the block.
     #[serde(default)]
     pub align: Option<AlignParam>,
     /// More leaders, for a note on a view: 16 leaders in all, its anchor's included.
