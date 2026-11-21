@@ -299,7 +299,7 @@ fn sweep_path_tangent_chain_brings_the_smooth_outline() {
     // A listed row of the chain (not the picked edge) takes the whole chain with it.
     let other = top(&h)[3].clone();
     let d = h.app.dialog.as_mut().unwrap();
-    d.remove_listed(&h.app.session, 1, &other);
+    d.remove_listed(&h.app.session, 1, 3, &other);
     h.frames(2);
     assert!(top(&h).is_empty(), "{:?}", top(&h));
     // Unticked: back to the picked edges.
@@ -394,7 +394,8 @@ fn tangent_chain_marquee_over_a_listed_edge_keeps_it_as_a_pick() {
     assert_eq!(seeds.len(), 8);
     assert_eq!(seeds.iter().filter(|(_, c)| c.is_some()).count(), 1, "one walk for the loop");
     // Removing a row takes out every pick, each of whose chain is the whole loop.
-    h.app.dialog.as_mut().unwrap().remove_listed(&h.app.session, 1, &other);
+    let row = top(&h).iter().position(|x| *x == other).expect("the row is listed");
+    h.app.dialog.as_mut().unwrap().remove_listed(&h.app.session, 1, row, &other);
     h.frames(2);
     assert!(top(&h).is_empty(), "{:?}", top(&h));
     h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
