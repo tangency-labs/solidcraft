@@ -19,7 +19,7 @@ design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSO
 | Rhino `.3dm` | solids, through cadmpeg | |
 | 3MF, STL, OBJ | mesh bodies | yes |
 | glTF 2.0 (`.glb`, `.gltf` with its `.bin` files) | mesh bodies in the node tree's components, materials as appearances | `.glb`: placed bodies with their colours, metallic and roughness, in metres with Y up |
-| OpenUSD (`.usd`, `.usda`, `.usdc`, `.usdz`), through cadmpeg | mesh bodies in the prim tree's components, materials as appearances; with `geometry: "exact"`, its B-reps as B-rep bodies | each part's exact B-rep and a mesh of it, colours, the component tree; in metres with Z up |
+| OpenUSD (`.usd`, `.usda`, `.usdc`, `.usdz`), through cadmpeg | mesh bodies in the prim tree's components, materials as appearances; with `geometry: "exact"`, its B-reps as B-rep bodies | each body's mesh, named, with its exact B-rep where cadmpeg's model holds it; looks with metallic, roughness and opacity; the component tree; in metres with Z up |
 | 3MF with face tags | as 3MF | each triangle tagged with its B-rep face, exact coordinates |
 | URDF | | the assembly as a robot: links with meshes, mass and inertia, joints from the assembly's joints |
 | DXF, SVG | into a sketch | sketches and flat patterns as DXF |
@@ -37,13 +37,17 @@ wrongly; leave such a body out with `bodies`. A refused export leaves a file alr
 **File → Export OpenUSD…** (`file.export` with a `.usd`, `.usda`, `.usdc` or `.usdz` path) writes an
 OpenUSD stage for NVIDIA Omniverse and Isaac Sim, Blender, Apple's tools and other USD viewers. The
 extension picks the encoding: `.usda` is text, `.usdc` and `.usd` are binary, and `.usdz` is a package of
-one binary file. The bodies are written as `file.export` writes STEP (a design with components, when no
-bodies are chosen, as its component tree), and cadmpeg restates that as USD. Each part is an `Xform` prim
-holding its exact B-rep (a `BrepArray` prim) and a mesh of it for viewers; a part placed more than once is
-written once, under the abstract `Prototypes` prim, and referenced at each placement. Colours become
-`UsdPreviewSurface` materials. The stage is in metres with Z up and says so in its metadata. Metallic,
-roughness, transparency and textures are not written yet, and neither are joints, masses or collision
-shapes.
+one binary file. The design is written straight into cadmpeg's model, which cadmpeg writes as USD. With
+no bodies chosen, each component placement is an `Xform` prim named after the occurrence, holding its
+component's bodies; a component placed more than once is written once, under the abstract `Prototypes`
+prim, and referenced at each placement. Chosen bodies are written where the design shows them, under one
+prim named after the design. Each body is a prim named after it, holding its exact B-rep (a `BrepArray`
+prim) and the mesh SolidCraft draws it with, made at the export's Mesh quality (`quality`: standard, fine
+or finest, as for STL). A mesh body has its mesh alone, and so has a body whose shape cadmpeg's model
+cannot hold exactly yet, with a warning naming it. Looks become `UsdPreviewSurface` materials named after them, with their colour,
+opacity (a transparent look stays transparent), metallic, roughness and index of refraction; a face with a
+look of its own gets that material. The stage is in metres with Z up and says so in its metadata.
+Textures, joints, masses and collision shapes are not written yet.
 
 Opening a STEP, IGES, FreeCAD or Rhino file creates a design with the file's bodies as a base feature, and
 inserting one adds them to the current design. Later features build on them. A FreeCAD file's
