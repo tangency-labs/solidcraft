@@ -1327,7 +1327,7 @@ impl Lit {
                 Sel::Plane { name } => Thing::Plane(name.clone()),
                 Sel::Axis { name } => Thing::Axis(name.clone()),
                 Sel::ConstructionPoint { name } => Thing::Point(name.clone()),
-                Sel::Occurrence { .. } | Sel::Drawing { .. } => continue,
+                Sel::Occurrence { .. } | Sel::Drawing { .. } | Sel::PointCloudPoint { .. } => continue,
             };
             selected.insert(thing);
         }
@@ -1343,6 +1343,7 @@ impl Lit {
             Some(Hit::Plane { name, .. }) => Some(Thing::Plane(name.clone())),
             Some(Hit::Axis { name }) => Some(Thing::Axis(name.clone())),
             Some(Hit::ConstructionPoint { name }) => Some(Thing::Point(name.clone())),
+            Some(Hit::PointCloudPoint { .. }) => None,
             None => app.viewport.hover_feature.and_then(|id| {
                 app.session.doc.feature(id).and_then(|f| match &f.kind {
                     FeatureKind::Sketch { .. } => Some(Thing::Sketch(id)),

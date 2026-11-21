@@ -7,6 +7,10 @@
 //! edge's name with where it is (its area and centre, its length and middle); the second build
 //! must give the same, and its stored names must find the same faces and edges.
 //!
+//! Every design saved as JSON, opened and saved again, is also the same bytes, so a design kept in
+//! Git changes only where the design changed (#626). A design that holds binary data saves only as
+//! a container and is left out of that check.
+//!
 //! Face and edge indices are left out: they are the kernel's order, which a rebuild need not
 //! keep (a fillet's or a boolean's faces come out in another order from one build to the next).
 //! How many faces a body has and what each is called is the kernel's business, not this test's.
@@ -316,6 +320,31 @@ fn record_refs(out: &mut Vec<(String, bool)>, s: &Session, f: &Feature) {
 struct Build {
     names: Vec<(String, [f64; 4])>,
     refs: Vec<(String, bool)>,
+    /// Whether the design, saved as JSON, opened and saved again, is the same bytes.
+    saves_alike: Result<(), String>,
+}
+
+/// Save the design as JSON, open the file and save it again. The two files must be the same
+/// bytes. When they are not, or a step fails, this says what went wrong in a whole sentence.
+fn saves_alike(s: &Session) -> Result<(), String> {
+    if !s.doc.binary_data().is_empty() {
+        return Ok(());
+    }
+    let saved = solidcraft_engine::io::write_design(&s.doc).map_err(|e| format!("it does not save as JSON ({e})"))?;
+    let opened = solidcraft_engine::io::read_design(&saved).map_err(|e| format!("the JSON it saves does not open again ({e})"))?;
+    let again = solidcraft_engine::io::write_design(&opened).map_err(|e| format!("opened again, it does not save ({e})"))?;
+    if again == saved {
+        return Ok(());
+    }
+    let (first, second) = (String::from_utf8_lossy(&saved), String::from_utf8_lossy(&again));
+    let line = first.lines().zip(second.lines()).position(|(a, b)| a != b).unwrap_or_else(|| first.lines().count().min(second.lines().count()));
+    let at = |text: &str| text.lines().nth(line).unwrap_or("(no line)").trim().to_string();
+    Err(format!(
+        "saved as JSON, opened and saved again, it is not the same bytes (line {} was `{}` and is `{}`)",
+        line + 1,
+        at(first.as_ref()),
+        at(second.as_ref())
+    ))
 }
 
 fn build(s: &Session) -> Build {
@@ -330,7 +359,7 @@ fn build(s: &Session) -> Build {
             refs.iter_mut().skip(from).for_each(|(_, ok)| *ok = true);
         }
     }
-    Build { names, refs }
+    Build { names, refs, saves_alike: saves_alike(s) }
 }
 
 /// Where two builds name their faces and edges apart (at most `cap` of them): a name only one
@@ -424,6 +453,10 @@ fn corpus_designs_name_alike_every_build_and_fail_where_a_reference_is_gone() {
                 continue;
             }
         };
+        // Both builds save, open and save again. One problem is enough, from either of them.
+        if let Some(e) = first.saves_alike.as_ref().err().or(second.saves_alike.as_ref().err()) {
+            problems.push(format!("{name}: {e}"));
+        }
         let lost: Vec<&str> = first.refs.iter().filter(|(_, ok)| !ok).map(|(r, _)| r.as_str()).collect();
         if !lost.is_empty() {
             problems.push(format!("{name}: stored names that find nothing, in features that build:\n  {}", lost.join("\n  ")));
