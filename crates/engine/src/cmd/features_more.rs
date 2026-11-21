@@ -635,13 +635,31 @@ fn align_frame(s: &Session, p: &Value, key: &str, bodies: &[String]) -> Result<O
         return Err(bad(cmd, format!("give `{fk}` or `{other}`, not both")));
     }
     let st = s.model.state();
-    let (frame, on) = match v.get("sketch") {
+    let (frame, on) = frame_param(s, v, cmd, &fk)?;
+    // The move is worked out in that component's coordinates: every body must be in it, and a
+    // component placed twice would not say which placement the picks were made in.
+    if bodies.iter().any(|b| st.body(b).map_or(0, |b| s.doc.model_body_component(b)) != on) {
+        return Err(bad(cmd, format!("not supported yet: `{fk}` on another component than the bodies")));
+    }
+    if on != 0 && s.doc.occurrences.iter().filter(|o| o.component == on).count() != 1 {
+        return Err(bad(cmd, format!("not supported yet: `{fk}` on a component placed more than once")));
+    }
+    frame.resolve(&s.doc, &st).map_err(|e| bad(cmd, format!("`{fk}`: {e}")))?;
+    Ok(Some(frame))
+}
+
+/// A frame found again from the model whenever the design changes (`key`'s value `v`): a joint
+/// origin as `joint.create` takes one, or a sketch point or the centre of a sketch circle, arc or
+/// ellipse (`{sketch, point|curve}`). Also the component the frame's geometry is on. Align's sides
+/// and the Amalgam Tag's seat (#18799) read frames with it.
+pub(super) fn frame_param(s: &Session, v: &Value, cmd: &str, key: &str) -> Result<(AlignFrame, u64)> {
+    Ok(match v.get("sketch") {
         Some(sk) => {
-            let sketch = super::features::sketch_id(s, Some(sk), cmd, &fk)?;
+            let sketch = super::features::sketch_id(s, Some(sk), cmd, key)?;
             let frame = match sketch_frame_id(v) {
                 Some(SketchFrameId::Point(point)) => AlignFrame::SketchPoint { sketch: SketchId(sketch), point },
                 Some(SketchFrameId::Curve(curve)) => AlignFrame::SketchCurve { sketch: SketchId(sketch), curve },
-                None => return Err(bad(cmd, format!("`{fk}`: a sketch frame takes `point` or `curve` (an id of 1 to {MAX_SKETCH_ID} characters)"))),
+                None => return Err(bad(cmd, format!("`{key}`: a sketch frame takes `point` or `curve` (an id of 1 to {MAX_SKETCH_ID} characters)"))),
             };
             (frame, s.doc.feature(sketch).map_or(0, |f| f.component))
         }
@@ -653,17 +671,7 @@ fn align_frame(s: &Session, p: &Value, key: &str, bodies: &[String]) -> Result<O
             let on = super::joints::component_of(s, origin.occurrence);
             (AlignFrame::Origin { origin: Box::new(origin) }, on)
         }
-    };
-    // The move is worked out in that component's coordinates: every body must be in it, and a
-    // component placed twice would not say which placement the picks were made in.
-    if bodies.iter().any(|b| st.body(b).map_or(0, |b| s.doc.model_body_component(b)) != on) {
-        return Err(bad(cmd, format!("not supported yet: `{fk}` on another component than the bodies")));
-    }
-    if on != 0 && s.doc.occurrences.iter().filter(|o| o.component == on).count() != 1 {
-        return Err(bad(cmd, format!("not supported yet: `{fk}` on a component placed more than once")));
-    }
-    frame.resolve(&s.doc, &st).map_err(|e| bad(cmd, format!("`{fk}`: {e}")))?;
-    Ok(Some(frame))
+    })
 }
 
 fn remove(s: &mut Session, p: &Value) -> Result<Value> {

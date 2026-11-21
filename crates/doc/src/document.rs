@@ -2495,6 +2495,10 @@ pub enum FeatureKind {
         add: Vec<BodyName>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         new: Vec<BodyName>,
+        /// The tool's origin: the frame placed at each place the tool goes, its z on the place's
+        /// z. None: the design's origin.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        seat: Option<AlignFrame>,
     },
 }
 

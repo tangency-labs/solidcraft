@@ -7,7 +7,7 @@
 //! tag belongs to the design that declares it: placing a tool brings in its geometry, never its
 //! tags, so a design that places tools and tags its own bodies is a tool made of tools.
 
-use crate::{BodyName, DocError, ModelState, Result};
+use crate::{AlignFrame, BodyName, DocError, Document, ModelState, Result};
 
 /// The most bodies one tag labels, over all its roles.
 pub const MAX_TAGGED: usize = 256;
@@ -38,10 +38,11 @@ pub fn roles<'a>(remove: &'a [BodyName], add: &'a [BodyName], new: &'a [BodyName
     remove.iter().map(|b| (b, Role::Remove)).chain(add.iter().map(|b| (b, Role::Add))).chain(new.iter().map(|b| (b, Role::New)))
 }
 
-/// Checks an Amalgam Tag against the bodies `st` holds where it stands in the timeline: it tags
-/// at least one body and at most [`MAX_TAGGED`], each an existing body with one role, no mesh
-/// body, and only bodies that enclose a volume for Remove and Add (they are cut and joined).
-pub fn check_tag(st: &ModelState, remove: &[BodyName], add: &[BodyName], new: &[BodyName]) -> Result<()> {
+/// Checks an Amalgam Tag against the model `st` where it stands in the timeline: it tags at least
+/// one body and at most [`MAX_TAGGED`], each an existing body with one role, no mesh body, and
+/// only bodies that enclose a volume for Remove and Add (they are cut and joined); its seat, when
+/// it has one, is found on the model.
+pub fn check_tag(doc: &Document, st: &ModelState, remove: &[BodyName], add: &[BodyName], new: &[BodyName], seat: Option<&AlignFrame>) -> Result<()> {
     let count = remove.len().saturating_add(add.len()).saturating_add(new.len());
     if count == 0 {
         return Err(DocError::Invalid("the Amalgam Tag tags no body: give it Remove, Add or New bodies".into()));
@@ -70,6 +71,9 @@ pub fn check_tag(st: &ModelState, remove: &[BodyName], add: &[BodyName], new: &[
                 if role == Role::Remove { "cut" } else { "joined" }
             )));
         }
+    }
+    if let Some(seat) = seat {
+        seat.resolve(doc, st).map_err(|e| DocError::Invalid(format!("the Amalgam Tag's seat: {e}")))?;
     }
     Ok(())
 }

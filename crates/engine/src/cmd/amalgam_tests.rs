@@ -1,7 +1,7 @@
-//! Amalgam Tag (#18799): labelling a tool design's bodies, and what the tag refuses.
+//! Amalgam Tag (#18799): labeling a tool design's bodies, and what the tag refuses.
 use crate::Session;
 use serde_json::{Value, json};
-use solidcraft_doc::{BodyName, FeatureKind};
+use solidcraft_doc::{AlignFrame, BodyName, FeatureKind};
 
 fn run(s: &mut Session, command: &str, p: Value) -> Value {
     s.execute(command, &p).unwrap_or_else(|e| panic!("{command} {p}: {e}"))
@@ -38,7 +38,7 @@ fn tool() -> Session {
 
 fn tag_of(s: &Session, id: u64) -> (Vec<BodyName>, Vec<BodyName>, Vec<BodyName>) {
     match &s.doc.feature(id).unwrap().kind {
-        FeatureKind::AmalgamTag { remove, add, new } => (remove.clone(), add.clone(), new.clone()),
+        FeatureKind::AmalgamTag { remove, add, new, .. } => (remove.clone(), add.clone(), new.clone()),
         k => panic!("not a tag: {k:?}"),
     }
 }
@@ -73,7 +73,7 @@ fn a_tag_refuses_what_it_cannot_use() {
     assert!(both.contains("`Pocket` is tagged both Remove and Add"), "{both}");
     let twice = refused(&mut s, json!({"new": ["Insert", "Insert"]}));
     assert!(twice.contains("`Insert` is tagged New twice"), "{twice}");
-    assert!(refused(&mut s, json!({"new": "Insert", "seat": "Origin"})).contains("unknown parameter `seat`"));
+    assert!(refused(&mut s, json!({"new": "Insert", "sea": 1})).contains("`sea`"));
     // A surface body (an open tube) can't be cut or joined, but it can come in on its own.
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Square"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [120, 0], "p1": [130, 10]}));
@@ -108,6 +108,26 @@ fn a_tag_is_saved_and_read_back() {
     let back = solidcraft_io::read_design(&bytes).unwrap();
     let f = back.feature(id).unwrap();
     assert_eq!(f.name, "Hinge cup");
-    assert!(matches!(&f.kind, FeatureKind::AmalgamTag { remove, add, new }
+    assert!(matches!(&f.kind, FeatureKind::AmalgamTag { remove, add, new, seat: None }
         if *remove == names(&["Pocket"]) && *add == names(&["Boss"]) && *new == names(&["Insert"])));
+}
+
+/// The seat is the tool's origin, a frame found on the tool design: a sketch point, or a joint
+/// origin picked on a body (here the center of `Boss`'s top, at (45, 5, 12)). A seat that isn't
+/// there is refused, naming it.
+#[test]
+fn a_tag_takes_a_seat() {
+    let mut s = tool();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Seat"}));
+    run(&mut s, "sketch.point", json!({"point": [10, 10], "id": "o"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let id = run(&mut s, "solid.amalgam_tag", json!({"remove": "Pocket", "seat": {"sketch": "Seat", "point": "o"}}))["feature"].as_u64().unwrap();
+    assert!(
+        matches!(&s.doc.feature(id).unwrap().kind, FeatureKind::AmalgamTag { seat: Some(AlignFrame::SketchPoint { point, .. }), .. } if point == "o")
+    );
+    let on_face = run(&mut s, "solid.amalgam_tag", json!({"add": "Boss", "seat": {"face": [45, 5, 12]}}))["feature"].as_u64().unwrap();
+    assert!(matches!(&s.doc.feature(on_face).unwrap().kind, FeatureKind::AmalgamTag { seat: Some(AlignFrame::Origin { .. }), .. }));
+    assert!(s.model.result(on_face).unwrap().error.is_none());
+    let missing = refused(&mut s, json!({"remove": "Pocket", "seat": {"sketch": "Seat", "point": "nowhere"}}));
+    assert!(missing.contains("nowhere"), "{missing}");
 }

@@ -8,7 +8,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<AmalgamTagParams>(), &["add", "name", "new", "participants", "remove"]);
+    assert_keys(input_schema_for::<AmalgamTagParams>(), &["add", "name", "new", "participants", "remove", "seat"]);
     assert!(input_schema_for::<AmalgamTagParams>().as_value().get("required").is_none());
 }
 
@@ -29,7 +29,12 @@ fn strict_keeps_todays_errors() {
         json!({"add": true}),
         json!({"new": {"body": "Pocket"}}),
         json!({"remove": null, "add": null, "new": null}),
+        json!({"remove": "Pocket", "sea": 1}),
+        json!({"remove": "Pocket", "seat": 5}),
         json!({"remove": "Pocket", "seat": "Origin"}),
+        json!({"remove": "Pocket", "seat": {"sketch": "S"}}),
+        json!({"remove": "Pocket", "seat": {"sketch": "Nope", "point": "p"}}),
+        json!({"remove": "Pocket", "seat": {"face": [1, 2]}}),
         json!({"remove": "Pocket", "name": 7}),
         json!({"remove": "Pocket", "participants": 5}),
         json!({"remove": "Pocket", "body_name": "X"}),
