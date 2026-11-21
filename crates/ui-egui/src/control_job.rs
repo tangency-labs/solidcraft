@@ -874,6 +874,8 @@ impl SolveApp {
                             if let Some(solidcraft_engine::plugin::HostError::StaleRevision { expected, actual }) = error.host_error() {
                                 stale_revision = Some((expected.clone(), actual.clone()));
                                 error.to_string()
+                            } else if error.host_error().is_some() {
+                                error.to_string()
                             } else {
                                 self.tr("ui.plugin_context_changed").to_string()
                             }

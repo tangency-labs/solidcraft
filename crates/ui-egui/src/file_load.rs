@@ -1425,6 +1425,7 @@ fn compute(
     if progress.is_cancelled() {
         return cancelled();
     }
+    session.plugin_state.defer_user_settings();
     // The timeline's rebuild reports each feature and stops at the next one after Cancel. An
     // agent's scope is per thread, so it is set again here.
     let result =
@@ -1648,6 +1649,10 @@ fn again(app: &mut SolveApp, mut running: Running) {
 
 /// A design opened while the person is busy goes in a new tab behind the one shown.
 fn behind(app: &mut SolveApp, mut running: Running) {
+    if running.cancelled() {
+        land_now(app, running);
+        return;
+    }
     let Some(Ok(made)) = running.ready.take() else { return };
     let request = &running.request;
     let key = format!("file:{}", request.serial);
@@ -2126,61 +2131,76 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn file_first_import_carries_the_chosen_folder_outside_its_json_options() {
-        let mut h = crate::scenario::Harness::new();
-        let library = h.dir.join("library");
-        std::fs::create_dir_all(&library).unwrap();
-        let entry = serde_json::from_value(json!({"name":"convert","kind":"importer","effect":"open","extensions":["smp"],
-        "input_schema":{"type":"object","properties":{
-            "library":{"type":"string","format":"directory","x-solidcraft-grant":"read"}
-        }}}))
-        .unwrap();
-        h.app.plugin_menu.listed = vec![crate::plugins::Plugin {
-            id: "sample".into(),
-            name: "Sample".into(),
-            version: "1".into(),
-            description: String::new(),
-            path: String::new(),
-            approval: "reviewed".into(),
-            disabled: false,
-            groups: Default::default(),
-            entries: vec![entry],
-            images: Default::default(),
-            swatches: Default::default(),
-        }];
-        h.app.plugin_menu.loaded = true;
-        crate::plugin_menu::open_entry(&mut h.app, 0, 0);
-        h.frames(2);
-        h.step(&json!({"handle":"plugin_dialog:field:library"})).unwrap();
-        h.step(&json!({"text":library.to_string_lossy()})).unwrap();
-        let path = h.dir.join("part.smp").to_string_lossy().into_owned();
-        let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
-        let id = dialog.id;
-        dialog.source = Some(path.clone());
-        dialog.file = Some(solidcraft_engine::plugin::dialog::FileFacts {
-            name: "part.smp".into(),
-            extension: "smp".into(),
-            size: 0,
-            format: "sample.convert".into(),
-            generation: dialog.file_generation,
-        });
-        // Keep file execution queued while inspecting the exact request the form submits.
-        h.app.services.pick_open = Some(Box::new(|_| Box::pin(std::future::pending())));
-        h.app.pick_open_for(&["smp"], |_, _| {});
-        assert!(h.app.file_picker_busy());
-        crate::plugin_menu::run_dialog(&mut h.app, id).unwrap();
-        let request = h.app.file_load.queued.back().unwrap();
-        assert_eq!(request.path, path);
-        assert!(request.plugin_import);
-        assert_eq!(request.options["options"]["library"], library.to_string_lossy().as_ref());
-        assert!(!request.options.contains_key("dialog_folders"));
-        let consent = request.plugin_folders.as_ref().unwrap();
-        assert_eq!((consent.plugin.as_str(), consent.entry.as_str(), consent.approval.as_str()), ("sample", "convert", "reviewed"));
-        assert_eq!(consent.folders.len(), 1);
-        assert_eq!(consent.folders[0].folder, std::fs::canonicalize(&library).unwrap());
-        assert!(consent.folders[0].read && !consent.folders[0].write);
-        assert!(h.app.plugin_menu.dialogs.is_empty());
-        h.app.file_load.cancel();
-        assert!(h.app.file_load.idle() && h.app.session.plugin_state.dialog_folders.is_none());
+        for file_first in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            let library = h.dir.join("library");
+            std::fs::create_dir_all(&library).unwrap();
+            let entry = serde_json::from_value(json!({"name":"convert","kind":"importer","effect":"open","extensions":["smp"],
+            "input_schema":{"type":"object","properties":{
+                "library":{"type":"string","format":"directory","x-solidcraft-grant":"read"}
+            }}}))
+            .unwrap();
+            h.app.plugin_menu.listed = vec![crate::plugins::Plugin {
+                id: "sample".into(),
+                name: "Sample".into(),
+                version: "1".into(),
+                description: String::new(),
+                path: String::new(),
+                approval: "reviewed".into(),
+                disabled: false,
+                groups: Default::default(),
+                entries: vec![entry],
+                images: Default::default(),
+                swatches: Default::default(),
+            }];
+            h.app.plugin_menu.loaded = true;
+            crate::plugin_menu::open_entry(&mut h.app, 0, 0);
+            h.app.preferences.plugin_import_file_first = file_first;
+            h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::pending())));
+            let path = h.dir.join("part.smp").to_string_lossy().into_owned();
+            // Supply the host's file-facts result before editing for file-first, afterwards for
+            // options-first. Both forms must publish the text editor's handle beside Browse.
+            let choose_file = |app: &mut SolveApp| {
+                let dialog = app.plugin_menu.dialogs.last_mut().unwrap();
+                dialog.source = Some(path.clone());
+                dialog.file = Some(solidcraft_engine::plugin::dialog::FileFacts {
+                    name: "part.smp".into(),
+                    extension: "smp".into(),
+                    size: 0,
+                    format: "sample.convert".into(),
+                    generation: dialog.file_generation,
+                });
+            };
+            if file_first {
+                choose_file(&mut h.app);
+            }
+            h.frames(2);
+            let editor = crate::scenario::handle_at("plugin_dialog:field:library").expect("directory editor is drawn in either flow");
+            let browse = crate::scenario::handle_at("plugin_dialog:browse:library").expect("Browse has its own handle");
+            assert_ne!(editor, browse);
+            h.step(&json!({"click":{"handle":"plugin_dialog:field:library"}})).unwrap();
+            h.step(&json!({"text":library.to_string_lossy()})).unwrap();
+            let id = h.app.plugin_menu.dialogs.last().unwrap().id;
+            choose_file(&mut h.app);
+            // Keep file execution queued while inspecting the exact request the form submits.
+            h.app.services.pick_open = Some(Box::new(|_| Box::pin(std::future::pending())));
+            h.app.pick_open_for(&["smp"], |_, _| {});
+            assert!(h.app.file_picker_busy());
+            crate::plugin_menu::run_dialog(&mut h.app, id).unwrap();
+            let request = h.app.file_load.queued.back().unwrap();
+            assert_eq!(request.path, path);
+            assert!(request.plugin_import);
+            assert_eq!(request.options["options"]["library"], library.to_string_lossy().as_ref());
+            assert!(!request.options.contains_key("dialog_folders"));
+            let consent = request.plugin_folders.as_ref().unwrap();
+            assert_eq!((consent.plugin.as_str(), consent.entry.as_str(), consent.approval.as_str()), ("sample", "convert", "reviewed"));
+            assert_eq!(consent.folders.len(), 1);
+            assert_eq!(consent.folders[0].folder, std::fs::canonicalize(&library).unwrap());
+            assert!(consent.folders[0].read && !consent.folders[0].write);
+            assert!(h.app.plugin_menu.dialogs.is_empty());
+            h.app.file_load.cancel();
+            assert!(h.app.file_load.idle() && h.app.session.plugin_state.dialog_folders.is_none());
+        }
     }
 
     /// Cancelling the queued retry forgets the session it read the file into: nothing runs again
@@ -2233,6 +2253,89 @@ mod tests {
             ready: None,
             sketch: None,
         });
+    }
+
+    #[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
+    fn settings_import(h: &mut crate::scenario::Harness) -> (Request, Made) {
+        let folder = h.dir.join("plugins/sample");
+        std::fs::create_dir_all(&folder).unwrap();
+        let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["formats@0.2","user-storage@0.1"],
+            "runtime":{"module":"importer.wasm","commands":[],"entries":[{"name":"convert","kind":"importer","extensions":["smp"]}],
+                "limits":{"fuel":10_000_000,"memory_mib":2,"deadline_ms":5000}}});
+        std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+        let code = "i32.const 512 i32.const 5 i32.const 2048 i32.const 2 i32.const 128 call $set";
+        let fixture = include_str!("../../craft-plugin-wasm/src/importer_storage_fixture.wat").replace("__CODE__", code);
+        std::fs::write(folder.join("importer.wasm"), wat::parse_str(fixture).unwrap()).unwrap();
+        let path = h.dir.join("part.smp");
+        let doc = solidcraft_engine::doc::Document::new("Imported settings");
+        std::fs::write(&path, solidcraft_engine::io::write_design(&doc).unwrap()).unwrap();
+        h.app.session.plugin_state.plugins_dir = Some(h.dir.join("plugins"));
+        h.app.session.plugin_state.user_settings_dir = Some(h.dir.join("settings"));
+        let mut scratch = Session::default();
+        scratch.plugin_state = h.app.session.plugin_state.clone();
+        let request = Request::new(&path.to_string_lossy(), Kind::Open);
+        let (command, params) = request.command();
+        let made = compute(scratch, command, &params, None, false, false, &AtomicU8::new(0), &Arc::new(Progress::default())).unwrap();
+        assert!(
+            solidcraft_engine::plugin::user_storage::load(&h.dir.join("settings"), "sample").unwrap().is_empty(),
+            "a fully computed file worker cannot publish before it lands"
+        );
+        (request, made)
+    }
+
+    #[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
+    #[test]
+    fn importer_settings_wait_for_final_open_acceptance_and_conflicts_keep_the_live_design() {
+        for outcome in ["cancel", "conflict", "accept", "behind"] {
+            let mut h = crate::scenario::Harness::new();
+            let before = h.app.session.doc.clone();
+            let (mut request, made) = settings_import(&mut h);
+            let settings = h.dir.join("settings");
+            let (answer, reply) = std::sync::mpsc::channel();
+            request.reply = Some(answer);
+            completed_open(&mut h.app, request, made.session);
+            let mut running = h.app.file_load.running.take().unwrap();
+            running.ready = Some(running.rx.recv().unwrap());
+            if outcome == "cancel" {
+                let serial = running.request.serial;
+                h.app.file_load.waiting.push(running);
+                cancel_waiting(&mut h.app, serial);
+                assert_eq!(reply.recv().unwrap()["ok"], false);
+                assert!(solidcraft_engine::plugin::user_storage::load(&settings, "sample").unwrap().is_empty());
+                assert!(Arc::ptr_eq(&before, &h.app.session.doc));
+            } else {
+                if outcome == "conflict" {
+                    solidcraft_engine::plugin::user_storage::save(
+                        &settings,
+                        "sample",
+                        &std::collections::BTreeMap::from([("external".into(), json!(true))]),
+                    )
+                    .unwrap();
+                }
+                if outcome == "behind" {
+                    behind(&mut h.app, running);
+                } else {
+                    land_now(&mut h.app, running);
+                }
+                let response = reply.recv().unwrap();
+                let saved = solidcraft_engine::plugin::user_storage::load(&settings, "sample").unwrap();
+                if outcome == "conflict" {
+                    assert_eq!(response["ok"], false, "{response}");
+                    assert!(response["error"].as_str().unwrap().contains("settings"), "{response}");
+                    assert!(Arc::ptr_eq(&before, &h.app.session.doc));
+                    assert_eq!(saved, std::collections::BTreeMap::from([("external".into(), json!(true))]));
+                } else {
+                    assert_eq!(response["ok"], true, "{response}");
+                    assert_eq!(saved["hinge"], json!(42));
+                    if outcome == "accept" {
+                        assert_eq!(h.app.session.doc.name, "Imported settings");
+                    } else {
+                        assert_eq!(h.app.docs.count(), 2);
+                        assert!(Arc::ptr_eq(&before, &h.app.session.doc));
+                    }
+                }
+            }
+        }
     }
 
     /// An Open says which design it brought in, by the name its tab shows, and whether it took

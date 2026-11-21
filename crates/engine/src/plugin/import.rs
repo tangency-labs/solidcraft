@@ -176,6 +176,8 @@ fn convert(
         let mut scratch = Session::default();
         scratch.plugin_state.user_settings_dir = session.plugin_state.user_settings_dir();
         scratch.plugin_state.user_storage_caller = user_storage.then(|| package.manifest.id.clone());
+        scratch.plugin_state.defer_user_settings = session.plugin_state.defer_user_settings;
+        scratch.plugin_state.pending_user_settings = session.plugin_state.pending_user_settings.clone();
         let host = SolidCraftHost {
             session: scratch,
             input_folders,
@@ -234,6 +236,7 @@ fn convert(
         }
         if user_storage {
             host.commit_transaction()?;
+            session.plugin_state.pending_user_settings = host.session.plugin_state.pending_user_settings;
         }
         session.replace_design(fresh);
         Ok(ImportedDesign {

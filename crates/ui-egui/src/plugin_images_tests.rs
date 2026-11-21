@@ -236,6 +236,9 @@ fn importer_icons_reach_ribbon_buttons_menus_and_dialogs_with_the_command_fallba
     *expected_menu.last_mut().unwrap() = "";
     assert_eq!(menu_icons, expected_menu, "an unannotated Plugins menu row keeps its previous appearance");
 
+    // Harness startup already started discovery for its original plugins folder. Replacing
+    // that folder invalidates the old snapshot, including an in-flight empty discovery.
+    crate::plugin_slots::invalidate(&mut h.app);
     crate::plugin_slots::refresh(&mut h.app);
     crate::plugin_slots::wait_for_discovery(&mut h.app);
     for name in ["File", "Help"] {

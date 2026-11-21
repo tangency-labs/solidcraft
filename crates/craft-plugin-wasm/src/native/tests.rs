@@ -1991,3 +1991,38 @@ fn file_aware_hooks_read_optional_user_settings_without_publishing_or_writing() 
     assert!(matches!(result, Err(HostError::PermissionDenied { .. })));
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn a_blocked_prefix_read_expires_and_late_reads_keep_the_global_slots_until_finished() {
+    let reads = Arc::new(AtomicUsize::new(0));
+    let mut releases = Vec::new();
+    let mut replies = Vec::new();
+    for _ in 0..MAX_PREFIX_READS {
+        let (release, blocked) = mpsc::channel();
+        let (entered, started) = mpsc::channel();
+        let reply = start_prefix_read(reads.clone(), move || {
+            entered.send(()).unwrap();
+            blocked.recv().unwrap();
+            Ok(vec![42_u8])
+        })
+        .unwrap();
+        started.recv().unwrap();
+        // An already elapsed deadline makes this deterministic: the reader is still blocked.
+        assert_eq!(wait_prefix(&reply, Instant::now()).unwrap_err(), deadline());
+        releases.push(release);
+        replies.push(reply);
+    }
+    assert_eq!(reads.load(Ordering::Acquire), MAX_PREFIX_READS);
+    assert!(matches!(start_prefix_read(reads.clone(), || Ok(())), Err(HostError::LimitExceeded { .. })));
+    for (release, reply) in releases.into_iter().zip(replies) {
+        release.send(()).unwrap();
+        assert_eq!(reply.recv().unwrap().unwrap(), vec![42]);
+    }
+    let (send, buffered) = mpsc::channel();
+    send.send(Ok(vec![9_u8])).unwrap();
+    // Even an already buffered late result cannot be returned as a successful hook update.
+    assert_eq!(wait_prefix(&buffered, Instant::now()).unwrap_err(), deadline());
+    assert_eq!(reads.load(Ordering::Acquire), 0);
+    let reply = start_prefix_read(reads, || Ok(vec![7_u8])).unwrap();
+    reply.recv().unwrap().unwrap();
+}

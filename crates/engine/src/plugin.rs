@@ -96,6 +96,9 @@ pub struct AppState {
     pub user_settings_dir: Option<PathBuf>,
     /// The authenticated command plugin for this run, only when it requests user-storage.
     pub user_storage_caller: Option<String>,
+    /// Worker-local settings travel with the candidate session until the app accepts it.
+    pub(crate) defer_user_settings: bool,
+    pub(crate) pending_user_settings: BTreeMap<String, (PathBuf, user_storage::Pending)>,
     /// Set when `grants` is kept in the plugins folder's grant store between sessions (the command
     /// line and headless MCP with `--keep-plugin-approvals`): what this session last read from or wrote to it. `None`: the
     /// grants live only in this session, or the app keeps them itself (the desktop app).
@@ -103,6 +106,20 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Compute without publishing settings. Dropping the candidate discards its changes.
+    pub fn defer_user_settings(&mut self) {
+        self.defer_user_settings = true;
+    }
+
+    /// Call after final cancellation/context checks, immediately before adopting the candidate.
+    /// A conflict leaves both the live design and all settings records unchanged.
+    pub fn publish_user_settings(&mut self) -> craft_plugin::Result<()> {
+        user_storage::publish_all(&self.pending_user_settings)?;
+        self.pending_user_settings.clear();
+        self.defer_user_settings = false;
+        Ok(())
+    }
+
     /// History restores authored links, not observations of a different source or version.
     pub(crate) fn prune_link_changes(&mut self, doc: &solidcraft_doc::Document) {
         let current = |component: &u64, change: &LinkChange| {
@@ -530,6 +547,7 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
         let (host, result) =
             craft_plugin_wasm::run(SolidCraftHost { file_folders, file_read_folders, ..host }, &package.manifest, &package.component, entry, params);
         let value = result?;
+        session.plugin_state.pending_user_settings = host.session.plugin_state.pending_user_settings.clone();
         if !std::sync::Arc::ptr_eq(&session.doc, &host.session.doc)
             || session.active_sketch != host.session.active_sketch
             || session.pending_moves != host.session.pending_moves
@@ -627,7 +645,10 @@ impl SolidCraftHost {
         }
         let (settings, id) = self.user_storage_identity()?;
         if self.user_data.is_none() {
-            self.user_data = Some(user_storage::Pending::load(&settings, &id)?);
+            self.user_data = Some(match self.session.plugin_state.pending_user_settings.get(&id) {
+                Some((folder, pending)) if folder == &settings => pending.clone(),
+                _ => user_storage::Pending::load(&settings, &id)?,
+            });
         }
         self.user_data.as_mut().ok_or_else(|| HostError::InvalidInput { field: "user-storage".into(), reason: "no active data".into() })
     }
@@ -777,11 +798,16 @@ impl PluginHost for SolidCraftHost {
         }
         if let Some(data) = &self.user_data {
             let (settings, id) = self.user_storage_identity()?;
-            data.publish(&settings, &id)?;
+            if self.session.plugin_state.defer_user_settings {
+                self.session.plugin_state.pending_user_settings.insert(id, (settings, data.clone()));
+            } else {
+                data.publish(&settings, &id)?;
+            }
         }
         self.user_data = None;
         let mut computed =
             self.transaction.take().ok_or_else(|| HostError::InvalidInput { field: "transaction".into(), reason: "not active".into() })?;
+        computed.plugin_state.pending_user_settings = self.session.plugin_state.pending_user_settings.clone();
         computed.undo.clear();
         computed.redo.clear();
         // Session::execute(plugin.run) owns the one outer undo step.

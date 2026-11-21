@@ -195,8 +195,80 @@ impl Roles<'_> {
         if !stack.is_empty() {
             return Err("unbalanced tags".into());
         }
+        validate_render_work(&doc)?;
         Ok(doc)
     }
+}
+
+/// Bound the renderer's expanded work, including repeated shared mask dependencies. XML depth
+/// alone does not bound either mask recursion or the number of temporary pixmaps it creates.
+const MAX_RENDER_WORK: usize = 1024;
+
+fn validate_render_work(doc: &Doc) -> Result<(), String> {
+    fn add(total: &mut usize, cost: usize) -> Result<(), String> {
+        *total = total.saturating_add(cost);
+        if *total > MAX_RENDER_WORK {
+            return Err("icon render-work budget exceeded".into());
+        }
+        Ok(())
+    }
+    fn mask(
+        doc: &Doc,
+        id: usize,
+        active: &mut std::collections::HashSet<usize>,
+        costs: &mut HashMap<usize, (usize, usize)>,
+        depth: usize,
+    ) -> Result<(usize, usize), String> {
+        if depth > MAX_DEPTH {
+            return Err("mask references nested too deeply".into());
+        }
+        if let Some(cost) = costs.get(&id) {
+            return Ok(*cost);
+        }
+        if !active.insert(id) {
+            return Err("cyclic mask reference".into());
+        }
+        let (mut cost, mut height) = (1, 1);
+        for node in doc.masks.get(id).ok_or("unknown mask")? {
+            add(&mut cost, 1)?;
+            if let Some(child) = node.mask {
+                let (work, levels) = mask(doc, child, active, costs, depth + 1)?;
+                add(&mut cost, work)?;
+                height = height.max(levels + 1);
+            }
+        }
+        if height > MAX_DEPTH {
+            return Err("mask references nested too deeply".into());
+        }
+        active.remove(&id);
+        costs.insert(id, (cost, height));
+        Ok((cost, height))
+    }
+    fn items(doc: &Doc, list: &[Item], costs: &HashMap<usize, (usize, usize)>, total: &mut usize) -> Result<(), String> {
+        for item in list {
+            add(total, 1)?;
+            match item {
+                Item::Node(node) => {
+                    if let Some(id) = node.mask {
+                        add(total, costs.get(&id).ok_or("unknown mask")?.0)?;
+                    }
+                }
+                Item::Group { clip, items: children, .. } => {
+                    if let Some(id) = clip {
+                        add(total, doc.clips.get(*id).ok_or("unknown clip")?.len())?;
+                    }
+                    items(doc, children, costs, total)?;
+                }
+            }
+        }
+        Ok(())
+    }
+    let mut costs = HashMap::new();
+    for id in 0..doc.masks.len() {
+        mask(doc, id, &mut std::collections::HashSet::new(), &mut costs, 1)?;
+    }
+    let mut total = 0;
+    items(doc, &doc.items, &costs, &mut total)
 }
 
 struct Tag<'a> {

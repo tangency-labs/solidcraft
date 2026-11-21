@@ -735,6 +735,49 @@ mod native {
         }
     }
     #[test]
+    fn worker_settings_publish_only_on_current_acceptance_and_conflicts_reject_the_design() {
+        let f = Fixture::new("");
+        let settings = f.0.join("settings");
+        let mut manifest = manifest();
+        manifest["capabilities"] = json!(["commands@0.2", "user-storage@0.1"]);
+        std::fs::write(f.0.join("sample/plugin.json"), manifest.to_string()).unwrap();
+        let code = "i32.const 512 i32.const 5 i32.const 2048 i32.const 2 i32.const 128 call $set";
+        let source = include_str!("../../../craft-plugin-wasm/src/user_storage_fixture.wat").replace("__CODE__", code);
+        std::fs::write(f.0.join("sample/plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+        let mut session = Session::default();
+        session.plugin_state.user_settings_dir = Some(settings.clone());
+        let approval = session.execute("plugin.inspect", &json!({"path":f.path()})).unwrap()["approval"].clone();
+        let calls = vec![
+            ("plugin.run".into(), json!({"path":f.path(),"approval":approval,"entry":"make","params":{}})),
+            ("solid.box".into(), json!({"length":2,"width":3,"height":4})),
+        ];
+        session.preview(&calls).unwrap();
+        assert!(user_storage::load(&settings, "sample").unwrap().is_empty(), "preview is not acceptance");
+        let cancelled = session.scratch().compute_commands(&calls, None).unwrap();
+        assert!(user_storage::load(&settings, "sample").unwrap().is_empty());
+        drop(cancelled);
+        let stale = session.scratch().compute_commands(&calls, None).unwrap();
+        session.execute("solid.box", &json!({"length":1,"width":1,"height":1})).unwrap();
+        let before = session.doc.clone();
+        assert!(session.accept_commands(stale).is_err());
+        assert!(std::sync::Arc::ptr_eq(&before, &session.doc));
+        assert!(user_storage::load(&settings, "sample").unwrap().is_empty());
+        let conflict = session.scratch().compute_commands(&calls, None).unwrap();
+        user_storage::save(&settings, "sample", &BTreeMap::from([("external".into(), json!(true))])).unwrap();
+        let undo = session.undo.len();
+        let error = session.accept_commands(conflict).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::UserStorageConflict { .. })), "{error}");
+        assert!(std::sync::Arc::ptr_eq(&before, &session.doc));
+        assert_eq!(session.undo.len(), undo);
+        assert_eq!(user_storage::load(&settings, "sample").unwrap(), BTreeMap::from([("external".into(), json!(true))]));
+        let accepted = session.scratch().compute_commands(&calls, None).unwrap();
+        assert_eq!(user_storage::load(&settings, "sample").unwrap().len(), 1);
+        session.accept_commands(accepted).unwrap();
+        assert_eq!(user_storage::load(&settings, "sample").unwrap()["hinge"], json!(42));
+        assert_eq!(session.doc.features.len(), 2);
+    }
+
+    #[test]
     fn user_storage_component_runs_keep_settings_between_designs_without_undo_and_rollback_failures() {
         let f = Fixture::new("");
         let settings = f.0.join("settings");
@@ -1022,7 +1065,7 @@ mod native {
         let f = Fixture::new("");
         let mut m = manifest();
         m["capabilities"] = json!(["commands@0.2", "dialog@0.1", "user-storage@0.1"]);
-        m["runtime"]["entries"] = json!([{"name":"make","dialog_hook":true,"input_schema":{"type":"object"}}]);
+        m["runtime"]["entries"] = json!([{"name":"make","dialog_hook":true,"input_schema":{"type":"object","properties":{}}}]);
         let read = "i32.const 512 i32.const 5 i32.const 128 call $get
             i32.const 128 i32.load if unreachable end
             i32.const 132 i32.load i32.const 1 i32.ne if unreachable end
@@ -2769,6 +2812,12 @@ mod importers {
              {STORE_OPTIONS}"
         );
         let (mut first, root) = storage_importer("user-storage-success", &code, true);
+        // This optional input distinguishes the fixture's first and subsequent calls. The
+        // settings themselves remain private host storage, never command parameters.
+        let manifest_path = root.join("plugins/smp/plugin.json");
+        let mut manifest: Value = serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+        manifest["runtime"]["entries"][0]["input_schema"] = json!({"type":"object","properties":{"again":{"type":"boolean"}}});
+        std::fs::write(manifest_path, manifest.to_string()).unwrap();
         let settings = root.join("settings");
         user_storage::save(&settings, "other", &BTreeMap::from([("private".into(), json!(true))])).unwrap();
         let file = put(&root, "bracket.smp", &design());
@@ -4134,7 +4183,7 @@ fn annotated_folders_need_bound_ui_consent_or_a_current_read_approval() {
     }});
     let manifest = parse_manifest(
         json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.2","folders@0.1"],
-        "runtime":{"module":"plugin.wasm","entries":[{"name":"make","input_schema":schema}],
+        "runtime":{"module":"plugin.wasm","commands":[],"entries":[{"name":"make","input_schema":schema}],
             "permissions":{"files":[{"name":"work","read":true,"write":false}]}}})
         .to_string()
         .as_bytes(),
@@ -4190,5 +4239,21 @@ fn annotated_folders_need_bound_ui_consent_or_a_current_read_approval() {
     }
     let scoped = solidcraft_io::vfs::PathScope::new([root.join("other")]);
     solidcraft_io::vfs::scoped(Some(scoped), || assert!(folders::for_entry(&s, &package, "make", &params, Some(&consent)).is_err()));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_settings_batch_conflict_publishes_none_of_its_records() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-settings-batch-{}", std::process::id()));
+    let mut state = AppState::default();
+    for id in ["first", "last"] {
+        let mut data = user_storage::Pending::load(&root, id).unwrap();
+        data.set("candidate", &json!(true)).unwrap();
+        state.pending_user_settings.insert(id.into(), (root.clone(), data));
+    }
+    user_storage::save(&root, "last", &BTreeMap::from([("external".into(), json!(true))])).unwrap();
+    assert!(matches!(state.publish_user_settings(), Err(HostError::UserStorageConflict { .. })));
+    assert!(user_storage::load(&root, "first").unwrap().is_empty());
+    assert_eq!(user_storage::load(&root, "last").unwrap(), BTreeMap::from([("external".into(), json!(true))]));
     std::fs::remove_dir_all(root).unwrap();
 }

@@ -3175,6 +3175,7 @@ impl Session {
     ) -> Result<ComputedCommands> {
         let editor_original = original.as_ref().map(|session| session.doc.clone());
         let mut computed = self.scratch();
+        computed.plugin_state.defer_user_settings();
         // UI consent travels to the worker invocation, never to the source identity that is
         // compared with the live session when accepting its result.
         self.plugin_state.dialog_folders = None;
@@ -3240,6 +3241,9 @@ impl Session {
                 }
             }
             return Err(EngineError::Other("the design changed while the feature was computing".into()));
+        }
+        if !self.plugin_state.defer_user_settings {
+            prepared.computed.plugin_state.publish_user_settings()?;
         }
         if let Some(original) = &prepared.editor_original {
             self.restore_editor_history(&prepared.source.doc, original);
@@ -3394,6 +3398,7 @@ impl Session {
     /// Commit commands evaluated on a scratch copy without losing this session's file,
     /// saved state, view state, checkpoints or earlier undo steps.
     pub fn accept_computed(&mut self, mut computed: Session) {
+        self.plugin_state.pending_user_settings = std::mem::take(&mut computed.plugin_state.pending_user_settings);
         // Audited direct-mutation jobs may not have passed through execute. Their
         // accepted document is still a new committed state with a fresh token.
         let newer = match (design_revision_generation(&computed.design_revision), design_revision_generation(&self.design_revision)) {
@@ -3548,6 +3553,7 @@ impl Session {
     }
 
     fn preview_in_place(mut self, commands: &[(String, Value)], step: Option<&std::sync::atomic::AtomicUsize>) -> Result<(Self, Vec<Value>)> {
+        self.plugin_state.defer_user_settings();
         if commands.is_empty() {
             return Err(EngineError::Other("nothing to preview".into()));
         }

@@ -12,7 +12,7 @@ use std::io::{Read, Write};
 use std::path::{Component as PathComponent, Path, PathBuf};
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicU64, AtomicUsize, Ordering},
     mpsc,
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -69,6 +69,51 @@ const O_NONBLOCK: i32 = 0x4;
 const MAX_LOG_BYTES: usize = 64 * 1024;
 const EPOCH_POLL: Duration = Duration::from_millis(10);
 static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
+
+/// A stalled regular-file read cannot be interrupted portably. Limit detached reads globally;
+/// their permits remain occupied until the OS returns, even after the dialog stops waiting.
+const MAX_PREFIX_READS: usize = 2;
+static PREFIX_READS: std::sync::OnceLock<Arc<AtomicUsize>> = std::sync::OnceLock::new();
+
+struct PrefixPermit(Arc<AtomicUsize>);
+impl Drop for PrefixPermit {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+fn start_prefix_read<T: Send + 'static>(
+    reads: Arc<AtomicUsize>,
+    read: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<mpsc::Receiver<Result<T>>> {
+    reads
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| (n < MAX_PREFIX_READS).then_some(n + 1))
+        .map_err(|_| limit("outstanding dialog prefix reads"))?;
+    let permit = PrefixPermit(reads);
+    let (send, reply) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("plugin-prefix".into())
+        .spawn(move || {
+            let result = read();
+            drop(permit);
+            // The receiver is dropped when its deadline expires; late bytes have no consumer.
+            let _ = send.send(result);
+        })
+        .map_err(|e| trap(format!("could not start prefix reader: {e}")))?;
+    Ok(reply)
+}
+
+fn wait_prefix<T>(reply: &mpsc::Receiver<Result<T>>, end: Instant) -> Result<T> {
+    let result = reply.recv_timeout(end.saturating_duration_since(Instant::now()));
+    if Instant::now() >= end {
+        return Err(deadline());
+    }
+    match result {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(deadline()),
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err(trap("prefix reader stopped unexpectedly")),
+    }
+}
 
 fn limit(name: &str) -> HostError {
     HostError::LimitExceeded { limit: name.into() }
@@ -1375,41 +1420,48 @@ fn run_import_or_dialog<H: PluginHost + 'static>(
         if name.is_empty() || name.len() > 255 || name.chars().any(char::is_control) || name.starts_with('.') {
             return Err(HostError::InvalidInput { field: "path".into(), reason: "choose a named, visible file".into() });
         }
-        let folder = request.path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-        let dir = Dir::open_ambient_dir(folder, cap_std::ambient_authority())
-            .map_err(|e| HostError::PermissionDenied { permission: format!("source: {}: {e}", folder.display()) })?;
-        let size = match dir.symlink_metadata(&name) {
-            Ok(metadata) if metadata.is_file() => metadata.len(),
-            Ok(_) => return Err(HostError::InvalidInput { field: "path".into(), reason: "not a regular file".into() }),
-            Err(e) => return Err(HostError::InvalidInput { field: "path".into(), reason: e.to_string() }),
-        };
-        if size > MAX_IMPORT_INPUT_BYTES {
-            return Err(limit("source: the file is larger than 1 GiB"));
-        }
+        let folder = request.path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).to_path_buf();
         let stack = stack_bytes(&runtime.limits, runtime_options, true)?;
         let (engine, component) = compile(bytes, stack)?;
         check_dialog_export(manifest, &engine, &component)?;
-        // Compilation is cached and happens outside the execution budget. Prefix acquisition
-        // and guest execution share one deadline; a slow read cannot publish a late update.
+        // Compilation is cached and happens outside the execution budget. Every source I/O
+        // operation and guest execution share one deadline, including open/stat on a slow mount.
         let dialog_deadline = dialog.then(|| Instant::now() + Duration::from_millis(runtime.limits.deadline_ms));
-        let prefix = if dialog {
-            let mut options = OpenOptions::new();
-            options.read(true);
-            #[cfg(unix)]
-            options.custom_flags(O_NONBLOCK);
-            let mut file = dir.open_with(&name, &options).map_err(|e| trap(e.to_string()))?;
-            if !file.metadata().map_err(|e| trap(e.to_string()))?.is_file() {
-                return Err(component_error("dialog source must be a regular file"));
+        let filename = name.clone();
+        let open = move || {
+            let dir = Dir::open_ambient_dir(&folder, cap_std::ambient_authority())
+                .map_err(|e| HostError::PermissionDenied { permission: format!("source: {}: {e}", folder.display()) })?;
+            let size = match dir.symlink_metadata(&filename) {
+                Ok(metadata) if metadata.is_file() => metadata.len(),
+                Ok(_) => return Err(HostError::InvalidInput { field: "path".into(), reason: "not a regular file".into() }),
+                Err(e) => return Err(HostError::InvalidInput { field: "path".into(), reason: e.to_string() }),
+            };
+            if size > MAX_IMPORT_INPUT_BYTES {
+                return Err(limit("source: the file is larger than 1 GiB"));
             }
-            let mut prefix = Vec::new();
-            Read::by_ref(&mut file).take(craft_plugin::dialog::MAX_PREFIX_BYTES).read_to_end(&mut prefix).map_err(|e| trap(e.to_string()))?;
-            Some((prefix, size))
-        } else {
-            None
+            let prefix = if dialog {
+                let mut options = OpenOptions::new();
+                options.read(true);
+                #[cfg(unix)]
+                options.custom_flags(O_NONBLOCK);
+                let mut file = dir.open_with(&filename, &options).map_err(|e| trap(e.to_string()))?;
+                if !file.metadata().map_err(|e| trap(e.to_string()))?.is_file() {
+                    return Err(component_error("dialog source must be a regular file"));
+                }
+                let mut prefix = Vec::new();
+                Read::by_ref(&mut file).take(craft_plugin::dialog::MAX_PREFIX_BYTES).read_to_end(&mut prefix).map_err(|e| trap(e.to_string()))?;
+                Some((prefix, size))
+            } else {
+                None
+            };
+            Ok((dir, size, prefix))
         };
-        if dialog_deadline.is_some_and(|end| Instant::now() >= end) {
-            return Err(with_limits(deadline(), &runtime.limits));
-        }
+        let (dir, size, prefix) = if let Some(end) = dialog_deadline {
+            let reply = start_prefix_read(PREFIX_READS.get_or_init(|| Arc::new(AtomicUsize::new(0))).clone(), open)?;
+            wait_prefix(&reply, end).map_err(|e| with_limits(e, &runtime.limits))?
+        } else {
+            open()?
+        };
         let import = ImportState {
             dialog: prefix,
             dir,

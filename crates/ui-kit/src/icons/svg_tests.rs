@@ -256,3 +256,40 @@ fn closing_a_path_clears_the_command_before_the_next_token() {
         assert_eq!(doc.items.len(), 1, "Z at the end or followed by a new command stays valid: {path}");
     }
 }
+
+#[test]
+fn cyclic_masks_are_rejected_before_rendering_and_acyclic_reuse_still_draws() {
+    let shape = "<path d='M8 8L56 8L56 56Z' fill='white' mask='url(#a)'/>";
+    let self_ref = format!("<svg><defs><mask id='a'>{shape}</mask></defs></svg>");
+    assert!(TEST_SET.parse(&self_ref).unwrap_err().contains("cyclic"));
+    // The inner definition refers to its active parent; the parent then refers back to it.
+    let cycle = format!("<svg><defs><mask id='a'><mask id='b'>{shape}</mask><path d='M8 8L56 56' mask='url(#b)'/></mask></defs></svg>");
+    assert!(TEST_SET.parse(&cycle).unwrap_err().contains("cyclic"));
+    let valid = "<svg><defs><mask id='a'><path d='M8 8L56 8L56 56Z' fill='white'/></mask><mask id='b'><path d='M8 8L56 8L56 56Z' fill='white' mask='url(#a)'/></mask></defs><path d='M8 8L56 8L56 56Z' fill='currentColor' mask='url(#b)'/><path d='M8 8L56 8L56 56Z' fill='currentColor' mask='url(#a)'/></svg>";
+    let doc = TEST_SET.parse(valid).unwrap();
+    let image = render(&doc, Look::themed(false, None, solidcraft_theme::ColorVision::Off), 64).unwrap();
+    assert!(image.data().chunks_exact(4).any(|pixel| pixel[3] != 0));
+}
+
+#[test]
+fn acyclic_mask_expansion_and_dependency_depth_have_fixed_budgets() {
+    let icon = |levels: usize, copies: usize| {
+        let mut svg = String::from("<svg><defs><mask id='m0'><path d='M8 8L56 8L56 56Z' fill='white'/></mask>");
+        for level in 1..=levels {
+            svg.push_str(&format!("<mask id='m{level}'>"));
+            for _ in 0..copies {
+                svg.push_str(&format!("<path d='M8 8L56 8L56 56Z' fill='white' mask='url(#m{})'/>", level - 1));
+            }
+            svg.push_str("</mask>");
+        }
+        svg.push_str(&format!("</defs><path d='M8 8L56 8L56 56Z' fill='currentColor' mask='url(#m{levels})'/></svg>"));
+        svg
+    };
+    assert!(TEST_SET.parse(&icon(4, 2)).is_ok(), "ordinary repeated shared masks remain supported");
+    assert!(TEST_SET.parse(&icon(16, 2)).unwrap_err().contains("budget"), "small DAGs must not expand exponentially at draw time");
+    assert!(TEST_SET.parse(&icon(64, 1)).unwrap_err().contains("deeply"), "a flat XML list must not create unbounded renderer recursion");
+    let mut repeated = icon(4, 2);
+    let node = "<path d='M8 8L56 8L56 56Z' mask='url(#m4)'/>";
+    repeated = repeated.replace("</svg>", &format!("{}</svg>", node.repeat(32)));
+    assert!(TEST_SET.parse(&repeated).unwrap_err().contains("budget"), "charge each top-level visit, too");
+}

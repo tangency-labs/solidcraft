@@ -977,6 +977,8 @@ pub(crate) struct EntryDialog {
     pub(crate) opens: Option<Vec<String>>,
     /// The selected path stays host-side. A replacement invalidates all earlier hook work.
     pub(crate) source: Option<String>,
+    /// The authority of the caller that supplied the file, retained across normal UI frames.
+    pub(crate) source_scope: Option<solidcraft_engine::io::vfs::PathScope>,
     pub(crate) file: Option<solidcraft_engine::plugin::dialog::FileFacts>,
     pub(crate) file_generation: u64,
     file_job: Option<FileJob>,
@@ -1262,6 +1264,9 @@ fn open_entry_at(app: &mut SolveApp, p: usize, e: usize, source: Option<String>)
     if let Some(id) = app.plugin_menu.dialogs.iter().find(|d| d.plugin.id == plugin.id && d.entry == entry.name && d.session == session).map(|d| d.id)
     {
         if let Some(source) = source {
+            if let Some(dialog) = app.plugin_menu.dialogs.iter_mut().find(|d| d.id == id) {
+                dialog.source_scope = solidcraft_engine::io::vfs::current_scope();
+            }
             select_file(app, id, source);
         }
         return;
@@ -1304,6 +1309,7 @@ fn open_entry_at(app: &mut SolveApp, p: usize, e: usize, source: Option<String>)
         result: None,
         opens,
         source: None,
+        source_scope: solidcraft_engine::io::vfs::current_scope(),
         file: None,
         file_generation: 0,
         file_job: None,
@@ -1681,7 +1687,7 @@ fn start_file_job(app: &mut SolveApp, id: u64) {
     session.plugin_state = app.session.plugin_state.clone();
     session.disabled_plugins = app.session.disabled_plugins.clone();
     session.plugin_limits = app.session.plugin_limits;
-    let scope = solidcraft_engine::io::vfs::current_scope();
+    let scope = dialog.source_scope.clone();
     let (tx, rx) = std::sync::mpsc::channel();
     let started = std::thread::Builder::new().name("import-dialog".into()).spawn(move || {
         let result = solidcraft_engine::io::vfs::scoped(scope, || {
@@ -2119,6 +2125,7 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
     // options-first dialog asks for its file here instead.
     if let Some(source) = dialog.source.clone() {
         let mut request = crate::file_load::Request::new(&source, crate::file_load::Kind::Open);
+        request.scope = dialog.source_scope.clone();
         request.plugin_import = true;
         request.plugin_folders = Some(consent);
         request.options.insert("format".into(), json!(format!("{}.{}", dialog.plugin.id, dialog.entry)));
@@ -2129,11 +2136,13 @@ pub(crate) fn run_dialog(app: &mut SolveApp, id: u64) -> Result<(), String> {
     }
     if let Some(extensions) = dialog.opens.clone() {
         let format = std::format!("{}.{}", dialog.plugin.id, dialog.entry);
+        let scope = dialog.source_scope.clone();
         app.plugin_menu.dialogs.retain(|d| d.id != id);
         let extensions: Vec<&str> = extensions.iter().map(String::as_str).collect();
         app.pick_open_for(&extensions, move |app, path| {
             let Some(path) = path else { return };
             let mut request = crate::file_load::Request::new(&path, crate::file_load::Kind::Open);
+            request.scope = scope;
             request.plugin_import = true;
             request.plugin_folders = Some(consent);
             request.options.insert("format".into(), json!(format));
@@ -2720,8 +2729,8 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let button = ui_kit::button(ui, browse_label, ui_kit::Button::Normal);
                         browse = button.clicked();
-                        let field = ui_kit::text_field_reserving(ui, text, hint, 0.0).1;
-                        field.union(button)
+                        crate::scenario::publish_handle(&format!("plugin_dialog:browse:{}", field.key), button.rect.center());
+                        ui_kit::text_field_reserving(ui, text, hint, 0.0).1
                     })
                     .inner
                 } else {

@@ -175,3 +175,20 @@ impl Pending {
         save_locked(settings, id, &self.data)
     }
 }
+
+/// Check every candidate under its record lock before writing any of them. In particular, a
+/// conflict in a later command in a worker batch must not publish an earlier command's settings.
+pub(crate) fn publish_all(pending: &BTreeMap<String, (PathBuf, Pending)>) -> Result<()> {
+    let mut locks = Vec::new();
+    for (id, (settings, data)) in pending.iter().filter(|(_, (_, data))| data.dirty) {
+        locks.push(lock_record(settings, id)?);
+        if load_snapshot(settings, id)?.1 != data.loaded_hash {
+            return Err(conflict(id));
+        }
+    }
+    for (id, (settings, data)) in pending.iter().filter(|(_, (_, data))| data.dirty) {
+        save_locked(settings, id, &data.data)?;
+    }
+    drop(locks);
+    Ok(())
+}

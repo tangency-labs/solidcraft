@@ -3277,6 +3277,7 @@ fn annotated_folder_fields_grant_only_edited_visible_values_for_the_internal_req
             "x-solidcraft-grant":"read","x-solidcraft-visible-when":{"field":"use_library","eq":true}}
     }});
     h.app.plugin_menu.listed = vec![listed("files", vec![command])];
+    h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::pending())));
     open_entry(&mut h.app, 0, 0);
     h.frames(2);
     let note = h.app.tr("ui.plugin_dialog_folder_read_once").to_owned();
@@ -3286,7 +3287,10 @@ fn annotated_folder_fields_grant_only_edited_visible_values_for_the_internal_req
     apply_browsed_folder(&mut h.app, id, "folder", root.to_string_lossy().into_owned());
     assert!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).is_ok(), "Browse consents even when it selects the default");
     h.frames(2);
-    h.step(&json!({"handle":"plugin_dialog:field:folder"})).unwrap();
+    let editor = crate::scenario::handle_at("plugin_dialog:field:folder").expect("directory text editor is drawn");
+    let browse = crate::scenario::handle_at("plugin_dialog:browse:folder").expect("Browse has a separate handle");
+    assert_ne!(editor, browse);
+    h.step(&json!({"click":{"handle":"plugin_dialog:field:folder"}})).unwrap();
     h.step(&json!({"key":"A","ctrl":true,"cmd":true})).unwrap();
     h.step(&json!({"text":pasted.to_string_lossy()})).unwrap();
     let consent = h.app.plugin_menu.dialog().unwrap().folder_consent().unwrap();
@@ -3340,4 +3344,44 @@ fn stored_folder_values_need_actual_consent_and_file_refresh_keeps_a_chosen_fold
     // A completed file-first form refresh rebuilds fields, retaining real user interaction.
     finish_import_fields(dialog, schema);
     assert_eq!(dialog.folder_consent().unwrap(), before);
+}
+
+#[test]
+fn scoped_ui_file_import_keeps_its_caller_scope_when_submitted_from_a_normal_frame() {
+    let mut h = crate::scenario::Harness::new();
+    let root = h.dir.join("allowed");
+    let folder = root.join("plugins/sample");
+    std::fs::create_dir_all(&folder).unwrap();
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["formats@0.2"],"runtime":{
+        "module":"sample.wasm","commands":[],"entries":[importing_entry()]}});
+    std::fs::write(folder.join("plugin.json"), manifest.to_string()).unwrap();
+    std::fs::write(folder.join("sample.wasm"), b"not executed by the dialog").unwrap();
+    let path = root.join("part.smp").to_string_lossy().into_owned();
+    std::fs::write(&path, b"header").unwrap();
+    h.app.session.plugin_state.plugins_dir = Some(root.join("plugins"));
+    h.app.preferences.plugin_import_file_first = true;
+    let reply = h.call("ui.file", json!({"path":path,"allow_paths":[root]}));
+    assert_eq!(reply["ok"], true, "{reply}");
+    let id = h.app.plugin_menu.dialog().unwrap().id;
+    // Join the facts worker without using frame timing; submit outside the caller's scope.
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    if let Some(job) = dialog.file_job.take() {
+        let update = job.reply.recv().unwrap().unwrap();
+        dialog.file = Some(update.file);
+        dialog.fields = form(&update.schema);
+        dialog.hook_values = Some(dialog_values(dialog));
+    }
+    assert!(solidcraft_engine::io::vfs::current_scope().is_none());
+    h.app.services.pick_open = Some(Box::new(|_| Box::pin(std::future::pending())));
+    h.app.pick_open_for(&["smp"], |_, _| {});
+    run_dialog(&mut h.app, id).unwrap();
+    let request = h.app.file_load.queued.back().unwrap();
+    assert_eq!(request.kind, crate::file_load::Kind::Open);
+    assert_eq!(request.path, path);
+    let scope = request.scope.as_ref().expect("the scoped ui.file authority survives the form");
+    assert!(scope.check(&path).is_ok());
+    let outside = h.dir.join("outside-caller-scope");
+    std::fs::write(&outside, b"private").unwrap();
+    assert!(scope.check(&outside.to_string_lossy()).is_err());
+    h.app.file_load.cancel();
 }
