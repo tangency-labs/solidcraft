@@ -12760,13 +12760,13 @@ fn captured_renderer_alpha_reaches_new_sections_and_alpha_only_drift_invalidates
         let painted = h.app.universal_panel_frame().unwrap().layout.clone();
         let captured_style = painted.geometry_policy.surfaces.as_ref().unwrap();
         let alpha = HostSurfaceAlpha {
-            docked: captured_style.appearance(PanelSurface::FollowZone, false).fill.a(),
-            floating: captured_style.appearance(PanelSurface::FollowZone, true).fill.a(),
+            docked: captured_style.appearance(PanelSurface::FollowZone, false).alpha,
+            floating: captured_style.appearance(PanelSurface::FollowZone, true).alpha,
         };
         assert_eq!(painted.geometry_policy.surface_alpha, Some(alpha), "the actual app captures the shared renderer policy before allocation");
         for card in &painted.sections {
             let appearance = captured_style.appearance(card.surface, card.peek || card.zone == Zone::Floating);
-            assert_eq!(card.paint_alpha, Some(appearance.fill.a()));
+            assert_eq!(card.paint_alpha, Some(appearance.alpha));
             assert_eq!(card.contrast, appearance.contrast);
             assert_eq!(card.paint_alpha, Some(255), "Classic's default opaque policy is preserved");
         }
@@ -12814,11 +12814,11 @@ fn captured_renderer_alpha_reaches_new_sections_and_alpha_only_drift_invalidates
         let reference = resolve(&policy);
         let mut styled_policy = policy.clone();
         styled_policy.default_opaque = false;
-        styled_policy.surfaces = Some(HostSurfaceStyle::capture(&h.ctx, false, Some(0.5), None));
+        styled_policy.surfaces = Some(HostSurfaceStyle::capture(&h.ctx, false, Some(0.5), None).readabilities());
         let styled = resolve(&styled_policy);
         for card in &styled.sections {
             let appearance = styled_policy.surfaces.as_ref().unwrap().appearance(card.surface, card.peek || card.zone == Zone::Floating);
-            assert_eq!(card.paint_alpha, Some(appearance.fill.a()));
+            assert_eq!(card.paint_alpha, Some(appearance.alpha));
             assert_eq!(card.contrast, appearance.contrast);
         }
         assert_eq!(styled.render_domain, reference.render_domain);
@@ -14293,4 +14293,16 @@ fn header_content_takes_the_titles_place_after_the_grip() {
         assert!(c.tab_strip.is_some() && c.header_content.is_none(), "a group keeps its tabs in the header");
         raw.host.set_header_content(id("lone"), None);
     }
+}
+
+#[test]
+fn placement_token_constants_match_the_theme() {
+    use solidcraft_engine::panels::{
+        TOKEN_CONTROL_HEIGHT, TOKEN_FORM_FOOTER_HEIGHT, TOKEN_FORM_HEADER_HEIGHT, TOKEN_SPACE_2, TOKEN_SPACE_4, TOKEN_SPACE_8, TOKEN_SPACE_10,
+    };
+    let t = solidcraft_theme::Tokens::get();
+    assert_eq!(
+        [t.space_2, t.space_4, t.space_8, t.space_10, t.control_height, t.form_header_height, t.form_footer_height],
+        [TOKEN_SPACE_2, TOKEN_SPACE_4, TOKEN_SPACE_8, TOKEN_SPACE_10, TOKEN_CONTROL_HEIGHT, TOKEN_FORM_HEADER_HEIGHT, TOKEN_FORM_FOOTER_HEIGHT]
+    );
 }

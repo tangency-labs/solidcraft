@@ -5,11 +5,17 @@
 //! commits changes through `LayoutService`, reads rects through `resolve_geometry`, and keeps
 //! the encoded envelope where it keeps its preferences.
 mod geometry;
+pub mod interaction;
+pub mod layout;
 mod model;
 mod persistence;
 mod reducer;
+mod scope;
 
 pub use geometry::*;
+pub use interaction::*;
+pub use layout::*;
 pub use model::*;
 pub use persistence::*;
 pub use reducer::*;
+pub use scope::*;

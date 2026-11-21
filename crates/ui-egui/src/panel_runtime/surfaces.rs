@@ -4,6 +4,7 @@ use std::sync::Arc;
 use egui::Color32;
 use solidcraft_engine::panels::{ContrastFailure, ContrastOutcome, PanelSurface};
 
+use super::{HostSurfaceReadabilities, HostSurfaceReadability};
 use solidcraft_theme::Tokens;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -69,6 +70,18 @@ impl HostSurfaceStyle {
             &self.floating
         } else {
             &self.docked
+        }
+    }
+
+    /// The app-neutral readability the geometry reads: the same alpha and contrast outcome per
+    /// surface kind, with forced-opaque hosts resolving every kind to the opaque surface.
+    pub fn readabilities(&self) -> HostSurfaceReadabilities {
+        let plain = |appearance: &HostSurfaceAppearance| HostSurfaceReadability { alpha: appearance.fill.a(), contrast: appearance.contrast.clone() };
+        let opaque = plain(&self.opaque);
+        if self.force_opaque {
+            HostSurfaceReadabilities { docked: opaque.clone(), floating: opaque.clone(), opaque }
+        } else {
+            HostSurfaceReadabilities { docked: plain(&self.docked), floating: plain(&self.floating), opaque }
         }
     }
 
