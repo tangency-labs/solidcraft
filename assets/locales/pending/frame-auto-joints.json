@@ -1,0 +1,34 @@
+{
+  "en": {
+    "Auto": "Auto",
+    "Fit Ends to Earlier Frames": "Fit Ends to Earlier Frames"
+  },
+  "ar": {
+    "Auto": "تلقائي",
+    "Fit Ends to Earlier Frames": "مواءمة الأطراف مع الإطارات السابقة"
+  },
+  "de": {
+    "Auto": "Automatisch",
+    "Fit Ends to Earlier Frames": "Enden an frühere Rahmen anpassen"
+  },
+  "he": {
+    "Auto": "אוטומטי",
+    "Fit Ends to Earlier Frames": "התאמת קצוות למסגרות קודמות"
+  },
+  "ja": {
+    "Auto": "自動",
+    "Fit Ends to Earlier Frames": "端部を前のフレームに合わせる"
+  },
+  "ko": {
+    "Auto": "자동",
+    "Fit Ends to Earlier Frames": "이전 프레임에 끝 맞추기"
+  },
+  "vi": {
+    "Auto": "Tự động",
+    "Fit Ends to Earlier Frames": "Khớp đầu với khung trước"
+  },
+  "zh": {
+    "Auto": "自动",
+    "Fit Ends to Earlier Frames": "端部贴合先前的框架"
+  }
+}

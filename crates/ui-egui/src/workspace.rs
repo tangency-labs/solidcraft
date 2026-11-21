@@ -284,7 +284,7 @@ pub const SECTIONS: &[Section] = &[
         ids: &[
             "drawing.view.base.planned",
             "drawing.view.section.planned",
-            "drawing.view.detail",
+            "drawing.view.detail.planned",
             "drawing.view.break",
             "drawing.view.auxiliary.planned",
             "drawing.view.pictorial",
@@ -343,7 +343,7 @@ pub const SECTIONS: &[Section] = &[
         promoted: 3,
         ids: &["drawing.revision", "drawing.revise.planned", "drawing.revision.tag.add.planned"],
     },
-    Section { tab: "DRAWING REVIEW", panel: "OUTPUT", promoted: 2, ids: &["drawing.export", "drawing.print.planned"] },
+    Section { tab: "DRAWING REVIEW", panel: "OUTPUT", promoted: 2, ids: &["drawing.export", "drawing.print"] },
     Section {
         tab: "MODEL",
         panel: "SKETCH",
@@ -674,7 +674,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("drawing.leader", "Leader Note"),
     ("drawing.note", "Note"),
     ("drawing.replace_model", "Replace"),
-    ("drawing.print.planned", "Print"),
+    ("drawing.print", "Print"),
     ("drawing.revise.planned", "Issue Rev."),
     ("drawing.revision", "Add Revision"),
     ("drawing.revision_table", "Revision Tbl."),
@@ -1207,7 +1207,7 @@ mod tests {
         let buttons = crate::toolbar_custom::buttons(&h.app, "DRAWING LAYOUT", "VIEWS", &views, count);
         assert_eq!(
             buttons.iter().map(|command| command.id).collect::<Vec<_>>(),
-            ["drawing.view.base.planned", "drawing.view.section.planned", "drawing.view.detail", "drawing.view.break"]
+            ["drawing.view.base.planned", "drawing.view.section.planned", "drawing.view.detail.planned", "drawing.view.break"]
         );
         assert!(views.iter().any(|command| command.id == "drawing.view.flat_pattern"));
         assert!(!views.iter().any(|command| command.id == "drawing.view.projected.planned"));
@@ -1225,7 +1225,7 @@ mod tests {
         let buttons = crate::toolbar_custom::buttons(&h.app, "DRAWING LAYOUT", "VIEWS", &views, count);
         assert_eq!(
             buttons.iter().map(|command| command.id).collect::<Vec<_>>(),
-            ["drawing.view.base.planned", "drawing.view.section.planned", "drawing.view.detail", "drawing.view.flat_pattern"]
+            ["drawing.view.base.planned", "drawing.view.section.planned", "drawing.view.detail.planned", "drawing.view.flat_pattern"]
         );
     }
 
@@ -1280,8 +1280,8 @@ mod tests {
         let model = h.app.session.doc.clone();
         let steps = h.app.session.undo.len();
         // One key at a time: Ctrl+Y after a wrong Ctrl+Z would put the design back.
-        for key in ["Z", "Y"] {
-            h.step(&json!({"key":key,"cmd":true})).unwrap();
+        for (key, shift) in [("Z", false), ("Y", false), ("Z", true)] {
+            h.step(&json!({"key":key,"cmd":true,"shift":shift})).unwrap();
             h.frames(2);
             assert_eq!(h.app.session.doc, model, "Ctrl+{key} on the empty Drawing page leaves the design alone");
             assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), (steps, 0), "Ctrl+{key}");
@@ -1306,6 +1306,12 @@ mod tests {
         h.step(&json!({"key":"Y","cmd":true})).unwrap();
         h.frames(2);
         assert_eq!(sheets(&mut h), added, "Ctrl+Y redoes it");
+        // Ctrl+Shift+Z redoes too (#12902), in a drawing as in Design.
+        h.step(&json!({"key":"Z","cmd":true})).unwrap();
+        h.frames(2);
+        h.step(&json!({"key":"Z","cmd":true,"shift":true})).unwrap();
+        h.frames(2);
+        assert_eq!(sheets(&mut h), added, "Ctrl+Shift+Z redoes it");
         for _ in 0..2 {
             h.step(&json!({"key":"Z","cmd":true})).unwrap();
             h.frames(2);

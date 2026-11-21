@@ -3646,6 +3646,24 @@ fn gpu_material_recipes_use_exact_linear_absorption_without_changing_saved_appea
 }
 
 #[test]
+fn render_only_revisions_preserve_model_source_bindings() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":3,"body_name":"Target"})).unwrap();
+    enter(&mut h.app, true).unwrap();
+    select_image_method(&mut h.app, ImageMethod::CpuRaytrace);
+    setups::save(&mut h.app).unwrap();
+    let source = h.app.session.doc.clone();
+    let token = h.app.session.design_token();
+    let before = setups::draft(&h.app).unwrap();
+    h.app.render_workspace.view.draft.exposure_ev += 0.25;
+    setups::persist_editor(&mut h.app, &before).unwrap();
+    assert_ne!(h.app.session.design_token(), token, "saved Render settings are a committed edit");
+    assert!(setups::same_model_source(&h.app, &Arc::downgrade(&source)), "history tracking does not change derived geometry");
+    h.app.run("appearance.assign", json!({"bodies":["Target"],"color":"#123456"})).unwrap();
+    assert!(!setups::same_model_source(&h.app, &Arc::downgrade(&source)), "material changes still invalidate the source");
+}
+
+#[test]
 fn numeric_editor_save_refreshes_only_unchanged_runtime_binding_sources() {
     use solidcraft_engine::render::job::ReflectionMode;
     for (method, change_geometry) in
@@ -4564,12 +4582,12 @@ fn hdr_ui_save_embeds_once_without_a_host_and_reload_never_reopens_the_source_pa
     let cpu = h.app.session.doc.render.setups.get("HDR CPU").unwrap().clone();
     assert!(matches!(&cpu.job, Some(RenderJob::CpuRaytrace { options, .. })
         if options.hdr.unwrap().samples == 64 && options.progressive.unwrap().samples_per_pixel == 7 && options.progressive.unwrap().seed == 84));
-    let encoded = h.app.session.doc.to_json();
-    assert!(!encoded.contains("original-embedded.hdr"), "the document never stores the source path");
+    assert!(!h.app.session.doc.to_json().contains("original-embedded.hdr"), "the document never stores the source path");
+    let encoded = solidcraft_engine::io::write_design_container(&h.app.session.doc).unwrap();
     std::fs::remove_file(&path).unwrap();
 
     for (name, expected, target) in [("HDR GPU", gpu, hdr::Target::Gpu), ("HDR CPU", cpu, hdr::Target::Cpu)] {
-        let loaded = solidcraft_engine::doc::Document::from_json(&encoded).unwrap();
+        let loaded = solidcraft_engine::io::read_design(&encoded).unwrap();
         h.app.session = Session::new(loaded);
         h.app.render_workspace.view.name = name.into();
         setups::load(&mut h.app);
