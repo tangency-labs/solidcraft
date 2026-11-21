@@ -35,6 +35,7 @@ pub type Result<T> = std::result::Result<T, HostError>;
 
 pub mod conditions;
 mod input;
+pub mod swatches;
 pub mod ui;
 pub use input::{check_input, prepare_input, strict_input_schema};
 

@@ -1829,6 +1829,15 @@ fn volume_at_len(h: &mut Harness, mm: f64) -> f64 {
     v - (mm * 200.0 + 500.0 - std::f64::consts::PI * 4.0 * 15.0)
 }
 
+/// Hold the work of the heavy commands started from here on until the sender is dropped. A key
+/// press or a click takes several frames, and this design computes in a moment: on a busy
+/// machine the work was in before the test looked, where it expects the app to be computing.
+fn hold_work(h: &mut Harness) -> std::sync::mpsc::Sender<()> {
+    let (release, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    release
+}
+
 /// A parameter changed in the Parameters dialog computes off the window thread (#6777): the
 /// design stays as it was while the window goes on, saying it computes, the row shows the
 /// expression being applied, and the change is in once computed.
@@ -1839,6 +1848,7 @@ fn a_parameter_changed_in_the_dialog_computes_off_the_window_thread() {
     h.app.preferences.operations_panel = false;
     h.step(&json!({"start": "parameters.change"})).unwrap();
     h.frames(4);
+    let release = hold_work(&mut h);
     h.run(&json!([{"click": {"handle": "param:len"}}, {"key": "A", "cmd": true}, {"text": "70 mm"}, {"key": "Enter"}])).unwrap();
     assert!(h.app.computing_since().is_some(), "computing");
     assert_eq!(len(&h).as_deref(), Some("60 mm"), "the design is as it was while it computes");
@@ -1846,6 +1856,7 @@ fn a_parameter_changed_in_the_dialog_computes_off_the_window_thread() {
     assert_eq!(applying.as_deref(), Some("70 mm"), "the row shows the expression it applies");
     h.frames(1);
     assert!(crate::scenario::rect_of("toast:computing").is_some(), "the window says it computes");
+    drop(release);
     until_settled(&mut h);
     assert_eq!(len(&h).as_deref(), Some("70 mm"));
     assert!(volume_at_len(&mut h, 70.0).abs() < 1.0);
@@ -1863,9 +1874,11 @@ fn held_parameter_edits_applied_compute_off_the_window_thread() {
     h.run(&json!([{"click": {"handle": "param:len"}}, {"key": "A", "cmd": true}, {"text": "80 mm"}, {"key": "Enter"}])).unwrap();
     h.frames(2);
     assert_eq!(h.app.params.as_ref().and_then(|d| d.editing.get("len").cloned()).as_deref(), Some("80 mm"), "held for Apply");
+    let release = hold_work(&mut h);
     h.step(&json!({"click": {"handle": "dialog:apply"}})).unwrap();
     assert!(h.app.computing_since().is_some(), "computing");
     assert_eq!(len(&h).as_deref(), Some("60 mm"));
+    drop(release);
     until_settled(&mut h);
     assert_eq!(len(&h).as_deref(), Some("80 mm"));
     assert!(volume_at_len(&mut h, 80.0).abs() < 1.0);
@@ -1879,9 +1892,11 @@ fn a_configuration_activated_computes_off_the_window_thread() {
     h.app.run("config.row", json!({"name": "Long", "values": {"len": "80 mm"}})).unwrap();
     h.app.start("config.table");
     h.frames(4);
+    let release = hold_work(&mut h);
     h.step(&json!({"click": {"handle": "config:activate:Long"}})).unwrap();
     assert!(h.app.computing_since().is_some(), "computing");
     assert_ne!(h.app.session.doc.configs.active.as_deref(), Some("Long"), "not active while it computes");
+    drop(release);
     until_settled(&mut h);
     assert_eq!(h.app.session.doc.configs.active.as_deref(), Some("Long"));
     assert_eq!(len(&h).as_deref(), Some("80 mm"));
@@ -1897,14 +1912,17 @@ fn cancel_puts_back_a_parameter_change_computed_off_the_window_thread() {
         h.app.preferences.parameters_apply_live = true;
         h.step(&json!({"start": "parameters.change"})).unwrap();
         h.frames(4);
+        let mut release = Some(hold_work(&mut h));
         h.run(&json!([{"click": {"handle": "param:len"}}, {"key": "A", "cmd": true}, {"text": "70 mm"}, {"key": "Enter"}])).unwrap();
         assert!(h.app.computing_since().is_some(), "computing");
         if in_before_cancel {
+            release.take();
             until_settled(&mut h);
             assert_eq!(len(&h).as_deref(), Some("70 mm"), "the edit is in");
         }
         h.step(&json!({"click": {"handle": "dialog:Cancel"}})).unwrap();
         assert!(h.app.params.is_none(), "Cancel closes the dialog");
+        release.take();
         until_settled(&mut h);
         assert_eq!(len(&h).as_deref(), Some("60 mm"), "Cancel puts the edit back (in before Cancel: {in_before_cancel})");
         assert!(volume_at_len(&mut h, 60.0).abs() < 1.0);

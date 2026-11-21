@@ -5838,6 +5838,15 @@ impl crate::blend::fillet_solver::p5::RailClassificationContext for SessionRollO
         self.classification()
             .classify(k, target, pseudo, face, class)
     }
+    fn continued_cliff(&self, vertex: VertexId, edge: EdgeId) -> Option<FaceId> {
+        use crate::blend::blend_corner::BlendCornerEvent;
+        let corner = session_corner_of_vertex(self.executive, vertex)?;
+        match self.corners.get(corner.0 as usize)?.blend?.event {
+            BlendCornerEvent::CliffJoin { rim, cliff } if rim.contains(&edge) => Some(cliff),
+            _ => None,
+        }
+    }
+
     fn corner_type(&self, corner: FilletCornerId) -> Result<FilletCornerType> {
         self.classification().corner_type(corner)
     }
@@ -6535,15 +6544,29 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                 continue;
                             };
                             // A constrained closest point can return an endpoint one
-                            // parameter ulp inside the interval. It is still beside
-                            // the band: testing only t would extend the band's chord
-                            // across the face and falsely catch a distant rail (#2903).
-                            // Use the existing solver tolerance in geometric space,
-                            // independent of the edge curve's parameterization. An end
-                            // the run's next edge continues from is no end of the band.
+                            // parameter ulp inside the interval. Use the existing solver
+                            // tolerance in geometric space, independent of the edge curve's
+                            // parameterization. An end the run's next edge continues from is
+                            // no end of the band.
                             let at_run_end = (end0
                                 && (t <= ivl_j.min() || (e - *start_j).length() <= tol))
                                 || (end1 && (t >= ivl_j.max() || (e - *stop_j).length() <= tol));
+                            // Not the fork's (#18563): a sample past the run's end is judged
+                            // only where that end is an end of edge `b` itself (below);
+                            // otherwise it is beside the band: testing only t would extend the
+                            // band's chord across the face and falsely catch a distant rail
+                            // (#2903), and an end on another edge of the run (a tangent
+                            // chain's) says nothing of band `b`'s width. A closed edge (both
+                            // ends one point) has no end to run on past.
+                            let own_end_b = edge_curves
+                                .get(b)
+                                .map(|(_, _, ends)| *ends)
+                                .filter(|[q0, q1]| (*q0 - *q1).length() > tol)
+                                .filter(|ends| ends.iter().any(|&q| (e - q).length() <= tol));
+                            let past_end = match own_end_b {
+                                Some(ends) if at_run_end && band_has_ends => Some(ends),
+                                _ => None,
+                            };
                             let on_rail = match curve_b.drop_point(
                                 k,
                                 &ivl_b,
@@ -6561,7 +6584,7 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                     return Err(error);
                                 }
                             };
-                            if at_run_end || !on_rail.success {
+                            if (at_run_end && past_end.is_none()) || !on_rail.success {
                                 continue; // beside the band, not across it
                             }
                             let r = match curve_b.evaluate_point(k, on_rail.parameter) {
@@ -6579,6 +6602,48 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                     || band_ends_b.iter().any(|&q| (r - q).length() <= tol))
                             {
                                 continue; // past the section that ends the band
+                            }
+                            if let Some([q0, q1]) = past_end {
+                                // Not the fork's (#18563): `p` lies past an end of edge `b`,
+                                // beside rail `b`'s kept part. Where that part runs on past
+                                // the edge's end (a round running out onto a face beyond it,
+                                // as onto the sphere that trims a block's corner), the band
+                                // runs on with it: a sample in it refuses as one beside the
+                                // edge does. Where the judgement cannot be made (an
+                                // evaluation fails), the sample is classified as for its own
+                                // evaluations: off the face it is dropped, on it the failure
+                                // is returned (#19243).
+                                let other_end = if (e - q0).length() <= (e - q1).length() {
+                                    q1
+                                } else {
+                                    q0
+                                };
+                                let inside = match inside_band_past_run_end(
+                                    k,
+                                    curve_b,
+                                    &ivl_b,
+                                    PastRunEnd {
+                                        end: e,
+                                        other_end,
+                                        sample: p,
+                                        on_rail: (on_rail.parameter, r),
+                                        kept: [kept_b.min(), kept_b.max()],
+                                    },
+                                    tol,
+                                    apart,
+                                ) {
+                                    Ok(inside) => inside,
+                                    Err(error) => {
+                                        if sample_off_face(k, self.target, *face_a, p)? {
+                                            continue;
+                                        }
+                                        return Err(error);
+                                    }
+                                };
+                                if inside && !sample_off_face(k, self.target, *face_a, p)? {
+                                    return Ok(false);
+                                }
+                                continue;
                             }
                             // Not the fork's (#18823): the band's section through `r` reaches
                             // the run at `r`'s own foot there, which is `p`'s where `p` lies in
@@ -6663,6 +6728,92 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         }
         Ok(true)
     }
+}
+
+/// A sample of the band check whose foot on a band's run is an end of the band's own edge
+/// ([`inside_band_past_run_end`]).
+#[derive(Clone, Copy)]
+struct PastRunEnd {
+    /// The edge's end: the sample's foot on the run.
+    end: crate::math::Point3,
+    /// The edge's other end.
+    other_end: crate::math::Point3,
+    /// The sample.
+    sample: crate::math::Point3,
+    /// The point of the band's rail nearest the sample, by its parameter, inside the rail's
+    /// kept part.
+    on_rail: (f64, crate::math::Point3),
+    /// The parameters of the ends of the rail's kept part.
+    kept: [f64; 2],
+}
+
+/// The band check past an end of a band's own edge (#18563): whether the sample lies in the
+/// band's run-on, the part of the band beside the rail's kept part past the edge's end. The
+/// band's section at that end goes from the rail's point across from the end to the end. The
+/// run-on is the rail's part from that point to the end of its kept part on the side away from
+/// the edge (the side the point across from the edge's other end does not lie on). The sample
+/// is in the run-on's band where its nearest point of the rail lies strictly within the
+/// run-on, and it lies on the end's side of the rail in the end section's direction, further
+/// than `tol` from the rail and short of that section's width by more than `apart`, as the
+/// check beside the edge judges a sample. The section's direction is the end's, not the rail's
+/// at the sample's nearest point: the two agree where the run-on is straight and stays on a
+/// plane. A rail without a point across from either end, or a section no wider than `2 apart`,
+/// takes no band there.
+///
+/// # Errors
+/// Those of the drops onto the rail and its evaluation.
+fn inside_band_past_run_end(
+    k: &Kernel,
+    rail: &crate::curve::curve::Curve,
+    ivl: &crate::geom::extent1d::Extent1d,
+    at: PastRunEnd,
+    tol: f64,
+    apart: f64,
+) -> Result<bool> {
+    use crate::geom::global_solver::SolverOperation;
+    let PastRunEnd {
+        end,
+        other_end,
+        sample,
+        on_rail: (t, r),
+        kept: [t0, t1],
+    } = at;
+    let drop = |q| {
+        rail.drop_point(
+            k,
+            ivl,
+            q,
+            None,
+            crate::math::BIG_DOUBLE,
+            None,
+            SolverOperation::Minimize,
+        )
+    };
+    let across = drop(end)?;
+    let across_other = drop(other_end)?;
+    if !across.success || !across_other.success {
+        return Ok(false);
+    }
+    // the run-on: from the point across from the end to the kept end on the side away from
+    // the point across from the edge's other end
+    let (lo, hi) = if across_other.parameter <= across.parameter {
+        (across.parameter, t1)
+    } else {
+        (t0, across.parameter)
+    };
+    if !(t > lo && t < hi) {
+        return Ok(false);
+    }
+    let section = end - rail.evaluate_point(k, across.parameter)?;
+    let width = section.length();
+    if !matches!(
+        width.partial_cmp(&(2.0 * apart)),
+        Some(core::cmp::Ordering::Greater)
+    ) {
+        return Ok(false);
+    }
+    let from_rail = (sample - r).dot(section * (1.0 / width));
+    Ok(from_rail > tol && from_rail < width - apart && (sample - r).length() < width)
 }
 
 /// A step of the band check that found nothing where a point always exists (a drop onto a
@@ -7367,10 +7518,44 @@ impl SessionObjects<'_> {
             extended_surfaces,
             ..
         } = self;
+        // Not upstream: at a cusp the band can run off its face before the vertex. Where the
+        // topology then fails ("Unable to Make Topology"), that is given as no room. Read before
+        // the topology is made and used only when it fails, so a corner that builds is never refused.
+        let cusp = {
+            let corner = corners
+                .get(id.0 as usize)
+                .ok_or_else(|| invalid("corner is not live"))?;
+            // Infallible: a lookup that fails here only means no cusp note, never a refusal.
+            if crate::blend::fillet_corner::topology::cusp_side_edge(k, target, corner)
+                .ok()
+                .flatten()
+                .is_some()
+            {
+                let vertex = corner.vertex;
+                let location = vertex.and_then(|v| crate::topology::vertex::point(target, v).ok());
+                let edge = crate::topology::edgeuse::p1::edge(target, edgeuse)
+                    .ok()
+                    .flatten();
+                Some((vertex, location, edge))
+            } else {
+                None
+            }
+        };
         let solver = solvers
             .get_mut(solver.0 as usize)
             .and_then(Option::as_mut)
             .ok_or_else(|| invalid("corner solver is not live"))?;
+        // A chamfer of unequal offsets is sized by a scale, any other blend by a radius.
+        let fit_kind = match solver.base().chamfer {
+            Some(chamfer)
+                if chamfer
+                    .offsets()
+                    .is_ok_and(|[r1, _]| !chamfer.holds([r1, r1])) =>
+            {
+                crate::blend::fillet_executive::p3::FitKind::Scale
+            }
+            _ => crate::blend::fillet_executive::p3::FitKind::Radius,
+        };
         let corner = corners
             .get_mut(id.0 as usize)
             .ok_or_else(|| invalid("corner is not live"))?;
@@ -7384,9 +7569,41 @@ impl SessionObjects<'_> {
             extended_surfaces,
             topo_edges: &mut executive.topo_edges,
         };
-        match corner.make_nx1_corner_topology(env)? {
-            Some(gaps) => self.nx1_end_gap_checks(k, id, gaps, executive),
-            None => Ok(()),
+        // On a cusp corner, a failure of the topology or of its end-gap checks (where the
+        // cusp case fails) is given as the cusp.
+        let made = match corner.make_nx1_corner_topology(env) {
+            Ok(Some(gaps)) => self.nx1_end_gap_checks(k, id, gaps, executive),
+            Ok(None) => Ok(()),
+            Err(e) => Err(e),
+        };
+        match (made, cusp) {
+            (Err(e), _) if e.is_unported_or_cancelled() => Err(e),
+            (Err(cause), Some((vertex, location, edge))) => {
+                executive.error.note_vertex_error(
+                    vertex
+                        .map(|v| FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(v))),
+                    location,
+                    crate::blend::fillet_geom::p1::FilStatus::Failure,
+                    crate::blend::fillet_geom::p1::FilletErrorType::NoRoom,
+                    Some(NX1_CUSP_SIDE_EDGE),
+                );
+                executive.error.no_room =
+                    Some(crate::blend::fillet_executive::NoRoomReason::RailLeavesFace);
+                executive.note_fit_radius(
+                    0.0,
+                    edge.map(|e| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(e))),
+                    fit_kind,
+                );
+                Err(crate::error::Failure::new(
+                    "SmFilletNx1Corner::MakeCornerTopology",
+                    crate::error::blend::BlendFailure::NoRoom(
+                        crate::blend::fillet_executive::NoRoomReason::RailLeavesFace,
+                    ),
+                )
+                .caused_by(cause)
+                .into_error())
+            }
+            (made, _) => made,
         }
     }
 
@@ -7822,7 +8039,12 @@ impl SessionObjects<'_> {
             ));
         }
         // (#2905) the size that builds: the other blend's offset, on the wider one's edge
-        if let JoinTopology::RefusedUnequalOffsets { blend, builds } = built {
+        if let JoinTopology::RefusedUnequalOffsets {
+            blend,
+            builds,
+            kind,
+        } = built
+        {
             let location = match vertex {
                 Some(v) => crate::topology::vertex::point(target, v).ok(),
                 None => None,
@@ -7850,7 +8072,7 @@ impl SessionObjects<'_> {
             executive.note_fit_radius(
                 builds,
                 edge.map(|e| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(e))),
-                crate::blend::fillet_executive::p3::FitKind::Radius,
+                kind,
             );
             return Err(SolidError::blend_failed(
                 "SmBlendCorner::MakeJoinTopology",
@@ -8306,6 +8528,9 @@ impl SessionObjects<'_> {
             .ok_or_else(|| invalid("corner is not live"))
     }
 }
+
+/// The Nx1 corner refused at a cusp (solidcraft#13156).
+const NX1_CUSP_SIDE_EDGE: &str = "Fillet Error: the blend's band runs off its face, which comes to a point at the vertex (a side edge leaves it along the blended edge)";
 
 impl CornerVertexAccess<FilletObject> for SessionObjects<'_> {
     fn vertices_make_topology(

@@ -5,6 +5,11 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod tiles;
 mod view_set;
 
-pub use view_set::{DesignView, MAX_NAME, MAX_VIEWS, ViewKind, ViewSet};
+pub use tiles::{Axis, EMPTY, Edge, MAX_TILES, Placement, Preset, Rect, Splitter, Tiles};
+pub use view_set::{
+    DesignView, MAX_NAME, MAX_POPOUTS, MAX_VIEWS, MoveError, Moved, PopOut, ViewKind, ViewSet, WindowId, WindowLevel, WindowPlacement, WindowTarget,
+    window_rect_for,
+};

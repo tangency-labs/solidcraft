@@ -267,6 +267,22 @@ rejected when loading the plugin. `solidcraft-cli plugin check` reports these er
 running Wasm. An invalid schema leaves the dialog's Run button off with the existing CLI/agent
 note. Conditions are bounded in depth and size.
 
+Hidden-key removal also follows the applicable `oneOf` and `anyOf` object branches, including
+nested objects and arrays. A composition containing conditional object rules must have one
+branch, or object branches distinguished pairwise by a required, unconditional scalar property
+with disjoint `const` or `enum` values. The parent or every branch must declare `"type":"object"`
+for these discriminators. This makes the applicable branch unambiguous before hidden keys are
+removed. Conditional object rules inside ambiguous compositions or `allOf` are rejected
+at load time with an `invalid_manifest` error naming the composition's schema location. Scalar
+choice options using `x-solidcraft-when` remain supported. The 1,024-property condition limit
+applies only to object scopes declaring conditional rules; plain object scopes skip that limit.
+
+All applicable scopes share the same visible controller values. When any scope hides a
+controller, conditions in every scope see it as missing. Required checks and choice filters
+use that same view. Loading checks visibility dependency cycles across each combination of
+enclosing scopes and selected branches, including nested objects and array items. Mutually
+exclusive branches are checked separately.
+
 Put `x-solidcraft-when` on a `oneOf` option to offer it only when its condition is true. If the
 current choice becomes unavailable, the dialog selects a matching conditional default, or the
 first available option in schema order. With no available option, the choice is empty; a required
@@ -277,7 +293,8 @@ Conditional defaults use the first matching rule in `x-solidcraft-defaults`. The
 it on opening and when a controlling value changes, until the user edits that field. Custom
 values survive later controller changes, except that unavailable choices must still reset.
 Programs provide their own values; conditional defaults do not overwrite program inputs.
-Schemas with these annotations opt into validation and hidden-key removal before direct calls.
+Command inputs and importer options with these annotations opt into validation and hidden-key
+removal before direct calls.
 Direct calls to schemas without conditional annotations keep their existing pass-through behaviour.
 For example:
 
@@ -388,6 +405,33 @@ relative path to an `.svg` file inside the package:
   and the command works as before.
 - Images are not part of the `approval` hash: changing one changes only what is drawn.
 
+An option may also name a material swatch with `x-solidcraft-swatch`. This is a separate
+annotation for PNG or JPEG artwork whose own colours are preserved, including transparency;
+the icon palette rules do not apply. For example:
+
+```json
+{"const": "oak", "title": "Natural oak", "x-solidcraft-swatch": "swatches/oak.png"}
+```
+
+Ship the image inside the plugin package. Paths follow the icon rules: plain relative paths,
+no `.` or `..`, no absolute paths or links, and nothing fetched from the network. Use `.png`,
+`.jpg` or `.jpeg`, at most 64 KiB and at most 256 × 256 decoded pixels. **128 × 128 pixels is
+recommended.** A package may name at most 256 distinct swatches. The host draws fixed-size
+tiles and loads and decodes each distinct image once
+when it loads the package, then caches its texture. A missing, corrupt, wrongly typed or oversized
+swatch is omitted with a warning in `plugin check` and the install review; the plugin still works.
+
+A partially illustrated choice shows tiles beside the option titles in its dropdown. When every
+available option has a usable swatch, the dialog offers a grid with a search box; search matches a
+case-insensitive substring of the title. Choosing either presentation still sends the option's
+`const` value. MCP and scripts use exactly the same input values as before.
+
+### View commands
+
+After Run commits the result, the app applies the run's last view command. `view.fit`
+frames the result, keeping the view direction; `view.home` frames it from the home direction.
+A run with no view command leaves the camera unchanged.
+
 ### Preview
 
 A command entry that edits the design is previewed the way native tools are: while its dialog's
@@ -403,6 +447,11 @@ The dialog has a **Preview** box, on when it opens; with it off, nothing runs un
 - It runs again only when the parameters or the design change, under the plugin's own fuel,
   memory and deadline limits, off the window's thread. A run left behind by newer inputs is
   dropped.
+- When the first successful preview is drawn, the app applies that run's last view command once
+  if it is `view.fit` or `view.home`. Fit includes previewed sketch geometry when there are no
+  bodies; even an empty result consumes this first-preview action. Later field changes leave the
+  camera alone, so you can move it freely. A run with no view command leaves the camera unchanged.
+  Reopening the dialog starts fresh: its first preview applies its view command again.
 - The most recently opened dialog on the design is previewed (the one picking in the viewport,
   when one is). While a native tool is open, its own preview is the one shown. Read entries and
   importers are not previewed.
