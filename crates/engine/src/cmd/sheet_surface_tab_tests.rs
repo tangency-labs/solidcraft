@@ -177,6 +177,9 @@ fn hostile_tab_params_never_panic() {
         json!([1, 2, 3]),
         json!("tab"),
     ] {
-        let _ = s.execute("sheet.tab", &p);
+        // A refusal is fine; a panic the session caught (an internal error) is not.
+        if let Err(crate::EngineError::Internal(_, msg)) = s.execute("sheet.tab", &p) {
+            panic!("sheet.tab {p} panicked: {msg}");
+        }
     }
 }

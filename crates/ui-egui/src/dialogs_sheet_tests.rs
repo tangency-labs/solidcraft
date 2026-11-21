@@ -1130,6 +1130,29 @@ fn tab_dialog_joins_the_profile_to_the_sheet() {
     }
 }
 
+/// A tab of every profile of its sketch (no `profiles`) edited with OK and the picks unchanged
+/// stays every profile, so a profile added to the sketch later joins it too.
+#[test]
+fn an_unchanged_tab_edit_keeps_every_profile() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    app.run("sketch.create", json!({"plane": {"face": [50, 30, 2.5]}, "name": "Ear"})).unwrap();
+    use solidcraft_engine::geom::prelude::*;
+    let plane = app.session.model.state().sketches.last().map(|ss| ss.plane).unwrap();
+    let (p0, p1) = (plane.to_local(solidcore_record::Vec3::new(30.0, 50.0, 2.5)), plane.to_local(solidcore_record::Vec3::new(70.0, 90.0, 2.5)));
+    app.run("sketch.rectangle.two_point", json!({"p0": [p0.x, p0.y], "p1": [p1.x, p1.y]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("sheet.tab", json!({"sketch": "Ear"})).unwrap();
+    let f = app.session.doc.features.last().cloned().unwrap();
+    assert!(matches!(&f.kind, FeatureKind::SheetTab { profiles: ProfileSel::All, .. }), "{:?}", f.kind);
+    let e = edit_dialog(&app, f.id, None).unwrap();
+    assert!(!e.inputs[0].items.is_empty(), "the edit shows the profiles it takes");
+    let c = apply_commands(&app, &e).unwrap();
+    let [(cmd, p)] = <[(String, serde_json::Value); 1]>::try_from(c).unwrap();
+    assert_eq!(cmd, "timeline.redefine");
+    assert_eq!(p["params"]["profiles"], json!("all"), "{p}");
+}
+
 // ---- flat pattern navigation ----
 
 fn flat_app(preset: &str, mode: crate::ui_kit::LayoutMode) -> SolveApp {
