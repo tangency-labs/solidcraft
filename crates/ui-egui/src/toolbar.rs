@@ -1389,7 +1389,8 @@ impl RibbonPanels {
                         size,
                         enabled: can_start(app, selected),
                         pressed: (ribbon_shows_pressed(app, selected.id) && !(persistent && app.preferences.persistent_ribbon_pressed))
-                            || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip),
+                            || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip)
+                            || (selected.id == "view.parts_library" && app.preferences.library_open),
                         // The buttons that leave the sketch or the edit never show pressed; a
                         // tool pinned into their group does.
                         exit: finish
@@ -1413,7 +1414,7 @@ impl RibbonPanels {
                         icon: info.icon,
                         size: ButtonSize { width: 0.0, min_width: 0.0 },
                         enabled: can_start(app, c),
-                        pressed: ribbon_shows_pressed(app, c.id),
+                        pressed: ribbon_shows_pressed(app, c.id) || (c.id == "view.parts_library" && app.preferences.library_open),
                         exit: false,
                         persistent: false,
                         disabled: info.disabled_reason,

@@ -25,7 +25,7 @@ mod view_spec;
 pub use analysis::{AnalysisMode, SceneAnalysis};
 pub use camera::{Camera, CameraAnim, Mat4, Quat, StandardView, UpAxis, ViewAngles, ease_in_out};
 pub use pick::{DrawnPoint, nearest_drawn_point};
-pub use raster::{Canvas, render, render_png, render_transparent, shade, unblend};
+pub use raster::{Canvas, render, render_picture, render_png, render_transparent, shade, unblend};
 pub use scene::{
     MAX_SECTION_PLANES, MIN_ALPHA, Rgb, SECTION_CAP, SECTION_HATCH, SECTION_HATCH_ANGLES, SEE_THROUGH, Scene, SceneLine, SceneMesh, png,
     section_hatch, section_hatch_line, section_hatch_of, section_plane_frame,

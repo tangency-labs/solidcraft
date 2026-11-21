@@ -82,14 +82,15 @@ impl SolveApp {
         self.begin_picker(future, Box::new(complete));
     }
 
-    /// Ask for a folder: a plugin field's Browse button, or the document library's folder.
+    /// Ask for a folder, under `title`: a plugin field's Browse button, the document library's
+    /// folder or the parts library's.
     /// The plugin dialog shows Browse only when this service is set. Without a host dialog,
     /// the answer is a cancel and nothing is changed.
-    pub(crate) fn pick_folder(&mut self, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
+    pub(crate) fn pick_folder(&mut self, title: &str, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
         if self.file_picker_busy() {
             return;
         }
-        let future = self.services.pick_folder.as_ref().map(|pick| pick());
+        let future = self.services.pick_folder.as_ref().map(|pick| pick(title));
         self.begin_picker(future, Box::new(complete));
     }
 
