@@ -179,13 +179,21 @@ impl OpCheck {
 
 /// The window's commands as the check runs them (New Body, Join or a Cut this window chose all
 /// run as a Join), with what tells them from other inputs.
-fn check_commands(cmds: &[(String, Value)], revision: u64) -> (Vec<(String, Value)>, u64) {
+fn check_commands(cmds: &[(String, Value)], revision: u64, shown: Option<Vec<String>>) -> (Vec<(String, Value)>, u64) {
     let mut out = cmds.to_vec();
     for (_, p) in &mut out {
         if let Some(op) = p.get_mut("operation")
             && op.as_str().is_some_and(|o| matches!(o, "new" | "join" | "cut"))
         {
             *op = Value::from("join");
+        }
+        // The choice goes by what is shown, as it does for every window, though Extrude's All
+        // takes hidden bodies too once made.
+        if let Some(shown) = &shown
+            && let Some(map) = p.as_object_mut()
+            && map.remove("all_bodies_touched").is_some()
+        {
+            map.insert("targets".into(), Value::from(shown.clone()));
         }
     }
     use std::hash::{Hash, Hasher};
@@ -242,7 +250,7 @@ pub fn update(app: &mut SolveApp, d: &mut Dialog, ctx: &egui::Context) {
         d.op_auto.set = Some(op);
         return;
     };
-    let (cmds, key) = check_commands(&cmds, app.session.revision);
+    let (cmds, key) = check_commands(&cmds, app.session.revision, solidcraft_engine::shown_scope(&app.session));
     let session = &app.session;
     let found = app.op_check.result(key, || session.ahead(), cmds, session.revision, rule.cut);
     let chosen = match found {

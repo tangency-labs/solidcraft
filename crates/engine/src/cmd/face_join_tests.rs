@@ -347,6 +347,28 @@ fn join_extrude_to_another_body_with_targets_joins_only_them() {
     check_target_joined(&s, true);
 }
 
+/// `all_bodies_touched` (the Extrude window's All) stores no targets and no participants: the
+/// Join takes every body the tool touches at each rebuild, a hidden one too, rather than the face's
+/// body as a default or the shown bodies (#2464). Without it, a hidden body is left alone.
+#[test]
+fn join_extrude_with_all_bodies_touched_takes_hidden_bodies_too() {
+    for all in [true, false] {
+        let mut s = Session::default();
+        let sketch = base_and_target(&mut s);
+        run(&mut s, "browser.visibility", json!({"items":["Target"],"visible":false}));
+        let extrude =
+            run(&mut s, "solid.extrude", json!({"sketch":sketch,"to":[20,20,40],"operation":"join","all_bodies_touched":all}))["feature"].clone();
+        check_target_joined(&s, all);
+        let f = s.doc.feature(extrude.as_u64().unwrap()).unwrap();
+        let FeatureKind::Extrude { targets, .. } = &f.kind else { panic!("an extrude") };
+        if all {
+            assert!(targets.is_empty() && f.participants.is_empty(), "{targets:?} {:?}", f.participants);
+        } else {
+            assert_eq!(targets.iter().map(|t| t.0.as_str()).collect::<Vec<_>>(), ["Base"], "the face's body, not the hidden one");
+        }
+    }
+}
+
 /// A Join To Object made before the body it runs to became one of its targets (format 40 up to
 /// this change: no `to_body_apart`) still joins that body whatever its targets say: on opening,
 /// and through an edit that doesn't say otherwise. The Extrude window's edit, which says

@@ -4155,8 +4155,10 @@ fn auto_operation(app: &SolveApp, d: &mut Dialog) {
     // cut: an empty `participants` would read as every body, hidden ones too (#9919).
     let mut params = params;
     let mut nothing_shown = false;
+    // Target Bodies' All (an empty `participants`) takes hidden bodies too once made; the choice
+    // still goes by what is shown.
     if let Some(shown) = shown
-        && params.get("participants").is_none()
+        && params.get("participants").and_then(Value::as_array).is_none_or(Vec::is_empty)
     {
         nothing_shown = shown.is_empty();
         params["participants"] = json!(shown);

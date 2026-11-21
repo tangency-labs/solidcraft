@@ -1277,9 +1277,8 @@ fn extrude_cut_only_cuts_the_target_bodies_picked_in_the_dialog() {
             }
         }
         h.frames(2);
-        // With Left hidden, the box shows the shown body OK stores, so Left is left alone.
-        let shown = if hidden_left { vec!["Right".to_string()] } else { vec![] };
-        assert_eq!(target_bodies(&h), Some(shown), "Cut shows Target Bodies");
+        // The profile is on no body's face: the box is All, hidden Left or not.
+        assert_eq!(target_bodies(&h), Some(vec![]), "Cut shows Target Bodies");
         if picked {
             let d = h.app.dialog.as_mut().unwrap();
             d.active = d.inputs.iter().position(|i| i.label == "Target Bodies").unwrap();
@@ -1289,11 +1288,12 @@ fn extrude_cut_only_cuts_the_target_bodies_picked_in_the_dialog() {
         let undo = h.app.session.undo.len();
         h.step(&json!({"widget":"OK"})).unwrap();
         assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
-        let left_volume = if picked || hidden_left { 8000.0 } else { 7400.0 };
+        // All cuts a hidden body too: Left is left alone only when Right alone is picked.
+        let left_volume = if picked { 8000.0 } else { 7400.0 };
         assert!((volume(&h, "Left") - left_volume).abs() < 1e-6);
         assert!((volume(&h, "Right") - 7400.0).abs() < 1e-6);
         let FeatureKind::Extrude { targets, extent, .. } = &h.app.session.doc.features.last().unwrap().kind else { panic!("extrude") };
-        assert_eq!(targets.iter().map(|n| n.0.as_str()).collect::<Vec<_>>(), if picked || hidden_left { vec!["Right"] } else { vec![] });
+        assert_eq!(targets.iter().map(|n| n.0.as_str()).collect::<Vec<_>>(), if picked { vec!["Right"] } else { vec![] });
         assert_eq!(extent.to.as_ref().map(|p| p.0), (!through_all).then_some(solidcore_record::Vec3::new(35.0, 10.0, 0.0)));
         assert_eq!(extent.through_all, through_all);
         assert_eq!(h.app.session.undo.len(), undo + 1);
@@ -1307,7 +1307,7 @@ fn extrude_cut_only_cuts_the_target_bodies_picked_in_the_dialog() {
 }
 
 #[test]
-fn editing_extrude_cut_restores_targets_and_clearing_them_keeps_the_original_scope() {
+fn editing_extrude_cut_restores_targets_and_clearing_them_takes_every_body() {
     for participants in [vec![], vec!["Left"]] {
         let (mut h, _) = overlapping_boxes_and_a_cut_profile();
         h.app
@@ -1333,9 +1333,10 @@ fn editing_extrude_cut_restores_targets_and_clearing_them_keeps_the_original_sco
         let feature = h.app.session.doc.find_feature("Depth").unwrap();
         let FeatureKind::Extrude { targets, .. } = &feature.kind else { panic!("extrude") };
         assert!(targets.is_empty(), "clearing the input must remove the stored targets");
-        assert_eq!(feature.participants, participants);
+        // All: Target Bodies alone say which bodies take part, so stored participants go too.
+        assert!(feature.participants.is_empty(), "{:?}", feature.participants);
         assert!((volume(&h, "Left") - 7400.0).abs() < 1e-6);
-        assert!((volume(&h, "Right") - if participants.is_empty() { 7400.0 } else { 8000.0 }).abs() < 1e-6);
+        assert!((volume(&h, "Right") - 7400.0).abs() < 1e-6);
         h.app.run("edit.undo", json!({})).unwrap();
         assert!((volume(&h, "Left") - 8000.0).abs() < 1e-6);
         assert!((volume(&h, "Right") - 7400.0).abs() < 1e-6);

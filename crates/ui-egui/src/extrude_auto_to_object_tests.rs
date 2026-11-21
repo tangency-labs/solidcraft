@@ -421,7 +421,7 @@ fn targets_chip(h: &Harness) -> Option<&'static str> {
 }
 
 /// Target Bodies shows what OK stores as soon as it is known: the body the profile was sketched
-/// on, then, To Object, the body the Join runs to (#6424); a Cut's automatic scope says so.
+/// on, for Join, Cut and Intersect alike, and for a Join To Object the body it runs to (#6424).
 #[test]
 fn target_bodies_follow_the_default_as_the_picks_change() {
     let mut h = join_to_scene();
@@ -431,14 +431,34 @@ fn target_bodies_follow_the_default_as_the_picks_change() {
     let params = extrude_params(&h);
     assert_eq!(params["targets"], json!(["Base", "Target"]));
     assert_eq!(params["to_body_apart"], json!(true));
-    set_operation(&mut h, 2);
-    assert!(target_bodies(dialog(&h)).is_empty(), "a cut takes every body it meets");
+    assert_eq!(params["participants"], json!([]), "Target Bodies alone say which bodies take part");
+    for op in [2, 3] {
+        set_operation(&mut h, op);
+        assert_eq!(target_bodies(dialog(&h)), ["Base"], "operation {op}: the profile's body, not the To body");
+        assert_eq!(extrude_params(&h)["targets"], json!(["Base"]));
+    }
     set_operation(&mut h, 1);
     assert_eq!(target_bodies(dialog(&h)), ["Base", "Target"]);
+    set_operation(&mut h, 0);
+    assert!(dialog(&h).inputs.iter().all(|i| i.label != "Target Bodies"), "a new body has none");
+}
+
+/// Until a face or profile is picked, Target Bodies is empty and says All: no body is known yet.
+#[test]
+fn target_bodies_wait_for_a_face_or_profile() {
+    let mut h = join_to_scene();
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.frames(3);
+    assert!(target_bodies(dialog(&h)).is_empty());
+    assert_eq!(targets_chip(&h), Some("All"));
+    let sketch = h.app.session.doc.find_feature("Top").unwrap().id;
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    h.frames(3);
+    assert_eq!(target_bodies(dialog(&h)), ["Base"]);
 }
 
 /// A body taken out of Target Bodies by hand stays out (#18428), and the Join leaves it alone;
-/// cleared, the box says Automatic and stays so, and OK leaves the choice to `solid.extrude`.
+/// cleared, the box says All and stays so, and OK names no bodies (`all_bodies_touched`).
 #[test]
 fn a_target_taken_out_by_hand_stays_out() {
     let mut h = join_to_scene();
@@ -463,38 +483,88 @@ fn a_target_taken_out_by_hand_stays_out() {
     set_operation(&mut h, 2);
     set_operation(&mut h, 1);
     assert!(target_bodies(dialog(&h)).is_empty(), "nothing is put back in");
-    assert!(extrude_params(&h).get("targets").is_none(), "solid.extrude chooses");
-    h.app.run("solid.extrude", extrude_params(&h)).unwrap();
-    assert_eq!(h.app.session.model.state().bodies.len(), 1, "the default, the sketch's body and the To body, joins");
+    let params = extrude_params(&h);
+    assert!(params.get("targets").is_none());
+    assert_eq!(params["all_bodies_touched"], json!(true));
+    h.app.run("solid.extrude", params).unwrap();
+    assert_eq!(h.app.session.model.state().bodies.len(), 1, "every body it touches joins, the To body among them");
 }
 
-/// With some bodies hidden, Target Bodies shows the shown ones, which OK stores so a hidden body
-/// is left alone (#3961). A profile on no body's face leaves the box empty: the automatic scope.
+/// Hidden bodies get no rule of their own in Target Bodies: the profile's body fills the box
+/// whatever else is hidden, a profile on no body leaves it All, and All cuts a hidden body too,
+/// storing no bodies, so showing it again changes nothing.
 #[test]
-fn target_bodies_show_the_shown_bodies_or_say_automatic() {
+fn hidden_bodies_get_no_rule_of_their_own_in_target_bodies() {
     let mut h = join_to_scene();
     h.app.dialog = None;
-    h.app.run("solid.box", json!({"corner": [100, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Spare"})).unwrap();
     h.app.run("browser.visibility", json!({"items": ["Target"], "visible": false})).unwrap();
     let sketch = h.app.session.doc.find_feature("Top").unwrap().id;
     h.app.start("solid.extrude");
     h.frames(2);
     h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
     set_operation(&mut h, 1);
-    assert_eq!(target_bodies(dialog(&h)), ["Base", "Spare"]);
+    assert_eq!(target_bodies(dialog(&h)), ["Base"], "the profile's body, not the shown ones");
     h.app.dialog = None;
-    h.app.run("browser.visibility", json!({"items": ["Target"], "visible": true})).unwrap();
-    h.app.run("sketch.create", json!({"plane": "XY", "name": "Floor"})).unwrap();
-    h.app.run("sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [30, 30]})).unwrap();
-    h.app.run("sketch.finish", json!({})).unwrap();
-    let floor = h.app.session.doc.find_feature("Floor").unwrap().id;
+    let floor = floor_sketch(&mut h);
     h.app.start("solid.extrude");
     h.frames(2);
     h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Profile { sketch: floor, index: 0 }];
-    set_operation(&mut h, 1);
+    set_operation(&mut h, 2);
     assert!(target_bodies(dialog(&h)).is_empty());
-    assert!(extrude_params(&h).get("targets").is_none(), "the automatic scope");
     assert_eq!(targets_chip(&h), Some("All"));
+    let mut params = extrude_params(&h);
+    assert!(params.get("targets").is_none());
+    assert_eq!(params["all_bodies_touched"], json!(true));
+    assert_eq!(params["participants"], json!([]));
+    // Through both: the base (16 000 mm³) and the hidden target (32 000) each lose 20 × 20 × their height.
+    params["distance"] = json!("70 mm");
+    params["direction"] = json!("positive");
+    let id = h.app.run("solid.extrude", params).unwrap()["feature"].as_u64().unwrap();
+    assert!(h.app.session.doc.feature(id).unwrap().participants.is_empty(), "no shown bodies kept");
+    check_volumes(&h, &[("Base", 12_000.0), ("Target", 24_000.0)]);
+    h.app.run("browser.visibility", json!({"items": ["Target"], "visible": true})).unwrap();
+    check_volumes(&h, &[("Base", 12_000.0), ("Target", 24_000.0)]);
+}
+
+/// An extrude made with no targets while a body was hidden keeps the shown bodies as its
+/// participants (#2464). Editing it shows them in Target Bodies, and clearing the box there makes
+/// it take every body it touches.
+#[test]
+fn editing_an_extrude_shows_its_participants_in_target_bodies() {
+    let mut h = join_to_scene();
+    h.app.dialog = None;
+    let floor = floor_sketch(&mut h);
+    h.app.run("browser.visibility", json!({"items": ["Target"], "visible": false})).unwrap();
+    h.app.run("solid.extrude", json!({"sketch": floor, "distance": 70, "operation": "cut", "name": "Hole"})).unwrap();
+    h.app.run("browser.visibility", json!({"items": ["Target"], "visible": true})).unwrap();
+    assert_eq!(h.app.session.doc.find_feature("Hole").unwrap().participants, ["Base"]);
+    check_volumes(&h, &[("Base", 12_000.0), ("Target", 32_000.0)]);
+    h.step(&json!({"call": "ui.editFeature", "params": {"feature": "Hole"}})).unwrap();
+    h.frames(8);
+    assert_eq!(target_bodies(dialog(&h)), ["Base"], "what it changes");
+    remove_target(&mut h, "Base");
+    assert_eq!(targets_chip(&h), Some("All"));
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.frames(8);
+    assert!(h.app.dialog.is_none(), "OK closed it");
+    assert!(h.app.session.doc.find_feature("Hole").unwrap().participants.is_empty());
+    check_volumes(&h, &[("Base", 12_000.0), ("Target", 24_000.0)]);
+}
+
+/// A 20 × 20 profile on the XY plane under the base, on no body's face: the sketch's id.
+fn floor_sketch(h: &mut Harness) -> u64 {
+    let id = h.app.run("sketch.create", json!({"plane": "XY", "name": "Floor"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [30, 30]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    id
+}
+
+fn check_volumes(h: &Harness, expected: &[(&str, f64)]) {
+    let state = h.app.session.model.state();
+    for (name, volume) in expected {
+        let measured = solidcraft_engine::doc::kernel::measure(&state.body(name).unwrap().body).unwrap().volume;
+        assert!((measured - volume).abs() < 1e-6, "{name}: {measured}, expected {volume}");
+    }
 }
 
 /// Editing a Join To Object made before the body it runs to was one of its targets, which joins

@@ -200,11 +200,13 @@ fn hidden_bodies_take_no_part() {
     h.step(&json!({"start": "solid.extrude"})).unwrap();
     checked(&mut h);
     assert_eq!(op(&mut h), NEW, "the hidden cube is not joined");
-    // Join picked by hand joins only the shown bodies: the hidden cube stays as it is.
+    // Join picked by hand, its Target Bodies left at All, joins every body it touches: the
+    // hidden cube too. The automatic choice alone goes by what is shown.
     pick(&mut h, JOIN);
     ok(&mut h);
     let st = h.app.session.model.state();
-    assert!(st.body("Base").is_some_and(|b| b.body.face_count() == 6), "the hidden cube is untouched");
+    let volume = st.body("Base").map(|b| solidcraft_engine::doc::kernel::measure(&b.body).unwrap().volume);
+    assert!(volume.is_some_and(|v| (v - 2000.0).abs() < 1e-6), "the hidden cube took the block: {volume:?}");
     // Nothing shown: New Body at once.
     let mut h = cube();
     h.app.run("browser.visibility", json!({"items": ["Base"], "visible": false})).unwrap();
