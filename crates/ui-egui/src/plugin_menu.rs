@@ -1312,10 +1312,8 @@ fn select_file(app: &mut SolveApp, id: u64, source: String) {
         }
         dialog.fields = fields;
     }
-    if let Some(picker) = app
-        .dialog
-        .as_mut()
-        .filter(|picker| matches!(picker.kind, crate::dialogs::Kind::PluginPick { dialog: picker_id } if picker_id == id))
+    if let Some(picker) =
+        app.dialog.as_mut().filter(|picker| matches!(picker.kind, crate::dialogs::Kind::PluginPick { dialog: picker_id } if picker_id == id))
     {
         picker.inputs = dialog.selection_inputs();
     }
