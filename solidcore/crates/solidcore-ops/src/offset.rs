@@ -670,5 +670,8 @@ pub fn draft(
     })?
 }
 
+mod surface;
+pub use surface::offset_surface;
+
 #[cfg(test)]
 mod tests;

@@ -2509,13 +2509,7 @@ impl<'target> FilletSession<'target> {
                         &lookup,
                     );
                     match event {
-                        Err(cause) => {
-                            let location = crate::topology::vertex::point(target, vertex).ok();
-                            return Ok(CornerCreation::Unsupported {
-                                location,
-                                cause: Some(cause),
-                            });
-                        }
+                        Err(cause) => return unclassified_corner(target, vertex, cause),
                         Ok(crate::blend::blend_corner::BlendCornerEvent::Ball) => {
                             let mut ball = FilletCorner::new(
                                 FilletCornerKind::NByTwo,
@@ -2563,13 +2557,7 @@ impl<'target> FilletSession<'target> {
                         set_back_fills,
                     );
                     match classified {
-                        Err(cause) => {
-                            let location = crate::topology::vertex::point(target, vertex).ok();
-                            return Ok(CornerCreation::Unsupported {
-                                location,
-                                cause: Some(cause),
-                            });
-                        }
+                        Err(cause) => return unclassified_corner(target, vertex, cause),
                         Ok(class)
                             if class.event
                                 == crate::blend::blend_corner::BlendCornerEvent::Setback =>
@@ -8832,6 +8820,31 @@ impl CornerAdjustmentAccess<FilletObject> for SessionObjects<'_> {
     }
 }
 
+/// What a corner whose blend classification failed with `cause` at `vertex` of `target` gives
+/// (`classify_ball`, `classify_setback`): an unsupported corner that keeps the classification's
+/// error (#19803), except for a cancellation, an unported call or a certificate out of its work
+/// budget (`is_unported_or_cancelled`), which is passed on as it is, as [`super::p3::caught`] and
+/// the setback-request classification do (#20216): work given up is never reported as a corner
+/// the kernel does not support.
+///
+/// # Errors
+///
+/// `cause`, where it is unported, cancelled or not certified.
+fn unclassified_corner<O>(
+    target: &Brep,
+    vertex: VertexId,
+    cause: SolidError,
+) -> Result<CornerCreation<O>> {
+    if cause.is_unported_or_cancelled() {
+        return Err(cause);
+    }
+    let location = crate::topology::vertex::point(target, vertex).ok();
+    Ok(CornerCreation::Unsupported {
+        location,
+        cause: Some(cause),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -9197,6 +9210,49 @@ mod tests {
 
     /// Without the spoil the cube's corner is the Ball and the fillet builds: the spoil, not
     /// the case, is what fails the classifications above.
+    /// #20216: a corner classification that fails with a cancellation, an unported call or a
+    /// certificate out of its budget passes that error on, not an unsupported corner; any other
+    /// failure (the face without a surface of #19803) is the unsupported corner keeping it. No
+    /// model reaches the arms with the first kind today (no cancellation is polled under the
+    /// classifications, and nothing under them makes an unported or not-certified error), so the
+    /// errors are given to the arms' function as the classification would return them.
+    #[test]
+    fn a_classification_cancelled_or_unported_is_passed_on_not_an_unsupported_corner() {
+        let mut k = Kernel::default();
+        let body =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                .unwrap();
+        let vertex = crate::topology::brep::p1::vertices(&body, None)
+            .unwrap()
+            .into_iter()
+            .find(|v| crate::topology::vertex::point(&body, *v).unwrap() == Point3::ZERO)
+            .unwrap();
+        let not_certified = SolidError::blend(
+            "blend::fillet_geom::tangent_end_rib",
+            crate::error::blend::BlendFailure::NotCertified {
+                halvings: 3,
+                stations: 9,
+            },
+        );
+        for given in [
+            SolidError::cancelled("blend::blend_corner::ball"),
+            SolidError::unported("evaluate_binormal", "unit"),
+            not_certified,
+        ] {
+            match unclassified_corner::<FilletObject>(&body, vertex, given.clone()) {
+                Err(e) => assert_eq!(e, given),
+                Ok(made) => panic!("{given:?} became {made:?}"),
+            }
+        }
+        match unclassified_corner::<FilletObject>(&body, vertex, face_without_surface()) {
+            Ok(CornerCreation::Unsupported { location, cause }) => {
+                assert_eq!(location, Some(Point3::ZERO));
+                assert_eq!(cause, Some(face_without_surface()));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
     #[test]
     fn the_unspoiled_cube_corner_builds() {
         let (result, error, _, _) = spoiled_cube_corner(|_, _| {});
