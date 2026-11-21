@@ -1409,3 +1409,15 @@ fn a_reference_beside_a_thread_s_groove_never_moves_to_another_face_when_the_thr
         }
     }
 }
+
+/// A chamfer as deep as the body takes its side wall away, so each chamfer face meets the bottom
+/// face directly. Those faces are still named exactly, and a sketch takes an attachment on them.
+#[test]
+fn a_sketch_attaches_to_a_chamfer_that_takes_the_whole_side_wall() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 85.5, "width": 85.5, "height": 11, "corner": [0, 0, 0], "body_name": "B"}));
+    let bottom = [[42.75, 0., 0.], [42.75, 85.5, 0.], [0., 42.75, 0.], [85.5, 42.75, 0.]];
+    run(&mut s, "solid.chamfer", json!({"edges": bottom, "distance": "11", "distance2": "1.75"}));
+    assert!(names(&s, "B").iter().all(|(_, exact)| *exact), "{:?}", names(&s, "B"));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [84.6745, 79.3562, 5.8114]}}));
+}
