@@ -86,6 +86,8 @@ fn joint_words(why: JointRefusal) -> &'static str {
         JointRefusal::RipPoints => "a rip's edge has two or more points on each panel, and a turn at each",
         JointRefusal::RipNotFinite => "a rip's edge is not numbers",
         JointRefusal::RipLap => "a rip cuts 0 or more from each side",
+        JointRefusal::OverlapRange => "an overlap has a gap of more than 0 and covers more than 0 and at most the sheet's thickness",
+        JointRefusal::OverlapTurn => "an overlap needs a corner between 0 and 180 degrees",
         JointRefusal::RipOffSurface => "a rip's edge leaves its panel's surface",
         JointRefusal::RipOffOutline => "a rip's edge is not on its panel's outline",
         JointRefusal::RipAgainstOutline => "a rip's edge runs against its panel's outline",

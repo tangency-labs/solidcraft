@@ -88,6 +88,7 @@ contact_sets	false
 continuity	false
 convert_sheet	false
 copy	false
+corner_join	false
 curvature_comb	false
 curvature_map	false
 cut	false
@@ -306,6 +307,9 @@ send	false
 settings	false
 settings_profile	false
 sheet	false
+sheet_corner_butt	false
+sheet_corner_full	false
+sheet_corner_partial	false
 sheet_rules	false
 shell	false
 shield	false

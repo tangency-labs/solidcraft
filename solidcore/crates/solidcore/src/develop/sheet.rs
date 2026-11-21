@@ -182,6 +182,17 @@ pub enum Lap {
         /// The gap between the two panels' metal.
         gap: f64,
     },
+    /// One panel covers the other's thickness, with `gap` between their facing surfaces: a
+    /// lapped corner. `None` as the amount covers the whole thickness, and so follows the
+    /// sheet's.
+    Overlap {
+        /// Whether the joint's `a` panel is the one that covers.
+        covering_a: bool,
+        /// How much of the other panel's thickness is covered, or all of it.
+        amount: Option<f64>,
+        /// The gap between the two panels' facing surfaces.
+        gap: f64,
+    },
     /// Each panel cut back the given distance from the edge, `(a, b)`, whatever the turn.
     Cut(f64, f64),
 }
@@ -285,11 +296,29 @@ const LAP_ALONG_TOL: f64 = 1e-9;
 
 impl Lap {
     /// What each panel `(a, b)` is cut back from the edge, square to it on its own surface,
-    /// where the sheet turns `turn` across it and is `thickness` thick.
+    /// where the sheet turns `turn` across it and is `thickness` thick. An overlap's cut below
+    /// 0 runs its panel on past the edge; it has one only where the sheet turns more than 0 and
+    /// less than a half turn, which the layout checks before it cuts.
     #[must_use]
     pub fn cuts(&self, turn: f64, thickness: f64) -> (f64, f64) {
         match *self {
             Lap::Cut(a, b) => (a.max(0.0), b.max(0.0)),
+            Lap::Overlap {
+                covering_a,
+                amount,
+                gap,
+            } => {
+                let (sin, cos) = turn.sin_cos();
+                let face = if turn > 0.0 { thickness } else { 0.0 };
+                let slope = (turn.signum() * thickness * cos).min(0.0);
+                let covering = (face - slope - amount.unwrap_or(thickness)) / sin.abs();
+                let covered = (face - slope + gap) / sin.abs();
+                if covering_a {
+                    (covering, covered)
+                } else {
+                    (covered, covering)
+                }
+            }
             Lap::Miter { gap } => {
                 // In the `a` panel's frame at the edge: y toward its material, z on toward the
                 // `b` panel. Into `a` is -z; into `b`, turned by `turn` toward the material, and

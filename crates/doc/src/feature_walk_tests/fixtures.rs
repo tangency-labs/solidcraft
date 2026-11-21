@@ -159,7 +159,16 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ("sheet_contour", json!({"type": "sheet_contour", "sketch": 1, "curves": ["l1"], "distance": "contour.distance"})),
         (
             "sheet_flange",
-            json!({"type": "sheet_flange", "edges": [{"point": o, "angle": "flange.e1_angle", "height": "flange.e1_height"}, {"point": o, "angle": null, "height": "flange.e2_height"}], "height": "flange.height", "angle": "flange.angle", "radius": "flange.radius", "corner_relief_shape": "round", "corner_relief": "flange.relief"}),
+            json!({"type": "sheet_flange", "edges": [{"point": o, "angle": "flange.e1_angle", "height": "flange.e1_height"}, {"point": o, "angle": null, "height": "flange.e2_height"}], "height": "flange.height", "angle": "flange.angle", "radius": "flange.radius", "corner_relief_shape": "round", "corner_relief": "flange.relief",
+            "corners": [
+                {"covering": "F7:cap.surface|F7:bend.inner", "covered": "F8:cap.surface|F8:bend.inner", "kind": "partial_overlap", "overlap": "flange.corner_overlap", "gap": "flange.corner_gap"},
+                {"covering": "F12:tab(F7:cap.surface)|F12:bend.inner", "covered": "F9:cap.surface|F9:bend.inner", "kind": "full_overlap", "overlap": "flange.inactive_overlap", "gap": "flange.second_corner_gap"}
+            ]}),
+        ),
+        (
+            "sheet_corner_join",
+            json!({"type": "sheet_corner_join", "body": "B", "covering": "F7:cap.surface|F7:bend.inner", "covered": "F8:cap.surface|F8:bend.inner",
+                "kind": "partial_overlap", "overlap": "corner.overlap", "gap": "corner.gap"}),
         ),
         ("sheet_hem", json!({"type": "sheet_hem", "edges": [o], "length": "hem.length", "gap": "hem.gap"})),
         (

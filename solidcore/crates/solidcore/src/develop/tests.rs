@@ -1263,6 +1263,184 @@ fn a_mitered_rip_keeps_both_panels_off_the_plane_between_them() {
     assert!(close(Lap::Cut(1.0, 2.0).cuts(0.3, T), (1.0, 2.0)));
 }
 
+/// A lapped rip cuts each panel square to the edge on its own surface: the covering panel to
+/// `amount` past the other's near face, the covered one to `gap` short of the covering one's. At
+/// a square corner toward the material those are T - amount and T + gap; away from it the
+/// covering panel runs on `amount` past the edge (a cut below 0) and the covered one stops `gap`
+/// short. At any other turn they are those over its sine, the thickness leaning over the edge by
+/// its cosine. Either panel may be the one that covers.
+#[test]
+fn a_lapped_rip_covers_one_panel_with_the_other() {
+    let (amount, gap) = (1.0, 0.5);
+    let angle = 72.0_f64.to_radians();
+    let (sin, cos) = angle.sin_cos();
+    for (turn, covering, covered) in [
+        (FRAC_PI_2, T - amount, T + gap),
+        (-FRAC_PI_2, -amount, gap),
+        (angle, (T - amount) / sin, (T + gap) / sin),
+        (-angle, (T * cos - amount) / sin, (T * cos + gap) / sin),
+        (
+            PI - angle,
+            (T * (1.0 + cos) - amount) / sin,
+            (T * (1.0 + cos) + gap) / sin,
+        ),
+        (angle - PI, -amount / sin, gap / sin),
+    ] {
+        for covering_a in [true, false] {
+            let lap = Lap::Overlap {
+                covering_a,
+                amount: Some(amount),
+                gap,
+            };
+            let got = lap.cuts(turn, T);
+            let want = if covering_a {
+                (covering, covered)
+            } else {
+                (covered, covering)
+            };
+            assert!(
+                (got.0 - want.0).abs() < 1e-9 && (got.1 - want.1).abs() < 1e-9,
+                "{turn}: {got:?}, not {want:?}"
+            );
+        }
+    }
+}
+
+/// A lap with no amount covers the other panel's whole thickness, whatever the sheet's is: at a
+/// square corner toward the material the covering panel is cut nothing and the covered one
+/// T + gap; away from it the covering panel runs on T past the edge.
+#[test]
+fn a_full_lap_follows_the_sheets_thickness() {
+    let gap = 0.5;
+    for thickness in [1.0, 2.0, 4.0] {
+        for (turn, covering, covered) in [
+            (FRAC_PI_2, 0.0, thickness + gap),
+            (-FRAC_PI_2, -thickness, gap),
+        ] {
+            for covering_a in [true, false] {
+                let lap = Lap::Overlap {
+                    covering_a,
+                    amount: None,
+                    gap,
+                };
+                let got = lap.cuts(turn, thickness);
+                let want = if covering_a {
+                    (covering, covered)
+                } else {
+                    (covered, covering)
+                };
+                assert!(
+                    (got.0 - want.0).abs() < 1e-9 && (got.1 - want.1).abs() < 1e-9,
+                    "{thickness} at {turn}: {got:?}, not {want:?}"
+                );
+            }
+        }
+    }
+}
+
+/// A lapped rip moves each panel's own edge in the flat: the 100 x 60 base and the 100 x 20
+/// flange of the bracket each lose their cut along the rip, and a cut below 0 adds that much.
+#[test]
+fn a_lapped_rip_moves_each_panels_own_edge() {
+    for turn in [FRAC_PI_2, -FRAC_PI_2] {
+        for amount in [Some(1.0), None] {
+            for covering_a in [true, false] {
+                let lap = Lap::Overlap {
+                    covering_a,
+                    amount,
+                    gap: 0.5,
+                };
+                let mut sheet = bracket(bend(FRAC_PI_2, Datum::Sharp, (0.0, 100.0)));
+                if let Some(j) = sheet.joints.get_mut(0) {
+                    j.kind = rip_along(j, 100.0, turn, lap);
+                    if let JointKind::Rip(rip) = &mut j.kind {
+                        let line = |edge: &[Vec2]| match edge {
+                            [a, b] => vec![Seg2::Line { a: *a, b: *b }],
+                            _ => Vec::new(),
+                        };
+                        rip.curves = (line(&rip.edges.0), line(&rip.edges.1));
+                    }
+                }
+                let dev = match develop(&sheet, &[(0, Rigid2::IDENTITY)]) {
+                    Ok(dev) => dev,
+                    Err(why) => panic!("{lap:?} at {turn}: {why}"),
+                };
+                let (Some(Some(base)), Some(Some(flange))) =
+                    (dev.panels.first(), dev.panels.get(1))
+                else {
+                    panic!("both panels are laid out: {dev:?}")
+                };
+                let (a, b) = lap.cuts(turn, T);
+                assert!(
+                    (area(&base.region) - 100.0 * (60.0 - a)).abs() < 1e-9,
+                    "{lap:?} at {turn}: the base is {}",
+                    area(&base.region)
+                );
+                assert!(
+                    (area(&flange.region) - 100.0 * (20.0 - b)).abs() < 1e-9,
+                    "{lap:?} at {turn}: the flange is {}",
+                    area(&flange.region)
+                );
+                assert!(
+                    (bounds(&base.region).min.y - a).abs() < 1e-9,
+                    "{lap:?} at {turn}: {:?}",
+                    bounds(&base.region)
+                );
+            }
+        }
+    }
+}
+
+/// A lap is refused, saying which, where its gap is not more than 0, where it covers nothing or
+/// more than the sheet's thickness, and where the sheet runs straight on or turns a half turn
+/// and so has no corner to lap.
+#[test]
+fn a_lapped_rip_out_of_range_is_refused() {
+    let lapped = |amount: f64, gap: f64| Lap::Overlap {
+        covering_a: true,
+        amount: Some(amount),
+        gap,
+    };
+    let laid = |turn: f64, lap: Lap| {
+        let mut sheet = bracket(bend(FRAC_PI_2, Datum::Sharp, (0.0, 100.0)));
+        if let Some(j) = sheet.joints.get_mut(0) {
+            j.kind = rip_along(j, 100.0, turn, lap);
+        }
+        develop(&sheet, &[(0, Rigid2::IDENTITY)])
+    };
+    let refused = |why: JointRefusal| Err(Refusal::Joint { joint: 0, why });
+    for lap in [
+        lapped(0.0, 0.5),
+        lapped(-1.0, 0.5),
+        lapped(T + 1.0, 0.5),
+        lapped(f64::INFINITY, 0.5),
+        lapped(f64::NAN, 0.5),
+        lapped(1.0, 0.0),
+        lapped(1.0, -0.5),
+        lapped(1.0, f64::NAN),
+    ] {
+        assert_eq!(
+            laid(FRAC_PI_2, lap),
+            refused(JointRefusal::OverlapRange),
+            "{lap:?}"
+        );
+    }
+    for turn in [0.0, PI, -PI] {
+        assert_eq!(
+            laid(turn, lapped(1.0, 0.5)),
+            refused(JointRefusal::OverlapTurn),
+            "{turn}"
+        );
+    }
+    for turn in [f64::NAN, f64::INFINITY] {
+        assert_eq!(
+            laid(turn, lapped(1.0, 0.5)),
+            refused(JointRefusal::RipNotFinite),
+            "{turn}"
+        );
+    }
+}
+
 /// A plate whose top is a half round of radius 27.5 about (0, 23), ripped from a roll along
 /// that arc and cut back 3, its edge given at 33 points and, where `exact`, as the arc itself:
 /// the plate's flat outline, each edge with what it is.
