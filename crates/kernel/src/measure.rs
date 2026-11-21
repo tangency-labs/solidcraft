@@ -201,11 +201,35 @@ pub fn levels_along(b: &Body, plane: &solidcore_record::Plane) -> Result<[f64; 2
         .map_err(|e| crate::KernelError::Invalid(format!("the body's reach along the plane's normal can't be measured: {e}")))
 }
 
+/// Whether the endless line through `o` along `d` meets the box `b`, its sides included (never an
+/// empty box, never a zero direction or a coordinate that is not finite). Each side counts a
+/// millionth of the box's size beyond it, so a line read back from a body's own face still meets
+/// its box (solidcore-ops' `measure::line_meets_box`).
+pub fn line_meets_box(b: &Aabb3, o: Vec3, d: Vec3) -> bool {
+    let k = |v: Vec3| [v.x, v.y, v.z];
+    !b.is_empty() && solidcore_ops::measure::line_meets_box(k(b.min), k(b.max), k(o), k(d), 1e-6).unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{BoolOp, boolean, cylinder, torus};
     use solidcraft_geom::prelude::*;
+
+    /// A line meets a box when it passes through it or along a side, never when it passes by, and
+    /// never an empty box or a zero direction.
+    #[test]
+    fn a_line_meets_a_box_it_passes_through() {
+        let b = Aabb3 { min: Vec3::new(0.0, 0.0, 0.0), max: Vec3::new(20.0, 20.0, 20.0) };
+        assert!(super::line_meets_box(&b, Vec3::new(10.0, 10.0, -50.0), Vec3::Z), "upright through the middle");
+        assert!(super::line_meets_box(&b, Vec3::new(-5.0, 10.0, 10.0), Vec3::new(1.0, 1.0, 0.0)), "slanted through");
+        assert!(super::line_meets_box(&b, Vec3::new(20.0, 10.0, 0.0), Vec3::Z), "along a side");
+        assert!(!super::line_meets_box(&b, Vec3::new(30.0, 10.0, 0.0), Vec3::Z), "beside it");
+        // A millionth of the box's size beyond a side still counts, a ten-thousandth does not.
+        assert!(super::line_meets_box(&b, Vec3::new(20.00001, 10.0, 0.0), Vec3::Z), "just past a side");
+        assert!(!super::line_meets_box(&b, Vec3::new(20.002, 10.0, 0.0), Vec3::Z), "clear of a side");
+        assert!(!super::line_meets_box(&b, Vec3::new(10.0, 10.0, 0.0), Vec3::ZERO) && !super::line_meets_box(&Aabb3::EMPTY, Vec3::ZERO, Vec3::Z));
+    }
 
     #[test]
     fn selected_faces_skip_exact_conversion_for_either_mesh_operand() {
