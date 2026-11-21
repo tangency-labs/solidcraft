@@ -6217,6 +6217,7 @@ dependencies = [
  "ureq",
  "wat",
  "web-time",
+ "zip",
 ]
 
 [[package]]
