@@ -128,8 +128,9 @@ fn legacy_v9_imported_emboss_anchor_and_ordinary_face_paint_replay_without_renam
     // not by its name.
     let mark = |name: &Option<String>| name.as_ref().map(|n| format!("{}{n}", solidcraft_doc::naming::LEGACY_MARK));
     let mut saved_plane = saved_plane;
-    if let solidcraft_doc::PlaneRef::Face { name, .. } = &mut saved_plane {
+    if let solidcraft_doc::PlaneRef::Face { name, anchor, .. } = &mut saved_plane {
         *name = mark(name);
+        anchor.as_mut().unwrap().old_kernel_frame = true;
     }
     let paint: Vec<_> = paint
         .into_iter()

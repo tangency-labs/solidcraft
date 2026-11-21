@@ -602,6 +602,9 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
     let drawings = take_drawings(&mut v)?;
     let legacy_wires = check_raw(&v, version)?;
     validate_body_transfers(&v)?;
+    if version <= crate::face_anchor::LAST_OLD_KERNEL_FORMAT {
+        crate::face_anchor::mark_old_kernel_frames(&mut v);
+    }
     DESIGN.upgrade(&mut v, version, applied)?;
     let mut d: Document = serde_json::from_value(v).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
     check_typed_numbers(&d)?;

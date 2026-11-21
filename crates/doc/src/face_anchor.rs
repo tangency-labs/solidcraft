@@ -22,6 +22,10 @@ pub struct FaceAnchor {
     /// Origin and x direction in the exact canonical face plane's coordinates.
     pub coordinates: [f64; 2],
     pub x_axis: [f64; 2],
+    /// Saved in format 48 or before: on a reversed plane face of an imported body, `coordinates`
+    /// and `x_axis` are in 0.30.1's frame, the surface's axes swapped (#15891).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub old_kernel_frame: bool,
 }
 
 impl FaceAnchor {
@@ -256,6 +260,7 @@ impl Document {
             placement: None,
             coordinates: [0., 0.],
             x_axis: [1., 0.],
+            old_kernel_frame: false,
         };
         let canonical = map_plane(&anchor.source_to_author(self, author, body)?, &source)?;
         if picked.normal().dot(canonical.normal()) < 1. - 1e-7 || (picked.origin - canonical.origin).dot(canonical.normal()).abs() > 1e-7 {
@@ -407,7 +412,12 @@ impl Document {
                 return Err(DocError::Invalid("attached face pieces no longer share one oriented plane".into()));
             }
         }
-        let canonical = map_plane(&anchor.source_to_author(self, author, body)?, &plane)?;
+        let mut canonical = map_plane(&anchor.source_to_author(self, author, body)?, &plane)?;
+        if anchor.old_kernel_frame && matches!(certificate, Some(crate::config::FaceCertificate::Imported { .. })) && !body.body.face_forward(first) {
+            // 0.30.1 read the reversed plane (u, v) as (v, u); today's reads it as (u, -v).
+            canonical = Plane::new(canonical.origin, -canonical.y, canonical.x)
+                .ok_or_else(|| DocError::Invalid("attached sketch basis is degenerate".into()))?;
+        }
         let origin = canonical.origin + canonical.x * anchor.coordinates[0] + canonical.y * anchor.coordinates[1];
         let x = canonical.x * anchor.x_axis[0] + canonical.y * anchor.x_axis[1];
         let plane =
@@ -463,8 +473,11 @@ impl Document {
 
 pub fn validate_face_anchor_json(value: &Value) -> Result<()> {
     let fields = value.as_object().ok_or_else(|| DocError::Invalid("face anchor must be an object".into()))?;
-    if !(6..=7).contains(&fields.len())
-        || fields.keys().any(|key| !["target", "component", "path", "author_path", "placement", "coordinates", "x_axis"].contains(&key.as_str()))
+    if !(6..=8).contains(&fields.len())
+        || fields.keys().any(|key| {
+            !["target", "component", "path", "author_path", "placement", "coordinates", "x_axis", "old_kernel_frame"].contains(&key.as_str())
+        })
+        || fields.get("old_kernel_frame").is_some_and(|flag| !flag.is_boolean())
     {
         return Err(DocError::Invalid("unknown or missing face anchor fields".into()));
     }
@@ -508,6 +521,29 @@ pub fn validate_face_anchor_json(value: &Value) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The last design format 0.30.1's kernel wrote ([`FaceAnchor::old_kernel_frame`]).
+pub(crate) const LAST_OLD_KERNEL_FORMAT: u32 = 48;
+
+/// Mark every face anchor that [`validate_face_anchors_json`] finds as in the old kernel's frame.
+pub(crate) fn mark_old_kernel_frames(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            if fields.get("type").and_then(Value::as_str) == Some("face")
+                && let Some(Value::Object(anchor)) = fields.get_mut("anchor")
+            {
+                anchor.insert("old_kernel_frame".into(), Value::Bool(true));
+            }
+            for (key, child) in fields.iter_mut() {
+                if !["sketch", "meshes", "step", "configs", "appearances", "materials"].contains(&key.as_str()) {
+                    mark_old_kernel_frames(child);
+                }
+            }
+        }
+        Value::Array(values) => values.iter_mut().for_each(mark_old_kernel_frames),
+        _ => {}
+    }
 }
 
 /// Walk reference-bearing JSON before typed decoding, excluding bulk geometry payloads.
