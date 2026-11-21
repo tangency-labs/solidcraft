@@ -27,6 +27,10 @@ from the input schema in the manifest.
 Plugins can be written in any language that compiles to a WebAssembly component. This guide uses
 Rust.
 
+Both examples are in SolidCraft's source, in `docs/book/plugin-examples`, and are built against
+the current WIT with every change to it (`cargo xtask plugin-examples`), so the code here
+compiles.
+
 ## What you need
 
 1. Rust, with the WebAssembly target: `rustup target add wasm32-unknown-unknown`.
@@ -95,26 +99,9 @@ geometry picked in the viewport, a dropdown, or a picture per option: see
 [Plugins](../../../plugins.md#integration-apis). `slots` place the entry in a ribbon tab or the
 File or Help menu; every entry is in the Plugins menu anyway.
 
-## Step 2: the interface
+## Step 2: the crate
 
-The WIT file is the contract between SolidCraft and the plugin: what the plugin may call, and what
-it must export. Copy it from SolidCraft's source, `crates/craft-plugin/wit/plugin.wit`, into
-`plate-maker-src/wit/plugin.wit`. Its package is `craft:plugin@0.2.0`, and it has two worlds:
-
-- `command-plugin` imports `commands` (run a SolidCraft command), `log`, `control` (progress and
-  cancel), `files` (granted folders) and `clock`, and exports `entry`, whose `execute(entry, params)`
-  SolidCraft calls with the entry's name and its parameters as JSON.
-- `importer-plugin` imports `source` (the file being opened), `design` (where the new design
-  goes), `evaluate`, `log`, `control` and `clock`, and exports `importer`.
-
-Errors are a `plugin-error` variant: `permission-denied`, `command-failed`, `limit-exceeded`,
-`invalid-input`, `unsupported` and the others name their cause, and the user sees them after the
-plugin's name. Return `unsupported` for a valid file or option your plugin does not handle ("the
-model has no solids"); `invalid-input` is for input that is broken.
-
-## Step 3: write the component
-
-Create the crate:
+Create the crate beside the package folder:
 
 ```sh
 cargo new --lib plate-maker-src
@@ -133,6 +120,32 @@ opt-level = "s"
 lto = true
 strip = true
 ```
+
+## Step 3: the interface
+
+The WIT file is the contract between SolidCraft and the plugin: what the plugin may call, and what
+it must export. Copy it from SolidCraft's source, `crates/craft-plugin/wit/plugin.wit`, into the
+crate's `wit` folder:
+
+```sh
+mkdir wit
+cp <SolidCraft source>/crates/craft-plugin/wit/plugin.wit wit/plugin.wit
+```
+
+Its package is `craft:plugin@0.2.0`, and it has two worlds:
+
+- `command-plugin` imports `commands` (run a SolidCraft command), `log`, `control` (progress and
+  cancel), `files` (granted folders) and `clock`, and exports `entry`, whose `execute(entry, params)`
+  SolidCraft calls with the entry's name and its parameters as JSON.
+- `importer-plugin` imports `source` (the file being opened), `design` (where the new design
+  goes), `evaluate`, `log`, `control` and `clock`, and exports `importer`.
+
+Errors are a `plugin-error` variant: `permission-denied`, `command-failed`, `limit-exceeded`,
+`invalid-input`, `unsupported` and the others name their cause, and the user sees them after the
+plugin's name. Return `unsupported` for a valid file or option your plugin does not handle ("the
+model has no solids"); `invalid-input` is for input that is broken.
+
+## Step 4: write the component
 
 `src/lib.rs`:
 
@@ -175,17 +188,21 @@ export!(Plugin);
 '{...}'` tries one on an empty design. An error from a command (or `?` on it) ends the run, and
 SolidCraft undoes everything the run did.
 
-## Step 4: build it
+## Step 5: build it
+
+In `plate-maker-src`:
 
 ```sh
 cargo build --release --target wasm32-unknown-unknown
 wasm-tools component new target/wasm32-unknown-unknown/release/plate_maker_src.wasm -o ../plate-maker/plate-maker.wasm
+cd ..
 ```
 
 Build for `wasm32-unknown-unknown`, not a WASI target: SolidCraft links no WASI, so a component
-that imports any is refused. `wasm-tools component new` turns the module into a component.
+that imports any is refused. `wasm-tools component new` turns the module into a component. The
+steps after this one run in the folder that holds `plate-maker` and `plate-maker-src`.
 
-## Step 5: check it
+## Step 6: check it
 
 ```sh
 solidcraft-cli plugin check plate-maker
@@ -211,7 +228,7 @@ It takes the package folder or the `.zip`, and `--json` prints the same as data,
 `plugin.check` command (which MCP clients can call too). In a folder, `tests/` and hidden files are
 left out, as they are out of the `.zip`.
 
-## Step 6: test it
+## Step 7: test it
 
 A plugin's tests are JSON files in its `tests` folder, one case per file. Create
 `plate-maker/tests/default-plate.json`:
@@ -261,9 +278,11 @@ An expected object needs only the keys you list; an array needs every item. An e
 case runs once with its fields' defaults, if it needs nothing else, and is skipped otherwise.
 `--json` prints pass or fail per case as data, and `--out DIR` keeps each case's resulting design
 and log for a closer look. The command exits with an error when a case fails, so a CI job can run
-it.
+it; `--require-cases` also fails the run when an entry is skipped, so CI catches an entry nobody
+tested. Given the `.zip`, `plugin test` runs the cases in the `tests/` folder the `.zip` holds;
+the `.zip` from Step 8 leaves them out, so test the folder.
 
-## Step 7: install it
+## Step 8: install it
 
 Zip the package, without its tests:
 

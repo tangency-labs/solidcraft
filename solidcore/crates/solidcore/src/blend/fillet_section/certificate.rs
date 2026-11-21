@@ -1078,7 +1078,9 @@ pub(crate) fn knot_cuts(
     Ok(at
         .iter()
         .zip(at.iter().skip(1))
-        .map(|(&a, &b)| (a, b, span(knots, p, n, 0.5 * (a + b))))
+        // The left endpoint selects the span to its right. A rounded midpoint
+        // can land on the next knot when the subinterval is only one ulp wide.
+        .map(|(&a, &b)| (a, b, span(knots, p, n, a)))
         .collect())
 }
 
@@ -6977,6 +6979,17 @@ mod tests {
                 "[{lo}, {hi}]"
             );
         }
+    }
+
+    #[test]
+    fn knot_cuts_keeps_the_span_just_below_a_knot() {
+        let knot = 0.5_f64;
+        let lo = knot.next_down();
+        let knots = [0.0, 0.0, 0.0, knot, 1.0, 1.0, 1.0];
+        assert_eq!(
+            knot_cuts(&knots, 2, 4, lo, knot, 1).unwrap(),
+            [(lo, knot, 2)],
+        );
     }
 
     /// A span whose feet's box crosses two knot lines of a face (three pieces in u) is not

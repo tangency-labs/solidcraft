@@ -417,7 +417,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         refresh_gone(app);
         let view = PanelView::of(app, &ctx);
         let mut prefs = AgentPanelPrefs::read(&app.preferences);
-        window(&mut app.agent_chat, &view, &ctx, &mut prefs);
+        window(&mut app.agent_chat, &view, &ctx, &mut prefs, &mut app.blur);
         prefs.write(&mut app.preferences);
         hand_over(app, ui);
         light_hovered(app);
@@ -838,12 +838,14 @@ pub fn window_builder(document: &str, placed: bool, prefs: &AgentPanelPrefs) -> 
 /// go to another screen, or a window floating inside the app where the system can't open one.
 /// The system's close button closes the chat (it opens there again); Dock puts it back.
 #[cfg(not(target_arch = "wasm32"))]
-fn window(chat: &mut AgentChat, view: &PanelView, ctx: &egui::Context, prefs: &mut AgentPanelPrefs) {
+fn window(chat: &mut AgentChat, view: &PanelView, ctx: &egui::Context, prefs: &mut AgentPanelPrefs, blur: &mut crate::blur::State) {
     let builder = window_builder(&view.document, chat.window_placed, prefs);
     chat.window_placed = true;
     // The side panel isn't drawn: its place no longer counts as "in the chat".
     chat.panel_rect = None;
     ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("sc_agent_chat_window"), builder, |ui, class| {
+        // A window drawn inside the main one shares its frame; a native one begins its own.
+        let _blur = (class != egui::ViewportClass::EmbeddedWindow).then(|| blur.begin(ui.ctx()));
         // Root/embedded inputs are handled by SolveApp::logic. A native chat window owns
         // its input and must see the toggle before its text editor can consume the chord.
         // The window holds the panel, not the shared host, so the toggle works on the panel's

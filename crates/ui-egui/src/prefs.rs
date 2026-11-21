@@ -31,6 +31,7 @@ mod mouse3d;
 mod navbar;
 mod navigation;
 pub(crate) mod panel_layout;
+mod privacy;
 mod security;
 mod sketch;
 mod theme_picker;
@@ -331,7 +332,14 @@ impl TrackpadScroll {
     }
 }
 
+pub use solidcraft_engine::schema::ui_prefs::BrowserScrollWheel;
+
 impl Prefs {
+    /// Whether browser scrolling should bypass automatic wheel and trackpad detection.
+    pub fn browser_wheel_always_zooms(&self) -> bool {
+        self.browser_scroll_wheel == BrowserScrollWheel::AlwaysZoom
+    }
+
     /// Touchpad scroll zooms without overwriting the user's preference for other presets.
     pub fn trackpad_pans(&self) -> bool {
         self.nav != TOUCHPAD_NAV && self.trackpad_pan
@@ -379,6 +387,7 @@ pub const PAGES: &[&str] = &[
     "Shortcuts",
     "Assistant",
     "Plugins",
+    "Privacy",
 ];
 pub const PAGE_GENERAL: usize = 0;
 pub const PAGE_APPEARANCE: usize = 1;
@@ -393,6 +402,7 @@ pub const PAGE_MOUSE3D: usize = 9;
 pub const PAGE_SHORTCUTS: usize = 10;
 pub const PAGE_ASSISTANT: usize = 11;
 pub const PAGE_PLUGINS: usize = 12;
+pub const PAGE_PRIVACY: usize = 13;
 /// What Preferences accepts for `parameter_list_rows`: `parameters.complete` answers at most 200.
 pub const PARAMETER_LIST_ROWS: std::ops::RangeInclusive<u16> = 5..=200;
 const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
@@ -444,7 +454,8 @@ const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
     prefs_window::Page::Host(prefs_window::HostPage {
         icon: ui_kit::Icon::Kit("shield"),
         label: "prefs.security",
-        group: Some("prefs.structure.work"),
+        // Already in Work, after Design: a group here drew a second "Work" heading.
+        group: None,
         handle: "prefs:page:Security",
         scroll: true,
         draw: page_draw::<PAGE_SECURITY>,
@@ -512,6 +523,15 @@ const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
         scroll: true,
         draw: page_draw::<PAGE_PLUGINS>,
         defaults: page_defaults::<PAGE_PLUGINS>,
+    }),
+    prefs_window::Page::Host(prefs_window::HostPage {
+        icon: ui_kit::Icon::Kit("eye"),
+        label: "prefs.privacy",
+        group: None,
+        handle: "prefs:page:Privacy",
+        scroll: true,
+        draw: page_draw::<PAGE_PRIVACY>,
+        defaults: page_defaults::<PAGE_PRIVACY>,
     }),
 ];
 
@@ -905,6 +925,13 @@ pub fn apply_sketch_limit(p: &Prefs) {
     }
 }
 
+/// The STEP files read from now on heal the parts SMLib's check fails, and Repair heals a part
+/// first, as the preference says (Preferences › Design › Imported files). A read already done
+/// keeps what it was read with until the design is evaluated again.
+pub fn apply_tolerance_heal(p: &Prefs) {
+    solidcraft_engine::kernel::set_heals_tolerance_defects(p.heal_tolerance_defects);
+}
+
 /// Perspective view's default field of view (about 34°), in radians.
 const PERSPECTIVE_FOV: f64 = 0.6;
 
@@ -1096,10 +1123,6 @@ preference_settings! {
     library_thumbnail_size: crate::library::ThumbnailSize = crate::library::ThumbnailSize::Large, PAGE_LAYOUT;
     /// Units of new designs.
     default_units: String = "mm".into(), PAGE_DESIGN;
-    /// Drawings (preview): the Drawing workspace and its settings. Off by default, so the app shows
-    /// no Drawing workspace until it is turned on; a design's drawings are kept as they are either
-    /// way.
-    drawings_preview: bool = false, PAGE_DESIGN => check_id_help("prefs.drawings_preview", "prefs.drawings_preview_help");
     /// First or third angle for new drawings (third when not set, or set to one this version
     /// doesn't know).
     default_projection: Projection = Projection::Third, PAGE_DESIGN;
@@ -1113,9 +1136,9 @@ preference_settings! {
     /// theme's dark sheet in a dark one), `white`, `blueprint` or `prussian_blue`
     /// (`crate::drawing_sheet_page::SheetColour`). Screen only: printed
     /// and exported sheets are always white, and nothing reaches the design or undo.
-    drawing_sheet_colour: String = "auto".into(), PAGE_DESIGN;
-    /// The on-screen drawing canvas pattern: datum_cloud, grid or none.
-    drawing_sheet_backdrop: String = "datum_cloud".into(), PAGE_DESIGN;
+    drawing_sheet_colour: String = "white".into(), PAGE_DESIGN;
+    /// The on-screen drawing canvas pattern: datum_cloud, grid or none (default none, a plain background).
+    drawing_sheet_backdrop: String = "none".into(), PAGE_DESIGN;
     /// Where the Drawing workspace shows its sheet chooser.
     drawing_sheets_visibility: String = "multiple".into(), PAGE_DESIGN;
     /// Scales true size on the drawing sheet so 100 % measures 1 mm as 1 mm on this screen, against
@@ -1140,6 +1163,10 @@ preference_settings! {
     /// An orbit drag that reaches the edge of the view moves the cursor to the opposite edge and
     /// keeps turning; false stops the drag at the edge of the screen, as before.
     orbit_cursor_wrap: bool = true, PAGE_NAVIGATION => check_tr("nav.orbit_cursor_wrap.label");
+    /// While an orbit turns about the origin or the model point under the cursor (Orbit around),
+    /// a faint ball marks that point, as it does for the 3D mouse (#17474); false draws nothing,
+    /// as before.
+    mark_orbit_point: bool = true, PAGE_NAVIGATION => check_tr("nav.mark_orbit_point.label");
     /// A right-click in the view with a dialog open confirms its input: on to the next one, then OK.
     /// Off: it does nothing there, as before (#6159).
     right_click_confirms: bool = false, PAGE_GENERAL => check("Right-click confirms dialog inputs", "With a dialog open, a right-click in the view goes on to its next empty input, and on the last one runs OK");
@@ -1178,6 +1205,9 @@ preference_settings! {
     navigator_home: bool = true, PAGE_NAVIGATION;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
     radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
+    /// The quick menu (`quick_menu`) also opens by itself shortly after a click in the viewport
+    /// selects something a command takes (#5501). Off by default: a click only selects.
+    quick_menu_after_selection: bool = false, PAGE_NAVIGATION => check_tr("prefs.quick_menu_after_selection");
     /// Work on the model directly in the viewport (pull a face to extrude or cut); off by default.
     direct_interaction: bool = false, PAGE_TOOLS;
     /// Mouse gestures: a ring of tools on the right button.
@@ -1403,6 +1433,12 @@ preference_settings! {
     /// A FreeCAD file opens or inserts as its sketches and features, rebuilt; off brings in only
     /// its solids as one Import feature, as before.
     freecad_history: bool = true, PAGE_GENERAL => check_id("settings.freecad_history");
+    /// Import with cadmpeg: a STEP, FreeCAD or Rhino file is read from cadmpeg's model straight
+    /// into B-rep records: a STEP file decoded by cadmpeg's STEP decoder instead of SolidCraft's
+    /// own STEP reader, and a FreeCAD or Rhino file's solids instead of restated as STEP by
+    /// cadmpeg's STEP writer and read by SolidCraft's STEP reader. Off (the default) keeps
+    /// SolidCraft's STEP reader for all three, as before.
+    cadmpeg_import: bool = false, PAGE_GENERAL => check_id("settings.cadmpeg_import");
     /// Explicit assembly Move uses joint handles; off keeps the previous Move panel.
     assembly_move_handles: bool = true, PAGE_TOOLS => check_id("joint_move.use_handles");
     /// Degrees per step near the assembly Move ring.
@@ -1487,6 +1523,8 @@ preference_settings! {
     /// and entering a sketch or Render opens a view of its own, as in 0.43.0. Off: the tab looks as
     /// it did before design views, with no switcher until the user opens a second view.
     show_design_view_switcher: bool = false, PAGE_LAYOUT;
+    /// Use distinct tab treatments for the focused view, cards, hidden views, and pop-outs.
+    clear_view_tabs: bool = true, PAGE_LAYOUT;
     /// A drawing sheet opens as a view (a sub-tab) of its design.
     design_sub_tab_sheets: bool = true, PAGE_LAYOUT;
     /// Editing a sketch opens it as a view of its design; Finish Sketch returns to the previous view.
@@ -1606,6 +1644,10 @@ preference_settings! {
     zoom_stop_at_model: bool = false, PAGE_NAVIGATION => check_id("prefs.zoom_stop_at_model");
     /// Spread discrete wheel input across frames (off: apply each event immediately).
     smooth_wheel_zoom: bool = true, PAGE_NAVIGATION => check("Smooth wheel zoom", "Turn off to apply each wheel event immediately, without a smoothing tail");
+    /// Browser-only wheel classification; native platforms keep their scroll phases.
+    browser_scroll_wheel: BrowserScrollWheel = BrowserScrollWheel::Automatic, PAGE_NAVIGATION;
+    /// The browser's one-time question to make a smooth mouse wheel zoom was answered "don't ask again".
+    browser_wheel_hint_dismissed: bool = false, PAGE_NAVIGATION;
     /// The face under the pointer keeps its highlight while the view moves under it (#2130).
     keep_hover_while_navigating: bool = true, PAGE_NAVIGATION;
     /// Two-finger trackpad scroll pans (off: it zooms like the wheel); pinch always zooms.
@@ -1639,6 +1681,11 @@ preference_settings! {
     remember_stand_up: bool = true, PAGE_DESIGN => check_id("prefs.remember_stand_up");
     /// Reopen an unchanged CAD import from the existing saved-design model cache.
     reuse_imports: bool = true, PAGE_DESIGN => check_id("prefs.reuse_imports");
+    /// A STEP part SMLib's check fails is healed of its tolerance-scale defects (edges shorter
+    /// than their tolerance, slivers between coincident edges, curve pieces of no length) in the
+    /// background once it is imported, and Repair heals a part first (#17689). Off: the part
+    /// stays as read, with its check's warning, and Repair does not heal first, as before.
+    heal_tolerance_defects: bool = true, PAGE_DESIGN => check_id("prefs.heal_tolerance_defects");
     /// Oldest-first bounded file answers; resetting settings preserves user history.
     stand_up_answers: crate::stand_up::Answers = Default::default();
     /// Extrude: with a profile picked, a face, vertex or parallel plane picked off its plane
@@ -1706,6 +1753,10 @@ preference_settings! {
     network_locations: bool = false, PAGE_GENERAL => check_tr("prefs.network_locations");
     /// The servers the files a design names may be on ("Always allow this server").
     network_hosts: Vec<String> = Vec::new(), PAGE_GENERAL;
+    /// Folders linked files are loaded from when a design opens, besides the design's own folder
+    /// (`link_folders_prompt`): those the user answered Load for. Kept in the user's settings,
+    /// never in a design.
+    linked_file_folders: Vec<String> = Vec::new(), PAGE_GENERAL;
     /// What a middle-button double-click in the view does: `home`, `fit` or `off`.
     middle_double_click: String = "home".into(), PAGE_NAVIGATION;
     /// A view chosen on the navigator (a face, corner or arrow, an axis tip) also frames the
@@ -1728,6 +1779,10 @@ preference_settings! {
     color_vision: solidcraft_theme::ColorVision = solidcraft_theme::ColorVision::Off, PAGE_APPEARANCE;
     /// Check for updates at start and once a day (docs/updates.md).
     check_updates: bool = true, 0;
+    /// Share anonymous usage statistics (docs/privacy.md, `usage_stats`): on unless the person,
+    /// the environment or the organization turns them off. A build without the `usage-stats`
+    /// feature keeps the value and does nothing with it.
+    usage_statistics: bool = true;
     /// When the last update check ran, and the versions skipped or put off (`update::Memo`).
     update: crate::update::Memo = crate::update::Memo::default();
     /// The variant last started in each split tool family (Rectangle, Circle, Arc, Slot, Polygon, Line,
@@ -1873,6 +1928,13 @@ preference_settings! {
     construction_line_classic: bool = false, PAGE_SKETCH;
     /// Use the only straight construction line in the preselection as Mirror's reference.
     sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
+    /// An image (Canvas or Decal) placed on the plane of the sketch being edited gets a
+    /// construction rectangle around it in that sketch and follows it, so the sketch's constraints
+    /// and dimensions place and size the image (#18405). A mode of the Canvas and Decal tools, set
+    /// in the Sketch Palette while one runs and kept for the next time; no Preferences page shows
+    /// or resets it. Off by default, so placing an image works as it always has: on its own, with
+    /// Frame Sketch to tie it to a rectangle when asked.
+    frame_images_in_sketch: bool = false;
     /// Pressing an active tool or dialog's shortcut again closes it, as Esc does. Off: the key
     /// starts the tool or dialog again.
     shortcut_again_ends_tool: bool = true, PAGE_SKETCH;
@@ -2262,6 +2324,7 @@ impl Snapshot {
         self.panel_visibility.restore(app);
         sync_surface_analysis(app);
         crate::render_workspace::apply_memory_policy(app);
+        apply_tolerance_heal(&app.preferences);
         app.preferences.stand_up_answers = stand_up_answers;
         app.preferences.update = update;
         if units_changed {
@@ -2562,6 +2625,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
     crate::plugins::sync_policy(app);
     sync_surface_analysis(app);
     crate::render_workspace::apply_memory_policy(app);
+    apply_tolerance_heal(&app.preferences);
     if app.preferences.default_units != units {
         default_units_changed(app);
     }
@@ -2676,6 +2740,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     }
     apply_file_limits(&app.preferences);
     apply_sketch_limit(&app.preferences);
+    apply_tolerance_heal(&app.preferences);
     // The viewport's display quality (an unknown saved value draws at Normal).
     solidcraft_engine::doc::display_quality::set_current(
         solidcraft_engine::doc::display_quality::DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default(),
@@ -3212,9 +3277,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             ok: "OK",
             cancel: "Cancel",
             apply: "Apply",
-            search: solidcraft_ui_text::tr("prefs.search"),
-            no_results: solidcraft_ui_text::tr("prefs.search_empty"),
-            restore_defaults: solidcraft_ui_text::tr("prefs.restore_page_defaults"),
             restore_defaults_hint: solidcraft_ui_text::tr(if layout_page {
                 "ui.panel_layout.page_defaults_hint"
             } else {
@@ -3394,6 +3456,7 @@ fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
         }
         PAGE_DESIGN => design::show(app, ui),
         PAGE_SECURITY => security::show(app, ui),
+        PAGE_PRIVACY => privacy::show(app, ui),
         PAGE_NAVIGATION => navigation::show(app, ui, t),
         PAGE_GRAPHICS => graphics::show(app, ui),
         PAGE_SKETCH => sketch::show(app, ui),
@@ -4066,9 +4129,6 @@ fn blur_availability_for(app: &SolveApp, offered: bool) -> crate::theme_options:
     }
     if reduced == Some(true) {
         return Unavailable("prefs.blur_reduce_transparency");
-    }
-    if app.home.open || crate::render_workspace::result_active(app) {
-        return Unavailable("prefs.blur_source");
     }
     match capability {
         crate::blur::Capability::Available => Available,
@@ -4809,7 +4869,7 @@ fn prepare_preferences(
         return Err("`drawing_sheets_visibility` must be multiple, always, off or legacy".into());
     }
     if !accepted::drawing_calibration(&new) || crate::drawing_sheet_page::SheetColour::parse(&new.drawing_sheet_colour).is_none() {
-        return Err("`drawing_calibration` must be 0.5…2 and `drawing_sheet_colour` auto, white, blueprint or prussian_blue".into());
+        return Err("`drawing_calibration` must be 0.5…2 and `drawing_sheet_colour` white, theme, blueprint or prussian_blue".into());
     }
     if !accepted::drawing_panel_width(&new)
         || !["top", "bottom", "under_browser"].contains(&new.drawing_sheet_dock.as_str())
@@ -4875,6 +4935,7 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
     crate::render_workspace::apply_memory_policy(app);
     apply_file_limits(&app.preferences);
     apply_sketch_limit(&app.preferences);
+    apply_tolerance_heal(&app.preferences);
     if units_changed {
         default_units_changed(app);
     }
@@ -5269,6 +5330,33 @@ mod tests {
         let mut restored = crate::SolveApp::new(Default::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
         assert!(restored.preferences.keep_unsaved_in_browser, "it is saved with the settings");
+    }
+
+    #[test]
+    fn browser_scroll_wheel_roundtrips_validates_and_resets() {
+        assert_eq!(Prefs::default().browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        assert_eq!(lenient(&json!({})).browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let initial = control(&mut app, &json!({})).unwrap();
+        assert_eq!(initial["browser_scroll_wheel"], "automatic");
+        control(&mut app, &json!({"open":"Navigation", "browser_scroll_wheel":"always_zoom", "button":"apply"})).unwrap();
+        assert!(app.preferences.browser_wheel_always_zooms());
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert_eq!(restored.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysZoom);
+        for invalid in [json!("future"), json!(""), json!(42), json!(null)] {
+            assert!(set(&mut app, &json!({"browser_scroll_wheel": invalid})).is_err());
+            assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysZoom);
+            assert_eq!(lenient(&json!({"browser_scroll_wheel": invalid})).browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        }
+        control(&mut app, &json!({"open":"Navigation", "button":"defaults"})).unwrap();
+        assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::Automatic);
+        control(&mut app, &json!({"button":"cancel"})).unwrap();
+        assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysZoom);
+        set(&mut app, &json!({"browser_scroll_wheel":"always_pan"})).unwrap();
+        assert_eq!(app.preferences.browser_scroll_wheel, BrowserScrollWheel::AlwaysPan);
+        set(&mut app, &json!({"browser_scroll_wheel":"automatic"})).unwrap();
+        assert!(!app.preferences.browser_wheel_always_zooms());
     }
 
     #[test]
@@ -7243,6 +7331,7 @@ mod tests {
             ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
             ("design_views_as_tabs", json!(false), PAGE_LAYOUT),
             ("show_design_view_switcher", json!(true), PAGE_LAYOUT),
+            ("clear_view_tabs", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_sheets", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_sketches", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_render", json!(false), PAGE_LAYOUT),
@@ -7322,6 +7411,7 @@ mod tests {
             ("signing_key", json!("0123456789ABCDEF0123456789ABCDEF01234567"), PAGE_SECURITY),
             ("trusted_signing_keys", json!("0123456789ABCDEF0123456789ABCDEF01234567"), PAGE_SECURITY),
             ("verify_opened_designs", json!(true), PAGE_SECURITY),
+            ("linked_file_folders", json!(["/work/parts"]), PAGE_GENERAL),
         ];
         let defaults = serde_json::to_value(Prefs::default()).unwrap();
         for (field, value, owner) in fields {
@@ -7381,16 +7471,14 @@ mod tests {
                 "3D mouse",
                 "Shortcuts",
                 "Assistant",
-                "Plugins"
+                "Plugins",
+                "Privacy"
             ]
         );
         assert_eq!(WINDOW_PAGES.len(), PAGES.len());
         let groups: Vec<_> =
             WINDOW_PAGES.iter().map(host_page).enumerate().filter_map(|(i, p)| p.group.map(|g| (i, solidcraft_ui_text::tr(g)))).collect();
-        assert_eq!(
-            groups,
-            [(PAGE_APPEARANCE, "Look"), (PAGE_DESIGN, "Work"), (PAGE_SECURITY, "Work"), (PAGE_NAVIGATION, "Input"), (PAGE_ASSISTANT, "Extend")]
-        );
+        assert_eq!(groups, [(PAGE_APPEARANCE, "Look"), (PAGE_DESIGN, "Work"), (PAGE_NAVIGATION, "Input"), (PAGE_ASSISTANT, "Extend")]);
         let mut fields = std::collections::BTreeSet::new();
         for (field, page) in FIELD_PAGES {
             assert!(fields.insert(field), "duplicate home for {field}");
@@ -9827,6 +9915,37 @@ mod tests {
         assert_eq!(app.preferences.display_quality, "normal");
     }
 
+    /// #17689: the tolerance heal is on by default, a saved choice reads back as saved, and the
+    /// preference reaches the kernel, which every STEP read and Repair consult: set off, the
+    /// kernel stops healing; set on, it heals again. (The kernel's switch is the process's: the
+    /// test holds it, as every test that turns it does.)
+    #[test]
+    fn heal_tolerance_defects_is_on_by_default_and_reaches_the_kernel() {
+        use serde_json::json;
+        use solidcraft_engine::kernel;
+        let _held = kernel::heal_preference_for_tests(true);
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        assert!(app.preferences.heal_tolerance_defects, "on by default");
+        assert!(!super::lenient(&json!({"heal_tolerance_defects": false})).heal_tolerance_defects, "off reads back as saved");
+        assert!(super::lenient(&json!({})).heal_tolerance_defects);
+        let out = super::set(&mut app, &json!({"heal_tolerance_defects": false})).unwrap();
+        assert_eq!(out["heal_tolerance_defects"], false);
+        assert!(!kernel::heals_tolerance_defects(), "off: the kernel stops healing");
+        let out = super::set(&mut app, &json!({"heal_tolerance_defects": true})).unwrap();
+        assert_eq!(out["heal_tolerance_defects"], true);
+        assert!(kernel::heals_tolerance_defects(), "on: the kernel heals again");
+        // Cancel and Restore Defaults reach the kernel at once too, not at the next frame.
+        let snapshot = super::Snapshot::take(&app);
+        super::set(&mut app, &json!({"heal_tolerance_defects": false})).unwrap();
+        snapshot.restore_other_preferences(&mut app).unwrap();
+        assert!(app.preferences.heal_tolerance_defects);
+        assert!(kernel::heals_tolerance_defects(), "cancelled: the kernel heals as before");
+        super::set(&mut app, &json!({"heal_tolerance_defects": false})).unwrap();
+        super::defaults(&mut app, super::PAGE_DESIGN);
+        assert!(app.preferences.heal_tolerance_defects);
+        assert!(kernel::heals_tolerance_defects(), "defaults: the kernel heals again");
+    }
+
     /// The validation mode is once per feature by default; set by name or by the command, the
     /// two stay one setting, the session computes under it, and Restore Defaults on Design brings
     /// each_feature back. A saved unknown mode reads as the default.
@@ -11358,6 +11477,24 @@ mod tests {
         assert!(h.app.preferences.orbit_cursor_wrap);
         h.call("ui.prefs", json!({"orbit_cursor_wrap":false,"button":"apply"}));
         assert!(!h.app.preferences.orbit_cursor_wrap);
+    }
+
+    #[test]
+    fn mark_orbit_point_defaults_on_and_can_be_turned_off() {
+        let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
+        assert!(old.mark_orbit_point, "saved preferences from before the option mark the point");
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.step(&json!({"click":{"handle":"prefs:mark_orbit_point"}})).unwrap();
+        assert!(!h.app.preferences.mark_orbit_point);
+        h.call("ui.prefs", json!({"button":"apply"}));
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(!restored.preferences.mark_orbit_point);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.mark_orbit_point);
+        h.call("ui.prefs", json!({"mark_orbit_point":false,"button":"apply"}));
+        assert!(!h.app.preferences.mark_orbit_point);
     }
 
     /// An agent's slow commands compute off the window thread unless a person turned that off:

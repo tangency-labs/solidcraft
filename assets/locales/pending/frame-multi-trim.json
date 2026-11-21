@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.frame_multi_trim": "Multi-Trim Corner"
+  },
+  "ar": {
+    "cmd.frame_multi_trim": "تشذيب متعدد للزاوية"
+  },
+  "de": {
+    "cmd.frame_multi_trim": "Ecke mehrfach trimmen"
+  },
+  "he": {
+    "cmd.frame_multi_trim": "חיתוך מרובה בפינה"
+  },
+  "ja": {
+    "cmd.frame_multi_trim": "コーナーのマルチトリム"
+  },
+  "ko": {
+    "cmd.frame_multi_trim": "코너 다중 트림"
+  },
+  "vi": {
+    "cmd.frame_multi_trim": "Cắt tỉa nhiều ống tại góc"
+  },
+  "zh": {
+    "cmd.frame_multi_trim": "角部多重修剪"
+  }
+}

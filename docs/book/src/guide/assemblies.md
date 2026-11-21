@@ -330,6 +330,16 @@ row, `motion.play` lists such joints under `unmoved`, and `joint.list` names eve
 `floating`. Ground a part of the chain, or join it to a grounded part (a rigid as-built joint keeps
 it where it is), and it moves.
 
+An imported assembly holds each of its parts with a rigid joint, so `joint.list` on it can run to
+hundreds of rows. Filters keep only the rows asked for: `moving_only` leaves out rigid and
+suppressed joints, `exclude_rigid` every rigid joint, `exclude_rigid_groups` only the rigid joints
+that hold a component's contents together (the ones Unlock Contents removes), `kinds` keeps the
+listed joint types, and `occurrences` keeps the joints with an end at those parts or at a part
+inside them. `dof_free_only` lists only the parts that can still move under `dof`, and
+`joint.solve` takes it too. The reply's `omitted` counts what was left out, by type, and
+`summary: true` adds every joint counted by type, with one row per component for the rigid joints
+that hold its contents (the 20 largest; `more_rigid_groups` counts the rest). `joint.inspect` takes the same filters.
+
 Driving a joint turns the side that is held by no grounded part, with everything joined to it
 rigidly. A rigid joint whose origin is lost (its face was deleted) still holds its two parts as
 they are, so the parts beyond it move with the side that turns. A joint between two grounded
@@ -497,6 +507,20 @@ a checkout. The parts it reads come in as one step, so one **Undo** takes them a
 that cannot be read keeps its bodies, is tried again the next time, and holds up no other.
 **Update changed linked designs when a tab comes back** (Preferences, Design,
 `update_changed_links`) turns this off.
+
+Linked files from other folders load after you allow them. When an assembly opens, the parts in
+its own folder, or below it, are read again by themselves as above. If a changed part is in
+another folder, SolidCraft asks once, naming the folders: **Load** reads those parts now and
+remembers the folders, so designs that link files from them load them as they open from then
+on; **Not now** leaves them out of date, and **Update Links** reads them whenever you choose.
+The folders you allowed are kept in your own settings, never in a design, and are listed under
+Preferences › General › Files, where you can remove one or forget them all.
+A design opened by a program (the command line, an MCP client, the control channel or the
+assistant) never asks: its parts in other folders stay out of date, also in folders you
+allowed, and running `component.update_links` (all links, or `components: [ids]`) reads them.
+The command line and a headless MCP session don't read links by themselves when a design
+opens, so there `component.update_links` is the way to bring in changed parts.
+
 To edit the source, right-click a linked component or occurrence in the Browser and choose
 **Open Linked Design**. It opens the part in another tab and reports if its file is missing.
 **Break Link** (`component.break_link`) keeps the bodies and forgets the file, and

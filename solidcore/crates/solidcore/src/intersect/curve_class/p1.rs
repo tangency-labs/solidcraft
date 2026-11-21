@@ -594,6 +594,12 @@ pub struct CurveClassification<O> {
     /// where it meets a seam or a pole (docs/booleans.md, "Seams and poles"). `None` until
     /// it is set or first read ([`CurveClassification::source_reach_in`]).
     pub(super) source_reach: Option<SourceReach>,
+    /// Not upstream: whether the face named here has a seam edge (an edge with the face
+    /// on both sides, [`crate::topology::edge::face_on_both_sides`]), as found once by
+    /// [`crate::query::face::p2::curve_on_classify_mut_with_seams`] for its run. Read only
+    /// while it names the classification's face; `None` makes every vertex and edge
+    /// test for itself.
+    pub(super) seam_hint: Option<(O, bool)>,
 }
 
 /// Not upstream: how far across itself a classified curve is known (docs/booleans.md,
@@ -739,6 +745,7 @@ impl<O: ClassObject> CurveClassification<O> {
             doing_fillets: false,
             ok_to_set_tolerance: true,
             source_reach: None,
+            seam_hint: None,
             tgt_loops_only: false,
             tgt_loops: Vec::new(),
             other_classification: None,
@@ -804,6 +811,10 @@ impl<O: ClassObject> CurveClassification<O> {
             doing_fillets: self.doing_fillets,
             ok_to_set_tolerance: self.ok_to_set_tolerance,
             source_reach: self.source_reach,
+            seam_hint: self
+                .seam_hint
+                .map(|(h, s)| f(h).map(|h| (h, s)))
+                .transpose()?,
             tgt_loops_only: self.tgt_loops_only,
             tgt_loops,
             other_classification: self.other_classification.map(&mut *f).transpose()?,
@@ -1055,6 +1066,25 @@ impl<O: ClassObject> CurveClassification<O> {
     #[must_use]
     pub const fn source_reach(&self) -> Option<SourceReach> {
         self.source_reach
+    }
+
+    /// Not upstream: the seam hint (see the field).
+    #[must_use]
+    pub const fn seam_hint(&self) -> Option<(O, bool)> {
+        self.seam_hint
+    }
+
+    /// Not upstream: sets the seam hint (see the field).
+    pub fn set_seam_hint(&mut self, hint: Option<(O, bool)>) {
+        self.seam_hint = hint;
+    }
+
+    /// Not upstream: whether the classification's face is known to have no seam edge, so
+    /// that none of its edges is a seam and none of its vertices a pole (a pole's edges
+    /// are all seams of the face).
+    #[must_use]
+    pub fn face_known_seam_free(&self) -> bool {
+        matches!(self.seam_hint, Some((h, false)) if self.face == Some(h))
     }
 
     /// Not upstream: sets how far across itself the classified curve is known.

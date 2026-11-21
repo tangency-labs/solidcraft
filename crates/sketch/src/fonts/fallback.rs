@@ -629,7 +629,7 @@ fn last_resort(dirs: &[PathBuf], mut left: Vec<&Query>) -> Vec<(Query, Answer)> 
         if left.is_empty() {
             break;
         }
-        if std::fs::metadata(&path).map_or(true, |meta| meta.len() > MAX_FONT_BYTES) {
+        if placeholder(&path) || std::fs::metadata(&path).map_or(true, |meta| meta.len() > MAX_FONT_BYTES) {
             continue;
         }
         for face in face_tables(&path, b"cmap", MAX_CMAP) {
@@ -644,6 +644,14 @@ fn last_resort(dirs: &[PathBuf], mut left: Vec<&Query>) -> Vec<(Query, Answer)> 
     }
     out.extend(left.into_iter().map(|query| (query.clone(), None)));
     out
+}
+
+/// A font whose glyphs stand in for characters rather than set them: the Last Resort font
+/// (macOS's `/System/Library/Fonts/LastResort.otf`, Unicode's `LastResort-Regular.ttf` and
+/// `LastResortHE-Regular.ttf`) maps every code point, unassigned ones too, to a box naming its
+/// block. Text "set" in it would be boxes, so it is never a fallback.
+pub(super) fn placeholder(path: &Path) -> bool {
+    path.file_stem().is_some_and(|stem| normalize(&stem.to_string_lossy()).contains("lastresort"))
 }
 
 /// Whether a face has outlines and a glyph for `ch`, by its character map.

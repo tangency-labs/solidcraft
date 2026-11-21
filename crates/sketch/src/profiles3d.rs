@@ -167,8 +167,15 @@ pub fn find_planar_3d_profiles(sk: &Sketch, plane: Plane) -> Vec<Profile3D> {
     // a wire (one tooth of a zigzag) and none of its key points but the ends of that part.
     if nodes.pts.len() <= MAX_NODES {
         key = (0..nodes.pts.len()).collect();
+    } else if key.len() > MAX_NODES {
+        // Subsample evenly across the candidate key points to protect the O(n³) plane triple
+        // search from combinatorial blowup while preserving loop plane spanning (#19093).
+        let step = key.len() as f64 / MAX_NODES as f64;
+        let mut downsampled: Vec<usize> = (0..MAX_NODES).map(|i| key[(i as f64 * step) as usize]).collect();
+        downsampled.dedup();
+        key = downsampled;
     }
-    if edges.is_empty() || key.len() < 3 || key.len() > MAX_NODES {
+    if edges.is_empty() || key.len() < 3 {
         return Vec::new();
     }
     // The planes the nodes span, deduplicated. A plane needs at least three edges on it, one of

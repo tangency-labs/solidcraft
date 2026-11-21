@@ -248,6 +248,59 @@ fn every_tooth_of_a_zigzag_wire_is_a_profile() {
 }
 
 #[test]
+fn many_curves_in_a_planar_3d_loop_finds_profile() {
+    for n in [20, 40] {
+        let mut sk = Sketch::new();
+        sk.view.three_d = true;
+        let r = 50.0;
+        for i in 0..n {
+            let t0 = 2.0 * std::f64::consts::PI * (i as f64) / (n as f64);
+            let t1 = 2.0 * std::f64::consts::PI * ((i + 1) as f64) / (n as f64);
+            let tm = 0.5 * (t0 + t1);
+            let p0 = Vec3 { x: r * t0.cos(), y: 0.0, z: r * t0.sin() };
+            let pm = Vec3 { x: r * tm.cos(), y: 0.0, z: r * tm.sin() };
+            let p1 = Vec3 { x: r * t1.cos(), y: 0.0, z: r * t1.sin() };
+            sk.add_drawn_wire_in(&[p0, pm, p1], WireSpace::Component).unwrap();
+        }
+        let ps = find_planar_3d_profiles(&sk, Plane::XY);
+        assert_eq!(ps.len(), 1, "profile should be found even with {n} curves: {:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
+        let expected_area = std::f64::consts::PI * r * r;
+        assert!((ps[0].area - expected_area).abs() < 0.01 * expected_area, "area {} vs expected {expected_area}", ps[0].area);
+    }
+}
+
+#[test]
+fn tilted_non_circular_loop_with_many_curves_is_a_profile() {
+    // Reporter case from #19093 requested by maintainer @raykholo: a 3-lobed loop
+    // r = 60(1 + 0.3 cos 3t) in a tilted plane (x_dir (0, 1, 0), y_dir (0.287, 0, 0.958))
+    // with 5 fit points per curve, which failed on 14..20 curves before downsampling.
+    for n in [16, 20] {
+        let mut sk = Sketch::new();
+        sk.view.three_d = true;
+        let x_dir = Vec3 { x: 0.0, y: 1.0, z: 0.0 };
+        let y_raw = Vec3 { x: 0.287, y: 0.0, z: 0.958 };
+        let y_dir = y_raw / y_raw.len();
+        for i in 0..n {
+            let t0 = 2.0 * std::f64::consts::PI * (i as f64) / (n as f64);
+            let t1 = 2.0 * std::f64::consts::PI * ((i + 1) as f64) / (n as f64);
+            let pts: Vec<Vec3> = (0..5)
+                .map(|s| {
+                    let t = t0 + (t1 - t0) * (s as f64) / 4.0;
+                    let r = 60.0 * (1.0 + 0.3 * (3.0 * t).cos());
+                    let (u, v) = (r * t.cos(), r * t.sin());
+                    x_dir * u + y_dir * v
+                })
+                .collect();
+            sk.add_drawn_wire_in(&pts, WireSpace::Component).unwrap();
+        }
+        let ps = find_planar_3d_profiles(&sk, Plane::XY);
+        assert_eq!(ps.len(), 1, "tilted loop profile should be found with {n} curves");
+        let expected_area = 1800.0 * std::f64::consts::PI * (2.0 + 0.3 * 0.3);
+        assert!((ps[0].area - expected_area).abs() < 0.01 * expected_area, "area {} vs expected {expected_area}", ps[0].area);
+    }
+}
+
+#[test]
 fn nothing_without_3d_wires() {
     let mut sk = Sketch::new();
     let a = sk.add_point(Vec2 { x: 0.0, y: 0.0 }, None).unwrap();

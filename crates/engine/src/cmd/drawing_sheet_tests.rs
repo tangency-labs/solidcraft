@@ -326,8 +326,8 @@ fn cells(s: &mut Session) -> BTreeMap<String, (String, Option<String>)> {
     cells.iter().map(|c| (text(&c["name"]).unwrap(), (text(&c["text"]).unwrap(), text(&c["value"])))).collect()
 }
 
-/// Runs model command `id` with the drawing closed (an open drawing locks the model), then opens
-/// it again.
+/// Runs model command `id` with the drawing closed, then opens it again: the path of a drawing
+/// reopened after the model changed.
 fn on_model(s: &mut Session, id: &str, p: Value) {
     let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
     run(s, "drawing.close", json!({}));

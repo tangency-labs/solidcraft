@@ -393,7 +393,7 @@ mod tests {
 
     fn entry(h: &Harness) -> Entry {
         let path = h.dir.join("MenuTest.solidcraft");
-        std::fs::write(&path, solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::new("Menu Test"))).unwrap();
+        std::fs::write(&path, solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::new("Menu Test")).unwrap()).unwrap();
         Entry { path, name: "MenuTest.solidcraft".into(), folder: false }
     }
 

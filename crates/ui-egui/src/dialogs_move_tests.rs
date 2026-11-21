@@ -619,8 +619,14 @@ fn triad_drag_ends_where_the_button_was_released() {
 #[test]
 fn a_triad_drag_on_a_gpu_moves_its_layer_and_uploads_nothing() {
     let mut h = crate::scenario::Harness::new();
-    h.app.viewport.gpu =
-        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    h.app.viewport.gpu = Some(crate::gpu::GpuTarget {
+        format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+        depth: None,
+        samples: 1,
+        tess: false,
+        oit: false,
+        edges: false,
+    });
     h.app.run("solid.box", json!({"length": 20, "width": 30, "height": 10})).unwrap();
     h.app.start("solid.move");
     {
@@ -670,8 +676,14 @@ fn a_triad_drag_on_a_gpu_moves_its_layer_and_uploads_nothing() {
 #[test]
 fn a_move_layer_hidden_for_a_pick_is_handed_over_again() {
     let mut h = translated_box();
-    h.app.viewport.gpu =
-        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    h.app.viewport.gpu = Some(crate::gpu::GpuTarget {
+        format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+        depth: None,
+        samples: 1,
+        tess: false,
+        oit: false,
+        edges: false,
+    });
     h.frames(3);
     let layer = h.app.preview.moving_layer().expect("the moved body is a layer");
     let still = h.app.preview.key;
@@ -708,8 +720,14 @@ fn a_typed_move_drawn_as_a_layer_lights_no_moved_triangles() {
     let lit = |h: &crate::scenario::Harness| crate::viewport::build_highlight(&h.app).merged().tris.len();
     h.frames(3);
     assert_eq!(lit(&h), 0, "without a layer the moved body is outlined, not lit whole");
-    h.app.viewport.gpu =
-        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    h.app.viewport.gpu = Some(crate::gpu::GpuTarget {
+        format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+        depth: None,
+        samples: 1,
+        tess: false,
+        oit: false,
+        edges: false,
+    });
     h.frames(3);
     let layer = h.app.preview.moving_layer().expect("the moved body is a layer").key;
     assert!(drawn_as_layer(&h.app));

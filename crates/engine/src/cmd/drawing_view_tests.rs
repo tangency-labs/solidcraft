@@ -252,6 +252,24 @@ fn standard_views_are_laid_out_together_in_the_drawings_projection() {
     }
 }
 
+/// An edit that moves a view or changes its size lists it, and the views lined up with it, when
+/// they now leave the sheet's drawing space, as the commands that place a view do; none is moved
+/// back in. An edit that changes no size or place lists nothing.
+#[test]
+fn an_edit_that_takes_a_view_off_the_sheet_says_so() {
+    let (mut s, [front, right, _]) = three_views();
+    let scaled = edit_view(&mut s, front, json!({"scale": "1:1"}));
+    assert!(scaled.get("outside").is_none(), "still on the sheet: {scaled}");
+    // Up past the sheet's top edge, the front view and the right view lined up with it both leave.
+    let off = edit_view(&mut s, front, json!({"place": {"at": [150.0, 290.0]}}));
+    let listed: Vec<Value> = off["outside"].as_array().unwrap().iter().map(|o| o["view"].clone()).collect();
+    assert_eq!(listed, vec![json!(ids::encode(front)), json!(ids::encode(right))], "{off}");
+    assert_eq!(inspect_view(&mut s, front)["place"], json!({"at": [150.0, 290.0]}), "none is moved back in");
+    // A display setting changes no size or place: nothing is listed.
+    let styled = edit_view(&mut s, front, json!({"visual_style": "visible"}));
+    assert!(styled.get("outside").is_none(), "{styled}");
+}
+
 /// A second sheet in the drawing, A3 landscape as the first: its id.
 fn second_sheet(s: &mut Session) -> u64 {
     let added = run(s, "drawing.sheet.add", json!({}));
@@ -885,8 +903,6 @@ fn hostile_snapshots_are_refused() {
         (json!({"view": {"direction": [0, 0, 0], "up": [0, 0, 1]}}), "direction"),
         (json!({"view": {"direction": [1e308, 1e308, 0], "up": [0, 0, 1]}}), "direction"),
         (json!({"view": {"direction": [0, 0, 1], "up": [0, 0, 2]}}), "along the view direction"),
-        (json!({"visual_style": "shaded_visible_hidden"}), "not supported yet"),
-        (json!({"reference_style": "shaded_visible"}), "not supported yet: shaded views with lines need the view's exact lines (W06)"),
         (json!({"visual_style": "Shaded"}), "unknown variant"),
         (json!({"tangent_edges": "thin"}), "thin"),
         (json!({"sheet": {"dpi": 24.9}}), "dpi"),
@@ -3994,8 +4010,8 @@ fn flat_view(s: &mut Session, p: Value) -> (u64, Value) {
     (ids::decode(reply["view"].as_str().unwrap()).unwrap(), reply)
 }
 
-/// `sheet.flat_pattern`'s reply. It's a model command, so while a drawing is open it runs with the
-/// drawing closed.
+/// `sheet.flat_pattern`'s reply, read with the drawing closed while one is open, as these tests
+/// have always read it.
 fn flat_pattern(s: &mut Session) -> Value {
     if s.open_drawing.is_none() {
         return run(s, "sheet.flat_pattern", json!({}));
