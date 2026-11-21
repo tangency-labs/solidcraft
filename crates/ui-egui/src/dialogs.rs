@@ -8789,6 +8789,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     if let (Some(pick), Some(inp)) = (model_axis_sel(s, face), d.inputs.get_mut(1)) {
                         inp.items = vec![pick];
                     }
+                    if let PatternKind::Face { more_faces, .. } = pattern
+                        && let Some(picks) = more_faces.iter().map(|g| model_axis_sel(s, g)).collect::<Option<Vec<Sel>>>()
+                        && let Some(inp) = d.inputs.get_mut(1)
+                        && !inp.items.is_empty()
+                    {
+                        inp.items.extend(picks);
+                    }
                     if let PatternKind::Face { attract, avoid, .. } = pattern {
                         let set = |geometry: &[solidcraft_engine::doc::construct::GeoRef], bodies: &[solidcraft_engine::doc::BodyName]| {
                             let mut picks: Vec<Sel> = geometry.iter().map(|g| point_sel(s, g).or_else(|| saved_pick(s, g))).collect::<Option<_>>()?;

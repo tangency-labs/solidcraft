@@ -6,7 +6,7 @@
 
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
-use solidcraft_engine::doc::{Attract, Avoid, Falloff, Noise, PatternKind};
+use solidcraft_engine::doc::{Attract, Avoid, FaceLayout, Falloff, Noise, PatternKind};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, form_row, set_object_accepting};
@@ -48,8 +48,18 @@ pub(crate) fn set_attractor_inputs(d: &mut Dialog, on: bool) {
 pub struct Form {
     pub count1: String,
     pub count2: String,
-    /// 0: grid; 1: grid with every other column half a cell along; 2: random.
+    /// 0: grid; 1: grid with every other column half a cell along; 2: random; 3: rows a spacing
+    /// apart; 4: a spiral; 5: an even fill; 6: a geodesic sphere ([`LAYOUTS`]).
     pub layout: usize,
+    /// Spacing: along the rows and across them (empty: the same), and every other row moved half
+    /// a spacing along.
+    pub spacing: String,
+    pub row_spacing: String,
+    pub staggered_rows: bool,
+    /// Spiral and even fill: how many instances.
+    pub layout_count: String,
+    /// Geodesic: its frequency.
+    pub frequency: String,
     /// Random: how many instances, the seed, and the noise (0 white, 1 blue, 2 pink, 3 brown).
     pub random_count: String,
     pub seed: String,
@@ -59,6 +69,10 @@ pub struct Form {
     pub avoid_margin: String,
     /// Copies may hang over the face's edges (only their centres on the face).
     pub overhang: bool,
+    /// The outer copies sit flush with the face's edges (with overhang, their centres on them),
+    /// the edge margin moving them in. On for a new pattern; off for one made before it, so it
+    /// keeps its copies where they were.
+    pub fit_edges: bool,
     pub flip: bool,
     /// The instances go into a browser group (on by default).
     pub group: bool,
@@ -78,6 +92,7 @@ pub struct Form {
     /// When editing: the saved face and attractor references, sent while nothing is picked
     /// in their place.
     pub saved_face: Option<Value>,
+    pub saved_more_faces: Vec<Value>,
     pub saved_geometry: Vec<Value>,
     pub saved_bodies: Vec<String>,
     pub saved_far_geometry: Vec<Value>,
@@ -92,6 +107,11 @@ impl Default for Form {
             count1: "5".into(),
             count2: "5".into(),
             layout: 0,
+            spacing: "10".into(),
+            row_spacing: String::new(),
+            staggered_rows: false,
+            layout_count: "50".into(),
+            frequency: "3".into(),
             random_count: "25".into(),
             seed: "1".into(),
             noise: 1,
@@ -99,6 +119,7 @@ impl Default for Form {
             margin: String::new(),
             avoid_margin: String::new(),
             overhang: false,
+            fit_edges: true,
             flip: false,
             group: true,
             attract: false,
@@ -113,6 +134,7 @@ impl Default for Form {
             cutoff: String::new(),
             falloff: 0,
             saved_face: None,
+            saved_more_faces: Vec::new(),
             saved_geometry: Vec::new(),
             saved_bodies: Vec::new(),
             saved_far_geometry: Vec::new(),
@@ -123,8 +145,12 @@ impl Default for Form {
     }
 }
 
+/// The Layout choices, in the order of [`Form::layout`].
+const LAYOUTS: [&str; 7] = ["Grid", "Staggered", "Random", "Spacing", "Spiral", "Even fill", "Geodesic"];
+
+/// The Face pick takes several faces of one body: one region, copies across the edges they share.
 pub(crate) fn inputs() -> Vec<SelInput> {
-    vec![SelInput::new("Objects", BODIES, true), SelInput::new("Face", FACES, false), SelInput::new(AVOID, AVOID_PICKS, true)]
+    vec![SelInput::new("Objects", BODIES, true), SelInput::new("Face", FACES, true), SelInput::new(AVOID, AVOID_PICKS, true)]
 }
 
 /// The dialog for a new face pattern.
@@ -142,15 +168,30 @@ pub(crate) fn draw(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let avoiding = avoiding || !f.saved_avoid_geometry.is_empty() || !f.saved_avoid_bodies.is_empty();
     let doc = &app.session.doc;
     let mut enter = false;
-    choice_row(ui, "Layout", "fp_layout", &mut f.layout, &["Grid", "Staggered", "Random"]);
-    if f.layout == 2 {
-        enter |= crate::dialogs::quantity_row(ui, doc, "Quantity", &mut f.random_count);
-        enter |= expr_row(ui, "Seed", &mut f.seed);
-        choice_row(ui, "Noise", "fp_noise", &mut f.noise, &["White noise", "Blue noise", "Pink noise", "Brown noise"]);
-    } else {
-        enter |= crate::dialogs::quantity_row(ui, doc, "Quantity U", &mut f.count1);
-        enter |= crate::dialogs::quantity_row(ui, doc, "Quantity V", &mut f.count2);
-        enter |= hint_row(ui, "Grid angle", &mut f.angle, "none");
+    choice_row(ui, "Layout", "fp_layout", &mut f.layout, &LAYOUTS);
+    match f.layout {
+        2 => {
+            enter |= crate::dialogs::quantity_row(ui, doc, "Quantity", &mut f.random_count);
+            enter |= expr_row(ui, "Seed", &mut f.seed);
+            choice_row(ui, "Noise", "fp_noise", &mut f.noise, &["White noise", "Blue noise", "Pink noise", "Brown noise"]);
+        }
+        3 => {
+            enter |= expr_row(ui, "Spacing", &mut f.spacing);
+            enter |= hint_row(ui, "Row spacing", &mut f.row_spacing, "same as spacing");
+            form_row(ui, "", |ui| {
+                ui_kit::checkbox(ui, "Staggered rows", &mut f.staggered_rows);
+            });
+        }
+        4 | 5 => enter |= crate::dialogs::quantity_row(ui, doc, "Quantity", &mut f.layout_count),
+        6 => {
+            enter |= expr_row(ui, "Frequency", &mut f.frequency);
+            enter |= hint_row(ui, "Turn", &mut f.angle, "none");
+        }
+        _ => {
+            enter |= crate::dialogs::quantity_row(ui, doc, "Quantity U", &mut f.count1);
+            enter |= crate::dialogs::quantity_row(ui, doc, "Quantity V", &mut f.count2);
+            enter |= hint_row(ui, "Grid angle", &mut f.angle, "none");
+        }
     }
     enter |= hint_row(ui, "Edge margin", &mut f.margin, "none");
     form_row(ui, "", |ui| {
@@ -205,33 +246,61 @@ pub(crate) fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
     if bodies.is_empty() {
         return Err("select the bodies to copy".into());
     }
-    let face = match picks("Face").first() {
-        Some(Sel::Face { point, .. }) => json!({"face": pt(*point)}),
-        _ => f.saved_face.clone().ok_or("select the face to pattern on")?,
+    // The faces picked, the first the pattern's face; while none is, the faces as saved.
+    let picked: Vec<Value> = picks("Face")
+        .iter()
+        .filter_map(|sel| match sel {
+            Sel::Face { point, .. } => Some(json!({"face": pt(*point)})),
+            _ => None,
+        })
+        .collect();
+    let (face, more) = match picked.split_first() {
+        Some((first, rest)) => (first.clone(), rest.to_vec()),
+        None => (f.saved_face.clone().ok_or("select the face to pattern on")?, f.saved_more_faces.clone()),
     };
     let mut p = json!({"bodies": bodies, "face": face});
-    if f.layout == 2 {
-        let seed: u32 = f.seed.trim().parse().map_err(|_| "the seed is a whole number from 0 to 4294967295".to_string())?;
-        let noise = ["white", "blue", "pink", "brown"].get(f.noise).copied().unwrap_or("white");
-        p["random"] = json!({"count": f.random_count.trim(), "seed": seed, "noise": noise});
-    } else {
-        p["count1"] = json!(f.count1.trim());
-        p["count2"] = json!(f.count2.trim());
+    if !more.is_empty() {
+        p["faces"] = json!(more);
+    }
+    match f.layout {
+        2 => {
+            let seed: u32 = f.seed.trim().parse().map_err(|_| "the seed is a whole number from 0 to 4294967295".to_string())?;
+            let noise = ["white", "blue", "pink", "brown"].get(f.noise).copied().unwrap_or("white");
+            p["random"] = json!({"count": f.random_count.trim(), "seed": seed, "noise": noise});
+        }
+        3 => {
+            let mut l = json!({"type": "spacing", "spacing": f.spacing.trim()});
+            if !f.row_spacing.trim().is_empty() {
+                l["row_spacing"] = json!(f.row_spacing.trim());
+            }
+            p["layout"] = l;
+        }
+        4 => p["layout"] = json!({"type": "spiral", "count": f.layout_count.trim()}),
+        5 => p["layout"] = json!({"type": "fill", "count": f.layout_count.trim()}),
+        6 => p["layout"] = json!({"type": "geodesic", "frequency": f.frequency.trim()}),
+        _ => {
+            p["count1"] = json!(f.count1.trim());
+            p["count2"] = json!(f.count2.trim());
+        }
     }
     let mut put = |key: &str, v: &str| {
         if !v.trim().is_empty() {
             p[key] = json!(v.trim());
         }
     };
-    if f.layout != 2 {
+    // The grid's angle turns it; the geodesic's, about the sphere's pole.
+    if matches!(f.layout, 0 | 1 | 6) {
         put("angle", &f.angle);
     }
     put("margin", &f.margin);
-    if f.layout == 1 {
+    if f.layout == 1 || (f.layout == 3 && f.staggered_rows) {
         p["staggered"] = json!(true);
     }
     if f.overhang {
         p["overhang"] = json!(true);
+    }
+    if f.fit_edges {
+        p["fit_edges"] = json!(true);
     }
     if f.flip {
         p["flip"] = json!(true);
@@ -309,7 +378,24 @@ pub(crate) fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
 
 /// The dialog's values for a saved face pattern.
 pub(crate) fn form_of(pattern: &PatternKind) -> Option<Form> {
-    let PatternKind::Face { face, count1, count2, staggered, random, angle, margin, overhang, avoid, flip, anchor: _, attract } = pattern else {
+    let PatternKind::Face {
+        face,
+        more_faces,
+        layout,
+        fit_edges,
+        count1,
+        count2,
+        staggered,
+        random,
+        angle,
+        margin,
+        overhang,
+        avoid,
+        flip,
+        anchor: _,
+        attract,
+    } = pattern
+    else {
         return None;
     };
     let s = |e: &Option<solidcraft_engine::doc::Expr>| e.as_deref().map(str::to_string).unwrap_or_default();
@@ -320,10 +406,33 @@ pub(crate) fn form_of(pattern: &PatternKind) -> Option<Form> {
         angle: s(angle),
         margin: s(margin),
         overhang: *overhang,
+        fit_edges: *fit_edges,
         flip: *flip,
         saved_face: serde_json::to_value(face).ok(),
+        saved_more_faces: more_faces.iter().filter_map(|g| serde_json::to_value(g).ok()).collect(),
         ..Form::default()
     };
+    match layout {
+        Some(FaceLayout::Spacing { spacing, row_spacing }) => {
+            f.layout = 3;
+            f.spacing = spacing.to_string();
+            f.row_spacing = s(row_spacing);
+            f.staggered_rows = *staggered;
+        }
+        Some(FaceLayout::Spiral { count }) => {
+            f.layout = 4;
+            f.layout_count = count.to_string();
+        }
+        Some(FaceLayout::Fill { count }) => {
+            f.layout = 5;
+            f.layout_count = count.to_string();
+        }
+        Some(FaceLayout::Geodesic { frequency }) => {
+            f.layout = 6;
+            f.frequency = frequency.to_string();
+        }
+        None => {}
+    }
     if let Some(r) = random {
         f.layout = 2;
         f.random_count = r.count.to_string();

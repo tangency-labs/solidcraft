@@ -54,6 +54,10 @@ const BLUE_CANDIDATES: usize = 12;
 /// its density field for their largest and smallest values.
 const FIELD_GRID: usize = 48;
 
+/// How near one of a face's loops a point outside its loops' even–odd test may be and still be
+/// on the face, for a layout fitted to the edges (mm): the records' tolerance.
+const ON_LOOP: f64 = 1e-6;
+
 /// Mixed into a random placement's seed, so seed 0 is not `SplitMix64`'s own start.
 const SEED_MIX: u64 = 0x005E_ED0F_FACE;
 
@@ -85,6 +89,39 @@ pub struct Grid {
     pub angle: f64,
     /// Every other column moved half a cell along.
     pub staggered: bool,
+}
+
+/// How far in from a face's edges a layout's outer stations stand, along the surface (mm): `u` from
+/// the edges its first parameter runs between, `v` from the second's. A pattern sets it to its
+/// copies' half-width each way and its margin, so its outer copies lie flush with the edges, or
+/// its margin in from them. An end of a parameter's range where the face closes to a point (a
+/// sphere's pole) is no edge: there the layout keeps half a step clear instead; a parameter the
+/// face turns round in has no edges at all.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fit {
+    /// In from the edges the first parameter runs between.
+    pub u: f64,
+    /// In from the edges the second parameter runs between.
+    pub v: f64,
+}
+
+impl Fit {
+    fn check(&self) -> Result<()> {
+        if self.u.is_finite() && self.v.is_finite() && self.u >= 0.0 && self.v >= 0.0 {
+            Ok(())
+        } else {
+            Err(invalid("a fit to the edges must be a number, not negative"))
+        }
+    }
+
+    /// The fit along parameter `k`.
+    fn along(&self, k: usize) -> f64 {
+        if k == 0 {
+            self.u
+        } else {
+            self.v
+        }
+    }
 }
 
 /// How a random placement spreads its stations: the colour of the noise that places them.
@@ -128,15 +165,57 @@ fn invalid(reason: &'static str) -> SolidError {
     }
 }
 
-/// One face of a record read for stations: its surface, extent in its parameters, whether its
-/// shell turns its normal over, and its boundary edges with points along them.
+/// Most faces one pattern spans.
+pub const MAX_FACES: usize = 256;
+
+/// One face of a record read for stations: its surface, extent in its parameters and whether its
+/// shell turns its normal over.
 struct Face<'q> {
     query: &'q Query,
     index: usize,
     surface: &'q SurfaceEval,
     extent: [[f64; 2]; 2],
     flip: bool,
+}
+
+/// The faces a pattern spans, each read for stations, and the boundary of the whole set: the edges
+/// one of its faces' loops uses and no other does, so not the seams of a face nor the edges two of
+/// its faces share.
+struct Region<'q> {
+    faces: Vec<Face<'q>>,
     boundary: Boundary,
+}
+
+impl<'q> Region<'q> {
+    fn new(query: &'q Query, faces: &[usize]) -> Result<Region<'q>> {
+        if faces.is_empty() || faces.len() > MAX_FACES {
+            return Err(invalid("a pattern spans 1 to 256 faces"));
+        }
+        for (i, f) in faces.iter().enumerate() {
+            if faces.iter().skip(i + 1).any(|g| g == f) {
+                return Err(invalid("a face is listed twice"));
+            }
+        }
+        Ok(Region {
+            faces: faces
+                .iter()
+                .map(|&f| Face::new(query, f))
+                .collect::<Result<Vec<_>>>()?,
+            boundary: Boundary::of(query, faces),
+        })
+    }
+
+    /// The station at `uv` on the region's face `face`, its margin measured to the region's
+    /// boundary ([`Face::station`]).
+    fn station(&self, face: &Face, uv: [f64; 2], margin: f64) -> Option<Station> {
+        face.station(uv, margin, &self.boundary, false)
+    }
+
+    /// The station at `uv` as [`Region::station`], a point on one of the face's loops on it too:
+    /// for a layout fitted to the edges, whose outer stations may lie on them.
+    fn fitted_station(&self, face: &Face, uv: [f64; 2], margin: f64) -> Option<Station> {
+        face.station(uv, margin, &self.boundary, true)
+    }
 }
 
 impl<'q> Face<'q> {
@@ -162,7 +241,6 @@ impl<'q> Face<'q> {
             surface,
             extent,
             flip: face.forward == Some(false),
-            boundary: Boundary::of(query, &[index]),
         })
     }
 
@@ -173,15 +251,35 @@ impl<'q> Face<'q> {
     }
 
     /// The station at `uv`, when `uv` is inside the face, the surface has a normal there (not at a
-    /// pole) and the point is at least `margin` from the face's boundary.
-    fn station(&self, uv: [f64; 2], margin: f64) -> Option<Station> {
+    /// pole) and the point is at least `margin` from `boundary`.
+    fn station(
+        &self,
+        uv: [f64; 2],
+        margin: f64,
+        boundary: &Boundary,
+        on_loops: bool,
+    ) -> Option<Station> {
+        // With `on_loops`, a point on one of the face's loops is on the face too, though the
+        // even–odd test of its parameters can't tell: a layout fitted to the edges stands
+        // stations on them.
         if self.query.holds(self.index, uv) != Some(true) {
-            return None;
+            if !on_loops {
+                return None;
+            }
+            let point = self.surface.point(uv)?;
+            if !self.query.face_contains(self.index, point, ON_LOOP) {
+                return None;
+            }
         }
+        self.station_at(uv, margin, boundary)
+    }
+
+    /// The station at `uv` as [`Face::station`], taking `uv` to be inside the face.
+    fn station_at(&self, uv: [f64; 2], margin: f64, boundary: &Boundary) -> Option<Station> {
         let (point, su, sv) = self.surface.derivs(uv[0], uv[1])?;
         let normal = su.cross(sv).normalized()?;
         let along = (su - normal * su.dot(normal)).normalized()?;
-        let to_edge = self.boundary.distance(self.query, point);
+        let to_edge = boundary.distance(self.query, point);
         if to_edge < margin {
             return None;
         }
@@ -210,16 +308,10 @@ struct Boundary {
 
 impl Boundary {
     fn of(query: &Query, faces: &[usize]) -> Boundary {
-        let mut edges = BTreeMap::new();
-        for &f in faces {
-            for e in boundary_edges(query, f) {
-                edges.entry(e).or_insert_with(|| search_points(query, e));
-            }
-        }
         Boundary {
-            edges: edges
+            edges: boundary_edges(query, faces)
                 .into_iter()
-                .filter_map(|(e, points)| Some((e, points?)))
+                .filter_map(|e| Some((e, search_points(query, e)?)))
                 .collect(),
         }
     }
@@ -233,11 +325,12 @@ impl Boundary {
     }
 }
 
-/// The edges face `f`'s loops use once, in the order of their indices: its boundary, without the
-/// seams a periodic face's loops run along twice.
-fn boundary_edges(query: &Query, f: usize) -> Vec<usize> {
+/// The edges the loops of `faces` use once between them, in the order of their indices: the
+/// set's boundary, without the seams a periodic face's loops run along twice or the edges two of
+/// the faces share.
+fn boundary_edges(query: &Query, faces: &[usize]) -> Vec<usize> {
     let mut uses: BTreeMap<usize, usize> = BTreeMap::new();
-    if let Some(face) = query.record().faces.get(f) {
+    for face in faces.iter().filter_map(|&f| query.record().faces.get(f)) {
         for l in &face.loops {
             if let Loop::Edges(edges) = l {
                 for u in edges {
@@ -273,6 +366,25 @@ fn search_points(query: &Query, e: usize) -> Option<Vec<(f64, Vec3)>> {
 /// number or a negative margin, a face the record lacks, or one whose surface or loops can't be
 /// read or that has no extent.
 pub fn grid_stations(query: &Query, face: usize, grid: &Grid, margin: f64) -> Result<Vec<Station>> {
+    grid_stations_across(query, &[face], grid, None, margin)
+}
+
+/// The stations a grid puts on each of `faces` ([`grid_stations`]), the margin measured to the
+/// boundary of the set: the edges two of the faces share are not edges of it. With `fit`, each
+/// way the grid runs from `fit`'s distance in from one edge of the face's extent to the same
+/// distance in from the other ([`Fit`]), its outer stations on those lines; without it, each
+/// station is at the centre of its cell, as [`grid_stations`]'s.
+///
+/// # Errors
+/// As [`grid_stations`]'s, and for a fit that is not a number or is negative, no face, more than
+/// [`MAX_FACES`] or a face listed twice.
+pub fn grid_stations_across(
+    query: &Query,
+    faces: &[usize],
+    grid: &Grid,
+    fit: Option<&Fit>,
+    margin: f64,
+) -> Result<Vec<Station>> {
     let counts = 1..=MAX_STATION_COUNT;
     if !(counts.contains(&grid.count_u) && counts.contains(&grid.count_v)) {
         return Err(invalid("a grid has 1 to 1000 cells each way"));
@@ -282,28 +394,51 @@ pub fn grid_stations(query: &Query, face: usize, grid: &Grid, margin: f64) -> Re
             "the angle and the margin must be numbers, the margin not negative",
         ));
     }
-    let f = Face::new(query, face)?;
-    // Cell centres in the extent's unit square, turned about its centre. The turned lattice runs
-    // a whole extent past each side, so it still fills the square at any angle.
+    if let Some(fit) = fit {
+        fit.check()?;
+    }
+    let region = Region::new(query, faces)?;
+    // Stations in the extent's unit square, turned about the middle of the part of it the grid
+    // spans. The turned lattice runs a whole grid past each side, so it still fills the square at
+    // any angle.
     let (s, c) = grid.angle.sin_cos();
-    let (nu, nv) = (grid.count_u as f64, grid.count_v as f64);
     let reach = |n: usize| -(n as i64)..2 * n as i64;
     let mut out = Vec::new();
-    for i in reach(grid.count_u) {
-        let shift = if grid.staggered && i & 1 == 1 {
-            0.5
-        } else {
-            0.0
+    for f in &region.faces {
+        let axes = match fit {
+            None => Some([
+                layouts::Axis::cells(grid.count_u),
+                layouts::Axis::cells(grid.count_v),
+            ]),
+            Some(fit) => layouts::fitted_axis(f, 0, grid.count_u, fit.u)
+                .zip(layouts::fitted_axis(f, 1, grid.count_v, fit.v))
+                .map(|(u, v)| [u, v]),
         };
-        for j in reach(grid.count_v) {
-            let a = (i as f64 + 0.5) / nu - 0.5;
-            let b = (j as f64 + 0.5 + shift) / nv - 0.5;
-            let (x, y) = (0.5 + c * a - s * b, 0.5 + s * a + c * b);
-            if !((0.0..1.0).contains(&x) && (0.0..1.0).contains(&y)) {
-                continue;
-            }
-            if let Some(station) = f.station(f.at(x, y), margin) {
-                out.push(station);
+        // A face too small for one station `fit` in from its edges stands none.
+        let Some([au, av]) = axes else { continue };
+        for i in reach(grid.count_u) {
+            let shift = if grid.staggered && i & 1 == 1 {
+                0.5
+            } else {
+                0.0
+            };
+            for j in reach(grid.count_v) {
+                let (Some(x0), Some(y0)) = (au.at(i as f64), av.at(j as f64 + shift)) else {
+                    continue;
+                };
+                let (a, b) = (x0 - au.middle(), y0 - av.middle());
+                let (x, y) = (au.middle() + c * a - s * b, av.middle() + s * a + c * b);
+                if !(au.holds(x) && av.holds(y)) {
+                    continue;
+                }
+                let at = f.at(x, y);
+                let station = match fit {
+                    Some(_) => region.fitted_station(f, at, margin),
+                    None => region.station(f, at, margin),
+                };
+                if let Some(station) = station {
+                    out.push(station);
+                }
             }
         }
     }
@@ -327,39 +462,86 @@ pub fn random_stations(
     margin: f64,
     keep: &mut dyn FnMut(&Station) -> bool,
 ) -> Result<Vec<Station>> {
+    random_stations_across(query, &[face], random, margin, keep)
+}
+
+/// `random.count` stations placed at random over `faces` together ([`random_stations`]): even over
+/// their joint area, the margin measured to the boundary of the set. One face draws exactly as
+/// [`random_stations`] does.
+///
+/// # Errors
+/// As [`random_stations`]'s, and for no face, more than [`MAX_FACES`] or a face listed twice.
+pub fn random_stations_across(
+    query: &Query,
+    faces: &[usize],
+    random: &Random,
+    margin: f64,
+    keep: &mut dyn FnMut(&Station) -> bool,
+) -> Result<Vec<Station>> {
     if random.count > MAX_STATION_COUNT {
         return Err(invalid("at most 1000 random stations"));
     }
     if !(margin.is_finite() && margin >= 0.0) {
         return Err(invalid("the margin must not be negative"));
     }
-    let f = Face::new(query, face)?;
+    let region = Region::new(query, faces)?;
     let grid = |i: usize| i as f64 / FIELD_GRID as f64;
-    // The largest area element bounds the rejection that makes places even over the area.
-    let mut most: f64 = 0.0;
-    for i in 0..=FIELD_GRID {
-        for j in 0..=FIELD_GRID {
-            if let Some(a) = f.area(f.at(grid(i), grid(j))) {
-                most = most.max(a);
+    // Each face's largest area element bounds the rejection that makes places even over its
+    // area; a face is drawn in proportion to that bound times its extent, so places are even
+    // over the faces' joint area.
+    let mut most = Vec::new();
+    for f in &region.faces {
+        let mut m: f64 = 0.0;
+        for i in 0..=FIELD_GRID {
+            for j in 0..=FIELD_GRID {
+                if let Some(a) = f.area(f.at(grid(i), grid(j))) {
+                    m = m.max(a);
+                }
             }
         }
+        let [[u0, u1], [v0, v1]] = f.extent;
+        let mass = m * (u1 - u0) * (v1 - v0);
+        most.push((
+            m,
+            if m.is_finite() && mass.is_finite() {
+                mass
+            } else {
+                0.0
+            },
+        ));
     }
-    if !(most > 0.0 && most.is_finite()) {
+    let total: f64 = most.iter().map(|(_, mass)| mass).sum();
+    if !(total > 0.0 && total.is_finite()) {
         return Err(invalid("the face has no area"));
     }
     let mut rng = Rng::new(random.seed ^ SEED_MIX);
     let field = Field::new(random.noise, &mut rng);
     let candidate = |rng: &mut Rng| -> Option<Station> {
         for _ in 0..RANDOM_TRIES {
+            // One face draws no face: its places are drawn as they were on one face.
+            let k = if region.faces.len() == 1 {
+                0
+            } else {
+                let mut left = rng.next_f64() * total;
+                most.iter()
+                    .position(|(_, mass)| {
+                        left -= mass;
+                        left < 0.0
+                    })
+                    .unwrap_or_else(|| most.len().saturating_sub(1))
+            };
+            let (Some(f), Some(&(m, _))) = (region.faces.get(k), most.get(k)) else {
+                continue;
+            };
             let (x, y) = (rng.next_f64(), rng.next_f64());
             let uv = f.at(x, y);
             if f.query.holds(f.index, uv) != Some(true)
-                || rng.next_f64() * most > f.area(uv).unwrap_or(0.0)
+                || rng.next_f64() * m > f.area(uv).unwrap_or(0.0)
                 || rng.next_f64() > field.density(x, y)
             {
                 continue;
             }
-            if let Some(s) = f.station(uv, margin) {
+            if let Some(s) = region.station(f, uv, margin) {
                 return Some(s);
             }
         }
@@ -481,37 +663,144 @@ impl Field {
 /// [`SolidError::InvalidInput`] for a spacing that is not above zero, a face the record lacks, or
 /// an edge whose curve can't be evaluated.
 pub fn edge_points(query: &Query, face: usize, spacing: f64) -> Result<Vec<Vec<Vec3>>> {
+    edge_points_across(query, &[face], spacing)
+}
+
+/// Points along each edge of the boundary of `faces` together ([`edge_points`]): not the seams of
+/// a face nor the edges two of them share.
+///
+/// # Errors
+/// As [`edge_points`]'s, and for no face, more than [`MAX_FACES`] or a face listed twice.
+pub fn edge_points_across(query: &Query, faces: &[usize], spacing: f64) -> Result<Vec<Vec<Vec3>>> {
+    Ok(edge_samples(query, faces, spacing)?
+        .into_iter()
+        .map(|(_, points)| points.into_iter().map(|(p, _)| p).collect())
+        .collect())
+}
+
+/// A point on an edge's curve and the curve's derivative there.
+type PointAndSlope = (Vec3, Vec3);
+
+/// Each boundary edge of `faces` together ([`edge_points_across`]), with its points along it and
+/// the edge's derivative at each: the parameter halved until no two neighbours are more than
+/// `spacing` apart, or [`MAX_EDGE_POINTS`] reached.
+fn edge_samples(
+    query: &Query,
+    faces: &[usize],
+    spacing: f64,
+) -> Result<Vec<(usize, Vec<PointAndSlope>)>> {
     if !(spacing.is_finite() && spacing > 0.0) {
         return Err(invalid("the spacing must be above zero"));
     }
-    if query.record().faces.get(face).is_none() {
+    if faces.is_empty() || faces.len() > MAX_FACES {
+        return Err(invalid("a pattern spans 1 to 256 faces"));
+    }
+    if faces.iter().any(|&f| query.record().faces.get(f).is_none()) {
         return Err(invalid("the record has no such face"));
     }
     let cannot = || invalid("an edge's curve can't be evaluated");
     let mut out = Vec::new();
-    for e in boundary_edges(query, face) {
+    for e in boundary_edges(query, faces) {
         let [t0, t1] = query.edge_interval(e).ok_or_else(cannot)?;
         let mut n = 16usize;
         loop {
             let points = (0..=n)
-                .map(|i| {
-                    query
-                        .edge_at(e, t0 + (t1 - t0) * i as f64 / n as f64)
-                        .map(|(p, _)| p)
-                })
-                .collect::<Option<Vec<Vec3>>>()
+                .map(|i| query.edge_at(e, t0 + (t1 - t0) * i as f64 / n as f64))
+                .collect::<Option<Vec<(Vec3, Vec3)>>>()
                 .ok_or_else(cannot)?;
             let widest = points
                 .iter()
                 .zip(points.iter().skip(1))
-                .map(|(a, b)| a.dist(*b))
+                .map(|(a, b)| a.0.dist(b.0))
                 .fold(0.0, f64::max);
             if widest <= spacing || n >= MAX_EDGE_POINTS {
-                out.push(points);
+                out.push((e, points));
                 break;
             }
             n = (n * 2).min(MAX_EDGE_POINTS);
         }
+    }
+    Ok(out)
+}
+
+/// A point along the boundary of a set of faces, with which way is off them there
+/// ([`edge_frames_across`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EdgeFrame {
+    /// The point, on the edge's curve.
+    pub point: Vec3,
+    /// The unit direction off the faces across the edge: along the face's surface, square to the
+    /// edge.
+    pub out: Vec3,
+    /// The face's unit normal there, out of the material ([`Query::face_normal`]).
+    pub normal: Vec3,
+}
+
+/// Points along each edge of the boundary of `faces` together, as [`edge_points_across`], each
+/// with the direction off the faces across the edge and the face's normal there: for telling
+/// whether something standing on the faces reaches past their edges. The direction is the edge's
+/// tangent crossed with the face's normal, turned so that a step back along it from the edge's
+/// middle lands inside the face. A point where the face's normal can't be found takes the frame
+/// of the point before it (at the start of an edge, with none before it, it is left out).
+///
+/// # Errors
+/// As [`edge_points_across`]'s, and for an edge whose face's surface or loops can't be read there.
+pub fn edge_frames_across(
+    query: &Query,
+    faces: &[usize],
+    spacing: f64,
+) -> Result<Vec<Vec<EdgeFrame>>> {
+    let cannot = || invalid("an edge's face can't be read along it");
+    let mut out = Vec::new();
+    for (e, points) in edge_samples(query, faces, spacing)? {
+        // The face of the set the edge bounds (it bounds only one of them: it is on the boundary).
+        let face = faces
+            .iter()
+            .copied()
+            .find(|&f| boundary_edges(query, &[f]).contains(&e))
+            .ok_or_else(cannot)?;
+        let length: f64 = points
+            .windows(2)
+            .map(|w| match w {
+                [a, b] => a.0.dist(b.0),
+                _ => 0.0,
+            })
+            .sum();
+        // The face's normal at each point, from its parameters there.
+        let accept = spacing.max(length * EDGE_SAG_SHARE);
+        let frames: Vec<Option<(Vec3, Vec3)>> = points
+            .iter()
+            .map(|&(p, d)| {
+                let uv = query.face_uv(face, p, accept)?;
+                let n = query.face_normal(face, uv)?;
+                Some((d.cross(n).normalized()?, n))
+            })
+            .collect();
+        // Which way is off the face: a step back from the middle's lands inside it.
+        let middle = frames.len() / 2;
+        let (Some(&(p, _)), Some(&Some((o, _)))) = (points.get(middle), frames.get(middle)) else {
+            return Err(cannot());
+        };
+        let step = (length * EDGE_SAG_SHARE).max(1e-9);
+        let back = p - o * step;
+        let inward = query
+            .face_uv(face, back, 2.0 * step)
+            .is_some_and(|uv| query.holds(face, uv) == Some(true));
+        let sign = if inward { 1.0 } else { -1.0 };
+        let mut last = None;
+        let mut line = Vec::new();
+        for (&(p, _), frame) in points.iter().zip(&frames) {
+            let Some((o, n)) = frame.or(last) else {
+                continue;
+            };
+            last = Some((o, n));
+            line.push(EdgeFrame {
+                point: p,
+                out: o * sign,
+                normal: n,
+            });
+        }
+        out.push(line);
     }
     Ok(out)
 }
@@ -611,6 +900,13 @@ pub fn attraction(
 pub fn ramp(at_near: f64, at_far: f64, t: f64) -> f64 {
     at_near + (at_far - at_near) * t
 }
+
+#[path = "face_pattern_layouts.rs"]
+mod layouts;
+pub use layouts::{
+    fill_stations, geodesic_stations, spaced_stations, spiral_stations, Spacing,
+    MAX_GEODESIC_FREQUENCY,
+};
 
 #[cfg(test)]
 #[path = "face_pattern_tests.rs"]

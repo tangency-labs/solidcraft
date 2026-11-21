@@ -10163,7 +10163,23 @@ fn pattern_transforms(
                 out.push(rotation(origin, axis, step * alignment.multiplier(i, *reversed)));
             }
         }
-        crate::PatternKind::Face { face, count1, count2, staggered, random, angle, margin, overhang, avoid, flip, anchor, attract } => {
+        crate::PatternKind::Face {
+            face,
+            more_faces,
+            layout,
+            fit_edges,
+            count1,
+            count2,
+            staggered,
+            random,
+            angle,
+            margin,
+            overhang,
+            avoid,
+            flip,
+            anchor,
+            attract,
+        } => {
             out = face_pattern(
                 doc,
                 vals,
@@ -10171,6 +10187,9 @@ fn pattern_transforms(
                 component,
                 FaceGrid {
                     face,
+                    more_faces,
+                    layout,
+                    fit_edges: *fit_edges,
                     count1,
                     count2,
                     staggered: *staggered,
@@ -10194,6 +10213,9 @@ fn pattern_transforms(
 /// A face pattern's inputs, as [`crate::PatternKind::Face`] holds them.
 struct FaceGrid<'a> {
     face: &'a crate::construct::GeoRef,
+    more_faces: &'a [crate::construct::GeoRef],
+    layout: &'a Option<crate::FaceLayout>,
+    fit_edges: bool,
     count1: &'a crate::Expr,
     count2: &'a crate::Expr,
     staggered: bool,
@@ -10221,9 +10243,9 @@ fn face_pattern(
     g: FaceGrid,
     count: impl Fn(&str) -> Result<usize>,
 ) -> Result<Vec<Mat>> {
-    let (n1, n2) = match g.random {
-        Some(_) => (1, 1),
-        None => (count(g.count1)?, count(g.count2)?),
+    let (n1, n2) = match (g.layout, g.random) {
+        (Some(_), _) | (None, Some(_)) => (1, 1),
+        (None, None) => (count(g.count1)?, count(g.count2)?),
     };
     if n1 * n2 > MAX_INSTANCES * 4 {
         return Err(DocError::Invalid(format!("a face pattern's grid has at most {} cells", MAX_INSTANCES * 4)));
@@ -10237,6 +10259,18 @@ fn face_pattern(
     let cst = construction_state(doc, st, component)?;
     let crate::construct::GeoRef::Face { at, name } = g.face else { return Err(DocError::Invalid("a face pattern needs a face".into())) };
     let (body, index, _) = crate::construct::face_of(&cst, *at, name)?;
+    // The faces together, all of the first one's body.
+    let mut faces = vec![index];
+    for r in g.more_faces {
+        let crate::construct::GeoRef::Face { at, name } = r else { return Err(DocError::Invalid("a face pattern's faces must be faces".into())) };
+        let (b, i, _) = crate::construct::face_of(&cst, *at, name)?;
+        if b.name != body.name {
+            return Err(DocError::Invalid("a face pattern's faces must all be on one body".into()));
+        }
+        if !faces.contains(&i) {
+            faces.push(i);
+        }
+    }
     let anchor = match g.anchor {
         Some([x, y, z]) => Vec3::new(val(vals, x, Kind::Length)?, val(vals, y, Kind::Length)?, val(vals, z, Kind::Length)?),
         // The centre of the bottom of the copied bodies' exact bounding box: they stand on the
@@ -10266,8 +10300,8 @@ fn face_pattern(
     // along them, closer together than a twentieth of the margin; at a margin of 0, than a
     // fiftieth of the copies' footprint, so no copy hangs over an edge or a hole. With
     // `overhang`, the stations alone keep each copy's centre the margin in from the edges.
-    let edges = match g.overhang {
-        true => Vec::new(),
+    let (edges, nudges) = match g.overhang {
+        true => (Vec::new(), Vec::new()),
         false => {
             let spacing = match margin > 0.0 {
                 true => margin / 20.0,
@@ -10281,7 +10315,19 @@ fn face_pattern(
                     footprint / 50.0
                 }
             };
-            kernel::face_edge_points(&body.body, index, spacing.clamp(1e-3, 0.5))?
+            let spacing = spacing.clamp(1e-3, 0.5);
+            match g.fit_edges {
+                false => (kernel::face_edge_points_across(&body.body, &faces, spacing)?, Vec::new()),
+                // Fitted, each point also with the way off the faces and out of them on the
+                // copies' side, to tell a copy flush with an edge from one reaching past it.
+                true => {
+                    let side = if g.flip { -1.0 } else { 1.0 };
+                    let frames = kernel::face_edge_frames_across(&body.body, &faces, spacing)?;
+                    let points = frames.iter().map(|l| l.iter().map(|f| f.point).collect()).collect();
+                    let nudges = frames.iter().map(|l| l.iter().map(|f| f.out + f.normal * side).collect()).collect();
+                    (points, nudges)
+                }
+            }
         }
     };
     let ctx = crate::construct::Ctx { doc, vals, st: &cst, depth: 0, component };
@@ -10314,11 +10360,11 @@ fn face_pattern(
         g.sources.iter().map(|n| st.body(n).map(|b| &b.body).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))).collect::<Result<Vec<_>>>()?;
     let mut rules = Vec::new();
     if !edges.is_empty() {
-        rules.push(Rule { margin, points: Vec::new(), shapes: Vec::new(), edges });
+        rules.push(Rule { margin, points: Vec::new(), shapes: Vec::new(), edges, nudges, flush: g.fit_edges });
     }
     if g.avoid.is_some() {
         let shapes = avoid_faces.iter().chain(avoid_bodies.iter().copied()).collect();
-        rules.push(Rule { margin: avoid_margin, points: avoid_points, shapes, edges: Vec::new() });
+        rules.push(Rule { margin: avoid_margin, points: avoid_points, shapes, edges: Vec::new(), nudges: Vec::new(), flush: false });
     }
     let clear = KeepClear::new(&sources, rules)?;
     // Where a copy goes at a station: its anchor on the face, +Z along the normal (moved out by
@@ -10326,31 +10372,66 @@ fn face_pattern(
     let placement = |s: &kernel::FaceStation, scale: f64, offset: f64, spin: f64| -> Result<Mat> {
         Ok(kernel::face_placement(s, anchor, g.flip, scale, offset, spin)?)
     };
-    let stations = match g.random {
-        Some(r) => {
+    let positive = |e: &crate::Expr, what: &str| -> Result<f64> {
+        let v = val(vals, e, Kind::Length)?;
+        if v > 0.0 { Ok(v) } else { Err(DocError::Invalid(format!("the pattern's {what} must be above zero"))) }
+    };
+    // Fitted to the edges, the layout's outer copies stand their half-width in from them (with
+    // overhang, their centres on them) and the margin farther: the copied bodies' exact box about
+    // the anchor, across (the face's first parameter, the copies' X) and along (their Y).
+    let fit = match g.fit_edges {
+        false => None,
+        true => {
+            let mut half = [0.0_f64; 2];
+            if !g.overhang {
+                for n in g.sources {
+                    let bb = st.body(n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?.body.exact_bounds()?;
+                    half[0] = half[0].max(anchor.x - bb.min.x).max(bb.max.x - anchor.x);
+                    half[1] = half[1].max(anchor.y - bb.min.y).max(bb.max.y - anchor.y);
+                }
+            }
+            Some(half.map(|h| h + margin))
+        }
+    };
+    let layout = match (g.layout, g.random) {
+        (Some(crate::FaceLayout::Spacing { spacing, row_spacing }), _) => {
+            let spacing = positive(spacing, "spacing")?;
+            let row_spacing = row_spacing.as_ref().map_or(Ok(spacing), |e| positive(e, "row spacing"))?;
+            kernel::FaceLayout::Spacing { spacing, row_spacing, staggered: g.staggered, fit }
+        }
+        (Some(crate::FaceLayout::Spiral { count: c }), _) => kernel::FaceLayout::Spiral { count: count(c)? },
+        (Some(crate::FaceLayout::Fill { count: c }), _) => kernel::FaceLayout::Fill { count: count(c)? },
+        (Some(crate::FaceLayout::Geodesic { frequency }), _) => {
+            let f = expr::eval_count(frequency, vals)?;
+            if !(1.0..=kernel::MAX_GEODESIC_FREQUENCY as f64).contains(&f) {
+                return Err(DocError::Invalid(format!("a geodesic's frequency is 1 to {}", kernel::MAX_GEODESIC_FREQUENCY)));
+            }
+            kernel::FaceLayout::Geodesic { frequency: f as usize, turn }
+        }
+        (None, Some(r)) => {
             let noise = match r.noise {
                 crate::Noise::White => kernel::Noise::White,
                 crate::Noise::Blue => kernel::Noise::Blue,
                 crate::Noise::Pink => kernel::Noise::Pink,
                 crate::Noise::Brown => kernel::Noise::Brown,
             };
-            // Each place where a copy, as placed before any attractor changes it, keeps clear.
-            let mut failed = None;
-            let mut keep = |s: &kernel::FaceStation| match placement(s, 1.0, 0.0, 0.0).and_then(|m| clear.too_close(&m)) {
-                Ok(near) => !near,
-                Err(e) => {
-                    failed.get_or_insert(e);
-                    false
-                }
-            };
-            let stations = kernel::face_random_stations(&body.body, index, count(&r.count)?, u64::from(r.seed), noise, margin, &mut keep)?;
-            if let Some(e) = failed {
-                return Err(e);
-            }
-            stations
+            kernel::FaceLayout::Random { count: count(&r.count)?, seed: u64::from(r.seed), noise }
         }
-        None => kernel::face_stations(&body.body, index, n1, n2, turn, g.staggered, margin)?,
+        (None, None) => kernel::FaceLayout::Grid { count_u: n1, count_v: n2, angle: turn, staggered: g.staggered, fit },
     };
+    // Each random place where a copy, as placed before any attractor changes it, keeps clear.
+    let mut failed = None;
+    let mut keep = |s: &kernel::FaceStation| match placement(s, 1.0, 0.0, 0.0).and_then(|m| clear.too_close(&m)) {
+        Ok(near) => !near,
+        Err(e) => {
+            failed.get_or_insert(e);
+            false
+        }
+    };
+    let stations = kernel::face_layout_stations(&body.body, &faces, &layout, margin, &mut keep)?;
+    if let Some(e) = failed {
+        return Err(e);
+    }
     // Each station's distance to the nearest near attractor, and to the nearest far one when
     // there are far attractors.
     let effects = match g.attract.as_deref() {
@@ -10424,6 +10505,16 @@ struct Rule<'a> {
     shapes: Vec<&'a Body>,
     /// Points along edges, each list along one edge on its exact curve.
     edges: Vec<Vec<Vec3>>,
+    /// For each point of `edges` (when `flush`), the way off the faces across the edge plus their
+    /// normal on the copies' side: a step along it from a point an edge a copy reaches past is
+    /// inside the copy, from one it is flush with is not.
+    nudges: Vec<Vec<Vec3>>,
+    /// A copy may come right up to the edges: it is near one only where a point along it is
+    /// nearer than the margin, or (at a margin of 0) a step past the edge and off the face from
+    /// one is inside the copy ([`FLUSH_STEP`]), so a copy the layout stands flush with an edge, or
+    /// the margin from it, stays. Without, the gaps between the points count against it too, and
+    /// a point inside the copy makes it near.
+    flush: bool,
 }
 
 /// How near a copy may come to its rules' points, shapes and edges before it is left out, measured
@@ -10448,6 +10539,14 @@ struct KeepClear<'a> {
     boxes: Vec<Vec<solidcraft_geom::Aabb3>>,
     probes: Vec<Vec<kernel::PointDistance<'a>>>,
 }
+
+/// How much nearer than its margin a copy the layout stands flush with an edge may measure, for
+/// rounding (mm): the records' tolerance.
+const FLUSH_ROUNDING: f64 = 1e-6;
+
+/// How far past a face's edge, and off the face, a copy flush with the edge is tested for
+/// reaching past it (mm): a copy reaching past by less than this still counts as flush.
+const FLUSH_STEP: f64 = 1e-3;
 
 /// The cells each way a copy's box is cut into, to bound how near the copy comes to a shape.
 const CLEAR_CELLS: usize = 4;
@@ -10587,23 +10686,43 @@ impl<'a> KeepClear<'a> {
     /// where the nearest point is farther than `near` by less than the gap to its neighbours (a
     /// point of the edge between them might not be).
     fn near_edges(&self, rule: &Rule, reach: &solidcraft_geom::Aabb3, near: f64, copies: &mut Option<Vec<Body>>, m: &Mat) -> Result<bool> {
-        let mut nearby: Vec<(Vec3, f64)> = Vec::new();
-        for line in &rule.edges {
+        // Each point near the copy's box, with the gap to its neighbours and its step off the face.
+        let mut nearby: Vec<(Vec3, f64, Vec3)> = Vec::new();
+        for (i, line) in rule.edges.iter().enumerate() {
             let gap = line.windows(2).map(|w| w[0].dist(w[1])).fold(0.0, f64::max);
             let grown = reach.inflated(near + gap);
-            nearby.extend(line.iter().filter(|p| grown.contains(**p)).map(|p| (*p, gap)));
+            let steps = rule.nudges.get(i);
+            nearby.extend(
+                line.iter()
+                    .enumerate()
+                    .filter(|(_, p)| grown.contains(**p))
+                    .map(|(j, p)| (*p, gap, steps.and_then(|s| s.get(j)).copied().unwrap_or(Vec3::ZERO))),
+            );
         }
         if nearby.is_empty() {
             return Ok(false);
         }
-        let points: Vec<Vec3> = nearby.iter().map(|(p, _)| *p).collect();
+        // Flush, the points a step past the edge and off the face: inside the copy where it reaches
+        // past the edge; on the face's own plane, as the points are, a copy standing on it would
+        // be told badly.
+        let points: Vec<Vec3> = match rule.flush {
+            true => nearby.iter().map(|(p, _, step)| *p + *step * FLUSH_STEP).collect(),
+            false => nearby.iter().map(|(p, _, _)| *p).collect(),
+        };
         for c in self.placed(copies, m)? {
             if !c.is_surface() && c.classify_points(&points)?.iter().any(|k| matches!(k, kernel::PointClass::Inside)) {
                 return Ok(true);
             }
+            // Flush, a point the margin away (to rounding) is clear, and at a margin of 0 only a
+            // copy reaching past the edge is near.
+            if rule.flush && rule.margin <= 0.0 {
+                continue;
+            }
             let to = kernel::PointDistance::to_body(c)?;
-            for (p, gap) in &nearby {
-                if to.distance(*p)? - gap < near {
+            for (p, gap, _) in &nearby {
+                let d = to.distance(*p)?;
+                let near_here = if rule.flush { d < rule.margin - FLUSH_ROUNDING } else { d - gap < near };
+                if near_here {
                     return Ok(true);
                 }
             }

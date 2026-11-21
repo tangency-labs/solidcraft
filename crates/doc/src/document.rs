@@ -3097,6 +3097,21 @@ pub enum PatternKind {
     /// Bodies only.
     Face {
         face: GeoRef,
+        /// More faces of the same body the copies stand on with `face`: together one region, so
+        /// the edges two of them share are not edges of it (no margin to them, copies across
+        /// them), and a count is shared over them by area.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        more_faces: Vec<GeoRef>,
+        /// A layout spaced by distance on the surface, in place of the grid and `random`, so it
+        /// stays even where the face's parameters crowd (a sphere's poles).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layout: Option<FaceLayout>,
+        /// The layout's outer copies sit flush with the face's edges (with `overhang`, their
+        /// centres on them) and the edge margin moves them in: the grid runs from edge to edge,
+        /// as do the spaced rows. Absent (designs made before it): each grid copy at the centre of
+        /// its cell, and the margin only leaves out the copies nearer the edges than it.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        fit_edges: bool,
         #[walk(unitless = "Quantity")]
         count1: Expr,
         #[walk(unitless = "Quantity 2")]
@@ -3224,6 +3239,40 @@ pub struct RandomPlacement {
     pub seed: u32,
     #[serde(default)]
     pub noise: Noise,
+}
+
+/// A face pattern's layout spaced by distance on the surface ([`PatternKind::Face`]'s `layout`):
+/// even where the face's parameters crowd, as round a sphere's poles. Its `staggered` and `angle`
+/// apply as noted.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FaceLayout {
+    /// Rows `row_spacing` apart along the surface (default `spacing`), each with as many copies as
+    /// fit its length at `spacing` apart: round a sphere, its circles of latitude. `staggered`
+    /// moves every other row half a spacing along.
+    Spacing {
+        #[walk(length = "Spacing")]
+        spacing: Expr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Row spacing")]
+        row_spacing: Option<Expr>,
+    },
+    /// `count` copies on a Fibonacci spiral, even over the faces' area.
+    Spiral {
+        #[walk(unitless = "Quantity")]
+        count: Expr,
+    },
+    /// `count` copies relaxed until evenly spread over the faces together.
+    Fill {
+        #[walk(unitless = "Quantity")]
+        count: Expr,
+    },
+    /// The vertices of a geodesic sphere of `frequency` (1 to 9: `10 f² + 2` on a whole sphere) on
+    /// faces of one sphere; `angle` turns it about the sphere's pole.
+    Geodesic {
+        #[walk(unitless = "Frequency")]
+        frequency: Expr,
+    },
 }
 
 /// How a random placement spreads its instances: the colour of the noise that places them.

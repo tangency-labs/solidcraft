@@ -1090,7 +1090,18 @@ pub struct PatternFaceParams {
     pub bodies: NameList,
     /// The face to copy onto: a point on it ({"face": [x, y, z]}, kept by the face's persistent
     /// name, so the copies follow the face as the model changes) or a reference as saved.
-    pub face: GeoRefParam,
+    /// Required unless `faces` lists the faces.
+    #[serde(default)]
+    pub face: Option<GeoRefParam>,
+    /// More faces of the same body to copy onto (with `face`, or alone): together one region, so
+    /// the edges two of them share are no edges of it, and a count is shared over them by area.
+    /// At most 256.
+    #[serde(default)]
+    pub faces: Option<Vec<GeoRefParam>>,
+    /// A layout spaced by distance on the surface, in place of the grid (`count1`, `count2`) and
+    /// `random`: even where the face's parameters crowd, as round a sphere's poles.
+    #[serde(default)]
+    pub layout: Option<FaceLayoutParams>,
     /// Cells across the face (round a cylinder, its first direction). Required without `random`.
     #[serde(default)]
     pub count1: Option<NumberExpr>,
@@ -1106,6 +1117,11 @@ pub struct PatternFaceParams {
     /// The grid's turn on the face. Default: 0.
     #[serde(default)]
     pub angle: Option<AngleExpr>,
+    /// The layout's outer copies sit flush with the face's edges (with `overhang`, their centres
+    /// on them), the edge margin moving them in: the grid and the spaced rows run from edge to
+    /// edge. Default: false (each grid copy at the centre of its cell). The dialog sets it.
+    #[serde(default)]
+    pub fit_edges: Option<bool>,
     /// The edge margin: no copy nearer than this to the face's edges, round its holes too,
     /// measured from the copy itself. Default: 0.
     #[serde(default)]
@@ -1208,6 +1224,28 @@ pub struct AttractParams {
     /// out at both ends).
     #[serde(default)]
     pub falloff: Option<FalloffParam>,
+}
+
+/// A face pattern's layout spaced by distance on the surface.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum FaceLayoutParams {
+    /// Rows `row_spacing` apart along the surface (default `spacing`), each with as many copies as
+    /// fit its length at `spacing` apart: round a sphere, its circles of latitude. `staggered`
+    /// moves every other row half a spacing along.
+    Spacing {
+        spacing: LengthExpr,
+        #[serde(default)]
+        row_spacing: Option<LengthExpr>,
+    },
+    /// `count` copies on a Fibonacci spiral, even over the faces' area.
+    Spiral { count: NumberExpr },
+    /// `count` copies relaxed until evenly spread over the faces together, round holes and across
+    /// the edges between them.
+    Fill { count: NumberExpr },
+    /// The vertices of a geodesic sphere of `frequency` (1 to 9: 10 f² + 2 copies on a whole
+    /// sphere) on faces of one sphere; `angle` turns it about the sphere's pole.
+    Geodesic { frequency: NumberExpr },
 }
 
 /// A face pattern's random placement.
