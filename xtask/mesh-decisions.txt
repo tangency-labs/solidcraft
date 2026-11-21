@@ -81,7 +81,6 @@ crates/doc/src/project3d.rs:part_of finds a reference's face nearest its point b
 crates/doc/src/project3d.rs:spun_outline spins a body's outline from mesh triangles
 crates/doc/src/project3d.rs:tris reads mesh triangles for 3D projections
 crates/engine/src/cmd/clearance.rs:clearance measures clearances between B-rep bodies on display meshes
-crates/engine/src/cmd/clearance.rs:measure_pair measures a pair's overlap or distance on display meshes
 crates/engine/src/cmd/compare.rs:compare_bodies compares two B-rep bodies by meshes
 crates/engine/src/cmd/compare.rs:enclosed_volume measures a B-rep body's volume from mesh triangles
 crates/engine/src/cmd/component_clone.rs:build places pasted bodies by meshes
