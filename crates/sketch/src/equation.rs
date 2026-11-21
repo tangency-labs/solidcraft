@@ -41,8 +41,9 @@ impl VariableUnit {
 /// A curve drawn from formulas: x(t) and y(t) over t from `start` to `end`, or (with `x` left
 /// out) the explicit y = f(x) over x from `start` to `end`. The formulas use the design's
 /// expression language and parameters; the variable is a plain number unless `variable_unit`
-/// says otherwise, so `sin(t)` reads it in radians, and a result without a unit is in the
-/// design's length unit.
+/// says otherwise, so `sin(t)` reads it in radians, as every plain number in a trig call does
+/// (`cos(0.5)` is radians, not degrees: write `deg` for degrees), and a result without a unit
+/// is in the design's length unit.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EquationCurve {
     /// The fit point spline it places (a curve id of the sketch).

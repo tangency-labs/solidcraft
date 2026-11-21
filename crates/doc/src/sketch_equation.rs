@@ -340,6 +340,22 @@ mod tests {
         assert!((last - Vec2::new(25.4, 50.8)).len() < 1e-9, "{last:?}");
     }
 
+    /// Plain numbers read radians in the formulas' trig calls, constants as well as the variable
+    /// (#19630): the same `cos(0.5)` that a sketch point reads in degrees is radians here, as
+    /// the variable in `sin(t)` is. `deg` spells degrees out.
+    #[test]
+    fn plain_numbers_read_radians_in_trig_calls_and_deg_spells_degrees_out() {
+        let vals = BTreeMap::new();
+        let rad = fit(&vals, &eq(None, "cos(0.5)", "0 mm", "10 mm")).unwrap();
+        for p in &rad.points {
+            assert!((p.y - 0.5f64.cos()).abs() < 1e-9, "{p:?}");
+        }
+        let deg = fit(&vals, &eq(None, "cos(0.5 deg)", "0 mm", "10 mm")).unwrap();
+        for p in &deg.points {
+            assert!((p.y - 0.5f64.to_radians().cos()).abs() < 1e-9, "{p:?}");
+        }
+    }
+
     #[test]
     fn more_points_where_the_tolerance_is_tighter() {
         let vals = BTreeMap::new();

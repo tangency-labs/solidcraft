@@ -33,7 +33,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              start, end: the range of t (or of x): a number or an expression (\"2 * pi\", \"360 deg\" is 2·pi, a length is in the design's unit); \
              tolerance?: mm (default 0.01): how far the curve may stray from the formulas (0.0001 to 10); construction?: bool; \
              variable_unit?: \"number\" (default) or \"range\". \
-             The variable is a plain number: sin(t) reads it in radians; a result without a unit is in the design's length unit. \
+             The variable is a plain number: sin(t) reads it in radians, and so does every plain number in a trig call (cos(0.5) is radians, not degrees: write deg for degrees); a result without a unit is in the design's length unit. \
              With variable_unit \"range\" it is a length, so a ^ 2 / (4 * t) is a length when a is one: start and end must both be lengths, or one a length and the other a plain number, which is then in the design's unit. \
              Makes a fit point spline through fixed points, as many as the tolerance needs (up to 500), closed smoothly when it ends where it starts; \
              the points are placed again from the formulas whenever the parameters change. Returns curve, points (how many), closed, deviation (mm)",
