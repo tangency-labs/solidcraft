@@ -1572,7 +1572,7 @@ impl<'t> Assembly<'t> {
         // Which loop is largest is decided on the areas the loops' pcurves enclose, integrated
         // along them, not on polygons: nested loops of nearly one size (a thin ring) must not swap
         // places by how finely, or in how many edges, each is sampled.
-        // Each with the bound on its integration error: `(area, error)`.
+        // Each with an estimate of its integration error: `(area, error)`.
         let sizes: Vec<Option<(f64, f64)>> = if edge_loops.len() > 1 {
             edge_loops
                 .iter()
@@ -1931,10 +1931,10 @@ fn loop_area(l: &[(u32, bool)], pcs: &[Curve2], periodic: [bool; 2]) -> Option<f
     loop_area_sampled(l, pcs, periodic, 16)
 }
 
-/// The loop that encloses the most, by `sizes` (`(area, error bound)` per loop, `None` for one that
-/// doesn't close): only when its lead over every other loop is more than their error bounds
-/// together, so the choice is certain. `None` when no loop is certainly the largest; the file's
-/// own outer bound then decides.
+/// The loop that encloses the most, by `sizes` (`(area, error estimate)` per loop, `None` for one
+/// that doesn't close): only when its lead over every other loop is more than their error
+/// estimates together and rounding. `None` when the areas can't tell; the file's own outer bound
+/// (`FACE_OUTER_BOUND`, the file's declaration of which loop is outer) then decides.
 fn largest_loop(sizes: &[Option<(f64, f64)>]) -> Option<usize> {
     let known: Vec<(usize, f64, f64)> = sizes.iter().enumerate().filter_map(|(i, s)| s.map(|(a, e)| (i, a.abs(), e))).collect();
     let &(best, area, error) = known.iter().max_by(|a, b| a.1.total_cmp(&b.1))?;
@@ -1943,7 +1943,7 @@ fn largest_loop(sizes: &[Option<(f64, f64)>]) -> Option<usize> {
 }
 
 /// The signed area a closed loop of pcurves encloses in (u, v), integrated along the curves, and
-/// a bound on the integration's error: half of the integral of `(u - u0) dv - (v - v0) du`
+/// an estimate of the integration's error: half of the integral of `(u - u0) dv - (v - v0) du`
 /// (Green), with `(u0, v0)` the loop's first point. Each edge is integrated knot span by knot span
 /// (the curve is smooth within a span) by an adaptive eight-point Gauss–Legendre rule: a piece is
 /// halved until its halves agree with it, so a rational arc is measured to rounding however its
