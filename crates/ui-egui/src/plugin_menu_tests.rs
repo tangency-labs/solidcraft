@@ -441,6 +441,273 @@ fn invalid_conditional_dialog_schemas_leave_run_off() {
     }
 }
 
+fn hook_dialog_harness() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    let mut command = entry("lookup", "read", json!([]));
+    command.dialog_hook = true;
+    command.input_schema = json!({"type":"object","required":["width"],"properties":{
+        "width":{"type":"number","title":"Width","default":1,"minimum":1},
+        "size":{"type":"string","title":"Size","default":"large","oneOf":[{"const":"small"},{"const":"large"}]}
+    }});
+    h.app.plugin_menu.listed = vec![listed("lookup", vec![command])];
+    h.app.plugin_menu.loaded = true;
+    h.app.home.open = false;
+    open_entry(&mut h.app, 0, 0);
+    h
+}
+
+fn computed_hook_reply(dialog: &EntryDialog) -> solidcraft_engine::plugin::dialog::Update {
+    let hook = dialog.hook.as_ref().unwrap();
+    solidcraft_engine::plugin::dialog::apply(
+        &hook.schema,
+        &json!({"width":1,"size":"large"}),
+        &Default::default(),
+        Some(r#"{"width":{"default":24},"size":{"choices":["large"]}}"#),
+        false,
+    )
+    .unwrap()
+}
+
+#[test]
+fn dialog_hook_drops_stale_generations_and_never_overwrites_user_edits() {
+    let mut h = hook_dialog_harness();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    let reply = computed_hook_reply(dialog);
+    dialog.hook.as_mut().unwrap().generation = 2;
+    assert!(!apply_hook_reply(dialog, 1, reply.clone()));
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["width"], 1.0);
+    set_input(dialog.fields.as_mut().unwrap(), "width", Input::Number(42.0));
+    assert!(apply_hook_reply(dialog, 2, reply));
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["width"], 42.0);
+}
+
+#[test]
+fn dialog_hook_defaults_take_precedence_after_computed_controllers_change() {
+    let schema = json!({"type":"object","properties":{
+        "mode":{"type":"boolean","default":false},
+        "width":{"type":"number","default":3,"x-solidcraft-defaults":[{"when":{"field":"mode","eq":true},"value":6}]}
+    }});
+    let mut h = hook_dialog_harness();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.fields = form(&schema);
+    dialog.hook.as_mut().unwrap().schema = schema.clone();
+    let update = solidcraft_engine::plugin::dialog::apply(
+        &schema,
+        &json!({}),
+        &Default::default(),
+        Some(r#"{"mode":{"value":true},"width":{"default":24}}"#),
+        false,
+    )
+    .unwrap();
+    apply_hook_reply(dialog, 0, update);
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap(), json!({"mode":true,"width":24.0}));
+    refresh_conditions(dialog.fields.as_mut().unwrap());
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["width"], 24.0);
+}
+
+#[test]
+fn dialog_hook_narrowing_preserves_an_edited_choice_until_the_user_selects_an_available_one() {
+    for artwork in ["none", "partial", "complete"] {
+        let mut h = hook_dialog_harness();
+        let plugin = &mut h.app.plugin_menu.listed[0];
+        let options = &mut plugin.entries[0].input_schema["properties"]["size"]["oneOf"];
+        *options = json!([{"const":"small"},{"const":"medium"},{"const":"large"}]);
+        if artwork != "none" {
+            image::RgbaImage::from_pixel(2, 2, image::Rgba([100, 150, 200, 255])).save(h.dir.join("size.png")).unwrap();
+            options[2]["x-solidcraft-swatch"] = json!("size.png");
+            if artwork == "complete" {
+                options[1]["x-solidcraft-swatch"] = json!("size.png");
+            }
+            plugin.swatches = Arc::new(std::sync::OnceLock::from(crate::plugin_images::read_swatches(&h.dir, &plugin.entries)));
+            assert_eq!(plugin.swatches.get().unwrap().len(), 1, "the swatch path must be exercised");
+        }
+        h.app.plugin_menu.dialogs.clear();
+        open_entry(&mut h.app, 0, 0);
+        let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+        set_input(dialog.fields.as_mut().unwrap(), "size", Input::Choice(Some(0)));
+        let update = solidcraft_engine::plugin::dialog::apply(
+            &dialog.hook.as_ref().unwrap().schema,
+            &json!({"width":1,"size":"small"}),
+            &std::collections::BTreeSet::from(["size".into()]),
+            Some(r#"{"size":{"choices":["medium","large"]}}"#),
+            false,
+        )
+        .unwrap();
+        apply_hook_reply(dialog, 0, update);
+        h.frames(3);
+        let fields = h.app.plugin_menu.dialog().unwrap().fields.as_ref().unwrap();
+        let (field, input) = fields.iter().find(|(f, _)| f.key == "size").unwrap();
+        assert_eq!(field.available, [1, 2]);
+        assert_eq!(scalar_value(field, input), Some(json!("small")), "painting must not replace an edited choice: {artwork}");
+        assert!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).is_err());
+        h.step(&json!({"click":{"handle":"plugin_dialog:field:size"}})).unwrap();
+        let option = if artwork == "none" { "dialog:Size:large" } else { "swatch:plugin_field_size:option:1" };
+        h.step(&json!({"click":{"handle":option}})).unwrap();
+        let fields = h.app.plugin_menu.dialog().unwrap().fields.as_ref().unwrap();
+        assert_eq!(fields.iter().find(|(f, _)| f.key == "size").unwrap().1, Input::Choice(Some(2)), "picker indices map to schema indices");
+        assert_eq!(params(fields).unwrap()["size"], "large");
+    }
+}
+
+#[test]
+fn dialog_hook_selection_defaults_preserve_viewport_edits() {
+    let schema = json!({"type":"object","properties":{"bodies":{"type":"array","items":{"type":"string"},"maxItems":1}}});
+    let mut h = hook_dialog_harness();
+    let doc = h.app.session.doc.clone();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.fields = form(&schema);
+    dialog.hook.as_mut().unwrap().schema = schema.clone();
+    let field = &dialog.fields.as_ref().unwrap()[0].0;
+    assert_eq!(default_input(field, &json!(["computed"])), Some(Input::Selection(vec![Sel::Body { name: "computed".into() }])));
+    let mut picker = crate::dialogs::Dialog::new(crate::dialogs::Kind::PluginPick { dialog: dialog.id }, dialog.selection_inputs());
+    picker.inputs[0].items = vec![Sel::Body { name: "chosen".into() }];
+    take_picks(dialog, &picker, &doc);
+    assert!(dialog.fields.as_ref().unwrap()[0].0.edited, "viewport picks are user edits");
+    let update =
+        solidcraft_engine::plugin::dialog::apply(&schema, &json!({}), &Default::default(), Some(r#"{"bodies":{"default":["computed"]}}"#), false)
+            .unwrap();
+    apply_hook_reply(dialog, 0, update);
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["bodies"], json!(["chosen"]));
+}
+
+#[test]
+fn dialog_hook_discards_selection_baselines_when_the_document_changes() {
+    let schema = json!({"type":"object","properties":{
+        "bodies":{"type":"array","items":{"type":"string"},"maxItems":1},
+        "width":{"type":"number","default":1}
+    }});
+    for changed_document in [false, true] {
+        let mut h = hook_dialog_harness();
+        let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+        dialog.fields = form(&schema);
+        dialog.hook.as_mut().unwrap().schema = schema.clone();
+        let (_, input) = dialog.fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "bodies").unwrap();
+        *input = Input::Selection(vec![Sel::Body { name: "prefilled-a".into() }]);
+        let update = solidcraft_engine::plugin::dialog::apply(
+            &schema,
+            &json!({"bodies":["prefilled-a"],"width":1}),
+            &Default::default(),
+            Some(r#"{"bodies":{"value":["computed-b"]},"width":{"value":24}}"#),
+            false,
+        )
+        .unwrap();
+        assert!(apply_hook_reply(dialog, 0, update));
+        dialog.picked_on = Some(h.app.session.doc.clone());
+        let (send, receive) = std::sync::mpsc::channel();
+        dialog.hook.as_mut().unwrap().pending = Some((0, receive));
+        if changed_document {
+            Arc::make_mut(&mut h.app.session.doc).name = "Changed design".into();
+            sync_picks(&mut h.app);
+        } else {
+            set_input(h.app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap(), "width", Input::Number(12.0));
+        }
+        poll_hooks(&mut h.app, &h.ctx);
+        let dialog = h.app.plugin_menu.dialog().unwrap();
+        let values = hook_values(dialog.fields.as_ref().unwrap());
+        let expected = (!changed_document).then(|| json!(["prefilled-a"]));
+        assert_eq!(values.get("bodies"), expected.as_ref(), "no old selection may be sent to the next hook");
+        assert_eq!(values["width"], if changed_document { 1.0 } else { 12.0 }, "ordinary field baselines still restore");
+        assert!(dialog.fields.as_ref().unwrap().iter().filter(|(f, _)| f.key == "bodies").all(|(f, _)| f.hook_baseline.is_none()));
+        assert!(dialog.hook.as_ref().unwrap().generation > 0);
+        drop(send);
+    }
+}
+
+#[test]
+fn dialog_hook_pending_rejects_invalid_current_inputs_instead_of_cached_parameters() {
+    let mut h = hook_dialog_harness();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    set_input(dialog.fields.as_mut().unwrap(), "width", Input::Number(12.0));
+    poll_hooks(&mut h.app, &h.ctx);
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    let (send, receive) = std::sync::mpsc::channel();
+    let generation = dialog.hook.as_ref().unwrap().generation;
+    dialog.hook.as_mut().unwrap().pending = Some((generation, receive));
+    let id = dialog.id;
+    let queued = h.app.control_held.len();
+    for input in [Input::Typed(String::new()), Input::Typed("invalid".into()), Input::Number(0.0)] {
+        set_input(h.app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap(), "width", input);
+        assert!(run_dialog(&mut h.app, id).is_err(), "invalid current fields must not submit the cached width");
+        assert_eq!(h.app.control_held.len(), queued);
+        assert!(h.app.plugin_menu.dialog().unwrap().running.is_none());
+    }
+    set_input(h.app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap(), "width", Input::Number(18.0));
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app).unwrap()["width"], 18.0);
+    run_dialog(&mut h.app, id).unwrap();
+    assert_eq!(h.app.control_held.len(), queued + 1);
+    assert_eq!(h.app.control_held.back().unwrap().params["params"]["params"]["width"], 18.0);
+    assert!(h.app.plugin_menu.dialog().unwrap().running.is_some());
+    drop(send);
+}
+
+#[test]
+fn dialog_hook_pending_accepts_widget_edits_and_drops_the_old_worker_reply() {
+    let mut h = hook_dialog_harness();
+    let (send, receive) = std::sync::mpsc::channel();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    let reply = computed_hook_reply(dialog);
+    dialog.hook.as_mut().unwrap().pending = Some((0, receive));
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"plugin_dialog:field:size"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Size:small"}})).unwrap();
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["size"], "small");
+    assert!(dialog.ready(&h.app).is_ok());
+    assert!(dialog.hook.as_ref().unwrap().generation > 0);
+    send.send(Ok(reply)).unwrap();
+    h.frames(1);
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["width"], 1.0, "the stale default was dropped");
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["size"], "small");
+}
+
+#[test]
+fn dialog_hook_wait_keeps_fields_and_run_interactive_and_renders_computed_default() {
+    let mut h = hook_dialog_harness();
+    let (send, receive) = std::sync::mpsc::channel();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    let generation = dialog.hook.as_ref().unwrap().generation;
+    let reply = computed_hook_reply(dialog);
+    dialog.hook.as_mut().unwrap().pending = Some((generation, receive));
+    h.ctx = crate::fonts::test_context();
+    solidcraft_theme::apply(&h.ctx);
+    let mut textures = std::collections::HashMap::new();
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/plugin-dialog-hook");
+    std::fs::create_dir_all(&dir).unwrap();
+    for stage in ["before", "after"] {
+        let mut output = None;
+        for _ in 0..5 {
+            let mut frame = h.ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0))),
+                    focused: true,
+                    ..Default::default()
+                },
+                |ui| {
+                    h.app.logic(ui.ctx());
+                    h.app.ui(ui);
+                },
+            );
+            ui_kit::test_textures_update(&mut textures, &frame.textures_delta);
+            frame.textures_delta.clear();
+            output = Some(frame);
+        }
+        let dialog = h.app.plugin_menu.dialog().unwrap();
+        assert!(dialog.running.is_none());
+        assert!(dialog.ready(&h.app).is_ok(), "Run stays enabled while the hook waits");
+        assert!(crate::scenario::handle_at("plugin_dialog:field:width").is_some(), "fields stay interactive");
+        let expected = if stage == "before" { 1.0 } else { 24.0 };
+        assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["width"], expected);
+        let output = output.unwrap();
+        let image = ui_kit::test_raster(&h.ctx, output.shapes, output.pixels_per_point, h.ctx.viewport_rect(), &textures);
+        assert_eq!(image.dimensions(), (1280, 720));
+        image.save(dir.join(format!("{stage}.png"))).unwrap();
+        if stage == "before" {
+            send.send(Ok(reply.clone())).unwrap();
+        }
+    }
+}
+
 #[test]
 fn conditional_dialog_dropdown_renders_before_and_after_switching() {
     fn paint(
