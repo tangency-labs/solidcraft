@@ -383,7 +383,7 @@ fn show_whats_sent_is_the_next_report() {
 
 #[test]
 fn a_stored_store_comes_back_and_a_hostile_one_is_a_new_one() {
-    let mut store = Store { install_id: new_id().unwrap(), notice_shown: true, days: BTreeMap::new() };
+    let mut store = Store { install_id: new_id().unwrap(), notice_shown: true, ..Store::default() };
     let ui: Counts = [("ui".to_string(), [("solid.box".to_string(), 2)].into())].into();
     store.days.insert("2023-11-14".into(), Day { active_minutes: 5, operations: ui.clone(), tools: ui, ..Day::default() });
     assert_eq!(Store::from_stored(Some(&store.to_stored())), store);
@@ -542,4 +542,81 @@ fn the_notice_shows_on_a_real_first_start_and_never_in_an_app_that_keeps_nothing
     h.app.load_usage_stats(None);
     h.frames(5);
     assert!(crate::scenario::rect_of("toast:usage_stats").is_some(), "the toast is drawn on a real first start");
+}
+
+#[test]
+fn delete_my_data_asks_the_server_to_delete_the_old_id_and_uses_a_new_one() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut app, requests) = app_with_server(Some(204));
+    use_app(&mut app, T0, 0.0);
+    let old = app.usage.store.install_id.clone();
+    // With statistics turned off it still goes: what was sent earlier stays until deleted.
+    app.preferences.usage_statistics = false;
+    assert!(delete_my_data(&mut app));
+    assert_ne!(app.usage.store.install_id, old);
+    assert!(app.usage.store.days.is_empty());
+    tick_at(&mut app, T0, 1.0, false);
+    tick_at(&mut app, T0, 2.0, false);
+    let sent = requests.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1);
+    assert_eq!((sent[0].method, sent[0].url.as_str()), ("DELETE", format!("{INSTALL_ENDPOINT}{old}").as_str()));
+    assert!(sent[0].body.is_none(), "nothing but the id");
+    assert!(app.usage.store.forget.is_empty(), "done once the server answered");
+    // Nothing more goes, however many frames follow.
+    for frame in 0..100 {
+        tick_at(&mut app, T0, 3.0 + f64::from(frame), false);
+    }
+    assert_eq!(requests.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn a_deletion_the_server_didnt_take_waits_an_hour_and_survives_a_restart() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut app, requests) = app_with_server(None);
+    use_app(&mut app, T0, 0.0);
+    let old = app.usage.store.install_id.clone();
+    assert!(delete_my_data(&mut app));
+    for second in 0..600 {
+        tick_at(&mut app, T0, 1.0 + f64::from(second), false);
+    }
+    assert_eq!(requests.lock().unwrap().len(), 1, "one try, no storm");
+    assert_eq!(app.usage.store.forget, std::slice::from_ref(&old));
+    let kept = Store::from_stored(Some(&app.usage.store.to_stored()));
+    assert_eq!(kept.forget, [old], "it waits across starts");
+    tick_at(&mut app, T0, 3700.0, false);
+    assert_eq!(requests.lock().unwrap().len(), 2, "tried again an hour later");
+}
+
+#[test]
+fn no_deletion_goes_when_the_organization_or_the_environment_turned_statistics_off() {
+    let _turn = TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    for policy in [true, false] {
+        let (mut app, requests) = app_with_server(Some(204));
+        use_app(&mut app, T0, 0.0);
+        if policy {
+            app.policy = crate::policy::Policy::from_json(r#"{"UsageStatistics": 0}"#);
+        } else {
+            app.usage.env_off = true;
+        }
+        assert!(!delete_my_data(&mut app));
+        tick_at(&mut app, T0, 1.0, false);
+        assert!(requests.lock().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn the_host_reaches_only_the_report_and_delete_addresses() {
+    let id = new_id().unwrap();
+    assert!(allowed_url(ENDPOINT));
+    assert!(allowed_url(&format!("{INSTALL_ENDPOINT}{id}")));
+    for not in [
+        format!("{INSTALL_ENDPOINT}{id}/x"),
+        format!("{INSTALL_ENDPOINT}../report"),
+        INSTALL_ENDPOINT.to_string(),
+        "https://metrics.solidcraft.io/v1/summary".to_string(),
+        "https://example.com/v1/report".to_string(),
+        format!("{ENDPOINT}?x=1"),
+    ] {
+        assert!(!allowed_url(&not), "{not}");
+    }
 }

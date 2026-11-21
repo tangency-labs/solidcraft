@@ -297,11 +297,20 @@ fn design_listeners_require_a_read_entry_and_design_capability() {
     let runtime = parse(&value).unwrap().runtime.unwrap();
     assert_eq!(runtime.listeners[0].entry, "refresh");
     assert_eq!(runtime.listeners[0].on, ["design.changed"]);
+    for events in [json!(["design.links_changed"]), json!(["design.changed", "design.links_changed"])] {
+        let mut opted_in = value.clone();
+        opted_in["runtime"]["listeners"][0]["on"] = events.clone();
+        let runtime = parse(&opted_in).unwrap().runtime.unwrap();
+        assert_eq!(serde_json::to_value(&runtime.listeners[0].on).unwrap(), events);
+    }
     for change in [
         |v: &mut Value| v["capabilities"] = json!(["commands@0.1"]),
         |v: &mut Value| v["runtime"]["entries"][0]["effect"] = json!("edit"),
         |v: &mut Value| v["runtime"]["listeners"][0]["entry"] = json!("missing"),
         |v: &mut Value| v["runtime"]["listeners"][0]["on"] = json!(["unknown"]),
+        |v: &mut Value| v["runtime"]["listeners"][0]["on"] = json!(["design.links_changed", "unknown"]),
+        |v: &mut Value| v["runtime"]["listeners"][0]["on"] = json!(["design.changed", "design.changed"]),
+        |v: &mut Value| v["runtime"]["listeners"][0]["on"] = json!(["design.links_changed", "design.links_changed"]),
         |v: &mut Value| v["runtime"]["listeners"][0]["on"] = json!([]),
         |v: &mut Value| {
             v["runtime"]["listeners"] = json!([
