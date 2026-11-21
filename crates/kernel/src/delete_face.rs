@@ -18,12 +18,12 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use solidcore_ops::cap::{is_face_on_plane, is_point_on_plane};
 use solidcore_record::Vec3;
-use solidcore_record::brep::Curve;
+use solidcore_record::brep::{Brep, Curve, Loop};
 use solidcraft_geom::Aabb3;
 
 use crate::assemble::{AFace, AUse, Assembly};
 use crate::body::Body;
-use crate::history::{Change, FaceProv};
+use crate::history::{Change, FaceProv, faces_of};
 use crate::offset::{Surf, surf_of};
 use crate::{KernelError, Result, guard};
 
@@ -44,6 +44,35 @@ fn surface_kind(rec: &solidcore_record::brep::Brep, f: usize) -> &'static str {
         Some(Surf::Torus { .. }) => "a torus (as a fillet or round often is)",
         None => "a free-form (spline) face",
     }
+}
+
+/// The lowest curved neighbour `f` of a chosen face `by` across an edge, as `(f, by)`.
+fn curved_neighbour(rec: &Brep, del: &BTreeSet<usize>) -> Option<(usize, usize)> {
+    let mut found: BTreeSet<(usize, usize)> = BTreeSet::new();
+    for &d in del {
+        let Some(face) = rec.faces.get(d) else { continue };
+        for l in &face.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for oe in edges {
+                let Some(e) = rec.edges.get(oe.edge as usize) else { continue };
+                for f in faces_of(e) {
+                    if !del.contains(&f) && !matches!(surf_of(rec, f), Some(Surf::Plane { .. })) {
+                        found.insert((f, d));
+                    }
+                }
+            }
+        }
+    }
+    found.into_iter().next()
+}
+
+/// The refusal for a gap that a curved neighbour `f` of face `by` cannot close.
+fn curved_refusal(rec: &Brep, by: usize, f: usize) -> KernelError {
+    fail(format!(
+        "face {by} ({}), borders face {f}, {}: include face {f} in the selection if it should go too, or take off the feature that made face {f} in the timeline instead; only planar neighbours can extend to close the gap",
+        surface_kind(rec, by),
+        surface_kind(rec, f),
+    ))
 }
 
 /// Key of a point for sharing vertices and edges between rebuilt faces.
@@ -305,6 +334,14 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
     if del.len() >= n {
         return Err(fail("that would delete every face"));
     }
+    if let Some((f, by)) = curved_neighbour(&rec, &del) {
+        // SMLib's fillet removal extends the fillet's two tangent neighbours whatever they are.
+        let chosen: Vec<usize> = del.iter().copied().collect();
+        return crate::offset_backend::delete_fillet_faces(body, &chosen).map_err(|e| {
+            log::debug!(target: "smlib", "delete face: fillet removal refused too: {e}");
+            curved_refusal(&rec, by, f)
+        });
+    }
     let size = body.size().max(1e-9);
     guard("delete face", || {
         let mut asm = Assembly::from_record(&rec)?;
@@ -339,23 +376,8 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
         }
         let mut planes: HashMap<usize, (Vec3, f64)> = HashMap::new();
         for &f in &neighbours {
-            match surf_of(&rec, f) {
-                Some(Surf::Plane { n, d }) => {
-                    planes.insert(f, (n, d));
-                }
-                _ => {
-                    let by = efaces
-                        .values()
-                        .find(|fs| fs.contains(&f) && fs.iter().any(|x| del.contains(x)))
-                        .and_then(|fs| fs.iter().find(|x| del.contains(x)).copied())
-                        .unwrap_or(0);
-                    return Err(fail(format!(
-                        "face {by} ({}), borders face {f}, {}: include face {f} in the selection if it should go too, or take off the feature that made face {f} in the timeline instead; only planar neighbours can extend to close the gap",
-                        surface_kind(&rec, by),
-                        surface_kind(&rec, f),
-                    )));
-                }
-            }
+            let Some(Surf::Plane { n, d }) = surf_of(&rec, f) else { return Err(fail("a neighbour is not planar")) };
+            planes.insert(f, (n, d));
         }
         // The deleted faces' vertices.
         let gap_vertices: BTreeSet<u32> = vfaces.iter().filter(|(_, fs)| fs.iter().any(|f| del.contains(f))).map(|(v, _)| *v).collect();
@@ -840,5 +862,68 @@ mod tests {
         assert!(crate::failing_check(&back).unwrap().is_none(), "{:?}", crate::failing_check(&back));
         let want = 37.0 * 26.0 / 2.0 * 50.0 + 20.0 * 5.0 * 26.0;
         assert!((volume(&back) - want).abs() < 1e-9 * want, "{} against {want}", volume(&back));
+    }
+
+    /// A round beside a curved neighbour goes to fillet removal: the sharp boss comes back.
+    #[test]
+    fn deleting_a_round_beside_a_cylinder_gives_the_sharp_boss() {
+        let plate = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 5.0)).unwrap();
+        let boss = cylinder(Vec3::new(20.0, 15.0, 5.0), Vec3::Z, 5.0, 8.0).unwrap();
+        let bossed = boolean(&plate, &boss, BoolOp::Union).unwrap().unwrap();
+        let sharp = 6000.0 + 200.0 * std::f64::consts::PI;
+        let round_at = |b: &crate::Body| {
+            let record = crate::brep_record(b).unwrap();
+            (0..record.faces.len())
+                .filter(|i| {
+                    !matches!(crate::offset::surf_of(&record, *i), Some(crate::offset::Surf::Plane { .. } | crate::offset::Surf::Cylinder { .. }))
+                })
+                .collect::<Vec<usize>>()
+        };
+        for edge in [Vec3::new(25.0, 15.0, 5.0), Vec3::new(25.0, 15.0, 13.0)] {
+            let rounded = fillet(&bossed, &[edge], 1.0).unwrap();
+            let round = round_at(&rounded);
+            assert_eq!(round.len(), 1, "{edge:?}: {round:?}");
+            let back = delete_faces(&rounded, &round).unwrap();
+            // Exact, not the meshed volume: a 1e-3 chord loses ~0.06 on the Ø10 boss.
+            let v = back.volume_at(1e-3).unwrap();
+            assert!((v - sharp).abs() < 1e-6 * sharp, "{edge:?}: {v}");
+            assert_eq!(back.face_count(), 8, "{edge:?}");
+            assert_eq!(back.unmeshed_faces(), 0);
+        }
+    }
+
+    #[test]
+    fn deleting_a_round_on_a_small_boss_gives_the_sharp_boss() {
+        let plate = box_solid(Vec3::ZERO, Vec3::new(0.4, 0.3, 0.05)).unwrap();
+        let boss = cylinder(Vec3::new(0.2, 0.15, 0.05), Vec3::Z, 0.05, 0.08).unwrap();
+        let bossed = boolean(&plate, &boss, BoolOp::Union).unwrap().unwrap();
+        let sharp = 0.006 + 0.0002 * std::f64::consts::PI;
+        let rounded = fillet(&bossed, &[Vec3::new(0.25, 0.15, 0.05)], 0.01).unwrap();
+        let record = crate::brep_record(&rounded).unwrap();
+        let round: Vec<usize> = (0..record.faces.len())
+            .filter(|i| {
+                !matches!(crate::offset::surf_of(&record, *i), Some(crate::offset::Surf::Plane { .. } | crate::offset::Surf::Cylinder { .. }))
+            })
+            .collect();
+        assert_eq!(round.len(), 1, "{round:?}");
+        let back = delete_faces(&rounded, &round).unwrap();
+        let v = back.volume_at(1e-9).unwrap();
+        assert!((v - sharp).abs() < 1e-6 * sharp, "{v}");
+        assert_eq!(back.face_count(), 8);
+    }
+
+    /// A chamfer beside a curved neighbour is refused with the curved-neighbour text.
+    #[test]
+    fn a_chamfer_beside_a_cylinder_is_still_refused() {
+        let plate = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 5.0)).unwrap();
+        let pin = cylinder(Vec3::new(20.0, 15.0, -1.0), Vec3::Z, 3.0, 7.0).unwrap();
+        let holed = boolean(&plate, &pin, BoolOp::Cut).unwrap().unwrap();
+        let chamfered = chamfer(&holed, &[Vec3::new(23.0, 15.0, 5.0)], 1.0).unwrap();
+        let record = crate::brep_record(&chamfered).unwrap();
+        let cone: Vec<usize> =
+            (0..record.faces.len()).filter(|i| matches!(crate::offset::surf_of(&record, *i), Some(crate::offset::Surf::Cone { .. }))).collect();
+        assert_eq!(cone.len(), 1, "{cone:?}");
+        let e = delete_faces(&chamfered, &cone).unwrap_err().to_string();
+        assert!(e.contains("only planar neighbours can extend"), "{e}");
     }
 }

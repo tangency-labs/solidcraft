@@ -27,6 +27,9 @@ mod convert;
 #[cfg(test)]
 mod convert_tests;
 pub(crate) mod definition;
+pub(crate) mod delete_face;
+#[cfg(test)]
+mod delete_face_tests;
 pub(crate) mod dump;
 pub(crate) mod file;
 pub(crate) mod history;
