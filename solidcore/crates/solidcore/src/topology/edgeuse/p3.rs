@@ -2011,10 +2011,10 @@ fn other_trims_bound(
 /// After a raise, the faces' own bounds are settled at the raised tolerance
 /// ([`settle_face_bounds`]): each bound is cut to a thousandth of the fit, and the fit after
 /// the raise is the raised tolerance, at which a bound can come out a rounding above the one
-/// it raised to, leaving the edge short of the face by its own measure. An edge raised, or
-/// holding a UV trim, is then raised to cover its UV trims ([`cover_raised_trims`]; #20373:
-/// whether or not a face raised it), and an edge raised by either its vertices the ends of
-/// their edges ([`cover_vertex_ends`]).
+/// it raised to, leaving the edge short of the face by its own measure. The raised edge is
+/// then raised to cover its UV trims ([`cover_raised_trims`]) and its vertices the ends of
+/// their edges ([`cover_vertex_ends`]). A joined edge no face raised covers its trims after
+/// the stitch's orientation, on the trims the B-rep ends with ([`cover_joined_trims`]).
 ///
 /// # Errors
 ///
@@ -2092,15 +2092,7 @@ pub(crate) fn cover_joined_faces(
     }
     if raised {
         settle_face_bounds(k, b, e, &settle)?;
-    }
-    // (#20373: the joined edge covers its UV trims whether or not a face raised it; the trims
-    // were covered only through a face raise, which a face bound proved within the tolerance
-    // no longer makes: `primitive.api_primitives` gen1108)
-    let before = b.edge(e)?.tolerance;
-    if raised || !trimmed.is_empty() {
         cover_raised_trims(k, b, e)?;
-    }
-    if raised || b.edge(e)?.tolerance > before {
         cover_vertex_ends(k, b, e)?;
     }
     Ok(())
@@ -2154,9 +2146,9 @@ fn sampled_face_gap(k: &Kernel, b: &Brep, e: EdgeId, f: FaceId) -> Result<Option
     Ok(Some(most))
 }
 
-/// Not upstream (#18166, #20373): for an edge `e` the cover raised or that holds a UV trim
-/// ([`cover_joined_faces`]), raises it once to the largest proved bound of its UV trims
-/// ([`raised_trim_bound`]) that its tolerance does not cover. Each bound is taken at the fit the raised tolerance gives, once:
+/// Not upstream (#18166, #20373): for an edge `e` the cover raised ([`cover_joined_faces`]),
+/// or a joined edge it did not raise ([`cover_joined_trims`]), raises it once to the largest
+/// proved bound of its UV trims ([`raised_trim_bound`]) that its tolerance does not cover. Each bound is taken at the fit the raised tolerance gives, once:
 /// a proved bound holds whatever the edge's tolerance, and bounding again at each raised
 /// tolerance only coarsens the fit (gen1108 edge 9 climbed 2.48e-5, 2.97e-5, ... 5.83e-5 in
 /// eight such rounds, for one trim bounded at 2.48e-5). A joined edge covers
@@ -2358,6 +2350,51 @@ pub(crate) fn covered_trimless_faces(
         }
     }
     Ok(out)
+}
+
+/// Not upstream (#20373): raises each edge of `edges` (the joined edges a stitch did not
+/// raise, [`crate::topology::brep::p5`]'s `StitchRaises`) that holds a UV trim to cover its
+/// trims ([`cover_raised_trims`]), and, where that raised it, its vertices the ends of their
+/// edges ([`cover_vertex_ends`]). It runs after the stitch's orientation, which rewrites the
+/// trims of the surfaces it reverses: a UV line trim, bounded with the slack of its analytic
+/// evaluation, comes out of it a B-spline without that slack (`primitive.api_primitives`
+/// gen1108 edges 0 to 3: 3.29e-5 to 3.90e-5 on the lines, 3.13e-5 to 3.54e-5 on the trims
+/// the body ends with). A joined edge covers everything it lies on; before #20373 its trims
+/// were covered only through a face raise, which a face bound proved within the tolerance no
+/// longer makes (gen1108 edges 6, 9 and 15). An edge that is gone, or whose cover fails
+/// (other than unported or cancelled), is left as it stands.
+///
+/// # Errors
+///
+/// The kernel's unported and cancelled statuses.
+pub(crate) fn cover_joined_trims(k: &Kernel, b: &mut Brep, edges: &[EdgeId]) -> Result<()> {
+    for &e in edges {
+        ignored(cover_joined_edge_trims(k, b, e))?;
+    }
+    Ok(())
+}
+
+/// [`cover_joined_trims`] of one edge.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of [`cover_raised_trims`] and
+/// [`cover_vertex_ends`].
+fn cover_joined_edge_trims(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
+    let rec = b.edge(e)?;
+    let before = rec.tolerance;
+    let mut trimmed = false;
+    for &x in &rec.edgeuses {
+        trimmed |= b.edgeuse(x)?.uv_trim_curve.is_some();
+    }
+    if !trimmed {
+        return Ok(());
+    }
+    cover_raised_trims(k, b, e)?;
+    if b.edge(e)?.tolerance > before {
+        cover_vertex_ends(k, b, e)?;
+    }
+    Ok(())
 }
 
 /// Not upstream (#18166): keeps each edge of `covered` ([`covered_trimless_faces`]) covering
