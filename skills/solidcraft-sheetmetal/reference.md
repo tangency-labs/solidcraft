@@ -76,13 +76,14 @@ An `edges` entry is `[x,y,z]` on a top or bottom edge, `{x,y,z}`, or
 
 ### On a drawing
 A note (`drawing.note.add`) or a title block cell on a sheet that documents a sheet metal part
-reads its sheet metal fields live, so a drawing never carries a typed-in thickness:
-`{"field":{"source":"component","key":"thickness"}}`, and likewise `sheet_rule` (the rule's
-name), `k_factor`, `bend_radius` (the radius all its bends share), `flat_length` and `flat_width`
-(the flat's longer and shorter side). Lengths are in the drawing's units with two decimals
-(`2.00 mm`). A field reads empty, and `drawing.check` lists it, when the part has no sheet metal
-body, its sheet bodies disagree, its bends have different radii, or its flat no longer describes
-the body.
+reads its sheet metal fields live, so a drawing never carries a typed-in thickness. A field is a
+part of the note's content: `content:[{"field":{"source":"component","key":"thickness"}}]`, and
+likewise `sheet_rule` (the rule's name), `k_factor`, `bend_radius` (the radius all its bends
+share), `flat_length` and `flat_width` (the flat's longer and shorter side). Lengths are in the
+drawing's units with two decimals (`2.00 mm`). A field reads empty when the part has no sheet
+metal body, its sheet bodies disagree, its bends have different radii, or its flat no longer
+describes the body. In a note, `drawing.note.inspect` shows that field with `state:"empty"` in the
+note's `fields`; `drawing.check` reports `empty_field` for title block cells only.
 
 ### Inspection
 - `inspect.measure`: `bodies?`, `names_only?`, or `items` (faces and edges) for lengths, areas,
