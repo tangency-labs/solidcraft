@@ -1309,7 +1309,8 @@ fn clear_view_width(ui: &egui::Ui, view: &ViewTab, label: f32, stage: CollapseSt
     if stage >= CollapseStage::Icons && !view.active && view.to_window.is_none() && !editing {
         return 28.0;
     }
-    let badge = if view.to_window.is_some() { 21.0 + text_width(ui, &window_badge(view), crate::type_face::semibold(Tokens::get().font_small)) } else { 0.0 };
+    let badge =
+        if view.to_window.is_some() { 21.0 + text_width(ui, &window_badge(view), crate::type_face::semibold(Tokens::get().font_small)) } else { 0.0 };
     let hide_name = remote_name_hidden(view, stage);
     let dot = if view.state == ViewState::SourceChanged && !hide_name { 12.0 } else { 0.0 };
     let label = if hide_name { 0.0 } else { label.min(VIEW_LABEL_MAX) };
