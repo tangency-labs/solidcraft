@@ -742,13 +742,27 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
 fn consume_middle_paste(app: &SolveApp, ui: &egui::Ui, rect: Rect, resp: &egui::Response) {
     let ctx = ui.ctx();
     let id = resp.id.with("middle_paste_owned");
-    let mut owned = ctx.data(|data| data.get_temp::<bool>(id).unwrap_or(false));
+    let modifiers = ui.input(|i| i.modifiers);
+    let (mut owned, previous_modifiers) = ctx.data(|data| data.get_temp::<(bool, egui::Modifiers)>(id).unwrap_or((false, modifiers)));
     let mut suppress = owned;
     // Hit-testing needs the context too, so do it outside the input lock. Process presses in
     // order: a slow frame can contain a viewport click followed by a legitimate field click.
     let mut events = ui.input_mut(|i| std::mem::take(&mut i.events));
+    let middle_transition = events.iter().any(|event| matches!(event, egui::Event::PointerButton { button: egui::PointerButton::Middle, .. }));
+    // egui-winit emits Paste without a V key event; the web integration emits both. Track
+    // modifiers in event order too, so releasing Ctrl/Cmd later in this frame loses no paste.
+    // InputState.modifiers is already the final state of this frame. Start with the previous
+    // pass's state so a later modifier change cannot alter the provenance of an earlier Paste.
+    let mut command = previous_modifiers.command_only();
+    let mut keyboard_paste = false;
     events.retain(|event| {
         match event {
+            egui::Event::ModifiersChanged(modifiers) => command = modifiers.command_only(),
+            egui::Event::Key { key, pressed: true, modifiers, .. }
+                if *key == egui::Key::Paste || (*key == egui::Key::V && modifiers.command) || (*key == egui::Key::Insert && modifiers.shift) =>
+            {
+                keyboard_paste = true;
+            }
             egui::Event::PointerButton { pos, button: egui::PointerButton::Middle, pressed: true, .. } => {
                 owned = ui.is_enabled()
                     && rect.contains(*pos)
@@ -760,7 +774,10 @@ fn consume_middle_paste(app: &SolveApp, ui: &egui::Ui, rect: Rect, resp: &egui::
                 // Keep suppressing through release, when browsers can send an ordinary Paste.
                 owned = false;
             }
-            egui::Event::Paste(_) | egui::Event::MiddleClickPaste { .. } => return !suppress,
+            // Browser PRIMARY paste accompanies a middle press/release. A Paste on a held
+            // frame alone is not evidence of middle-click paste and must reach the editor.
+            egui::Event::Paste(_) => return !suppress || !middle_transition || command || keyboard_paste,
+            egui::Event::MiddleClickPaste { .. } => return !suppress,
             _ => {}
         }
         true
@@ -768,7 +785,7 @@ fn consume_middle_paste(app: &SolveApp, ui: &egui::Ui, rect: Rect, resp: &egui::
     // Leave pointer input intact for the camera; only its clipboard side effects are consumed.
     ui.input_mut(|i| i.events = events);
     let held = ui.input(|i| i.focused && i.pointer.button_down(egui::PointerButton::Middle));
-    ctx.data_mut(|data| data.insert_temp(id, owned && held));
+    ctx.data_mut(|data| data.insert_temp(id, (owned && held, modifiers)));
 }
 
 /// The one place a perspective eye is kept off the target, whichever input moved the camera (#16628).
