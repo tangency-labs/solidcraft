@@ -711,6 +711,7 @@ pub enum ViewState {
 /// each its icon and colours.
 #[derive(Clone, Copy, Debug)]
 pub struct ViewTab<'a> {
+    pub compass: Option<bool>,
     pub name: &'a str,
     /// What its icon draws: `model`, `sketch`, `sheet`, `render` or `animation` ([`paint_view_glyph`]).
     pub icon: &'a str,
@@ -779,6 +780,8 @@ pub struct TabMenuRow<'a> {
     pub needs_others: bool,
     /// This action belongs to the window that holds the view.
     pub needs_local_view: bool,
+    /// Disabled for a view already in this window.
+    pub needs_remote_view: bool,
     /// A view glyph drawn before the label ([`paint_view_glyph`]); empty for none.
     pub icon: &'a str,
     /// The glyph's colour; none draws it in the menu's dim ink.
@@ -802,6 +805,7 @@ impl<'a> TabMenuRow<'a> {
             key_on_selected,
             needs_others: false,
             needs_local_view: false,
+            needs_remote_view: false,
             icon: "",
             accent: None,
             heading: false,
@@ -826,6 +830,11 @@ impl<'a> TabMenuRow<'a> {
     /// Keep this action in the window that owns the view.
     pub const fn for_local_view(mut self) -> Self {
         self.needs_local_view = true;
+        self
+    }
+
+    pub const fn needing_remote_view(mut self) -> Self {
+        self.needs_remote_view = true;
         self
     }
 
@@ -1452,7 +1461,7 @@ pub fn paint_view_glyph(p: &Painter, r: Rect, icon: &str, ink: egui::Color32) {
 /// off without `others`, and the row `off` is off; each row's centre is published under `prefix` and its id.
 fn menu_rows<'a>(
     ui: &mut egui::Ui,
-    rows: &'a [TabMenuRow<'a>],
+    rows: &[TabMenuRow<'a>],
     keys: bool,
     others: bool,
     off: &str,
@@ -1483,9 +1492,9 @@ fn menu_rows<'a>(
         if keys && !row.key_on_selected.is_empty() {
             item = item.key(row.key_on_selected);
         }
-        item.enabled = (!row.needs_others || others) && row.id != off && row.disabled_tip.is_none();
+        item.enabled = (!row.needs_others || others) && (!row.needs_remote_view || !local_view) && row.id != off && row.disabled_tip.is_none();
         let mut control = crate::MenuItem::from_item(&item, flyout.as_ref().is_some_and(|f| f.open == Some(i)));
-        control.checked = row.checked.then_some(true);
+        control.checked = if row.id == "view.compass" { Some(row.checked) } else { row.checked.then_some(true) };
         control.submenu = !row.children.is_empty();
         let response = control.show(ui);
         if let Some(tip) = row.disabled_tip {
@@ -1784,7 +1793,7 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
         pen.actions.push(TabAction::LiftView { view: k, origin: vr });
     } else if resp.middle_clicked() {
         pen.actions.push(TabAction::CloseView(k));
-    } else if resp.secondary_clicked() {
+    } else if resp.secondary_clicked() || (resp.has_focus() && ui.input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10))) {
         pen.popup = Some((Popup::View(k), pos2(vr.left(), pen.below), vr, ui.ctx().cumulative_frame_nr()));
     } else if resp.clicked() && !dragged {
         resp.request_focus();
@@ -2390,6 +2399,17 @@ fn draw_switcher(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g:
     close_design_button(ui, strip, tab, g, Rect::from_center_size(pos2(pr.right() - 15.0, cy), vec2(22.0, 22.0)), 12.0, pen);
 }
 
+/// Opens the shared view menu at a card's header control.
+pub fn open_card_view_menu(ctx: &egui::Context, strip: egui::Id, view: usize, anchor: &egui::Response) {
+    let opened = ctx.cumulative_frame_nr();
+    let popup: PopupState = Some((Popup::View(view), anchor.rect.left_bottom(), anchor.rect, opened));
+    ctx.data_mut(|data| {
+        data.insert_temp(strip.with("view_popup"), popup);
+        data.insert_temp(strip.with("view_menu_focus"), (opened, anchor.id));
+    });
+    ctx.request_repaint();
+}
+
 /// The open menu of the selected design's views (a view's, the +'s, the switcher's, the "N more"
 /// list): draws it and returns what was chosen through `pen`. It closes when a row is chosen, on
 /// Escape and on a press elsewhere.
@@ -2416,7 +2436,17 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
         Popup::View(index) => views.get(index).is_none_or(|view| view.to_window.is_none()),
         _ => true,
     };
-    let mut flyout = TabFlyout { open: open.map(|state| state.2), target: None, focus_first: false, local_view };
+    let frame = ui.ctx().cumulative_frame_nr();
+    let view_focus = strip.id.with("view_menu_focus");
+    let from_card = ui.ctx().data(|data| data.get_temp::<(u64, egui::Id)>(view_focus)).filter(|(at, _)| *at == opened);
+    let fresh = matches!(which, Popup::View(_)) && (frame == opened || (from_card.is_some() && frame == opened.saturating_add(1)));
+    if fresh
+        && from_card.is_none()
+        && let Some(focus) = ui.memory(|memory| memory.focused())
+    {
+        ui.ctx().data_mut(|data| data.insert_temp(view_focus, (opened, focus)));
+    }
+    let mut flyout = TabFlyout { open: open.map(|state| state.2), target: None, focus_first: fresh, local_view };
     let resp = crate::Container::new(ui.ctx(), crate::Surface::Popup)
         .area(strip.id.with("view_popup_area"))
         .fixed_pos(at)
@@ -2426,7 +2456,13 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
                 Popup::View(k) => {
                     let locals = views.iter().filter(|view| view.to_window.is_none()).count();
                     let off = if views.iter().skip(k + 1).any(|view| view.to_window.is_none()) { "" } else { strip.view_right_row };
-                    menu_rows(ui, strip.view_menu, true, locals > 1, off, h.menu_row, Some(&mut flyout)).map(|id| TabAction::ViewMenu { view: k, id })
+                    let compass = views.get(k).and_then(|view| view.compass);
+                    let rows: Vec<_> = strip
+                        .view_menu
+                        .iter()
+                        .filter_map(|row| if row.id == "view.compass" { compass.map(|checked| TabMenuRow { checked, ..*row }) } else { Some(*row) })
+                        .collect();
+                    menu_rows(ui, &rows, true, locals > 1, off, h.menu_row, Some(&mut flyout)).map(|id| TabAction::ViewMenu { view: k, id })
                 }
                 Popup::Plus => menu_rows(ui, strip.plus_menu, true, true, "", h.menu_row, None).map(|id| TabAction::PlusMenu { id }),
                 Popup::Layout => layout_grid(ui, strip).map(|id| TabAction::LayoutMenu { id }),
@@ -2469,8 +2505,15 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
         && !resp.response.contains_pointer()
         && !in_submenu
         && !on_opener;
-    if selected.is_some() || pressed_outside || ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
+    let escape = ui.ctx().input(|i| i.key_pressed(egui::Key::Escape));
+    if selected.is_some() || pressed_outside || escape {
         pen.popup = None;
+        if matches!(which, Popup::View(_)) {
+            if escape && let Some((_, focus)) = ui.ctx().data(|data| data.get_temp::<(u64, egui::Id)>(view_focus)).filter(|(at, _)| *at == opened) {
+                ui.memory_mut(|memory| memory.request_focus(focus));
+            }
+            ui.ctx().data_mut(|data| data.remove::<(u64, egui::Id)>(view_focus));
+        }
     }
     if let Some((view, row)) = next_menu {
         pen.popup = Some((Popup::View(view), row.right_top(), row, ui.ctx().cumulative_frame_nr()));
