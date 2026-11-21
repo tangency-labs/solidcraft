@@ -1900,6 +1900,8 @@ fn body(
                         continue;
                     }
                     let before = input.clone();
+                    // Cloned: the row closure borrows `field` mutably for selection fields.
+                    let tip = field.tip.clone();
                     ui.add_enabled_ui(field.enabled, |ui| {
                         let mut row = |ui: &mut egui::Ui| {
                             if let Input::Selection(items) = input {
@@ -1911,7 +1913,7 @@ fn body(
                                 browse = Some(field.key.clone());
                             }
                         };
-                        if let Some(tip) = field.tip.as_deref() {
+                        if let Some(tip) = tip.as_deref() {
                             ui_kit::with_row_label_tooltip(ui, tip, row);
                         } else {
                             row(ui);
