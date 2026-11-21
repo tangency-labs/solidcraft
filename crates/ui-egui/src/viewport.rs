@@ -1097,23 +1097,30 @@ fn ao_samples(app: &mut SolveApp, ctx: &egui::Context, view_proj: [[f32; 4]; 4],
 /// [`EDGE_PX`](solidcraft_viewport_gpu::view::EDGE_PX) once the view has held still for a moment,
 /// the coarser [`EDGE_PX_MOVING`](solidcraft_viewport_gpu::view::EDGE_PX_MOVING) while it moves,
 /// so orbiting a large assembly draws far fewer edge segments; the fine edges follow by
-/// themselves once it stops ([`view_settled`]).
+/// themselves once it stops ([`view_settled`]). A style without instanced edges ([`draws_instanced_edges`])
+/// keeps the fine value: no repaint is asked for it, and the cached picture stays valid.
 fn edge_px(app: &mut SolveApp, ctx: &egui::Context, view_proj: [[f32; 4]; 4], size_px: [f32; 2]) -> f32 {
-    if view_settled(app, ctx, view_proj, size_px) { solidcraft_viewport_gpu::view::EDGE_PX } else { solidcraft_viewport_gpu::view::EDGE_PX_MOVING }
+    if !draws_instanced_edges(app) || view_settled(app, ctx, view_proj, size_px) {
+        solidcraft_viewport_gpu::view::EDGE_PX
+    } else {
+        solidcraft_viewport_gpu::view::EDGE_PX_MOVING
+    }
 }
 
 /// Whether the frame on screen is the full-quality one a screenshot should wait for: the view
 /// has held still for [`SS_SETTLE`], so the picture has all its ambient occlusion samples
-/// (#7165) and its fine edges ([`edge_px`]); with neither drawn (no AO, wireframe) any frame
-/// is. Reads the state the last painted frame left.
+/// (#7165) and its fine edges ([`edge_px`]); with neither drawn (no AO and no instanced edges:
+/// Shaded, or wireframe) any frame is. Reads the state the last painted frame left.
 pub(crate) fn ao_settled(app: &SolveApp, ctx: &egui::Context) -> bool {
-    let fine_already = (!crate::safe_graphics::ambient_occlusion(app) || app.ui.visual_style == 2) && !draws_model_edges(app);
+    let fine_already = (!crate::safe_graphics::ambient_occlusion(app) || app.ui.visual_style == 2) && !draws_instanced_edges(app);
     fine_already || ctx.input(|i| i.time) - app.viewport.ss_view.1 >= SS_SETTLE
 }
 
-/// Whether the visual style draws the model's edges (all but Shaded).
-fn draws_model_edges(app: &SolveApp) -> bool {
-    app.ui.visual_style != 1
+/// Whether the visual style draws placements' edges from their shared edges, whose level
+/// [`edge_px`] picks: the shaded styles with edges. Shaded draws no edges, and wireframe draws
+/// no instances ([`Instances::new`]), so its edges are the bodies' own lines.
+fn draws_instanced_edges(app: &SolveApp) -> bool {
+    matches!(app.ui.visual_style, 0 | 3)
 }
 
 /// Whether the view (its view-projection and pixels) has held still for [`SS_SETTLE`]. Until it
@@ -11459,7 +11466,9 @@ mod tests {
         assert_eq!(at(&mut app, 1.0 + SS_SETTLE + 0.01, 1.0), (EDGE_PX, false, true), "settled: the fine edges, and a screenshot takes them");
         assert_eq!(at(&mut app, 1.4, 2.0), (EDGE_PX_MOVING, true, false), "moved again");
         app.ui.visual_style = 1;
-        assert!(at(&mut app, 1.45, 3.0).2, "shaded without edges or AO: any frame is the full one");
+        assert_eq!(at(&mut app, 1.45, 3.0), (EDGE_PX, false, true), "shaded without edges or AO: any frame is the full one");
+        app.ui.visual_style = 2;
+        assert_eq!(at(&mut app, 1.5, 4.0), (EDGE_PX, false, true), "wireframe draws no instanced edges: any frame is the full one");
     }
 
     #[test]
