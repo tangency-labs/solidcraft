@@ -1375,6 +1375,7 @@ impl Session {
         self.plugin_state = plugin_state;
         self.plugin_state.link_changes = Default::default();
         self.plugin_state.link_reads = Default::default();
+        self.plugin_state.link_read_source = Default::default();
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
         self.keep_print_faces = keep_print_faces;
@@ -2544,6 +2545,7 @@ impl Session {
         let link_read_before = (spec.id == "component.relink").then(|| before.doc.clone());
         let link_observations_before = self.plugin_state.link_changes.clone();
         let link_reads_before = self.plugin_state.link_reads.clone();
+        let link_read_source_before = self.plugin_state.link_read_source.clone();
         let ids = self.ids.clone();
         let design_before = self.design_revision.clone();
         let identity_before = self.document_id.clone();
@@ -2762,6 +2764,7 @@ impl Session {
                 self.ids = ids;
                 self.plugin_state.link_changes = link_observations_before;
                 self.plugin_state.link_reads = link_reads_before;
+                self.plugin_state.link_read_source = link_read_source_before;
                 self.design_revision = design_before;
                 self.document_id = identity_before;
                 self.redo_watch = redo_watch_before;
@@ -3000,6 +3003,7 @@ impl Session {
             plugin_state: {
                 let mut state = self.plugin_state.clone();
                 state.link_reads = Default::default();
+                state.link_read_source = state.link_changes.clone();
                 state
             },
             plugin_forms_interactive: self.plugin_forms_interactive,
@@ -3395,13 +3399,21 @@ impl Session {
         computed.remap_hidden_bodies(&self.doc, &self.model.state(), rename.as_ref().map(|(old, new, _)| (old.as_str(), new.as_str())));
         self.visibility.hidden_bodies = std::mem::take(&mut computed.visibility.hidden_bodies);
         self.body_renames = computed.body_renames;
-        // Only committed source reads cross back from the worker. Inherited observations
-        // from undo/redo do not describe a file read in that computation.
+        // Only committed source reads cross back from the worker. A no-op read must not
+        // replace a disk observation made since this evaluation began; changed source bytes
+        // being committed still describe a new design state and publish their read observation.
         let link_reads: Vec<_> = computed
             .plugin_state
             .link_changes
             .values()
             .filter(|change| {
+                let source_changed = self
+                    .doc
+                    .links
+                    .get(&change.component)
+                    .is_none_or(|link| link.path != change.path || link.file_sha256.as_ref() != Some(&change.digest));
+                let observed = self.plugin_state.link_changes.get(&change.component);
+                let started = computed.plugin_state.link_read_source.get(&change.component);
                 change.read
                     && computed.plugin_state.link_reads.contains(&change.component)
                     && computed
@@ -3409,6 +3421,7 @@ impl Session {
                         .links
                         .get(&change.component)
                         .is_some_and(|link| link.path == change.path && link.file_sha256.as_ref() == Some(&change.digest))
+                    && (source_changed || observed == started)
             })
             .cloned()
             .collect();

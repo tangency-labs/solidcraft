@@ -73,6 +73,8 @@ pub struct AppState {
     pub link_changes: std::sync::Arc<BTreeMap<u64, LinkChange>>,
     /// Successful source reads performed in this evaluation; scratch sessions start empty.
     pub(crate) link_reads: std::sync::Arc<BTreeSet<u64>>,
+    /// Observations at the start of this evaluation, before any source reads or disk checks.
+    pub(crate) link_read_source: std::sync::Arc<BTreeMap<u64, LinkChange>>,
     /// Host-only authority marker and event payload for a listener invocation.
     pub(crate) listener_design: Option<Option<DesignToken>>,
     pub packages: BTreeMap<String, String>,
