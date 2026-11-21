@@ -2216,9 +2216,9 @@ fn edge_geometry(
     // The owner naming scheme belongs to the caller; the type and edge-owner
     // identity resolved by that caller are kept by the curve itself.
     if curve.owner() != Some(keys(EntityRef::Edge(e))) {
-        return Err(crate::SolidError::topology_failed(
+        return Err(crate::SolidError::topology(
             super::OP,
-            "the edge's curve is not owned by the edge",
+            crate::error::topology::TopologyFailure::CurveNotOwnedByEdge,
         ));
     }
     let ivl = b.edge(e)?.interval;
@@ -2232,9 +2232,12 @@ fn edge_geometry(
                 let zone = tol::zone_tol3d(k, dist * 2.0);
                 crate::topology::vertex::set_tolerance(b, v, zone, true, true)?;
             } else {
-                return Err(crate::SolidError::topology_failed(
+                return Err(crate::SolidError::topology(
                     super::OP,
-                    "the edge's end is farther from its vertex than their tolerances",
+                    crate::error::topology::TopologyFailure::EdgeEndOffVertex {
+                        distance: dist,
+                        tolerance: v_tol + b.edge(e)?.tolerance,
+                    },
                 ));
             }
         }

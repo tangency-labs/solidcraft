@@ -43,7 +43,8 @@
 //! After the decomposition, a failed `SetCanonical` or `AngleBetween` is returned, as
 //! the fork does (WR-658), where upstream reads the angle as `0`.
 
-use crate::error::{ignore_status, Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{ignore_status, Failure, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::matrix::Matrix;
 use crate::kernel::Kernel;
@@ -102,10 +103,6 @@ pub fn mirror_with_notifications(
     }
 }
 
-fn null() -> SolidError {
-    SolidError::topology_missing(OP, "a link of the B-rep's topology")
-}
-
 fn mirror_in(
     k: &mut Kernel,
     b: &mut Brep,
@@ -150,7 +147,7 @@ fn mirror_in(
             .edge(edge)?
             .curve
             .as_ref()
-            .ok_or_else(null)?
+            .ok_or_else(|| SolidError::topology(OP, TopologyFailure::EdgeWithoutCurve))?
             .create_mirror_curve(k, mirror_plane)?;
         // SetCurve(pNewCurve, FALSE, FALSE) (status ignored), then SetOwner(pEdge); the
         // old curve is dropped here (upstream deletes it after the edge use reversal)
@@ -180,7 +177,7 @@ fn mirror_in(
             .face(face)?
             .surface
             .as_ref()
-            .ok_or_else(null)?
+            .ok_or_else(|| SolidError::topology(OP, TopologyFailure::FaceWithoutSurface))?
             .create_mirror_surface(k, mirror_plane)?;
 
         // Copy pTmpSurface for new face, when possible as an analytic surface
@@ -485,11 +482,10 @@ pub fn transform_matrix_with_notifications(
     let (d_diag, mut ut) = match sv.sv_decompose() {
         Ok(r) => r,
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(_) => {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the transform matrix could not be decomposed",
-            ))
+        Err(e) => {
+            return Err(Failure::new(OP, TopologyFailure::MatrixNotDecomposed)
+                .caused_by(e)
+                .into_error())
         }
     };
     ut.transpose()?;

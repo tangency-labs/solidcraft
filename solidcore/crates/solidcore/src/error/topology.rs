@@ -167,6 +167,13 @@
 //! | [`TopologyFailure::LoopSplitFaceEarly`] | `SM_ERR` |
 //! | [`TopologyFailure::EdgeNotSplit`] | `SM_ERR` |
 //! | [`TopologyFailure::SheetReoriented`] | `1` (upstream `TRUE`) |
+//! | [`TopologyFailure::TooFewSurfaces`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::VerticesNotJoinable`] | `SM_ERR_INVALID_INPUT` |
+//! | [`TopologyFailure::VertexuseWithoutVertex`] | `SM_ERR` |
+//! | [`TopologyFailure::CurveNotOwnedByEdge`] | `SM_ERR` |
+//! | [`TopologyFailure::EdgeEndOffVertex`] | `SM_ERR` |
+//! | [`TopologyFailure::MatrixNotDecomposed`] | `SM_ERR` |
+//! | [`TopologyFailure::MergedGroupNotOneFace`] | `SM_ERR` |
 //!
 //! A named cause keeps the status of the phrase it replaced, unless its site overrides it
 //! through `with_status`.
@@ -753,6 +760,36 @@ pub enum TopologyFailure {
     /// ([`crate::topology::brep::p9::OrientSheetNote`]), as an error for a caller that stops on
     /// it, with the note's status `1` (upstream `TRUE`). Class `failed`.
     SheetReoriented,
+    /// The caller gave fewer surfaces than faces. [`ErrorKind::InvalidInput`].
+    TooFewSurfaces {
+        /// The number of faces given.
+        faces: usize,
+        /// The number of surfaces given.
+        surfaces: usize,
+    },
+    /// The two vertices the caller gave cannot be joined: they are the same, apart, not in the
+    /// B-rep or share an edge. [`ErrorKind::InvalidInput`].
+    VerticesNotJoinable,
+    /// The validation found an edge use's vertex use without a vertex in the caller's body.
+    /// [`ErrorKind::InvalidInput`].
+    VertexuseWithoutVertex,
+    /// The validation found an edge whose curve names another owner in the caller's body.
+    /// [`ErrorKind::InvalidInput`].
+    CurveNotOwnedByEdge,
+    /// An end of the edge's curve lies `distance` from its vertex, past `tolerance` (the
+    /// vertex's tolerance plus the edge's). [`ErrorKind::NotWithinTolerance`].
+    EdgeEndOffVertex {
+        /// The distance from the curve end to the vertex.
+        distance: f64,
+        /// The tolerance it exceeds.
+        tolerance: f64,
+    },
+    /// The transform's matrix could not be decomposed; the error that stopped it is the cause.
+    /// Class `failed`; whether it is a defect or a refusal is its cause's.
+    MatrixNotDecomposed,
+    /// A group of faces the merge joined across removed edges left other than one face. Class
+    /// `failed`.
+    MergedGroupNotOneFace,
 }
 
 /// What a B-rep constructor call works in ([`TopologyFailure::ConstructorNotOpen`],
@@ -901,7 +938,12 @@ impl TopologyFailure {
             | Self::FaceNotMade { .. }
             | Self::LoopSplitNoFace
             | Self::LoopSplitFaceEarly
-            | Self::EdgeNotSplit => SM_ERR,
+            | Self::EdgeNotSplit
+            | Self::VertexuseWithoutVertex
+            | Self::CurveNotOwnedByEdge
+            | Self::EdgeEndOffVertex { .. }
+            | Self::MatrixNotDecomposed
+            | Self::MergedGroupNotOneFace => SM_ERR,
             // upstream's `TRUE`: the repair's note, not an error status
             Self::SheetReoriented => 1,
             Self::Missing(_)
@@ -933,7 +975,8 @@ impl TopologyFailure {
             | Self::AttributeSlotEmpty
             | Self::CurveSlotEmpty
             | Self::VertexWithoutUses
-            | Self::FaceWithoutUses => SM_ERR_NULL_POINTER,
+            | Self::FaceWithoutUses
+            | Self::TooFewSurfaces { .. } => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_)
             | Self::NoBrepGiven
             | Self::NoTrimmedBSpline
@@ -946,7 +989,8 @@ impl TopologyFailure {
             | Self::PartNotEmpty
             | Self::NoRegionGiven
             | Self::LoopIndexOutOfRange { .. }
-            | Self::CurveLoopsInvalid => SM_ERR_INVALID_INPUT,
+            | Self::CurveLoopsInvalid
+            | Self::VerticesNotJoinable => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) | Self::GatheredBothSides => SM_ERR_ASSERT_FAILURE,
             Self::OutOfMemory(_) | Self::TooManyOutputSlots { .. } | Self::AllocationFailed => {
                 SM_ERR_OUT_OF_MEMORY
@@ -1050,7 +1094,11 @@ impl TopologyFailure {
             | Self::UnknownShellType { .. }
             | Self::VertexWithoutUses
             | Self::FaceWithoutUses
-            | Self::LoopRecordWithoutEdgeuse => ErrorKind::InvalidInput,
+            | Self::LoopRecordWithoutEdgeuse
+            | Self::TooFewSurfaces { .. }
+            | Self::VerticesNotJoinable
+            | Self::VertexuseWithoutVertex
+            | Self::CurveNotOwnedByEdge => ErrorKind::InvalidInput,
             Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
             | Self::FaceWithoutEdges
@@ -1080,6 +1128,7 @@ impl TopologyFailure {
             | Self::FaceStitchFailed
             | Self::BlendRecordNotProved => ErrorKind::Failed,
             Self::NoPlaneThroughCurves { class } | Self::FaceNotMade { class } => *class,
+            Self::EdgeEndOffVertex { .. } => ErrorKind::NotWithinTolerance,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -1417,6 +1466,13 @@ impl core::fmt::Display for TopologyFailure {
             Self::LoopSplitFaceEarly => f.write_str("a face was split off before its loop closed"),
             Self::EdgeNotSplit => f.write_str("the edge could not be split"),
             Self::SheetReoriented => f.write_str("the sheet's faces were turned to agree"),
+            Self::TooFewSurfaces { faces, surfaces } => write!(f, "{surfaces} surfaces were given for {faces} faces"),
+            Self::VerticesNotJoinable => f.write_str("the vertices are the same, apart, not in the B-rep or share an edge"),
+            Self::VertexuseWithoutVertex => f.write_str("an edge use's vertex use has no vertex"),
+            Self::CurveNotOwnedByEdge => f.write_str("the edge's curve is not owned by the edge"),
+            Self::EdgeEndOffVertex { distance, tolerance } => write!(f, "an end of the edge's curve is {distance} from its vertex, past {tolerance}"),
+            Self::MatrixNotDecomposed => f.write_str("the transform matrix could not be decomposed"),
+            Self::MergedGroupNotOneFace => f.write_str("merged faces that do not leave exactly one face"),
         }
     }
 }
@@ -2358,6 +2414,39 @@ mod tests {
             (TopologyFailure::LoopSplitFaceEarly, SM_ERR, K::Failed),
             (TopologyFailure::EdgeNotSplit, SM_ERR, K::Failed),
             (TopologyFailure::SheetReoriented, 1, K::Failed),
+            (
+                TopologyFailure::TooFewSurfaces {
+                    faces: 3,
+                    surfaces: 2,
+                },
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                TopologyFailure::VerticesNotJoinable,
+                SM_ERR_INVALID_INPUT,
+                K::InvalidInput,
+            ),
+            (
+                TopologyFailure::VertexuseWithoutVertex,
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (
+                TopologyFailure::CurveNotOwnedByEdge,
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (
+                TopologyFailure::EdgeEndOffVertex {
+                    distance: 0.1,
+                    tolerance: 0.01,
+                },
+                SM_ERR,
+                K::NotWithinTolerance,
+            ),
+            (TopologyFailure::MatrixNotDecomposed, SM_ERR, K::Failed),
+            (TopologyFailure::MergedGroupNotOneFace, SM_ERR, K::Failed),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::topology(op, failure);
@@ -2400,17 +2489,8 @@ mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/topology/brep/cutting.rs", 11),
-            ("solidcore/src/topology/brep/local_operation.rs", 5),
-            ("solidcore/src/topology/brep/mirror.rs", 2),
             ("solidcore/src/topology/brep/p1.rs", 42),
             ("solidcore/src/topology/brep/p2.rs", 16),
-            ("solidcore/src/topology/brep/planar_section.rs", 3),
-            ("solidcore/src/topology/brep/sheet.rs", 4),
-            ("solidcore/src/topology/brep/validation/assert_valid.rs", 1),
-            ("solidcore/src/topology/brep/validation/assert_valid/seams.rs", 1),
-            ("solidcore/src/topology/brep/validation/pointers.rs", 2),
-            ("solidcore/src/topology/brep/vertex_fans.rs", 6),
             ("solidcore/src/topology/proto_topology/p1/proto.rs", 16),
             ("solidcore/src/topology/proto_topology/p2.rs", 8),
             ("solidcore/src/topology/proto_topology/p3.rs", 6),
