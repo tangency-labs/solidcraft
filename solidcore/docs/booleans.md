@@ -719,7 +719,8 @@ What the port does today:
   The other line/circle callers keep upstream's zero. The touching point is found only where
   it lies on both curves' intervals.
   The wall such an arc sweeps reads the contact the same way against the plane of that
-  flat side (`surface/cone/p3.rs`, with the faces' zone tolerance): the plane, a hair inside
+  flat side (`surface/cone/p3.rs`, with `contact_tol_3d` as the rim does, where either
+  surface is a face's): the plane, a hair inside
   the wall, crosses it in two lines and stays within that hair of it between them, and its
   tangent line is off a face that starts between them. Such a face touches the plane along
   the end of its sweep that lies between the tangent line and the crossing, one tangent
@@ -727,7 +728,8 @@ What the port does today:
   lies on the plane by every tolerance, so the crossing was a second line of the same
   contact: the flat side's edge was split at both, and the piece of intersection between
   them had no vertex to end on (a plate cut by notches whose entry arcs are tangent to its
-  side).
+  side). The touch is taken only along an end that the requested part of the wall holds and
+  where its line meets the plane's own patch; else the crossing stays.
 
 **The refusal that names a tangent contact.** The kernel's boolean has none today. The `ssi` crate
 refuses a contact it cannot prove with `Error::Tangent`, code `BOOLEAN_TANGENT`, carrying where it
