@@ -149,15 +149,15 @@ pub struct PointAlongPathParams {
     pub common: ConstructionCommon,
 }
 
-/// Add a construction point halfway between two points.
+/// Add a construction point at the average (the centroid) of two or more points.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
-pub struct PointMidpointParams {
-    /// The first point: a vertex, a construction point, a sketch point, a fixed point, or the
-    /// centre of a circular edge, a sketch circle or arc, or a spherical or toroidal face.
-    pub a: GeoRefParam,
-    /// The second point. The new point stays halfway between the two as they move.
-    pub b: GeoRefParam,
+pub struct PointAverageParams {
+    /// The points, in any order: vertices, construction points, sketch points, fixed points, or
+    /// the centres of circular edges, sketch circles or arcs, or spherical or toroidal faces. The
+    /// new point stays at their average as they move.
+    #[schemars(length(min = 2, max = 1000))]
+    pub points: Vec<GeoRefParam>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: ConstructionCommon,
 }

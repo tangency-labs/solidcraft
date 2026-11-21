@@ -114,8 +114,9 @@ pub enum PointDef {
     EdgeAndPlane { edge: GeoRef, plane: GeoRef },
     /// At a fraction `t` (0…1) of the way along an edge or sketch curve.
     AlongPath { path: GeoRef, t: crate::Expr },
-    /// Halfway between two points (vertices, sketch points or points).
-    Midpoint { a: GeoRef, b: GeoRef },
+    /// At the average (the centroid) of two or more points (vertices, sketch points or points),
+    /// whatever their order.
+    Average { points: Vec<GeoRef> },
 }
 
 /// Resolved construction geometry, kept in the model state by feature.
@@ -1045,7 +1046,16 @@ pub(crate) fn resolve_point(ctx: &Ctx, d: &PointDef) -> Result<Vec3> {
             let t = Document::eval_in(ctx.vals, t, Kind::Unitless)?;
             along(ctx, path, t).map(|(p, _)| p)
         }
-        PointDef::Midpoint { a, b } => Ok((point(ctx, a)? + point(ctx, b)?) * 0.5),
+        PointDef::Average { points } => {
+            if points.len() < 2 {
+                return Err(DocError::Invalid("a point at the average of points needs two or more points".into()));
+            }
+            let mut sum = Vec3::new(0.0, 0.0, 0.0);
+            for p in points {
+                sum = sum + point(ctx, p)?;
+            }
+            Ok(sum * (1.0 / points.len() as f64))
+        }
     }
 }
 
@@ -1297,7 +1307,8 @@ impl PointDef {
         match self {
             PointDef::At { point } => vec![point],
             PointDef::Center { of } => vec![of],
-            PointDef::TwoEdges { a, b } | PointDef::Midpoint { a, b } => vec![a, b],
+            PointDef::TwoEdges { a, b } => vec![a, b],
+            PointDef::Average { points } => points.iter().collect(),
             PointDef::ThreePlanes { a, b, c } => vec![a, b, c],
             PointDef::EdgeAndPlane { edge, plane } => vec![edge, plane],
             PointDef::AlongPath { path, .. } => vec![path],
@@ -1308,7 +1319,8 @@ impl PointDef {
         match self {
             PointDef::At { point } => vec![point],
             PointDef::Center { of } => vec![of],
-            PointDef::TwoEdges { a, b } | PointDef::Midpoint { a, b } => vec![a, b],
+            PointDef::TwoEdges { a, b } => vec![a, b],
+            PointDef::Average { points } => points.iter_mut().collect(),
             PointDef::ThreePlanes { a, b, c } => vec![a, b, c],
             PointDef::EdgeAndPlane { edge, plane } => vec![edge, plane],
             PointDef::AlongPath { path, .. } => vec![path],
