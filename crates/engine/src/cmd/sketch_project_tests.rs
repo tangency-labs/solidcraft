@@ -3256,7 +3256,7 @@ fn saved_traced_cylinder_projection() -> (Value, u64, f64) {
 fn a_saved_traced_whole_body_profile_rebuilds_with_the_exact_projection() {
     let (saved, sketch, expected) = saved_traced_cylinder_projection();
     let mut s = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
-    for pass in 0..2 {
+    let assert_rebuilt = |s: &Session| {
         for feature in &s.doc.features {
             let result = s.model.result(feature.id).unwrap();
             assert!(result.error.is_none(), "{}: {:?}", feature.name, result.error);
@@ -3265,19 +3265,28 @@ fn a_saved_traced_whole_body_profile_rebuilds_with_the_exact_projection() {
         let ss = state.sketch(sketch).unwrap();
         assert!(!ss.sketch.links[0].profile_boundary.is_empty());
         assert!(ss.sketch.curves.iter().any(|curve| matches!(curve.kind, solidcraft_sketch::CurveKind::Conic { .. })));
+        let solidcraft_doc::FeatureKind::Extrude { profiles, .. } = &s.doc.find_feature("Pad").unwrap().kind else {
+            panic!("Pad must remain an extrude");
+        };
+        let solidcraft_doc::ProfileSel::Curves { loops } = profiles else { panic!("Pad must retain its saved curve IDs") };
+        assert_eq!(loops.len(), 1);
+        // The rebuilt sketch cannot resolve the saved IDs directly: the migrated reference
+        // must identify the exact outline, rather than extruding the unchanged old trace.
+        assert_eq!(solidcraft_sketch::profile_by_curves(&ss.profiles, &loops[0]), Err(solidcraft_sketch::CurvePick::Missing));
+        assert_eq!(solidcraft_doc::profile_selection_indices(ss, profiles).unwrap(), vec![0]);
         let pad = state.body("ProjectionPad").unwrap();
         let actual = solidcraft_kernel::measure(&pad.body).unwrap().volume;
         assert!((actual - expected).abs() < 1e-6 * expected, "{actual} vs {expected}");
-        if pass == 0 {
-            // Finishing an edit stores the regenerated curves, so the next open cannot
-            // recover the old IDs from the sketch's geometry again: it needs the saved alias.
-            run(&mut s, "sketch.edit", json!({"sketch": "Outline"}));
-            run(&mut s, "sketch.finish", json!({}));
-            assert!(s.doc.sketch(sketch).unwrap().curves.iter().any(|curve| matches!(curve.kind, solidcraft_sketch::CurveKind::Conic { .. })));
-        }
-        // Opening the migrated save cold must keep the alias as well as the exact geometry.
-        s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
-    }
+    };
+    assert_rebuilt(&s);
+    // Evaluation refreshes a copy in model state. A no-op edit/finish does not write that
+    // copy into the document; check the rebuilt outline where evaluation keeps it.
+    run(&mut s, "sketch.edit", json!({"sketch": "Outline"}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert_rebuilt(&s);
+    // Opening the migrated save cold must preserve the reference and rebuild the exact outline.
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_rebuilt(&reopened);
 }
 
 #[test]
