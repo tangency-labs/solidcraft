@@ -356,7 +356,8 @@ pub enum IntersectFailure {
     /// `failed`.
     SqueezeStalled,
     /// A repair of a classification that restarts after each change it makes (inserting a
-    /// curve interval, fixing the classes of the interval ends) restarted `restarts` times,
+    /// curve interval, fixing the classes of the interval ends, squeezing out zero-length
+    /// intervals) restarted `restarts` times,
     /// the most it allows for the classification's number of intervals, without settling.
     /// Class `failed`.
     RepairDidNotSettle {
@@ -407,6 +408,26 @@ pub enum IntersectFailure {
     /// boundary given are not of the same face. The caller's boundary:
     /// [`ErrorKind::InvalidInput`].
     CacheItemNotOnBoundary,
+    /// The parameter given lies off the classified curve, before its start or past its end, by
+    /// `distance`, more than the `tolerance` the interval's end snaps within.
+    /// [`ErrorKind::OutsideDomain`].
+    ParameterOffClassifiedCurve {
+        /// Past the end (`true`) or before the start (`false`).
+        past_end: bool,
+        /// How far the parameter's point lies off the curve's end, along its tangent.
+        distance: f64,
+        /// The tolerance within which it would snap onto the end.
+        tolerance: f64,
+    },
+    /// The position given is neither the start nor the end of an interval. The caller's
+    /// argument: [`ErrorKind::InvalidInput`].
+    PositionNotAnEnd,
+    /// An end of an interval that classified to the edge a vertex split lies, at `parameter`,
+    /// on neither of the two edges the split made. Class `failed`.
+    NotOnSplitEdges {
+        /// The end's parameter on the split edge.
+        parameter: f64,
+    },
     /// An edge use of the boundary given has no uv trim curve, and the routine cannot make one
     /// over the read-only boundary (upstream makes it there; the cached path never needs it).
     /// [`ErrorKind::Unsupported`].
@@ -474,7 +495,9 @@ impl IntersectFailure {
             | Self::IntervalNotDegenerate
             | Self::NoKnots
             | Self::UvCurveAgainstVolume
-            | Self::UnalignedDiscontinuities => SM_ERR,
+            | Self::UnalignedDiscontinuities
+            | Self::PositionNotAnEnd
+            | Self::NotOnSplitEdges { .. } => SM_ERR,
             Self::Missing(_)
             | Self::CurveCacheNotBuilt
             | Self::FaceWithoutSurface
@@ -495,7 +518,9 @@ impl IntersectFailure {
             | Self::CurveHandleUnresolved
             | Self::CacheItemNotOnBoundary
             | Self::EdgeuseWithoutTrimCurve => SM_ERR_NULL_POINTER,
-            Self::OutsideDomain(_) | Self::SeamJumpNotSnapped => SM_ERR_OUTSIDE_OF_DOMAIN,
+            Self::OutsideDomain(_)
+            | Self::SeamJumpNotSnapped
+            | Self::ParameterOffClassifiedCurve { .. } => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::Inconsistent(_) | Self::TouchesUnpaired { .. } => SM_ERR_ASSERT_FAILURE,
         }
     }
@@ -504,7 +529,8 @@ impl IntersectFailure {
     /// [`IntersectFailure::StageFailed`] and [`IntersectFailure::Defect`], a defect;
     /// [`ErrorKind::Missing`] for
     /// [`IntersectFailure::Missing`], [`ErrorKind::OutsideDomain`] for
-    /// [`IntersectFailure::OutsideDomain`] and [`IntersectFailure::SeamJumpNotSnapped`],
+    /// [`IntersectFailure::OutsideDomain`], [`IntersectFailure::SeamJumpNotSnapped`] and
+    /// [`IntersectFailure::ParameterOffClassifiedCurve`],
     /// [`ErrorKind::NotWithinTolerance`] for [`IntersectFailure::PointsWhereAPlaneCrosses`]
     /// and [`IntersectFailure::MoveNotProved`], [`ErrorKind::InvalidInput`] for a check of
     /// the caller's argument, state or body, [`ErrorKind::Unsupported`] for a kind or size
@@ -539,7 +565,8 @@ impl IntersectFailure {
             | Self::IntervalIndexPastEnd { .. }
             | Self::ParameterOutsideRange { .. }
             | Self::CurveHandleUnresolved
-            | Self::CacheItemNotOnBoundary => ErrorKind::InvalidInput,
+            | Self::CacheItemNotOnBoundary
+            | Self::PositionNotAnEnd => ErrorKind::InvalidInput,
             Self::UnsupportedObjectKind
             | Self::CurveNotBSpline
             | Self::SingularPointInside
@@ -780,6 +807,22 @@ impl core::fmt::Display for IntersectFailure {
                 "an item of the face's surface cache is not on the boundary given",
             ),
             Self::EdgeuseWithoutTrimCurve => f.write_str("the edge use has no uv trim curve"),
+            Self::ParameterOffClassifiedCurve {
+                past_end,
+                distance,
+                tolerance,
+            } => write!(
+                f,
+                "the parameter lies {distance:e} {} the classified curve, more than {tolerance:e}",
+                if *past_end { "past the end of" } else { "before the start of" }
+            ),
+            Self::PositionNotAnEnd => {
+                f.write_str("the position is neither the start nor the end of an interval")
+            }
+            Self::NotOnSplitEdges { parameter } => write!(
+                f,
+                "the interval end at {parameter} lies on neither of the edges the split made"
+            ),
         }
     }
 }
@@ -1263,6 +1306,17 @@ pub(super) mod tests {
                 SM_ERR_NULL_POINTER,
                 K::Unsupported,
             ),
+            (
+                F::ParameterOffClassifiedCurve {
+                    past_end: true,
+                    distance: 1e-3,
+                    tolerance: 1e-6,
+                },
+                SM_ERR_OUTSIDE_OF_DOMAIN,
+                K::OutsideDomain,
+            ),
+            (F::PositionNotAnEnd, SM_ERR, K::InvalidInput),
+            (F::NotOnSplitEdges { parameter: 0.5 }, SM_ERR, K::Failed),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::intersect(op, failure);
@@ -1324,7 +1378,7 @@ pub(super) mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/intersect/curve_class/p3.rs", 19),
+            ("solidcore/src/intersect/curve_class/p3.rs", 3),
             ("solidcore/src/intersect/topology_solver/p1.rs", 12),
             ("solidcore/src/intersect/topology_solver/p2.rs", 24),
         ];
