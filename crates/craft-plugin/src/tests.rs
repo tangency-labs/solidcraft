@@ -66,6 +66,64 @@ fn swatches_validate_package_paths_sizes_types_and_images_without_refusing_the_m
     assert!(check_input(&entries[0].input_schema, &json!({"finish":"0"})).is_ok());
 }
 
+/// Synthetic pixels only: a part picture may be larger than a swatch, but not without limit.
+#[test]
+fn option_images_allow_larger_files_and_refuse_oversized_or_escaping_ones() {
+    let mut value = manifest();
+    let options: Vec<_> = ["parts/elbow.png", "../outside.png", "/abs.png", "huge.png", "wide.png", "heavy.png"]
+        .iter()
+        .enumerate()
+        .map(|(i, path)| json!({"const":i.to_string(),"x-solidcraft-image":path}))
+        .collect();
+    value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"part":{"type":"string","oneOf":options}}}}]);
+    let parsed = parse(&value).expect("bad artwork never refuses a plugin");
+    let entries = &parsed.runtime.unwrap().entries;
+    let encoded = |width, height| {
+        let pixels = image::RgbImage::from_pixel(width, height, image::Rgb([20, 90, 160]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        pixels.write_to(&mut out, image::ImageFormat::Png).unwrap();
+        out.into_inner()
+    };
+    let big = encoded(1024, 1024);
+    let wide = encoded(1025, 4);
+    let mut heavy = encoded(8, 8);
+    heavy.resize(512 * 1024 + 1, 0);
+    let report = swatches::check(entries, |path| {
+        Ok(match path {
+            "parts/elbow.png" => big.clone(),
+            "wide.png" => wide.clone(),
+            "heavy.png" => heavy.clone(),
+            _ => b"bad image".to_vec(),
+        })
+    });
+    assert_eq!(report.images.len(), 1, "{:?}", report.warnings);
+    assert_eq!(report.images["parts/elbow.png"].size, [512, 512], "kept at most 512 pixels on a side");
+    assert_eq!(report.warnings.len(), 5, "{:?}", report.warnings);
+    assert!(swatches::decode("big.png", &big).is_err(), "the same file is too big for a swatch");
+    assert!(swatches::decode_image("big.png", &big).is_ok());
+    assert!(swatches::decode_image("wide.png", &wide).is_err());
+}
+
+#[test]
+fn artwork_files_stay_inside_the_package_up_to_the_picture_size() {
+    let root = std::env::temp_dir().join(format!("solidcraft-image-paths-{}", std::process::id()));
+    std::fs::create_dir_all(root.join("package")).unwrap();
+    let dir = root.join("package");
+    std::fs::write(root.join("outside.png"), b"outside").unwrap();
+    std::fs::write(dir.join("ok.png"), vec![0; 100 * 1024]).unwrap();
+    std::fs::write(dir.join("large.png"), vec![0; 512 * 1024 + 1]).unwrap();
+    assert!(swatches::read_artwork(&dir, "ok.png").is_ok());
+    assert!(swatches::read_file(&dir, "ok.png").is_err(), "over the swatch size");
+    assert!(swatches::read_artwork(&dir, "large.png").is_err());
+    assert!(swatches::read_artwork(&dir, "../outside.png").is_err());
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(root.join("outside.png"), dir.join("linked.png")).unwrap();
+        assert!(swatches::read_artwork(&dir, "linked.png").is_err());
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn swatch_files_stay_inside_the_resolved_package() {
     let root = std::env::temp_dir().join(format!("solidcraft-swatch-paths-{}", std::process::id()));

@@ -17,7 +17,7 @@ fn swatch_picker_filters_titles_and_selects_original_option_indices() {
                 ui,
                 "finish",
                 &mut chosen,
-                SwatchPicker { titles: &titles, textures: &textures, choose: "Choose…", search_hint: "Search finishes" },
+                SwatchPicker { titles: &titles, textures: &textures, choose: "Choose…", search_hint: "Search finishes", preview: false },
             )
         });
     };

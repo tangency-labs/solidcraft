@@ -78,7 +78,7 @@ impl Swatch {
 }
 
 pub(crate) fn read_swatches(dir: &Path, entries: &[solidcraft_engine::plugin::Entry]) -> BTreeMap<String, Swatch> {
-    let report = solidcraft_engine::plugin::swatches::check(entries, |rel| solidcraft_engine::plugin::swatches::read_file(dir, rel));
+    let report = solidcraft_engine::plugin::swatches::check(entries, |rel| solidcraft_engine::plugin::swatches::read_artwork(dir, rel));
     for warning in report.warnings {
         log::warn!("plugin {}: {warning}", dir.display());
     }
@@ -99,12 +99,9 @@ pub(crate) fn load_swatches(dir: &Path, entries: &[solidcraft_engine::plugin::En
     let swatches = Swatches::default();
     let referenced = entries.iter().any(|entry| {
         entry.input_schema.get("properties").and_then(Value::as_object).into_iter().flat_map(|p| p.values()).any(|property| {
-            property
-                .get("oneOf")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .any(|option| option.get(solidcraft_engine::plugin::swatches::KEY).is_some())
+            property.get("oneOf").and_then(Value::as_array).into_iter().flatten().any(|option| {
+                option.get(solidcraft_engine::plugin::swatches::KEY).is_some() || option.get(solidcraft_engine::plugin::swatches::IMAGE_KEY).is_some()
+            })
         })
     });
     if !referenced {

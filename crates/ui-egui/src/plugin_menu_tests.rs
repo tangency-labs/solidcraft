@@ -606,6 +606,20 @@ fn swatch_annotations_preserve_partial_choices_and_const_values() {
     assert_eq!(params(&fields), Ok(json!({"finish":"walnut"})));
 }
 
+#[test]
+fn image_annotations_load_as_option_pictures_and_keep_const_values() {
+    let schema = json!({"type":"object","properties":{"part":{"type":"string","oneOf":[
+        {"const":"elbow","title":"Elbow","x-solidcraft-image":"parts/elbow.png"},
+        {"const":"tee","title":"Tee","x-solidcraft-image":7},
+        {"const":"plain","title":"Plain"}
+    ]}}});
+    let mut fields = form(&schema).expect("bad artwork does not disable the dialog");
+    assert_eq!(fields[0].0.swatches, [Some("parts/elbow.png".into()), None, None]);
+    assert!(fields[0].0.pictured);
+    fields[0].1 = Input::Choice(Some(1));
+    assert_eq!(params(&fields), Ok(json!({"part":"tee"})));
+}
+
 /// Two full dialog captures, with synthetic artwork generated here, plus pointer selection.
 #[test]
 fn swatch_dialog_dropdown_and_filtered_grid_render_and_send_const_values() {

@@ -88,6 +88,9 @@ pub(crate) struct Field {
     pub(crate) images: Vec<String>,
     /// Optional package raster per option, including partially illustrated lists.
     pub(crate) swatches: Vec<Option<String>>,
+    /// Whether an option names a larger `x-solidcraft-image`: the list then shows a big picture of
+    /// the highlighted option.
+    pub(crate) pictured: bool,
     conditions: FieldConditions,
     order: usize,
     pub(crate) visible: bool,
@@ -268,6 +271,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
     let default = p.get("default");
     let mut images = Vec::new();
     let mut swatches = Vec::new();
+    let mut pictured = false;
     let (kind, input) = match kind {
         "number" if !choice => {
             // `exclusiveMinimum` as a number (draft 6+); a boolean beside `minimum` (draft 4).
@@ -318,8 +322,20 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
-                .map(|option| option.get(solidcraft_engine::plugin::swatches::KEY).and_then(Value::as_str).map(str::to_owned))
+                .map(|option| {
+                    // A larger picture wins over a swatch when an option names both.
+                    [solidcraft_engine::plugin::swatches::IMAGE_KEY, solidcraft_engine::plugin::swatches::KEY]
+                        .iter()
+                        .find_map(|key| option.get(*key).and_then(Value::as_str))
+                        .map(str::to_owned)
+                })
                 .collect();
+            pictured = p
+                .get("oneOf")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .any(|option| option.get(solidcraft_engine::plugin::swatches::IMAGE_KEY).is_some());
             let chosen = default.and_then(Value::as_str).and_then(|d| values.iter().position(|o| o == d));
             (Kind::Choice { values, titles }, Input::Choice(chosen))
         }
@@ -341,6 +357,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             kind,
             images,
             swatches,
+            pictured,
             conditions: Default::default(),
             order: 0,
             visible: true,
@@ -417,6 +434,7 @@ fn selection_field(key: &str, p: &Map<String, Value>, required: bool) -> Option<
             kind,
             images: Vec::new(),
             swatches: Vec::new(),
+            pictured: false,
             conditions: Default::default(),
             order: 0,
             visible: true,
@@ -482,6 +500,7 @@ fn choices(p: &Map<String, Value>) -> Option<(Vec<String>, Vec<String>, Vec<Stri
                             | "x-solidcraft-when"
                             | crate::plugin_images::KEY
                             | solidcraft_engine::plugin::swatches::KEY
+                            | solidcraft_engine::plugin::swatches::IMAGE_KEY
                     )
                 }) {
                     return None;
@@ -2304,7 +2323,13 @@ fn field_row(app: &SolveApp, ui: &mut egui::Ui, plugin: &Listed, field: &Field, 
                         ui,
                         &id,
                         &mut selected,
-                        ui_kit::SwatchPicker { titles: &titles, textures: &tiles, choose: &choose, search_hint: app.tr("ui.plugin_swatch_search") },
+                        ui_kit::SwatchPicker {
+                            titles: &titles,
+                            textures: &tiles,
+                            choose: &choose,
+                            search_hint: app.tr("ui.plugin_swatch_search"),
+                            preview: field.pictured,
+                        },
                     )
                 });
                 if selected != before_selected {
