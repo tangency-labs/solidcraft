@@ -212,7 +212,7 @@ pub use iso::{IsoLine, MAX_ISO_COUNT, iso_curves, iso_grid};
 pub use lip::{LipRefusal, raise_band, rim_band};
 pub use loft_blend::loft_blend;
 pub use matchsurf::{match_surface, seam_continuity};
-pub use measure::{BodyMeasure, MassMeasure, measure, measure_mass};
+pub use measure::{BodyMeasure, MassMeasure, levels_along, measure, measure_mass};
 pub use mesh_convert::convert_prismatic_mesh;
 pub use meshbody::{MAX_TRIANGLES, mesh_body, mesh_body_with_normals};
 pub use native::{body_from_smlib, smlib_body};
@@ -252,7 +252,7 @@ pub use surface_extend::{ExtendLimit, ExtendMode, ExtendOptions, extend_surface}
 pub use surface_kind::{AxialPiece, EdgeCircle, FaceSurface, axial_face_section, edge_circle, face_edge_indices, face_surface};
 pub use surface_offset::offset_surface;
 pub use surface_ruled::{Ruled, RuledCorners, RuledMode, ruled_far_handles, ruled_surface, ruled_surface_with};
-pub use surface_trim::{TrimKeep, mutual_trim, trim, trim_keep};
+pub use surface_trim::{TrimKeep, mutual_trim, stop_at_bodies, trim, trim_keep};
 pub use surface_untrim::{UntrimHoles, untrim};
 pub use surfaces::{
     copy_faces, extend, extrude_sheet, loft_sheet, loft_sheet_with_rails, patch_edges, patch_region, remove_faces, reverse_faces, revolve_sheet,

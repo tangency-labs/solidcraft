@@ -78,7 +78,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("surface_extrude")
         .contract(&SURFACE_EXTRUDE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch?: id|name; curves?: [curve ids] (open or closed chains of curves meeting end to end) and/or profiles? (their boundaries; the default when no curves are given); distance: expr; direction?: positive|negative|symmetric (symmetric: distance is the total, split evenly around the start plane, as solid.extrude); convention?: total_distance|legacy_per_side (as solid.extrude; default total_distance; legacy_per_side: the distance on each side, as older symmetric surface extrudes keep); distance2?: expr; start_offset?: expr; name?, body_name? (a surface body: walls only, no caps)"),
+        .params("sketch?: id|name; curves?: [curve ids] (open or closed chains of curves meeting end to end) and/or profiles? (their boundaries; the default when no curves are given); distance: expr (unless `to` or `to_next`); to?: [x,y,z] (To Object: end at the face, vertex or point there; a curved or slanted face trims the walls where they meet its surface); to_offset?: expr (how far past `to`; a flat face square to the extrusion or a point only); to_next?: bool (To Next: each wall runs on, one way as `direction` says, until it first meets a solid or surface body, its faces as they are; a wall that meets none, or runs on past the side of a body covering only part of it, is refused); direction?: positive|negative|symmetric (symmetric: distance is the total, split evenly around the start plane, as solid.extrude); convention?: total_distance|legacy_per_side (as solid.extrude; default total_distance; legacy_per_side: the distance on each side, as older symmetric surface extrudes keep); distance2?: expr; start_offset?: expr; name?, body_name? (a surface body: walls only, no caps)"),
     CommandSpec::new("surface.revolve", "Surface Revolve", crate::checked!("surface.revolve", surface_revolve))
         .at("SURFACE", "CREATE")
         .icon("surface_revolve")
@@ -337,11 +337,27 @@ fn surface_extrude(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "surface.extrude";
     let sketch = feature_sketch(s, p, cmd)?;
     let (profiles, curves) = sheet_inputs(p, cmd)?;
-    let extent = extent_param(s, p, cmd)?;
-    if extent.through_all || extent.taper.is_some() || extent.to.is_some() || extent.from.is_some() {
-        return Err(bad(cmd, "not supported yet: through all, to or from an object, or a taper"));
+    let to_next = bool_(p, "to_next").unwrap_or(false);
+    let extent = if to_next {
+        // To Next takes no length: each wall runs on until it meets a body.
+        if let Some(key) = ["to", "to_offset", "distance", "distance2"].into_iter().find(|k| p.get(*k).is_some_and(|v| !v.is_null())) {
+            return Err(bad(cmd, format!("`{key}` does not go with `to_next`: each wall runs on until it meets a body")));
+        }
+        let mut with_distance = p.clone();
+        if let Some(o) = with_distance.as_object_mut() {
+            o.insert("distance".into(), Value::String("0".into()));
+        }
+        extent_param(s, &with_distance, cmd)?
+    } else {
+        extent_param(s, p, cmd)?
+    };
+    if extent.through_all || extent.taper.is_some() || extent.from.is_some() {
+        return Err(bad(cmd, "not supported yet: through all, from an object, or a taper"));
     }
-    add_feature(s, p, FeatureKind::SurfaceExtrude { sketch: SketchId(sketch), profiles, curves, extent })
+    if to_next && extent.direction == solidcraft_doc::Direction::Symmetric {
+        return Err(bad(cmd, "not supported yet: `to_next` to both sides (`direction: symmetric`)"));
+    }
+    add_feature(s, p, FeatureKind::SurfaceExtrude { sketch: SketchId(sketch), profiles, curves, extent, to_next })
 }
 
 /// A body by name, and points on some of its faces (none: all of them).
@@ -915,6 +931,184 @@ mod tests {
 
     /// Surface Extrude of a profile gives its walls alone; patching both ends and stitching
     /// makes the solid that solid.extrude makes of the same profile.
+    /// To Object (#16537): a surface extrude ends at a flat face square to it (and a To offset
+    /// past it), or is trimmed where it meets a curved face's surface. The expected values are
+    /// worked out by hand from the shapes, not taken from a run.
+    #[test]
+    fn surface_extrude_to_object() {
+        let mut s = Session::default();
+        // A box from z = 10 to 12, and a cylinder of radius 5 along X, axis at z = 20 (its
+        // underside at z = 15, clear of the box).
+        run(&mut s, "solid.box", json!({"corner": [-5, -5, 10], "length": 10, "width": 10, "height": 2, "body_name": "Lid"}));
+        run(&mut s, "solid.cylinder", json!({"base": [-10, 0, 20], "axis": "X", "radius": 5, "height": 20, "body_name": "Rod"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        run(&mut s, "sketch.line", json!({"points": [[-3, 0], [3, 0]], "ids": ["along"]}));
+        run(&mut s, "sketch.line", json!({"points": [[0, -3], [0, 3]], "ids": ["across"]}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 20], [0, 26]], "ids": ["aside"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let bounds = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().unwrap().body(name).unwrap().body).unwrap().bbox;
+
+        // To the box's bottom face: a 6 wide wall 10 high.
+        run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["along"], "to": [0, 0, 10], "body_name": "ToLid"}));
+        assert!((area(&s, "ToLid") - 60.0).abs() < 60.0 * 1e-6, "{}", area(&s, "ToLid"));
+        assert!((bounds(&s, "ToLid").max.z - 10.0).abs() < 1e-6);
+        // 2 mm past it, in the direction travelled.
+        run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["along"], "to": [0, 0, 10], "to_offset": "2 mm", "body_name": "PastLid"}));
+        assert!((bounds(&s, "PastLid").max.z - 12.0).abs() < 1e-6);
+
+        // To the rod's curved underside: the wall at x = 0 for |y| <= 3 ends at
+        // z = 20 - sqrt(25 - y^2). Area: 6 * 20 - (3 * 4 + 25 * asin(3/5)).
+        run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["across"], "to": [0, 0, 15], "body_name": "ToRod"}));
+        let want = 120.0 - (12.0 + 25.0 * (0.6f64).asin());
+        assert!((area(&s, "ToRod") - want).abs() < want * 1e-4, "{} vs {want}", area(&s, "ToRod"));
+        // Its top runs from z = 15 in the middle to z = 16 at the ends; nothing inside or past the rod is kept.
+        let bb = bounds(&s, "ToRod");
+        assert!(bb.min.z.abs() < 1e-6 && (bb.max.z - 16.0).abs() < 1e-4, "{bb:?}");
+
+        // From a sketch 5 above the origin: the same wall, 5 shorter. Area: 6 * 15 - (3 * 4 + 25 * asin(3/5)).
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Raised"}));
+        run(&mut s, "sketch.create", json!({"plane": "Raised", "name": "Up"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, -3], [0, 3]], "ids": ["raised"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.extrude", json!({"sketch": "Up", "curves": ["raised"], "to": [0, 0, 15], "body_name": "FromRaised"}));
+        let want = 90.0 - (12.0 + 25.0 * (0.6f64).asin());
+        assert!((area(&s, "FromRaised") - want).abs() < want * 1e-4, "{} vs {want}", area(&s, "FromRaised"));
+        let bb = bounds(&s, "FromRaised");
+        assert!((bb.min.z - 5.0).abs() < 1e-6 && (bb.max.z - 16.0).abs() < 1e-4, "{bb:?}");
+
+        // A slanted face meets a wall far beside its body: a cube of side 2 at (0, 40, 10) turned
+        // 45 degrees about Y has a face on the plane z = x + 10 - sqrt 2, which the wall from
+        // x = 50 to 56 meets at z = 58.6 to 64.6, well past the cube.
+        // Area: the integral of x + 10 - sqrt 2 from 50 to 56 = 318 + 60 - 6 sqrt 2.
+        run(&mut s, "solid.box", json!({"center": [0, 40, 10], "length": 2, "width": 2, "height": 2, "body_name": "Tilted"}));
+        run(&mut s, "solid.move", json!({"bodies": ["Tilted"], "axis": [0, 1, 0], "angle": "45 deg", "origin": [0, 40, 10]}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Far"}));
+        run(&mut s, "sketch.line", json!({"points": [[50, 0], [56, 0]], "ids": ["far"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let h = std::f64::consts::FRAC_1_SQRT_2;
+        run(&mut s, "surface.extrude", json!({"sketch": "Far", "curves": ["far"], "to": [h, 40, 10.0 - h], "body_name": "ToSlant"}));
+        let want = 378.0 - 6.0 * std::f64::consts::SQRT_2;
+        assert!((area(&s, "ToSlant") - want).abs() < want * 1e-6, "{} vs {want}", area(&s, "ToSlant"));
+        // Further still, past any fixed number of tries: the wall from x = 7000 to 7006 meets the
+        // plane at z = 7008.6 to 7014.6. Area: 6 (7003 + 10 - sqrt 2) = 42078 - 6 sqrt 2.
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "VeryFar"}));
+        run(&mut s, "sketch.line", json!({"points": [[7000, 0], [7006, 0]], "ids": ["very_far"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.extrude", json!({"sketch": "VeryFar", "curves": ["very_far"], "to": [h, 40, 10.0 - h], "body_name": "ToSlantFar"}));
+        let want = 42078.0 - 6.0 * std::f64::consts::SQRT_2;
+        assert!((area(&s, "ToSlantFar") - want).abs() < want * 1e-6, "{} vs {want}", area(&s, "ToSlantFar"));
+
+        // The design keeps it: a cold rebuild gives the same walls.
+        let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert!((area(&cold, "ToRod") - area(&s, "ToRod")).abs() < 1e-9);
+        assert!((area(&cold, "PastLid") - area(&s, "PastLid")).abs() < 1e-9);
+
+        // Refused, with the reason: a To offset past a curved face, and a wall beside the rod
+        // that never meets its surface. Neither adds a feature.
+        let features = s.doc.features.len();
+        let err =
+            s.execute("surface.extrude", &json!({"sketch": "S", "curves": ["across"], "to": [0, 0, 15], "to_offset": 1})).unwrap_err().to_string();
+        assert!(err.contains("To offset"), "{err}");
+        let err = s.execute("surface.extrude", &json!({"sketch": "S", "curves": ["aside"], "to": [0, 0, 15]})).unwrap_err().to_string();
+        assert!(err.contains("never meets"), "{err}");
+        assert_eq!(s.doc.features.len(), features);
+    }
+
+    /// To Next (#16537): each wall runs on until it first meets a body, any face of a solid or
+    /// surface body as it is, with no pick. The expected values are worked out by hand from the
+    /// shapes, not taken from a run.
+    #[test]
+    fn surface_extrude_to_next() {
+        let mut s = Session::default();
+        // A box from z = 10 to 12 over |x|, |y| <= 5; under it, a box from z = -8 to -7; a rod of
+        // radius 5 along X with its axis at y = 40, z = 20; and a flat surface body at z = 6
+        // over x -5 to 5, y -10 to -6.
+        run(&mut s, "solid.box", json!({"corner": [-5, -5, 10], "length": 10, "width": 10, "height": 2, "body_name": "Lid"}));
+        run(&mut s, "solid.box", json!({"corner": [-5, -5, -8], "length": 10, "width": 10, "height": 1, "body_name": "Floor"}));
+        run(&mut s, "solid.cylinder", json!({"base": [-10, 40, 20], "axis": "X", "radius": 5, "height": 20, "body_name": "Rod"}));
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 6, "name": "Mid"}));
+        run(&mut s, "sketch.create", json!({"plane": "Mid", "name": "CoverSketch"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-5, -10], "p1": [5, -6]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.patch", json!({"sketch": "CoverSketch", "body_name": "Cover"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        // Each case its own line: a wall made earlier is in the way of the later ones too.
+        run(&mut s, "sketch.line", json!({"points": [[-3, 0], [3, 0]], "ids": ["along"]}));
+        run(&mut s, "sketch.line", json!({"points": [[-3, 2], [3, 2]], "ids": ["down"]}));
+        run(&mut s, "sketch.line", json!({"points": [[-3, -2], [3, -2]], "ids": ["raised"]}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 37], [0, 43]], "ids": ["at_rod"]}));
+        run(&mut s, "sketch.line", json!({"points": [[-3, -8], [3, -8]], "ids": ["under_cover"]}));
+        run(&mut s, "sketch.line", json!({"points": [[100, 0], [106, 0]], "ids": ["aside"]}));
+        run(&mut s, "sketch.line", json!({"points": [[3, 3], [9, 3]], "ids": ["half_under"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let bounds = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().unwrap().body(name).unwrap().body).unwrap().bbox;
+
+        // Up to the lid's underside: a 6 wide wall 10 high, saved as To Next.
+        run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["along"], "to_next": true, "name": "UpToLid", "body_name": "ToLid"}));
+        assert!((area(&s, "ToLid") - 60.0).abs() < 60.0 * 1e-6, "{}", area(&s, "ToLid"));
+        assert!((bounds(&s, "ToLid").max.z - 10.0).abs() < 1e-6);
+        let FeatureKind::SurfaceExtrude { to_next, .. } = &s.doc.find_feature("UpToLid").unwrap().kind else { panic!("surface extrude") };
+        assert!(*to_next);
+        // Flipped: down to the floor's top at z = -7, 6 x 7.
+        run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["down"], "to_next": true, "direction": "negative", "body_name": "ToFloor"}));
+        assert!((area(&s, "ToFloor") - 42.0).abs() < 42.0 * 1e-6, "{}", area(&s, "ToFloor"));
+        assert!((bounds(&s, "ToFloor").min.z + 7.0).abs() < 1e-6);
+        // From 2 above the sketch: 6 x 8.
+        run(
+            &mut s,
+            "surface.extrude",
+            json!({"sketch": "S", "curves": ["raised"], "to_next": true, "start_offset": 2, "name": "FromRaised", "body_name": "Raised"}),
+        );
+        assert!((area(&s, "Raised") - 48.0).abs() < 48.0 * 1e-6, "{}", area(&s, "Raised"));
+        // Edited as the window does, naming no start offset: it keeps the stored 2, not the
+        // sketch plane (which would give 6 x 10 = 60). Naming one replaces it: from 4, 6 x 6.
+        let edit = json!({"sketch": "S", "curves": ["raised"], "to_next": true, "body_name": "Raised"});
+        run(&mut s, "timeline.redefine", json!({"feature": "FromRaised", "command": "surface.extrude", "params": edit}));
+        assert!((area(&s, "Raised") - 48.0).abs() < 48.0 * 1e-6, "{}", area(&s, "Raised"));
+        let mut edit = edit;
+        edit["start_offset"] = json!(4);
+        run(&mut s, "timeline.redefine", json!({"feature": "FromRaised", "command": "surface.extrude", "params": edit}));
+        assert!((area(&s, "Raised") - 36.0).abs() < 36.0 * 1e-6, "{}", area(&s, "Raised"));
+        edit["start_offset"] = json!(2);
+        run(&mut s, "timeline.redefine", json!({"feature": "FromRaised", "command": "surface.extrude", "params": edit}));
+        // A surface body stops it as a solid does: up to the cover at z = 6, 6 x 6.
+        run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["under_cover"], "to_next": true, "body_name": "ToCover"}));
+        assert!((area(&s, "ToCover") - 36.0).abs() < 36.0 * 1e-6, "{}", area(&s, "ToCover"));
+        // Up to the rod's curved underside: the wall at x = 0 for |y - 40| <= 3 ends at
+        // z = 20 - sqrt(25 - (y - 40)^2). Area: 6 * 20 - (3 * 4 + 25 * asin(3/5)).
+        run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["at_rod"], "to_next": true, "body_name": "ToRod"}));
+        let want = 120.0 - (12.0 + 25.0 * (0.6f64).asin());
+        assert!((area(&s, "ToRod") - want).abs() < want * 1e-4, "{} vs {want}", area(&s, "ToRod"));
+        let bb = bounds(&s, "ToRod");
+        assert!(bb.min.z.abs() < 1e-6 && (bb.max.z - 16.0).abs() < 1e-4, "{bb:?}");
+
+        // The design keeps it: a cold rebuild gives the same walls.
+        let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert!((area(&cold, "ToLid") - area(&s, "ToLid")).abs() < 1e-9);
+        assert!((area(&cold, "ToRod") - area(&s, "ToRod")).abs() < 1e-9);
+
+        // Refused, with the reason, and no feature added: a wall that meets no body; one that
+        // runs on past the side of the lid, which covers only part of it; both sides; and a
+        // length given with To Next.
+        let features = s.doc.features.len();
+        let refused = |s: &mut Session, p: Value| s.execute("surface.extrude", &p).unwrap_err().to_string();
+        let e = refused(&mut s, json!({"sketch": "S", "curves": ["aside"], "to_next": true}));
+        assert!(e.contains("meets no body"), "{e}");
+        let e = refused(&mut s, json!({"sketch": "S", "curves": ["half_under"], "to_next": true}));
+        assert!(e.contains("not supported yet") || e.contains("meets no body"), "{e}");
+        let e = refused(&mut s, json!({"sketch": "S", "curves": ["along"], "to_next": true, "direction": "symmetric"}));
+        assert!(e.contains("not supported yet"), "{e}");
+        for key in ["distance", "to_offset", "distance2"] {
+            let mut p = json!({"sketch": "S", "curves": ["along"], "to_next": true});
+            p[key] = json!(5);
+            let e = refused(&mut s, p);
+            assert!(e.contains(key), "{e}");
+        }
+        let e = refused(&mut s, json!({"sketch": "S", "curves": ["along"], "to_next": true, "to": [0, 0, 10]}));
+        assert!(e.contains("`to`"), "{e}");
+        assert_eq!(s.doc.features.len(), features);
+    }
+
     #[test]
     fn surface_extrude_profile_walls_stitch_into_the_solid() {
         let mut s = Session::default();

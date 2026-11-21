@@ -301,20 +301,29 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             Ok(())
         }
-        FeatureKind::SurfaceExtrude { sketch, profiles, curves, extent } => {
+        FeatureKind::SurfaceExtrude { sketch, profiles, curves, extent, to_next } => {
             let ss = constructor_profile_in_frame(
                 doc,
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
                 f,
             )?;
-            if extent.through_all || extent.taper.is_some() || extent.to.is_some() || extent.from.is_some() {
-                return Err(DocError::Invalid("not supported yet: a surface extrude through all, to or from an object, or with a taper".into()));
+            if extent.through_all || extent.taper.is_some() || extent.from.is_some() {
+                return Err(DocError::Invalid("not supported yet: a surface extrude through all, from an object, or with a taper".into()));
             }
-            let d = val(vals, &extent.distance, Kind::Length)?;
+            if *to_next && extent.to.is_some() {
+                return Err(DocError::Invalid("a surface extrude goes To Next or To Object, not both".into()));
+            }
             let off = extent.start_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
-            let (a, b) = extent_sides(vals, extent, d, extent.direction)?;
             let chains = sheet_chains(&ss, profiles.as_ref(), curves)?;
-            let body = kernel::extrude_sheet(&ss.plane, &chains, a + off, b + off)?;
+            let body = match extent.to {
+                Some(to) => sheet_to_object(doc, vals, f, st, &ss, &chains, extent, to.0, off)?,
+                None if *to_next => sheet_to_next(doc, f, st, &ss, &chains, extent, off)?,
+                None => {
+                    let d = val(vals, &extent.distance, Kind::Length)?;
+                    let (a, b) = extent_sides(vals, extent, d, extent.direction)?;
+                    kernel::extrude_sheet(&ss.plane, &chains, a + off, b + off)?
+                }
+            };
             push_sheet(st, f, crate::lineage::ChainRoles { sketch: &ss, chains: &chains }.tool(body));
             Ok(())
         }
@@ -578,6 +587,141 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         }
         _ => Err(DocError::Invalid("not a surface feature".into())),
     }
+}
+
+/// A surface extrude to a curved or slanted face runs its walls out further, each time
+/// [`SHEET_REACH_GROWTH`] times as far, looking for where they meet the face's surface, until they
+/// reach the extrusion limit. The count only guards against a reach that doesn't grow.
+const SHEET_REACH_TRIES: usize = 64;
+const SHEET_REACH_GROWTH: f64 = 8.0;
+
+/// A surface extrude that ends at the face, vertex or point at `to` (To Object), starting `start`
+/// along the sketch normal. A point, a vertex or a flat face square to the extrusion sets the
+/// length, moved past it by the To offset. Any other face (curved, or flat at a slant): the walls
+/// run past the body that face belongs to and are trimmed where they meet the face's surface,
+/// extended, keeping the pieces joined to the sketch. A wall that never meets that surface is
+/// refused, not left running past it.
+#[allow(clippy::too_many_arguments)]
+fn sheet_to_object(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &ModelState,
+    ss: &SolvedSketch,
+    chains: &[Vec<Seg2>],
+    extent: &crate::Extent,
+    to: Vec3,
+    start: f64,
+) -> Result<kernel::Body> {
+    let plane = &ss.plane;
+    let n = plane.normal();
+    // The target is measured where it stood when it was picked, as a solid extrude's is.
+    let tst = state_in_frame_pinned_to(doc, st, f.component, &extent.picked_placements)?;
+    let face =
+        object_face_at_level(&tst, f.face_names.first().map(String::as_str), to, plane).filter(|face| !on_edge_without_cap(&tst, *face, to, n));
+    let to_offset = extent.to_offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
+    let curved = face.filter(|_| curved_face(&tst, face, Some(n)).is_some());
+    let Some((fi, target)) = curved.and_then(|(bi, fi)| Some((fi, tst.bodies.get(bi)?))) else {
+        // A point, or a face whose level is one number.
+        let level = match face.and_then(|face| square_face_level(&tst, face, plane)) {
+            Some(square) => square.level,
+            None => level_along(plane, to),
+        };
+        // Past the object by the offset, in the direction travelled.
+        let end = level + if level >= start { to_offset } else { -to_offset };
+        if (end - start).abs() < 1e-9 {
+            return Err(DocError::Invalid("the To object is where the surface extrude starts".into()));
+        }
+        let (a, b) = extent_sides(vals, extent, end - start, crate::Direction::Positive)?;
+        return Ok(kernel::extrude_sheet(plane, chains, a + start, b + start)?);
+    };
+    if to_offset.abs() > 1e-9 {
+        return Err(DocError::Invalid("not supported yet: a To offset on a surface extrude to a curved or slanted face".into()));
+    }
+    if extent.distance2.is_some() {
+        return Err(DocError::Invalid("not supported yet: a second side on a surface extrude to a curved or slanted face".into()));
+    }
+    // The picked point lies on the face, so its level says which way the face is.
+    let toward = if level_along(plane, to) >= start { 1.0 } else { -1.0 };
+    // Each wall's start: a point on each chain at the start level picks the pieces to keep.
+    let start_plane = plane.offset(start);
+    let keep: Vec<Vec3> = chains.iter().filter_map(|c| c.first()).map(|s| start_plane.to_world(s.start())).collect();
+    let tool = kernel::SplitTool::Face { body: &target.body, face: fi };
+    // First past the whole target body. The face's surface runs on past the body, though (a
+    // slanted plane), so a wall beside the body can meet it further out: while a wall still
+    // runs to the far end, or none crosses the surface, the walls run out further.
+    // The last try runs the walls out to just short of the extrusion limit.
+    let limit = MAX_EXTRUDE_REACH - 1.0 - toward * start;
+    let mut reach = through_all_distance(&tst, plane, start, std::slice::from_ref(&target.name))?;
+    for tries_left in (0..SHEET_REACH_TRIES).rev() {
+        let far = start + toward * reach;
+        extrude_within_reach([start, far])?;
+        let long = kernel::extrude_sheet(plane, chains, start.min(far), start.max(far))?;
+        let last = tries_left == 0 || reach >= limit;
+        let kept = match kernel::trim_keep(&long, &tool, kernel::TrimKeep::Regions(&keep)) {
+            Ok(kept) => kept,
+            Err(_) if !last => {
+                reach = (reach * SHEET_REACH_GROWTH).min(limit);
+                continue;
+            }
+            Err(e) => return Err(DocError::Invalid(format!("the surface extrude never meets the To face's surface ({e})"))),
+        };
+        // A wall that never met the surface still runs out to `far`; `reach` runs at least 1 past
+        // the target body, so a kept wall ending within half of that met it.
+        let [low, high] = kernel::levels_along(&kept, plane)?;
+        let furthest = if toward > 0.0 { high } else { -low };
+        if furthest <= toward * far - 0.5 {
+            return Ok(kept);
+        }
+        if last {
+            break;
+        }
+        reach = (reach * SHEET_REACH_GROWTH).min(limit);
+    }
+    Err(DocError::Invalid("part of the surface extrude never meets the To face's surface".into()))
+}
+
+/// A surface extrude To Next, starting `start` along the sketch normal: each wall runs one way
+/// (`extent.direction`: positive along the normal, negative against it) until it first meets a
+/// body, any face of a solid or surface body as it is ([`kernel::stop_at_bodies`]). A wall that
+/// meets no body is refused, as To Object refuses one that never meets its face, and so is a
+/// symmetric or two-sided To Next.
+fn sheet_to_next(
+    doc: &Document,
+    f: &Feature,
+    st: &ModelState,
+    ss: &SolvedSketch,
+    chains: &[Vec<Seg2>],
+    extent: &crate::Extent,
+    start: f64,
+) -> Result<kernel::Body> {
+    if extent.direction == crate::Direction::Symmetric || extent.distance2.is_some() {
+        return Err(DocError::Invalid("not supported yet: a surface extrude To Next to both sides (symmetric or a second side)".into()));
+    }
+    let plane = &ss.plane;
+    let toward = if extent.direction == crate::Direction::Negative { -1.0 } else { 1.0 };
+    // The bodies as this feature's component sees them, as To Object measures its target.
+    let tst = state_in_frame_pinned_to(doc, st, f.component, &extent.picked_placements)?;
+    let bodies: Vec<&kernel::Body> = tst.bodies.iter().map(|b| &b.body).filter(|b| !b.is_mesh()).collect();
+    if bodies.is_empty() {
+        return Err(DocError::Invalid("a surface extrude To Next needs a body in its way, and the model has none".into()));
+    }
+    // Past every body, so a wall that meets none still runs to the far end.
+    let reach = through_all_distance(&tst, plane, start, &[])?;
+    let far = start + toward * reach;
+    extrude_within_reach([start, far])?;
+    let long = kernel::extrude_sheet(plane, chains, start.min(far), start.max(far))?;
+    // A corner of each chain's wall at the start picks the pieces to keep.
+    let start_plane = plane.offset(start);
+    let starts: Vec<Vec3> = chains.iter().filter_map(|c| c.first()).map(|s| start_plane.to_world(s.start())).collect();
+    let (kept, met) = kernel::stop_at_bodies(&long, &bodies, &starts, plane.normal() * toward)?;
+    // `reach` runs at least 1 past every body, so a wall that met one ends within half of it.
+    let [low, high] = kernel::levels_along(&kept, plane)?;
+    let furthest = if toward > 0.0 { high } else { -low };
+    if !met || furthest > toward * far - 0.5 {
+        return Err(DocError::Invalid("part of the surface extrude To Next meets no body".into()));
+    }
+    Ok(kept)
 }
 
 /// A surface builder's body, added to the model with what its faces came from.
