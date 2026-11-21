@@ -693,6 +693,168 @@ fn colours_read_into_records_are_the_ones_our_step_reader_reads() {
     assert_eq!(t, o);
 }
 
+/// An IGES file read by either reader: by SolidCraft's the Import feature keeps the file restated
+/// as STEP text, by cadmpeg's (its IGES decoder) the records the neutral model was read into,
+/// with no STEP text in between, as a STEP file read by cadmpeg is kept.
+fn read_iges(bytes: &[u8], file: &str, reader: crate::StepReader) -> crate::StepFeature {
+    let sf = read(bytes, file, reader);
+    let solidcraft_doc::FeatureKind::Import { file: held, step, records, .. } = &sf.kind else { panic!("{file}: not an Import feature") };
+    assert_eq!(held, std::path::Path::new(file).file_name().unwrap().to_str().unwrap());
+    match reader {
+        crate::StepReader::SolidCraft => {
+            assert!(step.starts_with("ISO-10303-21"), "{file}: the feature keeps the IGES file restated as STEP");
+            assert!(records.is_none(), "{file}: no records with SolidCraft's reader");
+        }
+        crate::StepReader::Cadmpeg => {
+            assert!(step.is_empty(), "{file}: no STEP text in between");
+            assert_eq!(records.as_ref().map(|r| r.bodies.len()), Some(sf.import.bodies.len()), "{file}: the feature keeps the records");
+        }
+    }
+    sf
+}
+
+/// A solid of known size in an IGES file: its name, colour, volume, area and box.
+struct KnownSolid {
+    name: &'static str,
+    color: Option<[f32; 3]>,
+    volume: f64,
+    area: f64,
+    bbox: [f64; 6],
+}
+
+/// Three manifold solid B-reps (186) of known size, each with its name and the first two with a
+/// colour (314), as SolidCraft's IGES export writes them: a 10 × 20 × 30 mm box (V = 6000,
+/// A = 2(200 + 300 + 600) = 2200), a cylinder of radius 5 and height 12 on the XY plane
+/// (V = 300π, A = 2π·5·12 + 2·25π = 170π) and a ball of radius 10 at (50, 0, 0) (V = 4000π/3,
+/// A = 400π). Each colour definition is made as IGES 5.3 (4.77) has it, which cadmpeg's decoder
+/// requires and SolidCraft's export does not yet write: its status a definition (use flag 02),
+/// and its empty name left out rather than written as a zero-length Hollerith string (`0H`).
+fn known_solids_iges() -> (String, [KnownSolid; 3]) {
+    use solidcore_record::Vec3;
+    use std::f64::consts::PI;
+    let block = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+    let pin = solidcraft_kernel::cylinder(Vec3::new(30.0, 0.0, 0.0), Vec3::Z, 5.0, 12.0).unwrap();
+    let ball = solidcraft_kernel::sphere(Vec3::new(50.0, 0.0, 0.0), 10.0).unwrap();
+    let known = [
+        KnownSolid { name: "Block", color: Some([1.0, 0.5, 0.0]), volume: 6000.0, area: 2200.0, bbox: [0.0, 0.0, 0.0, 10.0, 20.0, 30.0] },
+        KnownSolid { name: "Pin", color: Some([0.0, 0.0, 1.0]), volume: 300.0 * PI, area: 170.0 * PI, bbox: [25.0, -5.0, 0.0, 35.0, 5.0, 12.0] },
+        KnownSolid { name: "Ball", color: None, volume: 4000.0 * PI / 3.0, area: 400.0 * PI, bbox: [40.0, -10.0, -10.0, 60.0, 10.0, 10.0] },
+    ];
+    let bodies: Vec<solidcraft_kernel::ExportBody> = [&block, &pin, &ball]
+        .iter()
+        .zip(&known)
+        .map(|(body, k)| solidcraft_kernel::ExportBody { name: k.name.into(), body, color: k.color })
+        .collect();
+    let header = solidcraft_kernel::StepHeader { file_name: "solids.igs".into(), ..Default::default() };
+    let text = solidcraft_kernel::iges_export_bodies(&bodies, &header).unwrap();
+    let text: String = text
+        .lines()
+        .map(|l| {
+            let section = l.get(72..73);
+            let seq: u64 = l.get(73..).and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+            if section == Some("P") && l.contains(",0H;") {
+                // A parameter line ending in an empty name (`,0H;`) ends with the field left out.
+                format!("{}\n", l.replacen(",0H;", ";   ", 1))
+            } else if section == Some("D") && seq % 2 == 1 && l.get(..8).is_some_and(|t| t.trim() == "314") {
+                format!("{}00000200{}\n", &l[..64], &l[72..])
+            } else {
+                format!("{l}\n")
+            }
+        })
+        .collect();
+    (text, known)
+}
+
+/// IGES solids come in with their names, colours, volumes, areas and boxes through either reader,
+/// the reader chosen as for STEP: SolidCraft's keeps the STEP it restates the file as, cadmpeg's
+/// IGES decoder the records.
+#[test]
+fn iges_solids_keep_their_names_colours_and_sizes_with_either_reader() {
+    let (text, known) = known_solids_iges();
+    for reader in READERS {
+        let sf = read_iges(text.as_bytes(), "parts/solids.IGS", reader);
+        assert_eq!(sf.import.bodies.len(), known.len(), "{reader:?}: {:?}", sf.warnings);
+        for k in &known {
+            let what = format!("{} ({reader:?})", k.name);
+            let i = sf.body_names.iter().position(|n| n == k.name).unwrap_or_else(|| panic!("{what}: names {:?}", sf.body_names));
+            let b = &sf.import.bodies[i];
+            assert!(b.refused.is_none(), "{what}: a whole solid");
+            assert_eq!(b.body.color(), k.color, "{what}: {:?}", sf.warnings);
+            let m = solidcraft_kernel::measure(&b.body).unwrap();
+            assert!((m.volume - k.volume).abs() < 1e-3 * k.volume, "{what}: volume {} vs {}", m.volume, k.volume);
+            assert!((m.area - k.area).abs() < 1e-3 * k.area, "{what}: area {} vs {}", m.area, k.area);
+            let got = [m.bbox.min.x, m.bbox.min.y, m.bbox.min.z, m.bbox.max.x, m.bbox.max.y, m.bbox.max.z];
+            assert!(got.iter().zip(k.bbox).all(|(g, w)| (g - w).abs() < 1e-3), "{what}: box {got:?} vs {:?}", k.bbox);
+        }
+    }
+    let by = READERS.map(|r| built(&read(text.as_bytes(), "solids.igs", r).import));
+    assert!(same_bodies(&by[0], &by[1]), "the two readers built different bodies: {:?} vs {:?}", by[0], by[1]);
+}
+
+/// The IGES import kernel cases: boxes of trimmed planes (one, or two apart), a dome of a
+/// revolved arc and a patch with a square hole, each of a size `expected.json` derives by hand.
+const IGES_CASES: [&str; 7] = [
+    "3359-iges-trim-pieces-written-end-to-start",
+    "3806-iges-revolved-arc-spherical-cap-dome",
+    "3845-iges-trim-pieces-miss-by-a-gap",
+    "3886-iges-bspline-curve-over-tiny-knot-span",
+    "3912-iges-hole-trim-first-piece-reversed",
+    "3913-iges-trim-curve-first-piece-reversed",
+    "3972-iges-two-separate-closed-boxes",
+];
+
+/// Each IGES kernel case read by SolidCraft's reader builds what the case expects (its bodies,
+/// faces, area, volume and, where given, box). cadmpeg's IGES decoder (0.6.12) projects none of
+/// these hand-written trimmed surfaces (144): it takes a composite curve's pieces and a trimmed
+/// surface's carrier only when their directory entries mark them physically dependent, and does
+/// not sew trimmed surfaces into a solid, so with the cadmpeg reader the file is refused with a
+/// message naming it, never imported as something else; should cadmpeg read one, it must build
+/// the same bodies.
+#[test]
+fn iges_kernel_cases_with_either_reader() {
+    let cases = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/kernel-cases/import");
+    for c in IGES_CASES {
+        let expected: serde_json::Value = serde_json::from_slice(&std::fs::read(cases.join(c).join("expected.json")).unwrap()).unwrap();
+        let bytes = std::fs::read(cases.join(c).join("input.igs")).unwrap();
+        let file = format!("dir/{c}.igs");
+        let sf = read_iges(&bytes, &file, crate::StepReader::SolidCraft);
+        let measured: Vec<_> = sf.import.bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap()).collect();
+        let what = format!("{c}: {:?}", sf.warnings);
+        assert_eq!(measured.len() as u64, expected["body_count"].as_u64().unwrap(), "{what}");
+        assert_eq!(measured.iter().map(|m| m.faces as u64).sum::<u64>(), expected["faces"].as_u64().unwrap(), "{what}");
+        let area: f64 = measured.iter().map(|m| m.area).sum();
+        let want = expected["area_mm2"].as_f64().unwrap();
+        assert!((area - want).abs() < 1e-3 * want, "{what}: area {area} vs {want}");
+        if let Some(want) = expected["volume_mm3"].as_f64() {
+            let volume: f64 = measured.iter().map(|m| m.volume).sum();
+            assert!((volume - want).abs() < 1e-3 * want, "{what}: volume {volume} vs {want}");
+        }
+        if let Some(bbox) = expected.get("bbox") {
+            let m = &measured[0].bbox;
+            let got = [m.min.x, m.min.y, m.min.z, m.max.x, m.max.y, m.max.z];
+            let want: Vec<f64> = ["min", "max"].iter().flat_map(|k| bbox[k].as_array().unwrap().iter().map(|v| v.as_f64().unwrap())).collect();
+            assert!(got.iter().zip(&want).all(|(g, w)| (g - w).abs() < 1e-3), "{what}: box {got:?} vs {want:?}");
+        }
+        match crate::step_import_feature_read(&bytes, &file, crate::StepNames::default(), crate::StepReader::Cadmpeg) {
+            Err(e) => assert!(e.to_string().contains(&format!("{c}.igs")), "{c}: the message names the file: {e}"),
+            Ok(theirs) => assert!(same_bodies(&built(&theirs.import), &built(&sf.import)), "{c}: cadmpeg built different bodies"),
+        }
+    }
+}
+
+/// The cadmpeg IGES reader reads only IGES: STEP text named `.igs`, garbage and an empty file
+/// are refused with a message naming the file, and IGES contents are not read as STEP.
+#[test]
+fn the_cadmpeg_iges_reader_refuses_what_is_not_iges() {
+    for (bytes, name) in [(STEP_TEXT.as_bytes(), "x.igs"), (b"\0\0garbage".as_slice(), "x.iges"), (b"".as_slice(), "x.igs")] {
+        let e = cadmpeg_iges_records(bytes, name).expect_err(name);
+        assert!(e.starts_with(name), "{name}: the message names the file: {e}");
+    }
+    let (iges, _) = known_solids_iges();
+    assert!(cadmpeg_iges_records(iges.as_bytes(), "solids.step").is_err(), "only .igs and .iges");
+    assert!(cadmpeg_step_records(iges.as_bytes(), "solids.step").is_err(), "IGES contents are not STEP");
+}
+
 /// A part whose body was not imported (its conversion refused) is not compared with the figures
 /// its file states, as if what did import were the whole part: the warning says it was not checked.
 #[test]
