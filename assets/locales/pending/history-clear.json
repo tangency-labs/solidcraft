@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "ui.history_clear": "مسح السجل"
+  },
+  "de": {
+    "ui.history_clear": "Verlauf löschen"
+  },
+  "en": {
+    "ui.history_clear": "Clear History"
+  },
+  "he": {
+    "ui.history_clear": "ניקוי ציר הזמן"
+  },
+  "ja": {
+    "ui.history_clear": "履歴をクリア"
+  },
+  "ko": {
+    "ui.history_clear": "기록 지우기"
+  },
+  "vi": {
+    "ui.history_clear": "Xóa lịch sử"
+  },
+  "zh": {
+    "ui.history_clear": "清除历史"
+  }
+}
