@@ -892,7 +892,7 @@ impl Body {
 
     /// Whether face `index`'s normal in its body is its surface's natural normal (its first
     /// oriented face's `forward`, the side the record walks it by).
-    pub(crate) fn face_forward(&self, index: usize) -> bool {
+    pub fn face_forward(&self, index: usize) -> bool {
         self.record
             .shells
             .iter()
