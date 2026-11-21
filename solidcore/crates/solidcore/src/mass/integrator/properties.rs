@@ -77,9 +77,43 @@ use crate::topology::face::p2::{
     PPF_AREA, PPF_AREA_FIRST_MOMENTS,
 };
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, FaceuseId, RegionId, VertexId};
+use crate::error::{Failure, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::{EntityRef, Result, SolidError};
 
 const OP: &str = "mass::integrator::properties";
+
+/// A defect ([`MassFailure::Defect`]) with the status `SM_ERR` of the `SE(SM_ERR)` it
+/// replaces.
+#[track_caller]
+fn defect(why: &'static str) -> SolidError {
+    Failure::new(OP, MassFailure::Defect { why }).into_error()
+}
+
+/// A defect ([`MassFailure::Defect`]) with the status `SM_ERR_NULL_POINTER` of the `NER` it
+/// replaces.
+#[track_caller]
+fn null_defect(why: &'static str) -> SolidError {
+    Failure::new(OP, MassFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// Why an evaluation returned fewer values than asked for.
+const SHORT_EVALUATION: &str = "the curve's evaluation returned fewer values than asked for, \
+                                though an evaluation that succeeds returns the point and each \
+                                derivative asked for";
+/// Why a face has no face use.
+const NO_FACEUSE: &str =
+    "the face has no face use, though the kernel makes every face with its two face uses";
+/// Why a face use has no mate.
+const NO_MATE: &str =
+    "the face use has no mate, though the kernel makes a face's two uses as each other's mates";
+/// Why the closed boundary and the face's loops disagree.
+const BOUNDARY_LOOPS: &str = "the face's closed boundary and its loops disagree, though the \
+                              boundary is built from those loops, one edge use at a time";
+/// Why the integrator's moments are missing a group.
+const NO_MOMENTS: &str = "the integration's result has fewer moment groups than it always \
+                          fills";
 /// The fewest surface v knots inside a face's trims for which the face is integrated in
 /// bands between them (#14460).
 const MIN_BANDS: usize = 12;
@@ -176,7 +210,7 @@ pub fn edge_properties(
     radius: f64,
 ) -> Result<EdgeProperties> {
     let curve =
-        edge::curve(b, e)?.ok_or_else(|| SolidError::mass_missing(OP, "the edge's curve"))?;
+        edge::curve(b, e)?.ok_or_else(|| SolidError::mass(OP, MassFailure::EdgeWithoutCurve))?;
     curve_properties(k, curve, &edge::interval(b, e)?, accuracy, origin, radius)
 }
 /// The precise edge integration on an already-bound curve and interval.
@@ -209,7 +243,7 @@ pub fn curve_properties(
         .evaluate(k, interval.min(), 0, false, false)?
         .first()
         .copied()
-        .ok_or_else(|| SolidError::mass_missing(OP, "the curve's start point"))?;
+        .ok_or_else(|| null_defect(SHORT_EVALUATION))?;
     let reach = (start - origin).length() + approx;
     let length_scale = approx / 10.0;
     let area_scale = 2.0 * PI * radius.abs() * length_scale;
@@ -344,17 +378,20 @@ fn close_loops(
         let lp = trims
             .curves
             .get(start..start + n)
-            .ok_or_else(|| SolidError::mass_failed(OP, "the trim boundary's loop counts"))?;
+            .ok_or_else(|| {
+                defect(
+                    "the oriented trim boundary's loop counts add up to more curves than it \
+                     holds, though it counts each loop as it adds the loop's curves",
+                )
+            })?;
         let mut count = n;
         for (i, c) in lp.iter().enumerate() {
             curves.push(c.clone());
             if recorded {
                 edgeuses.push(trims.edgeuses.get(start + i).copied().flatten());
             }
-            let next = lp
-                .get(i + 1)
-                .or_else(|| lp.first())
-                .ok_or_else(|| SolidError::mass_failed(OP, "the trim boundary's loop counts"))?;
+            // (`lp` holds `c`, so it has a first curve)
+            let next = lp.get(i + 1).or_else(|| lp.first()).unwrap_or(c);
             let end = c.evaluate_point(k, c.natural_interval().max())?;
             let first = next.evaluate_point(k, next.natural_interval().min())?;
             let d = first - end;
@@ -643,7 +680,7 @@ fn face_properties_in(
         .face(f)?
         .surface
         .as_ref()
-        .ok_or_else(|| SolidError::mass_missing(OP, "the face's surface"))?;
+        .ok_or_else(|| SolidError::mass(OP, MassFailure::FaceWithoutSurface))?;
     // set for the integration alone (after the face's box, which may fill the surface's
     // caches), and restored when the guard drops, on every path
     let _unclamped = if closed {
@@ -682,7 +719,12 @@ fn trims_v_range(k: &Kernel, trims: &[Curve], domain: &Extent2d) -> Result<(f64,
         let bbox = trim
             .calculate_bounding_box(k, &trim.natural_interval(), req, true)?
             .normal
-            .ok_or_else(|| SolidError::mass_failed(OP, "the trim has no bounding box"))?;
+            .ok_or_else(|| {
+                defect(
+                    "the trim's bounding box came back without the axis-aligned box, though \
+                     that box is computed whenever it is asked for",
+                )
+            })?;
         let v = bbox.min().y;
         if v < base {
             base = v;
@@ -747,17 +789,11 @@ fn trim_integrand(
 ) -> Result<()> {
     let pv = trim.evaluate(k, t, 1, true, true)?;
     let (Some(p0), Some(p1)) = (pv.first().copied(), pv.get(1).copied()) else {
-        return Err(SolidError::mass_failed(
-            OP,
-            "the trim has no point or tangent",
-        ));
+        return Err(defect(SHORT_EVALUATION));
     };
     // a non-finite trim point would bisect to the depth bound and fail as step control
     if !(p0.x.is_finite() && p0.y.is_finite() && p1.x.is_finite()) {
-        return Err(SolidError::mass_failed(
-            OP,
-            "the trim's point or tangent is not finite",
-        ));
+        return Err(SolidError::mass(OP, MassFailure::Integrand));
     }
     dy.fill(0.0);
     if p1.x == 0.0 {
@@ -1338,7 +1374,12 @@ fn vertices(b: &Brep) -> Result<Vec<VertexId>> {
 /// no region is upstream's null pointer.
 fn faceuse_region(b: &Brep, fu: FaceuseId) -> Result<RegionId> {
     crate::topology::edgeuse::p1::faceuse_region(b, fu)?
-        .ok_or_else(|| SolidError::mass_missing(OP, "the faceuse's region"))
+        .ok_or_else(|| {
+            null_defect(
+                "the face use has no region, though the kernel makes every face use in a \
+                 shell of a region",
+            )
+        })
 }
 /// `SmRegion::IsVoid` as a C truth value (`UNSURE`, 2, counts as void).
 fn region_void(b: &Brep, r: RegionId) -> Result<bool> {
@@ -1581,10 +1622,7 @@ fn nearest_on_edge(
     for _ in 0..64 {
         let e = curve.evaluate(k, t, 1, true, false)?;
         let (Some(&ep), Some(&d1)) = (e.first(), e.get(1)) else {
-            return Err(SolidError::mass_failed(
-                OP,
-                "the edge curve's evaluation returned no derivative for the nearest point",
-            ));
+            return Err(defect(SHORT_EVALUATION));
         };
         let df = d1.dot(d1);
         let f = (ep - p).dot(d1);
@@ -1652,7 +1690,7 @@ fn gap_closure(
     use crate::nurbs::knots::Side;
     use crate::topology::edgeuse::{p1 as eu1, p3 as eu3};
     let fu = crate::topology::face::p2::upward_faceuse(b, f)?
-        .ok_or_else(|| SolidError::mass_missing(OP, "the face's faceuse"))?;
+        .ok_or_else(|| null_defect(NO_FACEUSE))?;
     let mut pools = Vec::new();
     for lu in eu1::faceuse_loopuses(b, fu, false, None)? {
         if crate::topology::loopuse::is_vertex_loopuse(b, lu)? {
@@ -1667,18 +1705,38 @@ fn gap_closure(
             let trim = eu1::uv_trim_curve(b, eu)?
                 .0
                 .cloned()
-                .ok_or_else(|| SolidError::mass_missing(OP, "the edge use's UV trim"))?;
+                .ok_or_else(|| {
+                    null_defect(
+                        "the edge use has no UV trim just after it was made where it was \
+                         missing",
+                    )
+                })?;
             let vu = b
                 .edgeuse(eu)?
                 .vertexuse
-                .ok_or_else(|| SolidError::mass_missing(OP, "the edge use's vertex use"))?;
+                .ok_or_else(|| {
+                    null_defect(
+                        "an edge use of the face's loop has no vertex use, though the kernel \
+                         makes every edge use with the vertex use at its start",
+                    )
+                })?;
             let v = b
                 .vertexuse(vu)?
                 .vertex
-                .ok_or_else(|| SolidError::mass_missing(OP, "the vertex use's vertex"))?;
+                .ok_or_else(|| {
+                    null_defect(
+                        "a vertex use has no vertex, though the kernel makes every vertex use \
+                         on its vertex",
+                    )
+                })?;
             let vertex = b.vertex(v)?.point;
             let e = eu1::edge(b, eu)?
-                .ok_or_else(|| SolidError::mass_missing(OP, "the edge use's edge"))?;
+                .ok_or_else(|| {
+                    null_defect(
+                        "an edge use of the face's loop has no edge, though the kernel makes \
+                         every edge use of a loop on its edge",
+                    )
+                })?;
             let ivl = b.edge(e)?.interval;
             let edge = edge::curve(b, e)?.map(|c| (c.clone(), ivl.min(), ivl.max()));
             sides.push((
@@ -1725,10 +1783,7 @@ fn gap_closure(
                         .find(|(id, _)| id == eu)
                         .and_then(|(_, side)| side.take())
                     else {
-                        return Err(SolidError::mass_failed(
-                            OP,
-                            "the face's boundary has a trim of no edge use of its loop",
-                        ));
+                        return Err(defect(BOUNDARY_LOOPS));
                     };
                     for trim in core::mem::take(&mut gaps) {
                         closed.push(gap_side(trim, side.vertex));
@@ -1736,16 +1791,15 @@ fn gap_closure(
                     closed.push(side);
                 }
                 Some(None) => {
-                    let trim = integrated.curves.get(j).cloned().ok_or_else(|| {
-                        SolidError::mass_failed(OP, "the face's boundary lost a gap line")
-                    })?;
+                    let trim = integrated
+                        .curves
+                        .get(j)
+                        .cloned()
+                        .ok_or_else(|| defect(BOUNDARY_LOOPS))?;
                     gaps.push(trim);
                 }
                 None => {
-                    return Err(SolidError::mass_failed(
-                        OP,
-                        "the face's boundary curve has no edge use record",
-                    ));
+                    return Err(defect(BOUNDARY_LOOPS));
                 }
             }
         }
@@ -1756,10 +1810,7 @@ fn gap_closure(
             }
         }
         if pool.iter().any(|(_, side)| side.is_some()) {
-            return Err(SolidError::mass_failed(
-                OP,
-                "the face's loop has more edge uses than its boundary",
-            ));
+            return Err(defect(BOUNDARY_LOOPS));
         }
         loops.push(closed);
     }
@@ -1767,7 +1818,7 @@ fn gap_closure(
         .face(f)?
         .surface
         .clone()
-        .ok_or_else(|| SolidError::mass_missing(OP, "the face's surface"))?;
+        .ok_or_else(|| SolidError::mass(OP, MassFailure::FaceWithoutSurface))?;
     // continued past its domain where the face's integration continues it, so the strips
     // start on the curves the face's Green integral runs along
     let _unclamped = Unclamped::where_trims_may_leave(k, &surface, &integrated.curves)?;
@@ -1803,7 +1854,7 @@ fn gap_closure(
         let [[p, sv], [su, _]] = pv;
         Ok((p, su, sv))
     };
-    let missing = || SolidError::mass_missing(OP, "a curve evaluation");
+    let missing = || null_defect(SHORT_EVALUATION);
     // the face integration's error scales: a length per extra dimension
     let length = (10.0 * estimated_area.sqrt())
         .max(face_box(k, b, f)?.min_distance(&Extent3d::from_point(origin)));
@@ -1882,13 +1933,8 @@ fn gap_closure(
                 let share = e0 + (e1 - e0) * f64::from(i) / f64::from(grid);
                 last = match nearest_on_edge(k, curve, e0, e1, p, last)? {
                     Some(t) => t,
-                    None => nearest_on_edge(k, curve, e0, e1, p, share)?.ok_or_else(|| {
-                        SolidError::mass_failed(
-                            OP,
-                            "the edge curve's derivative is zero or not finite at the nearest \
-                             point's step from both seeds",
-                        )
-                    })?,
+                    None => nearest_on_edge(k, curve, e0, e1, p, share)?
+                        .ok_or_else(|| SolidError::mass(OP, MassFailure::EdgeCurveSingular))?,
                 };
                 table.push((tau, last));
             }
@@ -2072,11 +2118,11 @@ fn properties_in_box(
         let up = b
             .face(f)?
             .faceuse
-            .ok_or_else(|| SolidError::mass_missing(OP, "the face's faceuse"))?;
+            .ok_or_else(|| null_defect(NO_FACEUSE))?;
         let mate = b
             .faceuse(up)?
             .mate
-            .ok_or_else(|| SolidError::mass_missing(OP, "the faceuse's mate"))?;
+            .ok_or_else(|| null_defect(NO_MATE))?;
         let mut separating = faceuse_region(b, up)? != faceuse_region(b, mate)?;
         // the face's closure onto its edges (#16735), made once for both its uses
         let mut closure: Option<PreciseProperties> = None;
@@ -2094,7 +2140,7 @@ fn properties_in_box(
                     let other = b
                         .faceuse(fu)?
                         .mate
-                        .ok_or_else(|| SolidError::mass_missing(OP, "the faceuse's mate"))?;
+                        .ok_or_else(|| null_defect(NO_MATE))?;
                     if !region_void(b, faceuse_region(b, fu)?)?
                         && region_void(b, faceuse_region(b, other)?)?
                     {
@@ -2235,7 +2281,11 @@ fn properties_in_box(
 /// the edge, so its zone tolerance (`SmTol::GetZoneTol3d(pCurve)`) is the edge's.
 pub fn edge_length(k: &Kernel, b: &Brep, e: EdgeId, accuracy: f64) -> Result<f64> {
     let c =
-        edge::curve(b, e)?.ok_or_else(|| SolidError::mass_failed(OP, "the edge has no curve"))?;
+        edge::curve(b, e)?.ok_or_else(|| {
+            Failure::new(OP, MassFailure::EdgeWithoutCurve)
+                .with_status(SM_ERR)
+                .into_error()
+        })?;
     let owner_zone_tol_3d = if c.owner().is_some() {
         Some(edge::tolerance(b, e)?)
     } else {
@@ -2291,7 +2341,7 @@ pub fn face_centroid(k: &Kernel, b: &mut Brep, f: FaceId, accuracy: f64) -> Resu
         origin
             + *p.moments
                 .first()
-                .ok_or_else(|| SolidError::mass_failed(OP, "no first moments"))?
+                .ok_or_else(|| defect(NO_MOMENTS))?
                 / p.area,
     ))
 }
@@ -2706,7 +2756,7 @@ fn estimate(
             .moments
             .get(i)
             .copied()
-            .ok_or_else(|| SolidError::mass_failed(OP, "a moment group is missing"))
+            .ok_or_else(|| defect(NO_MOMENTS))
     };
     let static_moment = moment(4)?;
     let mass = properties.mass;
@@ -2909,7 +2959,7 @@ fn faces_area_about(
             sum += *p
                 .moments
                 .first()
-                .ok_or_else(|| SolidError::mass_failed(OP, "no first moments"))?
+                .ok_or_else(|| defect(NO_MOMENTS))?
                 * sign;
         }
     }
