@@ -37,7 +37,8 @@ use crate::blend::fillet_solver::p1::{
     test_manifold_tangent_rollover, FilletSolver, FilletSolverOps,
 };
 use crate::curve::curve::Curve;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::blend::BlendFailure;
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
 use crate::intersect::curve_class::p1::{CurveClassification, CurveInterval};
@@ -90,10 +91,28 @@ fn rim_is_smooth_at(
     parameter: f64,
     tangency_tol: f64,
 ) -> Result<bool> {
-    let primary = eu::primary_edgeuse(target, e)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the rim's primary edge use"))?;
-    let radial = eu::radial(target, primary)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the rim's radial edge use"))?;
+    let primary = eu::primary_edgeuse(target, e)?.ok_or_else(|| {
+        Failure::new(
+            OP,
+            BlendFailure::Defect {
+                why: "the rail classifier identified a solid rim without the primary edge use \
+                      that the kernel's solid topology must retain",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    })?;
+    let radial = eu::radial(target, primary)?.ok_or_else(|| {
+        Failure::new(
+            OP,
+            BlendFailure::Defect {
+                why: "the rail classifier identified a solid rim without the radial partner \
+                      required to bound its material sector",
+            },
+        )
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+    })?;
     let options = BinormalOptions::default();
     let first = evaluate_binormal(k, target, primary, parameter, false, &options)?.face_normal;
     let second = evaluate_binormal(k, target, radial, parameter, false, &options)?.face_normal;
@@ -148,7 +167,15 @@ fn closed_rail_touches_rim(
             let edges = match (point.point_class(), object.target_entity()?) {
                 (PointClassType::Edge, EntityRef::Edge(e)) => {
                     if !point.are_parameters_set() {
-                        return Err(SolidError::blend_missing(OP, "the rim contact's parameter"));
+                        return Err(Failure::new(
+                            OP,
+                            BlendFailure::Defect {
+                                why: "the rail classifier reported an edge contact without \
+                                      locating its parameter, which classification must supply",
+                            },
+                        )
+                        .with_status(SM_ERR_NULL_POINTER)
+                        .into_error());
                     }
                     // The classifier has already located the contact on this edge.
                     vec![(e, point.t_param())]
