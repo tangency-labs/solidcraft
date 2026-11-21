@@ -510,7 +510,12 @@ fn rounding_of_copies(size: f64) -> f64 {
 /// rounding of the copies past it, as [`within_contact_tol`] reads a contact.
 #[must_use]
 pub fn coincidence_tol_3d(k: &Kernel, zone1: f64, zone2: f64) -> f64 {
-    // (`f64::max` passes over a NaN zone tolerance: the contact tolerance stands)
+    // A NaN zone tolerance stays NaN (`f64::max` would pass over it and let the other
+    // tolerance stand): no distance is within it, so an object whose tolerance is unknown
+    // is never made one with another place, as the two tolerances' sum read it before
+    if zone1.is_nan() || zone2.is_nan() {
+        return f64::NAN;
+    }
     contact_tol_3d(k).max(zone1).max(zone2)
 }
 
@@ -525,7 +530,8 @@ pub fn coincidence_reach_3d(k: &Kernel, zone1: f64, zone2: f64, size: f64) -> f6
 
 /// Whether two places `distance` apart, on objects with zone tolerances `zone1` and
 /// `zone2`, coincide: `distance` is within [`coincidence_reach_3d`]. Not upstream: the
-/// one reading of the coincidence rule ([`coincidence_tol_3d`]). A NaN distance is apart.
+/// one reading of the coincidence rule ([`coincidence_tol_3d`]). A NaN distance, or a NaN
+/// zone tolerance, is apart.
 #[must_use]
 pub fn within_coincidence_tol(
     k: &Kernel,
@@ -1678,6 +1684,35 @@ mod tests {
             SmallTopoType::from_code(3).map(SmallTopoType::code),
             Some(3)
         );
+    }
+
+    #[test]
+    fn coincidence_is_the_larger_tolerance_and_a_nan_tolerance_is_apart() {
+        let k = Kernel::default();
+        let contact = contact_tol_3d(&k);
+        assert_eq!(coincidence_tol_3d(&k, 0.0, 0.0), contact);
+        assert_eq!(
+            coincidence_tol_3d(&k, 4.0 * contact, contact),
+            4.0 * contact
+        );
+        assert!(within_coincidence_tol(&k, contact, 0.0, 0.0, 1.0));
+        assert!(!within_coincidence_tol(
+            &k,
+            2.0 * contact,
+            contact,
+            contact,
+            1.0
+        ));
+        // an unknown tolerance never makes two places one, however near they are
+        for (zone1, zone2) in [
+            (f64::NAN, contact),
+            (contact, f64::NAN),
+            (f64::NAN, f64::NAN),
+        ] {
+            assert!(coincidence_tol_3d(&k, zone1, zone2).is_nan());
+            assert!(!within_coincidence_tol(&k, 0.0, zone1, zone2, 1.0));
+        }
+        assert!(!within_coincidence_tol(&k, f64::NAN, contact, contact, 1.0));
     }
 }
 
