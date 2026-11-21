@@ -79,6 +79,28 @@ fn pieces_nothing_tells_apart_are_numbered_and_unverified() {
     assert!(!names.verified(0) && !names.verified(1));
 }
 
+/// #7990, change 4: pieces nothing around them tells apart, whose feature says where each
+/// starts along its definition (a hole's wall's halves along its sketch circle), are numbered in
+/// that order, whatever order the faces come in, and the names are exact. Where two would share a
+/// place the order says nothing, and they are numbered as before.
+#[test]
+fn pieces_are_numbered_along_their_definition_where_the_feature_says() {
+    let ranked = |order: [usize; 2]| {
+        let mut faces = named(&["F3:side:c1", "F3:side:c1", "F1:top"]);
+        for (face, place) in faces.iter_mut().zip(order) {
+            face.ordinal = Some(place);
+        }
+        qualify(faces, &[(0, 2), (1, 2)])
+    };
+    let names = ranked([2, 1]);
+    assert_eq!((names.faces[0].as_str(), names.faces[1].as_str()), ("F3:side:c1#2", "F3:side:c1#1"));
+    assert!(names.verified(0) && names.verified(1));
+    let names = ranked([1, 2]);
+    assert_eq!((names.faces[0].as_str(), names.faces[1].as_str()), ("F3:side:c1#1", "F3:side:c1#2"));
+    let names = ranked([1, 1]);
+    assert!(!names.verified(0) && !names.verified(1));
+}
+
 /// #5860: a piece of a split face that is split again must not stack another qualifier on
 /// its name: the name grew with every split (728 characters after eleven splits).
 #[test]
@@ -285,4 +307,31 @@ fn two_pieces_told_apart_by_one_blend_both_answer_to_a_stored_name() {
         (0..names.faces.len()).filter(|face| matches(&names, *face, stored).is_some_and(|level| level >= Match::Piece)).collect();
     assert_eq!(answering.len(), 2, "{:?}", names.faces);
     assert!(crate::name_lookup::locate_face_on_body(&state, Some("Body1"), stored, Vec3::new(5., 0., 4.)).is_none(), "two faces answer");
+}
+
+/// A face named only by its index (a thread's groove, `F7:face:12`, unverified) never tells its
+/// neighbours apart: the next evaluation can give that index to another face, so an exact piece
+/// qualified by it could change its name or take another's. Pieces only such faces tell apart
+/// are numbered and unverified, and a stored name qualified by an index finds no piece by its name
+/// alone (an edge saved with one is found only where its pick still lies beside such a face,
+/// #19455).
+#[test]
+fn a_face_named_by_its_index_never_qualifies_an_exact_piece() {
+    let groove = |name: &str| Named { name: name.to_string(), verified: false, ..Named::default() };
+    let mut faces = named(&["F2:side", "F2:side", "F2:end", "F2:start"]);
+    faces.extend([groove("F7:face:12"), groove("F7:face:13")]);
+    // Each piece touches one end of the part and a groove face of its own.
+    let names = qualify(faces, &[(0, 2), (0, 4), (1, 3), (1, 5)]);
+    assert_eq!(names.faces[0], "F2:side#[F2:end]");
+    assert_eq!(names.faces[1], "F2:side#[F2:start]");
+    assert!(names.verified(0) && names.verified(1));
+    assert!(names.info.iter().all(|i| !i.bounds.iter().any(|b| b.contains(":face:"))), "{:?}", names.info);
+    assert!(matches(&names, 0, "F2:side#[F7:face:12]").is_none_or(|m| m < Match::Piece), "an index never finds a piece");
+    // Told apart by nothing but groove faces: numbered, and no longer exact.
+    let mut faces = named(&["F2:side", "F2:side"]);
+    faces.extend([groove("F7:face:12"), groove("F7:face:13")]);
+    let names = qualify(faces, &[(0, 2), (1, 3)]);
+    assert!(names.faces.iter().take(2).all(|n| !n.contains(":face:")), "{:?}", names.faces);
+    assert_ne!(names.faces[0], names.faces[1]);
+    assert!(!names.verified(0) && !names.verified(1));
 }

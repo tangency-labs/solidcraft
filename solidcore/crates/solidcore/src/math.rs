@@ -263,6 +263,71 @@ impl Transform {
         )
     }
 
+    /// Maps a list of point coordinates in place, preserving their order.
+    /// Each point uses [`Self::transform_point`]'s row-vector convention and rounding.
+    pub fn transform_points(&self, points: &mut [[f64; 3]]) {
+        for point in points {
+            let [x, y, z] = *point;
+            let image = self.transform_point(Point3::new(x, y, z));
+            *point = [image.x, image.y, image.z];
+        }
+    }
+
+    /// The axis-aligned box around the eight corners of the box `lo`..`hi` mapped by
+    /// [`Self::transform_point`]: it holds the exact image of every point of the box, and for
+    /// a map that turns it is larger than the image itself. An empty box (`lo` above `hi` on
+    /// any axis) maps to itself.
+    ///
+    /// Rounding: each mapped coordinate `t + x a + y b + z c` is four terms summed in order,
+    /// within `gamma_4` of the sum of their sizes; the sizes' sum is itself rounded, so each
+    /// side moves out by `gamma_5` of it, plus the smallest normal number for products that
+    /// underflow, and then by one more double for the subtraction or addition.
+    #[must_use]
+    pub fn moved_box(&self, lo: Point3, hi: Point3) -> (Point3, Point3) {
+        use crate::geom::certified::{next_down, next_up};
+        use crate::nurbs::math::gamma;
+        if lo.x > hi.x || lo.y > hi.y || lo.z > hi.z {
+            return (lo, hi);
+        }
+        let (tx, ty, tz, td) = (
+            self.x_axis(),
+            self.y_axis(),
+            self.z_axis(),
+            self.translation_part(),
+        );
+        let g = gamma(5);
+        let mut min = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+        let mut max = Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for i in 0..8 {
+            let corner = Point3::new(
+                if i & 1 == 0 { lo.x } else { hi.x },
+                if i & 2 == 0 { lo.y } else { hi.y },
+                if i & 4 == 0 { lo.z } else { hi.z },
+            );
+            let p = self.transform_point(corner);
+            let size = |t: f64, a: f64, b: f64, c: f64| {
+                g * (t.abs() + (corner.x * a).abs() + (corner.y * b).abs() + (corner.z * c).abs())
+                    + f64::MIN_POSITIVE
+            };
+            let e = Vec3::new(
+                size(td.x, tx.x, ty.x, tz.x),
+                size(td.y, tx.y, ty.y, tz.y),
+                size(td.z, tx.z, ty.z, tz.z),
+            );
+            min = Vec3::new(
+                min.x.min(next_down(p.x - e.x)),
+                min.y.min(next_down(p.y - e.y)),
+                min.z.min(next_down(p.z - e.z)),
+            );
+            max = Vec3::new(
+                max.x.max(next_up(p.x + e.x)),
+                max.y.max(next_up(p.y + e.y)),
+                max.z.max(next_up(p.z + e.z)),
+            );
+        }
+        (min, max)
+    }
+
     /// The rigid placement `p` as a transform: its axes' images and its origin (the
     /// z axis as the placement derives it).
     #[must_use]
@@ -483,6 +548,15 @@ impl Transform {
             v.x * tx.z + v.y * ty.z + v.z * tz.z,
         )
     }
+
+    /// Not upstream: how far the linear part of this map (its rows 0 to 2, no translation) takes
+    /// the point `pivot` from where it was, as the move it adds to the map's turn about `pivot`:
+    /// `pivot - transform_vector(pivot)`. A turn about the origin followed by this move is the
+    /// same turn about `pivot`.
+    #[must_use]
+    pub fn pivot_displacement(&self, pivot: Vec3) -> Vec3 {
+        pivot - self.transform_vector(pivot)
+    }
 }
 
 /// The operation name of the refusals of the maps built from their numbers.
@@ -491,6 +565,62 @@ const OP_MAPS: &str = "math::Transform";
 /// Whether every coordinate of `v` is finite.
 fn finite3(v: Vec3) -> bool {
     v.x.is_finite() && v.y.is_finite() && v.z.is_finite()
+}
+
+/// Not upstream: the corners of a picture pinned to points on a plane, as an application ties
+/// a reference image to points of a sketch. Its bottom edge runs from `bl` to `br`; its top-left
+/// corner is `top_left` when the picture may stretch, and otherwise lies `aspect` (height over
+/// width) times the bottom edge's length from `bl`, square to the edge and on its left looking
+/// down `normal` (a unit normal of the plane). Returns bottom-left, bottom-right, top-right and
+/// top-left; `None` when the corners give no area: an edge not finite or shorter than a
+/// nanometre, or the two edges within a microradian of one line.
+#[must_use]
+pub fn picture_frame(
+    bl: Point3,
+    br: Point3,
+    top_left: Option<Point3>,
+    normal: Vec3,
+    aspect: f64,
+) -> Option<[Point3; 4]> {
+    let along = br - bl;
+    let up = match top_left {
+        Some(tl) => tl - bl,
+        None => normal.cross(along) * aspect,
+    };
+    let (width, height) = (along.length(), up.length());
+    let ok = width > 1e-9
+        && height > 1e-9
+        && width.is_finite()
+        && height.is_finite()
+        && along.cross(up).length() > 1e-6 * width * height;
+    if !ok {
+        return None;
+    }
+    Some([bl, br, br + up, bl + up])
+}
+
+/// Not upstream: a quad lifted clear of its own plane on both sides, as a decal is drawn just
+/// off the face it lies on so the face never hides it. `corners` are bottom-left, bottom-right,
+/// top-right and top-left; the normal is the unit cross product of the bottom edge with the left
+/// one. Returns that normal, the corners moved `lift` along it and the corners moved `lift`
+/// against it; `None` for a coordinate or lift not finite, or corners whose edges give no normal.
+#[must_use]
+pub fn lifted_quad(corners: [Point3; 4], lift: f64) -> Option<(Vec3, [Point3; 4], [Point3; 4])> {
+    if !(corners.iter().all(|p| finite3(*p)) && lift.is_finite()) {
+        return None;
+    }
+    let [bl, br, _, tl] = corners;
+    let normal = (br - bl).cross(tl - bl).unitize().ok()?;
+    let off = normal * lift;
+    Some((normal, corners.map(|p| p + off), corners.map(|p| p - off)))
+}
+
+/// Not upstream: the point `s` along the edge `u` and `t` along the edge `v` of the
+/// parallelogram with a corner at `corner`, `corner + s u + t v`, as a picture's texture
+/// coordinates place a point on the quad it is drawn on.
+#[must_use]
+pub fn parallelogram_point(corner: Point3, u: Vec3, v: Vec3, s: f64, t: f64) -> Point3 {
+    corner + u * s + v * t
 }
 
 /// Not upstream: the rigid motions and scalings an application asks for by their numbers
@@ -628,6 +758,56 @@ impl Transform {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn point_arrays_keep_their_order_under_an_affine_map() {
+        let map = Transform {
+            m: [
+                [2.0, 0.0, 0.0, 0.0],
+                [1.0, -1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [10.0, 20.0, 30.0, 1.0],
+            ],
+        };
+        let mut points = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
+        map.transform_points(&mut points);
+        assert_eq!(points, [[14.0, 18.0, 33.0], [23.0, 15.0, 36.0]]);
+        map.transform_points(&mut []);
+    }
+
+    #[test]
+    fn a_moved_box_holds_its_moved_corners_and_an_empty_box_stays_empty() {
+        // A quarter turn about z, then a move by (10, 20, 30): x goes to y, y to -x.
+        let map = Transform {
+            m: [
+                [0.0, 1.0, 0.0, 0.0],
+                [-1.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [10.0, 20.0, 30.0, 1.0],
+            ],
+        };
+        let (lo, hi) = map.moved_box(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 2.0, 3.0));
+        let (want_lo, want_hi) = (Point3::new(8.0, 20.0, 30.0), Point3::new(10.0, 21.0, 33.0));
+        for (got, want, out) in [
+            (lo.x, want_lo.x, -1.0),
+            (lo.y, want_lo.y, -1.0),
+            (lo.z, want_lo.z, -1.0),
+            (hi.x, want_hi.x, 1.0),
+            (hi.y, want_hi.y, 1.0),
+            (hi.z, want_hi.z, 1.0),
+        ] {
+            // outside the exact image, by no more than its rounding
+            assert!((got - want) * out > 0.0 && (got - want).abs() < 1e-13);
+        }
+        let empty = (Point3::new(1.0, 0.0, 0.0), Point3::new(0.0, 1.0, 1.0));
+        assert_eq!(map.moved_box(empty.0, empty.1), empty);
+        // 1 + 2^-53 rounds to 1: the box still holds it.
+        let tiny = 2f64.powi(-53);
+        let shift = Transform::translation(Vec3::new(1.0, 0.0, 0.0));
+        let p = Point3::new(tiny, 0.0, 0.0);
+        let (lo, hi) = shift.moved_box(p, p);
+        assert!(lo.x < 1.0 && hi.x > 1.0 && hi.x - lo.x < 1e-14);
+    }
 
     #[test]
     fn repeated_rigid_turns_keep_plane_axes_square_and_keep_uv_scales() {
@@ -893,6 +1073,20 @@ mod tests {
         assert_eq!(both.transform_vector(p), Vec3::new(0.0, 1.0, 0.0));
         assert_eq!(Transform::IDENTITY.concat(&both), both);
         assert_eq!(Transform::default(), Transform::IDENTITY);
+    }
+
+    #[test]
+    fn pivot_displacement_makes_a_turn_about_the_origin_a_turn_about_the_pivot() {
+        let rot_z = Transform::from_axes(Vec3::Y, -Vec3::X, Vec3::Z, Vec3::ZERO);
+        let pivot = Vec3::new(0.0, 10.0, 0.0);
+        let d = rot_z.pivot_displacement(pivot);
+        assert_eq!(d, Vec3::new(10.0, 10.0, 0.0));
+        // The pivot stays where it is under the turn followed by the displacement.
+        assert_eq!(rot_z.transform_vector(pivot) + d, pivot);
+        // No turn, no displacement; a translation in the map is not read as a turn.
+        assert_eq!(Transform::IDENTITY.pivot_displacement(pivot), Vec3::ZERO);
+        let tr = Transform::translation(Vec3::new(1.0, 2.0, 3.0));
+        assert_eq!(tr.pivot_displacement(pivot), Vec3::ZERO);
     }
 
     #[test]

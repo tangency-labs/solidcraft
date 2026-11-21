@@ -166,6 +166,18 @@ fn the_record_parameter_inverts_the_kernel_parameter() {
     );
 }
 
+/// A parameter a solve rounds just past an end (one ulp past 1, as a cone's silhouette end
+/// came back) is on that end; one past it by more than `EFF_ZERO` is outside.
+#[test]
+fn a_parameter_rounded_past_an_end_is_on_it() {
+    let past = 1.0 + f64::EPSILON;
+    assert_eq!(on_interval([0.0, 1.0], past), Some(1.0));
+    assert_eq!(on_interval([0.0, 1.0], -1e-13), Some(0.0));
+    assert_eq!(on_interval([0.0, 1.0], 0.5), Some(0.5));
+    assert_eq!(on_interval([0.0, 1.0], 1.0 + 1e-9), None);
+    assert_eq!(on_interval([0.0, 1.0], f64::NAN), None);
+}
+
 /// A frame not orthonormal is refused (the kernel would silently rebuild it), as is a radius
 /// of no length.
 #[test]
@@ -572,6 +584,48 @@ fn a_form_past_a_whole_turn_is_refused() {
     };
     let d = e.step_interval();
     assert!((d.max() - d.min() - 240.0).abs() < 1e-9, "{d:?}");
+}
+
+/// An arc that needs five quarters of its frame's grid (it ends 0.02° past the quarter line a
+/// turn on from the quarter it starts in, as an edge of a face that ends within its tolerance of
+/// that line) has its form cut to it ([`crate::eval::form::curve`]), so the form is taken: the
+/// conic over the arc's 330°, from the arc's start to its end. Five whole quarters were refused
+/// as a form past a whole turn, and with them every body that had such an edge.
+#[test]
+fn an_arc_that_needs_five_quarters_of_its_grid_is_taken_on_its_form() {
+    let k = k();
+    let (o, r) = ([1.0, 2.0, 0.0], 2.0);
+    let circle = Record::Circle {
+        frame: frame(o),
+        radius: r,
+    };
+    let point = |t: f64| [o[0] + r * t.cos(), o[1] + r * t.sin(), o[2]];
+    for [t0, t1] in [
+        [30.02_f64.to_radians(), 360.02_f64.to_radians()],
+        [89.98_f64.to_radians(), 419.98_f64.to_radians()],
+        [1.0, 6.5],
+        // A whole turn from inside a quarter.
+        [-2.5, -2.5 + TAU],
+    ] {
+        let (form, [a, b]) = crate::eval::form::curve(&circle, [t0, t1]).unwrap();
+        let c = conic_on_form(&k, &circle, &form).unwrap();
+        let crate::curve::curve::CurveKind::Ellipse(e) = c.kind() else {
+            panic!("not a conic")
+        };
+        let d = e.step_interval();
+        let sweep = (t1 - t0).to_degrees();
+        assert!((d.max() - d.min() - sweep).abs() < 1e-9, "{d:?}");
+        let ivl = e.base().natural_interval();
+        assert_eq!((ivl.min(), ivl.max()), (a, b));
+        near(at(&k, &c, a), point(t0), 1e-14 * 8.0);
+        near(at(&k, &c, b), point(t1), 1e-14 * 8.0);
+        let mid = 0.5 * (t0 + t1);
+        near(
+            at(&k, &c, crate::eval::form::param(mid)),
+            point(mid),
+            1e-14 * 8.0,
+        );
+    }
 }
 
 /// B1: a closed form on strongly uneven knots (three quarters on [0, 0.03], the last on

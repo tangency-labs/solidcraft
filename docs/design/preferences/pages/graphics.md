@@ -57,6 +57,7 @@ Four toggle tiles, then a chip row.
 |---|---|---|---|---|---|---|
 | Cosmetic thread markings | Checkbox | `Prefs.cosmetic_threads` | `false` | none | none | |
 | Halo under sketch curves | Checkbox | `Prefs.sketch_halo` | `false` | none | none | |
+| Show hidden edges of selected bodies | Checkbox | `Prefs.show_selected_hidden_edges` | `false` | `prefs.show_selected_hidden_edges_help` | none | Dims a selected whole body's hidden edges through the model. |
 | Reference geometry through bodies | Checkbox | `Prefs.reference_geometry_through_bodies` | `false` | none | none | |
 | Grid follows the view | Checkbox | `Prefs.grid_follows_view` (no page id in the table today) | `false` | "Side views show the grid on the facing plane." | none | |
 | Single surface analysis | Checkbox | `Prefs.single_surface_analysis` | `true` | "Shading and Continuity share one analysis." | none | |

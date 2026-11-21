@@ -17,7 +17,13 @@
 //! | [`face_bounding_box`], [`face_internal_point`], [`face_classify_uv`], [`face_closest_point`], [`face_closest_point_in_shape`] | `SmApiFaceBoundingBox`, `SmApiFaceInternalPoint`, `SmApiFaceClassifyUV`, `SmApiFaceClosestPoint` |
 //! | [`edge_bounding_box`], [`edge_closest_point`], [`edge_parameter_range`], [`edge_classify_parameter`], [`edge_tangent`] | `SmApiEdgeBoundingBox`, `SmApiEdgeClosestPoint`, `SmApiEdgeParameterRange`, `SmApiEdgeClassifyParameter`, `SmApiEdgeTangent` |
 //! | [`vertex_get_point`] | `SmApiVertexGetPoint` |
+//! | [`edge_plane_crossings`] | not upstream: where an edge, over its own interval, meets a plane |
+//! | [`edge_crossing_on_face`] | not upstream: where a curve meets an edge, solved on one of the edge's faces |
+//! | [`vertex_on_edge`] | not upstream: whether a vertex lies on an edge within the two's tolerances |
+//! | [`closest_to_members`], [`edge_curve_copy`] | not upstream: `ShapeCurveSolve`/`ShapePointSolve` minimum of a curve or point against faces and edges |
+//! | [`closest_between_faces`] | not upstream: selected-shape minimum on trimmed faces and their boundaries |
 //! | [`point_distance`], [`vertex_distance`], [`edge_face_gap_samples`], [`edgeuse_face_frame`] | not upstream: certified distances (the last on `SmCrvSrfGapFunction`'s samples) |
+//! | [`box_max_distance_to_point`] | not upstream: [`Extent3d::max_distance_to_point`] of a box given by two corners |
 //! | `count_contained_samples`, `edge_piece_points`, `point_in_solid`, `target_curve_crossings` (private) | `sm_CountContainedSamples`, `sm_PointInSolid`, its `BrepCurveSolve` |
 //! | `solution_point` (private) | `SmSolution::GetPoint` |
 //!
@@ -41,8 +47,10 @@
 //! serialized counts.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
+use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::Curve;
 use crate::error::{ignored, EntityRef, Result, SolidError};
+use crate::geom::attribute::ObjectKey;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -57,7 +65,7 @@ use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::intersect::topology_solver::p1::{CurveRef, TopologyObjects, TopologySolver};
 use crate::intersect::topology_solver::p2::TopologySolveOptions;
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3, Vec3, EFF_ZERO};
+use crate::math::{Point2, Point3, Vec2, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::math::MODEL_TOL;
@@ -256,6 +264,56 @@ fn solve_options(_k: &Kernel, requested: SolutionRequested) -> TopologySolveOpti
     }
 }
 
+/// The point of `object` in `solution`, its parameters starting at `parameter` (the vertex's own
+/// point, the curve's or edge's at one parameter, the surface's or face's at two): the step of
+/// [`solution_point`] at its object.
+fn object_point<O: SolutionObject>(
+    k: &Kernel,
+    objects: &dyn TopologyObjects<O>,
+    object: O,
+    solution: &Solution<O>,
+    parameter: usize,
+) -> Result<Point3> {
+    let kind = object.kind();
+    if kind == ObjectKind::Vertex {
+        return objects.vertex_point(object);
+    }
+    if matches!(kind, ObjectKind::Curve | ObjectKind::Edge) {
+        let curve = if kind == ObjectKind::Edge {
+            objects
+                .edge_curve(object)?
+                .ok_or_else(|| SolidError::query_missing(OP, "the edge's curve"))?
+        } else {
+            object
+        };
+        return Ok(ignored(
+            objects
+                .curve(curve)?
+                .evaluate_point(k, solution.start.param(parameter)?),
+        )?
+        .unwrap_or(Point3::UNDEF));
+    }
+    if matches!(kind, ObjectKind::Surface | ObjectKind::Face) {
+        let surface = if kind == ObjectKind::Face {
+            objects.face_surface(object)?
+        } else {
+            object
+        };
+        return Ok(ignored(objects.surface(surface)?.evaluate_point(
+            k,
+            Point2::new(
+                solution.start.param(parameter)?,
+                solution.start.param(parameter + 1)?,
+            ),
+        ))?
+        .unwrap_or(Point3::UNDEF));
+    }
+    Err(SolidError::query_failed(
+        OP,
+        "the solution's object is not a vertex, curve or edge",
+    ))
+}
+
 // SmSolution::GetPoint using the same caller-owned geometry adapter as the solver.
 fn solution_point<O: SolutionObject>(
     k: &Kernel,
@@ -274,43 +332,7 @@ fn solution_point<O: SolutionObject>(
             object.ok_or_else(|| SolidError::query_missing(OP, "the solution's object"))?;
         let kind = object.kind();
         if i == index {
-            if kind == ObjectKind::Vertex {
-                return objects.vertex_point(object);
-            }
-            if matches!(kind, ObjectKind::Curve | ObjectKind::Edge) {
-                let curve = if kind == ObjectKind::Edge {
-                    objects
-                        .edge_curve(object)?
-                        .ok_or_else(|| SolidError::query_missing(OP, "the edge's curve"))?
-                } else {
-                    object
-                };
-                return Ok(ignored(
-                    objects
-                        .curve(curve)?
-                        .evaluate_point(k, solution.start.param(parameter)?),
-                )?
-                .unwrap_or(Point3::UNDEF));
-            }
-            if matches!(kind, ObjectKind::Surface | ObjectKind::Face) {
-                let surface = if kind == ObjectKind::Face {
-                    objects.face_surface(object)?
-                } else {
-                    object
-                };
-                return Ok(ignored(objects.surface(surface)?.evaluate_point(
-                    k,
-                    Point2::new(
-                        solution.start.param(parameter)?,
-                        solution.start.param(parameter + 1)?,
-                    ),
-                ))?
-                .unwrap_or(Point3::UNDEF));
-            }
-            return Err(SolidError::query_failed(
-                OP,
-                "the solution's object is not a vertex, curve or edge",
-            ));
+            return object_point(k, objects, object, solution, parameter);
         }
         parameter += match kind {
             ObjectKind::Curve | ObjectKind::Edge => 1,
@@ -971,6 +993,183 @@ pub fn face_closest_point_in_shape<O: SolutionObject>(
     })
 }
 
+/// A copy of edge `id`'s curve with the edge's own interval of it (not upstream): the curve to
+/// measure as a [`Probe::Curve`] against faces and edges of this or another B-rep.
+///
+/// # Errors
+///
+/// [`SolidError::query_failed`] for an edge without a curve; a dangling edge; those of the copy.
+pub fn edge_curve_copy(k: &Kernel, brep: &Brep, id: EdgeId) -> Result<(Curve, Extent1d)> {
+    let edge = brep.edge(id)?;
+    let curve = edge
+        .curve
+        .as_ref()
+        .ok_or_else(|| SolidError::query_failed(OP, "the edge has no curve"))?;
+    Ok((curve.copy(k)?, edge.interval))
+}
+
+/// What [`closest_to_members`] measures from: a curve over an interval (an edge's curve over the
+/// edge's own interval, taken from any B-rep), or a point.
+#[derive(Debug, Clone, Copy)]
+pub enum Probe<'c> {
+    /// A curve over `interval`; the minimum is sought over that interval only, its ends included.
+    Curve {
+        /// The curve.
+        curve: &'c Curve,
+        /// The stretch of it measured.
+        interval: Extent1d,
+    },
+    /// A point.
+    Point(Point3),
+}
+
+/// The closest points of selected exact geometry ([`closest_to_members`],
+/// [`closest_between_faces`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MembersClosest {
+    /// The distance the solver reached between the two points.
+    pub distance: f64,
+    /// The point of the probe, or the first set of trimmed faces.
+    pub on_probe: Point3,
+    /// The point of the faces (as they are trimmed) and edges (over their intervals).
+    pub on_members: Point3,
+}
+
+/// The closest points of `probe` and the faces `faces` (as they are trimmed, their edges and
+/// vertices included) and edges `edges` (over their own intervals, their vertices included) of
+/// B-rep `brep`, known as `id` (not upstream): the kernel's own minimum-distance solve on the
+/// exact geometry (`ShapeCurveSolve` or `ShapePointSolve` of the members' shape), never on a
+/// tessellation. A curve's minimum against an edge is the curve/curve global solve over both
+/// intervals, so the closest point of an arc lies inside the arc, or at one of its ends when the
+/// curves come nearest past it. The probe's point is the probe curve's at the solution's
+/// parameter; the members' point is the solution's point on the member it names.
+///
+/// # Errors
+///
+/// [`SolidError::query_failed`] when the solve finds no closest points or a point does not
+/// evaluate; those of the shape, the solver and the solution point.
+pub fn closest_to_members(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    id: BrepId,
+    faces: &[FaceId],
+    edges: &[EdgeId],
+    probe: Probe<'_>,
+) -> Result<MembersClosest> {
+    let face_keys: Vec<FaceKey> = faces.iter().map(|f| (id, *f)).collect();
+    let edge_keys: Vec<_> = edges.iter().map(|e| (id, *e)).collect();
+    let shape = Shape::new(k, &(id, &*brep), &[], &face_keys, &edge_keys, &[])?;
+    let query = qbrep::BrepQuery::of_brep(brep);
+    let identity = query.effective_identity();
+    let objects = qbrep::LiveBrepObjects::new(brep, &identity, None)?;
+    let k = &*k;
+    let options = solve_options(k, SolutionRequested::Single);
+    let (solutions, member) = match probe {
+        Probe::Curve { curve, interval } => {
+            // The probe curve belongs to no B-rep the objects hold: a handle of its own kind.
+            let handle = CacheObject::Other(ObjectRef {
+                type_code: BSPLINE_CURVE_TYPE,
+                key: ObjectKey(0),
+            });
+            let solutions = TopologySolver::shape_curve_solve(
+                k,
+                &objects,
+                &shape,
+                CurveRef { curve, handle },
+                &interval,
+                options,
+            )?;
+            (solutions, 1)
+        }
+        Probe::Point(point) => (
+            TopologySolver::shape_point_solve(k, &objects, &shape, point, options)?,
+            0,
+        ),
+    };
+    let solution = solutions
+        .as_slice()
+        .first()
+        .ok_or_else(|| SolidError::query_failed(OP, "no closest points were found"))?;
+    let on_probe = match probe {
+        Probe::Curve { curve, .. } => curve.evaluate_point(k, solution.start.param(0)?)?,
+        Probe::Point(point) => point,
+    };
+    // The members' point: the solution's object after the probe, whose parameters follow the
+    // probe curve's one (a point probe has none). The probe curve's handle is of no kind the
+    // solution's own point extraction counts, so the offset is given here.
+    let object = solution
+        .objects
+        .get(member)
+        .copied()
+        .flatten()
+        .ok_or_else(|| SolidError::query_failed(OP, "the solution names no member"))?;
+    let first_parameter = member; // the probe curve's one parameter comes first
+    let on_members = object_point(k, &objects, object, solution, first_parameter)?;
+    let evaluated =
+        |p: Point3| !p.is_undef() && p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if !(evaluated(on_probe) && evaluated(on_members)) {
+        return Err(SolidError::query_failed(
+            OP,
+            "a closest point does not evaluate",
+        ));
+    }
+    Ok(MembersClosest {
+        distance: solution.start.solution_value,
+        on_probe,
+        on_members,
+    })
+}
+
+/// The minimum distance between two sets of trimmed faces of one B-rep, including their
+/// boundary edges and vertices. Both witnesses are evaluated on the exact geometry named by
+/// the topology solver's solution; no tessellation supplies a point or limits the search.
+///
+/// # Errors
+/// Those of shape construction and the topology solver; [`SolidError::query_failed`] when
+/// there is no solution or either witness does not evaluate to a finite point.
+pub fn closest_between_faces(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    id: BrepId,
+    first: &[FaceId],
+    second: &[FaceId],
+) -> Result<MembersClosest> {
+    let first: Vec<FaceKey> = first.iter().map(|f| (id, *f)).collect();
+    let second: Vec<FaceKey> = second.iter().map(|f| (id, *f)).collect();
+    let first = Shape::new(k, &(id, &*brep), &[], &first, &[], &[])?;
+    let second = Shape::new(k, &(id, &*brep), &[], &second, &[], &[])?;
+    let query = qbrep::BrepQuery::of_brep(brep);
+    let identity = query.effective_identity();
+    let objects = qbrep::LiveBrepObjects::new(brep, &identity, None)?;
+    let solutions = TopologySolver::shape_shape_solve(
+        k,
+        &objects,
+        &first,
+        &second,
+        solve_options(k, SolutionRequested::Single),
+    )?;
+    let solution = solutions
+        .as_slice()
+        .first()
+        .ok_or_else(|| SolidError::query_failed(OP, "no closest points were found"))?;
+    let on_probe = solution_point(k, &objects, solution, 0)?;
+    let on_members = solution_point(k, &objects, solution, 1)?;
+    let distance = solution.start.solution_value;
+    let evaluated =
+        |p: Point3| !p.is_undef() && p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if !(distance.is_finite() && distance >= 0.0 && evaluated(on_probe) && evaluated(on_members)) {
+        return Err(SolidError::query_failed(
+            OP,
+            "a closest point does not evaluate",
+        ));
+    }
+    Ok(MembersClosest {
+        distance,
+        on_probe,
+        on_members,
+    })
+}
+
 /// A forced failure of one step of [`faces_closest_distances_within`], for its own tests: the
 /// status paths are not reachable from any geometry the tests can build, so a test asks for the
 /// step to fail and checks what the pass answers. Compiled only for tests, so the pass itself
@@ -1178,6 +1377,243 @@ pub fn edge_closest_point(
     })
 }
 
+/// Whether vertex `v` lies on edge `e`: its point within the vertex's and the edge's
+/// tolerances together of the edge's curve, over the edge's interval (the exact distance of
+/// [`edge_closest_point`]). A point that does not drop onto the edge is not on it.
+///
+/// # Errors
+///
+/// Those of the vertex's and the edge's point and tolerance, and the evaluation errors of
+/// [`edge_closest_point`].
+pub fn vertex_on_edge(k: &Kernel, brep: &Brep, v: VertexId, e: EdgeId) -> Result<bool> {
+    let point = crate::topology::vertex::point(brep, v)?;
+    let Some(near) = crate::query::edge::closest_point(k, brep, e, point)? else {
+        return Ok(false);
+    };
+    let reach = crate::topology::vertex::tolerance(brep, v)? + edge::tolerance(brep, e)?;
+    Ok(near.distance <= reach)
+}
+
+/// One end of a [`PlaneCrossing`]: where it is on the edge.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CrossingEnd {
+    /// The edge curve's parameter.
+    pub parameter: f64,
+    /// The edge curve's point there.
+    pub point: Point3,
+    /// The edge's vertex, when the crossing is at one of its ends.
+    pub vertex: Option<VertexId>,
+}
+
+/// Where an edge meets a plane ([`edge_plane_crossings`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PlaneCrossing {
+    /// The edge crosses or touches the plane at one point.
+    Point(CrossingEnd),
+    /// The edge lies in the plane, within its tolerance, from `start` to `end`.
+    Along {
+        /// The stretch's first end along the edge.
+        start: CrossingEnd,
+        /// The stretch's last end along the edge.
+        end: CrossingEnd,
+    },
+}
+
+/// Where edge `id`, over its own interval, meets the plane through `point` with normal
+/// `normal` (not upstream), in order along the edge. No crossing is an empty list.
+///
+/// The edge's curve is solved against the plane by the kernel's own curve/plane solve,
+/// over the edge's interval and within the edge's tolerance (the tube that holds the exact
+/// edge), so a stretch within that tube of the plane is [`PlaneCrossing::Along`]. The
+/// points are the curve's at the solve's parameters. A crossing within the edge's
+/// tolerance of one of its vertices names that vertex and takes the interval's end as its
+/// parameter, so two edges meeting at a vertex on the plane name the same vertex.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a point or normal that isn't finite, a normal of no
+/// direction (the plane's axes are undefined for it) or an edge without a curve;
+/// [`SolidError::NotFound`] for a dangling edge; the solve's own errors, including
+/// [`SolidError::Unported`] for a curve type it doesn't solve.
+pub fn edge_plane_crossings(
+    k: &Kernel,
+    brep: &Brep,
+    id: EdgeId,
+    point: Point3,
+    normal: Vec3,
+) -> Result<Vec<PlaneCrossing>> {
+    if point.is_undef() || normal.is_undef() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "the plane's point and normal must be finite",
+        ));
+    }
+    // The plane's axes come from this step; it fails for a normal of no direction.
+    if normal.make_unit_ortho_vectors(None).is_err() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "the plane's normal has no direction",
+        ));
+    }
+    let edge = brep.edge(id)?;
+    // The edge's evaluation copy carries the edge's tolerance: the solve builds its curve tree
+    // to half of it (`SmTol::GetApproxTol3d` through the curve's edge), where the record's own
+    // curve gives the system's. The tube a touch is found in is `tol`, passed to the solve.
+    let curve = edge::evaluation_curve(brep, id)?
+        .ok_or(SolidError::invalid_input(OP, "the edge has no curve"))?;
+    let curve = &curve;
+    // An edge made without a tolerance is solved to the kernel's zero.
+    let tol = edge.tolerance.max(EFF_ZERO);
+    // The ends come from the edge uses: a closed edge's two ends are one vertex after the
+    // glue that closes it (`SmEdge::GetVertices`).
+    let (first_vertex, last_vertex) = edge::start_end_vertices(brep, id)?;
+    let ends = [
+        (edge.interval.min(), first_vertex),
+        (edge.interval.max(), last_vertex),
+    ];
+    let end = |parameter: f64| -> Result<CrossingEnd> {
+        let at = curve.evaluate_point(k, parameter)?;
+        // The end nearest along the edge whose vertex holds the point: a closed edge's two
+        // ends are one vertex, and a stretch from one to the other keeps both.
+        let mut snapped: Option<(f64, VertexId)> = None;
+        for (end_parameter, vertex) in ends {
+            let Some(vertex) = vertex else { continue };
+            let nearer = snapped
+                .is_none_or(|(p, _)| (end_parameter - parameter).abs() < (p - parameter).abs());
+            if nearer && brep.vertex(vertex)?.point.distance(at) <= tol {
+                snapped = Some((end_parameter, vertex));
+            }
+        }
+        Ok(match snapped {
+            Some((end_parameter, vertex)) => CrossingEnd {
+                parameter: end_parameter,
+                point: curve.evaluate_point(k, end_parameter)?,
+                vertex: Some(vertex),
+            },
+            None => CrossingEnd {
+                parameter,
+                point: at,
+                vertex: None,
+            },
+        })
+    };
+    let plane = crate::surface::plane::p1::Plane::from_normal(point, normal);
+    let solutions = crate::curve::curve::p4::plane_global_curve_intersect(
+        k,
+        &plane,
+        curve,
+        &edge.interval,
+        tol,
+    )?;
+    let mut crossings = Vec::new();
+    for (solution_type, start, finish) in solutions {
+        let first = start.parameters.first().copied().unwrap_or(0.0);
+        match solution_type {
+            SolutionType::SingleValue => crossings.push(PlaneCrossing::Point(end(first)?)),
+            SolutionType::RangeOfValues => {
+                let last = finish.parameters.first().copied().unwrap_or(first);
+                let (start, end) = (end(first.min(last))?, end(first.max(last))?);
+                crossings.push(if start.parameter == end.parameter {
+                    PlaneCrossing::Point(start)
+                } else {
+                    PlaneCrossing::Along { start, end }
+                });
+            }
+            // The plane solve reports points and ranges only; anything else is not a crossing.
+            _ => {}
+        }
+    }
+    crossings.sort_by(|a, b| first_parameter(a).total_cmp(&first_parameter(b)));
+    // A closed edge's two ends are one vertex: a crossing there can come from both.
+    crossings.dedup();
+    Ok(crossings)
+}
+
+/// Where a crossing starts along its edge.
+fn first_parameter(crossing: &PlaneCrossing) -> f64 {
+    match crossing {
+        PlaneCrossing::Point(p) => p.parameter,
+        PlaneCrossing::Along { start, .. } => start.parameter,
+    }
+}
+
+/// Where `curve`, over `interval`, meets the surface of face `face` near the curve's parameter
+/// `near`, as a point of edge `edge` (not upstream): the curve's parameter there. The face is one
+/// of the edge's faces. Its surface holds the exact edge, where the edge's curve holds it only to
+/// the edge's tolerance (a traced intersection's curve is an approximation of it). So a curve
+/// that lies on the edge's other face, as a contour lies on a sphere or a silhouette on a cone,
+/// meets the exact edge where it meets this surface.
+///
+/// The solve is the kernel's local curve/surface intersection (`Surface::local_curve_intersect`):
+/// Newton on the gap from `near` and the face's point nearest the curve's point there, at most
+/// [`LOCAL_CURVE_INTERSECT_STEPS`](crate::surface::surface::p6::LOCAL_CURVE_INTERSECT_STEPS)
+/// steps, to `EFF_ZERO / 10`, or a closest-point solve where the curve lies within 5 degrees of
+/// the surface's tangent plane. The edge's tolerance only accepts the answer: the curve's point
+/// and the surface's must be within it of each other, and the point within it of the edge's curve
+/// (the tube that holds the exact edge). It moves no answer.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a `near` that isn't finite; [`SolidError::NotFound`] for a
+/// dangling edge or face; a query failure for a face without a surface, and for a point the solve
+/// finds farther than the edge's tolerance from the edge (another crossing, not this edge's);
+/// [`SolidError::NotConverged`] when the solve finds no point within the edge's tolerance of the
+/// surface; those of the drop onto the surface and of the solves.
+pub fn edge_crossing_on_face(
+    k: &Kernel,
+    brep: &Brep,
+    edge: EdgeId,
+    face: FaceId,
+    curve: &Curve,
+    interval: &Extent1d,
+    near: f64,
+) -> Result<f64> {
+    const OP_CROSSING: &str = "query::api_queries::edge_crossing_on_face";
+    if !near.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP_CROSSING,
+            "the curve's parameter must be finite",
+        ));
+    }
+    // An edge made without a tolerance is held to the kernel's zero, as in the plane crossing.
+    let tol = brep.edge(edge)?.tolerance.max(EFF_ZERO);
+    let surface = face::surface(brep, face)?
+        .ok_or_else(|| SolidError::query_missing(OP_CROSSING, "the face's surface"))?
+        .clone_for_evaluation()?;
+    let domain = face::uv_domain(brep, face)?;
+    // The solve's start on the surface: the point nearest the curve's point at `near`, in the
+    // face's own parameters (a seam's point has two; the one its domain moves least).
+    let nearest = surface_closest_point(k, &surface, curve.evaluate_point(k, near)?)?;
+    let mut start: Option<(f64, Point2)> = None;
+    for &uv in &nearest.uvs {
+        let inside = domain.clamp_point(uv);
+        let moved = uv.distance(inside);
+        if start.is_none_or(|(least, _)| moved < least) {
+            start = Some((moved, inside));
+        }
+    }
+    let (_, uv) = start.ok_or_else(|| {
+        SolidError::query_failed(OP_CROSSING, "the point does not drop onto the surface")
+    })?;
+    let hit = surface
+        .local_curve_intersect(k, &domain, curve, interval, tol, uv, near)?
+        .ok_or(SolidError::NotConverged {
+            operation: OP_CROSSING,
+            iterations: crate::surface::surface::p6::LOCAL_CURVE_INTERSECT_STEPS,
+        })?;
+    // The tube that holds the exact edge: a point outside it is another crossing, not this edge's.
+    // Written to accept, so a distance that isn't a number refuses.
+    let on_edge = edge_closest_point(k, brep, edge, curve.evaluate_point(k, hit.t)?)?;
+    if on_edge.closest.distance <= tol {
+        Ok(hit.t)
+    } else {
+        Err(SolidError::query_failed(
+            OP_CROSSING,
+            "the crossing on the face's surface is off the edge",
+        ))
+    }
+}
+
 /// Parameter interval (`SmApiEdgeParameterRange`); dangling ids are errors.
 pub fn edge_parameter_range(brep: &Brep, id: EdgeId) -> Result<Extent1d> {
     Ok(brep.edge(id)?.interval)
@@ -1279,6 +1715,104 @@ pub fn point_distance(a: Point3, b: Point3) -> Result<Distance> {
     })
 }
 
+/// A point set's arithmetic centroid and mean Euclidean distance from that centroid.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PointSetSummary {
+    /// The arithmetic mean of the input points.
+    pub centroid: Point2,
+    /// The arithmetic mean of each point's distance from `centroid`.
+    pub mean_distance: f64,
+}
+
+/// The arithmetic centroid and mean radial distance of a non-empty point set.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for an empty set, a non-finite point, or a non-finite
+/// intermediate or result.
+pub fn point_set_summary(points: &[Point2]) -> Result<PointSetSummary> {
+    if points.is_empty() {
+        return Err(SolidError::invalid_input(OP, "empty point set"));
+    }
+    if points.iter().any(|p| !p.x.is_finite() || !p.y.is_finite()) {
+        return Err(SolidError::invalid_input(OP, "non-finite point"));
+    }
+
+    let (mut x, mut y) = (0.0, 0.0);
+    for point in points {
+        x += point.x;
+        y += point.y;
+        if !x.is_finite() || !y.is_finite() {
+            return Err(SolidError::invalid_input(OP, "point centroid overflows"));
+        }
+    }
+    let count = points.len() as f64;
+    let centroid = Point2::new(x / count, y / count);
+    if !centroid.x.is_finite() || !centroid.y.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "point centroid is not finite",
+        ));
+    }
+
+    let mut total_distance = 0.0;
+    for point in points {
+        let distance = point.distance(centroid);
+        if !distance.is_finite() {
+            return Err(SolidError::invalid_input(OP, "point distance overflows"));
+        }
+        total_distance += distance;
+        if !total_distance.is_finite() {
+            return Err(SolidError::invalid_input(
+                OP,
+                "mean point distance overflows",
+            ));
+        }
+    }
+    let mean_distance = total_distance / count;
+    if !mean_distance.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "mean point distance is not finite",
+        ));
+    }
+    Ok(PointSetSummary {
+        centroid,
+        mean_distance,
+    })
+}
+
+/// The vector from point `from` to point `to`.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for a non-finite input or a displacement that overflows.
+pub fn point_displacement(from: Point2, to: Point2) -> Result<Vec2> {
+    if !from.x.is_finite() || !from.y.is_finite() || !to.x.is_finite() || !to.y.is_finite() {
+        return Err(SolidError::invalid_input(OP, "non-finite point"));
+    }
+    let displacement = to - from;
+    if !displacement.x.is_finite() || !displacement.y.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "point displacement overflows",
+        ));
+    }
+    Ok(displacement)
+}
+
+/// The largest distance from `point` to a point of the box with opposite corners `a`
+/// and `b`: to its farthest corner ([`Extent3d::max_distance_to_point`]; not upstream).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a non-finite coordinate.
+pub fn box_max_distance_to_point(a: Point3, b: Point3, point: Point3) -> Result<f64> {
+    let finite = |p: Point3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if !finite(a) || !finite(b) || !finite(point) {
+        return Err(SolidError::invalid_input(OP, "non-finite point"));
+    }
+    Ok(Extent3d::from_points(a, b).max_distance_to_point(point))
+}
+
 /// The distance from vertex `id`'s point to `point`, as [`point_distance`] (not
 /// upstream; the point picks' vertex distance).
 ///
@@ -1336,7 +1870,7 @@ pub fn edgeuse_face_frame(
             return Err(SolidError::Unsupported {
                 operation: OP,
                 reason: "a faceuse whose orientation is unknown has no proved sense",
-            })
+            });
         }
     };
     let at = evaluate_binormal(k, brep, eu, parameter, false, &BinormalOptions::default())?;
@@ -1551,6 +2085,43 @@ mod tests {
     use crate::nurbs::math::CPoint;
     use crate::nurbs::srf_basic::Surface as NlSurface;
 
+    /// Opposite faces of a 1 × 2 × 3 block are 3 apart. Adjacent faces meet on their
+    /// shared boundary; reversing the selected sets preserves the distance and ownership.
+    #[test]
+    fn closest_between_faces_respects_selected_faces_and_their_boundaries() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let faces = get_faces(&b).unwrap();
+        let at_z = |z: f64| {
+            *faces
+                .iter()
+                .find(|&&f| {
+                    let box_ = face_bounding_box(&k, &b, f, true).unwrap();
+                    (box_.min().z - z).abs() <= 1e-9 && (box_.max().z - z).abs() <= 1e-9
+                })
+                .unwrap()
+        };
+        let (bottom, top) = (at_z(0.0), at_z(3.0));
+        let side = *faces.iter().find(|&&f| f != bottom && f != top).unwrap();
+        let id = BrepId::from_index(0);
+        for (first, second, distance) in [(bottom, top, 3.0), (top, bottom, 3.0), (top, side, 0.0)]
+        {
+            let c = closest_between_faces(&mut k, &mut b, id, &[first], &[second]).unwrap();
+            assert!((c.distance - distance).abs() <= 1e-9, "{c:?}");
+            assert!(
+                (c.on_probe.distance(c.on_members) - distance).abs() <= 1e-9,
+                "{c:?}"
+            );
+            for (f, p) in [(first, c.on_probe), (second, c.on_members)] {
+                let near =
+                    closest_to_members(&mut k, &mut b, id, &[f], &[], Probe::Point(p)).unwrap();
+                assert!(near.distance <= 1e-9, "{c:?}: {near:?}");
+            }
+        }
+    }
+
     /// Both call sites of [`faces_closest_distances_within`] read a kernel status as no answer
     /// about that one pair, and keep every other pair's answer. The status paths are not
     /// reachable from geometry these tests can build, so the step is made to fail
@@ -1734,6 +2305,81 @@ mod tests {
         assert!(point_distance(Point3::ZERO, nan).is_err());
         let inf = Point3::new(0.0, f64::INFINITY, 0.0);
         assert!(point_distance(inf, Point3::ZERO).is_err());
+    }
+
+    #[test]
+    fn point_set_summary_uses_the_arithmetic_mean_radius() {
+        let points = [
+            Point2::new(0.0, 0.0),
+            Point2::new(6.0, 0.0),
+            Point2::new(0.0, 6.0),
+        ];
+        let summary = point_set_summary(&points).unwrap();
+        assert_eq!(summary.centroid, Point2::new(2.0, 2.0));
+        let expected = (2.0 * 2.0_f64.sqrt() + 4.0 * 5.0_f64.sqrt()) / 3.0;
+        assert!((summary.mean_distance - expected).abs() <= 2.0 * f64::EPSILON * expected);
+        assert_ne!(
+            summary.mean_distance, 4.0,
+            "the RMS radius is not the mean radius"
+        );
+
+        let moved = [
+            Point2::new(0.0, 0.0),
+            Point2::new(6.0, 0.0),
+            Point2::new(0.0, 12.0),
+        ];
+        let moved_summary = point_set_summary(&moved).unwrap();
+        assert_eq!(moved_summary.centroid, Point2::new(2.0, 4.0));
+        let moved_expected =
+            (2.0 * 5.0_f64.sqrt() + 4.0 * 2.0_f64.sqrt() + 2.0 * 17.0_f64.sqrt()) / 3.0;
+        assert!(
+            (moved_summary.mean_distance - moved_expected).abs()
+                <= 2.0 * f64::EPSILON * moved_expected
+        );
+    }
+
+    #[test]
+    fn point_set_summary_accepts_single_and_duplicate_points() {
+        let one = Point2::new(3.0, -4.0);
+        assert_eq!(
+            point_set_summary(&[one]).unwrap(),
+            PointSetSummary {
+                centroid: one,
+                mean_distance: 0.0,
+            }
+        );
+        assert_eq!(
+            point_set_summary(&[one, one, one]).unwrap(),
+            PointSetSummary {
+                centroid: one,
+                mean_distance: 0.0,
+            }
+        );
+    }
+
+    #[test]
+    fn point_set_summary_refuses_empty_non_finite_and_overflowing_sets() {
+        assert!(point_set_summary(&[]).is_err());
+        assert!(point_set_summary(&[Point2::new(f64::NAN, 0.0)]).is_err());
+        assert!(point_set_summary(&[Point2::new(0.0, f64::INFINITY)]).is_err());
+        assert!(
+            point_set_summary(&[Point2::new(f64::MAX, 0.0), Point2::new(f64::MAX, 0.0),]).is_err()
+        );
+        assert!(
+            point_set_summary(&[Point2::new(-f64::MAX, 0.0), Point2::new(f64::MAX, 0.0),]).is_err()
+        );
+    }
+
+    #[test]
+    fn point_displacement_is_from_first_point_to_second_and_refuses_bad_values() {
+        assert_eq!(
+            point_displacement(Point2::new(2.0, 2.0), Point2::new(5.0, 6.0)).unwrap(),
+            Vec2::new(3.0, 4.0)
+        );
+        assert!(point_displacement(Point2::new(f64::NAN, 0.0), Point2::ZERO).is_err());
+        assert!(
+            point_displacement(Point2::new(-f64::MAX, 0.0), Point2::new(f64::MAX, 0.0),).is_err()
+        );
     }
 
     #[test]
@@ -2124,6 +2770,494 @@ mod tests {
                 .classify(&k, Point3::new(2.0, 2.0, 2.0), 1e-5, false)
                 .unwrap(),
             (PointClassType::Region, false)
+        );
+    }
+
+    /// A wire B-rep of one edge over `interval` of `curve`: the edge.
+    fn wire(k: &mut Kernel, curve: Curve, interval: Extent1d) -> (Brep, EdgeId) {
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        let e = crate::topology::brep::p5::create_wire_edge_from_curve(k, &mut b, curve, interval)
+            .unwrap();
+        (b, e)
+    }
+
+    /// A wire edge over the whole of `curve`.
+    fn whole(k: &mut Kernel, curve: Curve) -> (Brep, EdgeId) {
+        let interval = curve.natural_interval();
+        wire(k, curve, interval)
+    }
+
+    /// The closest points of the arc of `radius` about `center` over the angles `from..to`
+    /// (degrees from +X, counterclockwise; the kernel's exact circle segment, over its whole
+    /// interval) and a whole analytic circle of `whole_radius` about (0, 0, `z`), both in XY
+    /// planes ([`closest_to_members`]).
+    fn arc_to_circle(
+        center: Point3,
+        radius: f64,
+        [from, to]: [f64; 2],
+        whole_radius: f64,
+        z: f64,
+    ) -> MembersClosest {
+        let mut k = Kernel::default();
+        let circle = crate::primitive::api_curves::create_analytic_circle(
+            &k,
+            Point3::new(0.0, 0.0, z),
+            whole_radius,
+        )
+        .unwrap();
+        let (mut b, e) = whole(&mut k, Curve::from(circle));
+        let probe = Curve::from(
+            crate::primitive::api_curves::create_arc(center, radius, from, to).unwrap(),
+        );
+        let interval = probe.natural_interval();
+        // the arc runs from its `from` end to its `to` end
+        for (t, deg) in [(interval.min(), from), (interval.max(), to)] {
+            let end = probe.evaluate_point(&k, t).unwrap();
+            let (cos, sin) = (deg.to_radians().cos(), deg.to_radians().sin());
+            let want = center + Vec3::new(radius * cos, radius * sin, 0.0);
+            assert!(end.distance(want) <= 1e-9, "{end:?} {want:?}");
+        }
+        closest_to_members(
+            &mut k,
+            &mut b,
+            BrepId::from_index(0),
+            &[],
+            &[e],
+            Probe::Curve {
+                curve: &probe,
+                interval,
+            },
+        )
+        .unwrap()
+    }
+
+    /// A half circle of radius 35 about the centre of a circle of radius 20 is 15 from it,
+    /// at points on both.
+    #[test]
+    fn closest_to_members_of_concentric_circles_is_their_radii_apart() {
+        let c = arc_to_circle(Point3::new(0.0, 0.0, 5.0), 35.0, [0.0, 180.0], 20.0, 5.0);
+        assert!((c.distance - 15.0).abs() <= 1e-9, "{c:?}");
+        let radius = |p: Point3| p.x.hypot(p.y);
+        assert!((radius(c.on_probe) - 35.0).abs() <= 1e-9, "{c:?}");
+        assert!((radius(c.on_members) - 20.0).abs() <= 1e-9, "{c:?}");
+        assert!(c.on_probe.y >= -1e-9, "{c:?}");
+    }
+
+    /// The radius 35 arc moved 2 up, over its lower left quarter, against the radius 20 circle:
+    /// a point P of the circle is 35 - |P - C| from the arc's circle, largest |P - C| at
+    /// P = (0, -20), whose nearest arc point is the arc's end (0, -33): 13 apart.
+    #[test]
+    fn closest_to_members_of_shifted_circles_is_at_their_lowest_points() {
+        let c = arc_to_circle(Point3::new(0.0, 2.0, 0.0), 35.0, [180.0, 270.0], 20.0, 0.0);
+        assert!((c.distance - 13.0).abs() <= 1e-9, "{c:?}");
+        assert!(
+            c.on_members.distance(Point3::new(0.0, -20.0, 0.0)) <= 1e-9,
+            "{c:?}"
+        );
+        assert!(
+            c.on_probe.distance(Point3::new(0.0, -33.0, 0.0)) <= 1e-9,
+            "{c:?}"
+        );
+    }
+
+    /// A radius 10 arc about (40, 0) over 0°..170° against the radius 10 circle about the
+    /// origin: the circles come nearest at 180° on the arc's circle, past its end, and a point
+    /// at angle t of the arc is sqrt(1700 + 800 cos t) - 10 from the circle, least at the end
+    /// E (t = 170°), with the circle's point 10 E / |E|.
+    #[test]
+    fn closest_to_members_of_an_arc_past_its_end_is_at_the_end() {
+        let end = 170f64.to_radians();
+        let c = arc_to_circle(Point3::new(40.0, 0.0, 0.0), 10.0, [0.0, 170.0], 10.0, 0.0);
+        let e = Point3::new(40.0 + 10.0 * end.cos(), 10.0 * end.sin(), 0.0);
+        let reach = (1700.0 + 800.0 * end.cos()).sqrt();
+        assert!((c.distance - (reach - 10.0)).abs() <= 1e-9, "{c:?}");
+        assert!(c.on_probe.distance(e) <= 1e-9, "{c:?}");
+        let near = Point3::new(e.x * 10.0 / reach, e.y * 10.0 / reach, 0.0);
+        assert!(c.on_members.distance(near) <= 1e-9, "{c:?}");
+    }
+
+    /// Each crossing's point is on its edge at its parameter, to 1e-9.
+    fn on_the_edge(k: &Kernel, b: &Brep, e: EdgeId, crossings: &[PlaneCrossing]) {
+        let curve = b.edge(e).unwrap().curve.clone().unwrap();
+        for c in crossings {
+            let ends = match c {
+                PlaneCrossing::Point(p) => vec![*p],
+                PlaneCrossing::Along { start, end } => vec![*start, *end],
+            };
+            for end in ends {
+                let at = curve.evaluate_point(k, end.parameter).unwrap();
+                assert!(at.distance(end.point) <= 1e-9, "{c:?}");
+            }
+        }
+    }
+
+    /// The crossings are points, at `expected` in this order, to 1e-9.
+    fn points_at(crossings: &[PlaneCrossing], expected: &[Point3]) {
+        assert_eq!(crossings.len(), expected.len(), "{crossings:?}");
+        for (c, want) in crossings.iter().zip(expected) {
+            let PlaneCrossing::Point(p) = c else {
+                panic!("not a point: {c:?}")
+            };
+            assert!(p.point.distance(*want) <= 1e-9, "{c:?} against {want:?}");
+        }
+    }
+
+    /// The crossings are one stretch from `a` to `b`, to 1e-9.
+    fn along(crossings: &[PlaneCrossing], a: Point3, b: Point3) {
+        let [PlaneCrossing::Along { start, end }] = crossings else {
+            panic!("not one stretch: {crossings:?}")
+        };
+        assert!(
+            start.point.distance(a) <= 1e-9 && end.point.distance(b) <= 1e-9,
+            "{crossings:?}"
+        );
+    }
+
+    #[test]
+    fn edge_plane_crossings_of_a_straight_edge() {
+        // the segment (0,0,0)-(10,0,0) against x = 2.5: one point; against y = 0 (the
+        // normal not of unit length): the whole edge; against z = 1: none
+        let mut k = Kernel::default();
+        let line = |a: Point3, b: Point3| {
+            Curve::from(crate::primitive::api_curves::create_line_segment(a, b).unwrap())
+        };
+        let (b, e) = whole(&mut k, line(Point3::ZERO, Point3::new(10.0, 0.0, 0.0)));
+        let across = edge_plane_crossings(&k, &b, e, Point3::new(2.5, 0.0, 0.0), Vec3::X).unwrap();
+        points_at(&across, &[Point3::new(2.5, 0.0, 0.0)]);
+        on_the_edge(&k, &b, e, &across);
+        let PlaneCrossing::Point(p) = across[0] else {
+            panic!("not a point")
+        };
+        assert_eq!(p.vertex, None, "inside the edge");
+        let lying =
+            edge_plane_crossings(&k, &b, e, Point3::ZERO, Vec3::new(0.0, 2.0, 0.0)).unwrap();
+        along(&lying, Point3::ZERO, Point3::new(10.0, 0.0, 0.0));
+        on_the_edge(&k, &b, e, &lying);
+        assert!(
+            edge_plane_crossings(&k, &b, e, Point3::new(0.0, 0.0, 1.0), Vec3::Z)
+                .unwrap()
+                .is_empty()
+        );
+        // the same line over the stretch from 4 to 10 of the segment's 0 to 1: its curve
+        // crosses x = 2.5, the edge doesn't
+        let (b, e) = wire(
+            &mut k,
+            line(Point3::ZERO, Point3::new(10.0, 0.0, 0.0)),
+            Extent1d::from_min_max(0.4, 1.0),
+        );
+        assert!(
+            edge_plane_crossings(&k, &b, e, Point3::new(2.5, 0.0, 0.0), Vec3::X)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn edge_plane_crossings_of_a_circular_edge() {
+        // a circle of radius 5 about the origin in z = 0: x = 3 meets it at (3, -4) and
+        // (3, 4); y = 5 touches it at (0, 5) inside the edge; z = 0 holds all of it
+        let mut k = Kernel::default();
+        let circle =
+            crate::primitive::api_curves::create_analytic_circle(&k, Point3::ZERO, 5.0).unwrap();
+        let (b, e) = whole(&mut k, Curve::from(circle));
+        let mut two = edge_plane_crossings(&k, &b, e, Point3::new(3.0, 0.0, 0.0), Vec3::X).unwrap();
+        on_the_edge(&k, &b, e, &two);
+        two.sort_by(|a, c| match (a, c) {
+            (PlaneCrossing::Point(a), PlaneCrossing::Point(c)) => a.point.y.total_cmp(&c.point.y),
+            _ => std::cmp::Ordering::Equal,
+        });
+        points_at(
+            &two,
+            &[Point3::new(3.0, -4.0, 0.0), Point3::new(3.0, 4.0, 0.0)],
+        );
+        let touch = edge_plane_crossings(&k, &b, e, Point3::new(0.0, 5.0, 0.0), Vec3::Y).unwrap();
+        points_at(&touch, &[Point3::new(0.0, 5.0, 0.0)]);
+        let PlaneCrossing::Point(p) = touch[0] else {
+            panic!("not a point")
+        };
+        assert_eq!(p.vertex, None, "a touch inside the edge has no vertex");
+        let lying = edge_plane_crossings(&k, &b, e, Point3::ZERO, Vec3::Z).unwrap();
+        assert_eq!(lying.len(), 1, "{lying:?}");
+        assert!(matches!(lying[0], PlaneCrossing::Along { .. }), "{lying:?}");
+        on_the_edge(&k, &b, e, &lying);
+    }
+
+    #[test]
+    fn edge_plane_crossings_of_an_elliptical_edge() {
+        // the ellipse x^2/36 + y^2/16 = 1 in z = 0 against x = 3: y = +-4 sqrt(3)/2
+        let mut k = Kernel::default();
+        let ellipse =
+            crate::primitive::api_curves::create_ellipse(&k, Point3::ZERO, 6.0, 4.0).unwrap();
+        let (b, e) = whole(&mut k, Curve::from(ellipse));
+        let mut two = edge_plane_crossings(&k, &b, e, Point3::new(3.0, 0.0, 0.0), Vec3::X).unwrap();
+        on_the_edge(&k, &b, e, &two);
+        two.sort_by(|a, c| match (a, c) {
+            (PlaneCrossing::Point(a), PlaneCrossing::Point(c)) => a.point.y.total_cmp(&c.point.y),
+            _ => std::cmp::Ordering::Equal,
+        });
+        let y = 2.0 * 3.0_f64.sqrt();
+        points_at(&two, &[Point3::new(3.0, -y, 0.0), Point3::new(3.0, y, 0.0)]);
+    }
+
+    /// A cubic B-spline of three spans that is one polynomial curve: x = t, y =
+    /// 10 (t - 0.2)(t - 0.5)(t - 0.8), z = 0 on [0, 1], each span's control points the
+    /// cubic's blossom values at its ends, so it meets y = 0 at x = 0.2, 0.5 and 0.8.
+    fn three_span_cubic() -> Curve {
+        let c = [-0.8, 6.6, -15.0, 10.0];
+        let blossom = |u: [f64; 3]| {
+            let sum = u[0] + u[1] + u[2];
+            let pairs = u[0] * u[1] + u[0] * u[2] + u[1] * u[2];
+            let x = sum / 3.0;
+            let y = c[0] + c[1] * sum / 3.0 + c[2] * pairs / 3.0 + c[3] * u[0] * u[1] * u[2];
+            CPoint::from_point(Point3::new(x, y, 0.0))
+        };
+        let (a, b) = (1.0 / 3.0, 2.0 / 3.0);
+        let mut pw = Vec::new();
+        for (l, r) in [(0.0, a), (a, b), (b, 1.0)] {
+            if pw.is_empty() {
+                pw.push(blossom([l, l, l]));
+            }
+            pw.extend([blossom([l, l, r]), blossom([l, r, r]), blossom([r, r, r])]);
+        }
+        let knots = [0.0, 0.0, 0.0, 0.0, a, a, a, b, b, b, 1.0, 1.0, 1.0, 1.0];
+        Curve::from(BSplineCurve::from_data(3, 9, 13, 3, &pw, &knots).unwrap())
+    }
+
+    #[test]
+    fn edge_plane_crossings_of_a_b_spline_edge_of_three_spans() {
+        let mut k = Kernel::default();
+        let (b, e) = whole(&mut k, three_span_cubic());
+        let three = edge_plane_crossings(&k, &b, e, Point3::ZERO, Vec3::Y).unwrap();
+        on_the_edge(&k, &b, e, &three);
+        points_at(&three, &[0.2, 0.5, 0.8].map(|x| Point3::new(x, 0.0, 0.0)));
+        // over [0, 0.6] the edge holds the first two; its curve's third is past its end
+        let (b, e) = wire(&mut k, three_span_cubic(), Extent1d::from_min_max(0.0, 0.6));
+        let two = edge_plane_crossings(&k, &b, e, Point3::ZERO, Vec3::Y).unwrap();
+        points_at(&two, &[0.2, 0.5].map(|x| Point3::new(x, 0.0, 0.0)));
+    }
+
+    /// The edge's own tolerance is the tube the solve finds a touch in. The three-span cubic
+    /// peaks at x* = 0.5 - 0.3 / sqrt(3), y* = 20 (0.3)^3 / (3 sqrt(3)), with |y''| = 60 (0.3) /
+    /// sqrt(3) there, so the plane y = y* + 5e-4 passes within 1e-3 of it only for
+    /// |x - x*| <= sqrt(1e-3 / |y''|), under 0.01. An edge of tolerance 1e-3 touches that plane
+    /// there; one of 1e-5 (the default zone tolerance) doesn't, nor does the 1e-3 edge a plane
+    /// 2e-3 above the peak. The edge runs over [0, 0.6], where the peak is the curve's highest
+    /// point: past x = 0.8 the curve rises to 0.8 and crosses every plane above the peak.
+    #[test]
+    fn edge_plane_crossings_follow_the_edge_s_own_tolerance() {
+        let h = 0.3_f64;
+        let (x_peak, y_peak) = (
+            0.5 - h / 3.0_f64.sqrt(),
+            20.0 * h.powi(3) / (3.0 * 3.0_f64.sqrt()),
+        );
+        let mut k = Kernel::default();
+        let crossings = |k: &mut Kernel, tolerance: f64, above: f64| {
+            let (mut b, e) = wire(k, three_span_cubic(), Extent1d::from_min_max(0.0, 0.6));
+            b.edge_mut(e).unwrap().tolerance = tolerance;
+            let plane = Point3::new(0.0, y_peak + above, 0.0);
+            let found = edge_plane_crossings(k, &b, e, plane, Vec3::Y).unwrap();
+            on_the_edge(k, &b, e, &found);
+            found
+        };
+        let touch = crossings(&mut k, 1e-3, 5e-4);
+        assert!(!touch.is_empty(), "within the edge's tolerance of the peak");
+        for c in &touch {
+            let ends = match c {
+                PlaneCrossing::Point(p) => vec![*p],
+                PlaneCrossing::Along { start, end } => vec![*start, *end],
+            };
+            assert!(
+                ends.iter().all(|end| (end.point.x - x_peak).abs() <= 0.01),
+                "{c:?}"
+            );
+        }
+        assert!(
+            crossings(&mut k, 1e-3, 2e-3).is_empty(),
+            "beyond its tolerance"
+        );
+        assert!(crossings(&mut k, 1e-5, 5e-4).is_empty(), "a tighter edge");
+    }
+
+    #[test]
+    fn edge_plane_crossings_of_a_rational_quarter_circle() {
+        // the NURBS quarter circle of radius 5 from (5, 0) to (0, 5) in z = 0 (weights 1,
+        // sqrt(2)/2, 1) against x = 3: at (3, 4)
+        let mut k = Kernel::default();
+        let w = 0.5_f64.sqrt();
+        let pw = [
+            CPoint::new(5.0, 0.0, 0.0, 1.0),
+            CPoint::new(5.0 * w, 5.0 * w, 0.0, w),
+            CPoint::new(0.0, 5.0, 0.0, 1.0),
+        ];
+        let quarter = Curve::from(
+            BSplineCurve::from_data(3, 2, 5, 2, &pw, &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap(),
+        );
+        let (b, e) = whole(&mut k, quarter);
+        let one = edge_plane_crossings(&k, &b, e, Point3::new(3.0, 0.0, 0.0), Vec3::X).unwrap();
+        on_the_edge(&k, &b, e, &one);
+        points_at(&one, &[Point3::new(3.0, 4.0, 0.0)]);
+    }
+
+    #[test]
+    fn edge_plane_crossings_refuses_what_has_no_plane_or_edge() {
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+            .unwrap();
+        let e = get_edges(&b).unwrap()[0];
+        let bad = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY];
+        for x in bad {
+            for (point, normal) in [
+                (Point3::new(x, 0.0, 0.0), Vec3::Z),
+                (Point3::ZERO, Vec3::new(0.0, x, 1.0)),
+            ] {
+                let refused = edge_plane_crossings(&k, &b, e, point, normal);
+                assert!(
+                    matches!(refused, Err(SolidError::InvalidInput { .. })),
+                    "{point:?} {normal:?}: {refused:?}"
+                );
+            }
+        }
+        let zero = edge_plane_crossings(&k, &b, e, Point3::ZERO, Vec3::ZERO);
+        assert!(
+            matches!(zero, Err(SolidError::InvalidInput { .. })),
+            "{zero:?}"
+        );
+        let dangling = edge_plane_crossings(&k, &b, EdgeId::from_index(999), Point3::ZERO, Vec3::Z);
+        assert!(
+            matches!(dangling, Err(SolidError::NotFound { .. })),
+            "{dangling:?}"
+        );
+    }
+
+    #[test]
+    fn edge_plane_crossings_of_an_edge_that_misses_the_plane_is_empty() {
+        let mut k = Kernel::default();
+        let circle =
+            crate::primitive::api_curves::create_analytic_circle(&k, Point3::ZERO, 5.0).unwrap();
+        let (b, e) = whole(&mut k, Curve::from(circle));
+        assert_eq!(
+            edge_plane_crossings(&k, &b, e, Point3::new(0.0, 0.0, 1.0), Vec3::Z).unwrap(),
+            Vec::new()
+        );
+        assert_eq!(
+            edge_plane_crossings(&k, &b, e, Point3::new(5.5, 0.0, 0.0), Vec3::X).unwrap(),
+            Vec::new()
+        );
+    }
+
+    #[test]
+    fn edge_plane_crossings_at_a_vertex_name_it() {
+        // the plane x + y + z = 0 meets the box [0,1]x[0,2]x[0,3] at its corner (0,0,0)
+        // alone: each of the three edges there crosses at that corner, at its interval's
+        // end, and names the same vertex; the other nine edges miss it
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+            .unwrap();
+        let corner = b
+            .vertices()
+            .ids()
+            .find(|&v| b.vertex(v).unwrap().point == Point3::ZERO)
+            .unwrap();
+        let normal = Vec3::new(1.0, 1.0, 1.0);
+        let mut at_corner = 0;
+        for e in get_edges(&b).unwrap() {
+            let crossings = edge_plane_crossings(&k, &b, e, Point3::ZERO, normal).unwrap();
+            on_the_edge(&k, &b, e, &crossings);
+            match crossings.as_slice() {
+                [] => {}
+                [PlaneCrossing::Point(p)] => {
+                    assert_eq!(p.vertex, Some(corner), "{p:?}");
+                    assert!(p.point.distance(Point3::ZERO) <= 1e-12, "{p:?}");
+                    let ivl = b.edge(e).unwrap().interval;
+                    assert!(
+                        p.parameter == ivl.min() || p.parameter == ivl.max(),
+                        "at its interval's end: {p:?} {ivl:?}"
+                    );
+                    at_corner += 1;
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        assert_eq!(at_corner, 3);
+        // the box's bottom, z = 0: its four bottom edges lie in it, each from vertex to
+        // vertex; the four upright edges meet it at their bottom vertex
+        let (mut lying, mut ends) = (0, 0);
+        for e in get_edges(&b).unwrap() {
+            let crossings = edge_plane_crossings(&k, &b, e, Point3::ZERO, Vec3::Z).unwrap();
+            match crossings.as_slice() {
+                [] => {}
+                [PlaneCrossing::Along { start, end }] => {
+                    assert!(
+                        start.vertex.is_some()
+                            && end.vertex.is_some()
+                            && start.vertex != end.vertex,
+                        "{crossings:?}"
+                    );
+                    lying += 1;
+                }
+                [PlaneCrossing::Point(p)] => {
+                    assert!(p.vertex.is_some() && p.point.z.abs() <= 1e-12, "{p:?}");
+                    ends += 1;
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        assert_eq!((lying, ends), (4, 4));
+    }
+
+    #[test]
+    fn edge_crossing_on_face_solves_on_the_face_and_refuses_what_it_cannot() {
+        // the box [0,1]x[0,2]x[0,3]: its upright edge at x = 1, y = 0 and its face x = 1. The line
+        // from (0, 0, 1.5) to (2, 0, 1.5), on the face y = 0, guessed at 0.49, meets x = 1 at 0.5
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+            .unwrap();
+        let at =
+            |lo: f64, hi: f64, want: f64| (lo - want).abs() < 1e-12 && (hi - want).abs() < 1e-12;
+        let upright = get_edges(&b)
+            .unwrap()
+            .into_iter()
+            .find(|&e| {
+                let x = edge_bounding_box(&k, &b, e, true).unwrap();
+                at(x.min().x, x.max().x, 1.0) && at(x.min().y, x.max().y, 0.0)
+            })
+            .unwrap();
+        let side = get_faces(&b)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                let x = face_bounding_box(&k, &b, f, true).unwrap();
+                at(x.min().x, x.max().x, 1.0)
+            })
+            .unwrap();
+        let line = |a: Point3, c: Point3| {
+            Curve::from(crate::primitive::api_curves::create_line_segment(a, c).unwrap())
+        };
+        let front = line(Point3::new(0.0, 0.0, 1.5), Point3::new(2.0, 0.0, 1.5));
+        let ivl = front.natural_interval();
+        let t = edge_crossing_on_face(&k, &b, upright, side, &front, &ivl, 0.49).unwrap();
+        assert!((t - 0.5).abs() <= 1e-12, "{t}");
+        // at y = 1 the line meets x = 1 a whole unit off the edge
+        let off = line(Point3::new(0.0, 1.0, 1.5), Point3::new(2.0, 1.0, 1.5));
+        let refused = edge_crossing_on_face(&k, &b, upright, side, &off, &ivl, 0.49);
+        assert!(matches!(refused, Err(SolidError::Failed(_))), "{refused:?}");
+        // in x = 0.5, along z, the line never meets x = 1
+        let apart = line(Point3::new(0.5, 0.0, 0.0), Point3::new(0.5, 0.0, 3.0));
+        let refused = edge_crossing_on_face(&k, &b, upright, side, &apart, &ivl, 0.5);
+        assert!(
+            matches!(refused, Err(SolidError::NotConverged { .. })),
+            "{refused:?}"
+        );
+        let refused = edge_crossing_on_face(&k, &b, upright, side, &front, &ivl, f64::NAN);
+        assert!(
+            matches!(refused, Err(SolidError::InvalidInput { .. })),
+            "{refused:?}"
+        );
+        let dangling = FaceId::from_index(999);
+        let refused = edge_crossing_on_face(&k, &b, upright, dangling, &front, &ivl, 0.49);
+        assert!(
+            matches!(refused, Err(SolidError::NotFound { .. })),
+            "{refused:?}"
         );
     }
 }

@@ -4,9 +4,8 @@
 //! hole's tip is a cone's apex whose seam is its only edge: the extended offset builds
 //! no offset there, so the cone's offset ends open on a circle. Pinned SMLib returns
 //! that non-manifold offset as a success (`SmOffsetExecutive.cpp:255-262`). Here the
-//! default shell refuses it with or without WR-454's `shell_empty_cavity_fails` check,
-//! retaining the input. With `offset_point_vertex_caps` the apex's offset is a sphere
-//! zone of radius 2 and the shell is a closed solid.
+//! apex's offset is a sphere zone of radius 2 (WR-531's caps) and the shell is a closed
+//! solid.
 //!
 //! The successful result must pass the level-2 check (`check_brep`) clean.
 #![allow(
@@ -19,21 +18,18 @@
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
 
-use offset_fixture::{planar_faces_at, shell, volume, Notifications};
+use offset_fixture::{planar_faces_at, shell};
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
-use solidcore::error::offset::{OffsetFailure, Unsoundness};
-use solidcore::error::Reason;
-use solidcore::math::{Point3, Vec3, PI};
-use solidcore::offset::offset_executive::p1::OffsetExecutive;
-use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
+use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::sweep::api_brep::create_rotational_sweep;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
-use solidcore::{Brep, Kernel, SolidError};
+use solidcore::topology::vertex::{edges, tolerance};
+use solidcore::{Brep, Kernel};
 
 /// A 40 x 40 x 20 box with a hole r 3 drilled 10 deep from the top at (20, 20), its
 /// tip a 118 degree cone.
@@ -66,13 +62,33 @@ fn drilled_box(k: &mut Kernel) -> Brep {
     boolean_difference(k, block, drill).unwrap()
 }
 
-/// The drilled box shelled 2 inward, open at the top or at x = 0, with WR-531's `fixed`
-/// and WR-454's `refuse_open`.
-fn shelled(fixed: bool, refuse_open: bool, open_top: bool) -> solidcore::Result<(Kernel, Brep)> {
+/// The hole's tip (the cone's apex): the swept profile's end on the axis, exact.
+fn tip() -> Point3 {
+    Point3::new(20.0, 20.0, 10.0 - 3.0 / 59.0_f64.to_radians().tan())
+}
+
+/// The drilled box's vertex at the hole's tip (its one vertex with a single edge):
+/// its point and tolerance.
+fn tip_vertex(part: &Brep) -> (Point3, f64) {
+    let tips: Vec<_> = part
+        .vertex_list()
+        .iter()
+        .copied()
+        .filter(|&v| edges(part, v, None).unwrap().len() == 1)
+        .collect();
+    assert_eq!(tips.len(), 1, "one vertex with a single edge");
+    (
+        part.vertex(tips[0]).unwrap().point,
+        tolerance(part, tips[0]).unwrap(),
+    )
+}
+
+/// The drilled box shelled 2 inward, open at the top or at x = 0, with the drilled box's
+/// tip vertex ([`tip_vertex`]).
+fn shelled(open_top: bool) -> solidcore::Result<(Kernel, Brep, (Point3, f64))> {
     let mut k = Kernel::default();
-    k.fixes.offset_point_vertex_caps = fixed;
-    k.fixes.shell_empty_cavity_fails = refuse_open;
     let part = drilled_box(&mut k);
+    let tip = tip_vertex(&part);
     let open = if open_top {
         planar_faces_at(&k, &part, 2, 20.0)
     } else {
@@ -80,7 +96,7 @@ fn shelled(fixed: bool, refuse_open: bool, open_top: bool) -> solidcore::Result<
     };
     assert_eq!(open.len(), 1, "the open face");
     let b = shell(&mut k, part, -2.0, &open)?;
-    Ok((k, b))
+    Ok((k, b, tip))
 }
 
 /// The level-2 check's failure count and report lines.
@@ -89,139 +105,50 @@ fn check(k: &mut Kernel, b: &mut Brep) -> (usize, Vec<String>) {
     (c.failure_count(), c.lines())
 }
 
-fn spheres(b: &Brep) -> usize {
+/// The radius and centre of each face's sphere.
+fn spheres(b: &Brep) -> Vec<(f64, Point3)> {
     b.face_list()
         .iter()
-        .filter(|&&f| {
-            b.face(f)
-                .unwrap()
-                .surface
-                .as_ref()
-                .is_some_and(|s| matches!(s.kind(), SurfaceKind::Sphere(_)))
+        .filter_map(|&f| match b.face(f).unwrap().surface.as_ref()?.kind() {
+            SurfaceKind::Sphere(s) => Some((s.radius(), s.base().position().origin())),
+            _ => None,
         })
-        .count()
+        .collect()
 }
 
 #[test]
 fn wr_531_drilled_hole_shells_with_a_sphere_cap() {
     for open_top in [false, true] {
-        for refuse_open in [false, true] {
-            let case = format!("open_top {open_top} refuse_open {refuse_open}");
-            let (mut k, mut b) = shelled(true, refuse_open, open_top).unwrap();
-            assert!(
-                brep_is_manifold_solid(&b).unwrap(),
-                "{case}: not a closed solid"
-            );
-            assert_eq!(spheres(&b), 1, "{case}: one cap on a sphere");
-            let (failed, lines) = check(&mut k, &mut b);
-            assert_eq!(failed, 0, "{case}: {lines:?}");
-        }
-    }
-}
-
-/// Without a sphere cap the cone's offset stays open at the tip. The shell
-/// refuses it and retains the input, regardless of the legacy WR-454 flag.
-#[test]
-fn wr_531_without_a_tip_cap_the_shell_is_refused_and_keeps_the_input() {
-    for open_top in [false, true] {
-        for refuse_open in [false, true] {
-            let case = format!("open_top={open_top} refuse_open={refuse_open}");
-            let mut k = Kernel::default();
-            k.fixes.shell_empty_cavity_fails = refuse_open;
-            let mut part = drilled_box(&mut k);
-            let open = if open_top {
-                planar_faces_at(&k, &part, 2, 20.0)
-            } else {
-                planar_faces_at(&k, &part, 0, 0.0)
-            };
-            assert_eq!(open.len(), 1);
-            let mut notifications = Notifications::new(&mut part);
-            let key = part.key();
-            let tolerance = part.tolerance();
-            let ids = (
-                part.face_list().to_vec(),
-                part.edge_list().to_vec(),
-                part.vertex_list().to_vec(),
-            );
-            let points: Vec<_> = part
-                .vertices()
-                .iter()
-                .map(|(id, v)| (id, v.point, v.tolerance))
-                .collect();
-            let outcome = OffsetExecutive::shell_brep(
-                &mut k,
-                part,
-                ShellOptions {
-                    offset: OffsetOptions {
-                        distance: -2.0,
-                        extend_convex_edges: true,
-                        merge_results: true,
-                    },
-                    create_offset_solid: false,
-                    merge_sheet_side_walls: false,
-                },
-                &open,
-                &mut notifications.context(),
-            );
-            let error = outcome.result.as_ref().unwrap_err();
-            let SolidError::Failed(failure) = error else {
-                panic!("{case}: not a typed refusal: {error}");
-            };
-            assert_eq!(
-                failure.operation, "offset::offset_executive::p2::shell_brep",
-                "{case}: {error:?}"
-            );
-            assert_eq!(
-                failure.reason,
-                Reason::Offset(OffsetFailure::Unsound {
-                    what: Unsoundness::NotManifoldSolid
-                }),
-                "{case}: {error:?}"
-            );
-            assert!(!outcome.input_ownership_transferred());
-            let mut retained = outcome.retained_input.unwrap();
-            assert_eq!(retained.key(), key);
-            assert_eq!(retained.tolerance(), tolerance);
-            assert_eq!(
-                (
-                    retained.face_list().to_vec(),
-                    retained.edge_list().to_vec(),
-                    retained.vertex_list().to_vec()
-                ),
-                ids
-            );
-            assert_eq!(
-                retained
-                    .vertices()
-                    .iter()
-                    .map(|(id, v)| (id, v.point, v.tolerance))
-                    .collect::<Vec<_>>(),
-                points
-            );
-            // Inspect the returned caches without refreshing away an inconsistency.
-            assert!(
-                solidcore::topology::integrity::check(&retained).is_ok(),
-                "{case}"
-            );
-            assert!(brep_is_manifold_solid(&retained).unwrap(), "{case}");
-            assert_eq!(
-                spheres(&retained),
-                0,
-                "{case}: the original has no sphere cap"
-            );
-            for level in [CheckLevel::Level0, CheckLevel::Level1, CheckLevel::Level2] {
-                let checked = check_brep(&mut k, &mut retained, level).unwrap();
-                assert!(
-                    checked.is_valid(),
-                    "{case}, {level:?}: {:?}",
-                    checked.lines()
-                );
-            }
-            let v = volume(&k, &mut retained).unwrap();
-            let tip = 3.0 / 59.0_f64.to_radians().tan();
-            let exact = 40.0 * 40.0 * 20.0 - PI * 3.0 * 3.0 * (10.0 + tip / 3.0);
-            // Original block less the cylindrical bore and its conical drill tip.
-            assert!((v - exact).abs() <= 1e-9 * exact, "{case}: {v}");
-        }
+        let case = format!("open_top {open_top}");
+        let (mut k, mut b, (tip_point, tip_tol)) = shelled(open_top).unwrap();
+        assert!(
+            brep_is_manifold_solid(&b).unwrap(),
+            "{case}: not a closed solid"
+        );
+        let caps = spheres(&b);
+        assert_eq!(caps.len(), 1, "{case}: one cap on a sphere");
+        let (radius, centre) = caps[0];
+        // The cap is the sphere about the tip vertex's point at the shell's distance
+        // (`BuildOffsetOfVertex`). The radius is that distance, copied, so it agrees to a
+        // few ulps of 2. The centre goes through the sphere's placement arithmetic, so it
+        // need only meet the cap's own validity: within the tip vertex's tolerance of its
+        // point. That point lies within the same tolerance of the exact tip (the seam edge,
+        // a line swept about the axis through its end, ends at the tip exactly), so the
+        // centre is within twice it of the tip.
+        assert!(
+            (radius - 2.0).abs() <= 4.0 * f64::EPSILON * 2.0,
+            "{case}: radius {radius}"
+        );
+        assert!(
+            centre.distance(tip_point) <= tip_tol,
+            "{case}: centre {centre:?}, tip vertex {tip_point:?}, tolerance {tip_tol}"
+        );
+        assert!(
+            centre.distance(tip()) <= 2.0 * tip_tol,
+            "{case}: centre {centre:?} off the tip by more than {}",
+            2.0 * tip_tol
+        );
+        let (failed, lines) = check(&mut k, &mut b);
+        assert_eq!(failed, 0, "{case}: {lines:?}");
     }
 }

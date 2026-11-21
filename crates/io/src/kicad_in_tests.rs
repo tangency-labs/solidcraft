@@ -359,6 +359,36 @@ fn vrml_models_are_read_and_placed() {
     assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
 }
 
+/// KiCad's VRML unit is 0.1 inch (2.54 mm): a 10 x 10 x 5 mm box written in that unit imports at
+/// 10 x 10 x 5 mm, before the footprint's own scale and offset are applied.
+#[test]
+fn vrml_models_are_in_kicad_units_of_a_tenth_of_an_inch() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+        (model "box.wrl" (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0)))))"#;
+    let mut load = |path: &str| {
+        Ok(KicadModelFile { path: path.to_string(), bytes: b"#VRML V2.0 utf8\nShape { geometry Box { size 3.937008 3.937008 1.968504 } }".to_vec() })
+    };
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    assert_eq!(meshes.len(), 1, "the VRML model");
+    let mut low = [f64::MAX; 3];
+    let mut high = [f64::MIN; 3];
+    for point in meshes[0].positions.as_chunks::<3>().0 {
+        for axis in 0..3 {
+            low[axis] = low[axis].min(point[axis]);
+            high[axis] = high[axis].max(point[axis]);
+        }
+    }
+    // The file states each size to six decimals: half a unit in the last place, times 2.54 mm.
+    let tolerance = 0.5e-6 * 2.54 + 1e-9;
+    for (axis, want) in [10.0, 10.0, 5.0].into_iter().enumerate() {
+        let size = high[axis] - low[axis];
+        assert!((size - want).abs() <= tolerance, "axis {axis}: {size} mm, want {want} mm");
+    }
+}
+
 /// A footprint can name several models (a body and, say, a pin-1 marker). One of them missing
 /// costs that model alone: the others still come in.
 #[test]
@@ -414,6 +444,68 @@ fn one_model_named_in_both_formats_is_placed_once() {
     assert_eq!(meshes.len(), 1, "one file, one model: {meshes:?}");
     assert_eq!(imported.plan.slots, vec!["U1".to_string()]);
     assert_eq!(imported.plan.places.len(), 1, "placed once, not once per reference");
+}
+
+/// KiCad 10's 3D library ships `….stpZ`: a zip archive holding one STEP file.
+fn stpz(step: &str) -> Vec<u8> {
+    use std::io::Write;
+    let mut out = std::io::Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(&mut out);
+    zip.start_file("part.step", zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated)).unwrap();
+    zip.write_all(step.as_bytes()).unwrap();
+    zip.finish().unwrap();
+    out.into_inner()
+}
+
+#[test]
+fn a_zipped_stpz_model_is_read_as_step() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+        (model "${KICAD10_3DMODEL_DIR}/Package.3dshapes/part.stpZ")))"#;
+    let bytes = stpz(include_str!("../../../tests/step-conformance/cylinder.step"));
+    let mut load = |path: &str| Ok(KicadModelFile { path: path.to_string(), bytes: bytes.clone() });
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    assert_eq!(meshes.len(), 1, "the zipped STEP comes in: {meshes:?} {:?}", imported.feature.warnings);
+    assert_eq!(imported.plan.slots, vec!["U1".to_string()]);
+    // The model is placed for U1, and its mesh goes into U1's component, not the board's.
+    assert_eq!(imported.plan.places.len(), 1, "{:?}", imported.plan.places);
+    assert_eq!(imported.plan.places[0].slot, 0);
+    assert_eq!(imported.plan.bodies, vec![Some(0)], "{:?}", imported.plan.bodies);
+    assert!(imported.feature.warnings.iter().all(|w| !w.contains("part.stpZ")), "{:?}", imported.feature.warnings);
+}
+
+/// A `….wrl` reference that the installed library only has as `….stpZ` (KiCad 10) is answered
+/// by the zipped STEP: the format follows the file that was read.
+#[test]
+fn a_wrl_reference_answered_by_an_stpz_file_is_read_as_step() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+        (model "part.wrl")))"#;
+    let bytes = stpz(include_str!("../../../tests/step-conformance/cylinder.step"));
+    let mut load = |_: &str| Ok(KicadModelFile { path: "part.stpZ".to_string(), bytes: bytes.clone() });
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    assert_eq!(meshes.len(), 1, "{:?}", imported.feature.warnings);
+    // The model is placed for U1, and its mesh goes into U1's component, not the board's.
+    assert_eq!(imported.plan.slots, vec!["U1".to_string()]);
+    assert_eq!(imported.plan.places.len(), 1, "{:?}", imported.plan.places);
+    assert_eq!(imported.plan.places[0].slot, 0);
+    assert_eq!(imported.plan.bodies, vec![Some(0)], "{:?}", imported.plan.bodies);
+}
+
+#[test]
+fn a_corrupt_stpz_is_warned_and_the_board_is_kept() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+        (model "part.stpZ")))"#;
+    let mut load = |path: &str| Ok(KicadModelFile { path: path.to_string(), bytes: b"not a zip".to_vec() });
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    assert!(imported.plan.slots.is_empty());
+    assert!(imported.feature.warnings.iter().any(|w| w.starts_with("part.stpZ: not imported")), "{:?}", imported.feature.warnings);
 }
 
 #[test]

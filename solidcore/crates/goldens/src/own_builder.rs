@@ -1552,7 +1552,7 @@ fn renumber_walk(src: &Brep, g: &Walk, conv: &Conventions<'_>) -> Result<Brep, H
     // geometry owners are relabelled under `conv`'s identities below, and the copy
     // records `conv.naming` at the end (`record_naming`)
     b.set_editing_enabled(src.editing_enabled());
-    let probe = Kernel::default();
+    let probe = crate::runner_kernel();
     if src.this_model_size_estimate(&probe, false) != tol::USE_DEFAULT
         || src.this_large_small_size_ratio(&probe, false) != tol::USE_DEFAULT
     {
@@ -1881,7 +1881,7 @@ mod tests {
             size: [1.0, 2.0, 3.0],
         };
         let naming = |conv: &Conventions<'_>| {
-            let k = &mut Kernel::default();
+            let k = &mut crate::runner_kernel();
             match build_with(k, &src, false, false, conv).unwrap().unwrap() {
                 Built::Brep(b) => b.naming(),
                 Built::Failed(e) => panic!("box build failed: {e}"),
@@ -1926,7 +1926,7 @@ mod tests {
             eprintln!("unavailable upstream test file: Solids/box.smb");
             return;
         };
-        let k = &mut Kernel::default();
+        let k = &mut crate::runner_kernel();
         let path = path.to_string_lossy();
         let conv = &Conventions::EDGEUSE_GRAPH;
         let mut b = match read_with(k, &path, false, false, false, conv).unwrap() {

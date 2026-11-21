@@ -1,0 +1,13 @@
+[package]
+name = "solidcraft-views"
+description = "The views of a design as plain data: the kinds of view, the set a design keeps open with its closed stack, and the saved form; no UI toolkit, so commands, strips and windows read one model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde_json = { workspace = true }
+solidcraft-viewport = { workspace = true }

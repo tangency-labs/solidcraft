@@ -8,6 +8,8 @@
 
 // Components: each takes plain data and returns the action chosen.
 pub mod app_bar;
+pub mod app_bar_items;
+pub mod app_bar_layout;
 pub mod blur;
 pub mod browser;
 pub mod frame;
@@ -28,6 +30,8 @@ mod actions;
 mod assistant;
 mod assistant_entry;
 mod attention;
+#[cfg(not(target_arch = "wasm32"))]
+mod blur_plan;
 mod checks;
 mod choice;
 mod color;
@@ -41,6 +45,8 @@ mod drag;
 mod fields;
 pub mod file_view;
 mod framing;
+mod grid;
+mod grid_tsv;
 mod history;
 mod history_group;
 pub mod icons;
@@ -108,6 +114,8 @@ pub use fields::{Expressions, cell_editor, install_expressions, wide_cell_editor
 pub use file_view::Icon;
 pub use file_view::{FileView, RecentRow, RecoveryMessage, SampleCard};
 pub use framing::*;
+pub use grid::{CellEditor, CellKind, Edit, Gesture, Grid, GridColumn, GridOutput, GridSource, RowRef};
+pub use grid_tsv::{read_tsv, write_tsv};
 pub use history::*;
 pub use history_group::*;
 pub use keyboard_focus::*;
@@ -122,8 +130,8 @@ pub use navigation::{NavigationEdge, NavigationIdle, NavigationSize};
 pub use navigation_menu::*;
 pub use navigation_settings::*;
 pub use panel::{
-    ComputeStatus, FeatureOptions, InspectorAction, InspectorNames, Panel, Part, WindowPage, WorkspaceOptions, inspector_header, panel_header_hover,
-    within,
+    ComputeStatus, FeatureOptions, InspectorAction, InspectorNames, Panel, Part, StackCard, StackSlot, WindowPage, WorkspaceOptions,
+    inspector_header, panel_header_hover, within,
 };
 pub use panel::{DialogButtons, Window};
 #[cfg(any(test, feature = "test-support"))]
@@ -165,6 +173,8 @@ pub use tree::*;
 pub use value_focus::*;
 pub use viewport_status::*;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod blur_plan_tests;
 #[cfg(any(test, feature = "test-support"))]
 #[path = "gallery_tests.rs"]
 pub mod gallery;

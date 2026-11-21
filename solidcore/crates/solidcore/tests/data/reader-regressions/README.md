@@ -1,8 +1,8 @@
 # Pinned upstream reader fixtures
 
 These files are verbatim copies of the Apache-2.0 upstream SMLib test fixtures that
-`arena_uv_trim_owner.rs` and `issue_1570_flat_body_ray_fire.rs` read through the Rust
-B-rep reader. They are vendored so those regressions run without an `upstream/`
+`arena_uv_trim_owner.rs`, `brep_file_round_trip.rs` and `issue_1570_flat_body_ray_fire.rs`
+read through the Rust B-rep reader. They are vendored so those regressions run without an `upstream/`
 checkout, and they are the bytes of the pinned commit, not of whatever `upstream/`
 happens to have checked out.
 

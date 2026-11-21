@@ -941,4 +941,172 @@ mod tests {
             assert!(close(p.z, 0.0, 1e-12), "t={t}: point {p:?} off z=0");
         }
     }
+    /// Restricts a scalar quadratic Bernstein polynomial to [a,b], exactly in real arithmetic.
+    fn review_restrict_quadratic(p: [f64; 3], a: f64, b: f64) -> [f64; 3] {
+        let value = |t: f64| (1.0 - t).powi(2) * p[0] + 2.0 * t * (1.0 - t) * p[1] + t * t * p[2];
+        let start = value(a);
+        [
+            start,
+            start + (b - a) * ((1.0 - a) * (p[1] - p[0]) + a * (p[2] - p[1])),
+            value(b),
+        ]
+    }
+
+    /// Equal xy coordinates force equal UV, where the two trimmed patches have a strict z gap.
+    #[test]
+    fn review_lost_hit_is_not_an_intersection_of_the_trimmed_patches() {
+        let case = crate::case::regression_case(&Runner, "gen0483");
+        let input: Inputs = case.parse().unwrap();
+        assert_eq!(input.a.kind, 0);
+        assert_eq!(input.b.kind, 0);
+        for (a, b) in input.a.net.iter().zip(&input.b.net) {
+            assert_eq!(&a[..2], &b[..2]);
+        }
+        let mut dx_du = f64::INFINITY;
+        let mut dy_dv = f64::INFINITY;
+        let mut dx_dv = 0.0_f64;
+        let mut dy_du = 0.0_f64;
+        for u in 0..2 {
+            for v in 0..3 {
+                let a = input.a.net[3 * u + v];
+                let b = input.a.net[3 * (u + 1) + v];
+                dx_du = dx_du.min(2.0 * (b[0] - a[0]));
+                dy_du = dy_du.max((2.0 * (b[1] - a[1])).abs());
+            }
+        }
+        for u in 0..3 {
+            for v in 0..2 {
+                let a = input.a.net[3 * u + v];
+                let b = input.a.net[3 * u + v + 1];
+                dy_dv = dy_dv.min(2.0 * (b[1] - a[1]));
+                dx_dv = dx_dv.max((2.0 * (b[0] - a[0])).abs());
+            }
+        }
+        // Derivative coefficient hulls make the symmetric xy Jacobian positive definite.
+        // Integrating it along a segment proves strong monotonicity, hence injectivity.
+        let off_diagonal = 0.5 * (dx_dv + dy_du);
+        assert!(dx_du > off_diagonal && dy_dv > off_diagonal);
+        let d = input.a.domain;
+        assert!(d.iter().all(|x| (0.0..=1.0).contains(x)));
+        let columns: [[f64; 3]; 3] = std::array::from_fn(|v| {
+            let column =
+                std::array::from_fn(|u| input.b.net[3 * u + v][2] - input.a.net[3 * u + v][2]);
+            review_restrict_quadratic(column, d[0], d[2])
+        });
+        let delta: [[f64; 3]; 3] =
+            std::array::from_fn(|u| std::array::from_fn(|v| columns[v][u]));
+        let upper = delta
+            .into_iter()
+            .flat_map(|row| review_restrict_quadratic(row, d[1], d[3]))
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(
+            upper < -0.002,
+            "the shared-UV z gap stays strictly negative"
+        );
+        let k = Kernel::default();
+        let a = surface(&k, &input.a).unwrap();
+        let b = surface(&k, &input.b).unwrap();
+        let old = [
+            0.05113430312658039,
+            0.5433039577037712,
+            0.050544615256296214,
+            0.5421488725961695,
+        ];
+        let old_gap = a
+            .evaluate_point(&k, Point2::new(old[0], old[1]))
+            .unwrap()
+            .distance(b.evaluate_point(&k, Point2::new(old[2], old[3])).unwrap());
+        assert!(
+            old_gap < input.tol,
+            "the old approximate near-hit met its loose distance test"
+        );
+        assert_eq!(run_rust(&input).unwrap().ints["found"], [0]);
+        eprintln!("gen0483: injective xy margin {}; z difference <= {upper:e}; old near-hit gap {old_gap:e}", dx_du.min(dy_dv)-off_diagonal);
+    }
+
+    /// Main's `data` of `gen0258` (merge base ada55bdad): per curve its deviation, `3`, its
+    /// interval and its points at 0, 1/4, .., 1 of it.
+    const MAIN_GEN0258: &str = "
+[0.0, 3.0, 0.0, 1.0, -0.07512394115245234, -0.004610070336162646, 0.0, -0.06634120978028771,
+0.2610324907522801, 0.0, -0.06507151199981648, 0.4990004834863616, 0.0,
+-0.07131484781103867, 0.7092939078660819, 0.0, -0.08507121721395428, 0.8919127638914413,
+0.0, 0.0, 3.0, 0.0, 0.07837022252998035, -0.07512394115245234, -0.004610070336162646, 0.0,
+-0.05656254839072772, -0.0034084895347269123, 0.0, -0.03785365957171108,
+-0.002260319638593604, 0.0, -0.018997274695402442, -0.0011655606477627212, 0.0,
+6.606238198203496e-06, -0.00012421256223426442, 0.0, 0.0, 3.0, 0.07837022252998035,
+0.08077652189092824, 6.606238198203496e-06, -0.00012421256223426442, 0.0,
+0.0005924401642769245, -9.308389187306464e-05, 0.0, 0.001178413142459125,
+-6.200557471362089e-05, 0.0, 0.0017645251727448049, -3.097761075593318e-05, 0.0,
+0.002350776255133964, -1.5043305143236374e-18, 0.0, 0.0, 3.0, 0.08077652189092824,
+0.8203603013688167, 0.0023507762551339753, -1.951563910473908e-18, 0.0, 0.18912613111137497,
+0.00713499698165699, 0.0, 0.3890371794822135, 0.009513329308875988, 0.0, 0.6020839213676492,
+0.007134996981656992, 0.0, 0.8282663567676826, -2.168404344971009e-18, 0.0]";
+
+    /// gen0258, a plane and a Bezier patch in the plane `z = 0`, tolerance 9.94e-4 (WR-455's
+    /// contact move, tangency-labs/solidcraft#17404): main's pieces 3 and 4 of one boundary
+    /// curve of the patch, over `[0.07837, 0.08078]` and `[0.08078, 0.82036]`, are now one
+    /// piece over `[0.07837, 0.82036]`: main split them at a contact with the plane's
+    /// boundary that is now reported at that boundary's end. PROVEN: the new piece stays
+    /// within 1e-7 of that boundary curve of the patch over its whole interval
+    /// (`curves_stay_within`, certified, no samples), and main's two intervals tile it
+    /// exactly. Main's recorded points are that boundary curve's at their parameters within
+    /// 1e-12 (MEASURED: main's curves are gone, only their record is left), and both rows
+    /// keep the deviation 0. The first two pieces are main's, exactly (PROVEN). Class: equal.
+    #[test]
+    fn wr455_gen0258_split_boundary_piece_is_one_piece() {
+        use solidcore::curve::curve::p8::curves_stay_within;
+        use solidcore::geom::extent1d::Extent1d;
+        let case = crate::case::regression_case(&Runner, "gen0258");
+        let i: Inputs = case.parse().unwrap();
+        assert_eq!(i.op, 1);
+        let main: Vec<f64> = serde_json::from_str(MAIN_GEN0258).unwrap();
+        let now = run_rust_isb(&i).unwrap();
+        assert_eq!(now.ints["curves"], [3]);
+        let now = &now.values["data"];
+        assert_eq!(now.get(..38).unwrap(), main.get(..38).unwrap(), "the first two pieces");
+
+        let k = Kernel::default();
+        let (a, b) = (surface(&k, &i.a).unwrap(), surface(&k, &i.b).unwrap());
+        let found = a
+            .intersect_surface_boundaries(&k, &domain(i.a.domain), &b, &domain(i.b.domain), i.tol)
+            .unwrap();
+        assert_eq!(found.curves_3d.len(), 3);
+        let piece = found.curves_3d.get(2).unwrap();
+        let ivl = piece.natural_interval();
+        // main's pieces 3 and 4: [lo, mid] and [mid, hi]
+        let (lo, mid, hi) = (main[40], main[41], main[60]);
+        assert_eq!(main[59], mid);
+        assert_eq!([ivl.min(), ivl.max()], [lo, hi]);
+        assert_eq!(found.deviations.get(2).copied(), Some(0.0));
+        assert!(main[38] == 0.0 && main[57] == 0.0, "main's deviations");
+
+        // the patch's boundary curve the piece is cut from
+        let tight = 1e-7;
+        let mut bdry = Vec::new();
+        for dir in [SurfParamType::U, SurfParamType::V] {
+            let (c0, c1) = b.create_iso_boundaries(&k, dir, i.tol).unwrap().unwrap();
+            bdry.extend([c0, c1]);
+        }
+        let from = bdry
+            .iter()
+            .find(|c| {
+                let n = c.natural_interval();
+                n.min() <= lo
+                    && hi <= n.max()
+                    && curves_stay_within(&k, piece, c, [lo, lo], [hi, hi], tight).unwrap()
+            })
+            .expect("gen0258: the piece is not a boundary curve of the patch within 1e-7");
+
+        // main's recorded points of pieces 3 and 4 are that curve's
+        for (at, [s, e]) in [(42, [lo, mid]), (61, [mid, hi])] {
+            let span = Extent1d::from_min_max(s, e);
+            for j in 0..=4 {
+                let t = span.evaluate(f64::from(j) / 4.0);
+                let p = from.evaluate_point(&k, t).unwrap();
+                let q = main.get(at + 3 * j as usize..at + 3 * j as usize + 3).unwrap();
+                let d = p.distance(Vec3::new(q[0], q[1], q[2]));
+                assert!(d <= 1e-12, "gen0258: main's point {j} at {t} is {d:e} off");
+            }
+        }
+    }
 }

@@ -248,6 +248,11 @@ fn enter(app: &mut SolveApp, component: u64, path: Option<Vec<u64>>, ask: bool) 
 /// and nothing changes.
 fn prepare(app: &mut SolveApp, component: u64, path: Option<Vec<u64>>, ask: bool) -> Result<(PartContext, Value), String> {
     check_enter(app)?;
+    // Opening a source tab uses its saved row, which may differ from this link's selection.
+    // Do not show that other row as though it were the component being edited.
+    if app.session.doc.links.get(&component).is_some_and(|link| link.configuration.is_some()) {
+        return Err(solidcraft_ui_text::tr("ui.edit_in_place_configuration_source").to_string());
+    }
     let Some(assembly) = app.session.path.clone() else {
         return Err(solidcraft_ui_text::tr("ui.edit_in_place_save_first").to_string());
     };

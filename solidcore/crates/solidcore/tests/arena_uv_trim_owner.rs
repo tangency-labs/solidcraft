@@ -19,8 +19,7 @@
 )] // test helpers
 
 use solidcore::curve::curve::Curve;
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
@@ -28,7 +27,7 @@ use solidcore::topology::database_io::FileType;
 use solidcore::topology::edgeuse::p1::{set_uv_trim_curve, uv_trim_curve, UvTrimCurveArg};
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::NamingScheme;
-use solidcore::{Brep, EntityRef, Kernel};
+use solidcore::{Brep, Kernel};
 
 /// `Solids/box.smb` at the pinned upstream commit, vendored verbatim
 /// (`data/reader-regressions/README.md`).
@@ -42,10 +41,7 @@ fn arena_box(k: &mut Kernel) -> Brep {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,

@@ -70,7 +70,7 @@ use crate::blend::fillet_geom::p1::{
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -716,7 +716,6 @@ impl FilletSolver {
 
         // NewtonRaphson solver
         let mut ls = LocalSolveNd::new(&mut eval_fun, Some(&intervals), Some(&periodicities));
-        ls.set_skips_failed_evaluations(k.fixes.oscillating_skips_failed_guesses);
         ls.set_desired_accuracy(EFF_ZERO_SQ);
         ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
         ls.set_maximum_iterations(30);
@@ -839,19 +838,17 @@ impl EvalNFunctions for SphereSolveFn<'_, '_> {
 /// The trim interval pair of two overlapping classification intervals: their
 /// intersection (`SM_BT_MINIMAL`), their union (`SM_BT_MAXIMAL`), else each interval.
 /// Upstream sets both from `rCIvl1.Intersect/Union(rCIvl2)`; an `Intersect` failure
-/// (disjoint: excluded by the callers) leaves the "inside out" extent, or with
-/// `pass_on` (`fixes.fillet_statuses_pass_on`) is returned.
+/// (disjoint: excluded by the callers) leaves the "inside out" extent there; it is
+/// returned here, as the fork does (WR-661).
 fn trim_pair(
     trim_type: BoundaryTrimmingType,
     ivl1: &Extent1d,
     ivl2: &Extent1d,
-    pass_on: bool,
 ) -> Result<Option<(Extent1d, Extent1d)>> {
     Ok(match trim_type {
         BoundaryTrimmingType::Minimal => {
             // fork 66b02de passes this on (SER)
-            let i = crate::error::passed_on(ivl1.intersect(ivl2), pass_on)?
-                .unwrap_or_else(|_| Extent1d::new());
+            let i = ivl1.intersect(ivl2)?;
             Some((i, i))
         }
         BoundaryTrimmingType::Maximal => {
@@ -981,9 +978,7 @@ impl FilletSolver {
             let civl2 = interval_of(&cc2, start2)?;
             // disjoint intervals: just get the next good interval
             if !civl1.are_disjoint(&civl2, 0.0) {
-                let (ivl1, ivl2) =
-                    trim_pair(trim_type, &civl1, &civl2, k.fixes.fillet_statuses_pass_on)?
-                        .unwrap_or((civl1, civl2));
+                let (ivl1, ivl2) = trim_pair(trim_type, &civl1, &civl2)?.unwrap_or((civl1, civl2));
                 // Make sure that length of the intervals is sufficient.
                 let curve1 = class_curve(geometry, &cc1)?;
                 let curve2 = class_curve(geometry, &cc2)?;
@@ -1025,8 +1020,7 @@ impl FilletSolver {
                 found_intersection = true;
                 let (ivl1, ivl2) = match trim_type {
                     BoundaryTrimmingType::Minimal | BoundaryTrimmingType::Maximal => {
-                        trim_pair(trim_type, &civl1, &civl2, k.fixes.fillet_statuses_pass_on)?
-                            .unwrap_or((civl1, civl2))
+                        trim_pair(trim_type, &civl1, &civl2)?.unwrap_or((civl1, civl2))
                     }
                     BoundaryTrimmingType::None => {
                         if i > 0 {
@@ -1220,10 +1214,6 @@ pub fn refine_rail_curve_classification_scoped_with_ops(
     let rail_face = fillets.fillet_edge(rail)?.orig_face;
     let num_small_ivls = small_intervals.len();
     let num_ivls = classification.size();
-    // s3DPntMin / s3DPntMax live across iterations: a failed (ignored) evaluation
-    // keeps the previous value
-    let mut pnt_min = Point3::UNDEF;
-    let mut pnt_max = Point3::UNDEF;
     // sTsectPntMin / sTsectPntMax too (RailEdgeuseIntersect writes them in place)
     let mut tsect_min = TsectPnt::default();
     let mut tsect_max = TsectPnt::default();
@@ -1253,23 +1243,13 @@ pub fn refine_rail_curve_classification_scoped_with_ops(
             continue;
         };
 
-        // the RailCurve local end points (statuses ignored)
+        // the RailCurve local end points (statuses ignored upstream)
         let rail_curve =
             edge::curve(fillets.brep(), rail)?.ok_or_else(|| invalid("rail without a curve"))?;
         // fork 66b02de passes this on (SER)
-        if let Some(p) = ignored(crate::error::passed_on(
-            rail_curve.evaluate_point(k, ivl.min()),
-            k.fixes.fillet_statuses_pass_on,
-        )?)? {
-            pnt_min = p;
-        }
+        let mut pnt_min = rail_curve.evaluate_point(k, ivl.min())?;
         // fork 66b02de passes this on (SER)
-        if let Some(p) = ignored(crate::error::passed_on(
-            rail_curve.evaluate_point(k, ivl.max()),
-            k.fixes.fillet_statuses_pass_on,
-        )?)? {
-            pnt_max = p;
-        }
+        let mut pnt_max = rail_curve.evaluate_point(k, ivl.max())?;
 
         let edge_ivl = edge::interval(target, edge)?;
         // a copy: the solver below may give the side edge use a UV trim curve
@@ -1314,19 +1294,9 @@ pub fn refine_rail_curve_classification_scoped_with_ops(
 
         // Evaluate the params so we can check if the points are within tolerance
         // fork 66b02de passes this on (SER)
-        if let Some(p) = ignored(crate::error::passed_on(
-            edge_curve.evaluate_point(k, eu_param_min),
-            k.fixes.fillet_statuses_pass_on,
-        )?)? {
-            pnt_min = p;
-        }
+        pnt_min = edge_curve.evaluate_point(k, eu_param_min)?;
         // fork 66b02de passes this on (SER)
-        if let Some(p) = ignored(crate::error::passed_on(
-            edge_curve.evaluate_point(k, eu_param_max),
-            k.fixes.fillet_statuses_pass_on,
-        )?)? {
-            pnt_max = p;
-        }
+        pnt_max = edge_curve.evaluate_point(k, eu_param_max)?;
 
         // Can't squeeze the interval if it's not smaller than tolerance
         if pnt_min.distance(pnt_max) > zone_tol_3d {
@@ -1339,15 +1309,9 @@ pub fn refine_rail_curve_classification_scoped_with_ops(
         let mut max_side_ivl = classification.at(ii + 1)?.interval;
         let mut min_side_ivl = classification.at(ii - 1)?.interval;
         // fork 66b02de passes this on (SER)
-        ignore_status(crate::error::passed_on(
-            max_side_ivl.set_min(new_param),
-            k.fixes.fillet_statuses_pass_on,
-        )?)?;
+        max_side_ivl.set_min(new_param)?;
         // fork 66b02de passes this on (SER)
-        ignore_status(crate::error::passed_on(
-            min_side_ivl.set_max(new_param),
-            k.fixes.fillet_statuses_pass_on,
-        )?)?;
+        min_side_ivl.set_max(new_param)?;
         classification.at_mut(ii + 1)?.set_interval(&max_side_ivl);
         classification.at_mut(ii - 1)?.set_interval(&min_side_ivl);
 
@@ -1843,25 +1807,22 @@ mod tests {
 
     /// Fork 66b02de (`SplitAndTrimFilletSurface`: `SER( sIvl.Intersect(..) )`): two
     /// intervals that do not meet. Upstream drops the status and trims to an unset
-    /// interval; with `fillet_statuses_pass_on` the intersection's error is returned.
+    /// interval; the intersection's error is returned, as the fork does (WR-661).
     #[test]
-    fn fillet_statuses_pass_on_split_and_trim_returns_a_failed_intersect() {
+    fn split_and_trim_returns_a_failed_intersect() {
         let a = Extent1d::from_min_max(0.0, 1.0);
         let b = Extent1d::from_min_max(2.0, 3.0);
         let expected = a.intersect(&b).unwrap_err();
         assert_eq!(
-            trim_pair(BoundaryTrimmingType::Minimal, &a, &b, false).unwrap(),
-            Some((Extent1d::new(), Extent1d::new()))
-        );
-        assert_eq!(
-            trim_pair(BoundaryTrimmingType::Minimal, &a, &b, true).unwrap_err(),
+            trim_pair(BoundaryTrimmingType::Minimal, &a, &b).unwrap_err(),
             expected
         );
-        // an overlap trims as before
+        // an overlap trims to the intersection
         let c = Extent1d::from_min_max(0.5, 3.0);
+        let i = Extent1d::from_min_max(0.5, 1.0);
         assert_eq!(
-            trim_pair(BoundaryTrimmingType::Minimal, &a, &c, true).unwrap(),
-            trim_pair(BoundaryTrimmingType::Minimal, &a, &c, false).unwrap()
+            trim_pair(BoundaryTrimmingType::Minimal, &a, &c).unwrap(),
+            Some((i, i))
         );
     }
     use crate::blend::fillet_custom_solver::{

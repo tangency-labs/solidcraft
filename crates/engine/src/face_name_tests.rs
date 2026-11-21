@@ -635,3 +635,55 @@ fn a_chamfer_saved_under_numbered_side_pieces_of_a_peg_is_found_at_its_pick() {
     let result = reopened.model.result(reopened.doc.features[lead_in].id).unwrap();
     assert!(result.error.as_deref().is_some_and(|e| e.contains("reselect")), "{:?}", result.error);
 }
+
+/// A design saved by 0.30.1 (#14479): a round part with a flat (a circle of radius 15 cut off by a
+/// line at y = -3), whose round side and flat side meet along two upright edges (`~1` and `~2`).
+/// Round fillets both, and Bevel chamfers the top edges, the rounds' among them. 0.30.1 wrote
+/// Bevel's names in the older form, with the number of the edge each round replaced at the end
+/// (`F2:top|F3:blend:F2:side:c1|F2:side:l1~2`). That number is the round's edge, not a second edge
+/// between the top and the round, and Bevel finds the round's top edge at its pick again. A pick on
+/// another edge is not that round's edge: it asks again.
+#[test]
+fn a_chamfer_saved_on_a_rounds_edge_with_its_number_at_the_end_is_found_at_its_pick() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 15}));
+    run(&mut s, "sketch.line", json!({"points": [[-20, -3], [20, -3]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10, "profiles": [{"point": [0, -10]}], "body_name": "Part"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[14.697, -3, 5], [-14.697, -3, 5]], "radius": 2, "name": "Round"}));
+    let picks = [[0.0, -3.0, 10.0], [13.6641, -3.8906, 10.0], [-13.6641, -3.8906, 10.0], [0.0, -15.0, 10.0]];
+    run(&mut s, "solid.chamfer", json!({"edges": picks, "distance": 2, "name": "Bevel"}));
+    let index = |name: &str| s.doc.features.iter().position(|f| f.name == name).unwrap();
+    let (round, bevel) = (index("Round"), index("Bevel"));
+    let rounded = s.doc.features[round].edge_names.clone();
+    assert_eq!(rounded, vec!["F2:side:c1|F2:side:l1~2".to_string(), "F2:side:c1|F2:side:l1~1".to_string()]);
+    let (chamfered, chamfered_faces) = (volume(&mut s, "Part"), faces(&mut s, "Part"));
+
+    let round_id = s.doc.features[round].id;
+    let mut saved = (*s.doc).clone();
+    saved.features[bevel].edge_names[1] = format!("F2:top|F{round_id}:blend:{}", rounded[0]);
+    saved.features[bevel].edge_names[2] = format!("F2:top|F{round_id}:blend:{}", rounded[1]);
+    let mut reopened = Session::opened_at(saved.clone(), None, None);
+    let result = reopened.model.result(reopened.doc.features[bevel].id).unwrap();
+    assert!(!result.skipped && result.error.is_none(), "{:?}", result.error);
+    assert!((volume(&mut reopened, "Part") - chamfered).abs() < 1e-6);
+    let reopened_faces = faces(&mut reopened, "Part");
+    assert_eq!(reopened_faces.len(), chamfered_faces.len(), "{reopened_faces:?}");
+    for face in &chamfered_faces {
+        assert!(reopened_faces.iter().any(|f| vec(&f["point"]).dist(vec(&face["point"])) < 1e-6), "{face} is not in {reopened_faces:?}");
+    }
+
+    // The round's name with its pick on the flat side's top edge, or on the round side's: neither
+    // edge is between the top and a round, and that name asks again.
+    let asked = format!("`{}` no longer exists", saved.features[bevel].edge_names[1]);
+    for at in [Vec3::new(6.0, -3.0, 10.0), Vec3::new(5.0, -14.142135623730951, 10.0)] {
+        let mut off = saved.clone();
+        if let solidcraft_doc::FeatureKind::Chamfer { edges, .. } = &mut off.features[bevel].kind {
+            edges[1].0 = at;
+        }
+        let reopened = Session::opened_at(off, None, None);
+        let result = reopened.model.result(reopened.doc.features[bevel].id).unwrap();
+        assert!(result.error.as_deref().is_some_and(|e| e.contains(&asked)), "{at:?}: {:?}", result.error);
+    }
+}

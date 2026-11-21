@@ -442,3 +442,81 @@ fn a_texts_words_show_a_number_parameter_and_follow_it() {
     no_trouble(&s);
     assert_eq!(words(&s, &link), "90.0 / 30°");
 }
+
+#[test]
+fn a_parameter_change_is_saved_in_the_texts_words_place_and_outlines() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "p", "expression": "12.3"}));
+    run(&mut s, "parameters.add", json!({"name": "hh", "expression": "5"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let r = run(&mut s, "sketch.text", json!({"text_expression": "number(p, 1)", "at": ["p", "-hh / 2"], "height": "hh", "align": "center"}));
+    let link = r["link"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    // The glyph points as the saved document has them.
+    let saved_points = |s: &Session| -> Vec<Vec2> {
+        let id = s.doc.find_feature("S").unwrap().id;
+        s.doc.sketch(id).unwrap().points.iter().filter(|q| q.link.is_some()).map(|q| q.pos).collect()
+    };
+    let before = saved_points(&s);
+    run(&mut s, "parameters.change", json!({"name": "p", "expression": "45.6"}));
+    no_trouble(&s);
+    let id = s.doc.find_feature("S").unwrap().id;
+    let LinkSource::Text { text, at, .. } = &s.doc.sketch(id).unwrap().link(&link).unwrap().source else { panic!("not a text") };
+    assert_eq!(text, "45.6");
+    assert!((at.x - 45.6).abs() < 1e-9 && (at.y + 2.5).abs() < 1e-9, "{at:?}");
+    let after = saved_points(&s);
+    assert_ne!(before, after, "the saved glyph points moved");
+    // What is saved is what evaluating it gives.
+    let live: Vec<Vec2> = s.model.state().sketch(id).unwrap().sketch.points.iter().filter(|q| q.link.is_some()).map(|q| q.pos).collect();
+    assert_eq!(after.len(), live.len());
+    for (a, b) in after.iter().zip(&live) {
+        assert!((a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9, "{a:?} {b:?}");
+    }
+    let json = s.doc.to_json();
+    assert!(json.contains("\"text\": \"45.6\""), "the saved file holds the new words");
+}
+
+/// The saved text of sketch `S`, and the ends of its curve `id` as the saved sketch has them.
+fn saved_text_and_line(s: &Session, link: &str, id: &str) -> (String, Vec2, Vec2) {
+    let feature = s.doc.find_feature("S").unwrap().id;
+    let sk = s.doc.sketch(feature).unwrap();
+    let LinkSource::Text { text, .. } = &sk.link(link).unwrap().source else { panic!("not a text") };
+    let curve = sk.curves.iter().find(|c| c.id == id).unwrap();
+    let solidcraft_sketch::CurveKind::Line { a, b } = curve.kind else { panic!("not a line") };
+    (text.clone(), sk.points[a].pos, sk.points[b].pos)
+}
+
+#[test]
+fn a_text_with_more_glyphs_leaves_the_lines_made_after_it_on_their_own_points() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "p", "expression": "1"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let r = run(&mut s, "sketch.text", json!({"text_expression": "number(p, 0)", "at": [0, 0], "height": 5}));
+    let link = r["link"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.line", json!({"points": [[100, 0], [110, 5]], "ids": ["ext"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let (_, a, b) = saved_text_and_line(&s, &link, "ext");
+    assert!((a.x - 100.0).abs() < 1e-9 && (b.x - 110.0).abs() < 1e-9, "{a:?} {b:?}");
+    run(&mut s, "parameters.change", json!({"name": "p", "expression": "4567"}));
+    no_trouble(&s);
+    let (text, a, b) = saved_text_and_line(&s, &link, "ext");
+    assert_eq!(text, "4567");
+    assert!((a.x - 100.0).abs() < 1e-9 && a.y.abs() < 1e-9 && (b.x - 110.0).abs() < 1e-9 && (b.y - 5.0).abs() < 1e-9, "{a:?} {b:?}");
+}
+
+#[test]
+fn an_offset_that_does_not_follow_the_text_does_not_keep_the_saved_text_stale() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "p", "expression": "1"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let r = run(&mut s, "sketch.text", json!({"text_expression": "number(p, 0)", "at": [0, 0], "height": 5}));
+    let link = r["link"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.line", json!({"points": [[100, 0], [110, 0]], "ids": ["ext"]}));
+    run(&mut s, "sketch.offset", json!({"curves": ["ext"], "distance": 3.0, "side": [105, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "parameters.change", json!({"name": "p", "expression": "4567"}));
+    no_trouble(&s);
+    let (text, a, b) = saved_text_and_line(&s, &link, "ext");
+    assert_eq!(text, "4567");
+    assert!((a.x - 100.0).abs() < 1e-9 && (b.x - 110.0).abs() < 1e-9, "{a:?} {b:?}");
+}

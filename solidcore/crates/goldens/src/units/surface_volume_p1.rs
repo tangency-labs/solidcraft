@@ -492,7 +492,6 @@ fn opts(left: [bool; 3], nz: bool, comp: bool) -> EvalOptions {
         non_zero_tangents: nz,
         do_zero_sampling: true,
         with_compounding: comp,
-        ..EvalOptions::default()
     }
 }
 
@@ -1036,5 +1035,303 @@ impl UnitDiff for Runner {
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let k = &Kernel::default();
         rust(k, &case.parse()?)
+    }
+}
+
+#[cfg(test)]
+mod chain_rule_composition_tests {
+    use super::*;
+
+    /// The 12 kernel-free rows WR-45's retirement moves in this unit.
+    const MOVED: [&str; 12] = [
+        "concat_n3",
+        "gen0075",
+        "gen0320",
+        "gen0407",
+        "gen0436",
+        "gen0770",
+        "gen0868",
+        "gen1134",
+        "gen1151",
+        "lift_f1_o3",
+        "lift_f2_o3",
+        "lift_f2_o3_axes",
+    ];
+
+    /// A polynomial in up to three variables truncated above total degree 3: the
+    /// coefficient of `u^a v^b w^c` for each exponent with `a + b + c <= 3`.
+    type Poly = Vec<([usize; 3], f64)>;
+
+    fn exponents(nvars: usize) -> Vec<[usize; 3]> {
+        let mut out = Vec::new();
+        for a in 0..=3 {
+            for b in 0..=3 - a {
+                for c in 0..=3 - a - b {
+                    let e = [a, b, c];
+                    if e.iter().skip(nvars).all(|&x| x == 0) {
+                        out.push(e);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn coef(p: &Poly, e: [usize; 3]) -> f64 {
+        p.iter().find(|(x, _)| *x == e).map_or(0.0, |(_, c)| *c)
+    }
+
+    fn mul(p: &Poly, q: &Poly, nvars: usize) -> Poly {
+        exponents(nvars)
+            .into_iter()
+            .map(|e| {
+                let mut s = 0.0;
+                for (x, a) in p {
+                    for (y, b) in q {
+                        if (0..3).all(|i| x[i] + y[i] == e[i]) {
+                            s += a * b;
+                        }
+                    }
+                }
+                (e, s)
+            })
+            .collect()
+    }
+
+    fn fact(n: usize) -> f64 {
+        (1..=n).product::<usize>() as f64
+    }
+
+    /// The multi-indices of order `k` over `nvars` variables in the kernel's list
+    /// order (sorted index strings: `xx, xy, xz, yy, yz, zz`; `uuv` before `uvv`), as
+    /// exponent vectors.
+    fn multi(nvars: usize, k: usize) -> Vec<[usize; 3]> {
+        fn rec(nvars: usize, k: usize, from: usize, cur: &mut Vec<usize>, out: &mut Vec<[usize; 3]>) {
+            if cur.len() == k {
+                let mut e = [0; 3];
+                for &i in cur.iter() {
+                    e[i] += 1;
+                }
+                out.push(e);
+                return;
+            }
+            for i in from..nvars {
+                cur.push(i);
+                rec(nvars, k, i, cur, out);
+                cur.pop();
+            }
+        }
+        let mut out = Vec::new();
+        rec(nvars, k, 0, &mut Vec::new(), &mut out);
+        out
+    }
+
+    /// The order-`k` partials, in the kernel's list order, of the outer map composed
+    /// with the inner one: `G = sum over |beta| = 1..=order of D_beta delta^beta / beta!`,
+    /// `delta = sum over |alpha| >= 1 of S_alpha t^alpha / alpha!`, both from their
+    /// partials, composed as truncated Taylor polynomials (no chain-rule formula).
+    /// `inner[k - 1]` and `outer[k - 1]` hold the order-`k` partials.
+    /// With `abs`, every partial is replaced by its absolute value: the same expression
+    /// tree then evaluates `sum |term|`, the sum of the absolute values of the expanded
+    /// chain-rule terms.
+    fn compose(
+        nvars: usize,
+        order: usize,
+        inner: &[Vec<Vec3>],
+        outer: &[Vec<Vec3>],
+        abs: bool,
+    ) -> Vec<[f64; 3]> {
+        let f = |x: f64| if abs { x.abs() } else { x };
+        let ex = exponents(nvars);
+        // delta per coordinate of the inner map
+        let delta: Vec<Poly> = (0..3)
+            .map(|c| {
+                ex.iter()
+                    .map(|&e| {
+                        let k = e.iter().sum::<usize>();
+                        let val = if k == 0 || k > order {
+                            0.0
+                        } else {
+                            let i = multi(nvars, k).iter().position(|x| *x == e).unwrap();
+                            let s = inner[k - 1][i];
+                            f([s.x, s.y, s.z][c]) / e.iter().map(|&x| fact(x)).product::<f64>()
+                        };
+                        (e, val)
+                    })
+                    .collect()
+            })
+            .collect();
+        let one: Poly = ex.iter().map(|&e| (e, if e == [0, 0, 0] { 1.0 } else { 0.0 })).collect();
+        let mut g = vec![[0.0; 3]; ex.len()];
+        for k in 1..=order {
+            for (bi, beta) in multi(3, k).into_iter().enumerate() {
+                let mut p = one.clone();
+                for (c, &m) in beta.iter().enumerate() {
+                    for _ in 0..m {
+                        p = mul(&p, &delta[c], nvars);
+                    }
+                }
+                let d = outer[k - 1][bi];
+                let w = beta.iter().map(|&x| fact(x)).product::<f64>();
+                for (gi, &e) in ex.iter().enumerate() {
+                    let pc = coef(&p, e) / w;
+                    g[gi][0] += f(d.x) * pc;
+                    g[gi][1] += f(d.y) * pc;
+                    g[gi][2] += f(d.z) * pc;
+                }
+            }
+        }
+        multi(nvars, order)
+            .into_iter()
+            .map(|e| {
+                let gi = ex.iter().position(|x| *x == e).unwrap();
+                let f = e.iter().map(|&x| fact(x)).product::<f64>();
+                [g[gi][0] * f, g[gi][1] * f, g[gi][2] * f]
+            })
+            .collect()
+    }
+
+    /// `gamma(k) = k u / (1 - k u)` with `u = 2^-53`: the relative bound on `k`
+    /// successive roundings (Higham, Accuracy and Stability of Numerical Algorithms,
+    /// 2nd ed., Lemma 3.1).
+    fn gamma(k: f64) -> f64 {
+        let u = f64::EPSILON / 2.0;
+        k * u / (1.0 - k * u)
+    }
+
+    /// Rounding depth bound `K` for both evaluations of one entry. The kernel's lifts
+    /// add at most 56 terms per entry (`Duvw` of the volume form), each a product of
+    /// at most 5 factors (4 multiplications), with no subtraction: depth <= 61.
+    /// `compose` divides each inner partial by its factorials (1), multiplies three
+    /// truncated polynomials (3 x (1 product + at most 20 added terms) = 63), scales by
+    /// `1 / beta!` and the outer partial (2), adds over at most 19 `beta` (19), and
+    /// multiplies by the output's factorials (1): depth <= 86. `K = 128` bounds both.
+    const DEPTH: f64 = 128.0;
+
+    /// Higham's bound needs no underflow or overflow. `assert_no_underflow` checks
+    /// that every nonzero input lies in [1e-50, 1e50]. A product of at most 5 such
+    /// factors and the constants (factorials, `1/beta!`, at most 6 in size) then stays
+    /// within [1e-252, 1e252], normal in `f64`, and sums of at most 128 of them cannot
+    /// overflow.
+    fn assert_no_underflow(name: &str, vs: &[Vec3]) {
+        for v in vs {
+            for x in [v.x, v.y, v.z] {
+                assert!(
+                    x == 0.0 || (1e-50..=1e50).contains(&x.abs()),
+                    "{name}: input {x} outside the range the rounding bound covers"
+                );
+            }
+        }
+    }
+
+    /// Both values are expression trees of `+` and `x` (no subtraction) over the same
+    /// inputs, whose exact values are the same multivariate polynomial: each is within
+    /// `gamma(K) S` of it, where `S` is the tree evaluated on absolute values
+    /// (Higham, Section 3.1; the expanded terms of both trees have the same positive
+    /// coefficients, so `S` is the same for both). `abs` is that tree computed in
+    /// floating point, `S <= abs / (1 - gamma(K))`. So `|got - want| <= 2 gamma(K) abs
+    /// / (1 - gamma(K))` is the derived bound, not a chosen tolerance.
+    fn assert_close(name: &str, got: &[Vec3], want: &[[f64; 3]], abs: &[[f64; 3]]) {
+        assert_eq!(got.len(), want.len(), "{name}");
+        let g = gamma(DEPTH);
+        for ((gv, w), s) in got.iter().zip(want).zip(abs) {
+            for ((a, b), s) in [gv.x, gv.y, gv.z].into_iter().zip(w).zip(s) {
+                let tol = 2.0 * g * s / (1.0 - g);
+                assert!((a - b).abs() <= tol, "{name}: {a} vs {b} (bound {tol})");
+            }
+        }
+    }
+
+    /// Replays every `Lift` and `Concat` case of the unit (all forms and orders; among
+    /// them the 12 rows WR-45's retirement moves: `lift_f1_o3`, `lift_f2_o3`,
+    /// `lift_f2_o3_axes`, `concat_n3` and 8 generated order-3 lifts and
+    /// concatenations, which call the kernel-free lifts directly) against the
+    /// composition of truncated Taylor polynomials built from the same partials. That
+    /// composition is an independent statement of the multivariate chain rule; it
+    /// agrees with the kernel's lifts within the derived rounding bound of
+    /// `assert_close`. Upstream's third-order formulas (`Dxxz` for `Dxzz`,
+    /// `Fuv`/`Fv` in `Duww`) differ from it on generic inputs.
+    #[test]
+    fn lifts_and_concatenations_are_the_taylor_composition() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: MIN_GENERATED,
+        };
+        let (mut lifts, mut concats) = (0, 0);
+        let mut checked: Vec<String> = Vec::new();
+        for c in Runner.cases(&ctx).unwrap() {
+            match c.parse::<Inputs>().unwrap() {
+                Inputs::Lift { form, order, vecs } => {
+                    let nvars = form.min(2) + 1;
+                    let vs: Vec<Vec3> = vecs.iter().map(|&p| v3(p)).collect();
+                    assert_no_underflow(&c.name, &vs);
+                    let mut it = vs.into_iter();
+                    let inner: Vec<Vec<Vec3>> = (1..=order)
+                        .map(|k| it.by_ref().take(multi(nvars, k).len()).collect())
+                        .collect();
+                    let outer: Vec<Vec<Vec3>> = (1..=order)
+                        .map(|k| it.by_ref().take(multi(3, k).len()).collect())
+                        .collect();
+                    assert!(it.next().is_none(), "{}", c.name);
+                    let got = rust_lift(form, order, &vecs).unwrap();
+                    assert_close(
+                        &c.name,
+                        &got,
+                        &compose(nvars, order, &inner, &outer, false),
+                        &compose(nvars, order, &inner, &outer, true),
+                    );
+                    lifts += 1;
+                    checked.push(c.name.clone());
+                }
+                Inputs::Concat { n, a, b } => {
+                    let first: Vec<Vec3> = a.iter().map(|&p| v3(p)).collect();
+                    let second: Vec<Vec3> = b.iter().map(|&p| v3(p)).collect();
+                    assert_no_underflow(&c.name, &first);
+                    assert_no_underflow(&c.name, &second);
+                    let got = concat_evals(n, &first, &second).unwrap();
+                    let m = n + 1;
+                    let at = |v: &[Vec3], e: [usize; 3]| v[(e[0] * m + e[1]) * m + e[2]];
+                    let top = n.min(3);
+                    for order in 1..=top {
+                        let inner: Vec<Vec<Vec3>> = (1..=order)
+                            .map(|k| multi(3, k).into_iter().map(|e| at(&first, e)).collect())
+                            .collect();
+                        let outer: Vec<Vec<Vec3>> = (1..=order)
+                            .map(|k| multi(3, k).into_iter().map(|e| at(&second, e)).collect())
+                            .collect();
+                        let want = compose(3, order, &inner, &outer, false);
+                        let abs = compose(3, order, &inner, &outer, true);
+                        let gotk: Vec<Vec3> =
+                            multi(3, order).into_iter().map(|e| at(&got, e)).collect();
+                        assert_close(&format!("{} order {order}", c.name), &gotk, &want, &abs);
+                    }
+                    assert_eq!(at(&got, [0, 0, 0]), at(&second, [0, 0, 0]), "{}", c.name);
+                    // every other stored slot (total order above min(n, 3)) is the
+                    // kernel's undefined fill
+                    assert_eq!(got.len(), m * m * m, "{}", c.name);
+                    for i in 0..m {
+                        for j in 0..m {
+                            for l in 0..m {
+                                if i + j + l > top {
+                                    assert_eq!(
+                                        at(&got, [i, j, l]),
+                                        Vec3::UNDEF,
+                                        "{} slot {i},{j},{l}",
+                                        c.name
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    concats += 1;
+                    checked.push(c.name.clone());
+                }
+                _ => {}
+            }
+        }
+        assert!(lifts > 0 && concats > 0, "{lifts} {concats}");
+        for m in MOVED {
+            assert!(checked.iter().any(|c| c == m), "moved row {m} not replayed");
+        }
     }
 }

@@ -16,6 +16,7 @@
 //! | [`TopologySolver::shape_point_solve`] | `SmTopologySolver::ShapePointSolve` |
 //! | [`TopologySolver::brep_curve_solve`] | `SmTopologySolver::BrepCurveSolve` |
 //! | [`TopologySolver::shape_curve_solve`] | `SmTopologySolver::ShapeCurveSolve` |
+//! | [`TopologySolver::shape_shape_solve`] | not upstream: selected shapes through the B-rep pair comparisons |
 //! | [`TopologySolver::solve_two_tree_sets`] | `sm_SolveTwoTrees` |
 //! | [`TopologySolver::brep_brep_solve`] | `SmTopologySolver::BrepBrepSolve` |
 //!
@@ -1066,6 +1067,29 @@ impl<'t, O: SolutionObject + 't> TopologySolver<'t, '_, O> {
             result?;
             rewrite_endpoint_solutions(&mut ts.base.solutions, curve.handle, parameter);
         }
+        Ok(ts.base.solutions)
+    }
+
+    /// Solves two selected shapes, including their boundary edges and vertices, through the
+    /// same ordered comparisons as [`Self::brep_brep_solve`].
+    ///
+    /// # Errors
+    /// Invalid operation, handle mapping, tree traversal or local-solver errors.
+    pub fn shape_shape_solve(
+        kernel: &Kernel,
+        objects: &dyn TopologyObjects<O>,
+        first: &Shape,
+        second: &Shape,
+        options: TopologySolveOptions<'_>,
+    ) -> Result<SolutionArray<O>> {
+        const OP: &str = "intersect::topology_solver::p2::TopologySolver::shape_shape_solve";
+        if !valid_curve_operation(options.operation, false) {
+            return Err(SolidError::invalid_input(OP, "unsupported operation"));
+        }
+        let first = ShapeTreeViews::new(objects, first)?;
+        let second = ShapeTreeViews::new(objects, second)?;
+        let mut ts = new_topology_solver(kernel, objects, options);
+        ts.solve_two_tree_sets(first.views(), second.views())?;
         Ok(ts.base.solutions)
     }
 
