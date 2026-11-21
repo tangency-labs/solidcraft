@@ -1415,6 +1415,8 @@ fn a_midplane_parallel_to_a_world_plane_takes_that_world_planes_frame() {
     assert!(built.x.dist(Vec3::X) < 1e-9 && built.y.dist(Vec3::Y) < 1e-9, "the midplane takes the world XY frame: {built:?}");
 }
 
+const BEFORE_MIDPLANE_OLD_FRAME: u32 = 63;
+
 /// #18260: a design saved before the midplane took a world plane's frame keeps it. The pending
 /// format change marks every midplane of an older design, so the sketch drawn on it opens
 /// where it was drawn; a design saved now takes the world plane's frame.
@@ -1446,7 +1448,7 @@ fn a_design_saved_before_the_midplane_frame_change_keeps_its_old_frame() {
     // The design as an older build saved it: the format before this one, and no list of the
     // changes it has, so the pending change is applied to it as it opens.
     let mut saved: serde_json::Value = serde_json::from_str(&doc.to_json()).unwrap();
-    saved["format"] = serde_json::json!(crate::format::format_string(crate::format::FORMAT - 1));
+    saved["format"] = serde_json::json!(crate::format::format_string(BEFORE_MIDPLANE_OLD_FRAME));
     saved.as_object_mut().unwrap().remove("format_pending");
     let older = crate::format::read(&serde_json::to_string(&saved).unwrap()).unwrap();
     let built = plane_of(&older);
