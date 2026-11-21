@@ -518,20 +518,36 @@ fn a_hair_step_heals_to_one_edge_between_its_two_tops() {
 /// as SMLib's healer does, and grows none.
 #[test]
 fn a_hair_step_heals_where_the_tolerance_covers_a_real_gap() {
-    let rec = with_vertex_gap(
-        hair_step_box(3e-4, TOLS),
-        [10.0, 0.0, 0.0],
-        [0.0, 0.0, 2e-4],
-    );
-    let (body, _) = Body::from_record(&rec, true).unwrap();
+    let gap = 2e-4;
+    let rec = with_vertex_gap(hair_step_box(3e-4, TOLS), [10.0, 0.0, 0.0], [0.0, 0.0, gap]);
+    let (body, order) = Body::from_record(&rec, true).unwrap();
     assert_eq!(failed(&body), [7, 7, 11, 11, 11, 11, 34]);
     heals(&rec, [7, 15, 10]);
-    // SMLib's own healer on the same record: every tolerance reset small, the gap no longer
-    // covered
+    // `no_tolerance_grew` is one-sided; the heal shrinks none either: the gapped corner, which
+    // no squeeze moves, keeps the stated tolerance
+    let (healed, _) = solidcore_ops::heal::heal_tolerance_defects(&body, &order).unwrap();
+    let (after, _) = healed.unwrap().body.to_record().unwrap();
+    let corner = after.vertices.iter().find(|v| v.point == [10.0, 0.0, gap]);
+    assert_eq!(corner.map(|v| v.tolerance), Some(TOLS.vertex));
+
+    // SMLib's own healer on the same record passes the check by shrinking: every tolerance is
+    // reset under the stated one, and the gapped corner keeps the gap gain times twice its gap
+    // as its zone (#17739), half the record tolerance; the check holds a gap to half the zone
     let (smlib_healed, _) = Body::from_record(&rec, false).unwrap();
     let healed = smlib_healed.check(CheckLevel::All).unwrap();
-    assert!(!healed.is_valid());
-    assert!(healed.failed_tests().iter().all(|&t| t <= 3), "{healed}");
+    assert!(healed.is_valid(), "{healed}");
+    let (after, _) = smlib_healed.to_record().unwrap();
+    for v in &after.vertices {
+        assert!(v.tolerance < TOLS.vertex, "{v:?}");
+        if v.point == [10.0, 0.0, gap] {
+            assert!(v.tolerance / 2.0 >= 2.0 * gap, "{v:?}");
+        }
+    }
+    assert!(
+        after.vertices.iter().any(|v| v.point == [10.0, 0.0, gap]),
+        "the gapped corner is kept"
+    );
+    assert!(after.edges.iter().all(|e| e.tolerance < TOLS.edge));
 }
 
 /// The hair step ending in a 45° cap at the right face: four short edges squeezed (the cap's
