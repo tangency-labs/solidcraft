@@ -812,6 +812,7 @@ fn a_plane_label_needs_the_plane_s_parametrisation() {
         }
         r.definition.supports[0] = SupportRecord::Nurbs {
             kind: SupportKindRecord::Plane,
+            revolution: None,
             form: NurbsSurfaceRecord {
                 u_degree: 2,
                 v_degree: 1,

@@ -494,3 +494,150 @@ fn derives_about_the_z_axis(form: &Form, sweep: f64) {
         }
     }
 }
+
+/// One rational span of a right circular cone about +X: radius `r0` at `x0`, radius `r1`
+/// at `x1`, turned by `sweep_deg` and centred on the +Y meridian. The middle control is
+/// the tangents' intersection, weight `cos` of half the sweep (The NURBS Book, §7.5).
+fn cone_span(
+    x0: f64,
+    r0: f64,
+    x1: f64,
+    r1: f64,
+    sweep_deg: f64,
+    weight_sign: f64,
+) -> BSplineSurface {
+    let half = sweep_deg.to_radians() * 0.5;
+    let (c, s, w) = (half.cos(), half.sin(), half.cos());
+    let row = |x: f64, r: f64| {
+        let pts = [
+            (x, r * c, -r * s, weight_sign),
+            (x, r / c, 0.0, w * weight_sign),
+            (x, r * c, r * s, weight_sign),
+        ];
+        pts.iter()
+            .map(|&(x, y, z, wt)| CPoint::new(x * wt, y * wt, z * wt, wt))
+            .collect()
+    };
+    let nurb = solidcore::nurbs::srf_basic::Surface::new(
+        vec![row(x0, r0), row(x1, r1)],
+        1,
+        2,
+        vec![0.0, 0.0, 1.0, 1.0],
+        vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+    )
+    .unwrap();
+    BSplineSurface::from_nurb(nurb, true)
+}
+
+/// The rib cone a 2 mm fillet wrote as a support when the 15° edge was rounded together
+/// with the rib's end edges: one 12° rational span (weight `cos 6°`) between the root
+/// and the outer generator. Deriving it must build on this form. Dropping the cone label
+/// leaves the round a freeform support, and the round then does not certify.
+fn rib_support_form() -> BSplineSurface {
+    // (x, y, z, weight), u the 12° arc, v the generator.
+    let raw = [
+        [
+            [18.0, 28.3438740179958, -2.9790612031281256, 1.0],
+            [
+                26.74312899999874,
+                33.17091333596729,
+                -3.486403479240729,
+                1.0,
+            ],
+        ],
+        [
+            [
+                17.901394116628865,
+                28.50000000000001,
+                1.2145552174048781e-13,
+                0.994521895368273,
+            ],
+            [
+                26.596627341156914,
+                33.35362799999897,
+                2.2590727043730735e-13,
+                0.994521895368273,
+            ],
+        ],
+        [
+            [
+                17.99999999999991,
+                28.343874017995784,
+                2.9790612031283272,
+                1.0,
+            ],
+            [
+                26.743128999998635,
+                33.17091333596727,
+                3.4864034792412224,
+                1.0,
+            ],
+        ],
+    ];
+    // The record stores homogeneous coordinates (`wx, wy, wz`) beside the weight.
+    // Multiplying by the weight again pulls the tangent point off the circle.
+    let net = raw
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|p| CPoint::new(p[0], p[1], p[2], p[3]))
+                .collect()
+        })
+        .collect();
+    let nurb = solidcore::nurbs::srf_basic::Surface::new(
+        net,
+        2,
+        1,
+        vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        vec![0.0, 0.0, 8.743129, 8.743129],
+    )
+    .unwrap();
+    BSplineSurface::from_nurb(nurb, true)
+}
+
+/// A 12° rib on the frustum of #19724 is a right circular cone. The centre built from the
+/// tangent leg lies 6.8×10⁻¹³ mm off the axis, 1.06 times the rounding `build` allows, once
+/// the control points carry the fillet's conversions. The support was stored without its
+/// cone label and the round would not certify. The chord and the middle weight put the
+/// centre 2.7×10⁻¹⁴ mm off, and the form proves. A span past 180°, and a row whose
+/// weights are all negated, are the same circle and prove too. A one-degree span's recovered
+/// centre lies about `R / θ²` off the axis, about 8×10⁻¹² mm here, past the evaluation bound,
+/// so `build` returns `InvalidInput`.
+#[test]
+fn a_twelve_degree_rib_cone_derives_from_the_fillet_support() {
+    let k = Kernel::default();
+    let mut forms = vec![("recorded fillet support".to_string(), rib_support_form())];
+    for sweep in [1.0_f64, 3.0, 6.0, 12.0, 90.0, 179.0, 270.0] {
+        forms.push((
+            format!("constructed {sweep} degree cone"),
+            cone_span(18.0, 28.5, 26.743_129, 33.353_628, sweep, 1.0),
+        ));
+    }
+    // Negating every weight leaves the circle. The ends are negative together.
+    forms.push((
+        "constructed 12 degree cone, weights negated".to_string(),
+        cone_span(18.0, 28.5, 26.743_129, 33.353_628, 12.0, -1.0),
+    ));
+    for (name, form) in forms {
+        let derived = AnalyticSupport::derive(&k, SupportKind::Cone, &form)
+            .unwrap_or_else(|e| panic!("{name} does not derive: {e}"));
+        let short = name.contains("1 degree");
+        if !short {
+            let margin = derived.parametrisation_margin(&k, &form).unwrap();
+            assert!(
+                margin.is_some_and(|m| m <= 1.0),
+                "{name} parametrisation margin {margin:?}"
+            );
+        }
+        let built = derived.build(&k, form);
+        if short {
+            let err = built.expect_err("{name} published a centre the arc does not prove");
+            assert!(
+                matches!(err, solidcore::error::SolidError::InvalidInput { .. }),
+                "{name}: {err}"
+            );
+            continue;
+        }
+        built.unwrap_or_else(|e| panic!("{name} does not build: {e}"));
+    }
+}

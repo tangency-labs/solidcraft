@@ -7,7 +7,7 @@
 //! parameters of the other geometry, and a reflection the orientation: those are a kernel
 //! operation, not this.
 use solidcore_record::brep::blend::{
-    BlendDefinition, BlendDefinitionRecord, NurbsCurveRecord, NurbsSurfaceRecord, ProceduralBlendRecord, SupportRecord,
+    BlendDefinition, BlendDefinitionRecord, NurbsCurveRecord, NurbsSurfaceRecord, ProceduralBlendRecord, RevolutionRecord, SupportRecord,
 };
 use solidcore_record::brep::{Brep, Curve, Frame, Surface};
 
@@ -181,9 +181,27 @@ impl Rigid {
         Some(d)
     }
 
+    fn revolution(&self, r: &RevolutionRecord) -> RevolutionRecord {
+        RevolutionRecord {
+            origin: self.point(r.origin),
+            x_axis: self.direction(r.x_axis),
+            y_axis: self.direction(r.y_axis),
+            radius: r.radius,
+            semi_angle_deg: r.semi_angle_deg,
+        }
+    }
+
     fn support(&self, s: &SupportRecord) -> Option<SupportRecord> {
         Some(match s {
-            SupportRecord::Nurbs { kind, form } => SupportRecord::Nurbs { kind: *kind, form: self.nurbs_surface(form)? },
+            SupportRecord::Nurbs {
+                kind,
+                form,
+                revolution,
+            } => SupportRecord::Nurbs {
+                kind: *kind,
+                form: self.nurbs_surface(form)?,
+                revolution: revolution.as_ref().map(|r| self.revolution(r)),
+            },
             SupportRecord::Blend(b) => {
                 let net = self.nurbs_surface(&b.net)?;
                 let mut definition = self.procedural(&b.definition)?;
