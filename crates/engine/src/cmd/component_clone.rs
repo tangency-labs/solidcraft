@@ -313,7 +313,9 @@ pub(super) fn build(
     let root_occurrence = scratch.doc.occurrence_of(root).map(|o| o.id).ok_or_else(|| bad(CMD, "missing cloned placement"))?;
     let mut clone_path = if let Some(path) = parent_path {
         path
-    } else if let Some(o) = &source_occurrence {
+    } else if let Some(o) = source_occurrence.as_ref().filter(|o| o.parent == parent) {
+        // Into the source placement's own parent: through the parent placement it was picked in.
+        // Into another parent, that path leads elsewhere, so the parent's own path is used.
         let mut path = super::component::occurrence_path(s, params, o.id, CMD)?;
         path.pop();
         path
@@ -531,7 +533,7 @@ pub(super) fn build(
         let placements = solidcraft_doc::ClonePlacements {
             occurrences: &occurrences,
             source_roots: &source_roots,
-            root: root_occurrence,
+            root_path: &clone_path,
             doc: &scratch.doc,
             same_document: !origin.other_design,
         };

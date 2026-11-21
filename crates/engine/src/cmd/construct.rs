@@ -180,12 +180,17 @@ pub(crate) fn is_model_axis(v: &Value) -> bool {
 /// for any other form of `axis`.
 pub(super) fn model_axis_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<Option<(GeoRef, Vec3, Vec3)>> {
     let Some(v) = v.filter(|v| is_model_axis(v)) else { return Ok(None) };
-    let g = geo(s, Some(v), cmd, "axis")?;
     let state = s.world_state()?;
-    let line = if cmd == "solid.coil" {
-        solidcraft_doc::construct::coil_model_axis(&state, &g)
+    let (g, line) = if cmd == "solid.coil" {
+        // A Coil finds its edge or face in the world as it evaluates, so its world pick is named
+        // there too: an unplaced body's edge may pass through the pick where no placed one does.
+        let g = geo_in(s, Some(v), cmd, "axis", &state)?;
+        let line = solidcraft_doc::construct::coil_model_axis(&state, &g);
+        (g, line)
     } else {
-        solidcraft_doc::construct::model_axis_in(Some(&s.doc), &state, &g, 0)
+        let g = geo(s, Some(v), cmd, "axis")?;
+        let line = solidcraft_doc::construct::model_axis_in(Some(&s.doc), &state, &g, 0);
+        (g, line)
     };
     let (o, d) = line.map_err(|e| bad(cmd, format!("`axis`: {e}")))?;
     Ok(Some((g, o, d)))
@@ -266,6 +271,11 @@ pub(crate) fn geo_form(v: &Value) -> std::result::Result<GeoForm<'_>, GeoFormErr
 
 /// A reference from its JSON form.
 pub(super) fn geo(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Result<GeoRef> {
+    geo_in(s, v, cmd, what, &s.model.state())
+}
+
+/// [`geo`], with its picked faces and edges named in `st`: the state the reference is found in.
+fn geo_in(s: &Session, v: Option<&Value>, cmd: &str, what: &str, st: &solidcraft_doc::ModelState) -> Result<GeoRef> {
     let v = v.ok_or_else(|| bad(cmd, format!("`{what}` is required: {REF}")))?;
     let mut g = match geo_form(v) {
         Ok(GeoForm::Saved(g)) => g,
@@ -325,7 +335,7 @@ pub(super) fn geo(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Resu
         Err(GeoFormError::Saved(e)) => return Err(bad(cmd, format!("`{what}`: {e}"))),
         Err(GeoFormError::Unknown) => return Err(bad(cmd, format!("`{what}` must be {REF}"))),
     };
-    g.name_picks(&s.model.state());
+    g.name_picks(st);
     Ok(g)
 }
 

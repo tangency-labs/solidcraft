@@ -1093,6 +1093,47 @@ fn pasted_coil_and_datum_keep_the_selected_ancestor_occurrences() {
     }
 }
 
+/// A Child placed in a Parent that is placed twice, copied from the Parent's second placement:
+/// the copy sits in that placement, so its Coil edge and datum go through it, as its faces do,
+/// not through the Parent's first placement.
+#[test]
+fn pasted_coil_and_datum_go_through_the_parents_second_placement() {
+    use solidcraft_doc::construct::{AxisDef, GeoRef};
+    use solidcraft_doc::{AxisRef, FeatureKind};
+
+    let mut s = Session::default();
+    let parent = component(&mut s, "Parent");
+    let first = s.doc.occurrence_of(parent).unwrap().id;
+    let child = component(&mut s, "Child");
+    let leaf = s.doc.occurrence_of(child).unwrap().id;
+    let box_id = box2(&mut s);
+    let second = run(&mut s, "occurrence.copy", json!({"component":parent,"translate":[50,0,0]}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component":child,"occurrence":leaf,"path":[second,leaf]}));
+    let edge = format!("F{box_id}:-x|F{box_id}:-y");
+    run(
+        &mut s,
+        "solid.coil",
+        json!({"axis":{"type":"placed_edge","body":"Cube","path":[second,leaf],"author_path":[second,leaf],"at":[0,0,1],"name":edge},
+               "diameter":12,"section_size":1,"pitch":4,"revolutions":1,"body_name":"Winding"}),
+    );
+    run(&mut s, "construct.axis.two_points", json!({"a":format!("o:{second}/{leaf}/origin/O"),"b":{"point":[0,0,12]}}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    let copied = run(&mut s, "component.paste_new", json!({"component":child,"occurrence":leaf,"path":[second,leaf],"translate":[10,0,0]}));
+    let (owner, new_leaf) = (copied["component"].as_u64().unwrap(), copied["occurrence"].as_u64().unwrap());
+    let expected = vec![second, new_leaf];
+    assert_ne!(first, second);
+    let mut features = s.doc.features.iter().filter(|f| f.component == owner);
+    let mut kinds = features.by_ref().map(|f| &f.kind).filter(|k| matches!(k, FeatureKind::Coil { .. } | FeatureKind::ConstructionAxis { .. }));
+    let Some(FeatureKind::Coil { axis_ref: Some(AxisRef::Model { geo: GeoRef::PlacedEdge { path, author_path, .. } }), .. }) = kinds.next() else {
+        panic!("expected the copied Coil");
+    };
+    assert_eq!((path, author_path), (&expected, &expected));
+    let Some(FeatureKind::ConstructionAxis { def: AxisDef::TwoPoints { a: GeoRef::Datum { datum }, .. } }) = kinds.next() else {
+        panic!("expected the copied datum axis");
+    };
+    assert_eq!(datum.path, expected);
+}
+
 #[test]
 fn pasted_move_keeps_its_placed_edge_in_another_component() {
     use solidcraft_doc::FeatureKind;

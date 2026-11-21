@@ -2929,6 +2929,55 @@ fn coil_accepts_the_same_axis_reference_forms_as_revolve() {
     }
 }
 
+/// Two moved components: A's box is placed where B's box is drawn, so B's unplaced edge passes
+/// through the world point picked on A's placed edge. The Coil names its pick in the world, where
+/// it finds it, so it winds about A's edge, not B's placed edge far away.
+#[test]
+fn a_coil_edge_pick_is_named_where_the_moved_edge_is() {
+    let mut s = Session::default();
+    for (name, base, shift) in [("A", 0, 50), ("B", 50, 100)] {
+        let c = run(&mut s, "component.create", json!({"name":name,"grounded":false}))["component"].as_u64().unwrap();
+        run(&mut s, "solid.box", json!({"length":2,"width":2,"height":2,"body_name":name}));
+        if base != 0 {
+            run(&mut s, "solid.move", json!({"bodies":[name],"translate":[base,0,0]}));
+        }
+        run(&mut s, "component.activate", json!({"component":"root"}));
+        let occurrence = s.doc.occurrence_of(c).unwrap().id;
+        run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[shift,0,0]}));
+    }
+    let bbox = |s: &mut Session, name: &str| {
+        let m = measure(s);
+        let body = m["bodies"].as_array().unwrap().iter().find(|b| b["name"] == name).unwrap_or_else(|| panic!("{name}: {m}")).clone();
+        let read = |key: &str, i: usize| body["bbox"][key][i].as_f64().unwrap();
+        ([read("min", 0), read("min", 1)], [read("max", 0), read("max", 1)])
+    };
+    let (a_min, _) = bbox(&mut s, "A");
+    let (b_min, _) = bbox(&mut s, "B");
+    // B's unplaced box is where A's placed box is: the pick is on both, B's placed box is 100 away.
+    assert!((b_min[0] - a_min[0] - 100.0).abs() < 1e-6, "{a_min:?} {b_min:?}");
+    run(
+        &mut s,
+        "solid.coil",
+        json!({"axis":{"edge":[a_min[0], a_min[1], 1]},"diameter":6,"section_size":0.5,"revolutions":1,"pitch":4,"body_name":"Winding"}),
+    );
+    let (min, max) = bbox(&mut s, "Winding");
+    let centre = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0];
+    assert!((centre[0] - a_min[0]).abs() < 0.5 && (centre[1] - a_min[1]).abs() < 0.5, "the Coil winds about A's edge: {centre:?}, {a_min:?}");
+
+    // A second placement of A has the same edge names: the pick on it finds that placement's edge.
+    let a = s.doc.find_component("A").unwrap();
+    run(&mut s, "occurrence.copy", json!({"component":a,"translate":[30,0,0]}));
+    let second = [a_min[0] + 30.0, a_min[1]];
+    run(
+        &mut s,
+        "solid.coil",
+        json!({"axis":{"edge":[second[0], second[1], 1]},"diameter":6,"section_size":0.5,"revolutions":1,"pitch":4,"body_name":"Second"}),
+    );
+    let (min, max) = bbox(&mut s, "Second");
+    let centre = [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0];
+    assert!((centre[0] - second[0]).abs() < 0.5 && (centre[1] - second[1]).abs() < 0.5, "the Coil winds about A's second placement: {centre:?}");
+}
+
 #[test]
 fn a_coil_follows_its_named_axis_after_redefinition_and_save() {
     use solidcraft_doc::FeatureKind;

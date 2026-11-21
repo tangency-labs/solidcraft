@@ -208,7 +208,9 @@ pub struct ClonePlacements<'a> {
     pub occurrences: &'a BTreeMap<u64, u64>,
     /// All occurrences of the source root definition, including the one used to author a feature.
     pub source_roots: &'a BTreeSet<u64>,
-    pub root: u64,
+    /// The selected destination path, ending at the copy's root placement. A copy into the second
+    /// placement of a parent placed twice goes through that placement, not the parent's first one.
+    pub root_path: &'a [u64],
     pub doc: &'a crate::Document,
     pub same_document: bool,
 }
@@ -304,18 +306,19 @@ fn remap_occurrence_path(path: &mut Vec<u64>, placements: Option<&ClonePlacement
     }
     let outside = || crate::DocError::Invalid("the copied reference names a placement outside the copied tree".into());
     let placements = placements.ok_or_else(outside)?;
+    let broken = || crate::DocError::Invalid("the copied placement's path is broken".into());
+    let root = *placements.root_path.last().ok_or_else(broken)?;
     let mut mapped = path
         .iter()
-        .map(|id| if placements.source_roots.contains(id) { Some(placements.root) } else { placements.occurrences.get(id).copied() })
+        .map(|id| if placements.source_roots.contains(id) { Some(root) } else { placements.occurrences.get(id).copied() })
         .skip_while(Option::is_none)
         .peekable();
     if mapped.peek().is_none() {
         return if keep_external && placements.same_document { placements.doc.placement_frame(path).map(|_| ()) } else { Err(outside()) };
     }
     let mapped = mapped.collect::<Option<Vec<_>>>().ok_or_else(outside)?;
-    let broken = || crate::DocError::Invalid("the copied placement's path is broken".into());
-    let mut remapped = placements.doc.occurrence_path(placements.root).ok_or_else(broken)?;
-    if mapped.first() == Some(&placements.root) {
+    let mut remapped = placements.root_path.to_vec();
+    if mapped.first() == Some(&root) {
         remapped.pop();
     }
     remapped.extend(mapped);
@@ -594,7 +597,8 @@ mod clone_tests {
         let external_placement = doc.occurrence_of(external).unwrap().id;
         let copy = doc.add_component(Some("Copy"), 0).unwrap();
         let root = doc.occurrence_of(copy).unwrap().id;
-        let placements = ClonePlacements { occurrences: &BTreeMap::new(), source_roots: &BTreeSet::new(), root, doc: &doc, same_document: true };
+        let placements =
+            ClonePlacements { occurrences: &BTreeMap::new(), source_roots: &BTreeSet::new(), root_path: &[root], doc: &doc, same_document: true };
         let original = vec![external_placement];
         let mut path = original.clone();
         remap_occurrence_path(&mut path, Some(&placements), true).unwrap();
