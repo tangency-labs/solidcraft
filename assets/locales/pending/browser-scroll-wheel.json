@@ -1,0 +1,82 @@
+{
+  "en": {
+    "prefs.browser_scroll_wheel": "Scroll wheel in the browser",
+    "prefs.browser_scroll_wheel.always_pan": "Always pan",
+    "prefs.browser_scroll_wheel.always_zoom": "Always zoom",
+    "prefs.browser_scroll_wheel.automatic": "Automatic",
+    "prefs.browser_scroll_wheel.help": "Automatic pans with two-finger scrolling, as trackpads expect, and offers once to make the wheel zoom when it sees a smooth-scroll mouse wheel. Always zoom makes vertical scrolling zoom, including smooth mouse wheels; hold Shift or the navigation modifiers to pan. Always pan never asks.",
+    "ui.browser_wheel_hint": "Scrolling is panning the view. Using a mouse with a smooth-scroll wheel? Make the wheel zoom",
+    "ui.browser_wheel_hint_dismiss": "Don't ask again",
+    "ui.browser_wheel_hint_zoom": "Make the wheel zoom"
+  },
+  "de": {
+    "prefs.browser_scroll_wheel": "Mausrad im Browser",
+    "prefs.browser_scroll_wheel.always_pan": "Immer verschieben",
+    "prefs.browser_scroll_wheel.always_zoom": "Immer zoomen",
+    "prefs.browser_scroll_wheel.automatic": "Automatisch",
+    "prefs.browser_scroll_wheel.help": "Automatisch verschiebt die Ansicht beim Zwei-Finger-Scrollen, wie Trackpads es erwarten, und bietet einmal an, das Rad zum Zoomen zu verwenden, wenn es ein Maus-Rad mit sanftem Scrollen erkennt. Immer zoomen lässt vertikales Scrollen zoomen, auch bei sanft scrollenden Mausrädern; mit Umschalt oder den Navigationstasten wird verschoben. Immer verschieben fragt nie.",
+    "ui.browser_wheel_hint": "Scrollen verschiebt die Ansicht. Verwenden Sie eine Maus mit sanft scrollendem Rad? Das Rad zum Zoomen verwenden",
+    "ui.browser_wheel_hint_dismiss": "Nicht mehr fragen",
+    "ui.browser_wheel_hint_zoom": "Rad zum Zoomen verwenden"
+  },
+  "ko": {
+    "prefs.browser_scroll_wheel": "브라우저의 스크롤 휠",
+    "prefs.browser_scroll_wheel.always_pan": "항상 이동",
+    "prefs.browser_scroll_wheel.always_zoom": "항상 확대/축소",
+    "prefs.browser_scroll_wheel.automatic": "자동",
+    "prefs.browser_scroll_wheel.help": "자동은 트랙패드처럼 두 손가락 스크롤로 화면을 이동하고, 부드러운 스크롤 마우스 휠로 보이면 휠로 확대/축소할지 한 번 물어봅니다. 항상 확대/축소는 부드러운 마우스 휠을 포함해 세로 스크롤을 확대/축소로 처리하며, Shift나 탐색 보조 키를 누르면 이동합니다. 항상 이동은 묻지 않습니다.",
+    "ui.browser_wheel_hint": "스크롤하면 화면이 이동합니다. 부드러운 스크롤 휠이 있는 마우스를 쓰고 계신가요? 휠로 확대/축소하기",
+    "ui.browser_wheel_hint_dismiss": "다시 묻지 않기",
+    "ui.browser_wheel_hint_zoom": "휠로 확대/축소하기"
+  },
+  "ja": {
+    "prefs.browser_scroll_wheel": "ブラウザーのスクロールホイール",
+    "prefs.browser_scroll_wheel.always_pan": "常に平行移動",
+    "prefs.browser_scroll_wheel.always_zoom": "常に拡大縮小",
+    "prefs.browser_scroll_wheel.automatic": "自動",
+    "prefs.browser_scroll_wheel.help": "自動では、トラックパッドの想定どおり2本指スクロールで表示を平行移動し、スムーズスクロールのマウスホイールらしき動きを検出すると、ホイールで拡大縮小するかを一度だけ尋ねます。常に拡大縮小は、スムーズなマウスホイールを含め縦スクロールを拡大縮小にします。Shiftまたはナビゲーション修飾キーを押すと平行移動します。常に平行移動は尋ねません。",
+    "ui.browser_wheel_hint": "スクロールで表示が平行移動しています。スムーズスクロールのホイール付きマウスをお使いですか？ホイールで拡大縮小する",
+    "ui.browser_wheel_hint_dismiss": "今後は尋ねない",
+    "ui.browser_wheel_hint_zoom": "ホイールで拡大縮小する"
+  },
+  "zh": {
+    "prefs.browser_scroll_wheel": "浏览器中的滚轮",
+    "prefs.browser_scroll_wheel.always_pan": "始终平移",
+    "prefs.browser_scroll_wheel.always_zoom": "始终缩放",
+    "prefs.browser_scroll_wheel.automatic": "自动",
+    "prefs.browser_scroll_wheel.help": "自动模式按触控板的习惯用双指滚动平移视图，并在检测到平滑滚动的鼠标滚轮时，询问一次是否让滚轮缩放。始终缩放会让垂直滚动缩放，包括平滑滚动的鼠标滚轮；按住 Shift 或导航修饰键可平移。始终平移则不再询问。",
+    "ui.browser_wheel_hint": "滚动正在平移视图。使用的是平滑滚动滚轮的鼠标吗？让滚轮缩放",
+    "ui.browser_wheel_hint_dismiss": "不再询问",
+    "ui.browser_wheel_hint_zoom": "让滚轮缩放"
+  },
+  "vi": {
+    "prefs.browser_scroll_wheel": "Con lăn chuột trong trình duyệt",
+    "prefs.browser_scroll_wheel.always_pan": "Luôn kéo",
+    "prefs.browser_scroll_wheel.always_zoom": "Luôn thu phóng",
+    "prefs.browser_scroll_wheel.automatic": "Tự động",
+    "prefs.browser_scroll_wheel.help": "Tự động kéo khung nhìn bằng cuộn hai ngón như bàn di chuột, và hỏi một lần có muốn dùng con lăn để thu phóng khi thấy con lăn chuột cuộn mượt. Luôn thu phóng làm cuộn dọc thành thu phóng, kể cả con lăn chuột cuộn mượt; giữ Shift hoặc các phím điều hướng để kéo. Luôn kéo sẽ không hỏi.",
+    "ui.browser_wheel_hint": "Cuộn đang kéo khung nhìn. Bạn dùng chuột có con lăn cuộn mượt? Dùng con lăn để thu phóng",
+    "ui.browser_wheel_hint_dismiss": "Đừng hỏi lại",
+    "ui.browser_wheel_hint_zoom": "Dùng con lăn để thu phóng"
+  },
+  "ar": {
+    "prefs.browser_scroll_wheel": "عجلة التمرير في المتصفح",
+    "prefs.browser_scroll_wheel.always_pan": "التحريك دائمًا",
+    "prefs.browser_scroll_wheel.always_zoom": "التكبير دائمًا",
+    "prefs.browser_scroll_wheel.automatic": "تلقائي",
+    "prefs.browser_scroll_wheel.help": "يحرّك الوضع التلقائي العرض بالتمرير بإصبعين كما تتوقع لوحات اللمس، ويسأل مرة واحدة عن جعل العجلة تكبّر عندما يرى عجلة فأرة بتمرير سلس. يجعل التكبير دائمًا التمرير العمودي تكبيرًا، بما في ذلك عجلات الفأرة السلسة؛ اضغط Shift أو مفاتيح التنقل للتحريك. التحريك دائمًا لا يسأل أبدًا.",
+    "ui.browser_wheel_hint": "التمرير يحرّك العرض. هل تستخدم فأرة بعجلة تمرير سلس؟ اجعل العجلة تكبّر",
+    "ui.browser_wheel_hint_dismiss": "لا تسأل مرة أخرى",
+    "ui.browser_wheel_hint_zoom": "اجعل العجلة تكبّر"
+  },
+  "he": {
+    "prefs.browser_scroll_wheel": "גלגל הגלילה בדפדפן",
+    "prefs.browser_scroll_wheel.always_pan": "תמיד להזיז",
+    "prefs.browser_scroll_wheel.always_zoom": "תמיד לשנות מרחק",
+    "prefs.browser_scroll_wheel.automatic": "אוטומטי",
+    "prefs.browser_scroll_wheel.help": "במצב אוטומטי הגלילה בשתי אצבעות מזיזה את התצוגה, כפי שלוחות מגע מצפים, ושואלת פעם אחת אם לגרום לגלגל לשנות מרחק כשהיא מזהה גלגל עכבר עם גלילה חלקה. תמיד לשנות מרחק גורם לגלילה אנכית לשנות מרחק, גם בגלגלי עכבר חלקים; החזקת Shift או מקשי הניווט מזיזה. תמיד להזיז לא שואל לעולם.",
+    "ui.browser_wheel_hint": "הגלילה מזיזה את התצוגה. משתמשים בעכבר עם גלגל גלילה חלק? לגרום לגלגל לשנות מרחק",
+    "ui.browser_wheel_hint_dismiss": "לא לשאול שוב",
+    "ui.browser_wheel_hint_zoom": "לגרום לגלגל לשנות מרחק"
+  }
+}

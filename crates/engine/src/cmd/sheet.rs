@@ -535,7 +535,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
             }
             let flip = bool_(p, "flip").unwrap_or(false);
             let mut before = surface_panel_counts(s);
-            let mut made = add_feature(
+            let mut reply = add_feature(
                 s,
                 p,
                 FeatureKind::SheetFlange {
@@ -551,11 +551,14 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                     height_from: height_from.clone(),
                 },
             )?;
+            // The first bend owns the supplied name. Keep its identity and report the completed chain's result.
+            let named_feature =
+                str_(p, "name").filter(|name| !name.trim().is_empty() && !then.is_empty()).map(|_| (reply["feature"].clone(), reply["name"].clone()));
             // Each further bend stands on the far edge of the flange before it.
             for (angle, height, own_flip) in then {
                 let edges = far_edge_picks(s, &before, cmd)?;
                 before = surface_panel_counts(s);
-                made = add_feature(
+                reply = add_feature(
                     s,
                     &json!({}),
                     FeatureKind::SheetFlange {
@@ -572,7 +575,11 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                     },
                 )?;
             }
-            Ok(made)
+            if let Some((feature, name)) = named_feature {
+                reply["feature"] = feature;
+                reply["name"] = name;
+            }
+            Ok(reply)
         }
     }
 }
