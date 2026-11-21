@@ -118,14 +118,16 @@ pub fn stop_at_bodies(walls: &Body, bodies: &[&Body], starts: &[Vec3], along: Ve
     TrimKeep::Regions(starts).check()?;
     let along = along.normalized().filter(|a| a.is_finite()).ok_or_else(|| KernelError::Invalid("the walls' direction has no length".into()))?;
     let no_form = || KernelError::Failed(format!("{NAME}: a body has no solidcore form"));
-    let (ops, order) = walls.ops_body().ok_or_else(no_form)?;
-    let mut tools = Vec::new();
+    let form = walls.ops_body().ok_or_else(no_form)?;
+    let (ops, order) = (&form.0, &form.1);
+    let mut forms = Vec::new();
     for b in bodies {
         if b.is_mesh() || crate::apart(walls, b)? {
             continue;
         }
-        tools.push(&b.ops_body().ok_or_else(no_form)?.0);
+        forms.push(b.ops_body().ok_or_else(no_form)?);
     }
+    let tools: Vec<&solidcore_ops::Body> = forms.iter().map(|f| &f.0).collect();
     if tools.is_empty() {
         return Ok((walls.clone(), false));
     }

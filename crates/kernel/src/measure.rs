@@ -113,11 +113,12 @@ pub fn measure_mass(b: &Body) -> Result<MassMeasure> {
 /// its exact box read there), so the span is the body's own, not the shadow of its world box.
 /// A mesh body has no solidcore form and is refused.
 pub fn levels_along(b: &Body, plane: &solidcore_record::Plane) -> Result<[f64; 2]> {
-    let Some((ops, _)) = b.ops_body() else {
+    let Some(form) = b.ops_body() else {
         return Err(crate::KernelError::Failed("the body's reach along the plane's normal: the body has no solidcore form".into()));
     };
     let (o, x, y) = (plane.origin, plane.x, plane.y);
-    ops.levels_along([o.x, o.y, o.z], [x.x, x.y, x.z], [y.x, y.y, y.z])
+    form.0
+        .levels_along([o.x, o.y, o.z], [x.x, x.y, x.z], [y.x, y.y, y.z])
         .map_err(|e| crate::KernelError::Invalid(format!("the body's reach along the plane's normal can't be measured: {e}")))
 }
 
