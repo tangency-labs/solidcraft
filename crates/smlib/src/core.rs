@@ -56,7 +56,7 @@ mod trim_tests;
 
 #[cfg(test)]
 pub(crate) use convert::from_arrays;
-pub(crate) use convert::{from_arrays_with_shell_order, to_arrays};
+pub(crate) use convert::{from_arrays_with_shell_order, to_arrays, to_arrays_sampled_trims};
 pub(crate) use measure::{
     area, bounds, check, check_scoped, check_with, classify_point, classify_points, curve_face_gap_bound, edge_face_distance, is_manifold_solid,
     mass_properties, solid_count,
@@ -163,6 +163,8 @@ fn start_clean(k: &mut Kernel) {
     *k.blend_station_memo.borrow_mut() = Default::default();
     k.fillet_point_step.set(None);
     k.upstream_ub_passed.clear();
+    // (on for every call; the one that turns it off is the trims of a file's translation)
+    k.prove_lazy_trim_raise = true;
 }
 
 /// A kernel kept out of use until dropped ([`crate::hold_a_kernel`]).

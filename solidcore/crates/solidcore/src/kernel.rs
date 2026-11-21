@@ -887,6 +887,13 @@ pub struct Kernel {
     /// ([`crate::blend::definition_check`]), for the check that every blend face is a
     /// definition. `None` (the default) marks and keeps nothing; it changes no result.
     pub blend_face_log: Option<crate::blend::definition_check::BlendFaceLog>,
+    /// Not upstream (#18166): whether a lazily built UV trim raises its edge's tolerance by
+    /// the trim's proved distance from the edge (`topology::edgeuse::p3::trim_raise_distance`),
+    /// as it does by default, or by upstream's sampled distance (`false`). A caller that
+    /// builds every trim of a body it only reads, such as a file's translation, turns it off:
+    /// proving each trim there costs many times the translation (a 561-part assembly opened
+    /// in 126 s instead of 20 s), and the trims are then raised as before #18166.
+    pub prove_lazy_trim_raise: bool,
     /// Not upstream; diagnostic, tests only: while `Some`, each Coons corner patch made
     /// tangent to its sides appends the record of its refinement (every candidate, its
     /// stations and side angles, and the one kept), for tests that replay the choice.
@@ -981,6 +988,7 @@ impl Kernel {
             blend_operation_scopes: Arc::default(),
             work_counters: WorkCounters::default(),
             blend_face_log: None,
+            prove_lazy_trim_raise: true,
             coons_tangency_log: RefCell::new(None),
             #[cfg(feature = "profile")]
             profiler: crate::profile::Profiler::default(),

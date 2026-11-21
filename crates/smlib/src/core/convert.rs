@@ -295,6 +295,16 @@ pub(crate) fn to_arrays(body: &Body) -> Result<Arrays> {
     with_body("FlatFromBrep", body, |k, b| Ok(flat_from_brep(k, b)))?
 }
 
+/// [`to_arrays`] of a body made to read a file's trims from: the trims it builds raise their
+/// edges by upstream's sampled distance, not a proved one ([`Kernel::prove_lazy_trim_raise`]):
+/// proving every trim of every face a file translates cost many times the translation.
+pub(crate) fn to_arrays_sampled_trims(body: &Body) -> Result<Arrays> {
+    with_body("FlatFromBrep", body, |k, b| {
+        k.prove_lazy_trim_raise = false;
+        Ok(flat_from_brep(k, b))
+    })?
+}
+
 /// One NURBS curve's arrays (`smu_AddSmBSplineCurve3d`, `smu_AddSmBSplineCurve2d`): counts and
 /// orders, cartesian control points of `dim` coordinates, knots and weights.
 struct NurbsOut<'a> {

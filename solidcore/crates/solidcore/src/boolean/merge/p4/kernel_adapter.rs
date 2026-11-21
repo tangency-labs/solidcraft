@@ -89,6 +89,8 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
         work_counters: crate::kernel::WorkCounters::default(),
         // (building cache trees makes no blend faces)
         blend_face_log: None,
+        // (the caller's: a trim the copy builds raises its edge as the caller's would)
+        prove_lazy_trim_raise: k.prove_lazy_trim_raise,
         // (building cache trees makes no corner patches)
         coons_tangency_log: core::cell::RefCell::new(None),
         // (the caller's profiler: the copy's scopes record into its tree)
