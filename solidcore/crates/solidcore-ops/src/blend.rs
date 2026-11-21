@@ -47,6 +47,7 @@ use solidcore::blend::blend_corner::BlendCornerEvent;
 use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable, SetbackTooShortWhy};
 use solidcore::blend::chamfer_side::{faces_along, wedge_at_middle};
 use solidcore::blend::definition_check::BlendFaceLog;
+use solidcore::blend::fillet_corner::p3::FACE_CLOSES_TO_A_POINT;
 use solidcore::blend::fillet_executive::p3::{
     ErrorInfo, FitKind as KernelFit, FitSize as KernelFitSize, NoRoomReason,
 };
@@ -592,6 +593,22 @@ fn turn_refusal(s: &FilletSession<'_>) -> Option<Error> {
     })
 }
 
+/// The corners step refused a face beside a blended edge that narrows to a point, with
+/// the vertex's point; `None` for a note of another kind.
+fn face_closes_refusal(s: &FilletSession<'_>) -> Option<Error> {
+    let info = s.error_info();
+    if info.code != FilletErrorType::CornerUnsupported as i32 {
+        return None;
+    }
+    let why = info.comment.trim();
+    let why = why
+        .strip_prefix("Fillet Error:")
+        .map_or(why, str::trim_start);
+    (why == FACE_CLOSES_TO_A_POINT).then(|| Error::FaceClosesToPoint {
+        at: info.location.map(|p| [p.x, p.y, p.z]),
+    })
+}
+
 /// The kernel's refusal of an edge, or of a corner's setback as too long, as the operation's,
 /// its entities by their indices in the session's body; `None` for an entity that body does
 /// not hold, and for a setback too short ([`session_refusal`]'s).
@@ -942,9 +959,15 @@ fn pass(
         let mut step = prepared
             .and_then(|()| s.create_corners(k, None))
             .map(|()| Ok(Vec::new()));
-        // a swept turn the corners step refused, with the kernel's reason
-        let refused_turn = if p.turn == Turn::Swept && prepared_ok && step.is_err() {
-            turn_refusal(&s)
+        // A face narrowing to a point takes precedence over a swept turn's refusal.
+        let refused_turn = if prepared_ok && step.is_err() {
+            face_closes_refusal(&s).or_else(|| {
+                if p.turn == Turn::Swept {
+                    turn_refusal(&s)
+                } else {
+                    None
+                }
+            })
         } else {
             None
         };
