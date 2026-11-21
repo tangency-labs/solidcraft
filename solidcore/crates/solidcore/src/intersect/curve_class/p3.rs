@@ -19,6 +19,7 @@
 //! | [`fix_problems_by_squeezing`]                           | `sm_FixProblemsBySqueezing` (static)             |
 //! | [`CurveClassification::classify_edge_interval`]         | fork `SmCurveClassification::ClassifyEdgeInterval` (WR-305; both straight or curved pieces certified, not a midpoint sample) |
 //! | [`CurveClassification::set_edge_interval`], [`EdgeToleranceRaise`] | not upstream (#18065): an interval on its edge once the edge's tolerance is raised to its certified distance |
+//! | `circle_arcs_within`, `radial_deviation`, `coordinate_resolution` (private) | not upstream (#18065): two coplanar circles' NURB arcs within the band in closed form, allowing the coordinates' rounding only |
 //!
 //! Deviations:
 //! - **Object handles.** As in part 1, every `SmObject` pointer is a caller-chosen handle
@@ -67,6 +68,15 @@
 //!   `rbChangedToVertexFlag`; `MergePointClass`'s optional output arrays are
 //!   `Option<&mut Vec<O>>` that are added to, as upstream. `IsCoincident` ignores the
 //!   status of its two `FindInterval` calls and uses the outputs they leave, as upstream.
+//! - **Circle arcs in closed form (#18065).** A run along an edge
+//!   (`curve_runs_along`) also takes a pair of arcs of two circles in one plane (decided
+//!   exactly) whose stored NURBs are proved within the band plus the coordinates' resolution
+//!   `√3 ulp(m)` (`m` the larger coordinate magnitude): a rounding allowance, not a wider
+//!   tolerance. Each NURB's radial deviation from its circle is bounded exactly from its
+//!   control points (`radial_deviation`) and counted. A boss overhanging a closed circular
+//!   edge by exactly the band is `tol + 2.9e-16` from it (its stored radius's rounding and
+//!   its NURB's), within the allowance (`7.7e-16`) but beyond the chord enclosures' own
+//!   slack.
 //! - **Recursion.** `sm_FixProblemsBySqueezing` ends with a tail call that restarts the
 //!   scan after it removed an interval; it is a `loop` here that restarts at the same
 //!   point, so the order is unchanged and the depth no longer depends on the input. The
@@ -96,6 +106,7 @@
 
 use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::error::{ignore_status, EntityRef, Result, SolidError};
+use crate::geom::certified::{next_down, next_up};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p1::line_closest_point;
 use crate::geom::global_solver::SolverOperation;
@@ -2783,6 +2794,13 @@ const RUN_ALONG_PIECES: usize = 1024;
 /// failed drop, a curve of a kind with no enclosure ([`piece_tube`]), or more than [`RUN_ALONG_PIECES`]
 /// pairs bounded proves nothing: `false`.
 ///
+/// A pair the enclosures do not prove is also accepted when both are circle arcs in one plane
+/// whose NURBs [`circle_arcs_within`] proves within `tol` plus the coordinates' resolution
+/// [`coordinate_resolution`] (`√3 ulp` of their magnitude, `7.7e-16` near `2.4`): so `true`
+/// means each point of either within `tol` of the other, or, for such circle pairs only,
+/// within `tol + √3 ulp`, an acceptance allowance of about one ulp for the coordinates'
+/// rounding (#18065).
+///
 /// # Errors
 ///
 /// Those of the evaluations and of the drops.
@@ -2804,8 +2822,11 @@ pub(crate) fn curve_runs_along(
     let mut bounded = 0_usize;
     while let Some((t0, t1, s0, s1)) = pending.pop() {
         let piece = Extent1d::from_min_max(t0, t1);
-        // written so that a NaN bound refuses
-        if pieces_apart_bound(k, curve, &piece, other, [s0, s1], tol)?.is_some_and(|d| d < tol) {
+        // written so that a NaN bound refuses; two coplanar circles' arcs are proved in closed
+        // form when their chords' enclosures are not tight enough
+        if pieces_apart_bound(k, curve, &piece, other, [s0, s1], tol)?.is_some_and(|d| d < tol)
+            || circle_arcs_within(curve, &piece, other, [s0, s1], tol)
+        {
             continue;
         }
         bounded += 1;
@@ -2832,6 +2853,567 @@ pub(crate) fn curve_runs_along(
         pending.push((t0, tm, s0, sm));
     }
     Ok(true)
+}
+
+/// Not upstream (#18065): the distance to which two points whose coordinates are at most `m` in
+/// magnitude are fixed by their doubles, `√3 ulp(m)`.
+///
+/// **Derivation.** A double stands for any real within half a unit in its last place, and the
+/// unit of a smaller magnitude is not larger, so each coordinate of either point is fixed only
+/// to `ulp(m) / 2`: each point to a cube of half side `ulp(m) / 2`, at most `√3 ulp(m) / 2` from
+/// its centre, and the distance between the two points to `√3 ulp(m)`. So a modelled distance
+/// that is above the band by less than this is above it only by what the coordinates' own
+/// rounding can produce (the #18065 boss: a radius stored `4.2e-16` long). It is an acceptance
+/// allowance of about one ulp, fixed by the magnitude alone and the same for every input of
+/// it, not a tolerance a caller widens; raising the edge's tolerance instead
+/// ([`EdgeToleranceRaise`]) would change the model for a gap no measurement can resolve. Here
+/// `ulp(m)` is `next_up(m) - m` (exact: two doubles within a factor of two of each other), a
+/// power of two; the double nearest `√3` is below `√3` and its product with a normal power of
+/// two exact, so the value never exceeds `√3 ulp(m)`. The allowance covers the representation
+/// of the stored coordinates only and is spent once, in the gap's final decision; every other
+/// error (the NURBs' deviation from their circles, [`radial_deviation`], and each rounding of
+/// the measurement) is counted on its own. `None` for a magnitude that is not finite and
+/// positive or whose unit is not normal.
+fn coordinate_resolution(m: f64) -> Option<f64> {
+    if !(m.is_finite() && m > 0.0) {
+        return None;
+    }
+    let ulp = next_up(m) - m;
+    (ulp.is_normal() && (ulp * 2.0).is_finite()).then_some(ulp * SQRT_3)
+}
+
+/// A circle the curve is: an ellipse whose two radii are one finite, positive double, with its
+/// centre and the two axis vectors of its plane, all finite.
+fn circle_of(curve: &Curve) -> Option<(Point3, f64, Vec3, Vec3)> {
+    let CurveKind::Ellipse(e) = curve.kind() else {
+        return None;
+    };
+    let r = e.x_radius();
+    let p = e.position();
+    let (c, x, y) = (p.origin(), p.x_axis(), p.y_axis());
+    let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+    (r == e.y_radius() && r.is_finite() && r > 0.0 && finite(c) && finite(x) && finite(y))
+        .then_some((c, r, x, y))
+}
+
+/// The double nearest `√3` (below it); `f64::consts::SQRT_3` is not stable at the MSRV.
+const SQRT_3: f64 = 1.732_050_807_568_877_2;
+
+/// The unit roundoff `2^-53`.
+const ROUNDOFF: f64 = f64::EPSILON / 2.0;
+
+/// An angle and radius of `p - c` measured in a circle plane's frame ([`PlaneFrame::polar`]),
+/// with a bound of the angle's error.
+#[derive(Debug, Clone, Copy)]
+struct Polar {
+    angle: f64,
+    radius: f64,
+    angle_err: f64,
+}
+
+/// The two axis vectors `x`, `y` of a circle's plane, as the frame angles in the plane are
+/// measured in: the angle of `v` is `atan2(v · y, v · x)`.
+#[derive(Debug, Clone, Copy)]
+struct PlaneFrame {
+    x: Vec3,
+    y: Vec3,
+    /// The larger 1-norm of `x` and `y`.
+    l1: f64,
+    /// A bound of how far `x`, `y` are from orthonormal: `|x·y| + |x·x - 1| + |y·y - 1|`
+    /// with its rounding.
+    skew: f64,
+}
+
+impl PlaneFrame {
+    /// The frame of `x`, `y`; `None` when they are farther than `2^-30` from orthonormal.
+    fn new(x: Vec3, y: Vec3) -> Option<Self> {
+        let n1 = |v: Vec3| v.x.abs() + v.y.abs() + v.z.abs();
+        let l1 = n1(x).max(n1(y));
+        let skew = x.dot(y).abs()
+            + (x.dot(x) - 1.0).abs()
+            + (y.dot(y) - 1.0).abs()
+            + 32.0 * ROUNDOFF * (l1 * l1 + 1.0);
+        (skew <= 1.0 / 1_073_741_824.0).then_some(Self { x, y, l1, skew })
+    }
+
+    /// The angle and radius of the projection of `p - c` onto the plane, in a frame of
+    /// orthonormal axes in the plane whose first is along `x` (the projection is exact: a
+    /// component normal to the plane is dropped by both products).
+    ///
+    /// Errors: `p - c` is rounded by at most `u |v|∞` per coordinate (`u` the unit roundoff)
+    /// and each product with an axis by `γ3 |v|∞ ‖axis‖1`, so the two coordinates move by at
+    /// most `ε = 8 u |v|∞ l1` together. At a measured radius `r > 4 ε` the true radius is above
+    /// `r / 2`, and the angle moves by at most `asin(2 ε / r) ≤ 3 ε / r`, plus `16 u` for
+    /// `atan2`. That last is an assumption on the platform's libm, not proved here: Rust's
+    /// `atan2` is the C library's, and the libms targeted (glibc, musl, the macOS, Windows
+    /// and wasm ones) are within a few ulps (of `π`'s last place at most). The frame's skew
+    /// `g` maps a vector of the orthonormal frame to the measured coordinates within `3 g` of
+    /// its length, moving its angle by at most `4 g`. `None` when the radius is not above
+    /// `4 ε` or a value is not finite.
+    fn polar(&self, p: Point3, c: Point3) -> Option<Polar> {
+        let v = p - c;
+        let (x, y) = (v.dot(self.x), v.dot(self.y));
+        let size = v.x.abs().max(v.y.abs()).max(v.z.abs());
+        let eps = 8.0 * ROUNDOFF * size * self.l1;
+        let radius = (x * x + y * y).sqrt();
+        let angle = y.atan2(x);
+        if !(radius > 4.0 * eps && radius.is_finite() && angle.is_finite()) {
+            return None;
+        }
+        Some(Polar {
+            angle,
+            radius,
+            angle_err: 3.0 * eps / radius + 16.0 * ROUNDOFF + 4.0 * self.skew,
+        })
+    }
+}
+
+/// An angle difference in `[-2π, 2π]` wrapped to `(-π, π]`.
+fn wrap_angle(d: f64) -> f64 {
+    use core::f64::consts::{PI, TAU};
+    if d > PI {
+        d - TAU
+    } else if d <= -PI {
+        d + TAU
+    } else {
+        d
+    }
+}
+
+/// `e f` as an expansion.
+fn expansion_mul(e: &[f64], f: &[f64]) -> Option<Vec<f64>> {
+    f.iter().try_fold(vec![0.0], |acc, &c| {
+        Some(crate::geom::expansion::add(
+            &acc,
+            &crate::geom::expansion::scale(e, c)?,
+        ))
+    })
+}
+
+/// An expansion's value bounded below and above by doubles: its rounded sum widened by the
+/// sum's error bound, `2 n u Σ|e|` for `n` components (above `γ_(n-1) Σ|e|`,
+/// [`crate::geom::expansion::to_f64`]). `None` when not finite.
+fn expansion_bounds(e: &[f64]) -> Option<(f64, f64)> {
+    let v = crate::geom::expansion::to_f64(e);
+    let err = 2.0 * e.len() as f64 * ROUNDOFF * e.iter().map(|c| c.abs()).sum::<f64>();
+    let (lo, hi) = (next_down(v - err), next_up(v + err));
+    (lo.is_finite() && hi.is_finite()).then_some((lo, hi))
+}
+
+/// The range of the Bernstein basis function `B_k^n` (`n` 2 or 4) over `[a, b] ⊆ [0, 1]`: it
+/// is unimodal with its maximum at `k / n`, so its extremes are at the ends and, inside,
+/// there; each value, a product of at most five rounded factors and one rounded difference,
+/// is within `16 u` of itself as computed.
+fn bernstein_range(n: usize, k: usize, [a, b]: [f64; 2]) -> (f64, f64) {
+    let binom: &[f64] = if n == 2 {
+        &[1.0, 2.0, 1.0]
+    } else {
+        &[1.0, 4.0, 6.0, 4.0, 1.0]
+    };
+    let c = binom.get(k).copied().unwrap_or(0.0);
+    let f = n.saturating_sub(k);
+    // plain products (`powi`'s accuracy is not specified)
+    let at = |t: f64| {
+        let s = 1.0 - t;
+        let v = (0..k).fold(c, |v, _| v * t);
+        (0..f).fold(v, |v, _| v * s)
+    };
+    let peak = k as f64 / n as f64;
+    let (lo, mut hi) = (at(a).min(at(b)), at(a).max(at(b)));
+    if a < peak && peak < b {
+        hi = hi.max(at(peak));
+    }
+    (
+        (lo * (1.0 - 16.0 * ROUNDOFF)).max(0.0),
+        hi * (1.0 + 16.0 * ROUNDOFF),
+    )
+}
+
+/// Not upstream (#18065): bounds `(inward, outward)`, both at least `0`, of how far the curve's
+/// NURB over `range` lies inside and outside the circle of centre `c` and radius `r`: every
+/// point `C` of it has `r - inward ≤ |C - c| ≤ r + outward`. Decided on the NURB's stored
+/// doubles, not on evaluations: the NURB must be rational quadratic with positive weights,
+/// clamped, each interior knot doubled (Bézier segments, as a circle's NURB is), and its
+/// control points exactly in the plane through `c` spanned by `px`, `py` (so is the NURB,
+/// their positive combination), else `None`.
+///
+/// On a segment with homogeneous control points `H_i` and weights `w_i`,
+/// `|C - c|² - r² = N(τ) / W(τ)²` with `W = Σ w_i B_i^2 ≥ w_min` and the quartic
+/// `N = Σ_(i,j) B_i^2 B_j^2 (Q_i·Q_j - r² w_i w_j)`, `Q_i = H_i - c w_i`; `B_i^2 B_j^2 =
+/// C(2,i) C(2,j) / C(4,i+j) B_(i+j)^4`, so `6 N`'s Bernstein coefficients are integer sums
+/// of those terms, computed exactly on expansions. Over the segment's part of `range` (its
+/// local parameter widened by its rounding) `N` lies between the sums of each coefficient
+/// times its basis function's range ([`bernstein_range`]), `W` likewise (its weights positive),
+/// and `|C - c|² - r²` is that over `W²` (by `W`'s lower or upper bound as the sign needs).
+/// Outward, `|C - c| - r` is that over `|C - c| + r ≥ 2 r`; inward, `r - |C - c| = d` has
+/// `r² - |C - c|² = d (2 r - d) ≥ d r` (as `d ≤ r`), so `d` is at most that over `r`.
+fn radial_deviation(
+    curve: &Curve,
+    (c, r): (Point3, f64),
+    (px, py): (Vec3, Vec3),
+    [lo, hi]: [f64; 2],
+) -> Option<(f64, f64)> {
+    use crate::geom::expansion::{add, det3, is_zero, product, scale, sub};
+    use crate::nurbs::math::{NOW, NOZ};
+    let nurb = match curve.kind() {
+        CurveKind::Ellipse(e) => e.base().nurb_ref().ok()?,
+        _ => return None,
+    };
+    let (knots, cpts) = (nurb.knots(), nurb.cpts());
+    let n = cpts.len();
+    let at = |i: usize| knots.get(i).copied();
+    let clamped = n >= 3
+        && n % 2 == 1
+        && knots.len() == n + 3
+        && at(0) == at(2)
+        && at(1) == at(2)
+        && at(n) == at(n + 2)
+        && at(n + 1) == at(n + 2);
+    if nurb.degree() != 2
+        || !clamped
+        || lo
+            .partial_cmp(&hi)
+            .is_none_or(|o| o == core::cmp::Ordering::Greater)
+    {
+        return None;
+    }
+    // homogeneous points and weights; a non-rational point has weight 1, a 2D one `z = 0`;
+    // each point in the plane through `c` of axes `px`, `py`, exactly: `n·H_i = w_i n·c`
+    let plane_c = det3(px, py, c)?;
+    let mut hw = Vec::new();
+    for p in cpts {
+        let w = if p.w == NOW { 1.0 } else { p.w };
+        let z = if p.z == NOZ { 0.0 } else { p.z };
+        if !(w.is_finite() && w > 0.0 && p.x.is_finite() && p.y.is_finite() && z.is_finite()) {
+            return None;
+        }
+        if !is_zero(&sub(
+            &det3(px, py, Vec3::new(p.x, p.y, z))?,
+            &scale(&plane_c, w)?,
+        )) {
+            return None;
+        }
+        hw.push(([p.x, p.y, z], w));
+    }
+    let r2 = product(r, r)?;
+    let (mut inward, mut outward) = (0.0_f64, 0.0_f64);
+    for j in 0..(n - 1) / 2 {
+        let (Some(ka), Some(kb)) = (at(2 * j + 2), at(2 * j + 3)) else {
+            return None;
+        };
+        if j + 1 < (n - 1) / 2 && at(2 * j + 3) != at(2 * j + 4) {
+            return None;
+        }
+        if ka.partial_cmp(&kb) != Some(core::cmp::Ordering::Less) {
+            return None;
+        }
+        if hi < ka || kb < lo {
+            continue;
+        }
+        let seg = hw.get(2 * j..2 * j + 3)?;
+        // `Q_i = H_i - c w_i`, exactly (a non-rational point's `H_i` is its point, `w_i = 1`)
+        let mut q = Vec::new();
+        for &(h, w) in seg {
+            let mut qi = Vec::new();
+            for (hc, cc) in h.into_iter().zip([c.x, c.y, c.z]) {
+                qi.push(sub(&[hc], &product(cc, w)?));
+            }
+            q.push((qi, w));
+        }
+        let term = |i: usize, k: usize| -> Option<Vec<f64>> {
+            let ((qi, wi), (qk, wk)) = (q.get(i)?, q.get(k)?);
+            let mut d = vec![0.0];
+            for (a, b) in qi.iter().zip(qk) {
+                d = add(&d, &expansion_mul(a, b)?);
+            }
+            Some(sub(&d, &scale(&scale(&r2, *wi)?, *wk)?))
+        };
+        // `6 N`'s Bernstein coefficients
+        let coeff = [
+            scale(&term(0, 0)?, 6.0)?,
+            scale(&add(&term(0, 1)?, &term(1, 0)?), 3.0)?,
+            add(&add(&term(0, 2)?, &term(2, 0)?), &scale(&term(1, 1)?, 4.0)?),
+            scale(&add(&term(1, 2)?, &term(2, 1)?), 3.0)?,
+            scale(&term(2, 2)?, 6.0)?,
+        ];
+        // the segment's local parameters of the range, widened by their rounding
+        let len = kb - ka;
+        let local = |t: f64| (t.clamp(ka, kb) - ka) / len;
+        let slack = 8.0 * ROUNDOFF * (ka.abs().max(kb.abs()) / len + 1.0);
+        let span = [(local(lo) - slack).max(0.0), (local(hi) + slack).min(1.0)];
+        let (mut n_lo, mut n_hi, mut mag) = (0.0_f64, 0.0_f64, 0.0_f64);
+        for (k, e) in coeff.iter().enumerate() {
+            let (c_lo, c_hi) = expansion_bounds(e)?;
+            let (b_lo, b_hi) = bernstein_range(4, k, span);
+            n_hi += if c_hi >= 0.0 {
+                c_hi * b_hi
+            } else {
+                c_hi * b_lo
+            };
+            n_lo += if c_lo >= 0.0 {
+                c_lo * b_lo
+            } else {
+                c_lo * b_hi
+            };
+            mag += c_lo.abs().max(c_hi.abs()) * b_hi;
+        }
+        // `/ 6` and the sums' rounding: each of the five products rounded once and summed in
+        // four roundings, so each sum is within `8 u` of the sum of the magnitudes `mag`
+        // (itself within `8 u` of its value), padded by `16 u mag`
+        let pad = 16.0 * ROUNDOFF * mag;
+        let (n_lo, n_hi) = ((n_lo - pad) / 6.0, (n_hi + pad) / 6.0);
+        // `W` over the span, from below and above (positive terms, each within `4 u`)
+        let (mut wmin, mut wmax) = (0.0_f64, 0.0_f64);
+        for (i, &(_, w)) in seg.iter().enumerate() {
+            let (b_lo, b_hi) = bernstein_range(2, i, span);
+            wmin += w * b_lo;
+            wmax += w * b_hi;
+        }
+        let (wmin, wmax) = (wmin * (1.0 - 8.0 * ROUNDOFF), wmax * (1.0 + 8.0 * ROUNDOFF));
+        if wmin.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+            return None;
+        }
+        let up = if n_hi >= 0.0 {
+            n_hi / (wmin * wmin)
+        } else {
+            n_hi / (wmax * wmax)
+        };
+        let down = if n_lo >= 0.0 {
+            n_lo / (wmax * wmax)
+        } else {
+            n_lo / (wmin * wmin)
+        };
+        if !(up.is_finite() && down.is_finite()) {
+            return None;
+        }
+        outward = outward.max(up / (2.0 * r) * (1.0 + 8.0 * ROUNDOFF));
+        inward = inward.max(-down / r * (1.0 + 8.0 * ROUNDOFF));
+    }
+    (inward.is_finite() && outward.is_finite()).then_some((inward, outward))
+}
+
+/// The angles about `centre`, measured in `frame`, of points each within its slack of a
+/// vertex of a convex hull, lifted against `reference`; with their largest error.
+fn hull_angles(
+    frame: &PlaneFrame,
+    points: &[(Point3, f64)],
+    centre: Point3,
+    reference: f64,
+) -> Option<(Vec<f64>, f64)> {
+    let mut angles = Vec::new();
+    let mut err = 0.0_f64;
+    for &(p, slack) in points {
+        let polar = frame.polar(p, centre)?;
+        // a point within `slack` of `p` is at an angle within `2 slack / r` of it
+        if !(polar.radius > 4.0 * slack && slack.is_finite()) {
+            return None;
+        }
+        err = err.max(polar.angle_err + 2.0 * slack / polar.radius);
+        angles.push(wrap_angle(polar.angle - reference));
+    }
+    Some((angles, err))
+}
+
+/// Not upstream (#18065): whether the piece of the circle `curve` over `piece` and the piece
+/// of the circle `other` between `other_params` lie within the band `tol` of each other as
+/// wholes (their Hausdorff distance), the gap decided in closed form against `tol` plus the
+/// coordinates' resolution ([`coordinate_resolution`]). `false` (nothing proved) unless both
+/// curves are circles ([`circle_of`]) in exactly one plane (decided on exact expansions)
+/// whose NURBs [`radial_deviation`] bounds.
+///
+/// **What is proved is the NURBs.** The pieces are the curves' NURBs as evaluated, not the
+/// circles: each point `C` of the first lies in the annulus `ra - in_A ≤ |C - a0| ≤ ra + out_A`
+/// about circle `A` (centre `a0`, radius `ra`), in the circles' plane (its control points
+/// exactly in it, [`radial_deviation`]), and in the convex hull of its piece's control
+/// points (positive weights; [`Curve::piece_hull_points`], each within its slack), and each
+/// point of the second likewise about `E` (centre `e0`, radius `re`). Polar coordinates
+/// `(ρ, φ)` are taken about `e0`.
+///
+/// **Angles.** Every hull vertex of both pieces is measured about `e0` and lifted against the
+/// first one's angle; when they all lie within less than `π`, both hulls lie in one cone of
+/// apex `e0` and the lifts are consistent. Each piece's angles then lie within its hull's
+/// angle range and, a continuous path between its two ends, cover the range between its
+/// ends' angles. So every point of either piece has a point of the other at an angle within
+/// `Δ`, the larger excess of either hull's range over the other's ends' range.
+///
+/// **Radii.** With `δ = a0 - e0`, the first piece lies in the disk of radius `ra + out_A`
+/// about `a0`: `ρ ≤ |δ| + ra + out_A` (the apex, exact). From below, when every hull vertex
+/// lies within less than `π/2` of `δ`'s direction about `a0`, so does the hull (a convex set
+/// in an open half-plane), and a point at distance `s ≥ ra - in_A` from `a0` in such a
+/// direction `w` has `ρ² = |δ|² + s² + 2 s δ·w ≥ |δ|² + (ra - in_A)² + 2 (ra - in_A) |δ|
+/// cos γ`, `γ` the widest vertex angle from `δ`; with `δ = 0`, `ρ ≥ ra - in_A`. The second
+/// piece has `re - in_E ≤ ρ ≤ re + out_E`.
+///
+/// **The gap.** A point of one piece and the point of the other at an angle within `Δ` are,
+/// by the cosine law and `1 - cos x ≤ x²/2`, within `sqrt(R² + ρ_hi (re + out_E) Δ²)`, `R`
+/// the larger of `ρ_hi - (re - in_E)` and `(re + out_E) - ρ_lo` (and `0`).
+///
+/// **The decision.** `T = tol + A`, `A` the resolution of the larger coordinate magnitude of
+/// the two circles (`‖c‖∞ + r`). With `x ≥ ρ_hi (re + out_E) Δ²` and `y ≥ x / tol ≥ x / T`,
+/// `y < tol`, `R ≤ T - y` gives `R² ≤ (T - x/T)² ≤ T² - x` (as `x ≤ T²`), so `H ≤ T`. The
+/// apex term is decided exactly, `|δ|² ≤ (re - in_E - ra - out_A + T - y)²` on expansions,
+/// the lower one on a rigorous bound of `ρ_lo`. Every rounding of the measured angles and
+/// radii is counted ([`PlaneFrame::polar`]); a value that cannot be measured, a NaN or a
+/// non-finite value refuses. Bounded work: two hulls of the pieces and fixed-size expansions
+/// per NURB segment.
+///
+/// An evaluation that cannot be bounded proves nothing (`false`).
+fn circle_arcs_within(
+    curve: &Curve,
+    piece: &Extent1d,
+    other: &Curve,
+    [s0, s1]: [f64; 2],
+    tol: f64,
+) -> bool {
+    use crate::geom::expansion::{add, cross, det3, is_zero, sign, sub};
+    use core::f64::consts::{FRAC_PI_2, PI};
+    let (Some((a0, ra, xa, ya)), Some((e0, re, xe, ye))) = (circle_of(curve), circle_of(other))
+    else {
+        return false;
+    };
+    if !(tol > 0.0 && tol.is_finite()) {
+        return false;
+    }
+    // one plane, exactly: `E`'s axes span it (their cross product is not zero), `A`'s axes and
+    // the offset of `A`'s centre from `E`'s lie in it
+    let in_plane = |v: Vec3| det3(xe, ye, v).is_some_and(|d| is_zero(&d));
+    let spans = cross(xe, ye).is_some_and(|c| c.iter().any(|e| !is_zero(e)));
+    let offset_in_plane = match (det3(xe, ye, a0), det3(xe, ye, e0)) {
+        (Some(p), Some(q)) => is_zero(&sub(&p, &q)),
+        _ => false,
+    };
+    let Some(frame) = PlaneFrame::new(xe, ye) else {
+        return false;
+    };
+    if !(spans && in_plane(xa) && in_plane(ya) && offset_in_plane) {
+        return false;
+    }
+    let (t0, t1) = (piece.min(), piece.max());
+    let (u0, u1) = (s0.min(s1), s0.max(s1));
+    if !(t0 < t1 && u0 < u1) {
+        return false;
+    }
+    // the NURBs' annuli about their circles
+    let (Some((in_a, out_a)), Some((in_e, out_e))) = (
+        radial_deviation(curve, (a0, ra), (xe, ye), [t0, t1]),
+        radial_deviation(other, (e0, re), (xe, ye), [u0, u1]),
+    ) else {
+        return false;
+    };
+    // the pieces' hulls; their first and last points are the pieces' ends
+    let (Some(hp), Some(hq)) = (
+        curve.piece_hull_points(piece),
+        other.piece_hull_points(&Extent1d::from_min_max(u0, u1)),
+    ) else {
+        return false;
+    };
+    let (Some(&(p_first, _)), Some(_), Some(_)) = (hp.first(), hp.last(), hq.last()) else {
+        return false;
+    };
+    let Some(reference) = frame.polar(p_first, e0).map(|p| p.angle) else {
+        return false;
+    };
+    let (Some((ap, err_p)), Some((aq, err_q))) = (
+        hull_angles(&frame, &hp, e0, reference),
+        hull_angles(&frame, &hq, e0, reference),
+    ) else {
+        return false;
+    };
+    let err = err_p.max(err_q);
+    if err.partial_cmp(&(1.0 / 1_048_576.0)) != Some(core::cmp::Ordering::Less) {
+        return false;
+    }
+    let range = |a: &[f64]| {
+        a.iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), &x| {
+                (l.min(x), h.max(x))
+            })
+    };
+    let ends = |a: &[f64]| match (a.first(), a.last()) {
+        (Some(&f), Some(&l)) => (f.min(l), f.max(l)),
+        _ => (f64::NAN, f64::NAN),
+    };
+    let ((pl, ph), (ql, qh)) = (range(&ap), range(&aq));
+    let ((pel, peh), (qel, qeh)) = (ends(&ap), ends(&aq));
+    // one cone narrower than `π`: the lifts are consistent
+    if !(pl.min(ql) > -PI && ph.max(qh) - pl.min(ql) < PI - 8.0 * err) {
+        return false;
+    }
+    let excess = |(l, h): (f64, f64), (el, eh): (f64, f64)| (el - l).max(h - eh).max(0.0);
+    let gap = excess((pl, ph), (qel, qeh)).max(excess((ql, qh), (pel, peh)));
+    // each of the four angles in an excess within `err`, the differences rounded
+    let delta = (gap + 2.0 * err + 64.0 * ROUNDOFF) * (1.0 + 4.0 * ROUNDOFF);
+    if delta.partial_cmp(&FRAC_PI_2) != Some(core::cmp::Ordering::Less) {
+        return false;
+    }
+    let size = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
+    let Some(allowance) = coordinate_resolution(next_up(size(a0) + ra).max(next_up(size(e0) + re)))
+    else {
+        return false;
+    };
+    let concentric = a0 == e0;
+    let offset = a0 - e0;
+    let offset_len = offset.length();
+    // `ρ` over the first piece from below
+    let s_lo = (ra - in_a) * (1.0 - 2.0 * ROUNDOFF);
+    if s_lo.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+        return false;
+    }
+    let rho_lo = if concentric {
+        s_lo
+    } else {
+        let Some(pd) = frame.polar(a0, e0) else {
+            return false;
+        };
+        let mut widest = 0.0_f64;
+        for &(p, slack) in &hp {
+            let Some(polar) = frame.polar(p, a0) else {
+                return false;
+            };
+            if polar.radius.partial_cmp(&(4.0 * slack)) != Some(core::cmp::Ordering::Greater) {
+                return false;
+            }
+            let e = polar.angle_err + 2.0 * slack / polar.radius + pd.angle_err;
+            let gamma = wrap_angle(polar.angle - pd.angle).abs() + e + 8.0 * ROUNDOFF;
+            if gamma.partial_cmp(&FRAC_PI_2) != Some(core::cmp::Ordering::Less) {
+                return false;
+            }
+            widest = widest.max(gamma);
+        }
+        // `cos` within `4 u` of itself (an assumption on the platform's libm, as for
+        // `atan2` in [`PlaneFrame::polar`]) and decreasing on `[0, π/2]`; `|δ|` within `4 u`
+        let cos_lo = (widest.cos() - 4.0 * ROUNDOFF).max(0.0);
+        let d_lo = offset_len * (1.0 - 4.0 * ROUNDOFF);
+        let sq = (d_lo * d_lo + s_lo * s_lo + 2.0 * s_lo * d_lo * cos_lo) * (1.0 - 8.0 * ROUNDOFF);
+        sq.sqrt() * (1.0 - 4.0 * ROUNDOFF)
+    };
+    let rho_hi = (offset_len + ra + out_a) * (1.0 + 8.0 * ROUNDOFF);
+    let re_hi = (re + out_e) * (1.0 + 2.0 * ROUNDOFF);
+    let x = rho_hi * re_hi * delta * delta * (1.0 + 8.0 * ROUNDOFF);
+    let y = x / tol * (1.0 + 4.0 * ROUNDOFF);
+    if !(y < tol && y.is_finite() && rho_lo.is_finite()) {
+        return false;
+    }
+    // `T - y` exactly
+    let band = add(&add(&[tol], &[allowance]), &[-y]);
+    // apex: `|δ| ≤ re - in_E - ra - out_A + T - y`, both sides squared (the right one not
+    // negative)
+    let w = add(&sub(&sub(&sub(&[re], &[in_e]), &[ra]), &[out_a]), &band);
+    let mut offset2 = vec![0.0];
+    for (p, q) in [(a0.x, e0.x), (a0.y, e0.y), (a0.z, e0.z)] {
+        let d = sub(&[p], &[q]);
+        let Some(s) = expansion_mul(&d, &d) else {
+            return false;
+        };
+        offset2 = add(&offset2, &s);
+    }
+    let Some(w2) = expansion_mul(&w, &w) else {
+        return false;
+    };
+    let apex_within = sign(&w) >= 0 && sign(&sub(&w2, &offset2)) >= 0;
+    // the other side: `re + out_E - ρ_lo ≤ T - y`
+    let ends_within = sign(&sub(&sub(&add(&[re], &[out_e]), &[rho_lo]), &band)) <= 0;
+    apex_within && ends_within
 }
 
 /// Not upstream (#18065): a certified upper bound of the distance between `curve` over
@@ -4007,5 +4589,223 @@ mod tests {
             cc.at(0).expect("interval").mid.point_class(),
             PointClassType::Unknown
         );
+    }
+
+    /// The circles of #18065's half-torus seam test: a boss's top circle (its radius as the
+    /// design's record round trip left it) overhanging the face's closed circular edge by the
+    /// band `tol`, the edge's seam turned away from the overhang.
+    fn boss_and_edge(k: &Kernel, cx: f64) -> (Curve, Curve) {
+        use crate::curve::ellipse::{Ellipse, EllipseOptions};
+        let circle = |c: Point3, x: Vec3, y: Vec3, r: f64| {
+            let e = Ellipse::new_circle(
+                k,
+                c,
+                x,
+                y,
+                Extent1d::from_raw(0.0, 360.0),
+                r,
+                &EllipseOptions::default(),
+            )
+            .expect("circle");
+            Curve::from(e)
+        };
+        let boss = circle(
+            Point3::new(cx, 0.0, 0.0),
+            Vec3::new(0.8178681931579774, 0.5754056122601738, 0.0),
+            Vec3::new(-0.5754056122601738, 0.8178681931579774, 0.0),
+            0.07000000000000013,
+        );
+        let edge = circle(
+            Point3::ZERO,
+            Vec3::new(-1.0, 0.0, 0.0),
+            Vec3::new(0.0, -1.0, 0.0),
+            2.4,
+        );
+        (boss, edge)
+    }
+
+    /// The boss's arc about its apex (its point farthest from the edge's centre) and the edge's
+    /// parameters at the drops of the arc's ends.
+    fn apex_piece(k: &Kernel, boss: &Curve, edge: &Curve, tol: f64) -> (Extent1d, Extent1d) {
+        let drop = |c: &Curve, p: Point3| {
+            let d = c
+                .drop_point(
+                    k,
+                    &c.natural_interval(),
+                    p,
+                    None,
+                    tol,
+                    None,
+                    SolverOperation::Minimize,
+                )
+                .expect("drop");
+            assert!(d.success);
+            d.parameter
+        };
+        let apex = drop(boss, Point3::new(3.0, 0.0, 0.0));
+        let piece = Extent1d::from_min_max(apex - 0.0016, apex + 0.0016);
+        let (s0, s1) = (
+            drop(edge, boss.evaluate_point(k, piece.min()).expect("start")),
+            drop(edge, boss.evaluate_point(k, piece.max()).expect("end")),
+        );
+        (piece, Extent1d::from_min_max(s0.min(s1), s0.max(s1)))
+    }
+
+    /// #18065: the closed-form gap of the overhanging arc is `cx + ra - re`, above the band by
+    /// the stored radius's rounding (`4.2e-16`) and within the coordinates' resolution
+    /// `√3 ulp(2.4) = 7.7e-16`; the chord enclosures' certified bound is no lower than it (it is
+    /// a bound) and above the band, so only the closed form proves the run.
+    #[test]
+    fn an_arc_overhanging_a_circular_edge_by_the_band_runs_along_it_in_closed_form() {
+        use crate::geom::expansion::{add, sign, sub, to_f64};
+        let k = Kernel::default();
+        let tol = 2.0e-5;
+        let cx = 2.33002;
+        let (boss, edge) = boss_and_edge(&k, cx);
+        let excess = sub(&add(&add(&[cx], &[0.07000000000000013]), &[-2.4]), &[tol]);
+        let resolution = coordinate_resolution(next_up(2.4)).expect("resolution");
+        assert_eq!(sign(&excess), 1, "the closed-form gap is above the band");
+        assert!(
+            to_f64(&excess) < 0.6 * resolution,
+            "{:e} within {resolution:e}",
+            to_f64(&excess)
+        );
+        assert!((resolution - 7.69e-16).abs() < 1e-18, "{resolution:e}");
+        let (piece, edge_piece) = apex_piece(&k, &boss, &edge, tol);
+        let certified = run_along_gap_bound(&k, &boss, &piece, &edge, &edge_piece, tol)
+            .expect("bound")
+            .expect("certified");
+        assert!(
+            certified >= tol + to_f64(&excess),
+            "the certificate {certified:e} bounds the closed-form gap"
+        );
+        assert!(certified > tol, "the chords alone refuse: {certified:e}");
+        assert!(curve_runs_along(&k, &boss, &piece, &edge, &edge_piece, tol).expect("run"));
+    }
+
+    /// #18065: the closed form refuses a real defect near the accepted case: the boss's centre
+    /// a few units further out puts its gap past the band by more than the resolution.
+    #[test]
+    fn an_arc_overhanging_a_circular_edge_past_the_resolution_does_not_run_along_it() {
+        let k = Kernel::default();
+        let tol = 2.0e-5;
+        // `+ 1e-15` puts the gap about `1.4e-15` past the band, just past the resolution
+        for cx in [
+            2.33002 + 1.0e-15,
+            2.33002 + 2.0e-15,
+            2.33002 + 1.0e-12,
+            2.33002 + 1.0e-7,
+        ] {
+            let (boss, edge) = boss_and_edge(&k, cx);
+            let (piece, edge_piece) = apex_piece(&k, &boss, &edge, tol);
+            assert!(
+                !curve_runs_along(&k, &boss, &piece, &edge, &edge_piece, tol).expect("run"),
+                "centre {cx}"
+            );
+        }
+    }
+
+    /// #18065: what is proved is the stored NURB, not the analytic circle: a boss whose circle
+    /// lies well within the band but whose NURB is a larger circle's, bulging `1e-9` past the
+    /// band, does not run along the edge.
+    #[test]
+    fn an_arc_whose_nurb_bulges_past_the_band_does_not_run_along_it() {
+        use crate::curve::ellipse::{Ellipse, EllipseOptions};
+        let k = Kernel::default();
+        let tol = 2.0e-5;
+        let (cx, ra) = (2.33002 - 1.0e-9, 0.07000000000000013);
+        let (x, y) = (
+            Vec3::new(0.8178681931579774, 0.5754056122601738, 0.0),
+            Vec3::new(-0.5754056122601738, 0.8178681931579774, 0.0),
+        );
+        let circle = |r: f64, nurb: Option<&crate::nurbs::b_spline_curve::BSplineCurve>| {
+            Curve::from(
+                Ellipse::new_circle(
+                    &k,
+                    Point3::new(cx, 0.0, 0.0),
+                    x,
+                    y,
+                    Extent1d::from_raw(0.0, 360.0),
+                    r,
+                    &EllipseOptions {
+                        nurb,
+                        ..EllipseOptions::default()
+                    },
+                )
+                .expect("circle"),
+            )
+        };
+        let larger = circle(ra + 2.0e-9, None);
+        let boss = circle(ra, larger.b_spline_base());
+        let (_, edge) = boss_and_edge(&k, cx);
+        let (piece, edge_piece) = apex_piece(&k, &boss, &edge, tol);
+        let apex = boss
+            .evaluate_point(&k, 0.5 * (piece.min() + piece.max()))
+            .expect("apex");
+        assert!(
+            apex.length() > 2.4 + tol + 5.0e-10,
+            "the NURB bulges: {apex:?}"
+        );
+        let (_, outward) = radial_deviation(
+            &boss,
+            (Point3::new(cx, 0.0, 0.0), ra),
+            (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)),
+            [piece.min(), piece.max()],
+        )
+        .expect("a circle's NURB is bounded");
+        assert!(outward >= 1.9e-9, "the bulge is counted: {outward:e}");
+        assert!(!circle_arcs_within(
+            &boss,
+            &piece,
+            &edge,
+            [edge_piece.min(), edge_piece.max()],
+            tol
+        ));
+        assert!(!curve_runs_along(&k, &boss, &piece, &edge, &edge_piece, tol).expect("run"));
+    }
+
+    /// #18065: a NURB lifted out of its circle's plane is refused: a circle of radius
+    /// `sqrt(r² - h²)` at height `h` is at distance `r` from the centre everywhere, so only its
+    /// plane tells it apart from the edge it stands `h` away from.
+    #[test]
+    fn an_arc_whose_nurb_leaves_its_circles_plane_does_not_run_along_it() {
+        use crate::curve::ellipse::{Ellipse, EllipseOptions};
+        let k = Kernel::default();
+        let tol = 2.0e-5;
+        let (r, h) = (2.4_f64, 0.01_f64);
+        let (x, y) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+        let circle =
+            |c: Point3, r: f64, nurb: Option<&crate::nurbs::b_spline_curve::BSplineCurve>| {
+                Curve::from(
+                    Ellipse::new_circle(
+                        &k,
+                        c,
+                        x,
+                        y,
+                        Extent1d::from_raw(0.0, 360.0),
+                        r,
+                        &EllipseOptions {
+                            nurb,
+                            ..EllipseOptions::default()
+                        },
+                    )
+                    .expect("circle"),
+                )
+            };
+        let lifted = circle(Point3::new(0.0, 0.0, h), (r * r - h * h).sqrt(), None);
+        let boss = circle(Point3::ZERO, r, lifted.b_spline_base());
+        let edge = circle(Point3::ZERO, r, None);
+        let piece = Extent1d::from_min_max(0.001, 0.003);
+        let mid = boss.evaluate_point(&k, 0.002).expect("mid");
+        assert!((mid.z - h).abs() < 1e-12, "the NURB is lifted: {mid:?}");
+        assert!(radial_deviation(&boss, (Point3::ZERO, r), (x, y), [0.001, 0.003]).is_none());
+        assert!(!circle_arcs_within(
+            &boss,
+            &piece,
+            &edge,
+            [0.001, 0.003],
+            tol
+        ));
+        assert!(!curve_runs_along(&k, &boss, &piece, &edge, &piece, tol).expect("run"));
     }
 }
