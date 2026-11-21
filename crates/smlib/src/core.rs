@@ -163,8 +163,6 @@ fn start_clean(k: &mut Kernel) {
     *k.blend_station_memo.borrow_mut() = Default::default();
     k.fillet_point_step.set(None);
     k.upstream_ub_passed.clear();
-    // (on for every call; the one that turns it off is the trims of a file's translation)
-    k.prove_lazy_trim_raise = true;
 }
 
 /// A kernel kept out of use until dropped ([`crate::hold_a_kernel`]).
