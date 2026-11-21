@@ -69,6 +69,27 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     crate::scenario::publish_rect("prefs:environment", choice.rect);
                 });
                 ui_kit::text(ui, app.tr("prefs.environment_note"), ui_kit::Text::Note("environment"));
+                // How an assembly takes its linked parts' changes (#6892): Live reads them when its
+                // tab comes back or it opens; Update active names them and waits for Update Links.
+                // It is the per-user `update_changed_links`, also on the Design page.
+                if crate::prefs::parts_and_assemblies(&app.preferences) {
+                    ui_kit::row(ui, app.tr("prefs.update_linked_parts"), |ui| {
+                        let live = app.preferences.update_changed_links;
+                        let selected = app.tr(if live { "prefs.update_live" } else { "prefs.update_active" }).to_string();
+                        let choice = ui_kit::dropdown_menu(ui, "pref_update_linked_parts", &selected, |ui| {
+                            for (on, key) in [(true, "prefs.update_live"), (false, "prefs.update_active")] {
+                                let response = ui_kit::list_picker(ui, key, solidcraft_ui_text::tr(key), live == on);
+                                crate::scenario::publish_rect(if on { "prefs:update_live" } else { "prefs:update_active" }, response.rect);
+                                if response.clicked() {
+                                    app.preferences.update_changed_links = on;
+                                    ui.close();
+                                }
+                            }
+                        });
+                        crate::scenario::publish_rect("prefs:update_linked_parts", choice.rect);
+                    });
+                    ui_kit::text(ui, app.tr("prefs.update_linked_parts_note"), ui_kit::Text::Note("update_linked_parts"));
+                }
             });
         });
         ui_kit::settings_section(ui, "startup", app.tr("ui.on_startup"), |ui| {

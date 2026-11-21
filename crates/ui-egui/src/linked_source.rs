@@ -140,7 +140,26 @@ fn stamp(file: &str) -> Stamp {
 /// (`component.links` reports it unfound). The web build keeps no times, so it looks at nothing.
 fn disk_stamps(app: &mut SolveApp) -> Vec<(u64, Stamp)> {
     let on = app.preferences.update_changed_links;
+    if !on {
+        say_changed(app);
+    }
     stamps_of(&mut app.session, on)
+}
+
+/// Update active (#6892, under Parts and assemblies): nothing is read by itself, so the status line
+/// names the linked parts whose files changed since the design read them; Update Links brings
+/// them in. Live reads them instead ([`update_changed`]).
+fn say_changed(app: &mut SolveApp) {
+    if !crate::prefs::parts_and_assemblies(&app.preferences) || app.session.doc.links.is_empty() {
+        return;
+    }
+    let changed = changed_since_read(&mut app.session);
+    if changed.is_empty() {
+        return;
+    }
+    let names: Vec<&str> = app.session.doc.components.iter().filter(|c| changed.contains(&c.id)).map(|c| c.name.as_str()).collect();
+    let text = solidcraft_ui_text::format("linked.changed_since_read", &[("names", &names.join(", "))]);
+    app.set_status(text, false);
 }
 
 /// [`disk_stamps`] for any open design (`on`: the preference `update_changed_links`).
@@ -677,6 +696,14 @@ mod tests {
         app.preferences.update_changed_links = false;
         saved_elsewhere(&mut app);
         assert!(app.file_load.idle());
+        assert!((volume(&app) - 8000.0).abs() < 1e-6, "{}", volume(&app));
+        // Update active under Parts and assemblies (#6892): the status line names what changed,
+        // and still nothing is read until Update Links.
+        app.preferences.environment = crate::prefs::ENVIRONMENT_PARTS_AND_ASSEMBLIES.into();
+        saved_elsewhere(&mut app);
+        assert!(app.file_load.idle());
+        let said = app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+        assert!(said.starts_with("Changed since this assembly read them:") && said.ends_with("Update Links brings them in."), "{said}");
         assert!((volume(&app) - 8000.0).abs() < 1e-6, "{}", volume(&app));
         let _ = std::fs::remove_dir_all(folder);
     }

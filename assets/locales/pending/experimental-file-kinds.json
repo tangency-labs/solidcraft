@@ -11,7 +11,12 @@
     "missing_links.detail": "These parts are not where their links say, nor in a library folder. They keep their last shape. Locate each one to point its link at the file.",
     "missing_links.locate": "Locate…",
     "missing_links.close": "Close",
-    "missing_links.relink_nearby": "Relink {count} more found in that folder"
+    "missing_links.relink_nearby": "Relink {count} more found in that folder",
+    "prefs.update_linked_parts": "Update linked parts",
+    "prefs.update_live": "Live",
+    "prefs.update_active": "Update active",
+    "prefs.update_linked_parts_note": "Live reads a changed part when the assembly opens or its tab comes back. Update active only names it; Update Links brings it in.",
+    "linked.changed_since_read": "Changed since this assembly read them: {names}. Update Links brings them in."
   },
   "ar": {
     "prefs.environment": "البيئة",
@@ -25,7 +30,12 @@
     "missing_links.detail": "هذه الأجزاء ليست حيث تقول روابطها، ولا في مجلد مكتبة. تحتفظ بآخر شكل لها. حدّد موقع كل منها لتوجيه رابطه إلى الملف.",
     "missing_links.locate": "تحديد الموقع…",
     "missing_links.close": "إغلاق",
-    "missing_links.relink_nearby": "إعادة ربط {count} أخرى وُجدت في ذلك المجلد"
+    "missing_links.relink_nearby": "إعادة ربط {count} أخرى وُجدت في ذلك المجلد",
+    "prefs.update_linked_parts": "تحديث الأجزاء المرتبطة",
+    "prefs.update_live": "مباشر",
+    "prefs.update_active": "تحديث النشط",
+    "prefs.update_linked_parts_note": "المباشر يقرأ الجزء المتغير عند فتح التجميع أو عودة تبويبه. تحديث النشط يذكره فقط؛ وتحديث الروابط يجلبه.",
+    "linked.changed_since_read": "تغيّرت منذ أن قرأها هذا التجميع: {names}. تحديث الروابط يجلبها."
   },
   "de": {
     "prefs.environment": "Umgebung",
@@ -39,7 +49,12 @@
     "missing_links.detail": "Diese Teile sind nicht dort, wo ihre Verknüpfungen hinzeigen, und in keinem Bibliotheksordner. Sie behalten ihre letzte Form. Suchen Sie jedes, um seine Verknüpfung auf die Datei zu richten.",
     "missing_links.locate": "Suchen…",
     "missing_links.close": "Schließen",
-    "missing_links.relink_nearby": "{count} weitere in diesem Ordner gefundene neu verknüpfen"
+    "missing_links.relink_nearby": "{count} weitere in diesem Ordner gefundene neu verknüpfen",
+    "prefs.update_linked_parts": "Verknüpfte Teile aktualisieren",
+    "prefs.update_live": "Live",
+    "prefs.update_active": "Aktive aktualisieren",
+    "prefs.update_linked_parts_note": "Live liest ein geändertes Teil, wenn die Baugruppe geöffnet wird oder ihr Tab zurückkommt. Aktive aktualisieren nennt es nur; Verknüpfungen aktualisieren holt es herein.",
+    "linked.changed_since_read": "Geändert, seit diese Baugruppe sie gelesen hat: {names}. Verknüpfungen aktualisieren holt sie herein."
   },
   "he": {
     "prefs.environment": "סביבה",
@@ -53,7 +68,12 @@
     "missing_links.detail": "החלקים האלה אינם במקום שהקישורים שלהם מצביעים עליו, וגם לא בתיקיית ספרייה. הם שומרים על צורתם האחרונה. אתר כל אחד כדי לכוון את הקישור שלו לקובץ.",
     "missing_links.locate": "איתור…",
     "missing_links.close": "סגירה",
-    "missing_links.relink_nearby": "קישור מחדש של {count} נוספים שנמצאו בתיקייה זו"
+    "missing_links.relink_nearby": "קישור מחדש של {count} נוספים שנמצאו בתיקייה זו",
+    "prefs.update_linked_parts": "עדכון חלקים מקושרים",
+    "prefs.update_live": "חי",
+    "prefs.update_active": "עדכון פעיל",
+    "prefs.update_linked_parts_note": "חי קורא חלק שהשתנה כשהמכלול נפתח או כשהכרטיסייה שלו חוזרת. עדכון פעיל רק מציין אותו; עדכון קישורים מביא אותו.",
+    "linked.changed_since_read": "השתנו מאז שהמכלול קרא אותם: {names}. עדכון קישורים מביא אותם."
   },
   "ja": {
     "prefs.environment": "環境",
@@ -67,7 +87,12 @@
     "missing_links.detail": "これらの部品はリンク先にもライブラリ フォルダーにもありません。最後の形状を保っています。それぞれの場所を指定して、リンクをそのファイルに向けてください。",
     "missing_links.locate": "場所を指定…",
     "missing_links.close": "閉じる",
-    "missing_links.relink_nearby": "そのフォルダーで見つかった残り {count} 件を再リンク"
+    "missing_links.relink_nearby": "そのフォルダーで見つかった残り {count} 件を再リンク",
+    "prefs.update_linked_parts": "リンクされた部品の更新",
+    "prefs.update_live": "ライブ",
+    "prefs.update_active": "アクティブを更新",
+    "prefs.update_linked_parts_note": "ライブでは、アセンブリを開いたときやそのタブに戻ったときに変更された部品を読み込みます。アクティブを更新では名前を示すだけで、リンクを更新で取り込みます。",
+    "linked.changed_since_read": "このアセンブリが読み込んだ後に変更されました: {names}。リンクを更新で取り込みます。"
   },
   "ko": {
     "prefs.environment": "환경",
@@ -81,7 +106,12 @@
     "missing_links.detail": "이 부품들은 링크가 가리키는 곳에도, 라이브러리 폴더에도 없습니다. 마지막 모양을 유지합니다. 각각 위치를 지정해 링크가 그 파일을 가리키게 하세요.",
     "missing_links.locate": "찾기…",
     "missing_links.close": "닫기",
-    "missing_links.relink_nearby": "그 폴더에서 찾은 {count}개 더 다시 연결"
+    "missing_links.relink_nearby": "그 폴더에서 찾은 {count}개 더 다시 연결",
+    "prefs.update_linked_parts": "연결된 부품 업데이트",
+    "prefs.update_live": "라이브",
+    "prefs.update_active": "활성 업데이트",
+    "prefs.update_linked_parts_note": "라이브는 어셈블리를 열거나 탭으로 돌아올 때 변경된 부품을 읽습니다. 활성 업데이트는 이름만 알려 주며, 링크 업데이트로 가져옵니다.",
+    "linked.changed_since_read": "이 어셈블리가 읽은 뒤 변경됨: {names}. 링크 업데이트로 가져옵니다."
   },
   "vi": {
     "prefs.environment": "Môi trường",
@@ -95,7 +125,12 @@
     "missing_links.detail": "Các chi tiết này không ở nơi liên kết của chúng chỉ tới, cũng không ở thư mục thư viện. Chúng giữ hình dạng cuối cùng. Hãy định vị từng chi tiết để trỏ liên kết tới tệp.",
     "missing_links.locate": "Định vị…",
     "missing_links.close": "Đóng",
-    "missing_links.relink_nearby": "Liên kết lại {count} chi tiết khác tìm thấy trong thư mục đó"
+    "missing_links.relink_nearby": "Liên kết lại {count} chi tiết khác tìm thấy trong thư mục đó",
+    "prefs.update_linked_parts": "Cập nhật chi tiết liên kết",
+    "prefs.update_live": "Trực tiếp",
+    "prefs.update_active": "Cập nhật khi yêu cầu",
+    "prefs.update_linked_parts_note": "Trực tiếp đọc chi tiết đã thay đổi khi cụm lắp mở ra hoặc thẻ của nó được chọn lại. Cập nhật khi yêu cầu chỉ nêu tên; Cập nhật liên kết sẽ đưa nó vào.",
+    "linked.changed_since_read": "Đã thay đổi kể từ khi cụm lắp này đọc chúng: {names}. Cập nhật liên kết sẽ đưa chúng vào."
   },
   "zh": {
     "prefs.environment": "环境",
@@ -109,6 +144,11 @@
     "missing_links.detail": "这些零件不在其链接所指的位置，也不在库文件夹中。它们保留最后的形状。请逐个定位，使其链接指向该文件。",
     "missing_links.locate": "定位…",
     "missing_links.close": "关闭",
-    "missing_links.relink_nearby": "重新链接在该文件夹中找到的另外 {count} 个"
+    "missing_links.relink_nearby": "重新链接在该文件夹中找到的另外 {count} 个",
+    "prefs.update_linked_parts": "更新链接的零件",
+    "prefs.update_live": "实时",
+    "prefs.update_active": "手动更新",
+    "prefs.update_linked_parts_note": "实时会在装配体打开或其标签页返回时读取已更改的零件。手动更新只列出名称；“更新链接”会将其读入。",
+    "linked.changed_since_read": "自此装配体读取后已更改：{names}。“更新链接”会将其读入。"
   }
 }
