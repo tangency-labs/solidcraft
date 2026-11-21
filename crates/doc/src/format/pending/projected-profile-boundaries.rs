@@ -4,8 +4,9 @@
 //! downstream curve pick then requires the same source's uniquely certified complete loop;
 //! partial, split or ambiguous boundaries retain the existing profile error. New projections
 //! omit the field and keep their current curve-pick semantics. Older designs without a complete
-//! single-loop projection are unchanged. The last release opens this newer format with a
-//! warning and preserves fields it cannot read when saving (`crates/doc/src/newer_file.rs`).
+//! single-loop projection are unchanged. The last release asks for an update instead of meeting
+//! a format it cannot read: it warns about the newer format number, opens what it can read and
+//! keeps unknown fields untouched when saving (`crates/doc/src/newer_file.rs`).
 use serde_json::Value;
 use solidcraft_sketch::{CurveKind, LinkKind, LinkSource, Sketch};
 
