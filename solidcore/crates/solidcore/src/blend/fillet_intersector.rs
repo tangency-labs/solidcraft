@@ -2071,6 +2071,8 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
 
         // Clear out curve point list that's been copied into sPnts
         self.base.base.curve_points.clear();
+        // (fix WR-76: the curve points' marker goes with them)
+        self.base.base.lone_start_on_found_curve = None;
 
         // no work - not enough xsect points to flush a curve
         if pnts.len() < 2 {

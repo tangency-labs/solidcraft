@@ -41,7 +41,8 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     assert_eq!(
         keys.len(),
         109,
-        "include document browser visibility and sizing and the repeated-shortcut preference among the current portable settings"
+        110,
+        "include document browser visibility and sizing, the repeated-shortcut preference, the browser scroll wheel preferences and the centred command search among the current portable settings"
     );
     for key in [
         "nav",
@@ -61,6 +62,7 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "library_thumbnail_size",
         "show_document_browser",
         "suppress_sketch_snap",
+        "browser_scroll_wheel",
     ] {
         assert!(keys.contains(&key), "{key} belongs in a profile");
     }
@@ -810,6 +812,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
     let expected = [
         "browser_bodies_folders",
         "browser_eye_left",
+        "browser_scroll_wheel",
         "center_arc_follows_cursor",
         "color_vision",
         "command_search_centred",
@@ -921,7 +924,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
     // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
-    assert_eq!(expected.len(), 109);
+    assert_eq!(expected.len(), 110);
     assert_eq!(actual, expected);
 }
 

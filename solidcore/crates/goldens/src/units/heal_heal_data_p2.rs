@@ -2049,7 +2049,7 @@ fn rust_heal(
     let (path, block) = block_of(brep, validate_only, init_gaps)?;
     // the block contract (HANG-29, the size ranges)
     source_contract(&path, &block).map_err(|e| harness(format!("B-rep block: {e}")))?;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut b = match own_brep(&mut k, brep, validate_only, init_gaps)? {
         Built::Brep(b) => *b,
         // the B-rep could not be built: the shim reports `-1 status`
@@ -2590,6 +2590,7 @@ fn rust_heal(
             Ok(new_probs) if last_without_state => {
                 if repair {
                     put_repair_summary(&h, &b, &mut o).map_err(|e| harness(e.to_string()))?;
+                    crate::trim_hook::observe(&mut b);
                     put_owner_block(&b, &mut o).map_err(|e| harness(e.to_string()))?;
                 }
                 o.extend([0.0, flag(new_probs)]);
@@ -2946,6 +2947,57 @@ pub(crate) mod certificates {
         out
     }
 
+    /// One cached vertex-face gap and the enclosure of its vertex's distance to the face's
+    /// surface.
+    #[derive(Debug)]
+    pub(crate) struct CertifiedVertex {
+        pub(crate) gap: f64,
+        pub(crate) enclosure: Enclosure,
+    }
+
+    /// Runs the first `steps` steps of `script` and encloses, for every cached vertex-face
+    /// gap of the B-rep their dump read, the distance from the vertex to its face's
+    /// surface ([`crate::certify::nearest`] around the gap's own parameters); asserts each
+    /// gap lies in its enclosure.
+    pub(crate) fn vertex_face_gaps(name: &str, script: &super::Inputs, steps: usize) -> Vec<CertifiedVertex> {
+        let mut script = script.clone();
+        if let super::Inputs::Heal { steps: s, .. } = &mut script {
+            s.truncate(steps);
+        }
+        KEPT.with(|k| *k.borrow_mut() = None);
+        super::run_rust(&script).expect("rust");
+        let b = KEPT
+            .with(|k| k.borrow_mut().take())
+            .expect("the script dumped its state");
+        let k = Kernel::default();
+        let mut out = Vec::new();
+        for (vu, r) in b.vertexuses().iter() {
+            let cached = r.vertex_face_gap;
+            if !cached.is_init() {
+                continue;
+            }
+            let v = r.vertex.expect("a vertex");
+            let point = b.vertex(v).expect("vertex").point;
+            let fu = solidcore::topology::vertexuse::faceuse(&b, vu)
+                .expect("faceuse")
+                .expect("a faceuse");
+            let face = b.faceuse(fu).expect("faceuse").face.expect("a face");
+            let surface = b.face(face).expect("face").surface.as_ref().expect("surface");
+            let enclosure = crate::certify::nearest(&k, surface, None, point, cached.face_uv);
+            let gap = cached.gap_3d;
+            eprintln!(
+                "{name} vertex use {}: gap {gap:e} at {:?} in [{:e}, {:e}]",
+                vu.index(),
+                cached.face_uv,
+                enclosure.lo,
+                enclosure.hi
+            );
+            assert!(enclosure.holds(gap), "{name} vertex use {}: {gap:e} outside {enclosure:?}", vu.index());
+            out.push(CertifiedVertex { gap, enclosure });
+        }
+        out
+    }
+
     /// WR-56 (#17467): certifies a moved row, `case` of `runner`: every cached edge-face
     /// gap of its last state is enclosed ([`edge_face_gaps`]), and each moved value is one
     /// of them. `moved` holds (value before WR-56, value now) pairs.
@@ -2984,6 +3036,57 @@ pub(crate) mod certificates {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #17896 (the affine knot insertion, `CPoint::affine2`): the edge-face gaps it moves
+    /// in the heal rows (`tests/keepuv_moved_rows.rs` classes the rows' other moved
+    /// values). Each `(index into out, value on main, value now)` replays bit for bit, is
+    /// the cached edge-face gap of one edge use, and both values lie inside that gap's
+    /// certified enclosure ([`certificates::edge_face_gaps`]): the move is below what the
+    /// geometry decides, equal.
+    #[test]
+    fn keepuv_affine_edge_face_gaps() {
+        use super::super::heal_heal_data_p1::Runner as P1;
+        type Moved = &'static [(usize, f64, f64)];
+        let rows: [(&dyn UnitDiff, &str, Moved); 6] = [
+            (&P1, "gen0242", &[(314, 2.5550568800550892e-9, 2.555052069280629e-9)]),
+            (&Runner, "gen0085", &[(289, 1.4828392756372229e-12, 1.482683538041431e-12)]),
+            (&Runner, "gen0138", &[(168, 1.668595474901957e-10, 1.6640740971431822e-10)]),
+            (
+                &Runner,
+                "gen0161",
+                &[
+                    (164, 4.700439481382968e-16, 4.702354842745572e-16),
+                    (242, 4.3613132892691186e-13, 4.3613130612250355e-13),
+                ],
+            ),
+            (
+                &Runner,
+                "gen0181",
+                &[
+                    (193, 9.081025587056003e-13, 9.08102641617676e-13),
+                    (245, 2.328384760786022e-13, 2.328376082512667e-13),
+                ],
+            ),
+            (&Runner, "gen0576", &[(151, 9.600589354804734e-12, 9.543813662690915e-12)]),
+        ];
+        for (runner, name, moved) in rows {
+            let case = crate::case::regression_case(runner, name);
+            let out = runner.run_rust(&case).expect("rust");
+            let script: Inputs = case.parse().expect("a heal script");
+            let gaps = certificates::edge_face_gaps(name, &script);
+            let o = &out.values["out"];
+            for &(at, main, now) in moved {
+                assert_eq!(o[at].to_bits(), now.to_bits(), "{name} out[{at}]: {:e}, the golden holds {now:e}", o[at]);
+                let g = gaps
+                    .iter()
+                    .find(|g| g.gap.to_bits() == now.to_bits())
+                    .unwrap_or_else(|| panic!("{name} out[{at}] = {now:e} is not a cached edge-face gap"));
+                let e = &g.enclosure;
+                eprintln!("{name} out[{at}]: {main:e} -> {now:e}, edge use {}, enclosure [{:e}, {:e}]", g.edgeuse.index(), e.lo, e.hi);
+                assert!(e.holds(main) && e.holds(now), "{name} out[{at}]: {main:e} -> {now:e} not both inside {e:?}");
+            }
+        }
+    }
 
     /// WR-56 (#17467), the moved rows `gen0032` and `gen0145`: four edge-face gaps each,
     /// certified by [`certificates::moved_row`]; the histogram counts that moved

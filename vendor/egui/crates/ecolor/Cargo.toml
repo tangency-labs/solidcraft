@@ -1,0 +1,48 @@
+[package]
+name = "ecolor"
+version.workspace = true
+authors = ["Emil Ernerfeldt <emil.ernerfeldt@gmail.com>", "Andreas Reich <reichandreas@gmx.de>"]
+description = "Color structs and color conversion utilities"
+edition.workspace = true
+rust-version.workspace = true
+homepage = "https://github.com/emilk/egui"
+license.workspace = true
+readme = "README.md"
+repository = "https://github.com/emilk/egui"
+categories = ["mathematics", "encoding"]
+keywords = ["gui", "color", "conversion", "gamedev", "images"]
+include = ["../../LICENSE-APACHE", "../../LICENSE-MIT", "**/*.rs", "Cargo.toml"]
+
+[lints]
+workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--generate-link-to-definition"]
+
+[lib]
+
+
+[features]
+default = []
+
+
+[dependencies]
+emath.workspace = true
+
+#! ### Optional dependencies
+
+## [`bytemuck`](https://docs.rs/bytemuck) enables you to cast `ecolor` types to `&[u8]`.
+bytemuck = { workspace = true, optional = true, features = ["derive"] }
+
+## [`cint`](https://docs.rs/cint) enables interoperability with other color libraries.
+cint = { workspace = true, optional = true }
+
+## Enable the [`hex_color`] macro.
+color-hex = { workspace = true, optional = true }
+
+## Enable this when generating docs.
+document-features = { workspace = true, optional = true }
+
+## Allow serialization using [`serde`](https://docs.rs/serde).
+serde = { workspace = true, optional = true }

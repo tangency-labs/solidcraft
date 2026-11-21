@@ -314,7 +314,7 @@ fn generator(code: u32) -> SolidResult<FilletSurfaceGeneratorType> {
 pub(super) fn rust(input: &AttributedFillet) -> Result<Output, HarnessError> {
     let wire = input.wire();
     contract::validate_attributed(&wire).map_err(|e| HarnessError::new(e.to_string()))?;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut run = || -> SolidResult<Vec<f64>> {
         let behavior = Behavior::from_code(i32::from(input.behavior))?;
         let mut body = build(&mut k, &input.body)?;
