@@ -179,15 +179,24 @@ impl Request {
         }
     }
     fn answer(&self, r: Result<Value, String>) {
+        self.answer_response(match r {
+            Ok(v) => json!({"ok": true, "result": v}),
+            Err(e) => json!({"ok": false, "error": e}),
+        });
+    }
+    fn answer_failure(&self, failure: &LoadFailure) {
+        let mut response = json!({"ok": false, "error": failure.text});
+        if let Some(refusal) = &failure.refusal
+            && let solidcraft_engine::plugin::HostError::Unsupported { reason } = &refusal.error
+        {
+            response["plugin_error"] = json!({"kind": "unsupported", "plugin": refusal.plugin, "reason": reason});
+        }
+        self.answer_response(response);
+    }
+    fn answer_response(&self, response: Value) {
         if let Some(reply) = &self.reply {
-            let mut response = if crate::control::chat_turn_cancelled(self.chat_turn.as_deref()) {
-                crate::control::cancelled_chat_response()
-            } else {
-                match r {
-                    Ok(v) => json!({"ok": true, "result": v}),
-                    Err(e) => json!({"ok": false, "error": e}),
-                }
-            };
+            let mut response =
+                if crate::control::chat_turn_cancelled(self.chat_turn.as_deref()) { crate::control::cancelled_chat_response() } else { response };
             if let Some((level, warnings)) = &self.param_check {
                 crate::control::add_param_warnings(&mut response, warnings.clone());
                 if let Some(o) = response.as_object_mut() {
@@ -211,7 +220,42 @@ struct Made {
     /// Draw its Home picture once it is open (off the UI thread: a large design takes a while).
     thumbnail: bool,
 }
-type Job = Result<Made, String>;
+/// Keep a plugin's deliberate refusal alongside the worker's localised error text until it
+/// reaches the window. All other failures retain their existing status-line behaviour.
+struct LoadFailure {
+    text: String,
+    refusal: Option<Box<solidcraft_engine::plugin::PluginFailure>>,
+}
+
+impl From<String> for LoadFailure {
+    fn from(text: String) -> Self {
+        Self { text, refusal: None }
+    }
+}
+
+impl From<&str> for LoadFailure {
+    fn from(text: &str) -> Self {
+        text.to_string().into()
+    }
+}
+
+impl From<solidcraft_engine::EngineError> for LoadFailure {
+    fn from(error: solidcraft_engine::EngineError) -> Self {
+        // Format here, within the worker's language scope, as before.
+        let text = error.to_string();
+        let refusal = match error {
+            solidcraft_engine::EngineError::PluginFailed(failure)
+                if matches!(failure.error, solidcraft_engine::plugin::HostError::Unsupported { .. }) =>
+            {
+                Some(failure)
+            }
+            _ => None,
+        };
+        Self { text, refusal }
+    }
+}
+
+type Job = Result<Made, LoadFailure>;
 struct Running {
     request: Request,
     base: Arc<Document>,
@@ -320,6 +364,8 @@ impl Running {
 
 #[derive(Default)]
 pub struct FileLoad {
+    /// Interactive importer refusals, each kept until the person acknowledges it.
+    refusals: VecDeque<solidcraft_engine::plugin::PluginFailure>,
     queued: VecDeque<Request>,
     running: Option<Running>,
     /// Results that are in and wait to land: their design's tab is not shown, or the person is in
@@ -1134,7 +1180,7 @@ fn step_staged(running: &mut Running) {
                 running.phase.store(1, Ordering::Relaxed);
                 staged.ran = Some(result);
             }
-            Some(Err(e)) => send(staged, Err(e)),
+            Some(Err(e)) => send(staged, Err(e.into())),
         }
         return;
     }
@@ -1152,7 +1198,7 @@ fn step_staged(running: &mut Running) {
                 staged.session = Some(session);
                 staged.ran = Some(result);
             }
-            Err(e) => send(staged, Err(e.to_string())),
+            Err(e) => send(staged, Err(e.to_string().into())),
         }
         return;
     }
@@ -1168,7 +1214,7 @@ fn step_staged(running: &mut Running) {
         });
         match read {
             Ok(reading) => staged.reading = Some(reading),
-            Err(e) => send(staged, Err(e)),
+            Err(e) => send(staged, Err(e.into())),
         }
         return;
     };
@@ -1190,7 +1236,7 @@ fn step_staged(running: &mut Running) {
         Err(e) => Err(format!("{path}: {e}")),
     };
     let (Some(mut session), Ok(import)) = (staged.session.take(), import.clone()) else {
-        send(staged, Err(import.err().unwrap_or_else(|| "file operation cancelled".into())));
+        send(staged, Err(import.err().unwrap_or_else(|| "file operation cancelled".into()).into()));
         return;
     };
     let (command, params) = (staged.command, staged.params.clone());
@@ -1205,7 +1251,7 @@ fn step_staged(running: &mut Running) {
             staged.session = Some(session);
             staged.ran = Some(result);
         }
-        Err(e) => send(staged, Err(e.to_string())),
+        Err(e) => send(staged, Err(e.to_string().into())),
     }
 }
 
@@ -1412,7 +1458,7 @@ fn compute(
 ) -> Job {
     let profile = solidcraft_engine::geom::env::var_os("PROFILE_OPEN").is_some();
     let began = std::time::Instant::now();
-    let cancelled = || Err("file operation cancelled".to_string());
+    let cancelled = || Err("file operation cancelled".into());
     if progress.is_cancelled() {
         return cancelled();
     }
@@ -1420,7 +1466,7 @@ fn compute(
     // agent's scope is per thread, so it is set again here.
     let result =
         solidcraft_engine::io::vfs::scoped(scope, || solidcraft_engine::doc::progress::watch(progress.clone(), || session.execute(command, params)))
-            .map_err(|e| e.to_string())?;
+            .map_err(LoadFailure::from)?;
     if export {
         // A successful export has already published its complete file. A Cancel arriving
         // after that commit must not turn a completed save into a misleading cancellation.
@@ -1562,6 +1608,28 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     start_staged(app);
     if app.file_load.busy() {
         ctx.request_repaint_after(std::time::Duration::from_millis(16));
+    }
+}
+
+/// The app's shared message card, with plugin-controlled content rendered as plain text.
+pub(crate) fn show_refusal(app: &mut SolveApp, ctx: &egui::Context) {
+    if !app.preferences.importer_refusal_dialog {
+        app.file_load.refusals.clear();
+        return;
+    }
+    let Some(refusal) = app.file_load.refusals.front().cloned() else { return };
+    let solidcraft_engine::plugin::HostError::Unsupported { reason } = &refusal.error else { return };
+    let (closed, action) =
+        crate::ui_kit::Confirm::new(egui::Id::unique("sc_import_refusal"), "status_warning", app.tr("plugin_import.refused_title"))
+            .tone(crate::ui_kit::Tone::Warning)
+            .actions(app.tr("ui.heading_ok"), "", None)
+            .show(ctx, true, |ui| {
+                crate::ui_kit::text(ui, &refusal.plugin, crate::ui_kit::Text::Report("plugin", false));
+                crate::ui_kit::text(ui, reason, crate::ui_kit::Text::Report("message", false));
+            });
+    app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window");
+    if closed || action != crate::ui_kit::Action::None {
+        app.file_load.refusals.pop_front();
     }
 }
 
@@ -1864,10 +1932,20 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                 request.answer(Err(e.into()));
                 app.set_status(e, true);
             }
-            Err(e) => {
+            Err(failure) => {
+                request.answer_failure(&failure);
+                // Only an interactive Open asks for acknowledgement. Programs get the error;
+                // traps, invalid input and host failures keep the status-line path.
+                if request.kind == Kind::Open
+                    && request.reply.is_none()
+                    && app.preferences.importer_refusal_dialog
+                    && let Some(refusal) = failure.refusal
+                {
+                    app.file_load.refusals.push_back(*refusal);
+                }
+                let e = failure.text;
                 // A real cancel took the `running.cancelled()` arm above; this is a failure.
                 outcome = Outcome::Failed(e.clone());
-                request.answer(Err(e.clone()));
                 if request.reads_again() {
                     // Said as when the command ran here (the status line, the run's messages).
                     app.finish_command(request.command().0, &Err(e));
