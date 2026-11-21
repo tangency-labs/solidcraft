@@ -17,7 +17,31 @@
 //! | [`TopologyFailure::DropFailed`]      | the drop's own recorded status |
 //! | [`TopologyFailure::JoinedVertexReaches`] | `SM_ERR` (not upstream, #15718) |
 //! | [`TopologyFailure::Defect`]              | `SM_ERR` (or the site's, through `with_status`) |
-//! | the named causes, from [`TopologyFailure::EditingDisabled`] on | the status of the phrase each replaced (`comparison_status`), or the site's through `with_status` |
+//! | [`TopologyFailure::EditingDisabled`] | `SM_ERR` |
+//! | [`TopologyFailure::NoBrepGiven`] | `SM_ERR_INVALID_INPUT` |
+//! | [`TopologyFailure::NotInBrep`] | `SM_ERR` |
+//! | [`TopologyFailure::VertexNotOnEdge`] | `SM_ERR` |
+//! | [`TopologyFailure::ClosedEdge`] | `SM_ERR` |
+//! | [`TopologyFailure::CurveNotBSpline`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::SurfaceWithoutNurbs`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::FaceWithoutEdges`] | `SM_ERR` |
+//! | [`TopologyFailure::WireEndSqueezed`] | `SM_ERR` |
+//! | [`TopologyFailure::NoFootOnSurface`] | `SM_ERR` |
+//! | [`TopologyFailure::CurveNotApproximated`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::GatheredBothSides`] | `SM_ERR_ASSERT_FAILURE` |
+//! | [`TopologyFailure::EdgeNotDeletable`] | `SM_ERR` |
+//! | [`TopologyFailure::InnerLoopsOnBothSides`] | `SM_ERR` |
+//! | [`TopologyFailure::LaminaEdgeIsStrut`] | `SM_ERR` |
+//! | [`TopologyFailure::VertexHasEdges`] | `SM_ERR` |
+//! | [`TopologyFailure::RadialSweepNeedsCones`] | `SM_ERR` |
+//! | [`TopologyFailure::RadialRimsNotEllipses`] | `SM_ERR` |
+//! | [`TopologyFailure::RadialRimsNotAnnulus`] | `SM_ERR` |
+//! | [`TopologyFailure::RadialCapWithoutPlane`] | `SM_ERR` |
+//! | [`TopologyFailure::RadialRimsOffEndPlane`] | `SM_ERR` |
+//! | [`TopologyFailure::RadialSweepNotOutward`] | `SM_ERR` |
+//!
+//! A named cause keeps the status of the phrase it replaced, unless its site overrides it
+//! through `with_status`.
 //!
 //! [`TopologyFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
 //! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
@@ -124,6 +148,21 @@ pub enum TopologyFailure {
     /// orientable, or it is an open sheet the closed-solid orientation does not take. Class
     /// `failed`.
     GatheredBothSides,
+    /// The edge to delete is neither a wire, a lamina nor a manifold edge (for example a
+    /// spine edge, which more than two faces share): the deletion takes only those.
+    /// [`ErrorKind::Unsupported`].
+    EdgeNotDeletable,
+    /// Both sides of the manifold edge to delete are two different inner loops: the deletion
+    /// merges faces only through an outer loop. As upstream, it finds this after the edge
+    /// is deleted, so the B-rep is left edited. [`ErrorKind::Unsupported`].
+    InnerLoopsOnBothSides,
+    /// The lamina edge to delete is a strut at an end (its two edge uses follow each other
+    /// in the loop there), which the lamina deletion does not take.
+    /// [`ErrorKind::Unsupported`].
+    LaminaEdgeIsStrut,
+    /// The vertex to delete still has edges; the caller deletes them first.
+    /// [`ErrorKind::InvalidInput`].
+    VertexHasEdges,
     /// A radial sweep between two supports was asked for supports that are not both cones
     /// (a cylinder is a cone). [`ErrorKind::Unsupported`], status `SM_ERR`.
     RadialSweepNeedsCones,
@@ -159,6 +198,10 @@ impl TopologyFailure {
             | Self::FaceWithoutEdges
             | Self::WireEndSqueezed
             | Self::NoFootOnSurface
+            | Self::EdgeNotDeletable
+            | Self::InnerLoopsOnBothSides
+            | Self::LaminaEdgeIsStrut
+            | Self::VertexHasEdges
             | Self::RadialSweepNeedsCones
             | Self::RadialRimsNotEllipses
             | Self::RadialRimsNotAnnulus
@@ -180,9 +223,9 @@ impl TopologyFailure {
     /// [`TopologyFailure::Missing`], [`ErrorKind::InvalidInput`] for
     /// [`TopologyFailure::InvalidValue`] and for a check of the caller's arguments, state or
     /// body, [`ErrorKind::Unsupported`] for a kind or configuration the routine does not
-    /// handle, the
-    /// drop status's kind for [`TopologyFailure::DropFailed`], [`ErrorKind::Failed`]
-    /// otherwise. [`TopologyFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
+    /// handle, the drop status's kind for [`TopologyFailure::DropFailed`],
+    /// [`ErrorKind::Failed`] otherwise. [`TopologyFailure::Defect`] is
+    /// [`ErrorKind::StageFailed`], a defect.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
@@ -191,11 +234,15 @@ impl TopologyFailure {
             | Self::NoBrepGiven
             | Self::NotInBrep
             | Self::VertexNotOnEdge
-            | Self::ClosedEdge => ErrorKind::InvalidInput,
+            | Self::ClosedEdge
+            | Self::VertexHasEdges => ErrorKind::InvalidInput,
             Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
             | Self::FaceWithoutEdges
             | Self::WireEndSqueezed
+            | Self::EdgeNotDeletable
+            | Self::InnerLoopsOnBothSides
+            | Self::LaminaEdgeIsStrut
             | Self::RadialSweepNeedsCones => ErrorKind::Unsupported,
             Self::CurveNotApproximated => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
@@ -258,6 +305,14 @@ impl core::fmt::Display for TopologyFailure {
             Self::GatheredBothSides => {
                 f.write_str("more face uses are connected than faces remain to be oriented")
             }
+            Self::EdgeNotDeletable => {
+                f.write_str("only a wire, lamina or manifold edge can be deleted")
+            }
+            Self::InnerLoopsOnBothSides => {
+                f.write_str("both sides of the edge are inner loops of different faces")
+            }
+            Self::LaminaEdgeIsStrut => f.write_str("the lamina edge to delete is a strut"),
+            Self::VertexHasEdges => f.write_str("the vertex still has edges"),
             Self::RadialSweepNeedsCones => {
                 f.write_str("the radial sweep requires two conical supports")
             }
@@ -508,11 +563,7 @@ mod tests {
                 SM_ERR_ASSERT_FAILURE,
                 K::Failed,
             ),
-            (
-                TopologyFailure::RadialSweepNeedsCones,
-                SM_ERR,
-                K::Unsupported,
-            ),
+            (TopologyFailure::RadialSweepNeedsCones, SM_ERR, K::Unsupported),
             (TopologyFailure::RadialRimsNotEllipses, SM_ERR, K::Failed),
             (TopologyFailure::RadialRimsNotAnnulus, SM_ERR, K::Failed),
             (TopologyFailure::RadialCapWithoutPlane, SM_ERR, K::Failed),
@@ -535,6 +586,27 @@ mod tests {
         assert_eq!(e.cause(), Some(&cause));
         assert!(e.is_defect());
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+    }
+
+    /// The named causes of the B-rep edits of `brep/p4` keep the status of the phrase each
+    /// replaced, and have their class.
+    #[test]
+    fn the_brep_p4_causes_keep_their_status_and_have_their_class() {
+        use ErrorKind as K;
+        let cases = [
+            (TopologyFailure::EdgeNotDeletable, SM_ERR, K::Unsupported),
+            (TopologyFailure::InnerLoopsOnBothSides, SM_ERR, K::Unsupported),
+            (TopologyFailure::LaminaEdgeIsStrut, SM_ERR, K::Unsupported),
+            (TopologyFailure::VertexHasEdges, SM_ERR, K::InvalidInput),
+        ];
+        for (failure, status, kind) in cases {
+            let e = SolidError::topology("topology::op", failure);
+            assert_eq!(e.upstream_status(), Some(status), "{failure:?}");
+            assert_eq!(super::super::upstream_status(&e), Some(status));
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.topology_failure(), Some(&failure));
+            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+        }
     }
 
     /// The topology routines describe their failures: their library code builds no bare
@@ -607,7 +679,6 @@ mod tests {
             ("solidcore/src/topology/brep/p1.rs", 42),
             ("solidcore/src/topology/brep/p10.rs", 10),
             ("solidcore/src/topology/brep/p2.rs", 16),
-            ("solidcore/src/topology/brep/p4.rs", 50),
             ("solidcore/src/topology/brep/p5.rs", 61),
             ("solidcore/src/topology/brep/p6.rs", 29),
             ("solidcore/src/topology/brep/p7.rs", 13),

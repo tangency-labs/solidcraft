@@ -735,6 +735,9 @@ impl SolveApp {
     /// An export's or a reading's reply, from its copy, with the echo an export leaves when it
     /// runs here.
     fn answered(&mut self, job: ControlJob, reply: Option<Value>) {
+        // What the copy evaluated to answer is done with: its bodies let go of their kernel
+        // forms now, not at this session's next command (#19629).
+        self.session.release_left();
         if job.req.refuse_cancelled_chat() {
             return;
         }
