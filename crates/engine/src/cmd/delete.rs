@@ -25,7 +25,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "De
     .contract(&DELETE_CONTRACT)
     .output(output_schema_for::<SelectionDeleteResult>)
     .params(
-        "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step). With a drawing open, items are its views, dimensions and balloons ({type: drawing, drawing, object}); each view takes its dimensions and balloons with it; a view with views projected or cut from it is refused, naming them, unless they are in items or contents: delete takes them too → views, dimensions, balloons: [the ids that went], deleted: the names of the views that went with those asked for",
+        "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step). With a drawing open, items are its views, dimensions, balloons, notes and placed symbols ({type: drawing, drawing, object}); each view takes its dimensions, balloons, notes and placed symbols with it; a view with views projected or cut from it is refused, naming them, unless they are in items or contents: delete takes them too → views, dimensions, balloons, notes, placed_symbols: [the ids that went], deleted: the names of the views that went with those asked for",
     )];
 
 /// Run another command's body inside this one (so the whole delete is one undo step).
@@ -58,7 +58,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(r)
 }
 
-/// Deletes the views, dimensions, balloons and notes `items` name in the drawing open, as one change: the
+/// Deletes the views, dimensions, balloons, notes and placed symbols `items` name in the drawing open, as one change: the
 /// record's removal ([`solidcraft_doc::drawing::Drawing::remove_objects`]), with no model evaluated.
 fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value> {
     let cmd = "selection.delete";
@@ -70,7 +70,7 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
     }
     let with_projected = super::drawing_sheet::contents_delete(cmd, p, "a view goes with the views projected or cut from it")?;
     let open = s.drawing(cmd)?.clone();
-    let (mut views, mut dimensions, mut balloons, mut notes) = (BTreeSet::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut views, mut dimensions, mut balloons, mut notes, mut placed) = (BTreeSet::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for item in items {
         let Sel::Drawing { drawing, object } = item else { return Err(model()) };
         if *drawing != open.id {
@@ -84,11 +84,13 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
             balloons.push(*object);
         } else if open.notes.by_id(*object).is_some() {
             notes.push(*object);
+        } else if open.placed_symbols.by_id(*object).is_some() {
+            placed.push(*object);
         } else {
-            return Err(bad(cmd, format!("the drawing open has no view, dimension, balloon or note {}", ids::encode(*object))));
+            return Err(bad(cmd, format!("the drawing open has no view, dimension, balloon, note or placed symbol {}", ids::encode(*object))));
         }
     }
-    if views.is_empty() && dimensions.is_empty() && balloons.is_empty() && notes.is_empty() {
+    if views.is_empty() && dimensions.is_empty() && balloons.is_empty() && notes.is_empty() && placed.is_empty() {
         return Err(bad(cmd, "nothing to delete"));
     }
     let all = open.with_projected(&views);
@@ -121,6 +123,9 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
     gone.notes.extend(notes);
     gone.notes.sort_unstable();
     gone.notes.dedup();
+    gone.placed_symbols.extend(placed);
+    gone.placed_symbols.sort_unstable();
+    gone.placed_symbols.dedup();
     s.edit_drawing(cmd, |d| {
         d.remove_objects(&gone);
         Ok(())
@@ -128,7 +133,7 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
     let listed = |objects: &[u64]| objects.iter().map(|id| ids::encode(*id)).collect::<Vec<_>>();
     let (views, dimensions, balloons) = (listed(&gone.views), listed(&gone.dimensions), listed(&gone.balloons));
     Ok(
-        json!({ "deleted": also, "deleted_joints": [], "would_fail": [], "skipped": [], "views": views, "dimensions": dimensions, "balloons": balloons, "notes": listed(&gone.notes) }),
+        json!({ "deleted": also, "deleted_joints": [], "would_fail": [], "skipped": [], "views": views, "dimensions": dimensions, "balloons": balloons, "notes": listed(&gone.notes), "placed_symbols": listed(&gone.placed_symbols) }),
     )
 }
 
@@ -857,8 +862,8 @@ mod tests {
         let before = s.drawing("test").unwrap().clone();
         let good = item(drawing, front);
         for (p, says) in [
-            (json!({"items": [good, item(drawing, 99)]}), "no view, dimension, balloon or note"),
-            (json!({"items": [good, item(drawing, sheet)]}), "no view, dimension, balloon or note"),
+            (json!({"items": [good, item(drawing, 99)]}), "no view, dimension, balloon, note or placed symbol"),
+            (json!({"items": [good, item(drawing, sheet)]}), "no view, dimension, balloon, note or placed symbol"),
             (json!({"items": [good, item(99, front)]}), "isn't the drawing open"),
             (json!({"items": [good, {"type": "body", "name": "Block"}]}), "deleted apart from the model's"),
             (json!({"items": [good, {"type": "feature", "id": 1}]}), "deleted apart from the model's"),

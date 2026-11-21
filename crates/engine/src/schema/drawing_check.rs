@@ -19,7 +19,7 @@ pub struct CheckParams {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FindingKind {
-    /// A dimension, balloon or note whose reference isn't found.
+    /// A dimension, balloon, note or placed symbol whose reference isn't found.
     Lost,
     /// One whose reference is found more than once.
     Ambiguous,
@@ -35,7 +35,7 @@ pub enum FindingKind {
     OutOfDate,
     /// A view with nothing to measure.
     NothingShown,
-    /// A title block field with no value.
+    /// A title block's field with no value, or a placed symbol's.
     EmptyField,
     /// A parts list row no balloon points at.
     NotBallooned,
@@ -71,6 +71,8 @@ pub enum CheckedKind {
     Dimension,
     Balloon,
     Note,
+    /// A placed symbol: its id is the placement's.
+    Symbol,
     Table,
     Image,
     /// A sheet's title block: its id is the sheet's.

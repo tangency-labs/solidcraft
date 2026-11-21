@@ -193,3 +193,265 @@ fn random_symbols_are_kept_on_paper_or_refused() {
         }
     }
 }
+
+// Placements (Y2a): where a symbol sits, anchored as a note is.
+
+fn place_one(s: &mut Session, p: Value) -> Value {
+    let reply = s.execute(PLACE, &p).unwrap_or_else(|e| panic!("{PLACE}: {e}"));
+    let schema = output_schema_for::<PlacedResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    reply
+}
+
+/// A box 80 x 40 x 30 mm as the part Bracket, and a drawing of it, open, with a front view at 1:1 at
+/// (200, 150), and the mark of [`mark`] defined. The session, the view, the occurrence and the mark.
+fn viewed() -> (Session, u64, u64, Value) {
+    use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
+    use solidcraft_doc::drawing_view::{ViewDirection, ViewOverrides};
+    use solidcraft_geom::drawing_view::NamedView;
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name": "Bracket"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 40, "height": 30, "body_name": "Box"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "drawing.create", json!({}));
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let id = d.allocate_id(&mut ids::IdSource::seeded(13063)).unwrap();
+    let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
+    let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
+    let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), ..ViewOverrides::default() };
+    d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At([200.0, 150.0]), settings, reference_shown_percent: 0.0, label: None })]);
+    d.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(d));
+    let mark = run(&mut s, DEFINE, json!({"name": "Mark", "pieces": mark()}))["symbol"].clone();
+    (s, id, part, mark)
+}
+
+/// Placing, editing and deleting a placement are one undo step each, an edit that changes nothing
+/// is none, and the drawing lists its placements as saved, the angle in radians.
+#[test]
+fn a_symbol_is_placed_edited_and_deleted_in_one_step_each() {
+    let (mut s, _, _, mark) = viewed();
+    let first = json!({"symbol": mark, "anchor": {"sheet": "Sheet 1"}, "at": [40, 25], "scale": 2, "angle": 90, "answers": {"rev": "C"}});
+    let reply = place_one(&mut s, first);
+    let id = reply["placement"].clone();
+    let record = &reply["record"];
+    assert_eq!((&record["symbol"], &record["at"], &record["scale"]), (&mark, &json!([40.0, 25.0]), &json!(2.0)));
+    assert_eq!((&record["angle"], &record["answers"]), (&json!(90f64.to_radians()), &json!({"rev": "C"})));
+    let listed = run(&mut s, "drawing.inspect", json!({}));
+    assert_eq!(listed["placed_symbols"], json!([record]));
+    let plain = place_one(&mut s, json!({"symbol": mark, "anchor": {"sheet": "Sheet 1"}, "at": [0, 0]}));
+    assert_eq!((&plain["record"]["scale"], &plain["record"]["angle"]), (&json!(1.0), &json!(0.0)), "a size of 1 and no turn unless given");
+    assert!(plain["record"].get("answers").is_none(), "an unanswered prompt saves nothing: {plain}");
+
+    let set = json!({"placement": id, "set": {"at": [50, 30], "scale": 0.5, "angle": -45, "answers": {}}});
+    assert_eq!(run(&mut s, PLACED_EDIT, set)["changed"], json!(["at", "scale", "angle", "answers"]));
+    let after = saved(&s);
+    let same = json!({"placement": id, "set": {"at": [50, 30], "scale": 0.5, "angle": -45}});
+    assert_eq!(run(&mut s, PLACED_EDIT, same)["changed"], json!([]));
+    assert_eq!(saved(&s), after, "an edit that changes nothing changes nothing");
+    run(&mut s, "edit.undo", json!({}));
+    let placed = |s: &Session, id: &Value| {
+        let id = ids::decode(id.as_str().unwrap()).unwrap();
+        s.drawing("test").unwrap().placed_symbols.by_id(id).cloned()
+    };
+    assert_eq!(placed(&s, &id).unwrap().scale, 2.0, "one undo step");
+
+    assert_eq!(run(&mut s, PLACED_DELETE, json!({"placement": id}))["placement"], id);
+    assert!(placed(&s, &id).is_none());
+    assert_eq!(s.drawing("test").unwrap().symbols.len(), 1, "its symbol stays");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(placed(&s, &id).is_some(), "one undo step");
+}
+
+/// A placement sits on a view, or on an edge of the view's model; it goes with its view, is copied
+/// with it, and is deleted as the drawing's other objects are.
+#[test]
+fn a_placement_goes_with_its_view_as_a_note_does() {
+    let (mut s, view, part, mark) = viewed();
+    let v = ids::encode(view);
+    let on_view = place_one(&mut s, json!({"symbol": mark, "anchor": {"view": v}, "at": [-30, 20]}))["placement"].clone();
+    let edge = json!({"edge": {"view": v, "edge": {"point": [40, 0, 0], "path": [part]}}});
+    let on_edge = place_one(&mut s, json!({"symbol": mark, "anchor": edge, "at": [60, 40], "answers": {"rev": "B"}}))["placement"].clone();
+    let saved_edge = &run(&mut s, "drawing.inspect", json!({}))["placed_symbols"];
+    let edge_record = saved_edge.as_array().unwrap().iter().find(|p| p["id"] == on_edge).unwrap();
+    assert_eq!(edge_record["anchor"]["edge"]["view"], json!(v));
+    assert!(edge_record["anchor"]["edge"]["edge"]["name"].is_string(), "saved by name: {edge_record}");
+    // Copied with its view, on the copy.
+    let copy = run(&mut s, "drawing.view.copy_to_sheet", json!({"view": v, "sheet": "Sheet 1", "position_mm": [100, 100], "with_linked": false}));
+    let copied = ids::decode(copy["view"].as_str().unwrap()).unwrap();
+    let d = s.drawing("test").unwrap().clone();
+    assert_eq!(d.placed_symbols.len(), 4);
+    assert_eq!(d.placed_symbols.iter().filter(|p| p.anchor.view() == Some(copied)).count(), 2);
+    run(&mut s, "edit.undo", json!({}));
+    // Deleted by selection, and with its view.
+    let item = |object: &Value| json!({"type": "drawing", "drawing": ids::encode(d.id), "object": object});
+    let gone = run(&mut s, "selection.delete", json!({"items": [item(&on_view)]}));
+    assert_eq!(gone["placed_symbols"], json!([on_view]));
+    let gone = run(&mut s, "selection.delete", json!({"items": [item(&json!(v))]}));
+    assert_eq!(gone["placed_symbols"], json!([on_edge]), "the view takes its placements");
+    assert!(s.drawing("test").unwrap().placed_symbols.is_empty());
+}
+
+fn inspect_placed(s: &mut Session, placement: &Value) -> Value {
+    let reply = s.execute(PLACED_INSPECT, &json!({"placement": placement})).unwrap_or_else(|e| panic!("{PLACED_INSPECT}: {e}"));
+    let schema = output_schema_for::<PlacedInspectResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    reply
+}
+
+/// Inspect gives where a placement's anchor stands with the model and what each of its texts says:
+/// its prompts answered by the placement, unanswered ones empty, and a leader's end on the edge's
+/// middle. It changes nothing.
+#[test]
+fn inspect_says_where_a_placement_stands_and_what_it_says() {
+    let (mut s, view, part, mark) = viewed();
+    let on_sheet = place_one(&mut s, json!({"symbol": mark, "anchor": {"sheet": "Sheet 1"}, "at": [40, 25], "answers": {"rev": "C"}}));
+    let before = saved(&s);
+    let reply = inspect_placed(&mut s, &on_sheet["placement"]);
+    assert_eq!((&reply["status"], &reply["exact"], reply.get("point")), (&json!("ok"), &json!(true), None), "{reply}");
+    assert_eq!(reply["record"], on_sheet["record"]);
+    assert_eq!(reply["texts"], json!(["Rev C"]));
+    assert_eq!(reply["fields"], json!([{"source": "prompt", "key": "rev", "state": "shown", "value": "C"}]));
+    assert_eq!(saved(&s), before, "inspect changes nothing");
+
+    let edge = json!({"edge": {"view": ids::encode(view), "edge": {"point": [40, 0, 0], "path": [part]}}});
+    let on_edge = place_one(&mut s, json!({"symbol": mark, "anchor": edge, "at": [60, 40]}));
+    let reply = inspect_placed(&mut s, &on_edge["placement"]);
+    assert_eq!(reply["status"], json!("ok"), "{reply}");
+    let point: Vec<f64> = reply["point"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+    assert!(point.iter().zip([40.0, 0.0, 0.0]).all(|(a, b)| (a - b).abs() < 1e-6), "the edge's middle: {point:?}");
+    assert_eq!(reply["texts"], json!(["Rev "]), "an unanswered prompt shows nothing");
+    assert_eq!(reply["fields"][0]["state"], json!("empty"), "{reply}");
+
+    let unknown = refused(&mut s, PLACED_INSPECT, json!({"placement": ids::encode(9_999_999)}));
+    assert!(unknown.contains("the drawing has no placed symbol"), "{unknown}");
+}
+
+/// A placement on a view of another configuration row is inspected on that row's model, as Check
+/// Drawing reads it: the block's top front edge has its middle at Long's 60 mm, not the active
+/// row's 50 mm.
+#[test]
+fn inspect_reads_a_placement_on_its_views_configuration_row() {
+    let (mut s, _, [front, _], _) = crate::drawing_scene::tests::configured_front_and_top();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"configuration": "Long"}}));
+    let mark = run(&mut s, DEFINE, json!({"name": "Mark", "pieces": mark()}))["symbol"].clone();
+    let edge = json!({"edge": {"view": ids::encode(front), "edge": {"point": [50, 0, 20], "path": []}}});
+    let placed = place_one(&mut s, json!({"symbol": mark, "anchor": edge, "at": [60, 40]}));
+    let reply = inspect_placed(&mut s, &placed["placement"]);
+    assert_eq!(reply["status"], json!("ok"), "{reply}");
+    let point: Vec<f64> = reply["point"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+    assert!(point.iter().zip([60.0, 0.0, 20.0]).all(|(a, b)| (a - b).abs() < 1e-6), "Long's edge middle: {point:?}");
+}
+
+/// A placed symbol's delete is refused, naming its placements, unless they go too: then both go in
+/// one undo step.
+#[test]
+fn a_placed_symbol_is_deleted_only_with_its_placements() {
+    let (mut s, _, _, mark) = viewed();
+    let mut placements: Vec<Value> =
+        (0..2).map(|i| place_one(&mut s, json!({"symbol": mark, "anchor": {"sheet": "Sheet 1"}, "at": [10 * i, 0]}))["placement"].clone()).collect();
+    placements.sort_by_key(|p| ids::decode(p.as_str().unwrap()));
+    let before = saved(&s);
+    let why = refused(&mut s, DELETE, json!({"symbol": mark}));
+    let named = placements.iter().map(|p| p.as_str().unwrap()).collect::<Vec<_>>().join(", ");
+    assert!(why.contains(&format!("it is placed as {named}: give `\"placements\": \"delete\"`")), "{why}");
+    assert_eq!(saved(&s), before, "a refusal changes nothing");
+    assert!(refused(&mut s, DELETE, json!({"symbol": mark, "placements": "keep"})).contains("keep"));
+    let reply = run(&mut s, DELETE, json!({"symbol": mark, "placements": "delete"}));
+    assert_eq!(reply["placements"], json!(placements));
+    let d = s.drawing("test").unwrap().clone();
+    assert!(d.symbols.is_empty() && d.placed_symbols.is_empty());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(saved(&s), before, "one undo step brings both back");
+}
+
+/// What placing refuses, on both sides of every bound, each refusal changing nothing.
+#[test]
+fn hostile_placements_are_refused() {
+    let (mut s, view, part, mark) = viewed();
+    let before = saved(&s);
+    let at = |p: Value| {
+        let mut base = json!({"symbol": mark, "anchor": {"sheet": "Sheet 1"}, "at": [0, 0]});
+        base.as_object_mut().unwrap().extend(p.as_object().unwrap().clone());
+        base
+    };
+    let cases = [
+        (at(json!({"scale": 0.0099})), "its scale is 0.01 to 100"),
+        (at(json!({"scale": 100.01})), "its scale is 0.01 to 100"),
+        (at(json!({"scale": 0})), "its scale is 0.01 to 100"),
+        (at(json!({"scale": -2})), "its scale is 0.01 to 100"),
+        (at(json!({"answers": {"weld": "x"}})), "it answers `weld`, which symbol `Mark` doesn't prompt for"),
+        (at(json!({"answers": {"rev": "a\nb"}})), "its answer to `rev`"),
+        (at(json!({"at": [0, 5000.001]})), "its place is at most 5000 mm on paper"),
+        (at(json!({"symbol": ids::encode(1)})), "the drawing has no symbol"),
+        (at(json!({"anchor": {"view": ids::encode(1)}})), "the drawing has no view"),
+        (at(json!({"anchor": {"sheet": "Sheet 9"}})), "Sheet 9"),
+        (at(json!({"anchor": {"edge": {"view": ids::encode(view), "edge": {"point": [1e9, 0, 0], "path": [part]}}}})), ""),
+        (at(json!({"angle": "ninety"})), ""),
+        // Past MAX_REAL radians, reading the drawing back would refuse it: about 5.7e10 degrees.
+        (at(json!({"angle": 1e300})), "its angle is at most 1000000000 radians each way"),
+        (at(json!({"angle": 6e10})), "its angle is at most 1000000000 radians each way"),
+        (at(json!({"leader": true})), "leader"),
+    ];
+    for (p, why) in cases {
+        let got = refused(&mut s, PLACE, p.clone());
+        assert!(got.contains(why), "{p}: {got}");
+        assert_eq!(saved(&s), before, "{p}: a refusal changes nothing");
+    }
+    // Every angle a drawing reads back is a turn, and the bounds themselves are kept.
+    for p in [at(json!({"scale": 0.01})), at(json!({"scale": 100})), at(json!({"angle": 5e10})), at(json!({"angle": -720}))] {
+        place_one(&mut s, p);
+    }
+    let id = place_one(&mut s, at(json!({})))["placement"].clone();
+    let edited = |set: Value| json!({"placement": id, "set": set});
+    assert!(refused(&mut s, PLACED_EDIT, edited(json!({"scale": 100.01}))).contains("its scale is 0.01 to 100"));
+    assert!(refused(&mut s, PLACED_EDIT, edited(json!({"angle": 6e10}))).contains("its angle is at most"));
+    assert!(refused(&mut s, PLACED_EDIT, edited(json!({"answers": {"weld": "x"}}))).contains("doesn't prompt for"));
+    assert!(refused(&mut s, PLACED_EDIT, edited(json!({"symbol": mark}))).contains("symbol"), "what it places stays");
+    assert!(refused(&mut s, PLACED_EDIT, json!({"placement": ids::encode(1), "set": {}})).contains("the drawing has no placed symbol"));
+    assert!(refused(&mut s, PLACED_DELETE, json!({"placement": ids::encode(1)})).contains("the drawing has no placed symbol"));
+}
+
+/// Seeded random placements are kept and keep the drawing's rules, or are refused and change
+/// nothing; never a panic.
+#[test]
+fn random_placements_are_kept_or_refused() {
+    let (mut s, view, part, mark) = viewed();
+    let mut state = 13063;
+    let numbers = [json!(0), json!(0.01), json!(0.0099), json!(1), json!(100), json!(100.01), json!(-1), json!(1e300), json!(-1e-300)];
+    let v = ids::encode(view);
+    let anchors = [
+        json!({"sheet": "Sheet 1"}),
+        json!({"view": v}),
+        json!({"edge": {"view": v, "edge": {"point": [40, 0, 0], "path": [part]}}}),
+        json!({"corner": {"view": v, "corner": {"point": [80, 0, 30], "path": [part]}}}),
+        json!({"view": ids::encode(1)}),
+    ];
+    let answers = [json!({}), json!({"rev": "A"}), json!({"rev": ""}), json!({"rev": "x\u{7}"}), json!({"other": "x"})];
+    let (mut kept, mut refusals) = (0, 0);
+    for _ in 0..300 {
+        let mut pick = |n: usize| (splitmix(&mut state) % n as u64) as usize;
+        let k = numbers.len();
+        let (anchor, x, y, scale, angle, answer) = (pick(anchors.len()), pick(k), pick(k), pick(k), pick(k), pick(answers.len()));
+        let p = json!({
+            "symbol": mark,
+            "anchor": anchors[anchor],
+            "at": [numbers[x], numbers[y]],
+            "scale": numbers[scale],
+            "angle": numbers[angle],
+            "answers": answers[answer],
+        });
+        let before = saved(&s);
+        match s.execute(PLACE, &p) {
+            Ok(_) => {
+                s.drawing("test").unwrap().validate().unwrap();
+                kept += 1;
+            }
+            Err(_) => {
+                assert_eq!(saved(&s), before, "{p}");
+                refusals += 1;
+            }
+        }
+    }
+    assert!(kept > 10 && refusals > 10, "{kept} kept, {refusals} refused");
+}

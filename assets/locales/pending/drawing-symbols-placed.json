@@ -1,0 +1,50 @@
+{
+  "en": {
+    "cmd.drawing_symbol_place": "Place Symbol",
+    "cmd.drawing_symbol_placed_delete": "Delete Placed Symbol",
+    "cmd.drawing_symbol_placed_edit": "Edit Placed Symbol",
+    "cmd.drawing_symbol_placed_inspect": "Inspect Placed Symbol"
+  },
+  "ar": {
+    "cmd.drawing_symbol_place": "وضع رمز",
+    "cmd.drawing_symbol_placed_delete": "حذف الرمز الموضوع",
+    "cmd.drawing_symbol_placed_edit": "تحرير الرمز الموضوع",
+    "cmd.drawing_symbol_placed_inspect": "فحص الرمز الموضوع"
+  },
+  "de": {
+    "cmd.drawing_symbol_place": "Symbol platzieren",
+    "cmd.drawing_symbol_placed_delete": "Platziertes Symbol löschen",
+    "cmd.drawing_symbol_placed_edit": "Platziertes Symbol bearbeiten",
+    "cmd.drawing_symbol_placed_inspect": "Platziertes Symbol prüfen"
+  },
+  "he": {
+    "cmd.drawing_symbol_place": "מיקום סמל",
+    "cmd.drawing_symbol_placed_delete": "מחיקת סמל ממוקם",
+    "cmd.drawing_symbol_placed_edit": "עריכת סמל ממוקם",
+    "cmd.drawing_symbol_placed_inspect": "בדיקת סמל ממוקם"
+  },
+  "ja": {
+    "cmd.drawing_symbol_place": "記号を配置",
+    "cmd.drawing_symbol_placed_delete": "配置した記号を削除",
+    "cmd.drawing_symbol_placed_edit": "配置した記号を編集",
+    "cmd.drawing_symbol_placed_inspect": "配置した記号を確認"
+  },
+  "ko": {
+    "cmd.drawing_symbol_place": "기호 배치",
+    "cmd.drawing_symbol_placed_delete": "배치된 기호 삭제",
+    "cmd.drawing_symbol_placed_edit": "배치된 기호 편집",
+    "cmd.drawing_symbol_placed_inspect": "배치된 기호 확인"
+  },
+  "vi": {
+    "cmd.drawing_symbol_place": "Đặt ký hiệu",
+    "cmd.drawing_symbol_placed_delete": "Xóa ký hiệu đã đặt",
+    "cmd.drawing_symbol_placed_edit": "Sửa ký hiệu đã đặt",
+    "cmd.drawing_symbol_placed_inspect": "Kiểm tra ký hiệu đã đặt"
+  },
+  "zh": {
+    "cmd.drawing_symbol_place": "放置符号",
+    "cmd.drawing_symbol_placed_delete": "删除已放置的符号",
+    "cmd.drawing_symbol_placed_edit": "编辑已放置的符号",
+    "cmd.drawing_symbol_placed_inspect": "检查已放置的符号"
+  }
+}

@@ -112,6 +112,7 @@ fn listed(on: &OnSheet) -> String {
         kind("note", &on.notes),
         kind("sheet sketch", &on.sketches),
         kind("sheet fill", &on.fills),
+        kind("placed symbol", &on.placed_symbols),
     ]
     .into_iter()
     .flatten()

@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use solidcraft_doc::bom::Tree;
+use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::fields::{FieldState, Values, no_field};
 use solidcraft_doc::drawing::note::{Anchor, Branch, End, Note, leaders_refused};
 use solidcraft_doc::ids;
@@ -86,24 +87,10 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(ADD, why));
     }
     let record = s.drawing(ADD)?.clone();
-    let on_view = |view: u64| record.view(view).map(|_| view).ok_or_else(|| bad(ADD, format!("the drawing has no view {}", ids::encode(view))));
-    let anchor = match request.anchor {
-        AnchorParam::Sheet(named) => Anchor::Sheet(crate::drawing_scene::sheet_id(&record, &named, ADD)?),
-        AnchorParam::View(view) => Anchor::View(on_view(view.0)?),
-        AnchorParam::Edge { view, edge } => Anchor::Edge {
-            view: on_view(view.0)?,
-            edge: s.doc.edge_reference(&s.model, &edge.pick, &edge.path).map_err(|why| bad(ADD, why.to_string()))?,
-        },
-        AnchorParam::Corner { view, corner } => Anchor::Corner {
-            view: on_view(view.0)?,
-            point: s.doc.corner_reference(&s.model, &corner.pick, &corner.path).map_err(|why| bad(ADD, why.to_string()))?,
-        },
-    };
+    let anchor = anchor(s, &record, request.anchor, ADD)?;
     let branches = request.branches.iter().map(|pick| branch(s, pick, ADD)).collect::<Result<Vec<_>>>()?;
     let mut note = Note { id: 0, anchor, at: request.at, content: request.content.0, cap_mm: request.cap_mm, branches };
-    if let Some(view) = note.anchor.view() {
-        check_drawn(&record, view, note.paths(), ADD)?;
-    }
+    check_on_view(&record, &note.anchor, note.paths(), ADD)?;
     note.id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
     let id = note.id;
     s.edit_drawing(ADD, |d| {
@@ -111,6 +98,33 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     answer(s, ADD, id)
+}
+
+/// The anchor `param` names in `record`: a sheet, a view, or an edge or a corner of a view's model,
+/// saved by name. A note's, and anything else placed as a note is.
+pub(super) fn anchor(s: &Session, record: &Drawing, param: AnchorParam, cmd: &str) -> Result<Anchor> {
+    let on_view = |view: u64| record.view(view).map(|_| view).ok_or_else(|| bad(cmd, format!("the drawing has no view {}", ids::encode(view))));
+    Ok(match param {
+        AnchorParam::Sheet(named) => Anchor::Sheet(crate::drawing_scene::sheet_id(record, &named, cmd)?),
+        AnchorParam::View(view) => Anchor::View(on_view(view.0)?),
+        AnchorParam::Edge { view, edge } => Anchor::Edge {
+            view: on_view(view.0)?,
+            edge: s.doc.edge_reference(&s.model, &edge.pick, &edge.path).map_err(|why| bad(cmd, why.to_string()))?,
+        },
+        AnchorParam::Corner { view, corner } => Anchor::Corner {
+            view: on_view(view.0)?,
+            point: s.doc.corner_reference(&s.model, &corner.pick, &corner.path).map_err(|why| bad(cmd, why.to_string()))?,
+        },
+    })
+}
+
+/// Refuses an object anchored at `anchor` whose leaders point at the model through `paths`, when
+/// its view doesn't draw a part they point at. A note's, and anything else placed as a note is.
+pub(super) fn check_on_view<'a>(record: &Drawing, anchor: &Anchor, paths: impl IntoIterator<Item = &'a [u64]>, cmd: &str) -> Result<()> {
+    match anchor.view() {
+        Some(view) => check_drawn(record, view, paths, cmd),
+        None => Ok(()),
+    }
 }
 
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
@@ -252,8 +266,8 @@ fn branch_result(end: End) -> BranchResult {
     BranchResult { status: status.into(), why, point, exact: end.exact, candidates }
 }
 
-/// Each field `content` reads, in order, as `values` read it.
-fn fields(values: &Values, content: &Content) -> Vec<FieldResult> {
+/// Each field `content` reads, in order, as `values` read it: a note's, and a placed symbol's texts'.
+pub(super) fn fields(values: &Values, content: &Content) -> Vec<FieldResult> {
     let field = |part: &Part| {
         let Part::Field { source, key, .. } = part else { return None };
         let (state, value) = match values.state(*source, key) {
