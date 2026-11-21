@@ -1,4 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#[path = "../../../../solidcore/crates/solidcore/tests/support/annular_samples.rs"]
+mod annular_samples;
+
 use crate::Session;
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
@@ -551,6 +554,91 @@ fn body_volume(s: &mut Session, name: &str) -> f64 {
     let state = s.model.state();
     let b = state.bodies.iter().find(|b| b.name == name).unwrap_or_else(|| panic!("no body {name}"));
     solidcraft_kernel::measure(&b.body).unwrap().volume
+}
+
+/// A 3.5 mm boss on a plate with a coaxial 1.75 mm through bore. The plate makes the display
+/// chord tolerance large compared with a pick 0.05 mm from either circular rim of its end.
+fn annular_boss(s: &mut Session) {
+    run(s, "solid.box", json!({"length": 100, "width": 100, "height": 5, "corner": [-50, -50, -5], "body_name": "Boss"}));
+    run(s, "solid.cylinder", json!({"radius": 3.5, "height": 10, "operation": "join"}));
+    run(s, "solid.cylinder", json!({"base": [0, 0, -6], "radius": 1.75, "height": 17, "operation": "cut"}));
+}
+
+#[test]
+fn offset_face_near_annular_rims_keeps_the_end_face_name_and_body() {
+    let mut s = Session::default();
+    annular_boss(&mut s);
+    let before = s.doc.as_ref().clone();
+    let state = s.model.state();
+    let boss = state.body("Boss").unwrap();
+    let end = boss.body.face_at_point(Vec3::new(2.625, 0.0, 10.0)).unwrap().unwrap();
+    let name = solidcraft_doc::naming::face_names(boss)[end].clone();
+    run(&mut s, "solid.offset_face", json!({"faces": [[2.625, 0, 10]], "body": "Boss", "distance": 4}));
+    let expected = s.model.state().body("Boss").unwrap().body.record().clone();
+    // Plate less its bore, plus the annular boss extended from 10 to 14 mm.
+    let want = annular_samples::plate_and_extended_boss_volume();
+    assert!((body_volume(&mut s, "Boss") - want).abs() < want * 1e-7);
+    let mut picks = vec![json!(name), json!([2.625, 0, 10.0 + boss.body.record().tolerance * 0.5])];
+    picks.extend(annular_samples::rim_points(10.0).into_iter().map(|point| json!(point)));
+    for pick in picks {
+        let mut s = Session::new(before.clone());
+        let out = run(&mut s, "solid.offset_face", json!({"faces": [pick], "body": "Boss", "distance": 4}));
+        let feature = s.doc.feature(out["feature"].as_u64().unwrap()).unwrap();
+        assert_eq!(feature.face_names, [name.clone()], "{pick}");
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{pick}: {:?}", s.model.results);
+        assert_eq!(s.model.state().body("Boss").unwrap().body.record(), &expected, "{pick}");
+        // Reopening exercises the persistent name captured from a point near the rim.
+        let mut reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+        reopened.refresh();
+        assert!(reopened.model.results.iter().all(|r| r.error.is_none()), "{pick}: {:?}", reopened.model.results);
+        assert_eq!(reopened.model.state().body("Boss").unwrap().body.record(), &expected, "{pick}");
+    }
+}
+
+#[test]
+fn offset_face_refuses_a_point_just_off_the_annular_end() {
+    let mut s = Session::default();
+    annular_boss(&mut s);
+    let before = s.doc.as_ref().clone();
+    let state = s.model.state();
+    let boss = state.body("Boss").unwrap();
+    let original = boss.body.record().clone();
+    let off = 4.0 * original.tolerance;
+    for point in [json!([2.625, 0, 10.0 + off]), json!([0, 0, 10]), json!([3.5 + off, 0, 10]), json!([1.75 - off, 0, 10])] {
+        let mut s = Session::new(before.clone());
+        let e = s.execute("solid.offset_face", &json!({"faces": [point], "body": "Boss", "distance": 4})).unwrap_err();
+        assert!(e.to_string().contains("no face at"), "{point}: {e}");
+        assert_eq!(s.model.state().body("Boss").unwrap().body.record(), &original, "{point}");
+        assert_eq!(s.doc.features.len(), before.features.len(), "a refused pick does not add a feature");
+    }
+}
+
+#[test]
+fn offset_a_curved_face_by_name_or_exact_point_but_refuse_floating_points() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20, "body_name": "Cylinder"}));
+    let before = s.doc.as_ref().clone();
+    let state = s.model.state();
+    let body = state.body("Cylinder").unwrap();
+    assert!(body.display_tol() > 0.01, "the floating points are inside the display picking reach");
+    let wall = body.body.face_at_point(Vec3::new(10.0, 0.0, 10.0)).unwrap().unwrap();
+    let name = solidcraft_doc::naming::face_names(body)[wall].clone();
+    for point in [[9.99, 0.0, 10.0], [10.01, 0.0, 10.0]] {
+        let e = s.execute("solid.offset_face", &json!({"faces": [point], "body": "Cylinder", "distance": 2})).unwrap_err();
+        assert!(e.to_string().contains("no face at"), "{point:?}: {e}");
+        assert_eq!(s.doc.features.len(), before.features.len());
+    }
+    for pick in [json!([10, 0, 10]), json!(name)] {
+        let mut s = Session::new(before.clone());
+        run(&mut s, "solid.offset_face", json!({"faces": [pick], "body": "Cylinder", "distance": 2}));
+        let state = s.model.state();
+        let body = &state.body("Cylinder").unwrap().body;
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{pick}: {:?}", s.model.results);
+        assert!((0..body.face_count()).any(|f| matches!(
+            solidcraft_kernel::face_surface(body, f),
+            Some(solidcraft_kernel::FaceSurface::Cylinder { radius, .. }) if (radius - 12.0).abs() < 1e-6
+        )));
+    }
 }
 
 /// A point-only pick on the face two flush boxes share (the call in #12385) warns, naming both
