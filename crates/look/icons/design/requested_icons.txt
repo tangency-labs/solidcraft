@@ -223,6 +223,7 @@ panel_dock_bottom	false
 panel_dock_left	false
 panel_dock_right	false
 panel_float	false
+panel_popout	false
 panel_reset_height	false
 params	false
 paste	false
@@ -279,6 +280,7 @@ reach	false
 rect	false
 rect3	false
 rect_center	false
+rect_edge_center	false
 rect_rounded	false
 redo	false
 refold	false

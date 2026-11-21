@@ -2,9 +2,7 @@
 
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
-use std::hash::{BuildHasher, RandomState};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::{Arc, Weak};
 
 use serde_json::{Value, json};
 use solidcraft_sketch::CurveKind;
@@ -77,7 +75,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&DOCUMENT_REVISION_CONTRACT)
         .output(output_schema_for::<RevisionResult>)
         .params(
-        "→ document_id (this open design's id: kept while it stays open, another for each design started or opened), \
+        "→ document_id (the open design's identity, new on opening or starting a design), \
          revision (moves whenever the design, what is hidden or a component's uncaptured position changes, \
          never on a selection or a view; from one counter for the whole run, so it never repeats). Read-only",
     ),
@@ -541,10 +539,8 @@ fn sketch_inspect(s: &mut Session, p: &Value) -> Result<Value> {
     typed_reply("sketch.inspect", inspected)
 }
 
-/// Revisions of every design of this run (#6646).
-static NEXT_REVISION: AtomicU64 = AtomicU64::new(1);
-
 /// The design as `document.revision` last saw it, which its revision names.
+#[derive(Clone)]
 pub(crate) struct Followed {
     /// Held weakly: a design something holds weakly is never changed in place (`Arc::make_mut`
     /// moves it), and its address can't go to another design meanwhile.
@@ -552,20 +548,6 @@ pub(crate) struct Followed {
     visibility: crate::Visibility,
     pending_moves: BTreeMap<u64, solidcraft_doc::Mat>,
     revision: u64,
-}
-
-/// A new design's id: one for this run, then a number, so no two designs of one run, or of two
-/// runs, have the same.
-pub(crate) fn new_document_id() -> String {
-    static RUN: OnceLock<u64> = OnceLock::new();
-    static NEXT: AtomicU64 = AtomicU64::new(1);
-    let run = RUN.get_or_init(|| {
-        let started = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-        // Hashed with this process's random keys (where the system has them), so two runs differ
-        // even with the clock set back.
-        RandomState::new().hash_one(started)
-    });
-    format!("{run:016x}-{}", NEXT.fetch_add(1, Ordering::Relaxed))
 }
 
 impl Session {
@@ -579,7 +561,7 @@ impl Session {
         match self.followed.as_ref().filter(|f| seen(f)) {
             Some(f) => f.revision,
             None => {
-                let revision = NEXT_REVISION.fetch_add(1, Ordering::Relaxed);
+                let revision = solidcraft_doc::ids::next_design_revision();
                 let (doc, visibility, pending_moves) = (Arc::downgrade(&self.doc), self.visibility.clone(), self.pending_moves.clone());
                 self.followed = Some(Followed { doc, visibility, pending_moves, revision });
                 revision

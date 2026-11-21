@@ -22,13 +22,14 @@ const TABS_KEPT: f32 = 124.0;
 /// The least width of a document tab before the tabs scroll behind the » list.
 const MIN_TAB: f32 = 90.0;
 /// The expanded design tab (option A): its height and corner radius.
-const DESIGN_PILL_HEIGHT: f32 = 34.0;
+const DESIGN_PILL_HEIGHT: f32 = 30.0;
+const DESIGN_GROUP_BACKING_HEIGHT: f32 = 27.0;
 const PILL_RADIUS: u8 = 8;
 /// The room a pill keeps right of its views: the +, a separator, the close button and its padding.
 const PILL_AFTER: f32 = 63.0;
 /// A view's sub-tab: its height, corner radius, label size, the gap between sub-tabs and the
 /// longest label drawn before it is cut.
-const VIEW_HEIGHT: f32 = 24.0;
+const VIEW_HEIGHT: f32 = 22.0;
 const VIEW_RADIUS: u8 = 5;
 const VIEW_FONT: f32 = 12.5;
 const VIEW_GAP: f32 = 2.0;
@@ -94,7 +95,7 @@ pub struct BarButton<'a> {
     pub enabled: bool,
     /// Narrower on a compact bar.
     pub narrow: bool,
-    /// Left out of a compact bar (its shortcut and menus remain).
+    /// Yields before primary actions when space is scarce.
     pub wide_only: bool,
 }
 
@@ -134,6 +135,10 @@ pub struct Version<'a> {
 
 /// The bar as the app describes it this frame.
 pub struct AppBar<'a> {
+    /// Saved movable items; None uses today's default arrangement.
+    pub items: Option<&'a crate::app_bar_items::Layout>,
+    /// Stable command ids corresponding to the host's drawable quick-access buttons.
+    pub quick_ids: &'a [&'a str],
     /// The app's mark, painted centred at the point given, and its name beside it.
     pub mark: &'a dyn Fn(&Painter, Pos2),
     pub name: &'a str,
@@ -205,17 +210,34 @@ pub enum BarAction {
     },
     /// The version's link.
     Version,
+    /// An app-owned control, including a quick-access command by layout id.
+    App {
+        id: String,
+    },
 }
 
 /// The bar drawn: what was chosen, and the places it leaves to the app.
 #[derive(Debug)]
 pub struct BarOut {
+    /// Each quick button's source-list index and centre x, including reordered/cross-zone ones.
+    pub quick_slots: Vec<(usize, f32)>,
     /// Space reserved for the app-owned control before Home.
     pub leading: Option<Rect>,
     pub actions: Vec<BarAction>,
+    /// Hidden layout ids in bar order.
+    pub overflow: Vec<String>,
+    /// Core rows already have labels and actions; the host completes app-owned rows.
+    pub overflow_items: Vec<OverflowItem>,
+    pub overflow_button: Option<Rect>,
+    /// Number of drawn quick-access buttons. Use `quick_slots` to identify them in a custom list.
+    pub quick_count: usize,
+    pub tabs_end: f32,
+    pub managed: Option<Rect>,
+    pub managed_labeled: bool,
+    pub reserved_offers: bool,
     /// The File button, where its menu opens.
     pub file: Rect,
-    /// The quick-access buttons: the first one's centre x and the step between them.
+    /// Default arrangement's first quick-access centre and step; custom lists use `quick_slots`.
     pub quick: Option<(f32, f32)>,
     /// Where an offer pill may go (right-aligned in it), and whether it may carry its label.
     pub offer: Rect,
@@ -372,9 +394,33 @@ fn icon_button(ui: &mut egui::Ui, bar: Rect, at: f32, b: &BarButton, compact: bo
     b.enabled && clicked
 }
 
+/// Draws the app mark and optional title at the leading edge of a window's bar.
+/// Returns the right edge of the brand so the window can place its next control.
+pub fn paint_brand(painter: &Painter, content: Rect, mark: &dyn Fn(&Painter, Pos2), name: Option<&str>) -> f32 {
+    let left = content.left();
+    let y = content.center().y;
+    mark(painter, pos2(left + 20.0, y));
+    name.map_or(left + 32.0, |name| {
+        let t = Tokens::get();
+        painter.text(pos2(left + 36.0, y), Align2::LEFT_CENTER, name, crate::type_face::semibold(t.font_heading), t.app_bar_text).right()
+    })
+}
+
 /// Draws the bar in `bar`, its controls within `content` (the title bar's room between the
 /// window's own buttons).
 pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOut {
+    show_with_offers(ui, data, bar, content, Offers::default())
+}
+
+/// Measured app-owned transient controls, present from the first frame.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Offers {
+    pub update: Option<f32>,
+    pub managed: Option<f32>,
+}
+
+/// Draws the bar with explicitly measured transient controls.
+pub fn show_with_offers(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect, offers: Offers) -> BarOut {
     use crate::app_bar_layout::{application, layout};
 
     let t = Tokens::get();
@@ -396,48 +442,63 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
         search: data.search.then(|| (crate::CommandSearch::closed_width(ui.ctx(), data.search_shortcut), crate::CommandSearch::compact_width(26.0))),
         assistant: data.assistant,
         version: version.as_ref().map(|(_, galley)| galley.size().x),
-        offered: solidcraft_ui_registry::rect_of("titlebar:update").map(|u| u.width()),
+        offered: offers.update,
+        managed: offers.managed,
         pixels_per_point: ui.ctx().pixels_per_point(),
     };
-    let spec = application::spec(r.width(), content.left() - r.left(), r.right() - content.right(), measured);
-    let geometry = layout(&spec).application.unwrap_or_default();
+    let dimensions = (r.width(), content.left() - r.left(), r.right() - content.right());
+    let spec = if let Some(items) = data.items {
+        application::spec_with_items(
+            dimensions,
+            measured,
+            items,
+            &data.actions.iter().map(|b| b.id).collect::<Vec<_>>(),
+            data.quick_ids,
+            // The existing Ko-fi action/registry id stays intact; its saved placement is donate.
+            &data.pills.iter().map(|p| if p.id == "kofi" { "donate" } else { p.id }).collect::<Vec<_>>(),
+        )
+    } else {
+        application::spec(dimensions.0, dimensions.1, dimensions.2, measured)
+    };
+    let placed = layout(&spec);
+    let geometry = placed.application.clone().unwrap_or_default();
+    let visible = |id: &str| geometry.visible.iter().any(|s| s == id);
     let compact = geometry.compact;
     let rect = |span: application::Span, height| {
         Rect::from_min_max(pos2(r.left() + span.left, r.center().y - height / 2.0), pos2(r.left() + span.right, r.center().y + height / 2.0))
     };
     let mut actions = Vec::new();
-    (data.mark)(ui.painter(), pos2(r.left() + geometry.mark, r.center().y));
-    if !compact {
-        ui.painter().text(
-            pos2(r.left() + geometry.name, r.center().y),
-            Align2::LEFT_CENTER,
-            data.name,
-            crate::type_face::semibold(t.font_heading),
-            t.app_bar_text,
-        );
+    if visible("logo") {
+        let brand = Rect::from_min_max(pos2(r.left() + geometry.mark - 20.0, r.top()), r.right_bottom());
+        paint_brand(ui.painter(), brand, data.mark, geometry.name_visible.then_some(data.name));
     }
     let leading = geometry.leading.zip(data.leading).map(|(span, size)| rect(span, size.y));
     // Home.
     let home = rect(geometry.home, 32.0);
     let idle = data.home.enabled;
-    let home_response = ui.interact(home, ui.scope_id().with("appbar_home"), if idle { Sense::click() } else { Sense::hover() });
-    home_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, idle, data.home.tip));
-    for name in h.home {
-        solidcraft_ui_registry::publish_handle(name, home.center());
+    if visible("home") {
+        let home_response = ui.interact(home, ui.scope_id().with("appbar_home"), if idle { Sense::click() } else { Sense::hover() });
+        home_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, idle, data.home.tip));
+        for name in h.home {
+            solidcraft_ui_registry::publish_handle(name, home.center());
+        }
+        for name in h.home_rect {
+            solidcraft_ui_registry::publish_rect(name, home);
+        }
+        if idle && (home_response.hovered() || home_response.has_focus()) {
+            ui.painter().rect_filled(home.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
+        }
+        crate::icons::paint_app_bar(ui.painter(), home.shrink(7.0), data.home.icon, if idle { 1.0 } else { 0.35 });
+        if home_response.backing_on_hover_text(data.home.tip).clicked() && idle {
+            actions.push(BarAction::Home);
+        }
     }
-    for name in h.home_rect {
-        solidcraft_ui_registry::publish_rect(name, home);
+    if visible("brand") && geometry.brand_separator < geometry.file.left {
+        separator(ui, r, r.left() + geometry.brand_separator, "brand", h);
     }
-    if idle && (home_response.hovered() || home_response.has_focus()) {
-        ui.painter().rect_filled(home.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
-    }
-    crate::icons::paint_app_bar(ui.painter(), home.shrink(7.0), data.home.icon, if idle { 1.0 } else { 0.35 });
-    if home_response.backing_on_hover_text(data.home.tip).clicked() && idle {
-        actions.push(BarAction::Home);
-    }
-    separator(ui, r, r.left() + geometry.brand_separator, "brand", h);
-    // The File menu's text button, .
-    let (file, clicked) = text_button(ui, rect(geometry.file, 26.0), (data.file, data.file), data.file_open, idle, "file");
+    // The File menu's text button.
+    let file = rect(geometry.file, 26.0);
+    let clicked = visible("file") && text_button(ui, file, (data.file, data.file), data.file_open, idle, "file").1;
     for name in h.file {
         solidcraft_ui_registry::publish_handle(name, file.center());
     }
@@ -460,7 +521,9 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     }
     let quick = geometry.quick.map(|(at, step)| (r.left() + at, step));
     // The document tabs follow the file actions.
-    separator(ui, r, r.left() + geometry.documents_separator, "documents", h);
+    if visible("documents") {
+        separator(ui, r, r.left() + geometry.documents_separator, "documents", h);
+    }
     let tabs_start = r.left() + geometry.tabs_start;
     let report = rect(geometry.report, if data.report.icon_only { 32.0 } else { 26.0 });
     let report_label = geometry.report_labeled;
@@ -469,7 +532,7 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
         solidcraft_ui_registry::publish_target(h.search, search);
     }
     let help = r.left() + geometry.help;
-    if icon_button(ui, r, help, &data.help, compact, h) {
+    if visible("help") && icon_button(ui, r, help, &data.help, compact, h) {
         actions.push(BarAction::Help { x: help });
     }
     // An offer (a newer release) sits before the right cluster, in the space up to the file
@@ -478,50 +541,57 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     let offer = rect(geometry.offer, report.height());
     let offer_labeled = geometry.offer_labeled;
     // Report a bug.
-    let response = ui.interact(report, ui.scope_id().with("sc_report_button"), Sense::click());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), data.report.label));
-    solidcraft_ui_registry::publish_target(h.report, report);
-    let hot = response.hovered() || response.has_focus();
-    // A neutral pill shaped like the link pills: the bug mark, and the label where there is room.
-    let capsule_rect = Rect::from_center_size(report.center(), vec2(report.width().min(if report_label { f32::MAX } else { 28.0 }), PILL_HEIGHT));
-    // Neutral: a raised control in the theme's own colours, the same shape as the link pills.
-    let (neutral, ink) = (t.app_bar.lerp_to_gamma(t.app_bar_text, 0.12), t.app_bar_text);
-    capsule(ui, capsule_rect, neutral, hot);
-    let tip = if report_label {
-        let icon = Rect::from_center_size(pos2(capsule_rect.left() + 14.0, capsule_rect.center().y), vec2(16.0, 16.0));
-        crate::icons::paint_ink(ui.painter(), icon, "bug_report", ink);
-        ui.painter().text(
-            pos2(capsule_rect.left() + REPORT_TEXT_X, capsule_rect.center().y),
-            Align2::LEFT_CENTER,
-            data.report.label,
-            report_font,
-            ink,
-        );
-        data.report.tip
-    } else {
-        crate::icons::paint_ink(ui.painter(), Rect::from_center_size(capsule_rect.center(), vec2(16.0, 16.0)), "bug_report", ink);
-        if data.report.icon_only { data.report.label } else { data.report.tip }
-    };
-    if response.backing_on_hover_text(tip).clicked() {
-        actions.push(BarAction::Report);
+    if visible("report") {
+        let response = ui.interact(report, ui.scope_id().with("sc_report_button"), Sense::click());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), data.report.label));
+        solidcraft_ui_registry::publish_target(h.report, report);
+        let hot = response.hovered() || response.has_focus();
+        // A neutral pill shaped like the link pills: the bug mark, and the label where there is room.
+        let capsule_rect = Rect::from_center_size(report.center(), vec2(report.width().min(if report_label { f32::MAX } else { 28.0 }), PILL_HEIGHT));
+        // Neutral: a raised control in the theme's own colours, the same shape as the link pills.
+        let (neutral, ink) = (t.app_bar.lerp_to_gamma(t.app_bar_text, 0.12), t.app_bar_text);
+        capsule(ui, capsule_rect, neutral, hot);
+        let tip = if report_label {
+            let icon = Rect::from_center_size(pos2(capsule_rect.left() + 14.0, capsule_rect.center().y), vec2(16.0, 16.0));
+            crate::icons::paint_ink(ui.painter(), icon, "bug_report", ink);
+            ui.painter().text(
+                pos2(capsule_rect.left() + REPORT_TEXT_X, capsule_rect.center().y),
+                Align2::LEFT_CENTER,
+                data.report.label,
+                report_font,
+                ink,
+            );
+            data.report.tip
+        } else {
+            crate::icons::paint_ink(ui.painter(), Rect::from_center_size(capsule_rect.center(), vec2(16.0, 16.0)), "bug_report", ink);
+            if data.report.icon_only { data.report.label } else { data.report.tip }
+        };
+        if response.backing_on_hover_text(tip).clicked() {
+            actions.push(BarAction::Report);
+        }
     }
     // The link pills, left of the assistant.
     for (p, span) in data.pills.iter().zip(&geometry.pills).rev() {
-        pill(ui, r, rect(*span, PILL_HEIGHT), p, h, &mut actions);
+        if span.right > span.left {
+            let p = Pill { labelled: p.labelled && span.right - span.left > 45.0, ..*p };
+            pill(ui, r, rect(*span, PILL_HEIGHT), &p, h, &mut actions);
+        }
     }
     // Settings sits immediately left of Help.
     let gear = rect(geometry.settings, 32.0);
-    let gresp = ui.interact(gear, ui.scope_id().with("sc_prefs_button"), Sense::click());
-    if gresp.hovered() || gresp.has_focus() {
-        ui.painter().rect_filled(gear.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
+    if visible("settings") {
+        let gresp = ui.interact(gear, ui.scope_id().with("sc_prefs_button"), Sense::click());
+        if gresp.hovered() || gresp.has_focus() {
+            ui.painter().rect_filled(gear.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
+        }
+        crate::icons::paint_app_bar(ui.painter(), gear.shrink(7.0), data.settings.icon, 1.0);
+        solidcraft_ui_registry::publish_rect(h.settings, gear);
+        solidcraft_ui_registry::publish_handle(h.settings, gear.center());
+        if gresp.backing_on_hover_text(data.settings.tip).clicked() {
+            actions.push(BarAction::Button { id: data.settings.id.to_string() });
+        }
     }
-    crate::icons::paint_app_bar(ui.painter(), gear.shrink(7.0), data.settings.icon, 1.0);
-    solidcraft_ui_registry::publish_rect(h.settings, gear);
     let assistant = geometry.assistant.map(|span| rect(span, 32.0));
-    solidcraft_ui_registry::publish_handle(h.settings, gear.center());
-    if gresp.backing_on_hover_text(data.settings.tip).clicked() {
-        actions.push(BarAction::Button { id: data.settings.id.to_string() });
-    }
     if let Some((v, galley)) = version
         && let Some(span) = geometry.version
     {
@@ -541,7 +611,46 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
             actions.push(BarAction::Version);
         }
     }
-    BarOut { leading, actions, file, quick, offer, offer_labeled, tabs_start, controls_left, search, assistant }
+    let overflow_button = placed.overflow_button.map(|(x, w)| Rect::from_center_size(pos2(r.left() + x + w / 2.0, r.center().y), vec2(w, 32.0)));
+    if let Some(button) = overflow_button {
+        let more = solidcraft_ui_text::tr("ui.app_bar_more");
+        let b = BarButton { id: "overflow", icon: "chevron", tip: more, enabled: true, narrow: false, wide_only: false };
+        // Stable names independent of a host's handle prefixes.
+        for handle in ["titlebar:overflow", "appbar:overflow"] {
+            solidcraft_ui_registry::publish_target(handle, button);
+        }
+        if icon_button(ui, r, button.center().x, &b, false, h) {
+            let pass = ui.ctx().cumulative_pass_nr();
+            ui.ctx().data_mut(|d| {
+                let id = egui::Id::unique("sc_appbar_overflow_open");
+                let open = d.get_temp::<bool>(id).unwrap_or(false);
+                d.insert_temp(id, !open);
+                d.insert_temp(id.with("opened"), pass);
+            });
+        }
+    }
+    let overflow_items = overflow_items(data, &placed.overflow, overflow_button.map_or(r.left(), |b| b.left()));
+    BarOut {
+        quick_slots: geometry.quick_slots.iter().map(|&(i, x)| (i, r.left() + x)).collect(),
+        leading,
+        actions,
+        file,
+        quick,
+        offer,
+        offer_labeled,
+        tabs_start,
+        controls_left,
+        search,
+        assistant,
+        overflow: placed.overflow,
+        overflow_items,
+        overflow_button,
+        quick_count: geometry.quick_count,
+        tabs_end: r.left() + geometry.tabs_end,
+        managed: geometry.managed.map(|s| rect(s, 26.0)),
+        managed_labeled: geometry.managed_labeled,
+        reserved_offers: geometry.reserved_offers,
+    }
 }
 
 /// Where the tab strip publishes its parts: each prefix is followed by the tab's place.
@@ -612,6 +721,12 @@ pub struct ViewTab<'a> {
     pub state: ViewState,
     /// The design shows this view.
     pub active: bool,
+    /// Another view also visible in this window.
+    pub on_screen: bool,
+    pub window_name: Option<&'a str>,
+    pub window_number: Option<u32>,
+    /// A view listed here that belongs to another window.
+    pub to_window: Option<u32>,
     /// Its hover text ("Sketch 2 · Design workspace · Ctrl+2").
     pub tip: &'a str,
 }
@@ -662,6 +777,8 @@ pub struct TabMenuRow<'a> {
     pub key_on_selected: &'a str,
     /// Offered only while there are other tabs.
     pub needs_others: bool,
+    /// This action belongs to the window that holds the view.
+    pub needs_local_view: bool,
     /// A view glyph drawn before the label ([`paint_view_glyph`]); empty for none.
     pub icon: &'a str,
     /// The glyph's colour; none draws it in the menu's dim ink.
@@ -670,12 +787,29 @@ pub struct TabMenuRow<'a> {
     pub heading: bool,
     /// A separator line is drawn above this row.
     pub separator_before: bool,
+    /// The rows of this item's flyout.
+    pub children: &'a [TabMenuRow<'a>],
+    pub checked: bool,
+    pub disabled_tip: Option<&'a str>,
 }
 
 impl<'a> TabMenuRow<'a> {
     /// A plain row with no icon, always on, with no separator above it.
     pub const fn new(id: &'a str, label: &'a str, key_on_selected: &'a str) -> Self {
-        Self { id, label, key_on_selected, needs_others: false, icon: "", accent: None, heading: false, separator_before: false }
+        Self {
+            id,
+            label,
+            key_on_selected,
+            needs_others: false,
+            needs_local_view: false,
+            icon: "",
+            accent: None,
+            heading: false,
+            separator_before: false,
+            children: &[],
+            checked: false,
+            disabled_tip: None,
+        }
     }
 
     /// A muted header over the rows that follow; it is never chosen.
@@ -689,9 +823,21 @@ impl<'a> TabMenuRow<'a> {
         self
     }
 
+    /// Keep this action in the window that owns the view.
+    pub const fn for_local_view(mut self) -> Self {
+        self.needs_local_view = true;
+        self
+    }
+
     /// This row with a separator line above it.
     pub const fn separated(mut self) -> Self {
         self.separator_before = true;
+        self
+    }
+
+    /// Opens these rows beside this row.
+    pub const fn with_children(mut self, children: &'a [Self]) -> Self {
+        self.children = children;
         self
     }
 
@@ -718,6 +864,8 @@ pub struct TabStrip<'a> {
     /// app shows something else, its start page).
     pub selected: usize,
     pub shown_selected: Option<usize>,
+    /// Only this design's view controls appear in a pop-out's strip.
+    pub pop_out: bool,
     /// The tabs are part of the window's title bar: dragging the only tab, or one mostly up or
     /// down, moves the window, and a double click maximizes it (unless it renames).
     pub title_bar: bool,
@@ -740,11 +888,15 @@ pub struct TabStrip<'a> {
     /// The selected design's tab has a view switcher even with its one view (off: a design with one
     /// view is a plain tab). Ignored while `views_as_tabs` is on.
     pub switcher_always: bool,
+    /// Distinguish focused, on-screen, hidden and remote views directly in the strip.
+    pub clear_view_tabs: bool,
     pub view_text: ViewText<'a>,
     /// The rows of a view's right-click menu, of the menu of the + and of the switcher's footer.
     pub view_menu: &'a [TabMenuRow<'a>],
     /// The id of the row of `view_menu` that closes the views to the right: off for the last view.
     pub view_right_row: &'a str,
+    /// The id of the row of `view_menu` that renames the view: F2 and a double click act as it.
+    pub view_rename_row: &'a str,
     /// A view's name being edited in its sub-tab: its place in the design and the text.
     pub view_rename: Option<(usize, TabRename<'a>)>,
     pub plus_menu: &'a [TabMenuRow<'a>],
@@ -798,6 +950,7 @@ pub enum TabAction {
     /// The selected design's view at this place was chosen, or its close button was.
     SelectView(usize),
     CloseView(usize),
+    ReturnView(usize),
     /// The + was clicked and the strip has no menu for it.
     NewView,
     /// The name typed into view `view` of the selected design was kept, or the edit given up.
@@ -810,9 +963,15 @@ pub enum TabAction {
         from: usize,
         to: usize,
     },
-    /// A view tab dragged from the strip over the workspace.
+    /// The focused view tab was lifted with Space.
+    LiftView {
+        view: usize,
+        origin: Rect,
+    },
+    /// A view tab being dragged. The app decides whether to dock, reorder or move it.
     DockView {
         view: usize,
+        origin: Rect,
         pointer: Pos2,
         released: bool,
     },
@@ -847,6 +1006,8 @@ struct TabDrag {
 struct ViewDrag {
     from: usize,
     grab: f32,
+    origin: Rect,
+    cancelled: bool,
 }
 
 /// How the selected design's tab is drawn.
@@ -1019,6 +1180,8 @@ struct Pen<'a> {
     close_design: bool,
     /// The bar's bottom, where the menus open.
     below: f32,
+    view_centres: Vec<(usize, f32)>,
+    elsewhere: Vec<(u32, Rect)>,
 }
 
 /// How the selected design's tab is laid out: what [`measure`] decided.
@@ -1034,6 +1197,7 @@ struct Geom {
     view_ws: Vec<f32>,
     more_w: f32,
     switch_w: f32,
+    stage: Option<CollapseStage>,
 }
 
 fn text_width(ui: &egui::Ui, text: &str, font: FontId) -> f32 {
@@ -1051,17 +1215,23 @@ fn badge_width(ui: &egui::Ui, n: usize) -> f32 {
 
 /// The width of a view's sub-tab with a label `label` wide: its icon, label, the dot of a changed
 /// source and, for the shown view, its close button.
-fn view_width(label: f32, active: bool, state: ViewState) -> f32 {
-    let dot = if state == ViewState::SourceChanged { 14.0 } else { 0.0 };
-    9.0 + 15.0 + 6.0 + label + dot + if active { 6.0 + 20.0 } else { 10.0 }
+fn view_width(label: f32, view: &ViewTab) -> f32 {
+    let dot = if view.state == ViewState::SourceChanged { 14.0 } else { 0.0 };
+    let mark = if view.to_window.is_some() { WINDOW_MARK_WIDTH } else { 0.0 };
+    9.0 + 15.0 + 6.0 + label + dot + mark + if view.active || view.to_window.is_some() { 6.0 + 20.0 } else { 10.0 }
 }
+
+const WINDOW_MARK_WIDTH: f32 = 17.0;
+const DETACHED_VIEW_OPACITY: f32 = 0.62;
+const DESIGN_CLOSE_WIDTH: f32 = 33.0;
 
 /// What the Layout button takes in the pill, beside its plus.
 const LAYOUT_BUTTON: f32 = 28.0;
 
 /// What a pill takes after its views: the + (and the Layout button), the separator and the close.
 fn pill_after(strip: &TabStrip) -> f32 {
-    PILL_AFTER + if strip.layout_menu.is_empty() { 0.0 } else { LAYOUT_BUTTON }
+    PILL_AFTER - if strip.pop_out || strip.clear_view_tabs { DESIGN_CLOSE_WIDTH } else { 0.0 }
+        + if strip.layout_menu.is_empty() { 0.0 } else { LAYOUT_BUTTON }
 }
 
 /// What a pill takes before its views: border, padding, the unsaved dot, the name and its separator.
@@ -1087,30 +1257,96 @@ fn outline(r: Rect) -> [Pos2; 5] {
     [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()]
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(usize)]
+enum CollapseStage {
+    Full,
+    LayoutGlyph,
+    WindowNumber,
+    Icons,
+    Overflow,
+}
+
+fn collapse_stage(widths: [f32; 5], available: f32) -> CollapseStage {
+    [CollapseStage::Full, CollapseStage::LayoutGlyph, CollapseStage::WindowNumber, CollapseStage::Icons, CollapseStage::Overflow]
+        .into_iter()
+        .find(|stage| widths[*stage as usize] <= available)
+        .unwrap_or(CollapseStage::Overflow)
+}
+
+fn window_badge<'a>(view: &ViewTab<'a>, stage: CollapseStage) -> std::borrow::Cow<'a, str> {
+    if stage >= CollapseStage::WindowNumber
+        && let Some(number) = view.window_number
+    {
+        return number.to_string().into();
+    }
+    view.window_name.unwrap_or(solidcraft_ui_text::tr("multi_window.window_mark")).into()
+}
+
+fn clear_view_width(ui: &egui::Ui, view: &ViewTab, label: f32, stage: CollapseStage, editing: bool) -> f32 {
+    if stage >= CollapseStage::Icons && !view.active && view.to_window.is_none() && !editing {
+        return 28.0;
+    }
+    let badge = if view.to_window.is_some() {
+        21.0 + text_width(ui, &window_badge(view, stage), crate::type_face::semibold(Tokens::get().font_small))
+    } else {
+        0.0
+    };
+    let dot = if view.state == ViewState::SourceChanged { 12.0 } else { 0.0 };
+    (28.0 + label.min(VIEW_LABEL_MAX) + dot + badge + 20.0).max(72.0)
+}
+
 /// Lays out the selected design's tab for its views, `room` points of the bar being free for it.
 fn measure(ui: &egui::Ui, strip: &TabStrip, tab: &DocTab, name: &str, view_typed: Option<(usize, &str)>, room: f32) -> Geom {
     let t = Tokens::get();
     let n = tab.views.len();
     let dot = if tab.dirty { 14.0 } else { 0.0 };
-    let name_w = text_width(ui, name, crate::type_face::semibold(t.font_button)) + if tab.security.is_some() { 18.0 } else { 0.0 };
+    let mut name_w = text_width(ui, name, crate::type_face::semibold(t.font_button)) + if tab.security.is_some() { 18.0 } else { 0.0 };
     let label_w = |k: usize, v: &ViewTab| match view_typed {
         Some((i, text)) if i == k => text_width(ui, text, view_font(true)).max(RENAME_MIN),
         _ => text_width(ui, v.name, view_font(v.active)),
     };
-    let view_ws: Vec<f32> = tab.views.iter().enumerate().map(|(k, v)| view_width(label_w(k, v).min(VIEW_LABEL_MAX), v.active, v.state)).collect();
-    let more_w = 8.0 + text_width(ui, &more_label(strip, n), FontId::proportional(VIEW_FONT)) + 3.0 + 13.0 + 6.0;
+    let mut view_ws: Vec<f32> = tab.views.iter().enumerate().map(|(k, v)| view_width(label_w(k, v).min(VIEW_LABEL_MAX), v)).collect();
+    let mut more_w = 8.0 + text_width(ui, &more_label(strip, n), FontId::proportional(VIEW_FONT)) + 3.0 + 13.0 + 6.0;
     let active = tab.views.iter().position(|v| v.active).unwrap_or(0);
     let active_w = view_ws.get(active).copied().unwrap_or(0.0);
     let before = pill_before(dot, name_w);
     let after = pill_after(strip);
     let pill = before + view_ws.iter().map(|w| w + VIEW_GAP).sum::<f32>() + after + TAB_MARGIN;
     let pill_min = before + active_w + VIEW_GAP + more_w + VIEW_GAP + after + TAB_MARGIN;
-    let kind = selected_layout(n, strip.views_as_tabs, strip.switcher_always, pill_min, room);
+    let kind = if strip.pop_out { SelectedLayout::Pill } else { selected_layout(n, strip.views_as_tabs, strip.switcher_always, pill_min, room) };
     let kind = if view_typed.is_some() && kind == SelectedLayout::Plain { SelectedLayout::Switcher } else { kind };
     let shown = tab.views.get(active).map_or("", |v| v.name);
     let switch_w = 8.0 + 15.0 + 6.0 + text_width(ui, shown, view_font(true)).min(VIEW_LABEL_MAX) + 6.0 + badge_width(ui, n) + 6.0 + 13.0 + 4.0;
     let switcher = 13.0 + dot + name_w + 8.0 + SLASH + 8.0 + switch_w + 8.0 + 22.0 + 4.0;
-    let width = if kind == SelectedLayout::Pill { pill.min(room) } else { switcher.min(room.max(MIN_TAB)) };
+    let incoming = ui.ctx().data(|data| {
+        let lifted_here = data.get_temp::<ViewDrag>(strip.id.with("view_drag")).is_some_and(|drag| !drag.cancelled);
+        if lifted_here { 0.0 } else { data.get_temp::<(usize, f32)>(strip.id.with("view_drag_slot")).map_or(0.0, |(_, width)| width + VIEW_GAP) }
+    });
+    let mut stage = None;
+    let (kind, width) = if strip.clear_view_tabs && (strip.views_as_tabs || strip.pop_out) {
+        more_w = 28.0 + text_width(ui, &n.saturating_sub(1).to_string(), crate::type_face::semibold(t.font_caption));
+        let width_at = |k: usize, density: CollapseStage| {
+            tab.views
+                .get(k)
+                .map_or(0.0, |view| clear_view_width(ui, view, label_w(k, view), density, view_typed.is_some_and(|(editing, _)| editing == k)))
+        };
+        let all = |density| (0..n).map(|k| width_at(k, density) + VIEW_GAP).sum::<f32>();
+        let overflow = width_at(active, CollapseStage::Overflow) + VIEW_GAP + if n > 1 { more_w + VIEW_GAP } else { 0.0 };
+        let chip_action = if strip.pop_out { 0.0 } else { 19.0 };
+        let fixed = pill_before(dot, 0.0) + chip_action + after + TAB_MARGIN;
+        name_w = name_w.min((room - fixed - overflow).max(0.0));
+        let common = fixed + name_w;
+        let expanded = all(CollapseStage::Full);
+        let stages =
+            [common + expanded, common + expanded, common + all(CollapseStage::WindowNumber), common + all(CollapseStage::Icons), common + overflow];
+        let chosen = collapse_stage(stages, room);
+        stage = Some(chosen);
+        view_ws = (0..n).map(|k| width_at(k, chosen)).collect();
+        (SelectedLayout::Pill, (stages[chosen as usize] + incoming).min(room).max(stages[CollapseStage::Overflow as usize].min(room)))
+    } else {
+        (kind, if kind == SelectedLayout::Pill { (pill + incoming).min(room) } else { switcher.min(room.max(MIN_TAB)) })
+    };
     let (name_w, switch_w) = if kind == SelectedLayout::Switcher {
         // The tab's painted frame is two points narrower than its allocation. Keep the
         // switcher and close targets inside it before giving the design name any room.
@@ -1120,7 +1356,7 @@ fn measure(ui: &egui::Ui, strip: &TabStrip, tab: &DocTab, name: &str, view_typed
     } else {
         (name_w, switch_w)
     };
-    Geom { kind, index: strip.selected, width, dot, name_w, view_ws, more_w, switch_w }
+    Geom { kind, index: strip.selected, width, dot, name_w, view_ws, more_w, switch_w, stage }
 }
 
 /// Opens the menu `which` at `at`, or closes it when it is the one open.
@@ -1191,10 +1427,19 @@ pub fn paint_view_glyph(p: &Painter, r: Rect, icon: &str, ink: egui::Color32) {
 
 /// The rows of a menu: the id of the one chosen. Keys show with `keys`, rows that need others are
 /// off without `others`, and the row `off` is off; each row's centre is published under `prefix` and its id.
-fn menu_rows(ui: &mut egui::Ui, rows: &[TabMenuRow], keys: bool, others: bool, off: &str, prefix: &str) -> Option<String> {
+fn menu_rows<'a>(
+    ui: &mut egui::Ui,
+    rows: &'a [TabMenuRow<'a>],
+    keys: bool,
+    others: bool,
+    off: &str,
+    prefix: &str,
+    mut flyout: Option<&mut TabFlyout<'a>>,
+) -> Option<String> {
     let mut chosen = None;
-    for row in rows {
-        if row.separator_before {
+    let local_view = flyout.as_ref().is_none_or(|state| state.local_view);
+    for (i, row) in rows.iter().filter(|row| !row.needs_local_view || local_view).enumerate() {
+        if row.separator_before && i > 0 {
             crate::menu::list_row(ui, &crate::Item::sep());
         }
         if row.heading {
@@ -1209,31 +1454,84 @@ fn menu_rows(ui: &mut egui::Ui, rows: &[TabMenuRow], keys: bool, others: bool, o
         if keys && !row.key_on_selected.is_empty() {
             item = item.key(row.key_on_selected);
         }
-        item.enabled = (!row.needs_others || others) && row.id != off;
-        let top = ui.cursor().top();
-        let picked = crate::menu::list_row(ui, &item);
-        let rect = Rect::from_min_max(pos2(ui.min_rect().left(), top), pos2(ui.min_rect().right(), ui.cursor().top()));
-        solidcraft_ui_registry::publish_handle(&format!("{prefix}{}", row.id), rect.center());
-        if picked.is_some() {
+        item.enabled = (!row.needs_others || others) && row.id != off && row.disabled_tip.is_none();
+        let mut control = crate::MenuItem::from_item(&item, flyout.as_ref().is_some_and(|f| f.open == Some(i)));
+        control.checked = row.checked.then_some(true);
+        control.submenu = !row.children.is_empty();
+        let response = control.show(ui);
+        if let Some(tip) = row.disabled_tip {
+            response.clone().backing_on_hover_text(tip);
+        }
+        solidcraft_ui_registry::publish_target(&format!("{prefix}{}", row.id), response.rect);
+        if let Some(flyout) = flyout.as_deref_mut() {
+            if control.submenu {
+                let keyboard = response.has_focus()
+                    && ui.input(|input| [egui::Key::ArrowRight, egui::Key::Enter, egui::Key::Space].iter().any(|&key| input.key_pressed(key)));
+                if item.enabled && (response.hovered() || response.clicked() || keyboard) {
+                    flyout.open = Some(i);
+                    flyout.focus_first |= keyboard;
+                }
+                if flyout.open == Some(i) && item.enabled {
+                    flyout.target = Some((response.rect, row.children));
+                }
+                continue;
+            }
+            if flyout.focus_first && item.enabled && flyout.open.is_none() && flyout.target.is_none() {
+                response.request_focus();
+                flyout.focus_first = false;
+            }
+            if response.hovered() {
+                flyout.open = None;
+                flyout.target = None;
+            }
+        }
+        if response.clicked() && item.enabled {
             chosen = Some(row.id.to_string());
         }
     }
     chosen
 }
 
+/// The open flyout row and its anchor in the parent menu.
+struct TabFlyout<'a> {
+    open: Option<usize>,
+    target: Option<(Rect, &'a [TabMenuRow<'a>])>,
+    focus_first: bool,
+    local_view: bool,
+}
+
 /// Every view as a menu row (a check mark on the shown one, a hollow dot on one whose source
 /// changed, a dashed outline on a deleted one): the place of the one chosen. Rows are published
 /// under `prefix` and their place.
-fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str, menu: &mut Option<(usize, Rect)>) -> Option<usize> {
+fn view_list(ui: &mut egui::Ui, views: &[ViewTab], prefix: &str, modern: bool, menu: &mut Option<(usize, Rect)>) -> Option<usize> {
     let t = Tokens::get();
     let mut chosen = None;
     for (k, view) in views.iter().enumerate() {
         let id = format!("{prefix}{k}");
         let glyph = |p: &Painter, r: Rect, opacity: f32| paint_view_glyph(p, r, view.icon, view.accent.gamma_multiply(opacity));
         let mut row = crate::MenuItem::new(&id, view.name, crate::Icon::Paint(&glyph));
-        row.checked = Some(view.active);
-        let resp = row.show(ui);
+        if modern {
+            row.shortcut = if view_look(view) == ViewLook::Hidden { "" } else { view_status(view) };
+            row.highlighted = view.active;
+        } else {
+            row.checked = Some(view.active);
+        }
+        let resp = if !modern && view.to_window.is_some() {
+            ui.scope(|ui| {
+                ui.set_opacity(DETACHED_VIEW_OPACITY);
+                row.show(ui)
+            })
+            .inner
+            .backing_on_hover_text(solidcraft_ui_text::tr("multi_window.window_mark"))
+        } else {
+            row.show(ui)
+        };
         solidcraft_ui_registry::publish_target(&id, resp.rect);
+        if !modern && view.to_window.is_some() {
+            let mark = Rect::from_center_size(pos2(resp.rect.right() - t.space_16, resp.rect.center().y), vec2(13.0, 13.0));
+            paint_view_glyph(ui.painter(), mark, "window", t.form_ink.gamma_multiply(DETACHED_VIEW_OPACITY));
+            solidcraft_ui_registry::publish_target(&format!("{id}:window"), mark);
+        }
         match view.state {
             ViewState::SourceChanged => {
                 // Left of the check mark that closes the row of the shown view.
@@ -1302,16 +1600,48 @@ fn more_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, hidden: usize, p
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label.as_str()));
     solidcraft_ui_registry::publish_target(strip.handles.view_more, rect);
     let open = pen.popup.is_some_and(|(which, ..)| which == Popup::More);
-    if resp.hovered() || resp.has_focus() || open {
+    if resp.hovered() || resp.has_focus() || open || strip.clear_view_tabs {
         ui.painter().rect_filled(rect, VIEW_RADIUS, t.app_bar_hover);
     }
     let ink = t.app_bar_text.gamma_multiply(0.85);
-    let galley = ui.painter().layout_no_wrap(label, FontId::proportional(VIEW_FONT), ink);
+    let shown = if strip.clear_view_tabs { hidden.to_string() } else { label };
+    let galley = ui.painter().layout_no_wrap(shown, FontId::proportional(VIEW_FONT), ink);
     ui.painter().galley(pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0), galley, ink);
-    chevron_down(ui.painter(), pos2(rect.right() - 12.5, rect.center().y), 13.0, ink);
+    let indicator = pos2(rect.right() - 12.5, rect.center().y);
+    if strip.clear_view_tabs {
+        crate::disclosure::dropdown_indicator(ui.painter(), Rect::from_center_size(indicator, vec2(12.0, 12.0)), ink);
+    } else {
+        chevron_down(ui.painter(), indicator, 13.0, ink);
+    }
     if resp.clicked() {
         toggle(ui.ctx(), &mut pen.popup, Popup::More, pos2(rect.left(), pen.below), rect);
     }
+}
+
+/// Starts a drag while the primary press still belongs to this tab. Touch needs a dwell
+/// while a mouse uses a movement threshold.
+fn start_view_drag(ui: &egui::Ui, response: &egui::Response, tab: Rect, from: usize) -> Option<ViewDrag> {
+    if !response.is_pointer_button_down_on() {
+        return None;
+    }
+    const MOUSE_TRAVEL: f32 = 4.0;
+    const TOUCH_HOLD: f64 = 0.250;
+    let (origin, dwell) = ui.input(|input| {
+        if !input.pointer.primary_down() || input.key_pressed(egui::Key::Escape) {
+            return (None, None);
+        }
+        let Some(origin) = input.pointer.press_origin() else { return (None, None) };
+        if input.any_touches() {
+            let elapsed = input.pointer.press_start_time().map_or(0.0, |started| input.time - started);
+            return if elapsed >= TOUCH_HOLD { (Some(origin), None) } else { (None, Some(TOUCH_HOLD - elapsed)) };
+        }
+        let moved = input.pointer.interact_pos().is_some_and(|point| origin.distance_sq(point) >= MOUSE_TRAVEL * MOUSE_TRAVEL);
+        (moved.then_some(origin), None)
+    });
+    if let Some(delay) = dwell.and_then(|dwell| std::time::Duration::try_from_secs_f64(dwell).ok()) {
+        ui.ctx().request_repaint_after(delay);
+    }
+    origin.map(|point| ViewDrag { from, grab: point.x - tab.left(), origin: tab, cancelled: false })
 }
 
 /// One view's sub-tab in `vr`: icon, label, the shown view's underline and close button; a click
@@ -1320,14 +1650,34 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
     let t = Tokens::get();
     let h = strip.handles;
     let painter = ui.painter().clone();
-    let main = if view.active { Rect::from_min_max(vr.min, pos2(vr.right() - 20.0, vr.bottom())) } else { vr };
-    let resp = ui.interact(main, ui.scope_id().with(("doc_view", k)), Sense::click_and_drag()).backing_on_hover_text(view.tip);
+    let detached = view.to_window.is_some();
+    let close = view.active || detached;
+    let opacity = if detached { DETACHED_VIEW_OPACITY } else { 1.0 };
+    let main = if close { Rect::from_min_max(vr.min, pos2(vr.right() - 20.0, vr.bottom())) } else { vr };
+    let resp = ui.interact(main, ui.scope_id().with(("doc_view", k)), Sense::click_and_drag());
     solidcraft_ui_registry::publish_target(&format!("{}{k}", h.view), vr);
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, view.active, view.name));
+    resp.widget_info(|| {
+        let name = if detached {
+            format!("{} — {}", view.name, solidcraft_ui_text::tr("multi_window.window_mark")).into()
+        } else {
+            std::borrow::Cow::Borrowed(view.name)
+        };
+        egui::WidgetInfo::selected(egui::Role::Tab, true, view.active, name)
+    });
+    if !detached && pen.drag.is_none() && !pen.rename.as_ref().is_some_and(|(index, _)| *index == k) {
+        pen.drag = start_view_drag(ui, &resp, vr, k);
+    }
+    let dragged = pen.drag.is_some_and(|drag| drag.from == k);
+    if dragged && pen.drag.is_some_and(|drag| !drag.cancelled) {
+        let dash = Stroke::new(1.0, t.accent);
+        painter.extend(crate::dashed_line(&outline(vr.shrink(0.5)), vr.expand(2.0), dash, 3.0, 2.0));
+        return;
+    }
+    let resp = resp.backing_on_hover_text(view.tip);
     let deleted = view.state == ViewState::Deleted;
     if view.active {
         painter.rect_filled(vr, VIEW_RADIUS, t.app_bar_hover_strong);
-    } else if resp.hovered() || pen.drag.is_some_and(|d| d.from == k) {
+    } else if resp.hovered() {
         painter.rect_filled(vr, VIEW_RADIUS, t.app_bar_hover);
     }
     if deleted {
@@ -1335,26 +1685,26 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
         painter.extend(crate::dashed_line(&outline(vr.shrink(0.5)), vr.expand(2.0), dash, 3.0, 2.0));
     }
     if resp.has_focus() {
-        painter.rect_stroke(vr.expand(1.0), VIEW_RADIUS + 1, Stroke::new(2.0, t.accent), egui::StrokeKind::Outside);
+        painter.rect_stroke(vr, VIEW_RADIUS, Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
     }
     let dim = t.app_bar_text.gamma_multiply(0.55);
     let ink = if deleted {
         dim
-    } else if view.active {
+    } else if view.active || detached {
         t.app_bar_text
     } else {
         t.app_bar_text.gamma_multiply(0.8)
-    };
+    }
+    .gamma_multiply(opacity);
     paint_view_glyph(
         &painter,
         Rect::from_center_size(pos2(vr.left() + 16.5, vr.center().y), vec2(15.0, 15.0)),
         view.icon,
-        if deleted { dim } else { view.accent },
+        (if deleted { dim } else { view.accent }).gamma_multiply(opacity),
     );
     // A view being renamed shows its name field in place of the label, and nothing else of it acts.
     if let Some(rename) = pen.rename.as_mut().filter(|(i, _)| *i == k).map(|(_, r)| r) {
-        let field =
-            Rect::from_min_max(pos2(vr.left() + 26.0, vr.top() + 2.0), pos2(vr.right() - if view.active { 26.0 } else { 4.0 }, vr.bottom() - 2.0));
+        let field = Rect::from_min_max(pos2(vr.left() + 26.0, vr.top() + 2.0), pos2(vr.right() - if close { 26.0 } else { 4.0 }, vr.bottom() - 2.0));
         let done = rename_field(ui, field, rename, &h)
             .map(|a| if a == TabAction::RenameDone { TabAction::ViewRenameDone { view: k } } else { TabAction::ViewRenameCancelled });
         pen.actions.extend(done);
@@ -1369,11 +1719,19 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
         painter.hline(egui::Rangef::new(label_x, label_x + label_w), vr.center().y, Stroke::new(1.0, ink));
     }
     if view.state == ViewState::SourceChanged {
-        painter.circle_stroke(pos2(label_x + label_w + 10.0, vr.center().y), 3.25, Stroke::new(1.5, t.warning));
+        painter.circle_stroke(pos2(label_x + label_w + 10.0, vr.center().y), 3.25, Stroke::new(1.5, t.warning.gamma_multiply(opacity)));
+    }
+    if detached {
+        let dot_width = if view.state == ViewState::SourceChanged { 14.0 } else { 0.0 };
+        let rect = Rect::from_center_size(pos2(label_x + label_w + dot_width + 10.0, vr.center().y), vec2(13.0, 13.0));
+        paint_view_glyph(&painter, rect, "window", ink);
+        solidcraft_ui_registry::publish_target(&format!("{}{k}:window", h.view), rect);
     }
     if view.active {
         let underline = Rect::from_min_max(pos2(vr.left() + 7.0, vr.bottom() - 2.0), pos2(vr.right() - 7.0, vr.bottom()));
         painter.rect_filled(underline, 2u8, view.underline);
+    }
+    if close {
         let xr = Rect::from_center_size(pos2(vr.right() - 10.0, vr.center().y), vec2(20.0, 20.0));
         let xresp = ui.interact(xr, ui.scope_id().with(("doc_view_close", k)), Sense::click());
         let name = format!("{} {}", strip.view_text.close_view, view.name);
@@ -1383,68 +1741,384 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
         if hot {
             painter.rect_filled(xr, 4u8, t.app_bar_hover_button);
         }
-        crate::icons::paint_app_bar(&painter, Rect::from_center_size(xr.center(), vec2(11.0, 11.0)), "close", if hot { 1.0 } else { 0.7 });
+        crate::icons::paint_app_bar(&painter, Rect::from_center_size(xr.center(), vec2(11.0, 11.0)), "close", if hot { 1.0 } else { 0.7 * opacity });
         if xresp.backing_on_hover_text(name).clicked() {
             pen.actions.push(TabAction::CloseView(k));
             return;
         }
     }
-    if resp.middle_clicked() {
+    if !detached
+        && !dragged
+        && resp.has_focus()
+        && ui.input_mut(|i| i.modifiers == egui::Modifiers::NONE && i.consume_key(egui::Modifiers::NONE, egui::Key::Space))
+    {
+        pen.actions.push(TabAction::LiftView { view: k, origin: vr });
+    } else if resp.middle_clicked() {
         pen.actions.push(TabAction::CloseView(k));
     } else if resp.secondary_clicked() {
         pen.popup = Some((Popup::View(k), pos2(vr.left(), pen.below), vr, ui.ctx().cumulative_frame_nr()));
-    } else if resp.clicked() {
+    } else if resp.clicked() && !dragged {
+        resp.request_focus();
         pen.actions.push(TabAction::SelectView(k));
     }
-    if resp.drag_started_by(egui::PointerButton::Primary) {
-        let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(vr.center());
-        pen.drag = Some(ViewDrag { from: k, grab: origin.x - vr.left() });
+}
+
+const CLEAR_VIEW_HEIGHT: f32 = 26.0;
+const CLEAR_VIEW_RADIUS: u8 = 6;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ViewLook {
+    Ground,
+    Card,
+    Hidden,
+    Elsewhere,
+}
+
+fn view_look(view: &ViewTab<'_>) -> ViewLook {
+    if view.to_window.is_some() {
+        ViewLook::Elsewhere
+    } else if view.active {
+        ViewLook::Ground
+    } else if view.on_screen {
+        ViewLook::Card
+    } else {
+        ViewLook::Hidden
     }
+}
+
+fn view_status<'a>(view: &ViewTab<'a>) -> &'a str {
+    match view_look(view) {
+        ViewLook::Ground => solidcraft_ui_text::tr("view_tab.showing"),
+        ViewLook::Card => solidcraft_ui_text::tr("view_tab.on_screen"),
+        ViewLook::Hidden => solidcraft_ui_text::tr("view_tab.hidden"),
+        ViewLook::Elsewhere => view.window_name.unwrap_or(solidcraft_ui_text::tr("multi_window.window_mark")),
+    }
+}
+
+fn rounded_view_outline(rect: Rect) -> Vec<Pos2> {
+    let radius = 5.5_f32.min(rect.width() * 0.5).min(rect.height() * 0.5);
+    let centers = [
+        rect.right_top() + vec2(-radius, radius),
+        rect.right_bottom() - vec2(radius, radius),
+        rect.left_bottom() + vec2(radius, -radius),
+        rect.left_top() + vec2(radius, radius),
+    ];
+    let mut points = Vec::with_capacity(17);
+    for (corner, center) in centers.into_iter().enumerate() {
+        for point in 0..=3 {
+            let angle = std::f32::consts::FRAC_PI_2 * (corner as f32 - 1.0 + point as f32 / 3.0);
+            points.push(center + vec2(angle.cos(), angle.sin()) * radius);
+        }
+    }
+    if let Some(start) = points.first().copied() {
+        points.push(start);
+    }
+    points
+}
+
+fn paint_clear_view(painter: &Painter, rect: Rect, look: ViewLook, hovered: bool, focused: bool) {
+    let t = Tokens::get();
+    if look == ViewLook::Ground || hovered {
+        let fill = if look == ViewLook::Ground { t.app_bar_hover_strong } else { t.app_bar_hover };
+        painter.rect_filled(rect, CLEAR_VIEW_RADIUS, fill);
+    }
+    let stroke = Stroke::new(1.0, t.app_bar_text.gamma_multiply(0.45));
+    match look {
+        ViewLook::Card => {
+            painter.rect_stroke(rect, CLEAR_VIEW_RADIUS, stroke, egui::StrokeKind::Inside);
+        }
+        ViewLook::Elsewhere => {
+            painter.extend(crate::dashed_line(&rounded_view_outline(rect.shrink(0.5)), rect, stroke, 3.0, 2.0));
+        }
+        _ => {}
+    }
+    if focused {
+        painter.rect_stroke(rect, CLEAR_VIEW_RADIUS, Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
+    }
+}
+
+fn clear_view_navigation(ui: &egui::Ui, current: usize, visible: std::ops::Range<usize>) {
+    let move_to = ui.input_mut(|input| {
+        let modifiers = egui::Modifiers::NONE;
+        if input.consume_key(modifiers, egui::Key::Home) {
+            Some(visible.start)
+        } else if input.consume_key(modifiers, egui::Key::End) {
+            Some(visible.end.saturating_sub(1))
+        } else if input.consume_key(modifiers, egui::Key::ArrowLeft) {
+            Some(current.saturating_sub(1).max(visible.start))
+        } else if input.consume_key(modifiers, egui::Key::ArrowRight) {
+            Some(current.saturating_add(1).min(visible.end.saturating_sub(1)))
+        } else {
+            None
+        }
+    });
+    if let Some(next) = move_to {
+        ui.memory_mut(|memory| memory.request_focus(ui.scope_id().with(("doc_view", next))));
+    }
+}
+
+fn draw_clear_view(
+    ui: &mut egui::Ui,
+    strip: &TabStrip,
+    k: usize,
+    view: &ViewTab,
+    rect: Rect,
+    (stage, visible): (CollapseStage, std::ops::Range<usize>),
+    pen: &mut Pen,
+) {
+    let t = Tokens::get();
+    let look = view_look(view);
+    let remote = look == ViewLook::Elsewhere;
+    let editing = pen.rename.as_ref().is_some_and(|(index, _)| *index == k);
+    let compact = stage >= CollapseStage::Icons && !view.active && !remote && !editing;
+    let inside = ui.rect_contains_pointer(rect);
+    let view_id = ui.scope_id().with(("doc_view", k));
+    let button_id = ui.scope_id().with(("doc_view_close", k));
+    let focused = ui.memory(|memory| memory.has_focus(view_id) || memory.has_focus(button_id));
+    let show_action = look == ViewLook::Ground || focused || inside;
+    let action = if compact {
+        Rect::from_center_size(pos2(rect.right() - 6.0, rect.top() + 6.0), vec2(12.0, 12.0))
+    } else {
+        Rect::from_center_size(pos2(rect.right() - 12.0, rect.center().y), vec2(16.0, 16.0))
+    };
+    let main = if show_action && !compact { Rect::from_min_max(rect.min, pos2(action.left(), rect.bottom())) } else { rect };
+    let response = ui.interact(main, view_id, Sense::click_and_drag());
+    let title = if remote {
+        solidcraft_ui_text::format("view_tab.elsewhere", &[("view", view.name), ("window", view_status(view))])
+    } else {
+        format!("{}, {}", view.name, view_status(view))
+    };
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, view.active, title.as_str()));
+    solidcraft_ui_registry::publish_target(&format!("{}{k}", strip.handles.view), rect);
+    if let Some(window) = view.to_window {
+        let target = rect.intersect(ui.clip_rect());
+        if target.is_positive() {
+            pen.elsewhere.push((window, target));
+        }
+    }
+    if !remote && !editing && pen.drag.is_none() {
+        pen.drag = start_view_drag(ui, &response, rect, k);
+    }
+    if pen.drag.is_some_and(|drag| drag.from == k && !drag.cancelled) {
+        let dash = Stroke::new(1.0, t.accent);
+        ui.painter().extend(crate::dashed_line(&rounded_view_outline(rect.shrink(0.5)), rect, dash, 3.0, 2.0));
+        return;
+    }
+    let response = response.backing_on_hover_text(title);
+    let painter = ui.painter().clone();
+    paint_clear_view(&painter, rect, look, inside || response.hovered(), response.has_focus());
+    let opacity = if remote { 0.92 } else { 1.0 };
+    let ink = t.app_bar_text.gamma_multiply(opacity);
+    let icon_x = if compact { rect.center().x } else { rect.left() + 15.0 };
+    paint_view_glyph(
+        &painter,
+        Rect::from_center_size(pos2(icon_x, rect.center().y), vec2(14.0, 14.0)),
+        view.icon,
+        view.accent.gamma_multiply(opacity),
+    );
+    if let Some(rename) = pen.rename.as_mut().filter(|(index, _)| *index == k).map(|(_, rename)| rename) {
+        let field = Rect::from_min_max(pos2(rect.left() + 28.0, rect.top() + 2.0), pos2(action.left(), rect.bottom() - 2.0));
+        pen.actions.extend(
+            rename_field(ui, field, rename, &strip.handles)
+                .map(|action| if action == TabAction::RenameDone { TabAction::ViewRenameDone { view: k } } else { TabAction::ViewRenameCancelled }),
+        );
+        return;
+    }
+    if !compact {
+        let label = painter.layout_no_wrap(view.name.to_owned(), view_font(view.active), ink);
+        let at = pos2(rect.left() + 28.0, rect.center().y - label.size().y * 0.5);
+        let label_width = label.size().x.min(VIEW_LABEL_MAX);
+        let label_rect = Rect::from_min_size(pos2(at.x, rect.top()), vec2(label_width, rect.height())).intersect(rect);
+        painter.with_clip_rect(label_rect).galley(at, label, ink);
+        if view.state == ViewState::Deleted {
+            painter.hline(egui::Rangef::new(at.x, label_rect.right()), rect.center().y, Stroke::new(1.0, t.text_dim));
+        }
+        let mut after = at.x + label_width + 4.0;
+        if view.state == ViewState::SourceChanged {
+            painter.circle_stroke(pos2(after + 4.0, rect.center().y), 3.0, Stroke::new(1.0, t.warning));
+            after += 12.0;
+        }
+        if remote {
+            let badge = window_badge(view, stage);
+            let mark = Rect::from_min_size(pos2(after, rect.center().y - 5.5), vec2(11.0, 11.0));
+            let badge_ink = t.app_bar_text.gamma_multiply(0.70);
+            paint_view_glyph(&painter, mark, "window", badge_ink);
+            solidcraft_ui_registry::publish_target(&format!("{}{k}:window", strip.handles.view), mark);
+            painter.text(pos2(mark.right() + 4.0, rect.center().y), Align2::LEFT_CENTER, badge, crate::type_face::semibold(t.font_small), badge_ink);
+        }
+    }
+    if look == ViewLook::Ground {
+        let underline = Rect::from_min_max(pos2(rect.left() + 8.0, rect.bottom() - 2.0), pos2(rect.right() - 8.0, rect.bottom()));
+        painter.rect_filled(underline, 1, view.underline);
+    }
+    if show_action {
+        let action_response = ui.interact(action, button_id, Sense::click());
+        let label = if remote {
+            solidcraft_ui_text::format("view_tab.bring_back", &[("view", view.name)])
+        } else {
+            format!("{} {}", strip.view_text.close_view, view.name)
+        };
+        action_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label.as_str()));
+        let action_handle = if remote { format!("{}{k}:return", strip.handles.view) } else { format!("{}{k}", strip.handles.view_close) };
+        solidcraft_ui_registry::publish_target(&action_handle, action);
+        if action_response.hovered() || action_response.has_focus() {
+            painter.rect_filled(action, 4, t.app_bar_hover_button);
+        }
+        let glyph = Rect::from_center_size(action.center(), vec2(11.0, 11.0));
+        crate::icons::paint_app_bar(&painter, glyph, if remote { "undo" } else { "close" }, 1.0);
+        if action_response.backing_on_hover_text(label).clicked() {
+            pen.actions.push(if remote { TabAction::ReturnView(k) } else { TabAction::CloseView(k) });
+            return;
+        }
+    }
+    if response.has_focus() {
+        clear_view_navigation(ui, k, visible);
+    }
+    let key = |key| response.has_focus() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key));
+    if !remote && (response.double_clicked() || key(egui::Key::F2)) {
+        pen.actions.push(TabAction::ViewMenu { view: k, id: strip.view_rename_row.into() });
+    } else if !remote && key(egui::Key::Space) {
+        pen.actions.push(TabAction::LiftView { view: k, origin: rect });
+    } else if !remote && (response.middle_clicked() || key(egui::Key::Delete)) {
+        pen.actions.push(TabAction::CloseView(k));
+    } else if response.secondary_clicked()
+        || (response.has_focus() && ui.input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10)))
+    {
+        pen.popup = Some((Popup::View(k), pos2(rect.left(), pen.below), rect, ui.ctx().cumulative_frame_nr()));
+    } else if response.clicked() || key(egui::Key::Enter) {
+        response.request_focus();
+        if look != ViewLook::Ground {
+            pen.actions.push(TabAction::SelectView(k));
+        }
+    }
+}
+
+fn group_backing(rect: Rect) -> Rect {
+    rect.shrink2(vec2(0.0, (rect.height() - DESIGN_GROUP_BACKING_HEIGHT).max(0.0) * 0.5))
 }
 
 /// The selected design's tab as a pill (option A) in `pr`: its frame and separator, the views that
 /// fit as sub-tabs (the rest under "N more"), the +, and the close button. The name block (the
 /// design's name, which the caller draws) is the left part; a view dragged along the sub-tabs
 /// shows where it lands and is reported when released.
-fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Geom, pen: &mut Pen) {
+fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Geom, chip_focused: bool, pen: &mut Pen) {
     let t = Tokens::get();
     let painter = ui.painter().clone();
-    let line = Stroke::new(1.0, line_colour(&t));
+    let modern = g.stage.is_some();
+    let line = Stroke::new(1.0, if modern { t.app_bar_hover_strong } else { line_colour(&t) });
+    let height = if modern { CLEAR_VIEW_HEIGHT } else { VIEW_HEIGHT };
     let cy = pr.center().y;
-    painter.rect_filled(pr, PILL_RADIUS, t.app_bar_tab_active);
-    painter.rect_stroke(pr, PILL_RADIUS, line, egui::StrokeKind::Inside);
-    let separator = |x: f32| painter.line_segment([pos2(x, cy - 9.0), pos2(x, cy + 9.0)], line);
+    let backing = if modern { pr } else { group_backing(pr) };
+    painter.rect_filled(backing, PILL_RADIUS, if modern { t.app_bar_hover } else { t.app_bar_tab_active });
+    painter.rect_stroke(backing, PILL_RADIUS, line, egui::StrokeKind::Inside);
+    let divider_height = if modern { 8.0 } else { 9.0 };
+    let separator = |x: f32| painter.line_segment([pos2(x, cy - divider_height), pos2(x, cy + divider_height)], line);
     let name_end = pr.left() + 13.0 + g.dot + g.name_w + 10.0;
-    separator(name_end + 0.5);
+    let chip_action = if modern && !strip.pop_out { 19.0 } else { 0.0 };
+    separator(name_end + chip_action + 0.5);
     let close = Rect::from_center_size(pos2(pr.right() - 17.0, cy), vec2(24.0, 24.0));
-    separator(close.left() - 4.0);
+    if !modern && !strip.pop_out {
+        separator(close.left() - 4.0);
+    }
     let has_layout = !strip.layout_menu.is_empty();
-    let layout = Rect::from_center_size(pos2(close.left() - 20.0, cy), vec2(24.0, 24.0));
+    let layout_x = close.left() - 20.0 + if strip.pop_out || modern { DESIGN_CLOSE_WIDTH } else { 0.0 };
+    let layout = Rect::from_center_size(pos2(layout_x, cy), vec2(24.0, if modern { 26.0 } else { 24.0 }));
     let plus = if has_layout { layout.translate(vec2(-LAYOUT_BUTTON, 0.0)) } else { layout };
-    let start = name_end + 1.0 + 8.0 + VIEW_GAP;
+    if modern && has_layout {
+        separator(layout.left() - 2.0);
+    }
+    let start = name_end + chip_action + 1.0 + 8.0 + VIEW_GAP;
     let active = tab.views.iter().position(|v| v.active).unwrap_or(0);
-    let (first, count) = view_window(&g.view_ws, active, pr.right() - pill_after(strip) - start, g.more_w + VIEW_GAP);
+    let right = (pr.right() - pill_after(strip)).max(start);
+    let (first, count) = match g.stage {
+        Some(CollapseStage::Overflow) => (active, usize::from(!tab.views.is_empty())),
+        Some(_) => (0, tab.views.len()),
+        None => view_window(&g.view_ws, active, right - start, g.more_w + VIEW_GAP),
+    };
+    let more = (count < tab.views.len()).then_some((right - g.more_w).max(start));
+    let right = more.map_or(right, |left| (left - VIEW_GAP).max(start));
+    let slot = ui.ctx().data(|data| data.get_temp::<(usize, f32)>(strip.id.with("view_drag_slot")));
+    let source = pen.drag.filter(|drag| !drag.cancelled);
+    let gap = slot.map(|(index, width)| {
+        let width = width.min((right - start).max(0.0));
+        let mut x = start;
+        let mut local = tab.views.iter().take(first).filter(|view| view.to_window.is_none()).count();
+        for (k, view) in tab.views.iter().enumerate().skip(first).take(count) {
+            if local >= index {
+                break;
+            }
+            if source.is_none_or(|drag| drag.from != k) {
+                x += g.view_ws[k] + VIEW_GAP;
+            }
+            if view.to_window.is_none() {
+                local += 1;
+            }
+        }
+        (index, Rect::from_min_size(pos2(x.min(right - width), cy - height * 0.5), vec2(width, height)))
+    });
+    ui.ctx().data_mut(|data| {
+        let id = strip.id.with("view_drag_gap");
+        if let Some(gap) = gap {
+            data.insert_temp(id, gap);
+        } else {
+            data.remove::<(usize, Rect)>(id);
+        }
+    });
+    let slide_time = if slot.is_some() && ui.ctx().global_style().animation_time > 0.0 { 0.14 } else { 0.0 };
+    let clip = ui.clip_rect();
+    ui.set_clip_rect(clip.intersect(Rect::from_min_max(pos2(start, pr.top()), pos2(right, pr.bottom()))));
     let mut x = start;
+    let mut local = tab.views.iter().take(first).filter(|view| view.to_window.is_none()).count();
     for (k, view) in tab.views.iter().enumerate().skip(first).take(count) {
         let w = g.view_ws.get(k).copied().unwrap_or(0.0);
-        draw_view(ui, strip, k, view, Rect::from_min_size(pos2(x, cy - VIEW_HEIGHT / 2.0), vec2(w, VIEW_HEIGHT)), pen);
+        let rect = Rect::from_min_size(pos2(x, cy - height / 2.0), vec2(w, height));
+        let opening_after = gap.is_some_and(|(index, _)| local >= index);
+        let open = gap.filter(|_| opening_after).map_or(0.0, |(_, rect)| rect.width() + VIEW_GAP);
+        let close = source.filter(|drag| slot.is_some() && k > drag.from).map_or(0.0, |drag| drag.origin.width() + VIEW_GAP);
+        let offset = ui.ctx().animate_value_with_time(strip.id.with(("view_slide", k)), open - close, slide_time);
+        if view.to_window.is_none() {
+            // A moving neighbour cannot move the zone that chose the move.
+            pen.view_centres.push((local, rect.center().x));
+            local += 1;
+        }
+        let rect = rect.translate(vec2(offset, 0.0));
+        if gap.is_none() || source.is_none_or(|drag| drag.from != k) {
+            let region = ui.clip_rect();
+            if let Some((_, gap)) = gap {
+                let mut side = region;
+                if opening_after {
+                    side.min.x = side.min.x.max(gap.right());
+                } else {
+                    side.max.x = side.max.x.min(gap.left());
+                }
+                ui.set_clip_rect(side);
+            }
+            if ui.clip_rect().is_positive() {
+                if let Some(stage) = g.stage {
+                    draw_clear_view(ui, strip, k, view, rect, (stage, first..first + count), pen);
+                } else {
+                    draw_view(ui, strip, k, view, rect, pen);
+                }
+            }
+            ui.set_clip_rect(region);
+        }
         x += w + VIEW_GAP;
     }
-    if count < tab.views.len() {
-        more_button(ui, strip, Rect::from_min_size(pos2(x, cy - VIEW_HEIGHT / 2.0), vec2(g.more_w, VIEW_HEIGHT)), tab.views.len() - count, pen);
+    ui.set_clip_rect(clip);
+    if let Some(x) = more {
+        more_button(ui, strip, Rect::from_min_size(pos2(x, cy - height / 2.0), vec2(g.more_w, height)), tab.views.len() - count, pen);
     }
-    let pointer = ui.input(|i| i.pointer.interact_pos());
+    let pointer = ui.ctx().pointer_interact_pos();
     let released = ui.input(|i| i.pointer.primary_released());
-    if let Some((d, pointer)) = pen.drag.zip(pointer).filter(|(_, p)| p.y > pen.below + 6.0) {
-        pen.actions.push(TabAction::DockView { view: d.from, pointer, released });
-    } else if let Some(d) = pen.drag.filter(|d| (first..first + count).contains(&d.from)) {
-        let widths: Vec<f32> = (first..first + count).map(|k| g.view_ws.get(k).copied().unwrap_or(0.0) + VIEW_GAP).collect();
-        let left = ui.ctx().pointer_latest_pos().map_or(start, |p| p.x) - d.grab;
-        let slot = drop_slot(left, start, &widths, first, d.from);
-        let at = slot_left(start, &widths, first, d.from, slot) - 1.0;
-        painter.line_segment([pos2(at, cy - 10.0), pos2(at, cy + 10.0)], Stroke::new(2.0, t.accent));
-        if released && slot != d.from {
-            pen.actions.push(TabAction::ReorderView { from: d.from, to: slot });
+    let viewport = ui.ctx().viewport_rect();
+    if let Some((drag, pointer)) = pen.drag.filter(|drag| !drag.cancelled).zip(pointer) {
+        pen.actions.push(TabAction::DockView { view: drag.from, origin: drag.origin, pointer, released });
+        if released && (first..first + count).contains(&drag.from) && pointer.y <= pen.below + 6.0 && viewport.contains(pointer) {
+            let widths: Vec<f32> = (first..first + count).map(|k| g.view_ws.get(k).copied().unwrap_or(0.0) + VIEW_GAP).collect();
+            let slot = drop_slot(pointer.x - drag.grab, start, &widths, first, drag.from);
+            if slot != drag.from {
+                pen.actions.push(TabAction::ReorderView { from: drag.from, to: slot });
+            }
         }
     }
     if released {
@@ -1454,7 +2128,18 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     if has_layout {
         layout_button(ui, strip, layout, pen);
     }
-    close_design_button(ui, strip, tab, g, close, 12.0, pen);
+    if !strip.pop_out {
+        if !modern {
+            close_design_button(ui, strip, tab, g, close, 12.0, pen);
+        } else {
+            let chip = Rect::from_min_max(pr.min, pos2(name_end + chip_action, pr.bottom()));
+            let close_focused = ui.memory(|memory| memory.has_focus(ui.scope_id().with("view_close_design")));
+            if chip_focused || close_focused || ui.rect_contains_pointer(chip) {
+                let close = Rect::from_center_size(pos2(name_end + 8.0, cy), vec2(16.0, 16.0));
+                close_design_button(ui, strip, tab, g, close, 11.0, pen);
+            }
+        }
+    }
 }
 
 /// The Layout button next to the +: always there, it opens the miniatures of the ways to arrange
@@ -1584,7 +2269,7 @@ fn draw_switcher(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g:
     let t = Tokens::get();
     let painter = ui.painter().clone();
     let cy = pr.center().y;
-    painter.rect_filled(pr, PILL_RADIUS, t.app_bar_tab_active);
+    painter.rect_filled(group_backing(pr), t.radius_md, t.app_bar_tab_active);
     let slash_x = pr.left() + 13.0 + g.dot + g.name_w + 8.0;
     painter.text(pos2(slash_x, cy), Align2::LEFT_CENTER, "/", FontId::proportional(t.font_button), t.app_bar_text.gamma_multiply(0.5));
     let shown =
@@ -1645,6 +2330,13 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
     }
     let h = strip.handles;
     let mut next_menu = None;
+    let flyout_id = strip.id.with("tab_flyout");
+    let open = ui.ctx().data(|d| d.get_temp::<(Popup, u64, usize)>(flyout_id)).filter(|state| state.0 == which && state.1 == opened);
+    let local_view = match which {
+        Popup::View(index) => views.get(index).is_none_or(|view| view.to_window.is_none()),
+        _ => true,
+    };
+    let mut flyout = TabFlyout { open: open.map(|state| state.2), target: None, focus_first: false, local_view };
     let resp = crate::Container::new(ui.ctx(), crate::Surface::Popup)
         .area(strip.id.with("view_popup_area"))
         .fixed_pos(at)
@@ -1652,31 +2344,66 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
         .show(ui.ctx(), |ui| {
             crate::menu::menu_frame(ui, |ui| match which {
                 Popup::View(k) => {
-                    let off = if k + 1 >= views.len() { strip.view_right_row } else { "" };
-                    menu_rows(ui, strip.view_menu, true, views.len() > 1, off, h.menu_row).map(|id| TabAction::ViewMenu { view: k, id })
+                    let locals = views.iter().filter(|view| view.to_window.is_none()).count();
+                    let off = if views.iter().skip(k + 1).any(|view| view.to_window.is_none()) { "" } else { strip.view_right_row };
+                    menu_rows(ui, strip.view_menu, true, locals > 1, off, h.menu_row, Some(&mut flyout)).map(|id| TabAction::ViewMenu { view: k, id })
                 }
-                Popup::Plus => menu_rows(ui, strip.plus_menu, true, true, "", h.menu_row).map(|id| TabAction::PlusMenu { id }),
+                Popup::Plus => menu_rows(ui, strip.plus_menu, true, true, "", h.menu_row, None).map(|id| TabAction::PlusMenu { id }),
                 Popup::Layout => layout_grid(ui, strip).map(|id| TabAction::LayoutMenu { id }),
-                Popup::More => view_list(ui, views, &format!("{}:row:", h.view_more), &mut next_menu).map(TabAction::SelectView),
+                Popup::More => {
+                    if strip.clear_view_tabs
+                        && let Some(tab) = strip.tabs.get(strip.selected)
+                    {
+                        let caption = solidcraft_ui_text::tr("view_tab.views_in").replace("{design}", tab.name);
+                        crate::menu::Menu::heading(ui, &caption);
+                    }
+                    view_list(ui, views, &format!("{}:row:", h.view_more), strip.clear_view_tabs, &mut next_menu).map(TabAction::SelectView)
+                }
                 Popup::Switcher => {
-                    let picked = view_list(ui, views, &format!("{}:row:", h.switcher), &mut next_menu).map(TabAction::SelectView);
+                    let picked = view_list(ui, views, &format!("{}:row:", h.switcher), false, &mut next_menu).map(TabAction::SelectView);
                     crate::menu::Menu::separator(ui);
-                    let footer = menu_rows(ui, strip.switcher_menu, true, true, "", h.menu_row).map(|id| TabAction::SwitcherMenu { id });
+                    let footer =
+                        menu_rows(ui, strip.switcher_menu, true, true, "", h.menu_row, Some(&mut flyout)).map(|id| TabAction::SwitcherMenu { id });
                     picked.or(footer)
                 }
             })
         });
+    let sub = flyout.target.map(|(anchor, rows)| {
+        let mut submenu = TabFlyout { open: None, target: None, focus_first: flyout.focus_first, local_view };
+        crate::menu::Menu::submenu(ui.ctx(), flyout_id.with("area"), anchor, 40.0, false, |ui| {
+            menu_rows(ui, rows, false, true, "", h.menu_row, Some(&mut submenu))
+        })
+    });
+    let in_submenu = sub.as_ref().is_some_and(|menu| menu.response.contains_pointer());
+    let selected = resp.inner.or_else(|| {
+        let id = sub?.inner?;
+        match which {
+            Popup::View(view) => Some(TabAction::ViewMenu { view, id }),
+            Popup::Switcher => Some(TabAction::SwitcherMenu { id }),
+            _ => None,
+        }
+    });
     let on_opener = ui.ctx().pointer_latest_pos().is_some_and(|p| opener.contains(p));
-    let pressed_outside =
-        opened != ui.ctx().cumulative_frame_nr() && ui.ctx().input(|i| i.pointer.any_pressed()) && !resp.response.contains_pointer() && !on_opener;
-    if resp.inner.is_some() || pressed_outside || ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
+    let pressed_outside = opened != ui.ctx().cumulative_frame_nr()
+        && ui.ctx().input(|i| i.pointer.any_pressed())
+        && !resp.response.contains_pointer()
+        && !in_submenu
+        && !on_opener;
+    if selected.is_some() || pressed_outside || ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
         pen.popup = None;
     }
     if let Some((view, row)) = next_menu {
         pen.popup = Some((Popup::View(view), row.right_top(), row, ui.ctx().cumulative_frame_nr()));
         ui.ctx().request_repaint();
     }
-    pen.actions.extend(resp.inner);
+    ui.ctx().data_mut(|d| {
+        if let Some(row) = flyout.open.filter(|_| pen.popup.is_some_and(|(popup, _, _, from)| popup == which && from == opened)) {
+            d.insert_temp(flyout_id, (which, opened, row));
+        } else {
+            d.remove::<(Popup, u64, usize)>(flyout_id);
+        }
+    });
+    pen.actions.extend(selected);
 }
 
 /// Discard view-index popup and drag state when the host changes the shown design.
@@ -1688,27 +2415,84 @@ pub fn clear_view_popup(ctx: &egui::Context, strip: egui::Id) {
     });
 }
 
+/// The selected design strip can receive a view from another window.
+#[derive(Debug)]
+pub struct ViewDropZone {
+    pub document: usize,
+    pub rect: Rect,
+    pub view_centres: Vec<(usize, f32)>,
+    pub elsewhere: Vec<(u32, Rect)>,
+}
+
+/// The laid-out opening, shared by the strip and the drag preview.
+pub fn view_drag_gap(ctx: &egui::Context, strip: egui::Id, index: usize) -> Option<Rect> {
+    ctx.data(|data| data.get_temp::<(usize, Rect)>(strip.with("view_drag_gap")))
+        .filter(|(current, rect)| *current == index && rect.is_positive())
+        .map(|(_, rect)| rect)
+}
+
+/// Leave room for an insertion before the given local index. Clear it when the pointer leaves.
+pub fn set_view_drag_slot(ctx: &egui::Context, strip: egui::Id, index: Option<usize>, width: f32) {
+    let id = strip.with("view_drag_slot");
+    let target = index.filter(|_| width.is_finite() && width > 0.0).map(|index| (index, width));
+    let changed = ctx.data_mut(|data| {
+        if data.get_temp::<(usize, f32)>(id) == target {
+            return false;
+        }
+        if let Some(slot) = target {
+            data.insert_temp(id, slot);
+        } else {
+            data.remove::<(usize, f32)>(id);
+        }
+        true
+    });
+    if changed {
+        ctx.request_repaint();
+    }
+}
+
+/// The strip owns this drag until the user releases the pointer or cancels it.
+pub fn view_drag_active(ctx: &egui::Context, strip: egui::Id) -> bool {
+    ctx.data(|d| d.get_temp::<ViewDrag>(strip.with("view_drag")).is_some_and(|drag| !drag.cancelled))
+        && ctx.input(|i| i.pointer.primary_down() || i.pointer.primary_released())
+}
+
 /// Draws the document tabs in `r` from `x0` to `x1`: click to select, × to close, drag to
 /// reorder, a right-click for the tab's menu, » for every tab when they don't all fit, + for a
 /// new one. The selected design with several views expands to show them (see [`DocTab::views`]).
 pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) -> Vec<TabAction> {
+    tabs_with_view_drop_zones(ui, strip, r, x0, x1).0
+}
+
+/// Draw the strip and report the current drop geometry in window coordinates.
+pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) -> (Vec<TabAction>, Vec<ViewDropZone>) {
     let t = Tokens::get();
     let h = strip.handles;
     let n = strip.tabs.len();
+    let mut view_drop_zones = Vec::new();
     let mut actions = Vec::new();
     // Each tab fits its name (up to MAX_FIT) while all of them fit; otherwise they share the room.
     const MAX_FIT: f32 = 200.0;
     // The selected tab grows with a name being typed into it.
     let typed = strip.rename.as_ref().map(|r| r.text.clone());
     let view_typed = strip.view_rename.as_ref().map(|(k, r)| (*k, r.text.clone()));
-    // The selected design's several views: a pill or a switcher, as far as the bar has room (one
-    // view gets a switcher only when the app asks for it always).
+    let new_tab_width = if strip.pop_out { 0.0 } else { 34.0 };
     let min_views = if strip.switcher_always && !strip.views_as_tabs { 1 } else { 2 };
-    let expands = |tab: &DocTab| strip.shown_selected == Some(strip.selected) && (tab.views.len() >= min_views || strip.view_rename.is_some());
-    let geom = strip.tabs.get(strip.selected).copied().filter(expands).map(|tab| {
-        let room = (x1 - x0 - 34.0 - MIN_TAB * n.saturating_sub(1) as f32).max(0.0);
-        measure(ui, strip, &tab, typed.as_deref().unwrap_or(tab.name), view_typed.as_ref().map(|(k, text)| (*k, text.as_str())), room)
-    });
+    let geom = strip
+        .tabs
+        .get(strip.selected)
+        .copied()
+        .filter(|tab| {
+            strip.shown_selected == Some(strip.selected)
+                && (tab.views.len() >= min_views
+                    || strip.pop_out
+                    || strip.view_rename.is_some()
+                    || (strip.clear_view_tabs && strip.views_as_tabs && !tab.views.is_empty()))
+        })
+        .map(|tab| {
+            let room = (x1 - x0 - new_tab_width - MIN_TAB * n.saturating_sub(1) as f32).max(0.0);
+            measure(ui, strip, &tab, typed.as_deref().unwrap_or(tab.name), view_typed.as_ref().map(|(k, text)| (*k, text.as_str())), room)
+        });
     let selected = strip.selected;
     let kind_of = |i: usize| geom.as_ref().filter(|_| i == selected).map_or(SelectedLayout::Plain, |g| g.kind);
     let (first, shown, w) = tab_layout(n, strip.selected, x1 - x0 - geom.as_ref().map_or(0.0, |g| (g.width - MIN_TAB).max(0.0)));
@@ -1732,7 +2516,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
             (text + 40.0 + badge + plus + count).clamp(72.0, MAX_FIT)
         })
         .collect();
-    let fit_all = shown == n && natural.iter().sum::<f32>() <= x1 - x0 - 34.0;
+    let fit_all = shown == n && natural.iter().sum::<f32>() <= x1 - x0 - new_tab_width;
     let menu_id = strip.id.with("menu");
     let mut menu: Option<(usize, Pos2)> = ui.ctx().data(|d| d.get_temp(menu_id));
     let (popup_id, vdrag_id) = (strip.id.with("view_popup"), strip.id.with("view_drag"));
@@ -1741,9 +2525,14 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
         rename: strip.view_rename.take(),
         actions: Vec::new(),
         popup: ui.ctx().data(|d| d.get_temp::<PopupState>(popup_id)).flatten(),
-        drag: ui.ctx().data(|d| d.get_temp::<ViewDrag>(vdrag_id)).filter(|_| (held_down || released) && !escape),
+        drag: ui.ctx().data(|d| d.get_temp::<ViewDrag>(vdrag_id)).filter(|_| held_down || released).map(|mut drag| {
+            drag.cancelled |= escape;
+            drag
+        }),
         close_design: false,
         below: r.bottom(),
+        view_centres: Vec::new(),
+        elsewhere: Vec::new(),
     };
     // The shown tabs' widths, in strip order.
     let widths: Vec<f32> = (first..first + shown)
@@ -1794,7 +2583,8 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
         let plain = kind == SelectedLayout::Plain;
         let height = match kind {
             SelectedLayout::Plain => r.height() - 8.0,
-            SelectedLayout::Pill => DESIGN_PILL_HEIGHT.min(r.height() - 2.0),
+            SelectedLayout::Pill if strip.clear_view_tabs => 36.0_f32.min(r.height() - 2.0),
+            SelectedLayout::Pill => DESIGN_PILL_HEIGHT.min(r.height() - 4.0),
             SelectedLayout::Switcher => 30.0_f32.min(r.height() - 4.0),
         };
         let tr = Rect::from_center_size(pos2(left + (w - 2.0) / 2.0, r.center().y), vec2(w - 2.0, height));
@@ -1839,10 +2629,16 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
         }
         // An expanded tab draws its frame and views before its name goes over it.
         match (kind, geom.as_ref()) {
-            (SelectedLayout::Pill, Some(g)) => draw_pill(ui, strip, &tab, tr, g, &mut pen),
+            (SelectedLayout::Pill, Some(g)) => draw_pill(ui, strip, &tab, tr, g, resp.has_focus(), &mut pen),
             (SelectedLayout::Switcher, Some(g)) => draw_switcher(ui, strip, &tab, tr, g, &mut pen),
             _ => {}
         }
+        view_drop_zones.push(ViewDropZone {
+            document: i,
+            rect: tr,
+            view_centres: std::mem::take(&mut pen.view_centres),
+            elsewhere: std::mem::take(&mut pen.elsewhere),
+        });
         let lit = resp.hovered() || held.is_some_and(|(from, _)| from == i);
         if plain {
             tab_shape(ui.painter(), &t, tr, active, lit || resp.has_focus());
@@ -1876,11 +2672,11 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
             let br = Rect::from_center_size(pos2(shield_x, tr.center().y), vec2(14.0, 14.0));
             crate::icons::paint_ink(ui.painter(), br, "shield", badge.ink(&t));
         }
-        if resp.secondary_clicked() {
+        if !strip.pop_out && resp.secondary_clicked() {
             menu = Some((i, ui.ctx().pointer_interact_pos().unwrap_or(tr.left_bottom())));
         }
         // A middle click closes the tab, as in a web browser.
-        let mut closing = resp.middle_clicked() || (!plain && pen.close_design);
+        let mut closing = !strip.pop_out && (resp.middle_clicked() || (!plain && pen.close_design));
         if plain {
             if tab.views.len() > 1 {
                 let at = pos2(text_x + text_size.x.min(text_w) + 7.0, tr.center().y);
@@ -1930,7 +2726,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
     actions.append(&mut pen.actions);
     let mut x = strip_end;
     // More tabs than fit: a chevron lists them all.
-    if shown < n {
+    if !strip.pop_out && shown < n {
         let mr = Rect::from_center_size(pos2(x + 12.0, r.center().y), vec2(20.0, 22.0));
         let mresp = ui.interact(mr, ui.scope_id().with("doc_more"), Sense::click());
         solidcraft_ui_registry::publish_handle(h.more, mr.center());
@@ -1972,7 +2768,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
             .area(menu_id.with("area"))
             .fixed_pos(at)
             .order(egui::Order::Foreground)
-            .show(ui.ctx(), |ui| crate::menu::menu_frame(ui, |ui| menu_rows(ui, strip.menu, i == strip.selected, n > 1, "", h.menu_row)));
+            .show(ui.ctx(), |ui| crate::menu::menu_frame(ui, |ui| menu_rows(ui, strip.menu, i == strip.selected, n > 1, "", h.menu_row, None)));
         if let Some(id) = &resp.inner {
             actions.push(TabAction::Menu { tab: i, id: id.clone() });
         }
@@ -1992,6 +2788,9 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
     ui.ctx().data_mut(|d| d.insert_temp(popup_id, pen.popup));
     actions.append(&mut pen.actions);
     // A new tab.
+    if strip.pop_out {
+        return (actions, view_drop_zones);
+    }
     let pr = Rect::from_center_size(pos2(x + 14.0, r.center().y), vec2(22.0, 22.0));
     let presp = ui.interact(pr, ui.scope_id().with("doc_new"), Sense::click());
     if presp.hovered() {
@@ -2009,7 +2808,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
     }
     actions.extend(dropped.map(|(from, to)| TabAction::Reorder { from, to }));
     actions.extend(torn.map(TabAction::TearOff));
-    actions
+    (actions, view_drop_zones)
 }
 
 /// A row of the File menu: what it runs (its `id`), its label, shortcut and kit icon.
@@ -2052,7 +2851,9 @@ fn file_rows(ui: &mut egui::Ui, rows: &[FileRow], chosen: &mut Option<String>, i
     for row in rows {
         match row {
             FileRow::Item(item) => {
-                let row = crate::Item::action(&item.label, &item.label, &item.icon).key(&item.key).on_if(item.enabled);
+                let row = crate::Item::action(if item.id.starts_with("appbar:overflow:") { &item.id } else { &item.label }, &item.label, &item.icon)
+                    .key(&item.key)
+                    .on_if(item.enabled);
                 if crate::menu::list_row(ui, &row).is_some() {
                     *chosen = Some(item.id.clone());
                     if in_sub {
@@ -2104,8 +2905,110 @@ pub fn file_menu(ctx: &egui::Context, rows: &[FileRow], at: Pos2, id: egui::Id, 
             });
         });
     });
-    let close = chosen.is_some() || (!just_opened && resp.response.clicked_elsewhere());
+    let close = chosen.is_some() || ctx.input(|i| i.key_pressed(egui::Key::Escape)) || (!just_opened && resp.response.clicked_elsewhere());
     FileMenuOut { chosen, close }
+}
+
+/// A hidden control, with its original action and enabled state.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OverflowItem {
+    pub id: String,
+    pub label: String,
+    pub icon: String,
+    pub enabled: bool,
+    pub action: BarAction,
+}
+
+fn overflow_items(data: &AppBar, ids: &[String], anchor: f32) -> Vec<OverflowItem> {
+    ids.iter()
+        .map(|id| {
+            let action = || BarAction::App { id: id.clone() };
+            let mut row = OverflowItem { id: id.clone(), label: String::new(), icon: String::new(), enabled: true, action: action() };
+            let mut button = None;
+            match id.as_str() {
+                "home" => {
+                    button = Some(data.home);
+                    row.label = data.home.tip.to_string();
+                    row.action = BarAction::Home;
+                }
+                "settings" => {
+                    button = Some(data.settings);
+                    row.label = solidcraft_ui_text::tr("ui.preferences").to_string();
+                    row.action = BarAction::Button { id: data.settings.id.to_string() };
+                }
+                "help" => {
+                    button = Some(data.help);
+                    row.label = data.help.tip.to_string();
+                    row.action = BarAction::Help { x: anchor };
+                }
+                "report" => {
+                    row.label = data.report.label.to_string();
+                    row.icon = "bug_report".to_string();
+                    row.action = BarAction::Report;
+                }
+                "version" => {
+                    row.label = data.version.map_or("", |v| v.text).to_string();
+                    row.icon = "help".to_string();
+                    row.action = BarAction::Version;
+                }
+                _ => {
+                    if let Some(i) = id.strip_prefix("action:").and_then(|i| i.parse::<usize>().ok()).and_then(|i| data.actions.get(i)) {
+                        button = Some(*i);
+                        let key = match i.id {
+                            "save" => "ui.save",
+                            "undo" => "ui.undo",
+                            "redo" => "ui.redo",
+                            _ => "",
+                        };
+                        row.label = if key.is_empty() { i.tip.to_string() } else { solidcraft_ui_text::tr(key).to_string() };
+                        row.action = BarAction::Button { id: i.id.to_string() };
+                    }
+                    if let Some(p) = id.strip_prefix("pill:").and_then(|i| i.parse::<usize>().ok()).and_then(|i| data.pills.get(i)) {
+                        row.label = p.name.to_string();
+                        row.icon = p.icon.to_string();
+                        row.action = BarAction::Pill { id: p.id.to_string() };
+                    }
+                }
+            }
+            if let Some(b) = button {
+                row.icon = b.icon.to_string();
+                row.enabled = b.enabled;
+            }
+            row
+        })
+        .collect()
+}
+
+/// Call after show: draw the More menu while its button is open, using the File menu surface.
+/// Returns the original chosen action and closes after a choice, Escape or an outside click.
+/// App-owned rows must have their label, icon and availability filled by the host.
+pub fn overflow_menu(ctx: &egui::Context, rows: &[OverflowItem], button: Option<Rect>) -> Option<BarAction> {
+    let id = egui::Id::unique("sc_appbar_overflow_open");
+    let Some(button) = button else {
+        ctx.data_mut(|d| d.insert_temp(id, false));
+        return None;
+    };
+    if !ctx.data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
+        return None;
+    }
+    let menu_rows: Vec<FileRow> = rows
+        .iter()
+        .map(|row| {
+            FileRow::Item(FileItem {
+                id: format!("appbar:overflow:{}", row.id),
+                label: row.label.clone(),
+                key: String::new(),
+                icon: row.icon.clone(),
+                enabled: row.enabled,
+            })
+        })
+        .collect();
+    let just_opened = ctx.data(|d| d.get_temp::<u64>(id.with("opened"))) == Some(ctx.cumulative_pass_nr());
+    let out = file_menu(ctx, &menu_rows, button.left_bottom(), id.with("area"), just_opened);
+    if out.close {
+        ctx.data_mut(|d| d.insert_temp(id, false));
+    }
+    out.chosen.and_then(|chosen| rows.iter().find(|r| format!("appbar:overflow:{}", r.id) == chosen && r.enabled).map(|r| r.action.clone()))
 }
 
 /// The workspace switcher at the ribbon's left end: the workspace's icon and name over a caption

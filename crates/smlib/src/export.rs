@@ -126,6 +126,17 @@ impl Brep {
         }
         r
     }
+
+    /// Export the canonical record and, when a complex shell order was already confirmed,
+    /// prepare its runtime body for the STEP import's modelling check. The runtime body
+    /// is built from this export so it agrees with the body reconstructed from a saved file.
+    pub fn to_native_prepared(&self) -> Res<(b::Brep, Order, Option<Brep>)> {
+        let (record, order) = self.to_native_ordered()?;
+        let ready = (self.enclosing_shell_order_proven && record.regions.iter().skip(1).any(|region| region.shells.len() > 1))
+            .then(|| Self::from_proven_shell_order(&record).ok())
+            .flatten();
+        Ok((record, order, ready))
+    }
 }
 
 impl Brep {

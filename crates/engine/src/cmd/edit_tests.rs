@@ -604,6 +604,8 @@ fn inserting_variable_fillet_control_preserves_parameters_at_existing_positions(
     );
     let parameters = s.doc.find_feature("Round").unwrap().param_names.clone();
     run(&mut s, "solid.box", json!({"length": parameters[2], "width": parameters[3], "height": 2, "corner": [50, 0, 0], "name": "Dependent"}));
+    let volume = |s: &mut Session| run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    let original = volume(&mut s);
     run(
         &mut s,
         "timeline.redefine",
@@ -619,6 +621,20 @@ fn inserting_variable_fillet_control_preserves_parameters_at_existing_positions(
     let width = run(&mut s, "expr.evaluate", json!({"expression": parameters[3]}));
     assert_eq!(length["value"], 3.0);
     assert_eq!(width["value"], 4.0);
+    let edited_names = s.doc.find_feature("Round").unwrap().param_names.clone();
+    let edited_volume = volume(&mut s);
+    assert!(edited_volume < original);
+    let bytes = solidcraft_io::write_design_container(&s.doc).unwrap();
+    let mut reopened = Session::new(solidcraft_io::read_design(&bytes).unwrap());
+    assert_eq!(reopened.doc.find_feature("Round").unwrap().param_names, edited_names);
+    assert!(reopened.model.result(dependent).unwrap().error.is_none());
+    assert!((volume(&mut reopened) - edited_volume).abs() < 1e-6);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.find_feature("Round").unwrap().param_names, parameters);
+    assert!((volume(&mut s) - original).abs() < 1e-6);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.find_feature("Round").unwrap().param_names, edited_names);
+    assert!((volume(&mut s) - edited_volume).abs() < 1e-6);
 }
 
 #[test]
@@ -1846,6 +1862,20 @@ fn edits_after_a_canvas_share_its_image_with_every_undo_state() {
     }
     assert_eq!(s.doc.canvases[0].data.as_ptr(), image, "undo brings back the same image");
     assert_eq!(s.doc.canvases[0].bytes(), png.as_slice());
+}
+
+#[test]
+fn app_bar_reset_is_registered_and_only_requests_a_ui_reset() {
+    let mut s = Session::default();
+    let before = (s.doc.to_json(), s.revision, s.undo.len(), s.redo.len());
+    let spec = crate::find_command("ui.appBarReset").unwrap();
+    assert_eq!(spec.label, "Reset App Bar");
+    assert_eq!(spec.part, crate::cmd::Part::Any);
+    assert!((spec.enabled)(&s).is_ok());
+    assert!(!spec.undoable && !spec.reads_model);
+    assert_eq!(spec.tab, "", "palette command, without a ribbon placement");
+    assert_eq!(s.execute(spec.id, &json!({})).unwrap(), json!({"reset":true}));
+    assert_eq!((s.doc.to_json(), s.revision, s.undo.len(), s.redo.len()), before);
 }
 
 #[test]

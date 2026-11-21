@@ -3537,13 +3537,29 @@ fn certified_edge_face_gap(k: &Kernel, b: &Brep, e: EdgeId, floor: f64) -> Resul
             Some(SurfaceKind::ProceduralBlend(pb)) => pb.bound(),
             _ => 0.0,
         };
-        if !(net_off.is_finite() && net_off >= 0.0) {
+        let Some(g) = plus_net_bound(g, net_off) else {
             return Ok(None);
-        }
-        let g = g + net_off;
+        };
         most = Some(most.map_or(g, |m| m.max(g)));
     }
     Ok(most)
+}
+
+/// The bound `g` to a face's net plus the net's bound `net_off` from its definition, rounded
+/// up (a sum of two bounds is a bound only with its rounding: definitions-and-certificates.md
+/// §7, 5). A `net_off` of 0 leaves `g` as it is. `None` for a `net_off` that is not a finite
+/// non-negative number, or a sum that is not finite.
+fn plus_net_bound(g: f64, net_off: f64) -> Option<f64> {
+    use crate::blend::fillet_section::interval::Ivl;
+
+    if !(net_off.is_finite() && net_off >= 0.0) {
+        return None;
+    }
+    if net_off == 0.0 {
+        return Some(g);
+    }
+    let sum = (Ivl::from(g) + Ivl::from(net_off)).hi;
+    sum.is_finite().then_some(sum)
 }
 
 #[cfg(test)]
@@ -3619,6 +3635,22 @@ mod tests {
     /// probes the net at (the edge's 257 equally spaced parameters, 100/256 and 101/256). Its
     /// stated bound is `h`. The edge on v = 0 is the net's own row, so it lies on B (bound to B
     /// about 0) and is off S by the bump, whose peak is `2h/3` (a uniform cubic B-spline's).
+    /// The sum with a blend's bound is rounded up: `1 + 2^-53` rounds to 1 to nearest, under
+    /// the two bounds' sum. Without a bound to add the gap's bound is kept bit for bit.
+    #[test]
+    fn a_blend_s_bound_is_added_rounded_up() {
+        let tiny = f64::EPSILON / 2.0;
+        assert_eq!(1.0 + tiny, 1.0);
+        let sum = plus_net_bound(1.0, tiny).unwrap();
+        assert!(sum > 1.0, "{sum}");
+        assert!(sum <= 1.0 + 4.0 * f64::EPSILON, "{sum}");
+        let g = 0.1 + 0.2;
+        assert_eq!(plus_net_bound(g, 0.0).map(f64::to_bits), Some(g.to_bits()));
+        assert_eq!(plus_net_bound(f64::MAX, f64::MAX), None);
+        assert_eq!(plus_net_bound(1.0, -1e-9), None);
+        assert_eq!(plus_net_bound(1.0, f64::NAN), None);
+    }
+
     #[test]
     fn a_procedural_blend_s_gap_bound_is_to_its_definition() {
         use crate::blend::fillet_section::section::GnSectionFsg;
