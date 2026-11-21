@@ -563,7 +563,11 @@ mod tests {
                 SM_ERR_ASSERT_FAILURE,
                 K::Failed,
             ),
-            (TopologyFailure::RadialSweepNeedsCones, SM_ERR, K::Unsupported),
+            (
+                TopologyFailure::RadialSweepNeedsCones,
+                SM_ERR,
+                K::Unsupported,
+            ),
             (TopologyFailure::RadialRimsNotEllipses, SM_ERR, K::Failed),
             (TopologyFailure::RadialRimsNotAnnulus, SM_ERR, K::Failed),
             (TopologyFailure::RadialCapWithoutPlane, SM_ERR, K::Failed),
@@ -595,7 +599,11 @@ mod tests {
         use ErrorKind as K;
         let cases = [
             (TopologyFailure::EdgeNotDeletable, SM_ERR, K::Unsupported),
-            (TopologyFailure::InnerLoopsOnBothSides, SM_ERR, K::Unsupported),
+            (
+                TopologyFailure::InnerLoopsOnBothSides,
+                SM_ERR,
+                K::Unsupported,
+            ),
             (TopologyFailure::LaminaEdgeIsStrut, SM_ERR, K::Unsupported),
             (TopologyFailure::VertexHasEdges, SM_ERR, K::InvalidInput),
         ];
