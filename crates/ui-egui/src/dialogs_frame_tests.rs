@@ -2774,3 +2774,33 @@ fn a_crossing_where_a_tube_also_ends_is_a_crossing_override() {
     assert_eq!(other.len(), 1, "{other:?}");
     assert_ne!(plain, other, "Flip keeps the other diagonal whole");
 }
+
+#[test]
+fn continuous_member_dialog_preserves_path_order_and_edit_intent() {
+    let d = 100.0 / 2f64.sqrt();
+    let mut app = app_with(&[
+        ("sketch.create", json!({"plane": "XY", "name": "Chassis"})),
+        ("sketch.line", json!({"points": [[100, -200], [100, 0]]})),
+        ("sketch.arc.three_point", json!({"start": [100, 0], "through": [d, d], "end": [0, 100]})),
+        ("sketch.line", json!({"points": [[0, 100], [-300, 100]]})),
+        ("sketch.finish", json!({})),
+    ]);
+    let id = sketch_id(&app, "Chassis");
+    let ids: Vec<_> = app.session.doc.sketch(id).unwrap().curves.iter().map(|c| c.id.clone()).collect();
+    let mut d = dialog_on(&mut app, &ids);
+    member(&mut d).continuous = true;
+    let commands = apply_commands(&app, &d).unwrap();
+    assert_eq!(commands[0].1["continuous"], true);
+    assert_eq!(commands[0].1["lines"], json!(ids));
+    run_all(&mut app, commands);
+    assert_eq!(body_names(&app).len(), 1);
+    let fid = app.session.doc.features.last().unwrap().id;
+    let mut edit = edit_dialog(&app, fid, None).unwrap();
+    assert!(member(&mut edit).continuous);
+    let commands = apply_commands(&app, &edit).unwrap();
+    assert_eq!(commands[0].1["params"]["continuous"], true);
+    run_all(&mut app, commands);
+    assert_eq!(body_names(&app).len(), 1);
+    member(&mut edit).all = true;
+    assert!(apply_commands(&app, &edit).unwrap_err().contains("path order"));
+}

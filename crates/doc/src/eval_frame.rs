@@ -7,6 +7,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::f64::consts::{PI, TAU};
 
+use solidcore_ops::frame_member as stock;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::{Aabb2, Ring};
 use solidcraft_kernel::{self as kernel, BoolOp};
@@ -24,12 +25,13 @@ use crate::{DocError, Document, Feature, FeatureId, FeatureKind, ProfileSel, Res
 #[path = "frame_earlier.rs"]
 mod earlier;
 
+#[path = "frame_paths.rs"]
+mod paths;
+
 /// Most profiles a profile sketch may have for its material to be worked out.
 const MAX_PROFILE_PIECES: usize = 256;
 /// Shortest member (mm).
 const MIN_LENGTH: f64 = 1e-6;
-/// How far (mm) a 3D sketch curve may stray from the line between its ends and still be a line.
-const STRAIGHT_TOL: f64 = 1e-3;
 
 /// Evaluate a `FrameMember` feature: one new body per member (a line, a pair, or under every type but None each
 /// piece of a line cut where tubes cross, [`pieced`], but for a piece left wholly inside the tubes it is fitted to),
@@ -38,7 +40,15 @@ const STRAIGHT_TOL: f64 = 1e-3;
 /// `<its name> · <the other's>`. An error about a piece names it by its line and the tube it starts past
 /// ([`pieces_by_line`]).
 pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
-    built(doc, vals, f, st).map_err(|e| pieces_by_line(st, f, e))
+    let emitted_from = st.bodies.len();
+    let path_route = paths::uses(st, &f.kind)?;
+    if path_route {
+        paths::evaluate(doc, vals, f, st)?;
+    } else {
+        built(doc, vals, f, st).map_err(|e| pieces_by_line(st, f, e))?;
+    }
+    certify_stock(doc, vals, f, st, emitted_from, path_route);
+    Ok(())
 }
 
 /// `e` with each later piece of a cut line (`L>X`, [`LaterPieces`]) told as "the piece of `L` past `X`" (ruling C4):
@@ -1793,10 +1803,25 @@ struct Layout {
 }
 
 fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Layout> {
+    let (segments, sketch_x, drawn, planes) = segments(doc, vals, f, st)?;
+    let Section { regions, description, at, turn, turns, centre } = section(doc, vals, f, st)?;
+    Ok(Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre })
+}
+
+/// Shared section settings; Auto seam handling remains in the unchanged section preparation.
+struct Section {
+    regions: Vec<Region2>,
+    description: String,
+    at: Vec2,
+    turn: f64,
+    turns: BTreeMap<String, f64>,
+    centre: Vec2,
+}
+
+fn section(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<Section> {
     let FeatureKind::FrameMember { profile, anchor, locate, angle, mirror, corner, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
-    let (segments, sketch_x, drawn, planes) = segments(doc, vals, f, st)?;
     let (mut regions, description, origin) = profile_regions(vals, st, profile)?;
     if *mirror {
         regions = regions.iter().map(frame::mirrored).collect();
@@ -1830,7 +1855,7 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
     }
     let turns = member_turns(doc, vals, FeatureId(f.id)).into_iter().map(|(line, (_, a))| (line, a)).collect();
     let centre = frame::anchor_point(&regions, frame::Anchor::Center);
-    Ok(Layout { segments, regions, description, at, turn, sketch_x, drawn, planes, turns, centre })
+    Ok(Section { regions, description, at, turn, turns, centre })
 }
 
 /// The profile point on the line of a member a Rotate step turns `t` (radians) further (#15070): the profile turns
@@ -1907,6 +1932,9 @@ type Path = (Vec<(String, Vec3, Vec3)>, Option<Vec3>, Vec<usize>, Vec<MemberPlan
 /// Each member's centreline where the view shows it: (member id, start, end), in the world.
 /// `st` is the model the feature was evaluated on (`Model::state_before`).
 pub fn member_segments(doc: &Document, st: &ModelState, f: &Feature) -> Result<Vec<(String, Vec3, Vec3)>> {
+    if paths::uses(st, &f.kind)? {
+        return paths::member_segments(doc, st, f);
+    }
     let m = doc.component_transform(f.component);
     let place = |p: Vec3| crate::apply_point(&m, p);
     Ok(segments(doc, &doc.evaluation_values(), f, st)?.0.into_iter().map(|(id, a, b)| (id, place(a), place(b))).collect())
@@ -1925,6 +1953,9 @@ pub(crate) fn member_section(
     st: &ModelState,
     line: &str,
 ) -> Result<(Plane, f64, Region2, [bool; 2])> {
+    if paths::uses(st, &f.kind)? {
+        return paths::member_section(doc, vals, f, st, line);
+    }
     let FeatureKind::FrameMember { corner, corners, gap, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
@@ -1974,6 +2005,9 @@ pub(crate) fn member_section(
 /// The point member `line` of `f` turns about, halfway along it: the centre of the profile's
 /// bounding box, which a Rotate step's turn leaves where it is ([`turned_at`]).
 pub(crate) fn member_pivot(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState, line: &str) -> Result<Vec3> {
+    if paths::uses(st, &f.kind)? {
+        return paths::member_pivot(doc, vals, f, st, line);
+    }
     let FeatureKind::FrameMember { corner, corners, gap, .. } = &f.kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
@@ -2110,6 +2144,9 @@ pub(super) fn check_turn(doc: &Document, vals: &BTreeMap<String, Value>, f: &Fea
     if !member_line_ids(st, &source.kind)?.contains(&member.line) {
         return Err(DocError::Invalid(format!("Line `{}` of its frame member is gone", member.line)));
     }
+    if paths::uses(st, &source.kind)? {
+        paths::member_pivot(doc, vals, source, st, &member.line)?;
+    }
     turn_angle(vals, angle).map(|_| ())
 }
 
@@ -2121,6 +2158,9 @@ pub fn member_line_ids(st: &ModelState, kind: &FeatureKind) -> Result<Vec<String
 
 /// [`member_line_ids`], and which of them are later pieces of a cut line ([`LaterPieces`]).
 pub fn member_parts(st: &ModelState, kind: &FeatureKind) -> Result<(Vec<String>, LaterPieces)> {
+    if paths::uses(st, kind)? {
+        return paths::member_parts(st, kind);
+    }
     let FeatureKind::FrameMember { path_sketch, lines, pairs, corner, corners, .. } = kind else {
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
@@ -2435,7 +2475,7 @@ pub fn is_member_line(sk: &Sketch, ci: usize) -> bool {
 /// Whether wire `wi` of `sk` is a 3D line a frame member is laid on unless lines are picked: a
 /// straight one drawn in it (not projected or otherwise linked), as [`member_lines`] takes them.
 pub fn is_member_wire(sk: &Sketch, wi: usize) -> bool {
-    sk.wires.get(wi).is_some_and(|w| w.link.is_none() && straight(&w.pts).is_some())
+    sk.wires.get(wi).is_some_and(|w| w.link.is_none() && wire_line(w).is_ok_and(|line| line.is_some()))
 }
 
 /// Each member's place in the sketch's drawing order: a 2D line's curve index, a 3D line's wire
@@ -2463,7 +2503,7 @@ fn member_lines(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<(String, Vec3, 
             }
         }
         for w in sk.wires.iter().filter(|w| w.link.is_none()) {
-            if let Some((a, b)) = straight(&w.pts)
+            if let Some((a, b)) = wire_line(w)?
                 && a.dist(b) > MIN_LENGTH
             {
                 out.push((w.id.clone(), a, b));
@@ -2486,12 +2526,15 @@ fn member_lines(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<(String, Vec3, 
             return Err(DocError::Invalid(format!("line `{id}` is listed twice")));
         }
         let line = if let Some(wi) = sk.wire_index(id) {
-            sk.wires.get(wi).and_then(|w| straight(&w.pts))
+            match sk.wires.get(wi) {
+                Some(w) => wire_line(w)?,
+                None => None,
+            }
         } else {
             let ci = sk.curve_index(id).ok_or_else(|| DocError::Unknown(format!("line `{id}` in {}", ss.name)))?;
             planar_line(ss, ci)
         };
-        let (a, b) = line.ok_or_else(|| DocError::Invalid(format!("`{id}` is not a straight line (members run along lines)")))?;
+        let (a, b) = line.ok_or_else(|| DocError::Invalid(format!("`{id}` is not a straight line or an exact circular arc")))?;
         if !(a.dist(b) > MIN_LENGTH) {
             return Err(DocError::Invalid(format!("line `{id}` has no length")));
         }
@@ -2507,22 +2550,15 @@ fn planar_line(ss: &SolvedSketch, ci: usize) -> Option<(Vec3, Vec3)> {
     Some((ss.plane.to_world(pa), ss.plane.to_world(pb)))
 }
 
-/// The ends of a 3D polyline that runs straight from its first point to its last: every point
-/// within [`STRAIGHT_TOL`] of the line between them, none behind the start, past the end or back
-/// from a point before it.
-fn straight(pts: &[Vec3]) -> Option<(Vec3, Vec3)> {
-    let (a, b) = (*pts.first()?, *pts.last()?);
-    let (len, d) = (a.dist(b), (b - a).normalized()?);
-    let mut reached = 0.0_f64;
-    for p in pts {
-        let q = *p - a;
-        let t = q.dot(d);
-        if (q - d * t).len() > STRAIGHT_TOL || t < reached - STRAIGHT_TOL || t > len + STRAIGHT_TOL {
-            return None;
-        }
-        reached = reached.max(t);
-    }
-    Some((a, b))
+/// Exact straight stock only: defining line points or one retained analytic line.
+/// A display polyline never turns a spline into straight member stock.
+fn wire_line(w: &solidcraft_sketch::Wire) -> Result<Option<(Vec3, Vec3)>> {
+    paths::wire_line(w).map(|line| {
+        line.map(|p| {
+            let d = p.data();
+            (d.a, d.b)
+        })
+    })
 }
 
 /// The regions of a member's profile, in the profile's own coordinates: one piece of material,
@@ -2576,4 +2612,150 @@ fn material(ss: &SolvedSketch) -> Result<Vec<Region2>> {
         })
         .map(|(_, p)| p.region.clone())
         .collect())
+}
+
+/// Nominal section and terminal datums, from the same transport the sweep uses.
+fn round_record(
+    vals: &BTreeMap<String, Value>,
+    profile: &MemberProfile,
+    at: Vec2,
+    turn: f64,
+    path: &[stock::Piece],
+    straight_frame: Option<(Plane, f64)>,
+) -> Result<Option<crate::frame_cope::RoundMember>> {
+    use crate::frame_cope::{Bounds, RoundMember, Terminal};
+    use solidcore_ops::frame_member::Segment;
+    use solidcore_ops::tube_cope;
+    let MemberProfile::Library { profile } = profile else { return Ok(None) };
+    let frame::Profile::RoundTube { diameter, wall } = profile.resolve(|_, e, kind| val(vals, e, kind))? else { return Ok(None) };
+    // An off-centre circular profile sweeps about a different centreline at a bend.
+    // Straight stock uses the actual extrusion frame, including its centre-pivot translation.
+    if straight_frame.is_none() && (at.x.abs() > 1e-9 || at.y.abs() > 1e-9) {
+        return Ok(None);
+    }
+    let radius = diameter / 2.0;
+    let fail = |e: &dyn std::fmt::Display| DocError::Invalid(format!("the member's cope datum could not be placed: {e}"));
+    let pieces = path;
+    let bounds: Vec<Bounds> = pieces
+        .iter()
+        .map(|p| match p.data().segment {
+            Segment::Line { a, b } => tube_cope::line_box(a, b, radius).into(),
+            Segment::Arc { a, center, .. } => tube_cope::arc_box(a, center, radius).into(),
+        })
+        .collect();
+    let [first, last] = match (pieces.first(), pieces.last()) {
+        (Some(f), Some(l)) => [f, l],
+        _ => return Err(DocError::Invalid("empty member path".into())),
+    };
+    let [start_plane, end_plane] = match straight_frame {
+        // Reuse the very plane extruded above: recomputing from the path and global turn
+        // would lose both the Rotate step's seam direction and the profile-centre pivot.
+        Some((plane, length)) => [plane, plane.offset(length)],
+        None => stock::terminal_planes(pieces, Vec2::ZERO, turn).map_err(|e| fail(&e))?,
+    };
+    let start = match first.line_length().map_err(|e| fail(&e))? {
+        Some(length) => {
+            Some(Terminal::new(tube_cope::terminal_at(&start_plane, length, false).map_err(|e| fail(&e))?, bounds.iter().skip(1).copied().collect()))
+        }
+        None => None,
+    };
+    let end = match last.line_length().map_err(|e| fail(&e))? {
+        Some(length) => Some(Terminal::new(
+            tube_cope::terminal_at(&end_plane, length, true).map_err(|e| fail(&e))?,
+            bounds.iter().take(bounds.len().saturating_sub(1)).copied().collect(),
+        )),
+        None => None,
+    };
+    let straight = pieces.len() == 1 && start.is_some();
+    Ok(Some(RoundMember { radius, wall, start, end, straight, cuts: Vec::new() }))
+}
+
+/// The mating member's bore is filled for the cut: a cope meets its outside wall and must
+/// never retain the disconnected stub a subtraction of hollow stock would leave inside it.
+pub(super) fn cope(doc: &Document, f: &Feature, st: &mut ModelState) -> Result<()> {
+    use crate::frame_cope::{Cylinder, End, MAX_CUTTERS, Mate};
+    let FeatureKind::FrameCope { member, tools, end } = &f.kind else { return Err(DocError::Invalid("not a cope".into())) };
+    if tools.is_empty() || tools.len() > MAX_CUTTERS {
+        return Err(DocError::Invalid("a cope needs 1..16 mating members".into()));
+    }
+    let mb = st.body(member).ok_or_else(|| DocError::Unknown(format!("member {member}")))?.clone();
+    let mut data = mb.round_member()?.clone();
+    if doc.body_offsets.contains_key(member.as_ref()) {
+        return Err(DocError::Invalid("not supported yet: cope of an offset member".into()));
+    }
+    let mut seen = HashSet::new();
+    let mut cylinders = Vec::new();
+    let mut mates = Vec::new();
+    for name in tools {
+        if name == member || !seen.insert(name.as_ref()) {
+            return Err(DocError::Invalid("cope members must be distinct".into()));
+        }
+        let tool = st.body(name).ok_or_else(|| DocError::Unknown(format!("member {name}")))?;
+        if tool.component != mb.component || doc.body_offsets.contains_key(name.as_ref()) {
+            return Err(DocError::Invalid("not supported yet: cope members must share a component and have no body offsets".into()));
+        }
+        let mate = tool.round_member()?;
+        if !mate.straight {
+            return Err(DocError::Invalid(format!("not supported yet: a mating member must be straight; `{}` bends", name.as_ref())));
+        }
+        // A mate may already be coped at its ends; prepare refuses a joint that reaches one.
+        let reach = |at: End| mate.cuts.iter().filter(|c| c.end == at).map(|c| c.depth_bound).fold(0.0, f64::max);
+        let terminal = mate.terminal(End::Start)?;
+        cylinders.push(Cylinder { origin: terminal.origin, axis: terminal.axis, radius: mate.radius, length: terminal.length });
+        mates.push(Mate { name: name.as_ref().to_string(), start: reach(End::Start), end: reach(End::End) });
+    }
+    let cut = data.prepare(*end, cylinders, &mates)?;
+    let mut traced = mb.traced();
+    for c in &cut.cylinders {
+        let tool = crate::lineage::numbered_tool(kernel::cylinder(c.origin, c.axis, c.radius, c.length)?);
+        let result = kernel::boolean(&traced.body, &tool.body, kernel::BoolOp::Cut)?
+            .ok_or_else(|| DocError::Invalid("the cope removed the whole member".into()))?;
+        traced = crate::lineage::Traced::step(result, &[&traced, &tool]);
+    }
+    data.cuts.push(cut);
+    let mut body = ModelBody::traced_new(mb.name.clone(), traced, mb.feature);
+    body.component = mb.component;
+    body.certify_round_member(data);
+    let slot = st.bodies.iter_mut().find(|b| b.name == mb.name).ok_or(DocError::Unknown(mb.name))?;
+    *slot = body;
+    Ok(())
+}
+
+/// Optional manufacturing records are attached only after the complete construction route
+/// emitted its final bodies. A cap's open-end hints are not proof of pristine stock.
+fn certify_stock(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, emitted_from: usize, path_route: bool) {
+    if !crate::frame_cope::stock_eligible(&f.kind) {
+        return;
+    }
+    let FeatureKind::FrameMember { profile, .. } = &f.kind else { return };
+    let produced: Vec<_> =
+        st.bodies.iter().enumerate().skip(emitted_from).filter(|(_, b)| b.feature == f.id).map(|(i, b)| (i, b.name.clone())).collect();
+    let names: Vec<_> = produced.iter().map(|(_, name)| name.as_str()).collect();
+    let Ok(ids) = members_of_bodies(doc, st, f, &names) else { return };
+    let path_records = if path_route {
+        let Ok(records) = paths::cope_records(doc, vals, f, st) else { return };
+        records
+    } else {
+        BTreeMap::new()
+    };
+    let records: Vec<_> = produced
+        .iter()
+        .zip(ids)
+        .map(|((index, _), id)| {
+            let record = id.and_then(|id| {
+                if path_route {
+                    return path_records.get(&id).cloned();
+                }
+                let (plane, length, _, _) = member_section(doc, vals, f, st, &id).ok()?;
+                let piece = stock::line(plane.origin, plane.offset(length).origin).ok()?;
+                round_record(vals, profile, Vec2::ZERO, 0.0, &[piece], Some((plane, length))).ok().flatten()
+            });
+            (*index, record)
+        })
+        .collect();
+    for (index, record) in records {
+        if let (Some(body), Some(record)) = (st.bodies.get_mut(index), record) {
+            body.certify_round_member(record);
+        }
+    }
 }

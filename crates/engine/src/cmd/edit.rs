@@ -2454,6 +2454,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "frame.end_cap"
                 | "frame.rotate_member"
                 | "frame.member"
+                | "frame.cope"
         );
     if !constructor {
         return Err(bad(cmd, format!("`{cid}` does not make a feature")));

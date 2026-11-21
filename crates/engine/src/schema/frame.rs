@@ -29,7 +29,9 @@ use solidcraft_doc::frame::{self, Anchor, CornerOverride, CornerType, MAX_MEMBER
 use super::check::{keyed, located, whole};
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
-use super::types::{AngleExpr, GeoRefParam, LengthExpr, Point2, ProfilesParam, SketchRef, StringList, not_blank_pattern, present};
+use super::types::{
+    AngleExpr, FeatureCommon, GeoRefParam, LengthExpr, Point2, ProfilesParam, SketchRef, StringList, feature_common, not_blank_pattern, present,
+};
 use crate::params;
 
 /// The words `Anchor` is spelled with, as the handlers' message lists them.
@@ -1039,11 +1041,15 @@ pub struct FrameMemberKeys {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SketchRef")]
     pub sketch: Option<SketchRef>,
-    /// The lines to lay members along, by curve id, one member each. Default: every straight
+    /// The lines or arcs to lay members along, by curve id. One member each, unless continuous. Default: every straight
     /// line drawn in the sketch that isn't construction, projected or otherwise linked, or of no
     /// length.
     #[serde(default)]
     pub lines: Option<LineIds>,
+    /// One member along explicit, ordered tangent lines and circular arcs. Default: false.
+    /// Requires corner None without overrides, fitting, coping, Flip, gap or point pairs.
+    #[serde(default)]
+    pub continuous: Option<bool>,
     /// Members between two points, one each, after the lines' members; each point is found
     /// again whenever the design changes, so the member follows it. Give it, `sketch` or both.
     #[serde(default)]
@@ -1173,3 +1179,61 @@ impl JsonSchema for FrameMemberParams {
 #[cfg(test)]
 #[path = "frame_tests.rs"]
 mod tests;
+
+/// `frame.cope`: cut a round-tube member's end to fit the outside of its mating members.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CopeParams {
+    pub member: String,
+    /// One to sixteen distinct straight round-tube mating members.
+    pub tools: Vec<String>,
+    /// start or end of the original ordered path; required, never chosen by proximity.
+    pub end: String,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// `frame.export_cope_dxf`: a retained cope as a 1:1 DXF template of the tube's outside.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CopeDxfParams {
+    pub member: String,
+    pub end: String,
+    /// Angle in radians or an angle expression, measured from the terminal's x datum.
+    #[serde(default)]
+    pub seam: Option<AngleExpr>,
+    /// Millimetres, independent of the design's display units: 0.001..1, default 0.01.
+    #[serde(default)]
+    pub tolerance: Option<f64>,
+    /// Optional DXF destination; without it the reply contains the drawing text.
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+/// The reply of `frame.export_cope_dxf`: the physical datum, the profile and the drawing metadata.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CopeDxfResult {
+    pub member: String,
+    pub end: String,
+    pub units: String,
+    pub scale: f64,
+    pub outer_diameter: f64,
+    pub circumference: f64,
+    pub seam: f64,
+    /// Original endpoint in the member component's coordinates.
+    pub origin: [f64; 3],
+    pub component: u64,
+    /// Positive axial direction into the surviving stock, in that component.
+    pub axis: [f64; 3],
+    pub seam_direction: [f64; 3],
+    pub wrap_direction: String,
+    pub tolerance: f64,
+    pub segments: usize,
+    pub max_segments: usize,
+    /// Open profile, from x=0 to x=circumference; the two seam copies have equal stations.
+    pub profile: Vec<[f64; 2]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dxf: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}

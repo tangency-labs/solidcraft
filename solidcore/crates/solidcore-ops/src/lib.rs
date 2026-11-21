@@ -59,6 +59,7 @@ pub mod extend;
 pub mod face_surface;
 pub mod file;
 pub mod fit_projection;
+pub mod frame_member;
 pub mod hatch;
 pub mod heal;
 pub mod hlr;
@@ -89,6 +90,7 @@ pub mod surface_cvs;
 pub mod sweep;
 pub mod tangent;
 pub mod trim;
+pub mod tube_cope;
 pub mod untrim;
 pub mod vertex_meet;
 

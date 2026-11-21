@@ -142,6 +142,9 @@ pub enum Error {
     NotExact,
     /// A planar profile the kernel refuses, and why (`solidcore::prism::profile::check_regions`).
     Profile(solidcore::prism::profile::ProfileRefusal),
+    /// A frame-stock path or its section the kernel refuses, including the curve index
+    /// when its exact path checks name one.
+    FrameMember(solidcore::sweep::member::Refusal),
     /// The geometry has no value where one is needed (the kernel's `Degenerate`): a normal
     /// at a pole or an apex, a zero-length vector, a collapsed edge.
     Degenerate,
@@ -487,6 +490,7 @@ impl Error {
             Error::CurveDoesNotCut => "CurveDoesNotCut",
             Error::NotExact => "NotExact",
             Error::Profile(..) => "Profile",
+            Error::FrameMember(..) => "FrameMember",
             Error::Degenerate => "Degenerate",
             Error::UnsureRegion { .. } => "UnsureRegion",
             Error::DraftCornerRefused { .. } => "DraftCornerRefused",
@@ -987,6 +991,7 @@ impl std::fmt::Display for Error {
                         "free-form segments must be finite and of some length",
                 }
             ),
+            Error::FrameMember(reason) => reason.fmt(f),
             Error::Degenerate => write!(f, "degenerate geometry where a value is needed"),
             Error::UnsureRegion { region } => {
                 write!(f, "unsure whether region {region} is material")
