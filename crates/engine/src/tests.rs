@@ -4092,9 +4092,9 @@ fn split_body_makes_each_piece_that_does_not_touch_a_body() {
     for plane in [json!({"origin": [0, 0, 2], "normal": [0, 0, 1]}), picked] {
         let mut s = Session::default();
         cap(&mut s);
-        let whole = solidcraft_kernel::measure(&s.world_state().body("Cap").unwrap().body).unwrap().volume;
+        let whole = solidcraft_kernel::measure(&s.world_state().unwrap().body("Cap").unwrap().body).unwrap().volume;
         run(&mut s, "solid.split_body", json!({"body": "Cap", "plane": plane}));
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         let volume = |n: &str| solidcraft_kernel::measure(&st.body(n).unwrap().body).unwrap().volume;
         let names: Vec<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();
         assert_eq!(names, ["Cap", "Cap (1)", "Cap (2)"], "{plane}");

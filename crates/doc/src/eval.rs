@@ -15293,7 +15293,8 @@ fn split_side_lumps(whole: &Body, parts: Vec<Traced>) -> Vec<Traced> {
             continue;
         }
         let lineages = crate::lineage::Lineage::lumps(&part.body, part.lineage.as_ref(), &pieces);
-        let mut it = pieces.into_iter().zip(lineages).map(|(body, lineage)| Traced { body, lineage });
+        let recipe = part.recipe;
+        let mut it = pieces.into_iter().zip(lineages).map(|(body, lineage)| Traced { body, lineage, recipe });
         sides.extend(it.next());
         further.extend(it);
     }
