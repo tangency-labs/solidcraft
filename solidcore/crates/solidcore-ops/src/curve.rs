@@ -1076,6 +1076,35 @@ pub fn plane_crossings(
     })?
 }
 
+/// Isolated plane intersections of ordered curve pieces, retaining the first hit
+/// when pieces meet at the same point. Distances are measured by the kernel.
+///
+/// # Errors
+/// The errors of [`plane_crossings`] for any piece.
+pub fn piece_plane_crossings(
+    pieces: &[(&Curve, [f64; 2])],
+    plane: &solidcore_record::Plane,
+) -> Result<Vec<solidcore_record::Vec2>> {
+    let mut points: Vec<solidcore_record::Vec2> = Vec::new();
+    for (curve, interval) in pieces {
+        for hit in plane_crossings(curve, *interval, plane)? {
+            let mut duplicate = false;
+            for point in &points {
+                let distance =
+                    crate::measure::point_distance([point.x, point.y, 0.0], [hit.x, hit.y, 0.0])?;
+                if distance.value < 1e-7 {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if !duplicate {
+                points.push(hit);
+            }
+        }
+    }
+    Ok(points)
+}
+
 pub use solidcore::curve::stretch::Stretch;
 
 /// `curve` with the control points `picked` stretched by a drag `delta` of point `handle` from
@@ -1164,6 +1193,33 @@ pub fn stretch_cvs(
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn piece_plane_crossings_keep_shared_endpoints_once() {
+        use solidcore_record::Plane;
+
+        let a = Curve::Line {
+            start: [-1.0, -1.0, 0.0],
+            end: [0.0, 0.0, 0.0],
+        };
+        let b = Curve::Line {
+            start: [0.0, 0.0, 0.0],
+            end: [1.0, 1.0, 0.0],
+        };
+        let c = Curve::Line {
+            start: [2.0, -1.0, 0.0],
+            end: [2.0, 1.0, 0.0],
+        };
+        let hits = piece_plane_crossings(
+            &[(&a, [0.0, 1.0]), (&b, [0.0, 1.0]), (&c, [0.0, 1.0])],
+            &Plane::XZ,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 2);
+        assert!(hits[0].x.abs() < 1e-7 && hits[0].y.abs() < 1e-7);
+        assert!((hits[1].x - 2.0).abs() < 1e-7 && hits[1].y.abs() < 1e-7);
+        assert!(piece_plane_crossings(&[], &Plane::XZ).unwrap().is_empty());
+    }
 
     #[test]
     fn plane_crossings_keep_line_endpoints_and_refuse_hostile_inputs() {

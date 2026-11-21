@@ -400,19 +400,10 @@ fn resolve_uncached(
             let ci = ss.sketch.curve_index(curve).ok_or_else(|| lost(&format!("sketch curve {curve}")))?;
             match kind {
                 LinkKind::Intersect => {
-                    let mut points = Vec::new();
-                    // A linked point can anchor a guide rail, so intersect the curve pieces
-                    // themselves. Adjacent pieces can report the same endpoint.
-                    for piece in sketch_curves(ss, ci) {
-                        let hits = solidcore_ops::curve::plane_crossings(&piece.curve, piece.interval, plane)
-                            .map_err(|e| DocError::Invalid(e.to_string()))?;
-                        for hit in hits {
-                            if !points.iter().any(|point| matches!(point, LinkGeom::Point(p) if p.dist(hit) < 1e-7)) {
-                                points.push(LinkGeom::Point(hit));
-                            }
-                        }
-                    }
-                    points
+                    let curves = sketch_curves(ss, ci);
+                    let pieces: Vec<_> = curves.iter().map(|piece| (&piece.curve, piece.interval)).collect();
+                    let hits = solidcore_ops::curve::piece_plane_crossings(&pieces, plane).map_err(|e| DocError::Invalid(e.to_string()))?;
+                    hits.into_iter().map(LinkGeom::Point).collect()
                 }
                 LinkKind::Include => {
                     let pts: Vec<Vec3> = ss.sketch.polyline(ci).iter().map(|p| ss.plane.to_world(*p)).collect();
