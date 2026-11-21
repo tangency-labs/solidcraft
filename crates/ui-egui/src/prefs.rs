@@ -1523,6 +1523,8 @@ preference_settings! {
     /// and entering a sketch or Render opens a view of its own, as in 0.43.0. Off: the tab looks as
     /// it did before design views, with no switcher until the user opens a second view.
     show_design_view_switcher: bool = false, PAGE_LAYOUT;
+    /// Use distinct tab treatments for the focused view, cards, hidden views, and pop-outs.
+    clear_view_tabs: bool = true, PAGE_LAYOUT;
     /// A drawing sheet opens as a view (a sub-tab) of its design.
     design_sub_tab_sheets: bool = true, PAGE_LAYOUT;
     /// Editing a sketch opens it as a view of its design; Finish Sketch returns to the previous view.
@@ -7325,6 +7327,7 @@ mod tests {
             ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
             ("design_views_as_tabs", json!(false), PAGE_LAYOUT),
             ("show_design_view_switcher", json!(true), PAGE_LAYOUT),
+            ("clear_view_tabs", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_sheets", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_sketches", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_render", json!(false), PAGE_LAYOUT),

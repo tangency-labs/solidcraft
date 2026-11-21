@@ -1413,7 +1413,10 @@ pub fn view_beside(app: &mut SolveApp, id: Option<u64>, edge: solidcraft_views::
 
 /// Move the view at place `from` of the shown design to place `to`.
 pub fn view_move(app: &mut SolveApp, from: usize, to: usize) {
+    crate::view_windows::remember_strip_order(app);
     app.docs.views.move_view(from, to);
+    let window = app.view_windows.current_window();
+    crate::view_windows::remember_local_reorder(app, window);
 }
 
 /// The views of the design in tab `design` (the strip's order), each with whether it is shown.
@@ -2177,7 +2180,12 @@ pub(crate) fn sync_window_title(app: &mut SolveApp, ctx: &egui::Context) {
     let no_design = app.home.open && app.docs.count() == 1 && active_is_blank(app);
     let child_title = app.view_windows.is_child().then(|| {
         let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
-        format!("{} · {}", locale.given_name(&app.session.doc.name), locale.given_name(&app.docs.views.active().name))
+        let window = if app.preferences.clear_view_tabs {
+            crate::view_windows::window_name(app, app.view_windows.current_window())
+        } else {
+            locale.given_name(&app.docs.views.active().name)
+        };
+        format!("{} · {window}", locale.given_name(&app.session.doc.name))
     });
     let name = child_title.as_deref().or_else(|| (!no_design).then_some(app.session.doc.name.as_str()));
     if let Some(title) = app.window_title.update(name, app.session.is_dirty(), &app.preferences.language) {
@@ -2516,7 +2524,7 @@ fn kind_word(kind: ViewKind) -> &'static str {
     }
 }
 
-/// A view's hover text: "Sketch 2 · Design workspace · Ctrl+2" (the key for the first nine views).
+/// A view's hover text: "Sketch 2 · Design workspace · Alt+2" (the key for the first nine views).
 fn view_tip(view: &DesignView, place: usize) -> String {
     let workspace = solidcraft_ui_text::tr(match view.kind {
         ViewKind::Model | ViewKind::Sketch => "tab_strip.workspace_design",
@@ -2529,7 +2537,14 @@ fn view_tip(view: &DesignView, place: usize) -> String {
 
 /// A view as the strip draws it: its icon in the view's colour (the bar is dark in every theme)
 /// and the same colour under it while it is shown.
-fn view_tab<'a>(view: &'a DesignView, active: bool, tip: &'a str, to_window: Option<u32>) -> crate::app_bar::ViewTab<'a> {
+fn view_tab<'a>(
+    view: &'a DesignView,
+    active: bool,
+    on_screen: bool,
+    tip: &'a str,
+    to_window: Option<u32>,
+    window: Option<&'a crate::view_windows::WindowChoice>,
+) -> crate::app_bar::ViewTab<'a> {
     let colour = crate::workspace::view_icon_colour(kind_word(view.kind), true);
     crate::app_bar::ViewTab {
         name: &view.name,
@@ -2538,8 +2553,11 @@ fn view_tab<'a>(view: &'a DesignView, active: bool, tip: &'a str, to_window: Opt
         underline: colour,
         state: crate::app_bar::ViewState::Normal,
         active,
+        on_screen,
         tip,
         to_window,
+        window_name: window.map(|window| window.name.as_str()),
+        window_number: window.map(|window| window.number),
     }
 }
 
@@ -2551,12 +2569,7 @@ const TAB_MENU: [crate::app_bar::TabMenuRow<'static>; 3] = [
 ];
 
 pub(crate) fn strip_view_id(app: &SolveApp, index: usize) -> Option<u64> {
-    app.docs
-        .views
-        .views()
-        .get(index)
-        .map(|view| view.id)
-        .or_else(|| crate::view_windows::detached_views(app).nth(index.checked_sub(app.docs.views.len())?).map(|(_, view)| view.id))
+    crate::view_windows::strip_views(app).get(index).map(|(_, view)| view.id)
 }
 
 /// The document tabs in the application bar, from `x0` to `x1` ([`crate::app_bar::tabs`]): click
@@ -2588,39 +2601,67 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let selected = if child || app.docs.slots.is_empty() { 0 } else { app.docs.active };
     let mut rename = app.menu.rename.take();
     let renaming = renaming_tab_state(rename.as_ref());
-    // The switcher and sub-tab presentations both expose the view rename field.
-    let mut view_edit = app.docs.view_rename.take().filter(|r| !app.home.open && app.docs.views.get(r.view).is_some());
-    let view_place = view_edit.as_ref().and_then(|r| app.docs.views.views().iter().position(|v| v.id == r.view));
+    crate::view_windows::remember_strip_order(app);
     let new_tip = app.tr("ui.start_page").to_string();
     let views_as_tabs = child || DesignTabPrefs::from(&app.preferences).views_as_tabs || !app.docs.views.windows().is_empty();
-    let design_views: Vec<_> = (0..n)
+    let current_window = app.view_windows.current_window();
+    let design_views: Vec<Vec<_>> = (0..n)
         .map(|design| {
-            let source = if child { app.docs.active } else { design };
-            let mut views: Vec<_> = views_info(app, source).into_iter().map(|(view, active)| (view, active, None)).collect();
-            if !child && design == selected {
-                views.extend(crate::view_windows::detached_views(app).map(|(window, view)| (view.clone(), false, Some(window))));
+            if design == selected {
+                let set = &app.docs.views;
+                let tiles = set.tiles().filter(|_| set.is_tiled());
+                crate::view_windows::strip_views(app)
+                    .into_iter()
+                    .map(|(window, view)| {
+                        let elsewhere = (window != current_window).then_some(window);
+                        let active = elsewhere.is_none() && view.id == set.active().id;
+                        let on_screen = elsewhere.is_none() && tiles.is_some_and(|tiles| tiles.contains(view.id));
+                        (view.clone(), active, on_screen, elsewhere)
+                    })
+                    .collect()
+            } else {
+                views_info(app, design).into_iter().map(|(view, active)| (view, active, false, None)).collect()
             }
-            views
         })
         .collect();
+    // Local views expose their editor in both the switcher and sub-tab presentations.
+    let mut view_edit = app.docs.view_rename.take().filter(|r| !app.home.open && app.docs.views.get(r.view).is_some());
+    let view_place = view_edit.as_ref().and_then(|r| design_views.get(selected)?.iter().position(|(view, _, _, _)| view.id == r.view));
+    let window_choices = crate::view_windows::window_choices(app);
     let view_tips: Vec<Vec<String>> = design_views
         .iter()
         .map(|views| {
+            let mut local_place = 0;
             views
                 .iter()
-                .enumerate()
-                .map(
-                    |(k, (view, _, window))| {
-                        if window.is_some() { format!("{} · {}", view.name, app.tr("multi_window.window_mark")) } else { view_tip(view, k) }
-                    },
-                )
+                .map(|(view, _, _, window)| {
+                    let other = window.and_then(|id| window_choices.iter().find(|choice| choice.id == id));
+                    if let Some(other) = other.filter(|_| app.preferences.clear_view_tabs) {
+                        locale.format("view_tab.elsewhere", &[("view", &view.name), ("window", &other.name)])
+                    } else if window.is_some() {
+                        format!("{} · {}", view.name, app.tr("multi_window.window_mark"))
+                    } else {
+                        let tip = view_tip(view, local_place);
+                        local_place += 1;
+                        tip
+                    }
+                })
                 .collect()
         })
         .collect();
     let view_tabs: Vec<Vec<crate::app_bar::ViewTab>> = design_views
         .iter()
         .zip(&view_tips)
-        .map(|(views, tips)| views.iter().zip(tips).map(|((view, active, window), tip)| view_tab(view, *active, tip, *window)).collect())
+        .map(|(views, tips)| {
+            views
+                .iter()
+                .zip(tips)
+                .map(|((view, active, on_screen, window), tip)| {
+                    let choice = window.and_then(|id| window_choices.iter().find(|choice| choice.id == id));
+                    view_tab(view, *active, *on_screen, tip, *window, choice)
+                })
+                .collect()
+        })
         .collect();
     let more_text = solidcraft_ui_text::tr("tab_strip.more");
     let plus_menu = crate::design_view_ui::plus_menu(solidcraft_theme::is_dark());
@@ -2680,6 +2721,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             handles: TAB_HANDLES,
             views_as_tabs,
             switcher_always: DesignTabPrefs::from(&app.preferences).switcher_always(),
+            clear_view_tabs: app.preferences.clear_view_tabs,
             pop_out: child,
             view_text: crate::app_bar::ViewText {
                 close_view: solidcraft_ui_text::tr_label("Close view"),
@@ -2690,6 +2732,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             },
             view_menu: &view_menu,
             view_right_row: crate::design_view_ui::VIEW_CLOSE_RIGHT,
+            view_rename_row: crate::design_view_ui::VIEW_RENAME,
             view_rename: view_edit
                 .as_mut()
                 .zip(view_place)
@@ -2709,7 +2752,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         .into_iter()
         .filter_map(|zone| {
             let tab = if child || zone.document == selected { app.docs.current_tab() } else { app.docs.slots.get(zone.document)?.as_ref()?.tab };
-            let count = design_views.get(zone.document)?.iter().filter(|(_, _, window)| window.is_none()).count();
+            let count = design_views.get(zone.document)?.iter().filter(|(_, _, _, window)| window.is_none()).count();
             Some((tab, count, zone))
         })
         .collect();
@@ -3220,6 +3263,26 @@ mod tests {
         assert!(app.session.path.is_none());
         assert_eq!(app.docs.views.views().iter().map(|view| view.id).collect::<Vec<_>>(), [first, second]);
         assert!(app.docs.views.check());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn detached_view_keeps_its_tab_position_until_an_explicit_reorder() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.preferences.clear_view_tabs = true;
+        let first = app.docs.views.active().id;
+        let middle = view_duplicate(&mut app, first).unwrap();
+        let last = view_duplicate(&mut app, middle).unwrap();
+        let ids = |app: &SolveApp| crate::view_windows::strip_views(app).into_iter().map(|(_, view)| view.id).collect::<Vec<_>>();
+
+        let moved = app.run("tab.view.move_to_window", json!({"view":middle})).unwrap();
+        assert_eq!(ids(&app), [first, middle, last]);
+        assert_eq!(moved["window"], 1);
+        view_move(&mut app, 0, 1);
+        assert_eq!(ids(&app), [last, middle, first]);
+        app.run("tab.view.move_to_window", json!({"view":middle,"window":0})).unwrap();
+        assert_eq!(ids(&app), [last, middle, first]);
+        assert_eq!(app.docs.views.active().id, middle);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
