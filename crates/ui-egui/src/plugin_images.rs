@@ -74,11 +74,13 @@ impl Swatch {
         };
         egui::load::SizedTexture::new(texture.id(), texture.size_vec2())
     }
+}
 
 pub(crate) fn read_swatches(dir: &Path, entries: &[solidcraft_engine::plugin::Entry]) -> BTreeMap<String, Swatch> {
     let report = solidcraft_engine::plugin::swatches::check(entries, |rel| solidcraft_engine::plugin::swatches::read_file(dir, rel));
     for warning in report.warnings {
         log::warn!("plugin {}: {warning}", dir.display());
+    }
     report
         .images
         .into_iter()
@@ -90,6 +92,7 @@ pub(crate) fn read_swatches(dir: &Path, entries: &[solidcraft_engine::plugin::En
             (path, Swatch { image: egui::ColorImage::from_rgba_unmultiplied(image.size, &image.rgba), key })
         })
         .collect()
+}
 
 pub(crate) fn load_swatches(dir: &Path, entries: &[solidcraft_engine::plugin::Entry]) -> Swatches {
     let swatches = Swatches::default();
@@ -101,16 +104,21 @@ pub(crate) fn load_swatches(dir: &Path, entries: &[solidcraft_engine::plugin::En
                 .into_iter()
                 .flatten()
                 .any(|option| option.get(solidcraft_engine::plugin::swatches::KEY).is_some())
+        })
     });
     if !referenced {
         let _ = swatches.set(BTreeMap::new());
         return swatches;
+    }
     let (dir, entries, result) = (dir.to_path_buf(), entries.to_vec(), swatches.clone());
     if let Err(error) = std::thread::Builder::new().name("plugin-swatches".into()).spawn(move || {
         let _ = result.set(read_swatches(&dir, &entries));
     }) {
         log::warn!("could not load plugin swatches: {error}");
+        let _ = swatches.set(BTreeMap::new());
+    }
     swatches
+}
 
 /// The image paths a schema names: at its top, and on its properties' `oneOf` options.
 pub(crate) fn referenced(schema: &Value) -> Vec<String> {
@@ -119,7 +127,9 @@ pub(crate) fn referenced(schema: &Value) -> Vec<String> {
         for option in property.get("oneOf").and_then(Value::as_array).into_iter().flatten() {
             out.extend(option.get(KEY).and_then(Value::as_str).map(str::to_owned));
         }
+    }
     out
+}
 
 /// Whether `rel` is a path this host reads: forward slashes, plain names (letters, digits, `.`,
 /// `_`, `-`), no `.` or `..`, ending in `.svg`, at most 128 characters.
@@ -128,6 +138,8 @@ pub(crate) fn valid_path(rel: &str) -> bool {
         && rel.ends_with(".svg")
         && rel.split('/').all(|part| {
             !part.is_empty() && part != "." && part != ".." && part.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
+        })
+}
 
 /// Read, check and add the image `rel` of the package at `dir`: the icon name it is drawn by.
 fn read(dir: &Path, plugin_id: &str, rel: &str) -> Result<String, String> {
