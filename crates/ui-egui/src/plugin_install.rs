@@ -116,6 +116,11 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
     if permissions.and_then(|p| p.get("clock")).and_then(Value::as_bool).unwrap_or(false) {
         lines.push(tr("plugin_install.clock").to_string());
     }
+    for listener in plugin.get("listeners").and_then(Value::as_array).into_iter().flatten() {
+        if let Some(entry) = listener.get("entry").and_then(Value::as_str) {
+            lines.push(format("prefs.plugin_design_listener", &[("entry", entry)]));
+        }
+    }
     let commands = list(plugin.get("commands")).len();
     match commands {
         0 => {}
@@ -158,6 +163,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         &[("memory", &memory.to_string()), ("limit", &app.preferences.plugin_max_memory_mib.to_string())],
                     );
                     ui_kit::text(ui, &std::format!("• {line}"), ui_kit::Text::Hint("plugin_install_memory"));
+                }
+                for warning in list(plugin.get("param_warnings")) {
+                    ui_kit::status_line(ui, &warning, ui_kit::StatusTone::Warning);
                 }
                 for grant in &mut ask.grants.folders {
                     let access = tr(match (grant.read, grant.write) {
@@ -280,6 +288,31 @@ mod tests {
     }
 
     #[test]
+    fn install_review_shows_swatch_warnings_and_keeps_install_available() {
+        let mut h = crate::scenario::Harness::new();
+        let warning = "x-solidcraft-swatch bad.png: invalid image; swatch omitted";
+        described(&mut h.app, "test.zip".into(), json!({"name":"Finishes","version":"1","param_warnings":[warning]}));
+        let ctx = crate::fonts::test_context();
+        for frame in 0..6 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0))),
+                    time: Some(frame as f64 / 60.0),
+                    ..Default::default()
+                },
+                |ui| ui_kit::scope(ui, |ui| show(&mut h.app, ui.ctx())),
+            );
+            output.textures_delta.clear();
+            if frame == 5 {
+                let text = crate::test_support::text_shapes(&output).map(|shape| shape.galley.text().to_owned()).collect::<Vec<_>>().join("\n");
+                assert!(text.contains(warning), "{text}");
+                assert!(crate::plugins::valid_grants(&h.app.plugin_install.ask.as_ref().unwrap().grants));
+                assert!(crate::scenario::handle_at("dialog:ok").is_some());
+            }
+        }
+    }
+
+    #[test]
     fn plugin_install_permissions_use_plain_words_and_exact_folder_access() {
         // Each test runs in its own process under nextest: load the catalogs, or `tr` returns ids.
         crate::i18n::install();
@@ -287,7 +320,7 @@ mod tests {
             {"name":"source","read":true,"write":false},
             {"name":"output","read":false,"write":true},
             {"name":"project","read":true,"write":true}
-        ]}});
+        ]},"listeners":[{"entry":"refresh","on":["design.changed"]}]});
         let lines = permission_lines(&plugin);
         assert_eq!(
             lines,
@@ -298,7 +331,8 @@ mod tests {
                 "Inspect, install, remove or run other plugins.",
                 "source (read)",
                 "output (write)",
-                "project (read and write)"
+                "project (read and write)",
+                "Refresh after design changes (refresh); cannot edit, write files or start jobs"
             ]
         );
     }

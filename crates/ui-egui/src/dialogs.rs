@@ -1758,6 +1758,16 @@ impl Dialog {
     /// ([`Dialog::face_snap`] of the same hits). A face place picked on or near a sketch point that
     /// lies on that face (a circle's centre) is taken at the point, as a points input picks it.
     pub(crate) fn candidate_on(&self, s: &Session, h: &Hit, snap: Option<&FaceSnap>) -> Option<Sel> {
+        // A centreline of the Frame Member being made is picked for Remove Tube, never into an
+        // input (`dialogs_frame::click_tube`).
+        if matches!(h, Hit::Centreline { .. }) {
+            return None;
+        }
+        // A ghosted member's centreline end is a point for Frame Member's path alone (#15705).
+        if matches!(h, Hit::MemberEnd { .. }) {
+            let path = matches!(self.kind, Kind::Frame(_)) && self.active == 0;
+            return path.then(|| crate::dialogs_frame::end_pick(s, h)).flatten().map(|(sel, _)| sel);
+        }
         if matches!(self.kind, Kind::SketchModify(_)) {
             return crate::sketch_modify_ui::pick_candidate(self, s, h);
         }
@@ -1786,7 +1796,7 @@ impl Dialog {
         }
         // Only construction tools resolve wire-node references. In particular, Hole must
         // not silently freeze a wire node into a face position or accept an unresolved ID.
-        if matches!(h, Hit::SketchPoint3d { .. }) && !matches!(self.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. }) {
+        if matches!(h, Hit::SketchPoint3d { .. }) && !matches!(self.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. } | Kind::Frame(_)) {
             return None;
         }
         // Features are also picked on the canvas: a face stands for the feature that made it.
@@ -1980,6 +1990,14 @@ impl Dialog {
         }
         // Move/Copy moves one kind at a time (`dialogs_move::admit`).
         let Some(sel) = crate::dialogs_move::admit(s, &mut *self, sel) else { return };
+        // Frame Member's Corner Overrides take only corners of the frame, and say why not.
+        if let Kind::Frame(m) = &self.kind
+            && self.active == 2
+            && let Some(why) = crate::dialogs_frame::refused_corner(s, m, &self.inputs, &sel)
+        {
+            self.error = Some(why);
+            return;
+        }
         // Plane, Axis and Point: the pick is the tool's, which chooses the method again.
         if let Some(a) = &mut self.auto {
             a.toggle(sel);
@@ -2068,6 +2086,13 @@ impl Dialog {
 
     /// Box selection result: replace (or add to) the active input.
     pub fn take_box(&mut self, s: &Session, sels: Vec<Sel>, add: bool) {
+        // A marquee over a frame takes only its corners into Corner Overrides.
+        let sels = match &self.kind {
+            Kind::Frame(m) if self.active == 2 => {
+                sels.into_iter().filter(|x| crate::dialogs_frame::refused_corner(s, m, &self.inputs, x).is_none()).collect()
+            }
+            _ => sels,
+        };
         if let Some(key) = stored_input_reference_key(self, self.active) {
             self.extra.remove(key);
         }
@@ -2176,17 +2201,24 @@ impl Dialog {
 
     /// What input `i`'s list of picked items shows, one row each (#3683): what its chip counts.
     /// A rim or a surface split into pieces is one row, as it is one pick; a Shell with Tangent
-    /// Chain lists every face it opens.
+    /// Chain lists every face it opens. Frame Member's path lists a point once for each time it
+    /// is in it: each occurrence is in its own pair (#15705), and a pair is one row, its first
+    /// point's (`dialogs_frame::listed_rows`).
     pub(crate) fn listed_items(&self, s: &Session, i: usize) -> Vec<Sel> {
         if i == 0
             && let Some(faces) = self.shell_faces(s)
         {
             return faces;
         }
+        if let Some(rows) = crate::dialogs_frame::listed_rows(self, i) {
+            let items = selection::items(&self.inputs, i);
+            return rows.iter().filter_map(|r| r.first().and_then(|k| items.get(*k)).cloned()).collect();
+        }
+        let ordered = self.inputs.get(i).is_some_and(|inp| inp.ordered_points);
         let mut rows: Vec<Sel> = Vec::new();
         let mut shown: Vec<Sel> = Vec::new();
         for item in self.inputs.get(i).map(|inp| inp.items.as_slice()).unwrap_or_default() {
-            if shown.iter().any(|x| selection::same_item(x, item)) {
+            if !ordered && shown.iter().any(|x| selection::same_item(x, item)) {
                 continue;
             }
             shown.extend(crate::viewport::grouped_selection(s, item));
@@ -2198,8 +2230,8 @@ impl Dialog {
     /// Remove a listed row's item from input `i`, as picking it again toggles it off: the
     /// pieces of its rim or surface go with it, and the hand-picked edges and the explicit
     /// profile choice follow. A face a Shell's tangent chain opens goes with the picks whose
-    /// chain holds it.
-    pub(crate) fn remove_listed(&mut self, s: &Session, i: usize, item: &Sel) {
+    /// chain holds it. In Frame Member's path only row `row`'s entries go: a line, or a pair's two points.
+    pub(crate) fn remove_listed(&mut self, s: &Session, i: usize, row: usize, item: &Sel) {
         let shell_chain = i == 0 && self.shell_faces(s).is_some();
         // A Fillet or Chamfer row its Tangent Chain brought goes with the picks whose chain holds
         // it, as picking it again would; else ticking Tangent Chain again brings it back.
@@ -2228,6 +2260,12 @@ impl Dialog {
                     b != body || !model.is_some_and(|m| solidcraft_engine::doc::tangent_face_chain(m, &[*point]).iter().any(|(f, _)| f == index))
                 });
             }
+            // A point the path holds twice is in two pairs: the other pair keeps its own.
+            _ if inp.ordered_points => {
+                if let Kind::Frame(m) = &mut self.kind {
+                    m.remove_row(&mut inp.items, row);
+                }
+            }
             // Without the model to find the chain in, the row goes on its own.
             _ => {
                 inp.items.retain(|x| !gone.iter().any(|g| selection::same_item(x, g)));
@@ -2245,6 +2283,9 @@ impl Dialog {
         }
         self.list_hover = None;
         self.error = None;
+        if matches!(self.kind, Kind::Frame(_)) {
+            crate::dialogs_frame::prompt(self);
+        }
         self.sync_thread(s);
     }
 }
@@ -3596,7 +3637,9 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 let active = i == d.active && !text_focus;
                 // A chip: "↖ Select" (outlined) while empty, "N selected" (filled) once picked.
                 let custom_axis = i == 1 && inp.items.is_empty() && stored_revolve_axis(&d.kind).is_some();
-                let filled = !inp.items.is_empty() || custom_axis || stored_reference.is_some();
+                // Frame's Path counts its rows: a lone first point of a pair is none yet.
+                let frame_rows = crate::dialogs_frame::listed_rows(d, i).map(|rows| rows.len());
+                let filled = frame_rows.map_or(!inp.items.is_empty(), |n| n > 0) || custom_axis || stored_reference.is_some();
                 let text = if filled {
                     RichText::new(if stored_reference.is_some() && matches!(d.kind, Kind::Section { .. }) {
                         solidcraft_ui_text::tr("ui.viewport_status_section_plane").into()
@@ -3607,7 +3650,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                     } else if !inp.multi {
                         inp.items.first().map(|item| selection_label(s, names, d, inp, item)).unwrap_or_default()
                     } else {
-                        let count = if i == 0 { shell_count.unwrap_or(inp.items.len()) } else { inp.items.len() };
+                        let count = if i == 0 { shell_count.or(frame_rows).unwrap_or(inp.items.len()) } else { inp.items.len() };
                         solidcraft_ui_text::format("dialog.selected_count", &[("count", &count.to_string())])
                     })
                     .color(t.on_accent)
@@ -3665,7 +3708,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                     // own remove button (#3683). Drawn straight into the row, which is this field's
                     // own: a scope around it would take room and widen the dialog.
                     if inp.multi {
-                        let open = d.listed == Some(i);
+                        let open = crate::dialogs_frame::folds_own_rows(&d.kind, i).unwrap_or(d.listed == Some(i));
                         let at = rect.translate(vec2(-t.space_24, 0.0));
                         let label = solidcraft_ui_text::tr_label(if open { "Hide the picked items" } else { "Show the picked items" });
                         let arrow = crate::ui_kit::disclosure_button_at(ui, at, open, label);
@@ -3679,14 +3722,16 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
         });
         if inp.multi && d.listed == Some(i) && !inp.items.is_empty() {
             let rows = d.listed_items(s, i);
+            let labels = crate::dialogs_frame::row_labels(s, names, d, i);
             egui::ScrollArea::vertical().id_salt(("picked_items", i)).max_height(t.control_height * 6.5).show(ui, |ui| {
                 for (index, item) in rows.into_iter().enumerate() {
-                    let row = crate::ui_kit::list_row(ui, &format!("{}:{index}", inp.label), &selection_label(s, names, d, inp, &item));
+                    let label = labels.as_ref().and_then(|l| l.get(index).cloned()).unwrap_or_else(|| selection_label(s, names, d, inp, &item));
+                    let row = crate::ui_kit::list_row(ui, &format!("{}:{index}", inp.label), &label);
                     if row.hovered() {
                         hovered = Some((i, item.clone()));
                     }
                     if row.clicked() {
-                        remove = Some((i, item));
+                        remove = Some((i, index, item));
                     }
                 }
             });
@@ -3701,11 +3746,13 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
         }
         d.list_hover = hovered;
     }
-    if let Some(i) = toggle_list {
+    if let Some(i) = toggle_list
+        && !crate::dialogs_frame::toggle_own_rows(&mut d.kind, i)
+    {
         d.listed = if d.listed == Some(i) { None } else { Some(i) };
     }
-    if let Some((input, item)) = remove {
-        d.remove_listed(s, input, &item);
+    if let Some((input, row, item)) = remove {
+        d.remove_listed(s, input, row, &item);
     }
     if let Some(i) = activate {
         d.active = i;
@@ -3775,9 +3822,10 @@ fn missing_pick(error: &str) -> bool {
 }
 
 /// A refusal that is guidance, not a failure of the design, so the dialog offers nothing to
-/// report (#10181): the command is not available here, or the pick is in the sketch already.
+/// report (#10181): the command is not available here, the pick is in the sketch already, or
+/// Frame Member took back a pick that would make it fail.
 fn context_refusal(app: &SolveApp, d: &Dialog, error: &str) -> bool {
-    already_linked(error) || command_disabled(app, d, error)
+    already_linked(error) || command_disabled(app, d, error) || crate::dialogs_frame::refused_pick(error)
 }
 
 /// Project's or Intersect's refusal of a pick the sketch already holds ("already intersected into
@@ -4323,13 +4371,17 @@ pub(crate) fn sync_feature_edit(app: &mut SolveApp) {
 const CONFIGURATIONS_SIZE: crate::card_resize::CardSize =
     crate::card_resize::CardSize { width: "sc_configurations_width", height: "sc_configurations_height", handle: "config" };
 
-/// The width a dialog's card asks for: the managers' wider form, a study's table, or a card.
+/// The width a dialog's card asks for: the managers' wider form, a study's table, Frame Member's
+/// corner rows, or a card.
 pub(crate) fn card_width(d: &Dialog) -> f32 {
     let t = Tokens::get();
     if matches!(d.kind, Kind::Appearance(_) | Kind::Material { .. }) {
         t.form_card_width + t.form_label_width + t.space_6
     } else if matches!(&d.kind, Kind::Motion(k) if k.wide()) {
         t.form_card_width * 3.0
+    } else if matches!(d.kind, Kind::Frame(_)) {
+        // Room for a corner override's type, Flip and bin on one row.
+        t.form_card_width + 2.0 * t.space_24
     } else {
         t.form_card_width
     }
@@ -5013,7 +5065,18 @@ fn recall(app: &SolveApp, dialog: &mut Dialog) {
         (Kind::Plastic(crate::dialogs_plastic::Pl::SnapFit { hook, .. }), Kind::Plastic(crate::dialogs_plastic::Pl::SnapFit { hook: fresh, .. })) => {
             *hook = *fresh;
         }
-        (Kind::Frame(previous), Kind::Frame(fresh)) => previous.whole = fresh.whole,
+        // The points an edit loaded belonged to that edit, and the tubes picked to that dialog.
+        // Ghost Frame Members is unticked whenever the dialog opens. Corner Type and Flip come
+        // back; the overrides belonged to the last one's picks.
+        (Kind::Frame(previous), Kind::Frame(fresh)) => {
+            previous.whole = fresh.whole;
+            previous.path.clone_from(&fresh.path);
+            previous.refs.clone_from(&fresh.refs);
+            previous.pair_ids.clone_from(&fresh.pair_ids);
+            previous.ghost = fresh.ghost;
+            previous.picked_tubes.clear();
+            previous.overrides.clone_from(&fresh.overrides);
+        }
         _ => {}
     }
     let fresh_mode = mode_inputs_key(&dialog.kind);
@@ -5977,6 +6040,15 @@ pub(crate) fn report_title(d: &Dialog) -> String {
 
 /// The commands OK runs (an edit rebuilds its feature in place); the live preview runs the same.
 pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
+    // Remove Tube on every tube of an edited Frame Member: OK deletes it, as `frame.remove_member`
+    // does with its last tube. (All Lines with nothing loaded is a sketch that lost its lines,
+    // not tubes taken out.)
+    if let (Kind::Frame(m), Some((id, _))) = (&d.kind, d.editing)
+        && !m.all
+        && sels(d, 0).is_empty()
+    {
+        return Ok(vec![("timeline.delete".into(), json!({ "feature": id }))]);
+    }
     let mut normalized = d.clone();
     normalized.sync_material(&app.session);
     for value in crate::length_input::fields(&app.session.doc, &mut normalized.kind) {
@@ -7894,6 +7966,13 @@ fn saved_pick(s: &Session, reference: &solidcraft_engine::doc::construct::GeoRef
     })
 }
 
+/// A stored point reference as the pick it stands for, the vertex on its body where it can be
+/// found. Never none: a dialog that keeps the reference itself shows something for each one.
+pub(crate) fn point_pick(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Sel {
+    // ponytail: a component O (`Datum`) shows at the origin; its reference is kept as saved.
+    point_sel(s, g).or_else(|| saved_pick(s, g)).unwrap_or(Sel::Vertex { body: String::new(), point: Vec3::ZERO })
+}
+
 /// A stored construction reference back into a dialog pick.
 fn geo_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Option<Sel> {
     match g {
@@ -9095,7 +9174,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         other => {
             let (kind, inputs, extra) = crate::dialogs_sheet::for_feature(app, other)
                 .or_else(|| crate::dialogs_plastic::for_feature(app, other))
-                .or_else(|| crate::dialogs_frame::for_feature(app, other))
+                .or_else(|| crate::dialogs_frame::for_feature(app, &f))
                 .or_else(|| crate::dialogs_end_cap::for_feature(app, other))
                 .or_else(|| crate::dialogs_rotate_member::for_feature(app, id, other))
                 .or_else(|| crate::dialogs_surface::for_feature(app, other, &feature_frame(s, f.component)))?;
@@ -9207,6 +9286,7 @@ mod refused_ok_tests {
                 ghost: false,
                 tint_new: true,
                 cut_tint: true,
+                glass_new: false,
             },
         )
         .expect("the angled plane previews");

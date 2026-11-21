@@ -183,6 +183,116 @@ fn choice_options_show_their_titles_and_send_their_values() {
 }
 
 #[test]
+fn swatch_annotations_preserve_partial_choices_and_const_values() {
+    let schema = json!({"type":"object","properties":{"finish":{"type":"string","oneOf":[
+        {"const":"oak","title":"Oak","x-solidcraft-swatch":"oak.png"},
+        {"const":"walnut","title":"Walnut","x-solidcraft-swatch":7},
+        {"const":"plain","title":"Plain"}
+    ]}}});
+    let mut fields = form(&schema).expect("bad artwork does not disable the dialog");
+    assert_eq!(fields[0].0.swatches, [Some("oak.png".into()), None, None]);
+    fields[0].1 = Input::Choice(Some(1));
+    assert_eq!(params(&fields), Ok(json!({"finish":"walnut"})));
+}
+
+/// Two full dialog captures, with synthetic artwork generated here, plus pointer selection.
+#[test]
+fn swatch_dialog_dropdown_and_filtered_grid_render_and_send_const_values() {
+    let mut h = crate::scenario::Harness::new();
+    let dir = h.dir.join("swatches");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (path, base) in [("oak.png", [137, 61, 23]), ("walnut.jpg", [81, 41, 27])] {
+        let pixels = image::RgbImage::from_fn(128, 128, |x, y| {
+            let stripe = ((x / 8 + y / 16) % 2) as u8 * 16;
+            image::Rgb(base.map(|c| c + stripe))
+        });
+        pixels.save(dir.join(path)).unwrap();
+    }
+    let schema = |complete| {
+        json!({"type":"object","required":["finish"],"properties":{
+            "show_unavailable":{"type":"boolean","default":false},
+            "finish":{"type":"string","title":"Finish","oneOf":[
+            {"const":"unavailable","title":"Unavailable finish","x-solidcraft-swatch":"walnut.jpg",
+             "x-solidcraft-when":{"field":"show_unavailable","eq":true}},
+            {"const":"oak","title":"Natural oak","x-solidcraft-swatch":"oak.png"},
+            {"const":"walnut","title":"Walnut","x-solidcraft-swatch":"walnut.jpg"},
+            if complete { json!({"const":"white","title":"White oak","x-solidcraft-swatch":"oak.png"}) } else { json!({"const":"plain","title":"Plain"}) }
+        ]}}})
+    };
+    let ctx = crate::fonts::test_context();
+    let mut textures = std::collections::HashMap::new();
+    let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0));
+    let output_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/plugin-swatches");
+    std::fs::create_dir_all(&output_dir).unwrap();
+    let mut tick = 0;
+    let mut frame = |app: &mut SolveApp, events: Vec<egui::Event>, capture: Option<&str>| {
+        tick += 1;
+        solidcraft_ui_registry::clear_handles();
+        let mut output =
+            ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), time: Some(tick as f64 / 60.0), events, ..Default::default() }, |ui| {
+                ui_kit::scope(ui, |_ui| show(app, &ctx));
+            });
+        ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+        output.textures_delta.clear();
+        if let Some(name) = capture {
+            let image = ui_kit::test_raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures);
+            assert_eq!(image.dimensions(), (1280, 720));
+            image.save(output_dir.join(name)).unwrap();
+        }
+    };
+    let pointer = |pos, pressed| {
+        vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
+        ]
+    };
+    for complete in [false, true] {
+        let mut command = entry("finish", "read", json!([]));
+        command.input_schema = schema(complete);
+        let mut plugin = listed(if complete { "grid" } else { "dropdown" }, vec![command]);
+        plugin.swatches = Arc::new(std::sync::OnceLock::from(crate::plugin_images::read_swatches(&dir, &plugin.entries)));
+        h.app.plugin_menu.listed = vec![plugin];
+        h.app.plugin_menu.loaded = true;
+        h.app.plugin_menu.dialogs.clear();
+        open_entry(&mut h.app, 0, 0);
+        for _ in 0..6 {
+            frame(&mut h.app, vec![], None);
+        }
+        let trigger = crate::scenario::handle_at("plugin_dialog:field:finish").unwrap();
+        frame(&mut h.app, pointer(trigger, true), None);
+        frame(&mut h.app, pointer(trigger, false), None);
+        for _ in 0..3 {
+            frame(&mut h.app, vec![], None);
+        }
+        if complete {
+            let search = crate::scenario::handle_at("swatch:plugin_field_finish:search").unwrap();
+            frame(&mut h.app, pointer(search, true), None);
+            frame(&mut h.app, pointer(search, false), None);
+            frame(&mut h.app, vec![egui::Event::Text("OaK".into())], None);
+            frame(&mut h.app, vec![], Some("grid-filtered.png"));
+            assert!(crate::scenario::handle_at("swatch:plugin_field_finish:option:1").is_none(), "Walnut is filtered out");
+            assert!(crate::scenario::handle_at("swatch:plugin_field_finish:option:0").is_some());
+        } else {
+            frame(&mut h.app, vec![], Some("dropdown.png"));
+            assert!(crate::scenario::handle_at("swatch:plugin_field_finish:search").is_none());
+            assert!(crate::scenario::rect_of("swatch:plugin_field_finish:tile:0").is_some());
+            assert!(crate::scenario::rect_of("swatch:plugin_field_finish:tile:1").is_some());
+            assert!(crate::scenario::rect_of("swatch:plugin_field_finish:tile:2").is_none());
+        }
+        let select = crate::scenario::handle_at("swatch:plugin_field_finish:option:2").unwrap();
+        frame(&mut h.app, pointer(select, true), None);
+        frame(&mut h.app, pointer(select, false), None);
+        let fields = h.app.plugin_menu.dialog().unwrap().fields.as_ref().unwrap();
+        let (finish, selected) = fields.iter().find(|(field, _)| field.key == "finish").unwrap();
+        assert_eq!(finish.available, [1, 2, 3], "conditional choices retain their schema indices");
+        assert_eq!(*selected, Input::Choice(Some(3)), "picker index maps back past the unavailable option");
+        assert_eq!(params(fields), Ok(json!({"finish": if complete { "white" } else { "plain" }, "show_unavailable":false})));
+        frame(&mut h.app, vec![], None);
+        assert!(crate::scenario::handle_at("swatch:plugin_field_finish:option:0").is_none(), "selection closes the picker");
+    }
+}
+
+#[test]
 fn other_lists_and_nested_objects_are_not_guessed() {
     for property in [
         // A target list of strings: not body names (only `bodies` and `body_ids` send those).
@@ -242,6 +352,32 @@ fn conditional_dialog_fields_hide_disable_reset_and_follow_defaults_until_edited
     set_input(&mut fields, "storage", Input::Choice(Some(0)));
     assert_eq!(params(&fields).unwrap()["length"], 42.0, "custom value survives");
     assert_eq!(params(&fields).unwrap()["size"], "small", "an unavailable custom choice resets");
+}
+
+#[test]
+fn conditional_swatches_keep_defaults_visibility_and_enabled_state() {
+    let mut schema = cabinet_schema();
+    let size = &mut schema["properties"]["size"];
+    for (option, path) in size["oneOf"].as_array_mut().unwrap().iter_mut().zip(["small.png", "medium.jpg", "large.png"]) {
+        option["x-solidcraft-swatch"] = json!(path);
+    }
+    size["x-solidcraft-visible-when"] = json!({"field":"has_back","eq":true});
+    size["x-solidcraft-enabled-when"] = json!({"field":"storage","eq":"shelves"});
+    let mut fields = form(&schema).expect("conditions and swatches are supported together");
+    let size = |fields: &[(Field, Input)]| fields.iter().find(|(f, _)| f.key == "size").unwrap().clone();
+    assert_eq!(size(&fields).0.swatches, [Some("small.png".into()), Some("medium.jpg".into()), Some("large.png".into())]);
+    set_input(&mut fields, "storage", Input::Choice(Some(1)));
+    assert_eq!(size(&fields).0.available, [1, 2]);
+    assert!(!size(&fields).0.enabled);
+    assert_eq!(params(&fields).unwrap()["size"], "large", "a disabled swatch field still sends its conditional default");
+    set_input(&mut fields, "has_back", Input::Boolean(false));
+    assert!(!size(&fields).0.visible);
+    assert!(params(&fields).unwrap().get("size").is_none(), "hidden swatch fields are omitted");
+    set_input(&mut fields, "has_back", Input::Boolean(true));
+    set_input(&mut fields, "size", Input::Choice(Some(1)));
+    set_input(&mut fields, "storage", Input::Choice(Some(0)));
+    assert!(size(&fields).0.enabled);
+    assert_eq!(params(&fields).unwrap()["size"], "small", "an unavailable swatch choice resets to the matching default");
 }
 
 #[test]
@@ -601,6 +737,7 @@ fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -> Listed {
         groups: BTreeSet::new(),
         entries,
         images: Default::default(),
+        swatches: Default::default(),
     }
 }
 
