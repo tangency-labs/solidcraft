@@ -1561,6 +1561,10 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     if !lines.is_empty() {
         v.push(cmd(app, "sketch.infinite", "Infinite Line").with(json!({ "curves": lines })));
     }
+    // #20317: lines joined end to end on one straight line become one.
+    if lines.len() >= 2 {
+        v.push(cmd(app, "sketch.merge_lines", "Merge Lines").with(json!({ "curves": lines })));
+    }
     if curves.len() == 1 && ss.sketch.offset_distance(&curves[0]).is_some() {
         v.push(cmd(app, "sketch.offset.break", "Break Offset Association").with(json!({"curve":curves[0]})));
     }
