@@ -995,6 +995,69 @@ fn squarest_end_face(
     Ok(best.map(|(_, a)| a))
 }
 
+/// Not upstream: at a multi-neighbour end, the rail on side `pair[1]` (the other side
+/// edge use) that ends where it crosses its side edge is made to end on `end_face`'s
+/// extended surface instead ([`FilletVertexType::RailXExtendedEdgeuse`]) when that edge
+/// leaves `vertex` off the end face's surface: its crossing is then off the end face, which
+/// the cap lies on. `pair[0]` is the picked side edge use, whose edge the end face holds.
+/// `vertices` holds the two rail-end vertices first, in the order of `sides`.
+///
+/// # Errors
+/// Those of the topology lookups.
+#[allow(clippy::too_many_arguments)]
+fn rail_ends_on_end_face(
+    k: &Kernel,
+    target: &mut Brep,
+    pseudo: &mut FilletBrep,
+    vertices: &[VertexId],
+    sides: &mut [EdgeuseId; 2],
+    turned_back: [Option<TurnedBack>; 2],
+    pair: [EdgeuseId; 2],
+    end_face: Option<FaceId>,
+    filleted: EdgeuseId,
+    vertex: VertexId,
+    tangency_tol_radians: f64,
+) -> Result<()> {
+    let [pick, other] = pair;
+    let Some(rail) = sides.iter().position(|&s| s == other) else {
+        return Ok(());
+    };
+    if turned_back.get(rail).copied().flatten().is_some() {
+        return Ok(());
+    }
+    let Some(&fv) = vertices.get(rail) else {
+        return Ok(());
+    };
+    if pseudo.fillet_vertex(fv)?.fillet_vertex_type() != FilletVertexType::RailXEdgeuse {
+        return Ok(());
+    }
+    // the picked edge's use on the end face, whose normal at the vertex is the end face's
+    let on_end = if eu1::face(target, pick)? == end_face {
+        pick
+    } else {
+        let across = super::radial(target, pick)?;
+        if eu1::face(target, across)? != end_face {
+            return Ok(());
+        }
+        across
+    };
+    let tol_deg = crate::math::rad_to_deg(tangency_tol_radians);
+    if edge_leaves_in_face(k, target, on_end, other, vertex, tol_deg)? {
+        return Ok(());
+    }
+    pseudo
+        .fillet_vertex_mut(fv)?
+        .set_fillet_vertex_type(FilletVertexType::RailXExtendedEdgeuse);
+    // the cap's edge from the rail's end runs on the rail's face, as at a side of the
+    // blend's convexity: the side's use on the blend's face
+    if !super::is_fillet_side_face(target, filleted, eu1::face(target, other)?)? {
+        if let Some(slot) = sides.get_mut(rail) {
+            *slot = super::radial(target, other)?;
+        }
+    }
+    Ok(())
+}
+
 /// The gap checks `SmFilletNx1Corner::MakeCornerTopology` ends with when the end face
 /// of a mixed-convexity corner connects to more than the fillet surface and one other
 /// face: `CalcCornerVertGeom`, `CalcCornerEdgeGeom` of the two new side edges (statuses
@@ -1098,7 +1161,7 @@ impl FilletCorner {
             mixed,
             same,
             tangent_side,
-            sides,
+            mut sides,
             mut end_face,
             mut extend_edge,
             turned_back,
@@ -1238,6 +1301,27 @@ impl FilletCorner {
                         }
                     }
                     extend_edge = eu1::edge(target, pick)?;
+                    // (not upstream) The rail on the other side ends where it crosses that
+                    // side's edge. Where the edge leaves the vertex off the end face's surface
+                    // (a slanted side's top edge under an upright standing on the part, the end
+                    // face the upright's side), that crossing lies off the end face, and the
+                    // cap through it, the vertex and the other rail's end was left open: the
+                    // result was refused as not a closed solid. The rail then ends on the end
+                    // face's extended surface, as one beside a side edge of the blend's
+                    // convexity does.
+                    rail_ends_on_end_face(
+                        k,
+                        target,
+                        pseudo,
+                        &self.vertices,
+                        &mut sides,
+                        turned_back,
+                        [pick, other],
+                        end_face,
+                        filleted,
+                        vertex,
+                        self.tangency_tol_radians,
+                    )?;
                     other_side_edgeuse = Some(other);
                 } else {
                     // Invalid brep topology
