@@ -221,9 +221,7 @@ impl core::fmt::Display for HealFailure {
             ),
             Self::EdgesNotGlued => f.write_str("the edges could not be glued"),
             Self::GapWithoutTwoEnds => f.write_str("the gap does not have two end points"),
-            Self::EmptySampleInterval => {
-                f.write_str("the sample interval holds no knot interval")
-            }
+            Self::EmptySampleInterval => f.write_str("the sample interval holds no knot interval"),
             Self::HealStepNotRun => {
                 f.write_str("the heal step these properties depend on has not run yet")
             }
