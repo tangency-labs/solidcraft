@@ -227,8 +227,34 @@ ACP lets the client offer a file system and a terminal; the chat offers neither,
 agent in an empty working folder of SolidCraft's own (`<data>/agent-chat/work`), not the
 design's folder. The Claude Code adapter has shell, file and web tools of its own anyway: the
 session asks it to turn them off (`_meta.claudeCode.options.disallowedTools`) and not to offer
-"bypass permissions". Other agents' own permission requests appear in the panel with their
-options.
+"bypass permissions". Its read tools (Read, Glob, Grep) are on in every session, behind a
+`permissions.ask` rule (`_meta.claudeCode.options.settings`), so every read arrives as
+`session/request_permission` with the path in `rawInput` (`file_path` for Read, `path` and
+`pattern` for Glob, `path` or `file_path` and `glob` for Grep). `acp::read_path` accepts only
+that form, with an absolute path and a pattern that can't leave it; the chat answers allow-once
+when the path, links followed, lies inside a file or folder sent by path in this conversation
+(`AgentChat::by_path`, cleared by New chat), and declines any other read of Claude Code's (kind
+`read` or `search`) without asking, whatever the mode or a remembered answer. Checked with
+`claude-agent-acp` 0.107.0: without the rule these tools read any path without asking.
+
+An earlier version kept the read tools off until a message first sent a file by path, then opened
+the session again with them on (`session/new` with `_meta.claudeCode.options.resume`). That
+reopen raced New chat and the first session's opening, could lose another agent's conversation
+(only Claude Code knows `resume`), and needed a notice when a resume failed. With the tools on
+from the start and every unsent read declined, the agent can read exactly what it could then,
+with none of those cases. The chat sees only the
+path a Glob or Grep starts from, not where its walk goes, so a link inside an attached folder
+that points out of it is safe only because Claude Code's walk doesn't follow links. Checked with
+0.107.0, with a linked folder and a linked file that both point outside: Glob `**/*`, a Grep over
+the folder, and patterns that name a link (`linkdir/**/*`, `linkfile*`) returned only the
+folder's own file, even with a ripgrep config saying `--follow` (`RIPGREP_CONFIG_PATH`). Check
+this again when the adapter's version moves. Other agents' own
+permission requests appear in the panel with their options.
+
+A coding agent gets every attached file and folder by its path (`attach::reference`,
+`attach::folder`); an endpoint, which has no tool that opens a path, gets pictures, text and PDFs
+in the message (a PDF as an OpenAI `file` part or an Anthropic `document` block) and CAD files
+imported (`attach::read`), at most eight, and is refused any other file.
 
 ### Processes
 
