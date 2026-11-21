@@ -215,8 +215,11 @@ pub(crate) fn update_changed(app: &mut SolveApp) {
     // others the user is asked whether to load them (`link_folders_prompt`); after Not now they stay
     // out of date until their folder is allowed, and Update Links reads them anyway.
     let design = app.session.path.clone();
-    let outside: Vec<u64> =
-        now.iter().map(|(c, _)| *c).filter(|c| !app.session.doc.links.get(c).is_some_and(|l| inside_design_folder(design.as_deref(), &l.path))).collect();
+    let outside: Vec<u64> = now
+        .iter()
+        .map(|(c, _)| *c)
+        .filter(|c| !app.session.doc.links.get(c).is_some_and(|l| inside_design_folder(design.as_deref(), &l.path)))
+        .collect();
     let files = if outside.is_empty() { Vec::new() } else { read_files(&mut app.session) };
     let mut allowed: Vec<u64> = Vec::new();
     let mut ask: Vec<(u64, String)> = Vec::new();
@@ -248,9 +251,7 @@ pub(crate) fn update_changed(app: &mut SolveApp) {
     let changed: Vec<u64> = now
         .iter()
         .filter(|(c, s)| {
-            s.is_some()
-                && may_read(c)
-                && (app.docs.link_stamps.iter().any(|(k, was)| k == c && was != s) || (first.contains(c) && stale.contains(c)))
+            s.is_some() && may_read(c) && (app.docs.link_stamps.iter().any(|(k, was)| k == c && was != s) || (first.contains(c) && stale.contains(c)))
         })
         .map(|(c, _)| *c)
         .collect();
