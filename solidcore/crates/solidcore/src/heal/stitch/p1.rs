@@ -1482,16 +1482,13 @@ impl<'c> Stitch<'c> {
                 let pair_of = |v: Option<VertexId>| -> Result<Option<VertexId>> {
                     // an edge of the face to keep with a missing end: the caller's faces
                     let v = v.ok_or_else(|| named(HealFailure::FacesDoNotMatch))?;
-                    let i = k_vertices
-                        .iter()
-                        .position(|&x| x == v)
-                        .ok_or_else(|| {
-                            defect(
-                                "an edge of the face to keep ends at a vertex the pairing did \
+                    let i = k_vertices.iter().position(|&x| x == v).ok_or_else(|| {
+                        defect(
+                            "an edge of the face to keep ends at a vertex the pairing did \
                                  not record, though every vertex of the face was paired just \
                                  above",
-                            )
-                        })?;
+                        )
+                    })?;
                     Ok(d_vertices.get(i).copied())
                 };
                 let dk_v0 = pair_of(k_v0)?;
