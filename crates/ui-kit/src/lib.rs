@@ -24,6 +24,7 @@ pub mod theme_files;
 pub mod theme_options;
 pub mod toast;
 pub mod view_compass;
+pub mod view_layout_menu;
 pub mod window_chrome;
 
 mod actions;

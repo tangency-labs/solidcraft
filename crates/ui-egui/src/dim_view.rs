@@ -1013,7 +1013,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     // value would leave it (#11584); placing one only measures, so nothing moves.
     let typed = preview_world(app);
     let draft = editor_draft.or_else(|| placing.then(|| placement_preview(app)).flatten());
-    let st = typed.clone().unwrap_or_else(|| crate::open_meshing::session_world(&app.session));
+    let st = typed.clone().unwrap_or_else(|| crate::open_meshing::shown_world(app));
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else {
         DRAWN.with(|d| d.borrow_mut().clear());
         // Only a finished sketch's dimension edited from the model view stays open, at its text.

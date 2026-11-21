@@ -2594,15 +2594,10 @@ fn sketch_menu_rows(
 pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     ui.label(egui::RichText::new(solidcraft_ui_text::tr_label("Selection filter")).color(t.text_dim).size(t.font_small));
-    for (mode, label) in [("body", app.tr_label("Select bodies (a face picks its body)")), ("component", app.tr("ui.select_components_by_face"))] {
-        let mut on = app.pick_mode() == mode;
-        if ui_kit::checkbox(ui, label, &mut on).changed() {
-            // The Faces checkbox below is independent. The standalone command enables faces.
-            let filters = std::mem::take(&mut app.ui.pick_off);
-            let _ = app.run("select.filter", json!({"mode": if on { mode } else { "face" }}));
-            app.ui.pick_off = filters;
-        }
-    }
+    let bodies = app.tr_label("Select bodies (a face picks its body)");
+    crate::selection_mode::checkbox(app, ui, solidcraft_engine::PickMode::Bodies, bodies);
+    let components = app.tr("ui.select_components_by_face");
+    crate::selection_mode::checkbox(app, ui, solidcraft_engine::PickMode::Parts, components);
     for (k, label) in [
         ("faces", "Faces"),
         ("edges", "Edges"),
@@ -2663,13 +2658,18 @@ pub(crate) fn unfinished(app: &SolveApp) -> bool {
         || app.viewport.joint_handles.is_some()
         || app.viewport.text_drag.is_some()
         || crate::occurrence_drag::active(app)
+        || crate::joint_drag::cancellable(app)
 }
 
 /// Cancels what one Esc cancels before it reaches the dialog, the selection or the sketch:
 /// a drag, the Select Other list, or the active tool's points and then the tool. The view's
 /// corner Cancel (#6709) takes this step first too. Returns whether anything was cancelled.
 pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
-    if crate::joint_handles::cancel(app) || crate::sketch_text_move::cancel_drag(app) || crate::occurrence_drag::cancel(app) {
+    if crate::joint_handles::cancel(app)
+        || crate::sketch_text_move::cancel_drag(app)
+        || crate::occurrence_drag::cancel(app)
+        || crate::joint_drag::cancel(app)
+    {
         return true;
     }
     if crate::select_other::is_open(app) {
@@ -2689,6 +2689,11 @@ pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
 /// Global keyboard shortcuts (when no text field has focus).
 pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     if crate::view_window_drag::keyboard_active(app, ctx) {
+        return;
+    }
+    if crate::view_windows::is_clean(app) && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        let window = app.view_windows.current_window();
+        drop(app.run("tab.window.clean", json!({"window": window, "on": false})));
         return;
     }
     crate::viewport_status::reconcile(app, ctx);
