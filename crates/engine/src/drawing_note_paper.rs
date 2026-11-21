@@ -26,12 +26,7 @@ pub fn note_group(note: &Note, text: &str, tips: &[Vec2], line_mm: f64, letterin
     let mut text = Text::set(Some(text), cap_mm, lettering);
     // The text's box stands from its place by the alignment, level with it; its leaders, its landings
     // and its group are laid out from the box.
-    let reach = match note.align {
-        Align::Left => text.half.x,
-        Align::Centre => 0.0,
-        Align::Right => -text.half.x,
-    };
-    let centre = Vec2::new(note.at[0] + reach, note.at[1]);
+    let centre = box_centre(note, text.half);
     text.runs = justified(std::mem::take(&mut text.runs), note.align, text.half.x * 2.0);
     let mut why = text.why;
     let mut items = Vec::new();
@@ -51,6 +46,18 @@ pub fn note_group(note: &Note, text: &str, tips: &[Vec2], line_mm: f64, letterin
         pending: text.pending,
         layout: Layout::default(),
     }
+}
+
+/// The middle of the box a text `half` in size takes round `note`'s place by its alignment: the box
+/// starts at the place for left, is centred on it, or ends at it for right. The one rule the group, its
+/// leaders and [`text_box`] share.
+fn box_centre(note: &Note, half: Vec2) -> Vec2 {
+    let reach = match note.align {
+        Align::Left => half.x,
+        Align::Centre => 0.0,
+        Align::Right => -half.x,
+    };
+    Vec2::new(note.at[0] + reach, note.at[1])
 }
 
 /// `runs` with each of their lines moved along as `align` stands it in a box `width` wide: lines are the
@@ -88,14 +95,14 @@ pub fn label_group(view: u64, text: &str, lettering: &PaperFonts) -> (OnPaper, V
     (OnPaper { group, fonts: text.fonts, why: text.why, pending: text.pending, layout: Layout::default() }, text.half)
 }
 
-/// The box `note`'s text, reading `text`, takes round its place (from its sheet's corner, or from
+/// The box `note`'s text, reading `text`, takes at its place by its alignment (from its sheet's corner, or from
 /// its view's centre), set in `lettering` as [`note_group`] sets it; None while it isn't set.
 pub fn text_box(note: &Note, text: &str, lettering: &PaperFonts) -> Option<Aabb2> {
     let set = Text::set(Some(text), note.cap_mm.unwrap_or(TEXT_MM), lettering);
     if set.runs.is_empty() {
         return None;
     }
-    let centre = Vec2::new(note.at[0], note.at[1]);
+    let centre = box_centre(note, set.half);
     Some(Aabb2 { min: centre - set.half, max: centre + set.half })
 }
 

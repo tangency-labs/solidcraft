@@ -69,7 +69,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              (a lost one loses only its own leader), text: what it says now, its fields read for its sheet, \
              fields?: [{source, key, state: shown, empty, lost (its sheet documents a component the design no longer has) or unknown \
              (its source has no such field), value?, why?}], \
-             warnings?: its view edited since to leave out a part a leader points at, or its text, centred on at, running off the paper}. A lost reference keeps the note and its text in place, without a \
+             warnings?: its view edited since to leave out a part a leader points at, or its text, by its alignment at `at`, running off the paper}. A lost reference keeps the note and its text in place, without a \
              leader. Read-only; no model is evaluated.",
         ),
 ];
@@ -229,8 +229,8 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
-/// A warning when `note`'s text, reading `text`, runs off the paper of sheet `at` of `d`: its text is
-/// centred on its place, so a note placed near the paper's edge can run past it. None while its
+/// A warning when `note`'s text, reading `text`, runs off the paper of sheet `at` of `d`: its text
+/// starts at, is centred on or ends at its place, so a note placed near the paper's edge can run past it. None while its
 /// text isn't set, as while a font to fall back to is still being found.
 fn off_paper(d: &solidcraft_doc::drawing::Drawing, note: &Note, text: &str, at: usize) -> Option<String> {
     const EPS: f64 = 1e-6;
@@ -243,9 +243,14 @@ fn off_paper(d: &solidcraft_doc::drawing::Drawing, note: &Note, text: &str, at: 
     let text_box = crate::drawing_note_paper::text_box(note, text, &fonts)?;
     let (min, max) = (text_box.min + offset, text_box.max + offset);
     let on = min.x >= -EPS && min.y >= -EPS && max.x <= size.x + EPS && max.y <= size.y + EPS;
+    let stands = match note.align {
+        Align::Left => "starting at",
+        Align::Centre => "centred on",
+        Align::Right => "ending at",
+    };
     (!on).then(|| {
         format!(
-            "its text runs off the paper: it spans {:.1} to {:.1} mm across and {:.1} to {:.1} mm up a {:.0} x {:.0} mm sheet, centred on its place (move it with drawing.note.edit)",
+            "its text runs off the paper: it spans {:.1} to {:.1} mm across and {:.1} to {:.1} mm up a {:.0} x {:.0} mm sheet, {stands} its place (move it with drawing.note.edit)",
             min.x, max.x, min.y, max.y, size.x, size.y
         )
     })
