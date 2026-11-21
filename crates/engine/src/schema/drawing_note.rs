@@ -128,7 +128,7 @@ pub struct AddParams {
     pub cap_mm: Option<f64>,
     /// Which end of its text sits at its place: `left` (the default: the note starts where it is placed), `centre` or `right`.
     /// Each line of a note with several stands the same way: starting at the place for `left`, centred on it for `centre`, ending at it for `right`.
-    #[serde(default, deserialize_with = "align")]
+    #[serde(default, deserialize_with = "align", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "align_schema")]
     pub align: Option<HAlign>,
     /// More leaders, for a note on a view: 16 leaders in all, its anchor's included.
