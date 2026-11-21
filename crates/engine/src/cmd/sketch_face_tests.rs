@@ -1015,3 +1015,37 @@ fn top_of_a_block_with_a_modeled_thread_and_rounded_corners_keeps_its_attachment
     let plane = s.model.state().sketch(id).unwrap().plane;
     assert!((plane.origin.z - 20.).abs() < 1e-6 && plane.normal().z > 1. - 1e-9, "{plane:?}");
 }
+
+#[test]
+fn redefining_onto_a_face_picked_in_the_finished_design_reads_it_before_the_sketch() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base","name":"BaseFeature"}));
+    // The sketch to redefine comes before the boss, so it sees the plain box.
+    let id = run(&mut s, "sketch.create", json!({"plane":"XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    let top = top_pick(&s, "Base");
+    let boss = run(&mut s, "sketch.create", json!({"plane":top,"project_edges":false}))["sketch"].as_u64().unwrap();
+    draw(&mut s);
+    run(&mut s, "solid.extrude", json!({"sketch":boss,"distance":2,"operation":"join","targets":["Base"]}));
+    // The picker numbers the faces of the finished body: the box's top is now a face with the boss's footprint cut out.
+    let finished = s.world_state().unwrap();
+    let face = finished
+        .body("Base")
+        .unwrap()
+        .body
+        .faces(0.01)
+        .unwrap()
+        .into_iter()
+        .find(|face| face.plane_normal.is_some_and(|normal| normal.dot(Vec3::Z) > 0.999) && (face.centroid.z - 10.).abs() < 1e-6)
+        .unwrap();
+    let picked = json!({"body":"Base","index":face.index,"face":[7.0,7.0,10.0]});
+    // A stale index, as when the faces were numbered differently, names the same face by its point.
+    let stale = json!({"body":"Base","index":face.index + 50,"face":[7.0,7.0,10.0]});
+    for pick in [picked, stale] {
+        run(&mut s, "sketch.redefine", json!({"sketch":id,"plane":pick}));
+        let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &s.doc.feature(id).unwrap().kind else { panic!("not sketch") };
+        assert!(super::anchor(plane).is_some());
+        assert!((s.model.state().sketch(id).unwrap().plane.origin.z - 10.).abs() < 1e-6);
+        run(&mut s, "sketch.redefine", json!({"sketch":id,"plane":"XY"}));
+    }
+}

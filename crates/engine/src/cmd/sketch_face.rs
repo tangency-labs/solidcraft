@@ -73,9 +73,24 @@ pub(crate) fn face_pick_form(value: &Value) -> std::result::Result<FacePickForm<
     Ok(FacePickForm { point, fixed, body, index, path })
 }
 
+/// The message when no face holds the picked point (and, given, carries the picked index).
+const NO_SUCH_FACE: &str = "the selected planar face no longer exists; choose another face or an explicit fixed plane";
+
 fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result<PlaneRef> {
+    let first = capture_in(s, value, cmd, internal, true);
+    // A face index counts faces of the body as the picker showed it, which can be the finished
+    // design, while a sketch attaches to the design before itself (Redefine Sketch Plane): a
+    // feature after the sketch can add or remove faces, so the same face has another index here.
+    // When no face of that body has that index at the picked point, the point on the same body
+    // names the face; two faces holding it is still refused as ambiguous.
+    let missing = value.get("index").is_some() && first.as_ref().is_err_and(|error| error.to_string().contains(NO_SUCH_FACE));
+    if missing { capture_in(s, value, cmd, internal, false).or(first) } else { first }
+}
+
+fn capture_in(s: &Session, value: &Value, cmd: &str, internal: bool, use_index: bool) -> Result<PlaneRef> {
     let FacePickForm { point, fixed, body: requested_body, index: requested_index, path: requested_path } =
         face_pick_form(value).map_err(|why| bad(cmd, why))?;
+    let requested_index = requested_index.filter(|_| use_index);
     let state = s.model.state();
     let doc = s.placed_document();
     let author_path = s.active_occurrence_path.clone().unwrap_or_else(|| doc.first_path(s.active_component));
@@ -189,7 +204,7 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
         if curved {
             bad(cmd, "the selected face is curved or is not an exact plane; choose a flat face or an explicit fixed plane")
         } else {
-            bad(cmd, "the selected planar face no longer exists; choose another face or an explicit fixed plane")
+            bad(cmd, NO_SUCH_FACE)
         }
     })?;
     if fixed {
