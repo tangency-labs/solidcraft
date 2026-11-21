@@ -65,7 +65,9 @@ pub use solidcraft_kernel::develop::crossings;
 pub use solidcraft_kernel::develop::curve_through;
 pub use solidcraft_kernel::develop::hermite;
 pub use solidcraft_kernel::develop::offset_contour;
+pub use solidcraft_kernel::develop::retarget_corner_tail;
 pub use solidcraft_kernel::develop::segment_in_region;
+pub use solidcraft_kernel::develop::set_back_past;
 pub use solidcraft_kernel::develop::tear_slit;
 pub use solidcraft_kernel::query::Query;
 

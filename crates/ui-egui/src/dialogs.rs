@@ -11372,6 +11372,7 @@ mod refused_ok_tests {
                     edge: [5; 4],
                     ghost: false,
                     tint_new: true,
+                    glass_new: false,
                     cut_tint: true,
                 },
             )
@@ -11400,6 +11401,7 @@ mod refused_ok_tests {
     #[test]
     fn flange_corner_join_dialog_controls_edit_and_reset_source_choices() {
         let mut harness = Harness::new();
+        steps(&mut harness, &[json!({"call": "ui.resize", "params": {"width": 1600, "height": 1400}})]);
         for (command, params) in [
             ("parameters.add", json!({"name": "Overlap", "expression": "1.5 mm"})),
             ("sketch.create", json!({"plane": "XY", "name": "Base"})),

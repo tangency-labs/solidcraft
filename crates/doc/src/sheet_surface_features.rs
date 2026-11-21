@@ -13,6 +13,7 @@
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 use solidcraft_develop::Cut;
 use solidcraft_develop::prelude::*;
+use solidcraft_develop::set_back_past;
 use solidcraft_develop::{Anchor, Bend, Datum, Joint, JointKind, Lap, Panel, Relief, Rigid3, Rip, Sheet, Surface, Tail, ZoneEnds, develop};
 use solidcraft_geom::prelude::*;
 use solidcraft_kernel::BoolOp;
@@ -503,7 +504,8 @@ impl SurfaceSheet {
                 .ok_or_else(|| DocError::Invalid("the corner side runs along its bend".into()))?;
             let rise_axis = if along.perp().dot(direction) > 0.0 { along.perp() } else { -along.perp() };
             let target = next.panels.get_mut(panel).ok_or_else(|| DocError::Invalid("the corner panel is no longer present".into()))?;
-            target.region = retarget_corner_tail(&target.region, from, end, into, rise_axis, old_cut, new_cut)?;
+            target.region = solidcraft_develop::retarget_corner_tail(&target.region, from, end, into, rise_axis, old_cut, new_cut)
+                .map_err(|reason| DocError::Invalid(reason.into()))?;
         }
         let Some(Joint { kind: JointKind::Rip(rip), .. }) = next.joints.get_mut(joint) else {
             return err("the corner joint is no longer present");
@@ -3857,145 +3859,6 @@ fn half(region: &Region2, n: Vec2, from: f64) -> Result<Vec<Region2>> {
 
 fn area(r: &[Region2]) -> f64 {
     r.iter().map(Region2::area).sum()
-}
-
-/// `region` with its side from `from` along `m` for `rise` (as `to_line` leaves it) set back `by`
-/// toward `into`, square to it, past `h` along it: the side steps in at `h` and runs on parallel,
-/// and the edge past the side runs on along its line to meet it. Where the side is slanted and
-/// reaches only a little past `h` (a wall at 90° beside one at 60°), the step meets that edge
-/// before it has gone `by`: the line `by` in meets the edge at or below `h`, where the rip's cut
-/// reaches it, so the step stops at the edge and the edge runs on from there. (Stepping on past the
-/// edge left the side running back down that line, the way the rip's cut comes up it.) `None`
-/// where the side or that edge isn't a straight line of the outline, or the edge would run
-/// backwards.
-fn set_back_past(region: &Region2, from: Vec2, m: Vec2, rise: f64, h: f64, into: Vec2, by: f64) -> Option<Region2> {
-    let segs = &region.outer.segs;
-    let n = segs.len();
-    let top = from + m * rise;
-    let tol = rise.max(1.0) * 1e-9;
-    let same = |p: Vec2, q: Vec2| p.dist(q) <= tol;
-    let (k, side) = segs
-        .iter()
-        .enumerate()
-        .find(|(_, g)| matches!(**g, Seg2::Line { a, b } if (same(a, from) && same(b, top)) || (same(a, top) && same(b, from))))?;
-    let up = matches!(*side, Seg2::Line { a, .. } if same(a, from));
-    // The edge past the side, at its top (`segs` holds the side, so `n` > 0).
-    let past_at = if up { (k + 1) % n } else { (k + n - 1) % n };
-    let Seg2::Line { a: pa, b: pb } = *segs.get(past_at)? else { return None };
-    let (p, q) = (from + m * h, from + m * h + into * by);
-    let w = pb - pa;
-    let cross = m.cross(w);
-    if cross.abs() <= 1e-12 {
-        return None;
-    }
-    // How far on along `m` from `q` the line `by` in meets the edge past the side: ahead of `q`
-    // where the side runs on past the step; else the step itself reaches the edge, where it stops.
-    let ahead = (pa - q).cross(w) / cross;
-    let mut pts = if ahead > 0.0 {
-        vec![from, p, q, q + m * ahead]
-    } else {
-        let across = into.cross(w);
-        if across.abs() <= 1e-12 {
-            return None;
-        }
-        vec![from, p, p + into * ((pa - p).cross(w) / across)]
-    };
-    let end = *pts.last()?;
-    // The edge past the side keeps its way.
-    let kept = if up { pb - end } else { end - pa };
-    if !(kept.dot(w) > 0.0) {
-        return None;
-    }
-    if !up {
-        pts.reverse();
-    }
-    let side: Vec<Seg2> = pts.windows(2).map(|x| Seg2::Line { a: x[0], b: x[1] }).collect();
-    let mut out = segs.clone();
-    *out.get_mut(past_at)? = if up { Seg2::Line { a: end, b: pb } } else { Seg2::Line { a: pa, b: end } };
-    out.splice(k..=k, side);
-    Some(Region2 { outer: Loop2 { segs: out }, holes: region.holes.clone() })
-}
-
-fn retarget_corner_tail(region: &Region2, from: Vec2, end: Vec2, into: Vec2, rise_axis: Vec2, old_cut: f64, new_cut: f64) -> Result<Region2> {
-    let height = from.dist(end);
-    let direction = (end - from).normalized().ok_or_else(|| DocError::Invalid("the corner has no length".into()))?;
-    let tolerance = height.max(1.0) * 1e-9;
-    let same = |first: Vec2, second: Vec2| first.dist(second) <= tolerance;
-    let old_end = end + into * old_cut;
-    let mut restored = region.clone();
-    if old_cut.abs() > 1e-12 {
-        let mut steps = region.outer.segs.iter().enumerate().filter_map(|(index, segment)| match *segment {
-            Seg2::Line { a, b } if same(a, end) && same(b, old_end) => Some((index, true)),
-            Seg2::Line { a, b } if same(a, old_end) && same(b, end) => Some((index, false)),
-            _ => None,
-        });
-        if let Some((step, forward)) = steps.next() {
-            if steps.next().is_some() || region.outer.segs.len() < 4 {
-                return err("the corner's previous side trim is ambiguous");
-            }
-            let count = region.outer.segs.len();
-            let start = (step + count - 1) % count;
-            let mut segments: Vec<_> = region.outer.segs.iter().cycle().skip(start).take(count).copied().collect();
-            let (Some(Seg2::Line { a: first_start, b: first_end }), Some(Seg2::Line { a: last_start, b: last_end })) =
-                (segments.first().copied(), segments.get(2).copied())
-            else {
-                return err("the corner's previous side trim was modified");
-            };
-            let (top, connected) = if forward {
-                (last_end, same(first_start, from) && same(first_end, end) && same(last_start, old_end))
-            } else {
-                (first_start, same(first_end, old_end) && same(last_start, end) && same(last_end, from))
-            };
-            let past = if forward { 3 } else { count - 1 };
-            let Some(Seg2::Line { a: past_start, b: past_end }) = segments.get(past).copied() else {
-                return err("the edge past the corner's previous trim is not straight");
-            };
-            if !connected
-                || !same(if forward { past_start } else { past_end }, top)
-                || direction.cross(top - old_end).abs() > tolerance
-                || (top - old_end).dot(direction) <= tolerance
-            {
-                return err("the corner's previous side trim was modified");
-            }
-            let original_top = cross_lines((from, direction), (past_start, past_end - past_start))
-                .ok_or_else(|| DocError::Invalid("the edge past the corner runs along its side".into()))?;
-            if (original_top - from).dot(direction) <= height + tolerance {
-                return err("the corner's previous side trim no longer reaches past the other flange");
-            }
-            if let Some(segment) = segments.get_mut(past) {
-                *segment = if forward { Seg2::Line { a: original_top, b: past_end } } else { Seg2::Line { a: past_start, b: original_top } };
-            }
-            let side = if forward { Seg2::Line { a: from, b: original_top } } else { Seg2::Line { a: original_top, b: from } };
-            segments.splice(0..3, [side]);
-            restored.outer.segs = segments;
-        }
-    }
-    let mut sides = restored.outer.segs.iter().filter_map(|segment| {
-        let Seg2::Line { a, b } = *segment else { return None };
-        let top = if same(a, from) {
-            b
-        } else if same(b, from) {
-            a
-        } else {
-            return None;
-        };
-        let rise = (top - from).dot(direction);
-        (rise > height + tolerance && direction.cross(top - from).abs() <= tolerance).then_some(rise)
-    });
-    let Some(rise) = sides.next() else {
-        if restored.outer.segs.iter().any(|segment| (segment.start() - end).dot(rise_axis) > tolerance) {
-            return err("the corner's taller side was modified; its trim cannot be changed");
-        }
-        return Ok(restored);
-    };
-    if sides.next().is_some() {
-        return err("the corner's taller side is ambiguous");
-    }
-    if new_cut.abs() <= 1e-12 {
-        return Ok(restored);
-    }
-    set_back_past(&restored, from, direction, rise, height, into, new_cut)
-        .ok_or_else(|| DocError::Invalid("the edge past the corner's taller side is not straight".into()))
 }
 
 /// How far a point lies from the segment `a`–`b`.

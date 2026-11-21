@@ -32,6 +32,53 @@ pub use solidcore::develop::{
     MAX_JOINTS, MAX_PANELS, MIN_BEAD_RADIUS,
 };
 
+/// Sets back a record region's flange side using the kernel's contour edit.
+pub fn set_back_past(
+    region: &Region2,
+    from: Vec2,
+    direction: Vec2,
+    rise: f64,
+    height: f64,
+    into: Vec2,
+    by: f64,
+) -> Option<Region2> {
+    k::set_back_past(
+        &region2(region),
+        vec2(from),
+        vec2(direction),
+        rise,
+        height,
+        vec2(into),
+        by,
+    )
+    .map(|region| record_region2(&region))
+}
+
+/// Replaces a previous corner setback on a record region.
+///
+/// # Errors
+/// The kernel could not restore or trim the contour unambiguously.
+pub fn retarget_corner_tail(
+    region: &Region2,
+    from: Vec2,
+    end: Vec2,
+    into: Vec2,
+    rise_axis: Vec2,
+    old_cut: f64,
+    new_cut: f64,
+) -> Result<Region2, &'static str> {
+    k::retarget_corner_tail(
+        &region2(region),
+        vec2(from),
+        vec2(end),
+        vec2(into),
+        vec2(rise_axis),
+        old_cut,
+        new_cut,
+    )
+    .map(|region| record_region2(&region))
+}
+
 /// Lays the sheet out flat ([`solidcore::develop::develop`]): `anchors` says where some panels'
 /// neutral charts lie in the flat frame.
 ///
