@@ -300,6 +300,7 @@ const LAYOUT_MENU: [TabMenuRow<'static>; 8] = [
 
 const VIEWS: [ViewTab<'static>; 3] = [
     ViewTab {
+        compass: None,
         name: "Model",
         icon: "model",
         accent: egui::Color32::BLUE,
@@ -313,6 +314,7 @@ const VIEWS: [ViewTab<'static>; 3] = [
         tip: "Model",
     },
     ViewTab {
+        compass: None,
         name: "Sketch 2",
         icon: "sketch",
         accent: egui::Color32::GREEN,
@@ -326,6 +328,7 @@ const VIEWS: [ViewTab<'static>; 3] = [
         tip: "Sketch 2",
     },
     ViewTab {
+        compass: None,
         name: "Sheet 1",
         icon: "sheet",
         accent: egui::Color32::RED,
@@ -888,6 +891,17 @@ fn a_view_menu_opens_under_its_view_and_turns_off_rows_that_do_not_apply() {
     rig.frame(Vec::new());
     rig.frame(Vec::new());
     assert_eq!(rig.press(rig.at("t:menu:vothers"), egui::PointerButton::Primary), vec![TabAction::ViewMenu { view: 2, id: "vothers".into() }]);
+}
+
+#[test]
+fn shift_f10_opens_the_menu_of_the_focused_view_tab() {
+    let mut rig = TabsRig::with(Some(true));
+    rig.clear = true;
+    rig.frame(Vec::new());
+    rig.press(rig.at("t:view:0"), egui::PointerButton::Primary);
+    rig.frame(vec![egui::Event::Key { key: egui::Key::F10, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::SHIFT }]);
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:menu:vclose").is_some());
 }
 
 #[test]
@@ -1868,6 +1882,8 @@ fn layout_test_data(visible: usize, window_count: usize) -> crate::view_layout_m
     use crate::view_layout_menu::{LayoutMenu, LayoutText, LayoutView, LayoutWindow};
     LayoutMenu {
         text: LayoutText::default(),
+        saved: Vec::new(),
+        matching_saved: None,
         design: "One".into(),
         window: 0,
         native: true,

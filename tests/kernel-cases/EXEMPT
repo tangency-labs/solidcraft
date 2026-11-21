@@ -473,9 +473,16 @@ storage.get                       plugins: a plugin's own data in the design, no
 storage.list                      plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 storage.patch                     plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 storage.set                       plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
+tab.layout.apply                   manages an application view layout; no geometry, tested in the engine and UI
+tab.layout.list                    manages an application view layout; no geometry, tested in the engine and UI
+tab.layout.remove                  manages an application view layout; no geometry, tested in the engine and UI
+tab.layout.rename                  manages an application view layout; no geometry, tested in the engine and UI
+tab.layout.save                    manages an application view layout; no geometry, tested in the engine and UI
 tab.view.activate                 shows a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.beside                   puts a view beside another in the tiling: no geometry, tested in the views crate and the UI's documents tests
 tab.view.close                    closes a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
+tab.view.close_others             closes the other views in a window; no geometry, tested in the engine and UI
+tab.view.close_right              closes the views to the right of a view in a window; no geometry, tested in the engine and UI
 tab.view.duplicate                copies a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.equal_sizes              changes tile ratios; no geometry, tested in the views crate and engine
 tab.view.layout                   sets how the design's views are tiled: no geometry, tested in the views crate and the UI's documents tests
@@ -541,6 +548,7 @@ view.render_stage                 the view: camera, layout, display
 view.ribbon_tabs_only             the view: camera, layout, display
 view.right                        the view: camera, layout, display
 view.save                         the view: camera, layout, display
+view.set_compass                  per-view UI visibility, no geometry
 view.shots_strip                  the view: camera, layout, display
 view.spin                         the view: camera, layout, display
 view.status_details               the view: camera, layout, display
