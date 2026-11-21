@@ -2740,7 +2740,9 @@ mod importers {
         assert!(!dialog.hook);
         assert!(!root.join("settings/plugin-user-data/smp.json").exists(), "choosing a file executes no importer");
         session.plugin_state.dialog_folders = Some(folders::DialogFolders {
-            plugin: "smp".into(), approval: package.approval, entry: "convert".into(),
+            plugin: "smp".into(),
+            approval: package.approval,
+            entry: "convert".into(),
             folders: vec![FileGrant { name: "library".into(), folder: folders::directory(&library).unwrap(), read: true, write: false }],
         });
         session.execute("file.import", &json!({"path":file,"options":options})).unwrap();
@@ -3038,10 +3040,7 @@ mod importers {
         manifest["optional_capabilities"] = json!(["dialog@0.1"]);
         std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
         let package = read_package(&folder).unwrap();
-        assert!(
-            import_dialog(&session, &folder, &package.approval, "convert", &file, 10, &json!({})).is_err(),
-            "a supported optional hook runs"
-        );
+        assert!(import_dialog(&session, &folder, &package.approval, "convert", &file, 10, &json!({})).is_err(), "a supported optional hook runs");
         manifest["optional_capabilities"] = json!(["dialog@0.2"]);
         std::fs::write(root.join("plugins/smp/plugin.json"), manifest.to_string()).unwrap();
         let package = read_package(&folder).unwrap();

@@ -916,9 +916,8 @@ fn run_mode<H: PluginHost + 'static>(
         .iter()
         .any(|c| c.split_once('@').is_some_and(|(name, version)| name == "forms" && craft_plugin::capability_version(version) == Some((0, 1))));
     let user_storage = granted_capabilities.iter().any(|c| c.starts_with("user-storage@"));
-    let (mut state, outcome) = execute(
-        host, runtime, entry, params, compiled, commands, (folders, input_folders), granted_capabilities, forms, user_storage, dialog,
-    );
+    let (mut state, outcome) =
+        execute(host, runtime, entry, params, compiled, commands, (folders, input_folders), granted_capabilities, forms, user_storage, dialog);
     let result = (|| match outcome {
         Ok(value) => match state.host.commit_transaction() {
             Ok(()) => state.publish_writes().map(|()| value),
@@ -1189,7 +1188,8 @@ pub(super) fn check_component(manifest: &Manifest, bytes: &[u8], options: Runtim
         importer_dialog_bindings::ImporterDialogPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
         importer_dialog_bindings::ImporterDialogPluginPre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
     } else if importer {
-        importer_storage_bindings::ImporterPluginWithStorage::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;
+        importer_storage_bindings::ImporterPluginWithStorage::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s)
+            .map_err(link)?;
         importer_storage_bindings::ImporterPluginWithStoragePre::new(linker.instantiate_pre(&component).map_err(link)?).map_err(link)?;
     } else {
         bindings::CommandPlugin::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |s| s).map_err(link)?;

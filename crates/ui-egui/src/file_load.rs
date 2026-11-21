@@ -2130,9 +2130,9 @@ mod tests {
         let library = h.dir.join("library");
         std::fs::create_dir_all(&library).unwrap();
         let entry = serde_json::from_value(json!({"name":"convert","kind":"importer","effect":"open","extensions":["smp"],
-            "input_schema":{"type":"object","properties":{
-                "library":{"type":"string","format":"directory","x-solidcraft-grant":"read"}
-            }}}))
+        "input_schema":{"type":"object","properties":{
+            "library":{"type":"string","format":"directory","x-solidcraft-grant":"read"}
+        }}}))
         .unwrap();
         h.app.plugin_menu.listed = vec![crate::plugins::Plugin {
             id: "sample".into(),

@@ -1811,7 +1811,6 @@ fn folder_reads_confine_paths_resolve_case_and_share_the_import_budgets() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
-
 fn folder_import_component() -> Vec<u8> {
     let (package, version) = API.split_once('@').unwrap();
     let source = folder_or_files_source(&[false], false, "i32.const 4 i32.load i32.const 8 i32.load i32.const 32 call $write", true);
@@ -1954,9 +1953,7 @@ fn storage_importer_dialog_component(code: &str) -> Vec<u8> {
       i32.const 0)
     (func (export "execute")"#
     );
-    let source = include_str!("../importer_storage_fixture.wat")
-        .replace("__CODE__", "")
-        .replace("    (func (export \"execute\")", &hook);
+    let source = include_str!("../importer_storage_fixture.wat").replace("__CODE__", "").replace("    (func (export \"execute\")", &hook);
     let (prefix, _) = source.rsplit_once(')').unwrap();
     wat::parse_str(format!(
         r#"{prefix}
