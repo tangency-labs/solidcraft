@@ -98,9 +98,10 @@ or profile, and OK stores exactly those. A Join starts with the body its profile
 (or whose face it extrudes). When some bodies are hidden, a Join or Cut starts with the shown
 bodies instead, so a hidden body is left alone; visibility is read only then, never when the model
 rebuilds. Until you pick or remove a body there, the box follows your other choices; after that
-it keeps yours. Left empty, the box says **Bodies it touches**: the extrusion joins or cuts every
-body it touches each time the model rebuilds, hidden or not. Clearing the box (its **×**) chooses
-that. Editing a feature shows the bodies it stored, or Bodies it touches when it stored none.
+it keeps yours. Left empty, the box says **All**: a Join joins every body the extrusion touches or
+intersects, and a Cut cuts every body it intersects, each time the model rebuilds, even hidden
+bodies. Clearing the box (its **×**) chooses that. Editing a feature shows the bodies it stored,
+or All when it stored none.
 
 A Join **To Object** joins the body it runs to only when that body is one of its **Target
 Bodies**. Picking the To Object puts that body in the box, so you can see it. Take it out of the

@@ -458,7 +458,7 @@ fn a_target_taken_out_by_hand_stays_out() {
     remove_target(&mut h, "Target");
     remove_target(&mut h, "Base");
     assert!(target_bodies(dialog(&h)).is_empty(), "a cleared box stays cleared");
-    assert_eq!(targets_chip(&h), Some("Automatic"));
+    assert_eq!(targets_chip(&h), Some("All"));
     pick_to(&mut h, Vec3::new(20.0, 20.0, 60.0));
     set_operation(&mut h, 2);
     set_operation(&mut h, 1);
@@ -494,7 +494,7 @@ fn target_bodies_show_the_shown_bodies_or_say_automatic() {
     set_operation(&mut h, 1);
     assert!(target_bodies(dialog(&h)).is_empty());
     assert!(extrude_params(&h).get("targets").is_none(), "the automatic scope");
-    assert_eq!(targets_chip(&h), Some("Automatic"));
+    assert_eq!(targets_chip(&h), Some("All"));
 }
 
 /// Editing a Join To Object made before the body it runs to was one of its targets, which joins

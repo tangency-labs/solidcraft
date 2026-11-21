@@ -5352,7 +5352,7 @@ pub(crate) fn empty_field_prompt(d: &Dialog, inp: &SelInput) -> Option<&'static 
     if inp.label == "Edges" {
         Some(tr("Select edges"))
     } else if inp.label == EXTRUDE_TARGETS && matches!(d.kind, Kind::Extrude { .. }) {
-        Some(solidcraft_ui_text::tr("dialog.targets_touching"))
+        Some(solidcraft_ui_text::tr("dialog.targets_all"))
     } else {
         None
     }
