@@ -3440,6 +3440,58 @@ mod header_report_tests {
         assert!(!solidcraft_engine::io::is_design_container(&std::fs::read(saved).unwrap()), "subsequent Save keeps a .json choice");
     }
 
+    /// Export OBJ keeps its direct picker and whole-design scope, regardless of selection or
+    /// remembered Save As Mesh options. An empty filename template uses the design's name.
+    #[test]
+    fn obj_export_keeps_the_direct_picker_filename_and_all_bodies() {
+        for count in [1, 2] {
+            let mut h = crate::scenario::Harness::new();
+            let offered = std::rc::Rc::new(std::cell::RefCell::new(Vec::<(String, Vec<String>)>::new()));
+            let (seen, dir) = (offered.clone(), h.dir.clone());
+            h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+                seen.borrow_mut().push((name.to_string(), extensions.iter().map(|e| e.to_string()).collect()));
+                Box::pin(std::future::ready(Some(dir.join(name).to_string_lossy().into_owned())))
+            }));
+            for (name, x) in [("Base", 0), ("Pin", 20)].into_iter().take(count) {
+                h.app.run("solid.box", json!({"length":2,"width":3,"height":4,"corner":[x,0,0],"body_name":name,"operation":"new_body"})).unwrap();
+            }
+            h.app.session.doc_mut().name = "Bracket".into();
+            h.app.preferences.export_name.clear();
+            h.app.preferences.save_mesh_format = "3mf".into();
+            h.app.preferences.save_mesh_quality = "finest".into();
+            for selected in [false, true] {
+                for route in ["menu", "command", "direct"] {
+                    let output = h.dir.join("Bracket.obj");
+                    if output.exists() {
+                        std::fs::remove_file(&output).unwrap();
+                    }
+                    h.app.session.selection = if selected { vec![solidcraft_engine::Sel::Body { name: "Base".into() }] } else { Vec::new() };
+                    match route {
+                        "menu" => {
+                            h.frames(3);
+                            h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
+                            h.step(&json!({"widget":"Export OBJ…"})).unwrap();
+                        }
+                        "command" => h.app.start("file.export_obj"),
+                        _ => export(&mut h.app, "obj"),
+                    }
+                    assert!(h.app.dialog.is_none(), "{route}: OBJ must not open Save As Mesh");
+                    h.frames(3);
+                    h.settle();
+                    assert_eq!(offered.borrow_mut().drain(..).collect::<Vec<_>>(), [("Bracket.obj".to_string(), vec!["obj".to_string()])], "{route}");
+                    let bytes = std::fs::read(&output).unwrap();
+                    let (objects, warnings) = solidcraft_engine::io::read_obj(&bytes, "Bracket").unwrap();
+                    assert!(warnings.is_empty(), "{warnings:?}");
+                    let names: Vec<_> = objects.iter().map(|o| o.name.as_str()).collect();
+                    let expected: Vec<_> = ["Base", "Pin"].into_iter().take(count).collect();
+                    assert_eq!(names, expected, "{route}: export every body with selected={selected}");
+                    assert_eq!(h.app.preferences.save_mesh_format, "3mf");
+                    assert_eq!(h.app.preferences.save_mesh_quality, "finest");
+                }
+            }
+        }
+    }
+
     /// File › Export STL… and Export 3MF… both open the Save as mesh dialog with their format
     /// chosen (whatever was used last), and command search finds the export by format or purpose.
     #[test]

@@ -31,7 +31,8 @@ use solidcraft_theme::Tokens;
 
 /// The formats, as shown and as `file.save_mesh` names them.
 /// (label, `format` parameter, file extension).
-const FORMATS: [(&str, &str, &str); 3] = [("STL", "stl", "stl"), ("3MF", "3mf", "3mf"), ("3MF with face tags", "3mf-tagged", "3mf")];
+const FORMATS: [(&str, &str, &str); 4] =
+    [("STL", "stl", "stl"), ("3MF", "3mf", "3mf"), ("3MF with face tags", "3mf-tagged", "3mf"), ("OBJ", "obj", "obj")];
 /// The list key of the EasyPrint row (no slicer has it: ids are words, programs are paths).
 const EASYPRINT: &str = "easyprint";
 /// How closely the mesh follows curved faces (#4747): the label and `file.save_mesh`'s `quality`.
@@ -49,6 +50,8 @@ pub struct SaveMesh {
     open: bool,
     /// Index into [`QUALITIES`] (Save As Mesh; Send to Slicer has no quality row).
     quality: usize,
+    /// Explicit consent to write the remaining bodies if any face cannot mesh.
+    allow_missing: bool,
     /// The chosen slicer: an installed one's id, or the path of one the user added.
     slicer: String,
     /// The slicer list has not been read for this opening yet.
@@ -142,7 +145,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         _ => String::new(),
     };
     let quality = QUALITIES.iter().position(|q| q.1 == p.save_mesh_quality).unwrap_or(0);
-    let kind = Kind::SaveMesh(SaveMesh { format, quality, open, slicer, stale: true, shown: None });
+    let kind = Kind::SaveMesh(SaveMesh { format, quality, allow_missing: false, open, slicer, stale: true, shown: None });
     let mut inputs = vec![SelInput::new("Bodies", BODIES, true)];
     // The design's only body is the one to export (#13098); with more, nothing says which.
     let only = body_picks(app, false);
@@ -392,8 +395,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
         });
     }
     if !k.open {
-        choice_row(ui, "Format", "sm_format", &mut k.format, &FORMATS.map(|f| f.0));
+        let formats = FORMATS.map(|f| if f.1 == "obj" { solidcraft_ui_text::tr("ui.export_format_obj") } else { f.0 });
+        choice_row(ui, "Format", "sm_format", &mut k.format, &formats);
         choice_row(ui, "Quality", "sm_quality", &mut k.quality, &QUALITIES.map(|q| q.0));
+        form_row(ui, "", |ui| crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("ui.export_allow_missing"), &mut k.allow_missing));
         return false;
     }
     if k.stale {
@@ -558,6 +563,12 @@ fn add_custom(app: &mut SolveApp, path: &str) -> Result<(), String> {
 pub fn commands(k: &SaveMesh, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, String> {
     let format = FORMATS.get(k.format).map_or("stl", |f| f.1);
     let mut p = json!({ "format": format });
+    if !k.open
+        && k.allow_missing
+        && let Some(p) = p.as_object_mut()
+    {
+        p.insert("allow_missing".into(), json!(true));
+    }
     // Standard is the command's own default, so it is left out. Sending has no quality row.
     if let Some((_, quality)) = QUALITIES.get(k.quality).filter(|_| k.quality > 0 && !k.open) {
         p["quality"] = json!(quality);
@@ -577,6 +588,12 @@ pub fn commands(k: &SaveMesh, inputs: &[SelInput]) -> Result<Vec<(String, Value)
         }
         p["slicer"] = json!(k.slicer);
         return Ok(vec![("file.send_to_slicer".into(), p)]);
+    }
+    if format == "obj" {
+        if let Some(p) = p.as_object_mut() {
+            p.remove("format");
+        }
+        return Ok(vec![("file.export_obj".into(), p)]);
     }
     Ok(vec![("file.save_mesh".into(), p)])
 }
@@ -599,7 +616,7 @@ pub fn button(k: &SaveMesh) -> &'static str {
 /// Save: ask for a file name and write the file. Send: write it to the slicer folder and start the
 /// slicer with it, with no file dialog.
 pub fn run(app: &mut SolveApp, k: &SaveMesh, inputs: &[SelInput]) -> Result<(), String> {
-    let (_, params) = commands(k, inputs)?.into_iter().next().ok_or("nothing to save")?;
+    let (command, params) = commands(k, inputs)?.into_iter().next().ok_or("nothing to save")?;
     if k.open {
         app.preferences.send_slicer = k.slicer.clone();
         if k.slicer == EASYPRINT {
@@ -617,18 +634,18 @@ pub fn run(app: &mut SolveApp, k: &SaveMesh, inputs: &[SelInput]) -> Result<(), 
     // The file dialog answers later; the dialog closes meanwhile, as for every export.
     app.pick_save(&format!("{name}.{ext}"), &[ext], move |app, path| {
         if let Some(path) = path {
-            save(app, params, &path);
+            save(app, &command, params, &path);
         }
     });
     Ok(())
 }
 
 /// Run `file.save_mesh` into `path` and report what happened.
-fn save(app: &mut SolveApp, mut params: Value, path: &str) {
+fn save(app: &mut SolveApp, command: &str, mut params: Value, path: &str) {
     // Runs from the file picker's answer, outside the frame's language scope.
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     params["path"] = json!(path);
-    let Ok(result) = app.run("file.save_mesh", params) else { return };
+    let Ok(result) = app.run(command, params) else { return };
     report(app, &result);
 }
 
@@ -636,7 +653,16 @@ fn save(app: &mut SolveApp, mut params: Value, path: &str) {
 fn report(app: &mut SolveApp, result: &Value) {
     let path = result.get("path").and_then(Value::as_str).unwrap_or_default();
     let skipped = result.get("skipped").and_then(Value::as_array).map_or(Vec::new(), |a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>());
-    let skipped_suffix = if skipped.is_empty() { String::new() } else { format!(" (skipped {})", skipped.join(", ")) };
+    let skipped_suffix = if skipped.is_empty() {
+        String::new()
+    } else {
+        let details = result
+            .get("warnings")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("\n"))
+            .unwrap_or_default();
+        format!("\n{}", solidcraft_ui_text::format("ui.export_skipped", &[("bodies", &skipped.join(", ")), ("details", &details)]))
+    };
     match result.get("slicer_error").and_then(Value::as_str) {
         Some(e) => app.set_status(e.to_string(), true),
         None => match result.get("slicer").and_then(Value::as_str) {
@@ -657,12 +683,12 @@ fn report(app: &mut SolveApp, result: &Value) {
                 if result.get("stl_fallback").and_then(Value::as_bool) == Some(true) {
                     line = format!("{line}. {}", solidcraft_ui_text::tr("ui.slicer_stl_fallback"));
                 }
-                app.set_status(line, false);
+                app.set_status(line, !skipped.is_empty());
             }
             None => {
                 let saved = solidcraft_ui_text::format("ui.saved_to", &[("path", path)]);
                 let line = if skipped_suffix.is_empty() { saved } else { format!("{saved}{skipped_suffix}") };
-                app.set_status(line, false);
+                app.set_status(line, !skipped.is_empty());
             }
         },
     }
@@ -960,7 +986,7 @@ mod tests {
 
     #[test]
     fn send_to_slicer_asks_for_bodies_and_a_slicer_but_not_a_format() {
-        let k = SaveMesh { format: 0, quality: 0, open: true, slicer: "prusa".into(), stale: false, shown: None };
+        let k = SaveMesh { format: 0, quality: 0, allow_missing: false, open: true, slicer: "prusa".into(), stale: false, shown: None };
         let mut input = SelInput::new("Bodies", BODIES, true);
         assert!(commands(&k, std::slice::from_ref(&input)).is_err());
         input.items = vec![Sel::Body { name: "Part".into() }];
@@ -979,7 +1005,7 @@ mod tests {
     fn a_remembered_quality_goes_to_save_but_not_to_send() {
         let mut input = SelInput::new("Bodies", BODIES, true);
         input.items = vec![Sel::Body { name: "Part".into() }];
-        let k = SaveMesh { format: 0, quality: 2, open: true, slicer: "prusa".into(), stale: false, shown: None };
+        let k = SaveMesh { format: 0, quality: 2, allow_missing: false, open: true, slicer: "prusa".into(), stale: false, shown: None };
         let (_, sent) = commands(&k, std::slice::from_ref(&input)).unwrap().remove(0);
         assert_eq!(sent.get("quality"), None, "sending has no quality row: the default applies");
         let (_, saved) = commands(&SaveMesh { open: false, ..k }, &[input]).unwrap().remove(0);
@@ -1002,7 +1028,7 @@ mod tests {
         h.app.session.doc_mut().name = "Bracket".into();
         let mut bodies = SelInput::new("Bodies", BODIES, true);
         bodies.items = vec![Sel::Body { name: "Base".into() }];
-        let stl = SaveMesh { format: 0, quality: 0, open: false, slicer: String::new(), stale: false, shown: None };
+        let stl = SaveMesh { format: 0, quality: 0, allow_missing: false, open: false, slicer: String::new(), stale: false, shown: None };
         let offer = |h: &mut crate::scenario::Harness| {
             // One file picker at a time: the STEP export finishes before the mesh asks.
             crate::toolbar::export(&mut h.app, "step");
@@ -1102,7 +1128,7 @@ mod tests {
             assert_eq!(bodies(&mut h, id), one, "{id}");
         }
         let (_, p) = commands(
-            &SaveMesh { format: 0, quality: 0, open: false, slicer: String::new(), stale: true, shown: None },
+            &SaveMesh { format: 0, quality: 0, allow_missing: false, open: false, slicer: String::new(), stale: true, shown: None },
             &h.app.dialog.as_ref().unwrap().inputs,
         )
         .map(|mut c| c.remove(0))
@@ -1113,6 +1139,57 @@ mod tests {
         h.app.preferences.export_selects_only_body = true;
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[20,0,0],"operation":"new_body","body_name":"Two"})).unwrap();
         assert!(bodies(&mut h, "file.save_mesh").is_empty(), "with two bodies nothing says which one is meant");
+    }
+
+    #[test]
+    fn allow_missing_is_explicit_for_each_export() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 2, "width": 3, "height": 4})).unwrap();
+        for format in ["stl", "3mf", "3mf-tagged", "obj"] {
+            start_with_format(&mut h.app, format);
+            h.frames(3);
+            let d = h.app.dialog.as_ref().unwrap();
+            let Kind::SaveMesh(k) = &d.kind else { panic!("no mesh dialog") };
+            assert_eq!(commands(k, &d.inputs).unwrap()[0].1.get("allow_missing"), None);
+            h.step(&json!({"widget": "Allow missing bodies (report each skipped body)"})).unwrap();
+            let d = h.app.dialog.as_ref().unwrap();
+            let Kind::SaveMesh(k) = &d.kind else { panic!("no mesh dialog") };
+            assert_eq!(commands(k, &d.inputs).unwrap()[0].1["allow_missing"], true);
+            crate::dialogs::cancel(&mut h.app);
+        }
+    }
+
+    #[test]
+    fn mesh_export_options_fit_a_small_window() {
+        for (width, height) in [(1280., 720.), (800., 600.)] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.app.run("solid.box", json!({"length": 2, "width": 3, "height": 4})).unwrap();
+            start_with_format(&mut h.app, "obj");
+            h.ctx = egui::Context::default();
+            crate::fonts::setup_bundled_fonts(&h.ctx);
+            let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, height));
+            let mut textures = std::collections::HashMap::new();
+            let mut output = None;
+            for frame in 0..6 {
+                let current = h
+                    .ctx
+                    .run_ui(egui::RawInput { screen_rect: Some(bounds), time: Some(frame as f64 / 60.), ..Default::default() }, |ui| h.app.ui(ui));
+                crate::ui_kit::test_textures_update(&mut textures, &current.textures_delta);
+                output = Some(current);
+            }
+            let output = output.unwrap();
+            let option = crate::test_support::text_shapes(&output)
+                .find(|t| t.galley.text() == solidcraft_ui_text::tr("ui.export_allow_missing"))
+                .expect("the missing-body option is visible");
+            assert!(bounds.contains_rect(option.galley.rect.translate(option.pos.to_vec2())), "option must fit at {width}×{height}");
+            if let Ok(dir) = std::env::var("SOLIDCRAFT_EXPORT_EVIDENCE") {
+                std::fs::create_dir_all(&dir).unwrap();
+                crate::ui_kit::test_raster(&h.ctx, output.shapes, output.pixels_per_point, bounds, &textures)
+                    .save(std::path::Path::new(&dir).join(format!("export-{width}x{height}.png")))
+                    .unwrap();
+            }
+        }
     }
 
     /// #18780: report toast lists skipped bodies when an export skips untessellatable bodies.

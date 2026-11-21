@@ -63,6 +63,8 @@ Work the part out as numbers first. Then build it in a few large `batch` calls, 
 ## Finish
 `export {path}` writes `.step` for CAD, `.3mf`/`.stl` for printing, or `.urdf` (an assembly with joints, for robot simulators). `save {path}` writes `.sc` (`.solidcraft` files from earlier releases still open).
 
+STL, OBJ and 3MF exports refuse any body that cannot mesh, naming its body and face. For an intentionally incomplete file, call `file.export` through `execute` with `allow_missing: true`; read every entry in `skipped` and `warnings` and tell the user what is missing. If all selected bodies fail, the export still fails.
+
 ## Red flags
 
 | Thought | Do instead |
