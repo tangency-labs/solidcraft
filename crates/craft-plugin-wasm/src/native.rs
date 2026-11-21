@@ -299,6 +299,44 @@ impl<H: PluginHost> clock::Host for State<H> {
         SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or_default()
     }
 }
+impl<H: PluginHost> storage::Host for State<H> {
+    fn put_blob(&mut self, name: String, data: Vec<u8>, cache: bool, append: bool) -> std::result::Result<u64, PluginError> {
+        // A read entry stays read-only in every way: no change to the plugin's data either.
+        if self.effect == Effect::Read {
+            self.check()?;
+            return Err(self.fail(craft_plugin::read_entry_refusal("storage.put-blob")));
+        }
+        self.check()?;
+        if data.len() > MAX_JSON_BYTES {
+            return Err(self.fail(limit("storage write size")));
+        }
+        self.host.storage_put_blob(&name, &data, cache, append).map_err(|error| self.storage_error(error))
+    }
+    fn get_blob(&mut self, plugin: Option<String>, name: String, offset: u64, len: u32) -> std::result::Result<Vec<u8>, PluginError> {
+        self.check()?;
+        if len as usize > MAX_JSON_BYTES {
+            return Err(self.fail(limit("storage read size")));
+        }
+        self.host.storage_get_blob(plugin.as_deref(), &name, offset, len).map_err(|error| self.storage_error(error))
+    }
+    fn get_document(&mut self, plugin: Option<String>, offset: u64, len: u32) -> std::result::Result<Vec<u8>, PluginError> {
+        self.check()?;
+        if len as usize > MAX_JSON_BYTES {
+            return Err(self.fail(limit("storage read size")));
+        }
+        self.host.storage_get_document(plugin.as_deref(), offset, len).map_err(|error| self.storage_error(error))
+    }
+}
+impl<H: PluginHost> State<H> {
+    /// A storage call's error: a file that isn't there or an argument out of range is an answer the
+    /// plugin can act on; anything else (a permission, a limit) fails the run.
+    fn storage_error(&mut self, error: HostError) -> PluginError {
+        match error {
+            HostError::InvalidInput { .. } => wit_error(error),
+            error => self.fail(error),
+        }
+    }
+}
 impl<H: PluginHost> files::Host for State<H> {
     fn read_file(&mut self, grant: String, path: String) -> std::result::Result<Vec<u8>, PluginError> {
         self.file_path(&grant, &path, false)?;
