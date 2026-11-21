@@ -2460,18 +2460,15 @@ fn offset_collapses_by_definition(
 
 /// Not the fork's: the radius of the face `surface` at `uv` (on the edge) where the ball, its
 /// centre's signed offset along the face's normal `off`, is wider than the face by the face's
-/// definition, never from a net or from samples, as [`offset_collapses_by_definition`] reads a
-/// face as wide as the ball:
-///
-/// - an analytic cylinder, sphere or torus, or a surface of revolution that is one, with the
-///   ball on its inner side and its radius (a torus's tube radius) less than the ball's by more
-///   than `tol` ([`BlendQuadric::narrower_than_a_ball`]);
-/// - a round of one radius less than the ball's by more than `tol`, with the ball on its
-///   spine's side (its curvature toward the ball positive).
+/// definition, never from a net or from samples: an analytic cylinder, sphere or torus, or a
+/// surface of revolution that is one, with the ball on its inner side and its radius (a torus's
+/// tube radius) less than the ball's by more than `tol`
+/// ([`BlendQuadric::narrower_than_a_ball`]).
 ///
 /// Such a face curves toward the ball by 1 / its radius across it at every point, so a ball
 /// of a larger radius touching it there cuts into it: no ball of that size rolls on the face
-/// anywhere along the edge. `None` for any other face.
+/// anywhere along the edge. `None` for any other face: a round's net is not judged so, as the
+/// side of it its spine is on is not read from its definition here.
 ///
 /// # Errors
 ///
@@ -2489,26 +2486,6 @@ fn narrower_than_the_ball_by_definition(
         | SurfaceKind::Torus(_)
         | SurfaceKind::SurfOfRevolution(_) => {
             Ok(BlendQuadric::from_surface(k, surface, uv, tol)?.narrower_than_a_ball(off, tol))
-        }
-        SurfaceKind::ProceduralBlend(pb) => {
-            let offsets = [pb.offset(0).unwrap_or(0.0), pb.offset(1).unwrap_or(0.0)];
-            let own = offsets[0].abs();
-            let wider = off.abs() > own + tol;
-            if !wider
-                || !round_of_one_radius(
-                    pb.order(),
-                    pb.law().is_some(),
-                    pb.chamfer().is_some(),
-                    offsets,
-                    own,
-                    tol,
-                )
-            {
-                return Ok(None);
-            }
-            Ok(bending_toward_ball(k, surface, uv, off)?
-                .is_some_and(|b| b.k_max > 0.0)
-                .then_some(own))
         }
         _ => Ok(None),
     }

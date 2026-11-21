@@ -3479,24 +3479,6 @@ fn whole_edge_keeps_corners_tangent_arcs_and_authored_splits_apart() {
     }
 }
 
-/// The arc from `a` through `m` to `b`.
-fn arc_through(a: [f64; 2], m: [f64; 2], b: [f64; 2]) -> Seg2 {
-    let d = 2.0 * (a[0] * (m[1] - b[1]) + m[0] * (b[1] - a[1]) + b[0] * (a[1] - m[1]));
-    let sq = |p: [f64; 2]| p[0] * p[0] + p[1] * p[1];
-    let cx = (sq(a) * (m[1] - b[1]) + sq(m) * (b[1] - a[1]) + sq(b) * (a[1] - m[1])) / d;
-    let cy = (sq(a) * (b[0] - m[0]) + sq(m) * (a[0] - b[0]) + sq(b) * (m[0] - a[0])) / d;
-    let angle = |p: [f64; 2]| (p[1] - cy).atan2(p[0] - cx);
-    let ccw = (m[0] - a[0]) * (b[1] - m[1]) - (m[1] - a[1]) * (b[0] - m[0]) > 0.0;
-    let mut sweep = angle(b) - angle(a);
-    if ccw && sweep < 0.0 {
-        sweep += 2.0 * PI;
-    }
-    if !ccw && sweep > 0.0 {
-        sweep -= 2.0 * PI;
-    }
-    Seg2::Arc { center: Vec2::new(cx, cy), radius: ((a[0] - cx).powi(2) + (a[1] - cy).powi(2)).sqrt(), start: angle(a), sweep }
-}
-
 /// A round larger than a narrow concave round on its tangent chain is refused at once, naming
 /// that round's radius. A stem whose outline has three slight inward kinks (3, 5 and 9 degrees
 /// where its arcs meet) is joined into a bulged bar and its six corners are rounded at 2: at the
@@ -3511,18 +3493,53 @@ fn a_foot_round_wider_than_a_narrow_concave_round_on_its_chain_is_refused_naming
         segs: vec![
             Seg2::Line { a: Vec2::new(-30.0, 0.0), b: Vec2::new(30.0, 0.0) },
             Seg2::Line { a: Vec2::new(30.0, 0.0), b: Vec2::new(30.0, 17.5) },
-            arc_through([30.0, 17.5], [0.0, 22.5], [-30.0, 17.5]),
+            // from (30, 17.5) through (0, 22.5) to (-30, 17.5)
+            Seg2::Arc { center: Vec2::new(0.0, -70.0), radius: 92.5, start: 1.240498971965643, sweep: 0.6605947096585074 },
             Seg2::Line { a: Vec2::new(-30.0, 17.5), b: Vec2::new(-30.0, 0.0) },
         ],
     };
     let bar = revolve(&bar_plane, &[Region2 { outer: bar_loop, holes: vec![] }], Vec2::ZERO, Vec2::new(1.0, 0.0), 2.0 * PI).unwrap().remove(0);
+    // The stem's outline: five arcs and a line, corner to corner, each arc given by the three
+    // points the sketch drew it through (its start, a point on it, its end).
     let corners = [[21.54, -6.4], [13.71, 13.47], [-12.17, 14.52], [-21.5, -5.01], [-15.57, -15.06], [13.88, -15.91]];
-    let through = [[18.8, 4.0], [0.94, 17.9], [-17.68, 5.16], [-20.99, -11.41], [0.0, 0.0], [20.24, -13.18]];
-    let mut segs = Vec::new();
-    for i in 0..6 {
-        let (a, b) = (corners[i], corners[(i + 1) % 6]);
-        segs.push(if i == 4 { Seg2::Line { a: Vec2::new(a[0], a[1]), b: Vec2::new(b[0], b[1]) } } else { arc_through(a, through[i], b) });
-    }
+    let segs = vec![
+        // through (18.8, 4)
+        Seg2::Arc {
+            center: Vec2::new(-23.764857456221563, -12.77514513750452),
+            radius: 45.75120309514059,
+            start: 0.13979868890741112,
+            sweep: 0.4711554890184193,
+        },
+        // through (0.94, 17.9)
+        Seg2::Arc {
+            center: Vec2::new(-0.020515226704094107, -5.489318159144774),
+            radius: 23.409032304869626,
+            start: 0.9440065846664395,
+            sweep: 1.1724802229343485,
+        },
+        // through (-17.68, 5.16)
+        Seg2::Arc {
+            center: Vec2::new(39.13116330153082, -21.98152348199092),
+            radius: 62.96165954449315,
+            start: 2.5231805421562297,
+            sweep: 0.3454829737892329,
+        },
+        // through (-20.99, -11.41)
+        Seg2::Arc {
+            center: Vec2::new(-14.535971623535861, -7.675374301250519),
+            radius: 7.456668920769142,
+            start: 2.7760583061845803,
+            sweep: 1.7972107229845715,
+        },
+        Seg2::Line { a: Vec2::new(-15.57, -15.06), b: Vec2::new(13.88, -15.91) },
+        // through (20.24, -13.18)
+        Seg2::Arc {
+            center: Vec2::new(14.49239208224037, -8.563320015768795),
+            radius: 7.372159171714493,
+            start: -1.6539603698181953,
+            sweep: 1.9517884128893068,
+        },
+    ];
     let stem_plane = Plane { origin: Vec3::new(0.0, 0.0, 65.0), ..Plane::XY };
     let stem = extrude(&stem_plane, &[Region2 { outer: Loop2 { segs }, holes: vec![] }], -55.0, 0.0).unwrap().remove(0);
     let body = boolean(&bar, &stem, BoolOp::Union).unwrap().unwrap();
