@@ -520,10 +520,12 @@ impl Cone {
                             // line there, and no crossing a hair further on, as an arc that
                             // starts on a line a hair inside its circle touches it at its
                             // start (`Ellipse::intersect_with_line`, docs/booleans.md §6).
-                            // Only an end the requested domain holds, and only where the
-                            // tangent line meets the plane's own domain: else the crossing
-                            // stays, as the one curve of this pair there.
-                            let touch = if end_contact {
+                            // Only with the tangent line off the face (a wall nearly all
+                            // the way round holds it, and its start is then no end beside
+                            // this crossing), only an end the requested domain holds, and
+                            // only where the tangent line meets the plane's own domain: else
+                            // the crossing stays, as the one curve of this pair there.
+                            let touch = if end_contact && !line_in_sweep {
                                 sweep_end_on_the_lens(k, self, domain, axis, dir, start - bottom)?
                             } else {
                                 None
@@ -2032,6 +2034,33 @@ mod tests {
                 "{owner:?}: {lines:?}"
             );
         }
+
+        // a wall nearly all the way round, from -0.01° to 359.98°, holds the tangent line:
+        // the rule's premise fails, whatever the tolerances (here a zone tolerance of 1e-7,
+        // under the plane's depth, so the tangent line is not taken either). Its start lies
+        // between the tangent line and the crossing at -0.0468°, but that crossing is at
+        // the wall's other end; both crossings stay.
+        let round = wall_swept(&k, -0.01, 359.98);
+        let tight = Some(1e-7);
+        let lines = section_lines(&wall_section(
+            &k,
+            &round,
+            d,
+            PlaneOwner::NoFace,
+            [tight, None],
+        ));
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(
+            lines
+                .iter()
+                .all(|l| l.0 == TsectCurveType::Crossing && (l.1 - d).abs() < 1e-12),
+            "{lines:?}"
+        );
+        assert!(
+            (lines[0].2 + lines[1].2).abs() < 1e-12
+                && (lines[0].2.abs() - crossing.1).abs() < 1e-12,
+            "{lines:?}"
+        );
 
         // a zone tolerance grown past the contact tolerance
         let grown = Some(1e-4);
