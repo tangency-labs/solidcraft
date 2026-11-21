@@ -330,7 +330,10 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "Export bodies to STEP (.step/.stp), IGES (.iges/.igs), 3MF (.3mf), binary STL (.stl), ASCII STL (format stla), OBJ or GLB (.glb: binary glTF \
              in metres with Y up, with each body's colours, metallic and roughness, and each occurrence a named node holding its part's bodies; \
              transparent bodies are refused) or OpenUSD (.usda text, .usdc or .usd binary, .usdz package: in metres with Z up, \
-             each part's exact B-rep and a mesh of it, with colours, and the assembly as prims, a part placed twice written once). \
+             each body, named, as its exact B-rep and its mesh, with its looks' colour, opacity, metallic and roughness, \
+             and the assembly as prims named after the occurrences, a part placed twice written once) or Rhino (.3dm, Rhino 8: \
+             each body where the design shows it, as its exact shape, named and in its colour, when every face is planar and every \
+             edge straight, else as its mesh, without its name or colour; warnings say what the file left out; FreeCAD .FCStd cannot be written yet). \
              The format comes from the extension unless given; for OpenUSD the path's extension picks text, binary or package, and a \
              format naming another encoding is refused. URDF (.urdf) exports the whole assembly for robot simulators: a link per \
              component placement with mass and inertia, joints from the assembly's joints, and STL meshes in metres written \
@@ -340,7 +343,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             object(
                 json!({
                     "path": string("Output file"),
-                    "format": {"type": "string", "enum": ["step", "stp", "iges", "igs", "3mf", "3mf-tagged", "stl", "stla", "obj", "glb", "usd", "usda", "usdc", "usdz", "urdf", "sdf"]},
+                    "format": {"type": "string", "enum": ["step", "stp", "iges", "igs", "3mf", "3mf-tagged", "stl", "stla", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm", "urdf", "sdf"]},
                     "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all; not with urdf)"},
                     "mesh_prefix": string("urdf: put before each mesh file name (default: none, so relative to the .urdf)"),
                     "effort": {"type": "number", "description": "urdf: joint effort limit, N or N m (default 1000)"},
