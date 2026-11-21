@@ -2958,3 +2958,91 @@ fn circle_just_inside_hexagon_corners_keeps_the_regions() {
         assert_eq!(slivers, expected, "gap {gap}: {:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
     }
 }
+/// `bezier_distance` measures a point off a straight Bézier piece exactly (#20048): the piece
+/// whose controls all lie on a line is that line, so the distance is the perpendicular one.
+#[test]
+fn bezier_distance_measures_a_point_off_a_straight_piece() {
+    let line = [Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(20.0, 0.0), Vec2::new(30.0, 0.0)];
+    assert!((crate::bezier_distance(&line, Vec2::new(5.0, 3.0)) - 3.0).abs() < 1e-9);
+    assert!(crate::bezier_distance(&line, Vec2::new(17.0, 0.0)) < 1e-9);
+    assert!((crate::bezier_distance(&line, Vec2::new(40.0, 0.0)) - 10.0).abs() < 1e-9);
+}
+
+/// A smooth contour fits within the tolerance through few of its points (#20048): 800 samples
+/// of a sine need a fraction of the 500 a fit point spline takes, and the answer keeps the
+/// contour's order.
+#[test]
+fn a_smooth_contour_fits_within_the_tolerance_through_few_points() {
+    let given: Vec<Vec2> = (0..800)
+        .map(|i| {
+            let x = 80.0 * i as f64 / 799.0;
+            Vec2::new(x, 10.0 * (x / 10.0).sin())
+        })
+        .collect();
+    let fit = crate::fit_within_tolerance(&given, 0.01, false).unwrap();
+    assert!(fit.deviation <= 0.01, "deviation {}", fit.deviation);
+    assert!(fit.chosen.len() <= 150, "chose {} points", fit.chosen.len());
+    assert!(fit.chosen.len() >= 2);
+    assert_eq!(fit.chosen.first(), given.first());
+    assert_eq!(fit.chosen.last(), given.last());
+    // The chosen points are the given ones, in their order along the contour.
+    let mut next = 0;
+    for p in &fit.chosen {
+        let at = given[next..].iter().position(|q| q == p).expect("a chosen point is a given point") + next;
+        assert!(at >= next);
+        next = at + 1;
+    }
+}
+
+/// A corner is densified around, not skipped: the fit is smooth (no kink), so a V needs points
+/// beside its corner to stay within the tolerance, and the guarantee holds (#20048).
+#[test]
+fn a_v_contour_fits_within_the_tolerance_around_its_corner() {
+    let side = |from: Vec2, to: Vec2, n: usize| (0..=n).map(|i| from + (to - from) * (i as f64 / n as f64)).collect::<Vec<_>>();
+    let mut given = side(Vec2::new(0.0, 0.0), Vec2::new(10.0, 10.0), 50);
+    given.extend(side(Vec2::new(10.0, 10.0), Vec2::new(20.0, 0.0), 50).into_iter().skip(1));
+    let fit = crate::fit_within_tolerance(&given, 0.01, false).unwrap();
+    assert!(fit.deviation <= 0.01, "deviation {}", fit.deviation);
+    assert!(fit.chosen.len() <= 30, "chose {} points", fit.chosen.len());
+    assert_eq!(fit.chosen.first(), given.first());
+    assert_eq!(fit.chosen.last(), given.last());
+    // The fit is smooth, so it rounds the corner; it needs chosen points beside it.
+    assert!(fit.chosen.iter().any(|p| p.dist(Vec2::new(10.0, 10.0)) < 1.0), "{:?}", fit.chosen);
+}
+
+/// A straight contour fits through its two ends alone (#20048): the fit through two points is
+/// the segment between them, and every given point lies on it.
+#[test]
+fn a_straight_contour_fits_through_its_two_ends_alone() {
+    let given: Vec<Vec2> = (0..100).map(|i| Vec2::new(0.1 * i as f64, 0.0)).collect();
+    let fit = crate::fit_within_tolerance(&given, 0.01, false).unwrap();
+    assert_eq!(fit.chosen, vec![Vec2::new(0.0, 0.0), Vec2::new(9.9, 0.0)]);
+    assert!(fit.deviation < 1e-6, "the line is straight: deviation {}", fit.deviation);
+}
+
+/// Points too rough for a smooth spline refuse, naming that even the most points cannot reach
+/// the tolerance (#20048): a zigzag needs a point at nearly every turn.
+#[test]
+fn zigzag_points_beyond_the_tolerance_refuse() {
+    let given: Vec<Vec2> = (0..1000).map(|i| Vec2::new(0.1 * i as f64, 0.5 * (i % 2) as f64)).collect();
+    let err = crate::fit_within_tolerance(&given, 0.0001, false).unwrap_err();
+    let words = err.to_string();
+    assert!(words.contains("do not reach the tolerance"), "{words}");
+}
+
+/// A closed contour drops its closing repeat and fits the circle through few points (#20048).
+#[test]
+fn a_closed_contour_drops_its_closing_repeat_and_fits() {
+    let mut given: Vec<Vec2> = (0..100)
+        .map(|i| {
+            let a = std::f64::consts::TAU * i as f64 / 99.0;
+            Vec2::new(10.0 * a.cos(), 10.0 * a.sin())
+        })
+        .collect();
+    given.push(given[0]);
+    let fit = crate::fit_within_tolerance(&given, 0.01, true).unwrap();
+    assert!(fit.deviation <= 0.01, "deviation {}", fit.deviation);
+    assert!(fit.chosen.len() <= 60, "chose {} points", fit.chosen.len());
+    assert!(fit.chosen.len() >= 6);
+    assert_ne!(fit.chosen.first(), fit.chosen.last(), "the closing repeat is the caller's");
+}

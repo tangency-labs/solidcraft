@@ -231,6 +231,147 @@ pub fn fit_beziers_mode(p: &[Vec2], periodic: bool) -> crate::model::Result<Vec<
         solidcore_ops::fit_projection::fit_beziers(p, false).map_err(|e| crate::SketchError::Invalid(e.to_string()))
     }
 }
+
+/// The distance (mm) from `q` to a cubic Bézier piece, sampled along it: 32 samples, each
+/// projected on the chord between it and the next, so the answer is never larger than the
+/// sampling step beside the true nearest place.
+pub fn bezier_distance(b: &[Vec2; 4], q: Vec2) -> f64 {
+    const STEPS: usize = 32;
+    let at = |t: f64| {
+        let s = 1.0 - t;
+        b[0] * (s * s * s) + b[1] * (3.0 * t * s * s) + b[2] * (3.0 * t * t * s) + b[3] * (t * t * t)
+    };
+    let mut best = f64::INFINITY;
+    let mut prev = at(0.0);
+    for i in 1..=STEPS {
+        let next = at(i as f64 / STEPS as f64);
+        let d = next - prev;
+        let l2 = d.len2();
+        let t = if l2 > 0.0 { ((q - prev).dot(d) / l2).clamp(0.0, 1.0) } else { 0.0 };
+        best = best.min(q.dist(prev + d * t));
+        prev = next;
+    }
+    best
+}
+
+/// A fit of given contour points within a tolerance (#20048): the points a spline passes
+/// through, and how far the furthest given point strays from it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToleranceFit {
+    /// The points the spline passes through, in their order along the contour. A closed
+    /// contour's list holds each point once; the closing repeat is the caller's, as
+    /// `sketch.spline.fit_point` takes it.
+    pub chosen: Vec<Vec2>,
+    /// The largest distance (mm) from any given point to the spline through `chosen`.
+    pub deviation: f64,
+}
+
+/// How near (mm) two given points must be to count as one, so spans of no length are not made:
+/// relative to the contour's size, as a tiny contour still dedupes its repeats.
+fn dup_tolerance(points: &[Vec2]) -> f64 {
+    let size = points.iter().fold(f64::MIN, |m, p| m.max(p.x.abs()).max(p.y.abs()));
+    1e-9 * size.max(1.0)
+}
+
+/// The distance (mm) from `given[i]` to the nearest of the pieces `window` indexes: for a point
+/// of the span between `chosen[j]` and `chosen[j+1]`, the span's own piece and its neighbours.
+/// The window is some of the spline's pieces, so its answer is never nearer than the spline as
+/// a whole: a tolerance this meets, the whole spline meets.
+fn spanned_distance(given: &[Vec2], pieces: &[[Vec2; 4]], i: usize, window: [usize; 3]) -> f64 {
+    window.iter().filter_map(|w| pieces.get(*w)).map(|p| bezier_distance(p, given[i])).fold(f64::INFINITY, f64::min)
+}
+
+/// Fit one spline through as few of `points` — in order along the contour — as keep every given
+/// point within `tolerance` (mm) (#20048). Starts from the two ends of the contour (a closed
+/// one from three spread points) and adds, each round, the given point furthest from the spline
+/// in each span between chosen points, until every given point is within the tolerance or the
+/// spline's [`MAX_SPLINE_POINTS`] points cannot reach it; then the error names the deviation
+/// reached, so a caller can raise the tolerance. The returned `deviation` is measured against
+/// the whole spline, not only each span's neighbourhood.
+///
+/// The distance watched while fitting is each span's own piece and its neighbours, which is
+/// never nearer than the spline as a whole, so the tolerance is met honestly; the reported
+/// deviation is measured against every piece at the end.
+pub fn fit_within_tolerance(points: &[Vec2], tolerance: f64, periodic: bool) -> crate::model::Result<ToleranceFit> {
+    if !tolerance.is_finite() || tolerance <= 0.0 {
+        return Err(crate::SketchError::Invalid("the tolerance must be a positive number of mm".into()));
+    }
+    // Duplicates would make spans of no length between the same place.
+    let eps = dup_tolerance(points);
+    let mut given: Vec<Vec2> = Vec::with_capacity(points.len());
+    for p in points {
+        if !p.is_finite() {
+            return Err(crate::SketchError::Invalid("a point is not a finite position".into()));
+        }
+        if given.last().is_none_or(|q| q.dist(*p) > eps) {
+            given.push(*p);
+        }
+    }
+    if periodic && given.len() >= 2 && given[0].dist(given[given.len() - 1]) <= eps {
+        given.pop();
+    }
+    let (least, what) =
+        if periodic { (3, "a closed contour needs at least 3 distinct points") } else { (2, "a curve needs at least 2 distinct points") };
+    if given.len() < least {
+        return Err(crate::SketchError::Invalid(what.into()));
+    }
+    let n = given.len();
+    // The closing repeat counts towards the spline's point limit, as the sketch stores it.
+    let cap = (MAX_SPLINE_POINTS - usize::from(periodic)).min(n);
+    let mut chosen: Vec<usize> = if periodic {
+        let far = (1..n - 1).max_by(|a, b| given[0].dist(given[*a]).total_cmp(&given[0].dist(given[*b]))).unwrap_or(1);
+        vec![0, far, n - 1]
+    } else {
+        vec![0, n - 1]
+    };
+    // The list `fit_beziers_mode` takes: the chosen points, a closed one ending where it starts.
+    let closed_list = |chosen: &[usize]| -> Vec<Vec2> {
+        let mut v: Vec<Vec2> = chosen.iter().map(|&i| given[i]).collect();
+        if periodic {
+            v.push(given[chosen[0]]);
+        }
+        v
+    };
+    loop {
+        let pieces = fit_beziers_mode(&closed_list(&chosen), periodic)?;
+        let last_piece = pieces.len().saturating_sub(1);
+        let mut insert: Vec<(usize, usize)> = Vec::new();
+        let mut worst_seen: f64 = 0.0;
+        for j in 0..chosen.len() - 1 {
+            // A point of this span may sit nearest the piece before or after it, or (on a
+            // closed contour, for the first span) the piece that closes the contour.
+            let window = [if periodic && j == 0 { last_piece } else { j.saturating_sub(1) }, j, (j + 1).min(last_piece)];
+            let (a, b) = (chosen[j], chosen[j + 1]);
+            let mut worst: Option<(f64, usize)> = None;
+            for i in a + 1..b {
+                let d = spanned_distance(&given, &pieces, i, window);
+                worst_seen = worst_seen.max(d);
+                if d > tolerance && worst.is_none_or(|(w, _)| d > w) {
+                    worst = Some((d, i));
+                }
+            }
+            if let Some((_, i)) = worst {
+                insert.push((j + 1, i));
+            }
+        }
+        if insert.is_empty() {
+            // Every given point is within the tolerance of its span's neighbourhood, and so of
+            // the spline; measure against every piece for the honest deviation to report.
+            let deviation =
+                given.iter().map(|q| pieces.iter().map(|piece| bezier_distance(piece, *q)).fold(f64::INFINITY, f64::min)).fold(0.0, f64::max);
+            return Ok(ToleranceFit { chosen: chosen.iter().map(|&i| given[i]).collect(), deviation });
+        }
+        if chosen.len() + insert.len() > cap {
+            return Err(crate::SketchError::Invalid(format!(
+                "even {MAX_SPLINE_POINTS} spline points do not reach the tolerance: the largest deviation is still {worst_seen:.4} mm; the points may be too rough for a smooth spline, or the tolerance too tight"
+            )));
+        }
+        for (pos, i) in insert.iter().rev() {
+            chosen.insert(*pos, *i);
+        }
+    }
+}
+
 /// Tangent endpoints for one editable handle at each fit point. Each handle stores the natural
 /// tangent derivative per unit chord length times [`handle_unit`]; evaluation divides it back
 /// out, preserving the natural interpolant until a handle is moved.
