@@ -1327,7 +1327,10 @@ certified_units! {
 /// of each [`ROWS`] case is the one main's kernel writes for it (the line main's file keeps can
 /// lag main's own run within the golden compare's tolerance, which the compare accepts, and a
 /// moved line is written whole from the run; the regen blesses those cases again on a tree whose
-/// kernel is main's).
+/// kernel is main's). A later PR that changes a unit's expected file outside the rows rebases
+/// that unit's line on its own file (the digest with the remaining rows put back) and names
+/// the unit and its cases in a `# rebased by` line, so the ledger stays the rows plus those
+/// named changes.
 const MAIN: &str = include_str!("trim_tolerance_main.tsv");
 
 /// FNV-1a 64 of the canonical lines of the expected file `text` ([`crate::json`]: each line
