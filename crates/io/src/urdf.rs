@@ -200,8 +200,23 @@ fn sanitise(raw: &str, file: bool) -> String {
     let keep = |c: char| c.is_ascii_alphanumeric() || c == '_' || (file && (c == '-' || c.is_alphanumeric() || is_combining_mark(c)));
     let s: String =
         if file { raw.nfc().map(|c| if keep(c) { c } else { '_' }).collect() } else { raw.chars().map(|c| if keep(c) { c } else { '_' }).collect() };
-    if s.is_empty() { "part".into() } else { s }
+    if s.is_empty() {
+        return "part".into();
+    }
+    if !file {
+        return s;
+    }
+    // File systems allow 255 bytes a name, and a CJK character takes three in UTF-8: keep the stem
+    // to a length that leaves room for a `_N` suffix and the extension, cut on a character.
+    let mut end = s.len().min(MAX_FILE_STEM);
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s[..end].to_string()
 }
+
+/// Bytes kept of a sanitised file name's stem, well under the common 255-byte limit.
+const MAX_FILE_STEM: usize = 200;
 
 /// A file name as file systems compare it: lower case, then NFC, as macOS treats a name in its
 /// composed and decomposed Unicode forms as one file.
@@ -1228,6 +1243,9 @@ mod tests {
         assert_eq!(n.file("cafe\u{301}"), "café_2.stl");
         assert_eq!(n.file("\u{1100}\u{1161}"), "\u{ac00}.stl");
         assert_eq!(n.file("\u{ac00}"), "\u{ac00}_2.stl");
+        // A long name is cut on a character, leaving room for the suffix and extension.
+        let long = n.file(&"块".repeat(100));
+        assert!(long.len() <= 255 && long.ends_with(".stl") && long.starts_with("块"), "{long}");
     }
 
     #[test]
