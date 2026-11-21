@@ -1547,3 +1547,49 @@ fn a_part_moved_into_a_library_folder_is_found_there_and_said_so() {
     assert_eq!(run(&mut reopened, "component.links", json!({}))["links"][0]["path"], "parts/bolt.scprt", "the link still names its own file");
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// Missing files on open (#6892, slice 4b): under Parts and assemblies, an assembly whose part
+/// file has gone opens with its last bodies, and `doc.open` names that part with the file it
+/// looked for. Relinking it to where the file went brings it back, stored relative to the
+/// assembly, and the next open names nothing.
+#[test]
+fn an_assembly_names_the_parts_it_cannot_find_on_open_and_relink_finds_them() {
+    crate::set_experimental_file_kinds(true);
+    let root = folder("missing-on-open");
+    let (job, elsewhere) = (root.join("job"), root.join("elsewhere"));
+    std::fs::create_dir_all(job.join("parts")).unwrap();
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let (bracket, plate) = (job.join("parts").join("bracket.scprt"), job.join("parts").join("plate.scprt"));
+    part(&bracket, 10);
+    part(&plate, 20);
+    let mut s = Session::default();
+    run(&mut s, "file.save", json!({"path": job.join("frame.scasm")}));
+    run(&mut s, "component.insert_design", json!({"path": bracket}));
+    run(&mut s, "component.insert_design", json!({"path": plate, "translate": [30, 0, 0]}));
+    run(&mut s, "file.save", json!({}));
+    let full = volume(&mut s);
+    // Both part files move out of the job folder.
+    for name in ["bracket.scprt", "plate.scprt"] {
+        std::fs::rename(job.join("parts").join(name), elsewhere.join(name)).unwrap();
+    }
+    let mut opened = Session::default();
+    let reply = run(&mut opened, "doc.open", json!({"path": job.join("frame.scasm")}));
+    let missing = reply["missing_links"].as_array().cloned().unwrap_or_default();
+    let mut names: Vec<&str> = missing.iter().filter_map(|m| m["name"].as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, ["bracket", "plate"], "{reply}");
+    assert!(missing.iter().all(|m| m["path"].as_str().unwrap().replace('\\', "/").contains("job/parts/")), "{reply}");
+    assert!((volume(&mut opened) - full).abs() < 1e-6, "the missing parts keep their last bodies");
+    // Pointed at where the files went: each comes back, stored relative to the assembly.
+    for m in &missing {
+        let name = std::path::Path::new(m["path"].as_str().unwrap()).file_name().unwrap().to_owned();
+        run(&mut opened, "component.relink", json!({"component": m["component"], "path": elsewhere.join(name)}));
+    }
+    run(&mut opened, "file.save", json!({}));
+    let mut again = Session::default();
+    let reply = run(&mut again, "doc.open", json!({"path": job.join("frame.scasm")}));
+    assert!(reply.get("missing_links").is_none(), "{reply}");
+    let links = run(&mut again, "component.links", json!({}));
+    assert!(links["links"].as_array().unwrap().iter().all(|l| l["path"].as_str().unwrap().starts_with("../elsewhere/")), "{links}");
+    let _ = std::fs::remove_dir_all(root);
+}

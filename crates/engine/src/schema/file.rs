@@ -753,9 +753,25 @@ pub struct OpenedDesign {
     /// header, which wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind_note: Option<String>,
+    /// Under Parts and assemblies: the linked parts found neither at their link's path nor in a
+    /// library folder. Each keeps its last bodies; `component.relink {component, path}` points it
+    /// at its file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_links: Vec<MissingLink>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// A linked part `doc.open` couldn't find (#6892).
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MissingLink {
+    /// The linked component, by id.
+    pub component: u64,
+    /// Its name.
+    pub name: String,
+    /// The file the link looked for, whole.
+    pub path: String,
 }
 
 /// What a signature check found: the reply of `file.verify`, and part of `doc.open`'s when it

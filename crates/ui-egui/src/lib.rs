@@ -237,6 +237,7 @@ mod file_load_ui_tests;
 #[cfg(test)]
 mod fillet_spline_handle_tests;
 pub(crate) mod import_report;
+pub(crate) mod missing_links;
 pub mod mouse_gesture;
 use solidcraft_ui_kit::nav_bar;
 pub(crate) mod navigation;
@@ -860,6 +861,8 @@ pub struct SolveApp {
     pub locks: Option<open_elsewhere::Locks>,
     /// Opens waiting for "this design is open elsewhere" to be answered, first asked first.
     pub lock_prompts: Vec<open_elsewhere::LockPrompt>,
+    /// Linked parts an open couldn't find, waiting to be located (#6892).
+    pub missing_links: Option<missing_links::MissingLinks>,
     /// A Save waiting for "the file changed on disk" to be answered.
     pub disk_prompt: bool,
     /// Update Links, Open Linked Design or Reload from file waiting for a network server to be allowed.
@@ -1182,6 +1185,7 @@ impl SolveApp {
             autosave: None,
             locks: None,
             lock_prompts: Vec::new(),
+            missing_links: None,
             disk_prompt: false,
             network_prompt: None,
             link_folders_prompt: Vec::new(),
@@ -3646,6 +3650,7 @@ impl SolveApp {
         self.say_plugin_data();
         self.say_signature(&r);
         self.say_kind_note(&r);
+        missing_links::offer(self, &r);
         Ok(())
     }
 
@@ -4534,6 +4539,7 @@ impl SolveApp {
         kicad_import_dialog::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
+        missing_links::show(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
         network_prompt::show(self, ui.ctx());
         link_folders_prompt::show(self, ui.ctx());

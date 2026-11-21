@@ -194,3 +194,24 @@ pub(crate) fn refusal_with(kind: DesignKind, id: &str, on: bool) -> Option<Strin
         _ => None,
     }
 }
+
+/// The linked parts of `s` found neither at their link's path nor in a library folder, under
+/// Parts and assemblies (#6892, slice 4b): what `doc.open` names so the app can ask where they
+/// are. Their components keep their last bodies; `component.relink` points one at its file.
+pub(super) fn missing_links(s: &Session) -> Vec<crate::schema::file::MissingLink> {
+    if !experimental_file_kinds() {
+        return Vec::new();
+    }
+    s.doc
+        .links
+        .iter()
+        .filter_map(|(component, link)| {
+            let file = super::super::design_link::resolve(s.path.as_deref(), &link.path);
+            let problem = super::super::design_link::link_presence(&file, s.path.as_deref())?;
+            let missing =
+                problem.state == super::super::design_link::LinkState::Missing && super::super::design_link::found_in_library(&file).is_none();
+            let name = s.doc.components.iter().find(|c| c.id == *component).map(|c| c.name.clone())?;
+            missing.then(|| crate::schema::file::MissingLink { component: *component, name, path: file.display().to_string() })
+        })
+        .collect()
+}

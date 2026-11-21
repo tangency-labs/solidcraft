@@ -1560,3 +1560,45 @@ fn a_renamed_kind_file_opens_with_a_note_on_its_kind() {
     assert_eq!(app.session.design_kind, solidcraft_engine::io::DesignKind::Part);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Parts not found on open (#6892, slice 4b): under Parts and assemblies, opening an assembly
+/// whose part files moved lists them in the window. Locating one relinks it and finds the other
+/// in that file's folder, which "Relink 1 more" then relinks, and the window closes.
+#[test]
+fn an_assembly_with_moved_parts_lists_them_and_locating_one_finds_the_rest() {
+    solidcraft_engine::file_kinds_on_for_tests();
+    let dir = scratch("missing_links");
+    let (parts, moved) = (dir.join("parts"), dir.join("moved"));
+    std::fs::create_dir_all(&parts).unwrap();
+    std::fs::create_dir_all(&moved).unwrap();
+    for (name, height) in [("bracket.scprt", 2), ("plate.scprt", 4)] {
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length": 2, "width": 3, "height": height})).unwrap();
+        part.execute("file.save", &json!({"path": parts.join(name).to_string_lossy()})).unwrap();
+    }
+    let mut frame = Session::default();
+    frame.execute("file.save", &json!({"path": dir.join("frame.scasm").to_string_lossy()})).unwrap();
+    for name in ["bracket.scprt", "plate.scprt"] {
+        frame.execute("component.insert_design", &json!({"path": parts.join(name).to_string_lossy()})).unwrap();
+    }
+    frame.execute("file.save", &json!({})).unwrap();
+    for name in ["bracket.scprt", "plate.scprt"] {
+        std::fs::rename(parts.join(name), moved.join(name)).unwrap();
+    }
+    let mut app = SolveApp::new(Session::default(), Default::default());
+
+    app.open_path(&dir.join("frame.scasm").to_string_lossy());
+
+    let rows = app.missing_links.as_ref().map(|m| m.rows.clone()).unwrap_or_default();
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    let bracket = rows.iter().find(|r| r.name == "bracket").unwrap().component;
+    crate::missing_links::located(&mut app, bracket, &moved.join("bracket.scprt").to_string_lossy());
+    let left = app.missing_links.as_ref().unwrap();
+    assert_eq!(left.rows.len(), 1);
+    assert_eq!(left.found_nearby.len(), 1, "the plate is in the same folder");
+    crate::missing_links::relink_nearby(&mut app);
+    assert!(app.missing_links.is_none(), "every part found: the window closes");
+    let links = app.session.execute("component.links", &json!({})).unwrap();
+    assert!(links["links"].as_array().unwrap().iter().all(|l| l["found"] == true), "{links}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

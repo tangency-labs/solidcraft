@@ -6,7 +6,12 @@
     "prefs.environment_note": "For new files. Single design keeps parts, sheet metal and assemblies together in one .sc file, as before. Parts and assemblies makes each new file a part (.scprt), a sheet metal part (.scsht) or an assembly (.scasm), which keeps its kind.",
     "ui.new_part": "New part",
     "ui.new_sheet_metal_part": "New sheet metal part",
-    "ui.new_assembly": "New assembly"
+    "ui.new_assembly": "New assembly",
+    "missing_links.title": "Parts not found",
+    "missing_links.detail": "These parts are not where their links say, nor in a library folder. They keep their last shape. Locate each one to point its link at the file.",
+    "missing_links.locate": "Locate…",
+    "missing_links.close": "Close",
+    "missing_links.relink_nearby": "Relink {count} more found in that folder"
   },
   "ar": {
     "prefs.environment": "البيئة",
@@ -15,7 +20,12 @@
     "prefs.environment_note": "للملفات الجديدة. التصميم الواحد يجمع الأجزاء والصفائح المعدنية والتجميعات في ملف .sc واحد كما كان. الأجزاء والتجميعات تجعل كل ملف جديد جزءًا (.scprt) أو جزء صفائح معدنية (.scsht) أو تجميعًا (.scasm) ويحتفظ بنوعه.",
     "ui.new_part": "جزء جديد",
     "ui.new_sheet_metal_part": "جزء صفائح معدنية جديد",
-    "ui.new_assembly": "تجميع جديد"
+    "ui.new_assembly": "تجميع جديد",
+    "missing_links.title": "أجزاء غير موجودة",
+    "missing_links.detail": "هذه الأجزاء ليست حيث تقول روابطها، ولا في مجلد مكتبة. تحتفظ بآخر شكل لها. حدّد موقع كل منها لتوجيه رابطه إلى الملف.",
+    "missing_links.locate": "تحديد الموقع…",
+    "missing_links.close": "إغلاق",
+    "missing_links.relink_nearby": "إعادة ربط {count} أخرى وُجدت في ذلك المجلد"
   },
   "de": {
     "prefs.environment": "Umgebung",
@@ -24,7 +34,12 @@
     "prefs.environment_note": "Für neue Dateien. Einzelkonstruktion hält Teile, Blechteile und Baugruppen wie bisher in einer .sc-Datei zusammen. Teile und Baugruppen macht jede neue Datei zu einem Teil (.scprt), einem Blechteil (.scsht) oder einer Baugruppe (.scasm), die ihre Art behält.",
     "ui.new_part": "Neues Teil",
     "ui.new_sheet_metal_part": "Neues Blechteil",
-    "ui.new_assembly": "Neue Baugruppe"
+    "ui.new_assembly": "Neue Baugruppe",
+    "missing_links.title": "Teile nicht gefunden",
+    "missing_links.detail": "Diese Teile sind nicht dort, wo ihre Verknüpfungen hinzeigen, und in keinem Bibliotheksordner. Sie behalten ihre letzte Form. Suchen Sie jedes, um seine Verknüpfung auf die Datei zu richten.",
+    "missing_links.locate": "Suchen…",
+    "missing_links.close": "Schließen",
+    "missing_links.relink_nearby": "{count} weitere in diesem Ordner gefundene neu verknüpfen"
   },
   "he": {
     "prefs.environment": "סביבה",
@@ -33,7 +48,12 @@
     "prefs.environment_note": "לקבצים חדשים. תכן יחיד שומר חלקים, פח ומכלולים יחד בקובץ ‎.sc אחד, כמו קודם. חלקים ומכלולים הופך כל קובץ חדש לחלק (‎.scprt), לחלק פח (‎.scsht) או למכלול (‎.scasm), שסוגו נשמר.",
     "ui.new_part": "חלק חדש",
     "ui.new_sheet_metal_part": "חלק פח חדש",
-    "ui.new_assembly": "מכלול חדש"
+    "ui.new_assembly": "מכלול חדש",
+    "missing_links.title": "חלקים שלא נמצאו",
+    "missing_links.detail": "החלקים האלה אינם במקום שהקישורים שלהם מצביעים עליו, וגם לא בתיקיית ספרייה. הם שומרים על צורתם האחרונה. אתר כל אחד כדי לכוון את הקישור שלו לקובץ.",
+    "missing_links.locate": "איתור…",
+    "missing_links.close": "סגירה",
+    "missing_links.relink_nearby": "קישור מחדש של {count} נוספים שנמצאו בתיקייה זו"
   },
   "ja": {
     "prefs.environment": "環境",
@@ -42,7 +62,12 @@
     "prefs.environment_note": "新しいファイルに適用されます。単一デザインは、これまでどおり部品・板金・アセンブリを 1 つの .sc ファイルにまとめます。部品とアセンブリでは、新しいファイルはそれぞれ部品 (.scprt)、板金部品 (.scsht)、アセンブリ (.scasm) となり、その種類を保ちます。",
     "ui.new_part": "新しい部品",
     "ui.new_sheet_metal_part": "新しい板金部品",
-    "ui.new_assembly": "新しいアセンブリ"
+    "ui.new_assembly": "新しいアセンブリ",
+    "missing_links.title": "見つからない部品",
+    "missing_links.detail": "これらの部品はリンク先にもライブラリ フォルダーにもありません。最後の形状を保っています。それぞれの場所を指定して、リンクをそのファイルに向けてください。",
+    "missing_links.locate": "場所を指定…",
+    "missing_links.close": "閉じる",
+    "missing_links.relink_nearby": "そのフォルダーで見つかった残り {count} 件を再リンク"
   },
   "ko": {
     "prefs.environment": "환경",
@@ -51,7 +76,12 @@
     "prefs.environment_note": "새 파일에 적용됩니다. 단일 디자인은 지금처럼 부품, 판금, 어셈블리를 하나의 .sc 파일에 함께 둡니다. 부품과 어셈블리는 새 파일마다 부품(.scprt), 판금 부품(.scsht) 또는 어셈블리(.scasm)로 만들며 그 종류를 유지합니다.",
     "ui.new_part": "새 부품",
     "ui.new_sheet_metal_part": "새 판금 부품",
-    "ui.new_assembly": "새 어셈블리"
+    "ui.new_assembly": "새 어셈블리",
+    "missing_links.title": "찾을 수 없는 부품",
+    "missing_links.detail": "이 부품들은 링크가 가리키는 곳에도, 라이브러리 폴더에도 없습니다. 마지막 모양을 유지합니다. 각각 위치를 지정해 링크가 그 파일을 가리키게 하세요.",
+    "missing_links.locate": "찾기…",
+    "missing_links.close": "닫기",
+    "missing_links.relink_nearby": "그 폴더에서 찾은 {count}개 더 다시 연결"
   },
   "vi": {
     "prefs.environment": "Môi trường",
@@ -60,7 +90,12 @@
     "prefs.environment_note": "Áp dụng cho tệp mới. Thiết kế đơn giữ chi tiết, kim loại tấm và cụm lắp chung trong một tệp .sc như trước. Chi tiết và cụm lắp làm mỗi tệp mới thành một chi tiết (.scprt), một chi tiết kim loại tấm (.scsht) hoặc một cụm lắp (.scasm) và giữ nguyên loại đó.",
     "ui.new_part": "Chi tiết mới",
     "ui.new_sheet_metal_part": "Chi tiết kim loại tấm mới",
-    "ui.new_assembly": "Cụm lắp mới"
+    "ui.new_assembly": "Cụm lắp mới",
+    "missing_links.title": "Không tìm thấy chi tiết",
+    "missing_links.detail": "Các chi tiết này không ở nơi liên kết của chúng chỉ tới, cũng không ở thư mục thư viện. Chúng giữ hình dạng cuối cùng. Hãy định vị từng chi tiết để trỏ liên kết tới tệp.",
+    "missing_links.locate": "Định vị…",
+    "missing_links.close": "Đóng",
+    "missing_links.relink_nearby": "Liên kết lại {count} chi tiết khác tìm thấy trong thư mục đó"
   },
   "zh": {
     "prefs.environment": "环境",
@@ -69,6 +104,11 @@
     "prefs.environment_note": "适用于新文件。单一设计像以前一样把零件、钣金和装配体放在一个 .sc 文件中。零件和装配体让每个新文件成为零件 (.scprt)、钣金零件 (.scsht) 或装配体 (.scasm)，并保持其类型。",
     "ui.new_part": "新建零件",
     "ui.new_sheet_metal_part": "新建钣金零件",
-    "ui.new_assembly": "新建装配体"
+    "ui.new_assembly": "新建装配体",
+    "missing_links.title": "找不到零件",
+    "missing_links.detail": "这些零件不在其链接所指的位置，也不在库文件夹中。它们保留最后的形状。请逐个定位，使其链接指向该文件。",
+    "missing_links.locate": "定位…",
+    "missing_links.close": "关闭",
+    "missing_links.relink_nearby": "重新链接在该文件夹中找到的另外 {count} 个"
   }
 }

@@ -1668,6 +1668,7 @@ fn opened_design(
         signature: s.provenance.as_ref().map(signature_report),
         kind: kind::reported(kind),
         kind_note,
+        missing_links: kind::missing_links(s),
         param_warnings: Vec::new(),
     }))
 }
