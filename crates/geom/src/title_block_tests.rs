@@ -557,6 +557,7 @@ fn the_built_in_blocks_cells() {
     let content = |name: &str| text_of(block.cells.iter().find(|c| c.name == name).unwrap()).content.clone();
     assert_eq!(content("legal_owner"), Content(vec![field(Source::Drawing, "organization")]));
     assert_eq!(content("general_tolerances"), Content(Vec::new()));
+    assert_eq!(content("finish"), Content(vec![field(Source::Component, "finish")]), "the part's finish property, not a free one");
 }
 
 /// The built-in block's lines on A3 landscape, worked out by hand: the outline (230, 10) to
