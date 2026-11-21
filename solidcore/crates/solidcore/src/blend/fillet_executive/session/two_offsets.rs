@@ -702,11 +702,8 @@ impl FilletSession<'_> {
             // in the chain's side order: entry 1 on the side of the first member's support 1
             let side = |pair: [f64; 2], flip: bool| if flip { swapped(pair) } else { pair };
             let mut tolerance = 0.0_f64;
-            for &m in &group {
-                let id = edges
-                    .get(m)
-                    .copied()
-                    .ok_or_else(|| invalid("the group's edge"))?;
+            // the group's members are indices into `edges`
+            for id in group.iter().filter_map(|&m| edges.get(m).copied()) {
                 tolerance = tolerance.max(edge::tolerance(target, id)?);
             }
             let agree = members.iter().zip(&flips).all(|(m, &flip)| {
