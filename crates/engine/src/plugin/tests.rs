@@ -2757,7 +2757,8 @@ mod install_zip {
         );
         let reviewed = zip(&[("gears-0.1.0/plugin.json", &m[..]), ("gears-0.1.0/plugin.wasm", w), ("gears-0.1.0/data.txt", b"reviewed")]);
         let changed = zip(&[("gears-0.1.0/plugin.json", &m[..]), ("gears-0.1.0/plugin.wasm", w), ("gears-0.1.0/data.txt", b"changed")]);
-        let aux = put(&root, "aux.zip", &reviewed);
+        // Not aux.zip. Windows 10 keeps AUX for a device, whatever the extension.
+        let aux = put(&root, "auxiliary.zip", &reviewed);
         let aux_dry = s.execute("plugin.install", &json!({"path": aux, "dry_run": true})).unwrap();
         std::fs::write(&aux, &changed).unwrap();
         let error = s.execute("plugin.install", &json!({"path": aux, "approval": aux_dry["approval"], "archive": aux_dry["archive"]})).unwrap_err();
