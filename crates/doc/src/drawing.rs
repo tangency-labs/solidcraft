@@ -69,9 +69,11 @@ use crate::{DocError, Metadata, Result, expr};
 
 pub mod balloon;
 pub mod by_id;
+pub mod chamfer_note;
 pub mod coverage;
 pub mod cutting_line;
 pub mod dimension;
+pub mod feature_note;
 pub mod fields;
 mod fill;
 pub mod fold;

@@ -25,6 +25,7 @@ mod board_layers;
 mod bom;
 pub(crate) mod browser;
 mod cell_grid;
+mod chamfer_note;
 pub(crate) mod clearance;
 mod clipboard;
 mod clipboard_foreign;
@@ -534,6 +535,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
     v.extend(hole_callout::COMMANDS.iter());
+    v.extend(chamfer_note::COMMANDS.iter());
     v.extend(compare::COMMANDS.iter());
     v.extend(compare_picture::COMMANDS.iter());
     v.extend(silhouette::COMMANDS.iter());

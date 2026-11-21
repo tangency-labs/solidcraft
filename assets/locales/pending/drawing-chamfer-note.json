@@ -1,0 +1,10 @@
+{
+  "en": { "cmd.drawing_chamfer_note": "Chamfer Note" },
+  "ar": { "cmd.drawing_chamfer_note": "ملاحظة الشطفة" },
+  "de": { "cmd.drawing_chamfer_note": "Fasenangabe" },
+  "he": { "cmd.drawing_chamfer_note": "הערת שיפוע" },
+  "ja": { "cmd.drawing_chamfer_note": "面取りの注記" },
+  "ko": { "cmd.drawing_chamfer_note": "모따기 주석" },
+  "vi": { "cmd.drawing_chamfer_note": "Chú thích vát mép" },
+  "zh": { "cmd.drawing_chamfer_note": "倒角标注" }
+}

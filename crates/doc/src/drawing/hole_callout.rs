@@ -148,32 +148,8 @@ pub enum Form {
     },
 }
 
-/// How a callout's text is written: the drawing's length unit and content language.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TextStyle {
-    /// A length unit of the expression unit table (`mm`, `in`, `yd`, …), as a drawing fixes it.
-    pub units: String,
-    pub decimals: u8,
-    /// The drawing's content language, a BCP 47 tag.
-    pub language: String,
-}
-
-impl TextStyle {
-    /// Refuses an unknown unit, too many decimals or a malformed language tag.
-    pub fn validate(&self) -> Result<()> {
-        if !super::is_length_unit(&self.units) {
-            let unit: String = self.units.chars().take(32).collect();
-            return Err(DocError::Invalid(format!("unknown length unit `{}` (such as mm or in)", unit.escape_debug())));
-        }
-        if self.decimals > MAX_DECIMALS {
-            return Err(DocError::Invalid(format!("decimals are 0 to {MAX_DECIMALS}")));
-        }
-        if !super::is_language_tag(&self.language) {
-            return Err(DocError::Invalid("the language is not a BCP 47 tag (such as `en` or `de-DE`)".into()));
-        }
-        Ok(())
-    }
-}
+/// How a callout's text is written, as every feature note's is.
+pub use super::feature_note::TextStyle;
 
 impl HoleRef {
     /// Refuses a point id that is empty, too long or holds control characters.
@@ -190,15 +166,9 @@ impl HoleRef {
 /// The callout of the hole `hole` names, in the design `doc` evaluated as `model`.
 pub fn resolve(doc: &Document, model: &Model, hole: &HoleRef) -> Result<Resolution> {
     hole.validate()?;
-    let Some(f) = doc.feature(hole.feature) else {
-        if let Some(kind) = other_item(doc, hole.feature) {
-            return Err(DocError::Invalid(format!("{} is {kind}, not a Hole feature", hole.feature)));
-        }
-        // An id the design gave once belonged to something that has since been removed.
-        if hole.feature >= 1 && hole.feature < doc.next_id {
-            return Ok(Resolution::Lost { reason: format!("feature {} is gone", hole.feature) });
-        }
-        return Err(DocError::Unknown(format!("feature {}", hole.feature)));
+    let f = match super::feature_note::feature(doc, hole.feature, "Hole")? {
+        Ok(f) => f,
+        Err(reason) => return Ok(Resolution::Lost { reason }),
     };
     let FeatureKind::Hole { points, .. } = &f.kind else {
         return Err(DocError::Invalid(format!("not supported yet: hole callouts of {} features (only Hole features have them)", f.kind.base_name())));
@@ -266,25 +236,6 @@ fn later_motion(doc: &Document, model: &Model, vals: &BTreeMap<String, Value>, i
         m = crate::mat_mul(&crate::rigid(t, origin, axis, angle), &m);
     }
     Ok(m)
-}
-
-/// What the id `id`, which names no feature, names instead, if anything.
-fn other_item(doc: &Document, id: u64) -> Option<&'static str> {
-    let a = &doc.assembly;
-    [
-        ("a component", doc.components.iter().any(|c| c.id == id)),
-        ("an occurrence", doc.occurrences.iter().any(|o| o.id == id)),
-        ("a browser folder", doc.browser_groups.iter().any(|g| g.id == id)),
-        ("a timeline folder", doc.timeline_groups.iter().any(|g| g.id == id)),
-        ("a canvas", doc.canvases.iter().any(|c| c.id == id)),
-        ("a point cloud", doc.point_clouds.iter().any(|c| c.id == id)),
-        ("a joint", a.joints.iter().any(|j| j.id == id)),
-        ("a contact set", a.contact_sets.iter().any(|c| c.id == id)),
-        ("a motion study", a.studies.iter().any(|s| s.id == id)),
-        ("an exploded view", a.exploded.iter().any(|v| v.id == id)),
-    ]
-    .into_iter()
-    .find_map(|(kind, is)| is.then_some(kind))
 }
 
 /// The ids of the points the sketch feature `sketch` has now: none when it is no sketch.
@@ -545,9 +496,7 @@ pub fn text(c: &HoleCallout, style: &TextStyle) -> Result<Vec<String>> {
     match c.form {
         Form::Simple | Form::Drilled { .. } => {}
         Form::Counterbore { diameter, depth } => lines.push(format!("⌴ Ø{} ↧ {}", len(diameter), len(depth))),
-        Form::Countersink { diameter, angle } => {
-            lines.push(format!("⌵ Ø{} × {:.*}°", len(diameter), usize::from(style.decimals.min(MAX_DECIMALS)), angle.to_degrees()))
-        }
+        Form::Countersink { diameter, angle } => lines.push(format!("⌵ Ø{} × {}", len(diameter), style.degrees(angle))),
     }
     Ok(lines)
 }

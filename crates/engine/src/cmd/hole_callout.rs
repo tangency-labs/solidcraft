@@ -10,7 +10,7 @@ use solidcraft_doc::expr;
 
 use super::CommandSpec;
 use crate::params::bad;
-use crate::schema::hole_callout::{CalloutParams, CalloutResult, CalloutValues, HoleResult};
+use crate::schema::hole_callout::{CalloutParams, CalloutResult, CalloutValues, DecimalsParam, HoleResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
@@ -39,16 +39,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Hole Callout", cr
 
 fn callout(s: &mut Session, p: &Value) -> Result<Value> {
     let request: CalloutParams = crate::schema::read(CMD, p)?;
-    // With a drawing open, its fixed unit and its language; else the design's unit and English.
-    let drawing = s.open_drawing.and_then(|id| s.doc.drawing(id));
-    let units = match (request.units, drawing.map(|d| &d.units)) {
-        (Some(u), _) => u,
-        (None, Some(Units::Fixed { unit })) => unit.clone(),
-        (None, _) => expr::length_unit_or_mm(&s.doc.units).to_string(),
-    };
-    let language = request.language.or_else(|| drawing.map(|d| d.language.clone())).unwrap_or_else(|| "en".to_string());
-    let style = TextStyle { units, decimals: request.decimals.map_or(DEFAULT_DECIMALS, |d| d.0), language };
-    style.validate().map_err(|e| bad(CMD, e.to_string()))?;
+    let style = text_style(s, request.units, request.decimals, request.language, CMD)?;
     let hole = HoleRef { feature: request.feature.0, point: request.point };
     let resolution = hole_callout::resolve(&s.doc, &s.model, &hole).map_err(|e| bad(CMD, e.to_string()))?;
     let mut reply = CalloutResult {
@@ -79,6 +70,27 @@ fn callout(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     serde_json::to_value(&reply).map_err(|e| bad(CMD, e.to_string()))
+}
+
+/// How a feature note's text is written (a hole callout's, a chamfer note's): what the call gives,
+/// else with a drawing open its fixed unit and its language, else the design's unit and English.
+pub(super) fn text_style(
+    s: &Session,
+    units: Option<String>,
+    decimals: Option<DecimalsParam>,
+    language: Option<String>,
+    cmd: &str,
+) -> Result<TextStyle> {
+    let drawing = s.open_drawing.and_then(|id| s.doc.drawing(id));
+    let units = match (units, drawing.map(|d| &d.units)) {
+        (Some(u), _) => u,
+        (None, Some(Units::Fixed { unit })) => unit.clone(),
+        (None, _) => expr::length_unit_or_mm(&s.doc.units).to_string(),
+    };
+    let language = language.or_else(|| drawing.map(|d| d.language.clone())).unwrap_or_else(|| "en".to_string());
+    let style = TextStyle { units, decimals: decimals.map_or(DEFAULT_DECIMALS, |d| d.0), language };
+    style.validate().map_err(|e| bad(cmd, e.to_string()))?;
+    Ok(style)
 }
 
 #[cfg(test)]
