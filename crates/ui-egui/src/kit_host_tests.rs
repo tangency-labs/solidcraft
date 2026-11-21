@@ -919,7 +919,8 @@ mod panel {
                 authored.form_dim = egui::Color32::BLACK;
                 authored.dialog_label = egui::Color32::BLACK;
                 if fallback {
-                    authored.text = authored.panel;
+                    // A transparent ink cannot be lifted, so only the fallback reads.
+                    authored.text = egui::Color32::TRANSPARENT;
                 }
                 let _authored = solidcraft_theme::scoped_panel_tokens(authored);
                 let style = crate::panel_runtime::HostSurfaceStyle::capture(&ctx, false, Some(0.0), None);

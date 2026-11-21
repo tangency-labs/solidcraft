@@ -15,6 +15,8 @@ pub struct HostSurfaceAppearance {
 #[derive(Clone, Debug, PartialEq)]
 pub struct HostSurfaceStyle {
     authored: Arc<Tokens>,
+    /// The authored tokens with only the panel inks that miss contrast lifted.
+    readable: Arc<Tokens>,
     fallback: Arc<Tokens>,
     raw_fills: [Color32; 2],
     force_opaque: bool,
@@ -43,6 +45,10 @@ impl HostSurfaceStyle {
             return previous.clone();
         }
         let fallback = solidcraft_theme::panel_fallback_tokens(authored);
+        // A theme whose muted ink just misses contrast keeps its own panel
+        // colours; only that ink is lifted (#16023). The known-theme fallback
+        // stays for a theme that cannot be made readable this way.
+        let readable = solidcraft_theme::panel_readable_inks(authored, &raw_fills);
         let invalid = requested_opacity.is_some_and(|alpha| !alpha.is_finite() || !(0.0..=1.0).contains(&alpha));
         let resolve = |fill: Color32, opaque: bool| {
             if invalid {
@@ -54,12 +60,23 @@ impl HostSurfaceStyle {
                 return HostSurfaceAppearance { fill, contrast: None };
             }
             let requested = if opaque || force_opaque { 1.0 } else { requested_opacity.unwrap_or(f32::from(fill.a()) / 255.0) };
-            resolve_appearance(fill, &authored, &fallback, requested)
+            resolve_appearance(fill, &readable, &fallback, requested)
         };
         let opaque = resolve(raw_fills[0], true);
         let docked = resolve(raw_fills[0], false);
         let floating = resolve(raw_fills[1], false);
-        Self { authored: Arc::new(authored), fallback: Arc::new(fallback), raw_fills, force_opaque, requested_bits, dark, opaque, docked, floating }
+        Self {
+            authored: Arc::new(authored),
+            readable: Arc::new(readable),
+            fallback: Arc::new(fallback),
+            raw_fills,
+            force_opaque,
+            requested_bits,
+            dark,
+            opaque,
+            docked,
+            floating,
+        }
     }
 
     pub fn appearance(&self, surface: PanelSurface, floating: bool) -> &HostSurfaceAppearance {
@@ -73,7 +90,19 @@ impl HostSurfaceStyle {
     }
 
     pub fn palette(&self, appearance: &HostSurfaceAppearance) -> &Tokens {
-        if matches!(appearance.contrast, Some(ContrastOutcome::RetainReadableFallback { .. })) { &self.fallback } else { &self.authored }
+        if matches!(appearance.contrast, Some(ContrastOutcome::RetainReadableFallback { .. })) { &self.fallback } else { &self.readable }
+    }
+
+    /// The tokens a panel body must be painted with, or None to keep the
+    /// window's own: the fallback, or the lifted inks once readability was
+    /// checked and an ink actually moved. A translucent surface whose
+    /// readability is not checked keeps the authored inks.
+    pub fn paint_palette(&self, appearance: &HostSurfaceAppearance) -> Option<&Tokens> {
+        match appearance.contrast {
+            Some(ContrastOutcome::RetainReadableFallback { .. }) => Some(&self.fallback),
+            Some(ContrastOutcome::Readable { .. }) if self.readable != self.authored => Some(&self.readable),
+            _ => None,
+        }
     }
 }
 

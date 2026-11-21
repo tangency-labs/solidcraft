@@ -62,14 +62,18 @@ fn panel_surface_contrast_covers_actual_light_dark_and_bundled_high_contrast() {
                 let palette = style.palette(appearance);
                 match appearance.contrast.as_ref().unwrap() {
                     ContrastOutcome::Readable { effective_background_alpha } => {
-                        assert!(!impossible, "a shipped unreadable authored pair cannot be reported compliant: {name}");
                         assert!(*effective_background_alpha >= requested);
-                        assert_eq!(inks(palette), inks(&authored), "ordinary resolution preserves every canonical ink: {name}");
+                        for (before, after) in inks(&authored).into_iter().zip(inks(palette)) {
+                            if solidcraft_theme::contrast_ratio(before, opaque) >= 4.5 {
+                                assert_eq!(before, after, "ordinary resolution preserves every readable canonical ink: {name}");
+                            } else {
+                                assert!(impossible);
+                                assert!(solidcraft_theme::contrast_ratio(after, opaque) >= 4.5, "an unreadable ink is lifted: {name}");
+                            }
+                        }
                     }
-                    ContrastOutcome::RetainReadableFallback { reason } => {
-                        assert!(impossible, "fallback is justified by an independently checked opaque pair: {name}");
-                        assert_eq!(*reason, ContrastFailure::UnreadableAtFullOpacity);
-                        assert_eq!(appearance.fill.a(), 255);
+                    ContrastOutcome::RetainReadableFallback { .. } => {
+                        panic!("a shipped theme keeps its own panel colours and lifts only unreadable inks: {name}");
                     }
                 }
                 for viewport in [0, 1, 64, 117, 192, 254, 255] {
@@ -200,7 +204,8 @@ fn panel_surface_cache_tracks_dark_mode_even_with_identical_authored_tokens() {
     let _restore = RestoreDark(solidcraft_theme::is_dark());
     let ctx = egui::Context::default();
     let mut tokens = surface_test_palette(false);
-    tokens.form_dim = tokens.panel;
+    // A translucent-clear ink cannot be lifted, so only the known-theme fallback reads.
+    tokens.form_dim = egui::Color32::TRANSPARENT;
     let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
     solidcraft_theme::set_dark(false);
     let light = HostSurfaceStyle::capture(&ctx, false, Some(0.5), None);
@@ -216,7 +221,8 @@ fn panel_surface_cache_tracks_dark_mode_even_with_identical_authored_tokens() {
 fn invalid_panel_theme_reports_failure_and_uses_opaque_known_tokens() {
     let ctx = egui::Context::default();
     let mut tokens = surface_test_palette(false);
-    tokens.form_dim = tokens.panel;
+    // A translucent-clear ink cannot be lifted, so only the known-theme fallback reads.
+    tokens.form_dim = egui::Color32::TRANSPARENT;
     tokens.space_4 = 7.0;
     let _scope = solidcraft_theme::scoped_panel_tokens(tokens);
     for override_alpha in [Some(0.5), Some(f32::NAN), Some(f32::INFINITY), Some(-0.1), Some(1.1)] {
@@ -234,6 +240,72 @@ fn invalid_panel_theme_reports_failure_and_uses_opaque_known_tokens() {
         let cached = HostSurfaceStyle::capture(&ctx, false, override_alpha, Some(&style));
         assert_eq!(cached, style, "even an invalid raw NaN override has a stable bitwise cache key");
     }
+}
+
+#[test]
+fn built_in_themes_keep_their_own_panel_colours_and_lift_only_failing_inks() {
+    // #16023: a built-in theme whose muted ink missed 4.5:1 on its panel got the
+    // Dark or Light theme's panel colours (slate blue in Amber Phosphor).
+    crate::test_support::host_data();
+    struct RestoreDark(bool);
+    impl Drop for RestoreDark {
+        fn drop(&mut self) {
+            solidcraft_theme::set_dark(self.0);
+        }
+    }
+    let _restore = RestoreDark(solidcraft_theme::is_dark());
+    let inks = |t: &solidcraft_theme::Tokens| [t.text, t.text_dim, t.form_ink, t.form_dim, t.dialog_label];
+    let mut lifted = Vec::new();
+    for theme in crate::theme_files::builtin() {
+        let authored = crate::theme_files::resolve(theme);
+        solidcraft_theme::set_dark(theme.base.is_dark());
+        let _scope = solidcraft_theme::scoped_panel_tokens(authored);
+        let ctx = egui::Context::default();
+        let style = HostSurfaceStyle::capture(&ctx, false, None, None);
+        let appearance = style.appearance(PanelSurface::Opaque, false);
+        let id = &theme.id;
+        assert!(matches!(appearance.contrast, Some(ContrastOutcome::Readable { .. })), "{id}: panel fell back to another theme");
+        let own = crate::ui_kit::panel_host_frame(&ctx, false).fill.to_opaque();
+        assert_eq!(appearance.fill.to_opaque(), own, "{id}: the panel keeps its own fill");
+        let palette = style.palette(appearance);
+        assert!(solidcraft_theme::panel_surface_readable(appearance.fill, palette), "{id}");
+        for (before, after) in inks(&authored).into_iter().zip(inks(palette)) {
+            if solidcraft_theme::contrast_ratio(before, own) >= 4.5 {
+                assert_eq!(before, after, "{id}: a readable ink stays as authored");
+            } else {
+                assert!(solidcraft_theme::contrast_ratio(after, own) >= 4.5, "{id}: a lifted ink reads");
+            }
+        }
+        if inks(&authored) != inks(palette) {
+            lifted.push(id.clone());
+            // The paint path scopes the lifted inks for the panel body; a
+            // checked palette alone would leave the faint ink on screen.
+            assert_eq!(style.paint_palette(appearance), Some(palette), "{id}");
+            let bounds = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(200.0, 120.0));
+            let mut painted = None;
+            crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+                crate::ui_kit::panel_host_surface(
+                    ui,
+                    egui::Id::unique(id),
+                    bounds,
+                    false,
+                    appearance.fill,
+                    style.paint_palette(appearance),
+                    |_, _| {
+                        painted = Some(solidcraft_theme::Tokens::get());
+                    },
+                );
+            });
+            assert_eq!(painted.as_ref().map(inks), Some(inks(palette)), "{id}: the panel body paints the lifted inks");
+        } else {
+            assert_eq!(style.paint_palette(appearance), None, "{id}: an unchanged theme keeps the window's own tokens");
+        }
+        if id == "amber-phosphor" {
+            let dim = palette.text_dim;
+            assert!(dim.r() > dim.g() && dim.g() > dim.b(), "Amber Phosphor's muted ink stays amber: {dim:?}");
+        }
+    }
+    assert!(lifted.iter().any(|id| id == "amber-phosphor"), "Amber Phosphor's muted ink needed lifting: {lifted:?}");
 }
 
 #[test]
