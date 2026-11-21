@@ -51,17 +51,25 @@ fn near_face(m: &Mesh, d: f64) -> bool {
 /// of a planar face (the mouth of an existing bore, which a counterbore is centred on) is on
 /// that face too.
 pub(super) fn on_a_face(s: &Session, p: Vec3) -> bool {
-    let on_one = match face_at_in(s, p, None) {
-        Ok(Some((m, _, d, _))) => near_face(&m, d),
-        Ok(None) => false,
-        Err(tied) => tied.first().is_some_and(|b| matches!(face_at_in(s, p, Some(b)), Ok(Some((m, _, d, _))) if near_face(&m, d))),
+    let st = s.model.state();
+    let near = |bi: &str, d: f64| {
+        st.bodies.iter().find(|b| b.name == bi).is_some_and(|b| {
+            let tol = (b.body.size() * 1e-3).max(1e-3);
+            d <= tol * 10.0
+        })
     };
-    on_one || s.model.state().bodies.iter().any(|b| in_a_planar_face_outline(&b.mesh(), p))
+    let on_one = match face_at_in(s, p, None) {
+        Ok(Some((_, _, d, bi))) => near(&bi, d),
+        Ok(None) => false,
+        Err(tied) => tied.first().is_some_and(|b| matches!(face_at_in(s, p, Some(b)), Ok(Some((_, _, d, bi))) if near(&bi, d))),
+    };
+    on_one || st.bodies.iter().any(|b| in_a_planar_face_outline(b, p))
 }
 
-/// Does `p` lie in the plane of a planar face of `m`, inside the hull of that face's corners
+/// Does `p` lie in the plane of a planar face of `b`, inside the hull of that face's corners
 /// (so over its openings, not past its edge)?
-fn in_a_planar_face_outline(m: &Mesh, p: Vec3) -> bool {
+fn in_a_planar_face_outline(b: &solidcraft_doc::ModelBody, p: Vec3) -> bool {
+    let m = b.mesh();
     let mut faces: std::collections::BTreeMap<u32, Vec<[Vec3; 3]>> = std::collections::BTreeMap::new();
     for (t, f) in m.triangles.iter().zip(&m.tri_face) {
         if let Some(tri) = m.tri(t) {
@@ -72,7 +80,7 @@ fn in_a_planar_face_outline(m: &Mesh, p: Vec3) -> bool {
         let Some([a, b, c]) = tris.first().copied() else { return false };
         let Some(n) = (b - a).cross(c - a).normalized() else { return false };
         let planar = tris.iter().all(|[a, b, c]| (*b - *a).cross(*c - *a).normalized().is_some_and(|k| k.dot(n) > 1.0 - 1e-6));
-        if !planar || !near_face(m, (p - a).dot(n).abs()) {
+        if !planar || !near_face(&m, (p - a).dot(n).abs()) {
             return false;
         }
         let reference = if n.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
