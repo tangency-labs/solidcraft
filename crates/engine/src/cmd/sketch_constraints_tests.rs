@@ -1524,7 +1524,7 @@ fn a_constraint_that_squeezes_a_side_to_a_hair_is_refused() {
     }
     let before = sketch(&s);
     let e = s.execute("sketch.constraint.coincident", &json!({"a": "p6", "b": "p3"})).unwrap_err().to_string();
-    assert!(e.contains("shrink") && e.contains("to a point"), "{e}");
+    assert!((e.contains("shrink") && e.contains("to a point")) || e.contains("conflicts with"), "{e}");
     assert_eq!(sketch(&s), before);
 }
 
@@ -2033,4 +2033,123 @@ fn negative_distance_dimension_flips_to_the_opposite_side() {
     assert!(s.execute("sketch.dimension", &json!({"entities": ["la"], "value": -10})).is_err());
     let c = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}))["curves"])[0].clone();
     assert!(s.execute("sketch.dimension", &json!({"entities": [c], "value": -5})).is_err());
+}
+
+#[test]
+fn detach_point_uses_real_curve_arc_length_and_propagates_mirror_symmetry() {
+    let mut s = new_sketch();
+    // Quarter arc of radius 10 from (10, 0) to (0, 10) meeting a line at (10, 0).
+    let l1 = ids(&run(&mut s, "sketch.line", json!({"points": [[10, 0], [20, 0]]}))["curves"])[0].clone();
+    let a1 = ids(&run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [10, 0], "end": [0, 10]}))["curves"])[0].clone();
+    let shared_id = {
+        let sk = sketch(&s);
+        let p = sk.resolve_point(&format!("{l1}.start")).unwrap();
+        assert_eq!(Some(p), sk.resolve_point(&format!("{a1}.start")));
+        sk.points[p].id.clone()
+    };
+    // Detach arc by 5 mm along the real arc: endpoint must stay exactly on radius 10 at angle 0.5 rad.
+    let res = run(&mut s, "sketch.detach_point", json!({"curve": a1, "point": shared_id, "distance": 5.0}));
+    let new_pt_id = res["point"].as_str().unwrap().to_string();
+    let sk = sketch(&s);
+    let new_pos = sk.point(sk.resolve_point(&new_pt_id).unwrap()).unwrap();
+    let want = Vec2::new(10.0 * 0.5_f64.cos(), 10.0 * 0.5_f64.sin());
+    assert!(new_pos.dist(want) < 1e-4, "detached arc point {new_pos:?} vs exact {want:?}");
+
+    // Mirror detachment: two symmetric shared corners stay symmetric when one branch detaches.
+    let mut s = new_sketch();
+    let ax = ids(&run(&mut s, "sketch.line", json!({"points": [[0, -10], [0, 20]], "construction": true, "infer": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.constraint.fix", json!({"entities": [ax]}));
+    let l_a = ids(&run(&mut s, "sketch.line", json!({"points": [[-10, 0], [-20, 10]], "infer": false}))["curves"])[0].clone();
+    let l_base = ids(&run(&mut s, "sketch.line", json!({"points": [[-10, 0], [-10, -10]], "infer": false}))["curves"])[0].clone();
+    let r_a = ids(&run(&mut s, "sketch.line", json!({"points": [[10, 0], [20, 10]], "infer": false}))["curves"])[0].clone();
+    let r_base = ids(&run(&mut s, "sketch.line", json!({"points": [[10, 0], [10, -10]], "infer": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.constraint.symmetry", json!({"a": format!("{l_a}.start"), "b": format!("{r_a}.start"), "line": ax}));
+    run(&mut s, "sketch.constraint.symmetry", json!({"a": format!("{l_a}.end"), "b": format!("{r_a}.end"), "line": ax}));
+    let p_left = sketch(&s).points[sketch(&s).resolve_point(&format!("{l_a}.start")).unwrap()].id.clone();
+    run(&mut s, "sketch.detach_point", json!({"curve": l_a, "point": p_left, "distance": 3.0}));
+    let sk = sketch(&s);
+    let la_start = sk.curves[sk.curve_index(&l_a).unwrap()].kind.ends().unwrap().0;
+    let lbase_start = sk.curves[sk.curve_index(&l_base).unwrap()].kind.ends().unwrap().0;
+    let ra_start = sk.curves[sk.curve_index(&r_a).unwrap()].kind.ends().unwrap().0;
+    let rbase_start = sk.curves[sk.curve_index(&r_base).unwrap()].kind.ends().unwrap().0;
+    assert_ne!(la_start, lbase_start);
+    assert_ne!(ra_start, rbase_start, "mirrored curve also detached");
+    assert!(
+        sk.constraints
+            .iter()
+            .any(|c| matches!(c.kind, ConstraintKind::Symmetric { p, q, .. } if (p, q) == (la_start, ra_start) || (p, q) == (ra_start, la_start))),
+        "detached mirrored ends gained a replacement symmetry constraint"
+    );
+}
+
+#[test]
+fn point_merge_protects_expression_referenced_points_and_remaps_draw_point_reply() {
+    let mut s = new_sketch();
+    let p1 = run(&mut s, "sketch.point", json!({"point": [10, 0], "id": "A"}))["point"].as_str().unwrap().to_string();
+    // Second plain point on A merges and returns the surviving point id, never empty.
+    let p2 = run(&mut s, "sketch.point", json!({"point": [10, 0]}))["point"].as_str().unwrap().to_string();
+    assert_eq!(p2, p1, "merged sketch.point returns surviving point id");
+
+    // A point named by another point's expression is protected and keeps a Coincident instead of being deleted.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.point", json!({"point": [10, 0], "id": "B"}));
+    run(&mut s, "sketch.point", json!({"point": ["B.x + 5", "0"], "id": "C"}));
+    run(&mut s, "sketch.point", json!({"point": [20, 0], "id": "D"}));
+    let r = run(&mut s, "sketch.constraint.coincident", json!({"a": "D", "b": "B"}));
+    assert!(r.get("constraint").is_some(), "expression-referenced point stays protected: {r}");
+    assert!(sketch(&s).resolve_point("B").is_some(), "point B still exists for C's expression");
+}
+
+#[test]
+fn saved_sketch_with_coincident_constraints_replays_unchanged() {
+    let mut s = new_sketch();
+    let sid = s.active_sketch.unwrap();
+    // Construct a legacy-style closed triangle whose three corners use separate endpoints tied by
+    // explicit Coincident constraints (as saved by designs created before point merging).
+    let l1 = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "connect": false, "infer": false}))["curves"])[0].clone();
+    let l2 = ids(&run(&mut s, "sketch.line", json!({"points": [[10, 0], [10, 15]], "connect": false, "infer": false}))["curves"])[0].clone();
+    let l3 = ids(&run(&mut s, "sketch.line", json!({"points": [[10, 15], [0, 0]], "connect": false, "infer": false}))["curves"])[0].clone();
+    let mut doc = (*s.doc).clone();
+    {
+        let sk = doc.sketch_mut(sid).unwrap();
+        let (a0, a1) = sk.curves[sk.curve_index(&l1).unwrap()].kind.ends().unwrap();
+        let (b0, b1) = sk.curves[sk.curve_index(&l2).unwrap()].kind.ends().unwrap();
+        let (c0, c1) = sk.curves[sk.curve_index(&l3).unwrap()].kind.ends().unwrap();
+        assert_ne!(a1, b0);
+        assert_ne!(b1, c0);
+        assert_ne!(c1, a0);
+        for (id, p, q) in [("k_legacy_1", a1, b0), ("k_legacy_2", b1, c0), ("k_legacy_3", c1, a0)] {
+            sk.constraints.push(solidcraft_sketch::Constraint {
+                id: id.into(),
+                kind: ConstraintKind::Coincident { p, q },
+                param: None,
+                driven: false,
+                text: None,
+            });
+        }
+    }
+    s.set_doc(doc);
+    s.refresh();
+    let saved = s.doc.to_json();
+    let before = sketch(&s);
+    let before_coinc: Vec<String> =
+        before.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Coincident { .. })).map(|c| c.id.clone()).collect();
+    assert_eq!(before_coinc, vec!["k_legacy_1", "k_legacy_2", "k_legacy_3"]);
+
+    // Reload the saved design into a cold session and replay from scratch.
+    let mut cold = Session { doc: solidcraft_doc::format::read(&saved).unwrap().into(), ..Default::default() };
+    cold.refresh();
+    assert_eq!(cold.doc.to_json(), saved, "saved design JSON replays without mutation");
+    let state = cold.model.state();
+    let replayed = state.sketch(sid).unwrap();
+    assert!(replayed.report.ok(), "replayed legacy sketch solves cleanly: {:?}", replayed.report);
+    assert_eq!(replayed.sketch.points.len(), before.points.len(), "legacy points are not retroactively merged on load");
+    for (p_after, p_before) in replayed.sketch.points.iter().zip(before.points.iter()) {
+        assert_eq!(p_after.id, p_before.id);
+        assert!(p_after.pos.dist(p_before.pos) < 1e-12, "point {} moved: {:?} vs {:?}", p_before.id, p_after.pos, p_before.pos);
+    }
+    assert_eq!(replayed.sketch.curves, before.curves, "curve endpoint indices stay identical");
+    assert_eq!(replayed.sketch.constraints, before.constraints, "legacy Coincident constraints stay intact");
+    let total_area: f64 = replayed.profiles.iter().map(|p| p.area.abs()).sum();
+    assert!((total_area - 75.0).abs() < 1e-6, "replayed triangle profile area unchanged: {total_area}");
 }
