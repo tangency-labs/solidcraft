@@ -70,6 +70,7 @@ pub mod dialogs_surface;
 pub mod dialogs_sweep;
 mod dialogs_thread;
 pub mod dialogs_view_dxf;
+pub mod dialogs_wood_grain;
 pub mod dim_view;
 #[cfg(test)]
 mod dimension_create_ui_tests;
@@ -89,6 +90,7 @@ pub use solidcraft_ui_kit::frame;
 pub mod frame_rate;
 pub mod gizmo;
 pub mod gpu;
+mod grain_guides;
 pub mod help;
 pub use solidcraft_ui_kit::history_bar;
 mod history_folds;
@@ -458,6 +460,7 @@ pub struct UiState {
     pub show_browser: bool,
     pub show_timeline: bool,
     pub show_grid: bool,
+    pub show_grain: bool,
     pub show_navigation_bar: bool,
     pub perspective: bool,
     /// Perspective while orbiting, orthographic when the camera faces a standard axis view
@@ -508,6 +511,7 @@ impl Default for UiState {
             show_browser: true,
             show_timeline: true,
             show_grid: true,
+            show_grain: false,
             show_navigation_bar: true,
             perspective: false,
             auto_ortho_faces: false,
@@ -1894,6 +1898,7 @@ impl SolveApp {
                 }
                 // The command and the preference are one setting.
                 "diagnostics.validation" => self.preferences.validation = self.session.validation(),
+                "view.grain" => self.ui.show_grain = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.show_grain),
                 "view.grid" => self.ui.show_grid = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.show_grid),
                 "view.ground_shadow" => self.ui.ground_shadow = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.ground_shadow),
                 "view.navigation_bar" => {
@@ -2562,6 +2567,7 @@ impl SolveApp {
                 | "view.home"
                 | "view.tool.zoom"
                 | "view.spin"
+                | "view.grain"
                 | "view.grid"
                 | "view.ground_shadow"
                 | "view.navigation_bar"

@@ -77,6 +77,7 @@ pub(crate) fn evaluate(doc: &Document, st: &mut ModelState, bodies: &[String], f
         body.transferred = true;
         body.source_name = old.source_name.clone();
         body.source_transform = crate::mat_mul(&transform, &old.source_transform);
+        body.grain_frame = Some(crate::wood::GrainFrame::moved(old, &transform, false).into());
         body.imported = old.imported.clone();
         body.names = crate::naming::NameCell::same(old);
         body.drawn_as_moved(old, &transform);
