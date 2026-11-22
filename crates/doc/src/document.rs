@@ -1527,6 +1527,11 @@ pub enum FeatureKind {
         /// never given again.
         #[serde(default, skip_serializing_if = "is_zero_u32")]
         next_pair: u32,
+        /// Two or more groups of lines, each placed its own way (`frame::MemberGroup`); then they
+        /// stand in for `lines`, `anchor`, `locate`, `angle`, `mirror` and `body_name`, which stay
+        /// unset. None: those fields are the feature's one group (`frame::member_groups`).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        groups: Vec<crate::frame::MemberGroup>,
     },
     /// Raise or sink profiles on a planar face, or wrap them on a selected cylindrical wall.
     Emboss {
