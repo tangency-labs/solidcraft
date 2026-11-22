@@ -2011,21 +2011,11 @@ mod tests {
         Some(if changes == 0 { if vals[0] > 0.0 { 2 } else { 0 } } else { changes / 2 })
     }
 
-    /// The heights along A at which the line of A at angle `theta` meets B (none, or two).
-    fn heights_on_b(a: &Cone, b: &Cone, theta: f64) -> Vec<f64> {
-        let (pa, pb) = (a.rev().position(), b.rev().position());
-        let (za, zb) = (pa.z_axis(), pb.z_axis());
-        let q = pa.origin() + (pa.x_axis() * theta.cos() + pa.y_axis() * theta.sin()) * a.bot_radius() - pb.origin();
-        // |q + t za|^2 - ((q + t za).zb)^2 = rb^2, a quadratic in t
-        let (c, qz) = (za.dot(zb), q.dot(zb));
-        let a2 = 1.0 - c * c;
-        let b1 = q.dot(za) - qz * c;
-        let c0 = q.dot(q) - qz * qz - b.bot_radius().powi(2);
-        let disc = b1 * b1 - a2 * c0;
-        if disc < 0.0 {
-            return Vec::new();
-        }
-        vec![(-b1 + disc.sqrt()) / a2, (-b1 - disc.sqrt()) / a2]
+    /// A point's distance from a cylinder.
+    fn off_cylinder(c: &Cone, p: Point3) -> f64 {
+        let (o, z) = (c.rev().position().origin(), c.rev().position().z_axis());
+        let d = p - o;
+        ((d - z * d.dot(z)).length() - c.bot_radius()).abs()
     }
 
     /// The length of a curve, by 4000 chords.
@@ -2039,8 +2029,8 @@ mod tests {
     /// from a fixed seed, with near-touching, near-tangent and near-meeting axes among them),
     /// each solved by the discriminant: every point of every curve lies on both cylinders
     /// within the tolerance, and the curves are as many as the discriminant's loops. The old
-    /// tracer's answer is compared, point by point against the closed form (the height on A
-    /// at each of its points' angles) and by total length, and its disagreements printed
+    /// tracer's answer is compared (its curves' points on both cylinders, and the total
+    /// length of its curves against ours), and its disagreements printed
     /// (`--nocapture`). Equal cylinders whose axes meet within the tolerance keep their
     /// ellipses and are not this construction's.
     #[test]
@@ -2091,23 +2081,19 @@ mod tests {
                 eprintln!("case {case} (ra {ra:.4} rb {rb:.4} angle {angle:.4} dist {dist:.6}): the tracer fails: {old:?}");
                 continue;
             };
-            // each tracer point against the closed form's heights at its angle on A
-            let (pa, za) = (a.rev().position(), a.rev().position().z_axis());
+            // every point of the tracer's curves on both cylinders: a span that steps from one
+            // branch to the other leaves them between its points
             let mut worst = 0.0_f64;
             for c in &old.curves_3d {
                 let ivl = c.natural_interval();
-                for i in 0..=400 {
-                    let p = c.evaluate_point(&k, ivl.min() + ivl.length() * f64::from(i) / 400.0).unwrap();
-                    let d = p - pa.origin();
-                    let theta = d.dot(pa.y_axis()).atan2(d.dot(pa.x_axis()));
-                    let t = d.dot(za);
-                    let off = heights_on_b(&a, &b, theta).iter().map(|h| (h - t).abs()).fold(f64::INFINITY, f64::min);
-                    worst = worst.max(off);
+                for i in 0..=2000 {
+                    let p = c.evaluate_point(&k, ivl.min() + ivl.length() * f64::from(i) / 2000.0).unwrap();
+                    worst = worst.max(off_cylinder(&a, p)).max(off_cylinder(&b, p));
                 }
             }
             let (ours, theirs): (f64, f64) =
                 (out.curves_3d.iter().map(|c| length(&k, c)).sum(), old.curves_3d.iter().map(|c| length(&k, c)).sum());
-            if worst > 10.0 * tol {
+            if worst > tol {
                 tracer_off += 1;
                 eprintln!("case {case} (ra {ra:.4} rb {rb:.4} angle {angle:.4} dist {dist:.6}): a tracer point lies {worst:.3e} off the curve");
             }
