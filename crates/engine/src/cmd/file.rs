@@ -26,8 +26,8 @@ use crate::params::{bad, bool_, num, str_, string_list};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::schema::file::GpgKeyInfo;
 use crate::schema::file::{
-    ExportResult, GpgKeysParams, GpgKeysResult, NewerFileReport, OpenElsewhere, OpenResult, OpenedDesign, OpenedDrawing, OpenedFile,
-    OpenedPointCloud, RecoverParams, RecoverResult, RecoveredDesign, RecoveryDiscardParams, RecoveryDiscardResult, RecoveryListParams,
+    DiffParams, DiffResult, ExportResult, GpgKeysParams, GpgKeysResult, NewerFileReport, OpenElsewhere, OpenResult, OpenedDesign, OpenedDrawing,
+    OpenedFile, OpenedPointCloud, RecoverParams, RecoverResult, RecoveredDesign, RecoveryDiscardParams, RecoveryDiscardResult, RecoveryListParams,
     RecoveryListResult, SignatureRecord, SignatureReport, VerifyParams, VerifyResult,
 };
 use crate::schema::insert_mesh::{InsertMeshParams, MeshInserted};
@@ -90,6 +90,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&VERIFY_CONTRACT)
         .output(output_schema_for::<VerifyResult>)
         .params("path? (default: the design's current file) → {path, status, reason?, truncated, records: [{method, key_id, user_id?, author?, created?, format, covered}]}: status is unsigned, valid, not_covered (signed earlier, saved since without a key), invalid or unsupported"),
+    CommandSpec::new("file.diff", "Compare Design Files", crate::checked!("file.diff", diff)).any_part()
+        .icon("compare")
+        .noundo()
+        .read_only()
+        .doc_only()
+        .contract(&DIFF_CONTRACT)
+        .output(output_schema_for::<DiffResult>)
+        .params("a, b: design files (.sc or .json), read and upgraded but never evaluated, so a format upgrade alone is no change → {same, format: {a, b}, features: {added, removed, moved, changed, reused_ids, marker?}, parameters: {added, removed, changed}, sketches, imports, other, view}. Features and sketches match by id, parameter rows by name and their place among that name's rows, and imported files compare by the SHA-256 of what the design keeps. Other sections that differ are named"),
     CommandSpec::new("file.gpg_keys", "Signing Keys", crate::checked!("file.gpg_keys", gpg_keys)).any_part()
         .icon("shield")
         .noundo()
@@ -231,6 +239,7 @@ fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 const OPEN_CONTRACT: TypedContract<crate::schema::file::OpenParams> = TypedContract::new();
+const DIFF_CONTRACT: TypedContract<DiffParams> = TypedContract::new();
 const RECOVERY_LIST_CONTRACT: TypedContract<RecoveryListParams> = TypedContract::new();
 const RECOVER_CONTRACT: TypedContract<RecoverParams> = TypedContract::new();
 const RECOVERY_DISCARD_CONTRACT: TypedContract<RecoveryDiscardParams> = TypedContract::new();
@@ -2115,6 +2124,16 @@ fn verify(s: &mut Session, p: &Value) -> Result<Value> {
         None => SignatureReport { status: "unsigned".to_owned(), reason: None, truncated: false, records: Vec::new() },
     };
     serde_json::to_value(VerifyResult { path, signature }).map_err(|e| bad("file.verify", e.to_string()))
+}
+
+/// `file.diff` compares two design files without opening either in the session.
+fn diff(_s: &mut Session, p: &Value) -> Result<Value> {
+    let path = |key: &str| match str_(p, key) {
+        Some(path) if usable_path(path) => Ok(path),
+        _ => Err(bad("file.diff", format!("`{key}` is required, the path of a design file (.sc or .json)"))),
+    };
+    let reply = crate::design_diff::diff_files(path("a")?, path("b")?)?;
+    serde_json::to_value(reply).map_err(|e| bad("file.diff", e.to_string()))
 }
 
 /// `file.gpg_keys`: the GnuPG keys a signed save can use.

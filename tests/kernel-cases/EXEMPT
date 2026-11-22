@@ -174,6 +174,7 @@ explode.delete                    exploded views: display offsets
 explode.list                      exploded views: display offsets
 expr.evaluate                     expression evaluation
 file.copy                        file operations: tested in crates/engine/src/cmd/file_library.rs tests
+file.diff                        compares two design files without evaluating them, tested in crates/engine/src/design_diff_tests.rs and apps/solidcraft-cli/tests/designs_in_git.rs
 file.export_sdf                  writes a robot model folder from the meshes: tested in crates/io/src/sdf.rs and crates/engine/src/tests.rs
 file.gerber_files                 a listing of a board's files: crates/engine/src/cmd/board_import_tests.rs
 file.gpg_keys                     GnuPG key listing: tested in crates/engine/src/gpg.rs tests
