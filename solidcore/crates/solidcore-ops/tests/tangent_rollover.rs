@@ -3870,6 +3870,40 @@ fn a_round_nearly_filling_its_end_face_builds_its_end_rib_through_more_than_a_ha
     }
 }
 
+/// SolidCraft #15767 (review of #20757): [`narrowing_wall`] as SolidCraft builds it
+/// (`data/issue_15767_narrowing_wall_from_the_app.smb`: the same solid, its volume the closed
+/// form, with other entity order, plane parametrisations and edge tolerances). The roll-over
+/// splits the round into the rolled piece and the piece after it, joined by a cross section.
+/// The section's use on the rolled piece had no UV curve of its own and read the other piece's,
+/// on another surface, so the rolled piece's face capped the section with iso lines of its own
+/// domain; here that cap ran down the domain's boundary to y = -0.9 and the result was not a
+/// closed solid (main refused these as too large at 0.2). The section is dropped onto the
+/// rolled piece: each builds, valid, with the closed-form end vertices ([`end_vertices`]),
+/// taking at least the flat wall's part ([`flat_wall_removal`]).
+#[test]
+fn the_app_built_narrowing_wall_rounds_with_the_section_on_the_rolled_piece() {
+    fixes();
+    let bytes = include_bytes!("data/issue_15767_narrowing_wall_from_the_app.smb");
+    for r in [0.25, 0.5, 1.0] {
+        let b = Body::from_smb(bytes.to_vec(), false).unwrap();
+        let v0 = b.volume(1e-9).unwrap();
+        let want = narrowing_wall_volume();
+        assert!((v0 - want).abs() <= 1e-9 * want, "{v0} against {want}");
+        let e = edge_at(&b, [10.0, 0.0, 1.9]);
+        blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled)
+            .unwrap_or_else(|err| panic!("r {r}: {err:?}"));
+        let report = b.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "r {r}: {report}");
+        for want in end_vertices(r) {
+            let near = nearest_vertex(&b, want);
+            assert!(near <= 1e-6, "r {r}: no vertex at {want:?} ({near})");
+        }
+        let taken = v0 - b.volume(1e-9).unwrap();
+        let least = flat_wall_removal(r);
+        assert!(taken > least, "r {r}: takes {taken}, at least {least}");
+    }
+}
+
 /// SolidCraft #15767 (review of #20757): a round of [`narrowing_wall_between`]`(a, b)` whose
 /// rail crosses the wall's top edge z = 4 so near the end face y = 16 that its roll-over does
 /// not lie wholly before the end face. The end face's wall is `h = 4 - b` high. In the band
