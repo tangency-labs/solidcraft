@@ -3216,9 +3216,6 @@ fn half_torus() -> Body {
     boolean(torus, below, BooleanOp::Subtract).unwrap().unwrap()
 }
 
-/// A half torus of any radii. Kept for the notch case moved to its own issue (see the
-/// finding `heal-face-props-seam-review-18804.md`); no test calls it until that returns.
-#[allow(dead_code)]
 fn half_torus_of_radii(major: f64, tube: f64) -> Body {
     torus_above(major, tube, 0.0)
 }
@@ -3319,6 +3316,181 @@ fn a_boss_overhanging_a_half_torus_flat_face_by_a_tolerance_at_its_seam_joins() 
         assert!(gap <= tol, "d {d}: the seam's vertex is {gap} off the seam");
         let v = volume(&r);
         assert!((v - want).abs() <= 1e-8 * want, "d {d}: {v} vs {want}");
+    }
+}
+
+/// Stress corpus S1558/S1746 and S0321/S0583/S1100: a notch beside the seam
+/// of a half torus, at both scales. The cylinder stays on +Y. Tolerant contacts
+/// with the meridian are not crossings: the seam remains on the face boundary.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's operands and independent measures
+fn a_notch_beside_a_half_torus_seam_keeps_its_boundary_on_the_seam() {
+    all_fixes();
+    for (major, tube, radius, depth) in [(1.8, 0.6, 0.07, 0.3), (500.0, 0.5, 0.06, 0.25)] {
+        let outer = major + tube;
+        // At radius rho the torus is sqrt(tube² - (rho-major)²) high.
+        // The notch subtends 2 acos((rho²+outer²-radius²)/(2 rho outer)).
+        // Integrating height * rho * angle gives its removed volume, independent
+        // of the notch's longitude. The cylinder reaches above this whole overlap.
+        let removed = |step| {
+            tanh_sinh(
+                |rho| {
+                    let height = (tube * tube - (rho - major) * (rho - major))
+                        .max(0.0)
+                        .sqrt();
+                    let cosine =
+                        (rho * rho + outer * outer - radius * radius) / (2.0 * rho * outer);
+                    height * 2.0 * rho * cosine.clamp(-1.0, 1.0).acos()
+                },
+                outer - radius,
+                outer,
+                step,
+            )
+        };
+        let (coarse, fine) = (removed(1.0 / 32.0), removed(1.0 / 64.0));
+        assert!(
+            (coarse - fine).abs() <= 1e-7 * fine,
+            "{major}: {coarse} {fine}"
+        );
+        let want = PI * PI * major * tube * tube - fine;
+        // Other recipes reach the same notch after three blind holes (S2599,
+        // S7577), or with a closed toroidal void (S2104/S5649/S6816).
+        for preparation in 0..3 {
+            if preparation == 1 && major == 500.0 {
+                continue;
+            }
+            let mut prepared = half_torus_of_radii(major, tube);
+            let prior_removed = match preparation {
+                1 => {
+                    for y in [-0.18, 0.0, 0.18] {
+                        prepared = boolean(
+                            round_tripped(&prepared),
+                            round_tripped(&rod([1.32, y, 0.0], 0.06, 0.24)),
+                            BooleanOp::Subtract,
+                        )
+                        .unwrap()
+                        .unwrap();
+                    }
+                    3.0 * PI * 0.06 * 0.06 * 0.24
+                }
+                2 => {
+                    let wall = if major == 1.8 { 0.072 } else { 0.06 };
+                    let inner = tube - wall;
+                    prepared = boolean(
+                        round_tripped(&prepared),
+                        round_tripped(&torus_above(major, inner, wall)),
+                        BooleanOp::Subtract,
+                    )
+                    .unwrap()
+                    .unwrap();
+                    // Revolve the circular segment above z=wall: its area times
+                    // 2 pi R. Its maximum radius is smaller than `outer - radius`,
+                    // so this cavity and the notch have disjoint interiors.
+                    2.0 * PI
+                        * major
+                        * (inner * inner * (wall / inner).acos()
+                            - wall * (inner * inner - wall * wall).sqrt())
+                }
+                _ => 0.0,
+            };
+            for d in [1e-5, 2e-5] {
+                let angle = (radius + d) / outer;
+                let notch = rod(
+                    [outer * angle.cos(), outer * angle.sin(), 0.0],
+                    radius,
+                    depth,
+                );
+                let target = round_tripped(&prepared);
+                let (before, _) = target.to_record().unwrap();
+                // The outer meridian is the seam with the outer-equator endpoint.
+                // The holes' seams and the closed cavity's seam cannot reach it.
+                let meridians: Vec<_> = before
+                    .edges
+                    .iter()
+                    .filter(|edge| {
+                        edge.uses.len() == 2
+                            && edge.uses[0].face == edge.uses[1].face
+                            && edge
+                                .vertices
+                                .iter()
+                                .any(|&v| before.vertices[v as usize].point == [outer, 0.0, 0.0])
+                    })
+                    .collect();
+                assert_eq!(
+                    meridians.len(),
+                    1,
+                    "major {major} preparation {preparation}"
+                );
+                let meridian = meridians[0];
+                // These are whole-curve identities, not points sampled along it:
+                // the source meridian's definition and native form lie in y = 0.
+                let on_meridian_plane = |curve: &solidcore_record::brep::Curve| match curve {
+                    solidcore_record::brep::Curve::Circle { frame, .. }
+                    | solidcore_record::brep::Curve::Ellipse { frame, .. } => {
+                        frame.origin[1] == 0.0 && frame.x_axis[1] == 0.0 && frame.y_axis[1] == 0.0
+                    }
+                    solidcore_record::brep::Curve::Spline { points, .. } => {
+                        points.iter().all(|p| p[1] == 0.0)
+                    }
+                    solidcore_record::brep::Curve::RationalSpline { homogeneous, .. } => {
+                        homogeneous.iter().all(|p| p[1] == 0.0 && p[3] > 0.0)
+                    }
+                    _ => false,
+                };
+                assert!(on_meridian_plane(&meridian.curve), "{meridian:?}");
+                if let Some(native) = &meridian.nurbs {
+                    assert!(on_meridian_plane(native), "{native:?}");
+                }
+                let result = boolean(target, round_tripped(&notch), BooleanOp::Subtract)
+                    .unwrap_or_else(|e| panic!("major {major} d {d}: {e:?}"))
+                    .unwrap();
+                let report = result.check(CheckLevel::All).unwrap();
+                assert!(report.is_valid(), "major {major} d {d}: {}", report.text);
+                assert_eq!(result.solid_count().unwrap(), 1, "major {major} d {d}");
+                // The near notch corner shares the original seam vertex under
+                // the existing contact rule: its gap is strictly below d, which
+                // is at most the two vertex tolerances' sum. Thus the notch adds
+                // [1, 2, 1]. Each blind hole or closed void adds [2, 3, 2].
+                // See plan/findings/seam-boundary-review-18804.md for the derivation.
+                let counts = match preparation {
+                    1 => [9, 14, 9],
+                    2 => [5, 8, 5],
+                    _ => [3, 5, 3],
+                };
+                assert_eq!(
+                    result.counts().unwrap(),
+                    counts,
+                    "major {major} preparation {preparation} d {d}"
+                );
+                let (after, _) = result.to_record().unwrap();
+                let retained: Vec<_> = after
+                    .edges
+                    .iter()
+                    .filter(|edge| {
+                        edge.curve == meridian.curve
+                            && edge.nurbs == meridian.nurbs
+                            && edge.interval == meridian.interval
+                            && edge.vertices.map(|v| after.vertices[v as usize].point)
+                                == meridian.vertices.map(|v| before.vertices[v as usize].point)
+                    })
+                    .collect();
+                assert_eq!(
+                    retained.len(),
+                    1,
+                    "major {major} preparation {preparation} d {d}: the whole meridian changed"
+                );
+                // It remains one boundary edge used twice on the same face,
+                // with its complete original curve and parameter interval.
+                assert_eq!(retained[0].uses.len(), 2);
+                assert_eq!(retained[0].uses[0].face, retained[0].uses[1].face);
+                assert!(
+                    near(volume(&result), want - prior_removed),
+                    "major {major} d {d}: {} vs {}",
+                    volume(&result),
+                    want - prior_removed
+                );
+            }
+        }
     }
 }
 
