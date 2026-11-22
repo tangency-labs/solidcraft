@@ -4103,8 +4103,8 @@ fn a_saved_split_keeps_a_piece_of_two_legs_as_one_body() {
     for f in v["features"].as_array_mut().unwrap().iter_mut().filter(|f| f["type"] == "split") {
         f["split_keeps_lumps"] = json!(true);
     }
-    s.set_doc(solidcraft_doc::Document::from_json(&v.to_string()).unwrap());
-    let st = s.world_state().unwrap();
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&v.to_string()).unwrap());
+    let st = reopened.world_state().unwrap();
     let pieces: Vec<(String, usize)> = st.bodies.iter().map(|b| (b.name.clone(), b.body.lumps().unwrap().len())).collect();
     assert_eq!(pieces, [("Block".to_string(), 2), ("Block (1)".to_string(), 1)]);
 }
