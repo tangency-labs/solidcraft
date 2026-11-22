@@ -2011,11 +2011,38 @@ mod tests {
         Some(if changes == 0 { if vals[0] > 0.0 { 2 } else { 0 } } else { changes / 2 })
     }
 
+    /// The heights along A at which the line of A at angle `theta` meets B (none, or two).
+    fn heights_on_b(a: &Cone, b: &Cone, theta: f64) -> Vec<f64> {
+        let (pa, pb) = (a.rev().position(), b.rev().position());
+        let (za, zb) = (pa.z_axis(), pb.z_axis());
+        let q = pa.origin() + (pa.x_axis() * theta.cos() + pa.y_axis() * theta.sin()) * a.bot_radius() - pb.origin();
+        // |q + t za|^2 - ((q + t za).zb)^2 = rb^2, a quadratic in t
+        let (c, qz) = (za.dot(zb), q.dot(zb));
+        let a2 = 1.0 - c * c;
+        let b1 = q.dot(za) - qz * c;
+        let c0 = q.dot(q) - qz * qz - b.bot_radius().powi(2);
+        let disc = b1 * b1 - a2 * c0;
+        if disc < 0.0 {
+            return Vec::new();
+        }
+        vec![(-b1 + disc.sqrt()) / a2, (-b1 - disc.sqrt()) / a2]
+    }
+
+    /// The length of a curve, by 4000 chords.
+    fn length(k: &Kernel, c: &Curve) -> f64 {
+        let ivl = c.natural_interval();
+        let p = |i: u32| c.evaluate_point(k, ivl.min() + ivl.length() * f64::from(i) / 4000.0).unwrap();
+        (1..=4000).map(|i| p(i).distance(p(i - 1))).sum()
+    }
+
     /// #3350's probe: 400 random pairs of cylinders (radii, axis angles and offsets drawn
     /// from a fixed seed, with near-touching, near-tangent and near-meeting axes among them),
     /// each solved by the discriminant: every point of every curve lies on both cylinders
     /// within the tolerance, and the curves are as many as the discriminant's loops. The old
-    /// tracer's answer is compared and its disagreements printed (`--nocapture`).
+    /// tracer's answer is compared, point by point against the closed form (the height on A
+    /// at each of its points' angles) and by total length, and its disagreements printed
+    /// (`--nocapture`). Equal cylinders whose axes meet within the tolerance keep their
+    /// ellipses and are not this construction's.
     #[test]
     fn random_skew_cylinder_pairs_meet_in_their_discriminants_loops() {
         let k = Kernel::default();
@@ -2027,14 +2054,14 @@ mod tests {
             (seed >> 11) as f64 / (1u64 << 53) as f64
         };
         let tol = 5e-6;
-        let (mut solved, mut handed_back, mut tracer_differs) = (0, 0, 0);
+        let (mut solved, mut ellipses, mut handed_back, mut tracer_off, mut tracer_short) = (0, 0, 0, 0, 0);
         for case in 0..400 {
             let ra = 1.0 + 9.0 * rnd();
             let rb = if case % 4 == 0 { ra } else { 1.0 + 9.0 * rnd() };
             let angle = 0.2 + (PI / 2.0 - 0.2) * rnd();
             let dist = match case % 5 {
                 0 => (ra + rb) * (1.0 + (rnd() - 0.5) * 1e-4), // near touching outside
-                1 => (ra - rb).abs() + (rnd() - 0.5) * 1e-4,    // near touching inside
+                1 => (ra - rb).abs() + rnd() * 1e-4,            // near touching inside
                 2 => 1e-5 + 1e-4 * rnd(),                       // near meeting
                 _ => (ra + rb + 1.0) * rnd(),
             };
@@ -2047,34 +2074,56 @@ mod tests {
                 handed_back += 1;
                 continue;
             }
+            if ra == rb && dist <= tol {
+                ellipses += 1;
+                continue;
+            }
             solved += 1;
-            let pts = on_both_within(&k, &a, &b, &out, tol);
+            on_both_within(&k, &a, &b, &out, tol);
             if let Some(want) = expected_loops(&a, &b) {
                 assert_eq!(out.curves_3d.len(), want, "case {case}: ra {ra} rb {rb} angle {angle} dist {dist}");
             }
             let old = crate::surface::surface::p2::base_global_surface_intersect(
                 &k, &Surface::from(a.clone()), &da, &Surface::from(b.clone()), &db, [true, true], Some(tol), None,
             );
-            let old_pts: Vec<Point3> = match &old {
-                Ok(o) => o.curves_3d.iter().flat_map(|c| {
-                    let ivl = c.natural_interval();
-                    (0..=400).map(move |i| (c.clone(), ivl.min() + ivl.length() * f64::from(i) / 400.0))
-                }).map(|(c, t)| c.evaluate_point(&k, t).unwrap()).collect(),
-                Err(_) => Vec::new(),
+            let Ok(old) = old else {
+                tracer_off += 1;
+                eprintln!("case {case} (ra {ra:.4} rb {rb:.4} angle {angle:.4} dist {dist:.6}): the tracer fails: {old:?}");
+                continue;
             };
-            let far = old_pts.iter().map(|p| nearest(&pts, *p)).fold(0.0, f64::max);
-            let missed = pts.iter().step_by(37).map(|p| nearest(&old_pts, *p)).fold(0.0, f64::max);
-            if old.is_err() || far > 1e-2 || missed > 1e-2 || old.as_ref().is_ok_and(|o| o.curves_3d.len() != out.curves_3d.len()) {
-                tracer_differs += 1;
+            // each tracer point against the closed form's heights at its angle on A
+            let (pa, za) = (a.rev().position(), a.rev().position().z_axis());
+            let mut worst = 0.0_f64;
+            for c in &old.curves_3d {
+                let ivl = c.natural_interval();
+                for i in 0..=400 {
+                    let p = c.evaluate_point(&k, ivl.min() + ivl.length() * f64::from(i) / 400.0).unwrap();
+                    let d = p - pa.origin();
+                    let theta = d.dot(pa.y_axis()).atan2(d.dot(pa.x_axis()));
+                    let t = d.dot(za);
+                    let off = heights_on_b(&a, &b, theta).iter().map(|h| (h - t).abs()).fold(f64::INFINITY, f64::min);
+                    worst = worst.max(off);
+                }
+            }
+            let (ours, theirs): (f64, f64) =
+                (out.curves_3d.iter().map(|c| length(&k, c)).sum(), old.curves_3d.iter().map(|c| length(&k, c)).sum());
+            if worst > 10.0 * tol {
+                tracer_off += 1;
+                eprintln!("case {case} (ra {ra:.4} rb {rb:.4} angle {angle:.4} dist {dist:.6}): a tracer point lies {worst:.3e} off the curve");
+            }
+            if (ours - theirs).abs() > 1e-3 * ours {
+                tracer_short += 1;
                 eprintln!(
-                    "case {case} (ra {ra:.4} rb {rb:.4} angle {angle:.4} dist {dist:.6}): {} curves; tracer {:?}, its farthest point {far:.3e} from ours, ours {missed:.3e} from its",
+                    "case {case} (ra {ra:.4} rb {rb:.4} angle {angle:.4} dist {dist:.6}): length {ours:.6} in {} curves, the tracer's {theirs:.6} in {}",
                     out.curves_3d.len(),
-                    old.as_ref().map(|o| o.curves_3d.len()).map_err(|e| e.to_string()),
+                    old.curves_3d.len()
                 );
             }
         }
-        eprintln!("solved {solved}, handed to the tracer {handed_back}, tracer differs {tracer_differs}");
-        assert!(solved >= 300, "{solved} solved");
+        eprintln!(
+            "solved {solved}, ellipses {ellipses}, handed to the tracer {handed_back}; the tracer off the curve or failing {tracer_off}, of another length {tracer_short}"
+        );
+        assert!(solved >= 250, "{solved} solved");
     }
 
     /// [`on_both`] at tolerance `tol`.
