@@ -634,6 +634,11 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             item.children.push(cmd(app, "appearance.assign", "Remove override").key("").with(targets));
         }
     });
+    // Render's Fit frames the whole scene whatever is selected, so its component and
+    // occurrence menus do not offer Zoom to Selection.
+    if crate::render_workspace::active(app) {
+        v.retain(|item| item.id != "ui.zoomTo");
+    }
     v
 }
 
@@ -695,8 +700,15 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
             .with(json!({"items": targets.iter().map(|id| json!({"type": "feature", "id": id})).collect::<Vec<_>>()}))
             .on(exists),
         Item::sep(),
+        zoom_item(vec![Sel::Feature { id }], exists),
         act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({"feature":id})).on(exists),
     ]
+}
+
+/// Zoom to Selection in a Browser menu: frames what the row stands for, or the whole selection
+/// when the row is one of the selected (#18263).
+fn zoom_item(items: Vec<Sel>, enabled: bool) -> Item {
+    act("ui.zoomTo", "Zoom to Selection", "fit").with(json!({ "items": items })).on(enabled)
 }
 
 /// The canvas menus put Repeat on
@@ -959,6 +971,10 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         act("ui.lock", if locked { "Unlock" } else { "Lock" }, "ground").with(json!({ "bodies": names })),
         act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })),
     ];
+    if browser {
+        let at = v.len() - 1;
+        v.insert(at + 1, zoom_item(bodies.iter().map(|name| Sel::Body { name: name.clone() }).collect(), true));
+    }
     // Several selected bodies take one name, numbered after the first (#12341), as F2 renames
     // them. Rename itself still renames only the body the menu is for.
     if let Some(list) = several
@@ -1038,6 +1054,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.sketchDims", if dims { "Hide Dimension" } else { "Show Dimension" }, "dimension").with(json!({ "sketch": id })),
         act(if visible { "ui.hideSketch" } else { "ui.showSketch" }, "Show/Hide", "eye").key("V").with(json!({ "sketch": id })),
         Item::sep(),
+        zoom_item(vec![Sel::Feature { id }], true),
         act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": id })),
     ];
     items.retain(|item| parts || item.id != "component.move_sketches.to_parts");
@@ -1096,6 +1113,7 @@ fn plane_items(app: &SolveApp, id: u64) -> Vec<Item> {
         Item::sep(),
         act("ui.originPart", "Show/Hide", "eye").key("V").with(json!({ "keys": [f.name], "show": !visible })),
         Item::sep(),
+        zoom_item(vec![Sel::Feature { id }], true),
         act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": id })),
     ]);
     items
@@ -1181,6 +1199,7 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             item.enabled = app.session.active_occurrence_path.as_deref() != Some(path);
         }
         "ui.editInPlace" => item.params = Some(json!({"component": placement.component, "path": path})),
+        "ui.zoomTo" => item.params = Some(json!({ "items": [Sel::Occurrence { path: path.to_vec() }] })),
         "occurrence.ground" => {
             item.label = if placement.grounded { "Unground" } else { "Ground" }.into();
             item.params = Some(json!({"occurrence": placement.occurrence, "grounded": !placement.grounded}));
@@ -1396,6 +1415,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         v.push(act("ui.showAll", "Show All Bodies", "eye"));
     }
     v.push(act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })).on(!bodies.is_empty() && id != 0));
+    v.push(zoom_item(bodies.iter().map(|name| Sel::Body { name: name.clone() }).collect(), !bodies.is_empty()));
     v.push(Item::sep());
     let mut organize = vec![act("ui.newGroup", "New Group", "folder").with(json!({ "component": id }))];
     if id != 0 {
@@ -2038,6 +2058,19 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             }
         }
         "ui.fit" => app.animate_view("fit"),
+        // Only the row right-clicked is framed unless it is one of several selected rows.
+        "ui.zoomTo" => {
+            let items: Vec<Sel> = p.get("items").cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+            if !items.is_empty()
+                && !items.iter().all(|i| app.session.selection.contains(i))
+                && app.run("select.set", json!({ "items": items })).is_err()
+            {
+                // The selection stays as it was (select.set takes at most 10,000 items): framing
+                // it would frame something the row is not.
+                return;
+            }
+            app.animate_view("fit");
+        }
         "ui.home" => app.animate_view("home"),
         // One command for the whole selection: all fixed unless all already are.
         "ui.fix" => drop(app.run("sketch.constraint.fix", json!({ "entities": strs(&p, "entities") }))),
@@ -3610,6 +3643,85 @@ mod tests {
         let missing = h.call("engine.execute", json!({"command":"view.visual_style","params":{}}));
         assert_eq!(missing["ok"], false);
         assert!(h.app.viewport.context_menu.is_none());
+    }
+
+    /// #18263: a Browser row's menu frames that row, whichever bodies were selected before.
+    #[test]
+    fn browser_menu_zoom_to_selection_frames_the_right_clicked_row() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.look_at_anim = false;
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[500,0,0],"operation":"new"})).unwrap();
+        let bodies = h.app.session.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+        assert!(bodies.len() >= 2, "{bodies:?}");
+        let far = bodies[1].clone();
+        h.app.run("select.set", json!({"items":[Sel::Body { name: bodies[0].clone() }]})).unwrap();
+        h.frames(2);
+        let zoom = items(&h.app, &Target::Body { name: far.clone() })
+            .into_iter()
+            .find(|i| i.id == "ui.zoomTo")
+            .expect("Zoom to Selection in the Browser menu");
+        assert_eq!(zoom.label, "Zoom to Selection");
+        assert!(zoom.enabled);
+        run_item(&mut h.app, &zoom, Pos2::ZERO);
+        h.frames(2);
+        assert_eq!(h.app.session.selection, vec![Sel::Body { name: far }]);
+        assert!(h.app.cam.target.x > 400.0, "{:?}", h.app.cam.target);
+        // The viewport's own body menu keeps its entries.
+        assert!(!body_items(&h.app, &bodies[..1], false).iter().any(|i| i.id == "ui.zoomTo"));
+    }
+
+    /// #18263 review: a sketch or construction plane row frames that sketch or plane, not the
+    /// whole scene, when other geometry lies far from it.
+    #[test]
+    fn browser_menu_zoom_to_selection_frames_an_isolated_sketch_and_plane() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.look_at_anim = false;
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[800,0],[820,10]],"infer":false})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let sketch = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+        h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 25, "name": "Far"})).unwrap();
+        let plane = h.app.session.doc.find_feature("Far").map(|f| f.id).unwrap();
+        h.app.run("select.clear", json!({})).unwrap();
+        h.frames(3);
+        let whole = crate::viewport::view_bounds(&h.app);
+        assert!(whole.max.x > 700.0, "the sketch is part of the whole scene: {whole:?}");
+
+        let zoom =
+            items(&h.app, &Target::Sketch { id: sketch }).into_iter().find(|i| i.id == "ui.zoomTo").expect("Zoom to Selection in the sketch menu");
+        run_item(&mut h.app, &zoom, Pos2::ZERO);
+        h.frames(2);
+        let framed = crate::viewport::selection_bounds(&h.app).expect("the sketch has bounds");
+        assert!(framed.min.x > 700.0 && framed.max.x < 830.0, "{framed:?}");
+        assert!(h.app.cam.target.x > 700.0, "{:?}", h.app.cam.target);
+
+        h.app.run("select.clear", json!({})).unwrap();
+        h.app.run("view.home", json!({})).unwrap();
+        h.frames(3);
+        let zoom =
+            items(&h.app, &Target::Plane { id: plane }).into_iter().find(|i| i.id == "ui.zoomTo").expect("Zoom to Selection in the plane menu");
+        run_item(&mut h.app, &zoom, Pos2::ZERO);
+        h.frames(2);
+        let framed = crate::viewport::selection_bounds(&h.app).expect("the plane has bounds");
+        assert!((framed.min.z - 25.0).abs() < 1e-6 && (framed.max.z - 25.0).abs() < 1e-6, "{framed:?}");
+        assert!(framed.max.x < whole.max.x, "the plane square is not the whole scene: {framed:?} {whole:?}");
+    }
+
+    /// #18263 review: Render's Fit frames every visible body, so its component menu offers no
+    /// Zoom to Selection.
+    #[test]
+    fn render_component_menu_has_no_zoom_to_selection() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+        assert!(items(&h.app, &Target::Component { id: 0 }).iter().any(|i| i.id == "ui.zoomTo"));
+        h.app.ui.tab = "RENDER".into();
+        assert!(crate::render_workspace::active(&h.app));
+        assert!(!items(&h.app, &Target::Component { id: 0 }).iter().any(|i| i.id == "ui.zoomTo"));
     }
 
     #[test]
