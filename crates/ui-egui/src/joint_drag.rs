@@ -18,7 +18,7 @@
 //! at least the part's size. The point alone leaves the part free to spin about the line through
 //! the pivot and the point, and a grab near the pivot would turn it far for a small move.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use egui::Pos2;
@@ -68,6 +68,9 @@ struct Shown {
     /// The design the drag began on. A change to it from elsewhere (undo pressed mid-drag) ends
     /// the drag without applying it.
     design: Arc<Document>,
+    /// Public provenance of the solve baseline, frozen for this gesture.
+    document_id: String,
+    revision: u64,
     /// The world shown when the drag began and the moves not captured then: the viewport draws
     /// the drag's frames from it, the moving parts moved on the GPU
     /// (`viewport_joint_motions.rs`).
@@ -81,6 +84,10 @@ struct Shown {
     last: Option<(BTreeMap<u64, Vec<f64>>, Aim)>,
     /// What one frame's reach hands to the next (`joints::reach_frame`).
     carry: joints::FrameCarry,
+    /// Keep membership through a failed frame and a return to the starting pose.
+    reported: BTreeSet<u64>,
+    observed: Option<crate::preview::JointPose>,
+    error: Option<String>,
 }
 
 /// What a frame reaches for: where the grabbed point goes (world) and, for a part turning about
@@ -162,17 +169,23 @@ pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
     let Some(local) = mat_inverse(&joints::occurrence_world(&s.doc, occurrence)).map(|inv| apply_point(&inv, at)) else { return false };
     let normal = proj.ray(p).1;
     let pivot = if app.preferences.joint_drag_trackball { pivot(app, occurrence, &sol.fixed) } else { None };
+    let revision = app.session.design_revision();
     let s = &app.session;
     let frames = if on_the_design(app) {
         Frames::Applied { pushed: false }
     } else {
         Frames::Shown(Box::new(Shown {
             design: s.doc.clone(),
+            document_id: s.document_id.clone(),
+            revision,
             world: crate::open_meshing::session_world(s),
             pending: s.pending_moves.clone(),
             pose: (*s.doc).clone(),
             last: None,
             carry: joints::FrameCarry::default(),
+            reported: BTreeSet::new(),
+            observed: None,
+            error: None,
         }))
     };
     // The face under the pointer is not lit from here on (#5137): gone now rather than when the
@@ -185,6 +198,20 @@ pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
 /// Whether a part is being dragged along its joints.
 pub fn active(app: &SolveApp) -> bool {
     app.viewport.joint_drag.is_some()
+}
+
+/// The completed CPU pose of the active scratch drag, only for its original public baseline.
+/// Applied drags already edit the design; they have no scratch pose to report.
+pub(crate) fn pose_snapshot(app: &SolveApp, revision: u64) -> Option<(Option<&crate::preview::JointPose>, Option<&str>)> {
+    let Frames::Shown(sh) = &app.viewport.joint_drag.as_ref()?.frames else { return None };
+    if sh.document_id != app.session.document_id
+        || sh.revision != revision
+        || !Arc::ptr_eq(&sh.design, &app.session.doc)
+        || !app.session.drag_preview.as_ref().is_some_and(|preview| Arc::ptr_eq(&preview.design, &sh.design))
+    {
+        return None;
+    }
+    Some((sh.observed.as_ref(), sh.error.as_deref()))
 }
 
 /// The design, world and uncaptured moves the drag under way began on, when its frames are shown
@@ -272,9 +299,26 @@ fn show(app: &mut SolveApp, occurrence: u64, local: Vec3, sh: &mut Shown, aim: A
     let start = values(&sh.pose);
     let reach = joints::Reach { occurrence, point: local, to: aim.to, axis: aim.z.map(|z| (Vec3::Z, z)), joints: None };
     // A reach that can't move (a limit, a loop) leaves the pose where it was.
-    let _ = solidcraft_engine::cmd::reach_preview(&mut sh.pose, &app.session.model.state(), &reach, &mut sh.carry);
+    let reached = solidcraft_engine::cmd::reach_preview(&mut sh.pose, &app.session.model.state(), &reach, &mut sh.carry);
     sh.last = Some((start, aim));
     app.session.drag_preview = Some(DragPreview { design: sh.design.clone(), moves: moves(&sh.design, &sh.pose) });
+    sh.observed = None;
+    sh.error = None;
+    // Visibility and uncaptured moves can change the public baseline without replacing doc.
+    // Never relabel a continuing drag's old solve as a pose of those newer inputs.
+    if sh.document_id != app.session.document_id || sh.revision != app.session.design_revision() {
+        return;
+    }
+    match reached {
+        Ok(reached) => {
+            sh.reported.extend(reached.values.keys().copied());
+            let joints = solidcraft_engine::cmd::posed_joints(&sh.design, &sh.pose, sh.reported.iter().copied());
+            sh.reported.extend(joints.iter().map(|joint| joint.joint));
+            sh.observed = app.preview.completed_joint_pose(Some("joint.reach"), joints);
+        }
+        // A failed reach can still replace placements. Its old report is not that shown pose.
+        Err(error) => sh.error = Some(error),
+    }
 }
 
 /// Run one frame on the design: `joint.reach` with `params`. One undo step for the whole drag:
@@ -593,6 +637,212 @@ mod tests {
         play(h);
     }
 
+    /// A read alone, without advancing the pointer or running another UI frame.
+    fn read_pose(h: &mut Harness) -> Value {
+        let (req, _) = crate::control::ControlRequest::new("control.joint_pose", json!({}));
+        match crate::control::handle(&mut h.app, &h.ctx, &req) {
+            crate::control::Outcome::Done(reply) => {
+                assert_eq!(reply["ok"], true, "{reply}");
+                reply["result"].clone()
+            }
+            _ => panic!("a joint-pose read does not capture a screenshot"),
+        }
+    }
+
+    fn observed_angle(reply: &Value, joint: u64) -> f64 {
+        let row = reply["pose"]["joints"].as_array().and_then(|rows| rows.iter().find(|row| row["joint"] == joint)).expect("the posed joint");
+        assert_eq!(row["values"][0]["unit"], "deg", "{reply}");
+        row["values"][0]["value"].as_f64().expect("an angle")
+    }
+
+    /// #20458: a reader follows the solved, limited hinge and its linked follower while the
+    /// design stays still. Returning to the starting pose still reports both joints at zero.
+    #[test]
+    fn a_control_reader_follows_a_drag_without_changing_the_design() {
+        let (mut h, end, _, _) = hinged_arm();
+        let hinge = h.app.session.doc.assembly.joints.iter().find(|joint| joint.name == "Hinge").unwrap().id;
+        run(&mut h, "joint.limits", json!({"joint": hinge, "min": 0, "max": 30}));
+        run(&mut h, "component.create", json!({"name": "Follower"}));
+        run(&mut h, "solid.box", json!({"length": 30, "width": 6, "height": 5, "corner": [-75, -3, 5]}));
+        run(&mut h, "component.activate", json!({"component": "root"}));
+        let at = |occurrence: &str| json!({"occurrence": occurrence, "point": [-75, 0, 5], "z": [0, 0, 1]});
+        let follower = run(
+            &mut h,
+            "joint.create",
+            json!({"type": "revolute", "a": at("Base"), "b": at("Follower"), "flip": true, "name": "Follower hinge"}),
+        )["joint"]
+            .as_u64()
+            .expect("the follower joint");
+        run(&mut h, "joint.motion_link", json!({"a": hinge, "b": follower, "ratio": 0.5}));
+        h.frames(3);
+        let (a, b) = (screen(&mut h, end), screen(&mut h, Vec3::new(0.0, 55.0, 10.0)));
+        let before = read_pose(&mut h);
+        assert!(before["pose"].is_null());
+        let (doc, undo, redo, revision) = (h.app.session.doc.clone(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+        press_and_move(&mut h, a, b);
+
+        let reached = read_pose(&mut h);
+        assert_eq!(reached["pose"]["source"], "joint.reach", "{reached}");
+        assert_eq!(reached["document_id"], before["document_id"]);
+        assert_eq!(reached["revision"], before["revision"]);
+        assert_eq!(reached["busy"], false);
+        assert!(reached["error"].is_null());
+        assert!((observed_angle(&reached, hinge) - 30.0).abs() < 1e-6, "{reached}");
+        assert!((observed_angle(&reached, follower) - 15.0).abs() < 1e-6, "{reached}");
+        let row = reached["pose"]["joints"].as_array().unwrap().iter().find(|row| row["joint"] == hinge).unwrap();
+        assert_eq!(row["name"], "Hinge");
+        assert_eq!(row["values"][0]["limits"], json!([0.0, 30.0]));
+        let generation = reached["pose"]["generation"].as_u64().expect("a completed generation");
+        assert_eq!(read_pose(&mut h), reached, "reading alone creates no new pose");
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision), (undo, redo, revision));
+        assert!(arm_at(&h, end).dist(end) < 1e-9, "the committed arm has not moved");
+
+        // Pull past the lower stop so both stored values return exactly to their baseline.
+        let below = screen(&mut h, Vec3::new(0.0, -55.0, 10.0));
+        h.app.synthetic.push(egui::Event::PointerMoved(below));
+        play(&mut h);
+        let returned = read_pose(&mut h);
+        assert!(observed_angle(&returned, hinge).abs() < 1e-6, "{returned}");
+        assert!(observed_angle(&returned, follower).abs() < 1e-6, "{returned}");
+        let returned_generation = returned["pose"]["generation"].as_u64().unwrap();
+        assert!(returned_generation > generation);
+        escape(&mut h);
+        release(&mut h, a);
+        assert!(read_pose(&mut h)["pose"].is_null());
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
+        assert_eq!(h.app.session.undo.len(), undo);
+
+        press_and_move(&mut h, a, b);
+        let again = read_pose(&mut h);
+        assert!(again["pose"]["generation"].as_u64().unwrap() > returned_generation);
+        release(&mut h, b);
+        assert!(read_pose(&mut h)["pose"].is_null());
+        assert_eq!(h.app.session.undo.len(), undo + 1, "the release keeps one undo step");
+        let angle = h.app.session.doc.assembly.joints.iter().find(|joint| joint.id == hinge).unwrap().values[0].to_degrees();
+        assert!((angle - 30.0).abs() < 1e-6, "{angle}");
+        run(&mut h, "edit.undo", json!({}));
+        assert!(arm_at(&h, end).dist(end) < 1e-9);
+    }
+
+    /// A visibility or uncaptured-placement edit changes the public revision without replacing
+    /// the design Arc. Later drag frames must not adopt that revision for their older baseline.
+    #[test]
+    fn a_drag_pose_does_not_adopt_changed_visibility_or_pending_moves() {
+        for pending in [false, true] {
+            let (mut h, _, a, b) = hinged_arm();
+            press_and_move(&mut h, a, b);
+            let before = read_pose(&mut h);
+            assert!(before["pose"].is_object(), "{before}");
+            let design = h.app.session.doc.clone();
+            if pending {
+                let occurrence = design.find_component("Arm").and_then(|id| design.occurrence_of(id)).unwrap().id;
+                let mut placement = joints::occurrence_world(&design, occurrence);
+                placement[3][0] += 2.0;
+                h.app.session.pending_moves.insert(occurrence, placement);
+            } else {
+                let body = h.app.session.model.state().bodies.first().unwrap().name.clone();
+                h.app.session.visibility.hidden_bodies.push(body);
+            }
+            let changed = read_pose(&mut h);
+            assert!(changed["revision"].as_u64().unwrap() > before["revision"].as_u64().unwrap());
+            assert!(changed["pose"].is_null(), "{changed}");
+            assert!(std::sync::Arc::ptr_eq(&design, &h.app.session.doc));
+            h.app.synthetic.push(egui::Event::PointerMoved(b + egui::vec2(2.0, 0.0)));
+            play(&mut h);
+            assert!(super::active(&h.app), "the existing drag still has its original baseline");
+            assert!(read_pose(&mut h)["pose"].is_null(), "a later frame does not relabel the old solve");
+            escape(&mut h);
+            release(&mut h, b);
+        }
+    }
+
+    /// The reach can fail after a successful frame. The reader drops that frame's report,
+    /// reports the error, and allocates the next generation only for a successful completion.
+    #[test]
+    fn a_failed_drag_frame_has_no_pose_and_consumes_no_generation() {
+        let (mut h, _, a, b) = hinged_arm();
+        let hinge = h.app.session.doc.assembly.joints.iter().find(|joint| joint.name == "Hinge").unwrap().id;
+        press_and_move(&mut h, a, b);
+        let before = read_pose(&mut h);
+        let generation = before["pose"]["generation"].as_u64().unwrap();
+        let mut drag = h.app.viewport.joint_drag.take().unwrap();
+        let local = drag.local;
+        let super::Frames::Shown(sh) = &mut drag.frames else { panic!("a scratch drag") };
+        super::show(&mut h.app, 0, local, sh, super::Aim { to: Vec3::ZERO, z: None });
+        h.app.viewport.joint_drag = Some(drag);
+        let failed = read_pose(&mut h);
+        assert!(failed["pose"].is_null(), "{failed}");
+        assert!(failed["error"].as_str().is_some_and(|error| !error.is_empty()), "{failed}");
+
+        let mut drag = h.app.viewport.joint_drag.take().unwrap();
+        let (occurrence, local) = (drag.occurrence, drag.local);
+        let super::Frames::Shown(sh) = &mut drag.frames else { panic!("a scratch drag") };
+        let there = apply_point(&joints::occurrence_world(&sh.pose, occurrence), local);
+        super::show(&mut h.app, occurrence, local, sh, super::Aim { to: there, z: None });
+        h.app.viewport.joint_drag = Some(drag);
+        let recovered = read_pose(&mut h);
+        assert!(recovered["error"].is_null(), "{recovered}");
+        assert_eq!(recovered["pose"]["generation"].as_u64().unwrap(), generation + 1);
+        assert!((observed_angle(&recovered, hinge) - observed_angle(&before, hinge)).abs() < 1e-6);
+        escape(&mut h);
+        release(&mut h, b);
+    }
+
+    /// Native, dialog and connection-owned previews count completed poses in one sequence.
+    #[test]
+    fn a_drag_shares_completed_generations_with_the_other_joint_sources() {
+        let (mut h, end, a, b) = hinged_arm();
+        let hinge = h.app.session.doc.assembly.joints.iter().find(|joint| joint.name == "Hinge").unwrap().id;
+        press_and_move(&mut h, a, b);
+        let first = read_pose(&mut h)["pose"]["generation"].as_u64().unwrap();
+        escape(&mut h);
+        release(&mut h, b);
+
+        h.call("ui.start", json!({"command": "joint.drive", "params": {"joint": hinge, "values": [20]}}));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let dialog = loop {
+            let reply = read_pose(&mut h);
+            if reply["pose"]["source"] == "joint.drive" && reply["busy"] == false {
+                break reply["pose"]["generation"].as_u64().unwrap();
+            }
+            assert!(std::time::Instant::now() < deadline, "the joint dialog preview did not complete");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            h.frame();
+        };
+        assert!(dialog > first);
+        h.call("ui.key", json!({"key": "Escape"}));
+        assert!(read_pose(&mut h)["pose"].is_null());
+
+        let client = std::sync::Arc::new(());
+        let drive = |h: &mut Harness, params: Value| {
+            let (mut request, reply) = crate::control::ControlRequest::new("control.joint_drive", params);
+            request.connection = Some(std::sync::Arc::downgrade(&client));
+            assert!(request.ticket.take());
+            h.app.run_control(&h.ctx, request);
+            let reply = reply.try_recv().expect("the synchronous control drive reply");
+            assert_eq!(reply["ok"], true, "{reply}");
+            reply["result"].clone()
+        };
+        let document_id = h.app.session.document_id.clone();
+        let movement = drive(&mut h, json!({"action": "begin", "document_id": document_id, "joint": hinge}))["movement"].as_u64().unwrap();
+        drive(&mut h, json!({"action": "update", "movement": movement, "value": 20}));
+        let controlled = read_pose(&mut h);
+        assert_eq!(controlled["pose"]["source"], "control.joint_drive");
+        let control_generation = controlled["pose"]["generation"].as_u64().unwrap();
+        assert!(control_generation > dialog);
+        drive(&mut h, json!({"action": "cancel", "movement": movement}));
+        assert!(read_pose(&mut h)["pose"].is_null());
+
+        let (a, b) = (screen(&mut h, end), screen(&mut h, Vec3::new(0.0, 55.0, 10.0)));
+        press_and_move(&mut h, a, b);
+        let native = read_pose(&mut h);
+        assert_eq!(native["pose"]["source"], "joint.reach");
+        assert!(native["pose"]["generation"].as_u64().unwrap() > control_generation);
+        escape(&mut h);
+        release(&mut h, b);
+    }
+
     /// The far end of the arm's body where the world state (the view) shows it.
     fn shown_arm_reach(h: &Harness) -> f64 {
         let s = &h.app.session;
@@ -624,6 +874,30 @@ mod tests {
         let at = arm_at(&h, end);
         let fresh = run(&mut h, "joint.reach", json!({"occurrence": "Arm", "at": [at.x, at.y, at.z], "point": [target.x, target.y, target.z]}));
         assert!(arm_at(&h, end).dist(applied) < 1e-6, "{:?} vs {applied:?} ({fresh})", arm_at(&h, end));
+    }
+
+    /// Drag modes which commit each frame have no scratch pose. A caller follows the committed
+    /// state there, and the existing drag still keeps one Undo step.
+    #[test]
+    fn a_committed_drag_reports_no_scratch_joint_pose() {
+        let (mut h, end, a, b) = hinged_arm();
+        run(&mut h, "contact.enable_sets", json!({}));
+        let before = read_pose(&mut h);
+        let design = h.app.session.doc.clone();
+        let undo = h.app.session.undo.len();
+        press_and_move(&mut h, a, b);
+        let current = read_pose(&mut h);
+        assert!(current["pose"].is_null(), "{current}");
+        assert_eq!(current["busy"], false);
+        assert!(current["revision"].as_u64().unwrap() > before["revision"].as_u64().unwrap());
+        assert!(!std::sync::Arc::ptr_eq(&design, &h.app.session.doc));
+        assert!(arm_at(&h, end).dist(end) > 1.0, "the design already holds the moved arm");
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        release(&mut h, b);
+        assert!(read_pose(&mut h)["pose"].is_null());
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        run(&mut h, "edit.undo", json!({}));
+        assert!(arm_at(&h, end).dist(end) < 1e-9);
     }
 
     /// #6325: Escape in a drag leaves the design as it was, with no undo step.

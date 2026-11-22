@@ -268,6 +268,22 @@ model check accepts the s^(−1/2) curvature growth at that vertex only. Where E
 the end is refused. A round fading to nothing (its two contacts merging) is singular in the round's
 own system and is refused until its own chart is derived.
 
+**A tangent end at a touch.** The seam T may be one the model holds as a touch within its
+tolerance: an end face a hair inside or outside F's tangent plane, joined to F along one line
+([booleans.md](booleans.md) §6). P, where the rail crosses T, is then on S and λ0 off E along E's
+normal n there, and S ∩ E misses P: with E inside by δ it reaches the rail √(2δ/Δκ) along it from P,
+and with E outside it stops short of the rail. No curve from P is within the tolerance of that curve,
+and the certificate refuses one (§2.4). Where |λ0| is within what the model allows between T and E,
+the gap the edge check takes for T's tolerance and E's
+([validity-and-tolerances.md](validity-and-tolerances.md) §5.2), the end is the rib of the standoff:
+the point X of the section σ(t) of S with X + λ(t) n on E, λ(t) = λ0 (1 − ŝ^q), ŝ the section
+parameter normalised to [0, 1] and q the contact order. It passes through P, where E moved by λ0 n
+touches S and the end is a true tangent end, and it ends on S ∩ E at the far rail, so it runs between
+the two vertices the model has; q ≥ k keeps a ∝ s^(k/2) at P. Every point of it is within
+|λ(t)| ≤ |λ0| of E. It is built only where the rib of the surfaces as they are is not certified, and
+is certified as that rib is, against E moved by λ(t) n at the section t; a standoff past what the
+model allows is refused as before (`blend::fillet_geom::tangent_end_rib::Standoff`).
+
 ### 3.2 Corners
 
 One class, `SmBlendCorner`, classifies every blended vertex once and builds one of these events. It

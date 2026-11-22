@@ -806,18 +806,34 @@ fn parse_zone(expr: &Expr<'_>, warnings: &mut Vec<String>) -> Vec<KicadZone> {
 /// 0.01 mm apart (the default of `kicad-cli pcb export step --min-distance`).
 const OUTLINE_JOIN_DISTANCE: f64 = 0.01;
 
+/// How many segment ends the outline join may look at in all. A real board has a few ends near each
+/// corner, so it stays far below this; a file that piles its ends into one place would otherwise
+/// cost the square of its segment count.
+const MAX_OUTLINE_JOIN_WORK: usize = 50_000_000;
+
 /// The cell of the outline-joining grid a point is in.
 fn outline_cell(point: [f64; 2]) -> (i64, i64) {
     ((point[0] / OUTLINE_JOIN_DISTANCE).floor() as i64, (point[1] / OUTLINE_JOIN_DISTANCE).floor() as i64)
 }
 
 /// Take a joined segment's ends out of the grid: it holds only the segments not joined yet.
-fn forget_outline_segment(cells: &mut std::collections::HashMap<(i64, i64), Vec<usize>>, segment: ([f64; 2], [f64; 2]), index: usize) {
+/// Returns how many entries it looked through, which counts toward the join's work limit.
+fn forget_outline_segment(cells: &mut std::collections::HashMap<(i64, i64), Vec<usize>>, segment: ([f64; 2], [f64; 2]), index: usize) -> usize {
+    let mut looked = 0usize;
     for end in [segment.0, segment.1] {
         if let Some(cell) = cells.get_mut(&outline_cell(end)) {
+            looked = looked.saturating_add(cell.len());
             cell.retain(|other| *other != index);
         }
     }
+    looked
+}
+
+/// What the outline join gives when it passes its work limit: no outline at all (not the
+/// contours closed before it), and the warning that says why.
+fn outline_join_given_up(warnings: &mut Vec<String>) -> Vec<Vec<[f64; 2]>> {
+    warnings.push("the Edge.Cuts outline has too many ends in one place to join".into());
+    Vec::new()
 }
 
 fn join_outline_segments(segments: Vec<([f64; 2], [f64; 2])>, warnings: &mut Vec<String>) -> Vec<Vec<[f64; 2]>> {
@@ -830,12 +846,16 @@ fn join_outline_segments(segments: Vec<([f64; 2], [f64; 2])>, warnings: &mut Vec
     }
     let mut contours = Vec::new();
     let mut used = vec![false; segments.len()];
+    let mut work = 0usize;
     for index in 0..segments.len() {
         if used[index] {
             continue;
         }
+        if work > MAX_OUTLINE_JOIN_WORK {
+            return outline_join_given_up(warnings);
+        }
         used[index] = true;
-        forget_outline_segment(&mut cells, segments[index], index);
+        work = work.saturating_add(forget_outline_segment(&mut cells, segments[index], index));
         let (start, end) = segments[index];
         let mut contour = vec![start, end];
         let mut closed = near2(start, end);
@@ -847,7 +867,9 @@ fn join_outline_segments(segments: Vec<([f64; 2], [f64; 2])>, warnings: &mut Vec
             let mut best: Option<(f64, usize, bool)> = None;
             let (cx, cy) = outline_cell(last);
             for cell in (-1..=1).flat_map(|dx| (-1..=1).map(move |dy| (cx.saturating_add(dx), cy.saturating_add(dy)))) {
-                for &candidate in cells.get(&cell).map(Vec::as_slice).unwrap_or_default() {
+                let candidates = cells.get(&cell).map(Vec::as_slice).unwrap_or_default();
+                work = work.saturating_add(candidates.len());
+                for &candidate in candidates {
                     let Some((a, b)) = segments.get(candidate) else { continue };
                     for (gap, forward) in [(distance2(*a, last), true), (distance2(*b, last), false)] {
                         let nearer = best.is_none_or(|(least, index, _)| gap < least || (gap == least && candidate < index));
@@ -866,9 +888,12 @@ fn join_outline_segments(segments: Vec<([f64; 2], [f64; 2])>, warnings: &mut Vec
                 break;
             }
             let Some((_, next_index, forward)) = best else { break };
+            if work > MAX_OUTLINE_JOIN_WORK {
+                return outline_join_given_up(warnings);
+            }
             let (Some(taken), Some(segment)) = (used.get_mut(next_index), segments.get(next_index).copied()) else { break };
             *taken = true;
-            forget_outline_segment(&mut cells, segment, next_index);
+            work = work.saturating_add(forget_outline_segment(&mut cells, segment, next_index));
             contour.push(if forward { segment.1 } else { segment.0 });
             if contour.len() > MAX_OUTLINE_POINTS {
                 contour.clear();
