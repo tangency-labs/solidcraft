@@ -471,7 +471,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Timeline { feature } => crate::timeline::feature_items(app, *feature),
         Target::Workspace => {
             let rendering = crate::render_workspace::active(app);
-            let drawing = crate::drawing_workspace::active(app);
+            let drawing = crate::drawing_workspace::active(app) || crate::workspace::sheet_scope(app);
             // Design, then Drawing (the owner's order), then Render: the workspaces there are. Ones still
             // to come aren't listed.
             vec![
@@ -1560,12 +1560,29 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
             v.push(cmd(app, "sketch.toggle_driven", "Toggle Driven Dimension").with(json!({ "constraint": dims[0] })));
             // A circle's or an arc's radius or diameter switches to the other one (#7499).
             let round = |c: usize| matches!(ss.sketch.curves.get(c).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
-            if ss
-                .sketch
-                .constraints
-                .iter()
-                .any(|k| k.id == dims[0] && matches!(k.kind, ConstraintKind::Radius { c, .. } | ConstraintKind::Diameter { c, .. } if round(c)))
-            {
+            // So does a distance from a construction line, centreline or axis (#20660).
+            let reference = |l: usize| {
+                ss.sketch.curves.get(l).is_some_and(|c| {
+                    matches!(c.kind, CurveKind::Line { .. })
+                        && (c.construction
+                            || c.centerline
+                            || c.link.as_deref().and_then(|k| ss.sketch.link(k)).is_some_and(|k| {
+                                matches!(
+                                    k.source,
+                                    solidcraft_engine::sketch::LinkSource::Axis { .. } | solidcraft_engine::sketch::LinkSource::SketchAxis { .. }
+                                )
+                            }))
+                })
+            };
+            if ss.sketch.constraints.iter().any(|k| {
+                k.id == dims[0]
+                    && match k.kind {
+                        ConstraintKind::Radius { c, .. } | ConstraintKind::Diameter { c, .. } => round(c),
+                        ConstraintKind::PointLineDistance { l, .. } => reference(l),
+                        ConstraintKind::LinearDiameter { .. } => true,
+                        _ => false,
+                    }
+            }) {
                 v.push(cmd(app, "sketch.toggle_diameter", "Toggle Radius / Diameter").with(json!({ "constraint": dims[0] })));
             }
         }
@@ -3605,6 +3622,45 @@ mod tests {
         let menu = items(&h.app, &Target::Viewport);
         assert!(menu.iter().any(|i| i.id == "sketch.toggle_driven"));
         assert!(!menu.iter().any(|i| i.id == "sketch.toggle_diameter"), "a length is no radius");
+    }
+
+    /// #20660: a point's distance from a construction line offers Toggle Radius / Diameter; the
+    /// distance between two ordinary lines does not.
+    #[test]
+    fn a_distance_from_a_construction_line_offers_the_diameter_toggle() {
+        use solidcraft_engine::sketch::ConstraintKind;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let sid = h.app.session.active_sketch.unwrap();
+        let axis = h.app.run("sketch.line", json!({"points":[[0,0],[0,40]],"construction":true})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+        h.app.run("sketch.point", json!({"point":[5,10],"id":"rim"})).unwrap();
+        let pr = h.app.run("sketch.dimension", json!({"entities":["rim", axis],"type":"distance"})).unwrap()["param"].as_str().unwrap().to_owned();
+        let dim = |h: &crate::scenario::Harness, p: &str| {
+            crate::open_meshing::session_world(&h.app.session)
+                .sketch(sid)
+                .unwrap()
+                .sketch
+                .constraints
+                .iter()
+                .find(|c| c.param.as_deref() == Some(p))
+                .unwrap()
+                .clone()
+        };
+        h.app.session.selection = vec![Sel::SketchConstraint { id: dim(&h, &pr).id }];
+        let menu = items(&h.app, &Target::Viewport);
+        let item = menu.iter().find(|i| i.id == "sketch.toggle_diameter").expect("a distance from a construction line offers the toggle");
+        run_item(&mut h.app, item, egui::pos2(0.0, 0.0));
+        assert!(matches!(dim(&h, &pr).kind, ConstraintKind::LinearDiameter { .. }), "now a diameter");
+        let menu = items(&h.app, &Target::Viewport);
+        assert!(menu.iter().any(|i| i.id == "sketch.toggle_diameter"), "and it offers the way back");
+
+        let l1 = h.app.run("sketch.line", json!({"points":[[30,0],[30,40]]})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+        let l2 = h.app.run("sketch.line", json!({"points":[[40,0],[40,40]]})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+        let p2 = h.app.run("sketch.dimension", json!({"entities":[l1, l2],"type":"distance"})).unwrap()["param"].as_str().unwrap().to_owned();
+        h.app.session.selection = vec![Sel::SketchConstraint { id: dim(&h, &p2).id }];
+        let menu = items(&h.app, &Target::Viewport);
+        assert!(!menu.iter().any(|i| i.id == "sketch.toggle_diameter"), "two ordinary lines have no diameter");
     }
 
     #[test]
