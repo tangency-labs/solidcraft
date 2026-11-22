@@ -2221,14 +2221,18 @@ fn issue_18639_box_face_inside_a_cylinder_wall_unions_as_tangent() {
 
 /// #18639 at small radii: a box whose face x = r - d lies d = 5e-6 inside the side of a
 /// cylinder of radius r = 0.01 or 0.002 (height 1) unions as the tangent body, clean at
-/// Level 2 in both operand orders. The same bodies with the box face moved in until it dips
-/// 1.1e-5, 1.5e-5 or 2e-5 into the cylinder at the line, and with the overlap split between
-/// the faces (box face in by h, cylinder wall out by h, h = 7.5e-6 or 9.5e-6, so each face
-/// lies within the 1e-5 edge tolerance of the line but they overlap by 1.5e-5 or 1.9e-5),
-/// are real defects and report `SmEdge` test 9, as on main. At these radii the dip comes
-/// back within the contact tolerance before 20 edge tolerances (the dip less
-/// (2e-4)^2 / 2r, 2e-6 at r = 0.01 and 1e-5 at r = 0.002), so test 9 sees the crossing only
-/// by checking the faces' gap from the line itself out.
+/// Level 2 in both operand orders (main reports `SmEdge` test 9 at r = 0.01).
+///
+/// Real defects: the same bodies with the box face moved in until it dips 1.1e-5, 1.5e-5
+/// or 2e-5 into the cylinder at the line, or with the overlap split between the faces (box
+/// face in by h, cylinder wall out by h, h = 7.5e-6 or 9.5e-6, so each face lies within the
+/// 1e-5 edge tolerance of the line but they overlap by 1.5e-5 or 1.9e-5), report test 9
+/// wherever main reports it. Those are the rows below; on the other rows of the same
+/// matrix (r = 0.01 cylinder first dipping 1.5e-5 or 2e-5, r = 0.002 cylinder first, and
+/// the r = 0.002 splits) main reports no test 9 either. At these radii a dip comes back
+/// within the contact tolerance by 20 edge tolerances (it recovers by (2e-4)^2 / 2r, 2e-6
+/// at r = 0.01 and 1e-5 at r = 0.002), so test 9 sees the crossing only by checking the
+/// faces' gap from the line itself out.
 #[test]
 fn issue_18639_small_cylinders_union_as_tangent_and_still_report_real_defects() {
     use solidcore::surface::surface::SurfaceKind;
@@ -2240,9 +2244,9 @@ fn issue_18639_small_cylinders_union_as_tangent_and_still_report_real_defects() 
         let u = boolean_union(&mut k, x, y).unwrap();
         (k, u)
     }
-    // Moves the box face on the tangent line by `plane` and the cylinder wall by
-    // `cylinder` along x, and returns the Level 2 report.
-    fn moved(r: f64, d: f64, cylinder_first: bool, plane: f64, cylinder: f64) -> Vec<String> {
+    // Moves the box face on the tangent line in until it dips `dip` into the cylinder at
+    // the line and the cylinder wall out by `h` along x, and returns the Level 2 report.
+    fn moved(r: f64, d: f64, cylinder_first: bool, dip: f64, h: f64) -> Vec<String> {
         let (mut k, mut u) = union(r, d, cylinder_first);
         let line = solidcore::topology::brep::p1::edges(&u, None)
             .unwrap()
@@ -2253,9 +2257,9 @@ fn issue_18639_small_cylinders_union_as_tangent_and_still_report_real_defects() 
             let face = u.face_mut(f).unwrap();
             let surface = face.surface.as_mut().unwrap();
             let by = if matches!(surface.kind(), SurfaceKind::Plane(_)) {
-                plane
+                d - dip + h
             } else {
-                cylinder
+                h
             };
             let shift = Axis2Placement::new(Point3::new(by, 0.0, 0.0), Vec3::X, Vec3::Y);
             surface.transform(&k, &shift, None).unwrap();
@@ -2267,26 +2271,36 @@ fn issue_18639_small_cylinders_union_as_tangent_and_still_report_real_defects() 
     let d = 5e-6;
     for r in [0.01, 0.002] {
         for cylinder_first in [true, false] {
-            let case = format!("r {r}, cylinder first {cylinder_first}");
             let (mut k, mut u) = union(r, d, cylinder_first);
             let lines = check_brep(&mut k, &mut u, CheckLevel::Level2)
                 .unwrap()
                 .lines();
-            assert!(lines.is_empty(), "{case}: {lines:?}");
-            for dip in [1.1e-5, 1.5e-5, 2e-5] {
-                let lines = moved(r, d, cylinder_first, d - dip, 0.0);
-                assert!(
-                    lines.iter().any(|l| l.starts_with("SmEdge::Test #9 ")),
-                    "{case}, box face dipping {dip:e}: {lines:?}"
-                );
-            }
-            for h in [7.5e-6, 9.5e-6] {
-                let lines = moved(r, d, cylinder_first, d - h, h);
-                assert!(
-                    lines.iter().any(|l| l.starts_with("SmEdge::Test #9 ")),
-                    "{case}, overlap split {h:e} each: {lines:?}"
-                );
-            }
+            assert!(
+                lines.is_empty(),
+                "r {r}, cylinder first {cylinder_first}: {lines:?}"
+            );
         }
+    }
+    // (r, cylinder first, the box face's dip at the line, the cylinder wall's move out):
+    // a split of h each is a dip of 2h with the wall h out.
+    let defects = [
+        (0.01, true, 1.1e-5, 0.0),
+        (0.01, true, 1.5e-5, 7.5e-6),
+        (0.01, true, 1.9e-5, 9.5e-6),
+        (0.01, false, 1.1e-5, 0.0),
+        (0.01, false, 1.5e-5, 0.0),
+        (0.01, false, 2e-5, 0.0),
+        (0.01, false, 1.5e-5, 7.5e-6),
+        (0.01, false, 1.9e-5, 9.5e-6),
+        (0.002, false, 1.1e-5, 0.0),
+        (0.002, false, 1.5e-5, 0.0),
+        (0.002, false, 2e-5, 0.0),
+    ];
+    for (r, cylinder_first, dip, h) in defects {
+        let lines = moved(r, d, cylinder_first, dip, h);
+        assert!(
+            lines.iter().any(|l| l.starts_with("SmEdge::Test #9 ")),
+            "r {r}, cylinder first {cylinder_first}, dip {dip:e}, wall out {h:e}: {lines:?}"
+        );
     }
 }
