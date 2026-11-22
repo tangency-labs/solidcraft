@@ -96,7 +96,7 @@ const MAX_MESH_TRIANGLES: usize = 2_000_000;
 /// SMLib's own, as a STEP import's are. Readers outside the kernel (cadmpeg's neutral model, in
 /// `solidcraft-io`) pass this, so only the kernel uses SMLib.
 pub fn import_trims() -> &'static (dyn solidcore_ops::pcurve::Trims + Sync) {
-    &solidcraft_smlib::pcurves::SmlibTrims
+    &solidcraft_smlib::pcurves::SmlibImportTrims
 }
 
 /// The bodies an import kept as records makes, with its tree and warnings: what a STEP import

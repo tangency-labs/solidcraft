@@ -80,12 +80,13 @@ impl BSplineSurface {
             grid.push(row.to_vec());
         }
 
-        let p = usize::try_from(u_degree).map_err(|_| {
-            SolidError::b_spline(OP, BSplineFailure::Failed("a degree is negative"))
-        })?;
-        let q = usize::try_from(v_degree).map_err(|_| {
-            SolidError::b_spline(OP, BSplineFailure::Failed("a degree is negative"))
-        })?;
+        // (a u64 degree always fits a usize of 64 bits; only a narrower one refuses it)
+        let degree = |given: u64| {
+            usize::try_from(given)
+                .map_err(|_| SolidError::b_spline(OP, BSplineFailure::DegreeTooLarge { given }))
+        };
+        let p = degree(u_degree)?;
+        let q = degree(v_degree)?;
 
         // Least-squares NURBS approximation for a sampled grid of points: one control point
         // per sample, chord-length parameters. No rows or columns is a highest index of -1,
@@ -93,7 +94,10 @@ impl BSplineSurface {
         let (Some(n), Some(m)) = (rows.checked_sub(1), cols.checked_sub(1)) else {
             return Err(SolidError::b_spline(
                 OP,
-                BSplineFailure::Failed("the grid has no rows or no columns"),
+                BSplineFailure::EmptyGrid {
+                    rows,
+                    columns: cols,
+                },
             ));
         };
         let surface = lst_sq_approx(&grid, n, m, p, q, ParamMethod::ChordLength)
@@ -137,10 +141,13 @@ mod tests {
         assert!(matches!(
             BSplineSurface::approximate_points(&[], 0, 4, 3, 3),
             Err(e) if e.nurbs_failure()
-                == Some(&NurbsFailure::BSpline(BSplineFailure::Failed(
-                    "the grid has no rows or no columns"
-                )))
+                == Some(&NurbsFailure::BSpline(BSplineFailure::EmptyGrid {
+                    rows: 0,
+                    columns: 4,
+                }))
                 && e.sm_status() == Some(crate::error::SM_ERR)
+                && e.upstream_status() == Some(crate::error::SM_ERR)
+                && e.kind() == crate::error::ErrorKind::InvalidInput
         ));
         assert!(matches!(
             BSplineSurface::approximate_points(&grid(3, 7), 3, 7, 3, 3),

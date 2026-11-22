@@ -19,6 +19,7 @@ pub const VIEW_BESIDE: &str = "view.beside";
 pub const VIEW_NEW_WINDOW: &str = "view.new_window";
 pub const VIEW_MOVE_TO_WINDOW: &str = "view.move_to_window";
 const WINDOW_PREFIX: &str = "view.window.";
+pub const VIEW_RETURN: &str = "view.return";
 pub const VIEW_CLOSE: &str = "view.close";
 pub const VIEW_CLOSE_OTHERS: &str = "view.close_others";
 pub const VIEW_CLOSE_RIGHT: &str = "view.close_right";
@@ -43,12 +44,14 @@ pub const MOVE_TO_WINDOW_MENU: TabMenuRow<'static> = TabMenuRow::new(VIEW_MOVE_T
 
 /// A view's right-click menu in three groups set apart by lines: rename, copy and move; close
 /// views; close the design.
-pub const VIEW_MENU: [TabMenuRow<'static>; 9] = [
+pub const VIEW_MENU: &[TabMenuRow<'static>] = &[
     TabMenuRow::new(VIEW_RENAME, "Rename view", "F2").with_icon("rename", None).for_local_view(),
     TabMenuRow::new(VIEW_DUPLICATE, "Duplicate view", "").with_icon("duplicate", None).for_local_view(),
+    TabMenuRow::new("view.compass", "view_compass.visibility", "").separated().for_local_view(),
     TabMenuRow::new(VIEW_BESIDE, "Show beside", "").with_icon("tiles", None).for_local_view(),
     TabMenuRow::new("view.place", "design_view.place", "").with_icon("tiles", None).needing_others().for_local_view(),
     MOVE_TO_WINDOW_MENU,
+    TabMenuRow::new(VIEW_RETURN, "view_menu.return", "").with_icon(solidcraft_ui_kit::icons::window_icon(true), None).needing_remote_view(),
     TabMenuRow::new(VIEW_CLOSE, "Close view", "Ctrl+W").with_icon("close", None).separated(),
     TabMenuRow::new(VIEW_CLOSE_OTHERS, "Close other views", "").needing_others().for_local_view(),
     TabMenuRow::new(VIEW_CLOSE_RIGHT, "Close views to the right", "").needing_others().for_local_view(),
@@ -83,7 +86,8 @@ pub(crate) fn view_menu_rows<'a>(app: &SolveApp, window_rows: &'a [TabMenuRow<'a
     let pop_out = app.view_windows.is_child();
     let can_move = crate::view_windows::supports_pop_out(app);
     VIEW_MENU
-        .into_iter()
+        .iter()
+        .copied()
         .filter(|row| (row.id != VIEW_MOVE_TO_WINDOW || can_move) && (row.id != DESIGN_CLOSE || !pop_out))
         .map(|row| if row.id == VIEW_MOVE_TO_WINDOW { row.with_children(window_rows) } else { row })
         .collect()
@@ -91,12 +95,11 @@ pub(crate) fn view_menu_rows<'a>(app: &SolveApp, window_rows: &'a [TabMenuRow<'a
 
 /// The "+" menu: a header, one row per view kind with its icon in the kind's accent (`dark` picks
 /// the accent for the menu's ground), then copy the shown view and bring back the last closed one.
-pub fn plus_menu(dark: bool) -> Vec<TabMenuRow<'static>> {
+pub fn plus_menu<'a>(dark: bool) -> Vec<TabMenuRow<'a>> {
     let kind = |id, label: &'static str, icon| TabMenuRow::new(id, label, "").with_icon(icon, Some(crate::workspace::view_icon_colour(label, dark)));
     vec![
         TabMenuRow::heading("Open as a view"),
         kind("plus.model", "Model", "model"),
-        kind("plus.sketch", "Sketch", "sketch"),
         kind("plus.sheet", "Sheet", "sheet"),
         kind("plus.render", "Render", "render"),
         kind("plus.animation", "Animation", "animation"),
@@ -126,7 +129,7 @@ fn view_id(app: &SolveApp, index: usize) -> Option<u64> {
 }
 
 /// Carry out one of the strip's view actions. False for an action that is not a view action.
-pub fn handle(app: &mut SolveApp, _ctx: &egui::Context, action: TabAction) -> bool {
+pub fn handle(app: &mut SolveApp, ctx: &egui::Context, action: TabAction) -> bool {
     match action {
         TabAction::SelectView(i) => {
             if let Some(id) = view_id(app, i) {
@@ -158,7 +161,7 @@ pub fn handle(app: &mut SolveApp, _ctx: &egui::Context, action: TabAction) -> bo
         }
         TabAction::ViewMenu { view, id } => return view_menu(app, view, &id),
         TabAction::PlusMenu { id } => return plus_row(app, &id),
-        TabAction::LayoutMenu { id } => return layout_action(app, &id),
+        TabAction::LayoutMenu { id } => return crate::view_setups_ui::handle(app, ctx, &id) || layout_action(app, &id),
         TabAction::SwitcherMenu { id } => return switcher_menu(app, &id),
         TabAction::TearOff(i) => {
             if !app.file_picker_busy() {
@@ -179,8 +182,13 @@ fn view_menu(app: &mut SolveApp, index: usize, id: &str) -> bool {
         VIEW_RENAME => {
             documents::view_rename_start(app, view);
         }
+        "view.compass" => {
+            let Some(current) = app.docs.views.get(view) else { return false };
+            let on = !current.compass;
+            return app.run("view.set_compass", serde_json::json!({"view": view, "on": on})).is_ok();
+        }
         VIEW_DUPLICATE => {
-            documents::view_duplicate(app, view);
+            return app.run("tab.view.duplicate", serde_json::json!({"id": view})).is_ok();
         }
         VIEW_BESIDE => {
             let beside = (view != app.docs.views.active().id).then_some(view);
@@ -190,14 +198,22 @@ fn view_menu(app: &mut SolveApp, index: usize, id: &str) -> bool {
             app.docs.view_placement = Some((app.docs.active_tab(), view));
         }
         VIEW_NEW_WINDOW => move_to_window(app, view, serde_json::json!("new")),
+        VIEW_RETURN => {
+            let window = app.view_windows.current_window();
+            move_to_window(app, view, serde_json::json!(window));
+        }
+
         id if let Some(window) = window_menu_target(id) => move_to_window(app, view, serde_json::json!(window)),
         VIEW_CLOSE => {
             if !crate::view_windows::defer_close_view(app, view) {
                 documents::view_close(app, view);
             }
         }
-        VIEW_CLOSE_OTHERS => documents::view_close_others(app, view),
-        VIEW_CLOSE_RIGHT => documents::view_close_right_of(app, view),
+        VIEW_CLOSE_OTHERS | VIEW_CLOSE_RIGHT => {
+            let command = if id == VIEW_CLOSE_OTHERS { "tab.view.close_others" } else { "tab.view.close_right" };
+            let window = app.view_windows.current_window();
+            return app.run(command, serde_json::json!({"id": view, "window": window})).is_ok();
+        }
         DESIGN_CLOSE => documents::close(app, app.docs.active, false),
         _ => return false,
     }
@@ -237,6 +253,8 @@ pub(crate) fn window_layout(app: &SolveApp) -> solidcraft_ui_kit::view_layout_me
         CameraLinkMode::Zoom => "zoom",
         CameraLinkMode::Both => "both",
     };
+    let saved = crate::view_setups::names(app);
+    let matching_saved = crate::view_setups::matching_name(app);
     LayoutMenu {
         text: LayoutText {
             heading: tr("view_layout.heading").to_owned(),
@@ -256,7 +274,12 @@ pub(crate) fn window_layout(app: &SolveApp) -> solidcraft_ui_kit::view_layout_me
             equal: tr("view_layout.equal").to_owned(),
             reset: tr("view_layout.reset").to_owned(),
             clean: tr("view_layout.clean").to_owned(),
+            save: tr("view_layout.save").to_owned(),
+            saved: tr("view_layout.saved").to_owned(),
+            manage: tr("view_layout.manage").to_owned(),
         },
+        saved,
+        matching_saved,
         design: crate::i18n::tr_name(&documents::tab_name(app, &app.session)),
         window: app.view_windows.current_window(),
         native: crate::view_windows::supports_pop_out(app) && crate::view_windows::can_create(app),
@@ -298,6 +321,9 @@ fn layout_action(app: &mut SolveApp, id: &str) -> bool {
 }
 
 fn plus_row(app: &mut SolveApp, id: &str) -> bool {
+    if crate::sheet_views::menu_action(app, id) {
+        return true;
+    }
     if let Some(kind) = id.strip_prefix("plus.").and_then(ViewKind::from_key) {
         // A Model view is another angle on the design, so "+ Model" always opens a new one; the
         // Render workspace is one place, so it is reused.
@@ -499,7 +525,7 @@ mod tests {
     #[test]
     fn view_menu_groups_are_set_apart_by_lines() {
         let starts: Vec<&str> = VIEW_MENU.iter().filter(|r| r.separator_before).map(|r| r.id).collect();
-        assert_eq!(starts, [VIEW_CLOSE, DESIGN_CLOSE]);
+        assert_eq!(starts, ["view.compass", VIEW_CLOSE, DESIGN_CLOSE]);
     }
 
     #[test]

@@ -144,15 +144,17 @@ fn cases(u: &dyn UnitDiff) -> BTreeMap<String, Case> {
 }
 
 fn run(u: &dyn UnitDiff, case: &Case) -> Value {
+    encode(&case.name, &run_raw(u, case))
+}
+
+/// The case's output before it is encoded.
+fn run_raw(u: &dyn UnitDiff, case: &Case) -> crate::Output {
     let out = if u.id() == "corpus.parity" {
         run_in_process(case)
     } else {
         u.run_rust(case)
     };
-    encode(
-        &case.name,
-        &out.unwrap_or_else(|e| panic!("{}: {e:?}", case.name)),
-    )
+    out.unwrap_or_else(|e| panic!("{}: {e:?}", case.name))
 }
 
 fn hash(v: &Value) -> u64 {
@@ -315,8 +317,26 @@ fn replay_trim_cover(unit_id: &str) -> usize {
             undone: 0,
             failures: Vec::new(),
         }));
+        // (a row whose put-back run the joined-trims cover raises further: each raised value
+        // put back, it is main's row; see [`TRIM_COVER_JOINED`])
+        let joined = TRIM_COVER_JOINED
+            .iter()
+            .find(|r| r.0 == unit_id && r.1 == name)
+            .map(|r| r.2);
         // (a row the WR-493 retirement moves too: main had the fitted NURB)
-        let line = if TRIM_COVER_REFIT.contains(&(unit_id, name)) {
+        let line = if let Some(raised) = joined {
+            assert!(
+                !TRIM_COVER_REFIT.contains(&(unit_id, name)),
+                "{unit_id} {name}: joined and refit"
+            );
+            let mut out = run_raw(u.as_ref(), case);
+            for (key, count) in put_back_joined(&mut out, raised) {
+                failures.push(format!(
+                    "{name}: {count} values {key:e} raised by the joined cover, not as listed"
+                ));
+            }
+            encode(&case.name, &out)
+        } else if TRIM_COVER_REFIT.contains(&(unit_id, name)) {
             refit_run(case, &mut failures)
         } else {
             run(u.as_ref(), case)
@@ -577,28 +597,81 @@ replay_trim_cover_tests! {
     topology_face_p3_rows_move_only_through_the_trim_cover: "topology.face_p3", 13;
 }
 
+/// A value the joined-trims cover raises: `(raised, main's, count)` ([`TRIM_COVER_JOINED`]).
+type Raised = (f64, f64, usize);
+
+/// [`TRIM_COVER`] rows whose put-back run moves further through the joined-trims cover
+/// (tangency-labs/solidcraft#20373, `cover_joined_trims` at the end of the stitch): unit,
+/// case, and each value the joined cover raises, as `(raised, main's, count)`: the value it
+/// raises to, the value main's row holds there, and how many values of the put-back run's
+/// output are the raised one to the bit. The put-back run must hold exactly those counts
+/// of each raised value, and with main's values put back in their place encode to the
+/// row's [`TRIM_COVER`] main hash. Run as is, each is still the committed golden line.
+///
+/// `extended_surface_9_Platte`: the put-back takes the read's cover raises off e145 and
+/// e151 (1.4508e-5 to 1e-5) and e217 and e219 (4.9059e-5 to 1e-5). The blend's edges e19
+/// and e33 then carry trims those uncovered edges leave farther from them than their
+/// tolerance (1e-5), and the joined cover raises both to their proved trim bound:
+/// e19 to 4.898398292695583e-5 and e33 to 4.898398232973159e-5, and each edge's two
+/// vertices with it (`cover_vertex_ends`: a vertex at least its edges' tolerance). In
+/// `feature0_geometry` that is six values, each 1e-5 in main's row: entries 235 and 239
+/// (e19's vertices) and 390 (e19), 227 and 231 (e33's vertices) and 417 (e33); measured
+/// by dumping the raw output with `cover_joined_trims` on and off (off, the row is main's
+/// to the bit). As is, the read's cover already covers those trims and the joined cover
+/// raises nothing.
+const TRIM_COVER_JOINED: &[(&str, &str, &[Raised])] = &[(
+    "blend.feature_executive",
+    "extended_surface_9_Platte",
+    &[
+        (4.898398292695583e-5, 1e-5, 3),
+        (4.898398232973159e-5, 1e-5, 3),
+    ],
+)];
+
+/// Puts main's values back in `out` for each raised value of a [`TRIM_COVER_JOINED`] row,
+/// matched to the bit in every float array; returns each raised value whose count is not
+/// the listed one, with the count found.
+fn put_back_joined(out: &mut crate::Output, raised: &[Raised]) -> Vec<(f64, usize)> {
+    let mut wrong = Vec::new();
+    for &(after, before, count) in raised {
+        let mut found = 0;
+        for x in out.values.values_mut().flatten() {
+            if x.to_bits() == after.to_bits() {
+                *x = before;
+                found += 1;
+            }
+        }
+        if found != count {
+            wrong.push((after, found));
+        }
+    }
+    wrong
+}
+
 /// Rows #18166 took out of [`TRIM_COVER`] that it does not move (see the module docs): unit,
 /// case, and the hash of main's committed line (`origin/main` ee673a19bf's expected file).
+/// #18490 moves these four rows (the round sits on the sphere drop's finer trims), so each
+/// hash is of the row with that change, from Linux CI.
 const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0xa90a_9179_4750_1297,
+        0xbab5_3857_5f4c_54b2,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0x1679_1328_0d68_333a,
+        0x0879_39f6_c276_2c27,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0xfb1f_0985_b9ee_e48c,
+        0xaa56_e948_548e_16f9,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0xcc4d_2e3f_0192_8b71,
+        0x87dc_a442_4a0e_39cd,
     ),
 ];
 

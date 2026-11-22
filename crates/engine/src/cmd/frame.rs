@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use solidcore_record::{Loop2, Seg2, Vec2};
 use solidcraft_doc::construct::{DatumItem, GeoRef};
 use solidcraft_doc::frame::sizes::{self, Family};
-use solidcraft_doc::frame::{self, Anchor, CornerOverride, CornerType, MemberPair, MemberProfile, MemberRef, Profile, ProfileSpec};
+use solidcraft_doc::frame::{self, Anchor, CornerOverride, CornerType, MemberGroup, MemberPair, MemberProfile, MemberRef, Profile, ProfileSpec};
 use solidcraft_doc::{Feature, FeatureKind, ModelState, SketchId};
 use solidcraft_sketch::Sketch;
 
@@ -49,10 +49,9 @@ macro_rules! profile_doc {
 }
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("frame.member", "Frame Member", crate::checked!("frame.member", member))
+    CommandSpec::new("frame.member", "Frame Member", crate::checked!("frame.member", member)).begins_edit()
         .at("WELDMENTS", "CREATE")
         .icon("frame_member")
-        .enabled(not_in_sketch)
         .contract(&MEMBER_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(concat!(
@@ -351,6 +350,100 @@ fn member_pairs(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<MemberPair>, u
     Ok((pairs, next))
 }
 
+/// The keys of one group of members, given beside `profile` for a feature's single group or in
+/// each of its `groups`.
+const GROUP_KEYS: [&str; 7] = ["lines", "anchor", "locate", "angle", "mirror", "body_name", "continuous"];
+
+/// One group of members as `p` (the command's parameters, or one of its `groups`) gives it; `at`
+/// names the group in errors, and a group of several must list its lines.
+fn member_group(s: &Session, cmd: &str, p: &Value, at: &str, several: bool) -> Result<MemberGroup> {
+    let lines = match p.get("lines") {
+        None | Some(Value::Null) if !several => Vec::new(),
+        Some(Value::Array(a)) if !a.is_empty() && a.len() <= frame::MAX_MEMBERS && a.iter().all(Value::is_string) => {
+            let lines = string_list(cmd, p, "lines")?;
+            let mut seen = std::collections::HashSet::new();
+            if let Some(twice) = lines.iter().find(|l| !seen.insert(l.as_str())) {
+                return Err(bad(cmd, format!("{at}line `{twice}` is listed twice")));
+            }
+            lines
+        }
+        _ => Err(bad(cmd, format!("{at}`lines` must list 1…{} curve ids", frame::MAX_MEMBERS)))?,
+    };
+    let body_name = match p.get("body_name") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(
+            str_(p, "body_name")
+                .map(str::trim)
+                .filter(|n| !n.is_empty() && n.chars().count() <= 128)
+                .ok_or_else(|| bad(cmd, format!("{at}`body_name` must be 1…128 characters")))?
+                .to_string(),
+        ),
+    };
+    let anchor: Anchor = match p.get("anchor") {
+        None | Some(Value::Null) => Anchor::default(),
+        Some(v) => serde_json::from_value(v.clone()).map_err(|_| {
+            bad(
+                cmd,
+                format!("{at}`anchor` must be origin, center, centroid, top_left, top, top_right, left, right, bottom_left, bottom or bottom_right"),
+            )
+        })?,
+    };
+    let locate: Option<[f64; 2]> = match p.get("locate") {
+        None | Some(Value::Null) => None,
+        Some(v) => {
+            let a = v
+                .as_array()
+                .filter(|a| a.len() == 2)
+                .ok_or_else(|| bad(cmd, format!("{at}`locate` must be [x, y] in the profile's own coordinates")))?;
+            let x = a[0].as_f64().filter(|v| v.is_finite()).ok_or_else(|| bad(cmd, format!("{at}`locate` x must be a finite length")))?;
+            let y = a[1].as_f64().filter(|v| v.is_finite()).ok_or_else(|| bad(cmd, format!("{at}`locate` y must be a finite length")))?;
+            if x.abs() > frame::MAX_PROFILE_SIZE || y.abs() > frame::MAX_PROFILE_SIZE {
+                return Err(bad(cmd, format!("{at}`locate` is outside the largest profile")));
+            }
+            Some([x, y])
+        }
+    };
+    let angle = match p.get("angle") {
+        None | Some(Value::Null) => None,
+        Some(_) => {
+            let e = expr(p, "angle").ok_or_else(|| bad(cmd, format!("{at}`angle` must be an angle expression")))?;
+            check_expr(s, &e, solidcraft_doc::expr::Kind::Angle, cmd, "angle")?;
+            Some(e)
+        }
+    };
+    let mirror = match p.get("mirror") {
+        None | Some(Value::Null) => false,
+        Some(_) => bool_(p, "mirror").ok_or_else(|| bad(cmd, format!("{at}`mirror` must be true or false")))?,
+    };
+    Ok(MemberGroup { lines, anchor, locate, angle, mirror, body_name })
+}
+
+/// The groups of members `p` asks for: its `groups`, or the one group its own keys make.
+fn member_groups(s: &Session, cmd: &str, p: &Value) -> Result<Vec<MemberGroup>> {
+    let list = match p.get("groups") {
+        None | Some(Value::Null) => return Ok(vec![member_group(s, cmd, p, "", false)?]),
+        Some(Value::Array(a)) if !a.is_empty() && a.len() <= frame::MAX_MEMBERS && a.iter().all(Value::is_object) => a,
+        Some(_) => {
+            return Err(bad(
+                cmd,
+                format!("`groups` must list 1…{} groups, each {{lines, anchor?, locate?, angle?, mirror?, body_name?}}", frame::MAX_MEMBERS),
+            ));
+        }
+    };
+    if let Some(key) = GROUP_KEYS.iter().find(|k| p.get(**k).is_some_and(|v| !v.is_null())) {
+        return Err(bad(cmd, format!("give `{key}` in each of `groups`, not beside them")));
+    }
+    let groups = list.iter().enumerate().map(|(k, g)| member_group(s, cmd, g, &format!("group {}: ", k + 1), true)).collect::<Result<Vec<_>>>()?;
+    if groups.iter().map(|g| g.lines.len()).sum::<usize>() > frame::MAX_MEMBERS {
+        return Err(bad(cmd, format!("at most {} members in one feature", frame::MAX_MEMBERS)));
+    }
+    let mut seen = std::collections::HashSet::new();
+    if let Some(twice) = groups.iter().flat_map(|g| &g.lines).find(|l| !seen.insert(l.as_str())) {
+        return Err(bad(cmd, format!("line `{twice}` is in two groups")));
+    }
+    Ok(groups)
+}
+
 fn member(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "frame.member";
     // A `sketch` that is there is read, `null` included, as before pairs.
@@ -359,6 +452,7 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
         Some(v) => Some(sketch_id(s, Some(v), cmd, "sketch")?),
     };
     let (pairs, next_pair) = member_pairs(s, p, cmd)?;
+    let grouped = p.get("groups").filter(|g| !g.is_null()).map(|_| member_groups(s, cmd, p)).transpose()?;
     if path_sketch.is_none() && pairs.is_empty() {
         return Err(bad(cmd, "give `sketch` (the frame sketch, its lines), `pairs` (pairs of points), or both"));
     }
@@ -487,7 +581,6 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
             .collect::<Result<_>>()?,
         Some(_) => return Err(bad(cmd, format!("`names` must map up to {} line ids to names", frame::MAX_MEMBERS))),
     };
-    let base = body_name.clone().unwrap_or(default_name);
     let mut kind = FeatureKind::FrameMember {
         path_sketch: path_sketch.map(SketchId),
         lines,
@@ -506,6 +599,27 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
         names: BTreeMap::new(),
         pairs,
         next_pair,
+        groups: Vec::new(),
+    };
+    if let Some(mut given) = grouped
+        && let FeatureKind::FrameMember { lines, anchor, locate, angle, mirror, body_name, groups, .. } = &mut kind
+    {
+        if let [one] = given.as_mut_slice() {
+            let g = std::mem::take(one);
+            *lines = g.lines;
+            *anchor = g.anchor;
+            *locate = g.locate;
+            *angle = g.angle;
+            *mirror = g.mirror;
+            *body_name = g.body_name;
+        } else {
+            *groups = given;
+        }
+    }
+    frame::check_group_options(&kind).map_err(|e| bad(cmd, e.to_string()))?;
+    let base = match &kind {
+        FeatureKind::FrameMember { body_name, .. } => body_name.clone().unwrap_or_else(|| default_name.clone()),
+        _ => default_name.clone(),
     };
     let st = s.model.state();
     if flips.iter().any(Option::is_some) {
@@ -550,7 +664,16 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
     }
-    let mut pinned: BTreeMap<String, String> = ids.iter().cloned().zip(frame::member_names(&st, &ids, &later, &kept, &base)).collect();
+    let named = if matches!(&kind, FeatureKind::FrameMember { groups, .. } if !groups.is_empty()) {
+        let bases: Vec<String> = frame::member_groups(&kind)
+            .iter()
+            .flat_map(|g| std::iter::repeat_n(g.body_name.clone().unwrap_or_else(|| default_name.clone()), g.lines.len()))
+            .collect();
+        frame::group_member_names(&st, &ids, &bases, &kept)
+    } else {
+        frame::member_names(&st, &ids, &later, &kept, &base)
+    };
+    let mut pinned: BTreeMap<String, String> = ids.iter().cloned().zip(named).collect();
     // A piece split off where another tube overlaps it (`L>X`) is found only as the frame is built: a name given or
     // kept for it stays pinned under its id.
     pinned.extend(kept.into_iter().filter(|(id, _)| frame::overlap_parent(&ids, id).is_some()));

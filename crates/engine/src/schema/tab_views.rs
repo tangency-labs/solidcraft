@@ -1,5 +1,5 @@
 //! Contracts and result types for the commands in `cmd/tab_views.rs`: the views of a design
-//! (Model, Sketch, Sheet, Render, Animation), shown as sub-tabs of the design's tab. The engine
+//! (Model, Sheet, Render, Animation), shown as sub-tabs of the design's tab. The engine
 //! holds one design and no tabs: it checks the request and echoes it, and the window, which owns
 //! the views, makes the change and fills in what it did.
 
@@ -14,7 +14,6 @@ pub const MAX_NAME: usize = solidcraft_views::MAX_NAME;
 #[serde(rename_all = "lowercase")]
 pub enum TabViewKind {
     Model,
-    Sketch,
     Sheet,
     Render,
     Animation,
@@ -94,7 +93,7 @@ impl From<solidcraft_views::Placement> for TabViewPlacement {
     }
 }
 
-/// `tab.view.layout`: show the Model and Render views of the design together.
+/// `tab.view.layout`: show Model, Sheet and Render views of the design together.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct TabViewLayoutParams {
@@ -171,7 +170,9 @@ pub struct TabViewOpenParams {
     /// What the view shows. Default: the kind of the view that is active now.
     #[serde(default)]
     pub kind: Option<TabViewKind>,
-    /// The sketch or sheet the view shows (its id, at most 256 bytes); none for the other kinds.
+    /// Sheet subject: encoded drawing id / encoded sheet id (at most 256 bytes).
+    /// A legacy bare sheet id is accepted when its drawing is unambiguous.
+    /// None selects the current drawing's first sheet; unused for other kinds.
     #[serde(default)]
     pub subject: Option<String>,
     /// True shows a view that already has this kind and subject instead of opening another.
@@ -190,6 +191,18 @@ pub struct TabViewIdParams {
     /// The view's id (`tab.view.list`). Default: the active view.
     #[serde(default)]
     pub id: Option<u64>,
+}
+
+/// `tab.view.close_others` or `tab.view.close_right`: close views in one window's strip.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TabViewCloseGroupParams {
+    /// The view to leave open. Defaults to the active view in the chosen window.
+    #[serde(default)]
+    pub id: Option<u64>,
+    /// The target window. Defaults to the named view's window or the last focused window.
+    #[serde(default)]
+    pub window: Option<u32>,
 }
 
 /// `tab.view.activate`: show one view, by id or by place.
@@ -242,7 +255,7 @@ pub struct TabViewInfo {
     pub id: u64,
     pub kind: TabViewKind,
     pub name: String,
-    /// The sketch or sheet it shows, when it shows one.
+    /// The sheet it shows, when it shows one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subject: Option<String>,
     /// Whether it is the view shown.
@@ -305,3 +318,11 @@ pub struct TabViewReply {
 #[cfg(test)]
 #[path = "tab_views_tests.rs"]
 mod tests;
+
+/// Set visibility of the orientation compass in one 3D view.
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ViewCompassParams {
+    pub view: u64,
+    pub on: bool,
+}

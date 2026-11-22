@@ -337,15 +337,12 @@ pub fn click(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> bool {
     }
     TRIAD.with(|t| *t.borrow_mut() = hit.as_ref().map(|(w, i, _)| (w.clone(), *i)));
     if let Some((w, _, p)) = hit {
-        app.set_status(
-            format!(
-                "{w} at {}, {}, {}: drag an arrow (X, Y, Z) or the square (in the sketch plane); Delete removes it",
-                crate::prefs::show_mm(app, p.x, 1),
-                crate::prefs::show_mm(app, p.y, 1),
-                crate::prefs::show_mm(app, p.z, 1)
-            ),
-            false,
-        );
+        app.set_tool_hint(format!(
+            "{w} at {}, {}, {}: drag an arrow (X, Y, Z) or the square (in the sketch plane); Delete removes it",
+            crate::prefs::show_mm(app, p.x, 1),
+            crate::prefs::show_mm(app, p.y, 1),
+            crate::prefs::show_mm(app, p.z, 1)
+        ));
         return true;
     }
     false
