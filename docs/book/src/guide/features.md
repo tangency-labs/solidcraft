@@ -330,8 +330,8 @@ A design can keep several named sections and switch between them. In the Section
 dialog, **Saved sections** lists them: click one to show it in place of the section on show,
 type a name and press **Save as…** to keep the section on show, **Rename** or **×** to rename or
 delete one. They are saved with the design. Scripts use `inspect.section.save` (`name`),
-`inspect.section.show`, `inspect.section.rename`, `inspect.section.delete` (each by `section`)
-and `inspect.section.list`.
+`inspect.section.show` and `inspect.section.delete` (each by `section`),
+`inspect.section.rename` (`section` and the new `name`) and `inspect.section.list`.
 
 ## Comparing two bodies
 

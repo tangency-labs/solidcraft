@@ -2879,6 +2879,22 @@ fn saved_sections_are_kept_switched_and_saved_with_the_design() {
     assert!(!serde_json::to_string(&*again.doc).unwrap().contains("saved_sections"));
 }
 
+/// Two cuts far from the origin that differ by 0.05 are told apart: only the one on show is shown.
+#[test]
+fn saved_sections_far_from_the_origin_are_told_apart() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "inspect.section", json!({"plane": {"origin": [100000000.0, 0.0, 0.0], "normal": [0.0, 0.0, 1.0]}}));
+    run(&mut s, "inspect.section.save", json!({"name": "A"}));
+    run(&mut s, "inspect.section", json!({"plane": {"origin": [100000000.0, 0.0, 0.05], "normal": [0.0, 0.0, 1.0]}}));
+    run(&mut s, "inspect.section.save", json!({"name": "B"}));
+    assert_eq!(run(&mut s, "inspect.section.list", json!({}))["shown"], "B");
+    run(&mut s, "inspect.section.show", json!({"section": "A"}));
+    assert_eq!(run(&mut s, "inspect.section.list", json!({}))["shown"], "A");
+    run(&mut s, "inspect.section.show", json!({"section": "B"}));
+    assert_eq!(run(&mut s, "inspect.section.list", json!({}))["shown"], "B");
+}
+
 /// A saved section from a damaged file is refused rather than shown.
 #[test]
 fn saved_section_with_a_bad_plane_is_not_shown() {

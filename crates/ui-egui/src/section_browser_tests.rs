@@ -844,3 +844,44 @@ fn hiding_a_plane_leaves_the_others_hatch() {
     let scene = solidcraft_engine::view::scene_with_section(&h.app.session, &h.app.cam, &h.app.session.section).unwrap();
     assert_eq!(scene.clip_hatch, [1]);
 }
+
+/// A saved section shown from the open dialog stays the section on show: the dialog's own plane
+/// no longer drives the preview, and OK keeps it (#20649).
+#[test]
+fn showing_a_saved_section_from_the_dialog_keeps_it() {
+    let mut h = harness();
+    h.app.preferences.viewport_section_status = false;
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.run("inspect.section", json!({"plane": "XZ", "offset": 5})).unwrap();
+    h.app.run("inspect.section.save", json!({"name": "First cut"})).unwrap();
+    h.app.run("inspect.section", json!({"plane": "XZ", "offset": 12})).unwrap();
+    h.app.run("inspect.section.save", json!({"name": "Second cut"})).unwrap();
+    let second = only_cut(&h);
+    h.app.session.selection.clear();
+    h.app.start("inspect.section");
+    h.frames(3);
+    let shown = |h: &mut Harness| h.app.run("inspect.section.list", json!({})).unwrap()["shown"].as_str().map(str::to_string);
+    let previewed = |h: &Harness| {
+        let planes = crate::viewport::section_planes(&h.app);
+        let [c] = planes[..] else { panic!("one previewed plane: {planes:?}") };
+        (c.origin, c.normal)
+    };
+    h.step(&json!({"widget": "First cut"})).unwrap();
+    h.frames(5);
+    let first = only_cut(&h);
+    assert!((first.0 - second.0).len() > 1.0, "a different cut: {first:?} vs {second:?}");
+    assert_eq!(shown(&mut h).as_deref(), Some("First cut"));
+    let seen = previewed(&h);
+    assert!((seen.0 - first.0).len() < 1e-6 && (seen.1 - first.1).len() < 1e-6, "the preview shows it: {seen:?} vs {first:?}");
+
+    h.step(&json!({"widget": "Second cut"})).unwrap();
+    h.frames(5);
+    assert_eq!(shown(&mut h).as_deref(), Some("Second cut"));
+    let seen = previewed(&h);
+    assert!((seen.0 - second.0).len() < 1e-6 && (seen.1 - second.1).len() < 1e-6, "the preview shows it: {seen:?} vs {second:?}");
+
+    ok(&mut h);
+    let kept = only_cut(&h);
+    assert!((kept.0 - second.0).len() < 1e-6 && (kept.1 - second.1).len() < 1e-6, "OK keeps it: {kept:?} vs {second:?}");
+    assert_eq!(shown(&mut h).as_deref(), Some("Second cut"));
+}

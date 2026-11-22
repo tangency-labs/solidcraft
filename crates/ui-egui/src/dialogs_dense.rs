@@ -1249,7 +1249,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             } else if section_turns_off(&app.session, d.extra.contains_key("plane"), &d.inputs) {
                 ui_kit::text(ui, tr("section.off_hint"), ui_kit::Text::Hint("section_off"));
             }
-            saved_section_rows(app, ui);
+            saved_section_rows(app, d, ui);
         }
         Kind::Rename { name, .. } => {
             form_row(ui, "Name", |ui| {
@@ -1278,7 +1278,7 @@ struct SavedSectionDraft {
 
 /// The design's saved Section Analyses (#20649): pick one to show it, save the section on show
 /// under a name, rename or delete one. Each action is a command.
-fn saved_section_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
+fn saved_section_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
     let id = ui.id().with("saved_sections");
     let mut draft: SavedSectionDraft = ui.data(|data| data.get_temp(id)).unwrap_or_default();
     let list = app.run("inspect.section.list", json!({})).unwrap_or(Value::Null);
@@ -1329,7 +1329,10 @@ fn saved_section_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
         match app.run(cmd, params) {
             Ok(_) => {
                 draft.error.clear();
-                if cmd != "inspect.section.show" {
+                if cmd == "inspect.section.show" {
+                    // The dialog's preview and OK now stand for the section just shown.
+                    crate::dialogs::load_shown_section(app, d);
+                } else {
                     draft.name.clear();
                     draft.renaming = None;
                 }

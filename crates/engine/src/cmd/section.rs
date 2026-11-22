@@ -371,11 +371,9 @@ fn state_of(saved: &SavedSection) -> std::result::Result<crate::SectionState, St
     Ok(state)
 }
 
+/// Saved planes are copies of the planes shown, so equal means the stored values are the same.
 fn same_planes(a: &[SectionPlane], b: &[SectionPlane]) -> bool {
-    a.len() == b.len()
-        && a.iter()
-            .zip(b)
-            .all(|(a, b)| a.id == b.id && (a.origin - b.origin).len() <= 1e-9 * (1.0 + a.origin.len()) && (a.normal - b.normal).len() <= 1e-9)
+    a.len() == b.len() && a.iter().zip(b).all(|(a, b)| a.id == b.id && a.origin == b.origin && a.normal == b.normal)
 }
 
 /// Keep the section on show under a name, replacing a saved section of that name.
