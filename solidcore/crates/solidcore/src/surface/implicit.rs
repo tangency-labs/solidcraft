@@ -2573,13 +2573,14 @@ impl AnalyticSupport {
         let along_v = spread(true) <= spread(false);
         let (rows, len) = if along_v { (nu, nv) } else { (nv, nu) };
         // Each row's circle from its first rational quadratic arc, control points p0, p1,
-        // p2 (The NURBS Book, sections 7.3 and 7.5). The middle weight in standard form,
-        // w1/√(w0 w2), is the cosine of the half sweep α, and the radius is the chord over
-        // 2 sin α. The centre lies r cos α from the chord's midpoint, square to the chord.
-        // The angle between the tangent leg and the chord is the same α, but on a short arc
-        // those two are nearly parallel and the centre built from the leg sits off the axis
-        // along the bisector: 6.8×10⁻¹³ mm on the 12° rib below, 1.06 times the rounding
-        // `build` allows. The chord and the weight put it 2.7×10⁻¹⁴ mm off.
+        // p2 (The NURBS Book, sections 7.3 and 7.5). The angle α between the tangent leg
+        // and the chord is the half sweep. A wide span recovers the centre from that leg,
+        // which is exact for a circle of an exactly representable radius (a line at radius
+        // 5 revolved about the axis). A short span's leg is nearly parallel to the chord,
+        // and the centre built from the leg sits off the axis: 6.8×10⁻¹³ mm on the 12° rib,
+        // 1.06 times the rounding `build` allows. There the middle weight w1/√(w0 w2) is
+        // cos α, the radius is the chord over 2 sin α, and the centre lies r |cos α| from
+        // the chord's midpoint. That puts the 12° rib 2.7×10⁻¹⁴ mm off.
         let degree = form.degree(if along_v {
             crate::nurbs::b_spline_surface::SurfParamType::V
         } else {
@@ -2612,34 +2613,44 @@ impl AnalyticSupport {
                 let length = v.length();
                 (length > 0.0 && length.is_finite()).then(|| v * (1.0 / length))
             };
+            let tangent = unit(leg)?;
             let across = unit(chord)?;
-            let plane = unit(normal)?;
-            let at_cp = |c: usize| {
-                let (i, j) = if along_v { (r, c) } else { (c, r) };
-                let index = i.checked_mul(nv_cp)?.checked_add(j)?;
-                cps.get(index)
+            // sin α. At about 15° and above the leg is a stable reading of the circle.
+            // Below that the chord and the weight are.
+            let sine = tangent.cross(across).length();
+            let (centre, radius) = if sine >= 0.25 {
+                let inward = unit(normal)?.cross(tangent);
+                let radius = leg.length() * tangent.dot(across) / sine;
+                (p0 + inward * radius, radius)
+            } else {
+                let plane = unit(normal)?;
+                let at_cp = |c: usize| {
+                    let (i, j) = if along_v { (r, c) } else { (c, r) };
+                    let index = i.checked_mul(nv_cp)?.checked_add(j)?;
+                    cps.get(index)
+                };
+                let weight_of = |c: &crate::nurbs::math::CPoint| if c.w == NOW { 1.0 } else { c.w };
+                let (w0, w1, w2) = (
+                    weight_of(at_cp(0)?),
+                    weight_of(at_cp(1)?),
+                    weight_of(at_cp(2)?),
+                );
+                // The end weights share a sign and the middle one is not zero. cos α is
+                // w1/√(w0 w2), negative for a span past 180° and for a row whose weights
+                // are all negated. Both are the same circle. The control triangle's normal
+                // turns over with that row, and the centre offset uses |cos α|.
+                if !(w0 * w2 > 0.0 && w1.is_finite() && w1 != 0.0) {
+                    return None;
+                }
+                let cos_half = w1 / (w0 * w2).sqrt();
+                let sin_half = ((1.0 - cos_half) * (1.0 + cos_half)).sqrt();
+                if !(sin_half.is_finite() && sin_half > 0.0) {
+                    return None;
+                }
+                let radius = chord.length() / (2.0 * sin_half);
+                let centre = p0 + chord * 0.5 + plane.cross(across) * (radius * cos_half.abs());
+                (centre, radius)
             };
-            let weight_of = |c: &crate::nurbs::math::CPoint| if c.w == NOW { 1.0 } else { c.w };
-            let (w0, w1, w2) = (
-                weight_of(at_cp(0)?),
-                weight_of(at_cp(1)?),
-                weight_of(at_cp(2)?),
-            );
-            // The end weights share a sign and the middle one is not zero. cos α is
-            // w1/√(w0 w2), negative for a span past 180° and for a row whose weights are
-            // all negated. Both are the same circle. The control triangle's normal turns
-            // over with that row, and the centre offset uses |cos α|.
-            if !(w0 * w2 > 0.0 && w1.is_finite() && w1 != 0.0) {
-                return None;
-            }
-            let cos_half = w1 / (w0 * w2).sqrt();
-            // sin α = √(1 − cos² α), positive on (0, π).
-            let sin_half = ((1.0 - cos_half) * (1.0 + cos_half)).sqrt();
-            if !(sin_half.is_finite() && sin_half > 0.0) {
-                return None;
-            }
-            let radius = chord.length() / (2.0 * sin_half);
-            let centre = p0 + chord * 0.5 + plane.cross(across) * (radius * cos_half.abs());
             (centre.x.is_finite() && centre.y.is_finite() && centre.z.is_finite() && radius > 0.0)
                 .then_some((centre, radius, normal))
         };
