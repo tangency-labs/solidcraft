@@ -271,8 +271,9 @@ pub enum SurfaceFailure {
     /// the kernel's zero), so it is not built. Upstream's warning: status
     /// `SM_ERR_WARNING`, class `failed`.
     PlanesLineNearlySingular,
-    /// The scale given is not uniform (or, where the routine says so, not positive): an
-    /// analytic surface takes only a uniform scale. [`ErrorKind::InvalidInput`].
+    /// The scale given is not uniform (or, where the routine says so, not positive, or zero
+    /// or not finite): an analytic surface takes only a uniform scale that keeps it a
+    /// surface. [`ErrorKind::InvalidInput`].
     ScaleNotUniform,
     /// The trim domain given is not inside the surface's natural domain.
     /// [`ErrorKind::InvalidInput`].

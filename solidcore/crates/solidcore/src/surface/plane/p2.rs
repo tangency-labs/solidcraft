@@ -317,6 +317,14 @@ impl Plane {
                         SurfaceFailure::ScaleNotUniform,
                     ));
                 }
+                // a zero scale collapses the plane to a point, a non-finite one leaves no
+                // net: the caller's scale, not a plane the transform lost
+                if s.x == 0.0 || !s.x.is_finite() {
+                    return Err(SolidError::surface(
+                        OP_XFORM,
+                        SurfaceFailure::ScaleNotUniform,
+                    ));
+                }
             }
         }
 
@@ -345,9 +353,10 @@ impl Plane {
             SolidError::surface(
                 OP_XFORM,
                 SurfaceFailure::Defect {
-                    why: "the plane's bilinear NURB, moved rigidly and scaled uniformly (both \
-                          checked above), no longer tests as a plane at 1000 times the \
-                          tolerance, though such a transform keeps every net planar",
+                    why: "the plane's bilinear NURB, moved rigidly and scaled uniformly by a \
+                          finite, non-zero factor (both checked above), no longer tests as a \
+                          plane at 1000 times the tolerance, though such a transform keeps \
+                          every net planar",
                 },
             )
         })?;
@@ -1842,6 +1851,13 @@ mod tests {
         assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
         assert_eq!(e.surface_failure(), Some(&SurfaceFailure::ScaleNotUniform));
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        // a uniform zero scale collapses the plane: the caller's scale too, not a defect
+        let e = rect()
+            .transform(k, &Axis2Placement::IDENTITY, Some(Vec3::ZERO))
+            .unwrap_err();
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.surface_failure(), Some(&SurfaceFailure::ScaleNotUniform));
+        assert!(!e.is_defect());
         let mut q = rect();
         q.transform(k, &Axis2Placement::IDENTITY, Some(Vec3::new(2.0, 2.0, 2.0)))
             .unwrap();
