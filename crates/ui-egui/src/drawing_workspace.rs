@@ -599,8 +599,7 @@ pub(crate) fn sheets_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let selected = active_sheet(app);
     let top = ui.next_widget_position().y;
-    let limit = t.space_24 * 9.0;
-    let body = egui::ScrollArea::vertical().id_salt(id).min_scrolled_height(0.0).max_height(limit).show(ui, |ui| {
+    let body = egui::ScrollArea::vertical().id_salt(id).min_scrolled_height(0.0).show(ui, |ui| {
         for pair in drawing.sheets.chunks(2) {
             ui.spacing_mut().item_spacing.x = t.space_4;
             ui.columns(2, |columns| {
@@ -611,7 +610,7 @@ pub(crate) fn sheets_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         }
     });
-    crate::panel_runtime::report_content_extent(ui, top, body.content_size.y.min(limit), false);
+    crate::panel_runtime::report_content_extent(ui, top, body.content_size.y, false);
 }
 
 fn sheet_card(
@@ -1892,6 +1891,32 @@ mod tests {
         h.app.run("drawing.close", serde_json::json!({})).unwrap();
         h.frames(2);
         assert!(h.widget("Inspection sheet").is_none());
+    }
+
+    /// The Sheets panel grows with its sheets up to the room the window gives it (#19998): with
+    /// five sheets in a tall window every card can be clicked without scrolling.
+    #[test]
+    fn sheets_panel_grows_with_its_sheets_instead_of_stopping_at_two_rows() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_browser = true;
+        h.call("ui.resize", serde_json::json!({"width":1400,"height":1000}));
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", serde_json::json!({})).unwrap();
+        let mut ids = Vec::new();
+        for _ in 0..4 {
+            let added = h.app.run("drawing.sheet.add", serde_json::json!({})).unwrap();
+            ids.push(added["sheet"].as_str().unwrap().to_string());
+        }
+        h.frames(6);
+        assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().sheets.len(), 5);
+        for key in ids.iter().rev() {
+            h.step(&serde_json::json!({"click":{"handle":format!("drawing:sheets:sheet:{key}")}})).unwrap();
+            h.frames(3);
+            let selected = active_sheet(&h.app).map(solidcraft_engine::doc::ids::encode);
+            assert_eq!(selected.as_deref(), Some(key.as_str()), "the card of sheet {key} is on screen and takes the click");
+        }
     }
 
     #[test]
