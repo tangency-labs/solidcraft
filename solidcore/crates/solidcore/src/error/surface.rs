@@ -369,8 +369,9 @@ pub enum SurfaceFailure {
     /// `SmSurface`'s `SE(SM_ERR)`), or one that takes only another kind (a surface of
     /// extrusion's base). [`ErrorKind::Unsupported`].
     RoutineNotForKind,
-    /// The sphere's inversion could not answer whether the point is on it: the sphere's
-    /// radius is not above the 3D tolerance. Class `failed`.
+    /// The sphere's inversion could not answer whether the point is on it: the point is at
+    /// the centre of a sphere whose radius is not above the 3D tolerance, so it has no
+    /// parameters. Class `failed`.
     InversionNotAnswered,
     /// The surface record read names a surface type `code` the reader does not know.
     /// [`ErrorKind::InvalidInput`].
@@ -378,13 +379,15 @@ pub enum SurfaceFailure {
         /// The type code read.
         code: i64,
     },
-    /// The classification of the curve on the surface found no interval of it within the
-    /// surface's natural bounds: the curve does not cross the surface (rule 7). Class
-    /// `failed`.
-    CurveCrossesNoInterval,
+    /// The classification given has no intervals (it was never sized, so its reset leaves
+    /// it empty). [`ErrorKind::InvalidInput`].
+    ClassificationWithoutIntervals,
     /// The tree given is not owned by a surface cache (or a trimmed or tessellated
     /// surface's cache). [`ErrorKind::InvalidInput`].
     TreeNotOfSurfaceCache,
+    /// The surface cache that owns the tree was built without a surface handle, so the
+    /// tree names no original surface. [`ErrorKind::InvalidInput`].
+    CacheWithoutSurfaceHandle,
     /// The evaluation at this point failed before, and the evaluator keeps that answer
     /// until the point moves. Class `failed`.
     EvaluationFailedBefore,
@@ -546,7 +549,9 @@ impl SurfaceFailure {
             | Self::ToleranceNotADistance
             | Self::GeneratorOnAxis
             | Self::UnknownSurfaceType { .. }
+            | Self::ClassificationWithoutIntervals
             | Self::TreeNotOfSurfaceCache
+            | Self::CacheWithoutSurfaceHandle
             | Self::NoSurfaceGiven
             | Self::StepWithoutBase
             | Self::CrossSectionValuesDisagree => ErrorKind::InvalidInput,
@@ -798,10 +803,13 @@ impl core::fmt::Display for SurfaceFailure {
             Self::UnknownSurfaceType { code } => {
                 write!(f, "the surface type {code} is not one the reader knows")
             }
-            Self::CurveCrossesNoInterval => {
-                f.write_str("the curve crosses no interval of the surface")
+            Self::ClassificationWithoutIntervals => {
+                f.write_str("the classification has no intervals")
             }
             Self::TreeNotOfSurfaceCache => f.write_str("the tree is not owned by a surface cache"),
+            Self::CacheWithoutSurfaceHandle => {
+                f.write_str("the surface cache has no surface handle")
+            }
             Self::EvaluationFailedBefore => {
                 f.write_str("an earlier evaluation at the point failed")
             }
@@ -1333,12 +1341,17 @@ mod tests {
                 ErrorKind::InvalidInput,
             ),
             (
-                SurfaceFailure::CurveCrossesNoInterval,
+                SurfaceFailure::ClassificationWithoutIntervals,
                 SM_ERR,
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
             ),
             (
                 SurfaceFailure::TreeNotOfSurfaceCache,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                SurfaceFailure::CacheWithoutSurfaceHandle,
                 SM_ERR,
                 ErrorKind::InvalidInput,
             ),
