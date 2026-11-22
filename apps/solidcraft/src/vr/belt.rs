@@ -481,11 +481,7 @@ impl Layout {
             near |= (p[0] - at[0]).hypot(p[2] - at[2]) < reach;
         }
         let over = at[1] - height * 0.5 < high && at[1] + height * 0.5 > low;
-        if near && over {
-            [at[0], high + height * 0.5 + GAP, at[2]]
-        } else {
-            at
-        }
+        if near && over { [at[0], high + height * 0.5 + GAP, at[2]] } else { at }
     }
 }
 
