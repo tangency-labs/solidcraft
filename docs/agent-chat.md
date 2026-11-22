@@ -153,8 +153,8 @@ sketch, a brief, a part to fit around.
   leaves the part in the design (Undo removes it).
 - Every file is named in the message. In the conversation the attached pictures show under it as
   thumbnails (hold the pointer over one for a bigger preview, click it to open the viewer, where
-  the file's name is shown and ‹ › step through the message's pictures, together with the picture
-  of the view); the other files are listed by name. Pictures in any of the formats above are
+  the file's name is shown and ‹ › step through the message's pictures and any attached views).
+  The other files are listed by name. Pictures in any of the formats above are
   decoded in the background, with a spinner until they are in. A photo stored turned by its EXIF
   orientation is attached upright: its chip and size are the turned picture's, and it is sent as
   upright pixels. A file that can't be attached says why.
@@ -182,8 +182,9 @@ the current turn. Stop also cancels a file the agent is still opening.
 
 The input stays enabled during a turn. **Enter** queues the message: it shows in the conversation
 as a **Queued** bubble that you can **Edit** or remove (×) until it is sent. Several queued
-messages go as one prompt, in order, when the turn ends normally. The messages stay separate in
-the conversation, and each message keeps its own view, selection, context picks and files.
+messages go as one prompt, in order, when the turn ends normally. They appear together in one
+message in the conversation. When the prompt includes a view, selection, context pick or file,
+the prompt numbers the original messages and puts each attachment with its message.
 
 - **Send now** (on the bubble, or **Ctrl+Enter** / **Cmd+Enter** in the input) stops the current
   step, waits for the agent to say it stopped, then sends the queue as the next prompt, with a
@@ -464,7 +465,8 @@ The agent reaches the open design only through SolidCraft's own tools (the
 - **Attach view:** tick it to send a picture of the current view with your message, for agents
   that take pictures. SolidCraft captures the view when you send or queue the message. Each message
   keeps that picture if the view changes while it waits. The picture shows as a small thumbnail
-  under the message. Hold the pointer over the thumbnail for a bigger preview that stays
+  under the message. When several queued messages go together, the picture viewer shows each
+  view's message number. Hold the pointer over the thumbnail for a bigger preview that stays
   while you do; click it to open the viewer (the message's pictures one at a time, with **‹** and
   **›** or the arrow keys, closed with Esc or a click outside). A long message scrolls inside its
   box, so **Send** and the buttons beside it stay in view.

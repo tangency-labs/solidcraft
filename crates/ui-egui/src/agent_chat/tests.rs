@@ -1547,7 +1547,7 @@ fn the_queue_is_sent_when_the_turn_ends() {
             _ => None,
         })
         .collect();
-    assert_eq!(messages, ["first", "second", "third"], "the conversation keeps the original bubbles");
+    assert_eq!(messages, ["first", "second\n\nthird"], "the conversation shows one bubble for the batch");
     // Nothing queued: the end of the turn just ends it.
     ended(&script, "");
     poll(&mut app, &ctx);
@@ -3301,11 +3301,9 @@ fn a_queued_message_keeps_its_files_through_stop_and_sends_them() {
     assert!(second.contains("[Queued message 2]") && second.contains("wall 2 mm") && !second.contains("\n\n\n\n"), "{second}");
     let state = status(&app);
     let items = state["items"].as_array().expect("conversation items");
-    let mut users = items.iter().filter(|item| item.get("user").is_some()).rev();
-    let second = users.next().expect("the file-only message");
-    let first = users.next().expect("the picture message");
-    assert_eq!((&first["files"], &first["pictures"]), (&json!([]), &json!(1)));
-    assert_eq!((&second["files"], &second["pictures"]), (&json!(["brief.md"]), &json!(0)));
+    let users: Vec<_> = items.iter().filter(|item| item.get("user").is_some()).collect();
+    assert_eq!(users.len(), 2, "the original message and the batch");
+    assert_eq!((&users[1]["files"], &users[1]["pictures"]), (&json!(["brief.md"]), &json!(1)));
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -3958,7 +3956,7 @@ fn queued_messages_keep_the_selection_they_were_typed_with() {
             _ => None,
         })
         .collect();
-    assert_eq!(labels, [("first", vec![]), ("second", vec!["Alpha"]), ("third", vec!["Beta"])]);
+    assert_eq!(labels, [("first", vec![]), ("second\n\nthird", vec!["Alpha", "Beta"])]);
 }
 
 /// A large selection is capped and says how much is left out; nothing in it can break the prompt.
@@ -4325,11 +4323,12 @@ fn a_messages_pictures_open_in_a_viewer() {
     assert!(h.app.agent_chat.gallery.is_none());
 }
 
-/// Two queued messages go as one turn, keeping each captured view beside its own selection in the
-/// prompt and in its own bubble. A sign-in retry sends the same images without adding bubbles.
+/// Two queued messages go as one turn. The prompt identifies each view and selection, and the
+/// shared bubble labels both views. A sign-in retry sends the same images without a new bubble.
 #[test]
 fn queued_views_and_selections_stay_with_their_messages_on_send_and_retry() {
     use solidcraft_engine::Sel;
+    crate::i18n::install();
     let (mut app, script, ctx) = app_with_script();
     app.agent_chat.images = true;
     app.agent_chat.attach_selection = true;
@@ -4358,6 +4357,7 @@ fn queued_views_and_selections_stay_with_their_messages_on_send_and_retry() {
     };
     assert!(first.contains("[Queued message 1]") && first.contains("look from the top") && first.contains("- TopBody"), "{first}");
     assert!(second.contains("[Queued message 2]") && second.contains("look from the front") && second.contains("- FrontBody"), "{second}");
+    assert!(first.ends_with("[View for queued message 1]") && second.ends_with("[View for queued message 2]"));
     assert!(!first.contains("FrontBody") && !second.contains("TopBody"));
     assert!(!first.contains("LaterBody") && !second.contains("LaterBody"));
     assert_eq!(first_png, &backend::base64(&top));
@@ -4380,14 +4380,15 @@ fn queued_views_and_selections_stay_with_their_messages_on_send_and_retry() {
             _ => None,
         })
         .collect();
-    assert_eq!(bubbles.len(), 3, "the retry adds no user bubbles");
+    assert_eq!(bubbles.len(), 2, "the batch uses one bubble and the retry adds none");
     assert_eq!((bubbles[0].0, bubbles[0].1.len()), ("older", 0));
-    for ((text, pictures, context), (label, name, png)) in
-        bubbles[1..].iter().zip([("look from the top", "TopBody", &top), ("look from the front", "FrontBody", &front)])
-    {
-        assert_eq!(*text, label);
-        assert!(matches!(pictures, [picture] if picture.view && Arc::ptr_eq(&picture.bytes, png)));
-        assert_eq!(context.items.iter().map(|item| item.label.as_str()).collect::<Vec<_>>(), [name]);
+    let (text, pictures, context) = bubbles[1];
+    assert_eq!(text, "look from the top\n\nlook from the front");
+    assert_eq!(context.items.iter().map(|item| item.label.as_str()).collect::<Vec<_>>(), ["TopBody", "FrontBody"]);
+    assert_eq!(pictures.len(), 2);
+    for (index, (picture, png)) in pictures.iter().zip([&top, &front]).enumerate() {
+        assert!(picture.view && Arc::ptr_eq(&picture.bytes, png));
+        assert_eq!(picture.note, trf("ui.agent_chat_queued_view_caption", &[("number", &(index + 1).to_string())]));
     }
 }
 

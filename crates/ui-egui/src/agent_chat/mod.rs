@@ -1483,14 +1483,10 @@ pub(crate) fn leave_document(app: &mut SolveApp) {
     // A prompt waiting for startup or sign-in has not reached the backend yet. Keep it
     // with the explicit queue so a late Ready event cannot send it on returning to the tab.
     if let Some(submission) = chat.queued.take() {
-        if let Some(at) = submission.at {
-            for item in (at..at + submission.messages.len()).rev() {
-                if let Some(index) = item.checked_sub(chat.items_trimmed)
-                    && matches!(chat.items.get(index), Some(Item::User { .. }))
-                {
-                    chat.remove_item(index);
-                }
-            }
+        if let Some(index) = submission.at.and_then(|at| at.checked_sub(chat.items_trimmed))
+            && matches!(chat.items.get(index), Some(Item::User { .. }))
+        {
+            chat.remove_item(index);
         }
         chat.pending.splice(0..0, submission.messages);
     }
@@ -1795,33 +1791,45 @@ fn take_view(app: &mut SolveApp) -> Option<Picture> {
         Ok(png) if png.len() <= MAX_PICTURE_BYTES => Some(Picture::shared(Arc::new(png), "", true)),
         result => {
             log::warn!("the view's picture could not be attached: {}", result.err().as_deref().unwrap_or("picture exceeds the size limit"));
-            app.agent_chat.notice(tr("ui.agent_chat_view_capture_failed"), true);
             None
         }
     }
 }
 
-/// Show each message with its own attachments, and send the messages as one turn.
+/// Show the batch as one message, with all its context chips and labelled view pictures.
+/// Keep the original messages for the agent's numbered prompt and for retries.
 fn submit(app: &mut SolveApp, ctx: &egui::Context, messages: Vec<Pending>, interrupted: bool) {
     let at = app.agent_chat.items_trimmed + app.agent_chat.items.len();
-    for message in &messages {
-        let pictures: Vec<_> = message
-            .files
-            .iter()
-            .filter_map(|f| match &f.content {
-                attach::Content::Picture { bytes, .. } => Some(Picture::shared(Arc::clone(bytes), f.name.clone(), false)),
-                _ => None,
-            })
-            .chain(message.view.iter().cloned())
-            .collect();
-        app.agent_chat.push(Item::User {
-            text: message.text.clone(),
-            image: pictures.iter().any(|picture| picture.view),
-            pictures,
-            context: message.context.clone(),
-            files: message.files.iter().filter(|f| !f.is_picture()).map(|f| f.name.clone()).collect(),
-        });
+    let mut context = Context::default();
+    let mut texts = Vec::new();
+    let mut pictures = Vec::new();
+    let mut files = Vec::new();
+    for (index, message) in messages.iter().enumerate() {
+        let group = context.last_group();
+        if !message.text.trim().is_empty() {
+            texts.push(pills::shift(&message.text, group));
+        }
+        context.merge(message.context.clone().shifted(group));
+        for file in &message.files {
+            match &file.content {
+                attach::Content::Picture { bytes, .. } => pictures.push(Picture::shared(Arc::clone(bytes), file.name.clone(), false)),
+                _ => files.push(file.name.clone()),
+            }
+        }
+        if let Some(mut picture) = message.view.clone() {
+            if messages.len() > 1 {
+                picture.note = trf("ui.agent_chat_queued_view_caption", &[("number", &(index + 1).to_string())]);
+            }
+            pictures.push(picture);
+        }
     }
+    app.agent_chat.push(Item::User {
+        text: texts.join("\n\n").chars().take(MAX_PROMPT).collect(),
+        image: pictures.iter().any(|picture| picture.view),
+        pictures,
+        context,
+        files,
+    });
     app.agent_chat.chips_version += 1;
     let submission = Submission { messages, at: Some(at), interrupted };
     match app.agent_chat.state() {
@@ -1977,7 +1985,7 @@ fn prompt_parts(submission: &Submission, changed: Option<&str>, pictures: bool, 
             context_room -= kept;
             let header = if grouped { format!("[Queued message {}]\n", index + 1) } else { String::new() };
             let view_hint =
-                if grouped && pictures && message.view.is_some() { "\n\nThe next image is the view attached to this message." } else { "" };
+                if grouped && pictures && message.view.is_some() { format!("\n\n[View for queued message {}]", index + 1) } else { String::new() };
             let selection = context.prompt_block();
             let selection = if selection.is_empty() { selection } else { format!("\n\n{selection}") };
             (header, text, selection, view_hint)
@@ -2003,7 +2011,7 @@ fn prompt_parts(submission: &Submission, changed: Option<&str>, pictures: bool, 
         let about_files = attach::note(&message.files, pictures, documents, file_room);
         file_room = file_room.saturating_sub(about_files.chars().count());
         append_prompt_text(&mut lead, &about_files, &mut text_room);
-        lead.push_str(view_hint);
+        lead.push_str(&view_hint);
         let files = attach::parts(&message.files, pictures, documents);
         let view = message.view.as_ref().filter(|_| pictures);
         if view.is_some() || !files.is_empty() {

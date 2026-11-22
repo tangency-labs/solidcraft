@@ -1,0 +1,8 @@
+{
+  "en": {
+    "ui.agent_chat_queued_view_caption": "View for queued message {number}"
+  },
+  "de": {
+    "ui.agent_chat_queued_view_caption": "Ansicht zu Nachricht {number} in der Warteschlange"
+  }
+}
