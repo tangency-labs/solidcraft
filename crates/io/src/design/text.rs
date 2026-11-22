@@ -6,7 +6,8 @@
 //! - A container prints `container.json` on one line, then `document.json` (or a drawing
 //!   container's `drawing.json`) and each `drawings/<id>.json` in the same layout. Every other part
 //!   gets one line with its name, its size and the SHA-256 of its bytes. A blob whose bytes do not
-//!   match the SHA-256 in its name says so.
+//!   match the SHA-256 in its name says so. A name holding a control character, or starting with a
+//!   quote, is printed as a JSON string, so it cannot print as the lines of other parts.
 //! - The model cache, the preview and the thumbnail under `cache/` are left out, because a save
 //!   writes them afresh, so they would show as a change on every save. So is a plugin's own
 //!   `cache/` folder, which the plugin rebuilds. Everything else a container holds is shown,
@@ -20,6 +21,7 @@
 //! memory that grows with the size times the depth. When a part does not read, the text ends with
 //! the SHA-256 of the whole file, so a change inside that part still shows.
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::io::{Cursor, Read};
 
@@ -63,17 +65,38 @@ fn summary(what: &str, bytes: &[u8]) -> String {
     format!("# {what} ({} bytes, SHA-256 {})\n", bytes.len(), digest(bytes))
 }
 
-/// JSON text laid out as a `.json` save lays it out, with a final line feed. Text nested too deeply,
-/// or that would lay out past `budget` bytes, is summed up in one line instead.
-fn laid_out(text: &str, budget: usize) -> String {
+/// A part's name as printed. A name holding a control character (a line feed could forge the
+/// lines of other parts) or starting with a quote is printed as a JSON string, so two different
+/// names never print alike. A name read from a container never holds a backslash, and every
+/// quoted name starts with a quote.
+fn shown(name: &str) -> Cow<'_, str> {
+    if name.starts_with('"') || name.chars().any(char::is_control) {
+        Cow::Owned(serde_json::to_string(name).unwrap_or_default())
+    } else {
+        Cow::Borrowed(name)
+    }
+}
+
+/// An error's text on one line, so it cannot add lines of its own.
+fn one_line(error: &dyn std::fmt::Display) -> String {
+    error.to_string().replace(char::is_control, " ")
+}
+
+/// JSON text laid out as a `.json` save lays it out, with a final line feed, and the bytes the
+/// layout wrote. Text nested too deeply, or that would lay out past `budget` bytes, is summed up in
+/// one line instead. A layout that gives up has written the whole budget, so that is what it spent.
+fn laid_out(text: &str, budget: usize) -> (String, usize) {
     if depth(text) > MAX_DEPTH {
-        return summary(&format!("JSON nested more than {MAX_DEPTH} levels deep"), text.as_bytes());
+        let line = summary(&format!("JSON nested more than {MAX_DEPTH} levels deep"), text.as_bytes());
+        let spent = line.len();
+        return (line, spent);
     }
     let Some(mut out) = pretty_within(&compact(text), budget) else {
-        return summary(&format!("JSON that would lay out to more than {budget} bytes"), text.as_bytes());
+        return (summary(&format!("JSON that would lay out to more than {budget} bytes"), text.as_bytes()), budget);
     };
     out.push('\n');
-    out
+    let spent = out.len();
+    (out, spent)
 }
 
 /// The text of a design file's bytes, for `git diff`. It never fails and never panics. Content it
@@ -83,7 +106,7 @@ pub fn design_text(bytes: &[u8]) -> String {
         return container_text(bytes);
     }
     match std::str::from_utf8(bytes) {
-        Ok(text) if serde_json::from_str::<IgnoredAny>(text).is_ok() => laid_out(text, budget(text.len())),
+        Ok(text) if serde_json::from_str::<IgnoredAny>(text).is_ok() => laid_out(text, budget(text.len())).0,
         Ok(_) => summary("not JSON and not a SolidCraft container", bytes),
         Err(_) => summary("not text and not a SolidCraft container", bytes),
     }
@@ -111,21 +134,24 @@ pub fn large_file_text(what: &str, mut source: impl Read) -> std::io::Result<Str
 fn container_text(bytes: &[u8]) -> String {
     let mut reader = match PackageReader::new(Cursor::new(bytes)) {
         Ok(reader) => reader,
-        Err(e) => return summary(&format!("a SolidCraft container that does not open ({e})"), bytes),
+        Err(e) => return summary(&format!("a SolidCraft container that does not open ({})", one_line(&e)), bytes),
     };
-    let mut names = reader.part_names();
+    // Each part is read by its place, not looked up by name, so names stored without the UTF-8
+    // flag do not make reading every part quadratic.
+    let mut names = reader.indexed_part_names();
     names.sort();
     let mut out = String::new();
     let mut parts = String::new();
     let mut damaged = false;
     // One budget for every laid-out part together, so a container of many parts cannot add up to
-    // more than [`FLOOR`] and [`GROWTH`] times the text it holds.
+    // more than [`FLOOR`] and [`GROWTH`] times the text it holds. It is charged for the bytes each
+    // layout wrote, a layout that gave up included, so the work stays within it as well.
     let mut allowance = FLOOR;
-    for name in names.iter().filter(|name| !is_cache(name)) {
-        let part = match reader.limited_part(name, part_limit(name)) {
+    for (name, index) in names.iter().filter(|(name, _)| !is_cache(name)) {
+        let part = match reader.limited_part_at(*index, part_limit(name)) {
             Ok(part) => part,
             Err(e) => {
-                let _ = writeln!(parts, "{name} damaged ({e})");
+                let _ = writeln!(parts, "{} damaged ({})", shown(name), one_line(&e));
                 damaged = true;
                 continue;
             }
@@ -136,10 +162,10 @@ fn container_text(bytes: &[u8]) -> String {
                 let _ = writeln!(out, "# SolidCraft container {}", compact(text));
             }
             Some(text) if is_text_part(name) => {
-                let _ = writeln!(out, "# {name}");
+                let _ = writeln!(out, "# {}", shown(name));
                 allowance = allowance.saturating_add(text.len().saturating_mul(GROWTH));
-                let laid = laid_out(text, allowance);
-                allowance = allowance.saturating_sub(laid.len());
+                let (laid, spent) = laid_out(text, allowance);
+                allowance = allowance.saturating_sub(spent);
                 out.push_str(&laid);
             }
             _ => {
@@ -147,7 +173,7 @@ fn container_text(bytes: &[u8]) -> String {
                 // A blob is named for the SHA-256 of its bytes (`blobs/<sha256>.<extension>`).
                 let named = name.strip_prefix("blobs/").and_then(|file| file.split('.').next());
                 let mismatch = if named.is_some_and(|named| named != hash) { " damaged (its bytes do not match its name)" } else { "" };
-                let _ = writeln!(parts, "{name} {} {hash}{mismatch}", part.len());
+                let _ = writeln!(parts, "{} {} {hash}{mismatch}", shown(name), part.len());
             }
         }
     }

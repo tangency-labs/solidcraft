@@ -60,7 +60,7 @@ fn a_container_prints_its_design_and_one_line_per_part() {
     let mut reader = PackageReader::new(std::io::Cursor::new(bytes.as_slice())).unwrap();
     let document = reader.limited_part("document.json", part_limit("document.json")).unwrap();
     let document = std::str::from_utf8(&document).unwrap();
-    assert!(text.contains(&format!("# document.json\n{}", laid_out(document, budget(document.len())))), "{text}");
+    assert!(text.contains(&format!("# document.json\n{}", laid_out(document, budget(document.len())).0)), "{text}");
     let mut blobs = 0;
     for name in reader.part_names() {
         if name.starts_with("blobs/") {
@@ -165,6 +165,37 @@ fn a_containers_parts_share_one_budget() {
     assert_eq!(text.matches("# JSON that would lay out to more than").count(), 1, "only one part is summed up");
     assert!(text.contains("# drawings/c.json\n# JSON that would lay out to more than"), "the third part is the one summed up");
     assert!(text.len() < FLOOR + 3 * GROWTH * part.len(), "{} bytes", text.len());
+}
+
+/// A layout that gives up has written its whole budget, so the parts after it share what is left
+/// and the work stays within the budget, not only the text printed. Here the first drawing would
+/// lay out to about 80 MB and is summed up. The second lays out to about 220 KB, more than its own
+/// share of four times its 2 KB, so it is summed up too, where on its own it is laid out.
+#[test]
+fn a_layout_that_gives_up_spends_the_budget() {
+    let large = format!("{}{}1{}", "[".repeat(100), "1,".repeat(400_000), "]".repeat(100));
+    let small = format!("{}{}1{}", "[".repeat(100), "1,".repeat(1_000), "]".repeat(100));
+    let alone = container(&[("drawings/b.json", small.as_bytes())]);
+    assert!(!design_text(&alone).contains("# JSON that would lay out"), "on its own, the small part is laid out");
+    let both = container(&[("drawings/a.json", large.as_bytes()), ("drawings/b.json", small.as_bytes())]);
+    let text = design_text(&both);
+    assert_eq!(text.matches("# JSON that would lay out to more than").count(), 2, "{}", text.get(..400).unwrap_or_default());
+}
+
+/// A part name holding a line feed would otherwise print as the lines of other parts, so two
+/// different containers would print the same text. Such a name is printed as a JSON string, and
+/// so is a name starting with a quote, which no quoted name can then match.
+#[test]
+fn a_part_name_that_could_forge_lines_is_quoted() {
+    let two = container(&[("a", b"1"), ("b", b"2")]);
+    let forged_name = format!("a 1 {}\nb", digest(b"1"));
+    let forged = container(&[(&forged_name, b"2")]);
+    let text = design_text(&forged);
+    assert_ne!(design_text(&two), text);
+    assert!(text.contains(&format!("\n{} 1 {}\n", serde_json::to_string(&forged_name).unwrap(), digest(b"2"))), "{text}");
+    assert_eq!(text.lines().count(), 2, "{text}");
+    let quoted = design_text(&container(&[("\"a\"", b"1")]));
+    assert!(quoted.contains(&format!("\n\"\\\"a\\\"\" 1 {}\n", digest(b"1"))), "{quoted}");
 }
 
 /// A part that does not read (here its bytes no longer match the CRC-32 the ZIP keeps) is named
