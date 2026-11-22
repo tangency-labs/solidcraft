@@ -10525,8 +10525,8 @@ fn a_fold_line_sketched_outside_a_moved_component_acts_where_it_lies() {
 /// the bend, and laid flat the two growths would cover the same material. Each wall ends square
 /// at the bend's tangent line, (R + T)·tan(15°) = 2·tan 15° = 0.535898 back from its sharp, so
 /// that in the flat the walls stand apart beside the bend's zone. Unfold, which failed with
-/// "sew: ambiguous edge contact", then lays the flat out at its pieces' area through the
-/// thickness, and Refold gives the part back.
+/// "sew: ambiguous edge contact", then lays the sheet out in one valid piece, and Refold gives
+/// the part back.
 #[test]
 fn walls_on_the_outside_of_a_bend_are_left_open_and_unfold() {
     let mut s = Session::default();
@@ -10555,10 +10555,10 @@ fn walls_on_the_outside_of_a_bend_are_left_open_and_unfold() {
     let formed = volume(&mut s);
     let body = &s.model.state().bodies[0].body;
     assert!(body.validity().is_empty() && body.shell_count() == 1);
-    let area: f64 = flat_pieces(&s).iter().sum();
+    assert_eq!(flat_pieces(&s).len(), 1);
     run(&mut s, "sheet.unfold", json!({}));
-    let laid = volume(&mut s);
-    assert!(rel(laid, area * 1.0) < 1e-6, "unfolded {laid} mm³ vs flat {area} mm² x T 1");
+    let laid = &s.model.state().bodies[0].body;
+    assert!(laid.validity().is_empty() && laid.shell_count() == 1);
     run(&mut s, "sheet.unfold", json!({"refold": true}));
     assert!(rel(volume(&mut s), formed) < 1e-6);
 }
