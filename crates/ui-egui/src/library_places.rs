@@ -1,7 +1,8 @@
 //! The library places (#12982): the app keeps them in its preferences (`library_places` and
 //! `my_library_folder`), scans each place on a thread of its own, and gives every session one
 //! shared value built from the scans found so far (`Session::libraries`). The `library.places.*`
-//! commands check a change and echo it; [`command`] applies the echo.
+//! commands check a change and echo it; [`command`] applies the echo. A library write leaves the
+//! library it read again in the session; [`adopt`] keeps it.
 
 use std::sync::Arc;
 
@@ -26,6 +27,12 @@ pub struct Places {
     /// never taken.
     #[cfg(not(target_arch = "wasm32"))]
     running: Vec<(Place, crate::starting::Worker<Scanned>)>,
+    /// Places a changed-only refresh asked about, checked from the next frame.
+    to_check: Vec<Place>,
+    /// Checks under way ([`library::rescan_if_changed`]): a new scan when the place's files
+    /// changed. Dropped like `running`, and by a write, whose place they may have listed before it.
+    #[cfg(not(target_arch = "wasm32"))]
+    checking: Vec<(Place, crate::starting::Worker<Option<Scanned>>)>,
 }
 
 impl Places {
@@ -34,8 +41,32 @@ impl Places {
         let keep = |p: &Place| place.is_some_and(|wanted| wanted != p);
         self.found.retain(|s| keep(s.place()));
         self.failed.retain(|(p, _)| keep(p));
+        self.to_check.retain(keep);
         #[cfg(not(target_arch = "wasm32"))]
-        self.running.retain(|(p, _)| keep(p));
+        {
+            self.running.retain(|(p, _)| keep(p));
+            self.checking.retain(|(p, _)| keep(p));
+        }
+    }
+
+    /// Ask whether `place`'s files, or every place's, changed since its scan: only a scanned
+    /// place is checked, and one already being checked isn't asked twice.
+    fn check(&mut self, place: Option<&Place>) {
+        for scan in &self.found {
+            let wanted = place.is_none_or(|p| p == scan.place());
+            #[cfg(not(target_arch = "wasm32"))]
+            let wanted = wanted && !self.checking.iter().any(|(p, _)| p == scan.place());
+            if wanted && !self.to_check.contains(scan.place()) {
+                self.to_check.push(scan.place().clone());
+            }
+        }
+    }
+
+    /// Take a check's new scan in its place's.
+    fn replace(&mut self, scan: Scanned) {
+        if let Some(old) = self.found.iter_mut().find(|s| s.place() == scan.place()) {
+            *old = Arc::new(scan);
+        }
     }
 
     /// Rebuild the value from `mine` and `rows` and the scans found for them.
@@ -43,8 +74,12 @@ impl Places {
         let listed = |p: &Place| mine.iter().chain(&rows).any(|r| r.place == *p);
         self.found.retain(|s| listed(s.place()));
         self.failed.retain(|(p, _)| listed(p));
+        self.to_check.retain(listed);
         #[cfg(not(target_arch = "wasm32"))]
-        self.running.retain(|(p, _)| listed(p));
+        {
+            self.running.retain(|(p, _)| listed(p));
+            self.checking.retain(|(p, _)| listed(p));
+        }
         let built_in = Arc::clone(self.built_in.get_or_insert_with(|| Arc::new(library::scan(&Place::BuiltIn))));
         self.current = Some(Arc::new(Libraries::new(built_in, mine, rows, &self.found, &self.failed)));
     }
@@ -103,6 +138,30 @@ pub fn sync(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
         }
+        // A check that found nothing new, or stopped, leaves the place's scan as it is.
+        for (place, worker) in std::mem::take(&mut places.checking) {
+            match worker.poll() {
+                Poll::Running => places.checking.push((place, worker)),
+                Poll::Done(Some(scan)) => {
+                    places.replace(scan);
+                    changed = true;
+                }
+                Poll::Done(None) | Poll::Failed => {}
+            }
+        }
+    }
+    for place in std::mem::take(&mut places.to_check) {
+        let Some(scan) = places.found.iter().find(|s| *s.place() == place).cloned() else { continue };
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Ok(worker) = start_check(scan, ctx) {
+            places.checking.push((place, worker));
+        }
+        // As a scan there: in the frame.
+        #[cfg(target_arch = "wasm32")]
+        if let Some(fresh) = library::rescan_if_changed(&scan) {
+            places.replace(fresh);
+            changed = true;
+        }
     }
     for (row, state) in current.places() {
         if *state != library::RowState::Scanning {
@@ -132,11 +191,15 @@ pub fn sync(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
-/// Scan `place` as the app: only a place the user's preferences list reaches its own network
-/// host, under the scope of whoever starts the scan.
-fn scan(place: &Place) -> Scanned {
+/// Read `place` as the app: only a place the user's preferences list reaches its own network
+/// host, under the scope of whoever starts the read.
+fn as_the_app<T>(place: &Place, read: impl FnOnce() -> T) -> T {
     let hosts: Vec<String> = place.path().and_then(vfs::network_host).into_iter().collect();
-    vfs::allowing_hosts(&hosts, || library::scan(place))
+    vfs::allowing_hosts(&hosts, read)
+}
+
+fn scan(place: &Place) -> Scanned {
+    as_the_app(place, || library::scan(place))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -144,6 +207,16 @@ fn start(place: &Place, ctx: &egui::Context) -> Result<crate::starting::Worker<S
     let scope = vfs::current_scope();
     let place = place.clone();
     crate::starting::Worker::spawn("library scan", ctx.clone(), move || vfs::scoped(scope, || scan(&place))).map_err(|e| e.to_string())
+}
+
+/// A changed-only check of `scan`'s place on a thread of its own, as [`start`] scans one. A check
+/// that can't start leaves the scan as it is: the next refresh asks again.
+#[cfg(not(target_arch = "wasm32"))]
+fn start_check(scan: Arc<Scanned>, ctx: &egui::Context) -> std::io::Result<crate::starting::Worker<Option<Scanned>>> {
+    let scope = vfs::current_scope();
+    crate::starting::Worker::spawn("library check", ctx.clone(), move || {
+        vfs::scoped(scope, || as_the_app(scan.place(), || library::rescan_if_changed(&scan)))
+    })
 }
 
 /// The rest of a `library.places.*` command, after the engine checked it (`v`, its echo): the
@@ -161,14 +234,18 @@ pub fn command(app: &mut SolveApp, id: &str, v: &Value) -> Result<Value, String>
         ("library.places.remove", Some(path)) => PlaceEdit::Remove { path },
         ("library.places.set", Some(path)) => PlaceEdit::Set { path, read_only, at },
         ("library.places.refresh", path) => {
-            match path {
-                None => app.library_places.forget(None),
+            let place = match path {
+                None => None,
                 Some(path) => {
-                    let place =
-                        app.session.libraries.listed(&path).map(|row| row.place.clone()).ok_or_else(|| format!("no place is listed at {path}"))?;
-                    app.library_places.forget(Some(&place));
+                    Some(app.session.libraries.listed(&path).map(|row| row.place.clone()).ok_or_else(|| format!("no place is listed at {path}"))?)
                 }
+            };
+            // Window open and focus ask for changed places only; the Refresh button scans in full.
+            if v.get("changed_only").and_then(Value::as_bool) == Some(true) {
+                app.library_places.check(place.as_ref());
+                return Ok(v.clone());
             }
+            app.library_places.forget(place.as_ref());
             app.library_places.rebuild_same();
             sync_rows(app);
             return Ok(v.clone());
@@ -180,7 +257,29 @@ pub fn command(app: &mut SolveApp, id: &str, v: &Value) -> Result<Value, String>
     Ok(v.clone())
 }
 
-/// Wait for every scan under way, up to `limit` each (tests).
+/// Whether `id` writes a library: its command leaves the libraries it read again in the session.
+pub fn writes(id: &str) -> bool {
+    id == "library.create" || (id.starts_with("library.entry.") && id != "library.entry.list")
+}
+
+/// After a library write: take the session's libraries as they are, so the next frame keeps the
+/// write. Only a scanned place can be written, and a place being scanned has no scan in the set, so
+/// no scan still running can bring the old files back.
+pub fn adopt(app: &mut SolveApp) {
+    let fresh = Arc::clone(&app.session.libraries);
+    let places = &mut app.library_places;
+    // A check may have listed the place before the write: its answer is out of date.
+    #[cfg(not(target_arch = "wasm32"))]
+    places.checking.clear();
+    for scan in fresh.set().places().iter().skip(1) {
+        if let Some(old) = places.found.iter_mut().find(|s| s.place() == scan.place()) {
+            *old = Arc::clone(scan);
+        }
+    }
+    places.current = Some(fresh);
+}
+
+/// Wait for every scan and check under way, up to `limit` each (tests).
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) fn finish(app: &mut SolveApp, ctx: &egui::Context, limit: std::time::Duration) {
     use crate::starting::Poll;
@@ -189,6 +288,13 @@ pub(crate) fn finish(app: &mut SolveApp, ctx: &egui::Context, limit: std::time::
             Poll::Done(scan) => app.library_places.found.push(Arc::new(scan)),
             Poll::Running => app.library_places.running.push((place, worker)),
             Poll::Failed => app.library_places.failed.push((place, "the scan stopped before it finished".into())),
+        }
+    }
+    for (place, worker) in std::mem::take(&mut app.library_places.checking) {
+        match worker.wait_for(limit) {
+            Poll::Done(Some(scan)) => app.library_places.replace(scan),
+            Poll::Running => app.library_places.checking.push((place, worker)),
+            Poll::Done(None) | Poll::Failed => {}
         }
     }
     app.library_places.rebuild_same();

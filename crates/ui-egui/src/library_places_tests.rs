@@ -133,3 +133,61 @@ fn places_set_as_preferences_stay_inside_the_callers_scope() {
     assert!(crate::prefs::set(&mut h.app, &json!({"my_library_folder": "relative/lib"})).is_err());
     assert_eq!(h.app.preferences.library_places.len(), 1);
 }
+
+/// Writes in one batch all land, and the app keeps them: each write leaves its library read again
+/// in the session, so the next one finds what it wrote, and the frame after keeps it.
+#[test]
+fn a_library_write_is_seen_at_once_and_kept_by_the_next_frame() {
+    let shop = Shop::new("write-batch");
+    let mut h = Harness::new();
+    run(&mut h, "library.places.add", json!({"path": shop.path(), "kind": "library"}));
+    h.frame();
+    finish(&mut h);
+    let steel = json!({"kind": "material", "value": {"name": "Steel", "density_g_cm3": 7.85}});
+    let add = json!({"command": "library.entry.add", "params": {"library": "user.write-batch", "definition": steel}});
+    let out = h.call("engine.batch", json!({"commands": [add]}));
+    assert!(out["error"].is_null(), "{out}");
+    let listed = run(&mut h, "library.entry.list", json!({"library": "user.write-batch"}));
+    let added = listed["entries"][0].clone();
+    let firmer = json!({"kind": "material", "value": {"name": "Steel", "density_g_cm3": 7.9}});
+    let edit = json!({"command": "library.entry.edit", "params": {"entry": added["id"], "revision": added["revision"], "definition": firmer}});
+    let out = h.call("engine.batch", json!({"commands": [edit]}));
+    assert!(out["error"].is_null(), "{out}");
+    h.frame();
+    let listed = run(&mut h, "library.entry.list", json!({"library": "user.write-batch"}));
+    assert_eq!(listed["entries"].as_array().map(Vec::len), Some(1), "{listed}");
+    assert_ne!(listed["entries"][0]["revision"], added["revision"], "the frame after kept the write: {listed}");
+}
+
+/// A changed-only refresh (window open and focus) keeps the scan of a place whose files are as
+/// they were, the same shared value, so nothing reads it again, and scans again a place whose
+/// files changed. The Refresh button's full rescan is the test above.
+#[test]
+fn a_changed_only_refresh_keeps_an_unchanged_place_and_reads_a_changed_one() {
+    let (same, edited) = (Shop::new("check-same"), Shop::new("check-edited"));
+    let mut h = Harness::new();
+    for shop in [&same, &edited] {
+        run(&mut h, "library.places.add", json!({"path": shop.path(), "kind": "library"}));
+    }
+    h.frame();
+    finish(&mut h);
+    let scans = |h: &Harness| h.app.session.libraries.set().places().to_vec();
+    let before = scans(&h);
+    assert_eq!(before.len(), 3, "the built-in library and both places");
+    let echo = run(&mut h, "library.places.refresh", json!({"changed_only": true}));
+    assert_eq!(echo["changed_only"], json!(true));
+    h.frame();
+    finish(&mut h);
+    let after = scans(&h);
+    assert!(before.iter().zip(&after).all(|(a, b)| std::sync::Arc::ptr_eq(a, b)), "nothing changed: every scan kept");
+
+    edited.named("user.check-edited", "Renamed shop");
+    run(&mut h, "library.places.refresh", json!({"changed_only": true}));
+    h.frame();
+    finish(&mut h);
+    let listed = places(&mut h);
+    assert_eq!(listed[1]["libraries"][0]["name"], json!("Renamed shop"), "{listed:?}");
+    let again = scans(&h);
+    assert!(std::sync::Arc::ptr_eq(&after[1], &again[1]), "the unchanged place keeps its scan");
+    assert!(!std::sync::Arc::ptr_eq(&after[2], &again[2]));
+}

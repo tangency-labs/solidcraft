@@ -214,7 +214,9 @@ pub fn command(id: &str, params: &Value, undo_left: usize) -> Verdict {
         return Verdict::Ask(solidcraft_ui_text::format("ui.plugin_run_consent", &[("entry", &entry), ("path", &path)]));
     }
     // Files, and commands that replace or reload the whole design.
-    let file_command = id.starts_with("file.") || id.starts_with("doc.") || matches!(id, "render.export" | "render.start");
+    // A library write changes files though it names none (only an id).
+    let file_command =
+        id.starts_with("file.") || id.starts_with("doc.") || matches!(id, "render.export" | "render.start") || crate::library_places::writes(id);
     // The question says which program a send to a slicer would start.
     let with_slicer =
         |question: String| match params.get("slicer").and_then(Value::as_str).filter(|_| id.ends_with("save_mesh") || id.ends_with("send_to_slicer"))
@@ -462,6 +464,22 @@ mod tests {
         }
         assert_eq!(exec("library.places.list", json!({})), Verdict::Run { change: false });
         assert_eq!(exec("library.places.refresh", json!({})), Verdict::Run { change: true });
+    }
+
+    /// A library write changes files though it names only ids, so each asks first; listing a
+    /// library's entries only reads.
+    #[test]
+    fn library_writes_ask() {
+        for (id, p) in [
+            ("library.create", json!({"place": "/srv/lib", "name": "Shop"})),
+            ("library.entry.add", json!({"library": "user.shop", "definition": {}})),
+            ("library.entry.edit", json!({"entry": "user.shop/material-steel", "revision": "0", "definition": {}})),
+            ("library.entry.remove", json!({"entry": "user.shop/material-steel", "revision": "0"})),
+            ("library.entry.copy", json!({"entry": "solidcraft.builtin/material-steel", "to": "user.shop"})),
+        ] {
+            assert!(matches!(exec(id, p.clone()), Verdict::Ask(_)), "{id} {p}");
+        }
+        assert_eq!(exec("library.entry.list", json!({"library": "user.shop"})), Verdict::Run { change: false });
     }
 
     /// Every registered `file.*` and `doc.*` command asks, so a new one cannot slip through by

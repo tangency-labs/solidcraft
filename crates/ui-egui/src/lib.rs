@@ -2074,6 +2074,11 @@ impl SolveApp {
             Ok(v) if id.starts_with("settings.profile.") => settings_profiles::command(self, id, &v),
             // So do the library places.
             Ok(v) if id.starts_with("library.places.") => library_places::command(self, id, &v),
+            // A library write read its library again: the app keeps that.
+            Ok(v) if library_places::writes(id) => {
+                library_places::adopt(self);
+                Ok(v)
+            }
             // The view navigator is the app's too.
             Ok(v) if id == "view.navigator" => view_gizmo::command(self, &v),
             r => r,
