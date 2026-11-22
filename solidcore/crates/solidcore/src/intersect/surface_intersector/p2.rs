@@ -73,7 +73,8 @@ use core::cmp::Ordering;
 use crate::blend::fillet_standard_solver::p1::FilletLaw;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::Curve;
-use crate::error::{passed_on, Result, SolidError};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{passed_on, Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -542,9 +543,9 @@ impl SurfaceIntersector<'_> {
 
                 // error case - surface point has no normal
                 if norm.length_squared() < EFF_ZERO_SQ {
-                    return Err(SolidError::intersect_failed(
+                    return Err(SolidError::intersect(
                         OP_CPV,
-                        "the surface point has no normal",
+                        IntersectFailure::NoSurfaceNormal,
                     ));
                 }
             }
@@ -650,11 +651,10 @@ impl SurfaceIntersector<'_> {
                         ) {
                             Ok(()) => {}
                             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                            Err(_) => {
-                                return Err(SolidError::intersect_failed(
-                                    OP_SING,
-                                    "the advanced intersector could not place the singular point",
-                                ))
+                            Err(e) => {
+                                return Err(Failure::new(OP_SING, IntersectFailure::Tangent)
+                                    .caused_by(e)
+                                    .into_error())
                             }
                         }
                     } else {
@@ -1010,7 +1010,13 @@ impl SurfaceIntersector<'_> {
         let n = pnts.len();
         let at = |i: usize| {
             pnts.get(i).ok_or_else(|| {
-                SolidError::intersect_failed(OP_FLUSH, "the curve has no point at that index")
+                SolidError::intersect(
+                    OP_FLUSH,
+                    IntersectFailure::Defect {
+                        why: "the flush reads the points before, at and (at the next to last) \
+                              after its index, which runs below the point count",
+                    },
+                )
             })
         };
         let mut i = 1;
@@ -1095,7 +1101,10 @@ impl SurfaceIntersector<'_> {
                 // published deviation
                 Ok(fit) => max_deviation = max_deviation.max(fit.bound),
                 Err(why) => {
-                    return Err(SolidError::intersect_failed(OP_FLUSH, sweep_refusal(why)));
+                    return Err(SolidError::intersect(
+                        OP_FLUSH,
+                        IntersectFailure::SphereTrimNotCertified { why },
+                    ));
                 }
             }
         }
@@ -1357,9 +1366,11 @@ impl SurfaceIntersector<'_> {
         let mut ii = 1usize;
         loop {
             if ii > MAX_GAP_SAMPLES {
-                return Err(SolidError::intersect_failed(
+                return Err(SolidError::intersect(
                     OP_CLASSIFY,
-                    "the boundary start point is not classified within the sample limit",
+                    IntersectFailure::NotClassifiedWithinSamples {
+                        limit: MAX_GAP_SAMPLES,
+                    },
                 ));
             }
             // the sample array index: 1, then 2 (the last sample moves to 1)
@@ -1607,10 +1618,7 @@ fn compute_singularity_point_base(
     _point: &mut TsectPnt,
     _previous: Option<&TsectPnt>,
 ) -> Result<()> {
-    Err(SolidError::intersect_failed(
-        OP_SING,
-        "the basic intersector does not handle singular or tangent points",
-    ))
+    Err(SolidError::intersect(OP_SING, IntersectFailure::Tangent))
 }
 
 /// True when `point` is farther than `tol_3d` from every start point's curve point
@@ -1802,7 +1810,7 @@ pub fn compute_law_point_values_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     let ivl = &law.point_curve_interval;
 
     // for 6 iterations
-    for _ in 0..6 {
+    for _ in 0..LAW_DELTA_TRIES {
         // the guesses (read through the references on every try)
         let [uv0, uv1] = match guess {
             LawGuess::Given(uvs) => uvs,
@@ -1841,9 +1849,9 @@ pub fn compute_law_point_values_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             // `SER( Inversion(dParameter, ..) )`: SM_ERR outside the interval or for a
             // zero-length one
             if pass && !inv.is_success() {
-                return Err(SolidError::intersect_failed(
+                return Err(SolidError::intersect(
                     OP_LAW,
-                    "the law curve's normal could not be inverted",
+                    IntersectFailure::LawParameterNotInverted { parameter },
                 ));
             }
             let t = inv.parameter.unwrap_or(UNDEF_DOUBLE);
@@ -1852,9 +1860,11 @@ pub fn compute_law_point_values_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             // the step may end just past the interval, where the unclamped parameter
             // is set and extrapolates as wanted: only an undefined one is passed on
             if pass && inv.parameter.is_none() {
-                return Err(SolidError::intersect_failed(
+                return Err(SolidError::intersect(
                     OP_LAW,
-                    "the law curve's normal inversion gave no parameter",
+                    IntersectFailure::LawParameterNotInverted {
+                        parameter: delta_param,
+                    },
                 ));
             }
             let t = inv.parameter.unwrap_or(UNDEF_DOUBLE);
@@ -1920,38 +1930,16 @@ pub fn compute_law_point_values_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         // next iteration with a bigger delta step
         delta_step *= 10.0;
     }
-    Err(SolidError::intersect_failed(
+    Err(SolidError::intersect(
         OP_LAW,
-        "no delta step gives the law point's values",
+        IntersectFailure::NoDeltaStep {
+            tries: LAW_DELTA_TRIES,
+        },
     ))
 }
 
-/// Not upstream (#17110): the message of a refused monotone sweep fit
-/// ([`sphere_span::fit_monotone_sweep`]).
-const fn sweep_refusal(why: sphere_span::SweepRefusal) -> &'static str {
-    match why {
-        sphere_span::SweepRefusal::Off(sphere_span::Refusal::Off) => {
-            "the UV trim on the sphere made monotone in its sweep coordinate where the curve \
-             is monotone in longitude lies off the 3D curve by more than the tolerance"
-        }
-        sphere_span::SweepRefusal::Off(_) => {
-            "the UV trim on the sphere made monotone in its sweep coordinate where the curve \
-             is monotone in longitude could not be certified within the tolerance of the 3D \
-             curve"
-        }
-        sphere_span::SweepRefusal::TurnsBack => {
-            "a refitted span of the UV trim on the sphere could not be certified monotone \
-             in its sweep coordinate where the curve is monotone in longitude"
-        }
-        sphere_span::SweepRefusal::Degenerate => {
-            "the UV trim on the sphere made monotone in its sweep coordinate has a zero \
-             derivative at a joint"
-        }
-        sphere_span::SweepRefusal::Shape => {
-            "the UV and 3D control points of the traced curve are not matching cubic spans"
-        }
-    }
-}
+/// The delta steps [`compute_law_point_values_with`] tries, each ten times the last.
+const LAW_DELTA_TRIES: usize = 6;
 
 #[cfg(test)]
 mod tests {
