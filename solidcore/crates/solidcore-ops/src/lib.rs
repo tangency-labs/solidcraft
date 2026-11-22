@@ -113,10 +113,10 @@ pub use error::{
     Unblendable, Unsoundness,
 };
 pub use measure::{
-    point_displacement, point_distance, point_set_summary, points_meet, ClassifiedPoint, Distance,
-    EdgeCurve, EdgePoint, EdgeRayPoint, FaceCentroid, FaceRayHit, GapSample,
-    MassPropertiesEstimate, MembersClosest, Normal, PointClass, PointNormalFace, PointSetSummary,
-    RayEntity, RayHit, SquareFaceLevel, EDGE_POINTS_MAX,
+    cylinder_box, point_displacement, point_distance, point_set_summary, points_meet,
+    ClassifiedPoint, Distance, EdgeCurve, EdgePoint, EdgeRayPoint, FaceCentroid, FaceRayHit,
+    GapSample, MassPropertiesEstimate, MembersClosest, Normal, PointClass, PointNormalFace,
+    PointSetSummary, RayEntity, RayHit, SquareFaceLevel, EDGE_POINTS_MAX,
 };
 pub use offset::{draft, offset_faces, offset_sheet, offset_surface, shell, thicken};
 pub use order::Order;

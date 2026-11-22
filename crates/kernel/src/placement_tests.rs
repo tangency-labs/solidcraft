@@ -351,7 +351,14 @@ fn a_translated_body_keeps_its_measured_box_moved() {
     let shift = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [t.x, t.y, t.z, 1.0]];
     let placed = crate::transform_matrix(&source, shift).unwrap();
     let carried = (*placed.bounds.lock().unwrap()).expect("the box moved with the body");
-    assert_eq!((carried.min, carried.max), (measured.min + t, measured.max + t));
+    // `moved_box` rounds outward: the box moved holds the measured box shifted, within rounding.
+    let (lo, hi) = (measured.min + t, measured.max + t);
+    for (c, w) in [(carried.min.x, lo.x), (carried.min.y, lo.y), (carried.min.z, lo.z)] {
+        assert!(c <= w && w - c < 1e-12, "{carried:?} against {lo:?}");
+    }
+    for (c, w) in [(carried.max.x, hi.x), (carried.max.y, hi.y), (carried.max.z, hi.z)] {
+        assert!(c >= w && c - w < 1e-12, "{carried:?} against {hi:?}");
+    }
     // Measured afresh on the moved record, from a body that carried nothing.
     let fresh = Body::from_record(placed.record().clone()).unwrap().exact_bounds().unwrap();
     for (a, b) in [(carried.min, fresh.min), (carried.max, fresh.max)] {

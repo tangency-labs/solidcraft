@@ -5569,9 +5569,7 @@ fn apart_layers(tools: &[Traced]) -> Option<(Vec<Vec<usize>>, bool)> {
             }
             tested += 1;
             let (Some(a), Some(b), Some(ta), Some(tb)) = (boxes.get(i), boxes.get(j), tools.get(i), tools.get(j)) else { continue };
-            let lo = Vec3::new(a.min.x.max(b.min.x), a.min.y.max(b.min.y), a.min.z.max(b.min.z));
-            let hi = Vec3::new(a.max.x.min(b.max.x), a.max.y.min(b.max.y), a.max.z.min(b.max.z));
-            let mid = (lo + hi) * 0.5;
+            let mid = a.intersection(b).center();
             let inside = |t: &Traced| matches!(t.body.classify_point(mid), Ok(kernel::PointClass::Inside));
             if inside(ta) && inside(tb) {
                 meets = true;
@@ -7804,19 +7802,13 @@ fn measure_before_moving(tools: &[Traced]) {
 }
 
 /// The box of the solid cylinder of radius `radius` on the disc about `base` square to the unit
-/// `axis`, running `height` along it, grown as [`more::exact_box`] grows a body's (by twice its
-/// tolerance), here by more than any tolerance a tool's column takes: everything the column's
-/// exact box holds, without building the column. `None` for a degenerate cylinder.
+/// `axis`, running `height` along it ([`solidcore_ops::cylinder_box`]), grown as
+/// [`more::exact_box`] grows a body's (by twice its tolerance), here by more than any tolerance a
+/// tool's column takes: everything the column's exact box holds, without building the column.
+/// `None` for a degenerate cylinder.
 fn cylinder_box(base: Vec3, axis: Vec3, radius: f64, height: f64) -> Option<solidcraft_geom::Aabb3> {
-    if !(radius.is_finite() && height.is_finite() && radius >= 0.0 && base.is_finite() && axis.is_finite()) {
-        return None;
-    }
-    // Across axis i the disc reaches `radius` times the sine of the angle between the axis and
-    // that direction.
-    let across = |a: f64| radius * (1.0 - a * a).max(0.0).sqrt();
-    let r = Vec3::new(across(axis.x), across(axis.y), across(axis.z));
-    let top = base + axis * height;
-    let b: solidcraft_geom::Aabb3 = [base - r, base + r, top - r, top + r].into_iter().collect();
+    let (lo, hi) = solidcore_ops::cylinder_box([base.x, base.y, base.z], [axis.x, axis.y, axis.z], radius, height).ok()?;
+    let b = solidcraft_geom::Aabb3 { min: Vec3::new(lo[0], lo[1], lo[2]), max: Vec3::new(hi[0], hi[1], hi[2]) };
     Some(b.inflated(1e-4 + 1e-6 * (radius + height.abs())))
 }
 

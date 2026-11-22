@@ -1801,6 +1801,46 @@ pub fn point_displacement(from: Point2, to: Point2) -> Result<Vec2> {
     Ok(displacement)
 }
 
+/// The axis-aligned box of the solid cylinder of `radius` on the disc about `base` square
+/// to the unit `axis`, running `height` along it, as its two opposite corners (not
+/// upstream; the box a hole's run-on column is tested by without building the column,
+/// tangency-labs/solidcraft#2358). Along each coordinate direction the disc reaches
+/// `radius` times the sine of the angle between `axis` and that direction, at both ends.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a non-finite input, a negative radius or an axis that
+/// is not of unit length.
+pub fn cylinder_box(
+    base: Point3,
+    axis: Vec3,
+    radius: f64,
+    height: f64,
+) -> Result<(Point3, Point3)> {
+    let finite = |v: [f64; 3]| v.iter().all(|x| x.is_finite());
+    if !finite([base.x, base.y, base.z])
+        || !finite([axis.x, axis.y, axis.z])
+        || !radius.is_finite()
+        || !height.is_finite()
+    {
+        return Err(SolidError::invalid_input(OP, "non-finite cylinder"));
+    }
+    let length = (axis.x * axis.x + axis.y * axis.y + axis.z * axis.z).sqrt();
+    if radius < 0.0 || (length - 1.0).abs() > 1e-9 {
+        return Err(SolidError::invalid_input(OP, "cylinder radius or axis"));
+    }
+    // Along one coordinate: the axis's component `a`, the base's `at`; the extent of both discs.
+    let extent = |a: f64, at: f64| {
+        let reach = radius * (1.0 - a * a).max(0.0).sqrt();
+        let top = at + a * height;
+        (at.min(top) - reach, at.max(top) + reach)
+    };
+    let (x0, x1) = extent(axis.x, base.x);
+    let (y0, y1) = extent(axis.y, base.y);
+    let (z0, z1) = extent(axis.z, base.z);
+    Ok((Point3::new(x0, y0, z0), Point3::new(x1, y1, z1)))
+}
+
 /// The largest distance from `point` to a point of the box with opposite corners `a`
 /// and `b`: to its farthest corner ([`Extent3d::max_distance_to_point`]; not upstream).
 ///

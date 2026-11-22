@@ -509,6 +509,20 @@ pub use solidcore_tess::{DISPLAY_ANGLE, MeshTolerance};
 pub use solidcore_tess::{MESH_MIN_ANGLE, MeshSpec, PlanStats};
 
 impl Body {
+    /// This body's measured box moved by `matrix`, when `matrix` is a translation
+    /// ([`is_translation`]) and the box is measured: through
+    /// [`solidcore_ops::affine::moved_box`], exact for a translation. Not for a turn: the box of a
+    /// turned box holds the turned body but is larger than its exact box, which a measured box must
+    /// be.
+    fn translated_bounds(&self, matrix: &[[f64; 4]; 4]) -> Option<Aabb3> {
+        if !is_translation(matrix) {
+            return None;
+        }
+        let b = (*self.bounds.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
+        let (lo, hi) = solidcore_ops::affine::moved_box(matrix, [b.min.x, b.min.y, b.min.z], [b.max.x, b.max.y, b.max.z]).ok()?;
+        Some(Aabb3 { min: v3(lo), max: v3(hi) })
+    }
+
     /// Takes the box of `pieces` together as this body's own, unmeasured: this body is those
     /// pieces side by side, so its exact box is theirs. Only when each piece's box is measured
     /// already: nothing is measured here.
@@ -528,12 +542,12 @@ impl Body {
     }
 }
 
-/// The translation `m` is, when it is one exactly (its other entries the identity's), in the
-/// layout [`crate::transform_matrix`] takes: the offset in the last row.
-fn translation_of(m: &[[f64; 4]; 4]) -> Option<Vec3> {
+/// Whether `m` is a translation exactly (its other entries the identity's), in the layout
+/// [`crate::transform_matrix`] takes: the offset in the last row.
+fn is_translation(m: &[[f64; 4]; 4]) -> bool {
     let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
     let [r0, r1, r2, [x, y, z, w]] = *m;
-    ([r0, r1, r2] == identity && w == 1.0 && x.is_finite() && y.is_finite() && z.is_finite()).then(|| Vec3::new(x, y, z))
+    [r0, r1, r2] == identity && w == 1.0 && x.is_finite() && y.is_finite() && z.is_finite()
 }
 
 pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
@@ -1395,11 +1409,7 @@ impl Body {
         }
         // A translation moves the box with the body: a hole's tools moved to each copy of a
         // pattern were measured again at every copy (#2358).
-        let bounds = translation_of(&matrix).and_then(|t| {
-            let b = (*self.bounds.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
-            let moved = Aabb3 { min: b.min + t, max: b.max + t };
-            (moved.min.is_finite() && moved.max.is_finite()).then_some(moved)
-        });
+        let bounds = self.translated_bounds(&matrix);
         // Moved lazily already and not moved yet: both motions from the part's record.
         // A placed copy of a part another body shows (an assembly's instance) still shows it,
         // placed by both: it is meshed and planned from the part's, not on its own.

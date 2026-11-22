@@ -464,6 +464,30 @@ pub fn box_max_distance_to_point(lo: [f64; 3], hi: [f64; 3], p: [f64; 3]) -> Res
     q::box_max_distance_to_point(point(lo)?, point(hi)?, point(p)?).map_err(status)
 }
 
+/// The box of the solid cylinder of `radius` on the disc about `base` square to the unit
+/// `axis`, running `height` along it, as its lowest and highest corners
+/// (`query::api_queries::cylinder_box`): what an exact box of the cylinder holds, without
+/// building it.
+///
+/// # Errors
+/// [`Error::Argument`] for a coordinate that is not finite; those of
+/// `query::api_queries::cylinder_box` (a negative radius, an axis not of unit length).
+pub fn cylinder_box(
+    base: [f64; 3],
+    axis: [f64; 3],
+    radius: f64,
+    height: f64,
+) -> Result<([f64; 3], [f64; 3])> {
+    let (lo, hi) = q::cylinder_box(
+        point(base)?,
+        Vec3::new(axis[0], axis[1], axis[2]),
+        radius,
+        height,
+    )
+    .map_err(status)?;
+    Ok(([lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]))
+}
+
 /// Whether two points meet: their distance is within `tol` (the rounded distance of
 /// [`point_distance`], not more than `tol`).
 ///
@@ -1748,6 +1772,31 @@ fn across(b: &Brep, e: EdgeId, set: &[FaceId]) -> solidcore::Result<Result<FaceI
 pub(crate) mod tests {
     use super::*;
     use crate::{make_box, session};
+
+    /// A cylinder's box (tangency-labs/solidcraft#2358): along an axis, the disc's radius across
+    /// it and the height along it; slanted, the disc's reach across each direction at both ends.
+    #[test]
+    fn a_cylinders_box_holds_its_discs_at_both_ends() {
+        let (lo, hi) = cylinder_box([1.0, 2.0, 3.0], [0.0, 0.0, 1.0], 2.0, 5.0).unwrap();
+        assert_eq!((lo, hi), ([-1.0, 0.0, 3.0], [3.0, 4.0, 8.0]));
+        // Running down its axis: the box is the same cylinder's from its other end.
+        let (lo, hi) = cylinder_box([1.0, 2.0, 8.0], [0.0, 0.0, -1.0], 2.0, 5.0).unwrap();
+        assert_eq!((lo, hi), ([-1.0, 0.0, 3.0], [3.0, 4.0, 8.0]));
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let (lo, hi) = cylinder_box([0.0; 3], [s, 0.0, s], 1.0, 2.0).unwrap();
+        // Across x and z the disc reaches cos 45 deg, across y its whole radius.
+        let want_lo = [-s, -1.0, -s];
+        let want_hi = [2.0 * s + s, 1.0, 2.0 * s + s];
+        for i in 0..3 {
+            assert!(
+                (lo[i] - want_lo[i]).abs() < 1e-12 && (hi[i] - want_hi[i]).abs() < 1e-12,
+                "{lo:?} {hi:?}"
+            );
+        }
+        assert!(cylinder_box([0.0; 3], [0.0, 0.0, 1.0], -1.0, 1.0).is_err());
+        assert!(cylinder_box([0.0; 3], [0.0, 0.0, 2.0], 1.0, 1.0).is_err());
+        assert!(cylinder_box([f64::NAN, 0.0, 0.0], [0.0, 0.0, 1.0], 1.0, 1.0).is_err());
+    }
     use solidcore::surface::surface::SurfaceKind;
 
     fn all_fixes() {
