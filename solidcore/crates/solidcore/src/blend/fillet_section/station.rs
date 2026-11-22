@@ -30,6 +30,7 @@ use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::NOW;
+use crate::nurbs::nurbs_crv::MAX_DERIV;
 use crate::surface::procedural_blend::NetScope;
 use crate::surface::surface::{Surface, SurfaceKind};
 
@@ -1617,13 +1618,23 @@ pub fn leader_series_sided(
     if !c.is_rational()? {
         derivs = derivs.min(c.degree()?);
     }
-    // "SmGnSectionFSG: the leader's derivatives of this order are not evaluated"
+    // "SmGnSectionFSG: the leader's derivatives of this order are not evaluated": a
+    // rational leader's order can pass the most the curve evaluator takes
+    if derivs > MAX_DERIV {
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::SectionUnsupported(SectionLimit::OrderPastSeries {
+                order: derivs,
+                most: MAX_DERIV,
+            }),
+        ));
+    }
     let mut d = c.evaluate(s, derivs, !before, false).map_err(|e| {
         Failure::new(
             OP,
             BlendFailure::Defect {
-                why: "the leader's evaluation to the series' order failed: that order is \
-                      within the most the evaluator takes",
+                why: "the leader's evaluation failed at an order within the most the curve \
+                      evaluator takes, on a curve whose degree it just read",
             },
         )
         .caused_by(e)

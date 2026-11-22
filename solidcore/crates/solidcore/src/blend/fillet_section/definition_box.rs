@@ -71,6 +71,9 @@ pub struct DefPiece {
     s: f64,
     /// `ax`: the feet there, their first s-derivatives and second over 2.
     ax: [[f64; 4]; 3],
+    /// The tolerance the station's solve had to reach (not upstream's: kept so that a
+    /// piece whose station did not solve reports it again without re-evaluating).
+    tol: f64,
 }
 
 impl DefPiece {
@@ -79,6 +82,7 @@ impl DefPiece {
         state: 0,
         s: 0.0,
         ax: [[0.0; 4]; 3],
+        tol: 0.0,
     };
 }
 
@@ -279,36 +283,68 @@ fn def_piece_at(k: &Kernel, d: &mut GnDefFace<'_>, net: &Nurbs, kk: usize) -> Re
         let l = def.leader().evaluate_point(p.s)?;
         let tr = Trunc::new(2, 0)?;
         let tol = 1.0e-9 * smax(1.0, l.length());
-        if let Ok(st) = gn_solve_station(k, d.sup, def.leader(), p.s, seed, d.r, d.side, tr, tol) {
-            for (i, row) in p.ax.iter_mut().enumerate() {
-                for (q, x) in row.iter_mut().enumerate() {
-                    *x = st.x.get(q).map_or(f64::NAN, |sq| sq.at(i, 0));
+        p.tol = tol;
+        if let Some(slot) = d.pieces.get_mut(kk) {
+            *slot = p;
+        }
+        match gn_solve_station(k, d.sup, def.leader(), p.s, seed, d.r, d.side, tr, tol) {
+            Ok(st) => {
+                for (i, row) in p.ax.iter_mut().enumerate() {
+                    for (q, x) in row.iter_mut().enumerate() {
+                        *x = st.x.get(q).map_or(f64::NAN, |sq| sq.at(i, 0));
+                    }
+                }
+                p.state = 1;
+                if let Some(slot) = d.pieces.get_mut(kk) {
+                    *slot = p;
                 }
             }
-            p.state = 1;
-            if let Some(slot) = d.pieces.get_mut(kk) {
-                *slot = p;
+            Err(e) => {
+                // the piece stays failed (-1, as upstream); the solve's error is the cause,
+                // and its numbers are kept where it reports them
+                let (residual, step, iterations) = match e.blend_failure() {
+                    Some(&BlendFailure::StationDidNotConverge {
+                        residual,
+                        step,
+                        iterations,
+                        ..
+                    }) => (residual, step, iterations),
+                    _ => (None, None, None),
+                };
+                return Err(Failure::new(
+                    OP,
+                    BlendFailure::StationDidNotConverge {
+                        s: p.s,
+                        residual,
+                        tolerance: tol,
+                        step,
+                        iterations,
+                    },
+                )
+                .caused_by(e)
+                .into_error());
             }
         }
     }
     match d.pieces.get(kk) {
         Some(p) if p.state == 1 => Ok(*p),
-        _ => {
-            // the station at the piece's middle, solved from the seeds, did not converge
-            // (the solve's own numbers are not kept with the piece)
-            let s = d.a[0] + d.b[0] * 0.5 * (k0 + k1);
-            let tolerance = 1.0e-9 * smax(1.0, d.def.leader().evaluate_point(s)?.length());
-            Err(SolidError::blend(
-                OP,
-                BlendFailure::StationDidNotConverge {
-                    s,
-                    residual: None,
-                    tolerance,
-                    step: None,
-                    iterations: None,
-                },
-            ))
-        }
+        // the piece's station failed on an earlier call, which returned the solve's error
+        Some(p) => Err(SolidError::blend(
+            OP,
+            BlendFailure::StationDidNotConverge {
+                s: p.s,
+                residual: None,
+                tolerance: p.tol,
+                step: None,
+                iterations: None,
+            },
+        )),
+        None => Err(SolidError::blend(
+            OP,
+            BlendFailure::Defect {
+                why: "the piece has no slot: the pieces were just sized to the knots",
+            },
+        )),
     }
 }
 
