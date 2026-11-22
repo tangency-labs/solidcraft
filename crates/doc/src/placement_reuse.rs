@@ -226,6 +226,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         shell_piece_order,
         kernel_piece_order,
         pattern_names_in_order,
+        split_keeps_lumps,
         inserted,
         link_faces,
         link_threads,
@@ -247,6 +248,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         && *shell_piece_order == b.shell_piece_order
         && *kernel_piece_order == b.kernel_piece_order
         && *pattern_names_in_order == b.pattern_names_in_order
+        && *split_keeps_lumps == b.split_keeps_lumps
         && *inserted == b.inserted
         && *link_faces == b.link_faces
         && *link_threads == b.link_threads
