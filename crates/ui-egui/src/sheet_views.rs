@@ -145,8 +145,10 @@ fn open_local(app: &mut SolveApp, drawing: u64, sheet: u64, new: bool) -> Result
     let window = app.view_windows.current_window();
     let reply = app.run("tab.view.open", serde_json::json!({"kind":"sheet","subject":subject,"reuse":false,"window":window}))?;
     let id = reply.get("id").and_then(serde_json::Value::as_u64).ok_or_else(|| app.tr("sheet_views.missing").to_owned())?;
-    // The existing ground keeps its place; the newly opened Sheet gets a neighbouring card.
-    if previous != id && app.docs.views.get(previous).is_some_and(|view| view.kind.can_tile()) {
+    // Drawing keeps the whole free sheet area (docs/design/drawing-ui D05, D07, D22): a new
+    // Sheet becomes the view shown. Only where the person has tiled views does the existing
+    // ground keep its place, with the Sheet in a neighbouring card.
+    if previous != id && app.docs.views.is_tiled() && app.docs.views.get(previous).is_some_and(|view| view.kind.can_tile()) {
         crate::documents::view_activate(app, previous);
         crate::documents::change_views(app, |views| {
             let mut next = views.clone();
@@ -162,6 +164,8 @@ fn open_local(app: &mut SolveApp, drawing: u64, sheet: u64, new: bool) -> Result
                 *views = next;
             }
         });
+        crate::view_windows::focus_view(app, id, None)?;
+    } else if previous != id {
         crate::view_windows::focus_view(app, id, None)?;
     }
     Ok(id)
