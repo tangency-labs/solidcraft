@@ -4091,6 +4091,40 @@ fn split_body_through_two_legs_makes_a_body_of_each_leg() {
     }
 }
 
+/// A design saved before #15943 marks its Splits `split_keeps_lumps`: the two legs stay one body,
+/// as the names stored after it mean.
+#[test]
+fn a_saved_split_keeps_a_piece_of_two_legs_as_one_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 30, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"corner": [15, -1, 10], "length": 10, "width": 22, "height": 25, "operation": "cut", "targets": ["Block"]}));
+    run(&mut s, "solid.split_body", json!({"body": "Block", "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1]}}));
+    let mut v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    for f in v["features"].as_array_mut().unwrap().iter_mut().filter(|f| f["type"] == "split") {
+        f["split_keeps_lumps"] = json!(true);
+    }
+    s.set_doc(solidcraft_doc::Document::from_json(&v.to_string()).unwrap());
+    let st = s.world_state().unwrap();
+    let pieces: Vec<(String, usize)> = st.bodies.iter().map(|b| (b.name.clone(), b.body.lumps().unwrap().len())).collect();
+    assert_eq!(pieces, [("Block".to_string(), 2), ("Block (1)".to_string(), 1)]);
+}
+
+/// A body already in two lumps keeps its pieces as before: the legs one lump leaves apart stay
+/// with the other lump above the plane.
+#[test]
+fn split_body_of_a_body_of_two_lumps_keeps_its_pieces_whole() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 30, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"corner": [60, 0, 0], "length": 10, "width": 20, "height": 30, "operation": "join", "targets": ["Block"]}));
+    run(&mut s, "solid.box", json!({"corner": [15, -1, 10], "length": 10, "width": 22, "height": 25, "operation": "cut", "targets": ["Block"]}));
+    assert_eq!(s.world_state().unwrap().body("Block").unwrap().body.lumps().unwrap().len(), 2);
+    run(&mut s, "solid.split_body", json!({"body": "Block", "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1]}}));
+    let st = s.world_state().unwrap();
+    let pieces: Vec<(String, usize)> = st.bodies.iter().map(|b| (b.name.clone(), b.body.lumps().unwrap().len())).collect();
+    assert_eq!(pieces.len(), 2, "{pieces:?}");
+    assert_eq!(pieces.iter().map(|p| p.1).sum::<usize>(), 5, "{pieces:?}");
+}
+
 /// Fillet types: chord length (radius from the face angle) and a radius varying along the
 /// edge; volumes from the removed material.
 #[test]

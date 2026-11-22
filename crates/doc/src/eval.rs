@@ -12816,7 +12816,7 @@ fn eval_feature_kind(
                     split_by_plane_traced(&input, &pl)?
                 }
             };
-            let parts = separate_new_lumps(parts, input.body.lumps().map_or(1, |l| l.len()))?;
+            let parts = if f.split_keeps_lumps { parts } else { separate_new_lumps(parts, &input.body)? };
             if parts.len() < 2 {
                 return Err(DocError::Invalid("the tool does not split the body".into()));
             }
@@ -15259,18 +15259,23 @@ fn split_by_plane_traced(input: &Traced, plane: &Plane) -> Result<Vec<Traced>> {
     Ok(parts)
 }
 
-/// A split piece with more lumps than the body `had` becomes a piece per lump, as a cut's do
-/// (#15943); the extra lumps go after every piece, so the pieces keep their numbers.
-fn separate_new_lumps(parts: Vec<Traced>, had: usize) -> Result<Vec<Traced>> {
+/// A piece of a one-lump `input` that the plane leaves in separate parts becomes a piece per
+/// part, as a cut's do (#15943); the extra parts go after every piece, so the pieces keep their
+/// numbers. A body already in several lumps keeps its pieces as they were: which of a piece's
+/// lumps came from which of the body's is not known here.
+fn separate_new_lumps(parts: Vec<Traced>, input: &Body) -> Result<Vec<Traced>> {
+    if input.lumps().map_or(1, |l| l.len()) != 1 {
+        return Ok(parts);
+    }
     let mut kept = Vec::with_capacity(parts.len());
     let mut more = Vec::new();
     for part in parts {
         let lumps = part.body.lumps()?;
-        if lumps.len() <= had {
+        if lumps.len() < 2 {
             kept.push(part);
             continue;
         }
-        let lineages = crate::lineage::Lineage::lumps(&part.body, part.lineage.as_ref(), &lumps);
+        let lineages = crate::lineage::Lineage::pieces(&part.body, part.lineage.as_ref(), &lumps);
         let mut pieces = lumps.into_iter().zip(lineages).map(|(body, lineage)| Traced { body, lineage, recipe: None });
         kept.extend(pieces.next());
         more.extend(pieces);

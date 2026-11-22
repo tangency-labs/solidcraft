@@ -3606,6 +3606,11 @@ pub struct Feature {
     /// (`Session::pin_body_names`), so later count changes keep each name with its source.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pattern_names_in_order: bool,
+    /// This Split keeps a piece the plane leaves in separate parts as one body, as builds before
+    /// #15943 did. Set on the Splits of designs saved before then, whose stored body names mean
+    /// those pieces.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub split_keeps_lumps: bool,
     /// Made by inserting a file (STEP, IGES or a mesh file) into the design: the feature built
     /// the component tree its component is the top of, and deleting it removes that tree
     /// ([`Document::remove_component_tree`]). Not set on other imported bodies, such as the
@@ -4951,6 +4956,7 @@ impl Document {
             shell_piece_order: false,
             kernel_piece_order: false,
             pattern_names_in_order: false,
+            split_keeps_lumps: false,
             inserted: false,
             link_faces: Vec::new(),
             link_threads: Vec::new(),
