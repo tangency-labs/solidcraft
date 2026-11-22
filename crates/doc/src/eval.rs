@@ -12743,7 +12743,7 @@ fn eval_feature_kind(
                     }
                 };
                 for pl in &cut_planes {
-                    let side = pl.to_local(p.0).z;
+                    let side = pl.height(p.0);
                     if side.abs() <= 1e-7 * (1.0 + cell.body.size()) {
                         return Err(DocError::Invalid("Boundary Fill cell points must be away from tool planes".into()));
                     }
