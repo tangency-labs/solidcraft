@@ -12,6 +12,7 @@
 # blend.fillet_executive_p3, offset.offset_geometry_creation, topology.api_files, topology.brep_local_operation, topology.edgeuse_p3, topology.face_p3: main's file with the rows #18490 moves (the sphere drop subdivides the spans proved off its curve)
 # boolean.api_brep: main's file with torus_guard_major_2x_eff_zero recording the constructor's refusal of its torus, whose tube crosses its axis (#20227): ints.record [] -> [2]
 # primitive.api_primitives: main's file with the 40 spheres of negative radius refused, each `{"rec":[1007.0]}` (#20227); the 14 of them that had rows (gen0244, gen0416, gen0419, gen0585, gen0598, gen0621, gen0769, gen0790, gen0893, gen0897, gen0957, gen1094, gen1206, gen1252) lose their rows, and gen0244's and gen0893's `rounding-bound` entries leave the open list, since a refused case has no body
+# sweep.rotational_sweep_geometry: a nearly flat cone keeps its cone (#18005) moves gen0175 (its swept face a cone, not a surface of revolution; its two profile edges lines, not B-splines); no tolerance moves; the digest is the branch file
 blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -251,7 +252,7 @@ surface.volume_p1	abd24d71681331bd
 surface.volume_p2	0583bf0698f07807
 sweep.api_brep	e4f9ad425f1213ba
 sweep.api_surfaces	a46bb969a19dac47
-sweep.rotational_sweep_geometry	57f788664cc53347
+sweep.rotational_sweep_geometry	b982f26f728cbbae
 sweep.topology_sweep	a8bdd96fe6dc7b61
 sweep.trans_sweep_geometry	d85c69dbbc2574b4
 topology.api_files	ffb949079ea871c5
