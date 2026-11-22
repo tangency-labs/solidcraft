@@ -34,7 +34,7 @@ use super::geometry::SweepGeometry;
 use super::{SweepEntity as E, TopologySweep, OP};
 use crate::curve::curve::Curve;
 use crate::error::sweep::{SweepFailure, SweptKind};
-use crate::error::{ignore_status, EntityRef, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{ignore_status, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::{tag_ids, TagData};
 use crate::geom::tol::ZONE_TOL_3D;
 use crate::math::Point3;
@@ -103,10 +103,10 @@ fn f(f: FaceRef) -> E {
 /// kinds, so a caller can record one.
 fn image_of_other_kind(image: E, expected: SweptKind) -> SolidError {
     let (image, found) = match image {
-        E::Vertex(_, i) => (EntityRef::Vertex(i), SweptKind::Vertex),
-        E::Edge(_, i) => (EntityRef::Edge(i), SweptKind::Edge),
-        E::Face(_, i) => (EntityRef::Face(i), SweptKind::Face),
-        E::Region(_, i) => (EntityRef::Region(i), SweptKind::Region),
+        E::Vertex(_, i) => (crate::error::EntityRef::Vertex(i), SweptKind::Vertex),
+        E::Edge(_, i) => (crate::error::EntityRef::Edge(i), SweptKind::Edge),
+        E::Face(_, i) => (crate::error::EntityRef::Face(i), SweptKind::Face),
+        E::Region(_, i) => (crate::error::EntityRef::Region(i), SweptKind::Region),
     };
     SolidError::sweep(
         OP,
@@ -1437,7 +1437,7 @@ mod tests {
         assert_eq!(
             err.sweep_failure(),
             Some(&SweepFailure::SweepImageOfOtherKind {
-                image: EntityRef::Edge(e0),
+                image: crate::error::EntityRef::Edge(e0),
                 expected: SweptKind::Vertex,
                 found: SweptKind::Edge,
             })
