@@ -360,7 +360,8 @@ mod tests {
     }
 
     /// The three wrapping causes keep `SM_ERR` and carry the caught error as their cause,
-    /// as the sites in `fillet_intersector` build them.
+    /// as the sites in `fillet_intersector` build them; the caught error decides the
+    /// defect-or-refusal reading.
     #[test]
     fn wrapping_causes_keep_the_caught_error() {
         for cause in [
@@ -375,7 +376,8 @@ mod tests {
             assert_eq!(e.sm_status(), Some(SM_ERR), "{cause:?}");
             assert_eq!(e.kind(), ErrorKind::Failed, "{cause:?}");
             assert_eq!(e.cause(), Some(&inner), "{cause:?}");
-            assert!(!e.is_defect(), "{cause:?}");
+            // the caught error decides whether the failure is a defect or a refusal
+            assert!(e.is_defect() && inner.is_defect(), "{cause:?}");
         }
     }
 }
