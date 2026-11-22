@@ -594,10 +594,11 @@ fn conic_param(k: &Conic, x: Point3) -> f64 {
 /// ([`conic_param`]).
 ///
 /// # Errors
-/// [`BlendFailure::StageFailed`], a defect, when the half-line has no direction (`x` on the
-/// axis) or does not cross the conic ahead of the axis (the axis crosses the plane outside
-/// it, which a plane section of the axis's own cylinder or cone never does): the way round is
-/// then unknown, and is not read about the conic's centre instead.
+/// [`BlendFailure::ExactBlendAxisCannotPlaceEdge`], a check of the caller's input with status
+/// `SM_ERR`, when the half-line has no direction (`x` on the axis) or does not cross the
+/// conic ahead of the axis (the axis crosses the plane outside it, which a plane section of
+/// the axis's own cylinder or cone never does): the exact blend given is then not the one of
+/// the edge, the way round is unknown, and is not read about the conic's centre instead.
 fn ellipse_param_about_axis(
     k: &Conic,
     at: Point3,
@@ -629,13 +630,28 @@ fn ellipse_param_about_axis(
     let disc = aw * aw - ww * (a0 * a0 + a1 * a1 - 1.0);
     // in the conic's unit-circle coordinates, a half-line shorter than the kernel's zero
     // has no direction
-    if ww.sqrt() <= EFF_ZERO || disc < 0.0 {
-        return Err(SolidError::blend(OP, BlendFailure::StageFailed));
+    let length = ww.sqrt();
+    if length <= EFF_ZERO || disc < 0.0 {
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::ExactBlendAxisCannotPlaceEdge {
+                length,
+                discriminant: disc,
+                crossing: None,
+            },
+        ));
     }
     // the half-line's own crossing, ahead of the axis
     let mu = (disc.sqrt() - aw) / ww;
     if !positive(mu) {
-        return Err(SolidError::blend(OP, BlendFailure::StageFailed));
+        return Err(SolidError::blend(
+            OP,
+            BlendFailure::ExactBlendAxisCannotPlaceEdge {
+                length,
+                discriminant: disc,
+                crossing: Some(mu),
+            },
+        ));
     }
     Ok((a1 + mu * w1).atan2(a0 + mu * w0))
 }
@@ -1539,9 +1555,10 @@ mod tests {
         }
     }
 
-    /// A point the axis reading cannot place is refused, not read about the conic's centre:
-    /// one on the axis (the half-line from the axis has no direction) and one read against a
-    /// cylinder whose axis crosses the plane outside the conic (the half-line misses it).
+    /// A point the axis reading cannot place is refused as the caller's input, with status
+    /// `SM_ERR`, not read about the conic's centre: one on the axis (the half-line from the
+    /// axis has no direction) and one read against a cylinder whose axis crosses the plane
+    /// outside the conic (the half-line misses it, or crosses it behind the axis).
     #[test]
     fn a_point_the_axis_reading_cannot_place_is_refused() {
         let face = BlendQuadric {
@@ -1559,9 +1576,14 @@ mod tests {
         let refused = |r: Result<f64>| {
             let e = r.unwrap_err();
             assert!(
-                matches!(e.blend_failure(), Some(BlendFailure::StageFailed)),
+                matches!(
+                    e.blend_failure(),
+                    Some(BlendFailure::ExactBlendAxisCannotPlaceEdge { .. })
+                ),
                 "{e:?}"
             );
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{e:?}");
+            assert_eq!(e.sm_status(), Some(crate::error::SM_ERR), "{e:?}");
         };
         // on the axis, 3 along it from the origin
         refused(ellipse_param_about_axis(
