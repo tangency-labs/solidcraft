@@ -227,6 +227,8 @@ fn panel_host() -> SolidCraftHost {
         file_folders: Vec::new(),
         file_read_folders: Vec::new(),
         evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
     }
 }
 
