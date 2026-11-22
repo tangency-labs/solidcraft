@@ -89,6 +89,12 @@
 //!   bound is under the limit. The gap gain is a margin over 20 samples; an enclosure needs
 //!   none. Upstream gave an imported edge whose gap is under the limit a tolerance the check
 //!   refuses.
+//! - **`Fix_TolSizes` vertex tolerances** (not upstream, #17739): a vertex's new tolerance is
+//!   at least the gap gain times twice its largest gap. The check holds a vertex's gaps to half
+//!   its tolerance (WR-679, `SmBrep` Tests #0-#3), and upstream's `gain * gap / 2` and
+//!   `gain * gap - def` are under twice the gap. As the check's own tolerance update, it grows
+//!   no further than the limit past which Test #82 refuses a vertex (a misplaced vertex, not a
+//!   gap to absorb).
 //! - No recursion; no allocation from caller counts beyond the target lists given.
 
 use crate::error::{Result, SolidError};
@@ -109,6 +115,7 @@ use crate::heal::face_props::{
 };
 use crate::kernel::Kernel;
 use crate::math::{BIG_DOUBLE, EFF_ZERO, UNDEF_DOUBLE};
+use crate::topology::brep::validation::GROWTH_PAST_RATIO;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face_p2;
 use crate::topology::{
@@ -3205,6 +3212,20 @@ impl<O: LoopObject> HealData<O> {
                 b,
                 Some(max_edge_tol_3d),
             );
+            // not upstream (#17739): `gain * gap / 2` and `gain * gap - def` are under twice the
+            // gap, and the check holds a vertex's gaps to half its tolerance (WR-679), so a fixed
+            // vertex failed a gap its tolerance had covered. The tolerance covers twice the gap
+            // with the gap gain, as the edge branch above covers the edge/face gap, unless that
+            // passes the limit past which Test #82 refuses the vertex (as `validate_and_update`).
+            let twice_gap = 2.0 * max_vertex_edge_gap_3d_length.max(max_vertex_face_gap_3d_length);
+            let covered = zone_tol3d(k, gap_gain(k) * twice_gap);
+            let zone_tol_3d = if twice_gap > zone_tol_3d
+                && covered < GROWTH_PAST_RATIO * LARGE_SMALL_SIZE_RATIO * b.tolerance()
+            {
+                covered
+            } else {
+                zone_tol_3d
+            };
             if p.orig_zone_tol_3d == UNDEF_DOUBLE {
                 let t = vertex::tolerance(b, bad_tol_vertex)?;
                 self.vertex_props.props_mut(id)?.orig_zone_tol_3d = t;
@@ -3537,13 +3558,29 @@ fn certified_edge_face_gap(k: &Kernel, b: &Brep, e: EdgeId, floor: f64) -> Resul
             Some(SurfaceKind::ProceduralBlend(pb)) => pb.bound(),
             _ => 0.0,
         };
-        if !(net_off.is_finite() && net_off >= 0.0) {
+        let Some(g) = plus_net_bound(g, net_off) else {
             return Ok(None);
-        }
-        let g = g + net_off;
+        };
         most = Some(most.map_or(g, |m| m.max(g)));
     }
     Ok(most)
+}
+
+/// The bound `g` to a face's net plus the net's bound `net_off` from its definition, rounded
+/// up (a sum of two bounds is a bound only with its rounding: definitions-and-certificates.md
+/// §7, 5). A `net_off` of 0 leaves `g` as it is. `None` for a `net_off` that is not a finite
+/// non-negative number, or a sum that is not finite.
+fn plus_net_bound(g: f64, net_off: f64) -> Option<f64> {
+    use crate::blend::fillet_section::interval::Ivl;
+
+    if !(net_off.is_finite() && net_off >= 0.0) {
+        return None;
+    }
+    if net_off == 0.0 {
+        return Some(g);
+    }
+    let sum = (Ivl::from(g) + Ivl::from(net_off)).hi;
+    sum.is_finite().then_some(sum)
 }
 
 #[cfg(test)]
@@ -3619,6 +3656,22 @@ mod tests {
     /// probes the net at (the edge's 257 equally spaced parameters, 100/256 and 101/256). Its
     /// stated bound is `h`. The edge on v = 0 is the net's own row, so it lies on B (bound to B
     /// about 0) and is off S by the bump, whose peak is `2h/3` (a uniform cubic B-spline's).
+    /// The sum with a blend's bound is rounded up: `1 + 2^-53` rounds to 1 to nearest, under
+    /// the two bounds' sum. Without a bound to add the gap's bound is kept bit for bit.
+    #[test]
+    fn a_blend_s_bound_is_added_rounded_up() {
+        let tiny = f64::EPSILON / 2.0;
+        assert_eq!(1.0 + tiny, 1.0);
+        let sum = plus_net_bound(1.0, tiny).unwrap();
+        assert!(sum > 1.0, "{sum}");
+        assert!(sum <= 1.0 + 4.0 * f64::EPSILON, "{sum}");
+        let g = 0.1 + 0.2;
+        assert_eq!(plus_net_bound(g, 0.0).map(f64::to_bits), Some(g.to_bits()));
+        assert_eq!(plus_net_bound(f64::MAX, f64::MAX), None);
+        assert_eq!(plus_net_bound(1.0, -1e-9), None);
+        assert_eq!(plus_net_bound(1.0, f64::NAN), None);
+    }
+
     #[test]
     fn a_procedural_blend_s_gap_bound_is_to_its_definition() {
         use crate::blend::fillet_section::section::GnSectionFsg;

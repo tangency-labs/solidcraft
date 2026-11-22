@@ -1041,6 +1041,7 @@
   "cmd.motion_list": "Lister les études de mouvement",
   "cmd.motion_play": "Lire l'étude de mouvement",
   "cmd.motion_plot": "Graphique de l'étude de mouvement",
+  "cmd.motion_simulate": "Simuler le mouvement",
   "cmd.motion_study": "Étude de mouvement",
   "cmd.motion_trace": "Trajectoire de mouvement",
   "cmd.motion_trace_edit": "Modifier la trajectoire de mouvement",

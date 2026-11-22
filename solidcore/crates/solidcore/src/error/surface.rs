@@ -375,7 +375,7 @@ mod tests {
             ("solidcore/src/surface/surface/approximate.rs", 10),
             ("solidcore/src/surface/surface/p1.rs", 8),
             ("solidcore/src/surface/surface/p10.rs", 7),
-            ("solidcore/src/surface/surface/p11.rs", 21),
+            ("solidcore/src/surface/surface/p11.rs", 20),
             ("solidcore/src/surface/surface/p2.rs", 21),
             ("solidcore/src/surface/surface/p3.rs", 3),
             ("solidcore/src/surface/surface/p4.rs", 19),

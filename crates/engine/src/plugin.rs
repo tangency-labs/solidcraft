@@ -2,8 +2,8 @@
 
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::{
-    API, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES, MAX_JSON_BYTES,
-    MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, conditions, valid_id,
+    API, DesignToken, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES,
+    MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, conditions, dialog, swatches, valid_id,
 };
 use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};
@@ -63,6 +63,20 @@ pub struct Grants {
 /// Trusted host state, never loaded from a design or supplied by guest code.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AppState {
+    /// Listener failures are application state, displayed in Preferences, never design data.
+    pub listener_failures: BTreeMap<String, String>,
+    /// Diagnostics by package and listener entry. A different entry's success cannot clear them.
+    pub listener_entry_failures: BTreeMap<String, BTreeMap<String, String>>,
+    /// Last successful listener result; the future panel adapter may consume this data.
+    pub listener_data: std::sync::Arc<BTreeMap<String, Value>>,
+    /// Latest linked-file observations, outside saved designs and undo snapshots.
+    pub link_changes: std::sync::Arc<BTreeMap<u64, LinkChange>>,
+    /// Successful source reads performed in this evaluation; scratch sessions start empty.
+    pub(crate) link_reads: std::sync::Arc<BTreeSet<u64>>,
+    /// Observations at the start of this evaluation, before any source reads or disk checks.
+    pub(crate) link_read_source: std::sync::Arc<BTreeMap<u64, LinkChange>>,
+    /// Host-only authority marker and event payload for a listener invocation.
+    pub(crate) listener_design: Option<Option<DesignToken>>,
     pub packages: BTreeMap<String, String>,
     pub grants: BTreeMap<String, Grants>,
     /// Adapter folder grants for the active call; runtime calls use the package's approved grants.
@@ -82,6 +96,32 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// History restores authored links, not observations of a different source or version.
+    pub(crate) fn prune_link_changes(&mut self, doc: &solidcraft_doc::Document) {
+        let current = |component: &u64, change: &LinkChange| {
+            doc.links
+                .get(component)
+                .is_some_and(|link| link.path == change.path && change.read == (link.file_sha256.as_ref() == Some(&change.digest)))
+        };
+        if self.link_changes.iter().any(|(component, change)| !current(component, change)) {
+            std::sync::Arc::make_mut(&mut self.link_changes).retain(|component, change| current(component, change));
+        }
+        let read = |component: &u64| self.link_changes.get(component).is_some_and(|change| change.read);
+        if self.link_reads.iter().any(|component| !read(component)) {
+            std::sync::Arc::make_mut(&mut self.link_reads).retain(read);
+        }
+    }
+
+    /// Background cache/panel updates do not revoke an in-flight command's authority.
+    pub(crate) fn same_execution_context(&self, other: &Self) -> bool {
+        self.packages == other.packages
+            && self.grants == other.grants
+            && self.file_grants == other.file_grants
+            && self.command_groups == other.command_groups
+            && self.plugins_dir == other.plugins_dir
+            && self.storage_caller == other.storage_caller
+            && self.stored == other.stored
+    }
     /// The installed plugins' folder, if this platform has one.
     pub fn plugins_dir(&self) -> Option<PathBuf> {
         if cfg!(target_arch = "wasm32") {
@@ -205,7 +245,16 @@ const FILE_COMMANDS: &[&str] = &[
 /// Only reviewed input readers can access a folder granted for read without write.
 /// A new command defaults to needing both permissions until its file effects are audited.
 fn input_only_command(id: &str) -> bool {
-    matches!(id, "file.insert_step" | "file.insert_mesh" | "file.insert_gerber" | "file.gerber_files" | "sketch.insert_dxf" | "sketch.insert_svg")
+    matches!(
+        id,
+        "component.insert_design"
+            | "file.insert_step"
+            | "file.insert_mesh"
+            | "file.insert_gerber"
+            | "file.gerber_files"
+            | "sketch.insert_dxf"
+            | "sketch.insert_svg"
+    )
 }
 
 /// Both the manifest and the user must approve a folder for the intended access.
@@ -309,6 +358,67 @@ pub(super) fn package_hash(manifest: &[u8], component: &[u8]) -> String {
     format!("{:x}", digest.finalize())
 }
 
+/// The shared hook path for a dialog worker and plugin.run. Hook code receives a scratch host
+/// with no file or edit grants. Complete calls propagate execution failures; a form retains its
+/// declarative state and shows a quiet note instead.
+pub fn update_dialog(
+    session: &Session,
+    package: &Package,
+    entry: &str,
+    values: &Value,
+    protected: &BTreeSet<String>,
+    complete: bool,
+) -> Result<dialog::Update> {
+    if session.disabled_plugins.contains(&package.manifest.id) {
+        return Err(error("plugin is disabled"));
+    }
+    if session.plugin_state.grants.get(&package.manifest.id).is_some_and(|g| g.package_hash.as_deref() != Some(package.approval.as_str())) {
+        return Err(HostError::PermissionDenied { permission: "plugin grants need re-approval".into() }.into());
+    }
+    let rt = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
+    let declared = rt.entries.iter().find(|e| e.name == entry).ok_or_else(|| error("unknown entry"))?;
+    let schema = &declared.input_schema;
+    let baseline = dialog::apply(schema, values, protected, None, false)?.values;
+    if !declared.dialog_hook {
+        return dialog::apply(schema, &baseline, protected, None, complete).map_err(Into::into);
+    }
+    #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+    let result = {
+        let host = SolidCraftHost {
+            session: session.scratch(),
+            transaction: None,
+            sketch_exits: Vec::new(),
+            view: None,
+            groups: BTreeSet::new(),
+            file_folders: Vec::new(),
+            file_read_folders: Vec::new(),
+            evaluation: None,
+            forms: Vec::new(),
+            form_source: None,
+        };
+        let (_, result) = craft_plugin_wasm::dialog_fields(
+            host,
+            &package.manifest,
+            &package.component,
+            entry,
+            &baseline,
+            host_limits_for(session, &package.manifest.id, &package.approval),
+        );
+        result
+    };
+    #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
+    let result: craft_plugin::Result<String> = Err(HostError::Trap { reason: "plugin execution requires a native build with plugins".into() });
+    match result {
+        Ok(reply) => dialog::apply(schema, &baseline, protected, Some(&reply), complete).map_err(Into::into),
+        Err(error) if complete => Err(error.into()),
+        Err(error) => {
+            let mut update = dialog::apply(schema, &baseline, protected, None, false)?;
+            update.warning = Some(error.to_string());
+            Ok(update)
+        }
+    }
+}
+
 /// Runs `entry` of `package`. A failure starts with the plugin's name.
 pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_json::Value) -> Result<crate::schema::plugin::RunResult> {
     let name = package.manifest.name.clone();
@@ -331,8 +441,18 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
     let rt = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
     host_limits_for(session, &package.manifest.id, &package.approval).check(&rt.limits)?;
     let declared = rt.entries.iter().find(|e| e.name == entry).ok_or_else(|| error("unknown entry"))?;
-    let prepared =
-        conditions::has_conditions(&declared.input_schema).then(|| craft_plugin::prepare_input(&declared.input_schema, params)).transpose()?;
+    let prepared = if declared.dialog_hook {
+        let protected = params.as_object().map(|v| v.keys().cloned().collect()).unwrap_or_default();
+        let update = update_dialog(session, &package, entry, params, &protected, true)?;
+        if let Some(warning) = &update.warning {
+            session.echo(warning);
+        }
+        Some(craft_plugin::prepare_input(&declared.input_schema, &update.values)?)
+    } else if conditions::has_conditions(&declared.input_schema) {
+        Some(craft_plugin::prepare_input(&declared.input_schema, params)?)
+    } else {
+        None
+    };
     let params = prepared.as_ref().unwrap_or(params);
     #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
@@ -360,6 +480,8 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
             file_folders: Vec::new(),
             file_read_folders: Vec::new(),
             evaluation: None,
+            forms: Vec::new(),
+            form_source: Some((package.manifest.id.clone(), rt.entries.clone())),
         };
         let approved = host.granted_folders();
         let file_read_folders = approved_file_folders(&approved, &rt.permissions.files, false);
@@ -373,11 +495,20 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
         {
             session.accept_computed(host.session);
         } else {
+            session.plugin_state.link_changes = host.session.plugin_state.link_changes;
+            std::sync::Arc::make_mut(&mut session.plugin_state.link_reads).extend(host.session.plugin_state.link_reads.iter().copied());
             for message in host.session.log {
                 session.echo(message);
             }
         }
-        Ok(crate::schema::plugin::RunResult { result: value, sketch_exits: host.sketch_exits, view: host.view, param_warnings: vec![] })
+        Ok(crate::schema::plugin::RunResult {
+            result: value,
+            forms: host.forms,
+            form_validation: None,
+            sketch_exits: host.sketch_exits,
+            view: host.view,
+            param_warnings: vec![],
+        })
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
@@ -387,7 +518,12 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
 }
 
 pub mod check;
+mod events;
+pub use events::{LinkChange, design_changed, design_notifications};
+pub(crate) use events::{record_changed_link_reads, record_link_change, record_link_reads};
+mod form;
 pub mod grant_store;
+pub use form::form_errors;
 mod import;
 pub mod install;
 pub mod messages;
@@ -420,6 +556,8 @@ pub struct SolidCraftHost {
     file_read_folders: Vec<PathBuf>,
     /// An importer's own design, opened to check it (`evaluate@0.1`), apart from every open design.
     evaluation: Option<Box<Session>>,
+    forms: Vec<crate::schema::plugin::FormRequest>,
+    form_source: Option<(String, Vec<Entry>)>,
 }
 
 impl SolidCraftHost {
@@ -439,10 +577,31 @@ impl SolidCraftHost {
     }
 }
 
+/// A storage call's error as the plugin gets it: the host's own (a permission, a limit) as it is,
+/// a bad name or range as invalid input it can act on, anything else as the call failing.
+fn storage_error(call: &str, error: crate::EngineError) -> HostError {
+    if let Some(host) = error.host_error() {
+        return host.clone();
+    }
+    match error {
+        crate::EngineError::BadParams { .. } => HostError::InvalidInput { field: call.into(), reason: error.to_string() },
+        error => HostError::CommandFailed { command: call.into(), reason: error.to_string() },
+    }
+}
+
 /// The commands an importer may run on its own design to check it: they read the model, and
 /// `timeline.roll_to` moves only that private session's marker.
 pub const EVALUATE_COMMANDS: &[&str] = &["document.inspect", "inspect.measure", "model.edges", "model.faces", "timeline.roll_to"];
 impl PluginHost for SolidCraftHost {
+    fn open_form(&mut self, entry: &str, params: &Value) -> craft_plugin::Result<()> {
+        self.request_form(entry, params)
+    }
+    fn design_token(&self) -> craft_plugin::Result<Option<DesignToken>> {
+        match &self.session.plugin_state.listener_design {
+            Some(design) => Ok(design.clone()),
+            None => Ok(Some(self.transaction.as_ref().unwrap_or(&self.session).design_token())),
+        }
+    }
     fn evaluate_open(&mut self, design: &[u8]) -> craft_plugin::Result<()> {
         let doc = solidcraft_io::read_design(design)
             .map_err(|e| HostError::InvalidInput { field: "design".into(), reason: format!("SolidCraft can't read this design: {e}") })?;
@@ -462,6 +621,21 @@ impl PluginHost for SolidCraftHost {
     fn evaluate_close(&mut self) {
         self.evaluation = None;
     }
+    fn storage_put_blob(&mut self, name: &str, data: &[u8], cache: bool, append: bool) -> craft_plugin::Result<u64> {
+        let s = self
+            .transaction
+            .as_mut()
+            .ok_or_else(|| HostError::CommandFailed { command: "storage.put-blob".into(), reason: "no active transaction".into() })?;
+        storage::write_blob(s, name, data, cache, append).map_err(|e| storage_error("storage.put-blob", e))
+    }
+    fn storage_get_blob(&mut self, plugin: Option<&str>, name: &str, offset: u64, len: u32) -> craft_plugin::Result<Vec<u8>> {
+        let s = self.transaction.as_ref().unwrap_or(&self.session);
+        storage::read_blob(s, plugin, name, offset, len).map(|read| read.data).map_err(|e| storage_error("storage.get-blob", e))
+    }
+    fn storage_get_document(&mut self, plugin: Option<&str>, offset: u64, len: u32) -> craft_plugin::Result<Vec<u8>> {
+        let s = self.transaction.as_ref().unwrap_or(&self.session);
+        storage::read_document(s, plugin, offset, len).map(|(data, _)| data).map_err(|e| storage_error("storage.get-document", e))
+    }
     fn command_catalog(&self) -> Vec<CommandSchema> {
         crate::command_specs()
             .iter()
@@ -476,6 +650,19 @@ impl PluginHost for SolidCraftHost {
             .collect()
     }
     fn run_command(&mut self, name: &str, params: &Value) -> craft_plugin::Result<Value> {
+        // A deviation sweep starts its own parallel work, outside the guest's fuel/deadline.
+        // It remains a read command for explicit invocations, but never starts from a listener.
+        if self.session.plugin_state.listener_design.is_some() && name == "pointcloud.deviation" {
+            return Err(HostError::PermissionDenied { permission: format!("work command {name} from read entry") });
+        }
+        if self.session.plugin_state.listener_design.is_some()
+            && (command_group(name).is_some()
+                || name.starts_with("render.")
+                || name.starts_with("jobs.")
+                || catalog_command(name).is_none_or(|command| command.effect != Effect::Read))
+        {
+            return Err(HostError::PermissionDenied { permission: format!("edit command {name} from read entry") });
+        }
         if catalog_command(name).is_none() {
             return Err(HostError::PermissionDenied { permission: format!("command {name} is not granted") });
         }
@@ -535,6 +722,8 @@ impl PluginHost for SolidCraftHost {
         {
             self.session.accept_computed(computed);
         } else {
+            self.session.plugin_state.link_changes = computed.plugin_state.link_changes;
+            std::sync::Arc::make_mut(&mut self.session.plugin_state.link_reads).extend(computed.plugin_state.link_reads.iter().copied());
             for message in computed.log {
                 self.session.echo(message);
             }
@@ -544,6 +733,7 @@ impl PluginHost for SolidCraftHost {
     fn rollback_transaction(&mut self) -> craft_plugin::Result<()> {
         self.transaction = None;
         self.sketch_exits.clear();
+        self.forms.clear();
         self.view = None;
         Ok(())
     }
@@ -621,7 +811,11 @@ pub fn resolve_call(s: &Session, id: &str, params: &Value) -> Result<Option<Valu
     let inputs = params.get("params").cloned().unwrap_or(json!({}));
     // Preserve direct calls' input pass-through; tool callers validate their listed schema.
     // `named`: a refusal comes back in words an agent can act on (`tools::explain`).
-    Ok(Some(json!({"path":path,"approval":approval,"entry":entry,"params":inputs,"named":true})))
+    let mut call = json!({"path":path,"approval":approval,"entry":entry,"params":inputs,"named":true});
+    if let Some(expected) = params.get("expected_design") {
+        call["expected_design"] = expected.clone();
+    }
+    Ok(Some(call))
 }
 
 /// `engine.describe` of an installed, enabled plugin's entry: a command entry as the

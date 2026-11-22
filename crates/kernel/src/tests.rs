@@ -2387,6 +2387,42 @@ fn partial_revolve_on_the_axis() {
     assert!(vc < v - 1.0 && vc > v - PI * 3.75 * 3.75 * 2.5, "{vc}");
 }
 
+/// #17528: a profile corner 0.0000119 mm from the axis, as a sketch leaves it when nothing holds
+/// the corner on the axis line. It goes onto the axis, so the turn has no hair-thin cone face along
+/// the axis. That face went to STEP with its apex kilometres away: slicers hung on the file and
+/// SolidCraft read the body back open.
+#[test]
+fn revolve_puts_a_corner_next_to_the_axis_on_it() {
+    let off = 1.19e-5;
+    let profile = Region2 {
+        outer: Loop2::polygon(&[Vec2::new(0.0, -9.0), Vec2::new(2.1, -9.0), Vec2::new(4.25, -6.85), Vec2::new(4.25, 6.5), Vec2::new(off, 6.5)]),
+        holes: vec![],
+    };
+    let body = revolve(&Plane::XZ, &[profile], Vec2::ZERO, Vec2::Y, 2.0 * PI).unwrap().pop().unwrap();
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    // The top and bottom discs, the cylinder and the cone: no face from the edge beside the axis.
+    assert_eq!(measure(&body).unwrap().merged.faces, 4);
+    let text = step_export(&[&body], "peg").unwrap();
+    let back = step_import(&text).unwrap().bodies.remove(0).body;
+    assert!(back.validity().is_empty(), "{:?}", back.validity());
+    assert_eq!(measure(&back).unwrap().merged.faces, 4);
+    // A corner as near on the far side of the axis doesn't count as crossing it: the rectangle
+    // turns into a cylinder, two discs and its side.
+    let across =
+        Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(5.0, 0.0), Vec2::new(5.0, 5.0), Vec2::new(-off, 5.0)]), holes: vec![] };
+    let cylinder = revolve(&Plane::XZ, &[across], Vec2::ZERO, Vec2::Y, 2.0 * PI).unwrap().pop().unwrap();
+    assert!(rel(measure(&cylinder).unwrap().volume, PI * 25.0 * 5.0) < 5e-4);
+    assert_eq!(measure(&cylinder).unwrap().merged.faces, 3);
+    // A partial turn goes toward the sketch normal's side from where the profile is once its
+    // corners are on the axis, not from the centroid it had before (here on the other side).
+    let sliver = Region2 { outer: Loop2::polygon(&[Vec2::new(-9e-5, 0.0), Vec2::new(1.1e-4, 1.0), Vec2::new(-9e-5, 2.0)]), holes: vec![] };
+    let on_axis = Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(1.1e-4, 1.0), Vec2::new(0.0, 2.0)]), holes: vec![] };
+    // Too thin for mass properties: the boxes come from the vertices and edges.
+    let quarter = |r: Region2| revolve(&Plane::XY, &[r], Vec2::ZERO, Vec2::Y, PI / 2.0).unwrap().pop().unwrap().outline_bounds();
+    let (a, b) = (quarter(sliver), quarter(on_axis));
+    assert!(a.min.dist(b.min) < 1e-9 && a.max.dist(b.max) < 1e-9, "{a:?} vs {b:?}");
+}
+
 /// Boolean identities on primitives the robustness runs found failing: cylinders tangent to box
 /// faces from inside and out, crossing cylinders touching along a line (their seams used to lie
 /// exactly where the other body cut them).
