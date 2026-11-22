@@ -532,6 +532,53 @@ pub enum SolverFailure {
     /// The roll-over meets a side edge that rolls over tangentially, which the full
     /// roll-over does not handle ([`ErrorKind::Unsupported`]).
     TangentRolloverUnhandled,
+    /// The solver was given no edge use `index` of the edge to fillet: the caller's solver
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    SolverEdgeUseMissing {
+        /// The edge use's index, 0 or 1.
+        index: usize,
+    },
+    /// An edge use of the caller's body has no edge: the caller's input
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    EdgeUseWithoutEdge,
+    /// The edge to fillet has a curve of a kind with no B-spline form: a kind the routine
+    /// cannot handle ([`ErrorKind::Unsupported`]); status `SM_ERR_NULL_POINTER`.
+    EdgeCurveNotBSpline {
+        /// The edge.
+        edge: crate::topology::EdgeId,
+    },
+    /// The trace left no cross-section points to clean at its ends: an empty search
+    /// ([`ErrorKind::NotFound`]).
+    NoTracePoints,
+    /// An offset surface's base is neither a B-spline surface nor an offset of one: a kind
+    /// the routine cannot handle ([`ErrorKind::Unsupported`]); status
+    /// `SM_ERR_NULL_POINTER`.
+    BaseSurfaceNotBSpline,
+    /// The trace ran more than `limit` passes (too many self-intersections or other
+    /// restarts) without finishing ([`ErrorKind::NotConverged`]).
+    TraceLoopLimit {
+        /// The passes allowed.
+        limit: u32,
+    },
+    /// The trace touched a base surface's boundary again after tracing on past it once, a
+    /// case the trace does not handle ([`ErrorKind::Unsupported`]).
+    TraceTouchesBoundaryAgain,
+    /// The trace stepped no part of the last fillet geometry's centre line, so the cusp
+    /// recovery has no end to start from: an empty search ([`ErrorKind::NotFound`]);
+    /// status `SM_ERR_NULL_POINTER`.
+    NoCenterLineTraced,
+    /// The split point does not drop onto the rail's curve at the dropping tolerances
+    /// tried (1, 10 and 20 times `tol`): an empty search ([`ErrorKind::NotFound`]).
+    SplitPointDoesNotDropOnRail {
+        /// The trace's 3D approximation tolerance the dropping tolerances scale.
+        tol: f64,
+    },
+    /// The intersection point has no stepped neighbour on either side to take its
+    /// curve's tangent from: an empty search ([`ErrorKind::NotFound`]).
+    NeighbourPointsNotFound,
+    /// The two offset surfaces' normals at a tangent intersection point are parallel, so
+    /// their cross product gives the curve no direction ([`ErrorKind::Degenerate`]).
+    OffsetNormalsParallel,
 }
 
 /// The analytic shape a fillet solver routine builds
@@ -583,12 +630,17 @@ impl SolverFailure {
             | Self::CrossSectionNotFound
             | Self::SideEdgeNotOnRailFace
             | Self::GuessDoesNotDropOnSideEdge
-            | Self::RailMissesSideEdge => ErrorKind::NotFound,
+            | Self::RailMissesSideEdge
+            | Self::NoTracePoints
+            | Self::NoCenterLineTraced
+            | Self::SplitPointDoesNotDropOnRail { .. }
+            | Self::NeighbourPointsNotFound => ErrorKind::NotFound,
             Self::RailTangentZero { .. }
             | Self::OffsetNormalVanishes { .. }
             | Self::RadiusVanishes { .. }
             | Self::SweepAngleTooSmall { .. }
-            | Self::EdgeEndOnAxis { .. } => ErrorKind::Degenerate,
+            | Self::EdgeEndOnAxis { .. }
+            | Self::OffsetNormalsParallel => ErrorKind::Degenerate,
             Self::PiecesTooFarApart { .. } | Self::TraceEndOffBall { .. } => {
                 ErrorKind::NotWithinTolerance
             }
@@ -600,7 +652,11 @@ impl SolverFailure {
             | Self::RolloverIntervalNotAtEdge { .. }
             | Self::CenterLineNotBSpline { .. }
             | Self::ShortIntervalsNotRemoved { .. }
-            | Self::TangentRolloverUnhandled => ErrorKind::Unsupported,
+            | Self::TangentRolloverUnhandled
+            | Self::EdgeCurveNotBSpline { .. }
+            | Self::BaseSurfaceNotBSpline
+            | Self::TraceTouchesBoundaryAgain => ErrorKind::Unsupported,
+            Self::TraceLoopLimit { .. } => ErrorKind::NotConverged,
             Self::GnSideInputMissing { .. }
             | Self::ExtensionCornerMissing
             | Self::TooManySolverValues { .. }
@@ -608,7 +664,9 @@ impl SolverFailure {
             | Self::FaceWithoutSurface { .. }
             | Self::EdgeWithoutCurve { .. }
             | Self::EdgeUseWithoutMate
-            | Self::EdgeUseWithoutFace => ErrorKind::InvalidInput,
+            | Self::EdgeUseWithoutFace
+            | Self::SolverEdgeUseMissing { .. }
+            | Self::EdgeUseWithoutEdge => ErrorKind::InvalidInput,
             Self::JacobianNotLoaded
             | Self::SupportIntersectionFailed
             | Self::SurfaceCacheNotBuilt => ErrorKind::Failed,
@@ -627,7 +685,12 @@ impl SolverFailure {
             | Self::CenterLineNotBSpline { .. }
             | Self::SurfaceCacheNotBuilt
             | Self::SideSurfaceMissesEndPlane
-            | Self::SideEdgeNotOnRailFace => SM_ERR_NULL_POINTER,
+            | Self::SideEdgeNotOnRailFace
+            | Self::SolverEdgeUseMissing { .. }
+            | Self::EdgeUseWithoutEdge
+            | Self::EdgeCurveNotBSpline { .. }
+            | Self::BaseSurfaceNotBSpline
+            | Self::NoCenterLineTraced => SM_ERR_NULL_POINTER,
             Self::CrossSectionPointNotFound { .. }
             | Self::RailTangentZero { .. }
             | Self::PiecesTooFarApart { .. }
@@ -660,7 +723,13 @@ impl SolverFailure {
             | Self::ShortIntervalsNotRemoved { .. }
             | Self::GuessDoesNotDropOnSideEdge
             | Self::RailMissesSideEdge
-            | Self::TangentRolloverUnhandled => SM_ERR,
+            | Self::TangentRolloverUnhandled
+            | Self::NoTracePoints
+            | Self::TraceLoopLimit { .. }
+            | Self::TraceTouchesBoundaryAgain
+            | Self::SplitPointDoesNotDropOnRail { .. }
+            | Self::NeighbourPointsNotFound
+            | Self::OffsetNormalsParallel => SM_ERR,
         }
     }
 }
@@ -811,6 +880,40 @@ impl core::fmt::Display for SolverFailure {
             Self::TangentRolloverUnhandled => {
                 f.write_str("a side edge rolls over tangentially, which is not handled")
             }
+            Self::SolverEdgeUseMissing { index } => {
+                write!(
+                    f,
+                    "the solver has no edge use {index} of the edge to fillet"
+                )
+            }
+            Self::EdgeUseWithoutEdge => f.write_str("an edge use of the body has no edge"),
+            Self::EdgeCurveNotBSpline { edge } => write!(
+                f,
+                "the curve of edge {edge:?} to fillet has no B-spline form"
+            ),
+            Self::NoTracePoints => f.write_str("the trace left no cross-section points"),
+            Self::BaseSurfaceNotBSpline => f.write_str(
+                "an offset surface's base is neither a B-spline surface nor an offset of one",
+            ),
+            Self::TraceLoopLimit { limit } => {
+                write!(f, "the trace did not finish within {limit} passes")
+            }
+            Self::TraceTouchesBoundaryAgain => {
+                f.write_str("the trace touched a base surface's boundary a second time")
+            }
+            Self::NoCenterLineTraced => {
+                f.write_str("the trace stepped no part of the fillet's centre line")
+            }
+            Self::SplitPointDoesNotDropOnRail { tol } => write!(
+                f,
+                "the split point does not drop onto the rail at 1, 10 or 20 times {tol}"
+            ),
+            Self::NeighbourPointsNotFound => {
+                f.write_str("the intersection point has no stepped neighbour on either side")
+            }
+            Self::OffsetNormalsParallel => f.write_str(
+                "the offset surfaces' normals are parallel at the tangent intersection point",
+            ),
         }
     }
 }

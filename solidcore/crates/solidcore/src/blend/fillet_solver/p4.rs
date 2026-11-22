@@ -95,8 +95,8 @@ use crate::blend::fillet_geom::p3::{NoCorners, SplitCorners};
 use crate::blend::fillet_intersector::{FilletIntersector, StepSolve as StepSolveFlags};
 use crate::blend::fillet_solver::p1::NoExtensionCorners;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::blend::BlendFailure;
-use crate::error::{Result, SolidError};
+use crate::error::blend::{BlendFailure, SolverFailure};
+use crate::error::{Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
@@ -118,6 +118,17 @@ const OP: &str = "blend::fillet_solver::p4";
 
 fn invalid(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
+}
+
+#[track_caller]
+fn fail(cause: SolverFailure) -> SolidError {
+    SolidError::blend_solver(OP, cause)
+}
+
+/// A defect of the kernel's own fillet body or solver state, keeping upstream's `SM_ERR`.
+#[track_caller]
+fn defect(why: &'static str) -> SolidError {
+    SolidError::blend(OP, BlendFailure::Defect { why })
 }
 
 // =====================================================================================
@@ -737,13 +748,13 @@ fn c1_setup(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<CalcState>
         .solver()
         .edgeuse(0)?
         .ok_or_else(|| invalid("no edge use 0"))?;
-    let edge = eu::edge(cx.target, eu0)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the first edge use's edge"))?;
+    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| fail(SolverFailure::EdgeUseWithoutEdge))?;
     // SM_CAST_PTR(SmBSplineCurve, pEdge->GetCurve()): NULL for a missing curve or a
     // kind not derived from SmBSplineCurve
     let edge_curve = match topo_edge::curve(cx.target, edge)? {
         Some(c) if bspline_curve_cast(c).is_some() => c.clone(),
-        _ => return Err(SolidError::blend_missing(OP, "the edge's B-spline curve")),
+        Some(_) => return Err(fail(SolverFailure::EdgeCurveNotBSpline { edge })),
+        None => return Err(fail(SolverFailure::EdgeWithoutCurve { edge })),
     };
     let ivl = topo_edge::interval(cx.target, edge)?;
 
@@ -811,7 +822,7 @@ fn c1_collect_points(
     let eu_filleted_edge = ops
         .solver()
         .edgeuse(which_surf)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the filleted edge use"))?;
+        .ok_or_else(|| fail(SolverFailure::SolverEdgeUseMissing { index: which_surf }))?;
     let uv_curve = get_or_create_uv_trim_curve(cx.k, cx.target, eu_filleted_edge)?;
 
     // special case: don't sort SmTsectPnts on closed UVTrimCurves
@@ -883,11 +894,13 @@ fn c1_collect_points(
         ) {
             Ok(()) => {}
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => {
-                return Err(SolidError::blend_failed(
+            Err(e) => {
+                return Err(Failure::new(
                     OP,
-                    "the cross section point cannot be found",
-                ))
+                    BlendFailure::Solver(SolverFailure::CrossSectionPointNotFound { t: knot }),
+                )
+                .caused_by(e)
+                .into_error())
             }
         }
         // add new TsectPnt to sAllTsectPnts array (and sDeletePnts)
@@ -909,16 +922,16 @@ fn c1_collect_points(
     // Process rail_ends: rail[i]->edgeuse[jj]->FilletVertexuse->TsectPnt
     let geom0 = st.geom0;
     for which_rail in 0..2 {
-        let this_rail = cx
-            .fillets
-            .geom(geom0)?
-            .rail(which_rail)
-            .ok_or_else(|| SolidError::blend_missing(OP, "the fillet geometry's rail"))?;
+        let this_rail = cx.fillets.geom(geom0)?.rail(which_rail).ok_or_else(|| {
+            SolidError::blend_null_defect(
+                OP,
+                "the fillet geometry the solver built has no rail on this side",
+            )
+        })?;
         let fil_edgeuses = topo_edge::edgeuses(cx.fillets.brep(), this_rail, None, None)?;
         if fil_edgeuses.len() != 2 {
-            return Err(SolidError::blend_failed(
-                OP,
-                "the rail does not have two edge uses",
+            return Err(defect(
+                "the rail the solver built does not have its two edge uses",
             ));
         }
 
@@ -1167,10 +1180,14 @@ mod tests_c1 {
             error_info: None,
         };
         let e = c1_setup(&mut ops, &mut cx).unwrap_err();
-        assert_eq!(
-            e,
-            SolidError::blend_missing(OP, "the edge's B-spline curve")
+        assert!(
+            matches!(
+                e.blend_failure(),
+                Some(BlendFailure::Solver(SolverFailure::EdgeWithoutCurve { .. }))
+            ),
+            "{e:?}"
         );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
 
         // no edge use 0: an upstream NULL dereference
         ops.0.edgeuses = [None, None];
@@ -1266,8 +1283,9 @@ mod tests_c1 {
         let e = c1_collect_points(&mut ops, &mut cx, &mut st, 0).unwrap_err();
         assert_eq!(
             e,
-            SolidError::blend_failed(OP, "the rail does not have two edge uses")
+            defect("the rail the solver built does not have its two edge uses")
         );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
     }
 
     #[test]
@@ -1424,19 +1442,12 @@ fn c2_sort_points(
             SolutionRequested::Single,
             &GlobalPointSolveOptions::default(),
         )?;
-        if solutions.len() != 1 {
-            return Err(SolidError::blend_failed(
-                OP,
-                "the point does not drop onto the edge's curve once",
-            ));
-        }
-        let mut t = solutions
-            .get(0)
-            .ok_or_else(|| {
-                SolidError::blend_failed(OP, "the point does not drop onto the edge's curve once")
-            })?
-            .start
-            .param(0)?;
+        let [solution] = solutions.as_slice() else {
+            return Err(fail(SolverFailure::NoSingleCurveFoot {
+                count: solutions.len(),
+            }));
+        };
+        let mut t = solution.start.param(0)?;
 
         // a drop to the edge's end point may lie beyond it (the edge needs extending):
         // drop to the tangent extension line instead
@@ -1529,8 +1540,7 @@ fn c2_trace_to_edge_ends(
         .solver()
         .edgeuse(0)?
         .ok_or_else(|| invalid("no edge use 0"))?;
-    let edge = eu::edge(cx.target, eu0)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the first edge use's edge"))?;
+    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| fail(SolverFailure::EdgeUseWithoutEdge))?;
     if !st.do_sorting
         || topo_edge::start_vertex(cx.target, edge)? == topo_edge::end_vertex(cx.target, edge)?
     {
@@ -1568,9 +1578,9 @@ fn c2_trace_to_edge_ends(
             SolutionRequested::Single,
             &crate::curve::curve::p1::GlobalPointSolveOptions::default(),
         )?;
-        let sol = sols.get(0).ok_or_else(|| {
-            SolidError::blend_failed(OP, "the centre does not drop onto the edge's curve")
-        })?;
+        let sol = sols
+            .first()
+            .ok_or_else(|| fail(SolverFailure::NoSingleCurveFoot { count: 0 }))?;
         let end_param = if end == 0 { st.ivl.min() } else { st.ivl.max() };
         let at = st.edge_curve.evaluate_point(cx.k, sol.start.param(0)?)?;
         let end_pnt = st.edge_curve.evaluate_point(cx.k, end_param)?;
@@ -1687,20 +1697,20 @@ fn c2_end_past_tangent_edge(
     let eu0 = ops
         .solver()
         .edgeuse(0)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's first edge use"))?;
-    let edge = eu::edge(cx.target, eu0)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the first edge use's edge"))?;
+        .ok_or_else(|| fail(SolverFailure::SolverEdgeUseMissing { index: 0 }))?;
+    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| fail(SolverFailure::EdgeUseWithoutEdge))?;
     let corner_vertex = if at_end {
         topo_edge::end_vertex(cx.target, edge)?
     } else {
         topo_edge::start_vertex(cx.target, edge)?
     };
     for which_rail in 0..2 {
-        let rail = cx
-            .fillets
-            .geom(st.geom0)?
-            .rail(which_rail)
-            .ok_or_else(|| SolidError::blend_missing(OP, "the fillet geometry's rail"))?;
+        let rail = cx.fillets.geom(st.geom0)?.rail(which_rail).ok_or_else(|| {
+            SolidError::blend_null_defect(
+                OP,
+                "the fillet geometry the solver built has no rail on this side",
+            )
+        })?;
         let brep = cx.fillets.brep();
         let first = topo_edge::vertex(brep, rail)?;
         let second = match first {
@@ -1741,7 +1751,7 @@ fn c2_clean_ends(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>, st: &mut CalcSt
     // check state
     let mut total_tsects = st.tsect_pnts.len();
     if total_tsects == 0 {
-        return Err(SolidError::blend_failed(OP, "there are no cross sections"));
+        return Err(fail(SolverFailure::NoTracePoints));
     }
     let approx_tol_3d = ops.solver().approx_tol_3d;
 
@@ -1934,10 +1944,8 @@ mod tests_c2 {
         // no points
         let (mut st, _) = state(&[]);
         let e = c2_clean_ends(&mut fs, &mut cx, &mut st).unwrap_err();
-        assert_eq!(
-            e,
-            SolidError::blend_failed(OP, "there are no cross sections")
-        );
+        assert_eq!(e, fail(SolverFailure::NoTracePoints));
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
 
         // two points are never pruned, however close
         let (mut st, refs) = state(&[(0.5, 0.5), (0.5, 0.5)]);
@@ -2066,19 +2074,13 @@ fn c3_bspline_base(base: &Surface) -> Result<&Surface> {
     // If the base surface is not an SmBSplineSurface, maybe it's another level of
     // offset surface; check one more level.
     let SurfaceKind::OffsetSurface(offset) = base.kind() else {
-        return Err(SolidError::blend_missing(
-            OP,
-            "the offset surface's B-spline base",
-        ));
+        return Err(fail(SolverFailure::BaseSurfaceNotBSpline));
     };
     let inner = offset.base_surface();
     if is_bspline_surface(inner) {
         Ok(inner)
     } else {
-        Err(SolidError::blend_missing(
-            OP,
-            "the offset surface's B-spline base",
-        ))
+        Err(fail(SolverFailure::BaseSurfaceNotBSpline))
     }
 }
 
@@ -2381,10 +2383,8 @@ mod tests_c3 {
 
         let twice = offset(&k, 0.5, &once);
         let e = c3_bspline_base(&twice).unwrap_err();
-        assert_eq!(
-            e,
-            SolidError::blend_missing(OP, "the offset surface's B-spline base")
-        );
+        assert_eq!(e, fail(SolverFailure::BaseSurfaceNotBSpline));
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
     }
 
     #[test]
@@ -2627,7 +2627,9 @@ fn c4_trace(
                 C4_RADIUS_TOO_LARGE,
             ))?;
             // SER_MSG(SM_ERR, "CalcFilletGeom(): Ran into too many self-intersections ..")
-            return Err(SolidError::blend_failed(OP, "too many self-intersections"));
+            return Err(fail(SolverFailure::TraceLoopLimit {
+                limit: max_loop_count,
+            }));
         }
 
         // Determine the tracing direction. Every pass: this overwrites the recovery
@@ -2684,10 +2686,7 @@ fn c4_trace(
             // fillet.
             if ops.solver().extend_after {
                 // Something strange happening, return ERROR
-                return Err(SolidError::blend_failed(
-                    OP,
-                    "the fillet touches the base surface's boundary again",
-                ));
+                return Err(fail(SolverFailure::TraceTouchesBoundaryAgain));
             }
 
             // no need to trace next start point in both directions
@@ -2818,7 +2817,7 @@ fn c4_cusp_recovery(
             FilletErrorType::BadInt,
             C4_RADIUS_TOO_LARGE,
         ))?;
-        return Err(SolidError::blend_missing(OP, "the fillet surface"));
+        return Err(fail(SolverFailure::NoCenterLineTraced));
     };
 
     // find closest filletEdge point to centerline end
@@ -2833,24 +2832,14 @@ fn c4_cusp_recovery(
     )?;
 
     // expect 1 solution (it might be before or after the cusp section)
-    if solutions.len() != 1 {
-        return Err(SolidError::blend_failed(
-            OP,
-            "the last step point does not drop onto the centre line once",
-        ));
-    }
+    let [solution] = solutions.as_slice() else {
+        return Err(fail(SolverFailure::NoSingleCurveFoot {
+            count: solutions.len(),
+        }));
+    };
 
     // dT = param at which last centerline step ran into trouble (probable cusp)
-    let t = solutions
-        .get(0)
-        .ok_or_else(|| {
-            SolidError::blend_failed(
-                OP,
-                "the last step point does not drop onto the centre line once",
-            )
-        })?
-        .start
-        .param(0)?;
+    let t = solution.start.param(0)?;
 
     // pick initial skip size
     let mut skip_size = 0.1 * st.ivl.length();
@@ -3034,7 +3023,7 @@ mod tests_c4 {
         // on the last geometry: RecordFilletError's status is ignored, then
         // SM_ERR_NULL_POINTER.
         let e = c4_trace(&mut solver, &mut cx, &mut st, &mut fi).unwrap_err();
-        assert_eq!(e, SolidError::blend_missing(OP, "the fillet surface"));
+        assert_eq!(e, fail(SolverFailure::NoCenterLineTraced));
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
         // bExtendBefore = m_bExtendAfter, then TRUE for the missed point;
         // bExtendAfter = m_bExtendBefore
@@ -3088,7 +3077,7 @@ mod tests_c4 {
         });
         let e = c4_trace(&mut solver, &mut cx, &mut st, &mut fi).unwrap_err();
         // the pass's own error, not the recovery's missing centre line
-        assert_ne!(e, SolidError::blend_missing(OP, "the fillet surface"));
+        assert_ne!(e, fail(SolverFailure::NoCenterLineTraced));
         assert!(!e.is_unported_or_cancelled(), "{e:?}");
         // the missed point was dropped (RemoveAt(0, 1)), the recovery never ran
         assert_eq!(st.tsect_pnts.len(), 2);
@@ -3287,7 +3276,12 @@ fn c5_split_original_fillet(
             .fillets
             .geom(geom0)?
             .fillet_surface(None)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the fillet surface"))?;
+            .ok_or_else(|| {
+                SolidError::blend_null_defect(
+                    OP,
+                    "the traced fillet geometry being split has no fillet surface",
+                )
+            })?;
         fillet_surface.split_at(cx.k, split_at_param, SurfParamType::U)?
     };
     // delete pFilletSurface; m_pFilletSurface = SM_CAST_PTR(SmBSplineSurface, ..)
@@ -3330,15 +3324,19 @@ fn c5_split_rail(
         .rail(mm)
         .ok_or_else(|| invalid("split: geometry 0 has no rail"))?;
     let rail_curve = edge_unit::curve(brep, rail)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve"))?;
+        .ok_or_else(|| SolidError::blend_null_defect(OP, "a rail the solver built has no curve"))?;
     let mut trim_ivl = rail_curve.natural_interval();
     let mut new_trim_ivl = trim_ivl;
     let prim_eu = eu::primary_edgeuse(brep, rail)?
         .ok_or_else(|| invalid("split: rail without primary edge use"))?;
     let mate_eu =
         eu::mate(brep, prim_eu)?.ok_or_else(|| invalid("split: rail edge use without mate"))?;
-    let uv_curve = eu::uv_trim_curve_pointer(brep, mate_eu)?
-        .ok_or_else(|| SolidError::blend_missing(OP, "the mate edge use's uv trim curve"))?;
+    let uv_curve = eu::uv_trim_curve_pointer(brep, mate_eu)?.ok_or_else(|| {
+        SolidError::blend_null_defect(
+            OP,
+            "a rail edge use's mate in the solver's fillet body has no uv trim curve",
+        )
+    })?;
     let new_rail = cx
         .fillets
         .geom(new_geom)?
@@ -3379,8 +3377,9 @@ fn c5_split_rail(
     let pnt = if mm == 0 {
         let pnt = st.base_surfaces[0].evaluate_point(cx.k, uv)?;
         // Find the split-at parameter (i.e. -u) of the fillet
-        let rail_curve = edge_unit::curve(cx.fillets.brep(), rail)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve"))?;
+        let rail_curve = edge_unit::curve(cx.fillets.brep(), rail)?.ok_or_else(|| {
+            SolidError::blend_null_defect(OP, "a rail the solver built has no curve")
+        })?;
         split_at_param = c5_drop_split_param(
             cx.k,
             rail_curve,
@@ -3401,7 +3400,7 @@ fn c5_split_rail(
         .edge_mut(rail)?
         .curve
         .as_mut()
-        .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve"))?
+        .ok_or_else(|| SolidError::blend_null_defect(OP, "a rail the solver built has no curve"))?
         .trim(cx.k, &mut trim_ivl, TrimMode::Notify)?; // may snap sIvl by tol to existing knots
 
     // fork 66b02de passes this on (SER)
@@ -3411,7 +3410,9 @@ fn c5_split_rail(
         .edge_mut(new_rail)?
         .curve
         .as_mut()
-        .ok_or_else(|| SolidError::blend_missing(OP, "the new rail's curve"))?
+        .ok_or_else(|| {
+            SolidError::blend_null_defect(OP, "the rail the split just built has no curve")
+        })?
         .trim(cx.k, &mut new_trim_ivl, TrimMode::Notify)?; // may snap sIvl by tol to existing knots
 
     let new_vert = vertex_unit::edge_start_vertex(cx.fillets.brep(), new_rail)?
@@ -3474,10 +3475,9 @@ fn c5_drop_split_param(
         scale += 10.0;
     }
     if !success {
-        return Err(SolidError::blend_failed(
-            OP,
-            "no scale of the step succeeds",
-        ));
+        return Err(fail(SolverFailure::SplitPointDoesNotDropOnRail {
+            tol: approx_tol_3d,
+        }));
     }
     Ok(split_at_param)
 }
@@ -3529,7 +3529,10 @@ fn c5_undo_reversal(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<()
                 .and_then(bspline_curve_cast)
                 .is_none()
             {
-                return Err(SolidError::blend_missing(OP, "the rail's B-spline curve"));
+                return Err(SolidError::blend_null_defect(
+                    OP,
+                    "a rail the solver built has no B-spline curve",
+                ));
             }
             let prim_eu = eu::primary_edgeuse(b, rail)?
                 .ok_or_else(|| invalid("reverse: rail without primary edge use"))?;
@@ -3549,18 +3552,16 @@ fn c5_undo_reversal(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<()
             .status?;
             let (uv_curve, uv_owner) = eu::uv_trim_curve(cx.fillets.brep(), mate_eu)?;
             let (Some(_), Some(uv_owner)) = (uv_curve, uv_owner) else {
-                return Err(SolidError::blend_missing(
+                return Err(SolidError::blend_null_defect(
                     OP,
-                    "the mate edge use's uv trim curve",
+                    "a rail edge use's mate has no uv trim curve after one was fetched or made",
                 ));
             };
             let k = cx.k;
             let b = cx.fillets.brep_mut();
-            let curve_3d = b
-                .edge_mut(rail)?
-                .curve
-                .as_mut()
-                .ok_or_else(|| SolidError::blend_missing(OP, "the rail's curve"))?;
+            let curve_3d = b.edge_mut(rail)?.curve.as_mut().ok_or_else(|| {
+                SolidError::blend_null_defect(OP, "a rail the solver built has no curve")
+            })?;
             let mut ivl1 = curve_3d.natural_interval();
             ivl1 = curve_3d.reverse_parameterization(k, &ivl1)?;
             let uv_curve = b
@@ -3568,7 +3569,10 @@ fn c5_undo_reversal(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<()
                 .uv_trim_curve
                 .as_mut()
                 .ok_or_else(|| {
-                    SolidError::blend_missing(OP, "the mate edge use's uv trim curve")
+                    SolidError::blend_null_defect(
+                        OP,
+                        "the edge use found holding the rail's uv trim curve has none",
+                    )
                 })?;
             uv_curve.reverse_parameterization(k, &ivl1)?;
         }
@@ -3576,9 +3580,9 @@ fn c5_undo_reversal(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<()
         let k = cx.k;
         let geom = cx.fillets.geom_mut(g)?;
         if geom.center_line_curve.is_none() || !geom.has_fillet_surface() {
-            return Err(SolidError::blend_missing(
+            return Err(SolidError::blend_null_defect(
                 OP,
-                "the fillet geometry's centre line or surface",
+                "a traced fillet geometry has no centre line or no fillet surface",
             ));
         }
         if let Some(center_line) = geom.center_line_curve.as_mut() {
@@ -3837,7 +3841,10 @@ mod tests_c5 {
         let e = f.run().unwrap_err();
         assert_eq!(
             e,
-            SolidError::blend_missing(OP, "the fillet geometry's centre line or surface")
+            SolidError::blend_null_defect(
+                OP,
+                "a traced fillet geometry has no centre line or no fillet surface",
+            )
         );
         assert_close(f.rail_start(0), Point3::new(1.0, 0.0, 0.0));
         assert_close(
@@ -3877,7 +3884,7 @@ mod tests_c5 {
         let e = f.run().unwrap_err();
         assert_eq!(
             e,
-            SolidError::blend_missing(OP, "the rail's B-spline curve")
+            SolidError::blend_null_defect(OP, "a rail the solver built has no B-spline curve")
         );
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
     }
@@ -4130,12 +4137,7 @@ fn c6_compute_point_values(
             }
             (Some((f0, f1)), _) => ((f0 + f1) / 2.0, point.crv_pos()),
             (None, Some((b0, b1))) => (point.crv_pos(), (b0 + b1) / 2.0),
-            (None, None) => {
-                return Err(SolidError::blend_failed(
-                    OP,
-                    "the point has no neighbour on either side",
-                ))
-            }
+            (None, None) => return Err(fail(SolverFailure::NeighbourPointsNotFound)),
         };
 
         // :3685
@@ -4152,10 +4154,7 @@ fn c6_compute_point_values(
             let norm2 = offset_evaluate_normal(k, ops, 1, uv1)?;
             let mut curve_direction = norm1.cross(norm2);
             if curve_direction.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::blend_failed(
-                    OP,
-                    "the offset normals are parallel",
-                ));
+                return Err(fail(SolverFailure::OffsetNormalsParallel));
             }
             curve_direction *= curve_trace_direction;
             if curve_direction.dot(point.crv_deriv()) < 0.0 {
@@ -4610,11 +4609,9 @@ fn topology_split(
     geom_type: FilletGeomType,
 ) -> Result<FilletGeomId> {
     // the geometry's GetFilletSolver() is this solver
-    let solver_id = cx
-        .fillets
-        .geom(geom)?
-        .fillet_solver()
-        .ok_or_else(|| SolidError::blend_missing(OP, "the fillet geometry's solver"))?;
+    let solver_id = cx.fillets.geom(geom)?.fillet_solver().ok_or_else(|| {
+        SolidError::blend_null_defect(OP, "the fillet geometry being split has no solver")
+    })?;
     // a standalone entry point holds no executive: no corner of any vertex
     let corners: &mut dyn SplitCorners = match &mut cx.solvers {
         GeometrySolvers::Indexed(_) => &mut NoCorners,
@@ -4677,10 +4674,12 @@ fn calc_cross_section(ops: &dyn FilletSolverOps, cx: &mut Cx<'_>, edge: EdgeId) 
 fn get_or_create_uv_trim_curve(k: &Kernel, brep: &mut Brep, edgeuse: EdgeuseId) -> Result<Curve> {
     edgeuse_p3::get_or_create_uv_trim_curve(k, brep, edgeuse, false, false, true)?.status?;
     // a successful fetch with bOKToMakeUVTrimCurve = TRUE always leaves a curve
-    eu::uv_trim_curve(brep, edgeuse)?
-        .0
-        .cloned()
-        .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's uv trim curve"))
+    eu::uv_trim_curve(brep, edgeuse)?.0.cloned().ok_or_else(|| {
+        SolidError::blend_null_defect(
+            OP,
+            "the edge use has no uv trim curve after one was fetched or made",
+        )
+    })
 }
 
 /// `SmEdgeuse::EvaluateBinormal(t, FALSE, rPnt, rBinVec, &sTangent, NULL, &sUVParameter)`
@@ -5147,9 +5146,12 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         let solver = self.ops.solver_mut();
         let approx_tol_3d = solver.approx_tol_3d;
         let this_ang_tol_rad = solver.this_ang_tol_rad();
-        let generator = solver
-            .fillet_surface_generator_mut()
-            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's surface generator"))?;
+        let generator = solver.fillet_surface_generator_mut().ok_or_else(|| {
+            SolidError::blend_null_defect(
+                OP,
+                "the solver set up for the surface has no surface generator",
+            )
+        })?;
         // The fork's `SmGnSectionFSG::CircleSurface` folded-balls check (`sm_BallsFold`,
         // WR-685, d01d7b0's 2714d37) is gone since tangency-labs/smlib#79's 410dfe1: a round
         // whose balls fold is refused before the corners by `BallIsRegular` (`blend::fillet_executive::session::ball_regular`).
