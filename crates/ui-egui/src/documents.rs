@@ -5241,6 +5241,9 @@ mod tests {
     #[test]
     fn the_views_of_a_design_follow_commands_keys_and_the_app() {
         let mut h = crate::scenario::Harness::new();
+        // The classic switcher, which this test's keys cover: since #19655 a focused Sheet view
+        // brings the Drawing workspace, where model shortcuts such as Ctrl+Shift+W wait, as on main.
+        h.app.preferences.workspace_follows_view = false;
         h.app.preferences.design_views_as_tabs = true;
         h.app.home.open = false;
         let call =
@@ -5639,7 +5642,8 @@ mod tests {
         assert!(!h.app.preferences.show_design_view_switcher && !h.app.preferences.design_views_as_tabs, "both off by default");
         assert!(!switcher(&mut h), "one view: no switcher");
         assert!(crate::scenario::handle_at("tab:design:0").is_some(), "the strip is drawn");
-        assert!(crate::scenario::handle_at("tab:view_new").is_none(), "nor the tab's + for a new view");
+        // #19659 (owner-approved): a single-view design tab shows its + for a new view.
+        assert!(crate::scenario::handle_at("tab:view_new").is_some(), "but the tab's + for a new view is there");
         h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch1"})).unwrap();
         h.frames(2);
         assert!(h.app.session.active_sketch.is_some(), "the sketch is entered");
