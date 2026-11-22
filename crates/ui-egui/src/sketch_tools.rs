@@ -750,6 +750,7 @@ pub fn refine_snap(
     // 3-Point Arc: the centre lands on a sketch point (#20719); the click keeps it there.
     if !mid_only
         && arc_snap
+        && best.as_ref().is_none_or(|b| b.1 != "T")
         && let [start, end] = own[..]
         && let Some(i) = crate::inference::arc_centre(sk, start, end, lp, tol)
         && best.as_ref().is_none_or(|b| i.at.dist(lp) < b.0)
