@@ -1459,7 +1459,8 @@ fn plane_face_gap_bound(
 /// that net (a B-spline, a ball patch, a sphere, a torus, a surface of revolution or of
 /// extrusion: [`Surface::evaluate`] and `as_b_spline` take the same net); for a plane, which
 /// evaluates by its analytic formula `O + u s_u X + v s_v Y`, the largest distance at the
-/// net's four corners, enclosed in outward-rounded interval arithmetic. The net bilinear
+/// net's four corners, each held exactly and enclosed within a few ulps
+/// ([`exact_corner_offset`]; in outward-rounded interval arithmetic where that gives none). The net bilinear
 /// (degree 1 by 1, two by two points of one weight, clamped knots: [`bilinear_net`]), the
 /// difference of net and plane is bilinear in `(u, v)` over the box, so each of its values is
 /// a convex combination of its corner values and its length is at most the largest corner
@@ -1467,7 +1468,8 @@ fn plane_face_gap_bound(
 /// converted from its net's, its net's point up to the rounding of its stored control points
 /// and of that evaluation, neither enclosed: `0`, the net taken as the surface as
 /// [`NetSurface::of`] and the bisection take it, the two agreeing at the probes to `1e-9`
-/// relative: not enclosed, a blocker of #20373 (review r4) still open. `None` for any other
+/// relative: not enclosed, a pre-existing open item tracked in #20643 (the bisections took the
+/// same net as the surface before this residual was counted). `None` for any other
 /// surface, any other net of a plane, and a plane whose box is not inside its analytic domain
 /// while it clamps its parameters there (the plane then not affine over the box).
 fn net_to_surface_bound(surface: &Surface, net: &Nurbs) -> Option<f64> {
@@ -1509,18 +1511,61 @@ fn net_to_surface_bound(surface: &Surface, net: &Nurbs) -> Option<f64> {
                 return None;
             }
             let s = net.pw.get(4 * (2 * i + j)..4 * (2 * i + j) + 4)?;
-            let on_net = point_of([*s.first()?, *s.get(1)?, *s.get(2)?, *s.get(3)?])?;
-            let on_plane = plus(
-                o,
-                plus(
-                    scaled(x, Ivl::from(u) * Ivl::from(scale.x)),
-                    scaled(y, Ivl::from(v) * Ivl::from(scale.y)),
-                ),
-            );
-            worst = worst.max(norm_upper(minus(on_net, on_plane))?);
+            let p = [*s.first()?, *s.get(1)?, *s.get(2)?, *s.get(3)?];
+            let exact = exact_corner_offset(p, position, [u, v], [scale.x, scale.y]);
+            let corner = if let Some(d) = exact {
+                d
+            } else {
+                let on_net = point_of(p)?;
+                let on_plane = plus(
+                    o,
+                    plus(
+                        scaled(x, Ivl::from(u) * Ivl::from(scale.x)),
+                        scaled(y, Ivl::from(v) * Ivl::from(scale.y)),
+                    ),
+                );
+                minus(on_net, on_plane)
+            };
+            worst = worst.max(norm_upper(corner)?);
         }
     }
     worst.is_finite().then_some(worst)
+}
+
+/// Not upstream (#20373 review r4): the difference `P - (O + (u s_u) X + (v s_v) Y)` of a net
+/// corner `P` of unit weight (`p`, homogeneous) from the plane `position` at the corner's
+/// parameters, each coordinate held exactly as an expansion ([`crate::geom::expansion`]: the
+/// products `u s_u`, their products with the axes and the sums are error-free) and enclosed by
+/// summing its components outward, least significant first, so that the enclosure is within a
+/// few ulps of the exact coordinate (an interval evaluation of the formula widens by an ulp of
+/// the corner's size at each step: at `|u| = 1.2e6` about `2e-9`, 12 to 21 times the distance).
+/// `None` for another weight and where an expansion product is out of range (then the caller
+/// encloses the formula in intervals).
+fn exact_corner_offset(
+    p: [f64; 4],
+    position: &crate::geom::axis2_placement::Axis2Placement,
+    [u, v]: [f64; 2],
+    [su, sv]: [f64; 2],
+) -> Option<V3<Ivl>> {
+    use crate::geom::expansion::{product, scale, sub};
+    let [px, py, pz, w] = p;
+    if w != 1.0 || !(px.is_finite() && py.is_finite() && pz.is_finite()) {
+        return None;
+    }
+    let (o, x, y) = (position.origin(), position.x_axis(), position.y_axis());
+    let (us, vs) = (product(u, su)?, product(v, sv)?);
+    let coordinate = |pk: f64, ok: f64, xk: f64, yk: f64| -> Option<Ivl> {
+        let d = sub(&sub(&sub(&[pk], &[ok]), &scale(&us, xk)?), &scale(&vs, yk)?);
+        let mut parts = d.iter().copied();
+        let first = Ivl::from(parts.next().unwrap_or(0.0));
+        let sum = parts.fold(first, |acc, c| acc + Ivl::from(c));
+        sum.is_finite().then_some(sum)
+    };
+    Some(V3 {
+        x: coordinate(px, o.x, x.x, y.x)?,
+        y: coordinate(py, o.y, x.y, y.y)?,
+        z: coordinate(pz, o.z, x.z, y.z)?,
+    })
 }
 
 /// Not upstream (#20373 review r4): the net's own distance to the surface the bisections
@@ -3425,7 +3470,13 @@ pub fn trim_image_gap_bound_within(
     let Some(to_surface) = bisection_residual(surface, &net) else {
         return Ok(None);
     };
-    let c_slack = (Ivl::from(c_slack) + Ivl::from(to_surface)).hi;
+    // (only a positive residual is added: an interval sum rounds outward, so adding `0`
+    // would move the slack an ulp)
+    let c_slack = if to_surface > 0.0 {
+        (Ivl::from(c_slack) + Ivl::from(to_surface)).hi
+    } else {
+        c_slack
+    };
     if !c_slack.is_finite() {
         return Ok(None);
     }
@@ -3710,11 +3761,11 @@ mod tests {
         );
         // an empty or reversed range encloses nothing
         let top = crate::query::api_queries::get_faces(&b).unwrap();
-        assert!(top.iter().all(
-            |f| curve_face_gap_bound(&k, &b, *f, &line, [0.5, 0.5], 1e-7)
+        assert!(top.iter().all(|f| {
+            curve_face_gap_bound(&k, &b, *f, &line, [0.5, 0.5], 1e-7)
                 .unwrap()
                 .is_none()
-        ));
+        }));
     }
 
     /// A curve bowing within a plane parallel to a box's face is bounded against the face
@@ -5063,6 +5114,71 @@ mod tests {
             seen += 1;
         }
         assert!(seen >= 2, "{seen} cap trims structured");
+    }
+
+    /// #20373 review r4: a plane net's distance to its plane is held exactly at each corner
+    /// ([`exact_corner_offset`]) and enclosed within a few ulps of it. The rotated plane of
+    /// `topology.brep_local_operation` gen0014 over `[-1234567, 1234567]^2`: its net's corners
+    /// are the plane's corners rounded, `1.6e-10` off it at most, where an interval evaluation
+    /// of `O + u X + v Y` widens to `2.1e-9` (an ulp of `1.2e6` per step). The bound must be at
+    /// least the exact largest corner distance (checked in expansions, [`crate::query::exact`])
+    /// and within `1e-9` relative of it.
+    #[test]
+    fn a_plane_nets_distance_to_its_plane_is_enclosed_tightly() {
+        use crate::geom::extent2d::Extent2d;
+        use crate::math::{Vec2, Vec3};
+        use crate::query::exact::{le, Exact};
+        use crate::surface::plane::Plane;
+        let k = Kernel::default();
+        let a = 1_234_567.0;
+        let plane = Plane::new(
+            Point3::new(0.0, 2.5000000000000004, 0.055943466315470314),
+            Vec3::new(
+                -0.07001563037373039,
+                0.9697429256825116,
+                0.23387276368164822,
+            ),
+            Vec3::new(-0.9579909515227577, 0.0, -0.28679842538012873),
+            Vec2::new(1.0, 1.0),
+            &Extent2d::from_bounds(-a, -a, a, a),
+        );
+        let pos = *plane.position();
+        let surface = Surface::from(plane);
+        let net = NetSurface::of(&k, &surface, &[]).unwrap().unwrap().net;
+        let r = net_to_surface_bound(&surface, &net).unwrap();
+        let (o, x, y) = (pos.origin(), pos.x_axis(), pos.y_axis());
+        let mut worst = Exact::of(0.0);
+        for (i, u) in [net.u[1], net.u[2]].into_iter().enumerate() {
+            for (j, v) in [net.v[1], net.v[2]].into_iter().enumerate() {
+                let c = &net.pw[4 * (2 * i + j)..4 * (2 * i + j) + 4];
+                assert_eq!(c[3], 1.0);
+                let d2 = [
+                    (c[0], o.x, x.x, y.x),
+                    (c[1], o.y, x.y, y.y),
+                    (c[2], o.z, x.z, y.z),
+                ]
+                .into_iter()
+                .fold(Exact::of(0.0), |acc, (p, ok, xk, yk)| {
+                    let d = Exact::of(p)
+                        .sub(&Exact::of(ok))
+                        .sub(&Exact::of(u).scale(xk))
+                        .sub(&Exact::of(v).scale(yk));
+                    acc.add(&d.square())
+                });
+                if d2.sub(&worst).sign() == std::cmp::Ordering::Greater {
+                    worst = d2;
+                }
+            }
+        }
+        assert_ne!(
+            worst.sign(),
+            std::cmp::Ordering::Equal,
+            "the net is off its plane"
+        );
+        // sound: worst <= r^2; tight: r^2 <= worst (1 + 1e-9)^2
+        le(&worst, &Exact::of(r).square());
+        le(&Exact::of(r).square(), &worst.scale(1.000_000_002));
+        assert!(r < 3e-10, "{r:e}");
     }
 
     /// #20373 review r4: where the structured bound is above `enough`, the bisection answers,
