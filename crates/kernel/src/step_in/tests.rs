@@ -5493,8 +5493,6 @@ fn an_imported_part_whose_check_fails_is_healed_where_it_is_read() {
     assert_eq!(faces, 8);
     let origin: Vec<u64> = (100..100 + faces as u64).collect();
     let part = Part { body, closed: true, file_faces: faces, face_origin: origin.clone(), refused: None, split_edges: 0 };
-    let read = heal(&part, 7);
-    let part = Part { body, closed: true, file_faces: faces, face_origin: origin.clone(), refused: None };
     let read = heal(&part, 7, None);
     assert_eq!(part.body.record(), &source, "the part read stays as it was");
     let Healed::Kept(part, note, check, face_source) = read else { panic!("kept") };
@@ -5535,8 +5533,6 @@ fn an_imported_part_whose_check_fails_is_healed_where_it_is_read() {
     let clean = hair_step_body(3e-3, 1e-3);
     assert_eq!(crate::validation::failing_check(&clean).unwrap(), None);
     let part = Part { body: clean, closed: true, file_faces: 8, face_origin: origin.clone(), refused: None, split_edges: 0 };
-    assert!(matches!(heal(&part, 7), Healed::NotKept));
-    let part = Part { body: clean, closed: true, file_faces: 8, face_origin: origin.clone(), refused: None };
     assert!(matches!(heal(&part, 7, None), Healed::NotKept));
 }
 
@@ -5649,8 +5645,6 @@ fn a_stopped_heal_changes_nothing() {
     stop.stop();
     assert_eq!(stop.within(|| crate::heal_tolerance_defects(&hair)).err(), Some(KernelError::Heal(crate::HealFailure::Stopped)));
     let part = Part { closed: true, file_faces: 8, face_origin: (0..8).collect(), refused: None, split_edges: 0, body: hair.clone() };
-    assert!(matches!(stop.within(|| heal(&part, 7)), Healed::Stopped));
-    let part = Part { closed: true, file_faces: 8, face_origin: (0..8).collect(), refused: None, body: hair.clone() };
     assert!(matches!(stop.within(|| heal(&part, 7, None)), Healed::Stopped));
     assert_eq!(part.body.record(), &source);
     // In the import's checks: a stopped run heals nothing and says it was stopped.
