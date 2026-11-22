@@ -464,9 +464,10 @@ pub fn biarc(
 /// each endpoint contributes a piece unless it is within `1e-12` of the joint. A piece
 /// whose sagitta is negligible or whose radius exceeds `1e7` is represented by its chord.
 ///
-/// This approximation evaluates the distance quadratic and the circular parameters in input
-/// coordinates. It retains the rounding and piece cardinality of the planar arc fitter.
-/// Use [`biarc`] when the endpoint tangents and a shallow circular bend must remain exact.
+/// The auxiliary-distance construction is shared with [`biarc`], including the choice of a
+/// conditioned quadratic root. The approximation keeps the planar arc fitter's input-coordinate
+/// circular parameters and piece cardinality. Use [`biarc`] to retain exact endpoint contacts
+/// and shallow circular bends.
 ///
 /// # Errors
 /// Non-finite or coincident endpoints, tangents that are not unit vectors, or a span whose
@@ -665,84 +666,174 @@ impl BiarcContacts {
         })
     }
 
-    /// Construct the shared positive-distance biarc. Approximation retains unit input tangents,
-    /// input-coordinate arithmetic and permitted chord representations; exact contacts use
-    /// scaled coefficients and local chords to retain small bends and translated contacts.
+    /// Both callers use one auxiliary-distance solve and weighted tangent-point joint.
+    /// Only the approximation's chord representation and cardinality bounds differ.
     fn construct(
         &self,
         ratio: f64,
         approximation: Option<BiarcApproximation>,
         op: &'static str,
     ) -> Result<(Point2, Vec<Seg2>)> {
-        let Self {
-            start,
-            end,
-            chord,
-            length,
-            first,
-            last,
-        } = *self;
-        let (joint, chords) = if let Some(bounds) = approximation {
-            let squared_length = chord.dot(chord);
+        if let Some(bounds) = approximation {
+            let squared_length = self.chord.dot(self.chord);
             // The approximate fitter admits equality at the squared chord threshold.
             if squared_length < 1e-24 {
                 return Err(biarc_precision_error(op));
             }
-            let length = squared_length.sqrt();
-            let direction = chord / length;
-            if cross2(first, direction).abs() < bounds.straight_tolerance
-                && cross2(last, direction).abs() < bounds.straight_tolerance
-                && first.dot(direction) > 0.0
-                && last.dot(direction) > 0.0
+            let direction = self.chord / squared_length.sqrt();
+            if cross2(self.first, direction).abs() < bounds.straight_tolerance
+                && cross2(self.last, direction).abs() < bounds.straight_tolerance
+                && self.first.dot(direction) > 0.0
+                && self.last.dot(direction) > 0.0
             {
-                return Ok((start + chord * 0.5, vec![Seg2::Line { a: start, b: end }]));
+                return Ok((
+                    self.start + self.chord * 0.5,
+                    vec![Seg2::Line {
+                        a: self.start,
+                        b: self.end,
+                    }],
+                ));
             }
-            // Equal auxiliary distances d obey a*d² + 2*b*d - |chord|² = 0.
-            // Preserve the direct quadratic's rounding for approximate fitted spans.
-            let a = 2.0 * (1.0 - first.dot(last));
-            let b = chord.dot(first + last);
-            let distance = if a < bounds.straight_tolerance {
-                if b <= bounds.straight_tolerance * length {
-                    return Err(biarc_precision_error(op));
-                }
-                squared_length / (2.0 * b)
-            } else {
-                (-b + (b * b + a * squared_length).max(0.0).sqrt()) / a
-            };
-            if !(distance.is_finite() && distance > 0.0) {
-                return Err(biarc_precision_error(op));
-            }
-            let joint = ((start + first * distance) + (end - last * distance)) * 0.5;
-            (joint, [joint - start, joint - end])
+        }
+        let total = self.auxiliary_distance(ratio, op)?;
+        let rest = 1.0 - ratio;
+        let first_distance = ratio * total;
+        let last_distance = rest * total;
+        if !(first_distance > 0.0 && last_distance > 0.0) {
+            return Err(biarc_precision_error(op));
+        }
+        let first_contact = self.start + self.first * first_distance;
+        let last_contact = self.end - self.last * last_distance;
+        let [left_chord, right_chord] = self.local_chords(ratio, total);
+        let weighted_joint = first_contact * rest + last_contact * ratio;
+        let local_joint = self.start + left_chord;
+        // The coordinate readback allowance can exceed a tiny translated span. Arithmetic
+        // placement must also retain the span's own scale before any coordinate allowance.
+        let placement_tolerance = self.position_tolerance().min(EFF_ZERO * self.length);
+        // Tangent points can overflow or lose the endpoint separation before they are averaged.
+        // Use the local placement when that error exceeds the existing position allowance or
+        // loses the direction of an analytically straight piece.
+        let joint = if finite2(local_joint)
+            && (!biarc_near(weighted_joint, local_joint, placement_tolerance)
+                || !self.keeps_straight_contacts(weighted_joint, [left_chord, right_chord]))
+        {
+            local_joint
         } else {
-            let rest = 1.0 - ratio;
-            let difference = first - last;
-            let weighted = first * ratio + last * rest;
-            // In chord-length units, |chord - s*weighted| = s. The difference's
-            // squared length and the same-sign root avoid cancellation.
-            let a = ratio * rest * difference.length_squared();
-            let b = (chord / length).dot(weighted);
-            let root = b.hypot(a.sqrt());
-            let inverse = if b >= 0.0 { root + b } else { a / (root - b) };
-            if !(inverse > 0.0) {
-                return Err(SolidError::Unsupported {
-                    operation: op,
-                    reason: "tangents do not admit a finite biarc at this ratio",
-                });
-            }
-            let distance = length / inverse;
-            if !(distance.is_finite() && ratio * distance > 0.0 && rest * distance > 0.0) {
-                return Err(biarc_precision_error(op));
-            }
-            let turn = difference * (ratio * rest * distance);
-            let left_chord = chord * ratio + turn;
-            let right_chord = chord * -rest + turn;
-            (start + left_chord, [left_chord, right_chord])
+            weighted_joint
+        };
+        let chords = if approximation.is_some() {
+            [joint - self.start, joint - self.end]
+        } else {
+            [left_chord, right_chord]
         };
         Ok((
             joint,
             self.construct_pieces(joint, chords, approximation, op)?,
         ))
+    }
+
+    /// Twice the mean auxiliary distance, shared by interpolation and approximation.
+    ///
+    /// Let u = total/2 and w = r*first + (1-r)*last. The positive-distance construction
+    /// gives A*u² + 2*B*u - C = 0, with A = 8*r*(1-r)*(1-first·last),
+    /// B = 2*chord·w and C = chord·chord. At r = 1/2 these are the equal-distance
+    /// fitter's coefficients, retaining its arithmetic when the root meets the join bound.
+    fn auxiliary_distance(&self, ratio: f64, op: &'static str) -> Result<f64> {
+        let rest = 1.0 - ratio;
+        let weighted = self.first * ratio + self.last * rest;
+        let a = 8.0 * ratio * rest * (1.0 - self.first.dot(self.last));
+        let b = 2.0 * self.chord.dot(weighted);
+        let c = self.chord.dot(self.chord);
+        let direct = if a < EFF_ZERO {
+            (b > EFF_ZERO * c.sqrt()).then(|| c / (2.0 * b))
+        } else {
+            Some((-b + (b * b + a * c).max(0.0).sqrt()) / a)
+        };
+        if let Some(half) = direct {
+            let total = 2.0 * half;
+            if total.is_finite()
+                && total > 0.0
+                && self.join_is_conditioned(self.local_chords(ratio, total))
+            {
+                return Ok(total);
+            }
+        }
+
+        // A subtractive root can lose precision near parallel tangents. Use the same
+        // construction in chord-length units, with the difference-squared coefficient
+        // and a same-sign root. The choice depends on the geometric residual, not the caller.
+        let difference = self.first - self.last;
+        let a = ratio * rest * difference.length_squared();
+        let b = (self.chord / self.length).dot(weighted);
+        let root = b.hypot(a.sqrt());
+        let inverse = if b >= 0.0 { root + b } else { a / (root - b) };
+        if !(inverse > 0.0) {
+            return Err(SolidError::Unsupported {
+                operation: op,
+                reason: "tangents do not admit a finite biarc at this ratio",
+            });
+        }
+        let total = self.length / inverse;
+        if !(total.is_finite() && total > 0.0) {
+            return Err(biarc_precision_error(op));
+        }
+        Ok(total)
+    }
+
+    fn local_chords(&self, ratio: f64, total: f64) -> [Vec2; 2] {
+        let rest = 1.0 - ratio;
+        let turn = (self.first - self.last) * (ratio * rest * total);
+        [self.chord * ratio + turn, self.chord * -rest + turn]
+    }
+
+    /// Reflection across a circular piece's chord gives its other endpoint tangent.
+    /// Normalization, dot products and reflection contribute fewer than 24 rounding units per
+    /// side. Both sides and their cross product fit within `gamma(64)`, so the direct root must
+    /// have a residual indistinguishable from arithmetic roundoff.
+    fn join_is_conditioned(&self, [left, right]: [Vec2; 2]) -> bool {
+        let left_length = length2d(left);
+        let right_length = length2d(right);
+        if !(left_length.is_finite()
+            && left_length > 0.0
+            && right_length.is_finite()
+            && right_length > 0.0)
+        {
+            return false;
+        }
+        let left = left / left_length;
+        let right = right / right_length;
+        let from_left = left * (2.0 * self.first.dot(left)) - self.first;
+        let from_right = right * (2.0 * self.last.dot(right)) - self.last;
+        from_left.dot(from_right) > 0.0 && cross2(from_left, from_right).abs() <= gamma(64)
+    }
+
+    /// Coordinate-rounding allowance shared by joint placement and exact piece validation.
+    fn position_tolerance(&self) -> f64 {
+        EFF_ZERO * self.length.max(1.0)
+            + gamma(4) * self.start.max_dimension().max(self.end.max_dimension())
+    }
+
+    fn keeps_straight_contacts(&self, joint: Point2, [left, right]: [Vec2; 2]) -> bool {
+        [
+            (self.start, self.first, left),
+            (self.end, -self.last, right),
+        ]
+        .into_iter()
+        .all(|(start, tangent, chord)| {
+            let length = length2d(chord);
+            if !(length.is_finite() && length > 0.0) {
+                return true;
+            }
+            let unit = chord / length;
+            if !forward_collinear(cross2(tangent, unit), tangent.dot(unit)) {
+                return true;
+            }
+            let placed_chord = joint - start;
+            let placed_length = length2d(placed_chord);
+            placed_length.is_finite()
+                && placed_length > 0.0
+                && same_biarc_direction(placed_chord / placed_length, tangent)
+        })
     }
 
     fn pieces(&self, joint: Point2, chords: [Vec2; 2], op: &'static str) -> Result<[Seg2; 2]> {
@@ -758,13 +849,8 @@ impl BiarcContacts {
         approximation: Option<BiarcApproximation>,
         op: &'static str,
     ) -> Result<Vec<Seg2>> {
-        let tol = approximation.map_or_else(
-            || {
-                EFF_ZERO * self.length.max(1.0)
-                    + gamma(4) * self.start.max_dimension().max(self.end.max_dimension())
-            },
-            |bounds| bounds.minimum_piece,
-        );
+        let tol =
+            approximation.map_or_else(|| self.position_tolerance(), |bounds| bounds.minimum_piece);
         let mut built = Vec::new();
         for (start, tangent, chord, reverse) in [
             (self.start, self.first, left_chord, false),

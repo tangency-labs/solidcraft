@@ -486,6 +486,116 @@ fn a_fitted_biarc_keeps_the_inclusive_chord_and_strict_piece_cutoffs() {
 }
 
 #[test]
+fn biarc_fitting_and_interpolation_condition_the_same_nearly_parallel_contacts() {
+    let radius = 1e6;
+    for angle in [1e-5_f64, 6e-5, 1e-4] {
+        let start = Vec2::ZERO;
+        let from = p(1.0, 0.0);
+        // Stable half-angle form of a circle about (0, radius), avoiding 1 - cos(angle).
+        let end = p(
+            radius * angle.sin(),
+            2.0 * radius * (angle * 0.5).sin().powi(2),
+        );
+        let to = p(angle.cos(), angle.sin());
+        let (_, exact) = biarc(start, from, end, to, 0.5).unwrap();
+        let fitted = fit_biarc(start, from, end, to).unwrap();
+        // Recovering R = |chord|² / (2 * normal·chord) divides by sin(angle/4).
+        // Here sin(angle/4) > angle/8. Gamma_128 encloses fewer than 128 rounded input,
+        // normalization, conditioned-root, chord and quotient operations, amplified by 8/angle.
+        let roundings = 128.0 * f64::EPSILON;
+        let gamma = roundings / (1.0 - roundings);
+        let tolerance = 8.0 * gamma * radius / angle;
+        for pieces in [exact.to_vec(), fitted] {
+            assert_eq!(pieces.len(), 2);
+            for piece in pieces {
+                let Seg2::Arc {
+                    center,
+                    radius: actual_radius,
+                    ..
+                } = piece
+                else {
+                    panic!("the circle's radius lies within the approximation bound");
+                };
+                assert!(center.distance(p(0.0, radius)) < tolerance, "{center:?}");
+                assert!(
+                    (actual_radius - radius).abs() < tolerance,
+                    "{actual_radius}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn biarc_keeps_a_finite_joint_when_an_auxiliary_tangent_point_overflows() {
+    let start = p(1.6e308, 0.0);
+    let end = p(1.6e308 - 1e293, 0.0);
+    let slope = (2e-15_f64).sqrt();
+    // An auxiliary tangent point is beyond f64's range. The circle pair's joint
+    // lies between the finite endpoint x coordinates and has a finite positive y coordinate.
+    let (joint, pieces) = biarc(start, p(1.0, slope), end, p(1.0, -slope), 0.5).unwrap();
+    assert!(joint.x >= end.x && joint.x <= start.x);
+    assert!(joint.y.is_finite() && joint.y > 0.0);
+    assert!(pieces.into_iter().all(|piece| matches!(
+        piece,
+        Seg2::Arc { center, radius, .. }
+            if center.x.is_finite() && center.y.is_finite() && radius.is_finite() && radius > 0.0
+    )));
+}
+
+#[test]
+fn biarc_keeps_the_joint_when_finite_auxiliary_points_lose_endpoint_separation() {
+    let slope = 1e-8;
+    // Symmetric contacts put the joint halfway between endpoint x coordinates. The
+    // auxiliary x coordinates have magnitude 1e16, where their average can lose that half.
+    let (joint, pieces) = biarc(
+        Vec2::ZERO,
+        p(-1.0, slope),
+        p(1.0, 0.0),
+        p(-1.0, -slope),
+        0.5,
+    )
+    .unwrap();
+    assert_eq!(joint.x, 0.5);
+    assert!(joint.y.is_finite() && joint.y > 0.0);
+    assert!(pieces
+        .into_iter()
+        .all(|piece| matches!(piece, Seg2::Arc { .. })));
+}
+
+#[test]
+fn biarc_keeps_a_translated_straight_contact_when_averaging_rounds_off_the_line() {
+    let start = p(1e7, 0.0);
+    let end = p(1e7 + 40.0, 30.0);
+    let tangent = p(0.8, 0.6);
+    // 0.15 of the (40, 30) chord is exactly (6, 4.5). Averaging the auxiliary
+    // world coordinates can instead move x by an ulp, losing the straight tangent.
+    let (joint, pieces) = biarc(start, tangent, end, tangent, 0.15).unwrap();
+    assert_eq!(joint, p(1e7 + 6.0, 4.5));
+    assert_eq!(
+        pieces,
+        [
+            Seg2::Line { a: start, b: joint },
+            Seg2::Line { a: joint, b: end }
+        ]
+    );
+}
+
+#[test]
+fn biarc_keeps_a_small_translated_curve_when_the_joint_rounds_at_coordinate_scale() {
+    let start = p(1e7, -1e7);
+    let end = p(1e7 + 8e-9, -1e7 + 6e-9);
+    let vertical_x = FRAC_PI_2.cos();
+    // These are distinct representable endpoints. A coordinate-sized change in the
+    // weighted joint can erase one of its pieces; local placement retains the curve.
+    let (joint, pieces) = biarc(start, p(vertical_x, 1.0), end, p(vertical_x, -1.0), 0.37).unwrap();
+    assert!(joint.x.is_finite() && joint.y.is_finite());
+    assert!(pieces
+        .into_iter()
+        .all(|piece| matches!(piece, Seg2::Arc { .. })));
+}
+
+#[test]
 fn biarc_keeps_shallow_bends_as_arcs() {
     let start = p(0.0, 15.0);
     let end = p(4.0, 15.000014);
