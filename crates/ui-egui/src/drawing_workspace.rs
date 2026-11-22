@@ -765,7 +765,11 @@ fn sheet_card(
     let label = if selected { label.strong() } else { label };
     let name_response = ui.put(name, egui::Label::new(label).truncate().sense(Sense::click()));
     if response.clicked() || name_response.clicked() {
-        select_sheet(app, sheet.id);
+        if !app.preferences.design_sub_tab_sheets {
+            select_sheet(app, sheet.id);
+        } else if let Err(error) = crate::sheet_views::open_in(app, drawing.id, sheet.id, false) {
+            app.set_status(error, true);
+        }
     }
 
     let menu_button = ui_kit::icon_button_at(ui, menu, "dots", app.tr("ui.drawing_sheets.actions"));
