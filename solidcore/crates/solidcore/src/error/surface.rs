@@ -14,9 +14,12 @@
 //! | [`SurfaceFailure::OutsideDomain`]  | `SM_ERR_OUTSIDE_OF_DOMAIN`     |
 //! | [`SurfaceFailure::OffSurface`]     | `SM_ERR_NOT_WITHIN_TOLERANCE`  |
 //! | [`SurfaceFailure::Defect`]         | `SM_ERR` (or the site's, through `with_status`) |
-//! | [`SurfaceFailure::UnsupportedCacheKind`], [`SurfaceFailure::SolverSurfaceNotBSpline`], [`SurfaceFailure::NoControlPoints`], [`SurfaceFailure::PointsDoNotTurnOneWay`], [`SurfaceFailure::UnsupportedSurfaceKind`], [`SurfaceFailure::UnsupportedSolverOperation`], [`SurfaceFailure::NoRoughGuess`], [`SurfaceFailure::ZeroStepOutsideDomain`], [`SurfaceFailure::LineSearchNormUnsigned`], [`SurfaceFailure::LineSearchNotBracketed`] | `SM_ERR` |
-//! | [`SurfaceFailure::TrimmedCacheHasNoFace`], [`SurfaceFailure::SurfaceNotBSplineKind`], [`SurfaceFailure::CurveNotBSplineKind`], [`SurfaceFailure::CurvesNotCached`], [`SurfaceFailure::FaceHasNoSurface`], [`SurfaceFailure::EdgeuseHasNoTrimCurve`] | `SM_ERR_NULL_POINTER` |
-//! | [`SurfaceFailure::DisjointFaceDomain`] | `SM_ERR_INVALID_INPUT` |
+//! | [`SurfaceFailure::NoNurb`], [`SurfaceFailure::InputNotGiven`], [`SurfaceFailure::TrimmedCacheHasNoFace`], [`SurfaceFailure::SurfaceCacheHasNoTree`], [`SurfaceFailure::CurvesNotCached`], [`SurfaceFailure::FaceHasNoSurface`], [`SurfaceFailure::EdgeuseHasNoTrimCurve`], [`SurfaceFailure::NodeHasNoSurface`] | `SM_ERR_NULL_POINTER` (class [`ErrorKind::InvalidInput`]) |
+//! | [`SurfaceFailure::SurfaceNotBSplineKind`], [`SurfaceFailure::CurveNotBSplineKind`] | `SM_ERR_NULL_POINTER` (class [`ErrorKind::Unsupported`]) |
+//! | [`SurfaceFailure::SurfaceCacheNotBuilt`], [`SurfaceFailure::SurfaceCacheTreeNotBuilt`], [`SurfaceFailure::CurveCacheNotBuilt`], [`SurfaceFailure::CurveCacheTreeNotBuilt`] | `SM_ERR_NULL_POINTER` (class [`ErrorKind::Failed`]; defect-ness follows the cause) |
+//! | [`SurfaceFailure::NormalsCancel`]  | `SM_ERR_INVALID_INPUT` (class [`ErrorKind::Degenerate`]) |
+//! | [`SurfaceFailure::DisjointFaceDomain`] | `SM_ERR_INVALID_INPUT` (class [`ErrorKind::InvalidInput`]) |
+//! | every other named cause            | `SM_ERR`, with the class its doc names |
 //!
 //! [`SurfaceFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
 //! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
@@ -34,7 +37,7 @@ use super::{
 };
 
 /// Why a surface routine fails.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum SurfaceFailure {
     /// The routine could not continue, as the phrase says (for example "the generator
@@ -54,6 +57,104 @@ pub enum SurfaceFailure {
     /// A point is farther from the surface than the tolerance, as the phrase says (for
     /// example "the point is off the surface"): an inversion's answer.
     OffSurface(&'static str),
+    /// A derivative of an order above `max` was asked of a form that evaluates up to `max`.
+    /// [`ErrorKind::InvalidInput`].
+    DerivativeOrderTooHigh {
+        /// The highest order the form evaluates.
+        max: usize,
+    },
+    /// The surface given has no NURB form, which the routine reads.
+    /// [`ErrorKind::InvalidInput`].
+    NoNurb,
+    /// The surface cache is of a kind that does not do this: the base cache answers the
+    /// trimmed cache's queries with a refusal ([`ErrorKind::Unsupported`], `SM_ERR`).
+    UnsupportedCacheKind,
+    /// The surface's cache could not be made; the failure that stopped it is the cause
+    /// (`SM_ERR_NULL_POINTER`, class [`ErrorKind::Failed`]: its defect-ness follows the
+    /// cause).
+    SurfaceCacheNotBuilt,
+    /// The surface cache's tree could not be built; the failure that stopped it, where
+    /// there was one, is the cause (`SM_ERR_NULL_POINTER`, class [`ErrorKind::Failed`]).
+    SurfaceCacheTreeNotBuilt,
+    /// The surface cache the caller gave has no tree to solve on
+    /// ([`ErrorKind::InvalidInput`], `SM_ERR_NULL_POINTER`).
+    SurfaceCacheHasNoTree,
+    /// The curve's cache could not be made; the failure that stopped it is the cause
+    /// (`SM_ERR_NULL_POINTER`, class [`ErrorKind::Failed`]).
+    CurveCacheNotBuilt,
+    /// The curve cache has no tree (`SM_ERR_NULL_POINTER`, class [`ErrorKind::Failed`]).
+    CurveCacheTreeNotBuilt,
+    /// The cubic approximation of a surface was still farther from it than the tolerance
+    /// after the last subdivision pass: a solve that stops with its numbers, a defect
+    /// (guide §6 rule 3; class [`ErrorKind::StageFailed`], `SM_ERR`).
+    ApproximationNotConverged {
+        /// The largest distance of the approximation from the surface it sampled.
+        achieved: f64,
+        /// The distance asked for.
+        tolerance: f64,
+    },
+    /// The caller's parameter lies in none of the curve's segments, which cover its
+    /// interval ([`ErrorKind::InvalidInput`], `SM_ERR`).
+    ParameterOutsideInterval {
+        /// The parameter.
+        param: f64,
+    },
+    /// A first derivative (tangent) of the curve or surface is of zero length where the
+    /// routine needs its direction ([`ErrorKind::Degenerate`], `SM_ERR`).
+    ZeroLengthTangent,
+    /// The surface has no normal at the point ([`ErrorKind::Degenerate`], `SM_ERR`).
+    NoNormal,
+    /// The two surfaces' normals are parallel, so they span no plane
+    /// ([`ErrorKind::Degenerate`], `SM_ERR`).
+    ParallelNormals,
+    /// The normals around a singular point sum to zero, so they give no normal there
+    /// ([`ErrorKind::Degenerate`]; upstream's status `SM_ERR_INVALID_INPUT`).
+    NormalsCancel,
+    /// The curve's tangent is along the surface normal, so there is no binormal
+    /// ([`ErrorKind::Degenerate`], `SM_ERR`).
+    TangentAlongNormal,
+    /// The solver's caller gave fewer variables than its equations take
+    /// ([`ErrorKind::InvalidInput`], `SM_ERR`).
+    TooFewSolverVariables {
+        /// The number of variables the equations take.
+        needed: usize,
+    },
+    /// An input the routine needs was not given by its caller
+    /// ([`ErrorKind::InvalidInput`], `SM_ERR_NULL_POINTER`).
+    InputNotGiven {
+        /// Which input.
+        what: SolveInput,
+    },
+    /// The trimmed surface cache that point testing reads has no face to test against
+    /// ([`ErrorKind::InvalidInput`], `SM_ERR_NULL_POINTER`).
+    TrimmedCacheHasNoFace,
+    /// An end point of the caller's UV line lies outside the surface's UV domain
+    /// ([`ErrorKind::InvalidInput`], `SM_ERR`).
+    EndPointOutsideDomain,
+    /// The surface has fewer than two distinct knots in a direction, so it has no span
+    /// there ([`ErrorKind::Degenerate`], `SM_ERR`).
+    TooFewUniqueKnots,
+    /// The derivative surface definition's tangency type is not one a derivative surface
+    /// is made for ([`ErrorKind::Unsupported`], `SM_ERR`).
+    UnsupportedTangencyType,
+    /// The caller's derivative surface definition fails its validity check
+    /// ([`ErrorKind::InvalidInput`], `SM_ERR`).
+    InvalidDerivativeSurface,
+    /// A point of the boundary curve does not drop onto the surface
+    /// ([`ErrorKind::Failed`], `SM_ERR`).
+    PointDoesNotDrop,
+    /// A 3d direction has no direction in the surface's parameters at the point; the
+    /// failure is the cause ([`ErrorKind::Failed`], `SM_ERR`).
+    NoParameterDirection,
+    /// The tangent reference curve's point lies on the boundary curve, so it gives no
+    /// direction ([`ErrorKind::Degenerate`], `SM_ERR`).
+    ReferencePointOnBoundary,
+    /// No sampled tangent of the singular direction points along the given direction
+    /// ([`ErrorKind::Failed`], `SM_ERR`).
+    NoTangentTowardDirection,
+    /// The point is at a pole of the surface, where the seam test does not apply
+    /// ([`ErrorKind::Unsupported`], `SM_ERR`).
+    AtPole,
     /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
     /// `why` names the step that failed and why that is the kernel's fault, not the
     /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
@@ -62,12 +163,6 @@ pub enum SurfaceFailure {
         /// The step that failed, and why that is the kernel's fault.
         why: &'static str,
     },
-    /// The surface cache is of a kind that does not do this: the base cache answers the
-    /// trimmed cache's queries with a refusal ([`ErrorKind::Unsupported`], `SM_ERR`).
-    UnsupportedCacheKind,
-    /// The trimmed surface cache that point testing reads has no face to test against
-    /// ([`ErrorKind::InvalidInput`], `SM_ERR_NULL_POINTER`).
-    TrimmedCacheHasNoFace,
     /// The caller's surface is not of a B-spline kind, which the routine reads as one
     /// ([`ErrorKind::Unsupported`], `SM_ERR_NULL_POINTER`).
     SurfaceNotBSplineKind,
@@ -114,6 +209,57 @@ pub enum SurfaceFailure {
     /// The caller's edge use has no UV trim curve ([`ErrorKind::InvalidInput`],
     /// `SM_ERR_NULL_POINTER`).
     EdgeuseHasNoTrimCurve,
+    /// The surface cache already holds [`MAX_ALT_CACHES`](crate::surface::surface_cache::MAX_ALT_CACHES)
+    /// alternate caches or more, so a new one has no room: the list is the caller's through
+    /// `alt_caches_mut` ([`ErrorKind::InvalidInput`], `SM_ERR`).
+    AltCachesFull,
+    /// The caller's node is not a surface node, so it has no patch to test
+    /// ([`ErrorKind::InvalidInput`], `SM_ERR`).
+    NodeNotSurfaceNode,
+    /// The caller's node already has children, so it is not a leaf to test
+    /// ([`ErrorKind::InvalidInput`], `SM_ERR`).
+    NodeHasChildren,
+    /// The caller's node has no surface to subdivide
+    /// ([`ErrorKind::InvalidInput`], `SM_ERR_NULL_POINTER`).
+    NodeHasNoSurface,
+}
+
+/// An input of a surface routine that its caller did not give
+/// ([`SurfaceFailure::InputNotGiven`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SolveInput {
+    /// The surface.
+    Surface,
+    /// The first of two surfaces.
+    FirstSurface,
+    /// The second of two surfaces.
+    SecondSurface,
+    /// The plane of the solve.
+    Plane,
+    /// The surface cache of the solve.
+    SurfaceCache,
+    /// The target distance of a solve at a distance.
+    TargetDistance,
+    /// The direction vector of a directed minimize.
+    DirectionVector,
+    /// The tangent reference curve of a derivative surface.
+    TangentReference,
+}
+
+impl core::fmt::Display for SolveInput {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::Surface => "the surface",
+            Self::FirstSurface => "the first surface",
+            Self::SecondSurface => "the second surface",
+            Self::Plane => "the plane",
+            Self::SurfaceCache => "the surface cache",
+            Self::TargetDistance => "the target distance",
+            Self::DirectionVector => "the direction vector",
+            Self::TangentReference => "the tangent reference curve",
+        })
+    }
 }
 
 impl SurfaceFailure {
@@ -122,7 +268,24 @@ impl SurfaceFailure {
         match self {
             Self::Failed(_)
             | Self::Defect { .. }
+            | Self::DerivativeOrderTooHigh { .. }
             | Self::UnsupportedCacheKind
+            | Self::ApproximationNotConverged { .. }
+            | Self::ParameterOutsideInterval { .. }
+            | Self::ZeroLengthTangent
+            | Self::NoNormal
+            | Self::ParallelNormals
+            | Self::TangentAlongNormal
+            | Self::TooFewSolverVariables { .. }
+            | Self::EndPointOutsideDomain
+            | Self::TooFewUniqueKnots
+            | Self::UnsupportedTangencyType
+            | Self::InvalidDerivativeSurface
+            | Self::PointDoesNotDrop
+            | Self::NoParameterDirection
+            | Self::ReferencePointOnBoundary
+            | Self::NoTangentTowardDirection
+            | Self::AtPole
             | Self::SolverSurfaceNotBSpline
             | Self::NoControlPoints
             | Self::PointsDoNotTurnOneWay
@@ -131,15 +294,28 @@ impl SurfaceFailure {
             | Self::NoRoughGuess
             | Self::ZeroStepOutsideDomain
             | Self::LineSearchNormUnsigned
-            | Self::LineSearchNotBracketed => SM_ERR,
+            | Self::LineSearchNotBracketed
+            | Self::AltCachesFull
+            | Self::NodeNotSurfaceNode
+            | Self::NodeHasChildren => SM_ERR,
             Self::Missing(_)
+            | Self::NoNurb
+            | Self::SurfaceCacheNotBuilt
+            | Self::SurfaceCacheTreeNotBuilt
+            | Self::CurveCacheNotBuilt
+            | Self::CurveCacheTreeNotBuilt
+            | Self::InputNotGiven { .. }
             | Self::TrimmedCacheHasNoFace
+            | Self::SurfaceCacheHasNoTree
             | Self::SurfaceNotBSplineKind
             | Self::CurveNotBSplineKind
             | Self::CurvesNotCached
             | Self::FaceHasNoSurface
-            | Self::EdgeuseHasNoTrimCurve => SM_ERR_NULL_POINTER,
-            Self::InvalidValue(_) | Self::DisjointFaceDomain => SM_ERR_INVALID_INPUT,
+            | Self::EdgeuseHasNoTrimCurve
+            | Self::NodeHasNoSurface => SM_ERR_NULL_POINTER,
+            Self::InvalidValue(_) | Self::NormalsCancel | Self::DisjointFaceDomain => {
+                SM_ERR_INVALID_INPUT
+            }
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::OffSurface(_) => SM_ERR_NOT_WITHIN_TOLERANCE,
         }
@@ -152,22 +328,50 @@ impl SurfaceFailure {
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
-            Self::Defect { .. } => ErrorKind::StageFailed,
-            Self::TrimmedCacheHasNoFace
+            Self::Defect { .. } | Self::ApproximationNotConverged { .. } => ErrorKind::StageFailed,
+            Self::DerivativeOrderTooHigh { .. }
+            | Self::NoNurb
+            | Self::ParameterOutsideInterval { .. }
+            | Self::TooFewSolverVariables { .. }
+            | Self::InputNotGiven { .. }
+            | Self::TrimmedCacheHasNoFace
+            | Self::SurfaceCacheHasNoTree
+            | Self::EndPointOutsideDomain
+            | Self::InvalidDerivativeSurface
             | Self::CurvesNotCached
             | Self::FaceHasNoSurface
             | Self::LineSearchNormUnsigned
             | Self::LineSearchNotBracketed
             | Self::DisjointFaceDomain
-            | Self::EdgeuseHasNoTrimCurve => ErrorKind::InvalidInput,
+            | Self::EdgeuseHasNoTrimCurve
+            | Self::AltCachesFull
+            | Self::NodeNotSurfaceNode
+            | Self::NodeHasChildren
+            | Self::NodeHasNoSurface => ErrorKind::InvalidInput,
             Self::UnsupportedCacheKind
+            | Self::UnsupportedTangencyType
+            | Self::AtPole
             | Self::SurfaceNotBSplineKind
             | Self::CurveNotBSplineKind
             | Self::SolverSurfaceNotBSpline
             | Self::UnsupportedSurfaceKind
             | Self::UnsupportedSolverOperation => ErrorKind::Unsupported,
-            Self::NoControlPoints => ErrorKind::Failed,
-            Self::PointsDoNotTurnOneWay => ErrorKind::Degenerate,
+            Self::SurfaceCacheNotBuilt
+            | Self::SurfaceCacheTreeNotBuilt
+            | Self::CurveCacheNotBuilt
+            | Self::CurveCacheTreeNotBuilt
+            | Self::PointDoesNotDrop
+            | Self::NoParameterDirection
+            | Self::NoTangentTowardDirection
+            | Self::NoControlPoints => ErrorKind::Failed,
+            Self::ZeroLengthTangent
+            | Self::NoNormal
+            | Self::ParallelNormals
+            | Self::NormalsCancel
+            | Self::TangentAlongNormal
+            | Self::TooFewUniqueKnots
+            | Self::ReferencePointOnBoundary
+            | Self::PointsDoNotTurnOneWay => ErrorKind::Degenerate,
             Self::NoRoughGuess => ErrorKind::NotFound,
             Self::ZeroStepOutsideDomain => ErrorKind::OutsideDomain,
             _ => ErrorKind::of_status(self.comparison_status()),
@@ -184,10 +388,67 @@ impl core::fmt::Display for SurfaceFailure {
             | Self::OffSurface(what) => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
+            Self::DerivativeOrderTooHigh { max } => {
+                write!(f, "a derivative order above {max} was asked")
+            }
+            Self::NoNurb => f.write_str("the surface has no NURB form"),
             Self::UnsupportedCacheKind => {
                 f.write_str("the surface cache's kind does not support the operation")
             }
+            Self::SurfaceCacheNotBuilt => f.write_str("the surface's cache could not be made"),
+            Self::SurfaceCacheTreeNotBuilt => {
+                f.write_str("the surface cache's tree could not be built")
+            }
+            Self::SurfaceCacheHasNoTree => f.write_str("the surface cache given has no tree"),
+            Self::CurveCacheNotBuilt => f.write_str("the curve's cache could not be made"),
+            Self::CurveCacheTreeNotBuilt => f.write_str("the curve cache has no tree"),
+            Self::ApproximationNotConverged {
+                achieved,
+                tolerance,
+            } => write!(
+                f,
+                "the approximation is {achieved:e} from the surface after its last pass, above the tolerance {tolerance:e}"
+            ),
+            Self::ParameterOutsideInterval { param } => {
+                write!(f, "the parameter {param} lies in none of the curve's segments")
+            }
+            Self::ZeroLengthTangent => f.write_str("a tangent has zero length"),
+            Self::NoNormal => f.write_str("the surface has no normal at the point"),
+            Self::ParallelNormals => f.write_str("the surface normals are parallel"),
+            Self::NormalsCancel => f.write_str("the normals around the singularity sum to zero"),
+            Self::TangentAlongNormal => {
+                f.write_str("the curve tangent is along the surface normal")
+            }
+            Self::TooFewSolverVariables { needed } => {
+                write!(f, "the solver was given fewer than {needed} variables")
+            }
+            Self::InputNotGiven { what } => write!(f, "{what} was not given"),
             Self::TrimmedCacheHasNoFace => f.write_str("the trimmed surface cache has no face"),
+            Self::EndPointOutsideDomain => {
+                f.write_str("an end point is outside the surface's UV domain")
+            }
+            Self::TooFewUniqueKnots => {
+                f.write_str("the surface has fewer than two distinct knots in the direction")
+            }
+            Self::UnsupportedTangencyType => {
+                f.write_str("the tangency type has no derivative surface")
+            }
+            Self::InvalidDerivativeSurface => {
+                f.write_str("the derivative surface definition is not valid")
+            }
+            Self::PointDoesNotDrop => {
+                f.write_str("the curve point does not drop onto the surface")
+            }
+            Self::NoParameterDirection => {
+                f.write_str("the direction has no direction in the surface's parameters")
+            }
+            Self::ReferencePointOnBoundary => {
+                f.write_str("the reference curve point lies on the boundary curve")
+            }
+            Self::NoTangentTowardDirection => {
+                f.write_str("every sample tangent points away from the direction")
+            }
+            Self::AtPole => f.write_str("the point is at a pole"),
             Self::SurfaceNotBSplineKind => f.write_str("the surface is not of a B-spline kind"),
             Self::CurveNotBSplineKind => f.write_str("the curve is not of a B-spline kind"),
             Self::SolverSurfaceNotBSpline => {
@@ -221,6 +482,12 @@ impl core::fmt::Display for SurfaceFailure {
                 f.write_str("the face's domain and the surface's are disjoint")
             }
             Self::EdgeuseHasNoTrimCurve => f.write_str("the edge use has no UV trim curve"),
+            Self::AltCachesFull => {
+                f.write_str("the surface cache holds as many alternate caches as its limit")
+            }
+            Self::NodeNotSurfaceNode => f.write_str("the node is not a surface node"),
+            Self::NodeHasChildren => f.write_str("the node already has children"),
+            Self::NodeHasNoSurface => f.write_str("the node has no surface"),
         }
     }
 }
@@ -256,23 +523,6 @@ impl crate::SolidError {
     #[must_use]
     pub(crate) fn surface_missing(operation: &'static str, what: &'static str) -> Self {
         Self::surface(operation, SurfaceFailure::Missing(what))
-    }
-
-    /// [`crate::SolidError::Failed`] for a surface routine that fails with `failure`
-    /// because of `cause`, chained as its cause. A port failure is not chained: it would
-    /// turn the status answer into a port failure, so the failure stands alone then.
-    #[must_use]
-    pub(crate) fn surface_caused_by(
-        operation: &'static str,
-        failure: SurfaceFailure,
-        cause: Self,
-    ) -> Self {
-        let failure = Failure::new(operation, failure);
-        if cause.is_port_failure() {
-            failure.into_error()
-        } else {
-            failure.caused_by(cause).into_error()
-        }
     }
 
     /// The surface failure behind this error, for a [`crate::SolidError::Failed`] with a
@@ -341,6 +591,139 @@ mod tests {
             "surface::op: the point is off"
         );
         assert_eq!(SolidError::sm_err("surface::op").surface_failure(), None);
+    }
+
+    /// The named causes of the general surface evaluation (TE-O-07) keep the status of the
+    /// phrase cause each replaced, with their own class.
+    #[test]
+    fn the_surface_evaluation_causes_keep_their_status_with_their_class() {
+        use ErrorKind as K;
+        let cases = [
+            (
+                SurfaceFailure::DerivativeOrderTooHigh { max: 3 },
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (SurfaceFailure::NoNurb, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (SurfaceFailure::UnsupportedCacheKind, SM_ERR, K::Unsupported),
+            (
+                SurfaceFailure::SurfaceCacheNotBuilt,
+                SM_ERR_NULL_POINTER,
+                K::Failed,
+            ),
+            (
+                SurfaceFailure::SurfaceCacheTreeNotBuilt,
+                SM_ERR_NULL_POINTER,
+                K::Failed,
+            ),
+            (
+                SurfaceFailure::SurfaceCacheHasNoTree,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                SurfaceFailure::CurveCacheNotBuilt,
+                SM_ERR_NULL_POINTER,
+                K::Failed,
+            ),
+            (
+                SurfaceFailure::CurveCacheTreeNotBuilt,
+                SM_ERR_NULL_POINTER,
+                K::Failed,
+            ),
+            (
+                SurfaceFailure::ApproximationNotConverged {
+                    achieved: 2e-3,
+                    tolerance: 1e-3,
+                },
+                SM_ERR,
+                K::StageFailed,
+            ),
+            (
+                SurfaceFailure::ParameterOutsideInterval { param: 2.0 },
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (SurfaceFailure::ZeroLengthTangent, SM_ERR, K::Degenerate),
+            (SurfaceFailure::NoNormal, SM_ERR, K::Degenerate),
+            (SurfaceFailure::ParallelNormals, SM_ERR, K::Degenerate),
+            (
+                SurfaceFailure::NormalsCancel,
+                SM_ERR_INVALID_INPUT,
+                K::Degenerate,
+            ),
+            (SurfaceFailure::TangentAlongNormal, SM_ERR, K::Degenerate),
+            (
+                SurfaceFailure::TooFewSolverVariables { needed: 2 },
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (
+                SurfaceFailure::InputNotGiven {
+                    what: SolveInput::Plane,
+                },
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                SurfaceFailure::TrimmedCacheHasNoFace,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                SurfaceFailure::EndPointOutsideDomain,
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (SurfaceFailure::TooFewUniqueKnots, SM_ERR, K::Degenerate),
+            (
+                SurfaceFailure::UnsupportedTangencyType,
+                SM_ERR,
+                K::Unsupported,
+            ),
+            (
+                SurfaceFailure::InvalidDerivativeSurface,
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (SurfaceFailure::PointDoesNotDrop, SM_ERR, K::Failed),
+            (SurfaceFailure::NoParameterDirection, SM_ERR, K::Failed),
+            (
+                SurfaceFailure::ReferencePointOnBoundary,
+                SM_ERR,
+                K::Degenerate,
+            ),
+            (SurfaceFailure::NoTangentTowardDirection, SM_ERR, K::Failed),
+            (SurfaceFailure::AtPole, SM_ERR, K::Unsupported),
+        ];
+        for (failure, code, kind) in cases {
+            let typed = SolidError::surface("surface::op", failure);
+            assert_eq!(typed.sm_status(), Some(code), "{failure:?}");
+            assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
+            assert_eq!(typed.kind(), kind, "{failure:?}");
+            assert!(typed.is_status_answer(), "{failure:?}");
+            assert_eq!(typed.is_defect(), kind == K::StageFailed, "{failure:?}");
+            assert_eq!(typed.surface_failure(), Some(&failure));
+            assert!(!typed.to_string().is_empty());
+        }
+        assert_eq!(
+            SolidError::surface(
+                "surface::op",
+                SurfaceFailure::InputNotGiven {
+                    what: SolveInput::TargetDistance
+                }
+            )
+            .to_string(),
+            "surface::op: the target distance was not given"
+        );
+        // a cache failure's defect-ness follows its cause
+        let defect =
+            SolidError::surface("surface::inner", SurfaceFailure::Defect { why: "the step" });
+        let chained = Failure::new("surface::op", SurfaceFailure::SurfaceCacheNotBuilt)
+            .caused_by(defect)
+            .into_error();
+        assert!(chained.is_defect());
+        assert_eq!(chained.sm_status(), Some(SM_ERR_NULL_POINTER));
     }
 
     /// A sample of the second set of converted files (`extend` and its sides, `side`,
@@ -462,6 +845,7 @@ mod tests {
     /// phrase they replace, with their own class.
     #[test]
     fn the_surface_cache_and_solver_causes_keep_their_status_with_their_class() {
+        use crate::surface::surface::p7::chained;
         use SurfaceFailure as F;
         let cases = [
             (F::UnsupportedCacheKind, SM_ERR, ErrorKind::Unsupported),
@@ -513,6 +897,14 @@ mod tests {
                 SM_ERR_NULL_POINTER,
                 ErrorKind::InvalidInput,
             ),
+            (F::AltCachesFull, SM_ERR, ErrorKind::InvalidInput),
+            (F::NodeNotSurfaceNode, SM_ERR, ErrorKind::InvalidInput),
+            (F::NodeHasChildren, SM_ERR, ErrorKind::InvalidInput),
+            (
+                F::NodeHasNoSurface,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
         ];
         for (failure, code, kind) in cases {
             let typed = SolidError::surface("surface::op", failure);
@@ -527,15 +919,15 @@ mod tests {
         }
         // a caught cause is chained, unless it is a port failure
         let cause = SolidError::surface("surface::inner", F::NoRoughGuess);
-        let chained = SolidError::surface_caused_by("surface::op", F::NoRoughGuess, cause);
-        assert_eq!(chained.sm_status(), Some(SM_ERR));
-        assert!(chained.is_status_answer());
+        let caught = chained("surface::op", F::NoRoughGuess, cause);
+        assert_eq!(caught.sm_status(), Some(SM_ERR));
+        assert!(caught.is_status_answer());
         assert_eq!(
-            chained.cause().and_then(SolidError::surface_failure),
+            caught.cause().and_then(SolidError::surface_failure),
             Some(&F::NoRoughGuess)
         );
         let port = SolidError::unported("x", "y");
-        let alone = SolidError::surface_caused_by("surface::op", F::NoControlPoints, port);
+        let alone = chained("surface::op", F::NoControlPoints, port);
         assert_eq!(alone.sm_status(), Some(SM_ERR));
         assert!(!alone.is_port_failure());
         assert!(alone.is_status_answer());
@@ -599,16 +991,9 @@ mod tests {
             ("solidcore/src/surface/surf_of_revolution/p1.rs", 10),
             ("solidcore/src/surface/surf_of_revolution/p2.rs", 6),
             ("solidcore/src/surface/surf_of_revolution/p3.rs", 21),
-            ("solidcore/src/surface/surface/approximate.rs", 10),
-            ("solidcore/src/surface/surface/p1.rs", 8),
             ("solidcore/src/surface/surface/p10.rs", 7),
             ("solidcore/src/surface/surface/p11.rs", 20),
             ("solidcore/src/surface/surface/p2.rs", 21),
-            ("solidcore/src/surface/surface/p3.rs", 3),
-            ("solidcore/src/surface/surface/p4.rs", 19),
-            ("solidcore/src/surface/surface/p5.rs", 2),
-            ("solidcore/src/surface/surface/p6.rs", 22),
-            ("solidcore/src/surface/surface/p7.rs", 21),
             ("solidcore/src/surface/surface/p8.rs", 33),
             ("solidcore/src/surface/surface/p9.rs", 33),
             ("solidcore/src/surface/torus.rs", 15),

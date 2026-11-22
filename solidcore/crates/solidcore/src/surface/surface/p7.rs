@@ -147,7 +147,8 @@
 //!   (`plan/upstream-issues/WR-663--addendum-2026-10-31-surface-statuses.md`).
 
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::surface::{SolveInput, SurfaceFailure};
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::eval::collapse::certified_partials;
 use crate::eval::spline::EvalSurface;
 use crate::geom::certified;
@@ -1293,9 +1294,9 @@ impl Surface {
 
         // No solution: all sample tangents point away from the given dir.
         if near_best_f < 0.0 && best_f < 0.0 {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_DEGEN,
-                "every sample tangent points away from the direction",
+                SurfaceFailure::NoTangentTowardDirection,
             ));
         }
 
@@ -1711,6 +1712,7 @@ impl Surface {
         requested: SolutionRequested,
     ) -> Result<SolutionArray<O>> {
         // get surface spatial decomposition tree from Surface's cache
+        let cache_from_caller = cache.is_some();
         let mut owned;
         let cache = if let Some(c) = cache {
             if point_test_off {
@@ -1730,9 +1732,21 @@ impl Surface {
             }
             &owned
         };
-        let surface_tree = cache
-            .tree()
-            .ok_or_else(|| SolidError::surface_missing(OP_SOLVE, "the surface cache's tree"))?;
+        let surface_tree = cache.tree().ok_or_else(|| {
+            if cache_from_caller {
+                SolidError::surface(OP_SOLVE, SurfaceFailure::SurfaceCacheHasNoTree)
+            } else {
+                Failure::new(
+                    OP_SOLVE,
+                    SurfaceFailure::Defect {
+                        why: "the cache this solve made returned only after its tree was \
+                              built, so a made cache without a tree is the kernel's",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            }
+        })?;
 
         // put point into a single node PointTree
         let point_tree: Tree<O> = Tree::from_point(test_point, 0.0, false);
@@ -1864,9 +1878,16 @@ impl Surface {
             Some(context) => solve_surface_cache_with(k, self, handles[1], context)?,
             None => solve_surface_cache(k, self, handles[1])?,
         };
-        let surface_tree = surface_cache
-            .tree()
-            .ok_or_else(|| SolidError::surface_missing(OP_SOLVE, "the surface cache's tree"))?;
+        let surface_tree = surface_cache.tree().ok_or_else(|| {
+            Failure::new(
+                OP_SOLVE,
+                SurfaceFailure::Defect {
+                    why: "the solve's surface cache has no tree, but it is returned only after GetTree built one",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
         let curve_cache = match crate::curve::curve::p5::make_curve_cache::<O>(k, curve, handles[0])
         {
             Ok(c) => c,
@@ -1876,11 +1897,11 @@ impl Surface {
             {
                 return Err(e);
             }
-            Err(_) => return Err(SolidError::surface_missing(OP_SOLVE, "the curve cache")),
+            Err(e) => return Err(chained(OP_SOLVE, SurfaceFailure::CurveCacheNotBuilt, e)),
         };
         let curve_tree = curve_cache
             .tree()
-            .ok_or_else(|| SolidError::surface_missing(OP_SOLVE, "the curve cache's tree"))?;
+            .ok_or_else(|| SolidError::surface(OP_SOLVE, SurfaceFailure::CurveCacheTreeNotBuilt))?;
 
         // instance the solver (the leaf solve reads the curve and the surface cache)
         let mut gs = super::p1::CsGlobalSolver::new(
@@ -2072,10 +2093,24 @@ impl Surface {
             ),
         };
         let tree1 = cache1.tree().ok_or_else(|| {
-            SolidError::surface_missing(OP_SOLVE, "the first surface cache's tree")
+            Failure::new(
+                OP_SOLVE,
+                SurfaceFailure::Defect {
+                    why: "the solve's surface cache has no tree, but it is returned only after GetTree built one",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
         })?;
         let tree2 = cache2.tree().ok_or_else(|| {
-            SolidError::surface_missing(OP_SOLVE, "the second surface cache's tree")
+            Failure::new(
+                OP_SOLVE,
+                SurfaceFailure::Defect {
+                    why: "the solve's surface cache has no tree, but it is returned only after GetTree built one",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
         })?;
 
         let mut gs = SsGlobalSolver::new(
@@ -2327,7 +2362,7 @@ impl Surface {
             if e.is_unported_or_cancelled() {
                 e
             } else {
-                SolidError::surface_missing(OP_PROJ, "the surface cache")
+                chained(OP_PROJ, SurfaceFailure::SurfaceCacheNotBuilt, e)
             }
         };
         match context.as_mut() {
@@ -2469,7 +2504,12 @@ fn planar_of(k: &Kernel, s: &BSplineSurface, uv_domain: &Extent2d) -> Result<Pse
 fn point_solve_best_answer_sq(op: SolverOperation, target: Option<f64>) -> Result<f64> {
     let mut best = BIG_DOUBLE;
     if op == SolverOperation::AtDistance && target.is_none() {
-        return Err(SolidError::surface_missing(OP_SOLVE, "the target distance"));
+        return Err(SolidError::surface(
+            OP_SOLVE,
+            SurfaceFailure::InputNotGiven {
+                what: SolveInput::TargetDistance,
+            },
+        ));
     }
     if op == SolverOperation::Minimize || op == SolverOperation::Normalize {
         if let Some(t) = target {
@@ -2507,14 +2547,15 @@ fn solve_surface_cache<O: SolutionObject>(
     let mut cache = match super::p1::get_surface_cache(k, surface, handle) {
         Ok(c) => c,
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(_) => return Err(SolidError::surface_missing(OP_SOLVE, "the surface cache")),
+        Err(e) => return Err(chained(OP_SOLVE, SurfaceFailure::SurfaceCacheNotBuilt, e)),
     };
     match cache.get_tree(k) {
         Ok(_) => Ok(cache),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(_) => Err(SolidError::surface_missing(
+        Err(e) => Err(chained(
             OP_SOLVE,
-            "the surface cache's tree",
+            SurfaceFailure::SurfaceCacheTreeNotBuilt,
+            e,
         )),
     }
 }
@@ -2536,7 +2577,7 @@ fn solve_surface_cache_with<O: SolutionObject>(
         {
             return Err(e);
         }
-        Err(_) => return Err(SolidError::surface_missing(OP_SOLVE, "the curve cache")),
+        Err(e) => return Err(chained(OP_SOLVE, SurfaceFailure::SurfaceCacheNotBuilt, e)),
     };
     match cache.get_tree(k) {
         Ok(_) => Ok(cache),
@@ -2546,10 +2587,23 @@ fn solve_surface_cache_with<O: SolutionObject>(
         {
             Err(e)
         }
-        Err(_) => Err(SolidError::surface_missing(
+        Err(e) => Err(chained(
             OP_SOLVE,
-            "the curve cache's tree",
+            SurfaceFailure::SurfaceCacheTreeNotBuilt,
+            e,
         )),
+    }
+}
+
+/// The failure of `op` as `failure`, with `e` (the failure that stopped it) as its cause,
+/// unless `e` is a port failure: chaining one would make the answer a port failure, which
+/// the bare status it replaces was not (`SolidError::is_status_answer`).
+pub(super) fn chained(op: &'static str, failure: SurfaceFailure, e: SolidError) -> SolidError {
+    let failure = Failure::new(op, failure);
+    if e.is_port_failure() {
+        failure.into_error()
+    } else {
+        failure.caused_by(e).into_error()
     }
 }
 
@@ -2562,7 +2616,12 @@ fn pair_solve_best_answer_sq(
 ) -> Result<f64> {
     let mut best = BIG_DOUBLE;
     if op == SolverOperation::AtDistance && target.is_none() {
-        return Err(SolidError::surface_missing(OP_SOLVE, "the target distance"));
+        return Err(SolidError::surface(
+            OP_SOLVE,
+            SurfaceFailure::InputNotGiven {
+                what: SolveInput::TargetDistance,
+            },
+        ));
     }
     if op == SolverOperation::Minimize {
         if let Some(t) = target {
@@ -3132,10 +3191,7 @@ pub fn check_seam_drop<S: SurfaceEvaluate + ?Sized>(
     location: LocationType,
 ) -> Result<Point2> {
     if location == LocationType::Pole {
-        return Err(SolidError::surface_failed(
-            OP_SEAM,
-            "the point is at a pole",
-        ));
+        return Err(SolidError::surface(OP_SEAM, SurfaceFailure::AtPole));
     }
 
     if location != LocationType::USeam
@@ -3156,12 +3212,12 @@ pub fn check_seam_drop<S: SurfaceEvaluate + ?Sized>(
         evaluate_1st_derivatives(k, other_surf, other_uv, Side::Left, Side::Left)?;
 
     // Unitize them, so that dot-product comparisons mean direction only.
-    let mut other_u = other_u.unitize().map_err(|_| {
-        SolidError::surface_failed(OP_SEAM, "the other surface's u tangent has zero length")
-    })?;
-    let mut other_v = other_v.unitize().map_err(|_| {
-        SolidError::surface_failed(OP_SEAM, "the other surface's v tangent has zero length")
-    })?;
+    let mut other_u = other_u
+        .unitize()
+        .map_err(|_| SolidError::surface(OP_SEAM, SurfaceFailure::ZeroLengthTangent))?;
+    let mut other_v = other_v
+        .unitize()
+        .map_err(|_| SolidError::surface(OP_SEAM, SurfaceFailure::ZeroLengthTangent))?;
 
     // Flip directions of the derivatives if they are at the top of their domains.
     if other_uv.x > other_domain.u_interval().mid() {
@@ -3381,9 +3437,14 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
         let k = self.kernel;
         // When point testing is on and node is known to be outside of Surface->Face
         let surface_node = self.base.branch_node(branch, 1)?;
-        let cache = self
-            .surface_cache
-            .ok_or_else(|| SolidError::surface_missing(OP_MAY, "the surface cache"))?;
+        let cache = self.surface_cache.ok_or_else(|| {
+            SolidError::surface(
+                OP_MAY,
+                SurfaceFailure::InputNotGiven {
+                    what: SolveInput::SurfaceCache,
+                },
+            )
+        })?;
         if !is_node_valid(self.base.tree(1)?.owner(), cache, surface_node)? {
             return Ok(false);
         }
@@ -3395,7 +3456,14 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
             if surface_node.aux_type == AuxDataType::BezierSurface && surface_node.child1.is_some()
             {
                 let surface_id = branch.get(1).copied().flatten().ok_or_else(|| {
-                    SolidError::surface_missing(OP_MAY, "the branch's surface node")
+                    Failure::new(
+                        OP_MAY,
+                        SurfaceFailure::Defect {
+                            why: "the branch has no surface node, but its surface node was just read",
+                        },
+                    )
+                    .with_status(SM_ERR_NULL_POINTER)
+                    .into_error()
                 })?;
                 let patch = cache.patch(surface_id)?;
 
@@ -3506,10 +3574,14 @@ impl<O: SolutionObject> SsGlobalSolver<'_, '_, O> {
                     let id1 = branch.first().copied().flatten();
                     let id2 = branch.get(1).copied().flatten();
                     let (Some(id1), Some(id2)) = (id1, id2) else {
-                        return Err(SolidError::surface_missing(
+                        return Err(Failure::new(
                             OP_SOLVE,
-                            "a branch's surface node",
-                        ));
+                            SurfaceFailure::Defect {
+                                why: "a branch has no surface node, but both its nodes were just read",
+                            },
+                        )
+                        .with_status(SM_ERR_NULL_POINTER)
+                        .into_error());
                     };
                     let tree1 = self.base.tree(0)?;
                     let tree2 = self.base.tree(1)?;
@@ -3638,9 +3710,9 @@ fn alignment_slope(
     let m = surface.evaluate(k, q, 3, 3, flags(sides.0, sides.1, true))?;
     let derivs = at(&m, w.0, w.1)?.unitized_derivative2(at(&m, ws.0, ws.1)?, at(&m, wss.0, wss.1)?);
     let Ok([unit_t, _]) = derivs else {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP_DEGEN,
-            "the unit derivatives of the singular direction are undefined",
+            SurfaceFailure::ZeroLengthTangent,
         ));
     };
     Ok(unit_t.dot(dir))
@@ -5725,24 +5797,28 @@ mod tests {
     #[test]
     fn typed_surface_failures_keep_their_upstream_answers() {
         use crate::error::surface::SurfaceFailure;
-        let samples: [(&'static str, SurfaceFailure, i32); 3] = [
+        use crate::error::ErrorKind;
+        let samples: [(&'static str, SurfaceFailure, i32, ErrorKind); 3] = [
             (
                 OP_SOLVE,
-                SurfaceFailure::Missing("the surface cache's tree"),
-                crate::error::SM_ERR_NULL_POINTER,
+                SurfaceFailure::SurfaceCacheHasNoTree,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
             ),
             (
                 OP_SEAM,
-                SurfaceFailure::Failed("the point is at a pole"),
+                SurfaceFailure::AtPole,
                 crate::error::SM_ERR,
+                ErrorKind::Unsupported,
             ),
             (
                 OP_DEGEN,
-                SurfaceFailure::Failed("every sample tangent points away from the direction"),
+                SurfaceFailure::NoTangentTowardDirection,
                 crate::error::SM_ERR,
+                ErrorKind::Failed,
             ),
         ];
-        for (operation, failure, code) in samples {
+        for (operation, failure, code, kind) in samples {
             let typed = SolidError::surface(operation, failure);
             let before = SolidError::Upstream {
                 operation,
@@ -5751,12 +5827,33 @@ mod tests {
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
             assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
-            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.kind(), kind, "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), None, "{typed:?}");
             assert_eq!(typed.is_port_failure(), before.is_port_failure());
             assert_eq!(typed.is_status_answer(), before.is_status_answer());
             assert_eq!(typed.surface_failure(), Some(&failure));
         }
+    }
+
+    /// A cache that could not be built keeps the failure that stopped it as its cause,
+    /// except a port failure, which would turn the status answer into a port failure.
+    #[test]
+    fn a_cache_failure_chains_its_cause_but_not_a_port_failure() {
+        use crate::error::surface::SurfaceFailure;
+        let inner = SolidError::sm_err("surface::inner");
+        let e = chained(
+            OP_SOLVE,
+            SurfaceFailure::SurfaceCacheNotBuilt,
+            inner.clone(),
+        );
+        assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.cause(), Some(&inner));
+        assert!(e.is_status_answer());
+        let port = SolidError::port_invariant("surface::inner", "x");
+        let e = chained(OP_SOLVE, SurfaceFailure::SurfaceCacheNotBuilt, port);
+        assert_eq!(e.cause(), None);
+        assert!(e.is_status_answer());
+        assert!(!e.is_port_failure());
     }
 }

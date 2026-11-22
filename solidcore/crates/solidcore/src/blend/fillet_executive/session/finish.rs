@@ -1754,9 +1754,7 @@ mod ball_fit_tests {
         );
         assert_eq!(
             executive.blend_failure(),
-            Some(&BlendFailure::Failed(
-                "a step of the fillet executive failed"
-            ))
+            Some(&BlendFailure::ExecutiveStepFailed)
         );
         assert_eq!(executive.sm_status(), Some(1001));
         let stage = executive.cause().expect("the stage's error is kept");
@@ -1796,9 +1794,9 @@ mod ball_fit_tests {
     /// unsupported apex gives it in `session.rs`), over `root`.
     fn later_failure_over(root: SolidError) -> SolidError {
         let step = keeping_cause(
-            SolidError::blend_failed(
+            SolidError::blend(
                 "blend::fillet_executive::p3",
-                "a step of the fillet executive failed",
+                BlendFailure::ExecutiveStepFailed,
             ),
             root,
         );
