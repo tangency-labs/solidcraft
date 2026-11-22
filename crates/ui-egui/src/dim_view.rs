@@ -1209,7 +1209,10 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     }
     let tk = Tokens::get();
     let is_sel = |id: &str| app.session.selection.iter().any(|s| matches!(s, Sel::SketchConstraint { id: x } if x == id));
-    let hover = ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(proj.rect)).and_then(hit);
+    let hover = ui
+        .input(|i| i.pointer.hover_pos())
+        .filter(|p| ui.rect_contains_pointer(proj.rect) && !crate::sketch_tools::over_constraint_ui(app, *p))
+        .and_then(hit);
     let font = FontId::monospace(tk.font_body * crate::prefs::dimension_text_scale(&app.preferences));
     let centres = chain_centres(sk);
     let draft_sketch = draft.as_ref().and_then(|(_, d)| d.preview.sketch(d.sketch));

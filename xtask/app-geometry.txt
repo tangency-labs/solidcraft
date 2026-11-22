@@ -1217,6 +1217,15 @@ crates/ui-egui/src/canvas.rs:stored_plane cross,normalized
 crates/ui-egui/src/canvas.rs:taper_handle atan2
 crates/ui-egui/src/canvas.rs:to_segment distance,dot
 crates/ui-egui/src/configurations_ui.rs:column_menu triangles
+crates/ui-egui/src/constraint_glyphs/actions.rs:screen_point_to_segment_dist distance,dot (screen-pixel hover corridor between point rect and detach box; builds no geometry)
+crates/ui-egui/src/constraint_glyphs/actions.rs:sketch_px_per_mm distance (moved from sketch_tools.rs: screen pixels per sketch mm for display sizing)
+crates/ui-egui/src/constraint_glyphs/layout.rs:PlacementScene::nudge_clear distance,normalized (screen-pixel layout of constraint glyph boxes)
+crates/ui-egui/src/constraint_glyphs/layout.rs:PlacementScene::place_expanded distance,normalized (screen-pixel layout of expanded constraint group box)
+crates/ui-egui/src/constraint_glyphs/layout.rs:PlacementScene::place_group distance,dot,normalized (screen-pixel layout of constraint glyph groups)
+crates/ui-egui/src/constraint_glyphs/layout.rs:PlacementScene::seg_hits_point distance,dot (screen-pixel leader-line clearance check for glyph boxes)
+crates/ui-egui/src/constraint_glyphs/layout.rs:rect_dist_to_point hypot (screen-pixel distance from glyph box rect to anchor)
+crates/ui-egui/src/constraint_glyphs/layout.rs:segment_rect_clip_len hypot (screen-pixel segment-rect overlap length for glyph layout)
+crates/ui-egui/src/constraint_glyphs/render.rs:show distance,normalized (moved from sketch_tools.rs:glyphs: screen-pixel glyph layout and hover hit-testing)
 crates/ui-egui/src/context_menu.rs:tangent_chain tangent_chain
 crates/ui-egui/src/control_click.rs:ControlClick::remap distance
 crates/ui-egui/src/dialogs.rs:Dialog::extrude_target dot
@@ -1423,15 +1432,12 @@ crates/ui-egui/src/sketch_text_handles.rs:follow atan2,dot
 crates/ui-egui/src/sketch_text_handles.rs:hit distance
 crates/ui-egui/src/sketch_text_handles.rs:screen normalized
 crates/ui-egui/src/sketch_tools.rs:corner_point distance
-crates/ui-egui/src/sketch_tools.rs:glyph_anchors normalized
-crates/ui-egui/src/sketch_tools.rs:glyphs distance,normalized
 crates/ui-egui/src/sketch_tools.rs:nearest_glyph distance
 crates/ui-egui/src/sketch_tools.rs:nearest_on_polyline dot
 crates/ui-egui/src/sketch_tools.rs:on_click dot
 crates/ui-egui/src/sketch_tools.rs:periodic_start_snap distance
 crates/ui-egui/src/sketch_tools.rs:refine_snap distance
 crates/ui-egui/src/sketch_tools.rs:run_points cross,normalized
-crates/ui-egui/src/sketch_tools.rs:sketch_px_per_mm distance
 crates/ui-egui/src/sketch_tools.rs:trim_drag_to distance
 crates/ui-egui/src/sketch_transform_ui.rs:show normalized
 crates/ui-egui/src/smart_extrude.rs:picked_direction dot

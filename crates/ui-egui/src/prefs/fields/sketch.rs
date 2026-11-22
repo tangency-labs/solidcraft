@@ -14,6 +14,9 @@ macro_rules! sketch_preferences {
             /// How large constraint glyphs are drawn: a multiple of their 15-pixel badge, letter and icon
             /// included, so they can be read at any zoom (#10794). 1 (the default) is the size they always had.
             constraint_glyph_scale: f32 = 1.0, PAGE_SKETCH, accept(crate::sketch_tools::GLYPH_SCALES) => slider("prefs.constraint_glyph_size", crate::sketch_tools::GLYPH_SCALES, 0.25, |v| format!("{:.0}%", v * 100.0), "prefs:constraint_glyph_size");
+            /// Group constraint glyphs on the same curve or coincident point cluster when more than this
+            /// many share the geometry (`10` = Never, preserving the ungrouped view).
+            constraint_group_threshold: u8 = 2, PAGE_SKETCH, accept(crate::sketch_tools::CONSTRAINT_GROUP_THRESHOLD_RANGE) => slider("prefs.constraint_group_threshold", crate::sketch_tools::CONSTRAINT_GROUP_THRESHOLD_RANGE, 1.0, crate::sketch_tools::format_group_threshold, "prefs:constraint_group_threshold");
             /// The construction line tools as before #15066: the Construction/Normal switch under the
             /// Length box, and the Sketch Palette's Line Type icons leave these tools alone. Off (the
             /// default): those icons set the tools' line type.

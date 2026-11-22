@@ -35,6 +35,7 @@ mod colour_tokens_tests;
 mod colour_vision_tests;
 pub mod command_help;
 pub mod command_sketch;
+pub mod constraint_glyphs;
 pub mod context_menu;
 pub mod control;
 mod control_click;

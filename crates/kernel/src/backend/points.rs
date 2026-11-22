@@ -57,6 +57,33 @@ impl Points for Solidcore {
         measure::polyline_2d_closest_point(point, points).map_err(refused)
     }
 
+    fn polyline_2d_bounds(&self, points: &[[f64; 2]]) -> Result<Option<([f64; 2], [f64; 2])>, PointsRefused> {
+        measure::polyline_2d_bounds(points).map_err(refused)
+    }
+
+    fn segment_2d_intersection(&self, a1: [f64; 2], a2: [f64; 2], b1: [f64; 2], b2: [f64; 2], tol: f64) -> Result<Option<[f64; 2]>, PointsRefused> {
+        measure::segment_2d_intersection(a1, a2, b1, b2, tol).map_err(refused)
+    }
+
+    fn polyline_2d_crossings(&self, a: &[[f64; 2]], b: &[[f64; 2]], tol: f64) -> Result<Vec<[f64; 2]>, PointsRefused> {
+        measure::polyline_2d_crossings(a, b, tol).map_err(refused)
+    }
+
+    fn tangent_contact_line_circle_2d(
+        &self,
+        a: [f64; 2],
+        b: [f64; 2],
+        center: [f64; 2],
+        radius: f64,
+        tol: f64,
+    ) -> Result<Option<[f64; 2]>, PointsRefused> {
+        measure::tangent_contact_line_circle_2d(a, b, center, radius, tol).map_err(refused)
+    }
+
+    fn tangent_contact_circle_circle_2d(&self, c1: [f64; 2], r1: f64, c2: [f64; 2], r2: f64, tol: f64) -> Result<Option<[f64; 2]>, PointsRefused> {
+        measure::tangent_contact_circle_circle_2d(c1, r1, c2, r2, tol).map_err(refused)
+    }
+
     fn stored_face(&self, record: &Brep, face: usize, point: [f64; 3]) -> Result<bool, PointsRefused> {
         pick::stored_face(record, face, point).map_err(refused)
     }

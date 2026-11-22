@@ -4,15 +4,21 @@
 //! these are UI state only: every action runs a command.
 
 use crate::i18n::tr_engine_error;
-use crate::icons::markers::{glyph_icon, snap_icon};
+use crate::icons::markers::snap_icon;
 use crate::ui_kit::BackingTooltipExt as _;
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_ui_text::tr;
 use std::cell::{Cell, RefCell};
 
+pub use crate::constraint_glyphs::{
+    CONSTRAINT_GROUP_NEVER, CONSTRAINT_GROUP_THRESHOLD_RANGE, GLYPH_SCALES, MIN_GLYPH_PX_PER_MM, MIN_GLYPH_SPAN_PX, active_glyph_deletion,
+    clear_clicked_constraint, click_group_badge, constraint_glyphs_visible_at_scale, delete_glyph, detach_simulated_at, format_group_threshold,
+    glyph_at, glyph_deletion, glyph_group, glyph_positions, glyph_px, note_clicked_constraint, over_constraint_ui, over_group_badge_or_expanded,
+};
+
 use egui::{Pos2, Stroke};
 use serde_json::{Value, json};
-use solidcore_record::{Plane, Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::kernel::Continuity;
 
 use crate::SolveApp;
@@ -95,13 +101,6 @@ thread_local! {
     static SHIFT: Cell<bool> = const { Cell::new(false) };
     /// Extend's two-curve chord (`ModAction::ExtendPair`) held this frame.
     static EXTEND_PAIR: Cell<bool> = const { Cell::new(false) };
-    /// Glyphs drawn this frame (constraint id, screen centre) and the selected one.
-    static GLYPHS: RefCell<Vec<(String, Pos2)>> = const { RefCell::new(Vec::new()) };
-    /// The side of the glyphs drawn this frame (screen pixels), for [`glyph_at`] (#10794).
-    static GLYPH_PX: Cell<f32> = const { Cell::new(GLYPH) };
-    static PICKED: RefCell<Option<String>> = const { RefCell::new(None) };
-    /// Simulated break-off Coincident glyph shown when hovering a shared endpoint of a selected curve.
-    static DETACH_PREVIEW: RefCell<Option<DetachPreview>> = const { RefCell::new(None) };
     /// Active automatic constraint/snap badges and target entities at the cursor.
     static SNAP: RefCell<Option<SnapState>> = const { RefCell::new(None) };
     /// The comb tool's options: comb length (a multiplier on the automatic length) and teeth.
@@ -1248,167 +1247,11 @@ pub fn refine_snap(
     None
 }
 
-/// The constraints one glyph stands for. A point that is the midpoint of several lines (their
-/// midpoints meet) shows a single MidPoint glyph, the first constraint's, for all of them;
-/// any other constraint stands for itself.
-pub fn glyph_group(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> Vec<String> {
-    use solidcraft_engine::sketch::ConstraintKind::Midpoint;
-    match sk.constraints.iter().find(|c| c.id == id).map(|c| (c.kind.clone(), c.driven)) {
-        Some((Midpoint { p, .. }, false)) => {
-            sk.constraints.iter().filter(|c| !c.driven && matches!(c.kind, Midpoint { p: q, .. } if q == p)).map(|c| c.id.clone()).collect()
-        }
-        _ => vec![id.to_string()],
-    }
-}
-
-/// What deleting glyph `id` removes: the constraints it stands for, and, for one MidPoint glyph
-/// shared by several lines, their common point once nothing else holds it (it only tied the
-/// midpoints together, so it would be left floating).
-pub fn glyph_deletion(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> Vec<solidcraft_engine::Sel> {
-    use solidcraft_engine::{Sel, sketch::ConstraintKind::Midpoint};
-    let group = glyph_group(sk, id);
-    let shared = match sk.constraints.iter().find(|c| c.id == id).map(|c| &c.kind) {
-        Some(Midpoint { p, .. }) if group.len() > 1 => Some(*p),
-        _ => None,
-    };
-    let orphan = shared.filter(|&p| {
-        !sk.curves.iter().any(|c| c.kind.uses(p))
-            && !sk.constraints.iter().any(|c| !group.contains(&c.id) && c.kind.indices().0.contains(&p))
-            && sk.points.get(p).is_some_and(|q| !q.fixed && q.link.is_none() && q.exprs.is_none())
-    });
-    let mut out: Vec<Sel> = group.into_iter().map(|id| Sel::SketchConstraint { id }).collect();
-    if let Some(q) = orphan.and_then(|p| sk.points.get(p)) {
-        out.push(Sel::SketchPoint { id: q.id.clone() });
-    }
-    out
-}
-
-/// [`glyph_deletion`] in the active sketch.
-pub fn active_glyph_deletion(app: &SolveApp, id: &str) -> Vec<solidcraft_engine::Sel> {
-    let st = crate::open_meshing::session_world(&app.session);
-    match active_sketch(app).and_then(|s| st.sketch(s)) {
-        Some(ss) => glyph_deletion(&ss.sketch, id),
-        None => vec![solidcraft_engine::Sel::SketchConstraint { id: id.to_string() }],
-    }
-}
-
-/// The constraint glyph under a screen position (its constraint id).
-pub fn glyph_at(pos: Pos2) -> Option<String> {
-    let reach = GLYPH_PX.with(Cell::get) * 0.6;
-    GLYPHS.with(|g| nearest_glyph(g.borrow().iter().map(|(id, c)| (id.as_str(), *c)), pos, reach).map(|(id, _)| id.to_owned()))
-}
-
 /// The glyph within `reach` of `pos` whose centre is nearest (its id and centre). Large glyphs'
 /// hit regions overlap, so the first one in reach could be a neighbour of the one under the
 /// pointer (#10794); hover and click both pick with this rule, and so do the plane handles.
 pub(crate) fn nearest_glyph<K>(glyphs: impl IntoIterator<Item = (K, Pos2)>, pos: Pos2, reach: f32) -> Option<(K, Pos2)> {
     glyphs.into_iter().filter(|(_, c)| c.distance(pos) <= reach).min_by(|a, b| a.1.distance(pos).total_cmp(&b.1.distance(pos)))
-}
-
-/// Constraint glyphs drawn last frame: (constraint id, screen centre).
-pub fn glyph_positions() -> Vec<(String, Pos2)> {
-    GLYPHS.with(|g| g.borrow().clone())
-}
-
-#[derive(Clone, Debug)]
-struct DetachPreview {
-    curve_id: String,
-    point_id: String,
-    point_rect: egui::Rect,
-    glyph_rect: egui::Rect,
-    distance_mm: f64,
-}
-
-/// If `pos` is over the simulated coincident break-off glyph, detach that curve from the point.
-pub fn detach_simulated_at(app: &mut SolveApp, pos: Pos2) -> bool {
-    if active_sketch(app).is_none() || app.ui.pick_off.iter().any(|x| x == "constraints") {
-        return false;
-    }
-    let hit = DETACH_PREVIEW.with(|cell| {
-        let mut st = cell.borrow_mut();
-        let preview = st.as_ref()?;
-        if preview.glyph_rect.expand(3.0).contains(pos) {
-            let out = (preview.curve_id.clone(), preview.point_id.clone(), preview.distance_mm);
-            *st = None;
-            Some(out)
-        } else {
-            None
-        }
-    });
-    let Some((curve, point, distance)) = hit else { return false };
-    let _ = app.run("sketch.detach_point", json!({ "curve": curve, "point": point, "distance": distance }));
-    true
-}
-
-fn selected_detach_curve(app: &SolveApp, sid: u64, sk: &solidcraft_engine::sketch::Sketch) -> Option<(String, usize)> {
-    if app.tool.is_some() || app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
-        return None;
-    }
-    app.session.selection.iter().rev().find_map(|sel| match sel {
-        solidcraft_engine::Sel::SketchCurve { id, sketch } if sketch.is_none_or(|s| s == sid) => {
-            sk.curve_index(id).filter(|&ci| !sk.is_linked_curve(ci)).map(|ci| (id.clone(), ci))
-        }
-        solidcraft_engine::Sel::SketchMidpoint { id } => sk.curve_index(id).filter(|&ci| !sk.is_linked_curve(ci)).map(|ci| (id.clone(), ci)),
-        _ => None,
-    })
-}
-
-fn point_is_detachable_for_curve(sk: &solidcraft_engine::sketch::Sketch, ci: usize, pi: usize) -> bool {
-    if !sk.curves.get(ci).is_some_and(|c| c.kind.uses(pi)) {
-        return false;
-    }
-    let users = sk.curves.iter().filter(|c| c.kind.uses(pi)).count();
-    let has_coincident =
-        sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Coincident { p, q } if p == pi || q == pi));
-    users > 1 || has_coincident || pi == 0
-}
-
-fn resolve_detach_target(
-    app: &SolveApp,
-    sid: u64,
-    sk: &solidcraft_engine::sketch::Sketch,
-    hover: Option<Pos2>,
-    scale: f32,
-) -> Option<(String, usize, String)> {
-    let (curve_id, ci) = selected_detach_curve(app, sid, sk)?;
-    let curve = sk.curves.get(ci)?;
-    if let Some(Hit::SketchPoint { sketch, id, .. }) = app.viewport.hover.as_ref()
-        && *sketch == sid
-        && let Some(hovered_pi) = sk.resolve_point(id)
-        && curve.kind.uses(hovered_pi)
-        && point_is_detachable_for_curve(sk, ci, hovered_pi)
-        && let Some(pt) = sk.points.get(hovered_pi)
-    {
-        return Some((curve_id, hovered_pi, pt.id.clone()));
-    }
-    let h = hover?;
-    DETACH_PREVIEW.with(|cell| {
-        let st = cell.borrow();
-        let prev = st.as_ref()?;
-        if prev.curve_id != curve_id {
-            return None;
-        }
-        let keep = prev.glyph_rect.expand(10.0 * scale).contains(h) || prev.point_rect.expand(8.0 * scale).contains(h);
-        if !keep {
-            return None;
-        }
-        let target_pi = sk.resolve_point(&prev.point_id)?;
-        if point_is_detachable_for_curve(sk, ci, target_pi) { Some((curve_id, target_pi, prev.point_id.clone())) } else { None }
-    })
-}
-
-/// Delete the selected constraint glyph (true when one was selected).
-pub fn delete_glyph(app: &mut SolveApp) -> bool {
-    let Some(id) = PICKED.with(|p| p.borrow_mut().take()) else { return false };
-    let entities: Vec<String> = active_glyph_deletion(app, &id)
-        .into_iter()
-        .filter_map(|s| match s {
-            solidcraft_engine::Sel::SketchConstraint { id } | solidcraft_engine::Sel::SketchPoint { id } => Some(id),
-            _ => None,
-        })
-        .collect();
-    let _ = app.run("sketch.delete", json!({ "entities": entities, "preserve_projection_link": app.ui.project_link_tools }));
-    true
 }
 
 /// What the extra tools do with clicks.
@@ -2559,466 +2402,6 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     }
 }
 
-/// Constraint glyphs of the active sketch: a small badge per constraint at its anchor
-/// (failing ones in `sketch_conflict`).
-/// Glyph size and spacing (screen pixels) at the default `constraint_glyph_scale` of 1.
-const GLYPH: f32 = 15.0;
-
-/// The `constraint_glyph_scale` values Preferences › Sketch offers and the glyphs honour (#10794).
-pub const GLYPH_SCALES: std::ops::RangeInclusive<f32> = 1.0..=3.0;
-
-/// The side of a constraint glyph on screen for the `constraint_glyph_scale` preference. A value
-/// outside [`GLYPH_SCALES`] (a hand-edited settings file) is brought into it; one that is not a
-/// number gives the default size.
-pub fn glyph_px(scale: f32) -> f32 {
-    let scale = if scale.is_finite() { scale.clamp(*GLYPH_SCALES.start(), *GLYPH_SCALES.end()) } else { 1.0 };
-    GLYPH * scale
-}
-
-/// How far below and to the right of the pointer's hot spot a cursor can reach (screen pixels):
-/// an arrow or a hand hangs down and to the right of the point it marks.
-const CURSOR_REACH: f32 = 32.0;
-
-/// The widest the hovered glyph's label text may be in `bounds`: the view less the label's
-/// 3-pixel padding on each side (#10794).
-fn glyph_label_wrap_width(bounds: egui::Rect) -> f32 {
-    (bounds.width() - 6.0).max(1.0)
-}
-
-/// Where the hovered glyph's label goes (its background, `size` included): above the glyph and the
-/// pointer, where no cursor reaches, so the cursor never hides it (#10794). Without room above in
-/// `bounds`, it goes to the left of both; without room there either, below them, past the cursor,
-/// or to the right of the cursor. When none of those fits (a wrapped label in a short view), it is
-/// cut to whichever of those sides of the view has the most room, still clear of the cursor; only
-/// when no side has any room is it kept inside `bounds` regardless, cut to the view's height.
-pub fn glyph_label_rect(pointer: Pos2, glyph: egui::Rect, size: egui::Vec2, bounds: egui::Rect) -> egui::Rect {
-    const GAP: f32 = 6.0;
-    let fit_x = |left: f32| left.min(bounds.right() - size.x).max(bounds.left());
-    let fit_y = |top: f32| top.min(bounds.bottom() - size.y).max(bounds.top());
-    let above = pointer.y.min(glyph.top()) - GAP - size.y;
-    if above >= bounds.top() {
-        return egui::Rect::from_min_size(egui::pos2(fit_x(glyph.left()), above), size);
-    }
-    let left = pointer.x.min(glyph.left()) - GAP - size.x;
-    if left >= bounds.left() && size.y <= bounds.height() {
-        let top = fit_y(glyph.center().y - size.y * 0.5);
-        return egui::Rect::from_min_size(egui::pos2(left, top), size);
-    }
-    let below = (pointer.y + CURSOR_REACH).max(glyph.bottom()) + GAP;
-    if below + size.y <= bounds.bottom() {
-        return egui::Rect::from_min_size(egui::pos2(fit_x(glyph.left()), below), size);
-    }
-    let right = (pointer.x + CURSOR_REACH).max(glyph.right()) + GAP;
-    if right + size.x <= bounds.right() && size.y <= bounds.height() {
-        return egui::Rect::from_min_size(egui::pos2(right, fit_y(glyph.center().y - size.y * 0.5)), size);
-    }
-    // No side holds the whole label: cut it to the cursor-free side of the view with the most
-    // room, so it never covers the pointer or the cursor.
-    let beside = glyph.center().y - size.y * 0.5;
-    let sides = [
-        (egui::Rect::from_min_max(bounds.min, egui::pos2(bounds.right(), above + size.y)), egui::pos2(glyph.left(), above)),
-        (egui::Rect::from_min_max(bounds.min, egui::pos2(left + size.x, bounds.bottom())), egui::pos2(left, beside)),
-        (egui::Rect::from_min_max(egui::pos2(bounds.left(), below), bounds.max), egui::pos2(glyph.left(), below)),
-        (egui::Rect::from_min_max(egui::pos2(right, bounds.top()), bounds.max), egui::pos2(right, beside)),
-    ];
-    let room = |side: &egui::Rect| side.width().clamp(0.0, size.x) * side.height().clamp(0.0, size.y);
-    let mut best: Option<(egui::Rect, egui::Pos2)> = None;
-    for (side, at) in sides {
-        if room(&side) > best.map_or(0.0, |(b, _)| room(&b)) {
-            best = Some((side, at));
-        }
-    }
-    if let Some((side, at)) = best {
-        let x = at.x.min(side.right() - size.x).max(side.left());
-        let y = at.y.min(side.bottom() - size.y).max(side.top());
-        return egui::Rect::from_min_size(egui::pos2(x, y), size).intersect(side);
-    }
-    let fitted = egui::Rect::from_min_size(egui::pos2(fit_x(glyph.left()), fit_y(below)), size);
-    egui::Rect::from_min_max(fitted.min, egui::pos2(fitted.max.x, fitted.max.y.min(bounds.bottom())))
-}
-
-/// Screen pixels per millimetre of the sketch plane below which constraint glyphs hide when the
-/// `hide_constraint_glyphs_zoomed_out` preference is on (#8980). About two pixels per millimetre:
-/// a 10 mm feature is then smaller than a glyph.
-pub const MIN_GLYPH_PX_PER_MM: f32 = 2.0;
-
-/// Below `MIN_GLYPH_PX_PER_MM`, glyphs still draw while the sketch's points and curves span at
-/// least this many screen pixels (the larger side of their bounds), twenty glyphs across (#10518):
-/// a large sketch that still fills the view keeps its glyphs; a small one far away loses them, as
-/// before.
-pub const MIN_GLYPH_SPAN_PX: f32 = 20.0 * GLYPH;
-
-/// Whether constraint glyphs should draw at this sketch-plane scale (#8980), given how large the
-/// sketch is on screen (`span_px`, only measured when zoomed out, #10518).
-pub fn constraint_glyphs_visible_at_scale(px_per_mm: f32, hide_when_zoomed_out: bool, span_px: impl FnOnce() -> f32) -> bool {
-    !hide_when_zoomed_out || px_per_mm >= MIN_GLYPH_PX_PER_MM || span_px() >= MIN_GLYPH_SPAN_PX
-}
-
-/// The larger side, in screen pixels, of the bounds of the active sketch's points and curves. It
-/// stops measuring once that reaches `MIN_GLYPH_SPAN_PX`, so a large sketch costs no more.
-fn sketch_span_px(ss: &solidcraft_engine::doc::SolvedSketch, proj: &Proj) -> f32 {
-    let sk = &ss.sketch;
-    let at = sk.points.iter().map(|p| p.pos).chain((0..sk.curves.len()).flat_map(|c| sk.polyline(c)));
-    let mut r = egui::Rect::NOTHING;
-    for q in at {
-        if let Some(p) = proj.to_screen(ss.plane.to_world(q)) {
-            r.extend_with(p);
-            if r.width().max(r.height()) >= MIN_GLYPH_SPAN_PX {
-                return r.width().max(r.height());
-            }
-        }
-    }
-    if r.min.x <= r.max.x { r.width().max(r.height()) } else { 0.0 }
-}
-
-/// The constraints that draw a glyph: no dimensions, one MidPoint glyph where lines' midpoints
-/// meet, and a pattern's constraints once, on its first instance.
-fn glyph_constraints(sk: &solidcraft_engine::sketch::Sketch) -> impl Iterator<Item = &solidcraft_engine::sketch::Constraint> {
-    let mut midpoints = std::collections::HashSet::new();
-    sk.constraints.iter().filter(move |c| {
-        if c.kind.is_dimension() {
-            return false;
-        }
-        if let solidcraft_engine::sketch::ConstraintKind::Midpoint { p, .. } = c.kind
-            && !c.driven
-            && !midpoints.insert(p)
-        {
-            return false;
-        }
-        !(matches!(
-            c.kind,
-            solidcraft_engine::sketch::ConstraintKind::PatternPoint { .. } | solidcraft_engine::sketch::ConstraintKind::PatternRadius { .. }
-        ) && !sk.patterns.iter().any(|p| p.instances.first().and_then(|i| i.constraints.first()) == Some(&c.id)))
-    })
-}
-
-/// Whether a constraint refers to the selected point or curve. Selecting a point also
-/// exposes constraints on curves that use that point, so clicking a tangent endpoint can
-/// reveal its line/circle constraint without turning on every other badge (#18817).
-fn constraint_matches_selection(
-    sk: &solidcraft_engine::sketch::Sketch,
-    kind: &solidcraft_engine::sketch::ConstraintKind,
-    selected: &[solidcraft_engine::Sel],
-) -> bool {
-    let (curves, points) = constraint_entities(kind);
-    selected.iter().any(|item| match item {
-        solidcraft_engine::Sel::SketchCurve { id, .. } => curves.iter().any(|&index| sk.curves.get(index).is_some_and(|curve| curve.id == *id)),
-        solidcraft_engine::Sel::SketchPoint { id } => {
-            points.iter().any(|&index| sk.points.get(index).is_some_and(|point| point.id == *id))
-                || curves.iter().any(|&index| {
-                    sk.curves
-                        .get(index)
-                        .is_some_and(|curve| curve.kind.point_ids().into_iter().any(|p| sk.points.get(p).is_some_and(|point| point.id == *id)))
-                })
-        }
-        _ => false,
-    })
-}
-
-/// A shared glyph is visible when any constraint represented by it qualifies. In
-/// particular, a failing or selected second Midpoint constraint must not disappear
-/// because glyph_constraints() chose the first as the displayed representative.
-fn glyph_group_visible_when_selected(
-    sk: &solidcraft_engine::sketch::Sketch,
-    id: &str,
-    selected: &[solidcraft_engine::Sel],
-    picked: Option<&str>,
-    is_failing: impl Fn(&String) -> bool,
-) -> bool {
-    let group = glyph_group(sk, id);
-    sk.constraints.iter().filter(|c| group.contains(&c.id)).any(|c| {
-        is_failing(&c.id)
-            || picked == Some(c.id.as_str())
-            || selected.iter().any(|sel| matches!(sel, solidcraft_engine::Sel::SketchConstraint { id } if id == &c.id))
-            || constraint_matches_selection(sk, &c.kind, selected)
-    })
-}
-
-/// Pixels on screen for one millimetre along the sketch plane's U axis, near the plane origin.
-fn sketch_px_per_mm(plane: &Plane, proj: &Proj) -> Option<f32> {
-    let a = proj.to_screen(plane.to_world(Vec2::ZERO))?;
-    let b = proj.to_screen(plane.to_world(Vec2::new(1.0, 0.0)))?;
-    Some(a.distance(b))
-}
-
-fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Pos2>) {
-    let Some(sid) = active_sketch(app) else {
-        DETACH_PREVIEW.with(|c| *c.borrow_mut() = None);
-        return;
-    };
-    // While a dimension's value is typed, the glyphs sit where that value puts their geometry.
-    let st = crate::dim_view::preview_world(app).unwrap_or_else(|| crate::open_meshing::session_world(&app.session));
-    let Some(ss) = st.sketch(sid) else {
-        DETACH_PREVIEW.with(|c| *c.borrow_mut() = None);
-        return;
-    };
-    // The badge's side, from Preferences › Sketch (#10794); 15 px at the default.
-    let glyph = glyph_px(app.preferences.constraint_glyph_scale);
-    let scale = glyph / GLYPH;
-    GLYPH_PX.with(|g| g.set(glyph));
-    if ss.sketch.view.hide_constraints {
-        GLYPHS.with(|g| g.borrow_mut().clear());
-        DETACH_PREVIEW.with(|c| *c.borrow_mut() = None);
-        return;
-    }
-    // Zoomed out far enough: fixed-size glyphs would dominate the sketch (#8980), unless the
-    // sketch still spreads them across the view (#10518).
-    let px_per_mm = sketch_px_per_mm(&ss.plane, proj);
-    if let Some(scale) = px_per_mm
-        && !constraint_glyphs_visible_at_scale(scale, app.preferences.hide_constraint_glyphs_zoomed_out, || sketch_span_px(ss, proj))
-    {
-        GLYPHS.with(|g| g.borrow_mut().clear());
-        DETACH_PREVIEW.with(|c| *c.borrow_mut() = None);
-        return;
-    }
-    let tk = solidcraft_theme::Tokens::get();
-    let picked = PICKED.with(|p| p.borrow().clone());
-    // Where each glyph goes: beside its entity (to its left, away from the line), every entity
-    // of a two-entity constraint getting one; glyphs that would overlap step along. A glyph
-    // that would sit on a dimension's value goes to the other side of its line.
-    let dim_texts: Vec<egui::Rect> = crate::dim_view::text_rects().into_iter().map(|(_, r)| r.expand(2.0)).collect();
-    let on_dim = |p: Pos2| {
-        let r = egui::Rect::from_center_size(p, egui::vec2(glyph, glyph));
-        dim_texts.iter().any(|d| d.intersects(r))
-    };
-    let mut placed: Vec<(String, Pos2, Pos2)> = Vec::new();
-    for c in glyph_constraints(&ss.sketch) {
-        if app.ui.constraint_glyphs_selected_only
-            && !glyph_group_visible_when_selected(&ss.sketch, &c.id, &app.session.selection, picked.as_deref(), |id| ss.report.failing.contains(id))
-        {
-            continue;
-        }
-        for (at, dir) in glyph_anchors(&ss.sketch, &c.kind) {
-            let Some(base) = proj.to_screen(ss.plane.to_world(at)) else { continue };
-            // The entity's direction on screen, and its side.
-            let side = match dir.and_then(|d| proj.to_screen(ss.plane.to_world(at + d))) {
-                Some(q) => {
-                    let t = (q - base).normalized();
-                    if t.length() > 0.5 { egui::vec2(-t.y, t.x) } else { egui::vec2(0.7, -0.7) }
-                }
-                None => egui::vec2(0.7, -0.7),
-            };
-            let step = if dir.is_some() { egui::vec2(side.y, -side.x) } else { egui::vec2(1.0, 0.0) };
-            let free = |sp: Pos2| !placed.iter().any(|(_, q, _)| q.distance(sp) < glyph + 1.0);
-            let start = |s: egui::Vec2| base + s * (glyph * 0.9);
-            let side = if on_dim(start(side)) && !on_dim(start(-side)) { -side } else { side };
-            // Step along until clear of other glyphs, preferring a spot clear of dimension
-            // values too.
-            let settle = |avoid_dims: bool| {
-                let mut sp = start(side);
-                for _ in 0..12 {
-                    if free(sp) && !(avoid_dims && on_dim(sp)) {
-                        return Some(sp);
-                    }
-                    sp += step * (glyph + 2.0);
-                }
-                None
-            };
-            let sp = settle(true).or_else(|| settle(false)).unwrap_or_else(|| start(side) + step * (12.0 * (glyph + 2.0)));
-            placed.push((c.id.clone(), sp, base));
-        }
-    }
-    // The hovered glyph instance (a Parallel draws one per entity, all with the same id).
-    let hovered_at =
-        hover.and_then(|h| nearest_glyph(placed.iter().map(|(id, q, _)| (id.as_str(), *q)), h, glyph * 0.6)).map(|(id, q)| (id.to_owned(), q));
-    let hovered = hovered_at.as_ref().map(|(id, _)| id.clone());
-    // The hovered (or selected) constraint's entities lit up.
-    if let Some(id) = hovered.as_ref().or(picked.as_ref()) {
-        let group = glyph_group(&ss.sketch, id);
-        let (cs, ps) = ss.sketch.constraints.iter().filter(|c| group.contains(&c.id)).map(|c| constraint_entities(&c.kind)).fold(
-            (Vec::new(), Vec::new()),
-            |(mut cs, mut ps), (c, p)| {
-                cs.extend(c);
-                ps.extend(p);
-                (cs, ps)
-            },
-        );
-        let mut display_budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
-        for ci in cs {
-            crate::tools::paint_curve(&ss.sketch, ci, &ss.plane, painter, proj, Stroke::new(3.0, tk.accent.gamma_multiply(0.7)), &mut display_budget);
-        }
-        for pi in ps {
-            if let Some(q) = ss.sketch.point(pi).and_then(|q| proj.to_screen(ss.plane.to_world(q))) {
-                painter.circle_filled(q, 4.5, tk.accent);
-            }
-        }
-    }
-    let mut drawn: Vec<(String, Pos2)> = Vec::new();
-    for (id, sp, base) in &placed {
-        let Some(c) = ss.sketch.constraints.iter().find(|c| &c.id == id) else { continue };
-        let group = glyph_group(&ss.sketch, id);
-        let failing = group.iter().any(|g| ss.report.failing.contains(g));
-        // Redundant (already implied by the others, but holding): dimmed, not an error.
-        let redundant = !failing && group.iter().all(|g| ss.report.redundant.contains(g));
-        let selected = picked.as_deref() == Some(id.as_str())
-            || app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::SketchConstraint { id: x } if group.contains(x)));
-        let lit = selected || hovered.as_deref() == Some(id.as_str());
-        let col = if failing {
-            crate::viewport::Conflict::glyph_colour(app, &tk)
-        } else if lit {
-            tk.accent
-        } else if redundant {
-            tk.glyph_text.gamma_multiply(0.45)
-        } else {
-            tk.glyph_text
-        };
-        // A faint leader back to the entity when the glyph was pushed away from it.
-        if sp.distance(*base) > glyph * 1.6 {
-            painter.line_segment([*base, *sp], Stroke::new(0.8, tk.text_dim.gamma_multiply(0.6)));
-        }
-        let r = egui::Rect::from_center_size(*sp, egui::vec2(glyph, glyph));
-        painter.rect_filled(r, tk.radius_sm.saturating_sub(1), if lit { tk.accent_soft } else { tk.glyph_bg });
-        painter.rect_stroke(
-            r,
-            tk.radius_sm.saturating_sub(1),
-            Stroke::new(1.0, if failing || lit { col } else { tk.glyph_edge }),
-            egui::StrokeKind::Inside,
-        );
-        let pattern_icon = ss.sketch.patterns.iter().find(|p| p.instances.first().and_then(|i| i.constraints.first()) == Some(id)).map(|p| {
-            if matches!(p.kind, solidcraft_engine::sketch::SketchPatternKind::Circular { .. }) {
-                "sketch_circ_pattern"
-            } else {
-                "sketch_rect_pattern"
-            }
-        });
-        if let Some(icon) = pattern_icon.or_else(|| glyph_icon(c.kind.name())) {
-            crate::icons::paint_icon(painter, r.shrink(2.0 * scale), icon, f32::from(col.a()) / 255.0);
-        }
-        drawn.push((id.clone(), *sp));
-    }
-    // Simulated coincident break-off glyph (selected curve + hovered shared endpoint).
-    let mut detach_tooltip: Option<(egui::Rect, String)> = None;
-    let next_detach = resolve_detach_target(app, sid, &ss.sketch, hover, scale).and_then(|(curve_id, pi, point_id)| {
-        let base = proj.to_screen(ss.plane.to_world(ss.sketch.point(pi)?))?;
-        let point_rect = egui::Rect::from_center_size(base, egui::vec2(6.0 * scale, 6.0 * scale));
-        let reused = DETACH_PREVIEW.with(|c| {
-            c.borrow()
-                .as_ref()
-                .filter(|p| p.curve_id == curve_id && p.point_id == point_id && p.point_rect.center().distance(base) < 2.0)
-                .map(|p| p.glyph_rect)
-        });
-        let glyph_rect = reused.unwrap_or_else(|| {
-            let dirs = [
-                egui::vec2(0.7, -0.7),
-                egui::vec2(-0.7, -0.7),
-                egui::vec2(0.7, 0.7),
-                egui::vec2(-0.7, 0.7),
-                egui::vec2(1.0, 0.0),
-                egui::vec2(-1.0, 0.0),
-                egui::vec2(0.0, -1.0),
-                egui::vec2(0.0, 1.0),
-            ];
-            let free = |sp: Pos2| !placed.iter().any(|(_, q, _)| q.distance(sp) < glyph + 2.0) && !on_dim(sp);
-            let center = dirs.iter().map(|d| base + *d * (glyph * 1.15)).find(|&sp| free(sp)).unwrap_or(base + dirs[0] * (glyph * 1.15));
-            egui::Rect::from_center_size(center, egui::vec2(glyph, glyph))
-        });
-        let lit = hover.is_some_and(|h| glyph_rect.expand(2.0).contains(h));
-        painter.line_segment([base, glyph_rect.center()], Stroke::new(1.0, tk.accent.gamma_multiply(0.8)));
-        let rounding = tk.radius_sm.saturating_sub(1);
-        painter.rect_filled(glyph_rect, rounding, if lit { tk.accent_soft } else { tk.glyph_bg });
-        painter.rect_stroke(glyph_rect, rounding, Stroke::new(1.2, tk.accent), egui::StrokeKind::Inside);
-        crate::icons::paint_icon(painter, glyph_rect.shrink(2.0 * scale), "c_coincident", 1.0);
-        if lit {
-            detach_tooltip = Some((glyph_rect, format!("Coincident on {curve_id} (right-click to detach)")));
-        }
-        let distance_mm = 10.0 / px_per_mm.unwrap_or(1.0).max(1e-3) as f64;
-        Some(DetachPreview { curve_id, point_id, point_rect, glyph_rect, distance_mm })
-    });
-    DETACH_PREVIEW.with(|c| *c.borrow_mut() = next_detach);
-
-    if let (Some((anchor_rect, label)), Some(h)) = (detach_tooltip, hover) {
-        let g =
-            painter.layout(label, egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small), tk.text, glyph_label_wrap_width(proj.rect));
-        let chip = glyph_label_rect(h, anchor_rect, g.size() + egui::vec2(6.0, 6.0), proj.rect);
-        crate::scenario::publish_rect("sketch:glyph_label", chip);
-        painter.rect_filled(chip, tk.radius_sm.saturating_sub(1), tk.panel);
-        painter.with_clip_rect(chip.intersect(painter.clip_rect())).galley(chip.min + egui::vec2(3.0, 3.0), g, tk.text);
-    } else if let (Some((id, at_glyph)), Some(h)) = (hovered_at, hover)
-        && let Some(c) = ss.sketch.constraints.iter().find(|c| c.id == id)
-    {
-        let ids = glyph_group(&ss.sketch, &id).join(", ");
-        let label = if ss.report.redundant.contains(&id) {
-            format!("{} ({ids}), redundant: already implied by other constraints", c.kind.name())
-        } else {
-            format!("{} ({ids})", c.kind.name())
-        };
-        // Wrapped to the view's width so a narrow view never clips it (#10794).
-        let g =
-            painter.layout(label, egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small), tk.text, glyph_label_wrap_width(proj.rect));
-        // Clear of the cursor, which hangs below and right of the pointer, and next to the
-        // glyph instance under it (#10794).
-        let chip = glyph_label_rect(h, egui::Rect::from_center_size(at_glyph, egui::vec2(glyph, glyph)), g.size() + egui::vec2(6.0, 6.0), proj.rect);
-        crate::scenario::publish_rect("sketch:glyph_label", chip);
-        painter.rect_filled(chip, tk.radius_sm.saturating_sub(1), tk.panel);
-        // A label cut to fit beside the cursor shows only what fits in its chip.
-        painter.with_clip_rect(chip.intersect(painter.clip_rect())).galley(chip.min + egui::vec2(3.0, 3.0), g, tk.text);
-    }
-    GLYPHS.with(|g| *g.borrow_mut() = drawn);
-}
-
-/// The curves and points a constraint ties together.
-fn constraint_entities(k: &solidcraft_engine::sketch::ConstraintKind) -> (Vec<usize>, Vec<usize>) {
-    use solidcraft_engine::sketch::ConstraintKind::*;
-    match *k {
-        Coincident { p, q } | HorizontalPoints { p, q } | VerticalPoints { p, q } => (vec![], vec![p, q]),
-        PatternPoint { p, q, center, directions, .. } => {
-            (directions.into_iter().flatten().map(|(l, _)| l).collect(), vec![p, q].into_iter().chain(center).collect())
-        }
-        PatternRadius { a, b } => (vec![a, b], vec![]),
-        Fix { p } => (vec![], vec![p]),
-        Midpoint { p, l } => (vec![l], vec![p]),
-        PointOnCurve { p, c } | PointAlong { p, c, .. } => (vec![c], vec![p]),
-        Symmetric { p, q, l } => (vec![l], vec![p, q]),
-        Horizontal { l } | Vertical { l } => (vec![l], vec![]),
-        Parallel { a, b }
-        | Perpendicular { a, b }
-        | Collinear { a, b }
-        | Equal { a, b }
-        | Concentric { a, b }
-        | Tangent { a, b }
-        | Smooth { a, b } => (vec![a, b], vec![]),
-        _ => (vec![], vec![]),
-    }
-}
-
-/// Where a constraint's glyphs go: one per entity (the middle of a curve, with its direction
-/// there; a point, without).
-fn glyph_anchors(sk: &solidcraft_engine::sketch::Sketch, k: &solidcraft_engine::sketch::ConstraintKind) -> Vec<(Vec2, Option<Vec2>)> {
-    use solidcraft_engine::sketch::ConstraintKind::*;
-    // Half way along the curve, and the direction there.
-    let mid = |c: usize| -> Option<(Vec2, Option<Vec2>)> {
-        let poly = sk.polyline(c);
-        let total: f64 = poly.windows(2).map(|w| w[0].dist(w[1])).sum();
-        let mut acc = 0.0;
-        for w in poly.windows(2) {
-            let l = w[0].dist(w[1]);
-            if acc + l >= total * 0.5 && l > 0.0 {
-                return Some((w[0].lerp(w[1], (total * 0.5 - acc) / l), (w[1] - w[0]).normalized()));
-            }
-            acc += l;
-        }
-        poly.first().map(|p| (*p, None))
-    };
-    let pt = |p: usize| sk.point(p).map(|q| (q, None));
-    match *k {
-        Coincident { p, .. } | Fix { p } | Midpoint { p, .. } | PointOnCurve { p, .. } | PointAlong { p, .. } => pt(p).into_iter().collect(),
-        PatternPoint { p, center, .. } => pt(center.unwrap_or(p)).into_iter().collect(),
-        PatternRadius { .. } => Vec::new(),
-        HorizontalPoints { p, q } | VerticalPoints { p, q } | Symmetric { p, q, .. } => {
-            sk.point(p).zip(sk.point(q)).map(|(a, b)| ((a + b) * 0.5, None)).into_iter().collect()
-        }
-        Horizontal { l } | Vertical { l } => mid(l).into_iter().collect(),
-        Parallel { a, b }
-        | Perpendicular { a, b }
-        | Collinear { a, b }
-        | Equal { a, b }
-        | Concentric { a, b }
-        | Tangent { a, b }
-        | Smooth { a, b } => [mid(a), mid(b)].into_iter().flatten().collect(),
-        _ => Vec::new(),
-    }
-}
-
 /// Active snap/constraint labels at the cursor (in display order), for tests.
 #[cfg(test)]
 pub(crate) fn current_snap_labels() -> Vec<&'static str> {
@@ -3029,8 +2412,10 @@ pub(crate) fn current_snap_labels() -> Vec<&'static str> {
 /// or the tool-cursor badge.
 fn clear_snap_badge_rect(app: &SolveApp, painter: &egui::Painter, view_rect: egui::Rect, sp: egui::Pos2, size: egui::Vec2, glyph: f32) -> egui::Rect {
     let default_rect = crate::tool_cursor::clear_of_badge(app, painter, view_rect, egui::Rect::from_min_size(sp + egui::vec2(12.0, -24.0), size));
-    let glyph_rects: Vec<egui::Rect> =
-        GLYPHS.with(|g| g.borrow().iter().map(|(_, c)| egui::Rect::from_center_size(*c, egui::vec2(glyph, glyph)).expand(2.0)).collect());
+    let glyph_rects: Vec<egui::Rect> = crate::constraint_glyphs::glyph_positions()
+        .into_iter()
+        .map(|(_, c)| egui::Rect::from_center_size(c, egui::vec2(glyph, glyph)).expand(2.0))
+        .collect();
     let clear_of_glyphs = |cand: egui::Rect| !glyph_rects.iter().any(|g| g.intersects(cand));
     if clear_of_glyphs(default_rect) {
         return default_rect;
@@ -3096,8 +2481,8 @@ fn paint_badge_row(
         return;
     }
     let tk = solidcraft_theme::Tokens::get();
-    let glyph = glyph_px(app.preferences.constraint_glyph_scale);
-    let scale = glyph / GLYPH;
+    let glyph = crate::constraint_glyphs::glyph_px(app.preferences.constraint_glyph_scale);
+    let scale = glyph / crate::constraint_glyphs::GLYPH;
     let gap = (3.0 * scale).round();
     let badges: Vec<(&'static str, Option<&'static str>, f32)> = items
         .iter()
@@ -3179,7 +2564,13 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     SHIFT.with(|c| c.set(iso.contains(ModAction::IsoCurveAlternate)));
     let pair = crate::tool_modifiers::resolve(&[], crate::tool_modifiers::descriptor("sketch.extend"), held, Trigger::Press);
     EXTEND_PAIR.with(|c| c.set(pair.contains(ModAction::ExtendPair)));
-    glyphs(app, painter, proj, ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(proj.rect)));
+    crate::constraint_glyphs::show(
+        app,
+        painter,
+        proj,
+        ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(proj.rect)),
+        (ui.ctx().viewport_id(), ui.scope_id().with("viewport")),
+    );
     snap_hint(app, painter, proj);
     combs(app, painter, proj);
     comb_options_card(app, ui.ctx(), proj);
@@ -3190,254 +2581,8 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
 }
 
 #[cfg(test)]
-mod glyph_zoom_tests {
-    use super::{
-        CURSOR_REACH, GLYPH, MIN_GLYPH_PX_PER_MM, MIN_GLYPH_SPAN_PX, constraint_glyphs_visible_at_scale, glyph_label_rect, glyph_label_wrap_width,
-        glyph_px, nearest_glyph,
-    };
-
-    /// A sketch that is small on screen.
-    fn small() -> f32 {
-        40.0
-    }
-
-    #[test]
-    fn glyphs_stay_visible_when_zoomed_in() {
-        assert!(constraint_glyphs_visible_at_scale(MIN_GLYPH_PX_PER_MM, true, small));
-        assert!(constraint_glyphs_visible_at_scale(10.0, true, small));
-    }
-
-    #[test]
-    fn glyphs_hide_below_the_zoom_threshold() {
-        assert!(!constraint_glyphs_visible_at_scale(MIN_GLYPH_PX_PER_MM - f32::EPSILON, true, small));
-        assert!(!constraint_glyphs_visible_at_scale(0.5, true, small));
-        assert!(!constraint_glyphs_visible_at_scale(0.5, true, || MIN_GLYPH_SPAN_PX - 1.0));
-    }
-
-    #[test]
-    fn preference_off_keeps_glyphs_at_every_zoom() {
-        assert!(constraint_glyphs_visible_at_scale(0.1, false, small));
-        assert!(constraint_glyphs_visible_at_scale(MIN_GLYPH_PX_PER_MM - 1.0, false, small));
-    }
-
-    /// A 500 mm sketch zoomed to fit is below two pixels a millimetre yet fills the view: its
-    /// glyphs stay (#10518).
-    #[test]
-    fn glyphs_stay_while_a_large_sketch_fills_the_view() {
-        assert!(constraint_glyphs_visible_at_scale(1.5, true, || 500.0 * 1.5));
-        assert!(constraint_glyphs_visible_at_scale(0.05, true, || MIN_GLYPH_SPAN_PX));
-    }
-
-    /// A Divide Curve point's constraint has a glyph on its point, an icon, and lights its point
-    /// and curve, as a point-on-curve constraint does (#8969).
-    #[test]
-    fn a_point_along_constraint_has_a_glyph_on_its_point() {
-        use solidcraft_engine::sketch::{ConstraintKind, CurveKind, Sketch};
-        let mut sk = Sketch::new();
-        let (Ok(a), Ok(b), Ok(q)) = (
-            sk.add_point(super::Vec2::new(0.0, 0.0), None),
-            sk.add_point(super::Vec2::new(10.0, 0.0), None),
-            sk.add_point(super::Vec2::new(2.5, 0.0), None),
-        ) else {
-            panic!("points");
-        };
-        let Ok(l) = sk.add_curve(CurveKind::Line { a, b }, None) else { panic!("line") };
-        let k = ConstraintKind::PointAlong { p: q, c: l, at: 0.25 };
-        assert_eq!(super::constraint_entities(&k), (vec![l], vec![q]));
-        let anchors = super::glyph_anchors(&sk, &k);
-        assert_eq!(anchors.len(), 1);
-        assert!(anchors.first().is_some_and(|(at, dir)| (at.x - 2.5).abs() < 1e-9 && at.y.abs() < 1e-9 && dir.is_none()));
-        assert_eq!(crate::icons::markers::glyph_icon(k.name()), Some("c_midpoint"));
-    }
-
-    /// Opt-in filtering ties visible glyphs to selected curves and points, including a
-    /// curve's endpoints. Without a selection the normal glyph list is untouched (#18817).
-    #[test]
-    fn selected_geometry_can_reveal_its_constraint_glyphs() {
-        use solidcraft_engine::Sel;
-        use solidcraft_engine::sketch::{ConstraintKind, CurveKind, Sketch};
-        let mut sk = Sketch::new();
-        let a = sk.add_point(super::Vec2::new(0.0, 0.0), None).unwrap();
-        let b = sk.add_point(super::Vec2::new(20.0, 0.0), None).unwrap();
-        let other = sk.add_point(super::Vec2::new(0.0, 20.0), None).unwrap();
-        let line = sk.add_curve(CurveKind::Line { a, b }, None).unwrap();
-        let horizontal = ConstraintKind::Horizontal { l: line };
-        let curve = Sel::SketchCurve { id: sk.curves[line].id.clone(), sketch: None };
-        assert!(super::constraint_matches_selection(&sk, &horizontal, &[curve]));
-        assert!(super::constraint_matches_selection(&sk, &horizontal, &[Sel::SketchPoint { id: sk.points[a].id.clone() }]));
-        assert!(super::constraint_matches_selection(&sk, &horizontal, &[Sel::SketchPoint { id: sk.points[b].id.clone() }]));
-        assert!(!super::constraint_matches_selection(&sk, &horizontal, &[]), "unselected geometry has no filtered glyph");
-        assert!(
-            !super::constraint_matches_selection(&sk, &horizontal, &[Sel::SketchPoint { id: sk.points[other].id.clone() }]),
-            "unrelated points do not reveal every constraint"
-        );
-        let point_constraint = ConstraintKind::Fix { p: other };
-        assert!(super::constraint_matches_selection(&sk, &point_constraint, &[Sel::SketchPoint { id: sk.points[other].id.clone() }]));
-        assert!(!super::constraint_matches_selection(&sk, &point_constraint, &[Sel::SketchPoint { id: sk.points[a].id.clone() }]));
-        assert!(!crate::UiState::default().constraint_glyphs_selected_only, "the old display remains the default");
-    }
-
-    /// A shared midpoint badge must remain visible if any represented constraint fails or
-    /// belongs to the selection, even when the first constraint is not the relevant one.
-    #[test]
-    fn grouped_midpoint_glyph_respects_all_members() {
-        use solidcraft_engine::Sel;
-        use solidcraft_engine::sketch::{Constraint, ConstraintKind, CurveKind, Sketch};
-        let mut sk = Sketch::new();
-        let a = sk.add_point(super::Vec2::new(0.0, 0.0), None).unwrap();
-        let b = sk.add_point(super::Vec2::new(10.0, 0.0), None).unwrap();
-        let c = sk.add_point(super::Vec2::new(5.0, -5.0), None).unwrap();
-        let d = sk.add_point(super::Vec2::new(5.0, 5.0), None).unwrap();
-        let mid = sk.add_point(super::Vec2::new(5.0, 0.0), None).unwrap();
-        let other = sk.add_point(super::Vec2::new(20.0, 20.0), None).unwrap();
-        let line1 = sk.add_curve(CurveKind::Line { a, b }, None).unwrap();
-        let line2 = sk.add_curve(CurveKind::Line { a: c, b: d }, None).unwrap();
-        for (id, line) in [("first", line1), ("second", line2)] {
-            sk.constraints.push(Constraint {
-                id: id.into(),
-                kind: ConstraintKind::Midpoint { p: mid, l: line },
-                param: None,
-                driven: false,
-                driven_param: None,
-                text: None,
-            });
-        }
-        assert_eq!(super::glyph_constraints(&sk).count(), 1, "both constraints share a glyph");
-        assert_eq!(super::glyph_group(&sk, "first").len(), 2);
-        let show = |selected: &[Sel], picked: Option<&str>, failing: &str| {
-            super::glyph_group_visible_when_selected(&sk, "first", selected, picked, |id| id.as_str() == failing)
-        };
-        assert!(!show(&[], None, ""), "no matching selection hides the grouped badge");
-        assert!(show(&[], None, "second"), "a failure in the second constraint shows the shared error glyph");
-        assert!(show(&[], Some("second"), ""), "picking the second constraint reveals the group");
-        assert!(show(&[Sel::SketchConstraint { id: "second".into() }], None, ""), "explicitly selecting the second constraint reveals the group");
-        assert!(show(&[Sel::SketchCurve { id: sk.curves[line2].id.clone(), sketch: None }], None, ""), "selecting the second line reveals the group");
-        assert!(!show(&[Sel::SketchPoint { id: sk.points[other].id.clone() }], None, ""), "unrelated geometry does not reveal the group");
-    }
-
-    #[test]
-    fn glyph_size_follows_the_preference_and_defaults_to_the_old_size() {
-        assert_eq!(glyph_px(crate::prefs::Prefs::default().constraint_glyph_scale), GLYPH);
-        assert_eq!(GLYPH, 15.0, "the default badge keeps its size (#10794)");
-        assert_eq!(glyph_px(2.0), 30.0);
-        // A hand-edited settings file can hold anything: it never gives a glyph out of range.
-        for hostile in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -4.0, 0.0, 1e9] {
-            let px = glyph_px(hostile);
-            assert!((GLYPH..=GLYPH * 3.0).contains(&px), "{hostile} gives {px}");
-        }
-    }
-
-    /// The hovered glyph's label never sits where the cursor hangs, below and right of the
-    /// pointer, wherever in the view the glyph is (#10794).
-    #[test]
-    fn glyph_label_stays_clear_of_the_cursor() {
-        let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
-        let size = egui::vec2(140.0, 20.0);
-        for glyph_px in [GLYPH, GLYPH * 3.0] {
-            for x in [0.0, 5.0, 60.0, 400.0, 790.0, 800.0] {
-                for y in [0.0, 5.0, 30.0, 300.0, 590.0, 600.0] {
-                    let glyph = egui::Rect::from_center_size(egui::pos2(x, y), egui::vec2(glyph_px, glyph_px));
-                    for pointer in [glyph.center(), glyph.left_top(), glyph.right_bottom(), glyph.center_top()] {
-                        let cursor = egui::Rect::from_min_size(pointer, egui::vec2(CURSOR_REACH, CURSOR_REACH));
-                        let label = glyph_label_rect(pointer, glyph, size, view);
-                        assert!(!label.intersects(cursor), "label {label:?} under the cursor at {pointer:?}");
-                        assert!(!label.contains(pointer), "label {label:?} on the pointer {pointer:?}");
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn glyph_label_goes_above_and_stays_in_the_view() {
-        let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
-        let size = egui::vec2(140.0, 20.0);
-        let glyph = egui::Rect::from_center_size(egui::pos2(400.0, 300.0), egui::vec2(GLYPH, GLYPH));
-        let label = glyph_label_rect(glyph.center(), glyph, size, view);
-        assert!(label.bottom() < glyph.top(), "above the glyph: {label:?}");
-        // At the right edge it moves left to stay readable.
-        let glyph = egui::Rect::from_center_size(egui::pos2(795.0, 300.0), egui::vec2(GLYPH, GLYPH));
-        assert!(view.contains_rect(glyph_label_rect(glyph.center(), glyph, size, view)));
-    }
-
-    /// At 300% the hit regions of neighbouring glyphs overlap: the pointer picks the glyph it is
-    /// nearest, not whichever was placed first (#10794).
-    #[test]
-    fn overlapping_glyphs_pick_the_nearest() {
-        let reach = glyph_px(3.0) * 0.6;
-        let glyphs = [("c1", egui::pos2(100.0, 100.0)), ("c2", egui::pos2(147.0, 100.0))];
-        let pointer = egui::pos2(125.0, 100.0);
-        assert!(glyphs.iter().all(|(_, c)| c.distance(pointer) <= reach), "the test needs overlapping reach");
-        assert_eq!(nearest_glyph(glyphs, pointer, reach).map(|(id, _)| id), Some("c2"));
-        assert_eq!(nearest_glyph(glyphs, egui::pos2(110.0, 100.0), reach).map(|(id, _)| id), Some("c1"));
-        assert_eq!(nearest_glyph(glyphs, egui::pos2(400.0, 400.0), reach), None);
-    }
-
-    /// A Parallel draws a glyph per entity under one id: the hovered instance is the one the
-    /// label goes next to, not the first one drawn (#10794).
-    #[test]
-    fn hovered_instance_of_a_shared_glyph_is_the_one_under_the_pointer() {
-        let far = egui::pos2(500.0, 400.0);
-        let glyphs = [("parallel", egui::pos2(100.0, 100.0)), ("parallel", far)];
-        let (_, at) = nearest_glyph(glyphs, far + egui::vec2(3.0, 2.0), GLYPH * 0.6).unwrap_or(("", egui::Pos2::ZERO));
-        assert_eq!(at, far);
-        let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
-        let glyph = egui::Rect::from_center_size(at, egui::vec2(GLYPH, GLYPH));
-        let label = glyph_label_rect(far, glyph, egui::vec2(140.0, 20.0), view);
-        assert!(label.center().distance(far) < 100.0, "label {label:?} beside the hovered glyph");
-    }
-
-    /// A label wrapped to the view's width fits a view narrower than its one-line text.
-    #[test]
-    fn glyph_label_fits_a_narrow_view() {
-        let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(120.0, 600.0));
-        let size = egui::vec2(glyph_label_wrap_width(view) + 6.0, 40.0);
-        for x in [0.0, 60.0, 120.0] {
-            let glyph = egui::Rect::from_center_size(egui::pos2(x, 300.0), egui::vec2(GLYPH, GLYPH));
-            let label = glyph_label_rect(glyph.center(), glyph, size, view);
-            assert!(label.left() >= view.left() && label.right() <= view.right(), "label {label:?} in {view:?}");
-        }
-    }
-
-    /// A wrapped label in a short view stays inside it wherever the glyph is, and one taller than
-    /// the view is cut to the view's height (#10794).
-    #[test]
-    fn glyph_label_stays_inside_a_short_view() {
-        let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(300.0, 120.0));
-        for size in [egui::vec2(140.0, 80.0), egui::vec2(294.0, 80.0), egui::vec2(140.0, 200.0)] {
-            for x in [0.0, 150.0, 300.0] {
-                for y in [0.0, 10.0, 60.0, 110.0, 120.0] {
-                    let glyph = egui::Rect::from_center_size(egui::pos2(x, y), egui::vec2(GLYPH, GLYPH));
-                    for pointer in [glyph.center(), glyph.left_top(), glyph.right_bottom()] {
-                        let label = glyph_label_rect(pointer, glyph, size, view);
-                        assert!(view.contains_rect(label), "label {label:?} of {size:?} outside {view:?}");
-                        assert!(label.width() > 0.0 && label.height() > 0.0, "label {label:?} vanished");
-                    }
-                }
-            }
-        }
-    }
-
-    /// A label that fits on no side of a short view (above, left, below, right) is cut to a side
-    /// with room rather than laid over the pointer and the cursor (#10794).
-    #[test]
-    fn glyph_label_too_big_for_a_short_view_stays_clear_of_the_cursor() {
-        let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(300.0, 120.0));
-        for size in [egui::vec2(140.0, 80.0), egui::vec2(294.0, 80.0), egui::vec2(140.0, 200.0)] {
-            for x in [0.0, 5.0, 150.0, 290.0, 300.0] {
-                for y in [0.0, 5.0, 60.0, 110.0, 120.0] {
-                    let glyph = egui::Rect::from_center_size(egui::pos2(x, y), egui::vec2(GLYPH, GLYPH));
-                    for pointer in [glyph.center(), glyph.left_top(), glyph.right_bottom()] {
-                        let cursor = egui::Rect::from_min_size(pointer, egui::vec2(CURSOR_REACH, CURSOR_REACH));
-                        let label = glyph_label_rect(pointer, glyph, size, view);
-                        assert!(view.contains_rect(label), "label {label:?} of {size:?} outside {view:?}");
-                        assert!(!label.intersects(cursor), "label {label:?} of {size:?} under the cursor at {pointer:?}");
-                        assert!(label.width() > 0.0 && label.height() > 0.0, "label {label:?} vanished");
-                    }
-                }
-            }
-        }
-    }
+mod snap_badge_tests {
+    use crate::constraint_glyphs::glyph_px;
 
     #[test]
     fn constraint_glyph_and_snap_icons_cover_every_kind_without_placeholders() {
@@ -3644,7 +2789,7 @@ mod glyph_zoom_tests {
         let sp = proj.to_screen(target_world).unwrap();
         // Put the obstacle glyph right on top of the default badge position sp + (12, -24).
         let default_center = sp + egui::vec2(12.0, -24.0) + egui::vec2(glyph * 0.5, glyph * 0.5);
-        super::GLYPHS.with(|g| g.borrow_mut().push((placed[0].0.clone(), default_center)));
+        crate::constraint_glyphs::push_test_glyph(placed[0].0.clone(), default_center);
         let ctx = crate::fonts::test_context();
         let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(view_rect), ..Default::default() }, |ui| {
             let painter = ui.ctx().layer_painter(egui::LayerId::background());
