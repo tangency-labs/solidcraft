@@ -76,11 +76,8 @@ pub(in crate::error) fn phrase_sites() -> Vec<(String, Vec<Site>)> {
 #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
 const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/blend/blend_corner.rs", 5),
-    ("solidcore/src/blend/blend_corner/ball.rs", 15),
-    ("solidcore/src/blend/blend_corner/chamfer.rs", 8),
     ("solidcore/src/blend/blend_corner/end.rs", 9),
-    ("solidcore/src/blend/blend_corner/mixed.rs", 25),
-    ("solidcore/src/blend/blend_corner/mixed/algebra.rs", 1),
+    ("solidcore/src/blend/blend_corner/mixed.rs", 1),
     ("solidcore/src/blend/blend_corner/setback.rs", 27),
     ("solidcore/src/blend/blend_corner/swept.rs", 7),
     ("solidcore/src/blend/blend_setback.rs", 29),

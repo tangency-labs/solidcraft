@@ -24,7 +24,8 @@
 //! | [`BlendFailure::PlaneCurveEndOff`]     | [`ErrorKind::NotFound`] (2)                  |
 //! | [`BlendFailure::PlaneCurveLeavesDomain`] | [`ErrorKind::OutsideDomain`] (8)           |
 //! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
-//! | [`BlendFailure::CreasePieceEndUnbuildable`] | [`ErrorKind::Unsupported`] (5)           |
+//! | [`BlendFailure::MixedCornerUnbuildable`] | the step's ([`MixedStep::class`]): [`ErrorKind::NotFound`] (2), [`ErrorKind::Degenerate`] (3) or [`ErrorKind::Unsupported`] (5) |
+//! | [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::BallTriangleNotOnePatch`] | [`ErrorKind::Unsupported`] (5) |
 //! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
 //! | [`BlendFailure::BandInputMissing`]     | [`ErrorKind::Missing`]: neither defect nor refusal |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
@@ -36,7 +37,7 @@
 //!
 //! | Rust                                   | Status difftest compares          |
 //! |----------------------------------------|-----------------------------------|
-//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::PlaneCurveTouches`], [`BlendFailure::PlaneCurveEndOff`], [`BlendFailure::PlaneCurveLeavesDomain`], [`BlendFailure::PlaneCurveStepVanished`], [`BlendFailure::PlaneCurveFitCap`] | `SM_ERR` |
+//! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::BallTriangleNotOnePatch`], [`BlendFailure::MixedCornerUnbuildable`], [`BlendFailure::PlaneCurveTouches`], [`BlendFailure::PlaneCurveEndOff`], [`BlendFailure::PlaneCurveLeavesDomain`], [`BlendFailure::PlaneCurveStepVanished`], [`BlendFailure::PlaneCurveFitCap`] | `SM_ERR` |
 //! | [`BlendFailure::Failed`]               | `SM_ERR`                          |
 //! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`] | `SM_ERR_NULL_POINTER` |
 //! | [`BlendFailure::InvalidValue`]        | `SM_ERR_INVALID_INPUT`            |
@@ -182,6 +183,21 @@ pub enum BlendFailure {
         /// The end's parameter on the crease.
         t: f64,
     },
+    /// The ball corner's triangle between its three contacts is not one rational patch
+    /// from the pole tried: the far side's image under the stereographic projection is
+    /// not one arc of under a half turn (the triangle is too large, or a contact lies at
+    /// the pole's antipode), or a weight of the patch's net is not positive. Unsupported
+    /// ([`ErrorKind::Unsupported`]): the corner's geometry, not the kernel's fault; a
+    /// triangle too large for one patch is fanned into three.
+    BallTriangleNotOnePatch {
+        /// The contact the patch's pole was put at.
+        pole: usize,
+    },
+    /// The Mixed corner (a convex and a concave blend meeting at a tangent seam) has no
+    /// construction for its geometry at the step named: a crossing its construction needs
+    /// is not there, its shape is degenerate there, or the shape is one the construction
+    /// does not build. The step's class ([`MixedStep::class`]); status `SM_ERR`.
+    MixedCornerUnbuildable(MixedStep),
     /// Tracing a surface/plane crossing found a station where the surface touches the
     /// plane: its tangent along the crossing has no length, so the crossing has no direction.
     /// Degenerate ([`ErrorKind::Degenerate`]); status `SM_ERR`.
@@ -386,6 +402,132 @@ impl BandInput {
     }
 }
 
+/// The step of the Mixed corner's construction that has no construction for the corner's
+/// geometry ([`BlendFailure::MixedCornerUnbuildable`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MixedStep {
+    /// A blend's rail on its wall does not meet the other blend's rail on the common face
+    /// swept along the face's normal (the corner's vertex A or B). Not found.
+    RailMissesRailWall,
+    /// A blend's rail on its wall does not cross the seam's line on its side of the vertex
+    /// (the corner's vertex P or Q). Not found.
+    WallRailMissesSeamLine,
+    /// A corner point has no foot on a wall face, inside the face, to take the face's
+    /// normal at. Not found.
+    NoFootOnWallFace,
+    /// A blend's surface has no B-spline form for the corner's exact algebra.
+    /// Unsupported.
+    BlendSurfaceNotBSpline,
+    /// A blend's rail has no B-spline form for the corner's exact algebra. Unsupported.
+    RailNotBSpline,
+    /// A trimline's parameter curve has no B-spline form for the corner's exact algebra.
+    /// Unsupported.
+    TrimlineNotBSpline,
+    /// Three points of the concave blend's edge lie on one line: the edge has no circle
+    /// to take the corner's axis from. Degenerate.
+    ConcaveEdgeStraight,
+    /// A trimline has no speed at the rails' crossing: it has no tangent there.
+    /// Degenerate.
+    TrimlineStalls,
+    /// The first trimline runs along the convex edge at the rails' crossing: the second
+    /// trimline's direction has no coordinates in them. Degenerate.
+    TrimlineAlongConvexEdge,
+    /// The corner's shape at the rails' crossing has no asymptotic direction between the
+    /// trimlines. Unsupported.
+    NoAsymptoticDirection,
+    /// The inflection's end tangents (from the rails' crossing and at the vertex) are
+    /// parallel. Degenerate.
+    InflectionTangentsParallel,
+    /// The inflection's end tangents do not meet between the rails' crossing and the
+    /// vertex. Unsupported.
+    InflectionTangentsMiss,
+    /// The faces' tangent plane would turn the wrong way along the inflection (the twists'
+    /// rate is not positive). Unsupported.
+    TangentPlaneTurns,
+    /// A side's tangent leaves its neighbour's tangent plane at a corner of a face.
+    /// Unsupported.
+    SideLeavesTangentPlane,
+    /// The corner's twists are not compatible. Unsupported.
+    TwistsIncompatible,
+    /// A face's patch has a weight that is not positive. Unsupported.
+    FaceWeightNotPositive,
+    /// A curve's C1 reparametrization at a break has singular normal equations.
+    /// Degenerate.
+    JoinSingular,
+    /// A curve's C1 reparametrization at a break needs a span that is not positive.
+    /// Unsupported.
+    JoinSpanNotPositive,
+}
+
+impl MixedStep {
+    /// The step's class: [`ErrorKind::NotFound`] for a crossing or foot not found,
+    /// [`ErrorKind::Degenerate`] for a degenerate shape, [`ErrorKind::Unsupported`] for a
+    /// shape the construction does not build.
+    #[must_use]
+    pub const fn class(self) -> ErrorKind {
+        match self {
+            Self::RailMissesRailWall | Self::WallRailMissesSeamLine | Self::NoFootOnWallFace => {
+                ErrorKind::NotFound
+            }
+            Self::ConcaveEdgeStraight
+            | Self::TrimlineStalls
+            | Self::TrimlineAlongConvexEdge
+            | Self::InflectionTangentsParallel
+            | Self::JoinSingular => ErrorKind::Degenerate,
+            Self::BlendSurfaceNotBSpline
+            | Self::RailNotBSpline
+            | Self::TrimlineNotBSpline
+            | Self::NoAsymptoticDirection
+            | Self::InflectionTangentsMiss
+            | Self::TangentPlaneTurns
+            | Self::SideLeavesTangentPlane
+            | Self::TwistsIncompatible
+            | Self::FaceWeightNotPositive
+            | Self::JoinSpanNotPositive => ErrorKind::Unsupported,
+        }
+    }
+
+    /// What has no construction, as a phrase ("a rail does not meet ...").
+    #[must_use]
+    pub const fn what(self) -> &'static str {
+        match self {
+            Self::RailMissesRailWall => {
+                "a rail on its wall does not meet the other blend's rail swept along the common face's normal"
+            }
+            Self::WallRailMissesSeamLine => {
+                "a rail on its wall does not cross the seam's line on its side of the vertex"
+            }
+            Self::NoFootOnWallFace => "a corner point has no foot inside a wall face",
+            Self::BlendSurfaceNotBSpline => "a blend's surface has no B-spline form",
+            Self::RailNotBSpline => "a rail has no B-spline form",
+            Self::TrimlineNotBSpline => "a trimline's parameter curve has no B-spline form",
+            Self::ConcaveEdgeStraight => "the concave edge has no circle: its points lie on a line",
+            Self::TrimlineStalls => "a trimline has no tangent at the rails' crossing",
+            Self::TrimlineAlongConvexEdge => {
+                "the first trimline runs along the convex edge at the rails' crossing"
+            }
+            Self::NoAsymptoticDirection => {
+                "the shape at the rails' crossing has no asymptotic direction between the trimlines"
+            }
+            Self::InflectionTangentsParallel => "the inflection's end tangents are parallel",
+            Self::InflectionTangentsMiss => {
+                "the inflection's end tangents do not meet between the rails' crossing and the vertex"
+            }
+            Self::TangentPlaneTurns => {
+                "the faces' tangent plane would turn the wrong way along the inflection"
+            }
+            Self::SideLeavesTangentPlane => {
+                "a side's tangent leaves its neighbour's tangent plane at a face's corner"
+            }
+            Self::TwistsIncompatible => "the corner's twists are not compatible",
+            Self::FaceWeightNotPositive => "a face's patch has a weight that is not positive",
+            Self::JoinSingular => "a curve's C1 join at a break has singular equations",
+            Self::JoinSpanNotPositive => "a curve's C1 join at a break needs a span that is not positive",
+        }
+    }
+}
+
 /// The class of a blend larger than its faces allow, for `reason`: one of the blend's
 /// refusal classes 101 to 124 (the cliff overflow's own refusals grouped by what decides
 /// them), [`ErrorKind::TangentContinuationEnd`] (128) or [`ErrorKind::OverflowKeepsNothing`]
@@ -544,6 +686,8 @@ impl BlendFailure {
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
             | Self::CreasePieceEndUnbuildable { .. }
+            | Self::BallTriangleNotOnePatch { .. }
+            | Self::MixedCornerUnbuildable(_)
             | Self::PlaneCurveTouches { .. }
             | Self::PlaneCurveEndOff { .. }
             | Self::PlaneCurveLeavesDomain { .. }
@@ -578,7 +722,9 @@ impl BlendFailure {
     /// [`BlendFailure::PlaneCurveEndOff`], [`ErrorKind::OutsideDomain`] for
     /// [`BlendFailure::PlaneCurveLeavesDomain`], [`ErrorKind::BallsFold`] for
     /// [`BlendFailure::BallsNest`], and
-    /// [`ErrorKind::Unsupported`] for [`BlendFailure::CreasePieceEndUnbuildable`]. A phrase
+    /// [`ErrorKind::Unsupported`] for [`BlendFailure::CreasePieceEndUnbuildable`] and
+    /// [`BlendFailure::BallTriangleNotOnePatch`], and the step's class
+    /// ([`MixedStep::class`]) for [`BlendFailure::MixedCornerUnbuildable`]. A phrase
     /// cause keeps the kind of its status ([`ErrorKind::Failed`], [`ErrorKind::Missing`],
     /// [`ErrorKind::InvalidInput`], ...), as before the record ([`BlendFailure::is_phrase`]).
     #[must_use]
@@ -600,7 +746,10 @@ impl BlendFailure {
             Self::PlaneCurveEndOff { .. } => ErrorKind::NotFound,
             Self::PlaneCurveLeavesDomain { .. } => ErrorKind::OutsideDomain,
             Self::BallsNest { .. } => ErrorKind::BallsFold,
-            Self::CreasePieceEndUnbuildable { .. } => ErrorKind::Unsupported,
+            Self::CreasePieceEndUnbuildable { .. } | Self::BallTriangleNotOnePatch { .. } => {
+                ErrorKind::Unsupported
+            }
+            Self::MixedCornerUnbuildable(step) => step.class(),
             Self::BandInputMissing(_) | Self::CliffInputMissing { .. } => ErrorKind::Missing,
             Self::Failed(_)
             | Self::Missing(_)
@@ -634,6 +783,8 @@ impl BlendFailure {
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
             | Self::CreasePieceEndUnbuildable { .. }
+            | Self::BallTriangleNotOnePatch { .. }
+            | Self::MixedCornerUnbuildable(_)
             | Self::PlaneCurveTouches { .. }
             | Self::PlaneCurveEndOff { .. }
             | Self::PlaneCurveLeavesDomain { .. }
@@ -676,6 +827,8 @@ impl BlendFailure {
             | Self::SkinMeasureNotFinite { .. }
             | Self::BallsNest { .. }
             | Self::CreasePieceEndUnbuildable { .. }
+            | Self::BallTriangleNotOnePatch { .. }
+            | Self::MixedCornerUnbuildable(_)
             | Self::PlaneCurveTouches { .. }
             | Self::PlaneCurveEndOff { .. }
             | Self::PlaneCurveLeavesDomain { .. }
@@ -755,6 +908,17 @@ impl core::fmt::Display for BlendFailure {
                 "{}: the crease piece's {} at t = {t} cannot be ended on its meet: no construction for a {kind} curve there",
                 self.class(),
                 if *at_end { "end" } else { "start" },
+            ),
+            Self::BallTriangleNotOnePatch { pole } => write!(
+                f,
+                "{}: the ball corner's triangle is not one rational patch from the pole at contact {pole}",
+                self.class()
+            ),
+            Self::MixedCornerUnbuildable(step) => write!(
+                f,
+                "{}: the mixed corner has no construction: {}",
+                self.class(),
+                step.what()
             ),
             Self::PlaneCurveTouches { u, v } => write!(
                 f,
@@ -1425,6 +1589,39 @@ mod tests {
     }
 
     #[test]
+    fn a_ball_triangle_not_one_patch_is_unsupported_with_its_pole() {
+        let e = SolidError::blend(
+            "blend::op",
+            BlendFailure::BallTriangleNotOnePatch { pole: 2 },
+        );
+        assert_eq!(e.kind(), ErrorKind::Unsupported);
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert!(!e.is_defect());
+        assert!(!e.is_port_failure());
+        assert!(
+            e.to_string().contains(
+                "the ball corner's triangle is not one rational patch from the pole at contact 2"
+            ),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn a_mixed_corner_step_takes_its_class_and_keeps_sm_err() {
+        for (step, class) in [
+            (MixedStep::RailMissesRailWall, ErrorKind::NotFound),
+            (MixedStep::ConcaveEdgeStraight, ErrorKind::Degenerate),
+            (MixedStep::TangentPlaneTurns, ErrorKind::Unsupported),
+        ] {
+            let e = SolidError::blend("blend::op", BlendFailure::MixedCornerUnbuildable(step));
+            assert_eq!(e.kind(), class, "{e}");
+            assert_eq!(e.upstream_status(), Some(SM_ERR));
+            assert!(!e.is_defect() && !e.is_port_failure(), "{e}");
+            assert!(e.to_string().contains(step.what()), "{e}");
+        }
+    }
+
+    #[test]
     fn a_stage_failure_keeps_its_operation_status_and_origin_but_shows_neither() {
         let before = line!();
         let f =
@@ -1569,7 +1766,7 @@ mod tests {
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 29;
+    const VARIANTS: usize = 31;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -1605,6 +1802,8 @@ mod tests {
             BlendFailure::PlaneCurveFitCap { .. } => (26, None),
             BlendFailure::ClosedCliffWouldNotSplit { .. } => (27, None),
             BlendFailure::CliffInputMissing { .. } => (28, None),
+            BlendFailure::BallTriangleNotOnePatch { .. } => (29, None),
+            BlendFailure::MixedCornerUnbuildable(_) => (30, None),
         }
     }
 
@@ -1649,6 +1848,8 @@ mod tests {
                 at_end: true,
                 t: 0.0,
             },
+            BlendFailure::BallTriangleNotOnePatch { pole: 0 },
+            BlendFailure::MixedCornerUnbuildable(MixedStep::NoFootOnWallFace),
             BlendFailure::PlaneCurveTouches { u: 0.0, v: 0.0 },
             BlendFailure::PlaneCurveEndOff {
                 at_end: false,
