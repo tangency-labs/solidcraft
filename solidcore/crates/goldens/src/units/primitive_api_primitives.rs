@@ -1373,3 +1373,233 @@ impl UnitDiff for Runner {
         rust(&case.parse()?)
     }
 }
+
+/// #14246 G1 (WR-596 / WR-662 retired): the rows whose success became a refusal, each
+/// with its typed refusal and either the closed-form reason no valid body exists for its
+/// inputs or, for a kernel limit, the closed-form reason main's answer was not the body.
+/// On main these rows returned success with an empty body (no faces), an open body (one to
+/// five faces, not closed) or a body that fails the level-2 check; the blend rows returned
+/// the input box with no blend face. The per-row main bodies are listed in #18402.
+#[cfg(test)]
+mod moved_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::*;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+
+    /// Why a box or cylindrical box cannot be made.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    enum Reason {
+        /// Some side added to its origin coordinate gives the origin back in f64: two
+        /// opposite faces are the same plane.
+        Collapses,
+        /// The shortest side is within the new B-rep's tolerance of zero, so the two
+        /// vertices of each edge along it are one vertex.
+        BelowTolerance,
+        /// Some origin coordinate plus its side is not representable in f64 within the
+        /// B-rep's tolerance (the exact rounding error of the sum, from [`two_sum`],
+        /// exceeds it), so the requested far corner cannot be placed.
+        CornerNotRepresentable,
+        /// No closed form: a kernel limit. The requested box exists exactly in f64, but
+        /// `create_face`'s surface checks (`topology::brep::p7`, "surface degenerates to
+        /// a curve" / "... to a point": `is_degenerate_curve` / `is_degenerate_point` of
+        /// the plane's or cylinder's B-spline form at `DEGENERATE_TOL_3D`) compare
+        /// against a tolerance that scales with position, e.g. `1000 * EFF_ZERO * (1 +
+        /// max |coord|)` in `base_is_degenerate_point`, so they refuse sides up to about
+        /// 1e-9 times the coordinate (a 5e3 cube at 1e12 is refused). Tracked in
+        /// tangency-labs/solidcraft#18634. A larger box at the same place builds
+        /// ([`a_box_at_1e6_builds_from_3e_3`]). These rows lose no answer: main's was
+        /// not the box either (0 faces, a body that fails level 2, or one face where
+        /// six were asked; per row in [`BOXES`]).
+        KernelLimit,
+    }
+
+    /// The distance from `x` to the next f64 away from zero.
+    fn ulp(x: f64) -> f64 {
+        let x = x.abs();
+        f64::from_bits(x.to_bits() + 1) - x
+    }
+
+    /// The exact rounding error of `a + b` in f64 (Knuth's `TwoSum`: `a + b` equals the
+    /// rounded sum plus this, exactly, when nothing overflows; NaN on overflow).
+    fn two_sum(a: f64, b: f64) -> f64 {
+        let s = a + b;
+        let bb = s - a;
+        (a - (s - bb)) + (b - bb)
+    }
+
+    /// A box row: the inputs' origin and the sides (a cylindrical box: its length and
+    /// its radial thickness).
+    fn dims(i: &Inputs) -> (Point3, Vec<f64>) {
+        let a = |n: usize| i.arg(n).unwrap();
+        let sides = match i.op {
+            OpName::Box => vec![a(3), a(4), a(5)],
+            OpName::CylindricalBox => vec![a(3), a(5) - a(4)],
+            op => panic!("{op:?}"),
+        };
+        (i.point(0).unwrap(), sides)
+    }
+
+    /// The closed-form reason the row cannot be made, or [`Reason::KernelLimit`] when
+    /// there is none.
+    fn reason(i: &Inputs, tolerance: f64) -> Reason {
+        let (origin, sides) = dims(i);
+        let o = [origin.x, origin.y, origin.z];
+        if i.op == OpName::Box && (0..3).any(|n| o[n] + sides[n] == o[n]) {
+            return Reason::Collapses;
+        }
+        let shortest = sides.iter().copied().fold(f64::INFINITY, f64::min);
+        if shortest <= tolerance {
+            Reason::BelowTolerance
+        } else if i.op == OpName::Box && (0..3).any(|n| two_sum(o[n], sides[n]).abs() > tolerance)
+        {
+            Reason::CornerNotRepresentable
+        } else {
+            Reason::KernelLimit
+        }
+    }
+
+    fn made(k: &mut Kernel, i: &Inputs) -> solidcore::Result<Brep> {
+        let a = |n: usize| i.arg(n).unwrap();
+        match i.op {
+            OpName::Box => api::create_box(k, i.point(0).unwrap(), a(3), a(4), a(5)),
+            OpName::CylindricalBox => api::create_cylindrical_box(
+                k,
+                i.point(0).unwrap(),
+                a(3),
+                a(4),
+                a(5),
+                a(6),
+                a(7),
+            ),
+            op => panic!("{op:?}"),
+        }
+    }
+
+    const P8: &str = "topology::brep::p8";
+    const P9: &str = "topology::brep::p9";
+    const P7: &str = "topology::brep::p7";
+    const SEGMENT: &str = "curve::line::Line::create_line_segment";
+
+    /// (row, refusal site, reason). For the [`Reason::KernelLimit`] rows, main's answer
+    /// (the golden row this PR replaces) was not the box: `box_at_1e6_size_1e_3_refused`
+    /// and `box_origin_1e12_size_0p5_control` 0 faces; `box_l_huge` 5 faces, failing
+    /// level 2; `cyl_box_len_huge` 1 face where 6 were asked; `cyl_box_outside_huge` 3
+    /// faces, failing level 2.
+    const BOXES: [(&str, &str, Reason); 25] = [
+        ("box_1e6_size_1e_6_refused", P8, Reason::BelowTolerance),
+        ("box_at_1e6_size_1e_3_refused", P8, Reason::KernelLimit),
+        ("box_l_above_effzero", P8, Reason::BelowTolerance),
+        ("box_l_huge", P8, Reason::KernelLimit),
+        ("box_origin_1e12_size_0p5_control", P8, Reason::KernelLimit),
+        ("box_origin_1e200_size_0p5", SEGMENT, Reason::Collapses),
+        ("box_origin_1e294_size_1em3", SEGMENT, Reason::Collapses),
+        ("box_origin_1e95_size_0p5", SEGMENT, Reason::Collapses),
+        ("box_origin_x_1e294_size_0p5", SEGMENT, Reason::Collapses),
+        ("box_origin_x_1e95_size_0p5", SEGMENT, Reason::Collapses),
+        ("cyl_box_len_above_effzero", P8, Reason::BelowTolerance),
+        ("cyl_box_len_huge", P7, Reason::KernelLimit),
+        ("cyl_box_outside_huge", P7, Reason::KernelLimit),
+        ("gen0025", P8, Reason::BelowTolerance),
+        ("gen0165", P8, Reason::BelowTolerance),
+        ("gen0179", P9, Reason::BelowTolerance),
+        ("gen0260", P9, Reason::BelowTolerance),
+        ("gen0356", P9, Reason::BelowTolerance),
+        ("gen0521", P8, Reason::BelowTolerance),
+        ("gen0627", P8, Reason::BelowTolerance),
+        ("gen0711", P8, Reason::Collapses),
+        ("gen0756", P9, Reason::BelowTolerance),
+        ("gen0939", P8, Reason::CornerNotRepresentable),
+        ("gen1014", P8, Reason::BelowTolerance),
+        ("wr596_box_smaller_than_tolerance", P8, Reason::BelowTolerance),
+    ];
+
+    #[test]
+    fn each_moved_box_row_is_refused_for_its_reason() {
+        let mut k = Kernel::default();
+        let tolerance = solidcore::topology::brep::p3::new_brep(
+            &mut k,
+            solidcore::geom::tol::USE_DEFAULT,
+            solidcore::geom::tol::USE_DEFAULT,
+        )
+        .unwrap()
+        .tolerance();
+        for (name, site, expected) in BOXES {
+            let i: Inputs = crate::case::regression_case(&Runner, name).parse().unwrap();
+            assert_eq!(reason(&i, tolerance), expected, "{name}: reason");
+            let error = made(&mut Kernel::default(), &i).expect_err(name);
+            assert_eq!(error.operation(), site, "{name}: {error:?}");
+        }
+    }
+
+    /// The kernel limit `box_at_1e6_size_1e_3_refused` stands on: at (1e6, 1e6, 1e6) the
+    /// 1e-3 cube is refused, and the 3e-3 cube builds a closed six-face box that passes
+    /// the level-2 check. 3e-3 is a sample above the position-scaled threshold (about
+    /// 1e-9 x 1e6; 1.5e-3 builds too), not the smallest size that builds. The f64
+    /// spacing there (1.2e-10) is far below the tolerance, so the refusal has no closed
+    /// form; main's answer for the 1e-3 cube was the empty body, which is no box either.
+    #[test]
+    fn a_box_at_1e6_builds_from_3e_3() {
+        let at = Point3::new(1e6, 1e6, 1e6);
+        let k = &mut Kernel::default();
+        assert!(ulp(1e6) < 1e-9);
+        assert_eq!(
+            api::create_box(k, at, 1e-3, 1e-3, 1e-3).unwrap_err().operation(),
+            P8
+        );
+        let mut b = api::create_box(k, at, 3e-3, 3e-3, 3e-3).unwrap();
+        assert_eq!(p1::faces(&b, None).unwrap().len(), 6);
+        assert!(check_brep(k, &mut b, CheckLevel::Level2).unwrap().is_valid());
+    }
+
+    /// (row, refusal site)
+    const BLENDS: [(&str, &str); 12] = [
+        ("blend_corner_opposite_dir", SAMPLE),
+        ("blend_corner_same_dir", SAMPLE),
+        ("blend_cross_face_opposite_dir", SAMPLE),
+        ("blend_cross_face_same_dir", SAMPLE),
+        ("blend_large_scale", SAMPLE),
+        ("blend_small_scale", SAMPLE),
+        ("blend_success_without_face", UNITIZE),
+        ("gen0201", SAMPLE),
+        ("gen0219", UNITIZE),
+        ("gen0288", SAMPLE),
+        ("gen1010", UNITIZE),
+        ("gen1099", SAMPLE),
+    ];
+    const SAMPLE: &str = "surface::surface::p6::DerivSurfDefinition::sample_values";
+    const UNITIZE: &str = "geom::vector2d::Vec2::unitize";
+
+    /// Main returned success for these rows with the input box unchanged (six faces,
+    /// level-2 clean, no blend face). The refusal keeps that body: the box is still the
+    /// six-face level-2-clean box after the refused blend, and only the false success is
+    /// gone.
+    #[test]
+    fn each_moved_blend_row_is_refused_and_keeps_the_box() {
+        for (name, site) in BLENDS {
+            let i: Inputs = crate::case::regression_case(&Runner, name).parse().unwrap();
+            assert_eq!(i.op, OpName::BlendPrimitive, "{name}");
+            let k = &mut Kernel::default();
+            let a = |n: usize| i.arg(n).unwrap();
+            let mut brep = api::create_box(k, i.point(0).unwrap(), a(3), a(4), a(5)).unwrap();
+            let edges = p1::edges(&brep, None).unwrap();
+            let faces = p1::faces(&brep, None).unwrap();
+            let vertices = p1::vertices(&brep, None).unwrap();
+            let edge1 = pick(&i, 6, &edges, "edge1").unwrap();
+            let face1 = pick(&i, 7, &faces, "face1").unwrap();
+            let edge2 = pick(&i, 8, &edges, "edge2").unwrap();
+            let face2 = pick(&i, 9, &faces, "face2").unwrap();
+            let error =
+                api::create_blend_primitive(k, &mut brep, edge1, face1, edge2, face2, a(10) == 1.0)
+                    .expect_err(name);
+            assert_eq!(error.operation(), site, "{name}: {error:?}");
+            assert_eq!(faces.len(), 6, "{name}");
+            assert_eq!(p1::faces(&brep, None).unwrap(), faces, "{name}: the faces are kept");
+            assert_eq!(p1::edges(&brep, None).unwrap(), edges, "{name}: the edges are kept");
+            assert_eq!(p1::vertices(&brep, None).unwrap(), vertices, "{name}: the vertices are kept");
+            assert!(
+                check_brep(k, &mut brep, CheckLevel::Level2).unwrap().is_valid(),
+                "{name}: the kept box is level-2 clean"
+            );
+        }
+    }
+}

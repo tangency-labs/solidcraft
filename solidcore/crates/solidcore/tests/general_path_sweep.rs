@@ -982,14 +982,10 @@ fn closed_rounded_rectangle_has_no_internal_pole() {
     use solidcore::surface::surface::assert_valid::has_internal_pole;
     let mut k = Kernel::default();
     // Match the application's pole, closure and exact-trim handling.
-    k.fixes.internal_pole_row_through_knot = true;
-    k.fixes.sweep_statuses_pass_on = true;
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
-    k.fixes.bspline_trim_keeps_rational_end_spans = true;
     k.fixes.closed_smooth_pole_tangent_limit = true;
     k.fixes.keep_exact_pcurves = true;
-    k.fixes.face_swap_uv_transposes_trims = true;
     let mut curves = Vec::new();
     for (cx, cy, angle) in [
         (8.0, 2.0, -90.0),

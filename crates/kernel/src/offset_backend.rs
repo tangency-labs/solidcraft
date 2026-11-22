@@ -2,7 +2,8 @@
 //! record, tagged as operand 0, SMLib runs the operation, and the result comes back with SMLib's own
 //! history, renumbered into the body's and the result's face and edge order (as
 //! `crate::smlib_boolean` does for booleans). A result SMLib's own check refuses is an
-//! error, never a body.
+//! error, never a body, unless the evaluation's validation mode skips the check
+//! (`crate::validation`).
 //!
 //! SMLib's tags travel through the copies its offset makes, so a shell's inner wall and a
 //! thickened sheet's moved copy carry the tag of the face they were made from, and SMLib reads
@@ -40,6 +41,11 @@ fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
                  use a thinner or thicker wall, or move the feature"
             ))
         }
+        // A pad's or hole's corner on the edge of its face (#18568).
+        SmError::OutlineTouches { at: [x, y, z], .. } => KernelError::Invalid(format!(
+            "{op}: a corner of a pad or hole touches the edge of its face at ({x:.4}, {y:.4}, {z:.4}), so the walls offset from them would meet at a point, \
+             which the {op} does not build; move the feature clear of the edge"
+        )),
         // solidcore's one construction: a face curves tighter than the wall is thick.
         SmError::WallFolds { largest } => {
             let largest = largest.map(|w| format!("; the largest wall that works is {} mm", crate::blend::trimmed_mm(w))).unwrap_or_default();
@@ -48,6 +54,11 @@ fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
         SmError::NoMatch { point } => KernelError::Invalid(format!("{op}: no face at selection point {}", point + 1)),
         SmError::Ambiguous { point } => KernelError::Invalid(format!("{op}: selection point {} is as near to two faces", point + 1)),
         SmError::Unsupported => KernelError::Failed(format!("not supported yet: SMLib {op} for this geometry")),
+        // A tangent blend that cannot follow the moved faces, in solidcore's words (#18575).
+        SmError::BlendsNotFollowed { exact: false, why } => KernelError::Failed(format!("not supported yet: SMLib {op}: {why}")),
+        SmError::BlendsNotFollowed { exact: true, why } => {
+            KernelError::Failed(format!("SMLib {op}: SMLib cannot build this exactly in the input's geometry: {why}"))
+        }
         SmError::NoEffect => KernelError::Failed(format!("SMLib made no change: the {op} reported success but moved no face onto its new surface")),
         e => failed(op, "operation", e),
     }
@@ -64,22 +75,28 @@ fn points(p: &[Vec3]) -> Vec<[f64; 3]> {
 
 /// Runs `op` on `b` in SMLib, tagged as operand 0, and brings the result back with SMLib's
 /// history over `[b]` (none where an order cannot be matched). `wall`: the operation's wall
-/// thickness, for its refusals.
+/// thickness, for its refusals. SMLib's check of the result runs here unless the evaluation's
+/// validation mode leaves it to the feature's end or skips it (`crate::validation`), as for
+/// booleans, blends and sweeps (#17601).
 pub(crate) fn run(
     name: &str,
     b: &Body,
     wall: Option<f64>,
     op: impl FnOnce(&Brep) -> std::result::Result<Brep, SmError>,
 ) -> Result<(Body, Option<History>)> {
+    use crate::validation::{Checked, Step};
     b.require_brep(name)?;
     let (sb, ob) = smlib_body_ordered(b)?;
     let tagged = sb.tagged(0).map_err(|e| failed(name, "tag", e))?;
     let r = op(&tagged).map_err(|e| refused(name, wall, e))?;
-    let check = r.check(CheckLevel::All).map_err(|e| failed(name, "check", e))?;
-    if !check.is_valid() {
-        let input = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
-        let what = if input { "SMLib's check refuses the result (the body already fails it)" } else { "SMLib's check refuses the result" };
-        return Err(failed(name, what, check));
+    let step = crate::validation::step();
+    if step == Step::Check {
+        let check = r.check(CheckLevel::All).map_err(|e| failed(name, "check", e))?;
+        if !check.is_valid() {
+            let input = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
+            let what = if input { "SMLib's check refuses the result (the body already fails it)" } else { "SMLib's check refuses the result" };
+            return Err(failed(name, what, check));
+        }
     }
     let (body, or) = body_from_smlib_ordered(&r)?;
     let history = match (ob, or) {
@@ -89,6 +106,7 @@ pub(crate) fn run(
         }),
         _ => None,
     };
+    let body = if step == Step::Defer { body.left_unchecked(&format!("SMLib {name}"), Checked::AsIs, r, &[b]) } else { body };
     Ok((body, history))
 }
 

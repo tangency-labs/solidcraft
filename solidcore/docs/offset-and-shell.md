@@ -247,6 +247,27 @@ sheets, and the result is the cells whose number passes the rule. Local folds an
 self-intersections [10] are then one case, with no loop test. The rule, its ties at coincident
 sheets and its certificate are not designed in the code yet.
 
+The executive implements one exact empty-cell event before mating its sheets
+(`offset_executive/extinct_branches.rs`). A component attached through exactly one
+inner loop of an exterior planar support qualifies when all its straight-edged planar faces,
+together with the attachment polygon, bound a convex protrusion. Topology supplies incidence
+only: homogeneous exact expansion arithmetic reconstructs the vertices from triples of
+supporting planes. The first scope requires
+simple vertices and strict convex facet cycles, distinct vertices and independent edge planes.
+Every reconstructed vertex must lie on the support's outward side and in every exposed face's
+material halfspace. Toleranced stored vertices and trims do not decide this certificate.
+Opposite exposed planes whose actual offset definitions have crossed certify that their halfspaces have empty
+intersection. The branch contributes no cavity, so both its offset sheets and the support's
+attachment loop are removed. The attachment is an artificial cut, not an exposed face: it
+supplies no additional offset halfspace. Thus a short, wide boss can still contain cavity.
+
+This is an empty-cell certificate within the mitred construction, using outward-rounded
+interval inequalities and exact opposite normals, without a tolerance or an alternate
+construction. The source body remains intact for the shell difference. Curved or nonconvex
+branches, multiple attachments, cavity-shell branches, and infeasibility without an opposite
+plane pair still require the general arrangement and cavity rule. This event does not complete
+S3–S5 or change the existing refusal for exactly meeting planes.
+
 ### 5.2 Mitres and the reach, as they run today
 
 ![A convex edge between faces F and G with sector angle α. Each face's offset by d is drawn; F's offset is extended past F's edge until it meets G's offset at M. The reach r from the edge to M's foot is marked, and one more d past it.](offset-and-shell/mitre-reach.svg)
@@ -275,10 +296,11 @@ face's surface and intersects neighbouring offsets instead of filling convex edg
   curve whose trimmed midpoint is nearest the original edge's, trims it and gives it to both offset
   edge uses. With `offset_analytic_mate_edges` a marched piece lying on an exact line or conic of
   the two surfaces is replaced by that curve.
-- **The merge** joins the offset faces into one body. An inset keeps every finite region unless
-  `offset_keep_cavity_regions` is on; then `cavity::is_cavity_region` keeps a region whose face
-  has the input's face one wall behind it (a point solve along the normal). This is a local test,
-  not S4's winding number.
+- **The merge** joins the offset faces into one body. When it leaves two or more finite regions,
+  an inset solid offset keeps those `cavity::is_cavity_region` finds cavity: a region with a face
+  that has the input's face one wall behind it and none with it one wall ahead (a point solve
+  along the normal). If all or none are cavity, every region is kept. This is a local test, not
+  S4's winding number.
 
 Without `extend_convex_edges` the rounded offset closes convex edges with cylinders and vertices
 with spheres (`edgeuse_offset`, `vertex_offset`, `offset_geometry_creation.rs`).
@@ -356,8 +378,12 @@ expectation (`finish`, a closed solid for a thicken).
 B-rep tolerance (`configured_executive`, `p2.rs`), the offset body is allocated with it
 (`allocate_offset_brep`), the merge B-rep takes the original's, the implicit offsets are certified
 within it, and the shell's boolean runs at it. Edge and vertex tolerances only grow from
-there: with `offset_edges_keep_source_tolerance` an offset edge takes at least its source edge's
-tolerance (`keep_source_tolerances`, `p1.rs`). An offset never makes a body tolerance of its own.
+there: an offset edge takes at least its source edge's tolerance, and each of its ends its source
+vertex's (`keep_source_tolerances`, `p1.rs`; an offset end stands for each original end it lies
+on in UV, within `MapEdgeuses`'s base UV tolerance `EFF_ZERO_SQRT * (1 + |uv|)` and never the
+scaled one that matched a piece's middle, so a split end of a piece stands for none unless it
+lies within that base tolerance of an original end, where it is that end's point). An offset
+never makes a body tolerance of its own.
 
 ## 8. Invariants
 
@@ -434,8 +460,9 @@ local operation.
   sharp sector angle: print `extension_reach` for the face; a meeting outside the extension, or
   one that only touches its side, is the cause. A local operation uses its fixed bound instead.
 - **Check the side and the regions.** A face use opposite its surface negates the distance
-  (`faceuse_offset_with_backend`). An inset that keeps a sliver region: with
-  `offset_keep_cavity_regions` off, every finite region of the merge is kept (§5.2).
+  (`faceuse_offset_with_backend`). An inset that keeps a sliver region: check
+  `cavity::is_cavity_region`'s verdict for each finite region of the merge (asked only with two
+  or more finite regions, §5.2).
 - **Look at the tolerances.** Edge tolerances far above the body's after an offset mean a face
   was built across a collapse or a fold; run `cargo run --release -p diagnostics -- FILE.smb --out
   DIR` and read the large-tolerance edges.

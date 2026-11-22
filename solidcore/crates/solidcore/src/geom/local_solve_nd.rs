@@ -298,6 +298,7 @@ pub struct LocalSolveNd<'a, E: EvalNFunctions + ?Sized> {
     boundary_handler: BoundaryHandler,
     max_boundary_hits: u64,
     step_cutting_enabled: bool,
+    guess_unevaluated: bool,
     current_iteration: u64,
     termination_reason: TerminationReason,
 }
@@ -324,6 +325,7 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
             boundary_handler: BoundaryHandler::HitsAllBoundaries,
             max_boundary_hits: 3,
             step_cutting_enabled: false,
+            guess_unevaluated: false,
             current_iteration: 0,
             termination_reason: TerminationReason::Undefined,
         }
@@ -339,6 +341,14 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
     #[must_use]
     pub fn termination_reason(&self) -> TerminationReason {
         self.termination_reason
+    }
+
+    /// Whether the last solve stopped because the equations could not be evaluated at
+    /// the guess itself (not upstream). The solve then reports no solution (WR-20); a
+    /// caller can still check the guess without the failed equations.
+    #[must_use]
+    pub fn guess_unevaluated(&self) -> bool {
+        self.guess_unevaluated
     }
 
     /// The iteration counter after the last solve (`m_lCurrentIteration`; equals
@@ -441,6 +451,7 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
         let mut equation_values2 = vec![0.0; n];
 
         self.acceptable_accuracy = acceptable_accuracy;
+        self.guess_unevaluated = false;
 
         // the last guess point starts at the guess
         let mut solution = guess.to_vec();
@@ -453,7 +464,9 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
             Some(&mut jacobian),
         ))?
         else {
-            // An unevaluated guess is no solution (WR-20).
+            // An unevaluated guess is no solution (WR-20); a caller may still check it by
+            // other means (`guess_unevaluated`).
+            self.guess_unevaluated = true;
             return Ok(self.done(false, TerminationReason::UnableToConverge, solution));
         };
 

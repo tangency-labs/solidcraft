@@ -15,7 +15,7 @@
 //! | [`copy_vertices`], [`copy_vertices_with_context`], [`CopySource`] | `SmBrep::CopyVertices`                           |
 //! | [`delete_face`], [`DeleteFaceOptions`] | `SmBrep::DeleteFace`                      |
 //! | [`remove_slit_loops_where_solids_touch`] | not upstream: the fork's `SmBrep::RemoveSlitLoopsWhereSolidsTouch` (issue #746) |
-//! | [`split_disconnected_shells`]  | not upstream: the fork's `SmBrep::SplitDisconnectedShells` (issue #746) |
+//! | [`split_disconnected_shells`]  | not upstream: the fork's `SmBrep::SplitDisconnectedShells` (issue #746); its parts regrouped by nesting (below) |
 //! | [`make_wire_edge`]              | `SmBrep::MakeWireEdge`                           |
 //! | [`make_wire_edge_vertex`]       | `SmBrep::MakeWireEdgeVertex`                     |
 //! | [`merge_brep`], [`merge_brep_with_context`] | `SmBrep::MergeBrep`                              |
@@ -70,6 +70,11 @@
 //!   marked: the same answer, and the same marks as far as the walk goes. With the
 //!   caller's records ([`delete_face_with_body_identity`]), which keep the marks after
 //!   the call as upstream's objects do, the walk is upstream's.
+//! - **Split shells' regions.** The fork's `SplitDisconnectedShells` gives each part a
+//!   bounded region's split shell leaves a region of its own. The port regroups the parts
+//!   by nesting: a void part lying directly inside an outer part stays in that part's
+//!   region (a cavity that touched the body's outside along a slit), and only parts apart
+//!   from each other bound solids of their own (solids touching along a curve).
 //! - **Use notifications.** As elsewhere in the crate, the destructors and
 //!   constructors of uses, loops, shells and regions do not notify
 //!   (`SM_NO_DESTRUCTION` / `SM_NO_CONSTRUCTION` at `SmObject` level; `new_brep`'s own
@@ -123,7 +128,7 @@ use std::borrow::Cow;
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::topology::TopologyFailure;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::attribute::{AttributeHandle, ObjectKey};
 use crate::geom::context::{
     is_reserved_key, Context, IdentitySlot, MarkLock, MarkType, ALL_MARKS, MAX_BREP_SERIAL,
@@ -139,7 +144,6 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p1::OffsetParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use crate::surface::surface::p2::OFFSET_SURFACE_TYPE;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p1;
 use crate::topology::brep::p2::{self, NotifyArg, OldSurface};
@@ -167,15 +171,41 @@ const fn null_deref(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
-/// `NER(ptr)` on a null pointer: `what` is missing (upstream `SM_ERR_NULL_POINTER`).
-fn ner(what: &'static str) -> SolidError {
-    SolidError::topology_missing(OP, what)
+/// A defect of the B-rep's own links ([`TopologyFailure::Defect`]), with the status
+/// `SM_ERR_NULL_POINTER` of the `NER` it replaces.
+fn broken_link(why: &'static str) -> SolidError {
+    Failure::new(OP, TopologyFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
 }
 
-/// `SER_MSG(SM_ERR, ..)` / `SER(SM_ERR)`: the routine could not continue, as `what` says.
-fn ser(what: &'static str) -> SolidError {
-    SolidError::topology_failed(OP, what)
+/// A defect ([`TopologyFailure::Defect`]) with the status `SM_ERR` of the `SER` it
+/// replaces.
+fn defect(why: &'static str) -> SolidError {
+    SolidError::topology(OP, TopologyFailure::Defect { why })
 }
+
+/// Why an edge use has no edge.
+const EU_NO_EDGE: &str =
+    "an edge use has no edge, though the kernel links every edge use to its edge";
+/// Why an edge use has no mate.
+const EU_NO_MATE: &str =
+    "an edge use has no mate, though the kernel makes edge uses in mated pairs";
+/// Why a vertex use has no vertex.
+const VU_NO_VERTEX: &str =
+    "a vertex use has no vertex, though the kernel links every vertex use to its vertex";
+/// Why a face use has no shell.
+const FU_NO_SHELL: &str =
+    "a face use has no shell, though the kernel puts every face use into a shell";
+/// Why a loop has no loop use.
+const LOOP_NO_LU: &str =
+    "a loop has no loop use, though the kernel makes every loop with its loop uses";
+/// Why a face has no upward face use.
+const FACE_NO_UP_FU: &str =
+    "the face has no upward face use, though the kernel makes every face with its two face uses";
+/// Why a vertex loop use has no vertex use.
+const LU_NO_VU: &str = "a vertex loop use has no vertex use, though the kernel makes every \
+                        vertex loop use with its vertex use";
 
 /// A call whose status upstream does not check (no `SER`, or a `void` `Notify`): only
 /// [`SolidError::Unported`], the [`SolidError::InvalidInput`] of a null pointer
@@ -522,8 +552,13 @@ const fn brep_arg(b: &Brep) -> Option<NotifyArg> {
 
 /// The edge use's vertex (`pEU->GetVertexuse()->GetVertex()`), `NER` on each.
 fn eu_vertex(b: &Brep, eu: EdgeuseId) -> Result<(VertexuseId, VertexId)> {
-    let vu = eu1::vertexuse(b, eu)?.ok_or_else(|| ner("the edge use's vertex use"))?;
-    let v = vertexuse::vertex(b, vu)?.ok_or_else(|| ner("the vertex use's vertex"))?;
+    let vu = eu1::vertexuse(b, eu)?.ok_or_else(|| {
+        broken_link(
+            "an edge use has no vertex use, though the kernel gives every edge use the \
+             vertex use at its start",
+        )
+    })?;
+    let v = vertexuse::vertex(b, vu)?.ok_or_else(|| broken_link(VU_NO_VERTEX))?;
     Ok((vu, v))
 }
 
@@ -687,6 +722,16 @@ pub fn copy_brep(
     add_analytics: bool,
 ) -> Result<Brep> {
     let _ = copy_attributes;
+    // (not upstream) a source whose read raised tolerances to cover its kept trims passes
+    // that record to the copy: the copy's entities come from the source-to-copy map, a
+    // local one when the caller gives none
+    let mut own_reverse = CopyBrepMap::new();
+    let carry = !src.trim_cover_raises().is_empty();
+    let mut reverse_map = match reverse_map {
+        Some(m) => Some(m),
+        None if carry => Some(&mut own_reverse),
+        None => None,
+    };
     let mut b = Brep::new();
     b.set_key((env.key_of)(brep_entity()).key);
     // (not upstream) the copy's geometry is owned by `env.key_of`'s identities
@@ -718,7 +763,7 @@ pub fn copy_brep(
                 context: None,
             },
             copy_map,
-            reverse_map,
+            reverse_map.as_deref_mut(),
             add_analytics,
         ) {
             if e.is_unported_or_cancelled() {
@@ -738,7 +783,44 @@ pub fn copy_brep(
             ],
         ))
     })?;
+    if carry {
+        if let Some(map) = reverse_map.as_deref() {
+            copy_trim_cover_raises(src, &mut b, map)?;
+        }
+    }
     Ok(b)
+}
+
+/// (not upstream) The part of `src`'s kept-trim cover record ([`Brep::trim_cover_raises`])
+/// that holds on the copy `b`: each raised edge or vertex whose copy (`reverse_map`,
+/// source to copy) still holds the raised value, so the copy fits along it as the source
+/// does (`topology::edgeuse::p3::fit_tolerance`).
+///
+/// # Errors
+///
+/// Those of [`CopyBrepMap::get_at`] and of reading the copy's entities.
+fn copy_trim_cover_raises(
+    src: &Brep,
+    b: &mut Brep,
+    reverse_map: &CopyBrepMap<EntityRef>,
+) -> Result<()> {
+    let mut record = crate::topology::TrimCoverRaises::default();
+    for (&e, &(before, after)) in &src.trim_cover_raises().edges {
+        if let Some(EntityRef::Edge(c)) = reverse_map.get_at(Some(EntityRef::Edge(e)))? {
+            if b.edge(c)?.tolerance.to_bits() == after.to_bits() {
+                record.edges.insert(c, (before, after));
+            }
+        }
+    }
+    for (&v, &(before, after)) in &src.trim_cover_raises().vertices {
+        if let Some(EntityRef::Vertex(c)) = reverse_map.get_at(Some(EntityRef::Vertex(v)))? {
+            if b.vertex(c)?.tolerance.to_bits() == after.to_bits() {
+                record.vertices.insert(c, (before, after));
+            }
+        }
+    }
+    b.set_trim_cover_raises(record);
+    Ok(())
 }
 
 /// A default `SmTopology` record (flags, user value, marks) for every object of `b`
@@ -1666,7 +1748,7 @@ fn api_brep_copy_mapped(
     reverse_map: Option<&mut CopyBrepMap<EntityRef>>,
 ) -> Result<Brep> {
     let Some(brep) = brep else {
-        return Err(SolidError::topology_invalid_value(OP, "no B-rep was given"));
+        return Err(SolidError::topology(OP, TopologyFailure::NoBrepGiven));
     };
     // (not upstream: upstream names objects by their addresses) a source naming that
     // gives `brep`'s objects the keys `env.key_of` gives them names the copy's objects
@@ -2523,7 +2605,12 @@ fn merge_brep_in(
                     let new_curve = c.copy(k)?;
                     // m_pUVTrimCurve = SM_CAST_PTR(SmBSplineCurve, pNewCurve); NER(..)
                     if curve_bspline_base(&new_curve).is_none() {
-                        return Err(ner("the B-spline form of the copied UV trim curve"));
+                        return Err(SolidError::topology(
+                            OP,
+                            TopologyFailure::CurveNotBSpline {
+                                entity: Some(EntityRef::Edgeuse(eu)),
+                            },
+                        ));
                     }
                     Some(new_curve)
                 }
@@ -2964,12 +3051,12 @@ fn delete_face_in(
 
     // check state - m_bEditingEnabled must be on
     if !b.editing_enabled() {
-        return Err(ser("editing is not enabled"));
+        return Err(SolidError::topology(OP, TopologyFailure::EditingDisabled));
     }
 
     // Check if face is in brep
     if !p1::faces(b, None)?.contains(&f) {
-        return Err(ser("the face is not in the B-rep"));
+        return Err(SolidError::topology(OP, TopologyFailure::NotInBrep));
     }
 
     // tell Brep it's about to change
@@ -3007,10 +3094,10 @@ fn delete_face_in(
     let mut verts: Vec<Option<VertexId>> = face_vertices(b, f)?.into_iter().map(Some).collect();
     let orig_vertices: Vec<VertexId> = verts.iter().flatten().copied().collect();
 
-    let fu = face2::upward_faceuse(b, f)?.ok_or_else(|| ner("the face's upward face use"))?;
+    let fu = face2::upward_faceuse(b, f)?.ok_or_else(|| broken_link(FACE_NO_UP_FU))?;
     let other_fu = eu1::faceuse_mate(b, fu)?.ok_or(null_deref("face use without mate"))?;
 
-    let mut shell = eu1::faceuse_shell(b, fu)?.ok_or_else(|| ner("the face use's shell"))?;
+    let mut shell = eu1::faceuse_shell(b, fu)?.ok_or_else(|| broken_link(FU_NO_SHELL))?;
     let mut other_shell = eu1::faceuse_shell(b, other_fu)?;
 
     // Take care of the case where we have two Regions being combined as a result of
@@ -3020,11 +3107,8 @@ fn delete_face_in(
         let other_region = eu1::shell_region(b, os)?;
         if let Some(keep) = region_to_keep {
             if Some(keep) == other_region {
-                // Swap shells -- keep the specified Region
-                shell =
-                    eu1::faceuse_shell(b, other_fu)?.ok_or_else(|| ner("the face use's shell"))?;
-                other_shell =
-                    Some(eu1::faceuse_shell(b, fu)?.ok_or_else(|| ner("the face use's shell"))?);
+                // Swap shells -- keep the specified Region (`os` is `other_fu`'s shell)
+                (shell, other_shell) = (os, Some(shell));
             }
         } else {
             let other_r = other_region.ok_or(null_deref("shell without region"))?;
@@ -3033,10 +3117,7 @@ fn delete_face_in(
                     && eu1::shell_region(b, shell)? != b.infinite_region())
             {
                 // Swap shells -- keep the infinite (or void) region.
-                shell =
-                    eu1::faceuse_shell(b, other_fu)?.ok_or_else(|| ner("the face use's shell"))?;
-                other_shell =
-                    Some(eu1::faceuse_shell(b, fu)?.ok_or_else(|| ner("the face use's shell"))?);
+                (shell, other_shell) = (os, Some(shell));
             }
         }
         let os = other_shell.ok_or(null_deref("face use without shell"))?;
@@ -3048,23 +3129,18 @@ fn delete_face_in(
         let surviving = eu1::shell_region(b, shell)?.ok_or(null_deref("shell without region"))?;
         let del_region = eu1::shell_region(b, os)?.ok_or(null_deref("shell without region"))?;
         if surviving == del_region {
-            return Err(ser("the two shells are in the same region")); // Should not happen
+            // Should not happen
+            return Err(defect(
+                "the face's two face uses lie in different shells of one region, though each \
+                 side of a face faces the region its shell bounds",
+            ));
         }
-        ignore_soft(crate::error::passed_on(
-            shell::region_remove_shell(b, del_region, os),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        shell::region_remove_shell(b, del_region, os)?;
         shell::destroy(k, b, os, env)?;
         other_shell = None;
         for s in region_shells(b, del_region)? {
-            ignore_soft(crate::error::passed_on(
-                shell::region_remove_shell(b, del_region, s),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
-            ignore_soft(crate::error::passed_on(
-                shell::region_post_insert_shell(b, surviving, s),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            shell::region_remove_shell(b, del_region, s)?;
+            shell::region_post_insert_shell(b, surviving, s)?;
         }
         if Some(del_region) == b.infinite_region() {
             b.set_infinite_region(Some(surviving));
@@ -3085,10 +3161,7 @@ fn delete_face_in(
         ))?;
 
         // Remove and Delete the DelRegion
-        ignore_soft(crate::error::passed_on(
-            b.remove_region_from_list(del_region),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        b.remove_region_from_list(del_region)?;
         b.remove_region_record(del_region)?;
     }
 
@@ -3105,10 +3178,9 @@ fn delete_face_in(
         if lu1::is_vertex_loopuse(b, lu)? {
             // Single vertex loop - either remove vertexuses belonging to loops or change
             // them to shell vertexuses.
-            let vu = lu1::vertexuse(b, lu)?.ok_or_else(|| ner("the loop use's vertex use"))?;
-            let v = vertexuse::vertex(b, vu)?.ok_or_else(|| ner("the vertex use's vertex"))?;
-            let other_vu =
-                lu1::vertexuse(b, other_lu)?.ok_or_else(|| ner("the loop use's vertex use"))?;
+            let vu = lu1::vertexuse(b, lu)?.ok_or_else(|| broken_link(LU_NO_VU))?;
+            let v = vertexuse::vertex(b, vu)?.ok_or_else(|| broken_link(VU_NO_VERTEX))?;
+            let other_vu = lu1::vertexuse(b, other_lu)?.ok_or_else(|| broken_link(LU_NO_VU))?;
             let n_vus = vertex::vertexuses(b, v)?.len();
             // Remove vertexuses from the vertex.
             vertex_remove_vertexuse(b, v, other_vu)?;
@@ -3141,10 +3213,13 @@ fn delete_face_in(
                 if any_edgeuse.is_none() {
                     any_edgeuse = Some(eu);
                 }
-                let mate = eu1::mate(b, eu)?.ok_or_else(|| ner("the edge use's mate"))?;
-                let e = eu1::edge(b, eu)?.ok_or_else(|| ner("the edge use's edge"))?;
+                let mate = eu1::mate(b, eu)?.ok_or_else(|| broken_link(EU_NO_MATE))?;
+                let e = eu1::edge(b, eu)?.ok_or_else(|| broken_link(EU_NO_EDGE))?;
                 if eu1::face(b, mate)? != eu1::face(b, eu)? {
-                    return Err(ser("the edge use and its mate are on different faces"));
+                    return Err(defect(
+                        "an edge use of the face and its mate lie on different faces, though \
+                         an edge use's mate is its edge's use on the face's other side",
+                    ));
                 }
 
                 if edge::is_lamina(b, e)? {
@@ -3207,15 +3282,9 @@ fn delete_face_in(
     }
 
     // Take care of face and faceuses - remove from lists
-    ignore_soft(crate::error::passed_on(
-        shell::shell_remove_faceuse(b, shell, fu),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    shell::shell_remove_faceuse(b, shell, fu)?;
     if let Some(os) = other_shell {
-        ignore_soft(crate::error::passed_on(
-            shell::shell_remove_faceuse(b, os, other_fu),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        shell::shell_remove_faceuse(b, os, other_fu)?;
     }
 
     // Don't allow stale pointers to remain in the Faces.
@@ -3257,39 +3326,33 @@ fn delete_face_in(
         // delete every edge converted into a wire
         for e in new_wire_edges {
             deleted.push(EntityRef::Edge(e));
-            ignore_soft(crate::error::passed_on(
-                match body {
-                    Some(body) => super::p4::delete_edge_with_body_identity(
-                        k,
-                        b,
-                        &mut super::p4::DeleteEnv::from_notify(env),
-                        e,
-                        None,
-                        body,
-                    ),
-                    None => delete_edge(k, b, env, e, None),
-                },
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            match body {
+                Some(body) => super::p4::delete_edge_with_body_identity(
+                    k,
+                    b,
+                    &mut super::p4::DeleteEnv::from_notify(env),
+                    e,
+                    None,
+                    body,
+                ),
+                None => delete_edge(k, b, env, e, None),
+            }?;
         }
 
         // remove vertices that have become shell vertices
         for v in orig_vertices {
             if vertex::is_shell_vertex(b, v)? {
                 deleted.push(EntityRef::Vertex(v));
-                ignore_soft(crate::error::passed_on(
-                    match body {
-                        Some(body) => super::p4::delete_vertex_with_body_identity(
-                            k,
-                            b,
-                            &mut super::p4::DeleteEnv::from_notify(env),
-                            v,
-                            body,
-                        ),
-                        None => delete_vertex(k, b, env, v),
-                    },
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                match body {
+                    Some(body) => super::p4::delete_vertex_with_body_identity(
+                        k,
+                        b,
+                        &mut super::p4::DeleteEnv::from_notify(env),
+                        v,
+                        body,
+                    ),
+                    None => delete_vertex(k, b, env, v),
+                }?;
             }
         }
     }
@@ -3317,10 +3380,7 @@ fn delete_face_nesting(
     let mut vertices_needing_new_shell = 0usize;
     if any_edgeuse.is_none() && remaining(*vertex_count) == 0 {
         let r = eu1::shell_region(b, shell)?.ok_or(null_deref("shell without region"))?;
-        ignore_soft(crate::error::passed_on(
-            shell::region_remove_shell(b, r, shell),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        shell::region_remove_shell(b, r, shell)?;
         // delete pShell
         shell::destroy(k, b, shell, env)?;
     } else {
@@ -3444,12 +3504,8 @@ fn delete_face_nesting(
             )
         })?;
 
-        if faceuses.is_empty() && !edgeuses.is_empty() {
+        if let (true, Some(&eu)) = (faceuses.is_empty(), edgeuses.first()) {
             // Wire shell
-            let eu = edgeuses
-                .first()
-                .copied()
-                .ok_or_else(|| ser("the wire shell has no edge use"))?;
             set_shell_head(b, new_shell, ShellMembers::Edgeuse(eu))?;
             set_shell_type(b, new_shell, ShellType::Wire)?;
         } else if faceuses.is_empty() && edgeuses.is_empty() {
@@ -3479,10 +3535,7 @@ fn delete_face_nesting(
 
         // Transfer faceuses from the old shell to the new shell
         for &x in &faceuses {
-            ignore_soft(crate::error::passed_on(
-                shell::shell_remove_faceuse(b, shell, x),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            shell::shell_remove_faceuse(b, shell, x)?;
             shell::shell_post_insert_faceuse(b, new_shell, x)?;
         }
     }
@@ -3497,7 +3550,10 @@ fn delete_face_nesting(
                 None => false,
             };
         if !ok {
-            return Err(ser("the face use shell was not emptied into new shells"));
+            return Err(defect(
+                "the face use shell still holds members, or no new shell was made, after the \
+                 split that moves every member of it into a new shell",
+            ));
         }
     }
 
@@ -3505,14 +3561,8 @@ fn delete_face_nesting(
     // pLastNewShell
     let last = last_new_shell.ok_or(null_deref("no new shell"))?;
     let r = eu1::shell_region(b, shell)?.ok_or(null_deref("shell without region"))?;
-    ignore_soft(crate::error::passed_on(
-        shell::transfer_children(k, b, last, shell, None),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
-    ignore_soft(crate::error::passed_on(
-        shell::region_remove_shell(b, r, last),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    shell::transfer_children(k, b, last, shell, None)?;
+    shell::region_remove_shell(b, r, last)?;
     shell::destroy(k, b, last, env)
 }
 
@@ -3567,10 +3617,7 @@ pub fn remove_slit_loops_where_solids_touch(
         // inner loops only
         let loops = face2::loops(b, f, false, None)?;
         for &l in loops.iter().skip(1) {
-            let lu = b
-                .loop_(l)?
-                .loopuse
-                .ok_or_else(|| ner("the loop's loop use"))?;
+            let lu = b.loop_(l)?.loopuse.ok_or_else(|| broken_link(LOOP_NO_LU))?;
             let uses = lu1::edgeuses(b, lu, None, None)?;
             if uses.len() < 2 {
                 continue;
@@ -3578,7 +3625,7 @@ pub fn remove_slit_loops_where_solids_touch(
             // every edge used twice by the loop, and bounding another face too
             let mut slit = true;
             for &eu in &uses {
-                let e = eu1::edge(b, eu)?.ok_or_else(|| ner("the edge use's edge"))?;
+                let e = eu1::edge(b, eu)?.ok_or_else(|| broken_link(EU_NO_EDGE))?;
                 let mut in_loop = 0usize;
                 for &other in &uses {
                     if eu1::edge(b, other)? == Some(e) {
@@ -3597,15 +3644,22 @@ pub fn remove_slit_loops_where_solids_touch(
 
             // take the loop off its face, then its edge uses and vertex uses off their
             // edges and vertices
-            let other_lu = lu1::other_loopuse(b, lu)?.ok_or_else(|| ner("the loop use's mate"))?;
+            let other_lu = lu1::other_loopuse(b, lu)?.ok_or_else(|| {
+                broken_link("a loop use has no mate, though the kernel makes loop uses in pairs")
+            })?;
             b.face_mut(f)?.loops.retain(|&x| x != l);
             for x in [lu, other_lu] {
-                let fu = lu1::faceuse(b, x)?.ok_or_else(|| ner("the loop use's face use"))?;
+                let fu = lu1::faceuse(b, x)?.ok_or_else(|| {
+                    broken_link(
+                        "a loop use of a face's loop has no face use, though the kernel puts \
+                         every such loop use into the face use it bounds",
+                    )
+                })?;
                 faceuse_remove_loopuse(b, fu, x)?;
             }
             for eu in uses {
-                let mate = eu1::mate(b, eu)?.ok_or_else(|| ner("the edge use's mate"))?;
-                let e = eu1::edge(b, eu)?.ok_or_else(|| ner("the edge use's edge"))?;
+                let mate = eu1::mate(b, eu)?.ok_or_else(|| broken_link(EU_NO_MATE))?;
+                let e = eu1::edge(b, eu)?.ok_or_else(|| broken_link(EU_NO_EDGE))?;
                 edge_remove_edgeuse(b, e, eu)?;
                 edge_remove_edgeuse(b, e, mate)?;
                 let (vu1, v1) = eu_vertex(b, eu)?;
@@ -3645,16 +3699,33 @@ pub fn collapse_zero_area_two_edge_faces(
     b: &mut Brep,
     env: &mut NotifyEnv<'_>,
 ) -> Result<bool> {
+    let faces = p1::faces(b, None)?;
+    collapse_zero_area_two_edge_faces_among(k, b, env, &faces)
+}
+
+/// [`collapse_zero_area_two_edge_faces`] over `faces` only (in their order): a caller that
+/// has proved which faces are slivers (`crate::heal::tolerance_defects`) collapses those and
+/// leaves every other face as it is. A face of `faces` already gone is skipped.
+///
+/// # Errors
+///
+/// As [`collapse_zero_area_two_edge_faces`].
+pub fn collapse_zero_area_two_edge_faces_among(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    faces: &[FaceId],
+) -> Result<bool> {
     let mut collapsed = false;
-    for f in p1::faces(b, None)? {
+    for &f in faces {
+        if b.face(f).is_err() {
+            continue;
+        }
         let loops = face2::loops(b, f, false, None)?;
         let [l] = loops[..] else {
             continue;
         };
-        let lu = b
-            .loop_(l)?
-            .loopuse
-            .ok_or_else(|| ner("the loop's loop use"))?;
+        let lu = b.loop_(l)?.loopuse.ok_or_else(|| broken_link(LOOP_NO_LU))?;
         let uses = lu1::edgeuses(b, lu, None, None)?;
         let [use1, use2] = uses[..] else {
             continue;
@@ -3774,16 +3845,19 @@ fn is_upward_use(b: &Brep, eu: EdgeuseId) -> Result<bool> {
 /// `SmBrep::SplitDisconnectedShells`): splits each shell into its connected parts, as
 /// [`delete_face`] splits a shell a removed face leaves in pieces. The face uses
 /// reached through the shell from the first face use's face's first vertex stay; the
-/// rest move to a new face-use shell, in the infinite region or in a region of its
-/// own (with the old region's void flag), which is split in its turn. At most
-/// `MAX_SHELL_SPLITS` splits of each shell.
+/// rest move to a new face-use shell in the same region, which is split in its turn. At
+/// most `MAX_SHELL_SPLITS` splits of each shell. A bounded region whose shells split is
+/// then regrouped by nesting ([`regroup_split_region`]): the fork gives every part a
+/// region of its own, which is right for solids touching along a curve but makes a
+/// second solid of a cavity that touched the body's outside.
 ///
 /// # Errors
 ///
-/// Those of the shell traversal, the mark lock and the list edits.
+/// Those of the shell traversal, the mark lock, the list edits and the regrouping.
 pub fn split_disconnected_shells(k: &mut Kernel, b: &mut Brep) -> Result<()> {
     for r in p1::regions(b, None)? {
         let mut shells = region_shells(b, r)?;
+        let mut split = false;
         let mut jj = 0;
         while let Some(&s) = shells.get(jj) {
             jj += 1;
@@ -3798,8 +3872,12 @@ pub fn split_disconnected_shells(k: &mut Kernel, b: &mut Brep) -> Result<()> {
                 if all.len() < 2 {
                     break;
                 }
-                let face =
-                    eu1::faceuse_face(b, first)?.ok_or_else(|| ner("the face use's face"))?;
+                let face = eu1::faceuse_face(b, first)?.ok_or_else(|| {
+                    broken_link(
+                        "a face use has no face, though the kernel makes every face use \
+                             for its face",
+                    )
+                })?;
                 let Some(&start) = face_vertices(b, face)?.first() else {
                     break;
                 };
@@ -3822,19 +3900,11 @@ pub fn split_disconnected_shells(k: &mut Kernel, b: &mut Brep) -> Result<()> {
                     break;
                 }
 
-                // the face uses not reached go to a new shell, in the infinite region or
-                // a region of its own
+                // the face uses not reached go to a new shell in this region
                 let new_s = b.add_shell_record(crate::topology::Shell::default())?;
                 set_shell_type(b, new_s, ShellType::Faceuse)?;
-                if Some(r) == b.infinite_region() {
-                    shell::region_post_insert_shell(b, r, new_s)?;
-                } else {
-                    let new_r = b.add_region_record(Region::new())?;
-                    let is_void = b.region(r)?.is_void();
-                    region_set_is_void(b, new_r, is_void)?;
-                    shell::region_post_insert_shell(b, new_r, new_s)?;
-                    b.post_insert_region(new_r)?;
-                }
+                shell::region_post_insert_shell(b, r, new_s)?;
+                split = true;
                 for fu in all {
                     if reached.contains(&fu) {
                         continue;
@@ -3845,6 +3915,90 @@ pub fn split_disconnected_shells(k: &mut Kernel, b: &mut Brep) -> Result<()> {
                 // the new shell may have parts of its own: it is split in its turn
                 shells.push(new_s);
             }
+        }
+        if split && Some(r) != b.infinite_region() {
+            regroup_split_region(k, b, r)?;
+        }
+    }
+    Ok(())
+}
+
+/// Not upstream: the shells of bounded region `r` after [`split_disconnected_shells`] split
+/// one of them, regrouped into regions as their nesting says. A region is bounded by one
+/// outer shell and the voids that lie directly inside it. A void is a face-use shell the
+/// region does not lie inside (its face uses face out of it, so
+/// [`crate::topology::Shell::is_inner_shell`], which is true for the shell holding its
+/// region, as [`shell::order_region_shells`] reads it, is false). A void lying directly
+/// inside another of `r`'s shells that is not one ([`shell::is_inner_shell_of`]) bounds
+/// that shell's region; every other shell is the outer shell of a solid of its own, as solids touching
+/// along a curve are, and as a shell is whose nesting the ray tests cannot decide. The
+/// region of the group holding `r`'s first shell stays `r`; each other group gets a new
+/// region with `r`'s void flag. Each group's outer shell is listed first, its voids after
+/// it in `r`'s order.
+///
+/// # Errors
+///
+/// Those of the ray tests (an [`SolidError::Unported`] or cancelled call), the list edits
+/// and dangling ids.
+fn regroup_split_region(k: &mut Kernel, b: &mut Brep, r: RegionId) -> Result<()> {
+    let shells = region_shells(b, r)?;
+    // a void of the region: a face-use shell the region does not lie inside
+    let mut void = Vec::new();
+    for &s in &shells {
+        let is_void = b.shell(s)?.is_faceuse_shell()
+            && match crate::topology::Shell::is_inner_shell(k, b, s) {
+                Ok(holds_the_region) => !holds_the_region,
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Err(_) => false,
+            };
+        void.push(is_void);
+    }
+    // each shell's outer shell: itself, or the outer shell a void lies directly inside
+    let mut outer: Vec<usize> = (0..shells.len()).collect();
+    for (i, &s) in shells.iter().enumerate() {
+        if !void.get(i).copied().unwrap_or(false) {
+            continue;
+        }
+        for (j, &t) in shells.iter().enumerate() {
+            if i == j || void.get(j).copied().unwrap_or(true) {
+                continue;
+            }
+            if shell::is_inner_shell_of(k, b, s, Some(t))? == TRUE {
+                if let Some(slot) = outer.get_mut(i) {
+                    *slot = j;
+                }
+                break;
+            }
+        }
+    }
+    let keep = outer.first().copied().unwrap_or(0);
+    for (o, &head) in shells.iter().enumerate() {
+        if outer.get(o) != Some(&o) {
+            continue;
+        }
+        let group: Vec<ShellId> = std::iter::once(head)
+            .chain(
+                shells
+                    .iter()
+                    .enumerate()
+                    .filter(|&(i, _)| i != o && outer.get(i) == Some(&o))
+                    .map(|(_, &s)| s),
+            )
+            .collect();
+        let region = if o == keep {
+            r
+        } else {
+            let new_r = b.add_region_record(Region::new())?;
+            let is_void = b.region(r)?.is_void();
+            region_set_is_void(b, new_r, is_void)?;
+            b.post_insert_region(new_r)?;
+            new_r
+        };
+        for &s in &group {
+            shell::region_remove_shell(b, r, s)?;
+        }
+        for &s in &group {
+            shell::region_post_insert_shell(b, region, s)?;
         }
     }
     Ok(())
@@ -4206,12 +4360,12 @@ fn squeeze_edge_in(
 
     // check intput - pSurvivingVertex must be one of the edge's vertices
     if v1 != Some(survivor) && v2 != Some(survivor) {
-        return Err(ser("the surviving vertex is not on the edge"));
+        return Err(SolidError::topology(OP, TopologyFailure::VertexNotOnEdge));
     }
 
     // check input - edge cannot be a closed loop
     if v1 == v2 {
-        return Err(ser("the edge is a closed loop"));
+        return Err(SolidError::topology(OP, TopologyFailure::ClosedEdge));
     }
 
     // notify Brep and edge they are about to be modified
@@ -4260,34 +4414,17 @@ fn squeeze_edge_in(
             // We have to change the Shell's pointer to an edge use on the edge on the
             // other side of the vertex that's being deleted.
             let edges = vertex::edges(b, del_vertex, None)?;
-            if edges.len() < 2 {
-                return Err(ser("the vertex has fewer than two edges"));
-            }
-            let (e0, e1) = (
-                edges
-                    .first()
-                    .copied()
-                    .ok_or_else(|| ser("the vertex has fewer than two edges"))?,
-                edges
-                    .get(1)
-                    .copied()
-                    .ok_or_else(|| ser("the vertex has fewer than two edges"))?,
-            );
+            let [e0, e1, ..] = edges[..] else {
+                return Err(SolidError::topology(OP, TopologyFailure::WireEndSqueezed));
+            };
             let surviving_edge = if e0 == e { e1 } else { e0 };
             let surviving_eus = edge::edgeuses(b, surviving_edge, None, None)?;
-            if surviving_eus.len() < 2 {
-                return Err(ser("the surviving edge has fewer than two edge uses"));
-            }
-            let (s0, s1) = (
-                surviving_eus
-                    .first()
-                    .copied()
-                    .ok_or_else(|| ser("the surviving edge has fewer than two edge uses"))?,
-                surviving_eus
-                    .get(1)
-                    .copied()
-                    .ok_or_else(|| ser("the surviving edge has fewer than two edge uses"))?,
-            );
+            let [s0, s1, ..] = surviving_eus[..] else {
+                return Err(defect(
+                    "an edge at the vertex has fewer than two edge uses, though the kernel \
+                     makes every edge with its two mated edge uses",
+                ));
+            };
             let surviving_eu = if eu1::orientation(b, eu)? == eu1::orientation(b, s0)? {
                 s0
             } else {
@@ -4563,17 +4700,21 @@ fn turn_to_nurbs_in(
             .as_ref()
             .ok_or(null_deref("face without surface"))?;
         let Some(_) = as_bspline_surface(surface) else {
-            if surface.type_code() != OFFSET_SURFACE_TYPE {
-                continue;
-            }
+            // (only an offset surface has the offset surface's type code)
             let SurfaceKind::OffsetSurface(offset) = surface.kind() else {
-                return Err(ner("the offset surface"));
+                continue;
             };
 
             // it is an offset surface (ApproximateOffsetSurface's
             // GetOrCreateGwNurbPointer makes a missing NURB; NER there without one)
-            let base = with_nurb(k, offset.base_surface())?
-                .ok_or_else(|| ner("the NURBS form of the offset's base surface"))?;
+            let base = with_nurb(k, offset.base_surface())?.ok_or_else(|| {
+                SolidError::topology(
+                    OP,
+                    TopologyFailure::SurfaceWithoutNurbs {
+                        entity: Some(EntityRef::Face(f)),
+                    },
+                )
+            })?;
 
             // offset tolerance should be quite large compared to brep tol
             let approx_tol_3d = b.tolerance() * 10.0;
@@ -4596,16 +4737,11 @@ fn turn_to_nurbs_in(
             // first extend the new surface in all directions by a small amount
             let new_surface = Surface::from(new_bss);
             let domain = new_surface.natural_uv_domain_with_nurb(k)?;
-            // (status not checked upstream: a failed call leaves the Init() box, whose
-            // size clamps to 1.0 below)
-            let srf_bbox =
-                match new_surface.calculate_bounding_box(k, &domain, [true, false, false], true) {
-                    Ok(boxes) => boxes.normal_box.unwrap_or_else(Extent3d::new),
-                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                    // (fork 60a8a51 passes this status on: `SER`)
-                    Err(e) if k.fixes.brep_edit_statuses_pass_on => return Err(e),
-                    Err(_) => Extent3d::new(),
-                };
+            // (status not checked upstream; fork 60a8a51 passes it on: `SER`)
+            let srf_bbox = new_surface
+                .calculate_bounding_box(k, &domain, [true, false, false], true)?
+                .normal_box
+                .unwrap_or_else(Extent3d::new);
             let mut size = srf_bbox.size().length();
             if size >= 1.0e15 || size <= 0.0 {
                 size = 1.0;
@@ -4630,7 +4766,12 @@ fn turn_to_nurbs_in(
         // makes a missing NURB first
         let new_bss = Surface::from(
             with_nurb(k, surface)?
-                .ok_or_else(|| ner("the NURBS form of the surface"))?
+                .ok_or_else(|| {
+                    broken_link(
+                        "the surface gave no NURBS form, though `with_nurb` gives one for \
+                         every kind `as_bspline_surface` found a B-spline in",
+                    )
+                })?
                 .into_owned(),
         );
         let face_ref = (env.key_of)(EntityRef::Face(f));
@@ -4640,11 +4781,9 @@ fn turn_to_nurbs_in(
     // for every Brep->Curve
     let edges = p1::curve_owners(b, None, edge_owner)?;
     for e in edges {
-        let curve = b
-            .edge(e)?
-            .curve
-            .as_ref()
-            .ok_or_else(|| ner("the edge's curve"))?;
+        let curve = b.edge(e)?.curve.as_ref().ok_or_else(|| {
+            broken_link("the edge has no curve, though `curve_owners` listed it for its curve")
+        })?;
         if curve.type_code() == BSplineCurve::TYPE {
             // SetCurve(pCurve, FALSE) with the edge's own curve: nothing happens
             continue;
@@ -4681,28 +4820,40 @@ fn turn_to_nurbs_in(
             }
         }
 
-        // Approximate pCurve if we don't have a SmBSplineCurve yet (status ignored)
-        if bsc.is_none() {
+        // Approximate pCurve if we don't have a SmBSplineCurve yet; we must have one after
+        let bsc = if let Some(bsc) = bsc {
+            bsc
+        } else {
+            // (upstream ignores the knots' status; their failure is kept as the cause)
+            let mut knots_failure = None;
             let (knots, _) = match curve.knots(k, None) {
                 Ok(x) => x,
                 Err(err) if err.is_unported_or_cancelled() => return Err(err),
-                Err(_) => (Vec::new(), Vec::new()),
+                Err(err) => {
+                    knots_failure = Some(err);
+                    (Vec::new(), Vec::new())
+                }
             };
             let opts = crate::curve::curve::p1::ApproximateCurveOptions::default();
             match curve.approximate_curve(k, &knots, approx_tol, &opts) {
-                Ok(a) => bsc = Some(a.curve),
+                Ok(a) => a.curve,
                 Err(err) if err.is_unported_or_cancelled() => return Err(err),
-                Err(_) => {}
+                Err(err) => {
+                    return Err(Failure::new(OP, TopologyFailure::CurveNotApproximated)
+                        .caused_by(knots_failure.unwrap_or(err))
+                        .into_error())
+                }
             }
-        }
-
-        // Must have a BSplineCurve here
-        let bsc = bsc.ok_or_else(|| ner("the edge's B-spline curve"))?;
+        };
 
         // Update the edge: drop the old curve (TRUE = delete preExisting Curve)
         // (the new curve exists while the old one does: distinct identities)
-        let old_ref =
-            edge_curve_ref(k, b, env, e)?.ok_or_else(|| ner("the edge's curve reference"))?;
+        let old_ref = edge_curve_ref(k, b, env, e)?.ok_or_else(|| {
+            broken_link(
+                "the edge's curve has no identity, though the edge has a curve and every curve \
+                 is given one",
+            )
+        })?;
         let mut bsc = bsc;
         let r = curve_identity(issuer(&mut k.context, env.context.as_deref_mut()), &mut bsc)?;
         edge::set_curve(
@@ -4870,10 +5021,7 @@ fn orient_body(
         // If this face needs swapping, do it. Aids in bookkeeping later.
         if in_swap(face) {
             // (no SER upstream; fork 60a8a51 passes the status on)
-            ignore_soft(crate::error::passed_on(
-                face1::swap_uv_with_notifications(k, b, face, env),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            face1::swap_uv_with_notifications(k, b, face, env)?;
         }
 
         let (reverse_votes, same_votes) = if just_unify_normals {
@@ -4929,12 +5077,9 @@ fn orient_body(
             faceuses.clear();
             eu1::faceuse_collect_adjacent(k, b, start, &mut faceuses, Some(angle))?;
             if faceuses.len() > remaining {
-                return Err(SolidError::topology(
-                    OP,
-                    TopologyFailure::Inconsistent(
-                        "more face uses are connected than faces remain to be oriented",
-                    ),
-                ));
+                // upstream's assert "Nonorientable Brep, gathered faceuses from both sides
+                // of some face."
+                return Err(SolidError::topology(OP, TopologyFailure::GatheredBothSides));
             }
         }
         faceuses_processed += faceuses.len();
@@ -5064,7 +5209,8 @@ fn orient_ray_votes(
     let fu = face2::upward_faceuse(b, face)?.ok_or(null_deref("face without face use"))?;
     let edgeuses = eu1::faceuse_edgeuses(b, fu, false, None)?;
     if edgeuses.is_empty() {
-        return Err(ser("the face has no edges")); // Face needs to have at least one edge
+        return Err(SolidError::topology(OP, TopologyFailure::FaceWithoutEdges));
+        // Face needs to have at least one edge
     }
 
     let mut reverse = 0u32;
@@ -5148,7 +5294,7 @@ fn orient_ray_votes(
             )?;
             let sol = *sols
                 .get(0)
-                .ok_or_else(|| ser("the solver returned no solution"))?;
+                .ok_or_else(|| SolidError::topology(OP, TopologyFailure::NoFootOnSurface))?;
             let uv = crate::math::Point2::new(sol.start.param(0)?, sol.start.param(1)?);
             let normal = surface.evaluate_normal(
                 k,
@@ -5273,10 +5419,7 @@ fn brep_curve_solve(
             },
         )?;
         let mut out = Vec::new();
-        for i in 0..sols.len() {
-            let s = sols
-                .get(i)
-                .ok_or_else(|| ser("the solver solution is missing"))?;
+        for s in sols.as_slice() {
             out.push((s.num_variables, s.start.param(0)?));
         }
         Ok(out)
@@ -5358,9 +5501,9 @@ mod tests {
             assert!(!k.context.is_mark_locked(MarkType::Mark3));
             if fail_after_notifications {
                 let e = result.as_ref().unwrap_err();
-                assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+                assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
                 assert!(
-                    matches!(e.topology_failure(), Some(TopologyFailure::Missing(_))),
+                    e.topology_failure() == Some(&TopologyFailure::Defect { why: FACE_NO_UP_FU }),
                     "{e:?}"
                 );
                 assert!(b.face(face).is_ok());
@@ -5954,10 +6097,7 @@ mod tests {
             e.upstream_status(),
             Some(crate::error::SM_ERR_INVALID_INPUT)
         );
-        assert_eq!(
-            e.topology_failure(),
-            Some(&TopologyFailure::InvalidValue("no B-rep was given"))
-        );
+        assert_eq!(e.topology_failure(), Some(&TopologyFailure::NoBrepGiven));
     }
 
     #[test]
@@ -5991,7 +6131,7 @@ mod tests {
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
         assert_eq!(
             e.topology_failure(),
-            Some(&TopologyFailure::Failed("editing is not enabled"))
+            Some(&TopologyFailure::EditingDisabled)
         );
         b.set_editing_enabled(true);
         b.remove_from_face_list(f);
@@ -6007,10 +6147,7 @@ mod tests {
         });
         let e = r.unwrap_err();
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
-        assert_eq!(
-            e.topology_failure(),
-            Some(&TopologyFailure::Failed("the face is not in the B-rep"))
-        );
+        assert_eq!(e.topology_failure(), Some(&TopologyFailure::NotInBrep));
         assert!(DeleteFaceOptions::default().do_region_nesting);
     }
 
@@ -6392,9 +6529,8 @@ mod tests {
 
     /// WR-701 through a caller: `orient_trimmed_surfaces` asked to swap a cylinder face. With
     /// the face's net moved onto the axis the polar converter cannot be made on the
-    /// transposed net: the run returns the same error the face's own swap returns when
-    /// `brep_edit_statuses_pass_on` passes statuses on, and succeeds without it (the status
-    /// dropped as upstream drops it); either way the face keeps its surface, domain, face use
+    /// transposed net: the run returns the same error the face's own swap returns (the
+    /// status upstream drops is passed on), and the face keeps its surface, domain, face use
     /// and trims. The control: the unmoved face's own swap succeeds, and so does the run.
     #[test]
     fn orienting_with_a_face_whose_swap_is_refused_leaves_that_face_as_it_was() {
@@ -6467,41 +6603,29 @@ mod tests {
             (format!("{:?}", f.uv_domain), f.faceuse, kind, trims)
         };
 
-        for pass_on in [false, true] {
-            for on_axis in [false, true] {
-                let mut k = Kernel::default();
-                k.fixes.brep_edit_statuses_pass_on = pass_on;
-                // the face's own swap on a second, equal body: its error, if refused
-                let (mut direct, f2) = cylinder(&mut k, on_axis);
-                let swapped = face1::swap_uv(&k, &mut direct, f2);
-                assert_eq!(swapped.is_err(), on_axis, "{swapped:?}");
+        for on_axis in [false, true] {
+            let mut k = Kernel::default();
+            // the face's own swap on a second, equal body: its error, if refused
+            let (mut direct, f2) = cylinder(&mut k, on_axis);
+            let swapped = face1::swap_uv(&k, &mut direct, f2);
+            assert_eq!(swapped.is_err(), on_axis, "{swapped:?}");
 
-                let (mut b, face) = cylinder(&mut k, on_axis);
-                let before = state(&b, face);
-                b.set_editing_enabled(true);
-                let mut marks = Marks::default();
-                let r = with_env(|env| {
-                    orient_trimmed_surfaces(
-                        &mut k,
-                        &mut b,
-                        env,
-                        &mut marks,
-                        true,
-                        true,
-                        Some(&[face]),
-                    )
-                });
-                let what = format!("pass_on {pass_on}, on_axis {on_axis}");
-                if on_axis {
-                    match (pass_on, &r, &swapped) {
-                        (true, Err(e), Err(d)) => assert_eq!(e, d, "{what}"),
-                        (false, Ok(_), _) => {}
-                        _ => panic!("{what}: {r:?}"),
-                    }
-                    assert_eq!(state(&b, face), before, "{what}: the refused face changed");
-                } else {
-                    assert!(r.is_ok(), "{what}: {r:?}");
+            let (mut b, face) = cylinder(&mut k, on_axis);
+            let before = state(&b, face);
+            b.set_editing_enabled(true);
+            let mut marks = Marks::default();
+            let r = with_env(|env| {
+                orient_trimmed_surfaces(&mut k, &mut b, env, &mut marks, true, true, Some(&[face]))
+            });
+            let what = format!("on_axis {on_axis}");
+            if on_axis {
+                match (&r, &swapped) {
+                    (Err(e), Err(d)) => assert_eq!(e, d, "{what}"),
+                    _ => panic!("{what}: {r:?}"),
                 }
+                assert_eq!(state(&b, face), before, "{what}: the refused face changed");
+            } else {
+                assert!(r.is_ok(), "{what}: {r:?}");
             }
         }
     }

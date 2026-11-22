@@ -33,6 +33,7 @@
 //! | `half_quadratic_roots` (private) | the quadratic of `sm_DraftSeamPcurve` |
 //! | `has_corner`                  | `sm_DraftHasCorner`                   |
 //! | `draft_input` (private)       | `sm_DraftInput`                       |
+//! | `straight_bspline` (private)  | none (#16639)                         |
 //! | `lines_and_arcs`              | `sm_DraftLinesAndArcs`                |
 //! | `curvature_keeping_walls`     | `sm_CreateCurvatureKeepingWalls`      |
 //!
@@ -61,7 +62,11 @@
 //! sections that touch within the rounding of computing their crossing touch (the fork's took
 //! rounding's sign, so a tip where a line or an arc touches an arc was refused). No recursion;
 //! every loop is bounded by the profile's curve count or a fixed sample count (the arc span
-//! count is at most the arc's angle over a quarter turn).
+//! count is at most the arc's angle over a quarter turn). Walls whose sections all shrink to
+//! one point close the whole section there, a pyramid's apex or a ridge's far end, where the
+//! fork refused the draft (#17265). A B-spline input that is a straight line is a line (the
+//! fork takes only its lines, and drafts a square of B-spline segments by the offset method,
+//! #16639).
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-safe tests
 
@@ -81,6 +86,7 @@ use crate::nurbs::b_spline_curve::p1::{BSplineCurve, BSplineCurveForm, Canonical
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p1::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::math::NOW;
 use crate::surface::cone::Cone;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p7::FaceCurvesInput;
@@ -93,12 +99,14 @@ const OP: &str = "primitive::primitive_creation::p2::taper_walls";
 pub enum TaperCornerRefusal {
     /// `SM_TCR_APART`: the continued curves do not meet.
     Apart,
-    /// `SM_TCR_NOT_EXACT`: a curve there is neither a line nor an arc, so its wall has
+    /// `SM_TCR_NOT_EXACT`: a curve there is neither a line (or a straight B-spline) nor
+    /// an arc, so its wall has
     /// no exact continuation (or the seam is not exact on its walls).
     NotExact,
     /// `SM_TCR_WALL_CLOSES`: a wall closes before the far end: its neighbours meet
     /// across it, or its arc shrinks to its centre (WR-571: a wall closes at the far end,
-    /// the whole section closes, or an arc shrinks to its centre).
+    /// the section closes with walls still apart, or an arc shrinks to its centre; a
+    /// section that shrinks to one point closes there, #17265).
     WallCloses,
 }
 
@@ -887,9 +895,47 @@ pub(super) fn has_corner(k: &Kernel, composite: &CompositeCurve, n: Vec3) -> boo
     false
 }
 
+/// Whether `input` is a B-spline whose control points have positive weights (or none) and
+/// lie within `tol` of the segment `a b` between its ends, which is longer than `tol`: the
+/// whole curve lies in their convex hull, so within `tol` of that segment, and it is that
+/// straight line (#16639; the fork takes only lines). Each point `q`'s distance from the
+/// segment is proved: its foot on the chord (clamped to the segment) and the residual round
+/// as in [`touch_bound`], the point's Euclidean form once more, taken as `gamma_16` of
+/// `|q| + |a| + |b - a|`; the computed distance plus that bound is at most `tol`.
+fn straight_bspline(input: &Curve, tol: f64) -> bool {
+    let CurveKind::BSpline(c) = input.kind() else {
+        return false;
+    };
+    let Some(nurb) = c.gw_nurb() else {
+        return false;
+    };
+    let pts = nurb.cpts();
+    let (Some(first), Some(last)) = (pts.first(), pts.last()) else {
+        return false;
+    };
+    let a = first.to_euclid();
+    let d = last.to_euclid() - a;
+    let dd = d.dot(d);
+    let chord = dd.sqrt();
+    if !(chord > tol) {
+        return false;
+    }
+    pts.iter().all(|p| {
+        if !(p.w == NOW || p.w > 0.0) {
+            return false;
+        }
+        let q = p.to_euclid();
+        let w = q - a;
+        let t = (d.dot(w) / dd).clamp(0.0, 1.0);
+        let off = (w - d * t).length();
+        off + gamma(16) * (q.length() + a.length() + chord) <= tol
+    })
+}
+
 /// The line or circle among `inputs` that the profile's segment `c` is (its copy,
 /// split at tangent breaks, is a plain B-spline; a line or a circle has none, so it is
-/// the one with the same ends and middle), or `None` (`sm_DraftInput`).
+/// the one with the same ends and middle), or `None` (`sm_DraftInput`). A straight
+/// B-spline ([`straight_bspline`]) is a line here.
 fn draft_input<'a>(
     k: &Kernel,
     c: &Curve,
@@ -901,7 +947,10 @@ fn draft_input<'a>(
     let end = c.evaluate_point(k, ivl.max())?;
     let mid = c.evaluate_point(k, ivl.mid())?;
     for input in inputs {
-        if !(input.is_kind_of(CIRCLE_TYPE) || input.is_kind_of(LINE_TYPE)) {
+        if !(input.is_kind_of(CIRCLE_TYPE)
+            || input.is_kind_of(LINE_TYPE)
+            || straight_bspline(input, tol))
+        {
             continue;
         }
         let j = input.natural_interval();
@@ -919,7 +968,8 @@ fn draft_input<'a>(
     Ok(None)
 }
 
-/// Whether every segment of the profile `composite` is a line or an arc among
+/// Whether every segment of the profile `composite` is a line (or a straight B-spline) or
+/// an arc among
 /// `inputs` (`sm_DraftLinesAndArcs`).
 pub(super) fn lines_and_arcs(
     k: &Kernel,
@@ -949,7 +999,7 @@ pub(super) struct WallsInput<'a> {
     pub tangent: bool,
     /// The profile, one closed chain.
     pub composite: &'a CompositeCurve,
-    /// The curves it was made from (its lines and circles).
+    /// The curves it was made from (its lines, straight B-splines and circles).
     pub inputs: &'a [Curve],
     /// The unit normal the height runs along (`CreateTaperExtrude`'s): the profile's
     /// plane's, or near it where `CreateTaperExtrude` snapped a normal near Z to Z (the
@@ -1351,11 +1401,142 @@ impl Sections<'_> {
         Ok(Some(angle(wall, xb, *start + hint) - *start))
     }
 
+    /// Whether the whole section has closed at the point `q` of the profile's plane by
+    /// height `f` (#17265), so that every live wall's seams may end at one apex `q + f h`
+    /// within the B-rep's tolerance `tol` (the kernel's coincidence: points within it of one
+    /// vertex are that vertex): a pyramid's apex, or a ridge's far end.
+    ///
+    /// Every live wall moves into the material at its own speed per unit of `f`, `s_w`: a
+    /// line's `|offset|`, an arc's `|shrink|`. Let `s` be the least and `H = |h|`. If every
+    /// live wall's two crossings at `f` lie within `reach = tol s / (s + H)` of `q`, the
+    /// section there lies within `reach` of `q` (a line's section runs between its crossings;
+    /// an arc's is the short arc between them, checked below), so each of its points is
+    /// within `reach` of the nearest wall, which reaches it by `f + reach / s`: the section is
+    /// gone by then. Every point of the true walls' meeting above `f` is then within
+    /// `reach + (reach / s) H = tol` of the apex, by the triangle inequality. A wall that does
+    /// not move (`s` not above 0) is not closed.
+    ///
+    /// An arc's section is followed up from `f_from` in [`SECTION_STEPS`] steps, as the
+    /// closing search follows it, so that its angle stays continuous; the short arc over a
+    /// chord of at most `2 reach` is at most a half circle on it, `PI reach` long, and the
+    /// long one at least `2 PI r - PI reach`, more than `PI reach` while the radius `r` there
+    /// is over `reach` (an arc of radius at most `reach` lies within `2 reach` of `q` either
+    /// way, and `read_walls` refuses one whose radius falls to `tol`). A crossing that is
+    /// missing, or a value that is NaN, is not closed.
+    ///
+    /// Crossings all within `tol` of `q` but not all within `reach` are within the
+    /// tolerance of one vertex without the closure being bounded: neither one apex nor
+    /// separate vertices (a ridge shorter than the tolerance) is right, so that is
+    /// [`Closure::Ambiguous`], which the caller refuses. With no live wall left, nothing has
+    /// closed here ([`Closure::Open`]).
+    fn closed_at(
+        &self,
+        live: &[bool],
+        f_from: f64,
+        f: f64,
+        q: Point3,
+        tol: f64,
+    ) -> Result<Closure> {
+        let mut s = f64::INFINITY;
+        for (w, &alive) in live.iter().enumerate() {
+            if !alive {
+                continue;
+            }
+            let wall = at_ref(self.walls, w)?;
+            let speed = if wall.arc {
+                wall.shrink.abs()
+            } else {
+                wall.offset.length()
+            };
+            s = min2(s, speed);
+        }
+        let height = self.h.length();
+        if !(s > 0.0 && s.is_finite() && height.is_finite()) {
+            return Ok(Closure::Open);
+        }
+        let reach = tol * s / (s + height);
+        let mut within_reach = true;
+        for (w, &alive) in live.iter().enumerate() {
+            if !alive {
+                continue;
+            }
+            for p in [at(&self.ins, w)?, at(&self.outs, w)?] {
+                let Some(x) = self.at(p, f)? else {
+                    return Ok(Closure::Open);
+                };
+                let d = x.distance(q);
+                if !(d <= tol) {
+                    return Ok(Closure::Open);
+                }
+                if !(d <= reach) {
+                    within_reach = false;
+                }
+            }
+            let wall = at_ref(self.walls, w)?;
+            if !wall.arc {
+                continue;
+            }
+            let radius = wall.radius - f * wall.shrink;
+            if radius <= reach {
+                continue;
+            }
+            let mut start = wall.start_ang;
+            let Some(mut len) =
+                self.length(w, f_from, &mut start, wall.end_ang - wall.start_ang)?
+            else {
+                return Ok(Closure::Open);
+            };
+            for k in 1..=SECTION_STEPS {
+                let fk = f_from + (f - f_from) * f64::from(k) / f64::from(SECTION_STEPS);
+                let Some(l) = self.length(w, fk, &mut start, len)? else {
+                    return Ok(Closure::Open);
+                };
+                len = l;
+            }
+            let arc = radius * len.abs();
+            if !(arc <= PI * tol) {
+                return Ok(Closure::Open);
+            }
+            if !(arc <= PI * reach) {
+                within_reach = false;
+            }
+        }
+        Ok(if within_reach {
+            Closure::Closed
+        } else {
+            Closure::Ambiguous
+        })
+    }
+
+    /// Every live wall closes at `q` at height `f`: its pieces end there (#17265).
+    fn close_all_at(&mut self, live: &mut [bool], f: f64, q: Point3) -> Result<()> {
+        for (w, alive) in live.iter_mut().enumerate() {
+            if !*alive {
+                continue;
+            }
+            self.end(at(&self.ins, w)?, f, q)?;
+            self.end(at(&self.outs, w)?, f, q)?;
+            *alive = false;
+        }
+        Ok(())
+    }
+
     /// A refusal of `reason` at piece `p`'s low end, in the profile's plane.
     fn refuse(&self, reason: TaperCornerRefusal, p: usize) -> Result<Walls> {
         let seam = at_ref(&self.pieces, p)?.seam;
         Ok(refuse(reason, seam.p - seam.f0 * self.h))
     }
+}
+
+/// Whether the whole section has closed at one point ([`Sections::closed_at`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Closure {
+    /// Every live wall's section is within the closure bound of the point.
+    Closed,
+    /// Within the tolerance of it, but not within the bound: refused.
+    Ambiguous,
+    /// Not closed there.
+    Open,
 }
 
 /// Steps in which each live wall's section is followed up the height.
@@ -1429,8 +1610,13 @@ impl EdgeLoop {
 /// neighbours meet from that point up, a new seam built the same exact way. Two lines
 /// brought face to face so (a slot's sides) close together along their common line, and
 /// the walls beyond them meet from its other end. Each wall's face runs over its seams in
-/// order; a closed wall has no far edge. A wall closing at the far end, the whole section
-/// closing, and an arc shrinking to its centre are still refused.
+/// order; a closed wall has no far edge. Where every live wall's section has shrunk to one
+/// point (a pyramid's apex, or the far end of a ridge two walls close along), the whole
+/// section closes there and the walls end at that point (#17265; the fork refused it once
+/// fewer than three walls were left). A wall closing at the far end, a section that
+/// closes with walls still apart, a closure within the tolerance of one point but beyond
+/// its bound ([`Sections::closed_at`]), and an arc shrinking to its centre are still
+/// refused.
 #[allow(clippy::too_many_lines)] // one fork routine
 fn walls_closing_at_apexes(
     a: &mut impl PrimitiveCreationAccess,
@@ -1599,6 +1785,17 @@ fn walls_closing_at_apexes(
             return sections.refuse(TaperCornerRefusal::Apart, w_in);
         };
         let mut apex = 0.5 * (xa + xb);
+        // every live wall closes there with it: the section shrinks to the apex (#17265)
+        match sections.closed_at(&live, f_cur, f, apex, tol)? {
+            Closure::Closed => {
+                sections.close_all_at(&mut live, f, apex)?;
+                break;
+            }
+            Closure::Ambiguous => {
+                return sections.refuse(TaperCornerRefusal::WallCloses, w_in);
+            }
+            Closure::Open => {}
+        }
         sections.end(w_in, f, apex)?;
         sections.end(at(&sections.outs, w)?, f, apex)?;
         let mut wa = at(&prev, w)?;
@@ -1613,6 +1810,7 @@ fn walls_closing_at_apexes(
         // its neighbours meet from there up (each ridge closes two walls, so the loop ends
         // before every wall has closed)
         let mut met = false;
+        let mut collapsed = false;
         for _ in 0..=count {
             if live_count < 3 || wa == wb {
                 return sections.refuse(TaperCornerRefusal::WallCloses, w_in);
@@ -1656,6 +1854,20 @@ fn walls_closing_at_apexes(
                     SolidError::primitive_failed(OP, "a wall index is out of range")
                 })? = false;
                 live_count -= 2;
+                // the walls left close at its far end with them: the section shrinks
+                // along the ridge to that end (#17265)
+                match sections.closed_at(&live, f_cur, f, end, tol)? {
+                    Closure::Closed => {
+                        sections.close_all_at(&mut live, f, end)?;
+                        collapsed = true;
+                        met = true;
+                        break;
+                    }
+                    Closure::Ambiguous => {
+                        return sections.refuse(TaperCornerRefusal::WallCloses, w_in);
+                    }
+                    Closure::Open => {}
+                }
                 if live_count < 3 || c == wb || d == wa {
                     return sections.refuse(TaperCornerRefusal::WallCloses, w_in);
                 }
@@ -1693,6 +1905,9 @@ fn walls_closing_at_apexes(
                 OP,
                 "draft wall closing bound exceeded",
             ));
+        }
+        if collapsed {
+            break;
         }
         f_cur = f;
     }
@@ -2029,6 +2244,68 @@ pub(super) fn curvature_keeping_walls(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The quadratic from (0, 0) to (2, 0) whose middle control point is at (1, `y`).
+    fn quadratic(y: f64, weights: Option<&[f64]>) -> Result<Curve> {
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 2,
+            control_points: &[
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(1.0, y, 0.0),
+                Point3::new(2.0, 0.0, 0.0),
+            ],
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[3, 3],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights,
+            trim: None,
+        })
+        .map(Curve::from)
+    }
+
+    #[test]
+    fn a_straight_bspline_is_one_whose_control_points_are_on_its_chord() {
+        let tol = 1e-6;
+        let segment = |b: f64| {
+            Curve::from(
+                BSplineCurve::create_line_segment(3, Point3::ZERO, Point3::new(b, 0.0, 0.0))
+                    .unwrap(),
+            )
+        };
+        assert!(straight_bspline(&segment(4.0), tol));
+        // a chord no longer than the tolerance is no line
+        assert!(!straight_bspline(&segment(0.5 * tol), tol));
+        // bowed out by half its middle control point's offset
+        assert!(straight_bspline(&quadratic(0.5 * tol, None).unwrap(), tol));
+        assert!(!straight_bspline(&quadratic(4.0 * tol, None).unwrap(), tol));
+        // rational: on the chord with positive weights; a negative weight is refused by
+        // the constructor, or not straight
+        // points beside the segment's start, within `tol` of its line and of its extension
+        // by `tol` but 0.9 sqrt 2 `tol` from the segment: the curve leaves it by over `tol`
+        let mut control = vec![Point3::new(-0.9 * tol, -0.9 * tol, 0.0); 9];
+        control[0] = Point3::ZERO;
+        control[8] = Point3::new(100.0, 0.0, 0.0);
+        let hooked = BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 8,
+            control_points: &control,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[9, 9],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+        .unwrap();
+        assert!(!straight_bspline(&Curve::from(hooked), tol));
+        let rational = quadratic(0.0, Some(&[1.0, 2.0, 1.0])).unwrap();
+        assert!(straight_bspline(&rational, tol));
+        if let Ok(negative) = quadratic(0.0, Some(&[1.0, -0.5, 1.0])) {
+            assert!(!straight_bspline(&negative, tol));
+        }
+    }
 
     #[test]
     fn quartic_multiplies_bernstein_quadratics() {

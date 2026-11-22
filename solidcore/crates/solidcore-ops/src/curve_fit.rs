@@ -8,10 +8,11 @@
 //! pieces through its points, gets the same bounds ([`fit_spline_bounds`]).
 
 use solidcore::curve::from_parameters::{from_parameters, record_of as kernel_record, EdgeCurve};
+use solidcore::geom::tol::{context_zone_tol_3d, SmallTopoType};
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::crv_deviation::{certified_distance, interpolation_bound};
-use solidcore::nurbs::crv_fit::end_directions::interp_end_directions;
-use solidcore::nurbs::crv_fit::p1::{approx_knots, param_values, ParamMethod};
+use solidcore::nurbs::crv_fit::end_directions::{interp_end_directions, square_to_plane};
+use solidcore::nurbs::crv_fit::p1::{approx_knots, param_values, DerivEnd, ParamMethod};
 use solidcore::nurbs::crv_fit::p2::interp;
 use solidcore::nurbs::geom::Interval;
 use solidcore::nurbs::knots::{clamped_uniform, periodic_uniform, KnotVector, Side, MAX_DEGREE};
@@ -103,6 +104,86 @@ pub fn ep_curve_with_ends(
         let bound = interpolation_bound(&fit, &params, &data)?;
         Ok(record_of(&fit).map(|c| (c, bound)))
     })?
+}
+
+/// What an end of a curve through edit points is held to ([`ep_curve_with_end_conditions`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum EndCondition {
+    /// Free: the interpolation's own end.
+    Free,
+    /// Square to the plane of this normal. Asked, the normal is in either sense and of any
+    /// length; answered, it is the unit tangent there, in the sense the curve runs.
+    SquareTo([f64; 3]),
+}
+
+/// A curve through edit points, the kernel's bound of how far it misses them, and the condition
+/// each end got ([`ep_curve_with_end_conditions`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct EpCurve {
+    /// The curve.
+    pub curve: Curve,
+    /// How far, at most, the curve misses a point at its parameter.
+    pub bound: f64,
+    /// The condition the start got.
+    pub start: EndCondition,
+    /// The condition the end got.
+    pub end: EndCondition,
+}
+
+/// As [`ep_curve_with_ends`], with each end asked a condition instead of given a direction;
+/// the fit decides which it can hold and says what each end got. An end square to a plane
+/// leaves or reaches its point along the plane's normal, in the sense the points take from
+/// that end (the kernel's [`square_to_plane`]: the side they first leave the plane through the
+/// end to, more than the model's zone tolerance off it). An end square to a plane that every
+/// point lies in, within that tolerance, is left free and answered [`EndCondition::Free`]: the
+/// curve could not leave the plane square to it without hooking out of it and back. With both
+/// ends free it is [`ep_curve`].
+///
+/// # Errors
+/// As [`ep_curve_with_ends`]; [`Error::Argument`] also for a normal with a coordinate that is
+/// not finite or past the coordinate bound, or of no length.
+pub fn ep_curve_with_end_conditions(
+    points: &[[f64; 3]],
+    degree: usize,
+    start: EndCondition,
+    end: EndCondition,
+) -> Result<EpCurve> {
+    if points.len() < 2 || points.len() > CURVE_MAX_POINTS || !points.iter().all(|p| coord_ok(p)) {
+        return Err(Error::Argument);
+    }
+    let normal_ok = |c: EndCondition| match c {
+        EndCondition::Free => true,
+        EndCondition::SquareTo(n) => coord_ok(&n),
+    };
+    if !normal_ok(start) || !normal_ok(end) {
+        return Err(Error::Argument);
+    }
+    let data: Vec<Vec3> = points.iter().map(|&[x, y, z]| Vec3::new(x, y, z)).collect();
+    let (start, end) = run("curve_fit::ep_curve_with_end_conditions", |k| {
+        let tol = context_zone_tol_3d(k, None, SmallTopoType::NormalSize);
+        let held = |c: EndCondition, at: DerivEnd| match c {
+            EndCondition::Free => Ok(None),
+            EndCondition::SquareTo([x, y, z]) => {
+                square_to_plane(&data, Vec3::new(x, y, z), at, tol)
+            }
+        };
+        match (held(start, DerivEnd::Start), held(end, DerivEnd::End)) {
+            (Ok(s), Ok(e)) => Ok(Ok((s, e))),
+            (Err(SolidError::InvalidInput { .. }), _)
+            | (_, Err(SolidError::InvalidInput { .. })) => Ok(Err(Error::Argument)),
+            (Err(e), _) | (_, Err(e)) => Err(e),
+        }
+    })??;
+    let array = |d: Option<Vec3>| d.map(|v| [v.x, v.y, v.z]);
+    let (start, end) = (array(start), array(end));
+    let (curve, bound) = ep_curve_with_ends(points, degree, start, end)?;
+    let got = |d: Option<[f64; 3]>| d.map_or(EndCondition::Free, EndCondition::SquareTo);
+    Ok(EpCurve {
+        curve,
+        bound,
+        start: got(start),
+        end: got(end),
+    })
 }
 
 /// The closed B-spline of `degree` (below the number of points) with `points`

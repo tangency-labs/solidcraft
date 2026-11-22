@@ -25,6 +25,51 @@ pub fn tolerance(p: &Value, cmd: &str) -> Result<f64> {
     }
 }
 
+/// A `matrix` whose translation column (entries 4, 8 and 12 of a flat matrix, the last entry of
+/// each of the first three rows) may hold length expressions (#8192): the matrix with each worked
+/// out by `eval` (the text to a length in mm, or why it can't), and per axis the expression to
+/// keep, for those that name a parameter. A string anywhere else is refused.
+pub fn with_exprs(v: &Value, mut eval: impl FnMut(&str) -> std::result::Result<f64, String>, cmd: &str) -> Result<(Value, [Option<String>; 3])> {
+    let mut kept: [Option<String>; 3] = Default::default();
+    let Some(a) = v.as_array().filter(|a| a.iter().any(|x| x.is_string() || x.as_array().is_some_and(|r| r.iter().any(Value::is_string)))) else {
+        return Ok((v.clone(), kept));
+    };
+    let rows = a.iter().all(Value::is_array);
+    let mut one = |entry: &Value, at: Option<usize>| -> Result<Value> {
+        let Value::String(e) = entry else { return Ok(entry.clone()) };
+        let Some(axis) = at else {
+            return Err(bad(
+                cmd,
+                "matrix: only its translation column (entries 4, 8 and 12, or the last of each of the first three rows) can be a length expression",
+            ));
+        };
+        let x = eval(e).map_err(|err| bad(cmd, format!("matrix translation `{e}`: {err}")))?;
+        if !x.is_finite() || x.abs() > 1e9 {
+            return Err(bad(cmd, "matrix translation exceeds supported numeric range"));
+        }
+        if !solidcraft_doc::expr::references(e).is_empty()
+            && let Some(slot) = kept.get_mut(axis)
+        {
+            *slot = Some(e.trim().to_string());
+        }
+        Ok(serde_json::Number::from_f64(x).map_or(Value::Null, Value::Number))
+    };
+    let mut out = Vec::with_capacity(a.len());
+    for (i, item) in a.iter().enumerate() {
+        if rows {
+            let Some(row) = item.as_array() else { continue };
+            let mut r = Vec::with_capacity(row.len());
+            for (j, x) in row.iter().enumerate() {
+                r.push(one(x, (j == 3 && i < 3).then_some(i))?);
+            }
+            out.push(Value::Array(r));
+        } else {
+            out.push(one(item, (i % 4 == 3 && i < 12).then_some(i / 4))?);
+        }
+    }
+    Ok((Value::Array(out), kept))
+}
+
 /// Read `matrix` as a rigid transform. It is row-major: 12 numbers (three rows of rotation
 /// and translation, `[r00, r01, r02, tx, r10, …, tz]`) or 16 (a fourth row `0, 0, 0, 1`), flat
 /// or as rows.

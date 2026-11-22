@@ -105,13 +105,21 @@ fn assert_slices(c: f64, overlap: f64, op: BooleanOp, counts: [usize; 3], want: 
 /// corners they stay within 1e-10 of each other. Deciding their coincidence over the whole
 /// circles called them apart: the intersection and the difference failed (1001 or
 /// `NotSolid`). Now both are the closed-form wedge and the slice minus it.
+///
+/// Both have one arc edge per cap, from corner to corner. The two arcs cross halfway between
+/// the corners (4.3e-5 from each) at about 1e-6 rad, so that crossing is known along the arc
+/// only to tolerance / sin of it, about 20: no reach is proved and its uncertainty region
+/// reaches the capture distance, over both corners (docs/booleans.md, "One point or two").
+/// It is no point of its own: the wedge's caps are not split there (8 vertices and 11 edges
+/// with the two arc pieces on one circle, their ends grown to 4e-5, before the capture was
+/// bounded by tolerance).
 #[test]
 fn pie_slices_with_off_centre_arcs_and_overlapping_walls_meet_in_the_wedge() {
     all_fixes();
     let overlap = 1e-6;
     let wedge = wedge_volume(overlap);
     for c in [-4.85e-5, 4.85e-5] {
-        assert_slices(c, overlap, BooleanOp::Intersect, [5, 11, 8], wedge);
+        assert_slices(c, overlap, BooleanOp::Intersect, [5, 9, 6], wedge);
         assert_slices(
             c,
             overlap,

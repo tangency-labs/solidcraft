@@ -964,10 +964,7 @@ fn list_operand(k: &mut Kernel, breps: &[Brep], surfaces: &[Surface]) -> Result<
         let mut records = crate::topology::topology::NotifyRecords::new();
         for source in rest {
             // MergeBrep's ordinary status is ignored upstream.
-            ignored(crate::error::passed_on(
-                combine_brep_keeping(k, &mut records, &mut result, source, None, None, true),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            combine_brep_keeping(k, &mut records, &mut result, source, None, None, true)?;
         }
         (result, false)
     } else {
@@ -1240,16 +1237,10 @@ pub fn boolean_lists_with_notifications(
                             // reference attribute) and the result keeps its own.
                             copy_component(k, &mut result, &connected, &mut component, &face_ref)?;
                         }
-                        ignored(crate::error::passed_on(
-                            stitch_and_orient(k, &mut component, -0.1, false, None, None),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?;
+                        stitch_and_orient(k, &mut component, -0.1, false, None, None)?;
                         output.breps.push(component);
                         result.set_editing_enabled(true);
-                        ignored(crate::error::passed_on(
-                            remove_faces(k, &mut result, &connected),
-                            k.fixes.brep_edit_statuses_pass_on,
-                        )?)?;
+                        remove_faces(k, &mut result, &connected)?;
                         let next = bp::faces(&result, None)?;
                         if next.len() >= faces.len() {
                             return Err(SolidError::invalid_input(
@@ -1432,12 +1423,26 @@ mod tests {
             );
             // IntersectInsertRelate runs (the edge-less fixture faces relate nothing);
             // copying an unrelated B face then needs its face use, which a bare face
-            // record lacks, so Union, ExclusiveOr and Merge stop there
+            // record lacks, so Union, ExclusiveOr and Merge stop there. Intersection
+            // deletes A's unrelated face, which a bare face record cannot do either: upstream
+            // went on without the delete, the fork returns its failure (c8f6a31,
+            // `Boolean2D`'s `SER( sTI.DeleteFaces(sDelFaces) )`)
             let copies = matches!(
                 operation,
                 BooleanOperation::Union | BooleanOperation::ExclusiveOr | BooleanOperation::Merge
             );
-            if copies {
+            if operation == BooleanOperation::Intersection {
+                assert!(
+                    matches!(
+                        result,
+                        Err(SolidError::InvalidInput {
+                            operation: "boolean::topology_intersector::p2::delete_faces",
+                            ..
+                        })
+                    ),
+                    "{operation:?}: {result:?}"
+                );
+            } else if copies {
                 assert!(
                     matches!(
                         result,
@@ -1449,7 +1454,14 @@ mod tests {
                     "{operation:?}: {result:?}"
                 );
             } else {
-                assert!(result.is_ok(), "{operation:?}: {result:?}");
+                // Intersection and Difference delete faces instead, and deleting a bare
+                // face record needs its upward face use: upstream ignores that status and
+                // the fork passes it on (WR-658, tangency-labs/smlib e7ebc8d)
+                assert!(
+                    matches!(&result, Err(e) if e.operation() == "topology::brep::p3"
+                        && e.sm_status() == Some(1006)),
+                    "{operation:?}: {result:?}"
+                );
             }
             assert!(kernel.context.doing_boolean());
         }

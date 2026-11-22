@@ -31,6 +31,14 @@ fn scene_with(auto_to_object: bool) -> Harness {
     let d = h.app.dialog.as_mut().unwrap();
     d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
     d.active = 0;
+    // Extrude decides its operation off the window thread after the profile is picked; Join
+    // shows Target Bodies and New does not, so the form has its final rows only then (#17657).
+    for _ in 0..500 {
+        h.frames(1);
+        if !h.app.dialog.as_ref().is_some_and(|d| d.op_auto.pending) {
+            break;
+        }
+    }
     h.frames(2);
     h
 }
@@ -206,6 +214,82 @@ fn manual_to_object_accepts_a_parallel_plane_with_automatic_switching_off() {
     let commands = apply_commands(&h.app, dialog(&h)).unwrap();
     assert_eq!(commands[0].1["to"], json!([0.0, 0.0, 25.0]));
     assert!((solidcraft_engine::extrude_reach(&h.app.session, &commands[0].1).unwrap() - 25.0).abs() < 1e-9);
+}
+
+/// A snap point (the end of a sketch line, woken by hovering the line) reaches the dialog as a
+/// vertex of no body. To Object and From Object take it as the place to extrude to or from (#17394).
+#[test]
+fn to_and_from_object_take_a_snap_point() {
+    let mut h = scene_with(false);
+    h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Extent Type:To Object"}})).unwrap();
+    assert_eq!(dialog(&h).active_input().unwrap().label, "To Object");
+    let end = Vec3::new(5.0, 5.0, 30.0);
+    assert!(click(&mut h, |_| Hit::Vertex { body: String::new(), point: end }), "a sketch line's end is a To Object");
+    assert_eq!(to_object(dialog(&h)), Some(&Sel::Vertex { body: String::new(), point: end }));
+    let commands = apply_commands(&h.app, dialog(&h)).unwrap();
+    assert_eq!(commands[0].1["to"], json!([5.0, 5.0, 30.0]));
+    assert!((solidcraft_engine::extrude_reach(&h.app.session, &commands[0].1).unwrap() - 30.0).abs() < 1e-9);
+
+    h.step(&json!({"click": {"handle": "dialog:section:Advanced"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Start"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Start:From Object"}})).unwrap();
+    assert_eq!(dialog(&h).active_input().unwrap().label, "From Object");
+    assert!(click(&mut h, |_| Hit::Vertex { body: String::new(), point: Vec3::new(5.0, 5.0, 4.0) }), "and a From Object");
+    let commands = apply_commands(&h.app, dialog(&h)).unwrap();
+    assert_eq!(commands[0].1["from"], json!([5.0, 5.0, 4.0]));
+}
+
+#[test]
+fn manual_from_object_accepts_parallel_and_coplanar_planes() {
+    for automatic in [false, true] {
+        let mut h = scene_with(automatic);
+        h.step(&json!({"click": {"handle": "dialog:section:Advanced"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Start"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Start:From Object"}})).unwrap();
+        assert_eq!(dialog(&h).active_input().unwrap().label, "From Object");
+        assert!(!click(&mut h, |_| Hit::Plane { name: "YZ".into(), point: Vec3::new(0.0, 5.0, 5.0) }));
+        assert!(dialog(&h).active_input().unwrap().items.is_empty());
+
+        for (name, z) in [("Lid", 25.0), ("XY", 0.0), ("Under", -12.345678)] {
+            // Browser plane picks carry no point; use the plane's exact world origin.
+            assert!(click(&mut h, |_| Hit::Plane { name: name.into(), point: Vec3::ZERO }), "{name}, automatic={automatic}");
+            let d = dialog(&h);
+            assert_eq!(d.active_input().unwrap().label, "From Object");
+            assert!(to_object(d).is_none(), "a start pick must not change the end extent");
+            assert_eq!(d.inputs[0].items.len(), 1);
+            assert_eq!(distance(d), "10 mm");
+            let commands = apply_commands(&h.app, d).unwrap();
+            assert_eq!(commands[0].1["from"], json!([0.0, 0.0, z]));
+            assert!(commands[0].1.get("to").is_none());
+        }
+
+        // Refusing a crossing plane must preserve the previous valid start.
+        assert!(!click(&mut h, |_| Hit::Plane { name: "YZ".into(), point: Vec3::ZERO }));
+        let commands = apply_commands(&h.app, dialog(&h)).unwrap();
+        assert_eq!(commands[0].1["from"], json!([0.0, 0.0, -12.345678]));
+
+        assert!(click(&mut h, |h| face_hit(h, Vec3::new(40.0, 10.0, 20.0))));
+        let commands = apply_commands(&h.app, dialog(&h)).unwrap();
+        assert_eq!(commands[0].1["from"], json!([40.0, 10.0, 20.0]));
+        assert!(click(&mut h, |h| Hit::Vertex { body: dialog_body(h), point: Vec3::new(50.0, 20.0, 0.0) }));
+        let commands = apply_commands(&h.app, dialog(&h)).unwrap();
+        assert_eq!(commands[0].1["from"], json!([50.0, 20.0, 0.0]));
+        assert!(to_object(dialog(&h)).is_none());
+    }
+}
+
+#[test]
+fn manual_from_object_keeps_the_selected_end_plane() {
+    let mut h = scene();
+    assert!(click(&mut h, |_| Hit::Plane { name: "Lid".into(), point: Vec3::ZERO }));
+    h.step(&json!({"click": {"handle": "dialog:section:Advanced"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Start"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Start:From Object"}})).unwrap();
+    assert!(click(&mut h, |_| Hit::Plane { name: "Under".into(), point: Vec3::ZERO }));
+    let commands = apply_commands(&h.app, dialog(&h)).unwrap();
+    assert_eq!(commands[0].1["from"], json!([0.0, 0.0, -12.345678]));
+    assert_eq!(commands[0].1["to"], json!([0.0, 0.0, 25.0]));
 }
 
 #[test]

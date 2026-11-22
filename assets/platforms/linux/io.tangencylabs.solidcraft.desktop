@@ -13,4 +13,4 @@ Categories=Graphics;3DGraphics;Engineering;
 Keywords=cad;3d;parametric;sketch;step;stl;modelling;modeling;
 MimeType=application/x-solidcraft;model/step;model/iges;model/stl;model/3mf;
 # Desktop ids of earlier releases; launchers keep pinned entries across the renames.
-X-Flatpak-RenamedFrom=ai.storyteller.solidcraft.desktop;ai.storyteller.solvecraft.desktop;
+X-Flatpak-RenamedFrom=ai.storyteller.solidcraft.desktop;

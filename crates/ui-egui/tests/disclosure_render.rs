@@ -237,12 +237,12 @@ fn stand_up_memory_controls_apply_and_forget_with_visible_evidence() {
     h.app.run("file.export", json!({"path":path})).unwrap();
     let text = std::fs::read_to_string(&path).unwrap().replace("'SolidCraft','SolidCraft'", "'SolidCraft','Example CAD'");
     std::fs::write(&path, text).unwrap();
-    h.app.open_path_with(&path, &Default::default());
+    h.app.open_path_with(&path, &Default::default()).unwrap();
     assert!(h.app.stand_up.is_some());
     capture(&mut h, "first-offer.png");
     h.step(&json!({"click":{"handle":"stand_up:stand"}})).unwrap();
     let stood = solidcraft_engine::view::bounds(&h.app.session).unwrap();
-    h.app.open_path_with(&path, &Default::default());
+    h.app.open_path_with(&path, &Default::default()).unwrap();
     assert!(h.app.stand_up.is_none());
     assert_eq!(solidcraft_engine::view::bounds(&h.app.session).unwrap(), stood);
     capture(&mut h, "reopened.png");

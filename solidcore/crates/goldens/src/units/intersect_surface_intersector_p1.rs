@@ -661,7 +661,7 @@ fn run_op(
                 1 => si.through_points().to_vec(),
                 _ => si.curve_points().to_vec(),
             };
-            if let Some(f) = st(o, si.is_point_on_start_point(k, &p, &l, *skip))? {
+            if let Some(f) = st(o, si.is_point_on_start_point(&p, &l, *skip))? {
                 o.push(b(f));
             }
         }
@@ -1763,5 +1763,183 @@ mod review_geometry_tests {
             before, after,
             "no point or intersection state was manufactured"
         );
+    }
+}
+
+#[cfg(test)]
+mod wr51_tests {
+    use super::*;
+    use crate::case::{repo_root, CaseContext};
+
+    /// `IsPointOnStartPoint` from its definition: whether a start point in `list`
+    /// (skipping position `skip`) has both surface points within the distance test
+    /// `within` of `p`'s, the start points tried in order; `None` where an unknown
+    /// point id comes before any match (the call fails there).
+    fn on_start(
+        si: &SurfaceIntersector<'_>,
+        p: &TsectPnt,
+        list: &[TsectId],
+        skip: Option<usize>,
+        within: impl Fn(Vec3, Vec3) -> bool,
+    ) -> Option<bool> {
+        for (j, &id) in list.iter().enumerate() {
+            if skip == Some(j) {
+                continue;
+            }
+            let s = si.point(id).ok()?;
+            if within(s.srf_pos(SrfIndex::First), p.srf_pos(SrfIndex::First))
+                && within(s.srf_pos(SrfIndex::Second), p.srf_pos(SrfIndex::Second))
+            {
+                return Some(true);
+            }
+        }
+        Some(false)
+    }
+
+    /// WR-51 over every case of the unit: each `IsPointOnStartPoint` answer is the
+    /// definition (both surface points closer than the tolerance, as a real
+    /// distance), and lists the cases where upstream's test (the squared distance
+    /// against the tolerance itself) answers differently: 25 answers in 24 cases. 4 of
+    /// them (gen0136, gen0450, gen0673, gen0942) have golden blocks holding entries of
+    /// about 2e20, whose checksums round away a change of 1. (At the first surface's
+    /// tolerance, the default before tangency-labs/solidcraft#17720, the list was 26
+    /// answers in 25 cases, 21 of them the records that moved when the flag was retired:
+    /// gen0552 and gen1039 flipped, gen0136 did not.)
+    #[test]
+    fn wr51_every_on_start_answer_is_a_real_distance_to_the_tolerance() {
+        let ctx = CaseContext {
+            root: repo_root(),
+            seeds: 16,
+        };
+        let mut flipped = Vec::new();
+        let mut answers = 0;
+        // cases whose operands do not build (they record no answer) and scripts that
+        // stop at a harness failure
+        let (mut cases, mut unbuilt, mut stopped) = (0, 0, 0);
+        for case in Runner.cases(&ctx).unwrap() {
+            cases += 1;
+            let i: Inputs = case.parse().unwrap();
+            let k = Kernel::default();
+            let Ok(a) = rust_surface(&i.a) else {
+                unbuilt += 1;
+                continue;
+            };
+            let b_owned = match i.b.as_ref().map(rust_surface) {
+                Some(Ok(s)) => Some(s),
+                Some(Err(_)) => {
+                    unbuilt += 1;
+                    continue;
+                }
+                None => None,
+            };
+            let b_ref = b_owned.as_ref().unwrap_or(&a);
+            let Ok(curves) = i.curves.iter().map(rust_curve).collect::<Result<Vec<_>, _>>()
+            else {
+                unbuilt += 1;
+                continue;
+            };
+            let Ok(mut si) =
+                SurfaceIntersector::new(&k, &a, &ext(i.dom1), b_ref, &ext(i.dom2), i.fillet)
+            else {
+                unbuilt += 1;
+                continue;
+            };
+            for p in &i.points {
+                si.alloc_point(rust_point(p).unwrap());
+            }
+            let mut flips = 0;
+            // the record as `rust_run` builds it, and whether every flipped answer
+            // sits in a golden block that holds an entry of at least 1e20
+            let mut rec = vec![0.0];
+            let mut flip_slots = Vec::new();
+            for op in &i.ops {
+                let expect = if let OpIn::OnStart { i: pi, list, skip } = op {
+                    si.point(id(*pi)).ok().cloned().map(|p| {
+                        let l: Vec<TsectId> = match list {
+                            0 => si.start_points().to_vec(),
+                            1 => si.through_points().to_vec(),
+                            _ => si.curve_points().to_vec(),
+                        };
+                        let tol = si.this_approx_tol_3d;
+                        let real = on_start(&si, &p, &l, *skip, |s, q| s.distance(q) < tol);
+                        let pinned =
+                            on_start(&si, &p, &l, *skip, |s, q| s.distance_squared(q) < tol);
+                        (real, pinned)
+                    })
+                } else {
+                    None
+                };
+                rec.push(op_code(op));
+                let at = rec.len();
+                let mut o = Vec::new();
+                if run_op(&k, &mut si, &curves, op, &mut o).is_err() {
+                    stopped += 1;
+                    break;
+                }
+                rec.extend_from_slice(&o);
+                if let Some((real, pinned)) = expect {
+                    if let Some(f) = real {
+                        assert_eq!(o, vec![0.0, b(f)], "{}: not the definition", case.name);
+                        answers += 1;
+                    } else {
+                        assert_eq!(o.len(), 1, "{}: {o:?}", case.name);
+                        assert_ne!(o[0], 0.0, "{}", case.name);
+                    }
+                    if real != pinned {
+                        flips += 1;
+                        flip_slots.push(at + 1);
+                    }
+                }
+            }
+            if flips > 0 {
+                put_state(&mut rec, &si);
+                let hidden = flip_slots.iter().all(|&slot| {
+                    let block = slot / crate::golden::BLOCK * crate::golden::BLOCK;
+                    rec.len() > crate::golden::FULL
+                        && rec
+                            .iter()
+                            .skip(block)
+                            .take(crate::golden::BLOCK)
+                            .any(|x| x.abs() >= 1e20)
+                });
+                flipped.push((case.name.clone(), flips, hidden));
+            }
+        }
+        assert_eq!(
+            (cases, unbuilt, stopped, answers),
+            (1510, 0, 0, 652),
+            "cases, unbuilt, stopped, answers"
+        );
+        let hidden = ["gen0136", "gen0450", "gen0673", "gen0942"];
+        let expected: Vec<(String, usize, bool)> = [
+            ("gen0135", 1),
+            ("gen0136", 1),
+            ("gen0148", 1),
+            ("gen0177", 1),
+            ("gen0400", 1),
+            ("gen0408", 1),
+            ("gen0450", 1),
+            ("gen0490", 1),
+            ("gen0495", 1),
+            ("gen0502", 1),
+            ("gen0535", 1),
+            ("gen0666", 1),
+            ("gen0673", 1),
+            ("gen0749", 1),
+            ("gen0756", 1),
+            ("gen0792", 1),
+            ("gen0806", 1),
+            ("gen0881", 1),
+            ("gen0942", 1),
+            ("gen1215", 1),
+            ("gen1235", 1),
+            ("gen1387", 2),
+            ("gen1447", 1),
+            ("gen1473", 1),
+        ]
+        .iter()
+        .map(|(n, f)| ((*n).to_string(), *f, hidden.contains(n)))
+        .collect();
+        assert_eq!(flipped, expected);
     }
 }

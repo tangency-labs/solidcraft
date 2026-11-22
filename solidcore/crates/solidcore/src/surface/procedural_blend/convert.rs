@@ -100,8 +100,31 @@ fn to_record_at(k: &Kernel, pb: &ProceduralBlend, depth: u32) -> Result<Procedur
 }
 
 /// A support's record: a nested blend's own record, or the NURBS form its stations are
-/// solved on ([`as_b_spline`]: an analytic support is evaluated as its net).
+/// solved on ([`as_b_spline`]: an analytic support is evaluated as its net), labelled with
+/// its analytic kind only where reading the record derives that surface back from the form
+/// written ([`AnalyticSupport::derive`], then [`AnalyticSupport::build`], as
+/// [`exact_from_record`], [`from_record`] and [`corner_from_record`] do). The record holds
+/// no numbers for the label: reading it takes them off the form's control rows, and a form
+/// whose rows give them only to more than the evaluation's rounding (a cone's short arc
+/// span, whose control points carry the rounding of the conversions that made them) does
+/// not prove the surface read off it, though the support's own numbers prove the form. Such
+/// a support goes unlabelled, as its form, as a face whose form does not prove its label
+/// does (`face_surface::record_face`, owner 22254), and the record reads back.
 fn support_record(k: &Kernel, s: &Surface, depth: u32) -> Result<SupportRecord> {
+    nurbs_record(k, s, depth, true)
+}
+
+/// A corner's net or a draft's source or net: its record with its analytic label as it is,
+/// proved or not, since the record requires the label (a swept turn's net is a torus, a
+/// drafted plane a plane and a drafted cone a cone: [`CornerRecord::validate`],
+/// [`DraftRecord::validate`]).
+fn face_record(k: &Kernel, s: &Surface) -> Result<SupportRecord> {
+    nurbs_record(k, s, 1, false)
+}
+
+/// [`support_record`] (`proved`: a label only where reading derives it back) or
+/// [`face_record`].
+fn nurbs_record(k: &Kernel, s: &Surface, depth: u32, proved: bool) -> Result<SupportRecord> {
     if let SurfaceKind::ProceduralBlend(inner) = s.kind() {
         return Ok(SupportRecord::Blend(Box::new(to_record_at(
             k,
@@ -115,7 +138,20 @@ fn support_record(k: &Kernel, s: &Surface, depth: u32) -> Result<SupportRecord> 
             reason: "a support that is not a NURBS surface has no record",
         });
     };
-    let kind = match AnalyticSupport::of(s).map(|a| a.kind()) {
+    let form = surface_record(&b)?;
+    // the reader's own steps on the form as it reads it
+    let reads_back = |kind: SupportKind| -> Result<bool> {
+        match labelled(k, kind, surface_of(&form)?) {
+            Ok(_) => Ok(true),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+            Err(_) => Ok(false),
+        }
+    };
+    let label = match AnalyticSupport::of(s).map(|a| a.kind()) {
+        Some(kind) if !proved || reads_back(kind)? => Some(kind),
+        _ => None,
+    };
+    let kind = match label {
         None => SupportKindRecord::Free,
         Some(SupportKind::Plane) => SupportKindRecord::Plane,
         Some(SupportKind::Cylinder) => SupportKindRecord::Cylinder,
@@ -123,10 +159,14 @@ fn support_record(k: &Kernel, s: &Surface, depth: u32) -> Result<SupportRecord> 
         Some(SupportKind::Sphere) => SupportKindRecord::Sphere,
         Some(SupportKind::Torus) => SupportKindRecord::Torus,
     };
-    Ok(SupportRecord::Nurbs {
-        kind,
-        form: surface_record(&b)?,
-    })
+    Ok(SupportRecord::Nurbs { kind, form })
+}
+
+/// A labelled form's analytic surface, as every reader of a record makes it and
+/// [`support_record`] proves it before it writes the label: derived from the form
+/// ([`AnalyticSupport::derive`]) and proved its parametrisation ([`AnalyticSupport::build`]).
+fn labelled(k: &Kernel, kind: SupportKind, form: BSplineSurface) -> Result<Surface> {
+    AnalyticSupport::derive(k, kind, &form).and_then(|a| a.build(k, form))
 }
 
 /// The kernel's kind a record's label names.
@@ -265,19 +305,17 @@ fn from_record_at(k: &Kernel, rec: &ProceduralBlendRecord, depth: u32) -> Result
                 match kind_of(*kind) {
                     None => Surface::from(form),
                     // the analytic surface derived from the form, the form checked on it
-                    Some(kind) => AnalyticSupport::derive(k, kind, &form)
-                        .and_then(|a| a.build(k, form))
-                        .map_err(|e| match e {
-                            SolidError::InvalidInput { .. } => SolidError::invalid_input(
-                                OP_FROM,
-                                if i == 0 {
-                                    "support 1's NURBS form is not of its kind"
-                                } else {
-                                    "support 2's NURBS form is not of its kind"
-                                },
-                            ),
-                            other => other,
-                        })?,
+                    Some(kind) => labelled(k, kind, form).map_err(|e| match e {
+                        SolidError::InvalidInput { .. } => SolidError::invalid_input(
+                            OP_FROM,
+                            if i == 0 {
+                                "support 1's NURBS form is not of its kind"
+                            } else {
+                                "support 2's NURBS form is not of its kind"
+                            },
+                        ),
+                        other => other,
+                    })?,
                 }
             }
             SupportRecord::Blend(b) => Surface::from(from_record_at(k, b, depth + 1)?),
@@ -524,9 +562,7 @@ pub fn exact_from_record(k: &Kernel, rec: &ExactRoundRecord) -> Result<Surface> 
                 let form = surface_of(form)?;
                 match kind_of(*kind) {
                     None => Surface::from(form),
-                    Some(kind) => {
-                        AnalyticSupport::derive(k, kind, &form).and_then(|a| a.build(k, form))?
-                    }
+                    Some(kind) => labelled(k, kind, form)?,
                 }
             }
             SupportRecord::Blend(_) => {
@@ -538,9 +574,7 @@ pub fn exact_from_record(k: &Kernel, rec: &ExactRoundRecord) -> Result<Surface> 
         });
     }
     let form = surface_of(&rec.net.form)?;
-    let analytic = |kind: SupportKind, form: BSplineSurface| {
-        AnalyticSupport::derive(k, kind, &form).and_then(|a| a.build(k, form))
-    };
+    let analytic = |kind: SupportKind, form: BSplineSurface| labelled(k, kind, form);
     let mut net = match rec.net.kind {
         ExactNetKindRecord::Plane => analytic(SupportKind::Plane, form)?,
         ExactNetKindRecord::Cylinder => analytic(SupportKind::Cylinder, form)?,
@@ -707,14 +741,12 @@ pub fn definition_surface(
     };
     Ok(match definition {
         FaceDefinition::Procedural(d) => {
-            let pb = from_record(
-                k,
-                &ProceduralBlendRecord {
-                    definition: (**d).clone(),
-                    net,
-                },
-            )?;
-            certified(pb.recertify(k), d.bound)?.map(|()| Surface::from(pb))
+            let record = ProceduralBlendRecord {
+                definition: (**d).clone(),
+                net,
+            };
+            let pb = from_record(k, &record)?;
+            certified(recertify_remembered(k, &pb, &record), d.bound)?.map(|()| Surface::from(pb))
         }
         FaceDefinition::ExactRound(d) => {
             let rec = ExactRoundRecord {
@@ -739,6 +771,86 @@ pub fn definition_surface(
             proved.map(|()| made)
         }
     })
+}
+
+/// [`RecertifyMemo`]'s cap on the bytes its keys hold, the loop area memo's 8 MiB: past it the
+/// memo starts again empty. A round's key is about 45 KB (its definition's supports and its net
+/// as text), so the cap holds about 180 of them.
+const RECERTIFY_MEMO_BYTES: usize = 8 << 20;
+
+/// The memo of the procedural blends a kernel recertified as it gave a record's faces their
+/// definitions back (not upstream): the bound [`ProceduralBlend::recertify`] proved for each,
+/// by every bit of the blend's record (its definition and its net, by their debug text,
+/// which writes each double so that it reads back exactly) and of the kernel's tolerances
+/// and fixes. The certificate reads nothing else, so a hit returns what recertifying the
+/// blend again returns. A body that goes through one boolean after another comes back from
+/// each as a record, and its blends unchanged by the boolean are certified once, not again
+/// at every import. Only a certificate that finished is kept, not a refusal or a cancel.
+/// [`Kernel::memoize_curve_caches`] turns it off, with the curve cache memo.
+#[derive(Debug, Default)]
+pub struct RecertifyMemo {
+    bounds: std::collections::HashMap<Box<str>, f64>,
+    bytes: usize,
+}
+
+impl RecertifyMemo {
+    /// The blends the memo keeps.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.bounds.len()
+    }
+
+    /// Whether it keeps none.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.bounds.is_empty()
+    }
+
+    /// Keeps `bound` for `key`, its keys holding at most `cap` bytes: past the cap the memo
+    /// starts again empty. A key larger than the cap on its own is not kept, and the memo is
+    /// left as it was, since emptying it would not make room for that key.
+    fn remember(&mut self, key: String, bound: f64, cap: usize) {
+        if key.len() > cap {
+            return;
+        }
+        if self.bytes + key.len() > cap {
+            self.bounds.clear();
+            self.bytes = 0;
+        }
+        // (a boxed key holds its length exactly, not a grown string's spare room)
+        self.bytes += key.len();
+        self.bounds.insert(key.into_boxed_str(), bound);
+    }
+}
+
+/// `pb`'s [`ProceduralBlend::recertify`], from the kernel's [`RecertifyMemo`] when it
+/// recertified the same `record` (the one `pb` was made from) before.
+fn recertify_remembered(
+    k: &Kernel,
+    pb: &ProceduralBlend,
+    record: &ProceduralBlendRecord,
+) -> Result<f64> {
+    use std::fmt::Write as _;
+    if !k.memoize_curve_caches {
+        k.work_counters.add_blend_recertified();
+        return pb.recertify(k);
+    }
+    let mut key = format!("{:?}", k.tolerances);
+    for (name, on) in k.fixes.flags() {
+        key.push_str(if on { "+" } else { "-" });
+        key.push_str(name);
+    }
+    // (writing to a `String` never fails)
+    let _ = write!(key, "\n{record:?}");
+    if let Some(&hit) = k.recertify_memo.borrow().bounds.get(key.as_str()) {
+        return Ok(hit);
+    }
+    k.work_counters.add_blend_recertified();
+    let bound = pb.recertify(k)?;
+    k.recertify_memo
+        .borrow_mut()
+        .remember(key, bound, RECERTIFY_MEMO_BYTES);
+    Ok(bound)
 }
 
 /// Give each face of `faces` its definition back: its net is the face's surface as it was
@@ -832,7 +944,7 @@ pub fn corner_to_record(k: &Kernel, surface: &Surface) -> Result<CornerRecord> {
         ));
     };
     let xyz = |p: Point3| [p.x, p.y, p.z];
-    let face_net = || support_record(k, net, 1);
+    let face_net = || face_record(k, net);
     Ok(match corner {
         // the Ball's patch is recorded as its B-rep face, its sphere the face's `BallPatch`
         // label over its net, and read back certified by solidcore-convert's `ball_patch`
@@ -927,9 +1039,7 @@ fn corner_surface_of(k: &Kernel, s: &SupportRecord) -> Result<Surface> {
             let form = surface_of(form)?;
             match kind_of(*kind) {
                 None => Ok(Surface::from(form)),
-                Some(kind) => {
-                    AnalyticSupport::derive(k, kind, &form).and_then(|a| a.build(k, form))
-                }
+                Some(kind) => labelled(k, kind, form),
             }
         }
         SupportRecord::Blend(_) => Err(SolidError::invalid_input(
@@ -1166,13 +1276,13 @@ pub fn draft_to_record(k: &Kernel, surface: &Surface) -> Result<DraftRecord> {
     let xyz = |p: Point3| [p.x, p.y, p.z];
     let d = draft.draft();
     Ok(DraftRecord {
-        source: support_record(k, draft.source(), 1)?,
+        source: face_record(k, draft.source())?,
         outward: draft.outward(),
         neutral_origin: xyz(d.neutral_origin()),
         neutral_normal: xyz(d.neutral_normal()),
         pull: xyz(d.pull()),
         angle: d.angle(),
-        net: support_record(k, net, 1)?,
+        net: face_record(k, net)?,
     })
 }
 
@@ -1350,6 +1460,34 @@ pub fn section_blend_rebuild(rec: &SectionBlendRecord) -> Result<Surface> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The memo keeps keys up to its cap, starts again empty when the next key would pass it,
+    /// and keeps no key larger than the cap on its own, so no such allocation outlives the call.
+    #[test]
+    fn the_recertify_memo_keeps_no_key_larger_than_its_cap() {
+        let mut memo = RecertifyMemo::default();
+        memo.remember("a".repeat(6), 1.0, 10);
+        memo.remember("b".repeat(4), 2.0, 10);
+        assert_eq!(
+            (memo.len(), memo.bytes),
+            (2, 10),
+            "two keys fill the cap exactly"
+        );
+        memo.remember("c".repeat(3), 3.0, 10);
+        assert_eq!(
+            (memo.len(), memo.bytes),
+            (1, 3),
+            "a key past the cap starts the memo again"
+        );
+        assert_eq!(memo.bounds.get("ccc"), Some(&3.0));
+        memo.remember("d".repeat(11), 4.0, 10);
+        assert_eq!(
+            (memo.len(), memo.bytes),
+            (1, 3),
+            "a key larger than the cap is not kept"
+        );
+        assert_eq!(memo.bounds.get("d".repeat(11).as_str()), None);
+    }
 
     /// The record conversion failures keep the operation, status, kind and entity of the bare
     /// `Upstream` statuses they replace (a sample).
