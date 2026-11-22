@@ -61,7 +61,7 @@ fn an_a3_drawing_border_is_this_document() {
     let (text, report) = svg(&scene);
     let expected = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
         <svg xmlns=\"http://www.w3.org/2000/svg\" width=\"420mm\" height=\"297mm\" viewBox=\"0 0 420 297\" fill=\"none\" stroke=\"#000\" \
-        stroke-linecap=\"butt\" stroke-linejoin=\"miter\" stroke-miterlimit=\"4\">\n\
+        stroke-linecap=\"round\" stroke-linejoin=\"round\">\n\
         <g data-object=\"1\" data-kind=\"drawing_border\">\n\
         <path stroke-width=\"0.7\" d=\"M20 287L410 287L410 10L20 10Z\"/>\n\
         <path fill=\"#000\" stroke=\"none\" fill-rule=\"evenodd\" d=\"M0 297L10 297L10 292L0 292Z\"/>\n\
@@ -535,7 +535,9 @@ fn what_cannot_be_embedded_is_refused() {
     assert!(crate::paper::png::picture_png(4, &grid, window, &Provider::default(), 1 << 20).unwrap().len() > 6000);
 }
 
-/// A dashed stroke carries its pattern in millimetres, its offset only when its phase isn't 0.
+/// A dashed stroke carries the pattern its round caps need in millimetres, its offset only when
+/// that phase isn't 0. At 1 mm wide, [4.2, 1.05] is [3.2, 2.05] and its phase moves back 0.5: from
+/// 0 it is 4.75 (within 5.25), from 0.5 it is 0.
 #[test]
 fn a_dashed_stroke_has_its_dasharray_and_offset() {
     let path = |phase_mm| {
@@ -544,6 +546,6 @@ fn a_dashed_stroke_has_its_dasharray_and_offset() {
         let (text, _) = svg(&scene);
         text.lines().find(|l| l.starts_with("<path")).unwrap().to_string()
     };
-    assert_eq!(path(0.0), "<path stroke-width=\"1\" stroke-dasharray=\"4.2 1.05\" d=\"M5 287L105 287\"/>");
-    assert_eq!(path(0.5), "<path stroke-width=\"1\" stroke-dasharray=\"4.2 1.05\" stroke-dashoffset=\"0.5\" d=\"M5 287L105 287\"/>");
+    assert_eq!(path(0.0), "<path stroke-width=\"1\" stroke-dasharray=\"3.2 2.05\" stroke-dashoffset=\"4.75\" d=\"M5 287L105 287\"/>");
+    assert_eq!(path(0.5), "<path stroke-width=\"1\" stroke-dasharray=\"3.2 2.05\" d=\"M5 287L105 287\"/>");
 }

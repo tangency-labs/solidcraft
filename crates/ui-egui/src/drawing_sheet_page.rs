@@ -1018,8 +1018,7 @@ impl Marks {
                     }
                     let width = ((width_mm * at.scale) as f32).max(hair);
                     let points: Vec<Pos2> = points.iter().map(|p| at.screen(*p)).collect();
-                    let stroke = Stroke::new(width, ink);
-                    painter.add(if *closed { egui::Shape::closed_line(points, stroke) } else { egui::Shape::line(points, stroke) });
+                    round_line(painter, points, *closed, Stroke::new(width, ink));
                 }
                 Mark::Fill { triangles, outlines, bounds } => {
                     if !bounds.meets(&visible) {
@@ -1078,6 +1077,57 @@ impl Marks {
             }
         }
         flush(painter, &mut mesh);
+    }
+}
+
+/// The cosine of the sharpest turn a line is drawn through in one piece: past 30° egui's miter
+/// (which has no limit) would show past the round join the writers draw, by more than 3.5% of the
+/// half width.
+const SMOOTH_TURN_COS: f32 = 0.866;
+
+/// A line through `points` with round caps and round joins, as every writer strokes it
+/// ([`solidcraft_geom::paper`]): egui strokes with butt caps and unlimited miters, so the line is
+/// cut at each sharper turn and a disc one width across is put at the ends of every piece.
+fn round_line(painter: &egui::Painter, mut points: Vec<Pos2>, closed: bool, stroke: Stroke) {
+    points.dedup_by(|a, b| a.distance_sq(*b) < 1e-6);
+    let r = stroke.width / 2.0;
+    let sharp = |i: usize, points: &[Pos2]| -> bool {
+        let n = points.len();
+        let (Some(prev), Some(here), Some(next)) = (points.get((i + n - 1) % n), points.get(i), points.get((i + 1) % n)) else { return false };
+        (*here - *prev).normalized().dot((*next - *here).normalized()) < SMOOTH_TURN_COS
+    };
+    if points.len() < 2 {
+        if let Some(p) = points.first() {
+            painter.circle_filled(*p, r, stroke.color);
+        }
+        return;
+    }
+    if closed && points.len() > 2 {
+        // A closed line with no sharp turn is one smooth loop with no ends.
+        let Some(start) = (0..points.len()).find(|i| sharp(*i, &points)) else {
+            painter.add(egui::Shape::closed_line(points, stroke));
+            return;
+        };
+        // Otherwise it is an open line from a sharp corner round to that corner again.
+        points.rotate_left(start);
+        if let Some(first) = points.first().copied() {
+            points.push(first);
+        }
+    }
+    let mut from = 0;
+    for i in 1..points.len() {
+        if i + 1 == points.len() || sharp(i, &points) {
+            if let Some(piece) = points.get(from..=i) {
+                painter.add(egui::Shape::line(piece.to_vec(), stroke));
+            }
+            if let Some(end) = points.get(from) {
+                painter.circle_filled(*end, r, stroke.color);
+            }
+            from = i;
+        }
+    }
+    if let Some(last) = points.last() {
+        painter.circle_filled(*last, r, stroke.color);
     }
 }
 
@@ -1290,7 +1340,8 @@ fn marks(scene: &Scene, tol: f64) -> Result<(Vec<Mark>, Vec<u64>), Fault> {
                     let points = flatten(path, tol, &mut budget)?;
                     match pattern {
                         Some(dashes) => {
-                            for points in dashed(&points, *closed, dashes, &mut budget)? {
+                            // Each dash's round caps lie within its length, as the writers draw it.
+                            for points in dashed(&points, *closed, &dashes.under_round_caps(*width_mm), &mut budget)? {
                                 out.push(line(points, false, *width_mm));
                             }
                         }
@@ -1357,8 +1408,10 @@ fn flatten(path: &[Seg2], tol: f64, budget: &mut usize) -> Result<Vec<Vec2>, Fau
 /// The dashes of a line through `points` with pattern `dashes`, along its whole length (round a
 /// closed one), in paper millimetres.
 fn dashed(points: &[Vec2], closed: bool, dashes: &Dashes, budget: &mut usize) -> Result<Vec<Vec<Vec2>>, Fault> {
-    let lengths: Vec<f64> = dashes.lengths_mm.iter().copied().filter(|l| l.is_finite() && *l > 0.0).collect();
-    if lengths.len() < 2 {
+    // A dash may be 0 long: a dot under round caps.
+    let lengths: Vec<f64> = dashes.lengths_mm.iter().copied().filter(|l| l.is_finite() && *l >= 0.0).collect();
+    let period: f64 = lengths.iter().sum();
+    if lengths.len() < 2 || period <= 0.0 {
         return Ok(vec![points.to_vec()]);
     }
     let mut path = points.to_vec();
@@ -1366,7 +1419,6 @@ fn dashed(points: &[Vec2], closed: bool, dashes: &Dashes, budget: &mut usize) ->
         path.push(*first);
     }
     // Where in the pattern the line starts.
-    let period: f64 = lengths.iter().sum();
     let mut into = dashes.phase_mm.rem_euclid(period);
     let mut index = 0usize;
     while let Some(l) = lengths.get(index)
