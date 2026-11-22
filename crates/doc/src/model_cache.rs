@@ -263,6 +263,10 @@ impl Writer {
         let mut r = json!({
             "name": b.name, "feature": b.feature, "component": b.component, "key": hex(b.key), "names": names,
         });
+        // Only a body with grain has a frame to save: the rest read back without one, as evaluated.
+        if let Some(grain) = &b.grain_frame {
+            r["grain_frame"] = json!(grain);
+        }
         if let Some(depth) = b.names.depth() {
             r["depth"] = json!(depth);
         }
@@ -469,6 +473,9 @@ impl Model {
                 "rounds": w.rounds,
                 "sketch_key_sets": w.sketch_key_sets,
                 "named_faces": w.named_faces,
+                // Bodies with grain carry their frame: tells this cache from one written before
+                // grain frames, whose bodies have none either way.
+                "grain_frames": true,
             });
             // Evaluated with the tolerance heal off: recorded only then, so the models saved
             // with it on (the default) are as before.
@@ -574,6 +581,20 @@ impl SavedModel {
                 depth,
             );
             b.source_name = r.get("source_name").map(|s| text(Some(s))).transpose()?;
+            // Caches written before grain frames existed have none: such a body is read without a
+            // frame, and `Model::adopt` refuses the cache only where a frame member needs its axis.
+            if let Some(saved) = r.get("grain_frame") {
+                let grain: crate::wood::GrainFrame = serde_json::from_value(saved.clone()).map_err(|_| bad("saved model: grain frame"))?;
+                if grain.matrix.iter().flatten().any(|v| !v.is_finite())
+                    || crate::mat_inverse(&grain.matrix).is_none()
+                    || grain.sources.len() > MAX_ITEMS
+                    || grain.sources.iter().any(|s| s.len() > MAX_TEXT)
+                    || grain.member_axis.is_some_and(|d| crate::wood::unit(d).is_err())
+                {
+                    return Err(bad("saved model: grain frame"));
+                }
+                b.grain_frame = Some(grain.into());
+            }
             if let Some(m) = r.get("source_transform") {
                 let m: crate::Mat = serde_json::from_value(m.clone()).map_err(|_| bad("saved model: transform"))?;
                 if m.iter().flatten().any(|x| !x.is_finite()) {
@@ -1051,6 +1072,9 @@ impl SavedModel {
         if let (Some(validation), Some(out)) = (self.records.get("validation"), records.as_object_mut()) {
             out.insert("validation".into(), validation.clone());
         }
+        if let (Some(grain), Some(out)) = (self.records.get("grain_frames"), records.as_object_mut()) {
+            out.insert("grain_frames".into(), grain.clone());
+        }
         if let (Some(heal), Some(out)) = (self.records.get("tolerance_heal"), records.as_object_mut()) {
             out.insert("tolerance_heal".into(), heal.clone());
         }
@@ -1068,6 +1092,14 @@ impl Model {
     /// `doc` gives it now, and every record is well formed.
     pub fn adopt(doc: &Document, saved: &SavedModel) -> Result<Model> {
         let mut states = saved.states()?;
+        // A frame member's grain follows its axis, which only evaluation knows, and copies, joins and
+        // splits carry it to bodies of other features: a cache from before grain frames is evaluated
+        // again for any design with a member, and read as it is otherwise.
+        let has_members = doc.features.iter().any(|f| matches!(f.kind, FeatureKind::FrameMember { .. }));
+        let before_grain = saved.records.get("grain_frames").and_then(Json::as_bool) != Some(true);
+        if has_members && before_grain && states.iter().flat_map(|s| &s.bodies).any(|b| b.grain_frame.is_none()) {
+            return Err(bad("saved model: a frame member has no grain frame"));
+        }
         let frame_bodies = Arc::new(std::sync::Mutex::new(FrameBodies::default()));
         for state in &mut states {
             Arc::make_mut(state).frame_bodies = Arc::downgrade(&frame_bodies);
