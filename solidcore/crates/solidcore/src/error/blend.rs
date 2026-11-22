@@ -698,7 +698,8 @@ pub enum SolverFailure {
     BaseSurfaceNotBSpline {
         /// The offset surface, 0 or 1.
         side: usize,
-        /// The kind (type string) of the surface that is not of a B-spline class.
+        /// The kind (type string) of the surface found not of a B-spline class: the base,
+        /// or, when the base is an offset surface, the base's own base.
         kind: &'static str,
     },
     /// The trace ran more than `limit` passes (too many self-intersections or other
@@ -731,6 +732,36 @@ pub enum SolverFailure {
     FilletGeomWithoutRail {
         /// The rail side, 0 or 1.
         side: usize,
+    },
+    /// The caller's fillet geometry has no fillet surface (the trace stores none without a
+    /// surface generator): the caller's solver set-up ([`ErrorKind::InvalidInput`]); status
+    /// `SM_ERR_NULL_POINTER`.
+    FilletGeomWithoutSurface {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
+    },
+    /// The caller's fillet geometry has no centre line: the caller's solver set-up
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    FilletGeomWithoutCenterLine {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
+    },
+    /// The caller's fillet geometry names no fillet solver: the caller's solver set-up
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    FilletGeomWithoutSolver {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
+    },
+    /// Rail `side` of the caller's fillet geometry has no curve, or one not of a B-spline
+    /// class: the caller's solver set-up ([`ErrorKind::InvalidInput`]); status
+    /// `SM_ERR_NULL_POINTER`.
+    RailNotBSpline {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
+        /// The rail side, 0 or 1.
+        side: usize,
+        /// The curve's kind (its type string), `None` when the rail has no curve.
+        kind: Option<&'static str>,
     },
     /// A rail of the caller's fillet geometry has `count` edge uses where two are needed:
     /// the caller's solver set-up ([`ErrorKind::InvalidInput`]).
@@ -827,7 +858,11 @@ impl SolverFailure {
             | Self::SolverEdgeUseMissing { .. }
             | Self::EdgeUseWithoutEdge
             | Self::FilletGeomWithoutRail { .. }
-            | Self::RailEdgeUseCount { .. } => ErrorKind::InvalidInput,
+            | Self::RailEdgeUseCount { .. }
+            | Self::FilletGeomWithoutSurface { .. }
+            | Self::FilletGeomWithoutCenterLine { .. }
+            | Self::FilletGeomWithoutSolver { .. }
+            | Self::RailNotBSpline { .. } => ErrorKind::InvalidInput,
             Self::JacobianNotLoaded
             | Self::SupportIntersectionFailed
             | Self::SurfaceCacheNotBuilt => ErrorKind::Failed,
@@ -852,7 +887,11 @@ impl SolverFailure {
             | Self::EdgeCurveNotBSpline { .. }
             | Self::BaseSurfaceNotBSpline { .. }
             | Self::NoCenterLineTraced
-            | Self::FilletGeomWithoutRail { .. } => SM_ERR_NULL_POINTER,
+            | Self::FilletGeomWithoutRail { .. }
+            | Self::FilletGeomWithoutSurface { .. }
+            | Self::FilletGeomWithoutCenterLine { .. }
+            | Self::FilletGeomWithoutSolver { .. }
+            | Self::RailNotBSpline { .. } => SM_ERR_NULL_POINTER,
             Self::CrossSectionPointNotFound { .. }
             | Self::RailTangentZero { .. }
             | Self::PiecesTooFarApart { .. }
@@ -1057,8 +1096,8 @@ impl core::fmt::Display for SolverFailure {
             Self::NoTracePoints => f.write_str("the trace left no cross-section points"),
             Self::BaseSurfaceNotBSpline { side, kind } => write!(
                 f,
-                "offset surface {side}'s base is a {kind} surface, neither of a B-spline class \
-                 nor an offset of one"
+                "offset surface {side}'s base (or, for an offset base, its base) is a {kind} \
+                 surface, not of a B-spline class"
             ),
             Self::TraceLoopLimit { limit } => {
                 write!(f, "the trace did not finish within {limit} passes")
@@ -1082,6 +1121,30 @@ impl core::fmt::Display for SolverFailure {
             Self::FilletGeomWithoutRail { side } => {
                 write!(f, "the fillet geometry has no rail on side {side}")
             }
+            Self::FilletGeomWithoutSurface { fillet_geom } => {
+                write!(f, "fillet geometry {fillet_geom:?} has no fillet surface")
+            }
+            Self::FilletGeomWithoutCenterLine { fillet_geom } => {
+                write!(f, "fillet geometry {fillet_geom:?} has no centre line")
+            }
+            Self::FilletGeomWithoutSolver { fillet_geom } => {
+                write!(f, "fillet geometry {fillet_geom:?} names no fillet solver")
+            }
+            Self::RailNotBSpline {
+                fillet_geom,
+                side,
+                kind,
+            } => match kind {
+                Some(kind) => write!(
+                    f,
+                    "rail {side} of fillet geometry {fillet_geom:?} has a {kind} curve, not of a \
+                     B-spline class"
+                ),
+                None => write!(
+                    f,
+                    "rail {side} of fillet geometry {fillet_geom:?} has no curve"
+                ),
+            },
             Self::RailEdgeUseCount { count } => {
                 write!(
                     f,

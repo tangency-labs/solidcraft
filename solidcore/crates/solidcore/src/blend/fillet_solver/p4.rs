@@ -1187,6 +1187,38 @@ mod tests_c1 {
         );
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
 
+        // an edge curve not of a B-spline class (a Hermite curve): SM_ERR_NULL_POINTER
+        let (mut tb, eus) = target(Some(Curve::from(
+            crate::curve::hermite_curve::HermiteCurve::new(
+                Point3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Point3::new(2.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                3,
+            ),
+        )));
+        let (mut hermite_fb, _, _) = fillets(&k, ROWS);
+        let mut hermite_ops = solver(&k, eus);
+        let mut hermite_cx = Cx {
+            k: &k,
+            target: &mut tb,
+            fillets: &mut hermite_fb,
+            solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
+        };
+        let e = c1_setup(&mut hermite_ops, &mut hermite_cx).unwrap_err();
+        assert!(
+            matches!(
+                e.blend_failure(),
+                Some(BlendFailure::Solver(SolverFailure::EdgeCurveNotBSpline {
+                    kind,
+                    ..
+                })) if *kind == "SmHermiteCurve_TYPE"
+            ),
+            "{e:?}"
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+
         // no edge use 0: an upstream NULL dereference
         ops.0.edgeuses = [None, None];
         let e = c1_setup(&mut ops, &mut cx).unwrap_err();
@@ -3311,12 +3343,7 @@ fn c5_split_original_fillet(
             .fillets
             .geom(geom0)?
             .fillet_surface(None)?
-            .ok_or_else(|| {
-                SolidError::blend_null_defect(
-                    OP,
-                    "the traced fillet geometry being split has no fillet surface",
-                )
-            })?;
+            .ok_or_else(|| fail(SolverFailure::FilletGeomWithoutSurface { fillet_geom: geom0 }))?;
         fillet_surface.split_at(cx.k, split_at_param, SurfParamType::U)?
     };
     // delete pFilletSurface; m_pFilletSurface = SM_CAST_PTR(SmBSplineSurface, ..)
@@ -3560,14 +3587,13 @@ fn c5_undo_reversal(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<()
                 .rail(kk)
                 .ok_or_else(|| invalid("reverse: geometry has no rail"))?;
             let b = cx.fillets.brep();
-            if edge_unit::curve(b, rail)?
-                .and_then(bspline_curve_cast)
-                .is_none()
-            {
-                return Err(SolidError::blend_null_defect(
-                    OP,
-                    "a rail the solver built has no B-spline curve",
-                ));
+            let rail_curve = edge_unit::curve(b, rail)?;
+            if rail_curve.and_then(bspline_curve_cast).is_none() {
+                return Err(fail(SolverFailure::RailNotBSpline {
+                    fillet_geom: g,
+                    side: kk,
+                    kind: rail_curve.map(Curve::type_string),
+                }));
             }
             let prim_eu = eu::primary_edgeuse(b, rail)?
                 .ok_or_else(|| invalid("reverse: rail without primary edge use"))?;
@@ -3595,7 +3621,11 @@ fn c5_undo_reversal(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<()
             let k = cx.k;
             let b = cx.fillets.brep_mut();
             let curve_3d = b.edge_mut(rail)?.curve.as_mut().ok_or_else(|| {
-                SolidError::blend_null_defect(OP, "a rail the solver built has no curve")
+                SolidError::blend_null_defect(
+                    OP,
+                    "the rail's curve is gone after it was checked to be a B-spline: fetching \
+                     the mate's uv trim curve changes no 3D curve",
+                )
             })?;
             let mut ivl1 = curve_3d.natural_interval();
             ivl1 = curve_3d.reverse_parameterization(k, &ivl1)?;
@@ -3614,11 +3644,15 @@ fn c5_undo_reversal(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<()
 
         let k = cx.k;
         let geom = cx.fillets.geom_mut(g)?;
-        if geom.center_line_curve.is_none() || !geom.has_fillet_surface() {
-            return Err(SolidError::blend_null_defect(
-                OP,
-                "a traced fillet geometry has no centre line or no fillet surface",
-            ));
+        if geom.center_line_curve.is_none() {
+            return Err(fail(SolverFailure::FilletGeomWithoutCenterLine {
+                fillet_geom: g,
+            }));
+        }
+        if !geom.has_fillet_surface() {
+            return Err(fail(SolverFailure::FilletGeomWithoutSurface {
+                fillet_geom: g,
+            }));
         }
         if let Some(center_line) = geom.center_line_curve.as_mut() {
             let ivl2 = center_line.natural_interval();
@@ -3876,11 +3910,10 @@ mod tests_c5 {
         let e = f.run().unwrap_err();
         assert_eq!(
             e,
-            SolidError::blend_null_defect(
-                OP,
-                "a traced fillet geometry has no centre line or no fillet surface",
-            )
+            fail(SolverFailure::FilletGeomWithoutCenterLine { fillet_geom: f.g })
         );
+        assert!(!e.is_defect(), "{e:?}");
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         assert_close(f.rail_start(0), Point3::new(1.0, 0.0, 0.0));
         assert_close(
             f.surface_at(Point2::new(0.0, 0.25)),
@@ -3919,8 +3952,13 @@ mod tests_c5 {
         let e = f.run().unwrap_err();
         assert_eq!(
             e,
-            SolidError::blend_null_defect(OP, "a rail the solver built has no B-spline curve")
+            fail(SolverFailure::RailNotBSpline {
+                fillet_geom: f.g,
+                side: 1,
+                kind: None,
+            })
         );
+        assert!(!e.is_defect(), "{e:?}");
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
     }
 
@@ -3929,8 +3967,13 @@ mod tests_c5 {
         let mut f = Fixture::new();
         f.st.split_original_fillet = true;
         // TopologySplit (blend.fillet_geom_p3) needs the geometry's solver, which the
-        // fixture's geometry does not name: SM_ERR_NULL_POINTER
+        // fixture's geometry does not name (a caller's set-up): SM_ERR_NULL_POINTER
         let e = f.run().unwrap_err();
+        assert_eq!(
+            e,
+            fail(SolverFailure::FilletGeomWithoutSolver { fillet_geom: f.g })
+        );
+        assert!(!e.is_defect(), "{e:?}");
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER), "{e:?}");
     }
 
@@ -4644,9 +4687,11 @@ fn topology_split(
     geom_type: FilletGeomType,
 ) -> Result<FilletGeomId> {
     // the geometry's GetFilletSolver() is this solver
-    let solver_id = cx.fillets.geom(geom)?.fillet_solver().ok_or_else(|| {
-        SolidError::blend_null_defect(OP, "the fillet geometry being split has no solver")
-    })?;
+    let solver_id = cx
+        .fillets
+        .geom(geom)?
+        .fillet_solver()
+        .ok_or_else(|| fail(SolverFailure::FilletGeomWithoutSolver { fillet_geom: geom }))?;
     // a standalone entry point holds no executive: no corner of any vertex
     let corners: &mut dyn SplitCorners = match &mut cx.solvers {
         GeometrySolvers::Indexed(_) => &mut NoCorners,
