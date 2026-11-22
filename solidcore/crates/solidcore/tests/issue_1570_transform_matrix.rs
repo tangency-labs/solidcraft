@@ -175,11 +175,7 @@ fn edgeuse_ids(b: &Brep) -> Vec<EdgeuseId> {
 /// edge use's edge/face gap) and each edge/edge gap asked for once, then scaled by `s` with
 /// its tolerances (`Body::transform`). `cleared`: every gap cache of the scaled body is then
 /// emptied, the twin whose reads measure everything afresh.
-fn scaled_after_the_tolerance_pass(
-    build: Build,
-    s: f64,
-    cleared: bool,
-) -> (Kernel, Brep) {
+fn scaled_after_the_tolerance_pass(build: Build, s: f64, cleared: bool) -> (Kernel, Brep) {
     let mut k = Kernel::default();
     let mut b = build(&mut k);
     update_tolerances_after_boolean(&mut k, &mut b).unwrap();
