@@ -1991,11 +1991,12 @@ fn extrude_auto_from_a_hidden_bodys_face_makes_a_new_body() {
 /// Down from a hidden body's face into the shown cube, Auto cuts only the shown cube.
 #[test]
 fn extrude_auto_cut_from_a_hidden_bodys_face_leaves_it_alone() {
-    for hide in ["body", "own"] {
+    for hide in ["body", "placement", "own"] {
         let mut s = sketch_on_a_hidden_face(hide, |s, at| {
             run(s, "sketch.rectangle.two_point", json!({"p0": at(8.0, 2.0), "p1": at(16.0, 8.0)}));
         });
-        run(&mut s, "solid.extrude", json!({"distance": -3, "operation": "auto"}));
+        let feature = run(&mut s, "solid.extrude", json!({"distance": -3, "operation": "auto"}))["feature"].as_u64().unwrap();
+        assert_eq!(s.doc.feature(feature).unwrap().participants, ["Block"], "{hide}");
         assert!((body_volume(&s, "Stock") - 1000.0).abs() < 1e-6, "{hide}: Stock {:.1}", body_volume(&s, "Stock"));
         assert!(body_volume(&s, "Block") < 1000.0 - 1.0, "{hide}: Block {:.1}", body_volume(&s, "Block"));
     }

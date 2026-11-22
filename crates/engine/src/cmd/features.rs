@@ -376,10 +376,8 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
         active_scope(s, st)
     };
     // The hidden body the sketch is on is never probed: a Join or Cut that names no body leaves it alone.
-    if parts.is_empty()
-        && let Some(hidden) = &hidden_face
-    {
-        bodies.retain(|b| &b.name != hidden);
+    if parts.is_empty() && hidden_face.is_some() {
+        bodies.retain(|b| shown_solid(s, b));
     }
     if parts.is_empty()
         && let Some(body) = started_on.as_deref().and_then(|name| st.body(name))
@@ -1181,8 +1179,10 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
         });
     } else if let Some(hidden) = auto_hidden.filter(|_| operation == Operation::Cut) {
         let st = s.model.state();
-        let shown: Vec<String> =
-            active_scope(s, &st).into_iter().filter(|b| b.name != hidden && s.body_visible(&b.name) && !b.is_surface()).map(|b| b.name.clone()).collect();
+        let shown: Vec<String> = active_scope(s, &st).into_iter().filter(|b| b.name != hidden && shown_solid(s, b)).map(|b| b.name.clone()).collect();
+        if shown.is_empty() {
+            return Err(bad(cmd, format!("no visible body to cut: `{hidden}`, the body this sketch is on, is hidden; show it, or choose participants")));
+        }
         p.to_mut()["participants"] = json!(shown);
     } else if let Some(parts) = cut_scope(s, &p, operation, sketch, face_body, cmd)? {
         p.to_mut()["participants"] = json!(parts);
@@ -1407,7 +1407,11 @@ pub fn shown_scope(s: &Session) -> Option<Vec<String>> {
     if scope.iter().all(|b| s.body_visible(&b.name)) {
         return None;
     }
-    Some(scope.into_iter().filter(|b| s.body_visible(&b.name) && !b.is_surface()).map(|b| b.name.clone()).collect())
+    Some(scope.into_iter().filter(|b| shown_solid(s, b)).map(|b| b.name.clone()).collect())
+}
+
+fn shown_solid(s: &Session, b: &solidcraft_doc::ModelBody) -> bool {
+    s.body_visible(&b.name) && !b.is_surface()
 }
 
 /// The bodies a feature of the active component works on when it names none: the component's
