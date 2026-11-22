@@ -2355,6 +2355,87 @@ mod tests {
             .is_none());
     }
 
+    /// The wall a 0.4 mm cut made from a nearly straight arc of an imported DXF: radius
+    /// 914 mm over 0.042 degrees, extruded along z from 0.6 to 1, its control points as the
+    /// cut carries them. The far centre's rounding puts the middle point 2e-10 mm off the
+    /// chord's bisector, so its legs differ by 4.1e-10 mm, past the point zero; along the
+    /// curve's tangent that leaves it off the circle by under 1e-13 mm. It is a cylinder on
+    /// its form.
+    #[test]
+    fn a_nearly_straight_extruded_arc_is_a_cylinder_on_its_form() {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as Nurb;
+        use crate::surface::implicit::{lies_on, AnalyticSupport};
+        let k = kernel();
+        let w = 0.999_999_932_288_002_3;
+        let arc = [
+            (-0.726_592_329_545_042, -0.663_054_545_454_542_7, 1.0),
+            (-0.957_803_291_296_617_6, -0.418_702_097_341_421_05, w),
+            (-1.189_194_034_090_625_5, -0.174_519_886_363_658_4, 1.0),
+        ];
+        let net = arc
+            .into_iter()
+            .map(|(x, y, w)| {
+                vec![
+                    CPoint::new(x * w, y * w, 0.6 * w, w),
+                    CPoint::new(x * w, y * w, w, w),
+                ]
+            })
+            .collect();
+        let length = 2.0 * 3.68e-4 * 914.0;
+        let nurb = Nurb::new(
+            net,
+            2,
+            1,
+            vec![0.0, 0.0, 0.0, length, length, length],
+            vec![0.0, 0.0, 0.4, 0.4],
+        )
+        .unwrap();
+        let form = BSplineSurface::from_nurb(nurb, false);
+        let cone = Cone::is_nurb_surface_cylinder(&k, &form, 1.0)
+            .unwrap()
+            .expect("a cylinder");
+        let surface = crate::surface::surface::Surface::from(cone);
+        let support = AnalyticSupport::of(&surface).expect("an analytic surface");
+        assert!(lies_on(&form, &support.implicit()).unwrap(), "{support:?}");
+        let (AnalyticSupport::Cylinder { placement, radius }
+        | AnalyticSupport::Cone {
+            placement,
+            base_radius: radius,
+            ..
+        }) = support
+        else {
+            panic!("{support:?}");
+        };
+        assert!((radius - 914.0).abs() < 1.0, "{radius}");
+        let axis = placement.z_axis();
+        assert!(axis.x.abs() < 1e-15 && axis.y.abs() < 1e-15, "{axis:?}");
+    }
+
+    /// A rational quadratic of half sweep 78 degrees whose middle point is moved along the chord
+    /// by twice the point zero: within the chord test's bound, so the arc is recovered.
+    #[test]
+    fn a_wide_arc_with_its_middle_point_off_the_bisector_is_a_chord_arc() {
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::CPoint;
+        let k = kernel();
+        let (r, half) = (10.0_f64, 78.0_f64.to_radians());
+        let w = half.cos();
+        let (x, y) = (r * half.cos(), r * half.sin());
+        let zero = EFF_ZERO * 100.0 * (1.0 + 2.0 * y);
+        let arc = [(x, -y, 1.0), (r / w, 2.0 * zero, w), (x, y, 1.0)];
+        let points = arc
+            .into_iter()
+            .map(|(x, y, w)| CPoint::new(x * w, y * w, 0.0, w))
+            .collect();
+        let nurb = NurbCurve::new(points, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap();
+        let curve = BSplineCurve::from_nurb(nurb, 3, false);
+        let arc = iso_arc_from_chord(&k, &curve, zero, Some(Vec3::new(0.0, 0.0, 1.0)))
+            .unwrap()
+            .expect("an arc");
+        assert!((arc.radius - r).abs() < 1e-9, "{}", arc.radius);
+    }
+
     /// #16488: a form whose rows are not exact translates. A unit-radius arc of 1 rad about
     /// the x axis, extruded 1 mm along x, whose top row is turned about the axis by `turn`.
     /// The recogniser holds the arcs' X axes to `EFF_ZERO_SQRT` radians, so a turn of half
