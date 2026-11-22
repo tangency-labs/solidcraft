@@ -1041,41 +1041,24 @@ impl Sketch {
         Ok(rebuilt)
     }
 
-    /// [`Sketch::update_link`], and for each curve of the link after it (in [`Sketch::link_curves`]
-    /// order), the piece of `geom` it stands for, where that is known (the link's curves are
-    /// `geom` one for one). `in_name_order`: `geom` was put in the order of the link's curves by
-    /// their edges' names ([`Sketch::update_link_named`]).
-    fn update_link_read(&mut self, id: &str, geom: &[LinkGeom], in_name_order: bool) -> Result<(bool, Option<Vec<usize>>)> {
-        let Some(kind) = self.link(id).map(|l| l.kind) else {
-            return Err(SketchError::Unknown(id.into()));
-        };
-        let halves = self.saved_halves(id, geom);
-        let pieces = geom.len();
-        let geom = halves.as_deref().unwrap_or(geom);
-        let lay = layout(geom, kind)?;
-        // Each curve of the layout is the piece of `geom` of the same index.
-        let one_for_one = halves.is_none() && lay.curves.len() == pieces && lay.lone.is_empty();
-        let read = |map: Vec<usize>| one_for_one.then_some(map);
-        let in_order = || read((0..lay.curves.len()).collect());
-        // A projected face boundary is a closed loop: crossings and touching points make its
-        // identity ambiguous, and the link keeps the geometry it had. A face taken with
-        // `Intersect` is a section: an open chain, which no closed boundary describes.
-        if self.link(id).is_some_and(closed_boundary)
-            && lay.lone.is_empty()
-            && lay.curves.len() <= 512
-            && lay.pts.len() <= 512
-            && lay.curves.iter().all(|c| matches!(c, LCurve::Line(..) | LCurve::Arc(..) | LCurve::Circle(..)))
-            && !flat(&lay.curves, &lay.pts)
-            && !loops::valid(&lay.curves, &lay.pts)
-        {
-            self.set_link_lost(id, true);
-            return Err(SketchError::Invalid("projected face boundaries cross, touch or have ambiguous topology; last geometry retained".into()));
-        }
+    /// Read link `id` again from its new layout `lay` when the loops of its face cannot be
+    /// matched to the old ones: the link is rebuilt as making a sketch builds it (`build_link`),
+    /// so the result equals a fresh build. What can still be matched keeps its id, and what the
+    /// sketch holds on it moves along ([`Sketch::rebuild_link`]); the rest gets new ids.
+    fn read_afresh(&mut self, id: &str, lay: &Layout) -> Result<(bool, Option<Vec<usize>>)> {
         let curves = self.link_curves(id);
         let points = self.link_points(id);
-        // Current layout of the link, in the same terms.
+        let cur = self.link_layout(&curves, &points);
+        self.rebuild_link(id, lay, &points, &curves, cur.as_deref())?;
+        self.set_link_lost(id, false);
+        Ok((true, None))
+    }
+
+    /// The layout of the entities `curves` over `points` of a link, in local point numbers, or
+    /// `None` when they are not a layout (a spline with handles, a point outside the link).
+    fn link_layout(&self, curves: &[usize], points: &[usize]) -> Option<Vec<LCurve>> {
         let local = |p: usize| points.iter().position(|q| *q == p);
-        let cur: Option<Vec<LCurve>> = curves
+        curves
             .iter()
             .map(|ci| match self.curves.get(*ci).map(|c| &c.kind) {
                 Some(CurveKind::Line { a, b }) => Some(LCurve::Line(local(*a)?, local(*b)?)),
@@ -1096,7 +1079,43 @@ impl Sketch {
                 }
                 _ => None,
             })
-            .collect();
+            .collect()
+    }
+
+    /// [`Sketch::update_link`], and for each curve of the link after it (in [`Sketch::link_curves`]
+    /// order), the piece of `geom` it stands for, where that is known (the link's curves are
+    /// `geom` one for one). `in_name_order`: `geom` was put in the order of the link's curves by
+    /// their edges' names ([`Sketch::update_link_named`]).
+    fn update_link_read(&mut self, id: &str, geom: &[LinkGeom], in_name_order: bool) -> Result<(bool, Option<Vec<usize>>)> {
+        let Some(kind) = self.link(id).map(|l| l.kind) else {
+            return Err(SketchError::Unknown(id.into()));
+        };
+        let halves = self.saved_halves(id, geom);
+        let pieces = geom.len();
+        let geom = halves.as_deref().unwrap_or(geom);
+        let lay = layout(geom, kind)?;
+        // Each curve of the layout is the piece of `geom` of the same index.
+        let one_for_one = halves.is_none() && lay.curves.len() == pieces && lay.lone.is_empty();
+        let read = |map: Vec<usize>| one_for_one.then_some(map);
+        let in_order = || read((0..lay.curves.len()).collect());
+        // A projected face boundary is a closed loop: crossings and touching points make the
+        // identity of its loops ambiguous, and they cannot be matched to the old ones. The face
+        // itself did project, so the link is read afresh as a new sketch would read it, keeping
+        // the ids of what can still be matched. A face taken with `Intersect` is a section: an
+        // open chain, which no closed boundary describes.
+        if self.link(id).is_some_and(closed_boundary)
+            && lay.lone.is_empty()
+            && lay.curves.len() <= 512
+            && lay.pts.len() <= 512
+            && lay.curves.iter().all(|c| matches!(c, LCurve::Line(..) | LCurve::Arc(..) | LCurve::Circle(..)))
+            && !flat(&lay.curves, &lay.pts)
+            && !loops::valid(&lay.curves, &lay.pts)
+        {
+            return self.read_afresh(id, &lay);
+        }
+        let curves = self.link_curves(id);
+        let points = self.link_points(id);
+        let cur = self.link_layout(&curves, &points);
         // The new layout numbers points in first-use order: curves first, then lone points,
         // exactly as `build_link` creates them.
         let mut order: Vec<usize> = Vec::new();
@@ -1270,8 +1289,7 @@ impl Sketch {
                 && !flat(&lay.curves, &lay.pts);
             let loop_roles = loop_roles_required.then(|| loops::roles(cur, &old, &lay.curves, &lay.pts)).flatten();
             if loop_roles_required && loop_roles.is_none() {
-                self.set_link_lost(id, true);
-                return Err(SketchError::Invalid("projected face boundary identity is ambiguous; last geometry retained".into()));
+                return self.read_afresh(id, &lay);
             }
             let (a, b) = match &loop_roles {
                 Some(roles) => (roles.old_normal.clone(), roles.fresh_normal.clone()),
@@ -1445,8 +1463,7 @@ impl Sketch {
         // hole can have identical point graphs. Never move saved curve ids between them
         // when the geometric match is ambiguous; the document reports a lost link.
         if same && !same_order_agrees && self.link(id).is_some_and(closed_boundary) {
-            self.set_link_lost(id, true);
-            return Err(SketchError::Invalid("projected face boundary identity is ambiguous; last geometry retained".into()));
+            return self.read_afresh(id, &lay);
         }
         if same {
             for (k, pi) in points.iter().enumerate() {

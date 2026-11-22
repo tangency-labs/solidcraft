@@ -534,7 +534,9 @@ mod tests {
         let link = sk
             .add_link(solidcraft_sketch::LinkKind::Project, solidcraft_sketch::LinkSource::Face { body: "ambiguous".into(), at: Vec3::ZERO }, &geom)
             .unwrap();
-        assert!(sk.update_link(&link, &geom).is_err());
+        // The loops cannot be matched to the old ones, so the link is read afresh, not kept.
+        assert!(sk.update_link(&link, &geom).unwrap());
+        assert!(!sk.link(&link).unwrap().lost);
     }
 
     #[test]
