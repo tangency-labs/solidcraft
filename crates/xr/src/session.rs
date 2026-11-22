@@ -46,9 +46,14 @@ pub enum Error {
 }
 
 impl Error {
-    /// The runtime refused `what` with `code`.
+    /// The runtime refused `what` with `code`. The VR software gone (it was closed or crashed)
+    /// or the headset gone is said as such, not in OpenXR's words.
     fn xr(what: &'static str, code: xr::sys::Result) -> Error {
-        Error::Xr { what, code: code.to_string() }
+        match code {
+            xr::sys::Result::ERROR_INSTANCE_LOST => Error::NoRuntime(format!("{what}: {code:?}")),
+            xr::sys::Result::ERROR_SESSION_LOST => Error::NoHeadset(format!("{what}: {code:?}")),
+            _ => Error::Xr { what, code: code.to_string() },
+        }
     }
 }
 
@@ -853,5 +858,18 @@ mod tests {
         assert_eq!(asks(&mut ask, 1, true), [0]);
         ask.changed();
         assert_eq!(asks(&mut ask, 1, false), [0]);
+    }
+
+    /// The VR software closed or crashed under a running session (Monado stopped, seen on
+    /// Linux): that is said as no VR software running, the headset unplugged as no headset;
+    /// any other refusal keeps the runtime's words.
+    #[test]
+    fn a_lost_runtime_or_headset_is_said_plainly() {
+        let lost = Error::xr("reading the VR software's events", xr::sys::Result::ERROR_INSTANCE_LOST);
+        assert!(matches!(lost, Error::NoRuntime(_)), "{lost:?}");
+        let unplugged = Error::xr("waiting for the frame", xr::sys::Result::ERROR_SESSION_LOST);
+        assert!(matches!(unplugged, Error::NoHeadset(_)), "{unplugged:?}");
+        let other = Error::xr("ending the frame", xr::sys::Result::ERROR_VALIDATION_FAILURE);
+        assert!(matches!(other, Error::Xr { what: "ending the frame", .. }), "{other:?}");
     }
 }
