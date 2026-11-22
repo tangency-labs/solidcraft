@@ -155,6 +155,38 @@ fn a_damaged_stpz_does_not_hide_the_wrl_beside_it() {
     assert_the_model_comes_in(&board_with_model_files("stpz-damaged", "part.step", &[("part.wrl", wrl), ("part.stpZ", b"not a zip".to_vec())]));
 }
 
+/// Three footprints share one model: one component named after the model, and each placement
+/// is named after its own footprint's reference. Two footprints that both say `R1` keep apart.
+#[test]
+fn each_part_is_named_after_its_own_reference() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-kicad-references-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("R_0603.wrl"), b"#VRML V2.0 utf8\nShape { geometry Box { size 2 2 2 } }").unwrap();
+    let footprint = |x: u32, reference: &str| {
+        format!(r#"(footprint "R" (at {x} 5) (layer "F.Cu") (property "Reference" "{reference}") (model "${{KIPRJMOD}}/R_0603.wrl"))"#)
+    };
+    let path = dir.join("board.kicad_pcb");
+    std::fs::write(
+        &path,
+        format!(
+            "(kicad_pcb (general (thickness 1.6)) (gr_rect (start 0 0) (end 30 10) (layer \"Edge.Cuts\")) {} {} {})",
+            footprint(5, "R1"),
+            footprint(12, "R33"),
+            footprint(19, "R1")
+        ),
+    )
+    .unwrap();
+    let mut s = Session::default();
+    let r = run(&mut s, "doc.open", json!({"path": path.to_string_lossy()}));
+    assert_eq!(r["subcomponents"], json!(1), "one model, one component: {r}");
+    let part = s.doc.components.iter().find(|c| c.name == "R_0603").map(|c| c.id).expect("the model's component");
+    let mut names: Vec<&str> = s.doc.occurrences.iter().filter(|o| o.component == part).map(|o| o.name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, vec!["R1", "R1 (2)", "R33"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_bad_option_is_refused_before_the_board_is_read() {
     let path = board_file("bad", 2.0);

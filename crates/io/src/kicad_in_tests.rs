@@ -477,8 +477,9 @@ fn vrml_models_are_read_and_placed() {
     let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
     assert_eq!(meshes.len(), 1, "the VRML model");
     assert!(imported.board_step.is_some(), "the board is a solid");
-    assert_eq!(imported.plan.slots, vec!["U1".to_string()]);
+    assert_eq!(imported.plan.slots, vec!["part".to_string()]);
     assert_eq!(imported.plan.places.len(), 1);
+    assert_eq!(imported.plan.places[0].name.as_deref(), Some("U1"));
     assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
 }
 
@@ -535,7 +536,7 @@ fn a_missing_model_keeps_the_other_models_of_its_footprint() {
     let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
     let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
     assert_eq!(meshes.len(), 1, "the model that is here still comes in: {meshes:?}");
-    assert_eq!(imported.plan.slots, vec!["U1".to_string()], "the model that is here is placed");
+    assert_eq!(imported.plan.slots, vec!["body".to_string()], "the model that is here is placed");
     assert_eq!(imported.plan.places.len(), 1);
     assert!(
         imported.feature.warnings.iter().any(|warning| warning.contains("gone.step") && warning.contains("was not found")),
@@ -565,8 +566,34 @@ fn one_model_named_in_both_formats_is_placed_once() {
     let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
     let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
     assert_eq!(meshes.len(), 1, "one file, one model: {meshes:?}");
-    assert_eq!(imported.plan.slots, vec!["U1".to_string()]);
+    assert_eq!(imported.plan.slots, vec!["part".to_string()]);
     assert_eq!(imported.plan.places.len(), 1, "placed once, not once per reference");
+}
+
+/// Two resistors share one model: it is one component, named after the model, placed twice, and
+/// each placement carries its own footprint's reference (not both the first one's).
+#[test]
+fn footprints_sharing_a_model_are_placed_under_their_own_references() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "R_0603" (at 5 5) (layer "F.Cu") (property "Reference" "R1")
+        (model "${KICAD10_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_0603_1608Metric.wrl"))
+      (footprint "R_0603" (at 12 5) (layer "F.Cu") (property "Reference" "R33")
+        (model "${KICAD10_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_0603_1608Metric.wrl")))"#;
+    let mut load = |path: &str| {
+        Ok(KicadModelFile {
+            path: path.to_string(),
+            bytes: br#"#VRML V2.0 utf8
+      Shape { geometry Box { size 2 2 2 } }"#
+                .to_vec(),
+        })
+    };
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    assert_eq!(imported.plan.slots, vec!["R_0603_1608Metric".to_string()], "one model, one component");
+    let places: Vec<(usize, Option<&str>)> = imported.plan.places.iter().map(|p| (p.slot, p.name.as_deref())).collect();
+    assert_eq!(places, vec![(0, Some("R1")), (0, Some("R33"))]);
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    assert_eq!(meshes.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(), vec!["R_0603_1608Metric"], "the shared body is not named after R1");
 }
 
 /// KiCad 10's 3D library ships `….stpZ`: a zip archive holding one STEP file.
@@ -591,8 +618,8 @@ fn a_zipped_stpz_model_is_read_as_step() {
     let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
     let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
     assert_eq!(meshes.len(), 1, "the zipped STEP comes in: {meshes:?} {:?}", imported.feature.warnings);
-    assert_eq!(imported.plan.slots, vec!["U1".to_string()]);
-    // The model is placed for U1, and its mesh goes into U1's component, not the board's.
+    assert_eq!(imported.plan.slots, vec!["part".to_string()]);
+    // The model is placed for U1, and its mesh goes into the model's component, not the board's.
     assert_eq!(imported.plan.places.len(), 1, "{:?}", imported.plan.places);
     assert_eq!(imported.plan.places[0].slot, 0);
     assert_eq!(imported.plan.bodies, vec![Some(0)], "{:?}", imported.plan.bodies);
@@ -612,8 +639,8 @@ fn a_wrl_reference_answered_by_an_stpz_file_is_read_as_step() {
     let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
     let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
     assert_eq!(meshes.len(), 1, "{:?}", imported.feature.warnings);
-    // The model is placed for U1, and its mesh goes into U1's component, not the board's.
-    assert_eq!(imported.plan.slots, vec!["U1".to_string()]);
+    // The model is placed for U1, and its mesh goes into the model's component, not the board's.
+    assert_eq!(imported.plan.slots, vec!["part".to_string()]);
     assert_eq!(imported.plan.places.len(), 1, "{:?}", imported.plan.places);
     assert_eq!(imported.plan.places[0].slot, 0);
     assert_eq!(imported.plan.bodies, vec![Some(0)], "{:?}", imported.plan.bodies);

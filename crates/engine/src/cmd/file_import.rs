@@ -32,6 +32,8 @@ struct Place {
     slot: usize,
     parent: Option<usize>,
     transform: Mat,
+    /// The occurrence's own name, from the file (`None`: the component's name and a number).
+    name: Option<String>,
 }
 
 /// How a STEP file's tree becomes components.
@@ -49,6 +51,22 @@ struct Plan {
 /// A placement STEP assemblies can carry over as an occurrence: finite, rigid, not mirrored.
 fn rigid(m: &Mat) -> bool {
     crate::cmd::component::valid_position(m)
+}
+
+/// The name an occurrence the file names (a KiCad footprint's reference) is given: the file's name,
+/// cut to the 128 characters a rename allows, with ` (2)`, ` (3)`… when another occurrence has it.
+/// `None` keeps the usual `Component:N`: for an empty name, and for one of digits only, which a
+/// command would read as an occurrence id.
+fn placement_name(occurrences: &[solidcraft_doc::Occurrence], wanted: &str) -> Option<String> {
+    let wanted: String = wanted.trim().chars().take(128).collect();
+    if wanted.is_empty() || wanted.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let free = |name: &str| !occurrences.iter().any(|o| o.name == name);
+    if free(&wanted) {
+        return Some(wanted);
+    }
+    (2..=occurrences.len().saturating_add(2)).map(|k| format!("{wanted} ({k})")).find(|name| free(name))
 }
 
 /// What an import's file says about its structure.
@@ -107,7 +125,7 @@ impl Plan {
             if p.slot == made {
                 made += 1;
             }
-            places.push(Place { slot: p.slot, parent: p.parent, transform: p.transform });
+            places.push(Place { slot: p.slot, parent: p.parent, transform: p.transform, name: p.name.clone() });
         }
         if plan.bodies.iter().flatten().any(|s| *s >= made) {
             return None;
@@ -151,14 +169,14 @@ impl Plan {
         if let Some(&slot) = seen.get(&key) {
             // Another placement of a part already made: an occurrence of its component, and the
             // file's copy of its bodies is not built.
-            self.places.push(Place { slot, parent, transform: node.transform });
+            self.places.push(Place { slot, parent, transform: node.transform, name: None });
             collect_bodies(node, &mut self.skip, 0);
             return;
         }
         let slot = self.slots.len();
         self.slots.push(Slot { name: node.name.trim().to_string() });
         seen.insert(key, slot);
-        self.places.push(Place { slot, parent, transform: node.transform });
+        self.places.push(Place { slot, parent, transform: node.transform, name: None });
         for b in &node.bodies {
             self.bodies.push((*b, slot, inverse));
         }
@@ -499,8 +517,8 @@ pub(crate) fn add_in_component(
     let mut made: Vec<u64> = Vec::with_capacity(plan.places.len());
     for place in &plan.places {
         let parent_comp = place.parent.and_then(|p| comps.get(p).copied()).unwrap_or(top);
-        if let Some(&comp) = comps.get(place.slot) {
-            made.push(s.doc_mut().add_occurrence(comp, parent_comp, place.transform)?);
+        let occ = if let Some(&comp) = comps.get(place.slot) {
+            s.doc_mut().add_occurrence(comp, parent_comp, place.transform)?
         } else {
             let slot = plan.slots.get(place.slot).ok_or_else(|| EngineError::Other("import: component plan".into()))?;
             let label = if slot.name.is_empty() { None } else { Some(slot.name.as_str()) };
@@ -510,8 +528,14 @@ pub(crate) fn add_in_component(
             if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occ) {
                 o.transform = place.transform;
             }
-            made.push(occ);
+            occ
+        };
+        if let Some(name) = place.name.as_deref().and_then(|wanted| placement_name(&s.doc.occurrences, wanted))
+            && let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occ)
+        {
+            o.name = name;
         }
+        made.push(occ);
     }
     if let FeatureKind::Import { skip, .. } = &mut kind {
         // Bodies the reader already leaves out (a FreeCAD body's hidden intermediate shapes),
