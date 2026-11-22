@@ -373,6 +373,7 @@ pub(crate) fn clear_view_selection(app: &mut SolveApp) -> bool {
 }
 
 /// The sheet's selected drawing view, shared by every camera that shows that sheet.
+#[cfg(test)]
 pub(crate) fn selected_drawing_view(app: &SolveApp) -> Option<u64> {
     let sheet = active_sheet(app)?;
     let drawing = app.session.drawing(drawing_scene::CMD).ok()?;

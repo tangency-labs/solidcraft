@@ -5765,11 +5765,7 @@ mod tests {
         let background = h.app.docs.slots[1].as_ref().unwrap().tab;
         let mut recalled = ViewSet::new();
         let view = recalled.active().id;
-        let mut camera = Camera::default();
-        camera.yaw = 0.71;
-        camera.pitch = 0.23;
-        camera.fov = 0.52;
-        camera.up = solidcraft_viewport::UpAxis::Y;
+        let camera = Camera { yaw: 0.71, pitch: 0.23, fov: 0.52, up: solidcraft_viewport::UpAxis::Y, ..Camera::default() };
         recalled.set_spec(view, solidcraft_viewport::ViewSpec::new(camera));
         crate::view_memory::remember(&h.dir, &path, recalled.to_json()).unwrap();
         restore_views_in(&mut h.app, &path, &h.dir);
@@ -5808,9 +5804,7 @@ mod tests {
             for fov in [0.0, 0.52] {
                 let mut recalled = ViewSet::new();
                 let id = recalled.open(kind, None, true);
-                let mut camera = Camera::default();
-                camera.fov = fov;
-                camera.up = solidcraft_viewport::UpAxis::Y;
+                let camera = Camera { fov, up: solidcraft_viewport::UpAxis::Y, ..Camera::default() };
                 recalled.set_spec(id, solidcraft_viewport::ViewSpec::new(camera));
                 crate::view_memory::remember(&h.dir, &path, recalled.to_json()).unwrap();
                 h.app.ui.perspective = fov == 0.0;
