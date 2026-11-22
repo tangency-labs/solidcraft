@@ -689,11 +689,10 @@ impl BlendFailure {
             | Self::CliffInputMissing { .. }
             | Self::FaceSurfaceHasNoNurb { .. }
             | Self::SplitFaceNotGiven => SM_ERR_NULL_POINTER,
-            Self::ArcLengthNotConverged { .. } => SM_ERR_NOT_CONVERGING,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::BadIntersections(_) => SM_ERR_BAD_INTERSECTIONS,
-            Self::NotConverged(_) => SM_ERR_NOT_CONVERGING,
+            Self::ArcLengthNotConverged { .. } | Self::NotConverged(_) => SM_ERR_NOT_CONVERGING,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::NotWithinTolerance(_) => SM_ERR_NOT_WITHIN_TOLERANCE,
             Self::PassedOn { status, .. } => *status,
@@ -1723,7 +1722,10 @@ mod tests {
         ];
         for (cause, (class, status, message)) in fillet_geom_p2_causes().into_iter().zip(expected) {
             assert_eq!(cause.class(), class, "{cause:?}");
-            assert!(!cause.is_phrase() && cause.replaces_upstream_status(), "{cause:?}");
+            assert!(
+                !cause.is_phrase() && cause.replaces_upstream_status(),
+                "{cause:?}"
+            );
             assert_eq!(cause.comparison_status(), status, "{cause:?}");
             let e = SolidError::blend("blend::op", cause);
             assert_eq!(e.kind(), class, "{cause:?}");

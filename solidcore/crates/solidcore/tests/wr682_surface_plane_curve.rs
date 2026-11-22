@@ -523,7 +523,11 @@ fn a_heading_along_neither_way_round_is_refused() {
                 ),
                 "{from} -> {to}, {what}: {e:?}"
             );
-            assert_eq!(solidcore::error::upstream_status(&e), Some(1001), "{from} -> {to}, {what}");
+            assert_eq!(
+                solidcore::error::upstream_status(&e),
+                Some(1001),
+                "{from} -> {to}, {what}"
+            );
         }
     }
     // the half cylinder from 0 to 180 degrees: from 20 to 110, heading down (towards 0)
@@ -772,7 +776,11 @@ fn a_curve_through_a_closure_off_a_seam_it_crosses_keeps_the_drop_error() {
             ),
             "{from} -> {to}: {e:?}"
         );
-        assert_eq!(solidcore::error::upstream_status(&e), Some(1001), "{from} -> {to}");
+        assert_eq!(
+            solidcore::error::upstream_status(&e),
+            Some(1001),
+            "{from} -> {to}"
+        );
     }
     // through the closure, over no seam of the sphere: both UV curves
     let c = intersect(
