@@ -1196,7 +1196,8 @@ impl FilletCorner {
 /// first when they coincide, the 2x1 case) have parallel face use normals at the
 /// corner end of their edges (within `SM_EFF_ZERO_SQRT`). Anti-parallel normals are a
 /// cusp, an ordinary corner (WR-570), unless the two side edge uses are the two face
-/// uses of one face (a sheet's two sides), which stay degenerate.
+/// uses of one face (a sheet's edge read from its two sides, or a closed face's seam
+/// read through the mate), which stay degenerate.
 ///
 /// # Errors
 ///
@@ -1293,9 +1294,11 @@ pub fn check_nx1_degeneracy_status(
     // Check if faceuse normals are parallel to each other. Anti-parallel normals of two
     // faces are a cusp (WR-570, fork b7ec55b: the faces folded back on each other, a
     // knife edge): the ball touches them back from the vertex and the fillet ends there
-    // as at any other corner. Not the fork's: the two face uses of one face (a sheet's
-    // two sides) have anti-parallel normals at every point, and no ball touches both
-    // sides, so they stay a degenerate corner, as upstream
+    // as at any other corner. Not the fork's: two face uses of one face read the same
+    // surface at the same point, anti-parallel only by the face use's sign. At a sheet's
+    // edge read from its two sides no ball touches both; at a closed face's seam read
+    // through the mate the surface continues tangentially into itself, the opposite of
+    // a knife edge. Both stay a degenerate corner, as upstream
     // (`bAntiParallel` starts FALSE; `IsParallelTo` leaves it for a zero vector)
     let (parallel, anti) = faceuse_normal1.parallel_sense(faceuse_normal2, EFF_ZERO_SQRT);
     let face1 = eu1::face(b, side_eu1)?;

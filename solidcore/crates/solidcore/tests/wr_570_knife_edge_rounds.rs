@@ -31,7 +31,7 @@ use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_surface_n_lib::OrientType;
 use solidcore::primitive::api_curves::{create_arc, create_line_segment};
-use solidcore::primitive::api_primitives::create_plane;
+use solidcore::primitive::api_primitives::{create_cylinder, create_plane};
 use solidcore::sweep::api_brep::create_taper_extrude;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::edge;
@@ -195,6 +195,41 @@ fn wr_570_a_lamina_edge_is_not_a_cusp() {
             "edge use {eu:?}: a sheet's corner is degenerate"
         );
     }
+}
+
+/// A closed face's seam read through the mate (the 2x1 case: the two side edge uses
+/// are the seam's two uses on the one face use's loop, so the second is taken as the
+/// first's mate): the two sides are one surface at one point, its normal continuing
+/// across the seam, anti-parallel only by the face use's sign. The corner is
+/// degenerate (not a cusp).
+#[test]
+fn wr_570_a_closed_face_seam_is_not_a_cusp() {
+    let mut k = Kernel::default();
+    let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 20.0).unwrap();
+    let eus: Vec<EdgeuseId> = b.edgeuses().iter().map(|(id, _)| id).collect();
+    let mut seams = 0;
+    for eu in eus {
+        let s1 = eu1::cw_edgeuse(&b, eu).unwrap().unwrap();
+        let radial = eu1::radial(&b, eu).unwrap().unwrap();
+        if eu1::ccw_edgeuse(&b, radial).unwrap().unwrap() != s1 {
+            continue;
+        }
+        let [(f1, n1), (f2, n2)] = sides(&k, &mut b, eu);
+        if f1 != f2 {
+            continue;
+        }
+        seams += 1;
+        assert!(
+            (n1.dot(n2) + 1.0).abs() <= 1e-12,
+            "edge use {eu:?}: {n1:?}, {n2:?}"
+        );
+        let v = start(&b, eu);
+        assert!(
+            check_nx1_degeneracy(&k, &mut b, v, eu).unwrap(),
+            "edge use {eu:?}: a closed face's seam is degenerate"
+        );
+    }
+    assert!(seams > 0, "the cylinder has a corner read across its seam");
 }
 
 /// The knife edge's two faces are anti-parallel at its ends (the back face's normal
