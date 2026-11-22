@@ -1152,18 +1152,16 @@ fn coil_dialog_sizes_by_any_two_of_height_pitch_and_revolutions() {
     };
     assert_eq!(keys(&sent(&h)), ["pitch", "revolutions"]);
     assert!(shows(&h, "ui.revolutions") && shows(&h, "ui.pitch") && !shows(&h, "ui.height"));
-    // Height and pitch.
-    let choose = |h: &mut Harness, by: &str| {
-        let d = h.app.dialog.as_mut().unwrap();
-        d.extra.insert("size_by".into(), json!(by));
-        d.extra.insert("coil_height".into(), json!("20"));
-        h.frames(3);
-    };
-    choose(&mut h, "height_pitch");
+    // Height and pitch, picked in the Size by dropdown: the Height field starts at 20.
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_pitch");
     let p = sent(&h);
     assert_eq!(keys(&p), ["height", "pitch"]);
     assert!(shows(&h, "ui.height") && shows(&h, "ui.pitch") && !shows(&h, "ui.revolutions"));
     assert!(p.get("size_by").is_none() && p.get("coil_height").is_none());
+    // Back to the default pair: no height is sent.
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_revolutions_pitch");
+    assert_eq!(keys(&sent(&h)), ["pitch", "revolutions"]);
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_pitch");
     ok(&mut h);
     let by_height = volume(&mut h.app.session);
     // 20 high at pitch 8 is 2.5 turns.
@@ -1175,7 +1173,7 @@ fn coil_dialog_sizes_by_any_two_of_height_pitch_and_revolutions() {
     let mut h = design("mm");
     h.app.dialog = Some(crate::dialogs::Dialog::for_command(&h.app, "solid.coil").unwrap());
     h.frames(3);
-    choose(&mut h, "height_revolutions");
+    choose(&mut h, "ui.coil_size_by", "ui.coil_by_height_revolutions");
     let p = sent(&h);
     assert_eq!(keys(&p), ["height", "revolutions"]);
     assert!(shows(&h, "ui.height") && shows(&h, "ui.revolutions") && !shows(&h, "ui.pitch"));
