@@ -1134,6 +1134,53 @@ fn dialog_hook_keeps_its_last_reply_on_screen_while_the_next_one_is_pending() {
 }
 
 #[test]
+fn dialog_hook_request_keeps_a_selection_its_pre_hook_controller_shows() {
+    let schema = json!({"type":"object","properties":{
+        "plinth":{"type":"boolean","default":true},
+        "bodies":{"type":"array","items":{"type":"string"},"maxItems":1,"x-solidcraft-visible-when":{"field":"plinth","eq":true}}
+    }});
+    let mut h = hook_dialog_harness();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.fields = form(&schema);
+    dialog.hook.as_mut().unwrap().schema = schema.clone();
+    let (_, input) = dialog.fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "bodies").unwrap();
+    *input = Input::Selection(vec![Sel::Body { name: "a".into() }]);
+    let update = solidcraft_engine::plugin::dialog::apply(
+        &schema,
+        &json!({"plinth":true,"bodies":["a"]}),
+        &Default::default(),
+        Some(r#"{"plinth":{"value":false}}"#),
+        false,
+    )
+    .unwrap();
+    assert!(apply_hook_reply(dialog, 0, update));
+    let fields = dialog.fields.as_ref().unwrap();
+    assert!(!fields.iter().find(|(f, _)| f.key == "bodies").unwrap().0.visible, "the hook's value hides the selection on screen");
+    let values = hook_values(fields);
+    assert_eq!(values["plinth"], true);
+    assert_eq!(values.get("bodies"), Some(&json!(["a"])), "the next hook still gets the selection its sent controller shows");
+}
+
+#[test]
+fn dialog_hook_restored_field_takes_the_conditional_default_its_controller_now_gives() {
+    let schema = json!({"type":"object","properties":{
+        "mode":{"type":"boolean","default":false},
+        "depth":{"type":"number","default":1,"x-solidcraft-defaults":[{"when":{"field":"mode","eq":true},"value":5}]}
+    }});
+    let reply =
+        |values: Value, patch: &str| solidcraft_engine::plugin::dialog::apply(&schema, &values, &Default::default(), Some(patch), false).unwrap();
+    let mut h = hook_dialog_harness();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.fields = form(&schema);
+    dialog.hook.as_mut().unwrap().schema = schema.clone();
+    assert!(apply_hook_reply(dialog, 0, reply(json!({"mode":false,"depth":1}), r#"{"depth":{"default":24}}"#)));
+    set_input(dialog.fields.as_mut().unwrap(), "mode", Input::Boolean(true));
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["depth"], 24.0, "the hook value stays while its reply is pending");
+    assert!(apply_hook_reply(dialog, 0, reply(json!({"mode":true,"depth":1}), "{}")));
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["depth"], 5.0, "the reply dropped depth, so mode's default applies");
+}
+
+#[test]
 fn dialog_hook_pending_rejects_invalid_current_inputs_instead_of_cached_parameters() {
     let mut h = hook_dialog_harness();
     let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();

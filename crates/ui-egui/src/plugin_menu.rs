@@ -987,6 +987,9 @@ fn hook_values(fields: &[(Field, Input)]) -> Value {
         } else if matches!(input, Input::Selection(_)) {
             let mut field = field.clone();
             field.required = false;
+            // The shown visibility may come from a hook value; the engine drops what the sent
+            // controllers hide.
+            field.visible = true;
             if let Ok(value) = params(&[(field, input.clone())])
                 && let Some(object) = value.as_object()
             {
@@ -1032,6 +1035,8 @@ fn apply_hook_reply(dialog: &mut EntryDialog, generation: u64, update: solidcraf
             None => {
                 if let Some(baseline) = field.hook_baseline.take() {
                     *input = baseline;
+                    // Let refresh_conditions apply a conditional default that the hook value held back.
+                    field.controls = None;
                 }
             }
         }
