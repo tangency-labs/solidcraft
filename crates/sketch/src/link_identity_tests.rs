@@ -62,12 +62,14 @@ fn resized_and_reordered_face_keeps_constraints_on_the_same_boundary() {
 }
 
 #[test]
-fn ambiguous_face_refresh_is_read_afresh() {
+fn ambiguous_face_refresh_preserves_last_geometry_and_marks_link_lost() {
     let mut sk = Sketch::new();
     let link = sk.add_link(LinkKind::Project, face(), &ring(true, 10.0, 9.9)).unwrap();
-    let fresh = ring(false, 10.0, 2.0);
-    assert!(sk.update_link(&link, &fresh).unwrap());
-    assert_is_fresh_build(&sk, &link, &fresh);
+    let before = sk.clone();
+    assert!(sk.update_link(&link, &ring(false, 10.0, 2.0)).is_err());
+    assert_eq!(sk.points, before.points);
+    assert_eq!(sk.curves, before.curves);
+    assert!(sk.link(&link).unwrap().lost);
 }
 
 #[test]
@@ -183,9 +185,12 @@ fn many_curves_sharing_few_points_do_not_enter_permutation_matching() {
     let geom = vec![arc(Vec2::new(1.0, 1.0)); 513];
     let link = sk.add_link(LinkKind::Project, face(), &geom).unwrap();
     assert_eq!(sk.link_points(&link).len(), 3);
+    let before = sk.clone();
     let shifted = vec![arc(Vec2::new(3.0, 3.0)); 513];
-    assert!(sk.update_link(&link, &shifted).unwrap());
-    assert_is_fresh_build(&sk, &link, &shifted);
+    assert!(sk.update_link(&link, &shifted).is_err());
+    assert_eq!(sk.points, before.points);
+    assert_eq!(sk.curves, before.curves);
+    assert!(sk.link(&link).unwrap().lost);
 }
 
 #[test]
@@ -282,13 +287,15 @@ fn growing_face_retains_stationary_hole_arcs_and_shared_centre() {
 }
 
 #[test]
-fn touching_or_crossed_face_boundaries_are_read_afresh() {
+fn touching_or_crossed_face_boundaries_refuse_without_retargeting_ids() {
     for x in [9.0, 11.0] {
         let mut sk = Sketch::new();
         let link = sk.add_link(LinkKind::Project, face(), &[LinkGeom::Circle(Vec2::ZERO, 10.0), LinkGeom::Circle(Vec2::ZERO, 1.0)]).unwrap();
-        let fresh = [LinkGeom::Circle(Vec2::ZERO, 10.0), LinkGeom::Circle(Vec2::new(x, 0.0), 1.0)];
-        assert!(sk.update_link(&link, &fresh).unwrap());
-        assert_is_fresh_build(&sk, &link, &fresh);
+        let saved = sk.clone();
+        assert!(sk.update_link(&link, &[LinkGeom::Circle(Vec2::ZERO, 10.0), LinkGeom::Circle(Vec2::new(x, 0.0), 1.0)]).is_err());
+        assert_eq!(sk.points, saved.points);
+        assert_eq!(sk.curves, saved.curves);
+        assert!(sk.link(&link).unwrap().lost);
     }
 }
 
@@ -339,10 +346,13 @@ fn far_translated_small_hole_crossing_long_edge_is_not_certified_separate() {
     let mut old: Vec<_> = (0..4).map(|i| LinkGeom::Line(p[i], p[(i + 1) % 4])).collect();
     old.push(LinkGeom::Circle(Vec2::new(1e6, 5.0), 2.0));
     let link = sk.add_link(LinkKind::Project, face(), &old).unwrap();
+    let saved = sk.clone();
     let mut fresh: Vec<_> = (0..4).map(|i| LinkGeom::Line(p[i], p[(i + 1) % 4])).collect();
     fresh.push(LinkGeom::Circle(Vec2::new(1e6, 0.0), 2.0));
-    assert!(sk.update_link(&link, &fresh).unwrap());
-    assert_is_fresh_build(&sk, &link, &fresh);
+    assert!(sk.update_link(&link, &fresh).is_err());
+    assert_eq!(sk.points, saved.points);
+    assert_eq!(sk.curves, saved.curves);
+    assert!(sk.link(&link).unwrap().lost);
 }
 
 #[test]
@@ -355,9 +365,17 @@ fn equal_nested_sibling_candidates_remain_ambiguous_after_loop_classification() 
             &[LinkGeom::Circle(Vec2::ZERO, 10.0), LinkGeom::Circle(Vec2::new(-2.0, 0.0), 1.0), LinkGeom::Circle(Vec2::new(2.0, 0.0), 1.0)],
         )
         .unwrap();
-    let fresh = [LinkGeom::Circle(Vec2::ZERO, 10.0), LinkGeom::Circle(Vec2::new(0.0, -2.0), 1.0), LinkGeom::Circle(Vec2::new(0.0, 2.0), 1.0)];
-    assert!(sk.update_link(&link, &fresh).unwrap());
-    assert_is_fresh_build(&sk, &link, &fresh);
+    let saved = sk.clone();
+    assert!(
+        sk.update_link(
+            &link,
+            &[LinkGeom::Circle(Vec2::ZERO, 10.0), LinkGeom::Circle(Vec2::new(0.0, -2.0), 1.0), LinkGeom::Circle(Vec2::new(0.0, 2.0), 1.0)]
+        )
+        .is_err()
+    );
+    assert_eq!(sk.points, saved.points);
+    assert_eq!(sk.curves, saved.curves);
+    assert!(sk.link(&link).unwrap().lost);
 }
 
 #[test]
@@ -365,15 +383,18 @@ fn tiny_circle_crossing_huge_round_boundary_is_not_certified_separate() {
     let mut sk = Sketch::new();
     let direction = Vec2::new(std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2);
     let link = sk.add_link(LinkKind::Project, face(), &[LinkGeom::Circle(Vec2::ZERO, 1e8), LinkGeom::Circle(direction * (1e8 + 10.0), 2.0)]).unwrap();
-    let fresh = [LinkGeom::Circle(Vec2::ZERO, 1e8), LinkGeom::Circle(direction * (1e8 + 1.0), 2.0)];
-    assert!(sk.update_link(&link, &fresh).unwrap());
-    assert_is_fresh_build(&sk, &link, &fresh);
+    let saved = sk.clone();
+    assert!(sk.update_link(&link, &[LinkGeom::Circle(Vec2::ZERO, 1e8), LinkGeom::Circle(direction * (1e8 + 1.0), 2.0)]).is_err());
+    assert_eq!(sk.points, saved.points);
+    assert_eq!(sk.curves, saved.curves);
+    assert!(sk.link(&link).unwrap().lost);
 }
 
 #[test]
 fn huge_loop_does_not_make_nearby_bowtie_edges_topologically_adjacent() {
     let mut sk = Sketch::new();
     let link = sk.add_link(LinkKind::Project, face(), &square(10.0)).unwrap();
+    let saved = sk.clone();
     let p = [
         Vec2::ZERO,
         Vec2::new(0.04, 0.04),
@@ -384,8 +405,10 @@ fn huge_loop_does_not_make_nearby_bowtie_edges_topologically_adjacent() {
         Vec2::new(0.0, 10.0),
     ];
     let crossed: Vec<_> = (0..p.len()).map(|i| LinkGeom::Line(p[i], p[(i + 1) % p.len()])).collect();
-    assert!(sk.update_link(&link, &crossed).unwrap());
-    assert_is_fresh_build(&sk, &link, &crossed);
+    assert!(sk.update_link(&link, &crossed).is_err());
+    assert_eq!(sk.points, saved.points);
+    assert_eq!(sk.curves, saved.curves);
+    assert!(sk.link(&link).unwrap().lost);
 }
 
 #[test]
@@ -945,20 +968,4 @@ fn a_face_read_by_its_edge_names_keeps_its_curves_through_any_order() {
     assert_eq!(old.points, plain.points);
     assert_eq!(old.curves, plain.curves);
     assert_eq!(old.constraints, plain.constraints);
-}
-
-/// After a face was read afresh: the link is current (not lost) and holds what a sketch made
-/// from `fresh` holds, curve for curve and point for point.
-fn assert_is_fresh_build(sk: &Sketch, link: &str, fresh: &[LinkGeom]) {
-    assert!(!sk.link(link).unwrap().lost);
-    let mut made = Sketch::new();
-    let made_link = made.add_link(LinkKind::Project, face(), fresh).unwrap();
-    let points = |s: &Sketch, l: &str| -> Vec<(i64, i64)> {
-        let mut v: Vec<(i64, i64)> =
-            s.link_points(l).iter().map(|p| ((s.points[*p].pos.x * 1e6).round() as i64, (s.points[*p].pos.y * 1e6).round() as i64)).collect();
-        v.sort_unstable();
-        v
-    };
-    assert_eq!(sk.link_curves(link).len(), made.link_curves(&made_link).len());
-    assert_eq!(points(sk, link), points(&made, &made_link));
 }

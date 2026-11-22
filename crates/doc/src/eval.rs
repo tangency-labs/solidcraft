@@ -12202,7 +12202,7 @@ fn retained_outline_notes(f: &Feature, st: &ModelState) -> Vec<String> {
     ids.into_iter()
         .filter_map(|id| st.sketch(id))
         .filter(|ss| ss.sketch.links.iter().any(|l| l.lost))
-        .map(|ss| format!("built from Sketch {}'s last outline: its projected geometry could not be updated", ss.name))
+        .map(|ss| format!("built from Sketch {}'s last outline: its projected geometry could not be updated; pick the face again in the sketch", ss.name))
         .collect()
 }
 
