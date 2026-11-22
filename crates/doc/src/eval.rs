@@ -6420,36 +6420,37 @@ pub fn hole_on_surface(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String]) ->
 }
 
 /// [`hole_on_surface`]; with `from_inside` false a position inside a body stays where it is (a
-/// hole from a sketch on an explicit plane starts at that plane, #11538).
+/// hole from a sketch on an explicit plane starts at that plane, #11538). Exact: the body says
+/// whether the position is in it or on it, and the ray along the axis meets its faces' own surfaces
+/// ([`solidcraft_kernel::Body::fire_ray`]). A display mesh's facets lie off a curved face by their
+/// chord: a spot moved onto the facets of a bore (a hole drilled out from a tube's axis) started in
+/// the air short of the bore, and the material between it and the bore was left (#20424).
 fn hole_on_surface_in(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String], from_inside: bool) -> Vec3 {
     let size = st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max);
     let eps = size * 1e-6;
     let mut best: Option<Vec3> = None;
     for b in st.bodies.iter().filter(|b| in_hole_scope(scope, b)) {
-        let m = b.mesh();
-        // Every test below casts along the line through `p`: a mesh whose box that line misses
-        // has no triangle to hit, so skip it before scanning its triangles (in an assembly of
-        // hundreds of parts, these scans were most of a hole's time).
-        if !line_meets_box(p, dir, &m.bounds().inflated(eps * 8.0)) {
+        // The ray runs along the line through `p`: a body whose exact box that line misses has
+        // nothing for it to meet (in an assembly of hundreds of parts, most of them).
+        if b.body.exact_bounds().is_ok_and(|bb| !line_meets_box(p, dir, &bb.inflated(eps * 8.0))) {
             continue;
         }
-        // Already on the surface: the drill enters right here.
-        if !b.body.is_mesh() && matches!(b.body.classify_point(p), Ok(kernel::PointClass::OnBoundary)) {
-            return p;
-        }
-        if let Some((t, _)) = m.raycast(p - dir * eps, dir)
-            && t < eps * 4.0
+        let inside = match b.body.classify_point(p) {
+            // Already on the surface: the drill enters right here.
+            Ok(kernel::PointClass::OnBoundary) => return p,
+            Ok(kernel::PointClass::Inside) if !from_inside => return p,
+            Ok(kernel::PointClass::Inside) => true,
+            Ok(kernel::PointClass::Outside) => false,
+            // A body the kernel cannot classify the spot against does not move it.
+            Err(_) => continue,
+        };
+        // Inside, back against the drilling direction to where the drill enters; outside, on
+        // along it to the face it meets.
+        let hit = b.body.fire_ray(p, if inside { -dir } else { dir });
+        if let Ok(Some(h)) = hit
+            && best.is_none_or(|bq| h.point.dist(p) < bq.dist(p))
         {
-            return p;
-        }
-        if !from_inside && m.contains(p) {
-            return p;
-        }
-        let q = if m.contains(p) { m.raycast(p, -dir).map(|(t, _)| p - dir * t) } else { m.raycast(p, dir).map(|(t, _)| p + dir * t) };
-        if let Some(q) = q
-            && best.is_none_or(|bq| q.dist(p) < bq.dist(p))
-        {
-            best = Some(q);
+            best = Some(h.point);
         }
     }
     best.unwrap_or(p)
@@ -7369,9 +7370,8 @@ fn hole_drill_scope(f: &Feature) -> &[String] {
 /// it. When the hole cuts every body, or none, every body counts.
 pub fn hole_start(st: &ModelState, f: &Feature, p: Vec3, dir: Vec3) -> Vec3 {
     let anywhere = hole_on_surface(st, p, dir, &[]);
-    // `hole_on_surface` hands `p` itself back when `p` is on a face's mesh (or meets no body at
-    // all). On a round face, a point between its mesh's vertices lies off the mesh: the B-rep
-    // says whether it is on the face.
+    // `hole_on_surface` hands `p` itself back when `p` is on a body's boundary (or meets no body
+    // at all); the B-rep also says whether it is on a face within the chord tolerance.
     if anywhere == p || on_a_brep_face(st, p) {
         return p;
     }
