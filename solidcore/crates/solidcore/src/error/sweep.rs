@@ -398,6 +398,18 @@ impl core::fmt::Display for SweptKind {
     }
 }
 
+impl SweptKind {
+    /// The kind's name with its indefinite article ("a vertex", "an edge").
+    const fn with_article(self) -> &'static str {
+        match self {
+            Self::Vertex => "a vertex",
+            Self::Edge => "an edge",
+            Self::Face => "a face",
+            Self::Region => "a region",
+        }
+    }
+}
+
 impl core::fmt::Display for ProfileCurveStep {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self {
@@ -440,7 +452,9 @@ impl core::fmt::Display for SweepFailure {
                 found,
             } => write!(
                 f,
-                "the recorded same-dimension image {image} is a {found}, not a {expected}"
+                "the recorded same-dimension image {image} is {}, not {}",
+                found.with_article(),
+                expected.with_article()
             ),
             Self::SweepTooShort { moved, least } => write!(
                 f,
