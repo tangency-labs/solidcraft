@@ -2566,6 +2566,37 @@ fn secondary_alignment_review_drive_entry_restores_all_four_inputs() {
     assert_eq!(scratch.doc.assembly.joints, before.assembly.joints);
 }
 
+/// Edit Joint from the Drive Joints dialog opens with the joint's two sides, so its offsets can
+/// be edited and the edit confirmed (#17196).
+#[test]
+fn edit_joint_from_drive_joints_keeps_its_two_sides() {
+    let mut h = crate::scenario::Harness::new();
+    h.app = two_boxes();
+    let at = |o: &str| json!({"occurrence": o, "point": [25, 10, 5], "z": [1, 0, 0]});
+    h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Glue"})).unwrap();
+    let glue = h.app.session.doc.assembly.joints[0].id;
+    h.app.start("joint.drive");
+    h.frames(4);
+    h.step(&json!({"click": {"handle": "drive:edit_joint"}})).unwrap();
+    h.frames(2);
+    let mut d = h.app.dialog.clone().unwrap();
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("joint form") };
+    f.offset[0] = "20 mm".into();
+    // The edit can be confirmed: the dialog has the joint's two sides, so nothing is asked for
+    // again (without them OK was off and asked for component 1's joint origin).
+    let commands = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(commands[0].0, "joint.edit");
+    assert_eq!(commands[0].1["joint"], json!(glue));
+    assert_eq!(commands[0].1["offset_x"], json!(20.0));
+    // The two sides are the first two inputs; the Joint dialog holds the alignment references
+    // after them, so the sides are read by their place and not by the count of the inputs.
+    assert!(d.inputs.len() >= 2, "the Edit Joint dialog keeps its two sides");
+    assert_eq!(d.inputs[0].label, "Component 1");
+    assert_eq!(d.inputs[1].label, "Component 2");
+    assert_eq!(d.inputs[0].items.len(), 1, "the first side keeps its pick");
+    assert_eq!(d.inputs[1].items.len(), 1, "the second side keeps its pick");
+}
+
 /// A rigid joint has nothing to drive: Drive Joints won't start on it.
 #[test]
 fn drive_preset_refuses_a_rigid_joint() {
