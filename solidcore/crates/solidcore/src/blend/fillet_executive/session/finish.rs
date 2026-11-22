@@ -1085,8 +1085,18 @@ impl FilletSession<'_> {
             return Err(failure("an asked setback is not built"));
         }
         // (not the fork, #2933) a corner at a vertex marked set back is classified now, where
-        // the setback set on it is first read: the Setback where it is one
-        self.set_back_marked_corners(k)?;
+        // the setback set on it is first read: the Setback where it is one. A corner that is
+        // the Setback already builds the setback set on it (#16408); one beside a curved face
+        // asked an ease, which its G1 fill cannot take, is refused rather than built without
+        // the ask
+        if self.set_back_marked_corners(k)?.is_some() {
+            self.note_refusal(Refusal {
+                code: FilletErrorType::CornerUnsupported,
+                reason: None,
+                comment: crate::blend::blend_corner::setback::SETBACK_EASE_NOT_BUILT,
+            });
+            return Err(failure("an asked setback is not built"));
+        }
         // not the fork's (#3145): setbacks that overlap on an edge, before the trace
         if let Some((vertex, refusal)) = crate::blend::blend_corner::setback::overlapping_setbacks(
             k,
