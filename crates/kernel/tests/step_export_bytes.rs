@@ -60,6 +60,9 @@ const NO_READ_BACK: &[&str] = &["tests/step-regressions/thread_crest_band.step"]
 /// is written as that circle (#17929). Kernel-case 3208 differs only in its uncertainty (line #8,
 /// the largest edge tolerance): 1e-6 where main wrote 1.3356874714460462e-6, as the lazy UV trim
 /// no longer raises its edge past the trim's proved distance, which 1e-6 covers (#18166).
+/// Kernel-case 3098 writes its spline knots scaled exactly by a power of two, as the reader now
+/// rescales a curve too fast to resolve its edges (#16441); the curves are the same point for point
+/// (see `the_tiny_knot_span_block_exports_its_knots_scaled_exactly_and_reads_back_as_the_block`).
 /// Entries whose export's bytes differ only on macOS's math functions, beside the pinned values
 /// above: the reader's seam split now lands on the edge's own knot, and the pcurves made beside it
 /// carry macOS libm's rounding for these fixtures (on Linux the split solves within the export's
@@ -110,7 +113,7 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/kernel-cases/import/258-cone-point-vertex/input.step", "be8c91bead2f5a20"),
     ("tests/kernel-cases/import/258-cone-to-point/input.step", "112fb1ed128b8863"),
     ("tests/kernel-cases/import/258-tiny-pin/input.step", "7b4b8437f83a83a3"),
-    ("tests/kernel-cases/import/3098-bspline-edges-over-tiny-knot-span/input.step", "b570b62268740b6a"),
+    ("tests/kernel-cases/import/3098-bspline-edges-over-tiny-knot-span/input.step", "07d600c03b506f20"),
     ("tests/kernel-cases/import/3208-extruded-ellipse-face-over-parameter-seam/input.step", "cb1a867bf1b66556"),
     ("tests/kernel-cases/import/3352-vertex-off-its-edge-curve/input.step", "5e6454bed8d85bc3"),
     ("tests/kernel-cases/import/3730-void-oriented-shell-false/input.step", "e461e3732a479928"),
@@ -232,4 +235,53 @@ fn step_export_keeps_its_bytes_and_reads_back() {
     let expected = with_macos_digests(DIGESTS.iter().map(|(n, d)| ((*n).to_string(), (*d).to_string())).collect());
     assert_eq!(table, expected, "the export's bytes changed");
     assert!(failures.is_empty(), "round trips: {failures:#?}");
+}
+
+/// Kernel case 3098 is a 30 × 20 × 10 block whose 12 straight edges are degree-1 B-splines on the
+/// knots (0, 1e-7). STEP import now rescales such a curve's parameter by a power of two (#16441),
+/// so its export writes the scaled knots on the edges' curves and on their pcurves, which share the
+/// edge's parameter: the only row of [`DIGESTS`] that moved. The curve itself is unchanged: every
+/// written spline's knots are the file's (0, 1e-7) times 2^k exactly (a power-of-two
+/// scale changes only the exponent, and 0 has no shift), and the export reads back as the same
+/// block, measured against its closed form (V = 6000, A = 2(600 + 300 + 200) = 2200, box
+/// [0, 30] × [0, 20] × [0, 10], 6 faces, 12 edges, 8 vertices) to measure's integration accuracy
+/// (1e-8 relative).
+#[test]
+fn the_tiny_knot_span_block_exports_its_knots_scaled_exactly_and_reads_back_as_the_block() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let text = std::fs::read_to_string(root.join("tests/kernel-cases/import/3098-bspline-edges-over-tiny-knot-span/input.step")).unwrap();
+    let imp = step_import(&text).unwrap();
+    let bodies: Vec<ExportBody> = imp.bodies.iter().map(|b| ExportBody { name: b.name.clone(), body: &b.body, color: b.color }).collect();
+    let out = step_export_bodies(&bodies, &StepHeader { file_name: "input.step".into(), ..Default::default() }).unwrap();
+
+    let mut splines = 0;
+    for entity in out.split(';').filter(|e| e.contains("B_SPLINE_CURVE_WITH_KNOTS(")) {
+        let entity: String = entity.split_whitespace().collect();
+        // The knots are the last parenthesised list before the knot spec.
+        let end = entity.rfind("),").unwrap();
+        let knots: Vec<f64> = entity[entity[..end].rfind('(').unwrap() + 1..end].split(',').map(|k| k.parse().unwrap()).collect();
+        assert_eq!(knots.len(), 2, "{entity}");
+        assert_eq!(knots[0], 0.0, "{entity}");
+        let scale = knots[1] / 1e-7;
+        let k = scale.log2().round() as i32;
+        assert!(k >= 1, "{entity}: scale {scale}: not rescaled");
+        assert_eq!(knots[1].to_bits(), (1e-7 * 2f64.powi(k)).to_bits(), "{entity}: {} is not 1e-7 · 2^{k}", knots[1]);
+        splines += 1;
+    }
+    // The 12 edges' curves, and their pcurves on the same parameter.
+    assert!(splines >= 12, "{splines} splines for 12 edges");
+
+    let again = step_import(&out).unwrap();
+    assert_eq!(again.bodies.len(), 1);
+    let b = &again.bodies[0];
+    assert!(b.closed);
+    let m = measure(&b.body).unwrap();
+    let rel = |a: f64, b: f64| (a - b).abs() / b.abs();
+    assert!(rel(m.volume, 6000.0) <= 1e-8, "volume {}", m.volume);
+    assert!(rel(m.area, 2200.0) <= 1e-8, "area {}", m.area);
+    assert_eq!((m.faces, m.edges, m.vertices), (6, 12, 8));
+    let (lo, hi) = (m.bbox.min, m.bbox.max);
+    for (got, want) in [(lo.x, 0.0), (lo.y, 0.0), (lo.z, 0.0), (hi.x, 30.0), (hi.y, 20.0), (hi.z, 10.0)] {
+        assert!((got - want).abs() <= 1e-8 * 30.0, "box {lo:?} .. {hi:?}");
+    }
 }

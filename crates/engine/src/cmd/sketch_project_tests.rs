@@ -899,6 +899,230 @@ fn fit_curves_to_a_mesh_section() {
     assert!(s.execute("sketch.fit_curves_to_section", &json!({"body": "nope"})).is_err());
 }
 
+/// A 60 x 40 x 12 mm plate with its four upright edges rounded (radius 10), a boss of radius 12
+/// on it up to z = 30, a bore of radius 7 through both and two bolt holes of radius 3: the body
+/// `Mount`.
+fn mount(s: &mut Session) {
+    for (id, p) in [
+        ("solid.box", json!({"length": 60, "width": 40, "height": 12, "body_name": "Mount"})),
+        ("solid.fillet", json!({"edges": [[0, 0, 6], [60, 0, 6], [0, 40, 6], [60, 40, 6]], "radius": 10})),
+        ("solid.cylinder", json!({"base": [30, 20, 12], "radius": 12, "height": 18, "operation": "join"})),
+        ("solid.cylinder", json!({"base": [30, 20, -1], "radius": 7, "height": 40, "operation": "cut"})),
+        ("solid.cylinder", json!({"base": [10, 20, -1], "radius": 3, "height": 20, "operation": "cut"})),
+        ("solid.cylinder", json!({"base": [50, 20, -1], "radius": 3, "height": 20, "operation": "cut"})),
+    ] {
+        run(s, id, p);
+    }
+}
+
+/// A design whose only feature imports one mesh body, `Mesh`, with no shading normals (as an STL
+/// has none).
+fn mesh_design(positions: Vec<f64>, triangles: Vec<u32>) -> Session {
+    let mut doc = solidcraft_doc::Document::default();
+    let mesh = solidcraft_doc::MeshData {
+        name: "Mesh".into(),
+        positions: positions.into(),
+        triangles: triangles.into(),
+        color: None,
+        corner_normals: Default::default(),
+    };
+    doc.add_feature(solidcraft_doc::FeatureKind::MeshImport { file: "shapes.stl".into(), meshes: vec![mesh] }, Some("Imported mesh")).unwrap();
+    Session::new(doc)
+}
+
+/// Fit Curves to Mesh Section on a new sketch `z` mm above XY, then the sketch as inspected.
+fn fit_section_at(s: &mut Session, body: &str, z: f64) -> Value {
+    run(s, "sketch.create", json!({"plane": "XY", "offset": format!("{z} mm")}));
+    run(s, "sketch.fit_curves_to_section", json!({"body": body}));
+    let si = inspect(s);
+    run(s, "sketch.finish", json!({}));
+    si
+}
+
+fn at(v: &Value) -> [f64; 2] {
+    [v[0].as_f64().unwrap(), v[1].as_f64().unwrap()]
+}
+
+/// Whether every line and arc of a sketch ends where another of its curves ends: the outlines
+/// the fit made are closed.
+fn ends_meet(si: &Value) -> bool {
+    let curves = si["curves"].as_array().unwrap();
+    let ends: Vec<(usize, [f64; 2])> = curves
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c["type"] == "line" || c["type"] == "arc")
+        .flat_map(|(i, c)| [(i, at(&c["start_at"])), (i, at(&c["end_at"]))])
+        .collect();
+    ends.iter().all(|(i, e)| ends.iter().any(|(j, f)| i != j && (e[0] - f[0]).hypot(e[1] - f[1]) < 1e-9))
+}
+
+/// Checks a section of [`mount`] through its plate (0 < z < 12) against the part, every curve
+/// within `tol` of it: the four sides, the four corner rounds and the three holes, closed, with
+/// the plate's area and the holes'.
+fn assert_plate_section(si: &Value, tol: f64) {
+    let curves = si["curves"].as_array().unwrap();
+    let of = |kind: &str| curves.iter().filter(|c| c["type"] == kind).cloned().collect::<Vec<_>>();
+    let (lines, arcs, circles) = (of("line"), of("arc"), of("circle"));
+    assert_eq!((lines.len(), arcs.len(), circles.len(), curves.len()), (4, 4, 3, 11), "{si}");
+    let near = |p: [f64; 2], q: [f64; 2]| (p[0] - q[0]).hypot(p[1] - q[1]) <= tol;
+    let sides = [[[0., 10.], [0., 30.]], [[60., 10.], [60., 30.]], [[10., 0.], [50., 0.]], [[10., 40.], [50., 40.]]];
+    for side in sides {
+        let found = lines.iter().any(|l| {
+            let (a, b) = (at(&l["start_at"]), at(&l["end_at"]));
+            (near(a, side[0]) && near(b, side[1])) || (near(a, side[1]) && near(b, side[0]))
+        });
+        assert!(found, "no side {side:?} in {si}");
+    }
+    for c in [[10., 10.], [50., 10.], [50., 30.], [10., 30.]] {
+        assert!(arcs.iter().any(|a| near(at(&a["center_at"]), c) && (a["radius"].as_f64().unwrap() - 10.).abs() <= tol), "no round at {c:?} in {si}");
+    }
+    for (c, r) in [([10., 20.], 3.), ([30., 20.], 7.), ([50., 20.], 3.)] {
+        assert!(circles.iter().any(|h| near(at(&h["center_at"]), c) && (h["radius"].as_f64().unwrap() - r).abs() <= tol), "no hole at {c:?} in {si}");
+    }
+    assert!(ends_meet(si), "{si}");
+    // The plate, rounded and less its holes, and the holes: each within its outline's length
+    // times the tolerance.
+    let pi = std::f64::consts::PI;
+    let mut areas: Vec<f64> = si["profiles"].as_array().unwrap().iter().map(|p| p["area_mm2"].as_f64().unwrap()).collect();
+    areas.sort_by(f64::total_cmp);
+    let want = [9. * pi, 9. * pi, 49. * pi, 2000. + 100. * pi - 67. * pi];
+    let lengths = [6. * pi, 6. * pi, 14. * pi, 120. + 20. * pi];
+    assert_eq!(areas.len(), 4, "{si}");
+    for ((got, want), length) in areas.iter().zip(want).zip(lengths) {
+        assert!((got - want).abs() <= length * tol, "area {got} vs {want} in {si}");
+    }
+}
+
+/// An STL carries no shading normals, so every facet of its mesh body was shaded flat and the
+/// section took each vertex of a round for a crease: its crossings fell on the facets' chords,
+/// inside the surface by up to the mesh's sag, and the fit broke each round and hole into
+/// hundreds of short lines and could leave the outline open. The section now takes the surface
+/// from the facets, and fits it to their sag: the curves are the part's own, within the export's
+/// chord (2e-4 of the part's 78 mm box diagonal) of it.
+#[test]
+fn an_stl_section_is_fitted_with_the_parts_lines_arcs_and_circles() {
+    let dir = crate::tests::Folder::new("fit-stl-section");
+    let stl = dir.path("mount.stl");
+    let mut src = Session::default();
+    mount(&mut src);
+    run(&mut src, "file.export_stl", json!({ "path": stl }));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({ "path": stl }));
+    let body = s.model.state().bodies[0].name.clone();
+    let chord = 2e-4 * (60f64.powi(2) + 40f64.powi(2) + 30f64.powi(2)).sqrt();
+    for z in [3.0, 6.0, 10.0] {
+        assert_plate_section(&fit_section_at(&mut s, &body, z), chord);
+    }
+    // Through the boss: two circles, its wall and the bore.
+    let si = fit_section_at(&mut s, &body, 20.0);
+    let mut radii: Vec<f64> =
+        si["curves"].as_array().unwrap().iter().filter(|c| c["type"] == "circle").map(|c| c["radius"].as_f64().unwrap()).collect();
+    radii.sort_by(f64::total_cmp);
+    assert_eq!(si["curves"].as_array().unwrap().len(), 2, "{si}");
+    assert!(radii.len() == 2 && (radii[0] - 7.).abs() <= chord && (radii[1] - 12.).abs() <= chord, "{si}");
+}
+
+/// How far `p` lies from [`mount`]'s outline through its plate: its rounded rectangle, or the
+/// nearest of its three holes.
+fn off_the_plate(p: [f64; 2]) -> f64 {
+    let (x, y) = (p[0], p[1]);
+    let (cx, cy) = (x.clamp(10., 50.), y.clamp(10., 30.));
+    let outer = if x != cx && y != cy {
+        ((x - cx).hypot(y - cy) - 10.).abs()
+    } else {
+        [x.abs(), (60. - x).abs(), y.abs(), (40. - y).abs()].into_iter().fold(f64::MAX, f64::min)
+    };
+    [([10., 20.], 3.), ([30., 20.], 7.), ([50., 20.], 3.)].iter().map(|(c, r)| ((x - c[0]).hypot(y - c[1]) - r).abs()).fold(outer, f64::min)
+}
+
+/// A scan's mesh is noisy: the mount's mesh with each vertex moved up to `amp` mm along each axis
+/// (by a fixed formula of where it is, so the copies of a vertex the display mesh keeps for each
+/// face move alike and the mesh stays closed), as a mesh body without normals.
+fn noisy_mount(amp: f64) -> Session {
+    let mut src = Session::default();
+    mount(&mut src);
+    let mesh = src.model.state().bodies[0].body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
+    let jitter = |p: solidcore_record::Vec3, axis: f64| {
+        let x = (p.x * 12.9898 + p.y * 78.233 + p.z * 37.719 + axis * 4.581).sin() * 43758.5453;
+        (x - x.floor()) * 2.0 - 1.0
+    };
+    let positions =
+        mesh.positions.iter().flat_map(|p| [p.x + amp * jitter(*p, 0.), p.y + amp * jitter(*p, 1.), p.z + amp * jitter(*p, 2.)]).collect();
+    mesh_design(positions, mesh.triangles.iter().flatten().copied().collect())
+}
+
+/// A noisy mesh's section keeps its outlines closed, the holes circles, every curve within its
+/// noise of the part: each vertex lies within amp·√3 of the surface plus the mesh's 0.01 mm
+/// chord, the lines run between points of the section and the arcs and circles are
+/// least-squares fits through them. Noise tilts the normals of a round's narrow facets, so its
+/// surface is not taken from them: the rounds come out as short lines, as before.
+#[test]
+fn a_noisy_mesh_section_keeps_its_outlines_closed() {
+    for amp in [0.01, 0.05] {
+        let mut s = noisy_mount(amp);
+        let tol = amp * 3f64.sqrt() + 0.01;
+        for z in [3.0, 6.0, 9.0] {
+            let si = fit_section_at(&mut s, "Mesh", z);
+            assert!(ends_meet(&si) && si["profiles"].as_array().unwrap().len() == 4, "{amp} mm at z {z}: {si}");
+            let curves = si["curves"].as_array().unwrap();
+            let of = |kind: &str| curves.iter().filter(|c| c["type"] == kind).collect::<Vec<_>>();
+            let circles = of("circle");
+            assert_eq!(circles.len(), 3, "{amp} mm at z {z}: {si}");
+            for c in curves {
+                let ends: Vec<[f64; 2]> = match c["type"].as_str() {
+                    Some("circle") => {
+                        let (o, r) = (at(&c["center_at"]), c["radius"].as_f64().unwrap());
+                        vec![[o[0] + r, o[1]], [o[0], o[1] + r], [o[0] - r, o[1]], [o[0], o[1] - r]]
+                    }
+                    _ => vec![at(&c["start_at"]), at(&c["end_at"])],
+                };
+                assert!(ends.iter().all(|e| off_the_plate(*e) <= tol), "{amp} mm at z {z}: {c}");
+            }
+        }
+    }
+}
+
+/// A prism of radius 7 and 30 mm tall with `n` sides, as a mesh without normals: its sides, a
+/// quad of two triangles each, and a fan at each end.
+fn prism(n: u32) -> Session {
+    let ring = |z: f64| (0..n).map(move |k| f64::from(k) * std::f64::consts::TAU / f64::from(n)).flat_map(move |a| [7. * a.cos(), 7. * a.sin(), z]);
+    let positions: Vec<f64> = ring(0.).chain(ring(30.)).chain([0., 0., 0., 0., 0., 30.]).collect();
+    let (bottom, top) = (2 * n, 2 * n + 1);
+    let mut triangles = Vec::new();
+    for k in 0..n {
+        let j = (k + 1) % n;
+        triangles.extend([k, j, n + j, k, n + j, n + k, bottom, j, k, top, n + k, n + j]);
+    }
+    mesh_design(positions, triangles)
+}
+
+/// A prism's mesh cut across. With 48 sides it stands for a cylinder: its facets stray from one
+/// by 7·(1 − cos 3.75°) = 0.015 mm, within an STL export's chord (2e-4 of its 36.2 mm box
+/// diagonal) of the surface the section takes from them, and its section is one circle through
+/// the corners, exactly radius 7 (they lie on the surface). With 12 sides (0.24 mm off a circle)
+/// or 8 (sides turning 45 degrees, a crease) it is the polygon it is: a line on each side
+/// between its corners.
+#[test]
+fn a_mesh_without_normals_is_round_only_where_its_facets_follow_a_round_closely() {
+    let si = fit_section_at(&mut prism(48), "Mesh", 10.0);
+    let c = &si["curves"][0];
+    assert!(si["curves"].as_array().unwrap().len() == 1 && c["type"] == "circle", "{si}");
+    assert!((c["radius"].as_f64().unwrap() - 7.).abs() < 1e-6 && at(&c["center_at"]).iter().all(|x| x.abs() < 1e-6), "{c}");
+    for n in [12u32, 8] {
+        let si = fit_section_at(&mut prism(n), "Mesh", 10.0);
+        let curves = si["curves"].as_array().unwrap();
+        assert!(curves.len() == n as usize && curves.iter().all(|c| c["type"] == "line"), "{n} sides: {si}");
+        let step = std::f64::consts::TAU / f64::from(n);
+        let corner = |k: u32| [7. * (f64::from(k) * step).cos(), 7. * (f64::from(k) * step).sin()];
+        for c in curves {
+            for end in [at(&c["start_at"]), at(&c["end_at"])] {
+                assert!((0..n).any(|k| (end[0] - corner(k)[0]).hypot(end[1] - corner(k)[1]) < 1e-9), "{n} sides: {c}");
+            }
+        }
+        assert!(ends_meet(&si), "{n} sides: {si}");
+    }
+}
+
 #[test]
 fn three_d_sketch_curves() {
     let mut s = Session::default();
