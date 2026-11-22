@@ -681,8 +681,6 @@ pub enum CornerInput {
     /// A corner edge of the pseudo-B-rep with no curve (a rail's is
     /// [`FilletSetUp::RailCurve`], a target-body edge's [`BlendFailure::EdgeWithoutCurve`]).
     EdgeWithoutCurve,
-    /// A face the corner or a rail lies on with no surface.
-    FaceWithoutSurface,
     /// A fillet geometry with no fillet surface.
     FilletGeomWithoutSurface,
     /// A 3x2 corner of four edges with no on-edge edge.
@@ -712,7 +710,6 @@ impl CornerInput {
             | Self::NoRailXEdgeUseVertex
             | Self::EdgeUseWithoutFilletGeometry
             | Self::EdgeWithoutCurve
-            | Self::FaceWithoutSurface
             | Self::FilletGeomWithoutSurface
             | Self::MixedCornerWithoutOnEdgeEdge
             | Self::MixedCornerWithoutOnExtendedEdgeEdge => SM_ERR_NULL_POINTER,
@@ -2333,7 +2330,6 @@ mod tests {
             (I::VertexNotRailXRail, SM_ERR),
             (I::EdgeUseWithoutFilletGeometry, SM_ERR_NULL_POINTER),
             (I::EdgeWithoutCurve, SM_ERR_NULL_POINTER),
-            (I::FaceWithoutSurface, SM_ERR_NULL_POINTER),
             (I::FilletGeomWithoutSurface, SM_ERR_NULL_POINTER),
             (I::MixedCornerWithoutOnEdgeEdge, SM_ERR_NULL_POINTER),
             (I::MixedCornerWithoutOnExtendedEdgeEdge, SM_ERR_NULL_POINTER),
@@ -3075,7 +3071,7 @@ mod tests {
             BlendFailure::CornerPointDropUnresolved { solutions: 0 },
             BlendFailure::CornerPatchNotMade(CornerPatchMiss::FaceNotMade),
             BlendFailure::CornerInputInvalid {
-                input: CornerInput::FaceWithoutSurface,
+                input: CornerInput::EdgeWithoutCurve,
                 entity: None,
             },
             BlendFailure::FilletSetUpInvalid(FilletSetUp::GeomSolver),

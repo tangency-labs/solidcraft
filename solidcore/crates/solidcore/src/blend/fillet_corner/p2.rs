@@ -112,7 +112,7 @@ use crate::blend::fillet_standard_solver::p1::{FilletLaw, VariableRadiusFs};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::blend::{BlendFailure, CornerInput, CornerPatchMiss, CornerShape, FilletSetUp};
-use crate::error::{ignored, EntityRef, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
+use crate::error::{ignored, EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::solution_array::SolutionObject;
 use crate::geom::vector2d::Point2;
@@ -561,9 +561,10 @@ impl FilletCorner {
     ///
     /// Invalid input, each at the entity it is about: [`BlendFailure::CornerInputInvalid`]
     /// with [`CornerInput::VertexNotRailXRail`] (`SM_ERR`) for a corner vertex that is not
-    /// `SM_FV_RAIL_X_RAIL`, [`CornerInput::FaceWithoutSurface`] or
-    /// [`CornerInput::EdgeUseWithoutFilletGeometry`] (`SM_ERR_NULL_POINTER`) for a face
-    /// without surface or a corner edge without fillet geometry;
+    /// `SM_FV_RAIL_X_RAIL` or [`CornerInput::EdgeUseWithoutFilletGeometry`]
+    /// (`SM_ERR_NULL_POINTER`) for a corner edge without fillet geometry;
+    /// [`BlendFailure::FaceHasNoSurface`] (`SM_ERR_NULL_POINTER`) for a face without
+    /// surface;
     /// [`BlendFailure::FilletSetUpInvalid`] (`SM_ERR_NULL_POINTER`) with
     /// [`FilletSetUp::PointClassFace`], [`FilletSetUp::CrossSectionGeom`] or
     /// [`FilletSetUp::RailEndVertexUse`] for a vertex without original face, a cross section
@@ -1204,9 +1205,10 @@ impl FilletCorner {
     /// (concave `NxN`) corner intersects or a rail off the opposite fillet; a ring of edge
     /// uses that share no face ([`BlendFailure::CornerShapeNotBuilt`]); invalid input,
     /// with the C++ status and at the entity it is about, for a missing fillet geometry,
-    /// surface, fillet surface or corner-edge curve ([`BlendFailure::CornerInputInvalid`]:
-    /// [`CornerInput::EdgeUseWithoutFilletGeometry`], [`CornerInput::FaceWithoutSurface`],
-    /// [`CornerInput::FilletGeomWithoutSurface`], [`CornerInput::EdgeWithoutCurve`]) and
+    /// fillet surface or corner-edge curve ([`BlendFailure::CornerInputInvalid`]:
+    /// [`CornerInput::EdgeUseWithoutFilletGeometry`],
+    /// [`CornerInput::FilletGeomWithoutSurface`], [`CornerInput::EdgeWithoutCurve`]), for a
+    /// face without surface ([`BlendFailure::FaceHasNoSurface`], `SM_ERR_NULL_POINTER`) and
     /// for a cross section without fillet geometry or a rail without curve
     /// ([`BlendFailure::FilletSetUpInvalid`]: [`FilletSetUp::CrossSectionGeom`],
     /// [`FilletSetUp::RailCurve`]); those of the projections and evaluations;
@@ -1923,14 +1925,12 @@ fn no_curve(op: &'static str, e: EdgeId, status: i32) -> SolidError {
 }
 
 /// A face `face` a rail or the corner lies on without its surface
-/// ([`CornerInput::FaceWithoutSurface`], `SM_ERR_NULL_POINTER`).
+/// ([`BlendFailure::FaceHasNoSurface`] at the face, `SM_ERR_NULL_POINTER`: upstream `NER`).
 fn no_surface(op: &'static str, face: FaceId) -> SolidError {
-    corner_input(
-        op,
-        CornerInput::FaceWithoutSurface,
-        Some(EntityRef::Face(face)),
-        SM_ERR_NULL_POINTER,
-    )
+    Failure::new(op, BlendFailure::FaceHasNoSurface)
+        .with_status(SM_ERR_NULL_POINTER)
+        .at(EntityRef::Face(face))
+        .into_error()
 }
 
 /// The corner vertex `v` without its use at a rail's end

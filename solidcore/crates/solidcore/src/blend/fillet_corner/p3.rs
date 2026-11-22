@@ -2003,12 +2003,10 @@ impl FilletCorner {
             .surface
             .as_ref()
             .ok_or_else(|| {
-                corner_input(
-                    OP_3X2,
-                    CornerInput::FaceWithoutSurface,
-                    Some(EntityRef::Face(orig_face)),
-                    SM_ERR_NULL_POINTER,
-                )
+                Failure::new(OP_3X2, BlendFailure::FaceHasNoSurface)
+                    .with_status(SM_ERR_NULL_POINTER)
+                    .at(EntityRef::Face(orig_face))
+                    .into_error()
             })?;
         // `pSurface->DropCurve(m_crContext, pSurface->GetNaturalUVDomain(), *pCurve1,
         // pCurve1->GetNaturalInterval(), m_dThisApproxTol3d, ..)` (virtual with the
