@@ -1854,12 +1854,12 @@ fn sheet_editor_new_edits_finish_the_previous_receiver_even_when_refused() {
     for command in ["sketch.create", "drawing.sketch.create"] {
         let (mut s, drawing, sketch, made) = sheet_editor();
         run(&mut s, "sketch.line", json!({"points":[[10,10],[20,10]]}));
-        let before = s.doc.clone();
         let evaluations = s.evaluations;
         if command == "sketch.create" {
-            refused(&mut s, command, json!({"plane":"XY"}));
-            assert!(Arc::ptr_eq(&s.doc, &before));
+            // A model sketch ends the sheet sketch first, then opens.
+            run(&mut s, command, json!({"plane":"XY"}));
             assert!(s.active_sheet_sketch.is_none());
+            assert!(s.active_sketch.is_some());
         } else {
             let next = run(&mut s, command, json!({"owner":made["sheet"]}));
             assert_ne!(next["sketch"], made["sketch"]);
@@ -1869,7 +1869,9 @@ fn sheet_editor_new_edits_finish_the_previous_receiver_even_when_refused() {
         assert_eq!(event.sketch, sketch);
         assert!(matches!(event.domain, crate::SketchDomain::Sheet { drawing: owner, .. } if owner == drawing));
         assert!(s.take_sketch_finish_event().is_none());
-        assert_eq!(s.evaluations, evaluations);
+        if command != "sketch.create" {
+            assert_eq!(s.evaluations, evaluations);
+        }
     }
 }
 
@@ -4378,11 +4380,9 @@ fn sheet_sketch_creation_reserves_current_and_retired_image_ids() {
     }
 }
 
-/// A sheet sketch being edited holds no model command: one runs against the model with the
-/// sheet sketch still open, as its own model step, and the model's undo leaves the sheet sketch
-/// being edited. Entering a model sketch from a script (nothing shows the model) ends the sheet
-/// sketch as Finish would, since the shared sketch tools reach one sketch only; the model's
-/// command is never refused.
+/// A model command started while a sheet sketch is being edited ends that sheet sketch as Finish
+/// would (starting another edit finishes the open sketch), then runs as its own model step; the
+/// model's undo leaves the sheet sketch finished. The model's command is never refused.
 #[test]
 fn a_sheet_sketch_holds_no_model_command() {
     let mut s = design();
@@ -4394,13 +4394,13 @@ fn a_sheet_sketch_holds_no_model_command() {
     let features = s.doc.features.len();
     run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [60, 0, 0], "operation": "new"}));
     assert_eq!(s.doc.features.len(), features + 1, "the model changes under the sheet sketch");
-    assert_eq!(s.active_sheet_sketch, editing, "which stays open");
+    assert!(s.active_sheet_sketch.is_none(), "starting a model command ends the sheet sketch, as Finish would");
     assert_eq!(s.undo.last().unwrap().part, None, "the box is the model's step");
     s.model_focus = true;
     assert!(!s.sheet_sketching(), "with the model shown, the sketch tools are the model's");
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(s.doc.features.len(), features, "the model's undo");
-    assert_eq!(s.active_sheet_sketch, editing, "leaves the sheet sketch being edited");
+    assert!(s.active_sheet_sketch.is_none(), "and the sheet sketch stays finished");
     s.model_focus = false;
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     assert!(s.active_sketch.is_some(), "the model's sketch is entered");

@@ -541,6 +541,7 @@ fn edit_start_cache_catchup_rejects_changed_editor_or_document_source() {
     for changed in 0..3 {
         let mut s = Session::default();
         let id = s.execute("sketch.create", &json!({})).unwrap()["sketch"].as_u64().unwrap();
+        s.mark_sketch_entered_by_person();
         s.prepare_view_close(1).unwrap();
         assert!(s.doc.feature(id).is_none());
         let ready = s.ahead().refresh_sketch_model(DisplayQuality::Normal).unwrap();
@@ -572,6 +573,7 @@ fn edit_start_cache_catchup_keeps_worker_prepared_occurrences() {
     s.execute("component.create", &json!({"name":"Part"})).unwrap();
     s.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
     s.execute("sketch.create", &json!({})).unwrap();
+    s.mark_sketch_entered_by_person();
     s.prepare_view_close(1).unwrap();
     assert!(s.needs_sketch_finish_evaluation());
     let ready = s.ahead().refresh_sketch_model(DisplayQuality::Normal).unwrap();

@@ -2024,8 +2024,10 @@ impl SolveApp {
         });
         crate::sketch_view::project(self);
         if r.is_ok() && self.session.active_sketch.is_some() && !self.sketch_finish_processing {
+            // A sketch some command left open: remember the view to go back to, as a command run from
+            // a script does. Only the UI turns the view, and only when it starts the sketch.
             let before = self.settled_cam();
-            self.look_at_opened_sketch(before);
+            self.open_sketch_camera(before, false);
         }
         self.finish_command(id, &r);
         plugin_events::command_completed(self, id, r.is_ok());
@@ -3267,6 +3269,9 @@ impl SolveApp {
     /// opens" preference is off, and remember the view from `before` it and the one facing it for
     /// when the sketch ends (#7038). Returns whether the view turned.
     pub(crate) fn look_at_opened_sketch(&mut self, before: Camera) -> bool {
+        // Only the UI calls this: the person is the one sketching, so an empty sketch goes when
+        // it finishes.
+        self.session.mark_sketch_entered_by_person();
         self.open_sketch_camera(before, true)
     }
 

@@ -1290,6 +1290,8 @@ fn sketch_model_refreshes_are_bounded_and_current_design_gets_the_first_slot() {
     fn pending() -> solidcraft_engine::Session {
         let mut session = solidcraft_engine::Session::default();
         session.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
+        // An empty sketch a person entered goes when it finishes, which the model must catch up on.
+        session.mark_sketch_entered_by_person();
         session.prepare_edit_start("solid.box", &json!({})).unwrap();
         assert!(session.needs_sketch_finish_evaluation());
         session
@@ -1315,6 +1317,7 @@ fn drawing_toolbar_entry_finishes_a_sheet_sketch_started_through_the_engine() {
     app.run("solid.box", json!({"length":40,"width":30,"height":5})).unwrap();
     let made = app.run("drawing.create", json!({})).unwrap();
     app.ui.tab = "DRAWING LAYOUT".into();
+    app.session.model_focus = false;
     let entry = app.session.execute("drawing.sketch.create", &json!({"owner":made["sheets"][0]["id"]})).unwrap();
     let sketch = solidcraft_engine::doc::ids::decode(entry["sketch"].as_str().unwrap()).unwrap();
     app.session.execute("sketch.line", &json!({"points":[[10,10],[20,10]],"infer":false})).unwrap();

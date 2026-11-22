@@ -40,6 +40,11 @@ impl EditStart {
     }
 }
 
+/// A move that records no history (`capture: false`) is a pending placement, not a new edit.
+pub(crate) fn captures_history(params: &Value) -> bool {
+    params.get("capture").and_then(Value::as_bool) != Some(false)
+}
+
 /// Mixed annotation/joint setters preserve calls that only rename, hide or show their receiver.
 pub(crate) fn changes_editor_fields(params: &Value) -> bool {
     let fields = params.get("set").unwrap_or(params);
@@ -105,7 +110,7 @@ impl Session {
             if params.get("dry_run").and_then(Value::as_bool) == Some(true) {
                 return false;
             }
-            if ["components", "occurrences", "canvases", "point_clouds", "joints"]
+            if ["components", "occurrences", "point_clouds", "joints"]
                 .iter()
                 .any(|key| params.get(*key).and_then(Value::as_array).is_some_and(|items| !items.is_empty()))
             {

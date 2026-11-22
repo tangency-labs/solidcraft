@@ -861,7 +861,6 @@ fn edit_start_metadata_is_semantic_and_mixed_setters_preserve_visibility() {
         "timeline.rename",
         "browser.visibility",
         "select.set",
-        "drawing.dimension.edit",
         "drawing.open",
         "tab.view.layout",
         "tab.view.move",
@@ -871,6 +870,8 @@ fn edit_start_metadata_is_semantic_and_mixed_setters_preserve_visibility() {
             assert!(!spec.starts_edit(&json!({})), "{id}");
         }
     }
+    let dimension = crate::find_command("drawing.dimension.edit").unwrap();
+    assert!(dimension.starts_edit(&Value::Null), "opening its editor is a new edit, as a note's is");
     let note = crate::find_command("note.update").unwrap();
     assert!(!note.starts_edit(&json!({"note":1,"hidden":true})));
     assert!(note.starts_edit(&json!({"note":1,"text":"Changed"})));
@@ -922,6 +923,7 @@ fn edit_start_failed_live_commands_keep_the_exit_and_event_at_every_check_level(
 fn edit_start_empty_origin_is_discarded_but_lines_points_and_unsolved_geometry_remain() {
     let mut s = Session::default();
     let empty = run(&mut s, "sketch.create", json!({}))["sketch"].as_u64().unwrap();
+    s.mark_sketch_entered_by_person();
     run(&mut s, "sketch.finish", json!({}));
     assert!(s.doc.feature(empty).is_none());
     let line = edit_start_line(&mut s, "Line");

@@ -82,7 +82,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              drawing.dimension.inspect answers for it. Saved by the edges' names, never the points picked; one the \
              view can't measure, or on a part it doesn't draw, is refused. One undo step; no model is evaluated.",
         ),
-    CommandSpec::new(EDIT, "Edit Drawing Dimension", crate::checked!("drawing.dimension.edit", edit))
+    CommandSpec::new(EDIT, "Edit Drawing Dimension", crate::checked!("drawing.dimension.edit", edit)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .icon("dimension")
         .in_drawing()
         .doc_only()

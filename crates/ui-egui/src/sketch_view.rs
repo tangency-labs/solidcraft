@@ -93,6 +93,12 @@ pub(crate) fn prepare_edit(
         return Ok(None);
     }
     app.stopped_sketch_refreshes.remove(&app.session.uid);
+    // A Cancel Sketch still computing stays a cancel when another edit starts: the new edit must
+    // not commit the sketch the person walked away from.
+    if app.session.active_sketch.is_some() && app.deferred.as_ref().is_some_and(|deferred| deferred.command.0 == "sketch.cancel") {
+        app.deferred = None;
+        let _ = app.run("sketch.cancel", serde_json::json!({}));
+    }
     let already_prepared = app.prepared_edit_starts.get(&app.session.uid).is_some_and(|id| id == command);
     let result = app.session.prepare_edit_start(command, params).map_err(|error| error.to_string());
     if result.is_ok() {

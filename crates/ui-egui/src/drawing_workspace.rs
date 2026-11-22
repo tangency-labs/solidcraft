@@ -1434,16 +1434,15 @@ mod tests {
         assert_eq!(h.app.session.open_drawing, Some(first), "a fresh start opens the design's first drawing");
     }
 
-    /// A sheet sketch being edited never holds Design: Drawing can be left with it open, the
-    /// model's commands and sketch tools work on the model there, undo takes the model's steps, and
-    /// back in Drawing the sheet sketch is still being edited.
+    /// A sheet sketch being edited never holds Design: the model's commands and sketch tools work on
+    /// the model there, a model command ends the sheet sketch as Finish would, and undo takes the
+    /// model's steps.
     #[test]
     fn a_sheet_sketch_stays_open_in_drawing_while_design_changes_the_model() {
         let mut h = Harness::new();
         let drawing = drawing_with_a_view(&mut h);
         let sheet = h.app.session.drawing("test").unwrap().sheets[0].id;
         h.app.run("drawing.sketch.create", serde_json::json!({"owner": solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
-        let sketch = h.app.session.active_sheet_sketch.clone();
         crate::workspace::enter(&mut h.app, "design").unwrap();
         assert!(!active(&h.app));
         assert_eq!(h.app.session.open_drawing, drawing);
@@ -1452,16 +1451,14 @@ mod tests {
         assert_eq!(h.app.session.doc.features.len(), features + 1, "the model changes with the sheet sketch open");
         h.app.run("edit.undo", serde_json::json!({})).unwrap();
         assert_eq!(h.app.session.doc.features.len(), features, "undo in Design takes back the model's step");
-        assert_eq!(h.app.session.active_sheet_sketch, sketch, "and leaves the sheet sketch being edited");
+        assert!(h.app.session.active_sheet_sketch.is_none(), "and the sheet sketch stays finished");
         h.app.run("sketch.create", serde_json::json!({"plane": "XY"})).unwrap();
         h.app.run("sketch.circle.center", serde_json::json!({"center": [0, 0], "radius": 3})).unwrap();
         h.app.run("sketch.finish", serde_json::json!({})).unwrap();
         assert!(h.app.session.active_sketch.is_none(), "Finish in Design finishes the model's sketch");
-        assert_eq!(h.app.session.active_sheet_sketch, sketch, "and leaves the sheet sketch alone");
+        assert!(h.app.session.active_sheet_sketch.is_none(), "the sheet sketch was finished when the model command started");
         crate::workspace::enter(&mut h.app, "drawing").unwrap();
-        assert!(h.app.session.sheet_sketching(), "back in Drawing the sheet sketch is still being edited");
-        h.app.run("sketch.finish", serde_json::json!({})).unwrap();
-        assert!(h.app.session.active_sheet_sketch.is_none());
+        assert!(!h.app.session.sheet_sketching(), "back in Drawing no sheet sketch is being edited");
     }
 
     #[test]

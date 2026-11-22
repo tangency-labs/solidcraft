@@ -1650,8 +1650,12 @@ pub(crate) fn finish_model_edit(s: &mut Session, restore: bool) -> Result<Value>
         }
         s.selection.clear();
     }
+    // Only a sketch a person entered from the UI goes when nothing was drawn in it; one a script or an
+    // agent made stays, so a command that creates it and edits it later still finds it.
+    let by_person = s.sketch_by_person.take();
     if let Some(id) = id
-        && s.doc.sketch(id).is_ok_and(crate::edit_start::empty_geometry)
+        && by_person == Some(id)
+        && sketch_store::read(&s.doc, id).is_ok_and(crate::edit_start::empty_geometry)
     {
         s.doc_mut().delete_feature(id)?;
     }

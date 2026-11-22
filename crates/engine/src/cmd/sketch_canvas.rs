@@ -1151,10 +1151,9 @@ mod tests {
                 let sketch = s.execute("sketch.create", &json!({"plane": {"face": [20, 15, 10]}})).unwrap()["sketch"].as_u64().unwrap();
                 s.execute("sketch.line", &json!({"points": [[-40, -30], [-30, -20]]})).unwrap();
                 assert!(s.prepare_edit_start(command, &json!({})).unwrap().is_none(), "the image form keeps its sketch receiver");
-                let svg = base64_encode(
-                    br#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="red"/></svg>"#,
-                );
-                let mut params = json!({"data": svg, "width": 10, "resolution": 32, "frame": frame});
+                let svg =
+                    image_file(br#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="red"/></svg>"#);
+                let mut params = json!({"path": svg, "width": 10, "resolution": 32, "frame": frame});
                 if command == "canvas.decal" {
                     params["face"] = json!([20, 15, 10]);
                 } else {
@@ -1185,7 +1184,7 @@ mod tests {
             s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 0]})).unwrap();
             let sketch = s.execute("sketch.create", &json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
             s.execute("sketch.line", &json!({"points": [[0, 0], [10, 0]]})).unwrap();
-            let mut params = json!({"data": png(40, 20), "width": 10});
+            let mut params = json!({"path": png(40, 20), "width": 10});
             if command == "canvas.decal" {
                 params["face"] = json!([20, 15, 10]);
             }
@@ -1201,7 +1200,7 @@ mod tests {
         for command in ["canvas.insert", "canvas.decal", "canvas.frame_sketch"] {
             let mut s = Session::default();
             s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 0]})).unwrap();
-            let canvas = s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": "XY", "width": 10})).unwrap()["canvas"].clone();
+            let canvas = s.execute("canvas.insert", &json!({"path": png(40, 20), "plane": "XY", "width": 10})).unwrap()["canvas"].clone();
             let drawing = s.execute("drawing.create", &json!({"name": "Paper"})).unwrap();
             s.execute("drawing.sketch.create", &json!({"owner": drawing["sheets"][0]["id"], "name": "Sheet edit"})).unwrap();
             s.execute("sketch.line", &json!({"points": [[10, 10], [20, 10]]})).unwrap();
@@ -1209,8 +1208,8 @@ mod tests {
             s.model_focus = true;
             let params = match command {
                 "canvas.frame_sketch" => json!({"canvas": canvas}),
-                "canvas.decal" => json!({"data": png(40, 20), "face": [20, 15, 10], "width": 10, "frame": true}),
-                _ => json!({"data": png(40, 20), "plane": "XY", "width": 10, "frame": true}),
+                "canvas.decal" => json!({"path": png(40, 20), "face": [20, 15, 10], "width": 10, "frame": true}),
+                _ => json!({"path": png(40, 20), "plane": "XY", "width": 10, "frame": true}),
             };
             let reply = s.execute(command, &params).unwrap();
             assert_eq!(reply["finished_sketch"], "Sheet edit");

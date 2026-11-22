@@ -252,7 +252,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PASTE_NEW_CONTRACT)
         .output(output_schema_for::<PasteNewResult>)
         .params("component: independently copy its nested definition graph and history, materials and styles; occurrence?, path?: selected source placement; parent?: component the copy goes in (default: the source placement's; not the component or one inside it); in_place?, parent_path?: as occurrence.copy; translate?: [x,y,z]. Reassigned external bodies become base geometry; retained external links and omitted boundary joints are reported"),
-    CommandSpec::new("occurrence.move", "Move Occurrence", crate::checked!("occurrence.move", move_occurrence)).begins_edit()
+    CommandSpec::new("occurrence.move", "Move Occurrence", crate::checked!("occurrence.move", move_occurrence)).begins_edit_when(crate::edit_start::captures_history)
         .icon("move")
         .contract(&MOVE_CONTRACT)
         .output(output_schema_for::<MoveResult>)

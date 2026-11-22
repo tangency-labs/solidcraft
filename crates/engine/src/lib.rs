@@ -744,6 +744,8 @@ pub struct Session {
     sketch_finish_events: std::collections::VecDeque<SketchFinishEvent>,
     sketch_finish_sequence: u64,
     sketch_finish_pending: bool,
+    /// The sketch a person entered from the UI (not a command): finishing it empty deletes it.
+    sketch_by_person: Option<u64>,
     edit_source_sketch: Option<u64>,
     prepared_edit_source: Option<(String, SketchFinishEvent)>,
     edit_entry_depth: u32,
@@ -1313,6 +1315,7 @@ impl Session {
             sketch_finish_events: Default::default(),
             sketch_finish_sequence: 0,
             sketch_finish_pending: false,
+            sketch_by_person: None,
             edit_source_sketch: None,
             prepared_edit_source: None,
             edit_entry_depth: 0,
@@ -2087,6 +2090,12 @@ impl Session {
     /// never evaluates geometry or warms display meshes.
     pub fn evaluation_count(&self) -> usize {
         self.evaluations
+    }
+
+    /// The open sketch was entered by a person from the UI, not by a command: finishing it with
+    /// nothing drawn deletes it, where a sketch a script or an agent made stays.
+    pub fn mark_sketch_entered_by_person(&mut self) {
+        self.sketch_by_person = self.active_sketch;
     }
 
     pub fn refresh(&mut self) {
@@ -3184,6 +3193,7 @@ impl Session {
             sketch_finish_events: Default::default(),
             sketch_finish_sequence: self.sketch_finish_sequence,
             sketch_finish_pending: self.sketch_finish_pending,
+            sketch_by_person: self.sketch_by_person,
             edit_source_sketch: self.edit_source_sketch,
             prepared_edit_source: self.prepared_edit_source.clone(),
             edit_entry_depth: 0,
@@ -3707,6 +3717,7 @@ impl Session {
             }
         }
         self.sketch_finish_pending = computed.sketch_finish_pending;
+        self.sketch_by_person = computed.sketch_by_person;
         self.prepared_edit_source = computed.prepared_edit_source;
         self.prepared_edit_intent = computed.prepared_edit_intent;
         self.edit_start_sequence = self.edit_start_sequence.saturating_add(computed.edit_start_sequence);

@@ -6194,8 +6194,7 @@ mod tests {
         a.run("solid.sphere", json!({"diameter": 4})).unwrap();
         assert!(a.session.open_drawing.is_some(), "with the drawing still open");
         a.run("drawing.sketch.create", json!({"owner": solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
-        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
-        assert!(a.session.active_sheet_sketch.is_some(), "a model command leaves the sheet sketch open");
+        assert!(a.session.active_sheet_sketch.is_some(), "the sheet sketch is open");
         new_design(&mut a);
         a.run("solid.sphere", json!({"diameter": 4})).unwrap();
         assert!(a.session.active_sheet_sketch.is_none());
