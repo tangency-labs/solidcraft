@@ -18,7 +18,9 @@
 //! edge's direction, the faces' sections in the plane square to the edge are lines and
 //! circles, and this module decides in closed form a step at which every tangent pair is
 //! more than the contact tolerance apart along the normal, having never been more than it
-//! apart on both sides of each other on the way out; the steps stay inside a ball round
+//! apart on both sides of each other anywhere from the edge out to that step (the gap's
+//! closed-form extremes over the whole stretch, the edge point included); the steps stay
+//! inside a ball round
 //! the edge point that no other boundary of the faces enters. Every other edge, and every
 //! edge where one of those conditions fails, keeps WR-540's reading. No recursion, and a
 //! fixed amount of work per edge use.
@@ -305,8 +307,10 @@ struct Pair {
 /// The step in `(s0, s_max]` at which test 9 reads the faces, or `None` to keep the
 /// reading at `s0`. A step `sigma` is taken when, for every tangent pair and each of its
 /// faces against the other:
-/// - over `s0..=sigma` the gap is never past the contact tolerance on both sides (else
-///   the faces cross each other and the order depends on the step: `None`);
+/// - over `0..=sigma`, from the face's foot at the edge out, the gap is never past the
+///   contact tolerance on both sides (else the faces cross each other and the order
+///   depends on the step: `None`). The stretch inside `s0` counts too: a dip past the
+///   tolerance at the edge that comes back within it before `s0` is a crossing;
 /// - at `sigma` the gap is past the contact tolerance (`within_contact_tol` fails);
 /// - at `sigma` the turn from one face's direction to the other's has the sign the gap
 ///   gives (the other face lies on that side of the first one's surface);
@@ -315,6 +319,13 @@ struct Pair {
 /// drift bound of their angle at the edge, which is that far from 0 and 360 degrees. The
 /// candidates are `s0` and the closed-form steps at which a gap reaches the tolerance plus
 /// twice the rounding allowance; `sigma` is the least that passes.
+///
+/// Rounding: every gap here is a handful of products, sums, one square root and, for a
+/// circle, a sine, cosine and arcsine (one rounding each, correctly rounded to within an
+/// ulp), on coordinates at most `size`; their error is far below `slack = gamma(32) size`.
+/// The foot (`s = 0`) takes `asin(0) = 0` exactly, so its gap has no more roundings than
+/// any other step's and the same allowance covers it. Crossings are detected at
+/// `contact - slack`, so rounding can only turn a step into `None`.
 fn choose_step(
     sections: &[Section],
     pairs: &[Pair],
@@ -345,7 +356,7 @@ fn choose_step(
     for &sigma in &candidates {
         let mut apart = true;
         for &(x, y) in &faces {
-            let (lo, hi) = extremes(x, y, s0, sigma)?;
+            let (lo, hi) = extremes(x, y, 0.0, sigma)?;
             if hi > contact - slack && lo < -(contact - slack) {
                 return None;
             }
@@ -744,6 +755,83 @@ mod tests {
             choose_step(&[plane, cylinder], &pairs, 20.0 * L, 1e-3, L, 1.4),
             None
         );
+    }
+
+    /// The plane `x = -dp` leaving towards `+y` and the cylinder of radius `r` whose wall
+    /// lies `h` out from the edge point, `(h, 0)`, leaving towards `+y`: the faces overlap
+    /// by `dp + h` at the edge, the plane `dp` and the cylinder `h` from the edge point.
+    fn split(r: f64, dp: f64, h: f64) -> [Section; 2] {
+        [
+            Section::Line {
+                n: Vec2::new(1.0, 0.0),
+                c: -dp,
+                foot: Vec2::new(-dp, 0.0),
+                dir: Vec2::new(0.0, 1.0),
+            },
+            Section::Circle {
+                centre: Vec2::new(h - r, 0.0),
+                r,
+                foot_angle: 0.0,
+                sense: 1.0,
+            },
+        ]
+    }
+
+    fn split_step(r: f64, dp: f64, h: f64) -> Option<f64> {
+        let pairs = [Pair {
+            a: 0,
+            b: 1,
+            tangent: true,
+        }];
+        choose_step(&split(r, dp, h), &pairs, 20.0 * L, 0.4 * r, L, 1.4)
+    }
+
+    /// Small cylinders, and overlaps split between the plane and the cylinder, within the
+    /// contact tolerance are still read past their band, at the closed-form step: with
+    /// `o = dp + h`, the plane's points reach the cylinder's gap `v` at
+    /// `s = sqrt((r + v)^2 - (r - o)^2)` and the cylinder's points (`1 - cos(theta) =
+    /// (o + v) / r`) reach the plane's gap `-v` at the chord `sqrt(2 r (o + v))`.
+    #[test]
+    fn small_cylinders_and_split_overlaps_within_the_contact_tolerance_are_read_past_their_band() {
+        let v = L + 2.0 * gamma(32) * 1.4;
+        for r in [1.0, 0.01, 0.002] {
+            for o in [0.0, 1e-6, 5e-6, 9e-6] {
+                for (dp, h) in [(o, 0.0), (0.5 * o, 0.5 * o), (0.0, o)] {
+                    let want = ((r + v) * (r + v) - (r - o) * (r - o))
+                        .sqrt()
+                        .max((2.0 * r * (o + v)).sqrt());
+                    let got = split_step(r, dp, h).unwrap();
+                    assert!(
+                        (got - want).abs() <= 1e-9 * want,
+                        "r {r}, plane {dp:e}, cylinder {h:e}: {got} against {want}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Real defects at small radii and split between the faces: the faces overlap past
+    /// the contact tolerance at the edge (each face may still lie within the tolerance of
+    /// the edge point) and lie more than the tolerance apart the other way round within
+    /// the reach. They cross, so no step is certified and the reading stays at the first
+    /// step, whatever the radius. At `r = 0.002` such a dip comes back within the
+    /// tolerance before the first step, `20 L` out (the dip less `s0^2 / 2r` is under `L`
+    /// for dips up to `L + 1e-5`), so only the stretch from the edge shows the crossing.
+    #[test]
+    fn small_cylinders_and_split_overlaps_past_the_contact_tolerance_keep_the_first_step() {
+        for r in [1.0, 0.01, 0.002] {
+            for o in [1.001e-5, 1.1e-5, 1.5e-5, 1.9e-5, 2e-5, 3.5e-5] {
+                for (dp, h) in [(o, 0.0), (0.5 * o, 0.5 * o), (0.0, o)] {
+                    let case = format!("r {r}, plane {dp:e}, cylinder {h:e}");
+                    let [plane, cylinder] = split(r, dp, h);
+                    // The premises: past the tolerance one way at the edge, the other way
+                    // within the reach.
+                    assert!(cylinder.gap(plane.point(0.0)) < -L, "{case}");
+                    assert!(cylinder.gap(plane.point(0.4 * r)) > L, "{case}");
+                    assert_eq!(split_step(r, dp, h), None, "{case}");
+                }
+            }
+        }
     }
 
     /// The tangent pair's order at the chosen step is the side the gaps give: the plane

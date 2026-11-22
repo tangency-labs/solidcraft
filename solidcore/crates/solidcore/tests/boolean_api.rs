@@ -2218,3 +2218,75 @@ fn issue_18639_box_face_inside_a_cylinder_wall_unions_as_tangent() {
         }
     }
 }
+
+/// #18639 at small radii: a box whose face x = r - d lies d = 5e-6 inside the side of a
+/// cylinder of radius r = 0.01 or 0.002 (height 1) unions as the tangent body, clean at
+/// Level 2 in both operand orders. The same bodies with the box face moved in until it dips
+/// 1.1e-5, 1.5e-5 or 2e-5 into the cylinder at the line, and with the overlap split between
+/// the faces (box face in by h, cylinder wall out by h, h = 7.5e-6 or 9.5e-6, so each face
+/// lies within the 1e-5 edge tolerance of the line but they overlap by 1.5e-5 or 1.9e-5),
+/// are real defects and report `SmEdge` test 9, as on main. At these radii the dip comes
+/// back within the contact tolerance before 20 edge tolerances (the dip less
+/// (2e-4)^2 / 2r, 2e-6 at r = 0.01 and 1e-5 at r = 0.002), so test 9 sees the crossing only
+/// by checking the faces' gap from the line itself out.
+#[test]
+fn issue_18639_small_cylinders_union_as_tangent_and_still_report_real_defects() {
+    use solidcore::surface::surface::SurfaceKind;
+    fn union(r: f64, d: f64, cylinder_first: bool) -> (Kernel, Brep) {
+        let mut k = Kernel::default();
+        let c = api::create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), r, 1.0).unwrap();
+        let b = api::create_box(&mut k, Point3::new(r - d, -0.5, 0.0), 1.0, 1.0, 1.0).unwrap();
+        let (x, y) = if cylinder_first { (c, b) } else { (b, c) };
+        let u = boolean_union(&mut k, x, y).unwrap();
+        (k, u)
+    }
+    // Moves the box face on the tangent line by `plane` and the cylinder wall by
+    // `cylinder` along x, and returns the Level 2 report.
+    fn moved(r: f64, d: f64, cylinder_first: bool, plane: f64, cylinder: f64) -> Vec<String> {
+        let (mut k, mut u) = union(r, d, cylinder_first);
+        let line = solidcore::topology::brep::p1::edges(&u, None)
+            .unwrap()
+            .into_iter()
+            .find(|&e| u.edge(e).unwrap().edgeuses.len() == 8)
+            .unwrap();
+        for f in solidcore::topology::edge::faces(&u, line, None).unwrap() {
+            let face = u.face_mut(f).unwrap();
+            let surface = face.surface.as_mut().unwrap();
+            let by = if matches!(surface.kind(), SurfaceKind::Plane(_)) {
+                plane
+            } else {
+                cylinder
+            };
+            let shift = Axis2Placement::new(Point3::new(by, 0.0, 0.0), Vec3::X, Vec3::Y);
+            surface.transform(&k, &shift, None).unwrap();
+        }
+        check_brep(&mut k, &mut u, CheckLevel::Level2)
+            .unwrap()
+            .lines()
+    }
+    let d = 5e-6;
+    for r in [0.01, 0.002] {
+        for cylinder_first in [true, false] {
+            let case = format!("r {r}, cylinder first {cylinder_first}");
+            let (mut k, mut u) = union(r, d, cylinder_first);
+            let lines = check_brep(&mut k, &mut u, CheckLevel::Level2)
+                .unwrap()
+                .lines();
+            assert!(lines.is_empty(), "{case}: {lines:?}");
+            for dip in [1.1e-5, 1.5e-5, 2e-5] {
+                let lines = moved(r, d, cylinder_first, d - dip, 0.0);
+                assert!(
+                    lines.iter().any(|l| l.starts_with("SmEdge::Test #9 ")),
+                    "{case}, box face dipping {dip:e}: {lines:?}"
+                );
+            }
+            for h in [7.5e-6, 9.5e-6] {
+                let lines = moved(r, d, cylinder_first, d - h, h);
+                assert!(
+                    lines.iter().any(|l| l.starts_with("SmEdge::Test #9 ")),
+                    "{case}, overlap split {h:e} each: {lines:?}"
+                );
+            }
+        }
+    }
+}
