@@ -60,6 +60,10 @@ pub enum TraceFailure {
     /// but left its fillet geometry with no fillet surface: the trace found no curve to skin
     /// ([`ErrorKind::NotFound`]); status `SM_ERR_NULL_POINTER`.
     TraceBuiltNoSurface,
+    /// The constant-radius solver was asked for the fillet surface but holds no fillet
+    /// surface generator (one built with `ConstantRadiusAssistedFs::from_parts` has none):
+    /// the caller's solver ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    SurfaceGeneratorMissing,
     /// The solver could not compute a section's values: the solver's error is the
     /// failure's cause, and decides whether it is a defect or a refusal
     /// ([`ErrorKind::Failed`]).
@@ -132,7 +136,8 @@ impl TraceFailure {
         match self {
             Self::LawCornerEndMissing { .. }
             | Self::BaseSurfaceNotOnFace { .. }
-            | Self::CrossSectionsIncompatible { .. } => ErrorKind::InvalidInput,
+            | Self::CrossSectionsIncompatible { .. }
+            | Self::SurfaceGeneratorMissing => ErrorKind::InvalidInput,
             Self::ZoneEndsCoincide { .. }
             | Self::ZoneFootAtPole
             | Self::ChordTooShort { .. }
@@ -157,6 +162,7 @@ impl TraceFailure {
         match self {
             Self::BaseSurfaceNotOnFace { .. }
             | Self::TraceBuiltNoSurface
+            | Self::SurfaceGeneratorMissing
             | Self::TraceHasNoPoints => SM_ERR_NULL_POINTER,
             Self::LawCornerEndMissing { .. }
             | Self::ZoneEndsCoincide { .. }
@@ -204,6 +210,9 @@ impl core::fmt::Display for TraceFailure {
                 write!(f, "base surface {side} is not a face's surface")
             }
             Self::TraceBuiltNoSurface => f.write_str("the trace built no fillet surface"),
+            Self::SurfaceGeneratorMissing => {
+                f.write_str("the solver has no fillet surface generator")
+            }
             Self::SectionValuesFailed => f.write_str("the section's values could not be computed"),
             Self::ChordTooShort { length } => write!(
                 f,
@@ -276,6 +285,7 @@ mod tests {
                 SM_ERR_NULL_POINTER,
             ),
             (TraceFailure::TraceBuiltNoSurface, SM_ERR_NULL_POINTER),
+            (TraceFailure::SurfaceGeneratorMissing, SM_ERR_NULL_POINTER),
             (TraceFailure::TraceHasNoPoints, SM_ERR_NULL_POINTER),
             (TraceFailure::SkinningFailed, SM_ERR),
             (TraceFailure::ChordTooShort { length: 0.0 }, SM_ERR),
