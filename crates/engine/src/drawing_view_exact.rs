@@ -416,7 +416,7 @@ fn prepare(
     let wanted: Vec<Option<&Brep>> = firsts
         .iter()
         .filter(|(i, _)| index_of(*i).is_none_or(|index| !prepared.bodies.contains_key(&index)))
-        .map(|(_, item)| Some(item.body.body.record()).filter(|_| !item.body.body.is_mesh()))
+        .map(|(_, item)| (!item.body.body.is_mesh()).then(|| item.body.body.record()))
         .collect();
     let mut made = solidcraft_kernel::map_on_threads(&wanted, mesh_lines::WORKERS, |record| {
         // A body not started by the time of a cancel is not prepared at all: the workers take
