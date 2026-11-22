@@ -364,15 +364,16 @@ fn ends_unresolved(start: usize, end: usize) -> SolidError {
 /// A surface/surface intersection at a fillet corner that gave no curve: its error
 /// (`Some`) chained as the cause of [`BlendFailure::CornerSurfacesNotIntersected`], so
 /// that error decides defect or refusal (rule 6), or, for an intersection that returned
-/// no curve (`None`), [`BlendFailure::CornerSurfacesMeetInNoCurve`] (rule 7). Status
-/// `SM_ERR` either way, as upstream's `SER`.
+/// no curve (`None`), a reviewed [`BlendFailure::Defect`] ([`CORNER_SSI_NO_CURVE`]: the
+/// corners' calls never get `Ok` without a curve). Status `SM_ERR` either way, as
+/// upstream's `SER`.
 #[track_caller]
 fn corner_intersection_failed(op: &'static str, error: Option<SolidError>) -> SolidError {
     match error {
         Some(e) => Failure::new(op, BlendFailure::CornerSurfacesNotIntersected)
             .caused_by(e)
             .into_error(),
-        None => SolidError::blend(op, BlendFailure::CornerSurfacesMeetInNoCurve),
+        None => defect(op, CORNER_SSI_NO_CURVE),
     }
 }
 
@@ -1681,23 +1682,33 @@ impl FilletBrep {
         Ok(())
     }
 
-    /// `SmFilletVertex::CalcRailIntExtendedEdgeuse`: the vertex where a fillet surface
-    /// meets the (extended) surface of the side face across the vertex's
-    /// fillet/side-face edge (which gets the intersection curve, oriented from its
-    /// start vertex), or for a 3x2 mixed corner the end of that intersection lying on
-    /// the face the vertex is on.
+    /// `SmFilletVertex::CalcRailIntExtendedEdgeuse`: the vertex of a 3x2 mixed corner,
+    /// at the end of the intersection of its cross section's fillet surface with the
+    /// side face's extended surface that lies on the face the vertex is on. Every other
+    /// vertex (one with no corner, or with a corner of another type) is the rail's
+    /// crossing with the end face's surface: it returns
+    /// [`Self::calc_rail_int_end_surface`] (the fork's, WR-697). A cross section whose
+    /// fillet surface is not traced yet is left for later (`Ok`, unchanged).
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` for a missing edge of the wanted type, fillet geometry,
-    /// side face, solver, corner or extended B-spline surface; `SM_ERR` when the
-    /// neighbour vertex is not processed or no end lies on the face;
-    /// those of [`CornerLookup::corner`] and [`CornerLookup::extended_surface`]
-    /// (`corners` resolves the vertex's corner and holds the executive's extended
-    /// surfaces); [`SolidError::Unported`] from the intersection
-    /// (`sm_SrfSrfIntersection`). For a 3x2 mixed corner, those of the on-face's
-    /// fast-drop trim test (`SmFace::PointClassify` on `target`, which may make the
-    /// face's trimmed surface cache).
+    /// Those of [`Self::calc_rail_int_end_surface`] for a vertex that is not a 3x2 mixed
+    /// corner's. For a 3x2 mixed corner: a [`BlendFailure::Defect`] (status
+    /// `SM_ERR_NULL_POINTER`) for a missing cross-section edge, edge use, fillet
+    /// geometry, solver, classification, side or radial edge use face, or extended
+    /// surface; [`SolidError::InvalidInput`] when the vertex is classified to an entity
+    /// that is not an edge use; [`BlendFailure::SurfaceWithoutNet`] when the extended
+    /// surface has no B-spline net; [`BlendFailure::CornerSurfacesNotIntersected`] with the
+    /// intersection's error as its cause when the intersection fails (the vertex and
+    /// edge are marked `SurfIntFailure`); [`BlendFailure::BodyFaceWithoutSurface`] when
+    /// the face the vertex is on has no surface; [`BlendFailure::IntersectionEndsOffFace`]
+    /// when neither end of the curve lies on that face; those of
+    /// [`CornerLookup::corner`] and [`CornerLookup::extended_surface`] (`corners`
+    /// resolves the vertex's corner and holds the executive's extended surfaces);
+    /// [`SolidError::Unported`] or a cancellation from the intersection
+    /// (`sm_SrfSrfIntersection`), passed on; and those of the curve's evaluations and of
+    /// the on-face's fast-drop trim test (`SmFace::PointClassify` on `target`, which may
+    /// make the face's trimmed surface cache).
     pub fn calc_rail_int_extended_edgeuse(
         &mut self,
         k: &Kernel,
@@ -1728,17 +1739,14 @@ impl FilletBrep {
         context: &impl super::p5::FilletEdgeContext,
         target: &mut Brep,
     ) -> Result<()> {
-        let corner = self.fillet_vertex(v)?.fillet_corner();
-        let b3x2_mixed_corner_case = match corner {
-            Some(c) => corners.corner(c)?.corner_type() == FilletCornerType::ThreeByTwoMixed,
-            None => false,
-        };
         // The fork's (WR-697, 3e26f76): at an End's end rib the rail's end is its crossing
         // with the end face's surface (CalcRailIntEndSurface); the end rib is then the
-        // intersection between the two rail ends (CalcFilletIntSideFace)
-        if !b3x2_mixed_corner_case {
-            return self.calc_rail_int_end_surface(k, v, corners, context, target);
-        }
+        // intersection between the two rail ends (CalcFilletIntSideFace). Only a 3x2 mixed
+        // corner (`b3x2MixedCornerCase`), which has its corner, goes on.
+        let corner = match self.fillet_vertex(v)?.fillet_corner() {
+            Some(c) if corners.corner(c)?.corner_type() == FilletCornerType::ThreeByTwoMixed => c,
+            _ => return self.calc_rail_int_end_surface(k, v, corners, context, target),
+        };
 
         // Find adjacent fillet edge which was classified (only the 3x2 mixed corner
         // reaches here: its cross section)
@@ -1798,7 +1806,6 @@ impl FilletBrep {
         let side_face = sf.ok_or_else(|| broken_link(OP_EXT, EXT_SIDE_EU_NO_FACE))?;
 
         // get face->extendedSurface
-        let corner = corner.ok_or_else(|| broken_link(OP_EXT, VERTEX_NO_CORNER))?;
         let surface2 = context
             .extended_surface(corners.corner(corner)?, side_face)?
             .ok_or_else(|| broken_link(OP_EXT, EXT_NO_EXTENDED_SURFACE))?;
@@ -2356,8 +2363,15 @@ impl FilletBrep {
             }
         }
 
+        // every curve left is there: the loop above errors on a missing one and only removes
+        // entries, so the checked curves are carried on as they are
+        let loop_curves: Vec<Curve> = core::mem::take(&mut lists1.curves_3d)
+            .into_iter()
+            .flatten()
+            .collect();
+
         // set the number of curves forming this filletSurfaces boundary loop
-        let curve_loops = vec![lists1.curves_3d.len()];
+        let curve_loops = vec![loop_curves.len()];
 
         // turn off UseUVCurves if any UVCurve array member is set to NULL
         if lists1.uv_curves.iter().any(Option::is_none) {
@@ -2365,12 +2379,9 @@ impl FilletBrep {
         }
 
         // Make a copy of each 3D & UV curve
-        let mut curves_3d = Vec::with_capacity(lists1.curves_3d.len());
+        let mut curves_3d = Vec::new();
         let mut uv_curves = Vec::with_capacity(lists1.uv_curves.len());
-        for (c, uv) in lists1.curves_3d.iter().zip(&lists1.uv_curves) {
-            let c = c
-                .as_ref()
-                .ok_or_else(|| broken_link(OP_FACE, LOOP_NO_CURVE))?;
+        for (c, uv) in loop_curves.iter().zip(&lists1.uv_curves) {
             as_b_spline(c).ok_or_else(|| curve_without_net(OP_FACE, None, c))?;
             // (`Copy` keeps each kind `as_b_spline` accepts, so the copy is a B-spline
             // curve too)
@@ -3010,7 +3021,8 @@ impl FilletBrep {
 /// `sm_CreateUVCurve`'s seam check.
 const SEAM_NOT_CLOSED: &str = "the surface whose two seam curves are asked for is not closed \
     at its v-min or v-max corners, though they are asked for only on a closed join's fillet \
-    surface, which its trace builds closed along the closed edge";
+    surface, which the join's geometry fix (`ExamineNFixFilletGeoms`, run for a closed join \
+    whose geometries are not cliff rollovers) closes by making its end row its start row";
 /// `sm_CreateUVCurve`'s dropping tolerance.
 const UV_NO_BOX: &str = "the surface's bounding box came back without its box, though the \
     box was asked for and the bounding box routine makes every box asked for";
@@ -3048,8 +3060,18 @@ const NX2_NO_SURFACE: &str = "a fillet surface to intersect at the N x 2 corner 
     the corner computes this vertex only after its two geometries are traced";
 /// `CalcFilletInt2Fillets`'s reversal of the intersection's UV curves.
 const SSI_NO_UV_CURVE: &str = "the intersection of the corner's fillet surfaces returned its \
-    curve without a UV curve, which the reversal reverses with it: the intersection leaves one \
-    out only where it could not build it, a shortfall of the intersection";
+    curve without a UV curve, which the reversal reverses with it, though the intersection \
+    returns a curve only with both UV curves: the corners ask for no closure, so a UV curve \
+    the intersector leaves out is made by dropping the curve, and a drop that makes none \
+    fails the intersection; the curves it keeps and drops are B-spline kinds, which the \
+    corner keeps";
+/// The corners' intersections of two surfaces (`CalcFilletIntNx2Fillets`,
+/// `CalcFilletInt2Fillets`, `CalcRailIntExtendedEdgeuse`) that returned no curve.
+const CORNER_SSI_NO_CURVE: &str = "the intersection of the corner's surfaces returned no \
+    curve, though it returns its curve on every success: the corners' calls pass no end \
+    point (so the plane-curve path is not taken) and either no start point or the two-point \
+    search skipped (so the two-point path is not taken), and the general path fails rather \
+    than return a curve of a kind that is not a B-spline, the kinds the corner keeps";
 /// `CalcFilletInt2Fillets`'s two intersection curves.
 const INT2_FEWER_CURVES: &str = "fewer than two fillet/fillet edges at the vertex where three \
     fillets meet got an intersection curve, though such a vertex has two of them and each got \

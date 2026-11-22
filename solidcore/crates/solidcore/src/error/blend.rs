@@ -1950,7 +1950,7 @@ mod tests {
     fn the_fillet_corner_geometry_causes_keep_their_status_and_name_their_numbers() {
         use crate::topology::{EdgeId, FaceId};
         let face = FaceId::from_index(3);
-        let cases: [(BlendFailure, ErrorKind, i32, &str); 14] = [
+        let cases: [(BlendFailure, ErrorKind, i32, &str); 13] = [
             (
                 BlendFailure::SeamCornersBothCut,
                 ErrorKind::Unsupported,
