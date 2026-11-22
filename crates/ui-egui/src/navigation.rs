@@ -1084,17 +1084,27 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         let drag = secondary_down && !i.pointer.could_any_button_be_click();
         (drag, i.pointer.press_origin().zip(i.pointer.latest_pos()).map(|(from, to)| to - from))
     });
+    // A side button the user mapped to a drag in Preferences works the same way: it navigates once
+    // the press can no longer be a click, so a plain click on it still goes Back.
+    let extra_drag = [(egui::PointerButton::Extra1, crate::prefs::NavButton::Extra1), (egui::PointerButton::Extra2, crate::prefs::NavButton::Extra2)]
+        .into_iter()
+        .find(|(pointer, nav)| {
+            ui.input(|i| i.pointer.button_down(*pointer) && !i.pointer.could_any_button_be_click())
+                && (crate::prefs::nav_mode(app, *nav, mods).is_some() || app.viewport.button_nav.is_some_and(|(held, _)| held == *nav))
+        })
+        .map(|(_, nav)| nav);
+    let side_drag = right_drag || extra_drag.is_some();
     let delta = match travel {
-        Some(travel) if right_drag && !app.viewport.right_drag && !middle && travel.is_finite() => travel,
+        Some(travel) if side_drag && !app.viewport.right_drag && !middle && travel.is_finite() => travel,
         _ => delta,
     };
-    app.viewport.right_drag = right_drag;
+    app.viewport.right_drag = side_drag;
     let button = if middle {
         Some(crate::prefs::NavButton::Middle)
     } else if right_drag {
         Some(crate::prefs::NavButton::Right)
     } else {
-        None
+        extra_drag
     };
     // The full canvas response can report a drag whose press belonged to a panel above it.
     // A camera drag that started in free space keeps its capture when it crosses a panel.
@@ -2898,6 +2908,101 @@ mod tests {
         }
     }
 
+    /// A mouse button drag on the model, from the viewport's middle: press, move, release.
+    fn drag_with(h: &mut crate::scenario::Harness, button: egui::PointerButton, mods: egui::Modifiers) {
+        use egui::{Event, vec2};
+        let at = h.app.viewport.rect.map_or(egui::pos2(600.0, 400.0), |r| r.center());
+        let press = |pressed| Event::PointerButton { pos: at, button, pressed, modifiers: mods };
+        h.frame_with(vec![Event::ModifiersChanged(mods), Event::PointerMoved(at)]);
+        h.frame_with(vec![press(true)]);
+        for i in 1..=8 {
+            h.frame_with(vec![Event::PointerMoved(at + vec2(9.0, 6.0) * i as f32)]);
+        }
+        h.frame_with(vec![press(false)]);
+        h.frame_with(vec![Event::ModifiersChanged(egui::Modifiers::NONE)]);
+        h.frames(2);
+    }
+
+    #[test]
+    fn side_buttons_do_nothing_until_a_drag_is_chosen_and_the_presets_are_unchanged() {
+        use crate::prefs::{NAV_PRESETS, NavButton, nav_mode};
+        use egui::{Modifiers, PointerButton};
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(2);
+        assert!(h.app.preferences.nav_button_map.is_empty(), "nothing is mapped by default");
+        for preset in NAV_PRESETS {
+            h.app.preferences.nav = preset.id.into();
+            for mods in [Modifiers::NONE, Modifiers::SHIFT, Modifiers::CTRL, Modifiers::ALT, Modifiers::SHIFT | Modifiers::ALT] {
+                for button in NavButton::ALL {
+                    if !crate::mouse_gesture::active(&h.app) || button != NavButton::Right {
+                        assert_eq!(nav_mode(&h.app, button, mods), preset.mode(button, mods), "{}: {button:?} {mods:?}", preset.id);
+                    }
+                }
+                assert_eq!(nav_mode(&h.app, NavButton::Extra1, mods), None, "{}: the side buttons do nothing", preset.id);
+                assert_eq!(nav_mode(&h.app, NavButton::Extra2, mods), None, "{}: the side buttons do nothing", preset.id);
+            }
+        }
+        h.app.preferences.nav = "fusion".into();
+        let before = h.app.cam;
+        drag_with(&mut h, PointerButton::Extra1, Modifiers::NONE);
+        drag_with(&mut h, PointerButton::Extra2, Modifiers::NONE);
+        assert_eq!(h.app.cam, before, "an unmapped side-button drag leaves the view alone");
+    }
+
+    #[test]
+    fn a_mapped_side_button_drags_the_view_on_the_model_and_still_clicks() {
+        use crate::viewport::NavMode;
+        use egui::{Modifiers, PointerButton};
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":30,"height":20})).unwrap();
+        h.frames(2);
+        let reply = h.call("ui.prefs", serde_json::json!({"nav_button_map": {"extra1": "orbit", "extra2": "shift+pan"}}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(crate::prefs::nav_mode(&h.app, crate::prefs::NavButton::Extra1, Modifiers::NONE), Some(NavMode::Orbit));
+        assert_eq!(crate::prefs::nav_mode(&h.app, crate::prefs::NavButton::Extra2, Modifiers::NONE), None, "Shift is needed");
+        assert_eq!(crate::prefs::nav_mode(&h.app, crate::prefs::NavButton::Extra2, Modifiers::SHIFT), Some(NavMode::Pan));
+        let before = h.app.cam;
+        drag_with(&mut h, PointerButton::Extra1, Modifiers::NONE);
+        assert_ne!(h.app.cam.back(), before.back(), "the side button orbits");
+        assert!((h.app.cam.distance - before.distance).abs() < 1e-9, "and does not zoom");
+        let orbited = h.app.cam;
+        drag_with(&mut h, PointerButton::Extra2, Modifiers::NONE);
+        assert_eq!(h.app.cam, orbited, "without Shift the second side button does nothing");
+        drag_with(&mut h, PointerButton::Extra2, Modifiers::SHIFT);
+        assert!(h.app.cam.target.dist(orbited.target) > 1e-6, "with Shift it pans");
+        assert_eq!(h.app.cam.back(), orbited.back());
+        // The other buttons keep the preset.
+        let before = h.app.cam;
+        drag_with(&mut h, PointerButton::Secondary, Modifiers::NONE);
+        assert_ne!(h.app.cam.back(), before.back(), "the right button still orbits");
+        // Choosing "Nothing" for a preset button turns its drag off.
+        h.call("ui.prefs", serde_json::json!({"nav_button_map": {"extra1": "orbit", "right": "none"}}));
+        let before = h.app.cam;
+        drag_with(&mut h, PointerButton::Secondary, Modifiers::NONE);
+        assert_eq!(h.app.cam, before);
+        // Reset: back to the preset, the side buttons idle again.
+        h.call("ui.prefs", serde_json::json!({"nav_button_map": {}}));
+        drag_with(&mut h, PointerButton::Extra1, Modifiers::NONE);
+        assert_eq!(h.app.cam, before);
+        drag_with(&mut h, PointerButton::Secondary, Modifiers::NONE);
+        assert_ne!(h.app.cam.back(), before.back());
+    }
+
+    #[test]
+    fn a_bad_button_mapping_is_refused() {
+        let mut h = crate::scenario::Harness::new();
+        for bad in [serde_json::json!({"extra3": "orbit"}), serde_json::json!({"extra1": "spin"}), serde_json::json!({"extra1": "meta+pan"})] {
+            let reply = h.call("ui.prefs", serde_json::json!({"nav_button_map": bad}));
+            assert_eq!(reply["ok"], false, "{reply}");
+        }
+        assert!(h.app.preferences.nav_button_map.is_empty());
+        for choice in ["orbit", "pan", "zoom", "none", "shift+ctrl+orbit", "alt+zoom"] {
+            assert_eq!(crate::prefs::NavChoice::parse(choice).map(|c| c.text()).as_deref(), Some(choice));
+        }
+    }
+
     #[test]
     fn right_drag_orbits_off_leaves_the_camera_to_the_middle_button() {
         use serde_json::json;
@@ -3073,6 +3178,8 @@ mod tests {
                     NavButton::Left => PointerButton::Primary,
                     NavButton::Middle => PointerButton::Middle,
                     NavButton::Right => PointerButton::Secondary,
+                    NavButton::Extra1 => PointerButton::Extra1,
+                    NavButton::Extra2 => PointerButton::Extra2,
                 };
                 let keys = binding.keys;
                 let mods = Modifiers { shift: keys.shift, ctrl: keys.ctrl, command: keys.ctrl, alt: keys.alt, ..Default::default() };
@@ -3729,6 +3836,8 @@ mod tests {
                         NavButton::Left => "left",
                         NavButton::Middle => "middle",
                         NavButton::Right => "right",
+                        NavButton::Extra1 => "extra1",
+                        NavButton::Extra2 => "extra2",
                     };
                     let drag = |h: &mut crate::scenario::Harness, dx: f32, dy: f32| {
                         let out = h.call(
