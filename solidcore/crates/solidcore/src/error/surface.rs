@@ -14,6 +14,8 @@
 //! | [`SurfaceFailure::OutsideDomain`]  | `SM_ERR_OUTSIDE_OF_DOMAIN`     |
 //! | [`SurfaceFailure::OffSurface`]     | `SM_ERR_NOT_WITHIN_TOLERANCE`  |
 //! | [`SurfaceFailure::Defect`]         | `SM_ERR` (or the site's, through `with_status`) |
+//! | [`SurfaceFailure::ScaleNotUniform`], [`SurfaceFailure::CurveNoNurb`], [`SurfaceFailure::BallDefinitionUnreadable`], [`SurfaceFailure::PointOnAxis`], [`SurfaceFailure::IsoCircleUndefined`], [`SurfaceFailure::ExtensionWeightNotPositive`] | `SM_ERR` |
+//! | [`SurfaceFailure::NoNurb`], [`SurfaceFailure::NoInputStream`] | `SM_ERR_NULL_POINTER` (or the site's, through `with_status`) |
 //!
 //! [`SurfaceFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
 //! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
@@ -59,28 +61,69 @@ pub enum SurfaceFailure {
         /// The step that failed, and why that is the kernel's fault.
         why: &'static str,
     },
+    /// The scale given is not uniform (or, where the routine says so, not positive, or zero
+    /// or not finite): an analytic surface takes only a uniform scale that keeps it a
+    /// surface. [`ErrorKind::InvalidInput`].
+    ScaleNotUniform,
+    /// The surface given has no NURB form, which the routine reads.
+    /// [`ErrorKind::InvalidInput`].
+    NoNurb,
+    /// The curve given has no NURB form, which the routine reads.
+    /// [`ErrorKind::InvalidInput`].
+    CurveNoNurb,
+    /// The database reader given has no input stream to read from.
+    /// [`ErrorKind::InvalidInput`].
+    NoInputStream,
+    /// A ball patch's definition (its sphere's centre and radius) could not be read from
+    /// the file's record. [`ErrorKind::InvalidInput`].
+    BallDefinitionUnreadable,
+    /// A point the construction takes a direction from the analytic's axis through lies on
+    /// that axis (a pole, an apex, or every row of the side collapsed onto it), or its
+    /// distance from the axis is not finite. Class `failed`.
+    PointOnAxis,
+    /// The three points of the source's iso across the side that orient its circle (its
+    /// far end, its halfway point and its point on the side) are collinear or not finite,
+    /// so they give no plane. Class `failed`.
+    IsoCircleUndefined,
+    /// An extension asked inside the solve's bracket has a weight that is not positive,
+    /// though the asks at both ends of the bracket had positive weights (a weight's sign is
+    /// not monotone in the ask). Class `failed`.
+    ExtensionWeightNotPositive,
 }
 
 impl SurfaceFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) | Self::Defect { .. } => SM_ERR,
-            Self::Missing(_) => SM_ERR_NULL_POINTER,
+            Self::Failed(_)
+            | Self::Defect { .. }
+            | Self::ScaleNotUniform
+            | Self::CurveNoNurb
+            | Self::BallDefinitionUnreadable
+            | Self::PointOnAxis
+            | Self::IsoCircleUndefined
+            | Self::ExtensionWeightNotPositive => SM_ERR,
+            Self::Missing(_) | Self::NoNurb | Self::NoInputStream => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::OffSurface(_) => SM_ERR_NOT_WITHIN_TOLERANCE,
         }
     }
 
-    /// The failure's stable [`ErrorKind`]: the kind of the status it replaced
-    /// ([`ErrorKind::Failed`], [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`],
+    /// The failure's stable [`ErrorKind`]: [`ErrorKind::InvalidInput`] for a check of the
+    /// caller's argument, surface, curve or file, otherwise the kind of the status it
+    /// replaced ([`ErrorKind::Failed`], [`ErrorKind::Missing`], [`ErrorKind::InvalidInput`],
     /// [`ErrorKind::OutsideDomain`], [`ErrorKind::NotWithinTolerance`]).
     /// [`SurfaceFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::ScaleNotUniform
+            | Self::NoNurb
+            | Self::CurveNoNurb
+            | Self::NoInputStream
+            | Self::BallDefinitionUnreadable => ErrorKind::InvalidInput,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -95,6 +138,20 @@ impl core::fmt::Display for SurfaceFailure {
             | Self::OffSurface(what) => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
+            Self::ScaleNotUniform => f.write_str("an analytic surface takes only a uniform scale"),
+            Self::NoNurb => f.write_str("the surface has no NURB form"),
+            Self::CurveNoNurb => f.write_str("the curve has no NURB form"),
+            Self::NoInputStream => f.write_str("the database has no input stream"),
+            Self::BallDefinitionUnreadable => {
+                f.write_str("the ball patch's definition could not be read")
+            }
+            Self::PointOnAxis => f.write_str("a point the construction turns about is on the axis"),
+            Self::IsoCircleUndefined => {
+                f.write_str("the source's iso across the side orients no circle")
+            }
+            Self::ExtensionWeightNotPositive => f.write_str(
+                "an extension inside the solve's bracket has a weight that is not positive",
+            ),
         }
     }
 }
@@ -288,6 +345,67 @@ mod tests {
         super::super::bare_scan::assert_waiting("surface", 51, &[]);
     }
 
+    /// The named causes of the surface extensions and the ball patch keep the status of the
+    /// phrase causes they replaced (a site whose status differs from the cause's own keeps
+    /// it through `with_status`), with the kind their condition is: the caller's input, or a
+    /// failure of the geometry.
+    #[test]
+    fn the_named_extension_causes_keep_the_status_they_replaced() {
+        use crate::error::ErrorKind as K;
+        let cases = [
+            (
+                SurfaceFailure::ScaleNotUniform,
+                None,
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (
+                SurfaceFailure::NoNurb,
+                Some(SM_ERR),
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (SurfaceFailure::CurveNoNurb, None, SM_ERR, K::InvalidInput),
+            (
+                SurfaceFailure::NoInputStream,
+                None,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
+                SurfaceFailure::BallDefinitionUnreadable,
+                None,
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (SurfaceFailure::PointOnAxis, None, SM_ERR, K::Failed),
+            (SurfaceFailure::IsoCircleUndefined, None, SM_ERR, K::Failed),
+            (
+                SurfaceFailure::ExtensionWeightNotPositive,
+                None,
+                SM_ERR,
+                K::Failed,
+            ),
+        ];
+        for (failure, status, code, kind) in cases {
+            let mut f = Failure::new("surface::op", failure);
+            if let Some(s) = status {
+                f = f.with_status(s);
+            }
+            let e = f.into_error();
+            assert_eq!(e.sm_status(), Some(code), "{failure:?}");
+            assert_eq!(e.upstream_status(), Some(code), "{failure:?}");
+            assert_eq!(super::super::upstream_status(&e), Some(code), "{failure:?}");
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.surface_failure(), Some(&failure));
+            assert!(!e.is_defect(), "{failure:?}");
+        }
+        assert_eq!(
+            SurfaceFailure::NoNurb.comparison_status(),
+            SM_ERR_NULL_POINTER
+        );
+    }
+
     /// A reviewed defect is of class 127 with the status of the phrase cause it replaces,
     /// and says why.
     #[test]
@@ -346,16 +464,10 @@ mod tests {
         const PINNED: &[(&str, usize)] = &[
             ("solidcore/src/surface/b_spline_volume.rs", 4),
             ("solidcore/src/surface/b_spline_volume_n_lib.rs", 1),
-            ("solidcore/src/surface/ball_patch.rs", 8),
             ("solidcore/src/surface/bend_volume.rs", 2),
             ("solidcore/src/surface/cone/p1.rs", 12),
             ("solidcore/src/surface/cone/p2.rs", 14),
             ("solidcore/src/surface/cone/p3.rs", 3),
-            ("solidcore/src/surface/extend.rs", 2),
-            ("solidcore/src/surface/extend/analytic.rs", 25),
-            ("solidcore/src/surface/extend/ball.rs", 16),
-            ("solidcore/src/surface/extend/blend.rs", 6),
-            ("solidcore/src/surface/extend/sides.rs", 2),
             ("solidcore/src/surface/from_parameters.rs", 1),
             ("solidcore/src/surface/implicit.rs", 9),
             ("solidcore/src/surface/offset_surface.rs", 27),
@@ -364,7 +476,6 @@ mod tests {
             ("solidcore/src/surface/procedural_blend.rs", 9),
             ("solidcore/src/surface/procedural_blend/convert.rs", 13),
             ("solidcore/src/surface/procedural_blend/offset.rs", 5),
-            ("solidcore/src/surface/side.rs", 7),
             ("solidcore/src/surface/sphere.rs", 16),
             ("solidcore/src/surface/srf_in_volume.rs", 4),
             ("solidcore/src/surface/surf_of_extrusion/p1.rs", 16),

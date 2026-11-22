@@ -42,7 +42,8 @@
 //! recursion: the reader reads its net as a plain B-spline record, inside the surface
 //! dispatcher's nesting count.
 
-use crate::error::{Result, SolidError};
+use crate::error::surface::SurfaceFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR};
 use crate::eval;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::are_same;
@@ -217,8 +218,11 @@ impl BallPatch {
         if !net.is_rational() {
             return Ok(false);
         }
+        // the caller's net (a B-spline whose data was never read or set has no NURB)
         let form = surface_form(net).ok_or_else(|| {
-            SolidError::surface_failed(OP_ON_SPHERE, "the net has no rational surface form")
+            Failure::new(OP_ON_SPHERE, SurfaceFailure::NoNurb)
+                .with_status(SM_ERR)
+                .into_error()
         })?;
         Ok(eval::sphere::surface_on_sphere(&form, xyz(centre), radius, rel_tol).is_ok())
     }
@@ -236,9 +240,9 @@ impl BallPatch {
         radius: f64,
         rel_tol: f64,
     ) -> Result<bool> {
-        let form = curve_form(curve).ok_or_else(|| {
-            SolidError::surface_failed(OP_CURVE_ON_SPHERE, "the curve has no rational curve form")
-        })?;
+        // the caller's curve
+        let form = curve_form(curve)
+            .ok_or_else(|| SolidError::surface(OP_CURVE_ON_SPHERE, SurfaceFailure::CurveNoNurb))?;
         Ok(eval::sphere::curve_on_sphere(&form, xyz(centre), radius, rel_tol).is_ok())
     }
 
@@ -359,7 +363,7 @@ impl BallPatch {
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] where the offset passes the sphere's centre
-    /// ([`Self::offset_collapses`]); `SM_ERR` for a control net of the wrong size; those
+    /// ([`Self::offset_collapses`]); a defect for a control net of the wrong size; those
     /// of the evaluations, the control points and [`Self::create`].
     pub fn create_offset_surface(&self, k: &Kernel, signed_offset_distance: f64) -> Result<Self> {
         let side = self.normal_side(k)?;
@@ -376,22 +380,31 @@ impl BallPatch {
         let cpn = self.net.control_point_net()?;
         let (u_count, v_count) = (cpn.u_count, cpn.v_count);
         let count = u_count.checked_mul(v_count).ok_or_else(|| {
-            SolidError::surface_failed(OP_OFFSET, "the control point count overflows")
+            SolidError::surface(
+                OP_OFFSET,
+                SurfaceFailure::Defect {
+                    why: "the control point count overflows, though the net holds that many points in memory",
+                },
+            )
         })?;
         if cpn.points.len() != count || cpn.weights.len() != cpn.points.len() {
-            return Err(SolidError::surface_failed(
-                OP_OFFSET,
-                "the control point net does not match its counts",
-            ));
+            return Err(SolidError::surface(
+                    OP_OFFSET,
+                    SurfaceFailure::Defect {
+                        why: "the control point net does not match its counts, though `control_point_net` gives one point and one weight per control point of the NURB's rows",
+                    },
+                ));
         }
         for ii in 0..u_count {
             for jj in 0..v_count {
                 let at = ii * v_count + jj;
                 let (Some(&p), Some(&w)) = (cpn.points.get(at), cpn.weights.get(at)) else {
-                    return Err(SolidError::surface_failed(
-                        OP_OFFSET,
-                        "a control point is missing from the net",
-                    ));
+                    return Err(SolidError::surface(
+                            OP_OFFSET,
+                            SurfaceFailure::Defect {
+                                why: "a control point is missing from the net, though its index is below the count the net's length was just checked against",
+                            },
+                        ));
                 };
                 let scaled = self.centre + (p - self.centre) * scale;
                 net.set_control_point(ControlPointForm::EuclideanRational, ii, jj, scaled, w)?;
@@ -427,9 +440,9 @@ impl BallPatch {
         if let Some(sc) = scale {
             #[allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-refusing test
             if !are_same(sc.x, sc.y) || !are_same(sc.x, sc.z) || !(sc.x > EFF_ZERO) {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_TRANSFORM,
-                    "the scale is not uniform and positive",
+                    SurfaceFailure::ScaleNotUniform,
                 ));
             }
             factor = sc.x;
@@ -468,7 +481,7 @@ impl BallPatch {
         if db.file_type() == FileType::Ascii {
             let st = db
                 .in_stream_mut()
-                .ok_or_else(|| SolidError::surface_missing(OP_READ, "the input stream"))?;
+                .ok_or_else(|| SolidError::surface(OP_READ, SurfaceFailure::NoInputStream))?;
             let mut read = true;
             for v in &mut values {
                 match st.extract_double() {
@@ -478,10 +491,10 @@ impl BallPatch {
             }
             db.go_to_next_line();
             if !read || db.in_stream().is_none_or(InputStream::fail) {
-                // "its definition could not be read"
-                return Err(SolidError::surface_failed(
+                // "its definition could not be read": the file's record
+                return Err(SolidError::surface(
                     OP_READ,
-                    "the definition could not be read",
+                    SurfaceFailure::BallDefinitionUnreadable,
                 ));
             }
         } else {
