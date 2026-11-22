@@ -33,6 +33,7 @@
 //! | [`BlendFailure::EaseInputMissing`] | [`ErrorKind::Missing`]: neither defect nor refusal |
 //! | [`BlendFailure::EaseNotBuilt`] | its stop's kind ([`EaseStop`]): [`ErrorKind::NotFound`] (2), [`ErrorKind::Degenerate`] (3), [`ErrorKind::Unsupported`] (5) or [`ErrorKind::OutsideDomain`] (8) |
 //! | [`BlendFailure::EaseGeometryNotBSpline`] | [`ErrorKind::Unsupported`] (5) |
+//! | [`BlendFailure::EaseLengthNotConverged`] | [`ErrorKind::NotConverged`] (4) |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
@@ -50,6 +51,7 @@
 //! | [`BlendFailure::Inconsistent`]         | `SM_ERR_ASSERT_FAILURE`           |
 //! | [`BlendFailure::BadIntersections`]     | `SM_ERR_BAD_INTERSECTIONS`        |
 //! | [`BlendFailure::NotConverged`]         | `SM_ERR_NOT_CONVERGING`           |
+//! | [`BlendFailure::EaseLengthNotConverged`] | `SM_ERR_NOT_CONVERGING`         |
 //! | [`BlendFailure::OutsideDomain`]        | `SM_ERR_OUTSIDE_OF_DOMAIN`        |
 //! | [`BlendFailure::NotWithinTolerance`]   | `SM_ERR_NOT_WITHIN_TOLERANCE`     |
 //! | [`BlendFailure::PassedOn`]             | the status of the stage passed on |
@@ -391,6 +393,16 @@ pub enum BlendFailure {
     /// A kind the ease does not build on ([`ErrorKind::Unsupported`]); status
     /// `SM_ERR_NULL_POINTER` (upstream `NER` of the cast).
     EaseGeometryNotBSpline(EaseGeometry),
+    /// The parameter an arc length along the filleted edge away from the setback (the ease's
+    /// end) is not found: the curve's Newton iteration stopped moving. A solve that does not
+    /// converge ([`ErrorKind::NotConverged`]), carrying where it started and the length
+    /// asked for; status `SM_ERR_NOT_CONVERGING`.
+    EaseLengthNotConverged {
+        /// The edge parameter the length is measured from.
+        start: f64,
+        /// The arc length asked for.
+        length: f64,
+    },
     /// The routine could not continue, as the phrase says (for example "the fillet's law
     /// has no value at the base"). Upstream `return SE(SM_ERR)`. A phrase cause
     /// ([`BlendFailure::is_phrase`]).
@@ -917,7 +929,7 @@ impl BlendFailure {
             | Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::BadIntersections(_) => SM_ERR_BAD_INTERSECTIONS,
-            Self::NotConverged(_) => SM_ERR_NOT_CONVERGING,
+            Self::NotConverged(_) | Self::EaseLengthNotConverged { .. } => SM_ERR_NOT_CONVERGING,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::NotWithinTolerance(_) => SM_ERR_NOT_WITHIN_TOLERANCE,
             Self::PassedOn { status, .. } => *status,
@@ -964,6 +976,7 @@ impl BlendFailure {
             | Self::SequenceCurveNotBSpline { .. }
             | Self::FilletCrossesItself { .. }
             | Self::EaseGeometryNotBSpline(_) => ErrorKind::Unsupported,
+            Self::EaseLengthNotConverged { .. } => ErrorKind::NotConverged,
             Self::BandInputMissing(_)
             | Self::CliffInputMissing { .. }
             | Self::EaseInputMissing(_) => ErrorKind::Missing,
@@ -1052,6 +1065,7 @@ impl BlendFailure {
             | Self::EaseInputMissing(_)
             | Self::EaseNotBuilt(_)
             | Self::EaseGeometryNotBSpline(_)
+            | Self::EaseLengthNotConverged { .. }
             | Self::NotCertified { .. } => false,
             Self::Failed(_)
             | Self::Missing(_)
@@ -1119,6 +1133,7 @@ impl BlendFailure {
             | Self::EaseInputMissing(_)
             | Self::EaseNotBuilt(_)
             | Self::EaseGeometryNotBSpline(_)
+            | Self::EaseLengthNotConverged { .. }
             | Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -1332,6 +1347,12 @@ impl core::fmt::Display for BlendFailure {
             Self::EaseGeometryNotBSpline(geometry) => {
                 write!(f, "{}: {}", self.class(), geometry.what())
             }
+            Self::EaseLengthNotConverged { start, length } => write!(
+                f,
+                "{}: no parameter is found at arc length {length} from parameter {start} along \
+                 the filleted edge",
+                self.class()
+            ),
             Self::Failed(what)
             | Self::InvalidValue(what)
             | Self::BadIntersections(what)
@@ -2303,6 +2324,14 @@ mod tests {
                 SM_ERR_NULL_POINTER,
             ));
         }
+        rows.push((
+            BlendFailure::EaseLengthNotConverged {
+                start: 0.5,
+                length: 2.0,
+            },
+            ErrorKind::NotConverged,
+            SM_ERR_NOT_CONVERGING,
+        ));
         for (cause, class, status) in rows {
             assert!(!cause.is_phrase(), "{cause:?}");
             assert!(cause.replaces_upstream_status(), "{cause:?}");
@@ -2325,7 +2354,7 @@ mod tests {
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 54;
+    const VARIANTS: usize = 55;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -2386,6 +2415,7 @@ mod tests {
             BlendFailure::EaseInputMissing(_) => (51, None),
             BlendFailure::EaseNotBuilt(_) => (52, None),
             BlendFailure::EaseGeometryNotBSpline(_) => (53, None),
+            BlendFailure::EaseLengthNotConverged { .. } => (54, None),
         }
     }
 
@@ -2517,6 +2547,10 @@ mod tests {
             BlendFailure::EaseInputMissing(EaseInput::CornerVertex),
             BlendFailure::EaseNotBuilt(EaseStop::EasePastEdgeEnd),
             BlendFailure::EaseGeometryNotBSpline(EaseGeometry::RailCurve),
+            BlendFailure::EaseLengthNotConverged {
+                start: 0.0,
+                length: 1.0,
+            },
         ];
         let mut names = Vec::new();
         let mut indices = Vec::new();

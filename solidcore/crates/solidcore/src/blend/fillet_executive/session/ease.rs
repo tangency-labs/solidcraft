@@ -137,10 +137,7 @@ fn arc_length_param(
     } else {
         Err(SolidError::blend(
             OP,
-            BlendFailure::PassedOn {
-                what: "the parameter at the arc length is not found",
-                status: r.status(),
-            },
+            BlendFailure::EaseLengthNotConverged { start, length },
         ))
     }
 }
