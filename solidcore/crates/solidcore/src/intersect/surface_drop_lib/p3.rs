@@ -99,6 +99,12 @@
 //!   across a line, or ending a rounding error past one, turns the corner inside itself:
 //!   a notch a fraction of the tolerance deep whose radius of curvature is far below the
 //!   curve's. Where the two sides' tangents agree the joint is as upstream's.
+//! - **Procedural boundary crossings.** The traced Hermite jets on a procedural
+//!   definition are preserved: neither a near-boundary tangent flattening nor a
+//!   polygon fix-up has a bound on that definition (#17016). Every emitted cubic's
+//!   full control polygon must be finite and inside the UV domain, proving the
+//!   entire polynomial stays there; otherwise the construction fails. Intermediate
+//!   flushes obey the same rule. The trace's existing accuracy checks are retained.
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks, the `SM_ASSERT`s and the
 //!   messages.
 
@@ -138,8 +144,8 @@ use super::p1::{
     SM_SUCCESS,
 };
 use super::p2::{
-    add_to_curve_bounded, flush_curve_bounded, DropOffset, SM_ERR_BAD_SURFACE_POINT,
-    SM_ERR_INVALID_INPUT, SM_ERR_NOT_WITHIN_TOLERANCE, SS_NONE,
+    add_to_curve_with_policy, flush_curve_with_policy, BoundaryPolicy, DropOffset,
+    SM_ERR_BAD_SURFACE_POINT, SM_ERR_INVALID_INPUT, SM_ERR_NOT_WITHIN_TOLERANCE, SS_NONE,
 };
 
 /// `SM_ERR_NOT_CONVERGING` (`SmMessages.h`).
@@ -998,6 +1004,12 @@ impl Surface {
         // not upstream: a B-spline surface's net bounds the boundary fix-up's moves
         // (`boundary_moves`); its budget is set before each use
         let mut move_bound = MoveBound::of(k, this, approx_tol_3d);
+        // A net cannot bound a move on a surface evaluated from its definition.
+        // Keep its traced Hermite jets instead of flattening a merely nearby,
+        // oblique boundary crossing into a tiny-radius UV bend (#17016).
+        let preserve_uv = this.procedural_definition().is_some()
+            || matches!(this.kind(), SurfaceKind::OffsetSurface(o)
+                if o.base_surface().procedural_definition().is_some());
 
         // surface singularities and their pole points
         let sings = this.get_singularities(k, true, true)?;
@@ -1697,13 +1709,15 @@ impl Surface {
                     }
 
                     // fix boundary tangents
-                    let _fix_bt_change = start.fix_boundary_tangents(
-                        &s_uv_domain,
-                        &mut end,
-                        uv_tol_x,
-                        uv_tol_y,
-                        approx_tol_3d,
-                    );
+                    if !preserve_uv {
+                        let _fix_bt_change = start.fix_boundary_tangents(
+                            &s_uv_domain,
+                            &mut end,
+                            uv_tol_x,
+                            uv_tol_y,
+                            approx_tol_3d,
+                        );
+                    }
 
                     // test the span
                     let acc = start.test_span_accuracy(
@@ -1760,7 +1774,14 @@ impl Surface {
                         if let Some(b) = move_bound.as_mut() {
                             b.budget = approx_tol_3d - max_approx_dev;
                         }
-                        let added = add_to_curve_bounded(
+                        let policy = if preserve_uv {
+                            BoundaryPolicy::Preserve
+                        } else {
+                            move_bound.as_ref().map_or(BoundaryPolicy::Unbounded, |b| {
+                                BoundaryPolicy::Bounded(k, b)
+                            })
+                        };
+                        let added = add_to_curve_with_policy(
                             k,
                             this,
                             &s_uv_domain,
@@ -1773,11 +1794,19 @@ impl Surface {
                             uv_tol_y,
                             &mut out.uv_curves,
                             &mut fix_bc_change,
-                            move_bound.as_ref(),
+                            policy,
                         );
-                        // the fix-up's refusal, kept as the cause of the drop's stop (rule 6)
-                        let refusal = added.as_ref().err().cloned();
-                        ignore_status(added)?;
+                        let refusal = if preserve_uv {
+                            // A failed whole-span domain proof fails the construction;
+                            // it must not leave a partial UV curve behind as success.
+                            added?;
+                            None
+                        } else {
+                            // the fix-up's refusal, kept as the cause of the drop's stop (rule 6)
+                            let refusal = added.as_ref().err().cloned();
+                            ignore_status(added)?;
+                            refusal
+                        };
                         if let Some(b) = move_bound.as_ref() {
                             if b.refused() {
                                 let stop =
@@ -1900,7 +1929,14 @@ impl Surface {
             if let Some(b) = move_bound.as_mut() {
                 b.budget = approx_tol_3d - max_approx_dev;
             }
-            flush_curve_bounded(
+            let policy = if preserve_uv {
+                BoundaryPolicy::Preserve
+            } else {
+                move_bound
+                    .as_ref()
+                    .map_or(BoundaryPolicy::Unbounded, |b| BoundaryPolicy::Bounded(k, b))
+            };
+            flush_curve_with_policy(
                 &s_uv_domain,
                 &mut ctrl_poly,
                 &mut knots,
@@ -1908,7 +1944,7 @@ impl Surface {
                 uv_tol_y,
                 &mut out.uv_curves,
                 &mut fix_bc_change,
-                move_bound.as_ref().map(|b| (k, b)),
+                policy,
             )?;
             if let Some(b) = move_bound.as_ref() {
                 max_approx_dev += b.spent();
