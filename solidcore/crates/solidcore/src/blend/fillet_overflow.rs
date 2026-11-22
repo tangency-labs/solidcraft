@@ -79,18 +79,21 @@ const OP: &str = "blend::fillet_overflow";
 /// A face or edge the overflow reads lacks `input` ([`BlendFailure::OverflowInputMissing`]).
 /// The helpers read the caller's body and the executive's sheet alike, so the failure names
 /// no entity: the executive's refusal carries the error's entity as the target's.
+#[track_caller]
 fn input_missing(input: OverflowInput) -> SolidError {
     SolidError::blend(OP, BlendFailure::OverflowInputMissing(input))
 }
 
 /// A step that cannot fail did ([`BlendFailure::Defect`], status `SM_ERR`), `why` saying
 /// why it is the kernel's fault.
+#[track_caller]
 fn defect(why: &'static str) -> SolidError {
     SolidError::blend(OP, BlendFailure::Defect { why })
 }
 
 /// A missing thing this module built ([`BlendFailure::Defect`] keeping the upstream `NER`
 /// status `SM_ERR_NULL_POINTER`), `why` saying why it is always there.
+#[track_caller]
 fn null_defect(why: &'static str) -> SolidError {
     Failure::new(OP, BlendFailure::Defect { why })
         .with_status(SM_ERR_NULL_POINTER)
@@ -1274,8 +1277,10 @@ fn takes_off(
         Failure::new(
             OP,
             BlendFailure::Defect {
-                why: "a run's tangent is parallel to its face's normal: the run is a piece of a \
-                      rail on the face's plane longer than the tolerance, so it runs in the plane",
+                why: "a run's tangent at its middle is zero or parallel to its face's normal: the \
+                      run is a piece of a rail of the executive's sheet, which the fillet trace \
+                      builds as a regular curve (its tangent never vanishes), on the face's plane \
+                      over more than the tolerance, so its tangent is nonzero and in the plane",
             },
         )
         .caused_by(e)

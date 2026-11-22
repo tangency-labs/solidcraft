@@ -29,6 +29,7 @@ const OP: &str = "blend::fillet_executive::session::cliff_overflow";
 
 /// A missing thing the executive built ([`BlendFailure::Defect`] keeping the upstream `NER`
 /// status `SM_ERR_NULL_POINTER`), `why` saying why it is always there.
+#[track_caller]
 fn null_defect(why: &'static str) -> SolidError {
     Failure::new(OP, BlendFailure::Defect { why })
         .with_status(SM_ERR_NULL_POINTER)
