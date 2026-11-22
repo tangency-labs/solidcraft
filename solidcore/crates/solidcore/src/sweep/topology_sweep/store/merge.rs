@@ -45,8 +45,14 @@ use std::collections::BTreeMap;
 /// Why the merge's primary operand missing at a merge call is the kernel's fault (a
 /// reviewed defect).
 const NO_PRIMARY: &str = "the merge session holds its primary body from its setup to its end; set_operands restores it after each call";
-/// Why the merge's other operand missing at a merge call is the kernel's fault.
-const NO_OTHER: &str = "the merge session holds its other body from its setup to its end; set_operands restores it after each call";
+/// Why the merge's other operand missing at a Boolean of the merge is the kernel's fault:
+/// the session check every store call on the merge makes first ([`CONSUMED_OTHER`]) has
+/// already refused a consumed other body.
+const NO_OTHER: &str = "every store call on a merge first refuses a session whose other body was consumed, and with the sweep's default merge options only a final Merge or Union consumes it";
+/// A store call on a merge whose other body an earlier union or merge consumed (it was
+/// deleted or merged into the primary): the caller's use of a spent merge, as an unknown or
+/// released merge is.
+const CONSUMED_OTHER: &str = "the merge's other body was consumed by an earlier union or merge";
 
 #[derive(Debug)]
 pub(super) struct Session {
@@ -97,8 +103,7 @@ impl Session {
         Ok((
             self.primary
                 .ok_or_else(|| SolidError::sweep_null_defect(OP, NO_PRIMARY))?,
-            self.other
-                .ok_or_else(|| SolidError::sweep_null_defect(OP, NO_OTHER))?,
+            self.other.ok_or_else(|| invalid(CONSUMED_OTHER))?,
         ))
     }
 }
@@ -1362,6 +1367,30 @@ mod tests {
             .is_some());
         assert_eq!(store.merge_operands(merge).unwrap(), (dest, source));
         assert!(store.take_cleanup_errors().is_empty());
+        store.delete_merge(merge);
+    }
+
+    #[test]
+    fn a_merge_whose_other_body_was_consumed_refuses_further_calls_as_input() {
+        use crate::boolean::merge::p3::PiecewiseAccess;
+        use crate::error::ErrorKind;
+        let (mut store, source, dest, _, _) = models(true);
+        let merge = store.new_merge(dest, dest, source, 0.1, 0.2).unwrap();
+        // what a successful union leaves: the other body is gone from the session
+        store
+            .run_merge(merge, |_, driver| {
+                driver.set_operands(Some(dest), None);
+                Ok(())
+            })
+            .unwrap();
+        for e in [
+            store.merge_operands(merge).unwrap_err(),
+            store.union(merge).unwrap_err(),
+        ] {
+            assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e}");
+            assert!(!e.is_defect(), "{e}");
+            assert!(e.to_string().contains(CONSUMED_OTHER), "{e}");
+        }
         store.delete_merge(merge);
     }
 

@@ -41,7 +41,7 @@ use crate::math::Point3;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::SurfaceKind;
 use crate::topology::{
-    edge, edgeuse::p1 as eu, face::p2 as face, loopuse, vertex, vertexuse, LoopuseStart,
+    edge, edgeuse::p1 as eu, face::p2 as face, loopuse, vertex, vertexuse, EdgeId, LoopuseStart,
 };
 
 /// Most repetitions one [`TopologySweep::do_sweep`] executes (not upstream).
@@ -620,13 +620,30 @@ impl TopologySweep {
         Ok(())
     }
 
-    /// `DoSweepEdgesHigher`, copying source tags to the far edge and swept face.
+    /// `DoSweepEdgesHigher`, copying source tags to the far edge and swept face. With
+    /// tagging on, an edge without a tag is the caller's ([`SweepFailure::UntaggedEdge`]):
+    /// this runs no `tag_profile` of its own.
     pub fn sweep_edges_higher(
         &mut self,
         a: &mut impl SweepAccess,
         g: &SweepGeometry,
         region: RegionRef,
         edges: &[Option<EdgeRef>],
+    ) -> Result<()> {
+        self.sweep_edges_higher_untagged_as(a, g, region, edges, |edge| {
+            SweepFailure::UntaggedEdge { edge }
+        })
+    }
+
+    /// [`Self::sweep_edges_higher`], `untagged` naming an edge without a tag: the caller's
+    /// edge, or a whole-B-rep sweep's silhouette edge, which `tag_profile` never sees.
+    fn sweep_edges_higher_untagged_as(
+        &mut self,
+        a: &mut impl SweepAccess,
+        g: &SweepGeometry,
+        region: RegionRef,
+        edges: &[Option<EdgeRef>],
+        untagged: fn(EdgeId) -> SweepFailure,
     ) -> Result<()> {
         for original in edges.iter().flatten().copied() {
             check_cancelled(a, original.0)?;
@@ -638,14 +655,9 @@ impl TopologySweep {
             if self.do_tagging {
                 let tag = a.tag(e(original))?;
                 for entity in result.far_edge.map(e).into_iter().chain(result.face.map(f)) {
-                    // tag_profile tagged every edge of a selected sweep; only a whole-B-rep
+                    // tag_profile tagged every edge of a selected sweep; a whole-B-rep
                     // sweep's silhouette edges, copied from the untagged scene, have none
-                    let mut tag = tag.ok_or_else(|| {
-                        SolidError::sweep(
-                            OP,
-                            SweepFailure::UntaggedSilhouetteEdge { edge: original.1 },
-                        )
-                    })?;
+                    let mut tag = tag.ok_or_else(|| SolidError::sweep(OP, untagged(original.1)))?;
                     tag.primary_ordinal =
                         tag.primary_ordinal.wrapping_add(tag_ids::SWEEP_STEP_DELTA);
                     a.add_tag(entity, tag)?;
@@ -1268,7 +1280,9 @@ impl TopologySweep {
                             };
                             self.tag_profile(a, &targets)?;
                         }
-                        self.sweep_edges_higher(a, g, *region, &edges)?;
+                        self.sweep_edges_higher_untagged_as(a, g, *region, &edges, |edge| {
+                            SweepFailure::UntaggedSilhouetteEdge { edge }
+                        })?;
                         if closed {
                             let faces = a.faces(original)?;
                             a.remove_faces(original, &faces)?;

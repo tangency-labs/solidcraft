@@ -21,6 +21,7 @@
 //! | [`SweepFailure::UntaggedSilhouetteEdge`] | `SM_ERR_NULL_POINTER` |
 //! | [`SweepFailure::FaceCopyByFullTurn`]  | `SM_ERR_NULL_POINTER`    |
 //! | [`SweepFailure::UntaggedFace`]        | `SM_ERR_NULL_POINTER`    |
+//! | [`SweepFailure::UntaggedEdge`]        | `SM_ERR_NULL_POINTER`    |
 //! | [`SweepFailure::SweptEdgeCurveDropped`] | `SM_ERR_NULL_POINTER`  |
 //! | [`SweepFailure::Defect`]              | `SM_ERR` (or the site's, through `with_status`) |
 //! | every other cause                     | `SM_ERR` (or the site's, through `with_status`) |
@@ -148,6 +149,14 @@ pub enum SweepFailure {
     UntaggedFace {
         /// The face.
         face: FaceId,
+    },
+    /// An edge given to a tagging edge sweep (`TopologySweep::sweep_edges_higher` with
+    /// tagging on) has no tag: `tag_profile` was not run on it. [`ErrorKind::InvalidInput`].
+    /// (An untagged silhouette edge of a whole-B-rep sweep is
+    /// [`SweepFailure::UntaggedSilhouetteEdge`].)
+    UntaggedEdge {
+        /// The edge.
+        edge: EdgeId,
     },
     /// A same-dimension image recorded in the sweep's maps (which a caller can fill through
     /// `TopologySweep::set_same` or the public maps) is of another kind than the entity it
@@ -291,6 +300,7 @@ impl SweepFailure {
             | Self::UntaggedSilhouetteEdge { .. }
             | Self::FaceCopyByFullTurn
             | Self::UntaggedFace { .. }
+            | Self::UntaggedEdge { .. }
             | Self::SweptEdgeCurveDropped => SM_ERR_NULL_POINTER,
             Self::RailPastStationCap { .. }
             | Self::LoftSectionsTooLarge { .. }
@@ -332,6 +342,7 @@ impl SweepFailure {
             | Self::BrepWithoutInfiniteRegion { .. }
             | Self::FaceCopyByFullTurn
             | Self::UntaggedFace { .. }
+            | Self::UntaggedEdge { .. }
             | Self::FaceAlreadySwept
             | Self::SweepImageOfOtherKind { .. }
             | Self::SweepTooShort { .. }
@@ -444,6 +455,11 @@ impl core::fmt::Display for SweepFailure {
                 f,
                 "face {} has no tag to copy: tag the sweep's targets before a tagging sweep",
                 face.index()
+            ),
+            Self::UntaggedEdge { edge } => write!(
+                f,
+                "edge {} has no tag to copy: tag the sweep's targets before a tagging sweep",
+                edge.index()
             ),
             Self::FaceAlreadySwept => f.write_str("the face was already swept"),
             Self::SweepImageOfOtherKind {
@@ -653,6 +669,11 @@ mod tests {
                 SweepFailure::UntaggedFace {
                     face: FaceId::from_index(2),
                 },
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                SweepFailure::UntaggedEdge { edge },
                 SM_ERR_NULL_POINTER,
                 ErrorKind::InvalidInput,
             ),

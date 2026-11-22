@@ -1615,6 +1615,49 @@ mod tests {
         }
     }
 
+    /// `sweep_edges_higher` is public and runs no `tag_profile` of its own: with tagging on,
+    /// a caller's untagged edge (not a silhouette edge) is the caller's input.
+    #[test]
+    fn a_direct_tagging_edge_sweep_refuses_an_untagged_edge_as_input() {
+        use crate::curve::line::Line;
+        use crate::error::sweep::SweepFailure;
+        use crate::error::ErrorKind;
+        use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+        let mut store = SweepStore::owned();
+        let c = store.insert_kernel(Kernel::default()).unwrap();
+        let source = store.create_brep(c).unwrap();
+        let dest = store.create_brep(c).unwrap();
+        let start = point(&mut store, source, Vec3::ZERO);
+        let source_region = store.infinite_region(source).unwrap();
+        let curve = Curve::from(Line::from_points(Vec3::ZERO, Vec3::X, 3));
+        let interval = curve.natural_interval();
+        let (edge, _) = store
+            .make_wire_edge_vertex(
+                (source, source_region),
+                (source, start),
+                curve,
+                interval,
+                OrientType::Same,
+                Vec3::X,
+            )
+            .unwrap();
+        let region = store.infinite_region(dest).unwrap();
+        let mut sweep = TopologySweep {
+            do_tagging: true,
+            do_stitching: false,
+            ..TopologySweep::default()
+        };
+        let e = sweep
+            .sweep_edges_higher(&mut store, &translation(), (dest, region), &[Some(edge)])
+            .unwrap_err();
+        assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e}");
+        assert_eq!(
+            e.sweep_failure(),
+            Some(&SweepFailure::UntaggedEdge { edge: edge.1 })
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+    }
+
     #[test]
     fn higher_vertex_sweep_constructs_the_real_wire_and_preserves_contexts() {
         let mut store = SweepStore::owned();
