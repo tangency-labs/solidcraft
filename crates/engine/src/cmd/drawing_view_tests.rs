@@ -11,7 +11,7 @@ use solidcraft_geom::paper::NoPictures;
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 
 use super::*;
-use crate::drawing_scene::tests::{add_a_pin, configured_block, hinge_pair, plate as sheet_plate, two_cubes};
+use crate::drawing_scene::tests::{add_a_pin, configured_block, hinge_pair, in_the_model, plate as sheet_plate, two_cubes, with_the_model};
 use crate::drawing_view::bend_dashes_mm;
 use crate::schema::tests::conforms;
 
@@ -2652,15 +2652,6 @@ fn configured_views() -> (Session, [u64; 3], u64) {
     (s, views, long)
 }
 
-/// Runs `id` on the design with the drawing open closed, as the model can only be changed then, and
-/// opens the drawing again.
-fn in_the_design(s: &mut Session, id: &str, p: Value) {
-    let drawing = ids::encode(s.open_drawing.unwrap());
-    run(s, "drawing.close", json!({}));
-    run(s, id, p);
-    run(s, "drawing.open", json!({"drawing": drawing}));
-}
-
 /// How view `view` of the drawing open stands in its sheet's scene: its status, and why (null when it
 /// says nothing).
 fn scene_entry(s: &mut Session, view: u64) -> (Value, Value) {
@@ -2691,7 +2682,7 @@ fn a_view_of_a_row_draws_it_and_leaves_the_design() {
     assert!((width(&mut s, front) - 60.0).abs() < 1e-6 && (width(&mut s, active) - 50.0).abs() < 1e-6);
     run(&mut s, "drawing.scene", json!({"sheet": sheet}));
     assert!(design(&s) == before && s.pending_moves.is_empty(), "the design is as it was");
-    in_the_design(&mut s, "config.activate", json!({"row": "Long"}));
+    in_the_model(&mut s, "config.activate", json!({"row": "Long"}));
     assert!((width(&mut s, front) - 60.0).abs() < 1e-6 && (width(&mut s, active) - 60.0).abs() < 1e-6);
 }
 
@@ -2702,7 +2693,7 @@ fn a_view_of_a_row_draws_it_and_leaves_the_design() {
 fn a_deleted_configuration_row_leaves_the_views_that_named_it() {
     let (mut s, [front, right, top], long) = configured_views();
     edit_view(&mut s, front, json!({"configuration": "Long"}));
-    in_the_design(&mut s, "config.row", json!({"name": "Long", "delete": true}));
+    in_the_model(&mut s, "config.row", json!({"name": "Long", "delete": true}));
     let gone = inspect_view(&mut s, front);
     assert_eq!(
         (gone["extents"]["status"].as_str(), gone["extents"]["provenance"].as_str()),
@@ -2716,7 +2707,7 @@ fn a_deleted_configuration_row_leaves_the_views_that_named_it() {
     }
     let d = s.drawing("test").unwrap();
     assert_eq!(&Drawing::from_json(&d.to_json().unwrap()).unwrap(), &**d);
-    in_the_design(&mut s, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     assert!((width(&mut s, front) - 60.0).abs() < 1e-6);
 }
 
@@ -2726,8 +2717,8 @@ fn a_deleted_configuration_row_leaves_the_views_that_named_it() {
 fn a_row_added_again_by_name_is_another_row() {
     let (mut s, [front, ..], long) = configured_views();
     edit_view(&mut s, front, json!({"configuration": "Long"}));
-    in_the_design(&mut s, "config.row", json!({"name": "Long", "delete": true}));
-    in_the_design(&mut s, "config.row", json!({"name": "Long", "values": {"L": "120 mm"}}));
+    in_the_model(&mut s, "config.row", json!({"name": "Long", "delete": true}));
+    in_the_model(&mut s, "config.row", json!({"name": "Long", "values": {"L": "120 mm"}}));
     let again = s.doc.configs.rows.iter().find(|row| row.name == "Long").map(|row| row.id).unwrap();
     assert_ne!(again, long);
     assert_eq!(inspect_view(&mut s, front)["extents"]["provenance"], json!("no_configuration"));
@@ -2785,7 +2776,7 @@ fn a_view_of_a_row_that_rebuilds_with_errors_draws_what_it_builds_and_says_so() 
     assert_eq!((configuration["drawn"]["name"].as_str(), configuration.get("errors")), (Some("Default"), None), "{configuration}");
     assert_eq!(scene_entry(&mut s, front), (json!("drawn"), Value::Null));
     // Edited by hand, the design is in none of its rows.
-    in_the_design(&mut s, "parameters.change", json!({"name": "L", "expression": "110 mm"}));
+    in_the_model(&mut s, "parameters.change", json!({"name": "L", "expression": "110 mm"}));
     assert_eq!(inspect_view(&mut s, front)["settings"]["configuration"].get("drawn"), Some(&Value::Null));
 }
 
@@ -2894,7 +2885,7 @@ fn hostile_configuration_choices_are_refused() {
     edit_view(&mut plain, view, json!({"configuration": "active"}));
     // A deleted row is refused by its id, while the view that saved it still reads.
     edit_view(&mut s, front, json!({"configuration": long}));
-    in_the_design(&mut s, "config.row", json!({"name": "Long", "delete": true}));
+    in_the_model(&mut s, "config.row", json!({"name": "Long", "delete": true}));
     assert!(edit_refused(&mut s, front, json!({"configuration": long})).contains(&format!("no configuration `{long}`")));
     assert_eq!(saved(&s, front).settings.configuration, Some(ViewConfiguration::Row(long)));
 }
@@ -3028,13 +3019,12 @@ fn a_pose_naming_a_gone_joint_skips_it() {
 /// Makes motion study Open in [`hinge_pair`]'s design, turning Hinge along `points` ([step, degrees])
 /// over `steps` steps, or makes it again with them: with the drawing closed, then open again.
 fn study(s: &mut Session, steps: u32, points: Value) {
-    let drawing = ids::encode(s.open_drawing.unwrap());
-    run(s, "drawing.close", json!({}));
-    let again = if s.doc.assembly.studies.is_empty() { json!({}) } else { json!({"study": "Open"}) };
-    let mut p = json!({"name": "Open", "steps": steps, "keys": [{"joint": "Hinge", "points": points}]});
-    p.as_object_mut().unwrap().extend(again.as_object().unwrap().clone());
-    run(s, "motion.study", p);
-    run(s, "drawing.open", json!({"drawing": drawing}));
+    with_the_model(s, |s| {
+        let again = if s.doc.assembly.studies.is_empty() { json!({}) } else { json!({"study": "Open"}) };
+        let mut p = json!({"name": "Open", "steps": steps, "keys": [{"joint": "Hinge", "points": points}]});
+        p.as_object_mut().unwrap().extend(again.as_object().unwrap().clone());
+        run(s, "motion.study", p);
+    });
 }
 
 /// The top view's height with the leaf at `degrees`: the plate's 20 mm and the leaf's 20 cos.
@@ -3994,14 +3984,6 @@ fn the_view_beside_a_point_follows_the_drawings_projection() {
 
 const FLAT: &str = "drawing.view.flat";
 
-/// `change` made with the drawing closed, then the drawing opened again.
-fn with_drawing_closed(s: &mut Session, change: impl FnOnce(&mut Session)) {
-    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
-    run(s, "drawing.close", json!({}));
-    change(s);
-    run(s, "drawing.open", drawing);
-}
-
 /// `drawing.view.flat` with `p`: the new view's id and the reply, checked against its schema.
 fn flat_view(s: &mut Session, p: Value) -> (u64, Value) {
     let reply = run(s, FLAT, p);
@@ -4017,7 +3999,7 @@ fn flat_pattern(s: &mut Session) -> Value {
         return run(s, "sheet.flat_pattern", json!({}));
     }
     let mut reply = Value::Null;
-    with_drawing_closed(s, |s| reply = run(s, "sheet.flat_pattern", json!({})));
+    with_the_model(s, |s| reply = run(s, "sheet.flat_pattern", json!({})));
     reply
 }
 
@@ -4082,7 +4064,7 @@ fn a_flat_view_measures_the_flat_size_at_its_scale() {
 #[test]
 fn a_round_hole_is_one_circle_on_a_flat_view() {
     let mut s = sheet_plate();
-    with_drawing_closed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "sketch.create", json!({"plane": "XY", "name": "Hole"}));
         run(s, "sketch.circle.center", json!({"center": [50, 30], "radius": 5}));
         run(s, "sketch.finish", json!({}));
@@ -4111,7 +4093,7 @@ fn a_round_hole_is_one_circle_on_a_flat_view() {
 #[test]
 fn a_flat_pattern_view_is_never_exploded_posed_or_configured() {
     let mut s = sheet_plate();
-    with_drawing_closed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "parameters.add", json!({"name": "W", "expression": "60 mm"}));
         run(s, "config.configure", json!({"params": ["W"]}));
         run(s, "config.row", json!({"name": "Wide", "values": {"W": "80 mm"}}));
@@ -4247,7 +4229,7 @@ fn bend_lines_are_long_dashes_with_one_and_two_dots_in_every_group() {
 #[test]
 fn bends_up_and_down_draw_in_two_line_types_and_end_on_the_outline() {
     let mut s = sheet_plate();
-    with_drawing_closed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "sheet.flange", json!({"edges": [[50, 60, 2]], "height": 20, "flip": true}));
     });
     let reply = flat_pattern(&mut s);
@@ -4600,7 +4582,7 @@ fn a_flat_view_of_a_body_that_isnt_sheet_metal_is_refused() {
 
     let mut s = sheet_plate();
     let (id, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "body": "Plate", "scale": "1:1"}));
-    with_drawing_closed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         run(s, "body.rename", json!({"body": "Plate", "name": "Blank"}));
     });
     let (strokes, status) = flat_strokes(&s, id);
@@ -4616,7 +4598,7 @@ fn a_flat_view_follows_the_flange_and_the_rule() {
     let size_on_sheet = |s: &mut Session| boundary(&inspect_view(s, id)).0;
     assert!((size_on_sheet(&mut s) - flat_size(&mut s)).len() < 1e-6);
     let (mut taller, mut smaller) = (Vec2::ZERO, Vec2::ZERO);
-    with_drawing_closed(&mut s, |s| {
+    with_the_model(&mut s, |s| {
         let names = s.doc.features.last().map(|f| f.param_names.clone()).unwrap_or_default();
         run(s, "parameters.change", json!({"name": names[0], "expression": "30"}));
         taller = flat_size(s);
