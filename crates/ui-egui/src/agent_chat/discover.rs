@@ -830,7 +830,9 @@ mod tests {
     fn vibe_is_offered_for_install_and_discovered_as_an_acp_executable() {
         let root = std::env::temp_dir().join(format!("sc-agent-vibe-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
-        let detect = || detect_in(std::slice::from_ref(&root), None, PROBE_LIMIT);
+        // A generous limit, as the other probes here: a whole test run can keep the shell from
+        // starting within the app's three seconds, and a probe that runs out reports no version.
+        let detect = || detect_in(std::slice::from_ref(&root), None, Duration::from_secs(60));
         let uninstalled = detect();
         let missing = uninstalled.missing.iter().find(|agent| agent.id == "vibe").unwrap();
         assert_eq!(missing.install, "uv tool install mistral-vibe");

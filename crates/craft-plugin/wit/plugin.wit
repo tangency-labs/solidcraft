@@ -5,8 +5,11 @@ package craft:plugin@0.2.0;
 // - `commands@0.2`: types, commands, log, control, files, clock and entry (world `command-plugin`);
 // - `formats@0.2`: types, log, control, clock, source, design and importer (world `importer-plugin`);
 // - `evaluate@0.2`: with `formats`, evaluate, so an importer can check its result;
-// - `storage@0.1`: with `commands`, the app's `storage.*` commands, so a plugin keeps its own data
-//   in the open design (no interface of its own).
+// - `storage@0.1`: with `commands`, the app's `storage.*` commands and the `storage` interface, so a
+//   plugin keeps its own data in the open design: its main document as JSON, its files as bytes.
+// - `design@0.1`: with `commands`, design-state, for document identity/revision and read listeners.
+// - `forms@0.1`: with `commands`, forms.open, to request a populated command form;
+//   programs receive an interactive-required refusal instead of a window.
 // Later capabilities (ui, viewport) arrive as their own interfaces. While the version is
 // 0.x, a minor version may break the one before it. 0.2 added `plugin-error.unsupported`. A host
 // still runs plugins built against 0.1 (`../wit-0.1/plugin.wit`): it reads the version from the
@@ -36,6 +39,18 @@ interface commands {
     use types.{json, plugin-error};
     run: func(command: string, args: json) -> result<json, plugin-error>;
 }
+// Additive forms@0.1 capability. Existing command components need not import this.
+interface forms {
+    use types.{json, plugin-error};
+    open: func(entry: string, params: json) -> result<_, plugin-error>;
+}
+// Additive read-only import: JSON {document_id: string, revision: string}, or null with no document.
+// Both fields are opaque printable ASCII, bounded to 128 characters; compare them for equality.
+// Importing this interface requires the manifest capability design@0.1. Older components omit it.
+interface design-state {
+    use types.{json, plugin-error};
+    get-token: func() -> result<json, plugin-error>;
+}
 interface log {
     enum level { debug, info, warn, error }
     log: func(level: level, message: string);
@@ -51,6 +66,22 @@ interface files {
 }
 interface clock {
     now: func() -> u64;
+}
+// A plugin's own files in the open design (capability `storage@0.1`), as bytes: never as text.
+// Files are named by a plain relative path; a cache file is one the plugin can make again, which
+// a save may drop. Only the plugin's own run writes its files; anyone reads them.
+interface storage {
+    use types.{plugin-error};
+    // Writes the running plugin's file `name` (`cache`: as a cache file), its bytes as they are;
+    // `append` adds them to the file's end, to write a large file in parts. One name is one file:
+    // writing it as the other kind moves it. Returns the file's size. Part of the run's one undo step.
+    put-blob: func(name: string, data: list<u8>, cache: bool, append: bool) -> result<u64, plugin-error>;
+    // Up to `len` bytes (at most 1 MiB) of a plugin's file from `offset`; empty past its end.
+    // `plugin`: whose file, the running plugin's own when left out (inside a run, only its own).
+    get-blob: func(plugin: option<string>, name: string, offset: u64, len: u32) -> result<list<u8>, plugin-error>;
+    // Up to `len` bytes (at most 1 MiB) of a plugin's main document, its saved JSON, from
+    // `offset`; empty past its end, or when it has none.
+    get-document: func(plugin: option<string>, offset: u64, len: u32) -> result<list<u8>, plugin-error>;
 }
 // What the plugin exports: its manifest's entries, called by name.
 interface entry {
@@ -102,11 +133,14 @@ interface importer {
     import-file: func(entry: string, file: file-info, options: json) -> result<json, plugin-error>;
 }
 world command-plugin {
+    import forms;
     import commands;
+    import design-state;
     import log;
     import control;
     import files;
     import clock;
+    import storage;
     export entry;
 }
 world importer-plugin {
@@ -117,4 +151,23 @@ world importer-plugin {
     import design;
     import evaluate;
     export importer;
+}
+
+// Optional, additive capability dialog@0.1. Existing worlds retain their exports.
+interface dialog-provider {
+    use types.{json, plugin-error};
+    // Values and reply are JSON objects. The host validates the entire reply before applying it.
+    update-fields: func(entry: string, values: json) -> result<json, plugin-error>;
+}
+world dialog-plugin {
+    import commands;
+    import log;
+    import control;
+    import files;
+    import clock;
+    export dialog-provider;
+}
+world command-dialog-plugin {
+    include command-plugin;
+    export dialog-provider;
 }

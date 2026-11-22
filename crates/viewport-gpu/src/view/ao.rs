@@ -1,6 +1,7 @@
-//! The optional AO passes. Opaque model, preview and virtual ground triangles participate: their depth is
-//! drawn once into a single-sample depth map, and the occlusion term of the surface that depth
-//! holds is drawn into a texture of the same size and blurred by depth (#9327), which the lit
+//! The optional AO passes. Opaque model, preview and virtual ground triangles participate: their depth and
+//! normal are drawn once into single-sample maps, the occlusion term of the surface they hold is
+//! worked out per pixel of the maps (the triangles are not drawn again: that took as long as the
+//! prepass itself) into a texture of the same size and blurred by depth (#9327), which the lit
 //! fragment reads. The maps are independent of the window's MSAA, and the depth runs the same way
 //! as the viewport's own buffer (see [`super::depth_compare`] and [`super::far_depth`]).
 //! Depth testing chooses the nearest surface; an R32Uint colour attachment stores that depth's
@@ -10,6 +11,9 @@
 use super::{Batches, TriSource, color_layout, depth_compare, far_depth, instance_layout, planned_layout, shared_layout, tri_layout};
 
 const TERM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
+/// The normal map's format: 8 bits per axis is plenty to aim a hemisphere of samples, and it can
+/// be drawn into on every adapter (float colour attachments cannot).
+const NORMAL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 /// What the opaque triangles are drawn with in one pass, by where they come from.
 struct OpaquePipelines {
@@ -26,6 +30,7 @@ pub(super) struct Maps {
     blur_bind: wgpu::BindGroup,
     depth: wgpu::TextureView,
     values: wgpu::TextureView,
+    normals: wgpu::TextureView,
     raw: wgpu::TextureView,
     smooth: wgpu::TextureView,
 }
@@ -108,7 +113,7 @@ pub(super) struct Resources {
     pub maps: Maps,
     size: [u32; 2],
     prepass: OpaquePipelines,
-    term: OpaquePipelines,
+    term: wgpu::RenderPipeline,
     blur: wgpu::RenderPipeline,
 }
 
@@ -130,6 +135,7 @@ fn maps(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, size: [u32; 2]) -
     let drawn_and_read = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
     let depth = view("sc_ao_depth", wgpu::TextureFormat::Depth32Float, wgpu::TextureUsages::RENDER_ATTACHMENT);
     let values = view("sc_ao_values", wgpu::TextureFormat::R32Uint, drawn_and_read);
+    let normals = view("sc_ao_normals", NORMAL_FORMAT, drawn_and_read);
     let raw = view("sc_ao_raw", TERM_FORMAT, drawn_and_read);
     let smooth = view("sc_ao_smooth", TERM_FORMAT, drawn_and_read);
     let group = |label, term| {
@@ -139,10 +145,11 @@ fn maps(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, size: [u32; 2]) -
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&values) },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(term) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&normals) },
             ],
         })
     };
-    Maps { bind: group("sc_ao_lit", &smooth), blur_bind: group("sc_ao_blur", &raw), depth, values, raw, smooth }
+    Maps { bind: group("sc_ao_lit", &smooth), blur_bind: group("sc_ao_blur", &raw), depth, values, normals, raw, smooth }
 }
 
 /// A term map as a pass's target, cleared to no occlusion.
@@ -181,9 +188,11 @@ fn draw_opaque(pass: &mut wgpu::RenderPass<'_>, pipelines: &OpaquePipelines, lay
             pass.set_index_buffer(draw.mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..draw.mesh.index_count, 0, 0..1);
         }
-        for draw in batch.instanced.iter().filter(|d| d.look == super::InstanceLook::Opaque) {
-            draw.draw(pass, &pipelines.instanced, &pipelines.instanced_flat, &uncounted);
-        }
+        // The placements in view, each at the level the lit pass draws it: through the lit pass's
+        // indirect draws where the device has them. (Drawn one mesh at a time instead, a mesh the
+        // indirect draws batch kept the placement lists its last unbatched cull left: every
+        // placement at full detail, in view or not, which took longer than the lit pass.)
+        batch.draw_instanced(pass, super::InstanceLook::Opaque, false, &pipelines.instanced, &pipelines.instanced_flat, &uncounted);
     }
 }
 
@@ -198,7 +207,11 @@ impl Resources {
         };
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("sc_ao_maps"),
-            entries: &[entry(0, wgpu::TextureSampleType::Uint), entry(1, wgpu::TextureSampleType::Float { filterable: false })],
+            entries: &[
+                entry(0, wgpu::TextureSampleType::Uint),
+                entry(1, wgpu::TextureSampleType::Float { filterable: false }),
+                entry(2, wgpu::TextureSampleType::Float { filterable: false }),
+            ],
         })
     }
 
@@ -225,7 +238,12 @@ impl Resources {
         let evaluated = [Some(planned_layout()), Some(color_layout())];
         let placed = [Some(shared_layout()), Some(instance_layout())];
         let target = |format| [Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::RED })];
-        let opaque = |label, layout: &wgpu::PipelineLayout, fragment: &str, format, depth_write_enabled, compare| {
+        // The prepass's depth (as bits) and normal.
+        let depth_and_normal = [
+            Some(wgpu::ColorTargetState { format: wgpu::TextureFormat::R32Uint, blend: None, write_mask: wgpu::ColorWrites::RED }),
+            Some(wgpu::ColorTargetState { format: NORMAL_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL }),
+        ];
+        let opaque = |label, layout: &wgpu::PipelineLayout, fragment: &str, depth_write_enabled, compare| {
             let pipeline = |source: TriSource| {
                 device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some(label),
@@ -252,7 +270,7 @@ impl Resources {
                     fragment: Some(wgpu::FragmentState {
                         module,
                         entry_point: Some(&source.fragment(fragment)),
-                        targets: &target(format),
+                        targets: &depth_and_normal,
                         compilation_options: Default::default(),
                     }),
                     multiview_mask: None,
@@ -266,25 +284,28 @@ impl Resources {
                 instanced_flat: pipeline(TriSource::InstancedFlat),
             }
         };
-        let prepass = opaque("sc_ao_prepass", &prepass_layout, "fs_ao_depth", wgpu::TextureFormat::R32Uint, true, wgpu::CompareFunction::Less);
-        // The term only where the prepass's depth is, so each pixel's term is worked out once.
-        let term = opaque("sc_ao_term", &term_layout, "fs_ao_term", TERM_FORMAT, false, wgpu::CompareFunction::LessEqual);
-        let blur = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("sc_ao_blur"),
-            layout: Some(&term_layout),
-            vertex: wgpu::VertexState { module, entry_point: Some("vs_ao_blur"), buffers: &[], compilation_options: Default::default() },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module,
-                entry_point: Some("fs_ao_blur"),
-                targets: &target(TERM_FORMAT),
-                compilation_options: Default::default(),
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let prepass = opaque("sc_ao_prepass", &prepass_layout, "fs_ao_depth", true, wgpu::CompareFunction::Less);
+        // The term once per pixel of the maps, from the depth and normal the prepass left there.
+        let screen = |label, fragment| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&term_layout),
+                vertex: wgpu::VertexState { module, entry_point: Some("vs_ao_blur"), buffers: &[], compilation_options: Default::default() },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module,
+                    entry_point: Some(fragment),
+                    targets: &target(TERM_FORMAT),
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let term = screen("sc_ao_term", "fs_ao_term_screen");
+        let blur = screen("sc_ao_blur", "fs_ao_blur");
         let maps = maps(device, &layout, [1, 1]);
         Self { layout, maps, size: [1, 1], prepass, term, blur }
     }
@@ -312,15 +333,24 @@ impl Resources {
         };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("sc_ao_prepass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &self.maps.values,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color { r: f64::from(far_depth(reversed).to_bits()), g: 0.0, b: 0.0, a: 0.0 }),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
+            color_attachments: &[
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &self.maps.values,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color { r: f64::from(far_depth(reversed).to_bits()), g: 0.0, b: 0.0, a: 0.0 }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                }),
+                // No surface (alpha 0) where nothing is drawn.
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &self.maps.normals,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+                }),
+            ],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &self.maps.depth,
                 depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(far_depth(reversed)), store: wgpu::StoreOp::Store }),
@@ -335,17 +365,15 @@ impl Resources {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("sc_ao_term"),
             color_attachments: &[term_target(&self.maps.raw)],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &self.maps.depth,
-                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Discard }),
-                stencil_ops: None,
-            }),
+            depth_stencil_attachment: None,
             timestamp_writes: timer.and_then(|t| t.writes("sc_ao_term")),
             occlusion_query_set: None,
             multiview_mask: None,
         });
+        pass.set_pipeline(&self.term);
+        pass.set_bind_group(0, first, &[]);
         pass.set_bind_group(2, &self.maps.bind, &[]);
-        draw_opaque(&mut pass, &self.term, layers);
+        pass.draw(0..3, 0..1);
         drop(pass);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("sc_ao_blur"),

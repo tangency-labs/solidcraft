@@ -508,8 +508,11 @@ impl<'a> MenuItem<'a> {
         // Areas first measure intrinsic content. Filling their provisional available
         // width would make a flipped submenu cover its parent and consume the opening click.
         let width = if ui.is_sizing_pass() {
-            let label =
-                ui.painter().layout_no_wrap(solidcraft_ui_text::tr_label(self.label).to_string(), FontId::proportional(t.font_label), t.form_ink);
+            let label = ui.painter().layout_no_wrap(
+                solidcraft_ui_text::tr_command(self.id, self.label).to_string(),
+                FontId::proportional(t.font_label),
+                t.form_ink,
+            );
             let shortcut = ui.painter().layout_no_wrap(self.shortcut.to_string(), FontId::monospace(t.font_small), t.form_dim);
             let trailing = if self.submenu { t.space_16 } else { 0.0 };
             let check = Self::trailing_check_width(self.icon, self.checked.is_some());
@@ -559,12 +562,13 @@ impl<'a> MenuItem<'a> {
             painter.rect(icon, t.radius_sm, color, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
         } else if !self.icon.is_blank() {
             match self.icon {
+                Icon::Kit(name @ ("window_here" | "window_other")) => icons::paint_ink(&painter, icon, name, t.text_dim),
                 Icon::Kit(name) if self.danger => icons::paint_danger(&painter, icon, name, 1.0),
                 Icon::Kit(name) if hot => icons::paint_ink(&painter, icon, name, dim),
                 plain => plain.paint_plain(&painter, icon, 1.0),
             }
         }
-        let label = solidcraft_ui_text::tr_label(self.label);
+        let label = solidcraft_ui_text::tr_command(self.id, self.label);
         let mut right = r.right() - t.space_8 - trailing;
         if self.submenu {
             let c = pos2(right - t.space_4, r.center().y);
@@ -815,7 +819,7 @@ pub fn workspace_menu(ui: &mut egui::Ui, menu: &WorkspaceMenu<'_>, key_row: Opti
                     icon.paint_plain(ui.painter(), tile.shrink(t.space_6 + 1.0), opacity);
                 }
                 let text = if item.enabled { t.text } else { t.text_dim };
-                let name = solidcraft_ui_text::tr_label(&item.label);
+                let name = solidcraft_ui_text::tr_command(&item.id, &item.label);
                 let x = r.left() + 74.0;
                 let y = r.top() + 17.0;
                 let galley =
@@ -826,21 +830,25 @@ pub fn workspace_menu(ui: &mut egui::Ui, menu: &WorkspaceMenu<'_>, key_row: Opti
                 let ppp = ui.ctx().pixels_per_point().max(0.5);
                 let origin = pos2((origin.x * ppp).round() / ppp, (origin.y * ppp).round() / ppp);
                 ui.painter().galley(origin, galley, text);
-                let badge = solidcraft_ui_text::tr(if planned {
-                    "ui.workspace_planned"
+                // Only what isn't plain gets a pill: the workspace you're in, and the ones still to come.
+                // One you can open just has its name, as any menu row.
+                let badge = if planned {
+                    Some("ui.workspace_planned")
                 } else if current {
-                    "ui.workspace_current"
+                    Some("ui.workspace_current")
                 } else {
-                    "ui.workspace_available"
-                });
-                let badge = ui.painter().layout_no_wrap(
-                    badge.to_string(),
-                    FontId::proportional(solidcraft_theme::Tokens::get().font_small),
-                    if current { t.on_accent } else { accent },
-                );
-                let badge_rect = Rect::from_min_size(pos2(badge_x, y - 8.0), badge.size() + vec2(t.space_12, t.space_3));
-                ui.painter().rect_filled(badge_rect, t.radius_lg, if current { accent } else { soft });
-                ui.painter().galley(badge_rect.min + vec2(t.space_6, t.space_3 / 2.0), badge, accent);
+                    None
+                };
+                if let Some(badge) = badge {
+                    let badge = ui.painter().layout_no_wrap(
+                        solidcraft_ui_text::tr(badge).to_string(),
+                        FontId::proportional(solidcraft_theme::Tokens::get().font_small),
+                        if current { t.on_accent } else { accent },
+                    );
+                    let badge_rect = Rect::from_min_size(pos2(badge_x, y - 8.0), badge.size() + vec2(t.space_12, t.space_3));
+                    ui.painter().rect_filled(badge_rect, t.radius_lg, if current { accent } else { soft });
+                    ui.painter().galley(badge_rect.min + vec2(t.space_6, t.space_3 / 2.0), badge, accent);
+                }
                 let line = |content: String, y: f32| {
                     let mut job =
                         egui::text::LayoutJob::simple_singleline(content, FontId::proportional(solidcraft_theme::Tokens::get().font_body), text);
@@ -1032,6 +1040,61 @@ mod tests {
         assert_eq!(frame(key(egui::Key::ArrowDown)), (Some(0), false));
         assert_eq!(frame(key(egui::Key::ArrowUp)), (Some(2), false));
         assert_eq!(frame(key(egui::Key::Enter)), (Some(2), true));
+    }
+
+    #[test]
+    fn pop_out_window_menu_fits_small_screens_and_restores_focus() {
+        use crate::window_options_menu::{self, Action, CardHeaders, TopBar, WindowMenu};
+
+        let ctx = crate::test_support::context();
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 220.0));
+        let anchor = Rect::from_min_size(pos2(276.0, 4.0), vec2(32.0, 26.0));
+        let id = egui::Id::unique("test-window-options");
+        let text = window_options_menu::WindowText { top_bar: "Top bar".into(), card_headers: "Card headers".into(), ..Default::default() };
+        let menu = WindowMenu {
+            text: &text,
+            title: "Window 2",
+            displays: &[],
+            card_headers: CardHeaders::Always,
+            keep_on_top: false,
+            interface_size: 100,
+            interface_sizes: &[90, 100, 125, 150, 200],
+            ribbon: true,
+            ribbon_auto_hide: true,
+            panels: false,
+            top_bar: TopBar::Always,
+        };
+        let frame = |events, open| {
+            let mut action = None;
+            let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), events, ..Default::default() }, |ui| {
+                let response = ui.interact(anchor, id, egui::Sense::click());
+                action = window_options_menu::show(ui, response, open, &menu);
+            });
+            output.textures_delta.clear();
+            action
+        };
+
+        frame(vec![], true);
+        frame(vec![], false);
+        let area = ctx.memory(|memory| memory.area_rect(id.with("window_options").with("popup"))).unwrap();
+        assert!(screen.contains_rect(area), "{area:?} exceeds {screen:?}");
+        frame(key(egui::Key::ArrowDown), false);
+        frame(key(egui::Key::ArrowDown), false);
+        assert_eq!(frame(key(egui::Key::ArrowRight), false), Some(Action::TopBar(TopBar::Edge)));
+        frame(key(egui::Key::ArrowDown), false);
+        frame(key(egui::Key::ArrowDown), false);
+        assert_eq!(frame(key(egui::Key::ArrowRight), false), Some(Action::CardHeaders(CardHeaders::Hover)));
+        frame(key(egui::Key::Escape), false);
+        assert!(ctx.memory(|memory| memory.has_focus(id)));
+        frame(vec![], true);
+        assert!(window_options_menu::is_open(&ctx, id));
+        let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), focused: false, ..Default::default() }, |ui| {
+            let response = ui.interact(anchor, id, egui::Sense::click());
+            assert!(window_options_menu::show(ui, response, false, &menu).is_none());
+        });
+        assert!(!window_options_menu::is_open(&ctx, id), "losing the window focus dismisses its menu");
+        frame(vec![], false);
+        assert!(!window_options_menu::is_open(&ctx, id), "the menu stays closed when the window regains focus");
     }
 
     #[test]

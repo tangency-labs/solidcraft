@@ -260,10 +260,10 @@ mod tests {
     fn a_design_without_properties_saves_as_before() {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
-        let before = solidcraft_io::write_design(&s.doc);
+        let before = solidcraft_io::write_design(&s.doc).unwrap();
         run(&mut s, "document.metadata.set", json!({"key": "author", "value": "Jane"}));
         run(&mut s, "document.metadata.remove", json!({"key": "author"}));
-        assert_eq!(solidcraft_io::write_design(&s.doc), before, "byte for byte");
+        assert_eq!(solidcraft_io::write_design(&s.doc).unwrap(), before, "byte for byte");
         assert!(!String::from_utf8_lossy(&before).contains("\"metadata\""));
     }
 

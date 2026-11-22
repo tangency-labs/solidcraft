@@ -40,6 +40,7 @@ fn ao_comparison(ground: u32) -> Result<(), Box<dyn std::error::Error>> {
         samples: 4,
         tess: false,
         oit: false,
+        edges: false,
     };
     let mut session = solidcraft_engine::Session::default();
     for corner in [[-65, -10, 0], [45, -10, 0]] {
@@ -237,6 +238,8 @@ fn comparison_frame(scene: GpuScene, cam: &Camera, width: u32, height: u32, key:
         sky: [0.0; 4],
         ssaa: 1.0,
         moving: None,
+        motions: Default::default(),
+        ground: None,
     }
 }
 

@@ -31,6 +31,33 @@ fn acceptance_preserves_file_history_and_prepared_world_without_evaluation() {
 }
 
 #[test]
+fn prepared_preview_includes_visibility_and_command_replies() {
+    let mut session = Session::default();
+    session.execute("solid.box", &json!({"length":1,"width":1,"height":1,"body_name":"Hidden"})).unwrap();
+    session.execute("browser.visibility", &json!({"items":["Hidden"],"visible":false})).unwrap();
+    let history = session.undo.len();
+    let document = session.doc.clone();
+    let prepared = session.scratch().compute_commands(&commands(), None).unwrap();
+
+    let preview = prepared.preview_visible_world().unwrap();
+    assert!(preview.before.bodies.is_empty());
+    assert_eq!(preview.after.bodies.len(), 1);
+    assert_eq!(preview.replies.as_slice(), std::slice::from_ref(&prepared.steps[0].reply));
+    assert!(prepared.changes_document());
+    assert!(Arc::ptr_eq(&document, &session.doc));
+    assert_eq!(session.undo.len(), history);
+}
+
+#[test]
+fn an_equal_document_in_a_new_allocation_is_unchanged() {
+    let session = Session::default();
+    let mut prepared = session.scratch().compute_commands(&[], None).unwrap();
+    prepared.computed.doc = Arc::new((*prepared.computed.doc).clone());
+    assert!(!Arc::ptr_eq(&prepared.source.doc, &prepared.computed.doc));
+    assert!(!prepared.changes_document());
+}
+
+#[test]
 fn failure_discards_the_entire_batch() {
     let session = Session::default();
     let document = session.doc.clone();
@@ -176,6 +203,19 @@ fn editor_display_changes_allow_apply_and_cancel() {
         session.restore_editor(&source, original).unwrap_or_else(|e| panic!("Cancel after {display:?}: {e}"));
         assert_editor_volume(&mut session, 6024.0);
     }
+}
+
+#[test]
+fn cancelling_a_previewed_editor_restores_authored_bytes_with_a_fresh_plugin_token() {
+    let (mut session, source, original, commands) = extrusion_editor();
+    let bytes = original.doc.to_json();
+    let historical = original.design_token();
+    let rolled_back = session.design_token();
+    session.preview(&commands).unwrap();
+    session.restore_editor(&source, original).unwrap();
+    assert_eq!(session.doc.to_json(), bytes);
+    assert_ne!(session.design_token(), historical);
+    assert_ne!(session.design_token(), rolled_back);
 }
 
 #[test]
@@ -386,4 +426,43 @@ fn a_cancelled_computation_stops_promptly_and_is_never_cached() {
     // The cut is the one feature computed anew (the session's counter carries over to its copies).
     assert_eq!(again.computed.model.recomputed, session.model.recomputed + 1, "nothing of the cancelled run was cached");
     assert!(again.computed.model.results.iter().all(|r| r.error.is_none()), "OK again finishes the cut");
+}
+
+#[test]
+fn computed_sketch_ownership_rejects_closed_targets_and_keeps_live_view_metadata() {
+    use crate::{ViewContext, ViewDescriptor};
+    use solidcraft_views::ViewKind;
+    let context = |window| {
+        ViewContext::new(
+            vec![
+                ViewDescriptor { id: 1, kind: ViewKind::Model, window: 0, subject: None },
+                ViewDescriptor { id: 2, kind: ViewKind::Model, window, subject: None },
+            ],
+            1,
+            vec![1, 2],
+        )
+        .unwrap()
+    };
+    let mut session = Session::default();
+    session.set_view_context(context(1)).unwrap();
+    let commands = vec![("sketch.create".into(), json!({"plane":"XY","view":2}))];
+    let prepared = session.scratch().compute_commands(&commands, None).unwrap();
+    session.set_view_context(ViewContext::default()).unwrap();
+    let before = (session.doc.to_json(), session.undo.len(), session.revision);
+    assert!(!prepared.is_current(&session));
+    assert!(session.accept_commands(prepared).is_err());
+    assert_eq!((session.doc.to_json(), session.undo.len(), session.revision), before);
+    session.set_view_context(context(1)).unwrap();
+    let mut computed = session.scratch();
+    computed.execute("sketch.create", &json!({"view":2})).unwrap();
+    session.set_view_context(ViewContext::default()).unwrap();
+    assert!(session.accept_computed(computed).is_err());
+    assert_eq!((session.doc.to_json(), session.undo.len(), session.revision), before);
+    session.set_view_context(context(1)).unwrap();
+    let prepared = session.scratch().compute_commands(&commands, None).unwrap();
+    session.set_view_context(context(2)).unwrap();
+    assert!(prepared.is_current(&session), "moving the same open Model is valid");
+    session.accept_commands(prepared).unwrap();
+    assert_eq!(session.sketching_view, Some(2));
+    assert_eq!(session.view_context, context(2), "adoption cannot reinstall the worker's stale window placement");
 }

@@ -300,6 +300,7 @@ fn joint_and_drive_preview_on_the_placed_model() {
         ghost: true,
         tint_new: true,
         cut_tint: true,
+        glass_new: false,
     };
     let cmds = preview_commands(&app, &d).unwrap();
     let b = world_preview(&app.session, &cmds, colors).unwrap().unwrap();
@@ -1248,6 +1249,7 @@ fn drive_says_where_a_loop_stopped_it() {
         ghost: true,
         tint_new: true,
         cut_tint: true,
+        glass_new: false,
     };
     let rocker = app.session.doc.assembly.joints.iter().position(|j| j.name == "Rocker").unwrap();
     let mut d = drive_joint(&app, app.session.doc.assembly.joints[rocker].id).unwrap();
@@ -1313,6 +1315,7 @@ fn drive_says_when_its_joint_is_joined_to_nothing_grounded() {
         ghost: true,
         tint_new: true,
         cut_tint: true,
+        glass_new: false,
     };
     let b = world_preview(&app.session, &apply_commands(&app, &d).unwrap(), colors).unwrap().unwrap();
     let why = b.stopped.as_ref().and_then(drive_stop).unwrap();
@@ -2372,4 +2375,22 @@ fn lateral_offset_controls_do_not_change_assembly_constraint_rules() {
     harness.settle();
     assert_eq!(harness.app.session.doc.assembly.joints[0].constraint, None);
     assert_eq!(harness.app.session.doc.assembly.joints[0].offset_xy, [12.0, 0.0]);
+}
+
+/// A joint origin clicked inside a face, a few points from its edge, is the face: an edge is taken
+/// only within `JOINT_EDGE_REACH` of the pointer, not the 6 points other picks use (#18255).
+#[test]
+fn a_joint_origin_a_few_points_inside_a_face_is_the_face() {
+    let pick_at = |dy: f64| {
+        let mut h = joint_picking_component_1();
+        let at = h.call("ui.at", json!({ "world": [15, 0, 10] }))["result"].clone();
+        let p = json!([at[0].as_f64().unwrap(), at[1].as_f64().unwrap() + dy]);
+        h.step(&json!({ "move": p })).unwrap();
+        h.step(&json!({ "click": p })).unwrap();
+        h.app.dialog.as_ref().unwrap().inputs[0].items.clone()
+    };
+    let near = pick_at(1.5);
+    assert!(matches!(near.as_slice(), [Sel::Edge { .. } | Sel::Vertex { .. }]), "right on the edge: {near:?}");
+    let inside = pick_at(4.5);
+    assert!(matches!(inside.as_slice(), [Sel::Face { body, .. }] if body == "Body1"), "inside the face: {inside:?}");
 }

@@ -48,9 +48,9 @@ enum Done {
 }
 
 impl crate::session::Answer for Done {
-    fn refusal(&self) -> Option<String> {
+    fn refusal(&self) -> Option<Error> {
         match self {
-            Done::Refused(e) => Some(e.to_string()),
+            Done::Refused(e) => Some(e.clone()),
             _ => None,
         }
     }

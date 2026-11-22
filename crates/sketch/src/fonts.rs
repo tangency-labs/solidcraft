@@ -139,6 +139,25 @@ pub fn font_data_styled(name: Option<&str>, bold: bool, italic: bool) -> Result<
     Ok((data, italic && !face_italic))
 }
 
+/// The face a saved text is set in (#19230). A saved design is not a choice of font: when this
+/// computer lacks the text's font, or its bold face, the text is not lost but set in what is here
+/// (the regular face of its font, else the built-in font in the text's slant) and the note says
+/// so. The text keeps the font it names, so it is set in it again where that font is installed.
+pub fn font_data_saved(name: Option<&str>, bold: bool, italic: bool) -> Result<((FontData, bool), Option<String>)> {
+    let first = match font_data_styled(name, bold, italic) {
+        Ok(found) => return Ok((found, None)),
+        Err(e) => e,
+    };
+    let trimmed = name.map(str::trim).unwrap_or("");
+    let builtin = trimmed.is_empty() || normalize(trimmed) == normalize(DEFAULT_FONT_FAMILY);
+    let which = if builtin { "the built-in font".to_string() } else { format!("the font `{trimmed}`") };
+    if bold && let Ok(regular) = font_data_styled(name, false, italic) {
+        return Ok((regular, Some(format!("{which} has no bold face here: the text is set in its regular face"))));
+    }
+    let fallback = font_data_styled(None, false, italic)?;
+    Ok((fallback, Some(format!("{first}; the text is set in the built-in font until {which} is installed"))))
+}
+
 /// Bold on a variable face's weight axis: 700 (the weight fonts name Bold), within the axis, when
 /// the axis reaches past semibold from a lighter default. None for a face with no such axis.
 fn variable_bold(data: &FontData) -> Option<f32> {
@@ -582,6 +601,18 @@ mod tests {
     /// Files sort by their bytes within a folder, whatever order the system lists them in; a
     /// folder's files come before its subfolders', and `dirs`' order stands.
     /// A list's known files come row by row, each row's in its order: the order they are tried in.
+    /// The Last Resort font maps every code point to a box naming its block, so the search for a
+    /// font that has a character never takes it: on macOS it would "set" unassigned characters.
+    #[test]
+    fn the_last_resort_font_is_never_a_fallback() {
+        for path in ["/System/Library/Fonts/LastResort.otf", "/usr/share/fonts/LastResort-Regular.ttf", "C:\\Fonts\\LastResortHE-Regular.ttf"] {
+            assert!(fallback::placeholder(Path::new(path)), "{path}");
+        }
+        for path in ["/System/Library/Fonts/Supplemental/Arial Unicode.ttf", "/usr/share/fonts/NotoSans-Regular.ttf", "/fonts/Resort.ttf"] {
+            assert!(!fallback::placeholder(Path::new(path)), "{path}");
+        }
+    }
+
     #[test]
     fn candidate_files_keep_their_rows_and_their_order() {
         const ROWS: fallback::Candidates = &[("A", &["a1", "a2"]), ("B", &["b1"]), ("A", &["a3"])];

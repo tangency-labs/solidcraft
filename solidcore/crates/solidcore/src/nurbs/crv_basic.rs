@@ -239,6 +239,19 @@ impl Curve {
         (self.n, self.m)
     }
 
+    /// Not upstream: the same curve by definition. The degree, the indices in use, and
+    /// every control point and knot in use are equal (IEEE `==`, so a NaN anywhere
+    /// refuses; storage past the indices is not compared). Equal definitions evaluate
+    /// to the same points at every parameter, exactly.
+    #[must_use]
+    pub fn same_definition(&self, other: &Self) -> bool {
+        self.p == other.p
+            && self.n == other.n
+            && self.m == other.m
+            && self.cpts() == other.cpts()
+            && self.knots() == other.knots()
+    }
+
     /// The control points in use, `Pw[0..=n]` (`N_CrvGetCPts`).
     #[must_use]
     pub fn cpts(&self) -> &[CPoint] {

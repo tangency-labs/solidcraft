@@ -7,6 +7,7 @@
 //! | Rust                                         | Upstream                                     |
 //! |----------------------------------------------|----------------------------------------------|
 //! | [`read_from_file`]                           | `SmBrep::ReadFromFile`                       |
+//! | [`read_from_data`]                           | `SmBrep::ReadFromFile` after the file is read |
 //! | [`make_face`], [`MakeFaceOptions`], [`NewFace`] | `SmBrep::MakeFace`                        |
 //! | [`make_face_with_curves`], [`make_face_with_curves_with_kernel_context`], [`make_face_with_curve_owners`], [`FaceCurvesInput`] | `SmBrep::MakeFaceWithCurves` |
 //! | [`glue_edges_general`]                       | `SmBrep::GlueEdgesGeneral`                   |
@@ -762,7 +763,23 @@ pub fn read_from_file(
     rebuild_uv_trim_curves_flag: bool,
     env: &mut TopologyEnv<'_>,
 ) -> Result<()> {
-    let mut brep_data = BrepData::read_from_file(k, data, file_type)?;
+    let brep_data = BrepData::read_from_file(k, data, file_type)?;
+    read_from_data(k, b, brep_data, rebuild_uv_trim_curves_flag, env)
+}
+
+/// [`read_from_file`] after its file is read into `brep_data`: the topology made from it,
+/// then the UV trim curves checked and fixed, or rebuilt with `rebuild_uv_trim_curves_flag`.
+///
+/// # Errors
+///
+/// As [`read_from_file`], less those of [`BrepData::read_from_file`].
+pub fn read_from_data(
+    k: &mut Kernel,
+    b: &mut Brep,
+    mut brep_data: BrepData,
+    rebuild_uv_trim_curves_flag: bool,
+    env: &mut TopologyEnv<'_>,
+) -> Result<()> {
     // MakeTopologyFromData(pBrepData, sAttributes, FALSE, TRUE, TRUE)
     make_topology_from_data(k, b, &mut brep_data, env, false, true, true)?;
     drop(brep_data);
@@ -1884,7 +1901,7 @@ fn make_face_with_curves_transfer_impl(
 /// `SM_ERR` when the edges do not share both vertices; those of the radial sector, edge
 /// use and shell edits and of `SmBrep::Notify`'s representation checks;
 /// [`SolidError::Unported`] (see the module docs).
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
+#[allow(clippy::too_many_arguments)] // upstream's argument list
 pub fn glue_edges_general(
     k: &mut Kernel,
     b: &mut Brep,
@@ -1892,6 +1909,42 @@ pub fn glue_edges_general(
     relative_orientation: OrientType,
     edge_gap: f64,
     do_region_nesting: bool,
+    to_delete: Option<EdgeId>,
+    inside_faceuses: Option<&[FaceuseId]>,
+    env: &mut ed::NotifyEnv<'_>,
+) -> Result<()> {
+    glue_edges_general_searching(
+        k,
+        b,
+        surviving,
+        relative_orientation,
+        edge_gap,
+        do_region_nesting,
+        p6::InfiniteHalf::Searched,
+        to_delete,
+        inside_faceuses,
+        env,
+    )
+}
+
+/// [`glue_edges_general`] for a caller that says how a split of the infinite region tells
+/// its infinite half: by the search (`InfiniteHalf::Searched`, upstream's behaviour), or
+/// from a face use the caller knows to lie outside the solid whose shell the glue closes
+/// (`InfiniteHalf::Of`, not upstream). Without `do_region_nesting` nothing is split and
+/// the argument is not read.
+///
+/// # Errors
+///
+/// Those of [`glue_edges_general`].
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
+pub(crate) fn glue_edges_general_searching(
+    k: &mut Kernel,
+    b: &mut Brep,
+    surviving: Option<EdgeId>,
+    relative_orientation: OrientType,
+    edge_gap: f64,
+    do_region_nesting: bool,
+    infinite_half: p6::InfiniteHalf,
     to_delete: Option<EdgeId>,
     inside_faceuses: Option<&[FaceuseId]>,
     env: &mut ed::NotifyEnv<'_>,
@@ -2199,7 +2252,14 @@ pub fn glue_edges_general(
         let mut new_region = None;
         for fu in test_split {
             // each call first resets rpNewRegion to NULL
-            let attempt = p6::test_closure_split_region_attempt(k, b, &mut marks, env, true, fu)?;
+            let attempt = p6::test_closure_split_region_attempt_telling(
+                k,
+                b,
+                &mut marks,
+                env,
+                infinite_half,
+                fu,
+            )?;
             ignore_status(attempt.status)?;
             new_region = attempt.region;
         }

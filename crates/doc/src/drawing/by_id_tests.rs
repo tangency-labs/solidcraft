@@ -48,3 +48,16 @@ fn the_rules_name_the_kind_and_the_record() {
     let e = things(&[2, 3]).check(2, "thing", odd).unwrap_err().to_string();
     assert!(e.contains(&format!("thing {}: it is odd", ids::encode(3))), "{e}");
 }
+
+#[test]
+fn named_records_prefer_their_id_then_require_a_unique_name() {
+    let encoded = ids::encode(7);
+    let missing_id = ids::encode(11);
+    let records = [(7, "Same"), (8, "Same"), (9, encoded.as_str()), (10, "Unique"), (12, missing_id.as_str())];
+    let lookup = |named: &str| named_index(&records, named, "sheet", |record| record.0, |record| record.1);
+    assert_eq!(lookup(&encoded).unwrap(), 0, "an existing id wins over another item's name");
+    assert_eq!(lookup("Unique").unwrap(), 3);
+    assert_eq!(lookup(&missing_id).unwrap(), 4, "a missing id can still be a unique name");
+    assert!(lookup("Same").is_err_and(|e| e.to_string().contains("more than one sheet is called `Same`: give its id")));
+    assert!(lookup("Missing").is_err_and(|e| e.to_string().contains("no sheet `Missing`")));
+}
