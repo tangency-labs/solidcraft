@@ -2421,6 +2421,13 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 app.tree.cloud_panel = Some(crate::browser::CloudPanel::new(app, c));
             }
         }
+        "scan.align" if item.params.is_some() => {
+            if let Some(c) = id_of(&p, "cloud") {
+                app.dialog = Some(crate::dialogs_scan_align::start_for_cloud(&app.session, c));
+            } else {
+                app.start("scan.align");
+            }
+        }
         "ui.editCanvas" | "ui.calibrateCanvas" => {
             if let Some(c) = id_of(&p, "canvas") {
                 let calibrate = item.id == "ui.calibrateCanvas";

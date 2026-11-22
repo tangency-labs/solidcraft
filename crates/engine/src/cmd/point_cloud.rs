@@ -199,7 +199,7 @@ fn set_colors(c: &mut PointCloud, by: Option<(ColorBy, Option<String>)>, color: 
 }
 
 /// The cloud's placement as `matrix` takes it: 12 numbers, row by row.
-pub(super) fn matrix_rows(m: &Mat) -> Vec<f64> {
+fn matrix_rows(m: &Mat) -> Vec<f64> {
     (0..3).flat_map(|row| (0..4).map(move |col| m[col][row])).collect()
 }
 

@@ -293,6 +293,25 @@ mod tests {
     use crate::Error;
 
     #[test]
+    fn large_distance_tolerance_does_not_reject_normalized_direction() {
+        let sol = solve_alignment(
+            PlaneInput::Explicit {
+                origin: [0.0, 0.0, 0.0],
+                normal: [0.0, 0.0, 1.0],
+            },
+            DirectionInput::Vector([50.0, 0.0, 0.0]),
+            [0.0, 0.0, 0.0],
+            false,
+            false,
+            Frame3D::world(),
+            2.0,
+        )
+        .expect("tolerance=2.0 must not reject valid direction [50,0,0] after normalization");
+        assert!((sol.determinant - 1.0).abs() < 1e-12);
+        assert!(sol.orthogonality_error < 1e-12);
+    }
+
+    #[test]
     fn solve_alignment_fits_plane_projects_origin_and_keeps_det_plus_one() {
         let pts = [
             [10.0, 20.0, 5.0],

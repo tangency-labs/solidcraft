@@ -9,11 +9,11 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use egui::{Pos2, RichText, Stroke};
+use egui::{RichText, Stroke};
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
+use solidcraft_engine::doc::Mat;
 use solidcraft_engine::doc::construct::ConstructGeom;
-use solidcraft_engine::doc::{Mat, apply_point, mat_mul};
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::schema::scan_align::ScanAlignResult;
 use solidcraft_engine::{Sel, Session};
@@ -60,6 +60,15 @@ fn sync_inputs(d: &mut Dialog, has_cloud: bool) {
     }
 }
 
+/// Start a new `scan.align` dialog targeting an explicitly clicked point cloud (e.g. from the
+/// Point Cloud Browser context menu), falling back to [`start`] if that cloud no longer exists.
+pub(crate) fn start_for_cloud(s: &Session, cloud_id: u64) -> Dialog {
+    if !s.doc.point_clouds.iter().any(|c| c.id == cloud_id) {
+        return start(s);
+    }
+    build_dialog(Some(cloud_id))
+}
+
 /// Start a new `scan.align` dialog, pre-selecting a cloud if one is active/only cloud and no
 /// occurrence is preselected.
 pub(crate) fn start(s: &Session) -> Dialog {
@@ -77,7 +86,10 @@ pub(crate) fn start(s: &Session) -> Dialog {
     } else {
         None
     };
+    build_dialog(target_cloud)
+}
 
+fn build_dialog(target_cloud: Option<u64>) -> Dialog {
     let form = ScanAlignForm { target_cloud, target_frame: "world".into(), flip_normal: false, flip_direction: false, cached: None };
     let mut inputs = Vec::with_capacity(4);
     if target_cloud.is_none() {
@@ -190,23 +202,7 @@ pub(crate) fn build_params(app: &SolveApp, d: &Dialog, form: &ScanAlignForm, pre
     if dir_items.len() == 1 {
         match &dir_items[0] {
             Sel::Axis { name } => p["direction"] = json!(name),
-            Sel::Edge { body, index, .. } => {
-                let st = crate::open_meshing::shown_world(app);
-                let edge_dir = st.body(body).and_then(|b| {
-                    let (m, place) = b.mesh_in_place();
-                    let e = m.edges.get(*index)?;
-                    let a = apply_point(&place, *e.first()?);
-                    let c = apply_point(&place, *e.last()?);
-                    let v = c - a;
-                    (v.len() > 1e-9).then_some([v.x, v.y, v.z])
-                });
-                match edge_dir {
-                    Some(v) => p["direction"] = json!({"vector": v}),
-                    None => {
-                        return Err(solidcraft_ui_text::tr("scan_align.err_need_two_dir_points").to_string());
-                    }
-                }
-            }
+            Sel::Edge { point, .. } => p["direction"] = json!({"edge": [point.x, point.y, point.z]}),
             _ => {
                 return Err(solidcraft_ui_text::tr("scan_align.err_need_two_dir_points").to_string());
             }
@@ -274,8 +270,7 @@ pub(crate) fn preview_cloud_transform(app: &SolveApp, cloud_id: u64) -> Option<M
         owned_res = evaluate_preview(app, d, form);
         owned_res.as_ref().ok()?
     };
-    let cloud = app.session.doc.point_clouds.iter().find(|c| c.id == cloud_id)?;
-    Some(mat_mul(&sol.world_transform, &cloud.transform))
+    sol.composed_transform
 }
 
 /// Draw the `scan.align` dialog fields inside the standard dialog card.
@@ -430,30 +425,19 @@ pub(crate) fn overlay(_app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: 
         &t,
     );
 
-    // If the picked origin lies off-plane, show both positions connected by a projection line.
+    // If the picked origin lies off-plane, show both positions connected by a clipped dashed line.
     if sol.origin.off_plane_distance_mm > 1e-4 {
         let raw_o = arr_vec(sol.origin.raw_origin);
-        if let (Some(a), Some(b)) = (proj.to_screen(raw_o), proj.to_screen(src_o)) {
-            draw_dashed(painter, a, b, Stroke::new(1.5, t.warning));
+        if let (Some(a), Some(b)) = (proj.to_screen(raw_o), proj.to_screen(src_o))
+            && a.x.is_finite()
+            && a.y.is_finite()
+            && b.x.is_finite()
+            && b.y.is_finite()
+        {
+            painter.extend(ui_kit::dashed_line(&[a, b], painter.clip_rect(), Stroke::new(1.5, t.warning), 4.5, 3.5));
             painter.circle_filled(a, 3.5, t.warning);
             painter.circle_stroke(a, 5.0, Stroke::new(1.25, t.text));
         }
-    }
-}
-
-fn draw_dashed(painter: &egui::Painter, a: Pos2, b: Pos2, stroke: Stroke) {
-    let d = b - a;
-    let len = d.length();
-    if len < 1.0 {
-        return;
-    }
-    let step = 8.0_f32;
-    let dir = d / len;
-    let mut s = 0.0_f32;
-    while s < len {
-        let e = (s + 4.5).min(len);
-        painter.line_segment([a + dir * s, a + dir * e], stroke);
-        s += step;
     }
 }
 
@@ -583,5 +567,49 @@ end_header
         assert_eq!(h.app.session.doc.point_clouds[0].transform, initial_transform);
 
         let _ = std::fs::remove_dir_all(tmp_dir);
+    }
+
+    #[test]
+    fn context_menu_targets_clicked_cloud_and_mesh_face_picks_feed_datum_inputs() {
+        let mut h = Harness::new();
+        let (c1, dir1) = insert_tilted_cloud(&mut h);
+        let dir2 = std::env::temp_dir().join(format!("solidcraft-ui-scan-align-2-{}", std::process::id()));
+        std::fs::create_dir_all(&dir2).unwrap();
+        let ply2 = dir2.join("second.ply");
+        std::fs::write(
+            &ply2,
+            "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\nend_header\n0 0 0\n10 0 0\n0 10 0\n",
+        )
+        .unwrap();
+        let c2 = h.app.run("pointcloud.insert", json!({"path": ply2.to_string_lossy()})).unwrap()["cloud"].as_u64().unwrap();
+
+        // Even with a point on c1 selected, opening Align Scan from c2's context menu targets c2.
+        h.app.session.selection = vec![Sel::PointCloudPoint { cloud: c1, index: 0, point: Vec3::ZERO }];
+        let d = start_for_cloud(&h.app.session, c2);
+        let Kind::ScanAlign(form) = &d.kind else { panic!("expected ScanAlign") };
+        assert_eq!(form.target_cloud, Some(c2));
+
+        // Mesh-occurrence mode accepts mesh face hits as exact points for Primary plane, Direction, and Origin.
+        let stl = dir2.join("plate.stl");
+        std::fs::write(&stl, "solid p\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 20 0 0\nvertex 0 20 0\nendloop\nendfacet\nendsolid p\n")
+            .unwrap();
+        let ins = h.app.run("file.insert_mesh", json!({"path": stl.to_string_lossy()})).unwrap();
+        let occ = ins["occurrence"].as_u64().unwrap();
+        let body_name = h.app.session.occurrence_bodies(&[occ], true).unwrap()[0].clone();
+
+        let mut md = build_dialog(None);
+        for active_idx in [1usize, 2, 3] {
+            md.active = active_idx;
+            let hit = crate::viewport::Hit::Face { body: body_name.clone(), index: 0, point: Vec3::new(5.0, 5.0, 0.0) };
+            let cand = md.candidate_on(&h.app.session, &hit, None);
+            assert_eq!(
+                cand,
+                Some(Sel::Vertex { body: body_name.clone(), point: Vec3::new(5.0, 5.0, 0.0) }),
+                "input {active_idx} should accept mesh face pick as a 3D point"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(dir1);
+        let _ = std::fs::remove_dir_all(dir2);
     }
 }

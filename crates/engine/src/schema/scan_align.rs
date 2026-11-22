@@ -38,7 +38,8 @@ pub struct ScanAlignParams {
     pub plane: Value,
     /// Secondary direction (projected into the primary plane):
     /// - `{"from": [x,y,z], "to": [x,y,z]}` (two distinct points),
-    /// - `{"vector": [x,y,z]}` (explicit non-zero vector), or
+    /// - `{"vector": [x,y,z]}` (explicit non-zero vector),
+    /// - `{"edge": [x,y,z]}` (a point on a straight model edge; curved edges are rejected), or
     /// - an axis name (`"X"`, `"Y"`, `"Z"`, `"-X"`, `"-Y"`, `"-Z"`, or a construction axis name).
     pub direction: Value,
     /// Explicit source frame origin `[x, y, z]` (or `"origin"` for `[0, 0, 0]`), projected
@@ -147,6 +148,9 @@ pub struct ScanAlignResult {
     pub world_transform: [[f64; 4]; 4],
     /// World-space proper rigid delta as 16 row-major numbers.
     pub world_matrix: Vec<f64>,
+    /// For point clouds: the final composed placement (column-major 4×4 `m[col][row]`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub composed_transform: Option<[[f64; 4]; 4]>,
     /// For point clouds: the final composed placement matrix (16 row-major numbers).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub composed_matrix: Option<Vec<f64>>,

@@ -817,6 +817,18 @@ pub(crate) fn line(ctx: &Ctx, g: &GeoRef) -> Result<(Vec3, Vec3)> {
     }
 }
 
+/// The plane of a verified planar B-rep face at `at` (rejects curved faces and mesh bodies).
+pub fn planar_face_plane(st: &ModelState, at: Vec3) -> Result<Plane> {
+    let (b, fi, q) = face_of(st, at, &None)?;
+    match kernel::face_surface(&b.body, fi) {
+        Some(FaceSurface::Plane { normal, point }) => {
+            let o = q - normal * (q - point).dot(normal);
+            Plane::from_normal(o, normal).ok_or_else(|| bad("degenerate face"))
+        }
+        _ => Err(bad("the face is not planar")),
+    }
+}
+
 /// A reference as a plane.
 pub(crate) fn plane(ctx: &Ctx, g: &GeoRef) -> Result<Plane> {
     match g {

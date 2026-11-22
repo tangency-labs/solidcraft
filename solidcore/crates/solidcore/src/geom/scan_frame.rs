@@ -33,6 +33,9 @@ const OP_ALIGN: &str = "geom::scan_frame::rigid_alignment";
 /// Directions closer to normal than this are rejected as degenerate.
 const MIN_IN_PLANE_SIN: f64 = 1e-5;
 
+/// Minimum length of a dimensionless direction vector before unitization.
+const MIN_DIR_LEN: f64 = 1e-12;
+
 /// Result of fitting or validating a primary reference plane.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PlaneFit {
@@ -187,6 +190,8 @@ pub fn plane_from_origin_normal(origin: Point3, normal: Vec3) -> Result<PlaneFit
 /// Projects an explicit direction vector into the plane defined by unit `plane_normal`.
 ///
 /// Rejects zero/non-finite directions and directions normal (or near-normal) to the plane.
+/// Direction vectors are treated as dimensionless axes (not compared against point-distance `tol`),
+/// so an already-normalized direction remains valid even when `tol >= 1.0`.
 pub fn project_direction_onto_plane(direction: Vec3, plane_normal: Vec3, tol: f64) -> Result<Vec3> {
     if !(tol.is_finite() && tol > 0.0) {
         return Err(invalid(
@@ -204,15 +209,12 @@ pub fn project_direction_onto_plane(direction: Vec3, plane_normal: Vec3, tol: f6
         .unitize()
         .map_err(|_| invalid(OP_PROJECT_DIR, "plane normal must be non-zero"))?;
     let raw_len = direction.length();
-    if !(raw_len.is_finite() && raw_len > tol) {
-        return Err(invalid(
-            OP_PROJECT_DIR,
-            "direction vector is zero or shorter than tolerance",
-        ));
+    if !(raw_len.is_finite() && raw_len > MIN_DIR_LEN) {
+        return Err(invalid(OP_PROJECT_DIR, "direction vector must be non-zero"));
     }
     let proj = direction - n * direction.dot(n);
     let proj_len = proj.length();
-    if !(proj_len.is_finite() && proj_len > tol && proj_len / raw_len > MIN_IN_PLANE_SIN) {
+    if !(proj_len.is_finite() && proj_len > MIN_DIR_LEN && proj_len / raw_len > MIN_IN_PLANE_SIN) {
         return Err(invalid(
             OP_PROJECT_DIR,
             "direction is normal or nearly normal to the primary plane",
@@ -223,17 +225,45 @@ pub fn project_direction_onto_plane(direction: Vec3, plane_normal: Vec3, tol: f6
 
 /// Projects the vector from `from` to `to` into the plane defined by `plane_normal`.
 ///
-/// Rejects coincident points and directions normal to the plane.
+/// Rejects coincident points (distance `<= tol`) and directions normal to the plane.
 pub fn project_points_direction_onto_plane(
     from: Point3,
     to: Point3,
     plane_normal: Vec3,
     tol: f64,
 ) -> Result<Vec3> {
-    if !is_finite_vec(from) || !is_finite_vec(to) {
-        return Err(invalid(OP_PROJECT_DIR, "direction points must be finite"));
+    if !(tol.is_finite() && tol > 0.0) {
+        return Err(invalid(
+            OP_PROJECT_DIR,
+            "tolerance must be finite and positive",
+        ));
     }
-    project_direction_onto_plane(to - from, plane_normal, tol)
+    if !is_finite_vec(from) || !is_finite_vec(to) || !is_finite_vec(plane_normal) {
+        return Err(invalid(
+            OP_PROJECT_DIR,
+            "direction points and plane normal must be finite",
+        ));
+    }
+    let delta = to - from;
+    let raw_len = delta.length();
+    if !(raw_len.is_finite() && raw_len > tol) {
+        return Err(invalid(
+            OP_PROJECT_DIR,
+            "direction points are coincident or closer than tolerance",
+        ));
+    }
+    let n = plane_normal
+        .unitize()
+        .map_err(|_| invalid(OP_PROJECT_DIR, "plane normal must be non-zero"))?;
+    let proj = delta - n * delta.dot(n);
+    let proj_len = proj.length();
+    if !(proj_len.is_finite() && proj_len > tol && proj_len / raw_len > MIN_IN_PLANE_SIN) {
+        return Err(invalid(
+            OP_PROJECT_DIR,
+            "direction is normal or nearly normal to the primary plane",
+        ));
+    }
+    Ok(proj / proj_len)
 }
 
 /// Projects an explicit `raw_origin` orthogonally onto `plane`, retaining both positions

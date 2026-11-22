@@ -95,8 +95,10 @@ fn resolve_plane(s: &Session, v: &Value, cmd: &str) -> Result<ResolvedPlane> {
             let fp = vec3(face_val)
                 .filter(|q| q.x.is_finite() && q.y.is_finite() && q.z.is_finite())
                 .ok_or_else(|| bad(cmd, "`plane.face` must be [x, y, z]"))?;
-            let n = super::face::face_normal_world(s, fp).ok_or_else(|| bad(cmd, "`plane.face` must lie on a planar face"))?;
-            return Ok(ResolvedPlane::Explicit { origin: to_arr(fp), normal: to_arr(n) });
+            let world = s.world_state()?;
+            let pl = solidcraft_doc::construct::planar_face_plane(&world, fp)
+                .map_err(|e| bad(cmd, format!("`plane.face` must lie on a planar face: {e}")))?;
+            return Ok(ResolvedPlane::Explicit { origin: to_arr(pl.origin), normal: to_arr(pl.normal()) });
         }
         if obj.contains_key("origin") || obj.contains_key("normal") {
             let origin = obj
@@ -152,8 +154,23 @@ fn resolve_direction(s: &Session, v: &Value, cmd: &str) -> Result<DirectionInput
                 .ok_or_else(|| bad(cmd, "`direction.vector` must be finite [x, y, z]"))?;
             return Ok(DirectionInput::Vector(to_arr(d)));
         }
+        if let Some(edge_val) = obj.get("edge") {
+            let ep = vec3(edge_val)
+                .filter(|q| q.x.is_finite() && q.y.is_finite() && q.z.is_finite())
+                .ok_or_else(|| bad(cmd, "`direction.edge` must be finite [x, y, z]"))?;
+            let (vals, _) = s.doc.param_values();
+            let world = s.world_state()?;
+            let d = solidcraft_doc::construct::straight_direction(
+                &s.placed_document(),
+                &vals,
+                &world,
+                &solidcraft_doc::construct::GeoRef::Edge { at: ep, name: None },
+            )
+            .map_err(|e| bad(cmd, format!("`direction.edge` must lie on a straight edge: {e}")))?;
+            return Ok(DirectionInput::Vector(to_arr(d)));
+        }
     }
-    Err(bad(cmd, "`direction` must be {from, to}, {vector}, or an axis name (X, Y, Z, -X, -Y, -Z, or construction axis)"))
+    Err(bad(cmd, "`direction` must be {from, to}, {vector}, {edge}, or an axis name (X, Y, Z, -X, -Y, -Z, or construction axis)"))
 }
 
 fn resolve_target_frame(s: &Session, v: Option<&Value>, tol: f64, cmd: &str) -> Result<Frame3D> {
@@ -207,6 +224,44 @@ pub fn preview_align(s: &Session, p: &Value) -> Result<ScanAlignResult> {
     plan_align(s, p, Some(true)).map(|(_, res)| res)
 }
 
+fn matrix_rows_4x4(m: &Mat) -> Vec<f64> {
+    (0..4).flat_map(|r| (0..4).map(move |c| m[c][r])).collect()
+}
+
+/// Reject selections where one target occurrence owns a component subtree containing the terminal
+/// occurrence id of another target path (for example `[A]` and `[B, c]` where `A` and `B` share a
+/// component defining child `c`). Updating both `A` and `c` would double-transform `A`'s copy of `c`.
+fn reject_shared_definition_overlap(doc: &solidcraft_doc::Document, paths: &[Vec<u64>], cmd: &str) -> Result<()> {
+    use std::collections::HashSet;
+    let terminals: Vec<u64> = paths.iter().filter_map(|p| p.last().copied()).collect();
+    for (i, &root_occ_id) in terminals.iter().enumerate() {
+        let Some(root_occ) = doc.occurrences.iter().find(|o| o.id == root_occ_id) else { continue };
+        let mut stack = vec![root_occ.component];
+        let mut visited_comps = HashSet::new();
+        let mut descendant_occs = HashSet::new();
+        while let Some(comp_id) = stack.pop() {
+            if !visited_comps.insert(comp_id) {
+                continue;
+            }
+            for o in &doc.occurrences {
+                if o.parent == comp_id {
+                    descendant_occs.insert(o.id);
+                    stack.push(o.component);
+                }
+            }
+        }
+        for (j, &other_occ_id) in terminals.iter().enumerate() {
+            if i != j && descendant_occs.contains(&other_occ_id) {
+                return Err(bad(
+                    cmd,
+                    "cannot align an occurrence together with a nested occurrence inside a shared component definition; align the parent occurrences instead",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn plan_align(s: &Session, p: &Value, preview_override: Option<bool>) -> Result<(AlignPlan, ScanAlignResult)> {
     let cmd = "scan.align";
     let has_cloud = p.get("cloud").is_some_and(|v| !v.is_null());
@@ -248,7 +303,7 @@ fn plan_align(s: &Session, p: &Value, preview_override: Option<bool>) -> Result<
         solve_alignment(plane_input, direction, raw_origin, flip_normal, flip_direction, target_frame, tol).map_err(|e| bad(cmd, e.to_string()))?;
 
     let world_move: Mat = sol.column_major;
-    let world_matrix = super::point_cloud::matrix_rows(&world_move);
+    let world_matrix = matrix_rows_4x4(&world_move);
 
     if has_cloud {
         let idx = super::point_cloud::find(s, p, cmd)?;
@@ -259,7 +314,7 @@ fn plan_align(s: &Session, p: &Value, preview_override: Option<bool>) -> Result<
         if !super::component::valid_position(&composed) {
             return Err(bad(cmd, "alignment transform exceeds supported numeric range"));
         }
-        let composed_rows = super::point_cloud::matrix_rows(&composed);
+        let composed_rows = matrix_rows_4x4(&composed);
         let result = ScanAlignResult {
             preview,
             target_kind: "cloud".into(),
@@ -286,6 +341,7 @@ fn plan_align(s: &Session, p: &Value, preview_override: Option<bool>) -> Result<
             target_frame: to_frame_info(sol.target),
             world_transform: world_move,
             world_matrix,
+            composed_transform: Some(composed),
             composed_matrix: Some(composed_rows),
             determinant: sol.determinant,
             orthogonality_error: sol.orthogonality_error,
@@ -297,6 +353,7 @@ fn plan_align(s: &Session, p: &Value, preview_override: Option<bool>) -> Result<
     // Mesh / component occurrence targets: enforce grounding, rigid-group, parent-frame, and
     // shared-placement rules identically to `occurrence.align`.
     let paths = super::component::align::resolve_paths(s, p, cmd)?;
+    reject_shared_definition_overlap(&s.doc, &paths, cmd)?;
     let mut moved_names = Vec::with_capacity(paths.len());
     for path in &paths {
         let Some(&id) = path.last() else {
@@ -364,6 +421,7 @@ fn plan_align(s: &Session, p: &Value, preview_override: Option<bool>) -> Result<
         target_frame: to_frame_info(sol.target),
         world_transform: world_move,
         world_matrix,
+        composed_transform: None,
         composed_matrix: None,
         determinant: sol.determinant,
         orthogonality_error: sol.orthogonality_error,
@@ -522,6 +580,10 @@ mod tests {
         );
         assert_eq!(res["preview"], false);
         assert_eq!(res["target_kind"], "cloud");
+        assert_eq!(res["world_matrix"].as_array().map(Vec::len), Some(16));
+        assert_eq!(res["composed_matrix"].as_array().map(Vec::len), Some(16));
+        assert_eq!(&res["world_matrix"].as_array().unwrap()[12..16], &[json!(0.0), json!(0.0), json!(0.0), json!(1.0)]);
+        assert_eq!(&res["composed_matrix"].as_array().unwrap()[12..16], &[json!(0.0), json!(0.0), json!(0.0), json!(1.0)]);
         assert!((res["determinant"].as_f64().unwrap() - 1.0).abs() < 1e-9);
         assert!(res["orthogonality_error"].as_f64().unwrap() < 1e-9);
 
@@ -694,8 +756,11 @@ mod tests {
         let child_occ = child["occurrence"].as_u64().unwrap();
         run(&mut s, "component.activate", json!({"component": "root"}));
         run(&mut s, "occurrence.ground", json!({"occurrence": sub_occ, "grounded": false}));
-        run(&mut s, "occurrence.move", json!({"occurrence": sub_occ, "translate": [100, -40, 25], "rotate": {"axis": [0, 0, 1], "angle": 90}}));
+        run(&mut s, "occurrence.move", json!({"occurrence": sub_occ, "translate": [100, -40, 25], "axis": [0, 0, 1], "angle": "90 deg"}));
         let child_before = s.occurrence_placement(&[sub_occ, child_occ]).unwrap().world;
+        // Verify the parent subassembly was actually rotated 90 deg about Z (local +X maps to world +Y).
+        let x_dir_world = solidcraft_doc::apply_vector(&child_before, Vec3::X);
+        assert!(x_dir_world.dist(Vec3::Y) < 1e-6, "parent should be rotated 90 deg about Z, got {x_dir_world:?}");
         let wp = |v: Vec3| {
             let q = solidcraft_doc::apply_point(&child_before, v);
             json!([q.x, q.y, q.z])
@@ -716,7 +781,71 @@ mod tests {
         assert!(c0.dist(Vec3::ZERO) < 1e-5, "nested origin landed at {c0:?}");
         assert!(cx.dist(Vec3::new(10.0, 0.0, 0.0)) < 1e-5, "nested +X landed at {cx:?}");
 
+        // Shared-definition overlap: selecting parent A and a nested child under sibling copy B
+        // (sharing the same component definition) must be rejected without mutating the document.
+        let sub_b = run(&mut s, "occurrence.copy", json!({"component": sub_comp, "translate": [50, 0, 0]}));
+        let sub_b_occ = sub_b["occurrence"].as_u64().unwrap();
+        let doc_before_overlap = s.doc.clone();
+        let overlap_err = s
+            .execute(
+                "scan.align",
+                &json!({
+                    "paths": [[sub_occ], [sub_b_occ, child_occ]],
+                    "plane": "XY",
+                    "direction": "X",
+                    "origin": [0, 0, 0],
+                }),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(overlap_err.contains("shared component definition"), "{overlap_err}");
+        assert_eq!(s.doc, doc_before_overlap);
+
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn curved_face_and_curved_edge_are_rejected_while_planar_face_and_straight_edge_succeed() {
+        let mut s = Session::default();
+        let cloud_id = add_synthetic_cloud(&mut s, &[Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0)]);
+        // Create a cylinder at base (50, 0, 0) (curved lateral face + curved rim edge, planar top face)
+        // and a box at corner (-35, -5, 0) (straight edges).
+        run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20, "base": [50, 0, 0]}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-35, -5, 0]}));
+
+        // Curved cylindrical lateral face at (60, 0, 10) must be rejected as non-planar.
+        let curved_face_err = s
+            .execute(
+                "scan.align",
+                &json!({"cloud": cloud_id, "plane": {"face": [60, 0, 10]}, "direction": "X", "origin": [0, 0, 0], "preview": true}),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(curved_face_err.contains("the face is not planar"), "{curved_face_err}");
+
+        // Curved circular rim edge at (60, 0, 20) must be rejected as non-straight.
+        let curved_edge_err = s
+            .execute(
+                "scan.align",
+                &json!({"cloud": cloud_id, "plane": "XY", "direction": {"edge": [60, 0, 20]}, "origin": [0, 0, 0], "preview": true}),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(curved_edge_err.contains("the edge is not straight"), "{curved_edge_err}");
+
+        // Planar top face of cylinder at (50, 0, 20) + straight box edge at (-30, -5, 10) succeed.
+        let ok = run(
+            &mut s,
+            "scan.align",
+            json!({
+                "cloud": cloud_id,
+                "plane": {"face": [50, 0, 20]},
+                "direction": {"edge": [-30, -5, 10]},
+                "origin": [50, 0, 20],
+                "preview": true,
+            }),
+        );
+        assert!((ok["determinant"].as_f64().unwrap() - 1.0).abs() < 1e-9);
     }
 
     #[test]

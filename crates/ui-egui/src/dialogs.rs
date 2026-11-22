@@ -1889,8 +1889,8 @@ impl Dialog {
             return Some(sel);
         }
         // A mesh body has no vertices or edges to pick, and its own surface is its triangles: a
-        // point input of a construction takes the exact point the pointer's ray meets on one (#16400).
-        if matches!(self.kind, Kind::Construct { .. })
+        // point input of a construction or Align Scan takes the exact point the pointer's ray meets on one (#16400, #14353).
+        if matches!(self.kind, Kind::Construct { .. } | Kind::ScanAlign(_))
             && inp.accept & selection::VERTICES != 0
             && let Hit::Face { body, point, .. } = h
             && is_mesh_body(s, body)
