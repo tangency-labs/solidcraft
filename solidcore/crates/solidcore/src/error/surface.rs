@@ -14,7 +14,7 @@
 //! | [`SurfaceFailure::OutsideDomain`]  | `SM_ERR_OUTSIDE_OF_DOMAIN`     |
 //! | [`SurfaceFailure::OffSurface`]     | `SM_ERR_NOT_WITHIN_TOLERANCE`  |
 //! | [`SurfaceFailure::Defect`]         | `SM_ERR` (or the site's, through `with_status`) |
-//! | [`SurfaceFailure::ScaleNotUniform`], [`SurfaceFailure::CurveNoNurb`], [`SurfaceFailure::BallDefinitionUnreadable`], [`SurfaceFailure::PointOnAxis`], [`SurfaceFailure::IsoCircleUndefined`], [`SurfaceFailure::ExtensionWeightNotPositive`] | `SM_ERR` |
+//! | [`SurfaceFailure::ScaleNotUniform`], [`SurfaceFailure::CurveNoNurb`], [`SurfaceFailure::BallDefinitionUnreadable`], [`SurfaceFailure::PointOnAxis`], [`SurfaceFailure::IsoCircleUndefined`], [`SurfaceFailure::ExtensionNotMadeInBracket`] | `SM_ERR` |
 //! | [`SurfaceFailure::NoNurb`], [`SurfaceFailure::NoInputStream`] | `SM_ERR_NULL_POINTER` (or the site's, through `with_status`) |
 //!
 //! [`SurfaceFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
@@ -85,10 +85,11 @@ pub enum SurfaceFailure {
     /// far end, its halfway point and its point on the side) are collinear or not finite,
     /// so they give no plane. Class `failed`.
     IsoCircleUndefined,
-    /// An extension asked inside the solve's bracket has a weight that is not positive,
-    /// though the asks at both ends of the bracket had positive weights (a weight's sign is
-    /// not monotone in the ask). Class `failed`.
-    ExtensionWeightNotPositive,
+    /// An extension asked inside the solve's bracket could not be made (a weight that is not
+    /// positive, a half turn on the analytic path, or its points, its world net or its bound
+    /// not finite), though the bracket's upper end was made (whether an extension can be made
+    /// is not monotone in the ask). Class `failed`.
+    ExtensionNotMadeInBracket,
 }
 
 impl SurfaceFailure {
@@ -102,7 +103,7 @@ impl SurfaceFailure {
             | Self::BallDefinitionUnreadable
             | Self::PointOnAxis
             | Self::IsoCircleUndefined
-            | Self::ExtensionWeightNotPositive => SM_ERR,
+            | Self::ExtensionNotMadeInBracket => SM_ERR,
             Self::Missing(_) | Self::NoNurb | Self::NoInputStream => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
@@ -149,8 +150,8 @@ impl core::fmt::Display for SurfaceFailure {
             Self::IsoCircleUndefined => {
                 f.write_str("the source's iso across the side orients no circle")
             }
-            Self::ExtensionWeightNotPositive => f.write_str(
-                "an extension inside the solve's bracket has a weight that is not positive",
+            Self::ExtensionNotMadeInBracket => f.write_str(
+                "an extension asked inside the solve's bracket could not be made, though its upper end was made",
             ),
         }
     }
@@ -381,7 +382,7 @@ mod tests {
             (SurfaceFailure::PointOnAxis, None, SM_ERR, K::Failed),
             (SurfaceFailure::IsoCircleUndefined, None, SM_ERR, K::Failed),
             (
-                SurfaceFailure::ExtensionWeightNotPositive,
+                SurfaceFailure::ExtensionNotMadeInBracket,
                 None,
                 SM_ERR,
                 K::Failed,

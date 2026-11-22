@@ -888,14 +888,9 @@ fn certify_iso(
             return Err(refused(ExtendRefusal::NotExact, None));
         }
         let turn = 2.0 * (g(8) * lift(hk, wwk) / dk / reach + gamma(12));
-        let n = unit(f.axis.cross(far)).ok_or_else(|| {
-            SolidError::surface(
-                OP,
-                SurfaceFailure::Defect {
-                    why: "the axis and the farthest point's radial part are parallel, though that part is normal to the axis and its length was just checked positive",
-                },
-            )
-        })?;
+        // (its radial part is normal to the axis and positive, but may be infinite: its
+        // distance from the axis is not finite)
+        let n = unit(f.axis.cross(far)).ok_or_else(on_axis)?;
         (n, 0.0, 0.0, turn)
     };
     for &(x, w, (h, ww)) in &points {

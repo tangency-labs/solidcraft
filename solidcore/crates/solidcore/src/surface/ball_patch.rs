@@ -43,7 +43,7 @@
 //! dispatcher's nesting count.
 
 use crate::error::surface::SurfaceFailure;
-use crate::error::{Failure, Result, SolidError, SM_ERR};
+use crate::error::{Result, SolidError};
 use crate::eval;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::are_same;
@@ -62,7 +62,6 @@ use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 const OP_CREATE: &str = "surface::ball_patch::BallPatch::create";
 const OP_OFFSET: &str = "surface::ball_patch::BallPatch::create_offset_surface";
 const OP_TRANSFORM: &str = "surface::ball_patch::BallPatch::transform";
-const OP_ON_SPHERE: &str = "surface::ball_patch::BallPatch::is_on_sphere";
 const OP_CURVE_ON_SPHERE: &str = "surface::ball_patch::BallPatch::is_curve_on_sphere";
 const OP_CERTIFIED: &str = "surface::ball_patch::BallPatch::create_certified";
 const OP_READ: &str = "surface::ball_patch::BallPatch::read_from_db";
@@ -208,7 +207,7 @@ impl BallPatch {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` for a net without NURB data.
+    /// None: a net without NURB data is not rational, so `false`.
     pub fn is_on_sphere(
         net: &BSplineSurface,
         centre: Point3,
@@ -218,12 +217,11 @@ impl BallPatch {
         if !net.is_rational() {
             return Ok(false);
         }
-        // the caller's net (a B-spline whose data was never read or set has no NURB)
-        let form = surface_form(net).ok_or_else(|| {
-            Failure::new(OP_ON_SPHERE, SurfaceFailure::NoNurb)
-                .with_status(SM_ERR)
-                .into_error()
-        })?;
+        // (never taken: `is_rational` is false without a NURB, and the form is there whenever
+        // the NURB is)
+        let Some(form) = surface_form(net) else {
+            return Ok(false);
+        };
         Ok(eval::sphere::surface_on_sphere(&form, xyz(centre), radius, rel_tol).is_ok())
     }
 

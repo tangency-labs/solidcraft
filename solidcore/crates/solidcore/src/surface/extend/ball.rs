@@ -44,7 +44,7 @@
 use super::sides::{ExtendedSides, SideExtension};
 use super::{below_resolution, keeps, Continuity, ExtendRefusal, Local};
 use crate::error::surface::SurfaceFailure;
-use crate::error::{Result, SolidError};
+use crate::error::{Failure, Result, SolidError, SM_ERR};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::Vec3;
@@ -132,6 +132,13 @@ pub(super) fn ball_extended_sides(
             OP,
             "the distance is not finite and positive",
         ));
+    }
+    // the caller's patch: `BallPatch::create` reads its net's control net, but the public
+    // `net_mut` can replace the net with one that has no NURB
+    if patch.net().gw_nurb().is_none() {
+        return Err(Failure::new(OP, SurfaceFailure::NoNurb)
+            .with_status(SM_ERR)
+            .into_error());
     }
     // the net's knot box: the extension is past the net's ends, whatever box the patch keeps
     let dom = knot_box(patch.net())?;
@@ -227,7 +234,7 @@ pub(super) fn knot_box(s: &BSplineSurface) -> Result<Extent2d> {
         SolidError::surface(
             OP,
             SurfaceFailure::Defect {
-                why: "the knot box was asked of a net with no NURB, though every caller passes a ball patch's net (whose control net `BallPatch::create` read), an analytic's form `AnalyticSupport::check` proved on its NURB, or an extension built from a NURB",
+                why: "the knot box was asked of a net with no NURB, though every caller passes a ball patch's net (whose NURB the entry checked), an analytic's form `AnalyticSupport::check` proved on its NURB, or an extension built from a NURB",
             },
         )
     })?;
@@ -325,7 +332,7 @@ fn extend_side_world(
         SolidError::surface(
             OP,
             SurfaceFailure::Defect {
-                why: "the net continued past the side has no NURB, though it is the ball patch's net (whose control net `BallPatch::create` read) or an extension built from a NURB",
+                why: "the net continued past the side has no NURB, though it is the ball patch's net (whose NURB the entry checked) or an extension built from a NURB",
             },
         )
     })?;
@@ -499,7 +506,7 @@ fn extend_side_local(
         SolidError::surface(
             OP,
             SurfaceFailure::Defect {
-                why: "the net continued past the side has no NURB, though it is the ball patch's net (whose control net `BallPatch::create` read) or an extension built from a NURB",
+                why: "the net continued past the side has no NURB, though it is the ball patch's net (whose NURB the entry checked) or an extension built from a NURB",
             },
         )
     })?;
@@ -813,7 +820,7 @@ fn bisect(
             break;
         }
         let v = f(m)?
-            .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::ExtensionWeightNotPositive))?;
+            .ok_or_else(|| SolidError::surface(OP, SurfaceFailure::ExtensionNotMadeInBracket))?;
         if (v - target).abs() <= MEET * target {
             return Ok(m);
         }
