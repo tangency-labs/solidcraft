@@ -28,7 +28,15 @@ fn block_boss_hole() -> Harness {
 /// Frames until nothing computes or waits (a few seconds at most).
 fn until_settled(h: &mut Harness) {
     for _ in 0..500 {
-        if h.app.deferred.is_none() && h.app.deferred_queue.is_empty() && h.app.delete_check.is_none() && h.app.pending_feature_edit.is_none() {
+        // Finishing a sketch for the next edit computes off the window thread too: the edit waits
+        // for that sketch refresh (`start_after_roll`), as the control channel's `pending` does.
+        if h.app.deferred.is_none()
+            && h.app.deferred_queue.is_empty()
+            && h.app.delete_check.is_none()
+            && h.app.pending_feature_edit.is_none()
+            && h.app.start_after_roll.is_none()
+            && !h.app.sketch_refreshes.contains_key(&h.app.session.uid)
+        {
             break;
         }
         h.frames(1);
