@@ -647,26 +647,28 @@ fn put_back_joined(out: &mut crate::Output, raised: &[Raised]) -> Vec<(f64, usiz
 
 /// Rows #18166 took out of [`TRIM_COVER`] that it does not move (see the module docs): unit,
 /// case, and the hash of main's committed line (`origin/main` ee673a19bf's expected file).
+/// #18490 moves these four rows (the round sits on the sphere drop's finer trims), so each
+/// hash is of the row with that change, from Linux CI.
 const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0xa90a_9179_4750_1297,
+        0xbab5_3857_5f4c_54b2,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0x1679_1328_0d68_333a,
+        0x0879_39f6_c276_2c27,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0xfb1f_0985_b9ee_e48c,
+        0xaa56_e948_548e_16f9,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0xcc4d_2e3f_0192_8b71,
+        0x87dc_a442_4a0e_39cd,
     ),
 ];
 
@@ -730,8 +732,11 @@ fn record() {
 
 /// The rows that read `Fillet/sphere_diff_3cylinders.smb` and move with #20179 (besides
 /// `blend.fillet_executive_p3`'s, which `wr493_rows` proves), with main's row hash
-/// (`goldens` at the PR's base, 4c275ffb7d, MEASURED). The two `uv_trim_f6` rows read the
-/// file too but do not move; they are listed so that the put-back is shown to keep them.
+/// (`goldens` at the PR's base, 4c275ffb7d, MEASURED). The twelve `topology.face_p3`
+/// `_rebuild` rows hold main's row after #18490 moved them (main at 0cfdad69ff: the hash of
+/// main's blessed line, MEASURED equal to this branch's run with the trims put back). The two
+/// `uv_trim_f6` rows read the file too but do not move with #20179; they are listed so that
+/// the put-back is shown to keep them.
 const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "corpus.parity",
@@ -752,7 +757,7 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f0_rebuild",
-        0x9a898c26c89131aa,
+        0xc4a920b322329987,
     ),
     (
         "topology.face_p3",
@@ -767,7 +772,7 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f10_rebuild",
-        0x89cba9d4c6d99ae6,
+        0x344817f8e2360100,
     ),
     (
         "topology.face_p3",
@@ -777,12 +782,12 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f11_rebuild",
-        0x4806150682523a7b,
+        0x650d363ee5d8b829,
     ),
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f1_rebuild",
-        0x979cec6acf3baa09,
+        0x1e49694bff2783c8,
     ),
     (
         "topology.face_p3",
@@ -792,7 +797,7 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f2_rebuild",
-        0x1341cd7ebbaf52ad,
+        0x9c0baa5c2cfaf6e7,
     ),
     (
         "topology.face_p3",
@@ -802,7 +807,7 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f3_rebuild",
-        0xc61030b32794b19e,
+        0xfae79645f70fc936,
     ),
     (
         "topology.face_p3",
@@ -812,7 +817,7 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f4_rebuild",
-        0xbb606cfc9dfe762f,
+        0x5bca12f6769919d2,
     ),
     (
         "topology.face_p3",
@@ -822,7 +827,7 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f5_rebuild",
-        0x5abbf5a8a4cba99e,
+        0x09f860420df241b3,
     ),
     (
         "topology.face_p3",
@@ -832,7 +837,7 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f6_rebuild",
-        0x737e249829170407,
+        0x8e918074b11ab263,
     ),
     (
         "topology.face_p3",
@@ -842,7 +847,7 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f7_rebuild",
-        0x81f81773c4acbe8c,
+        0xc8792b6ad7002c8b,
     ),
     (
         "topology.face_p3",
@@ -852,7 +857,7 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f8_rebuild",
-        0xd787fda3ca627882,
+        0x9857e670ca50f05f,
     ),
     (
         "topology.face_p3",
@@ -862,7 +867,7 @@ const CLASSIFIED_READ_ROWS: &[(&str, &str, u64)] = &[
     (
         "topology.face_p3",
         "own_reader_sphere_diff_3cylinders_uv_trim_f9_rebuild",
-        0x388c261c9a210511,
+        0xd8bd3415a29dbaa0,
     ),
 ];
 
