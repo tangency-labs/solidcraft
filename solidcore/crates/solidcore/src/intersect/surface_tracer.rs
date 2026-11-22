@@ -480,18 +480,14 @@ impl<'s> SurfaceTracer<'s> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` for an empty curve.
+    /// [`IntersectFailure::NoCurveToReverse`] (`SM_ERR_NULL_POINTER`) for an empty curve:
+    /// the kernel's own callers reverse only a curve with points.
     pub fn reverse_curve_direction(&mut self) -> Result<()> {
         if self.curve_points.is_empty() {
-            return Err(Failure::new(
+            return Err(SolidError::intersect(
                 OP_REVERSE,
-                IntersectFailure::Defect {
-                    why: "the boundary-start trace reverses the curve its forward trace left \
-                          empty; the kernel emptied it itself",
-                },
-            )
-            .with_status(crate::error::SM_ERR_NULL_POINTER)
-            .into_error());
+                IntersectFailure::NoCurveToReverse,
+            ));
         }
 
         // Grab points in m_vCurvePoints list into an array, and empty the list.
@@ -2048,6 +2044,13 @@ where
         // Trace the other direction if appropriate.
         let start_type = t.tracer().point(start_id)?.point_type;
         if !t.tracer().curve_is_closed && start_type != TracePointType::Singularity {
+            // A trace that starts on a found curve at a tangent point, or whose start
+            // values fail, leaves the curve empty: upstream's reversal then fails and the
+            // curve is flushed. Test for it here instead of reversing into the error.
+            if t.tracer().curve_points.is_empty() {
+                ignore_status(flush_curve(k, t.tracer_mut(), out, None))?;
+                continue;
+            }
             match t.reverse_curve_direction() {
                 Ok(()) => {}
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
@@ -2059,16 +2062,10 @@ where
             }
 
             t.tracer_mut().curve_trace_direction = -1.0;
+            // the default reversal keeps every point; only an outside `SurfaceTrace`
+            // override can succeed and leave none
             let back_start = *t.tracer().curve_points.last().ok_or_else(|| {
-                Failure::new(
-                    OP_REVERSE,
-                    IntersectFailure::Defect {
-                        why: "the reversal just succeeded, which it does only on a curve with \
-                              points, so the reversed curve has a last point",
-                    },
-                )
-                .with_status(crate::error::SM_ERR_NULL_POINTER)
-                .into_error()
+                SolidError::intersect(OP_REVERSE, IntersectFailure::ReversalLeftNoPoints)
             })?;
             ignore_status(t.trace_curve(k, back_start, &out.curves_3d))?;
             ignore_status(t.reverse_curve_direction())?;
@@ -2251,8 +2248,14 @@ mod tests {
         let s = plane();
         let d = Extent2d::from_bounds(0.0, 0.0, 10.0, 10.0);
         let mut t = SurfaceTracer::new(k, &s, &d).unwrap();
+        // a caller reversing an empty tracer: its own input, not a kernel defect
         let e = t.reverse_curve_direction().unwrap_err();
-        assert!(e.is_defect());
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::NoCurveToReverse)
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert!(!e.is_defect());
         assert_eq!(e.upstream_status(), Some(1006));
         for (i, param) in [0.0, 1.0, 3.0].into_iter().enumerate() {
             let mut p = TracePoint::new();

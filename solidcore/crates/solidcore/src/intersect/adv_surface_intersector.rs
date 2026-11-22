@@ -388,8 +388,10 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` ([`SolidError::null_pointer`]) without caches or when a
-    /// tree cannot be built (`NER`); [`SolidError::Unported`] from a build that reaches unported code.
+    /// `SM_ERR_NULL_POINTER`: [`IntersectFailure::NoSurfaceCaches`] without caches,
+    /// [`IntersectFailure::SurfaceCacheNotBuilt`] (the build's error is the cause) when a
+    /// tree cannot be built (`NER`); [`SolidError::Unported`] from a build that reaches
+    /// unported code.
     pub fn set_surface_caches(
         &mut self,
         k: &Kernel,
@@ -428,8 +430,8 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` ([`SolidError::null_pointer`]) for a cache without tree
-    /// (`NER(pTree)`).
+    /// `SM_ERR_NULL_POINTER` as an [`IntersectFailure::Defect`] for a cache without tree
+    /// (`NER(pTree)`): both callers build the trees just before.
     pub(crate) fn bind_caches(
         &mut self,
         cache1: &'t SurfaceCache<O>,
@@ -499,21 +501,12 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
 
     /// The `SmBezierPatch` of node `id` of tree `index` (`(SmBezierPatch*)m_pData`).
     fn patch(&self, index: usize, id: Option<NodeId>) -> Result<&'t BezierPatch<O>> {
-        let cache = self.caches.get(index).copied().flatten().ok_or_else(|| {
-            unbound_patch(
-                OP_LOCAL,
-                "the solve walks the trees bound with their caches, so a \
-                                 branch with no cache for its tree was never bound",
-            )
-        })?;
-        let id = id.ok_or_else(|| {
-            unbound_patch(
-                OP_LOCAL,
-                "the solve reaches a patch only through a branch or a \
-                                 solution that holds the node it was found in for each tree, \
-                                 so one without it was built wrong",
-            )
-        })?;
+        // a caller can set the pub `solver.trees` without `set_surface_caches`
+        let cache =
+            self.caches.get(index).copied().flatten().ok_or_else(|| {
+                SolidError::intersect(OP_LOCAL, IntersectFailure::NoSurfaceCaches)
+            })?;
+        let id = id.ok_or_else(|| unbound_patch(OP_LOCAL))?;
         cache.patch(id)
     }
 
@@ -931,21 +924,12 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
 
     /// `((SmBezierAux2d*)m_pData)->GetPolarBox()` of node `id` of tree `index`.
     fn polar_box(&self, k: &Kernel, index: usize, id: Option<NodeId>) -> Result<PolarBox> {
-        let cache = self.caches.get(index).copied().flatten().ok_or_else(|| {
-            unbound_patch(
-                OP_GAUSS,
-                "the solve walks the trees bound with their caches, so a \
-                                 branch with no cache for its tree was never bound",
-            )
-        })?;
-        let id = id.ok_or_else(|| {
-            unbound_patch(
-                OP_GAUSS,
-                "the solve reaches a patch only through a branch or a \
-                                 solution that holds the node it was found in for each tree, \
-                                 so one without it was built wrong",
-            )
-        })?;
+        // a caller can set the pub `solver.trees` without `set_surface_caches`
+        let cache =
+            self.caches.get(index).copied().flatten().ok_or_else(|| {
+                SolidError::intersect(OP_GAUSS, IntersectFailure::NoSurfaceCaches)
+            })?;
+        let id = id.ok_or_else(|| unbound_patch(OP_GAUSS))?;
         // built lazily upstream; built without storing it here (the caches are
         // shared), which gives the same box
         cache.polar_box_unstored(k, id)
@@ -1930,11 +1914,20 @@ impl SurfaceIntersector<'_> {
 }
 
 /// A defect with the null pointer status upstream's `NULL` dereference has: a patch the
-/// solve reaches through a branch whose tree has no bound cache or no node.
-fn unbound_patch(op: &'static str, why: &'static str) -> SolidError {
-    Failure::new(op, IntersectFailure::Defect { why })
-        .with_status(SM_ERR_NULL_POINTER)
-        .into_error()
+/// solve reaches through a branch with no node for its tree. `local_solve` and
+/// `branch_is_gauss_separate` look the node up with `node` first, which already fails on a
+/// branch without one, and `find_interior_curves` passes the solver's own solutions, whose
+/// leaf save fills the node of both trees.
+fn unbound_patch(op: &'static str) -> SolidError {
+    Failure::new(
+        op,
+        IntersectFailure::Defect {
+            why: "the solve reaches a patch only through a branch it checked or a solution it \
+                  saved with a node for each tree, so one without it was built wrong",
+        },
+    )
+    .with_status(SM_ERR_NULL_POINTER)
+    .into_error()
 }
 
 #[cfg(test)]

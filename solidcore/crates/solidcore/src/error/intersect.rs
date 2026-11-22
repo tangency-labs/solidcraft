@@ -158,9 +158,10 @@ pub enum IntersectFailure {
     /// The surface has no normal at the point (the cross product of its tangents and
     /// the evaluated normal are both shorter than the kernel's zero). [`ErrorKind::Degenerate`].
     NoSurfaceNormal,
-    /// The curve to drop has no tangent to step along: its first derivative is zero where
-    /// the curve is not marked degenerate, or its tangent projected onto the surface's tangent
-    /// plane is zero at the first point. [`ErrorKind::Degenerate`].
+    /// The curve has no tangent to step along: the curve to drop has a zero first derivative
+    /// where it is not marked degenerate, or its tangent projected onto the surface's tangent
+    /// plane is zero at the first point, or the silhouette's tangent is zero at the point.
+    /// [`ErrorKind::Degenerate`].
     DegenerateTangent,
     /// The curve's tangent is `degrees` from the surface normal, within the 3 degrees under
     /// which its drop onto the tangent plane has no direction. [`ErrorKind::Degenerate`].
@@ -292,6 +293,11 @@ pub enum IntersectFailure {
         /// The number of UV curves the drop gave.
         found: usize,
     },
+    /// A tracer's reversal succeeded but left the curve with no points. The default
+    /// `SurfaceTrace::reverse_curve_direction` keeps every point, so only an outside
+    /// implementor's override reaches it (upstream's `SM_ERR_NULL_POINTER`).
+    /// [`ErrorKind::InvalidInput`].
+    ReversalLeftNoPoints,
 }
 
 impl IntersectFailure {
@@ -352,7 +358,8 @@ impl IntersectFailure {
             | Self::SurfaceCacheNotBuilt
             | Self::NoSurfaceCaches
             | Self::SurfaceNotOffset { .. }
-            | Self::NoCurveToReverse => SM_ERR_NULL_POINTER,
+            | Self::NoCurveToReverse
+            | Self::ReversalLeftNoPoints => SM_ERR_NULL_POINTER,
             Self::OutsideDomain(_) | Self::SeamJumpNotSnapped => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
         }
@@ -389,7 +396,8 @@ impl IntersectFailure {
             | Self::NoSurfaceCaches
             | Self::PointCountNotTaken { .. }
             | Self::PointNotOnBothSurfaces
-            | Self::NoCurveToReverse => ErrorKind::InvalidInput,
+            | Self::NoCurveToReverse
+            | Self::ReversalLeftNoPoints => ErrorKind::InvalidInput,
             Self::UnsupportedObjectKind
             | Self::CurveNotBSpline
             | Self::SingularPointInside
@@ -472,7 +480,7 @@ impl core::fmt::Display for IntersectFailure {
                 "the dropped curve reached {limit} control points, more than the drop builds"
             ),
             Self::NoSurfaceNormal => f.write_str("the surface has no normal at the point"),
-            Self::DegenerateTangent => f.write_str("the curve to drop has no tangent there"),
+            Self::DegenerateTangent => f.write_str("the curve has no tangent there"),
             Self::TangentAlongNormal { degrees } => write!(
                 f,
                 "the curve's tangent is {degrees} degrees from the surface normal, within 3"
@@ -548,6 +556,9 @@ impl core::fmt::Display for IntersectFailure {
                 "the boundary curve dropped onto {found} uv curves, neither one nor two"
             ),
             Self::NoCurveToReverse => f.write_str("the curve to reverse has no points"),
+            Self::ReversalLeftNoPoints => {
+                f.write_str("the tracer's reversal left the curve with no points")
+            }
             Self::DeltaStepUnsupported => {
                 f.write_str("the basic intersector does not compute a law point's delta step")
             }
@@ -917,6 +928,11 @@ pub(super) mod tests {
             (F::TracerHasNoPointSolve, SM_ERR, K::Unsupported),
             (F::TracerHasNoBoundaryDrop, SM_ERR, K::Unsupported),
             (F::BoundaryDropNotOneOrTwo { found: 3 }, SM_ERR, K::Failed),
+            (
+                F::ReversalLeftNoPoints,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::intersect(op, failure);
