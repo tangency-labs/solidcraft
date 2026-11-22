@@ -528,7 +528,8 @@ fn three_point_arc_click_commits_the_tangent_point_the_hover_showed() {
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
     let k = 100.0 * 0.5f64.sqrt();
     h.app.run("sketch.arc.three_point", json!({"start":[10,0],"end":[110,-100],"through":[10.0 + k, -100.0 + k]})).unwrap();
-    h.app.cam.distance = 150.0;
+    // Close enough that the click at (0, 1) is not taken by the origin's snap a millimetre away.
+    h.app.cam.distance = 50.0;
     h.settle();
     h.step(&json!({"start":"sketch.arc.three_point"})).unwrap();
     for at in [[0.0, 1.0], [10.0, 0.0]] {
@@ -579,11 +580,12 @@ fn three_point_arc_centre_snaps_to_the_corner_of_the_l() {
 
     // No point near the arc's centre: the plain arc through the pointer, and no constraint.
     let mut plain = l_with_arc_ends(true);
-    plain.step(&json!({"move":{"sketch":[60.0, 60.0]}})).unwrap();
+    // (40, 40): on screen, and the arc through it has its centre at (11.7, 11.7), far from any point.
+    plain.step(&json!({"move":{"sketch":[40.0, 40.0]}})).unwrap();
     plain.frames(2);
     let hover = plain.app.tool.as_ref().unwrap().hover.clone().unwrap();
-    assert!(hover.0.dist(Vec2::new(60.0, 60.0)) < 0.5, "{:?}", hover.0);
-    plain.step(&json!({"click":{"sketch":[60.0, 60.0]}})).unwrap();
+    assert!(hover.0.dist(Vec2::new(40.0, 40.0)) < 0.5, "{:?}", hover.0);
+    plain.step(&json!({"click":{"sketch":[40.0, 40.0]}})).unwrap();
     plain.frames(2);
     assert!(!constraints(&plain).iter().any(|k| matches!(k, ConstraintKind::Coincident { .. })));
 
