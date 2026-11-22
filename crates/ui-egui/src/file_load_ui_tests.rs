@@ -1640,3 +1640,59 @@ fn a_missing_internal_component_is_marked_and_replacing_it_keeps_it_internal() {
     assert_eq!(links["links"][0]["found"], true, "{links}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Recovery components (#6892): a design whose internal component was saved again after the
+/// design itself, as a crash leaves it, opens with the window listing it. Restore brings that
+/// work into the design; opened again with newer work, Discard goes back to the design's copy.
+/// Either way the window closes and the component is no longer marked.
+#[test]
+fn a_recovery_component_is_listed_on_open_and_restored_or_discarded() {
+    solidcraft_engine::file_kinds_on_for_tests();
+    let dir = scratch("recovery_components");
+    let part_file = dir.join("bracket.scprt");
+    let save_part = |file: &std::path::Path, height: u32| {
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length": 2, "width": 3, "height": height})).unwrap();
+        part.execute("file.save", &json!({"path": file.to_string_lossy()})).unwrap();
+    };
+    save_part(&part_file, 2);
+    let design = dir.join("frame.scasm");
+    let mut frame = Session::default();
+    frame.execute("file.save", &json!({"path": design.to_string_lossy()})).unwrap();
+    frame.execute("component.insert_design", &json!({"path": part_file.to_string_lossy()})).unwrap();
+    let made = frame.execute("component.make_internal", &json!({"component": "bracket"})).unwrap();
+    let work = std::path::PathBuf::from(made["file"].as_str().unwrap());
+    frame.execute("file.save", &json!({})).unwrap();
+    let volume = |app: &mut SolveApp| app.session.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    let link = |app: &mut SolveApp| app.session.execute("component.links", &json!({})).unwrap()["links"][0].clone();
+
+    // The part is saved again and the design is not: a recovery component.
+    save_part(&work, 5);
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    app.open_path(&design.to_string_lossy());
+    let rows = app.recovery_components.as_ref().map(|r| r.rows.clone()).unwrap_or_default();
+    assert!(rows.len() == 1 && rows[0].name == "bracket" && rows[0].member == "bracket.scprt", "{rows:?}");
+    assert!((volume(&mut app) - 12.0).abs() < 1e-6, "held as the design's file has it");
+    crate::recovery_components::restore(&mut app, rows[0].component);
+    assert!(app.recovery_components.is_none(), "settled: the window closes");
+    assert!(!app.status.as_ref().is_some_and(|s| s.2), "{:?}", app.status);
+    assert!((volume(&mut app) - 30.0).abs() < 1e-6, "the restored work is in the design");
+    let restored = link(&mut app);
+    assert!(restored.get("recovery").is_none() && restored["changed"] == false, "{restored}");
+    app.session.execute("file.save", &json!({})).unwrap();
+
+    // Newer work again, discarded this time: the design's copy is unpacked again.
+    let kept = std::fs::read(&work).unwrap();
+    save_part(&work, 9);
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    app.open_path(&design.to_string_lossy());
+    let rows = app.recovery_components.as_ref().map(|r| r.rows.clone()).unwrap_or_default();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    crate::recovery_components::discard(&mut app, rows[0].component);
+    assert!(app.recovery_components.is_none());
+    assert_eq!(std::fs::read(&work).unwrap(), kept, "the design's copy is back");
+    assert!((volume(&mut app) - 30.0).abs() < 1e-6);
+    let discarded = link(&mut app);
+    assert!(discarded.get("recovery").is_none() && discarded["changed"] == false, "{discarded}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

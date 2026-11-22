@@ -239,6 +239,7 @@ mod fillet_spline_handle_tests;
 pub(crate) mod import_report;
 pub(crate) mod missing_links;
 pub mod mouse_gesture;
+pub(crate) mod recovery_components;
 use solidcraft_ui_kit::nav_bar;
 pub(crate) mod navigation;
 pub use solidcraft_ui_kit::navigation_bar;
@@ -863,6 +864,9 @@ pub struct SolveApp {
     pub lock_prompts: Vec<open_elsewhere::LockPrompt>,
     /// Linked parts an open couldn't find, waiting to be located (#6892).
     pub missing_links: Option<missing_links::MissingLinks>,
+    /// Internal components an open found with unsaved work beside the design, waiting to be
+    /// restored or discarded (#6892).
+    pub recovery_components: Option<recovery_components::RecoveryComponents>,
     /// A Save waiting for "the file changed on disk" to be answered.
     pub disk_prompt: bool,
     /// Update Links, Open Linked Design or Reload from file waiting for a network server to be allowed.
@@ -1186,6 +1190,7 @@ impl SolveApp {
             locks: None,
             lock_prompts: Vec::new(),
             missing_links: None,
+            recovery_components: None,
             disk_prompt: false,
             network_prompt: None,
             link_folders_prompt: Vec::new(),
@@ -3651,6 +3656,7 @@ impl SolveApp {
         self.say_signature(&r);
         self.say_kind_note(&r);
         missing_links::offer(self, &r);
+        recovery_components::offer(self, &r);
         Ok(())
     }
 
@@ -4540,6 +4546,7 @@ impl SolveApp {
         open_meshing::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
         missing_links::show(self, ui.ctx());
+        recovery_components::show(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());
         network_prompt::show(self, ui.ctx());
         link_folders_prompt::show(self, ui.ctx());
