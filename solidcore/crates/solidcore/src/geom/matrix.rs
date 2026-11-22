@@ -492,7 +492,10 @@ impl Matrix {
             }
             let denom = self.get(row, row, OP)?;
             if denom.abs() < zero_tol {
-                return Err(SolidError::geom(OP, GeomFailure::Singular { measure: denom }));
+                return Err(SolidError::geom(
+                    OP,
+                    GeomFailure::Singular { measure: denom },
+                ));
             }
             *x.get_mut(row).ok_or_else(|| out_of_range(OP))? = sum / denom;
         }
@@ -1189,7 +1192,7 @@ mod tests {
         assert_eq!(singular.upstream_status(), Some(1001));
         assert_eq!(
             singular.geom_failure(),
-            Some(&crate::error::geom::GeomFailure::CallFailed)
+            Some(&GeomFailure::CallFailed)
         );
         assert!(singular
             .to_string()

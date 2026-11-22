@@ -298,9 +298,10 @@ impl Transform {
     /// `SM_ERR` when the axes sub-matrix is singular.
     pub fn inv_transform_point(&self, p: Point3) -> Result<Point3> {
         let mid = p - self.to_disp();
-        self.inv_transform_vector(mid).map_err(SolidError::geom_call(
-            "geom::transform::Transform::inv_transform_point",
-        ))
+        self.inv_transform_vector(mid)
+            .map_err(SolidError::geom_call(
+                "geom::transform::Transform::inv_transform_point",
+            ))
     }
 
     /// Maps a projection-space vector back to parameter space through the inverse

@@ -318,10 +318,7 @@ impl PeriodicExtent1d {
                     }
                     return Err(SolidError::geom(
                         OP,
-                        GeomFailure::Disjoint {
-                            a: extent,
-                            b: span,
-                        },
+                        GeomFailure::Disjoint { a: extent, b: span },
                     ));
                 }
                 // full case

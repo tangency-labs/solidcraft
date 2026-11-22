@@ -421,7 +421,10 @@ pub fn line_plane_intersect(
     let denom = line_vec.dot(plane_norm);
 
     if denom.abs() < tol {
-        return Err(SolidError::geom(OP, GeomFailure::Parallel { measure: denom })); // Parallel case
+        return Err(SolidError::geom(
+            OP,
+            GeomFailure::Parallel { measure: denom },
+        )); // Parallel case
     }
 
     Ok(-(plane_eq_d + line_pnt.dot(plane_norm)) / denom)
@@ -455,7 +458,10 @@ pub fn line_plane_intersect_uv(
     let denom = line_vec.dot(norm);
 
     if denom.abs() < tol {
-        return Err(SolidError::geom(OP, GeomFailure::Parallel { measure: denom })); // Parallel case
+        return Err(SolidError::geom(
+            OP,
+            GeomFailure::Parallel { measure: denom },
+        )); // Parallel case
     }
 
     // Cramer's rule:
@@ -623,7 +629,10 @@ pub fn circle_from_3_points(
 ) -> Result<Circle3Points> {
     const OP: &str = "geom::geom_utility::p1::circle_from_3_points";
     if !(2..=3).contains(&dimension) {
-        return Err(SolidError::geom(OP, GeomFailure::BadDimension { dimension }));
+        return Err(SolidError::geom(
+            OP,
+            GeomFailure::BadDimension { dimension },
+        ));
     }
 
     let mut sp = start;

@@ -234,7 +234,7 @@ pub fn compute_jacobian<E: EvalNFunctions + ?Sized>(
         if delta.abs() < EFF_ZERO {
             return Err(SolidError::geom(
                 OP,
-                crate::error::geom::GeomFailure::ZeroDifferenceStep {
+                GeomFailure::ZeroDifferenceStep {
                     parameter: jj,
                     at: base_param,
                 },
@@ -1168,7 +1168,7 @@ mod tests {
         let e = s.solve_it(&[1.0], EFF_ZERO).unwrap_err();
         assert!(matches!(
             e.geom_failure(),
-            Some(crate::error::geom::GeomFailure::Defect { .. })
+            Some(GeomFailure::Defect { .. })
         ));
         assert!(e.is_defect());
         assert_eq!(e.upstream_status(), Some(SM_ERR));
@@ -1200,7 +1200,7 @@ mod tests {
         let e = r.unwrap_err();
         assert_eq!(
             e.geom_failure(),
-            Some(&crate::error::geom::GeomFailure::ZeroDifferenceStep {
+            Some(&GeomFailure::ZeroDifferenceStep {
                 parameter: 0,
                 at: 0.5
             })
