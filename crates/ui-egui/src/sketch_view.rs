@@ -278,6 +278,10 @@ pub(crate) fn poll_refreshes(app: &mut SolveApp, ctx: &egui::Context) {
             continue;
         }
         match result {
+            // A feature editor opening meanwhile evaluates the finished sketch itself, against the
+            // design as it was when it started: adopting the refresh first would change that design
+            // under it, and the editor would refuse to open.
+            Some(Ok(_)) if uid == app.session.uid && app.pending_feature_edit.is_some() => {}
             Some(Ok(prepared)) if uid == app.session.uid => {
                 let _ = app.session.accept_refreshed_sketch_model(prepared);
             }
