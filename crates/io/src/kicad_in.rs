@@ -197,7 +197,7 @@ pub struct KicadFootprint {
 pub struct KicadText {
     pub text: String,
     /// X/Y in millimetres in the containing frame, and the rotation in degrees. A footprint's
-    /// text stores its rotation on the board, not relative to the footprint (KiCad 6 and later).
+    /// text stores its rotation on the board, not relative to the footprint (KiCad 5 files as well).
     pub at: [f64; 3],
     /// A footprint text KiCad may draw upside down: `(unlocked yes)`, or `unlocked` in its `at`.
     /// Other footprint text is turned to read upright (see [`footprint_text_angle`]).
