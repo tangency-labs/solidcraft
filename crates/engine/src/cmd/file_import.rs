@@ -7,7 +7,7 @@
 //! together by one rigid group (`RigidGroup`), so the import moves as one; `component.unlock`
 //! releases them.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use solidcore_record::Vec3;
@@ -53,20 +53,44 @@ fn rigid(m: &Mat) -> bool {
     crate::cmd::component::valid_position(m)
 }
 
-/// The name an occurrence the file names (a KiCad footprint's reference) is given: the file's name,
-/// cut to the 128 characters a rename allows, with ` (2)`, ` (3)`… when another occurrence has it.
-/// `None` keeps the usual `Component:N`: for an empty name, and for one of digits only, which a
-/// command would read as an occurrence id.
-fn placement_name(occurrences: &[solidcraft_doc::Occurrence], wanted: &str) -> Option<String> {
-    let wanted: String = wanted.trim().chars().take(128).collect();
-    if wanted.is_empty() || wanted.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
+/// The occurrence names in use while one import names its placements. A file can give thousands
+/// of placements one name, so a name is looked up in a set, and each name remembers the next
+/// ` (k)` to try instead of counting up from ` (2)` again.
+struct PlacementNames {
+    used: HashSet<String>,
+    next: HashMap<String, usize>,
+}
+
+impl PlacementNames {
+    fn new(occurrences: &[solidcraft_doc::Occurrence]) -> Self {
+        Self { used: occurrences.iter().map(|o| o.name.clone()).collect(), next: HashMap::new() }
     }
-    let free = |name: &str| !occurrences.iter().any(|o| o.name == name);
-    if free(&wanted) {
-        return Some(wanted);
+
+    /// An occurrence made during the import: its name is taken too.
+    fn note(&mut self, name: &str) {
+        self.used.insert(name.to_string());
     }
-    (2..=occurrences.len().saturating_add(2)).map(|k| format!("{wanted} ({k})")).find(|name| free(name))
+
+    /// The name an occurrence the file names (a KiCad footprint's reference) is given: the file's
+    /// name, cut to the 128 characters a rename allows, with ` (2)`, ` (3)`… when another
+    /// occurrence has it. `None` keeps the usual `Component:N`: for an empty name, and for one of
+    /// digits only, which a command would read as an occurrence id.
+    fn take(&mut self, wanted: &str) -> Option<String> {
+        let wanted: String = wanted.trim().chars().take(128).collect();
+        if wanted.is_empty() || wanted.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        let name = if self.used.contains(&wanted) {
+            let start = self.next.get(&wanted).copied().unwrap_or(2);
+            let (k, name) = (start..).map(|k| (k, format!("{wanted} ({k})"))).find(|(_, name)| !self.used.contains(name))?;
+            self.next.insert(wanted, k.saturating_add(1));
+            name
+        } else {
+            wanted
+        };
+        self.used.insert(name.clone());
+        Some(name)
+    }
 }
 
 /// What an import's file says about its structure.
@@ -515,6 +539,7 @@ pub(crate) fn add_in_component(
     let mut comps: Vec<u64> = Vec::with_capacity(plan.slots.len());
     // The occurrences made: what the import's rigid group holds.
     let mut made: Vec<u64> = Vec::with_capacity(plan.places.len());
+    let mut names = PlacementNames::new(&s.doc.occurrences);
     for place in &plan.places {
         let parent_comp = place.parent.and_then(|p| comps.get(p).copied()).unwrap_or(top);
         let occ = if let Some(&comp) = comps.get(place.slot) {
@@ -530,10 +555,12 @@ pub(crate) fn add_in_component(
             }
             occ
         };
-        if let Some(name) = place.name.as_deref().and_then(|wanted| placement_name(&s.doc.occurrences, wanted))
-            && let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occ)
-        {
-            o.name = name;
+        // The occurrence was just made, so it is at the end of the list.
+        if let Some(o) = s.doc_mut().occurrences.iter_mut().rev().find(|o| o.id == occ) {
+            names.note(&o.name);
+            if let Some(name) = place.name.as_deref().and_then(|wanted| names.take(wanted)) {
+                o.name = name;
+            }
         }
         made.push(occ);
     }
