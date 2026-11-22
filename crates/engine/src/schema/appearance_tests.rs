@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use super::{
     AppearanceAssignParams, AppearanceAssignResult, AppearanceCopyParams, AppearanceCopyResult, AppearanceFavoriteParams, AppearanceFavoriteResult,
     AppearanceLibraryParams, AppearanceLibraryResult, AppearanceListParams, AppearanceListResult, AppearancePaintParams, AppearancePaintResult,
-    AppearancePickUpParams, AppearancePickUpResult, AppearanceReplaceParams, AppearanceReplaceResult, ChainTarget,
+    AppearancePasteParams, AppearancePickUpParams, AppearancePickUpResult, AppearanceReplaceParams, AppearanceReplaceResult, ChainTarget,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -19,6 +19,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<AppearanceFavoriteParams>(), &["favorite", "look"]);
     assert_keys(input_schema_for::<AppearanceListParams>(), &["body"]);
     assert_keys(input_schema_for::<AppearancePaintParams>(), &["appearance", "color", "done", "name", "opacity", "pbr"]);
+    assert_keys(input_schema_for::<AppearancePasteParams>(), &["bodies", "body", "components", "faces"]);
     assert_keys(input_schema_for::<AppearancePickUpParams>(), &["target"]);
     assert_keys(input_schema_for::<AppearanceReplaceParams>(), &["from", "scope", "to"]);
 }
@@ -226,7 +227,9 @@ fn the_gestures_answer_with_their_schemas() {
 /// Copying a look from a body and from one of its faces, in Warn: the look is the object the
 /// pick-up answers with, the reply matches the published output schema, and what was copied is what
 /// `appearance.paste` applies. The published input schema says the target is required, because a
-/// copy has no ask-the-UI form.
+/// copy has no ask-the-UI form. Pasting answers with `appearance.assign`'s object and takes the
+/// assignment targets only, so a look named on the paste call is a warning in Warn and a refusal in
+/// strict, and never changes what lands.
 #[test]
 fn a_copied_look_answers_with_its_schema() {
     assert_keys(input_schema_for::<AppearanceCopyParams>(), &["target"]);
@@ -252,15 +255,50 @@ fn a_copied_look_answers_with_its_schema() {
     assert_eq!(face, copied, "a face with no look of its own follows its body");
     let other = run("solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [20, 0, 0]}));
     let other = other["created_bodies"][0].as_str().unwrap_or_default().to_string();
-    run("appearance.paste", json!({"bodies": [other]}));
-    let pasted = run("appearance.pick_up", json!({"target": {"body": other}}));
-    assert_eq!(pasted["look"], copied["look"], "pasting applies the copied look");
+    let pasted = run("appearance.paste", json!({"bodies": [other]}));
+    assert!(pasted.get("param_warnings").is_none(), "{pasted}");
+    matches(output_schema_for::<AppearanceAssignResult>(), "appearance.paste", &pasted);
+    let sampled = run("appearance.pick_up", json!({"target": {"body": other}}));
+    assert_eq!(sampled["look"], copied["look"], "pasting applies the copied look");
+    // A look named on the paste call is the caller's mistake, not a second look: the clipboard's is
+    // what lands, as it always did.
+    let named = run("appearance.paste", json!({"bodies": [other], "color": "#ff0000"}));
+    assert!(named["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{named}");
+    matches(output_schema_for::<AppearanceAssignResult>(), "appearance.paste", &named);
+    let sampled = run("appearance.pick_up", json!({"target": {"body": other}}));
+    assert_eq!(sampled["look"], copied["look"], "a look named on paste is not what lands");
     // A key the command doesn't take is a warning, not a refusal: the chain ignores it, as it does
     // with the pick-up.
     let warned = run("appearance.copy", json!({"target": {"body": body}, "targt": 1}));
     assert_eq!(warned["look"], copied["look"], "{warned}");
     assert!(warned["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{warned}");
     matches(output_schema_for::<AppearanceCopyResult>(), "appearance.copy", &warned);
+}
+
+/// `appearance.paste` takes the assignment targets and no look of its own. With the check off or in
+/// Warn that changes nothing: a look key is dropped, as it always was, and the clipboard's look is
+/// what lands. In strict the contract answers first and names the command that was called.
+#[test]
+fn paste_takes_the_targets_and_no_look_of_its_own() {
+    let error = |p: Value, level: ParamCheck| {
+        let mut s = Session { param_check: level, ..Session::default() };
+        s.execute("appearance.paste", &p).err().map(|e| e.to_string())
+    };
+    for key in ["appearance", "color", "opacity", "name", "pbr"] {
+        let mut p = json!({"bodies": ["Box1"]});
+        p[key] = json!("#ff0000");
+        for level in [ParamCheck::Off, ParamCheck::Warn] {
+            // Below strict the handler still runs, and has no clipboard to read.
+            assert_eq!(error(p.clone(), level), bad_params("appearance.paste", "copy a look first"), "{p}");
+        }
+        assert_eq!(error(p.clone(), ParamCheck::Strict), bad_params("appearance.paste", &format!("unknown key `{key}`")), "{p}");
+    }
+    // A target key the assignment command doesn't take either is refused in strict under paste's id,
+    // and the contract's own help names the key that was meant.
+    assert_eq!(
+        error(json!({"bodiesy": ["Box1"]}), ParamCheck::Strict),
+        bad_params("appearance.paste", "unknown key `bodiesy`; did you mean `bodies`?")
+    );
 }
 
 /// A target the chain can't read keeps the chain's own message with the check off and in warn, which
