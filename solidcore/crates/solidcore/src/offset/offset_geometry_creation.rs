@@ -467,10 +467,6 @@ const OFFSET_SURFACE_COLLAPSED_LATE: &str = "the offset surface's construction f
 /// Why a bounding edge of a vertex has no curve ([`OffsetGeometryCreation::vertex_offset`]).
 const BOUNDING_EDGE_WITHOUT_CURVE: &str = "an offset edge bounding the vertex has no curve, \
      though the offset made each such edge with its curve";
-/// Why the sphere through a vertex's bounding arcs is not made.
-const SPHERE_FROM_ARCS_FAILED: &str = "the sphere through the vertex's three bounding arcs \
-     could not be made, though they are the ends of offset edges built at the one offset \
-     distance, and an arc that missed a neighbour's plane was re-made between the planes";
 /// Why an intersection's UV curve is of no B-spline kind ([`OffsetGeometryCreation::mate_edges`]).
 const SSI_UV_CURVE_KIND: &str = "a UV curve of an intersection of the extended surfaces is of no \
      B-spline curve kind, though the intersection gives its UV curves as B-spline curves \
@@ -3430,22 +3426,20 @@ impl OffsetGeometryCreation {
                 }
             } // end exactly 3 curves check
 
-            // (any failure is SM_ERR, a defect keeping the sphere's error as its cause, whose
-            // class decides; an unported callee stays unported)
+            // (any failure is SM_ERR, keeping the sphere's error as its cause, which decides
+            // its class: the planes checked above do not prove the arcs of one sphere; an
+            // unported callee stays unported)
             let sphere = match BSplineSurface::create_sphere_from_arcs(k, &curves, tolerance) {
                 Ok(sphere) => sphere,
                 Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
                     return Err(e)
                 }
                 Err(e) => {
-                    return Err(Failure::new(
-                        OP_VERTEX,
-                        OffsetFailure::Defect {
-                            why: SPHERE_FROM_ARCS_FAILED,
-                        },
+                    return Err(
+                        Failure::new(OP_VERTEX, OffsetFailure::VertexArcsNotOneSphere)
+                            .caused_by(e)
+                            .into_error(),
                     )
-                    .caused_by(e)
-                    .into_error())
                 }
             };
             let trim_curves: Vec<Curve> = sphere
@@ -9659,10 +9653,11 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             e.offset_failure(),
-            Some(&OffsetFailure::Defect {
-                why: SPHERE_FROM_ARCS_FAILED
-            })
+            Some(&OffsetFailure::VertexArcsNotOneSphere)
         );
+        // the sphere's error decides the class, never a defect of its own
+        assert_eq!(e.is_defect(), built.is_defect());
+        assert_eq!(e.is_refusal(), built.is_refusal());
         assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert_eq!(e.cause(), Some(&built));
     }

@@ -36,7 +36,7 @@
 //! | [`OffsetFailure::BlendRailWithoutSupport`], [`OffsetFailure::FollowedBlendIncomplete`] | `SM_ERR_NULL_POINTER` (the face move's) |
 //! | [`OffsetFailure::FaceMoveEmpty`]       | `SM_ERR_INVALID_INPUT` (the face move's)  |
 //! | [`OffsetFailure::EdgeHasNoCurve`], [`OffsetFailure::FaceHasNoSurface`], [`OffsetFailure::FaceHasNoOuterFaceuse`], [`OffsetFailure::VertexNotGiven`], [`OffsetFailure::EdgeuseNotGiven`], [`OffsetFailure::CurveKindUnsupported`], [`OffsetFailure::EdgeuseHasNoUvTrim`] | `SM_ERR_NULL_POINTER`, or the site's through `with_status` |
-//! | the other causes of `offset_geometry_creation` ([`OffsetFailure::VertexCurveNotArc`] to [`OffsetFailure::LocalFaceNotListed`]) | `SM_ERR` |
+//! | the other causes of `offset_geometry_creation` ([`OffsetFailure::VertexCurveNotArc`] to [`OffsetFailure::VertexArcsNotOneSphere`]) | `SM_ERR` |
 //!
 //! A stage of an offset routine that fails with no reason the kernel names is an
 //! [`OffsetFailure::StageFailed`], a defect ([`ErrorKind::StageFailed`], #15034), keeping the
@@ -376,7 +376,10 @@ pub enum OffsetFailure {
     },
     /// The UV domain of an offset face's UV trim curves could not be found (they cover no
     /// part of the surface's domain, or the computation failed: the failure's cause says
-    /// which), so its surface domain cannot be updated.
+    /// which), so its surface domain cannot be updated. [`ErrorKind::Failed`], neither a
+    /// defect nor a refusal on its own, as the blend's `ExecutiveStepFailed`: the kept cause
+    /// decides ([`crate::SolidError::is_defect`], [`crate::SolidError::is_refusal`]), and
+    /// [`crate::SolidError::cause`] gives its own class.
     FaceDomainUnresolved,
     /// An offset edge's curve (its UV curve extended along its face's offset, or an
     /// intersection of the extended surfaces beside it) is cut at neither end where
@@ -430,6 +433,11 @@ pub enum OffsetFailure {
     /// A local operation's geometry creator was asked for the surface of a face that is not
     /// among the faces it was given.
     LocalFaceNotListed,
+    /// At a vertex with three bounding arcs, the sphere through them could not be made
+    /// (`CreateSphereFromArcs`): the arcs are not of one centre and radius, or do not meet
+    /// at their ends. [`ErrorKind::Failed`], neither a defect nor a refusal on its own: the
+    /// sphere's error is kept as the cause and decides ([`crate::SolidError::is_defect`]).
+    VertexArcsNotOneSphere,
 }
 
 /// What a local operation's or a solid offset's built body fails ([`OffsetFailure::Unsound`]).
@@ -591,6 +599,7 @@ impl OffsetFailure {
             | Self::ShellTangentVertexMoveTooFar { .. }
             | Self::CrossingUndecided
             | Self::LocalFaceNotListed
+            | Self::VertexArcsNotOneSphere
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
             | Self::TangentBranchUncertified
@@ -627,7 +636,8 @@ impl OffsetFailure {
 
     /// True for a cause named at a site of `offset_faces` or `offset_geometry_creation` that
     /// returned a bare status or a stage failure ([`OffsetFailure::FacesMoveRefused`] to
-    /// [`OffsetFailure::LocalFaceNotListed`]): each keeps the status of the site it replaced.
+    /// [`OffsetFailure::VertexArcsNotOneSphere`]): each keeps the status of the site it
+    /// replaced.
     #[must_use]
     pub const fn is_named_at_a_status_site(&self) -> bool {
         matches!(
@@ -658,6 +668,7 @@ impl OffsetFailure {
                 | Self::ShellTangentVertexMoveTooFar { .. }
                 | Self::CrossingUndecided
                 | Self::LocalFaceNotListed
+                | Self::VertexArcsNotOneSphere
         )
     }
 
@@ -716,7 +727,8 @@ impl OffsetFailure {
             | Self::ShellTangentUvUnmatched
             | Self::ShellTangentVertexMoveTooFar { .. }
             | Self::CrossingUndecided
-            | Self::LocalFaceNotListed => false,
+            | Self::LocalFaceNotListed
+            | Self::VertexArcsNotOneSphere => false,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
                 true
             }
@@ -781,7 +793,8 @@ impl OffsetFailure {
             | Self::ShellTangentUvUnmatched
             | Self::ShellTangentVertexMoveTooFar { .. }
             | Self::CrossingUndecided
-            | Self::LocalFaceNotListed => false,
+            | Self::LocalFaceNotListed
+            | Self::VertexArcsNotOneSphere => false,
         }
     }
 
@@ -821,7 +834,8 @@ impl OffsetFailure {
             | Self::ShellTangentUvUnmatched
             | Self::ShellTangentVertexMoveTooFar { .. }
             | Self::CrossingUndecided
-            | Self::LocalFaceNotListed => SM_ERR,
+            | Self::LocalFaceNotListed
+            | Self::VertexArcsNotOneSphere => SM_ERR,
             Self::Missing(_)
             | Self::BlendRailWithoutSupport { .. }
             | Self::FollowedBlendIncomplete
@@ -881,8 +895,9 @@ impl OffsetFailure {
             | Self::ShellTangentVertexMoveTooFar { .. }
             | Self::LaminaEdgeOtherSide
             | Self::CrossingUndecided => ErrorKind::Unsupported,
-            // its class is its cause's: the failure keeps the error of the step that failed
-            Self::FaceDomainUnresolved => ErrorKind::Failed,
+            // neither a defect nor a refusal: the failure keeps the error of the step that
+            // failed, which decides (`SolidError::is_defect`, `is_refusal`)
+            Self::FaceDomainUnresolved | Self::VertexArcsNotOneSphere => ErrorKind::Failed,
             Self::DistanceUnresolved { .. }
             | Self::ToleranceUnresolved { .. }
             | Self::FollowedBlendIncomplete
@@ -1275,6 +1290,9 @@ impl core::fmt::Display for OffsetFailure {
                 "where an offset edge's curve meets a neighbour's offset surface, the curve has \
                  no tangent or the surface no tangent plane: whether it passes through is not \
                  decided",
+            ),
+            Self::VertexArcsNotOneSphere => f.write_str(
+                "the sphere through the three arcs bounding a vertex could not be made",
             ),
             Self::LocalFaceNotListed => f.write_str(
                 "invalid input: the face is not among the faces the local operation was given",
@@ -1732,6 +1750,8 @@ mod tests {
             ),
             (O::CrossingUndecided, ErrorKind::Unsupported, false, false),
             (O::LocalFaceNotListed, ErrorKind::InvalidInput, false, false),
+            // its cause decides
+            (O::VertexArcsNotOneSphere, ErrorKind::Failed, false, false),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -1787,6 +1807,7 @@ mod tests {
                 O::ShellTangentVertexMoveTooFar { .. } => 49,
                 O::CrossingUndecided => 50,
                 O::LocalFaceNotListed => 51,
+                O::VertexArcsNotOneSphere => 52,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
@@ -1895,6 +1916,7 @@ mod tests {
             ),
             (OffsetFailure::ExtendedEdgeUntrimmed, SM_ERR, None),
             (OffsetFailure::LocalFaceNotListed, SM_ERR, None),
+            (OffsetFailure::VertexArcsNotOneSphere, SM_ERR, None),
         ];
         for (cause, status, entity) in samples {
             assert!(cause.replaces_upstream_status(), "{cause:?}");
@@ -1916,12 +1938,42 @@ mod tests {
             "offset::op: invalid input: the face has no face use on the outside of its body \
              (face 3)"
         );
-        // the domain's cause decides its class
-        let caused = Failure::new("offset::op", OffsetFailure::FaceDomainUnresolved)
-            .caused_by(SolidError::offset_stage_failed("offset::inner", SM_ERR))
-            .into_error();
-        assert!(caused.is_defect());
-        assert_eq!(caused.upstream_status(), Some(SM_ERR));
+        // a contextual cause's kept cause decides its class: a defect, a refusal, or
+        // neither (an invalid input), whose own class the cause keeps
+        for cause in [
+            OffsetFailure::FaceDomainUnresolved,
+            OffsetFailure::VertexArcsNotOneSphere,
+        ] {
+            let around = |inner: SolidError| {
+                Failure::new("offset::op", cause)
+                    .caused_by(inner)
+                    .into_error()
+            };
+            let defect = around(SolidError::offset_stage_failed("offset::inner", SM_ERR));
+            assert!(defect.is_defect() && !defect.is_refusal(), "{cause:?}");
+            assert_eq!(defect.upstream_status(), Some(SM_ERR));
+            let refusal = around(SolidError::offset(
+                "offset::inner",
+                OffsetFailure::Folds {
+                    face,
+                    distance: 2.0,
+                    largest: 1.0,
+                },
+            ));
+            assert!(refusal.is_refusal() && !refusal.is_defect(), "{cause:?}");
+            assert_eq!(refusal.upstream_status(), Some(SM_ERR));
+            let input = around(SolidError::invalid_input(
+                "geom::extent2d::Extent2d::intersect",
+                "disjoint",
+            ));
+            assert!(!input.is_refusal() && !input.is_defect(), "{cause:?}");
+            assert_eq!(input.kind(), ErrorKind::Failed);
+            assert_eq!(
+                input.cause().map(SolidError::kind),
+                Some(ErrorKind::InvalidInput)
+            );
+            assert_eq!(input.upstream_status(), Some(SM_ERR));
+        }
     }
 
     /// A body whose edge or vertex tolerance grew past its certificate's bound is refused

@@ -465,12 +465,32 @@ impl OffsetFacesExecutive {
         reason: &str,
         more: Option<&str>,
     ) -> SolidError {
+        self.refuse_after(refusal, reason, more, None)
+    }
+
+    /// [`Self::refuse`] for a refusal decided by an error the step caught (`cause`), kept as
+    /// the failure's cause (rule 6): [`OffsetFailure::FacesMoveRefused`] is neither a defect
+    /// nor a refusal class of its own, so the cause's class decides
+    /// ([`SolidError::is_refusal`], [`SolidError::is_defect`]). A refusal the move decides
+    /// from the geometry itself has none.
+    fn refuse_after(
+        &mut self,
+        refusal: OffsetFacesRefusal,
+        reason: &str,
+        more: Option<&str>,
+        cause: Option<SolidError>,
+    ) -> SolidError {
         self.refusal = refusal;
         self.reason = match more {
             Some(m) if !m.is_empty() => format!("{reason}: {m}"),
             _ => reason.to_string(),
         };
-        failed(OffsetFailure::FacesMoveRefused { refusal })
+        let failure = Failure::new(OP, OffsetFailure::FacesMoveRefused { refusal });
+        match cause {
+            Some(cause) => failure.caused_by(cause),
+            None => failure,
+        }
+        .into_error()
     }
 
     /// `OffsetFaces` step 1: the blends that follow `faces` (beside a moved face across a
@@ -1115,10 +1135,11 @@ impl OffsetFacesExecutive {
                 return Err(e);
             }
             if code == FilletErrorType::NoRoom as i32 {
-                return Err(self.refuse(
+                return Err(self.refuse_after(
                     OffsetFacesRefusal::NoRoom,
                     "a blend that follows a moved face no longer fits",
                     Some(&comment),
+                    Some(e),
                 ));
             }
             // (the fork's SM_FILERR_NOT_EXACT has no counterpart here: see the module
@@ -1324,7 +1345,8 @@ impl OffsetFacesExecutive {
                     }
                 }
             }
-            let applied = {
+            // (whether the group came off, and the defeature's refusal where it refused)
+            let (applied, refused) = {
                 let mut defeature = FeatureExecutive::new(k, b)?;
                 let Some(feature) = defeature.add_feature(
                     k,
@@ -1339,23 +1361,25 @@ impl OffsetFacesExecutive {
                 // itself; here, not upstream (WR-656), it refuses a base it could not patch,
                 // put back, which is the refusal below)
                 match defeature.do_defeature(k) {
-                    Err(e) if is_open_base_refusal(&e) => false,
+                    Err(e) if is_open_base_refusal(&e) => (false, Some(e)),
                     r => {
                         r?;
-                        defeature
+                        let applied = defeature
                             .features()
                             .get(feature)
-                            .is_some_and(|f| f.base_was_applied)
+                            .is_some_and(|f| f.base_was_applied);
+                        (applied, None)
                     }
                 }
             };
             // (not upstream: the port's cached topology fields)
             b.refresh_cached_topology();
             if !applied {
-                return Err(self.refuse(
+                return Err(self.refuse_after(
                     OffsetFacesRefusal::Unsupported,
                     "mitred blends on a moved face could not be taken off together",
                     None,
+                    refused,
                 ));
             }
             // the extended faces were split where the blends had been: join them again
@@ -1861,6 +1885,8 @@ mod tests {
         );
         assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported);
+        // decided from the marks themselves, not from an error the move caught
+        assert!(e.cause().is_none());
     }
 
     /// A face move given no face, or a zero distance, is the caller's argument, with the
