@@ -114,11 +114,15 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     if chains.is_empty() {
                         return Err(DocError::Invalid(format!("sketch `{}` has no curves to trim with", ss.name)));
                     }
-                    kernel::trim_keep(
-                        &mb.body,
-                        &kernel::SplitTool::Curves { plane: ss.plane, curves: chains, along: c.direction.map(|d| d.0) },
-                        keeps,
-                    )?
+                    if c.face_normal {
+                        kernel::trim_dropped_keep(&mb.body, &ss.plane, &chains, keeps)?
+                    } else {
+                        kernel::trim_keep(
+                            &mb.body,
+                            &kernel::SplitTool::Curves { plane: ss.plane, curves: chains, along: c.direction.map(|d| d.0) },
+                            keeps,
+                        )?
+                    }
                 }
                 (None, None) => {
                     kernel::trim_keep(&mb.body, &kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?), keeps)?

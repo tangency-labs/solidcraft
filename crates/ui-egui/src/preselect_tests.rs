@@ -2953,9 +2953,38 @@ fn trim_dialog_takes_curves_several_keep_points_and_another_surface() {
     assert!((area(&app, "Floor") - 200.0).abs() < 1e-6 && app.session.world_state().unwrap().body("Wall").is_none());
     let fid = app.session.doc.features.last().unwrap().id;
     let back = crate::dialogs::for_feature(&app, fid, None).unwrap();
-    assert!(matches!(back.kind, Kind::Surface(crate::dialogs_surface::Surf::Trim { stitch: true, extend: false, direction: None })));
+    assert!(matches!(
+        back.kind,
+        Kind::Surface(crate::dialogs_surface::Surf::Trim { stitch: true, extend: false, direction: None, face_normal: false })
+    ));
     let counts: Vec<usize> = back.inputs.iter().map(|i| i.items.len()).collect();
     assert_eq!(counts, [1, 0, 1, 1, 1]);
+}
+
+/// A trim whose curves are projected along the surface's normal is made by a script (the
+/// dialog has no control for it). Edit Feature keeps the choice: the dialog sends
+/// `direction: "face_normal"` again, so OK does not turn the trim into a sweep along the
+/// sketch's normal.
+#[test]
+fn trim_dialog_keeps_a_projection_along_the_surface_normal_through_edit_feature() {
+    // A 20 × 10 sheet on XY cut along the sketch line x = 3, keeping x > 3: 7 × 10.
+    let app = app_with(json!([
+        {"command": "sketch.create", "params": {"plane": "XY", "name": "F"}},
+        {"command": "sketch.rectangle.two_point", "params": {"p0": [-10, 0], "p1": [10, 10]}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "surface.patch", "params": {"sketch": "F", "body_name": "Floor"}},
+        {"command": "sketch.create", "params": {"plane": "XY", "name": "Cut"}},
+        {"command": "sketch.line", "params": {"points": [[3, -5], [3, 15]], "ids": ["c1"]}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "surface.trim", "params": {"body": "Floor", "curves": {"sketch": "Cut", "direction": "face_normal"}, "keep": [5, 5, 0]}}
+    ]));
+    let area = app.session.world_state().unwrap().body("Floor").unwrap().mesh().measure().area;
+    assert!((area - 70.0).abs() < 1e-6, "{area}");
+    let fid = app.session.doc.features.last().unwrap().id;
+    let back = crate::dialogs::for_feature(&app, fid, None).unwrap();
+    assert!(matches!(back.kind, Kind::Surface(crate::dialogs_surface::Surf::Trim { face_normal: true, direction: None, .. })));
+    let (_, p) = apply_commands(&app, &back).unwrap().remove(0);
+    assert_eq!(p["params"]["curves"]["direction"], json!("face_normal"), "{p}");
 }
 
 #[test]
