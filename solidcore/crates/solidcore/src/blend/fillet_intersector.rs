@@ -874,10 +874,12 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         let approx_tol_3d = self.solver.this_approx_tol_3d();
         let sur0 = Surface::from(self.surface(0)?.surface.clone());
         let sur1 = Surface::from(self.surface(1)?.surface.clone());
+        // FlushCurve asks only after has_surface_generator, but the solver and this trait
+        // method are pub: a solver built by from_parts has no generator
         let generator = self.solver.fillet_surface_generator_mut().ok_or_else(|| {
-            SolidError::blend_null_defect(
+            SolidError::blend_trace(
                 "blend::fillet_intersector::create_fillet_surface",
-                "FlushCurve skins the surface only after has_surface_generator found the generator",
+                TraceFailure::SurfaceGeneratorMissing,
             )
         })?;
         generator
@@ -3417,6 +3419,35 @@ mod tests {
                 [1.0, 0.0, 1.0],
             ]),
         )
+    }
+
+    /// A caller's solver built by `from_parts` has no surface generator: asking it for
+    /// the fillet surface through the pub trait is the caller's input, not a defect.
+    #[test]
+    fn a_solver_without_a_generator_refuses_the_fillet_surface() {
+        let k = Kernel::default();
+        let (a, b) = surfaces();
+        let mut s = solver(&a, &b);
+        assert!(!s.has_surface_generator().unwrap());
+        let line = |y: f64| {
+            BSplineCurve::create_line_segment(3, Vec3::new(0.0, y, 0.0), Vec3::new(1.0, y, 0.0))
+                .unwrap()
+        };
+        let (mut center, mut c1, mut c2) = (line(0.0), line(1.0), line(2.0));
+        let (mut uv1, mut uv2) = (line(0.0), line(0.0));
+        let e = s
+            .create_fillet_surface(&k, &mut center, &mut c1, &mut c2, &[], &mut uv1, &mut uv2)
+            .unwrap_err();
+        assert_eq!(
+            e,
+            SolidError::blend_trace(
+                "blend::fillet_intersector::create_fillet_surface",
+                TraceFailure::SurfaceGeneratorMissing,
+            )
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert!(!e.is_defect());
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR_NULL_POINTER));
     }
 
     #[test]
