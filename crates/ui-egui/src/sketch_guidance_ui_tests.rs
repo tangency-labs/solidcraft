@@ -592,13 +592,18 @@ fn a_point_on_a_midpoint_guide_stays_lined_up_with_the_midpoint() {
 
 /// #20859: a point placed where the guides from two edges' midpoints cross, at a rectangle's
 /// centre, stays plumb with the top edge's midpoint and level with the right edge's, also when
-/// "Snap to where two guides cross" takes the point there first. With lining up off, the
-/// crossing snap only places the point, as before.
+/// "Snap to where two guides cross" takes the point there first, and not with a free point
+/// that happens to be level or plumb with it. With lining up off, the crossing snap only places
+/// the point, as before.
 #[test]
 fn a_point_where_two_midpoint_guides_cross_stays_lined_up_with_both() {
     use solidcraft_engine::sketch::ConstraintKind::Midpoint;
     for (aligning, crossing) in [(true, true), (true, false), (false, true)] {
-        let mut h = lining_up_fixture(&[("sketch.rectangle.two_point", json!({"p0":[20,10],"p1":[100,50]}))]);
+        let mut h = lining_up_fixture(&[
+            ("sketch.rectangle.two_point", json!({"p0":[20,10],"p1":[100,50]})),
+            ("sketch.point", json!({"point":[130,30]})),
+            ("sketch.point", json!({"point":[60,75]})),
+        ]);
         h.app.preferences.sketch_align_points = aligning;
         h.app.preferences.sketch_recent_snap = crossing;
         h.app.preferences.sketch_tracking_guides = true;
