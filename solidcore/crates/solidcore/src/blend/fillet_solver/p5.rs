@@ -589,7 +589,8 @@ fn squeeze_rail(
             let curve = edge::curve(fillets.brep(), rail)?.ok_or_else(|| {
                 SolidError::blend_null_defect(
                     OP,
-                    "the squeeze found no curve on the rail: `test_roll_over` read the rail's                      curve before it classified the rail, and nothing since removes it",
+                    "the squeeze found no curve on the rail: `test_roll_over` read the rail's \
+                     curve before it classified the rail, and nothing since removes it",
                 )
             })?;
             let start = curve.evaluate_point(k, interval.min())?;
