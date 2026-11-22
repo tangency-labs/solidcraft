@@ -1190,7 +1190,8 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
                 None => app.viewport.nav.is_some(),
             };
         decide_orbit_flip(app, button, mods);
-        orbit_drag(app, rect, f64::from(delta.x), f64::from(delta.y), press, snap, true);
+        let free = mouse_free_orbit(app);
+        orbit_drag_styled(app, rect, f64::from(delta.x), f64::from(delta.y), press, snap, true, free);
         wrap_cursor(app, ui, rect);
     } else {
         app.viewport.orbit_flip = None;
@@ -1558,20 +1559,27 @@ fn snapped_quarter_roll(mut target: Camera, reference: Camera) -> Camera {
 /// direction at once; the unsnapped orbit is kept in `orbit_free` so many small deltas still
 /// cross snap boundaries. A small angular margin avoids flicker at a boundary.
 pub(crate) fn orbit_drag(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press: Option<Pos2>, snap: bool, around_cursor: bool) {
+    let free = app.preferences.free_orbit;
+    orbit_drag_styled(app, rect, dx, dy, press, snap, around_cursor, free);
+}
+
+/// [`orbit_drag`] in the orbit style `free` names, which a mouse drag takes from
+/// [`mouse_free_orbit`].
+fn orbit_drag_styled(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press: Option<Pos2>, snap: bool, around_cursor: bool, free_style: bool) {
     let displayed = app.cam;
     let previous_free = app.viewport.orbit_free.take();
     if let Some(free) = previous_free {
         app.cam = free;
     }
     if around_cursor {
-        orbit(app, rect, dx, dy, press);
+        orbit_styled(app, rect, dx, dy, press, free_style);
     } else {
-        orbit_camera(app, dx, dy);
+        orbit_camera_styled(app, dx, dy, free_style);
     }
     let free = app.cam;
     app.viewport.orbit_free = Some(free);
     if !snap {
-        if free_orbit_now(app) {
+        if free_style {
             app.viewport.orbit_free = None;
         }
         return;
@@ -1585,7 +1593,7 @@ pub(crate) fn orbit_drag(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press
             target.pitch = displayed.pitch;
         }
     }
-    if free_orbit_now(app) {
+    if free_style {
         target = snapped_quarter_roll(target, free);
     }
     // The cursor, origin and view-centre pivots stay still. The axis gizmo uses the origin when selected;
@@ -1639,14 +1647,21 @@ pub(crate) fn middle_double_click(app: &mut SolveApp, ui: &egui::Ui, inside: boo
 /// point. The cursor pivot is chosen once, when the drag begins; the view-centre pivot too, while
 /// it stays under the middle of the view (see [`kept_view_middle`]).
 pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Option<Pos2>) {
+    let free = app.preferences.free_orbit;
+    orbit_styled(app, rect, dx, dy, press, free);
+}
+
+/// [`orbit`] in the orbit style `free_style` names (the trackpad and the other callers use the
+/// `free_orbit` preference; a mouse drag takes it from [`mouse_free_orbit`]).
+fn orbit_styled(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Option<Pos2>, free_style: bool) {
     let (pivot, kept) = orbit_pivot(app, rect, (app.viewport.orbit_pivot, app.viewport.orbit_pivot_at), press.unwrap_or(rect.center()));
     (app.viewport.orbit_pivot, app.viewport.orbit_pivot_at) = kept;
     app.viewport.orbit_mark = orbit_mark(app, pivot);
-    if free_orbit_now(app) {
+    if free_style {
         app.viewport.orbit_from = None;
         match pivot {
-            Some(p) => orbit_about(app, rect, dx, dy, p),
-            None => orbit_camera(app, dx, dy),
+            Some(p) => orbit_about_styled(app, rect, dx, dy, p, free_style),
+            None => orbit_camera_styled(app, dx, dy, free_style),
         }
         return;
     }
@@ -1828,9 +1843,14 @@ pub struct OrbitFrom {
 }
 
 /// Rotate rigidly about the chosen pivot, keeping its camera-frame position unchanged.
-pub(crate) fn orbit_about(app: &mut SolveApp, _rect: egui::Rect, dx: f64, dy: f64, pivot: Vec3) {
+pub(crate) fn orbit_about(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, pivot: Vec3) {
+    let free = app.preferences.free_orbit;
+    orbit_about_styled(app, rect, dx, dy, pivot, free);
+}
+
+fn orbit_about_styled(app: &mut SolveApp, _rect: egui::Rect, dx: f64, dy: f64, pivot: Vec3, free_style: bool) {
     let coords = app.cam.frame_coords(pivot);
-    orbit_camera(app, dx, dy);
+    orbit_camera_styled(app, dx, dy, free_style);
     app.cam.place(pivot, coords);
 }
 
@@ -2050,9 +2070,10 @@ impl TouchNavigation {
     }
 }
 
-/// Whether an orbit turns freely now: the `free_orbit` preference, turned over for a mouse drag
-/// that began with the `free_orbit_key` held (#20917).
-fn free_orbit_now(app: &SolveApp) -> bool {
+/// Whether the mouse orbit drag under way turns freely: the `free_orbit` preference, turned over
+/// for a drag that began with the `free_orbit_key` held (#20917). Only the mouse drag asks; the
+/// trackpad, touch and 3D mouse orbits use the preference itself.
+fn mouse_free_orbit(app: &SolveApp) -> bool {
     app.preferences.free_orbit != app.viewport.orbit_flip.unwrap_or(false)
 }
 
@@ -2079,7 +2100,12 @@ fn decide_orbit_flip(app: &mut SolveApp, button: Option<crate::prefs::NavButton>
 }
 
 fn orbit_camera(app: &mut SolveApp, dx: f64, dy: f64) {
-    if !free_orbit_now(app) {
+    let free = app.preferences.free_orbit;
+    orbit_camera_styled(app, dx, dy, free);
+}
+
+fn orbit_camera_styled(app: &mut SolveApp, dx: f64, dy: f64, free_style: bool) {
+    if !free_style {
         app.cam.orbit(dx, dy);
     } else if app.preferences.free_orbit_upright && app.preferences.upright_orbit_unrolls {
         // The same preference as the upright orbit's: the pointer is read through the view's
@@ -3029,16 +3055,9 @@ mod tests {
         (before, h.app.cam)
     }
 
-    fn turn_angle(before: &solidcraft_viewport::Camera, after: &solidcraft_viewport::Camera) -> f64 {
-        before.back().dot(after.back()).clamp(-1.0, 1.0).acos()
-    }
-
-    /// The turn of the 80-point drag over the pole: free orbit turns the whole 0.64 radian, the
-    /// turntable stops at the pole.
-    const FREE_TURN: f64 = 0.64;
-
-    fn is_free_turn(before: &solidcraft_viewport::Camera, after: &solidcraft_viewport::Camera) -> bool {
-        (turn_angle(before, after) - FREE_TURN).abs() < 1e-3
+    /// Two views are the same turn when their back directions agree.
+    fn same_view(a: &solidcraft_viewport::Camera, b: &solidcraft_viewport::Camera) -> bool {
+        a.back().dist(b.back()) < 1e-9
     }
 
     #[test]
@@ -3046,12 +3065,15 @@ mod tests {
         use egui::{Modifiers, PointerButton};
         assert_eq!(crate::prefs::Prefs::default().free_orbit_key, "none");
         let mut reference = crate::scenario::Harness::new();
-        let (before, plain) = orbit_over_the_pole(&mut reference, PointerButton::Secondary, Modifiers::NONE, None);
-        assert!(!is_free_turn(&before, &plain), "the turntable stops at the pole: {}", turn_angle(&before, &plain));
+        let (_, plain) = orbit_over_the_pole(&mut reference, PointerButton::Secondary, Modifiers::NONE, None);
+        let mut free = crate::scenario::Harness::new();
+        free.app.preferences.free_orbit = true;
+        let (_, free_turn) = orbit_over_the_pole(&mut free, PointerButton::Secondary, Modifiers::NONE, None);
+        assert!(!same_view(&plain, &free_turn), "the turntable stops at the pole and a free orbit goes over it");
         for mods in [Modifiers::ALT, Modifiers::CTRL] {
             let mut h = crate::scenario::Harness::new();
-            let (before, held) = orbit_over_the_pole(&mut h, PointerButton::Secondary, mods, None);
-            assert!(!is_free_turn(&before, &held), "{mods:?} with no key chosen stays a turntable orbit");
+            let (_, held) = orbit_over_the_pole(&mut h, PointerButton::Secondary, mods, None);
+            assert!(same_view(&held, &plain), "{mods:?} with no key chosen stays a turntable orbit");
             assert_eq!(h.app.viewport.orbit_flip, None, "nothing is left set after the drag");
         }
         for mods in [Modifiers::NONE, Modifiers::SHIFT, Modifiers::ALT, Modifiers::CTRL, Modifiers::COMMAND] {
@@ -3072,37 +3094,60 @@ mod tests {
             ("ctrl", Modifiers::CTRL, Some(Modifiers::ALT), Secondary, "fusion"),
             ("alt", Modifiers::ALT, None, Middle, "solidworks"),
         ] {
-            let run = |free: bool, mods: Modifiers, release_after: Option<usize>| {
+            let run = |free: bool, key: &str, mods: Modifiers, release_after: Option<usize>| {
                 let mut h = crate::scenario::Harness::new();
                 h.app.preferences.nav = nav.into();
                 h.app.preferences.free_orbit = free;
                 h.app.preferences.free_orbit_key = key.into();
-                orbit_over_the_pole(&mut h, button, mods, release_after)
+                orbit_over_the_pole(&mut h, button, mods, release_after).1
             };
             let label = format!("{key} {button:?}");
-            let (before, turntable) = run(false, Modifiers::NONE, None);
-            assert!(!is_free_turn(&before, &turntable), "{label}: no key stays upright");
+            // The two styles, as the plain drag turns them with no key chosen.
+            let turntable = run(false, "none", Modifiers::NONE, None);
+            let free = run(true, "none", Modifiers::NONE, None);
+            assert!(!same_view(&turntable, &free), "{label}: the styles differ over the pole");
+            assert!(same_view(&run(false, key, Modifiers::NONE, None), &turntable), "{label}: no key stays upright");
             if let Some(other) = other {
-                let (before, other_key) = run(false, other, None);
-                assert!(!is_free_turn(&before, &other_key), "{label}: another key changes nothing");
+                assert!(same_view(&run(false, key, other, None), &turntable), "{label}: another key changes nothing");
             }
-            let (before, free) = run(false, mods, None);
-            assert!(is_free_turn(&before, &free), "{label}: the key makes the drag free, turn {}", turn_angle(&before, &free));
+            assert!(same_view(&run(false, key, mods, None), &free), "{label}: the key makes the drag free");
             // With Free chosen, the key gives the turntable instead.
-            let (before, free_default) = run(true, Modifiers::NONE, None);
-            assert!(is_free_turn(&before, &free_default), "{label}: Free chosen stays free");
-            let (_, upright) = run(true, mods, None);
-            assert!(upright.back().dist(turntable.back()) < 1e-9, "{label}: the key turns a Free orbit into the turntable");
+            assert!(same_view(&run(true, key, Modifiers::NONE, None), &free), "{label}: Free chosen stays free");
+            assert!(same_view(&run(true, key, mods, None), &turntable), "{label}: the key turns a Free orbit into the turntable");
             // Let go partway: the drag keeps the style it began with.
-            let (_, kept) = run(false, mods, Some(4));
-            assert!(kept.back().dist(free.back()) < 1e-9, "{label}: the drag keeps its mode");
+            assert!(same_view(&run(false, key, mods, Some(4)), &free), "{label}: the drag keeps its mode");
         }
         // With "A drag keeps the navigation it started with" off, the keys held decide each frame.
         let mut h = crate::scenario::Harness::new();
+        h.app.preferences.free_orbit = true;
+        let (_, free) = orbit_over_the_pole(&mut h, Secondary, Modifiers::NONE, None);
+        let mut h = crate::scenario::Harness::new();
         h.app.preferences.free_orbit_key = "alt".into();
         h.app.preferences.nav_drag_keeps_mode = false;
-        let (before, partly) = orbit_over_the_pole(&mut h, Secondary, Modifiers::ALT, Some(4));
-        assert!(!is_free_turn(&before, &partly));
+        let (_, partly) = orbit_over_the_pole(&mut h, Secondary, Modifiers::ALT, Some(4));
+        assert!(!same_view(&partly, &free));
+    }
+
+    /// The trackpad and every other orbit that is not a mouse drag follow the `free_orbit`
+    /// preference, whatever a mouse drag left in `orbit_flip` (it is still set on the frame the
+    /// flipped drag ends).
+    #[test]
+    fn orbits_that_are_not_a_mouse_drag_ignore_the_free_orbit_key() {
+        use super::*;
+        let turn = |free: bool, flip: Option<bool>| {
+            let mut h = crate::scenario::Harness::new();
+            h.app.preferences.free_orbit = free;
+            h.app.viewport.orbit_flip = flip;
+            let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+            h.app.cam = solidcraft_viewport::Camera { yaw: 0.0, pitch: 1.4, ..Default::default() };
+            orbit(&mut h.app, rect, 0.0, 80.0, None);
+            h.app.cam
+        };
+        for free in [false, true] {
+            assert!(same_view(&turn(free, Some(true)), &turn(free, None)), "free_orbit {free}: a stale flip changed the trackpad orbit");
+            assert!(same_view(&turn(free, Some(false)), &turn(free, None)));
+        }
+        assert!(!same_view(&turn(false, None), &turn(true, None)), "the two styles differ here");
     }
 
     #[test]
