@@ -483,11 +483,18 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 act("ui.workspace.drawing", "Drawing", "ws_drawing")
                     .with(json!({"workspace":"drawing"}))
                     .key(if drawing { "current" } else { "" })
-                    .on(app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()),
-                act("ui.workspace.render", "Render", "ws_render")
-                    .with(json!({"workspace":"render"}))
-                    .key(if rendering { "current" } else { "" })
-                    .on(crate::render_workspace::entry_open(app)),
+                    .on(if app.preferences.workspace_follows_view {
+                        crate::workspace::switcher_available(app)
+                    } else {
+                        app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()
+                    }),
+                act("ui.workspace.render", "Render", "ws_render").with(json!({"workspace":"render"})).key(if rendering { "current" } else { "" }).on(
+                    if app.preferences.workspace_follows_view {
+                        crate::workspace::switcher_available(app)
+                    } else {
+                        crate::render_workspace::entry_open(app)
+                    },
+                ),
             ]
         }
         Target::Units => crate::prefs::UNITS
@@ -4405,6 +4412,9 @@ mod workspace_menu_tests {
     #[test]
     fn workspace_rows_keep_switching_handles_and_disabled_render_behavior() {
         let mut h = Harness::new();
+        // The classic switcher, which this test covers: since #19655 the default lets the focused
+        // view choose the workspace (`workspace_follows_view`).
+        h.app.preferences.workspace_follows_view = false;
         h.call("ui.resize", json!({"width":1200,"height":1000}));
         h.step(&json!({"click":{"handle":"ribbon:workspace"}})).unwrap();
         let opener = rect_of("ribbon:workspace").unwrap();
@@ -4435,6 +4445,9 @@ mod workspace_menu_tests {
     #[test]
     fn render_row_opens_while_isocurve_analysis_is_on() {
         let mut h = Harness::new();
+        // The classic switcher, which this test covers: since #19655 the default lets the focused
+        // view choose the workspace (`workspace_follows_view`).
+        h.app.preferences.workspace_follows_view = false;
         h.call("ui.resize", json!({"width":1200,"height":1000}));
         h.app.run("solid.cylinder", json!({"radius": 10, "height": 30})).unwrap();
         h.settle();

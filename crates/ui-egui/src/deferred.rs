@@ -237,6 +237,8 @@ impl SolveApp {
 
     /// [`Self::run_heavy`], as the operation `serial` (the operations panel's row).
     fn run_heavy_as(&mut self, id: &str, params: Value, serial: u64) -> Result<Value, String> {
+        crate::sketch_view::sync(self)?;
+        crate::workspace::command_receiver(self, id, &params)?;
         if id == "timeline.play" {
             return self.run(id, params);
         }
