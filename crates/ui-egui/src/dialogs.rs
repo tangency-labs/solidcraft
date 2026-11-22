@@ -1030,9 +1030,10 @@ impl Dialog {
                 vec![SelInput::new("Faces", PLANAR_FACES, true), SelInput::new("Target", PLANES | PLANAR_FACES, false)],
             ),
             "face.delete" => Dialog::new(Kind::DeleteFaces, vec![SelInput::new("Faces", FACES, true)]),
-            "solid.boundary_fill" => {
-                Dialog::new(Kind::BoundaryFill { operation: 0, cells: Vec::new(), of: Vec::new() }, vec![SelInput::new("Tools", BODIES, true)])
-            }
+            "solid.boundary_fill" => Dialog::new(
+                Kind::BoundaryFill { operation: 0, cells: Vec::new(), of: Vec::new() },
+                vec![SelInput::new("Tools", BODIES | PLANES, true)],
+            ),
             "solid.align" => {
                 let components = s.selection.iter().any(|x| matches!(x, Sel::Occurrence { .. }));
                 // Bodies also take sketch points and circles: a frame the bodies follow (#6257).
@@ -4053,7 +4054,8 @@ fn update_fill_cells(app: &SolveApp, d: &mut Dialog) {
         Some((id, _)) => app.session.model.state_before(id),
         None => crate::open_meshing::session_world(&app.session),
     };
-    let found = fill_cells(&st, &names);
+    let planes = fill_planes(&app.session, &tools);
+    let found = fill_cells(&st, &names, &planes);
     let kept: Vec<String> = cells.iter().filter(|c| c.2).map(|c| c.1.clone()).collect();
     *cells = found.into_iter().map(|(p, label)| (p, label.clone(), kept.is_empty() || kept.contains(&label))).collect();
     *of = tools;
@@ -4061,7 +4063,11 @@ fn update_fill_cells(app: &SolveApp, d: &mut Dialog) {
 
 /// The cells a set of tool bodies makes: each region inside some of them and outside the rest,
 /// as a point inside it and which tools hold it. Found by sampling a grid over the tools.
-pub(crate) fn fill_cells(st: &solidcraft_engine::doc::ModelState, tools: &[String]) -> Vec<(Vec3, String)> {
+pub(crate) fn fill_cells(
+    st: &solidcraft_engine::doc::ModelState,
+    tools: &[String],
+    planes: &[(String, solidcore_record::Plane)],
+) -> Vec<(Vec3, String)> {
     let bodies: Vec<_> = tools.iter().filter_map(|n| st.body(n).map(|b| (n.clone(), b.mesh()))).take(16).collect();
     if bodies.is_empty() {
         return Vec::new();
@@ -4069,6 +4075,10 @@ pub(crate) fn fill_cells(st: &solidcraft_engine::doc::ModelState, tools: &[Strin
     let indexes: Vec<_> = bodies.iter().map(|(_, m)| m.inside_index()).collect();
     let bb = bodies.iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |b, (_, m)| b.union(&m.bounds()));
     let n = 20;
+    if !planes.is_empty() {
+        let names: Vec<&str> = bodies.iter().map(|(name, _)| name.as_str()).collect();
+        return fill_cells_between(&names, &indexes, &bb, planes, n);
+    }
     let at = |i: usize, lo: f64, hi: f64| lo + (hi - lo) * (i as f64 + 0.5) / n as f64;
     // Signature (which tools hold the point) → the points with it.
     let mut groups: Vec<(u32, Vec<Vec3>)> = Vec::new();
@@ -4098,6 +4108,119 @@ pub(crate) fn fill_cells(st: &solidcraft_engine::doc::ModelState, tools: &[Strin
             Some((rep, format!("Inside {}", inside.join(", "))))
         })
         .collect()
+}
+
+/// The origin and construction planes among the Boundary Fill tools, by name, as they lie.
+fn fill_planes(s: &Session, tools: &[Sel]) -> Vec<(String, solidcore_record::Plane)> {
+    tools
+        .iter()
+        .filter_map(|t| match t {
+            Sel::Plane { name } => plane_by_name(s, name).map(|pl| (name.clone(), pl)),
+            _ => None,
+        })
+        .take(16)
+        .collect()
+}
+
+/// The names of the planes among the Boundary Fill tools.
+pub(crate) fn fill_plane_names(tools: &[Sel]) -> Vec<String> {
+    tools.iter().filter_map(|t| if let Sel::Plane { name } = t { Some(name.clone()) } else { None }).collect()
+}
+
+/// [`fill_cells`] with plane tools: a plane cuts space like an infinite plane, so the cells are the
+/// connected regions of one signature (the tools that hold a point and its side of each plane).
+/// A region outside every tool is a cell only when it does not reach the edge of the sampled box
+/// (the tools and planes close it off).
+fn fill_cells_between(
+    names: &[&str],
+    indexes: &[solidcraft_engine::geom::InsideIndex<'_>],
+    bb: &Aabb3,
+    planes: &[(String, solidcore_record::Plane)],
+    n: usize,
+) -> Vec<(Vec3, String)> {
+    let at = |i: usize, lo: f64, hi: f64| lo + (hi - lo) * (i as f64 + 0.5) / n as f64;
+    let cell_count = n * n * n;
+    let point = |c: usize| Vec3::new(at(c / (n * n), bb.min.x, bb.max.x), at(c / n % n, bb.min.y, bb.max.y), at(c % n, bb.min.z, bb.max.z));
+    // Which tools hold a point (the low bits) and which side of each plane it is on (from bit 16).
+    let signature = |p: Vec3| {
+        let held = indexes.iter().enumerate().fold(0u32, |acc, (t, ix)| if ix.contains(p) { acc | (1 << t) } else { acc });
+        planes.iter().enumerate().fold(held, |acc, (t, (_, pl))| if pl.to_local(p).z > 0.0 { acc | (1 << (16 + t)) } else { acc })
+    };
+    let sigs: Vec<u32> = (0..cell_count).map(|c| signature(point(c))).collect();
+    let mut seen = vec![false; cell_count];
+    let mut out: Vec<(Vec3, String)> = Vec::new();
+    let mut labels: Vec<String> = Vec::new();
+    for start in 0..cell_count {
+        if seen.get(start).copied().unwrap_or(true) {
+            continue;
+        }
+        let sig = sigs.get(start).copied().unwrap_or(0);
+        let mut stack = vec![start];
+        let mut members: Vec<usize> = Vec::new();
+        let mut reaches_edge = false;
+        if let Some(s) = seen.get_mut(start) {
+            *s = true;
+        }
+        while let Some(c) = stack.pop() {
+            members.push(c);
+            let (i, j, k) = (c / (n * n), c / n % n, c % n);
+            reaches_edge |= [i, j, k].iter().any(|&x| x == 0 || x + 1 == n);
+            let mut neighbours: Vec<usize> = Vec::new();
+            if i > 0 {
+                neighbours.push(c - n * n);
+            }
+            if i + 1 < n {
+                neighbours.push(c + n * n);
+            }
+            if j > 0 {
+                neighbours.push(c - n);
+            }
+            if j + 1 < n {
+                neighbours.push(c + n);
+            }
+            if k > 0 {
+                neighbours.push(c - 1);
+            }
+            if k + 1 < n {
+                neighbours.push(c + 1);
+            }
+            for nb in neighbours {
+                if sigs.get(nb) == Some(&sig) && seen.get(nb) == Some(&false) {
+                    if let Some(s) = seen.get_mut(nb) {
+                        *s = true;
+                    }
+                    stack.push(nb);
+                }
+            }
+        }
+        let held = sig & 0xffff;
+        // Outside every tool and open to the edge of the box: not enclosed.
+        if held == 0 && reaches_edge {
+            continue;
+        }
+        let pts: Vec<Vec3> = members.iter().map(|&c| point(c)).collect();
+        let centre = pts.iter().fold(Vec3::ZERO, |a, p| a + *p) * (1.0 / pts.len().max(1) as f64);
+        let Some(rep) = pts.iter().min_by(|a, b| a.dist(centre).total_cmp(&b.dist(centre))).copied() else { continue };
+        let inside: Vec<&str> = names.iter().enumerate().filter(|(t, _)| held & (1 << t) != 0).map(|(_, name)| *name).collect();
+        let base = if inside.is_empty() { "Enclosed by the tools and planes".to_string() } else { format!("Inside {}", inside.join(", ")) };
+        let sides: Vec<String> = planes
+            .iter()
+            .enumerate()
+            .map(|(t, (name, _))| format!("{} {name}", if sig & (1 << (16 + t)) != 0 { "above" } else { "below" }))
+            .collect();
+        let mut label = format!("{base}, {}", sides.join(", "));
+        // A region apart from another of the same signature gets its own number.
+        let same = labels.iter().filter(|l| **l == label).count();
+        labels.push(label.clone());
+        if same > 0 {
+            label = format!("{label} #{}", same + 1);
+        }
+        out.push((rep, label));
+        if out.len() >= 64 {
+            break;
+        }
+    }
+    out
 }
 
 /// Measure again when the picked items changed.
@@ -7162,7 +7285,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             (
                 "solid.boundary_fill",
-                json!({"tools": sels(d, 0).body_names(), "cells": picked, "operation": OPS.get(*operation).copied().unwrap_or("new")}),
+                json!({"tools": sels(d, 0).body_names(), "planes": fill_plane_names(sels(d, 0)), "cells": picked, "operation": OPS.get(*operation).copied().unwrap_or("new")}),
             )
         }
         Kind::Combine { operation, keep_tools } => {
@@ -8620,14 +8743,15 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d.extra.insert("axis".into(), pt3(axis.0));
             d
         }
-        FeatureKind::BoundaryFill { tools, cells, operation, remove_tools } => {
+        FeatureKind::BoundaryFill { tools, planes, cells, operation, remove_tools } => {
             let mut d = start("solid.boundary_fill")?;
             // The cells again, ticked where a stored cell point lies in the same cell.
             let before = s.model.state_before(f.id);
-            let found = fill_cells(&before, &solidcraft_engine::doc::plain(tools));
+            let mut items: Vec<Sel> = tools.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
+            items.extend(planes.iter().filter_map(|pl| plane_sel(s, pl)));
+            let found = fill_cells(&before, &solidcraft_engine::doc::plain(tools), &fill_planes(s, &items));
             let filled: Vec<String> =
                 cells.iter().filter_map(|c| found.iter().min_by(|a, b| a.0.dist(c.0).total_cmp(&b.0.dist(c.0))).map(|x| x.1.clone())).collect();
-            let items: Vec<Sel> = tools.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
             d.kind = Kind::BoundaryFill {
                 operation: op_index(operation),
                 cells: found.into_iter().map(|(p, l)| (p, l.clone(), filled.contains(&l))).collect(),
