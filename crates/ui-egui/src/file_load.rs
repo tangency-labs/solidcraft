@@ -117,6 +117,9 @@ pub struct Request {
     /// An export written to be printed: once written it opens in the system's PDF viewer
     /// ([`crate::drawing_workspace::print::written`]).
     pub print: bool,
+    /// An open (`doc.open` with `new_tab`) that gets a tab of its own, even where a blank design
+    /// would be replaced.
+    pub new_tab: bool,
 }
 
 impl Request {
@@ -140,6 +143,7 @@ impl Request {
             auto_verify: false,
             plugin_import: false,
             print: false,
+            new_tab: false,
         }
     }
     /// It adds what it reads to the active design.
@@ -760,6 +764,8 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         options.remove("path");
         options.retain(|_, v| !v.is_null());
     }
+    // `new_tab` is for where the design lands: the engine, which has no tabs, never sees it.
+    let new_tab = id == "doc.open" && options.remove("new_tab").and_then(|v| v.as_bool()) == Some(true);
     let request = Request {
         path: path.into(),
         kind,
@@ -779,6 +785,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         auto_verify: false,
         plugin_import: id == "file.import",
         print: false,
+        new_tab,
     };
     let _ = begin_request(app, request);
     None
@@ -1784,8 +1791,13 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                     // No tab left for it: `adopt` said why, and nothing else of the open happens.
                     // Opened by a program, not the user: nothing is asked about its links.
                     app.docs.quiet_open = request.reply.is_some() || request.chat_turn.is_some();
-                    let adopted =
-                        crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| crate::documents::adopt(app, made.session));
+                    let adopted = crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| {
+                        if request.new_tab {
+                            crate::documents::adopt_in_new_tab(app, made.session)
+                        } else {
+                            crate::documents::adopt(app, made.session)
+                        }
+                    });
                     app.docs.quiet_open = false;
                     if !adopted {
                         app.open_meshing_next = false;

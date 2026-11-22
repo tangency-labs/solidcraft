@@ -1911,6 +1911,106 @@ pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
     }
 }
 
+/// Show `session` in a new tab after the active one, even when the active design is blank
+/// ([`adopt`] replaces a blank one). Whether it is shown (no tab left for it: the status says so).
+pub fn adopt_in_new_tab(app: &mut SolveApp, session: Session) -> bool {
+    match open_tab(app, session) {
+        Ok(()) => true,
+        Err(e) => {
+            app.set_status(e, true);
+            false
+        }
+    }
+}
+
+/// Run `id` (`file.new` or `doc.open`, given `new_tab`) in a tab of its own: a blank tab opens
+/// after the active one and is shown, then the command runs in it as it would in any tab. When the
+/// command fails the tab closes again and the design that was shown comes back, as nothing had
+/// happened. `new_tab` is taken off the parameters: the engine has no tabs.
+pub(crate) fn run_in_new_tab(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String> {
+    let before = app.docs.active;
+    open_tab(app, Session::default())?;
+    crate::prefs::apply_new_design(app);
+    let at = app.docs.active;
+    match app.run(id, params) {
+        Ok(mut reply) => {
+            if id == "file.new"
+                && let Some(reply) = reply.as_object_mut()
+            {
+                reply.insert("document_id".into(), json!(app.session.document_id));
+            }
+            Ok(reply)
+        }
+        Err(e) => {
+            // Back to the design that was shown, then the tab that was opened for this goes.
+            switch(app, before);
+            close(app, at, true);
+            Err(e)
+        }
+    }
+}
+
+/// `new_tab` of a `file.new` or `doc.open`: whether it is true, taken off `params` (the engine
+/// refuses it, as it has one design and no tabs).
+pub(crate) fn take_new_tab(params: &mut Value) -> bool {
+    params.as_object_mut().and_then(|p| p.remove("new_tab")).and_then(|v| v.as_bool()) == Some(true)
+}
+
+/// `p` as the contract type `T`; no parameters at all (`null`) is the empty object.
+fn read_params<T: serde::de::DeserializeOwned>(command: &str, p: &Value) -> Result<T, String> {
+    let p = if p.is_null() { json!({}) } else { p.clone() };
+    serde_json::from_value(p).map_err(|e| format!("{command}: {e}"))
+}
+
+/// `document.list` and `document.activate`: the window answers them for every design tab, as the
+/// engine, with one design, cannot. Ids are the ones `document.revision` gives.
+pub(crate) fn command(app: &mut SolveApp, id: &str, p: &Value) -> Result<Value, String> {
+    use solidcraft_engine::schema::documents::{
+        DocumentActivateParams, DocumentActivateResult, DocumentListParams, DocumentListResult, OpenDocument,
+    };
+    let reply = |value: Result<Value, serde_json::Error>| value.map_err(|e| format!("{id}: {e}"));
+    if id == "document.list" {
+        let DocumentListParams {} = read_params(id, p)?;
+        let documents: Vec<OpenDocument> = open_sessions(app)
+            .into_iter()
+            .enumerate()
+            .map(|(i, s)| OpenDocument {
+                document_id: s.document_id.clone(),
+                name: tab_name(app, s),
+                path: s.path.clone(),
+                active: i == app.docs.active,
+                dirty: s.is_dirty(),
+            })
+            .collect();
+        return reply(serde_json::to_value(DocumentListResult {
+            active_document_id: app.session.document_id.clone(),
+            documents,
+            param_warnings: Vec::new(),
+        }));
+    }
+    let request: DocumentActivateParams = read_params(id, p)?;
+    let at = open_sessions(app)
+        .iter()
+        .position(|s| s.document_id == request.document_id)
+        .ok_or("document.activate: no open design has that document_id (document.list names the open designs)")?;
+    if at != app.docs.active {
+        if app.docs.group.is_some() || app.docs.closing.is_some() || app.docs.quitting.is_some() || app.docs.batch.is_some() {
+            return Err("finish the save prompt before showing another design".into());
+        }
+        switch(app, at);
+        if app.docs.active != at {
+            return Err("document.activate: the design could not be shown".into());
+        }
+    }
+    let s = &app.session;
+    reply(serde_json::to_value(DocumentActivateResult {
+        document_id: s.document_id.clone(),
+        name: tab_name(app, s),
+        path: s.path.clone(),
+        param_warnings: Vec::new(),
+    }))
+}
+
 /// The active design as its file holds it (`document.export`): what a host that keeps the files
 /// itself writes (#8517). `text` is the design's JSON, the same a `.json` design file holds, and
 /// `revision` is the one `document.revision` names this state by.
@@ -5738,6 +5838,139 @@ mod tests {
         new_tab(&mut a);
         assert_eq!(a.docs.count(), 3);
         assert_eq!(a.docs.active, 2);
+    }
+
+    /// The volume of the shown design's bodies, in mm³.
+    fn shown_volume(a: &mut SolveApp) -> f64 {
+        a.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap()
+    }
+
+    /// Three sheets in three tabs: a cube of side 10, 20 and 30 mm, each named, as a nesting
+    /// program makes them. Tab order and ids come back with the app.
+    fn three_sheets() -> (SolveApp, Vec<String>) {
+        let mut a = app();
+        let mut ids = Vec::new();
+        for (n, side) in [(1, 10), (2, 20), (3, 30)] {
+            if n == 1 {
+                a.run("file.new", json!({"name": "Sheet 1"})).unwrap();
+            } else {
+                let reply = a.run("file.new", json!({"name": format!("Sheet {n}"), "new_tab": true})).unwrap();
+                assert_eq!(reply["document_id"], json!(a.session.document_id), "the reply names the new design");
+            }
+            a.run("solid.box", json!({"length": side, "width": side, "height": side})).unwrap();
+            ids.push(a.session.document_id.clone());
+        }
+        (a, ids)
+    }
+
+    /// `file.new` with `new_tab` opens a design in a tab of its own, after the active one, and
+    /// shows it: three calls make three tabs with three ids, and the first two keep their contents.
+    #[test]
+    fn file_new_with_new_tab_opens_a_tab_each_time_and_keeps_the_others() {
+        let (mut a, ids) = three_sheets();
+        assert_eq!(a.docs.count(), 3);
+        assert_eq!(a.docs.active, 2, "the new design is the one shown");
+        let distinct: std::collections::HashSet<_> = ids.iter().collect();
+        assert_eq!(distinct.len(), 3, "{ids:?}");
+        for (i, side) in [10.0, 20.0, 30.0].into_iter().enumerate() {
+            switch(&mut a, i);
+            assert_eq!(a.session.document_id, ids[i]);
+            assert_eq!(a.session.doc.name, format!("Sheet {}", i + 1));
+            assert!((shown_volume(&mut a) - side * side * side).abs() < 1e-6, "tab {i}");
+        }
+        assert_eq!(a.docs.count(), 3, "looking at the tabs opens none");
+    }
+
+    /// The new tab is always opened, even where the active design is blank (a launch's untouched
+    /// design stays beside it), and without `new_tab` or with it false `file.new` replaces the
+    /// active design as it always did.
+    #[test]
+    fn file_new_replaces_the_design_unless_it_is_asked_for_a_tab() {
+        let mut a = app();
+        a.run("file.new", json!({"new_tab": true})).unwrap();
+        assert_eq!(a.docs.count(), 2, "the blank design is kept");
+        for params in [json!({}), json!({"name": "Plain"}), json!({"new_tab": false}), json!({"new_tab": null, "name": "Plain"})] {
+            let reply = a.run("file.new", params.clone()).unwrap();
+            assert_eq!(a.docs.count(), 2, "{params}");
+            assert!(reply.get("document_id").is_none(), "no id without a new tab: {reply}");
+        }
+    }
+
+    /// `document.list` says which design is active, in tab order; `document.activate` shows one by
+    /// its id, and the commands after it act on that design.
+    #[test]
+    fn document_list_and_activate_follow_the_tabs() {
+        let (mut a, ids) = three_sheets();
+        let listed = a.run("document.list", json!({})).unwrap();
+        assert_eq!(listed["active_document_id"], json!(ids[2]), "{listed}");
+        let rows = listed["documents"].as_array().unwrap();
+        assert_eq!(rows.iter().map(|r| r["document_id"].clone()).collect::<Vec<_>>(), ids.iter().map(|i| json!(i)).collect::<Vec<_>>());
+        assert_eq!(rows.iter().map(|r| r["name"].clone()).collect::<Vec<_>>(), [json!("Sheet 1"), json!("Sheet 2"), json!("Sheet 3")]);
+        assert_eq!(rows.iter().map(|r| r["active"].clone()).collect::<Vec<_>>(), [json!(false), json!(false), json!(true)]);
+        assert!(rows.iter().all(|r| r["path"].is_null() && r["dirty"] == json!(true)), "{listed}");
+
+        let shown = a.run("document.activate", json!({"document_id": ids[0]})).unwrap();
+        assert_eq!((shown["document_id"].clone(), shown["name"].clone()), (json!(ids[0]), json!("Sheet 1")), "{shown}");
+        assert_eq!((a.docs.active, &a.session.document_id), (0, &ids[0]));
+        assert_eq!(a.run("document.list", json!({})).unwrap()["active_document_id"], json!(ids[0]));
+        // A command acts on the shown design, and only on it.
+        a.run("solid.box", json!({"length": 1, "width": 1, "height": 1, "corner": [50, 0, 0]})).unwrap();
+        assert!((shown_volume(&mut a) - 1001.0).abs() < 1e-6);
+        switch(&mut a, 1);
+        assert!((shown_volume(&mut a) - 8000.0).abs() < 1e-6, "the other tab is as it was");
+
+        // A name that no open design has changes nothing, and neither does the design already shown.
+        for bad in [json!({"document_id": "no-such-design"}), json!({}), json!({"document_id": ids[0], "index": 1})] {
+            assert!(a.run("document.activate", bad.clone()).is_err(), "{bad}");
+            assert_eq!(a.docs.active, 1, "{bad}");
+        }
+        a.run("document.activate", json!({"document_id": ids[1]})).unwrap();
+        assert_eq!(a.docs.active, 1);
+    }
+
+    /// `doc.open` with `new_tab` opens the file in a tab of its own, keeps the design that was
+    /// open, and a failed open leaves the tabs and the shown design as they were.
+    #[test]
+    fn doc_open_with_new_tab_keeps_the_open_design() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-doc-open-tab-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("sheet.solidcraft").to_string_lossy().into_owned();
+        let mut saved = Session::default();
+        saved.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        saved.execute("file.save_as", &json!({"path": file})).unwrap();
+
+        let mut a = app();
+        a.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let first = a.session.document_id.clone();
+        a.run("doc.open", json!({"path": file, "new_tab": true})).unwrap();
+        assert_eq!((a.docs.count(), a.docs.active), (2, 1));
+        assert_eq!(a.session.path.as_deref(), Some(file.as_str()));
+        assert!((shown_volume(&mut a) - 125.0).abs() < 1e-6);
+        switch(&mut a, 0);
+        assert_eq!(a.session.document_id, first);
+        assert!((shown_volume(&mut a) - 1000.0).abs() < 1e-6, "the design that was open is as it was");
+
+        let missing = dir.join("missing.solidcraft").to_string_lossy().into_owned();
+        assert!(a.run("doc.open", json!({"path": missing, "new_tab": true})).is_err());
+        assert_eq!((a.docs.count(), a.docs.active), (2, 0), "no stray tab");
+        assert_eq!(a.session.document_id, first);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The tabs are the window's: a batch or a script that opens or shows one would roll back, or
+    /// go on, in the wrong design, so they are refused as the other tab switches are.
+    #[test]
+    fn a_batch_may_not_open_or_show_a_design() {
+        let (a, ids) = three_sheets();
+        for step in
+            [json!({"command": "file.new", "params": {"new_tab": true}}), json!({"command": "document.activate", "params": {"document_id": ids[0]}})]
+        {
+            assert!(crate::control::batch_refusal(std::slice::from_ref(&step)).is_some(), "{step}");
+        }
+        for step in [json!({"command": "file.new", "params": {"new_tab": false}}), json!({"command": "document.list"})] {
+            assert!(crate::control::batch_refusal(std::slice::from_ref(&step)).is_none(), "{step}");
+        }
+        assert_eq!(a.docs.count(), 3);
     }
 
     /// Quitting asks once per design with unsaved changes: Don't Save moves on (and keeps no
