@@ -333,3 +333,16 @@ fn an_untouched_list_leaves_the_cut_as_it_was() {
         None => assert!(p.get("targets").is_none(), "{p}"),
     }
 }
+
+/// A changed list holds when its only ticked body is hidden while the window is open: the Cut is
+/// refused rather than run on the bodies the user did not tick (#20647).
+#[test]
+fn hiding_the_only_ticked_body_refuses_the_cut() {
+    let mut h = two_cubes(true);
+    if let Some(d) = h.app.dialog.as_mut() {
+        d.extra.insert(crate::cut_bodies::SKIPPED.into(), json!(["B"]));
+    }
+    h.app.session.visibility.hidden_bodies.push("B".into());
+    h.frames(1);
+    assert!(crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err());
+}

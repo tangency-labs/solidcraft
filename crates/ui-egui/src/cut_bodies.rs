@@ -99,12 +99,12 @@ pub(crate) fn scope(app: &SolveApp, d: &Dialog, cmds: &mut [(String, Value)]) ->
     if d.editing.is_some() || !cutting(&d.kind) {
         return Ok(());
     }
-    let list = candidates(app);
-    if list.is_empty() {
-        return Ok(());
-    }
     // Untouched, the Cut takes its bodies as it did before the list.
     let Some(picked) = chosen(&d.extra) else { return Ok(()) };
+    // A changed list holds even when its bodies are no longer listed (one was hidden while the
+    // window was open): only ticked bodies still shown are cut, and none left is refused, never
+    // a fall back to bodies the user did not tick.
+    let list = candidates(app);
     let ticked: Vec<String> = list.into_iter().map(|(body, _)| body).filter(|body| picked.contains(body)).collect();
     for (_, p) in cmds {
         let cut = p.get("operation").and_then(Value::as_str) == Some("cut");
