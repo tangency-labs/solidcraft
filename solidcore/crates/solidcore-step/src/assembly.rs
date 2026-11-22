@@ -1091,6 +1091,19 @@ impl<'t> Assembly<'t> {
             // Face order is unchanged; shell sides also determine the edge/vertex walk.
             brep = brep.canonical().map_err(|e| e.to_string())?.brep;
         }
+        // Trim construction returns a continuous lift on a periodic surface. Only now, with
+        // the whole body mutable, can its crossed cuts become edges and its trim pieces be
+        // moved into the base period. An internal seam used on both sides is replaced rather
+        // than retained as a boundary that would divide the same material into sliver faces.
+        if let Some((completed, from)) = pcurve::complete_periodic_seams(&brep).map_err(|e| e.to_string())? {
+            face_origin = from
+                .iter()
+                .map(|&i| face_origin.get(i).copied().ok_or_else(|| pcurve::PeriodicSeamError::InputFaceLost(i).to_string()))
+                .collect::<R<Vec<_>>>()?;
+            turned_faces =
+                from.iter().enumerate().filter(|(_, i)| turned_faces.contains(&(**i as u32))).map(|(i, _)| index(i)).collect::<R<Vec<_>>>()?;
+            brep = completed;
+        }
         solidcore_ops::record_check::validate(&brep).map_err(|e| format!("the record is invalid: {e}"))?;
         solidcore_ops::record_check::agreement(&brep).map_err(|e| format!("the record's geometry disagrees: {e}"))?;
         Ok(Solid { item, name, product: None, brep, face_origin, sheet, notes, turned: turned_faces })
