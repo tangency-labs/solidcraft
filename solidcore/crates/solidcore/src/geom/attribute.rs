@@ -2061,28 +2061,37 @@ fn append_new_regions(
 /// `GOTO_NEXT_ATTLINE`: consume through the next `'\n'`.
 fn goto_next_attline(s: &mut InputStream) -> Result<()> {
     const OP: &str = "geom::attribute::AttributeStore::read_indexed_attributes_from_db";
+    // `count` counts read attempts, as upstream, and drives the limit; `consumed`
+    // counts the bytes the stream returned, which the failure reports.
     let mut count = 0u32;
+    let mut consumed = 0u32;
     loop {
+        let got = s.get();
+        let at_end = got.is_none();
         // `(signed char)rFileIn.get()`: EOF and a 0xFF byte both become -1.
-        let ch: i8 = s.get().map_or(-1, |b| b as i8);
+        let ch: i8 = got.map_or(-1, |b| b as i8);
         if ch == b'\n' as i8 {
             return Ok(());
         }
         count += 1;
+        if !at_end {
+            consumed += 1;
+        }
         if count > 1000 {
             return Err(SolidError::geom(
                 OP,
                 GeomFailure::AttributeLineUnterminated {
-                    bytes: count,
-                    end_of_input: false,
+                    bytes: consumed,
+                    end_of_input: at_end,
                 },
             ));
         }
+        // EOF, or a 0xFF byte the reader takes for one (and has consumed).
         if ch == -1 {
             return Err(SolidError::geom(
                 OP,
                 GeomFailure::AttributeLineUnterminated {
-                    bytes: count,
+                    bytes: consumed,
                     end_of_input: true,
                 },
             ));
@@ -2549,5 +2558,30 @@ mod tests {
         assert!(s.is_live(shared));
         assert_eq!(s.attributes(O2), vec![shared]);
         assert_eq!(s.users(shared).unwrap(), vec![O1, O2]);
+    }
+
+    #[test]
+    fn goto_next_attline_reports_bytes_consumed() {
+        let fail = |data: Vec<u8>| {
+            goto_next_attline(&mut InputStream::new(data))
+                .unwrap_err()
+                .geom_failure()
+                .copied()
+        };
+        let unterminated = |bytes, end_of_input| {
+            Some(GeomFailure::AttributeLineUnterminated {
+                bytes,
+                end_of_input,
+            })
+        };
+        // EOF at once: no byte consumed.
+        assert_eq!(fail(Vec::new()), unterminated(0, true));
+        // A 0xFF byte reads as EOF upstream; it is counted as consumed.
+        assert_eq!(fail(vec![b'a', 0xFF, b'\n']), unterminated(2, true));
+        // EOF right after the limit's 1000 bytes: the input ended, 1000 bytes in.
+        assert_eq!(fail(vec![b'a'; 1000]), unterminated(1000, true));
+        // A 1001st byte that is not a line end passes the limit.
+        assert_eq!(fail(vec![b'a'; 1001]), unterminated(1001, false));
+        assert!(goto_next_attline(&mut InputStream::new(b"abc\nx".to_vec())).is_ok());
     }
 }

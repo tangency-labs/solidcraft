@@ -31,7 +31,7 @@
 //! degenerate where the routine needs it not to be (no direction, parallel, collinear,
 //! singular) is [`ErrorKind::Degenerate`]; a solve that stops unconverged with its numbers
 //! is a defect ([`ErrorKind::StageFailed`]); a routine whose callee failed keeps that
-//! error as its cause ([`GeomFailure::CallFailed`]).
+//! error as its cause and takes its class from it ([`GeomFailure::CallFailed`]).
 //!
 //! Deviations: not upstream. The failure's `operation` path says which routine. No failure names an
 //! entity: the sites they replace named none. The failures that are checks of a
@@ -229,8 +229,11 @@ pub enum GeomFailure {
         limit: f64,
     },
     /// A routine this one calls failed; the failure keeps that routine's error as its
-    /// cause. [`ErrorKind::Failed`].
-    CallFailed,
+    /// cause and takes its class from it.
+    CallFailed {
+        /// The class of the callee's error, the cause.
+        class: ErrorKind,
+    },
     /// The global solve's branch still needs subdividing after its local solve, but none
     /// of its trees has a node left to subdivide. [`ErrorKind::Failed`].
     NoNodeToSubdivide {
@@ -318,6 +321,7 @@ impl GeomFailure {
             | Self::NoPerpendicular
             | Self::ShortChord { .. } => ErrorKind::Degenerate,
             Self::TooFarApart { .. } => ErrorKind::NotWithinTolerance,
+            Self::CallFailed { class } => *class,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -428,7 +432,7 @@ impl core::fmt::Display for GeomFailure {
                 f,
                 "the lines are {distance:e} apart, farther than {limit:e}"
             ),
-            Self::CallFailed => f.write_str("a routine it calls failed"),
+            Self::CallFailed { .. } => f.write_str("a routine it calls failed"),
             Self::NoNodeToSubdivide { trees } => write!(
                 f,
                 "none of the branch's {trees} trees has a node left to subdivide"
@@ -475,7 +479,7 @@ impl crate::SolidError {
     pub(crate) fn geom_call(operation: &'static str) -> impl Fn(Self) -> Self {
         move |e| match e {
             Self::Unported { .. } | Self::Cancelled { .. } | Self::PreparationRequired { .. } => e,
-            _ => Failure::new(operation, GeomFailure::CallFailed)
+            _ => Failure::new(operation, GeomFailure::CallFailed { class: e.kind() })
                 .caused_by(e)
                 .into_error(),
         }

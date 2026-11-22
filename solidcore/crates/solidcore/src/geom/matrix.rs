@@ -1153,6 +1153,7 @@ fn sort_eigen_system(d: &mut [f64], v: &mut Matrix) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::ErrorKind;
 
     fn m(rows: usize, cols: usize, v: &[f64]) -> Matrix {
         Matrix::from_row_major(rows, cols, v.to_vec()).unwrap()
@@ -1190,7 +1191,13 @@ mod tests {
         let z = m(2, 2, &[1.0, 2.0, 0.0, 0.0]);
         let singular = z.solve_linear_system(&[1.0, 2.0]).unwrap_err();
         assert_eq!(singular.upstream_status(), Some(1001));
-        assert_eq!(singular.geom_failure(), Some(&GeomFailure::CallFailed));
+        assert_eq!(
+            singular.geom_failure(),
+            Some(&GeomFailure::CallFailed {
+                class: ErrorKind::Degenerate
+            })
+        );
+        assert_eq!(singular.kind(), ErrorKind::Degenerate);
         assert!(singular
             .to_string()
             .contains("; caused by geom::matrix::Matrix::lu_decompose"));
