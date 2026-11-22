@@ -182,7 +182,7 @@ fn the_history_bar_offers_edit_sketch_on_a_sketch() {
     let on_sketch = context_menu::items(&app, &Target::Timeline { feature: sketch });
     assert!(!on_sketch.iter().any(|i| i.label == "Edit Feature"), "{:?}", labels(&on_sketch));
     let edit = find(&on_sketch, "Edit Sketch");
-    assert_eq!((edit.icon.as_str(), edit.params.clone()), ("sketch", Some(json!({"feature": sketch}))));
+    assert_eq!((&*edit.icon, edit.params.clone()), ("sketch", Some(json!({"feature": sketch}))));
     let on_block = context_menu::items(&app, &Target::Timeline { feature: block });
     assert!(find(&on_block, "Edit Feature").enabled);
     assert!(!on_block.iter().any(|i| i.label == "Edit Sketch"), "{:?}", labels(&on_block));
