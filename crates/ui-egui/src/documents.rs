@@ -5959,7 +5959,7 @@ mod tests {
         assert!(a.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).is_err(), "a design adopted over a blank one");
     }
 
-    /// The Origin folder preference on Hidden hides the Origin of designs that don't keep its eye; a design that
+    /// The Origin visibility preference on Hidden hides the Origin of designs that don't keep its eye; a design that
     /// does keeps it, along with the rest of the browser's view, in its tab and in its file.
     #[test]
     fn the_browsers_view_follows_each_design_and_the_origin_preference() {
@@ -5987,7 +5987,7 @@ mod tests {
         assert!(c.origin_shown() && c.session.visibility == a.session.visibility);
     }
 
-    /// The Origin folder preference on Automatic: the Origin shows until the design has a body, and
+    /// The Origin visibility preference on Automatic: the Origin shows until the design has a body, and
     /// again when the body is undone or rolled back. It saves nothing in the design, the Browser's
     /// eye wins over it, and each design decides by its own bodies.
     #[test]

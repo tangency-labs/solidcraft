@@ -3444,7 +3444,7 @@ impl SolveApp {
     }
 
     /// Is the browser's Origin folder shown? The design keeps it once it is toggled; until then
-    /// the Origin folder preference decides. Automatic follows the model as shown, so it saves
+    /// the Origin visibility preference decides. Automatic follows the model as shown, so it saves
     /// nothing in the design: undoing the first body, or rolling back before it, shows the Origin
     /// again. While a dialog edits a feature it follows the design from before that edit's own
     /// rollback, so editing the first body leaves the Origin hidden.

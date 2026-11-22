@@ -11413,10 +11413,10 @@ mod tests {
         assert_eq!(h.app.preferences.origin_plane_names, TopFrontRight);
     }
 
-    /// Origin folder: the old on/off values keep their meaning both ways, Automatic is a name, an
+    /// Origin visibility: the old on/off values keep their meaning both ways, Automatic is a name, an
     /// unknown value is refused, and Cancel and Restore Defaults take the choice back.
     #[test]
-    fn origin_folder_choice_keeps_the_old_on_off_values() {
+    fn origin_visibility_keeps_the_old_on_off_values() {
         crate::i18n::install();
         use OriginDisplay::{Automatic, Hidden, Shown};
         assert_eq!(Prefs::default().hide_origin, Shown);
