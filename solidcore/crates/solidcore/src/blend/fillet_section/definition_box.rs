@@ -39,14 +39,15 @@
 //!   the direct enclosure, not the centred form. The net's piece only seeds the feet.
 
 use super::certificate::{
-    crosses_a_knot, gn_enclose_over_using, is_foot_past_domain_end, knot_cuts, partials_hull,
-    EndContinuation, NurbsCurve, SpanAt,
+    crosses_a_knot, gn_enclose_over_using, is_foot_past_domain_end, knot_cuts, no_part_of_the_box,
+    partials_hull, EndContinuation, NurbsCurve, SpanAt,
 };
 use super::definition::{t2_pow, tv_dot, T2Of, TvOf};
 use super::interval::{cmax, cmin, Ivl};
 use super::series::{Trunc, MAX_S, V3};
 use super::station::{as_b_spline, gn_solve_station, smax, Nurbs, Partials};
-use crate::error::{Result, SolidError};
+use crate::error::blend::{BlendFailure, SectionLimit, SectionProof};
+use crate::error::{Failure, Result, SolidError};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::surface::procedural_blend::{ProceduralBlend, PROCEDURAL_BLEND_TYPE};
@@ -160,14 +161,24 @@ pub fn gn_def_face_of<'a>(k: &Kernel, surface: &'a Surface) -> Result<GnDefFace<
         }
     };
     let (Some(s0), Some(s1)) = (def.support(0), def.support(1)) else {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the definition does not have two supports",
+            BlendFailure::Defect {
+                why: "the definition has no support on a side, though the enclosable check \
+                      just found both",
+            },
         ));
     };
     let nurbs_of = |s: &Surface| -> Result<Nurbs> {
-        let bs = as_b_spline(k, s)?
-            .ok_or_else(|| SolidError::blend_failed(OP, "a support is not a NURBS surface"))?;
+        let bs = as_b_spline(k, s)?.ok_or_else(|| {
+            SolidError::blend(
+                OP,
+                BlendFailure::Defect {
+                    why: "a support has no NURBS form, though the enclosable check found \
+                              it a B-spline surface",
+                },
+            )
+        })?;
         Nurbs::of(&bs)
     };
     let sup_n = [nurbs_of(s0)?, nurbs_of(s1)?];
@@ -214,16 +225,22 @@ impl GnDefFace<'_> {
 fn def_piece_at(k: &Kernel, d: &mut GnDefFace<'_>, net: &Nurbs, kk: usize) -> Result<DefPiece> {
     let knots = if d.swapped { &net.v } else { &net.u };
     let (Some(&k0), Some(&k1)) = (knots.get(kk), knots.get(kk + 1)) else {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the piece's knots are outside the net",
+            BlendFailure::Defect {
+                why: "the net's piece index is past its knots: the certificate takes it from \
+                      the knot cuts of the same net",
+            },
         ));
     };
     let piece = k1 > k0;
     if !piece {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the piece has no span (its two knots are equal)",
+            BlendFailure::Defect {
+                why: "the net's piece has two equal knots: the knot cuts name only spans of \
+                      positive length",
+            },
         ));
     }
     if d.pieces.len() < knots.len() {
@@ -243,7 +260,13 @@ fn def_piece_at(k: &Kernel, d: &mut GnDefFace<'_>, net: &Nurbs, kk: usize) -> Re
             let w = def
                 .seed(f)
                 .ok_or_else(|| {
-                    SolidError::blend_failed(OP, "the definition has no seed for the face")
+                    SolidError::blend(
+                        OP,
+                        BlendFailure::Defect {
+                            why: "the definition has no seed for a face: a blend by its \
+                                  definition always holds both seeds",
+                        },
+                    )
                 })?
                 .evaluate_point(p.s)?;
             if let Some(x) = seed.get_mut(2 * f) {
@@ -270,10 +293,22 @@ fn def_piece_at(k: &Kernel, d: &mut GnDefFace<'_>, net: &Nurbs, kk: usize) -> Re
     }
     match d.pieces.get(kk) {
         Some(p) if p.state == 1 => Ok(*p),
-        _ => Err(SolidError::blend_failed(
-            OP,
-            "the piece's station did not solve",
-        )),
+        _ => {
+            // the station at the piece's middle, solved from the seeds, did not converge
+            // (the solve's own numbers are not kept with the piece)
+            let s = d.a[0] + d.b[0] * 0.5 * (k0 + k1);
+            let tolerance = 1.0e-9 * smax(1.0, d.def.leader().evaluate_point(s)?.length());
+            Err(SolidError::blend(
+                OP,
+                BlendFailure::StationDidNotConverge {
+                    s,
+                    residual: None,
+                    tolerance,
+                    step: None,
+                    iterations: None,
+                },
+            ))
+        }
     }
 }
 
@@ -332,9 +367,9 @@ fn box_st(d: &GnDefFace<'_>, ua: f64, ub: f64, va: f64, vb: f64) -> Result<(Ivl,
     let t = Ivl::from(d.a[1]) + Ivl::from(d.b[1]) * pt;
     let finite = s.lo.is_finite() && s.hi.is_finite() && t.lo.is_finite() && t.hi.is_finite();
     if !finite {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the piece's box is not finite",
+            BlendFailure::SectionNotProved(SectionProof::BoundFinite),
         ));
     }
     Ok((s, t))
@@ -392,7 +427,7 @@ pub fn definition_partials_naive(
             Some(h) => partials_hull(h, &p, lk),
         });
     }
-    out.ok_or_else(|| SolidError::blend_failed(OP, "no piece encloses the box"))
+    out.ok_or_else(|| no_part_of_the_box(OP))
 }
 
 /// The definition's partials over `s x t` (`s` on the leader's piece `leader`), to total
@@ -424,9 +459,12 @@ fn partials_on(
     use_lk: usize,
 ) -> Result<(Partials<Ivl>, bool)> {
     if lk > MAX_S {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the order is past the most the series hold",
+            BlendFailure::SectionUnsupported(SectionLimit::OrderPastSeries {
+                order: lk,
+                most: MAX_S,
+            }),
         ));
     }
     let piece = def_piece_at(k, d, net, kk)?;
@@ -473,7 +511,21 @@ fn partials_on(
         Err(e) if is_foot_past_domain_end(&e) => return Err(e),
         // the feet across a knot line below C^2, refused by name (cell by cell, #14284)
         Err(e @ SolidError::Unsupported { .. }) => return Err(e),
-        _ => return Err(SolidError::blend_failed(OP, "the enclosure is not proved")),
+        // the enclosure not proved over the feet's box (a narrower box may prove it)
+        Ok(None) => {
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::SectionNotProved(SectionProof::Enclosure),
+            ))
+        }
+        // any other failure of the enclosure, kept as the cause
+        Err(e) => {
+            return Err(
+                Failure::new(OP, BlendFailure::SectionNotProved(SectionProof::Enclosure))
+                    .caused_by(e)
+                    .into_error(),
+            )
+        }
     };
     let mut crossed = false;
     for (f, n) in d.sup_n.iter().enumerate() {
@@ -611,7 +663,7 @@ pub fn definition_partials_over_box(
             Some(h) => partials_hull(h, &p, lk),
         });
     }
-    out.ok_or_else(|| SolidError::blend_failed(OP, "no piece encloses the box"))
+    out.ok_or_else(|| no_part_of_the_box(OP))
 }
 
 /// [`definition_partials_over_box`] on one part `s x t` (`s` on the leader's piece
@@ -657,9 +709,13 @@ fn centred_on(
                 let x = Ivl::new(cmax(c.lo, w.lo), cmin(c.hi, w.hi));
                 let meet = x.lo <= x.hi;
                 if !meet {
-                    return Err(SolidError::blend_failed(
+                    return Err(SolidError::blend(
                         OP,
-                        "the two enclosures do not meet",
+                        BlendFailure::Defect {
+                            why: "the centred form's and the wide enclosure of one partial are \
+                                  disjoint: both enclose the definition's partial over the \
+                                  part, so one of them is not an enclosure",
+                        },
                     ));
                 }
                 *g = x;
