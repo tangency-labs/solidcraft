@@ -29,7 +29,7 @@ that rule's thickness), `corner_relief_shape` (`notch`|`round`|`rectangular`|`te
 
 ### `sheet.flange`
 Base: `sketch`, `profiles?`, `rule?`, `flip?`, `name?`, `body_name?`.
-Contour: `sketch`, `curves` (an open chain of lines), `distance`, `rule?`, `flip?`, `reverse?`.
+Contour: `sketch`, `curves` (an open chain of lines and tangent arcs), `distance`, `rule?`, `flip?`, `reverse?`.
 Edge: `edges`, `height`, `angle?` (default 90°), `radius?` (default: the rule's), `height_from?`
 (`outer`|`inner`|`tangent`), `position?` (`inside`|`outside`|`middle`|`material_outside`|
 `tangent`), `flip?`, `body?`, `corner_relief_shape?`, `corner_relief?`, `then?`, `name?`,

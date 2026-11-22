@@ -421,6 +421,17 @@ continued cliff face, so the rim moves down.*
 Keeping the edge instead (the ball rolling on the rim, the spine continuing as the other offset
 meeting the rim's pipe) is a possible future option, never the default.
 
+A fixed-offset concave round whose rail runs into an adjoining concave wall is trimmed at its crease with
+that wall by the same construction. Every off-face run's exit and return must cross classified
+manifold edges locally concave at those parameters; whole-edge samples cannot establish this
+when a spline seam changes convexity. The end sections must fit their end faces. A run wrapping past both
+end labels is eligible only on a topologically closed edge, where those labels refer to the
+periodic seam rather than physical ends. The original round is cut on the
+adjoining wall; it is not retraced as a tangent rollover. At a fixed-offset rail crossing, support tangency
+requires the Join section-gap bound `2 o tan(a/2)` to be below the body's intersection tolerance,
+where `o` is the solver's largest absolute support offset and `a` the tangent-plane angle. The
+angular budget is also capped by the solver's angle tolerance.
+
 For concave overflow the added material ends flush with the continued cliff face, keeping the
 original cliff edge, the default of T-FLEX on Parasolid [52]. A concave chamfer can touch a sharp
 rim tangentially where its planar support ends. Its strips share their section on the continued
@@ -429,6 +440,7 @@ crease. The crease and the crossed rim edges bound the extension of the wall. A 
 is divided at an interior section before cutting it at the tangent rim, so the two creases
 keep their separate parameters at the seam. The pieces are sewn together on the same surface.
 The Roll-over's second pass (§3.2) also trims its added material at the crease.
+Other concave hanging-cliff overflows remain refused. Convex overflow still moves the sharp edge.
 
 ### 3.5 Refusals name the size that fits
 

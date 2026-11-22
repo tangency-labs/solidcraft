@@ -15,6 +15,7 @@
 //! | [`IntersectFailure::Inconsistent`]  | `SM_ERR_ASSERT_FAILURE`    |
 //! | [`IntersectFailure::StepTangentTooShort`] | `SM_ERR`             |
 //! | [`IntersectFailure::PointsWhereAPlaneCrosses`] | `SM_ERR`        |
+//! | [`IntersectFailure::UvPolygonNotInDomain`] | `SM_ERR`            |
 //! | [`IntersectFailure::StageFailed`]   | the site's (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`) |
 //! | [`IntersectFailure::Defect`]        | the site's (`SM_ERR`, or another through `with_status`) |
 //! | the named causes, from [`IntersectFailure::NoIntersection`] on | the status of the phrase each replaced (`comparison_status`), or the site's through `with_status` |
@@ -72,6 +73,10 @@ pub enum IntersectFailure {
         /// The surfaces' default approximation tolerance.
         surface_tolerance: f64,
     },
+    /// The control polygon of a traced curve's UV cubic has a point that is not finite or
+    /// not inside the surface's parameter domain, so the convex-hull property cannot prove
+    /// the curve stays on the surface; the curve is refused rather than snapped (#17016).
+    UvPolygonNotInDomain,
     /// A stage of an intersection routine failed with no reason the kernel names: a defect
     /// ([`ErrorKind::StageFailed`]). The failure holds the operation, the status the C++
     /// reports (for the goldens only), where it was built, and the error of the call it made
@@ -189,6 +194,7 @@ impl IntersectFailure {
             Self::Failed(_)
             | Self::StepTangentTooShort
             | Self::PointsWhereAPlaneCrosses { .. }
+            | Self::UvPolygonNotInDomain
             | Self::StageFailed
             | Self::Defect { .. }
             | Self::NoIntersection
@@ -282,6 +288,9 @@ impl core::fmt::Display for IntersectFailure {
                  surface: at the tolerance {tolerance:e} they lie farther from the surfaces than \
                  their default tolerance {surface_tolerance:e}"
             ),
+            Self::UvPolygonNotInDomain => f.write_str(
+                "the traced UV control polygon is not proved inside the surface domain",
+            ),
             Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
             Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
             Self::NoIntersection => f.write_str("no intersection was found"),
@@ -363,6 +372,15 @@ impl crate::SolidError {
     #[must_use]
     pub(crate) fn intersect_missing(operation: &'static str, what: &'static str) -> Self {
         Self::intersect(operation, IntersectFailure::Missing(what))
+    }
+
+    /// [`crate::SolidError::Failed`] for a traced curve whose UV control polygon is not
+    /// proved inside the surface's domain ([`IntersectFailure::UvPolygonNotInDomain`]),
+    /// with status [`SM_ERR`].
+    #[must_use]
+    #[track_caller]
+    pub(crate) fn intersect_uv_polygon_not_in_domain(operation: &'static str) -> Self {
+        Self::intersect(operation, IntersectFailure::UvPolygonNotInDomain)
     }
 
     /// [`crate::SolidError::Failed`] for a stage of an intersection routine that failed with
@@ -499,6 +517,18 @@ pub(super) mod tests {
         assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert_eq!(e.kind(), ErrorKind::Failed);
         assert!(!e.is_defect() && e.is_status_answer());
+        let e = SolidError::intersect_uv_polygon_not_in_domain("intersect::op");
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
+        assert_eq!(e.kind(), ErrorKind::Failed);
+        assert!(!e.is_defect() && e.is_status_answer());
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::UvPolygonNotInDomain)
+        );
+        assert_eq!(
+            e.to_string(),
+            "intersect::op: the traced UV control polygon is not proved inside the surface domain"
+        );
     }
 
     /// A reviewed defect is of class 127 with the stage failure's status, and says why.
