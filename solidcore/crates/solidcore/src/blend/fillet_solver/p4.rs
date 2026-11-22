@@ -937,14 +937,17 @@ fn c1_collect_points(
     // Process rail_ends: rail[i]->edgeuse[jj]->FilletVertexuse->TsectPnt
     let geom0 = st.geom0;
     for which_rail in 0..2 {
-        let this_rail = cx
-            .fillets
-            .geom(geom0)?
-            .rail(which_rail)
-            .ok_or_else(|| fail(SolverFailure::FilletGeomWithoutRail { side: which_rail }))?;
+        let this_rail = cx.fillets.geom(geom0)?.rail(which_rail).ok_or_else(|| {
+            fail(SolverFailure::FilletGeomWithoutRail {
+                fillet_geom: geom0,
+                side: which_rail,
+            })
+        })?;
         let fil_edgeuses = topo_edge::edgeuses(cx.fillets.brep(), this_rail, None, None)?;
         if fil_edgeuses.len() != 2 {
             return Err(fail(SolverFailure::RailEdgeUseCount {
+                fillet_geom: geom0,
+                side: which_rail,
                 count: fil_edgeuses.len(),
             }));
         }
@@ -1353,7 +1356,14 @@ mod tests_c1 {
         };
         let mut st = c1_setup(&mut ops, &mut cx).unwrap();
         let e = c1_collect_points(&mut ops, &mut cx, &mut st, 0).unwrap_err();
-        assert_eq!(e, fail(SolverFailure::RailEdgeUseCount { count: 1 }));
+        assert_eq!(
+            e,
+            fail(SolverFailure::RailEdgeUseCount {
+                fillet_geom: g,
+                side: 1,
+                count: 1
+            })
+        );
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
     }
 
@@ -1370,7 +1380,14 @@ mod tests_c1 {
         fb.brep_mut().edge_mut(rail).unwrap().edgeuses.pop();
         let mut ops = solver(&k, eus);
         let e = FilletSolver::calc_fillet_geom(&mut ops, &k, &mut tb, &mut fb, &[]).unwrap_err();
-        assert_eq!(e, fail(SolverFailure::RailEdgeUseCount { count: 1 }));
+        assert_eq!(
+            e,
+            fail(SolverFailure::RailEdgeUseCount {
+                fillet_geom: g,
+                side: 1,
+                count: 1
+            })
+        );
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert!(!e.is_defect(), "{e:?}");
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
@@ -1380,7 +1397,13 @@ mod tests_c1 {
         fb.geom_mut(g).unwrap().set_rail(1, None);
         let mut ops = solver(&k, eus);
         let e = FilletSolver::calc_fillet_geom(&mut ops, &k, &mut tb, &mut fb, &[]).unwrap_err();
-        assert_eq!(e, fail(SolverFailure::FilletGeomWithoutRail { side: 1 }));
+        assert_eq!(
+            e,
+            fail(SolverFailure::FilletGeomWithoutRail {
+                fillet_geom: g,
+                side: 1
+            })
+        );
         assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert!(!e.is_defect(), "{e:?}");
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
@@ -1803,11 +1826,12 @@ fn c2_end_past_tangent_edge(
         topo_edge::start_vertex(cx.target, edge)?
     };
     for which_rail in 0..2 {
-        let rail = cx
-            .fillets
-            .geom(st.geom0)?
-            .rail(which_rail)
-            .ok_or_else(|| fail(SolverFailure::FilletGeomWithoutRail { side: which_rail }))?;
+        let rail = cx.fillets.geom(st.geom0)?.rail(which_rail).ok_or_else(|| {
+            fail(SolverFailure::FilletGeomWithoutRail {
+                fillet_geom: st.geom0,
+                side: which_rail,
+            })
+        })?;
         let brep = cx.fillets.brep();
         let first = topo_edge::vertex(brep, rail)?;
         let second = match first {

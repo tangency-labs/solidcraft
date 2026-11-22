@@ -781,12 +781,13 @@ pub enum SolverFailure {
     /// The caller's fillet geometry has no rail on side `side`: the caller's solver set-up
     /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
     FilletGeomWithoutRail {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
         /// The rail side, 0 or 1.
         side: usize,
     },
-    /// The caller's fillet geometry has no fillet surface (the trace stores none without a
-    /// surface generator): the caller's solver set-up ([`ErrorKind::InvalidInput`]); status
-    /// `SM_ERR_NULL_POINTER`.
+    /// The caller's fillet geometry has no fillet surface: the caller's solver set-up
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
     FilletGeomWithoutSurface {
         /// The fillet geometry.
         fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
@@ -823,9 +824,13 @@ pub enum SolverFailure {
         /// The rail side, 0 or 1.
         side: usize,
     },
-    /// A rail of the caller's fillet geometry has `count` edge uses where two are needed:
-    /// the caller's solver set-up ([`ErrorKind::InvalidInput`]).
+    /// Rail `side` of the caller's fillet geometry has `count` edge uses where two are
+    /// needed: the caller's solver set-up ([`ErrorKind::InvalidInput`]).
     RailEdgeUseCount {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
+        /// The rail side, 0 or 1.
+        side: usize,
         /// The rail's edge uses.
         count: usize,
     },
@@ -1167,8 +1172,11 @@ impl core::fmt::Display for SolverFailure {
             Self::OffsetNormalsParallel => f.write_str(
                 "the offset surfaces' normals are parallel at the tangent intersection point",
             ),
-            Self::FilletGeomWithoutRail { side } => {
-                write!(f, "the fillet geometry has no rail on side {side}")
+            Self::FilletGeomWithoutRail { fillet_geom, side } => {
+                write!(
+                    f,
+                    "fillet geometry {fillet_geom:?} has no rail on side {side}"
+                )
             }
             Self::FilletGeomWithoutSurface { fillet_geom } => {
                 write!(f, "fillet geometry {fillet_geom:?} has no fillet surface")
@@ -1199,12 +1207,14 @@ impl core::fmt::Display for SolverFailure {
                 "the mate edge use of rail {side} of fillet geometry {fillet_geom:?} has no uv \
                  trim curve"
             ),
-            Self::RailEdgeUseCount { count } => {
-                write!(
-                    f,
-                    "the fillet geometry's rail has {count} edge uses, not two"
-                )
-            }
+            Self::RailEdgeUseCount {
+                fillet_geom,
+                side,
+                count,
+            } => write!(
+                f,
+                "rail {side} of fillet geometry {fillet_geom:?} has {count} edge uses, not two"
+            ),
         }
     }
 }
