@@ -78,13 +78,19 @@
 //! point and within `SM_EFF_ZERO m` of each other (`m` their largest coordinate), a
 //! gap the boundary always closed to. The slab's polygon merges such neighbours
 //! until none is left (`close_ring`: it stays closed), and a monotone region drops
-//! such a segment (`segment`). Each merge removes a vertex within `SM_EFF_ZERO m`
-//! of the vertex it merges into, but merges chain: a removed vertex lies within
-//! `(n - 1) SM_EFF_ZERO m` of the polygon (n <= 6), which is also the most a removed
-//! edge can be off, so an overestimated bound can drop an edge main kept. The
-//! region stays sound: the ring is a sub-polygon of the convex cut polygon, and the
-//! cover check on its vertices certifies what is emitted. A bound that is too small
-//! only keeps an edge.
+//! such a segment (`segment`). Two slab neighbours on two sides of the domain box
+//! that meet at a corner (a cut of the slab's line across that corner) merge into
+//! the corner (`merged_corner`), which is within both of their bounds: every edge
+//! along a side stays on it, and only the slab's line, known no better than those
+//! bounds, moves to run through the corner. Keeping one of the two instead would
+//! turn the other's side into a chord across the region, off by the merge distance
+//! over the side's whole length (#18903). Each other merge removes a vertex within
+//! `SM_EFF_ZERO m` of the vertex it merges into, but merges chain: a removed vertex
+//! lies within `(n - 1) SM_EFF_ZERO m` of the polygon (n <= 6), which is also the
+//! most a removed edge can be off, so an overestimated bound can drop an edge main
+//! kept. The region stays sound: the ring is the convex cut polygon up to merges
+//! within its vertices' bounds, and the cover check on its vertices certifies what
+//! is emitted. A bound that is too small only keeps an edge.
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignore_status, Result};
@@ -1891,7 +1897,7 @@ fn slab_region(
         }
         ring.push(v);
     }
-    let ring = close_ring(ring);
+    let ring = close_ring(plane, &dom, ring);
     // a slab touching the domain along a side or at a point bounds no area
     let mut area2 = 0.0;
     let mut scale = 0.0_f64;
@@ -1929,16 +1935,49 @@ fn slab_region(
     Ok(Some(()))
 }
 
+/// Whether the vertex lies on a vertical (`axis` 0) or horizontal (`axis` 1) side of
+/// the domain box `dom`: that coordinate is exact (`r` 0) and equal to the side's.
+fn on_side(v: &Vertex, dom: &Extent2d, axis: usize) -> bool {
+    let (c, r, lo, hi) = if axis == 0 {
+        (v.uv.x, v.r.x, dom.min().x, dom.max().x)
+    } else {
+        (v.uv.y, v.r.y, dom.min().y, dom.max().y)
+    };
+    r == 0.0 && (c == lo || c == hi)
+}
+
+/// The box corner that the merging neighbours `a` and `b` of the slab's polygon
+/// become when one lies on a vertical side of the domain box and the other on a
+/// horizontal side: the corner where those sides meet (exact). Each of their other
+/// edges runs along its side, which keeps its place; the slab's line between them
+/// moves within its error to run through the corner. The corner is within both
+/// vertices' bounds: it takes each coordinate exactly from the vertex on that
+/// coordinate's side, and the other vertex is within the two bounds of it
+/// (`one_point`), the first's bound being 0 there. `None` otherwise.
+fn merged_corner(plane: &Plane, dom: &Extent2d, a: &Vertex, b: &Vertex) -> Option<Vertex> {
+    let corner = if on_side(a, dom, 0) && on_side(b, dom, 1) {
+        Point2::new(a.uv.x, b.uv.y)
+    } else if on_side(a, dom, 1) && on_side(b, dom, 0) {
+        Point2::new(b.uv.x, a.uv.y)
+    } else {
+        return None;
+    };
+    Some(Vertex::on_plane(plane, corner, Point2::new(0.0, 0.0)))
+}
+
 /// The slab's polygon (its vertices in order, the last joined to the first) with
 /// neighbours that merge (`merges`, the predicate of `segment`) merged until none
-/// is left, each merge keeping the better known of the two (the other's exact place
-/// is within the two bounds of it; on a tie the earlier). The polygon stays closed
-/// by construction: `segment` of any two neighbours is an edge. `merges` is not
-/// transitive (with `A`, `B`, `C` in order, `A` and `B` apart, `B` and `C` merging
-/// into `C`, `A` and `C` may merge), so a merge is followed by a new pass over every
-/// pair, the last with the first included. Each merge drops a vertex: at most `n`
-/// passes of `n` pairs (`n <= 6`, a box cut by two half-planes).
-fn close_ring(mut ring: Vec<Vertex>) -> Vec<Vertex> {
+/// is left, each merge replacing the two by `merged_corner` (a box corner when they lie
+/// on two sides that meet there, else the better known of the two). Keeping one
+/// of two such neighbours would move the other's side to a chord across the region
+/// (an area of the merge distance times the side's length); the corner keeps every
+/// side's edge on its side. The polygon stays closed by construction: `segment` of
+/// any two neighbours is an edge. `merges` is not transitive (with `A`, `B`, `C` in
+/// order, `A` and `B` apart, `B` and `C` merging into `C`, `A` and `C` may merge),
+/// so a merge is followed by a new pass over every pair, the last with the first
+/// included. Each merge drops a vertex: at most `n` passes of `n` pairs (`n <= 6`,
+/// a box cut by two half-planes).
+fn close_ring(plane: &Plane, dom: &Extent2d, mut ring: Vec<Vertex>) -> Vec<Vertex> {
     loop {
         let n = ring.len();
         if n < 2 {
@@ -1948,16 +1987,20 @@ fn close_ring(mut ring: Vec<Vertex>) -> Vec<Vertex> {
             // (the successor, the last's the first)
             let j = if i + 1 < n { i + 1 } else { 0 };
             let (a, b) = (ring.get(i)?, ring.get(j)?);
-            (i != j && merges(a, b)).then_some((i.min(j), i.max(j)))
+            (i != j && merges(a, b)).then_some((i, j))
         });
-        let Some((keep, drop)) = pair else {
+        let Some((i, j)) = pair else {
             return ring;
         };
+        let (keep, drop) = (i.min(j), i.max(j));
         if let (Some(&a), Some(&b)) = (ring.get(keep), ring.get(drop)) {
-            if b.spread() < a.spread() {
-                if let Some(x) = ring.get_mut(keep) {
-                    *x = b;
-                }
+            let m = match merged_corner(plane, dom, &a, &b) {
+                Some(corner) => corner,
+                None if b.spread() < a.spread() => b,
+                None => a,
+            };
+            if let Some(x) = ring.get_mut(keep) {
+                *x = m;
             }
         }
         ring = ring
@@ -2186,6 +2229,55 @@ mod tests {
         }
     }
 
+    /// The plane `z = 0` with unit axes and scale, its origin at `(x0, 0, 0)`.
+    fn z_plane(x0: f64, dom: &Extent2d) -> Plane {
+        Plane::new(
+            Point3::new(x0, 0.0, 0.0),
+            Vec3::X,
+            Vec3::Y,
+            crate::geom::vector2d::Vec2::new(1.0, 1.0),
+            dom,
+        )
+    }
+
+    /// #18903: the unit box with its corner `(0, 0)` cut off by `(d, 0)` and
+    /// `(0, d)`, on a plane at `x = 1e12`, each cut known to `2e-2` along its side.
+    /// The cuts merge (one point to their bounds, within `SM_EFF_ZERO m`). Keeping
+    /// either moved the other's side to a chord (`(d, 0)` to `(0, 1)`); in every
+    /// rotation of the ring they merge into the corner `(0, 0)` (exact, its plane
+    /// point), and the ring is the box's four corners.
+    #[test]
+    fn slab_ring_merges_cuts_on_two_sides_into_their_corner() {
+        let d = 2f64.powi(-10);
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let plane = z_plane(1e12, &dom);
+        let at = |x: f64, y: f64, rx: f64, ry: f64| {
+            Vertex::on_plane(&plane, Point2::new(x, y), Point2::new(rx, ry))
+        };
+        let (cx, cy) = (at(d, 0.0, 2e-2, 0.0), at(0.0, d, 0.0, 2e-2));
+        assert!(merges(&cx, &cy));
+        let box_corners = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+        let ring = [
+            cx,
+            at(1.0, 0.0, 0.0, 0.0),
+            at(1.0, 1.0, 0.0, 0.0),
+            at(0.0, 1.0, 0.0, 0.0),
+            cy,
+        ];
+        for turn in 0..ring.len() {
+            let mut rotated = ring.to_vec();
+            rotated.rotate_left(turn);
+            let closed = close_ring(&plane, &dom, rotated);
+            assert_eq!(closed.len(), 4, "rotation {turn}");
+            for &(x, y) in &box_corners {
+                let c = closed.iter().find(|v| v.uv == Point2::new(x, y));
+                let c = c.unwrap_or_else(|| panic!("rotation {turn}: no corner ({x}, {y})"));
+                assert_eq!(c.r, Point2::new(0.0, 0.0), "rotation {turn}");
+                assert_eq!(c.p, plane.evaluate_point_fast(c.uv), "rotation {turn}");
+            }
+        }
+    }
+
     /// Review r2 of #18771, M1: `merges` is not transitive. With `A`, `B`, `C` in
     /// order (`m = 1000`, so the cap `SM_EFF_ZERO m` is `1e-9`), `A` and `B` are
     /// `4e-10` apart beyond their bounds (`0`, `3e-10`), `B` and `C` merge into the
@@ -2200,11 +2292,14 @@ mod tests {
         let c = v(1000.0 + 1e-10, 0.0, 1.5e-10);
         let (d, e) = (v(1000.0, 10.0, 0.0), v(990.0, 5.0, 0.0));
         assert!(!merges(&a, &b) && merges(&b, &c) && merges(&a, &c));
+        // (a domain none of the vertices is on a side of)
+        let dom = Extent2d::from_bounds(-1e7, -1e7, 1e7, 1e7);
+        let plane = z_plane(0.0, &dom);
         let ring = [a, b, c, d, e];
         for turn in 0..ring.len() {
             let mut rotated = ring.to_vec();
             rotated.rotate_left(turn);
-            let closed = close_ring(rotated);
+            let closed = close_ring(&plane, &dom, rotated);
             assert_eq!(closed.len(), 3, "rotation {turn}");
             assert!(closed.iter().any(|x| x.uv == a.uv), "rotation {turn}");
             for (&p, &q) in closed.iter().zip(closed.iter().cycle().skip(1)) {
