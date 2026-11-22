@@ -212,15 +212,28 @@ pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
         return false;
     };
     let (vals, _) = doc.param_values();
-    let Ok(plane) = doc.canvas_plane(&vals, &c, &app.session.model.state()) else {
-        return false;
+    let state = app.session.model.state();
+    // An anchored canvas shows, and is traced, in its anchor sketch's plane through the anchor's
+    // frame: a trace click is read there, as `canvas.to_sketch` reads its point.
+    let anchored = c.anchor.as_ref().filter(|_| panel.trace).and_then(|a| {
+        let frame = doc.canvas_anchor_frame(&c, a, &state).ok()?;
+        Some((state.sketch(a.sketch)?.plane.clone(), frame))
+    });
+    let (plane, corners) = match anchored {
+        Some(found) => found,
+        None => {
+            let Ok(plane) = doc.canvas_plane(&vals, &c, &state) else {
+                return false;
+            };
+            (plane, c.corners())
+        }
     };
     let (origin, direction) = proj.ray(screen);
     let Some(world) = plane.intersect_ray(origin, direction) else {
         return false;
     };
     let local = plane.to_local(world);
-    if !on_image(&c, local) {
+    if !on_image(corners, local) {
         return false;
     }
     let point = [local.x, local.y];
@@ -296,8 +309,7 @@ pub(crate) fn paint_marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) 
     }
 }
 
-fn on_image(c: &Canvas, p: Vec2) -> bool {
-    let [bl, br, _, tl] = c.corners();
+fn on_image([bl, br, _, tl]: [Vec2; 4], p: Vec2) -> bool {
     let (u, v) = (br - bl, tl - bl);
     let (uu, vv) = (u.dot(u), v.dot(v));
     if !(uu > 1e-18 && vv > 1e-18) {
