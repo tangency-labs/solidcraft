@@ -1028,7 +1028,8 @@ pub enum FilletSetUp {
     PrimaryEdgeUseMate,
     /// The two fillet vertices a fillet edge joins.
     EdgeVertices,
-    /// The face a rail/rail interpolation edge lies on.
+    /// The original face a fillet edge records, of any fillet edge type (a rail/rail
+    /// interpolation edge's face it lies on included).
     OriginalFace,
     /// The rail ending at an end of a rail/rail interpolation edge.
     InterpolationEndRail,
@@ -1090,7 +1091,7 @@ impl FilletSetUp {
             Self::PrimaryEdgeUse => "a fillet edge has no primary edge use",
             Self::PrimaryEdgeUseMate => "a fillet edge's primary edge use has no mate",
             Self::EdgeVertices => "a fillet edge does not join two fillet vertices",
-            Self::OriginalFace => "the rail/rail interpolation edge records no face it lies on",
+            Self::OriginalFace => "a fillet edge records no original face",
             Self::InterpolationEndRail => {
                 "an end of the rail/rail interpolation edge is no rail's end"
             }
