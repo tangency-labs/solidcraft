@@ -7280,7 +7280,9 @@ mod tests {
             for unit in UNITS {
                 h.step(&json!({"click":{"handle":format!("prefs:default_units:{unit}")}})).unwrap();
                 h.frames(2);
-                let sample = format_length(12.5 * unit_scale(unit).0, unit, 2);
+                // 12.5 in the chosen unit; inches keep at least three decimals.
+                let sample = if *unit == "in" { "12.500 in".to_string() } else { format!("12.50 {unit}") };
+                assert_eq!(design::length_decimals_sample(unit, 2), sample);
                 assert!(h.widget(&sample).is_some(), "{theme}: {unit} uses the real unit-aware sample {sample}");
                 assert_eq!(h.app.session.doc.to_json(), doc);
             }
@@ -7294,7 +7296,7 @@ mod tests {
                 h.frames(2);
             }
             assert_eq!((h.app.preferences.length_decimals, h.app.preferences.angle_decimals, h.app.preferences.parameter_list_rows), (4, 3, 75));
-            assert!(h.widget(&format_length(12.5 * unit_scale("ft").0, "ft", 4)).is_some());
+            assert!(h.widget("12.5000 ft").is_some());
             assert!(h.widget("45.000°").is_some());
             assert_eq!(saved_prefs(&h.app)["preferences"]["length_decimals"], original.length_decimals);
             h.call("ui.prefs", json!({"button":"apply"}));
@@ -8163,6 +8165,16 @@ mod tests {
         h.frames(2);
         let hard = resolved_theme(&h.app.preferences, active_theme_file(&h.app).unwrap());
         assert_eq!((Tokens::get().panel, Tokens::get().viewport_top), (hard.panel, Tokens::light().viewport_top));
+        // Dark on a dark theme file is the built-in Dark view too, not the file's own: every choice shows something.
+        let builtin = Tokens::dark();
+        assert_ne!((hard.viewport_top, hard.body), (builtin.viewport_top, builtin.body), "the fixture's view differs from the built-in Dark");
+        for (view, want) in [("dark", (builtin.viewport_top, builtin.body)), ("theme", (hard.viewport_top, hard.body))] {
+            h.call("ui.prefs", json!({"viewport_theme": view}));
+            h.frames(2);
+            let (t, v) = (Tokens::get(), Tokens::view());
+            assert_eq!(t.panel, hard.panel, "{view}: the window keeps the theme file's colours");
+            assert_eq!(((t.viewport_top, t.body), (v.viewport_top, v.body)), (want, want), "{view}: the view");
+        }
 
         // Asked for, an unknown value is refused; read from saved preferences, it is the default.
         assert!(h.call("ui.prefs", json!({"viewport_theme": "dim"}))["error"].is_string());

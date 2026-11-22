@@ -195,6 +195,9 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
                 format!("unknown command group `{group}`; SolidCraft has {}", COMMAND_GROUPS.join(", ")),
             ));
         }
+        if runtime.is_exporter() {
+            export::refuse_unreadable(runtime)?;
+        }
         let storage = manifest.capabilities.iter().any(|capability| capability.starts_with("storage@"));
         for command in &runtime.commands {
             if command.starts_with("storage.") && !storage {
@@ -522,6 +525,7 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
 
 pub mod check;
 mod events;
+mod export;
 pub use events::{LinkChange, design_changed, design_notifications};
 pub(crate) use events::{record_changed_link_reads, record_link_change, record_link_reads};
 mod form;
@@ -536,7 +540,8 @@ pub mod storage;
 #[cfg(not(target_arch = "wasm32"))]
 pub use package::{remove, store_grants, validate_grants};
 
-pub use import::{Importer, describe as describe_importers, import_file, importer_for, importers, open_filters};
+pub use export::{describe as describe_exporters, export_file, exporter_for, exporters};
+pub use import::{FormatSlot, Importer, describe as describe_importers, format_slots, import_file, importer_for, importers, open_filters};
 pub use messages::PluginFailure;
 #[cfg(test)]
 mod tests;
@@ -831,7 +836,8 @@ pub fn resolve_call(s: &Session, id: &str, params: &Value) -> Result<Option<Valu
 }
 
 /// `engine.describe` of an installed, enabled plugin's entry: a command entry as the
-/// `<plugin>.<entry>` command, an importer as the tool that opens its files; each with the
+/// `<plugin>.<entry>` command, an importer as the tool that opens its files, or an exporter as
+/// the tool that writes the open design; each with the
 /// schema `tools/list` gives it. Read with the app's authority, whatever the caller's folders.
 pub fn describe_entry(s: &Session, id: &str) -> Result<Option<Value>> {
     tools::describe(s, id)
