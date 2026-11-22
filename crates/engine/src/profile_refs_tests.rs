@@ -104,3 +104,37 @@ fn a_lost_profile_is_an_error_not_another_pick() {
     let id = s.doc.features.last().unwrap().id;
     assert!(s.model.result(id).is_some_and(|r| r.error.is_some()), "{:?}", s.model.result(id));
 }
+
+/// A plate with two blocks on it, a sketch on its top face and a thin layer over the whole face
+/// outline of that sketch; `px` places the small block.
+fn skinned_plate(px: &str) -> Session {
+    let mut s = Session::default();
+    let script = json!([
+        {"command": "parameters.add", "params": {"name": "px", "expression": px}},
+        {"command": "solid.box", "params": {"corner": [0, 0, 0], "length": 50, "width": 40, "height": 2.5}},
+        {"command": "solid.box", "params": {"corner": [15, 10, 2.5], "length": 15, "width": 15, "height": 8, "operation": "join"}},
+        {"command": "solid.box", "params": {"corner": ["px", 25, 2.5], "length": 6, "width": 6, "height": 0.6, "operation": "join"}},
+        {"command": "sketch.create", "params": {"plane": {"face": [2, 2, 2.5]}, "name": "OnTop"}},
+        {"command": "sketch.finish", "params": {}},
+        {"command": "solid.extrude", "params": {"sketch": "OnTop", "distance": "0.3 mm", "operation": "join", "profiles": [{"point": [3, 3]}], "name": "Skin"}}
+    ]);
+    s.run_script(&script).unwrap();
+    s
+}
+
+/// A feature built from a sketch whose face outline could not be refreshed says so on its own
+/// row; with the outline refreshed it carries no such note.
+#[test]
+fn a_feature_built_from_a_retained_outline_says_so() {
+    let note = "built from Sketch OnTop's last outline";
+    let mut s = skinned_plate("31 mm");
+    let skin = s.doc.find_feature("Skin").unwrap().id;
+    assert!(s.model.result(skin).is_some_and(|r| r.warning.is_none()), "{:?}", s.model.result(skin));
+    // At 30 mm the small block touches the large one at a corner: the face may not project
+    // again, and the sketch then keeps its last outline. Whenever that happens the layer says so.
+    run(&mut s, "parameters.change", json!({"name": "px", "expression": "30 mm"}));
+    let sketch = s.doc.find_feature("OnTop").unwrap().id;
+    let retained = s.model.state().sketch(sketch).is_some_and(|ss| ss.sketch.links.iter().any(|l| l.lost));
+    let warning = s.model.result(skin).and_then(|r| r.warning.clone());
+    assert_eq!(retained, warning.as_deref().is_some_and(|w| w.contains(note)), "{warning:?}");
+}

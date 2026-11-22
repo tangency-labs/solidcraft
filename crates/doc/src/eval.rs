@@ -12181,10 +12181,29 @@ fn eval_feature(
 ) -> Result<()> {
     JOINED_TARGETS.with(|n| n.borrow_mut().clear());
     let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal, prepared_meshes);
+    if r.is_ok() {
+        for note in retained_outline_notes(f, st) {
+            append_warning(warning, note);
+        }
+    }
     for note in JOINED_TARGETS.with(|n| std::mem::take(&mut *n.borrow_mut())) {
         append_warning(warning, note);
     }
     r
+}
+
+/// A note for each sketch the feature is built from whose linked outline could not be refreshed
+/// (a link marked lost keeps its last geometry): the feature then follows that old outline, and
+/// says so on its own row, not only on the sketch's.
+fn retained_outline_notes(f: &Feature, st: &ModelState) -> Vec<String> {
+    let mut ids = f.kind.input_sketches();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.into_iter()
+        .filter_map(|id| st.sketch(id))
+        .filter(|ss| ss.sketch.links.iter().any(|l| l.lost))
+        .map(|ss| format!("built from Sketch {}'s last outline: its projected geometry could not be updated", ss.name))
+        .collect()
 }
 
 /// [`eval_feature`] for one kind of feature. `heal` is the tolerance heal preference the
