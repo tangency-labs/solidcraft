@@ -13205,6 +13205,17 @@ fn eval_feature_kind(
                             // the first face each other body's.
                             crate::SplitSheet::Body => {
                                 let names: Vec<&crate::BodyName> = std::iter::once(&t.body).chain(tool_bodies).collect();
+                                // A further placement's body (`Sheet (Part:2)`) is not in the model,
+                                // which holds a component's first placement only: it is placed where
+                                // its occurrence puts it, in the body's frame, as a combine's tool
+                                // is (#20040).
+                                let missing: Vec<&str> = names.iter().map(|n| n.0.as_str()).filter(|n| st.body(n).is_none()).collect();
+                                let placed = if missing.is_empty() {
+                                    ModelState::default()
+                                } else {
+                                    with_placed_copies(doc, st, std::borrow::Cow::Owned(ModelState::default()), &body_world(doc, &mb), &missing)
+                                        .into_owned()
+                                };
                                 let mut pieces = vec![input.clone()];
                                 for (k, name) in names.iter().enumerate() {
                                     if names.get(..k).is_some_and(|before| before.contains(name)) {
@@ -13213,12 +13224,15 @@ fn eval_feature_kind(
                                     if *name == body {
                                         return Err(DocError::Invalid(format!("`{body}` cannot split itself")));
                                     }
-                                    let tool = st.body(name).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?;
+                                    let (tool, in_frame) = match st.body(name) {
+                                        Some(b) => (b, false),
+                                        None => (placed.body(name).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?, true),
+                                    };
                                     if !tool.body.is_surface() {
                                         return Err(DocError::Invalid(format!("`{name}` is not a surface body, so it cannot split as a whole")));
                                     }
                                     let side = if k == 0 { face } else { 0 };
-                                    let tool = sheet(tool)?;
+                                    let tool = if in_frame { tool.body.clone() } else { sheet(tool)? };
                                     let mut next = Vec::with_capacity(pieces.len() + 1);
                                     let mut cut = false;
                                     for piece in pieces {

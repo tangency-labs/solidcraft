@@ -3611,8 +3611,15 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
     if s.model.state().body(&body).is_none() {
         return Err(bad(cmd, format!("no body `{body}`")));
     }
+    // More surface bodies cut only with a face tool's whole surface body (#13303): a plane or a
+    // sketch line would drop them.
+    let face_tool = p.get("tool").is_some_and(|t| !t.is_null());
+    let lines = p.get("sketch").is_some_and(|v| !v.is_null()) || p.get("line").is_some_and(|v| !v.is_null());
+    if p.get("tool_bodies").is_some_and(|v| !v.is_null()) && (!face_tool || lines) {
+        return Err(bad(cmd, "`tool_bodies` needs a face `tool` with `tool_sheet` \"body\""));
+    }
     // A straight sketch line as the tool: `sketch` and `line` (#1552).
-    if p.get("sketch").is_some_and(|v| !v.is_null()) || p.get("line").is_some_and(|v| !v.is_null()) {
+    if lines {
         let sketch = p.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "`sketch` must be a sketch feature id"))?;
         let line = str_(p, "line").ok_or_else(|| bad(cmd, "`line` must name a line of the sketch"))?.to_string();
         let st = s.model.state();
@@ -3692,9 +3699,15 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
                     return Err(bad(cmd, format!("`tool_bodies` takes at most {MAX_SPLIT_TOOL_BODIES} bodies")));
                 }
                 let mut bodies: Vec<BodyName> = Vec::with_capacity(names.len());
+                // A further placement's body (`Sheet (Part:2)`) keeps its name and cuts where its
+                // occurrence puts it, as a combine's tool does (#20040); the model holds only a
+                // component's first placement, the placed model the others.
+                let further = names.iter().any(|n| n.as_str().is_some_and(|n| st.body(n).is_none()));
+                let world = if further { Some(s.world_state()?) } else { None };
                 for name in names {
                     let name = name.as_str().ok_or_else(|| bad(cmd, "`tool_bodies` must be a list of body names"))?;
-                    let other = st.body(name).ok_or_else(|| bad(cmd, format!("no body `{name}`")))?;
+                    let other =
+                        st.body(name).or_else(|| world.as_ref().and_then(|w| w.body(name))).ok_or_else(|| bad(cmd, format!("no body `{name}`")))?;
                     if !other.body.is_surface() {
                         return Err(bad(cmd, format!("`{name}` is not a surface body, so it cannot split as a whole")));
                     }
