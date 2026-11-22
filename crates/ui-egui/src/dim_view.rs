@@ -1020,8 +1020,12 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         let model = EDIT.with(|e| {
             let mut e = e.borrow_mut();
             let keep = e.as_ref().and_then(|x| x.sketch).is_some_and(|s| app.session.active_sketch.is_none() && st.sketch(s).is_some());
+            // A box open on a sheet belongs to the sheet's own view, which a Model view painting in
+            // the same frame must not close.
             if !keep {
-                *e = None;
+                if e.as_ref().is_none_or(|x| x.sheet.is_none()) {
+                    *e = None;
+                }
             } else if let Some(x) = e.as_mut()
                 && let Some(d) = MODEL.with(|m| m.borrow().iter().find(|d| d.param.as_deref() == Some(x.param.as_str())).cloned())
             {

@@ -2056,16 +2056,18 @@ mod tests {
         let added = h.app.run("drawing.sheet.add", serde_json::json!({})).unwrap();
         let second = added["sheet"].as_str().unwrap();
         h.frames(4);
-        let first = active_sheet(&h.app);
+        let remaining = h.app.session.drawing("drawing.inspect").unwrap().sheets[0].id;
+        // Adding a sheet shows it in its own view, so it is the one on screen before the menu opens.
+        let shown = active_sheet(&h.app);
         h.step(&serde_json::json!({"click":{"handle":format!("drawing:sheets:menu:{second}")}})).unwrap();
         h.frames(3);
         h.step(&serde_json::json!({"widget":"Delete Sheet"})).unwrap();
         h.frames(3);
-        assert_eq!(active_sheet(&h.app), first);
+        assert_eq!(active_sheet(&h.app), shown, "asking to delete changes nothing on screen");
         assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().sheets.len(), 2);
         h.step(&serde_json::json!({"click":{"handle":"dialog:ok"}})).unwrap();
         h.frames(3);
-        assert_eq!(active_sheet(&h.app), first);
+        assert_eq!(active_sheet(&h.app), Some(remaining));
         assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().sheets.len(), 1);
     }
 
@@ -2080,18 +2082,19 @@ mod tests {
         h.app.run("drawing.create", serde_json::json!({})).unwrap();
         let added = h.app.run("drawing.sheet.add", serde_json::json!({"name":"Detail"})).unwrap();
         let second = added["sheet"].as_str().unwrap();
-        let first = active_sheet(&h.app);
+        let remaining = h.app.session.drawing("drawing.inspect").unwrap().sheets[0].id;
         h.frames(8);
+        let shown = active_sheet(&h.app);
         h.step(&serde_json::json!({"click":{"handle":format!("drawing:browser:sheet:{second}")},"button":"right"})).unwrap();
         h.frames(3);
 
-        assert_eq!(active_sheet(&h.app), first);
+        assert_eq!(active_sheet(&h.app), shown, "the menu opens without changing the sheet on screen");
         h.step(&serde_json::json!({"widget":"Delete Sheet"})).unwrap();
         h.frames(3);
         h.step(&serde_json::json!({"click":{"handle":"dialog:ok"}})).unwrap();
         h.frames(3);
 
-        assert_eq!(active_sheet(&h.app), first);
+        assert_eq!(active_sheet(&h.app), Some(remaining));
         assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().sheets.len(), 1);
     }
 
@@ -2165,6 +2168,10 @@ mod tests {
         assert_eq!((h.app.session.revision, h.app.session.undo.len()), (revision, undo));
 
         h.app.run("drawing.sheet.delete", serde_json::json!({"sheet":second})).unwrap();
+        h.frames(3);
+        // The deleted sheet's view stays with a notice until it is closed; closing it falls back.
+        let deleted = h.app.docs.views.active().id;
+        h.app.run("tab.view.close", serde_json::json!({"id": deleted})).unwrap();
         h.frames(3);
         assert_eq!(crate::drawing_sheet_page::inspect(&h.app)["sheet"], first);
         assert!(!sheets_visible(&h.app));
