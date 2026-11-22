@@ -95,7 +95,7 @@ use crate::blend::fillet_geom::p3::{NoCorners, SplitCorners};
 use crate::blend::fillet_intersector::{FilletIntersector, StepSolve as StepSolveFlags};
 use crate::blend::fillet_solver::p1::NoExtensionCorners;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::blend::{BlendFailure, SolverFailure};
+use crate::error::blend::{BlendFailure, FilletSetUp, SolverFailure};
 use crate::error::{Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -123,6 +123,14 @@ fn invalid(reason: &'static str) -> SolidError {
 #[track_caller]
 fn fail(cause: SolverFailure) -> SolidError {
     SolidError::blend_solver(OP, cause)
+}
+
+/// A rail edge of the caller's fillet geometry without its 3D curve:
+/// [`BlendFailure::FilletSetUpInvalid`] ([`FilletSetUp::RailCurve`]), status
+/// `SM_ERR_NULL_POINTER`.
+#[track_caller]
+fn rail_without_curve() -> SolidError {
+    SolidError::blend(OP, BlendFailure::FilletSetUpInvalid(FilletSetUp::RailCurve))
 }
 
 /// An edge use of the caller's body without an edge: [`BlendFailure::EdgeUseWithoutEdge`]
@@ -3453,13 +3461,7 @@ fn c5_split_rail(
         .ok_or_else(|| invalid("split: geometry 0 has no rail"))?;
     // a trace can succeed without a flush (c4_trace), leaving geometry 0's rails as the
     // caller built them
-    let rail_curve = edge_unit::curve(brep, rail)?.ok_or_else(|| {
-        fail(SolverFailure::RailNotBSpline {
-            fillet_geom: st.geom0,
-            side: mm,
-            kind: None,
-        })
-    })?;
+    let rail_curve = edge_unit::curve(brep, rail)?.ok_or_else(rail_without_curve)?;
     let mut trim_ivl = rail_curve.natural_interval();
     let mut new_trim_ivl = trim_ivl;
     let prim_eu = eu::primary_edgeuse(brep, rail)?
@@ -3670,12 +3672,12 @@ fn c5_undo_reversal(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<()
                 .rail(kk)
                 .ok_or_else(|| invalid("reverse: geometry has no rail"))?;
             let b = cx.fillets.brep();
-            let rail_curve = edge_unit::curve(b, rail)?;
-            if rail_curve.and_then(bspline_curve_cast).is_none() {
+            let rail_curve = edge_unit::curve(b, rail)?.ok_or_else(rail_without_curve)?;
+            if bspline_curve_cast(rail_curve).is_none() {
                 return Err(fail(SolverFailure::RailNotBSpline {
                     fillet_geom: g,
                     side: kk,
-                    kind: rail_curve.map(Curve::type_string),
+                    kind: rail_curve.type_string(),
                 }));
             }
             let prim_eu = eu::primary_edgeuse(b, rail)?
@@ -4028,19 +4030,12 @@ mod tests_c5 {
     }
 
     #[test]
-    fn reversed_trace_rejects_a_rail_curve_that_is_not_a_bspline() {
+    fn reversed_trace_rejects_a_rail_edge_without_a_curve() {
         let mut f = Fixture::new();
         f.st.trace.reverse_tracing = true;
         f.fb.brep_mut().edge_mut(f.rails[1]).unwrap().curve = None;
         let e = f.run().unwrap_err();
-        assert_eq!(
-            e,
-            fail(SolverFailure::RailNotBSpline {
-                fillet_geom: f.g,
-                side: 1,
-                kind: None,
-            })
-        );
+        assert_eq!(e, rail_without_curve());
         assert!(!e.is_defect(), "{e:?}");
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
     }
@@ -4075,14 +4070,7 @@ mod tests_c5 {
             error_info: None,
         };
         let e = c5_split_rail(&mut cx, &f.st, f.g, 1, 0.0).unwrap_err();
-        assert_eq!(
-            e,
-            fail(SolverFailure::RailNotBSpline {
-                fillet_geom: f.g,
-                side: 1,
-                kind: None,
-            })
-        );
+        assert_eq!(e, rail_without_curve());
         assert!(!e.is_defect(), "{e:?}");
         assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
 
