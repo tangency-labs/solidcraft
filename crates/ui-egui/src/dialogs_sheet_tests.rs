@@ -2318,6 +2318,7 @@ fn press_in_hardware_preview_says_what_the_sheet_cannot_hold() {
         mirrored: [6; 4],
         edge: [5; 4],
         ghost: false,
+        glass_new: false,
         tint_new: true,
         cut_tint: true,
     };
