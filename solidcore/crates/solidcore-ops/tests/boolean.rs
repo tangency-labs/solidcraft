@@ -3135,6 +3135,32 @@ fn half_torus() -> Body {
     boolean(torus, below, BooleanOp::Subtract).unwrap().unwrap()
 }
 
+/// A half torus of any radii. Kept for the notch case moved to its own issue (see the
+/// finding `heal-face-props-seam-review-18804.md`); no test calls it until that returns.
+#[allow(dead_code)]
+fn half_torus_of_radii(major: f64, tube: f64) -> Body {
+    torus_above(major, tube, 0.0)
+}
+
+fn torus_above(major: f64, tube: f64, bottom: f64) -> Body {
+    let profile = [Curve::Arc {
+        center: [major, 0.0, 0.0],
+        axis: [0.0, -1.0, 0.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: tube,
+        start: 0.0,
+        end: TAU,
+    }];
+    let torus = revolve(&profile, [0.0; 3], [0.0, 0.0, 1.0], TAU, true).unwrap();
+    let outside = major + tube + 1.0;
+    let below = make_box(
+        [-outside, -outside, -tube - 1.0],
+        [2.0 * outside, 2.0 * outside, tube + 1.0 + bottom],
+    )
+    .unwrap();
+    boolean(torus, below, BooleanOp::Subtract).unwrap().unwrap()
+}
+
 /// A cylinder of `radius` about z from `base` up `height`, its seam at the angle SolidCraft
 /// gives a cylinder's (0.6131 rad from +x).
 #[allow(clippy::disallowed_methods)] // the test's operand, not ops computing geometry
