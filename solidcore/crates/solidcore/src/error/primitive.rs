@@ -15,8 +15,8 @@
 //! | [`PrimitiveFailure::AxisInsideFace`]   | `SM_ERR_AXIS_INSIDE_FACE`     |
 //! | [`PrimitiveFailure::PlaneCannotCover`] | `SM_ERR_INVALID_INPUT`        |
 //! | [`PrimitiveFailure::Defect`]           | `SM_ERR` (or the site's, through `with_status`) |
-//! | [`PrimitiveFailure::EdgeWithoutCurve`], [`PrimitiveFailure::NoCurveGiven`], [`PrimitiveFailure::NoRegion`], [`PrimitiveFailure::TreeLeftNoBrep`], [`PrimitiveFailure::MergeOperandMissing`], [`PrimitiveFailure::MergeGaveNoBrep`], [`PrimitiveFailure::PlanarDifferenceEmpty`], [`PrimitiveFailure::FaceWithoutSurface`], [`PrimitiveFailure::EdgeWithoutFace`], [`PrimitiveFailure::SphereEdgeNotDropped`] | `SM_ERR_NULL_POINTER` |
-//! | [`PrimitiveFailure::HeightTooSmall`], [`PrimitiveFailure::TreeLeavesMoreBreps`], [`PrimitiveFailure::PathTurnsBack`], [`PrimitiveFailure::SweepDoesNotClose`], [`PrimitiveFailure::SweepEnclosesNoMaterial`], [`PrimitiveFailure::SweepAngleTooSmall`], [`PrimitiveFailure::ConeSideTooShort`], [`PrimitiveFailure::ConeHasNoRadius`], [`PrimitiveFailure::ProfileFrameDegenerate`], [`PrimitiveFailure::TooFewProfiles`], [`PrimitiveFailure::ProfilesDoNotMatch`], [`PrimitiveFailure::ProfileMakesSeveralFaces`], [`PrimitiveFailure::ProfileNotOneComposite`], [`PrimitiveFailure::OffsetMakesNoCurves`], [`PrimitiveFailure::SeamWeightNotPositive`], [`PrimitiveFailure::SeamLeavesSpan`], [`PrimitiveFailure::CurvesMakeNoLoop`], [`PrimitiveFailure::OffsetMakesNoSurface`], [`PrimitiveFailure::HelixNotEvaluated`], [`PrimitiveFailure::PolygonSideNotMade`], [`PrimitiveFailure::SheetHasNoFace`], [`PrimitiveFailure::CircleNotMade`], [`PrimitiveFailure::CylinderDomainNotSet`], [`PrimitiveFailure::ConeSurfaceNotMade`], [`PrimitiveFailure::AnalyticSweepRefused`], [`PrimitiveFailure::SweptSurfaceNotMade`], [`PrimitiveFailure::SweptFaceNotMade`] | `SM_ERR` |
+//! | [`PrimitiveFailure::EdgeWithoutCurve`], [`PrimitiveFailure::NoCurveGiven`], [`PrimitiveFailure::NoRegion`], [`PrimitiveFailure::TreeLeftNoBrep`], [`PrimitiveFailure::MergeOperandMissing`], [`PrimitiveFailure::MergeGaveNoBrep`], [`PrimitiveFailure::PlanarDifferenceEmpty`], [`PrimitiveFailure::FaceWithoutSurface`], [`PrimitiveFailure::EdgeWithoutFace`], [`PrimitiveFailure::SphereEdgeNotDropped`], [`PrimitiveFailure::ClosestPointNotFound`] | `SM_ERR_NULL_POINTER` |
+//! | [`PrimitiveFailure::HeightTooSmall`], [`PrimitiveFailure::TreeLeavesMoreBreps`], [`PrimitiveFailure::PathTurnsBack`], [`PrimitiveFailure::SweepDoesNotClose`], [`PrimitiveFailure::SweepEnclosesNoMaterial`], [`PrimitiveFailure::SweepAngleTooSmall`], [`PrimitiveFailure::ConeSideTooShort`], [`PrimitiveFailure::ConeHasNoRadius`], [`PrimitiveFailure::ProfileFrameDegenerate`], [`PrimitiveFailure::TooFewProfiles`], [`PrimitiveFailure::ProfilesDoNotMatch`], [`PrimitiveFailure::ProfileMakesSeveralFaces`], [`PrimitiveFailure::ProfileNotOneComposite`], [`PrimitiveFailure::OffsetMakesNoCurves`], [`PrimitiveFailure::SeamWeightNotPositive`], [`PrimitiveFailure::SeamLeavesSpan`], [`PrimitiveFailure::CurvesMakeNoLoop`], [`PrimitiveFailure::OffsetMakesNoSurface`], [`PrimitiveFailure::HelixNotEvaluated`], [`PrimitiveFailure::PolygonSideNotMade`], [`PrimitiveFailure::SheetHasNoFace`], [`PrimitiveFailure::CircleNotMade`], [`PrimitiveFailure::CylinderDomainNotSet`], [`PrimitiveFailure::ConeSurfaceNotMade`], [`PrimitiveFailure::AnalyticSweepRefused`], [`PrimitiveFailure::SweptSurfaceNotMade`], [`PrimitiveFailure::SweptFaceNotMade`], [`PrimitiveFailure::NoProfiles`], [`PrimitiveFailure::SectionNotFinite`], [`PrimitiveFailure::SectionLoopNoInterval`], [`PrimitiveFailure::SectionLayersDiffer`], [`PrimitiveFailure::OffsetMapMissing`], [`PrimitiveFailure::OffsetMapIndexOutOfRange`], [`PrimitiveFailure::OffsetFacesMissing`], [`PrimitiveFailure::RuledSidesTooShort`], [`PrimitiveFailure::ProfileSlotEmpty`], [`PrimitiveFailure::ProfileMakesNoWire`], [`PrimitiveFailure::CappedSweepNoRepetition`], [`PrimitiveFailure::CappedRevolutionRepeats`] | `SM_ERR` |
 //!
 //! [`PrimitiveFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
 //! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
@@ -241,6 +241,64 @@ pub enum PrimitiveFailure {
         /// The caller's tolerance the drop used.
         tolerance: f64,
     },
+    /// The caller gave no profile to sweep. [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    NoProfiles,
+    /// A section of the caller's skin gives a non-finite centroid or correspondence
+    /// distance (its coordinates overflow, or its area all but vanishes).
+    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    SectionNotFinite,
+    /// A section loop of the caller's skin, joined, has no finite parameter interval of
+    /// positive length. [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    SectionLoopNoInterval,
+    /// The caller's skin sections have different numbers of loops.
+    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    SectionLayersDiffer {
+        /// The first section's loops.
+        first: usize,
+        /// This section's loops.
+        this: usize,
+    },
+    /// The closest point on the caller's scale reference curve was not found. Class
+    /// `failed`, status `SM_ERR_NULL_POINTER`.
+    ClosestPointNotFound,
+    /// The caller's offset curve carries no offset map. [`ErrorKind::InvalidInput`],
+    /// status `SM_ERR`.
+    OffsetMapMissing,
+    /// An index of the caller's offset map is outside its curves.
+    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    OffsetMapIndexOutOfRange {
+        /// The map's index.
+        index: u64,
+        /// The number of curves the index must stay under.
+        len: usize,
+    },
+    /// The offset curve's faces are missing: its generator is already married, or the
+    /// caller said so. Class `failed`, status `SM_ERR`.
+    OffsetFacesMissing,
+    /// Both sides of the ruled surface are shorter than twice the tolerance.
+    /// [`ErrorKind::Degenerate`], status `SM_ERR`.
+    RuledSidesTooShort {
+        /// The first and the second rule curve's approximate lengths.
+        lengths: [f64; 2],
+        /// The shortest length that passes (twice the tolerance).
+        minimum: f64,
+    },
+    /// A slot of the caller's profile curves is empty, where the profile is made of wire
+    /// edges (the `SM_ERR` of that path; [`PrimitiveFailure::NoCurveGiven`] elsewhere).
+    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    ProfileSlotEmpty,
+    /// A profile curve could not be made a wire edge (the wire's error is the cause).
+    /// Class `failed`, status `SM_ERR`.
+    ProfileMakesNoWire,
+    /// The caller asked for a capped repeated sweep with no repetitions.
+    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    CappedSweepNoRepetition,
+    /// The caller asked for a capped partial revolution repeated other than once.
+    /// [`ErrorKind::InvalidInput`], status `SM_ERR`.
+    CappedRevolutionRepeats {
+        /// The caller's repetitions.
+        repetitions: u64,
+    },
 }
 
 /// Why the caller's curve cannot be revolved about the axis into one analytic face
@@ -332,7 +390,19 @@ impl PrimitiveFailure {
             | Self::ConeSurfaceNotMade
             | Self::AnalyticSweepRefused(_)
             | Self::SweptSurfaceNotMade
-            | Self::SweptFaceNotMade => SM_ERR,
+            | Self::SweptFaceNotMade
+            | Self::NoProfiles
+            | Self::SectionNotFinite
+            | Self::SectionLoopNoInterval
+            | Self::SectionLayersDiffer { .. }
+            | Self::OffsetMapMissing
+            | Self::OffsetMapIndexOutOfRange { .. }
+            | Self::OffsetFacesMissing
+            | Self::RuledSidesTooShort { .. }
+            | Self::ProfileSlotEmpty
+            | Self::ProfileMakesNoWire
+            | Self::CappedSweepNoRepetition
+            | Self::CappedRevolutionRepeats { .. } => SM_ERR,
             Self::Missing(_)
             | Self::EdgeWithoutCurve
             | Self::NoCurveGiven
@@ -343,7 +413,8 @@ impl PrimitiveFailure {
             | Self::PlanarDifferenceEmpty
             | Self::FaceWithoutSurface
             | Self::EdgeWithoutFace
-            | Self::SphereEdgeNotDropped { .. } => SM_ERR_NULL_POINTER,
+            | Self::SphereEdgeNotDropped { .. }
+            | Self::ClosestPointNotFound => SM_ERR_NULL_POINTER,
             Self::HelixDeviates { .. } => SM_ERR_NOT_WITHIN_TOLERANCE,
             Self::AxisInsideFace => SM_ERR_AXIS_INSIDE_FACE,
             Self::PlaneCannotCover => SM_ERR_INVALID_INPUT,
@@ -378,9 +449,20 @@ impl PrimitiveFailure {
             | Self::CurvesMakeNoLoop
             | Self::FaceWithoutSurface
             | Self::EdgeWithoutFace
-            | Self::AnalyticSweepRefused(_) => ErrorKind::InvalidInput,
+            | Self::AnalyticSweepRefused(_)
+            | Self::NoProfiles
+            | Self::SectionNotFinite
+            | Self::SectionLoopNoInterval
+            | Self::SectionLayersDiffer { .. }
+            | Self::OffsetMapMissing
+            | Self::OffsetMapIndexOutOfRange { .. }
+            | Self::ProfileSlotEmpty
+            | Self::CappedSweepNoRepetition
+            | Self::CappedRevolutionRepeats { .. } => ErrorKind::InvalidInput,
             Self::PathTurnsBack | Self::SweepDoesNotClose => ErrorKind::Unsupported,
-            Self::OffsetMakesNoSurface | Self::PlanarDifferenceEmpty => ErrorKind::Degenerate,
+            Self::OffsetMakesNoSurface
+            | Self::PlanarDifferenceEmpty
+            | Self::RuledSidesTooShort { .. } => ErrorKind::Degenerate,
             Self::TreeLeftNoBrep
             | Self::SweepEnclosesNoMaterial
             | Self::OffsetMakesNoCurves
@@ -388,7 +470,10 @@ impl PrimitiveFailure {
             | Self::SeamLeavesSpan { .. }
             | Self::MergeOperandMissing { .. }
             | Self::MergeGaveNoBrep
-            | Self::SphereEdgeNotDropped { .. } => ErrorKind::Failed,
+            | Self::SphereEdgeNotDropped { .. }
+            | Self::ClosestPointNotFound
+            | Self::OffsetFacesMissing
+            | Self::ProfileMakesNoWire => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -492,6 +577,40 @@ impl core::fmt::Display for PrimitiveFailure {
                 f,
                 "the drop of a sphere patch's edge onto the cap patch found no UV curve at the tolerance {tolerance}"
             ),
+            Self::NoProfiles => f.write_str("no profiles to sweep"),
+            Self::SectionNotFinite => f.write_str("a section gives a non-finite value"),
+            Self::SectionLoopNoInterval => {
+                f.write_str("a section loop has no finite parameter interval")
+            }
+            Self::SectionLayersDiffer { first, this } => write!(
+                f,
+                "the sections have different numbers of loops: {first} in the first, {this} in this one"
+            ),
+            Self::ClosestPointNotFound => {
+                f.write_str("the closest point on the scale reference was not found")
+            }
+            Self::OffsetMapMissing => f.write_str("the offset curve has no offset map"),
+            Self::OffsetMapIndexOutOfRange { index, len } => write!(
+                f,
+                "the offset map's index {index} is outside its {len} curves"
+            ),
+            Self::OffsetFacesMissing => f.write_str("the offset curve's faces are missing"),
+            Self::RuledSidesTooShort {
+                lengths: [offset, generator],
+                minimum,
+            } => write!(
+                f,
+                "both ruled sides, of lengths {offset} and {generator}, are shorter than {minimum}"
+            ),
+            Self::ProfileSlotEmpty => f.write_str("a profile curve slot is empty"),
+            Self::ProfileMakesNoWire => f.write_str("a profile curve makes no wire"),
+            Self::CappedSweepNoRepetition => {
+                f.write_str("a capped repeated sweep needs at least one repetition")
+            }
+            Self::CappedRevolutionRepeats { repetitions } => write!(
+                f,
+                "a capped revolution repeats once, not {repetitions} times"
+            ),
         }
     }
 }
@@ -503,22 +622,6 @@ impl crate::SolidError {
     #[track_caller]
     pub(crate) fn primitive(operation: &'static str, failure: PrimitiveFailure) -> Self {
         Failure::new(operation, failure).into_error()
-    }
-
-    /// [`crate::SolidError::Failed`] for a primitive-creation routine that could not
-    /// continue, as the phrase says, with status [`SM_ERR`] (upstream
-    /// `return SE(SM_ERR)`).
-    #[must_use]
-    pub(crate) fn primitive_failed(operation: &'static str, what: &'static str) -> Self {
-        Self::primitive(operation, PrimitiveFailure::Failed(what))
-    }
-
-    /// [`crate::SolidError::Failed`] for something a primitive-creation routine needs
-    /// that is not there, as the phrase says, with status [`SM_ERR_NULL_POINTER`]
-    /// (upstream `NER(ptr)` on a `NULL` pointer).
-    #[must_use]
-    pub(crate) fn primitive_missing(operation: &'static str, what: &'static str) -> Self {
-        Self::primitive(operation, PrimitiveFailure::Missing(what))
     }
 
     /// [`crate::SolidError::Failed`] for a reviewed defect of a primitive-creation routine
@@ -589,11 +692,19 @@ mod tests {
             assert_eq!(typed.primitive_failure(), Some(&failure));
         }
         assert_eq!(
-            SolidError::primitive_missing("primitive::op", "the face's surface").to_string(),
+            SolidError::primitive(
+                "primitive::op",
+                PrimitiveFailure::Missing("the face's surface")
+            )
+            .to_string(),
             "primitive::op: the face's surface is missing"
         );
         assert_eq!(
-            SolidError::primitive_failed("primitive::op", "the step could not go on").to_string(),
+            SolidError::primitive(
+                "primitive::op",
+                PrimitiveFailure::Failed("the step could not go on")
+            )
+            .to_string(),
             "primitive::op: the step could not go on"
         );
         assert_eq!(
@@ -608,7 +719,8 @@ mod tests {
             ErrorKind::NotWithinTolerance
         );
         assert_eq!(
-            SolidError::primitive_failed("primitive::op", "x").primitive_failure(),
+            SolidError::primitive("primitive::op", PrimitiveFailure::Failed("x"))
+                .primitive_failure(),
             Some(&PrimitiveFailure::Failed("x"))
         );
         assert_eq!(
@@ -973,6 +1085,87 @@ mod tests {
                 "no analytic surface could be built",
             ),
             (
+                PrimitiveFailure::NoProfiles,
+                SM_ERR,
+                K::InvalidInput,
+                "no profiles to sweep",
+            ),
+            (
+                PrimitiveFailure::SectionNotFinite,
+                SM_ERR,
+                K::InvalidInput,
+                "a section gives a non-finite value",
+            ),
+            (
+                PrimitiveFailure::SectionLoopNoInterval,
+                SM_ERR,
+                K::InvalidInput,
+                "a section loop has no finite parameter interval",
+            ),
+            (
+                PrimitiveFailure::SectionLayersDiffer { first: 1, this: 2 },
+                SM_ERR,
+                K::InvalidInput,
+                "the sections have different numbers of loops: 1 in the first, 2 in this one",
+            ),
+            (
+                PrimitiveFailure::ClosestPointNotFound,
+                SM_ERR_NULL_POINTER,
+                K::Failed,
+                "the closest point on the scale reference was not found",
+            ),
+            (
+                PrimitiveFailure::OffsetMapMissing,
+                SM_ERR,
+                K::InvalidInput,
+                "the offset curve has no offset map",
+            ),
+            (
+                PrimitiveFailure::OffsetMapIndexOutOfRange { index: 3, len: 2 },
+                SM_ERR,
+                K::InvalidInput,
+                "the offset map's index 3 is outside its 2 curves",
+            ),
+            (
+                PrimitiveFailure::OffsetFacesMissing,
+                SM_ERR,
+                K::Failed,
+                "the offset curve's faces are missing",
+            ),
+            (
+                PrimitiveFailure::RuledSidesTooShort {
+                    lengths: [0.5, 0.25],
+                    minimum: 1.0,
+                },
+                SM_ERR,
+                K::Degenerate,
+                "both ruled sides, of lengths 0.5 and 0.25, are shorter than 1",
+            ),
+            (
+                PrimitiveFailure::ProfileSlotEmpty,
+                SM_ERR,
+                K::InvalidInput,
+                "a profile curve slot is empty",
+            ),
+            (
+                PrimitiveFailure::ProfileMakesNoWire,
+                SM_ERR,
+                K::Failed,
+                "a profile curve makes no wire",
+            ),
+            (
+                PrimitiveFailure::CappedSweepNoRepetition,
+                SM_ERR,
+                K::InvalidInput,
+                "a capped repeated sweep needs at least one repetition",
+            ),
+            (
+                PrimitiveFailure::CappedRevolutionRepeats { repetitions: 2 },
+                SM_ERR,
+                K::InvalidInput,
+                "a capped revolution repeats once, not 2 times",
+            ),
+            (
                 PrimitiveFailure::SweptFaceNotMade,
                 SM_ERR,
                 K::Failed,
@@ -1028,12 +1221,7 @@ mod tests {
             wrappers: Wrappers::Phrase,
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
-        const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/primitive/primitive_creation/p3/construct.rs", 7),
-            ("solidcore/src/primitive/primitive_creation/p3/geometry.rs", 5),
-            ("solidcore/src/primitive/primitive_creation/p3/ruled.rs", 9),
-            ("solidcore/src/primitive/primitive_creation/p3/sweeps.rs", 10),
-        ];
+        const PINNED: &[(&str, usize)] = &[];
         assert_pinned(
             "primitive phrase-cause sites",
             &crate_sites(&PHRASES),

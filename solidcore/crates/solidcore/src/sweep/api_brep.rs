@@ -1230,10 +1230,14 @@ mod tests {
             2,
             false
         )));
-        // capped repeated sweeps need exactly one repetition: SM_ERR
+        // capped repeated sweeps need at least one repetition: SM_ERR, the caller's input
         assert!(
-            create_linear_sweep_with_repetitions(&mut k, &ok, z, 5.0, 0, true)
-                .is_err_and(|e| !e.is_unported())
+            create_linear_sweep_with_repetitions(&mut k, &ok, z, 5.0, 0, true).is_err_and(|e| {
+                e.primitive_failure()
+                    == Some(&crate::error::primitive::PrimitiveFailure::CappedSweepNoRepetition)
+                    && e.upstream_status() == Some(crate::error::SM_ERR)
+                    && e.kind() == crate::error::ErrorKind::InvalidInput
+            })
         );
         assert!(invalid(&create_rotational_sweep_with_repetitions(
             &mut k,
