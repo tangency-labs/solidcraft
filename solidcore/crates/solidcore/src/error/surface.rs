@@ -303,26 +303,6 @@ impl SurfaceFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_)
-            | Self::Defect { .. }
-            | Self::DerivativeOrderTooHigh { .. }
-            | Self::UnsupportedCacheKind
-            | Self::ApproximationNotConverged { .. }
-            | Self::ParameterOutsideInterval { .. }
-            | Self::ZeroLengthTangent
-            | Self::NoNormal
-            | Self::ParallelNormals
-            | Self::TangentAlongNormal
-            | Self::TooFewSolverVariables { .. }
-            | Self::EndPointOutsideDomain
-            | Self::TooFewUniqueKnots
-            | Self::UnsupportedTangencyType
-            | Self::InvalidDerivativeSurface
-            | Self::PointDoesNotDrop
-            | Self::NoParameterDirection
-            | Self::ReferencePointOnBoundary
-            | Self::NoTangentTowardDirection
-            | Self::AtPole => SM_ERR,
             Self::Missing(_)
             | Self::NoNurb
             | Self::SurfaceCacheNotBuilt
@@ -347,7 +327,7 @@ impl SurfaceFailure {
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
-            Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::Defect { .. } | Self::ApproximationNotConverged { .. } => ErrorKind::StageFailed,
             Self::TooFewKnots { .. }
             | Self::BendBoxMalformed
             | Self::BaseSurfaceNotOwned
@@ -355,7 +335,14 @@ impl SurfaceFailure {
             | Self::UnknownVolumeType { .. }
             | Self::NoNurb
             | Self::CurveWithoutNurb
-            | Self::CurveWithoutControlPoints => ErrorKind::InvalidInput,
+            | Self::CurveWithoutControlPoints
+            | Self::ParameterOutsideInterval { .. }
+            | Self::TooFewSolverVariables { .. }
+            | Self::InputNotGiven { .. }
+            | Self::TrimmedCacheHasNoFace
+            | Self::SurfaceCacheHasNoTree
+            | Self::EndPointOutsideDomain
+            | Self::InvalidDerivativeSurface => ErrorKind::InvalidInput,
             Self::BoxOutsideBendHalfSpace { .. }
             | Self::BoxOutsideZeroPeriod { .. }
             | Self::PointOutsideVolumeDomain { .. }
@@ -364,34 +351,28 @@ impl SurfaceFailure {
             | Self::PseudoBoxOutsideDomain => ErrorKind::OutsideDomain,
             Self::DerivativeCombinationUnsupported { .. }
             | Self::PlainVolume
-            | Self::BSplineVolumeUnsupported => ErrorKind::Unsupported,
-            Self::PointInBendSingularity | Self::ZeroVolumeTangent { .. } => ErrorKind::Degenerate,
-            Self::NoVolumeInverse | Self::CallFailed => ErrorKind::Failed,
-            Self::ApproximationNotConverged { .. } => ErrorKind::StageFailed,
-            Self::ParameterOutsideInterval { .. }
-            | Self::TooFewSolverVariables { .. }
-            | Self::InputNotGiven { .. }
-            | Self::TrimmedCacheHasNoFace
-            | Self::SurfaceCacheHasNoTree
-            | Self::EndPointOutsideDomain
-            | Self::InvalidDerivativeSurface => ErrorKind::InvalidInput,
-            Self::UnsupportedCacheKind | Self::UnsupportedTangencyType | Self::AtPole => {
-                ErrorKind::Unsupported
-            }
-            Self::SurfaceCacheNotBuilt
-            | Self::SurfaceCacheTreeNotBuilt
-            | Self::CurveCacheNotBuilt
-            | Self::CurveCacheTreeNotBuilt
-            | Self::PointDoesNotDrop
-            | Self::NoParameterDirection
-            | Self::NoTangentTowardDirection => ErrorKind::Failed,
-            Self::ZeroLengthTangent
+            | Self::BSplineVolumeUnsupported
+            | Self::UnsupportedCacheKind
+            | Self::UnsupportedTangencyType
+            | Self::AtPole => ErrorKind::Unsupported,
+            Self::PointInBendSingularity
+            | Self::ZeroVolumeTangent { .. }
+            | Self::ZeroLengthTangent
             | Self::NoNormal
             | Self::ParallelNormals
             | Self::NormalsCancel
             | Self::TangentAlongNormal
             | Self::TooFewUniqueKnots
             | Self::ReferencePointOnBoundary => ErrorKind::Degenerate,
+            Self::NoVolumeInverse
+            | Self::CallFailed
+            | Self::SurfaceCacheNotBuilt
+            | Self::SurfaceCacheTreeNotBuilt
+            | Self::CurveCacheNotBuilt
+            | Self::CurveCacheTreeNotBuilt
+            | Self::PointDoesNotDrop
+            | Self::NoParameterDirection
+            | Self::NoTangentTowardDirection => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -502,7 +483,7 @@ impl core::fmt::Display for SurfaceFailure {
                 f.write_str("an end point is outside the surface's UV domain")
             }
             Self::TooFewUniqueKnots => {
-                f.write_str("the surface has fewer than two distinct knots in the direction")
+                f.write_str("the surface has fewer than two unique knots in the other direction")
             }
             Self::UnsupportedTangencyType => {
                 f.write_str("the tangency type has no derivative surface")
