@@ -11,7 +11,7 @@
 use crate::blend::fillet_section::interval::Ivl;
 use crate::error::surface::SurfaceFailure;
 use crate::error::{Failure, Result, SolidError, SM_ERR};
-use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::axis2_placement::{axes_are_orthonormal, Axis2Placement};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
 use crate::math::{Vec2, Vec3, PI};
@@ -1524,13 +1524,6 @@ pub enum AnalyticSupport {
     },
 }
 
-/// The frame precision accepted by the analytic support's definition check.
-pub(crate) fn orthonormal_placement(p: &Axis2Placement) -> bool {
-    let ulps = 8.0 * f64::EPSILON;
-    let unit = |v: Vec3| (v.length() - 1.0).abs() <= ulps;
-    unit(p.x_axis()) && unit(p.y_axis()) && p.x_axis().dot(p.y_axis()).abs() <= ulps
-}
-
 impl AnalyticSupport {
     /// The analytic kind of a surface, if it is a plane, cylinder, cone, sphere or torus.
     #[must_use]
@@ -1662,7 +1655,6 @@ impl AnalyticSupport {
     /// `InvalidInput` where `form` is off the analytic surface or is not its
     /// parametrisation; those of the recognisers, the evaluations and [`lies_on`].
     pub fn build(&self, k: &Kernel, form: BSplineSurface) -> Result<Surface> {
-        // the placement's axes as stored: unit and square to rounding (8 ulps)
         let p = match self {
             Self::Plane { placement, .. }
             | Self::Cylinder { placement, .. }
@@ -1670,7 +1662,7 @@ impl AnalyticSupport {
             | Self::Sphere { placement, .. }
             | Self::Torus { placement, .. } => placement,
         };
-        if !orthonormal_placement(p) {
+        if !axes_are_orthonormal(p.x_axis(), p.y_axis()) {
             return Err(SolidError::invalid_input(
                 OP_BUILD,
                 "a support's placement is not orthonormal",

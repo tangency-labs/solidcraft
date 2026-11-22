@@ -13,12 +13,13 @@
 use crate::blend::fillet_section::interval::Ivl;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::{Ellipse, RadialSupport};
+use crate::geom::axis2_placement::axes_are_orthonormal;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::interval_vector::{cross, dot, norm, unit};
 use crate::geom::tol::coincidence_reach_3d;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
-use crate::surface::implicit::{orthonormal_placement, AnalyticSupport};
+use crate::surface::implicit::AnalyticSupport;
 
 /// Native geometry whose separation can be certified without a sampled approximation.
 pub(crate) struct NativeSupport<'a> {
@@ -141,14 +142,15 @@ impl<'a> NativeSupport<'a> {
             _ => return false,
         };
         let origin = placement.origin();
-        if !orthonormal_placement(placement)
+        let (x_axis, y_axis) = (placement.x_axis(), placement.y_axis());
+        if !axes_are_orthonormal(x_axis, y_axis)
             || !radius.is_finite()
             || radius < 0.0
             || ![origin.x, origin.y, origin.z].iter().all(|v| v.is_finite())
         {
             return false;
         }
-        let Some(axis) = unit(cross(xyz(placement.x_axis()), xyz(placement.y_axis()))) else {
+        let Some(axis) = unit(cross(xyz(x_axis), xyz(y_axis))) else {
             return false;
         };
         let distance = if matches!(support, AnalyticSupport::Plane { .. }) {
