@@ -2584,10 +2584,9 @@ pub(crate) fn close_corners_on(
                 let (Some(rf), Some(rw)) = (sheet.panels.get(f).map(|x| x.region.clone()), sheet.panels.get(w).map(|x| x.region.clone())) else {
                     continue;
                 };
-                let (Some((rf, _)), Some((rw, _))) = (
-                    to_line(&rf, &on_f, -1.0, e1, s_f, -on_f.dir.perp())?,
-                    to_line(&rw, &on_w, side_w, e2, s_w, on_w.dir.perp() * side_w)?,
-                ) else {
+                let (Some((rf, _)), Some((rw, _))) =
+                    (to_line(&rf, &on_f, -1.0, e1, s_f, -on_f.dir.perp())?, to_line(&rw, &on_w, side_w, e2, s_w, on_w.dir.perp() * side_w)?)
+                else {
                     continue;
                 };
                 if let Some(x) = sheet.panels.get_mut(f) {

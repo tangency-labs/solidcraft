@@ -1332,10 +1332,7 @@ pub(super) fn sheet_eval(
             let mut said: Vec<Vec3> = Vec::new();
             for at in open {
                 if !said.iter().any(|p| p.dist(at) < 1e-6) {
-                    append_warning(
-                        warning,
-                        format!("the flanges at ({:.3}, {:.3}, {:.3}) {}", at.x, at.y, at.z, crate::OUTSIDE_BEND_OPEN),
-                    );
+                    append_warning(warning, format!("the flanges at ({:.3}, {:.3}, {:.3}) {}", at.x, at.y, at.z, crate::OUTSIDE_BEND_OPEN));
                     said.push(at);
                 }
             }
