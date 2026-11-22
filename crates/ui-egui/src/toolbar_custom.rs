@@ -570,7 +570,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
                                 let shown = buttons(app, &tab, panel, &cmds, n);
                                 for c in &cmds {
                                     let mut on = shown.iter().any(|b| b.id == c.id) || pinned_on(app, &tab, c.id).is_some();
-                                    let r = ui_kit::checkbox_icon(ui, app.tr_label(c.label), row_icon(app, c), &mut on);
+                                    let r = ui_kit::checkbox_icon(ui, app.tr_command(c.id, c.label), row_icon(app, c), &mut on);
                                     crate::scenario::publish_handle(&format!("customize:{}", c.id), r.rect.center());
                                     if r.changed() {
                                         changes.push((c.id, on));

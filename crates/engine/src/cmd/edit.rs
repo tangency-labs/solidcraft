@@ -424,6 +424,14 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
         None => Snapshot { doc: drawings_from(snap.doc, &s.doc), active_sheet_sketch: s.active_sheet_sketch.clone(), ..snap },
     };
     snap.sketching_view = s.historical_sketch_owner(snap.active_sketch, snap.sketching_view);
+    // History restores geometry in its own part, never a second editor beside the current one.
+    if snap.active_sketch.is_some() && snap.active_sheet_sketch.is_some() {
+        if snap.part.is_some() {
+            snap.active_sheet_sketch = None;
+        } else {
+            snap.sketching_view = None;
+        }
+    }
     if snap.active_sketch.is_some() && snap.sketching_view.is_none() {
         snap.active_sketch = None;
         if let Some(marker) = snap.sketch_restore_marker {
@@ -2661,7 +2669,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         // Offset Plane has no parameter mapping in `frames::map_local`: its constructor maps
         // the complete definition, or captures a face directly in the authoring frame.
         let _world = (spec.id == "construct.plane.offset").then(crate::frames::world_geometry);
-        spec.run_nested(&mut trial, &params)
+        spec.run_nested_continuing(&mut trial, &params)
     }?;
     let made = r.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
     let mut new = trial.doc.feature(made).cloned().ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;

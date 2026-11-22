@@ -211,7 +211,7 @@ impl DimensionDraft {
 /// of its id, and without the `value:` field tag, since the box is the value
 /// ("Sketch Dimension: `mm` is a unit name, so it cannot be a parameter name").
 fn shown_error(id: &str, e: &str) -> String {
-    let label = solidcraft_ui_text::tr_label(crate::command_label(id));
+    let label = solidcraft_ui_text::tr_command(id, crate::command_label(id));
     crate::friendly_error(id, e).replacen(&format!("{label}: value: "), &format!("{label}: "), 1)
 }
 
