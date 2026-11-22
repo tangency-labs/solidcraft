@@ -3008,6 +3008,71 @@ fn coil_from_a_sketch_cuts_a_thread_groove() {
     assert_eq!(measure(&mut s)["body_count"], 1);
 }
 
+/// The flat faces of a d 20, pitch 7 coil of 3.25 turns about Z: each face's normal and the
+/// helix's unit tangent at the end it caps (#20737).
+fn coil_ends(end_cut: Option<&str>, clockwise: bool) -> (Session, Vec<(solidcore_record::Vec3, solidcore_record::Vec3)>) {
+    use solidcore_record::Vec3;
+    use std::f64::consts::TAU;
+    let mut s = Session::default();
+    let mut p = json!({"diameter": 20, "revolutions": 3.25, "pitch": 7, "section_size": 2, "clockwise": clockwise});
+    if let Some(cut) = end_cut {
+        p["end_cut"] = json!(cut);
+    }
+    run(&mut s, "solid.coil", p);
+    let turn = if clockwise { -1.0 } else { 1.0 };
+    let at = |a: f64| Vec3::new(10.0 * a.cos(), turn * 10.0 * a.sin(), 7.0 * a / TAU);
+    let tangent = |a: f64| Vec3::new(-10.0 * a.sin(), turn * 10.0 * a.cos(), 7.0 / TAU).normalized().unwrap_or(Vec3::ZERO);
+    let faces = s.model.state().bodies[0].body.faces(1e-4).unwrap();
+    let ends: Vec<_> = faces
+        .iter()
+        .filter_map(|f| f.plane_normal.map(|n| (f.centroid, n)))
+        .map(|(c, n)| {
+            let a = [0.0, 3.25 * TAU].into_iter().min_by(|a, b| (at(*a) - c).len().total_cmp(&(at(*b) - c).len())).unwrap_or(0.0);
+            assert!((at(a) - c).len() < 1e-2, "an end face off the helix's end: {c:?}");
+            (n, tangent(a))
+        })
+        .collect();
+    assert_eq!(ends.len(), 2, "{faces:?}");
+    (s, ends)
+}
+
+#[test]
+fn a_coil_cut_square_ends_its_wire_square_to_the_helix() {
+    use std::f64::consts::{PI, TAU};
+    for clockwise in [false, true] {
+        let (mut s, ends) = coil_ends(Some("square"), clockwise);
+        for (n, t) in ends {
+            assert!(n.dot(t).abs() > 1.0 - 1e-6, "clockwise {clockwise}: normal {n:?}, tangent {t:?}");
+        }
+        // A wire of round section 2 as long as the helix.
+        let length = 3.25 * (TAU * 10.0).hypot(7.0);
+        assert!(rel(volume(&mut s), PI * length) < 1e-3, "{}", volume(&mut s));
+    }
+}
+
+#[test]
+fn a_coil_keeps_its_ends_through_the_axis_by_default() {
+    use solidcore_record::Vec3;
+    for end_cut in [None, Some("axial")] {
+        let (s, ends) = coil_ends(end_cut, false);
+        let faces = s.model.state().bodies[0].body.faces(1e-4).unwrap();
+        for ((n, _), f) in ends.iter().zip(faces.iter().filter(|f| f.plane_normal.is_some())) {
+            let radial = Vec3::new(f.centroid.x, f.centroid.y, 0.0).normalized().unwrap_or(Vec3::ZERO);
+            assert!(n.dot(Vec3::Z).abs() < 1e-9 && n.dot(radial).abs() < 1e-6, "{end_cut:?}: normal {n:?} at {:?}", f.centroid);
+        }
+    }
+}
+
+#[test]
+fn a_square_ended_coil_refuses_turns_that_overlap() {
+    // Square to the wire, a side-2 square section spans more than 2 mm along the axis.
+    let coil = |pitch: f64| json!({"diameter": 20, "revolutions": 3, "pitch": pitch, "section": "square", "section_size": 2, "end_cut": "square"});
+    let mut s = Session::default();
+    let e = s.execute("solid.coil", &coil(2.0005)).unwrap_err().to_string();
+    assert!(e.contains("runs into itself"), "{e}");
+    run(&mut s, "solid.coil", coil(2.002));
+}
+
 fn clockwise_coil_bbox(clockwise: bool) -> Value {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
@@ -3072,6 +3137,7 @@ fn a_sketch_coil_refuses_contradictory_parameters() {
         ("section", json!("square")),
         ("section_position", json!("outside")),
         ("start_angle", json!(0)),
+        ("end_cut", json!("square")),
     ] {
         let mut p = json!({"sketch": "Section", "revolutions": 3, "pitch": 8});
         p[k] = v;
@@ -3109,7 +3175,7 @@ fn a_loaded_sketch_coil_cannot_also_set_the_primitive_section() {
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 3, "pitch": 8}));
-    for (field, value) in [("section", json!("square")), ("position", json!(1)), ("start_angle", json!("45 deg"))] {
+    for (field, value) in [("section", json!("square")), ("position", json!(1)), ("start_angle", json!("45 deg")), ("end_cut", json!("square"))] {
         let mut v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
         let coil = v["features"].as_array_mut().unwrap().iter_mut().find(|f| f["type"] == "coil").unwrap();
         coil[field] = value;

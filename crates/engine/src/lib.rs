@@ -71,6 +71,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore_record::Vec3;
+use solidcraft_doc::drawing::Owner;
 use solidcraft_doc::{Document, Model, ModelState};
 
 pub use cmd::drawing_export::print_pdf;
@@ -440,14 +441,34 @@ impl ForeignCopy {
     }
 }
 
-/// A sheet-sketch editing entry. Its owner is never a model feature id.
-/// Original geometry is only the cancel boundary; Session keeps the one undo history.
+/// A drawing-sketch editing entry. Its owner, a sheet or a view of the drawing, is never a model
+/// feature id. Original geometry is only the cancel boundary; Session keeps the one undo history.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SheetSketchEdit {
     pub drawing: u64,
-    pub sheet: u64,
+    pub owner: Owner,
+    /// Stable host Sheet tile, independent of the drawing view the geometry belongs to.
+    /// Headless sessions have no tile identity.
+    pub view: Option<u64>,
     pub sketch: u64,
     pub(crate) original: Option<Arc<solidcraft_doc::drawing::SheetSketch>>,
+}
+
+impl SheetSketchEdit {
+    /// The sheet displayed by the editing tile, including sketches owned by a drawing view.
+    pub fn sheet(&self, document: &Document) -> Option<u64> {
+        let drawing = document.drawing(self.drawing)?;
+        match self.owner {
+            Owner::Sheet(sheet) => drawing.sheets.iter().any(|record| record.id == sheet).then_some(sheet),
+            Owner::View(view) => drawing.view(view).map(|record| record.sheet),
+        }
+    }
+
+    /// Whether the sketch being edited is among `gone`, taken out of drawing `drawing`: a delete
+    /// that would take it waits until it is finished or cancelled.
+    pub(crate) fn goes_with(&self, drawing: u64, gone: &solidcraft_doc::drawing::OnSheet) -> bool {
+        self.drawing == drawing && gone.sketches.binary_search(&self.sketch).is_ok()
+    }
 }
 
 /// One undo step.
@@ -603,7 +624,8 @@ pub struct Preview {
 impl Preview {
     fn new(before: Arc<ModelState>, after: Arc<ModelState>, source: &Session, result: &Session, replies: Vec<Value>) -> Self {
         let shown_sketches = after.sketches.iter().filter(|sketch| view::sketch_shown(result, sketch.feature)).map(|sketch| sketch.feature).collect();
-        let joints = cmd::joints::posed_joints(source, result, &replies);
+        let driven = replies.iter().filter_map(|reply| reply.get("joint").and_then(Value::as_u64));
+        let joints = cmd::joints::posed_joints(&source.doc, &result.doc, driven);
         Self { before, after, shown_sketches, replies, joints, doc: result.doc.clone(), model: result.model.clone() }
     }
 
@@ -678,6 +700,7 @@ impl ComputedCommands {
         let source = &self.source;
         session.same_document_context(source)
             && session.checked_sketch_owner(self.computed.active_sketch, self.computed.sketching_view).is_ok()
+            && session.checked_sheet_sketch_owner(&session.view_context, self.computed.active_sheet_sketch.as_deref(), &self.computed.doc).is_ok()
             && self.selection_is_current(session)
             && (!self.steps.iter().any(|step| {
                 step.id.eq_ignore_ascii_case("plugin.run")
@@ -1683,12 +1706,13 @@ impl Session {
     /// An undo or document replacement cannot leave an edit aimed at another owner.
     pub(crate) fn prune_sheet_sketch_edit(&mut self) {
         if self.active_sheet_sketch.as_ref().is_some_and(|entry| {
-            self.open_drawing != Some(entry.drawing)
+            (entry.view.is_none() && self.open_drawing != Some(entry.drawing))
+                || self.checked_sheet_sketch_owner(&self.view_context, Some(entry), &self.doc).is_err()
                 || self
                     .doc
                     .drawing(entry.drawing)
                     .and_then(|drawing| drawing.sheet_sketch(entry.sketch))
-                    .is_none_or(|record| record.sheet != entry.sheet)
+                    .is_none_or(|record| record.owner != entry.owner)
         }) {
             self.active_sheet_sketch = None;
         }
@@ -2302,6 +2326,14 @@ impl Session {
     /// The pass of [`Session::pin_body_names`] over every feature's result, run when something
     /// it reads changed.
     fn pin_body_names_pass(&mut self) {
+        // With no body left and no feature holding a stored name, nothing the reserved numbers
+        // guard is left, so the next body starts again at `Body1`.
+        if !self.doc.reserved_body_names.is_empty()
+            && self.model.state().bodies.is_empty()
+            && self.doc.features.iter().all(|f| f.body_names.iter().all(|n| n.trim().is_empty()))
+        {
+            self.doc_mut().reserved_body_names.clear();
+        }
         let mut pins: Vec<(u64, Vec<String>)> = Vec::new();
         let mut reserve: Vec<String> = Vec::new();
         // The names of the bodies each feature made, kept with the state they were read from:
@@ -2651,6 +2683,7 @@ impl Session {
         {
             context.resolve_sketch_target(Some(owner))?;
         }
+        self.checked_sheet_sketch_owner(&context, self.active_sheet_sketch.as_deref(), &self.doc).map_err(|error| error.to_string())?;
         self.view_context = context;
         Ok(())
     }
@@ -2744,7 +2777,9 @@ impl Session {
         if self.open_drawing.is_some() {
             spec.allowed(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
         }
-        let reads_model = spec.reads_model && !(self.sheet_sketching() && spec.part == cmd::Part::Sketch);
+        let reads_model = spec.reads_model
+            && !(self.sheet_sketching() && spec.part == cmd::Part::Sketch)
+            && !(spec.id == "selection.delete" && cmd::delete::in_drawing(self, params));
         // What an import's SMLib check found since it was shown is in the model a command reads.
         self.model.settle_import_checks();
         if live.is_none() {
@@ -3093,7 +3128,7 @@ impl Session {
             .filter(|entry| !self.model_focus && self.open_drawing == Some(entry.drawing))
         {
             let current = self.doc.drawing(entry.drawing).and_then(|drawing| drawing.sheet_sketch(entry.sketch));
-            if let Some(after) = current.filter(|record| record.sheet == entry.sheet) {
+            if let Some(after) = current.filter(|record| record.owner == entry.owner) {
                 let previous = before.doc.drawing(entry.drawing).and_then(|drawing| drawing.sheet_sketch(entry.sketch));
                 out.insert("created".into(), cmd::sketch_created(previous.map(|record| &record.sketch), &after.sketch));
             }
@@ -3166,7 +3201,8 @@ impl Session {
                 }
             }
         }
-        self.active_sheet_sketch = c.active_sheet_sketch;
+        self.active_sheet_sketch =
+            c.active_sheet_sketch.filter(|entry| self.checked_sheet_sketch_owner(&self.view_context, Some(entry), &self.doc).is_ok());
         self.open_drawing = c.open_drawing;
         self.pending_moves = c.pending_moves;
         self.visibility = c.visibility;
@@ -3449,6 +3485,7 @@ impl Session {
     /// No model evaluation occurs here. Rejected or cancelled work never enters the journal.
     pub fn accept_commands(&mut self, mut prepared: ComputedCommands) -> Result<Vec<(String, Value)>> {
         self.checked_sketch_owner(prepared.computed.active_sketch, prepared.computed.sketching_view)?;
+        self.checked_sheet_sketch_owner(&self.view_context, prepared.computed.active_sheet_sketch.as_deref(), &prepared.computed.doc)?;
         // A plugin is evaluated only once on its worker. Recheck its precondition while
         // holding the live transaction, before accepting any of its computed steps.
         if !prepared.is_current(self) {
@@ -3538,6 +3575,7 @@ impl Session {
     /// after preview work has evicted the old suffix from the shared evaluation cache.
     pub fn restore_editor(&mut self, source: &Session, mut original: Session) -> Result<()> {
         self.checked_sketch_owner(original.active_sketch, original.sketching_view)?;
+        self.checked_sheet_sketch_owner(&self.view_context, original.active_sheet_sketch.as_deref(), &original.doc)?;
         if !self.same_document_context(source) {
             return Err(EngineError::Other("the design changed while the feature editor was open; its current timeline was preserved".into()));
         }
@@ -3624,6 +3662,7 @@ impl Session {
     /// refused before any part of the computed transaction is installed.
     pub fn accept_computed(&mut self, mut computed: Session) -> Result<()> {
         let owner = self.checked_sketch_owner(computed.active_sketch, computed.sketching_view)?;
+        self.checked_sheet_sketch_owner(&self.view_context, computed.active_sheet_sketch.as_deref(), &computed.doc)?;
         computed.sketching_view = owner;
         // Audited direct-mutation jobs may not have passed through execute. Their
         // accepted document is still a new committed state with a fresh token.
