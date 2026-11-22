@@ -947,7 +947,9 @@ fn ground_chip(app: &mut SolveApp, ui: &egui::Ui, id: u64, ground: Rect) {
     let badge_width = badges.as_ref().map_or(0.0, |(paper, state)| {
         [paper, state]
             .iter()
-            .map(|label| painter.layout_no_wrap((*label).clone(), crate::ui_kit::type_face::semibold(t.font_small), t.text).size().x + t.space_12 + t.space_6)
+            .map(|label| {
+                painter.layout_no_wrap((*label).clone(), crate::ui_kit::type_face::semibold(t.font_small), t.text).size().x + t.space_12 + t.space_6
+            })
             .sum::<f32>()
     });
     let size = vec2(
