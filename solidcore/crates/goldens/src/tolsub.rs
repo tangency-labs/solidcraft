@@ -207,8 +207,9 @@ pub(crate) mod state {
     /// reads: main's read keeps no trim on those uses and its healer raises none of them).
     /// A raise there that the kept-trim cover recorded (`Brep::trim_cover_raises`) stays:
     /// main's cover makes it too, from the edge's other kept trim. Each tolerance put back
-    /// must first cover every gap cached on its entity (the edge's uses' edge/face and
-    /// edge/edge gaps, the vertex's uses' vertex/face and vertex/edge gaps).
+    /// must be a raise, and [`CLASSIFIED_READ_ZONE_TOL`] must first cover every gap cached
+    /// on its entity (the edge's uses' edge/face and edge/edge gaps, the vertex's uses'
+    /// vertex/face and vertex/edge gaps), so the raised tolerance covers them as well.
     fn put_back_healed_raises(b: &mut Brep, ids: &[(solidcore::topology::EdgeuseId, bool)]) {
         let raises = b.trim_cover_raises().clone();
         let mut edges = Vec::new();
@@ -228,36 +229,47 @@ pub(crate) mod state {
         }
         vertices.sort();
         vertices.dedup();
+        // (each gap is held to the tolerance put back, which is under the raised one: the
+        // raised tolerance covers it too)
+        let put_back = CLASSIFIED_READ_ZONE_TOL;
         for e in edges {
             let tol = b.edge(e).unwrap().tolerance;
+            assert!(
+                tol > put_back,
+                "edge {e:?} tolerance {tol:e} is not a raise"
+            );
             for (_, u) in b.edgeuses().iter().filter(|(_, u)| u.edge == Some(e)) {
                 assert!(
-                    u.max_edge_face_gap.gap_3d <= tol,
-                    "edge {e:?} face gap over {tol:e}"
+                    u.max_edge_face_gap.gap_3d <= put_back,
+                    "edge {e:?} face gap over {put_back:e}"
                 );
                 assert!(
-                    u.edge_ccw_edge_gap.gap_3d <= tol,
-                    "edge {e:?} edge gap over {tol:e}"
+                    u.edge_ccw_edge_gap.gap_3d <= put_back,
+                    "edge {e:?} edge gap over {put_back:e}"
                 );
             }
-            b.edge_mut(e).unwrap().tolerance = CLASSIFIED_READ_ZONE_TOL;
+            b.edge_mut(e).unwrap().tolerance = put_back;
         }
         for v in vertices {
             let tol = b.vertex(v).unwrap().tolerance;
-            if tol == CLASSIFIED_READ_ZONE_TOL || raises.vertices.contains_key(&v) {
+            if tol == put_back || raises.vertices.contains_key(&v) {
                 continue;
             }
+            assert!(
+                tol > put_back,
+                "vertex {v:?} tolerance {tol:e} is not a raise"
+            );
             for (_, u) in b.vertexuses().iter().filter(|(_, u)| u.vertex == Some(v)) {
                 assert!(
-                    u.vertex_face_gap.gap_3d <= tol,
-                    "vertex {v:?} face gap over {tol:e}"
+                    u.vertex_face_gap.gap_3d <= put_back,
+                    "vertex {v:?} face gap over {put_back:e}"
                 );
                 assert!(
-                    u.vertex_edge_gap.gap_3d <= tol,
-                    "vertex {v:?} edge gap over {tol:e}"
+                    u.vertex_edge_gap.gap_3d <= put_back,
+                    "vertex {v:?} edge gap over {put_back:e}"
                 );
             }
-            b.vertex_mut(v).unwrap().tolerance = CLASSIFIED_READ_ZONE_TOL;
+            b.vertex_mut(v).unwrap().tolerance = put_back;
         }
     }
 
