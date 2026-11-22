@@ -4574,6 +4574,8 @@ impl Model {
                     // Held while a check before it, or its own, runs.
                     checks.store(i, entry, &self.cache, &self.kept);
                 }
+                // Not in the cached result: its notes follow the sketches as they are now.
+                let warning = if error.is_none() { with_retained_notes(warning, f, &state) } else { warning };
                 reuse &= error.is_none();
                 if reusing
                     && error.is_none()
@@ -4728,6 +4730,12 @@ impl Model {
                 })
                 .clone();
             r.state = state;
+        }
+        // A note naming the sketch follows its new name.
+        for (r, f) in self.results.iter_mut().zip(&doc.features).skip(at) {
+            if r.error.is_none() && !r.skipped {
+                r.warning = with_retained_notes(r.warning.take(), f, &r.state);
+            }
         }
         self.refingerprint(doc);
         true
@@ -12181,20 +12189,19 @@ fn eval_feature(
 ) -> Result<()> {
     JOINED_TARGETS.with(|n| n.borrow_mut().clear());
     let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal, prepared_meshes);
-    if r.is_ok() {
-        for note in retained_outline_notes(f, st) {
-            append_warning(warning, note);
-        }
-    }
     for note in JOINED_TARGETS.with(|n| std::mem::take(&mut *n.borrow_mut())) {
         append_warning(warning, note);
     }
     r
 }
 
+/// The start and end of the note a feature built from a sketch with a lost link carries.
+const RETAINED_NOTE_START: &str = "built from Sketch ";
+const RETAINED_NOTE_END: &str = "'s last outline: its projected geometry could not be updated; pick the face again in the sketch";
+
 /// A note for each sketch the feature is built from whose linked outline could not be refreshed
 /// (a link marked lost keeps its last geometry): the feature then follows that old outline, and
-/// says so on its own row, not only on the sketch's.
+/// says so on its own row, not only on the sketch's. `st` is the state after the feature.
 fn retained_outline_notes(f: &Feature, st: &ModelState) -> Vec<String> {
     let mut ids = f.kind.input_sketches();
     ids.sort_unstable();
@@ -12202,8 +12209,37 @@ fn retained_outline_notes(f: &Feature, st: &ModelState) -> Vec<String> {
     ids.into_iter()
         .filter_map(|id| st.sketch(id))
         .filter(|ss| ss.sketch.links.iter().any(|l| l.lost))
-        .map(|ss| format!("built from Sketch {}'s last outline: its projected geometry could not be updated; pick the face again in the sketch", ss.name))
+        .map(|ss| format!("{RETAINED_NOTE_START}{}{RETAINED_NOTE_END}", ss.name))
         .collect()
+}
+
+/// `warning` without the retained-outline notes it holds. They are never kept in a cached result,
+/// since they follow the sketches' names and links as they are now.
+pub(crate) fn without_retained_notes(warning: Option<String>) -> Option<String> {
+    let mut s = warning?;
+    while let Some(a) = s.match_indices(RETAINED_NOTE_START).map(|(i, _)| i).find(|&i| i == 0 || s[..i].ends_with("; ")) {
+        let Some(rel) = s[a..].find(RETAINED_NOTE_END) else { break };
+        let b = a + rel + RETAINED_NOTE_END.len();
+        let (from, to) = if a >= 2 {
+            (a - 2, b)
+        } else if s[b..].starts_with("; ") {
+            (a, b + 2)
+        } else {
+            (a, b)
+        };
+        s.replace_range(from..to, "");
+    }
+    (!s.is_empty()).then_some(s)
+}
+
+/// `warning` with the retained-outline notes the feature has now (replacing any it held), read
+/// from `st`, the state after it: a saved model or a rename cannot leave an old one.
+pub(crate) fn with_retained_notes(warning: Option<String>, f: &Feature, st: &ModelState) -> Option<String> {
+    let mut warning = without_retained_notes(warning);
+    for note in retained_outline_notes(f, st) {
+        append_warning(&mut warning, note);
+    }
+    warning
 }
 
 /// [`eval_feature`] for one kind of feature. `heal` is the tolerance heal preference the

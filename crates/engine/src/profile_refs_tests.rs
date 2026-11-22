@@ -138,3 +138,40 @@ fn a_feature_built_from_a_retained_outline_says_so() {
     let warning = s.model.result(skin).and_then(|r| r.warning.clone());
     assert_eq!(retained, warning.as_deref().is_some_and(|w| w.contains(note)), "{warning:?}");
 }
+
+/// Whether `OnTop` of a plate whose small block moved to 30 mm kept its last outline.
+fn retained(s: &Session) -> bool {
+    let sketch = s.doc.find_feature("OnTop").map(|f| f.id).unwrap_or_default();
+    s.model.state().sketch(sketch).is_some_and(|ss| ss.sketch.links.iter().any(|l| l.lost))
+}
+
+/// A design saved before the note existed (its record has no warning) says so on reopening.
+#[test]
+fn a_saved_model_without_the_retained_outline_note_gets_it_on_reopening() {
+    let mut s = skinned_plate("31 mm");
+    run(&mut s, "parameters.change", json!({"name": "px", "expression": "30 mm"}));
+    let skin = s.doc.find_feature("Skin").unwrap().id;
+    let mut saved = s.model.saved(&s.doc).expect("the model saves");
+    if let Some(features) = saved.records.get_mut("features").and_then(Value::as_array_mut) {
+        for f in features {
+            if let Some(f) = f.as_object_mut() {
+                f.remove("warning");
+            }
+        }
+    }
+    let reopened = solidcraft_doc::Model::adopt(&s.doc, &saved).expect("the saved model is adopted");
+    let warning = reopened.result(skin).and_then(|r| r.warning.clone());
+    assert_eq!(retained(&s), warning.as_deref().is_some_and(|w| w.contains("built from Sketch OnTop's last outline")), "{warning:?}");
+}
+
+/// Renaming the sketch renames it in the note.
+#[test]
+fn the_retained_outline_note_follows_a_renamed_sketch() {
+    let mut s = skinned_plate("31 mm");
+    run(&mut s, "parameters.change", json!({"name": "px", "expression": "30 mm"}));
+    let skin = s.doc.find_feature("Skin").unwrap().id;
+    run(&mut s, "timeline.rename", json!({"feature": "OnTop", "name": "Lid"}));
+    let warning = s.model.result(skin).and_then(|r| r.warning.clone());
+    assert_eq!(retained(&s), warning.as_deref().is_some_and(|w| w.contains("built from Sketch Lid's last outline")), "{warning:?}");
+    assert!(warning.as_deref().is_none_or(|w| !w.contains("OnTop")), "{warning:?}");
+}
