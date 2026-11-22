@@ -74,6 +74,17 @@
 //!   Each `Trim` uses the tolerance of the edge reached through the UV curve's actual
 //!   holding edge use, matching `SmTol::GetZoneTol3d(curve)`; an owner path without an
 //!   edge uses the system tolerance. Notification probes use that same tolerance.
+//! - **Not upstream (#18162): the edited trims stay covered.** Upstream moves the two
+//!   trims' ends in UV and leaves their edges' tolerances as they were, so a trim whose
+//!   image was within its edge's tolerance can leave it (a 1.4e-7 step in UV is 1.4e-5 in
+//!   3D on a face whose surface moves 100 per unit of UV). Where the edge's tolerance
+//!   provably covered a trim before the edit (`trim_deviation_bound` at most the
+//!   tolerance), it is raised to the edited trim's proved distance from the edge curve
+//!   when that is larger, however far (`keep_trim_covered`: a tolerance below the trim's
+//!   real distance is invalid, one above it only loose; the bound is the whole bisection's
+//!   past the tolerance, so a loose enclosure is tightened first); it is never lowered. The edited trim's bound may stop at `KEEP_COVERED_PIECES` (64)
+//!   pieces only while it may still show the trim within the tolerance (then nothing is
+//!   raised); a trim an end value shows past it is bounded with every piece it needs.
 //! - **Not upstream (#14257): the end move is spread.** Upstream moves each trim's end
 //!   control point alone onto the vertex's UV point, which turns the end control leg by
 //!   any angle when the gap is not small against it (WR-794). Here the control points
@@ -145,7 +156,8 @@
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::CurveKind;
 use crate::curve::curve::Curve;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::a_object;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -968,10 +980,18 @@ pub(crate) struct FaceCurveRun {
     pub interval: Extent1d,
     /// `m_vStart`'s class and edge.
     pub start: (PointClassType, Option<EdgeId>),
+    /// Parameter on the classified start edge, when there is one.
+    pub start_edge_param: Option<f64>,
     /// `m_vMid`'s class.
     pub mid: PointClassType,
     /// `m_vEnd`'s class and edge.
     pub end: (PointClassType, Option<EdgeId>),
+    /// Parameter on the classified end edge, when there is one.
+    pub end_edge_param: Option<f64>,
+    /// The vertex the start is classified at, when it is.
+    pub start_vertex: Option<VertexId>,
+    /// The vertex the end is classified at, when it is.
+    pub end_vertex: Option<VertexId>,
 }
 
 /// `SmCurveClassification sClass(&crCurve, interval, NULL, dTol)` followed by
@@ -1021,14 +1041,22 @@ pub(crate) fn classify_free_curve_on_face(
         Some(ClassHandle::Edge(e)) => Some(e),
         _ => None,
     };
+    let vertex_of = |o: Option<ClassHandle>| match o {
+        Some(ClassHandle::Vertex(v)) => Some(v),
+        _ => None,
+    };
     Ok(classification
         .intervals()
         .iter()
         .map(|i| FaceCurveRun {
+            start_vertex: vertex_of(i.start.object()),
+            end_vertex: vertex_of(i.end.object()),
             interval: i.interval,
             start: (i.start.point_class(), edge_of(i.start.object())),
+            start_edge_param: edge_of(i.start.object()).map(|_| i.start.t_param()),
             mid: i.mid.point_class(),
             end: (i.end.point_class(), edge_of(i.end.object())),
+            end_edge_param: edge_of(i.end.object()).map(|_| i.end.t_param()),
         })
         .collect())
 }
@@ -1554,15 +1582,21 @@ fn internal_point<B: QueryBrep>(k: &Kernel, b: B, f: FaceId) -> Result<Point3> {
 
     // no work - no surface
     let Some(surf) = face.surface.as_ref() else {
-        return Err(SolidError::topology_failed(OP, "the face has no surface"));
+        return Err(Failure::new(OP, TopologyFailure::FaceWithoutSurface)
+            .with_status(SM_ERR)
+            .into_error());
     };
 
     // no work - Bspline surface with no owner
     if surf.owner().is_none() {
-        return Err(SolidError::topology_failed(
+        return Err(Failure::new(
             OP,
-            "the face's surface has no owner",
-        ));
+            TopologyFailure::Defect {
+                why: "the face's surface names no owner; the kernel sets a surface's \
+                    owner when it attaches the surface to its face",
+            },
+        )
+        .into_error());
     }
 
     let mut classification: CurveClassification<UvLineHandle> = CurveClassification::new(k);
@@ -1611,7 +1645,16 @@ fn internal_point<B: QueryBrep>(k: &Kernel, b: B, f: FaceId) -> Result<Point3> {
                     // pSurface: the face's surface, read after the classification's
                     // edits (it stays the same surface)
                     let Some(surf) = uv_objects.brep().face(f)?.surface.as_ref() else {
-                        return Err(SolidError::topology_failed(OP, "the face has no surface"));
+                        return Err(Failure::new(
+                            OP,
+                            TopologyFailure::Defect {
+                                why: "the face has no surface after a UV line was \
+                                    classified against it, though it had one \
+                                    before; the classification adds UV trim \
+                                    curves and does not change a face's surface",
+                            },
+                        )
+                        .into_error());
                     };
                     let Ok(p) = surf.evaluate_point(k, Point2::new(uv3.x, uv3.y)) else {
                         continue;
@@ -1623,10 +1666,7 @@ fn internal_point<B: QueryBrep>(k: &Kernel, b: B, f: FaceId) -> Result<Point3> {
     }
 
     // arrive here when no curve classify to face
-    Err(SolidError::topology_failed(
-        OP,
-        "no line interval classifies into the face",
-    ))
+    Err(SolidError::topology(OP, TopologyFailure::NoInteriorPoint))
 }
 
 /// The result of [`points_in_face`].
@@ -1683,9 +1723,9 @@ pub fn points_in_face(
     let u_len = u_interval.length();
     let mut v_inc = v_interval.length();
     if u_len <= EFF_ZERO || v_inc <= EFF_ZERO {
-        return Err(SolidError::topology_failed(
+        return Err(SolidError::topology(
             OP,
-            "the face's UV domain is degenerate",
+            TopologyFailure::DegenerateUvDomain,
         ));
     }
     if point_count == 0 {
@@ -1757,8 +1797,10 @@ pub fn points_in_face(
             Point3::new(uv_start.x, uv_start.y, 0.0),
             Point3::new(uv_end.x, uv_end.y, 0.0),
         )
-        .map_err(|_| {
-            SolidError::topology_failed(OP, "the iso-parameter UV line could not be made")
+        .map_err(|e| {
+            Failure::new(OP, TopologyFailure::IsoLineNotMade)
+                .caused_by(e)
+                .into_error()
         })?;
 
         // for all u values of interest - see if any map to inside the face
@@ -1798,9 +1840,9 @@ pub fn points_in_face(
 
         // if we failed to find any U Params inside the face quit
         if classes.is_empty() {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP,
-                "no iso-parameter line crosses the face",
+                TopologyFailure::NoIsoLineCrossesFace,
             ));
         }
 
@@ -2446,10 +2488,15 @@ pub fn trim_curve_breaks(
     let ivl = uv_curve.natural_interval();
     let (knots, _) = uv_curve.knots(k, Some(&ivl))?;
     if knots.len() < 2 {
-        return Err(SolidError::topology_failed(
+        return Err(Failure::new(
             "topology::face::trim_curve_breaks",
-            "the trim curve has fewer than two knots",
-        ));
+            TopologyFailure::Defect {
+                why: "the UV trim curve has fewer than two knots in its natural \
+                    interval; a B-spline curve has at least the knots at its two \
+                    ends",
+            },
+        )
+        .into_error());
     }
     let req = crate::nurbs::b_spline_curve::p2::BoundingBoxRequest {
         normal: true,
@@ -2831,10 +2878,7 @@ pub fn create_curves_from_face(
     // check state
     if !want_3d && !want_uv {
         // Need one or the other
-        return Err(SolidError::topology_failed(
-            OP,
-            "neither 3D nor UV curves are asked for",
-        ));
+        return Err(SolidError::topology(OP, TopologyFailure::NoCurvesAskedFor));
     }
 
     // init outputs
@@ -2915,10 +2959,16 @@ pub fn create_curves_from_face(
                 let copy = uv_curve.copy(k)?;
                 // NER(SM_CAST_PTR(SmBSplineCurve, pNewUV))
                 if bspline_slice(&copy).is_none() {
-                    return Err(SolidError::topology_missing(
+                    return Err(Failure::new(
                         OP,
-                        "the B-spline form of the UV trim curve's copy",
-                    ));
+                        TopologyFailure::Defect {
+                            why: "the copy of the edge use's UV trim curve is not a B-spline \
+                                curve; the kernel makes UV trim curves only as B-spline curves \
+                                and a copy keeps its curve's kind",
+                        },
+                    )
+                    .with_status(SM_ERR_NULL_POINTER)
+                    .into_error());
                 }
                 if let Some(list) = out.uv_curves.as_mut() {
                     list.push(copy);
@@ -3366,6 +3416,12 @@ pub fn fix_uv_trim_curves_notified(
     let _prev_edge_gap = surf_vertex.distance(prev_edge_point);
     let _ = tol_3d;
 
+    // Not upstream (#18162): the two trims and their edges' tolerances before they are
+    // edited, to ask after the edits whether the tolerance provably covered the trim
+    // ([`keep_trim_covered`]).
+    let curr_before = trim_before(k, b, eu_current, curr_holder)?;
+    let prev_before = trim_before(k, b, eu_previous, prev_holder)?;
+
     // drop sUVVertex to each UVTrimCurve, trim there and stretch back (upstream). The
     // opt-in WR-255 fix (#959/#570) skips this and only moves the end points below.
     if !k.fixes.uv_trim_corner_end_points_only {
@@ -3478,8 +3534,151 @@ pub fn fix_uv_trim_curves_notified(
     let w_prev = held_curve(b, prev_holder)?.is_rational()?.then_some(w_prev);
     notified_end_point_edit(b, env, prev_holder, uv_vertex_3d, edit_prev_start, w_prev)?;
 
+    // Not upstream (#18162): the edits moved the trims' ends in UV, where a step is
+    // scaled by the surface's speed in 3D, and upstream leaves the edge tolerances as
+    // they were.
+    keep_trim_covered(k, b, eu_current, curr_holder, curr_before)?;
+    keep_trim_covered(k, b, eu_previous, prev_holder, prev_before)?;
+
     // all done
     Ok(true)
+}
+
+/// Not upstream (#18162): the UV trim held at `holder` for `eu`, copied for evaluation, the
+/// tolerance of `eu`'s edge and the tolerance its trims are fitted at
+/// (`edgeuse::p3::fit_tolerance`), before [`fix_uv_trim_curves_notified`] edits it; `None`
+/// without an edge.
+fn trim_before(
+    k: &Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+    holder: EdgeuseId,
+) -> Result<Option<TrimBefore>> {
+    let Some(e) = eu1::edge(b, eu)? else {
+        return Ok(None);
+    };
+    let tolerance = b.edge(e)?.tolerance;
+    let fit = crate::topology::edgeuse::p3::fit_tolerance(k, b, e)?;
+    Ok(Some(TrimBefore {
+        trim: held_curve(b, holder)?.clone_for_evaluation()?,
+        tolerance,
+        fit,
+    }))
+}
+
+/// Not upstream (#18162): a UV trim and its edge's tolerances before an edit ([`trim_before`]).
+struct TrimBefore {
+    /// The trim, copied for evaluation.
+    trim: Curve,
+    /// The edge's tolerance.
+    tolerance: f64,
+    /// The tolerance the edge's trims are fitted at.
+    fit: f64,
+}
+
+/// The most pieces [`keep_trim_covered`]'s bounds bisect a trim into: the bisection's 32 first
+/// pieces cut once more (about 70 µs a piece on a dense loft net).
+const KEEP_COVERED_PIECES: usize = 64;
+
+/// Not upstream (#18162): after [`fix_uv_trim_curves_notified`] edited the UV trim held at
+/// `holder` for `eu`, raises the edge's tolerance to the trim's enclosed distance from the
+/// edge curve (`trim_deviation_bound`) where it no longer covers the trim but covered it
+/// before the edit (`before`, [`trim_before`]: the bound of the trim before the edit at most
+/// the tolerance then; a bound that does not certify the tolerance before an edit is not
+/// one to raise the tolerance to after it). Never lowers it.
+///
+/// The raise is to the whole bound, however far past the tolerance: a tolerance below the
+/// trim's real distance is invalid, one above it only loose. Past the tolerance the bound is
+/// the whole bisection's (to its piece and depth limits), so a loose enclosure is tightened
+/// as far as it goes before the edge is raised to it. The tolerance is set to the bound
+/// itself, the tightest the proof gives, as `trim_raise_distance` raises a refit trim past
+/// upstream's (where upstream's own `SetUVTrimCurve` allowance, twice a reported distance,
+/// stays only while it covers the proved one).
+///
+/// A bound past the B-rep check's edge tolerance limit
+/// ([`within_edge_tolerance_limit`](crate::topology::edgeuse::p3::within_edge_tolerance_limit))
+/// raises nothing: the edit would be refused with the body.
+///
+/// A trim the edit left as it was (its geometry the same, bit for bit) at a tolerance not
+/// lowered is not bounded at all: it is covered after the edit exactly where it was before.
+///
+/// The trim before the edit is bounded only where the edited one would raise: on a dense
+/// net a trim just within its tolerance costs a deep bisection each time (the
+/// `crashes/2992` rig case bounds over a thousand such trims, all still covered).
+///
+/// The edited trim's bound has a budget of [`KEEP_COVERED_PIECES`] pieces, which holds only
+/// while the bound may still show the trim within its tolerance: a trim lying within 2% of
+/// its tolerance along its whole length is closed below it only by fine pieces (in the same
+/// rig case 260 such trims took about 1150 pieces and 80 ms each, 20 s of the union's 26 s,
+/// and none of them raised), and one the budget stops there raises nothing. Once an end value
+/// of a piece is past the tolerance, the trim is not within it whatever the cuts, and the
+/// pieces still open are cut as far as the bisection goes, only those not yet within the
+/// largest end value (`bisect` in `query::curve_surface_gap`): the raise then covers the trim
+/// (#18166, `crashes/stitched_corner`: three edges left uncovered by a budget for all
+/// pieces). The trim before the edit is bounded without a budget: it is bounded only where
+/// the edited trim raises.
+fn keep_trim_covered(
+    k: &Kernel,
+    b: &mut Brep,
+    eu: EdgeuseId,
+    holder: EdgeuseId,
+    before: Option<TrimBefore>,
+) -> Result<()> {
+    let Some(before) = before else {
+        return Ok(());
+    };
+    let Some(e) = eu1::edge(b, eu)? else {
+        return Ok(());
+    };
+    let tolerance = b.edge(e)?.tolerance;
+    // (an edit that left the trim as it was, its tolerance not lowered, uncovers nothing: the
+    // trim covered before is the trim now; the corners of a body whose trims already meet
+    // there are most of them, each a deep bisection of a trim just within its tolerance)
+    if tolerance >= before.tolerance
+        && format!("{:?}", held_curve(b, holder)?.kind()) == format!("{:?}", before.trim.kind())
+    {
+        return Ok(());
+    }
+    let fit = crate::topology::edgeuse::p3::fit_tolerance(k, b, e)?;
+    let bound = {
+        let trim = held_curve(b, holder)?;
+        // (a bound within the tolerance raises nothing)
+        crate::topology::edgeuse::p3::trim_deviation_bound(
+            k,
+            b,
+            eu,
+            trim,
+            fit,
+            [tolerance, f64::INFINITY],
+            Some(KEEP_COVERED_PIECES),
+        )?
+    };
+    let Some(bound) = bound else {
+        return Ok(());
+    };
+    if !(bound.is_finite() && bound > tolerance) {
+        return Ok(());
+    }
+    // (whether the tolerance before the edit provably covered the trim before it)
+    let covered = matches!(
+        crate::topology::edgeuse::p3::trim_deviation_bound(
+            k,
+            b,
+            eu,
+            &before.trim,
+            before.fit,
+            [before.tolerance; 2],
+            None,
+        )?,
+        Some(was) if was <= before.tolerance
+    );
+    // UNPROVED fallback (#18166): a bound the B-rep check refuses as an edge tolerance is the
+    // enclosure's limit; the tolerance stays, as `trim_raise_distance` keeps upstream's raise
+    // there, and the edge is not proved to cover the edited trim.
+    if covered && crate::topology::edgeuse::p3::within_edge_tolerance_limit(b, bound) {
+        crate::topology::edge::set_tolerance(b, e, bound, true, true)?;
+    }
+    Ok(())
 }
 
 /// `sm_FindBestUVCurve`: of the candidate UV curves (`None` entries skipped) with their
@@ -4077,14 +4276,14 @@ mod tests {
             calculate_an_internal_point(&k, &mut b, f)
                 .err()
                 .and_then(|e| e.upstream_status()),
-            Some(crate::error::SM_ERR)
+            Some(SM_ERR)
         );
         b.face_mut(f).unwrap().surface = Some(plane());
         assert_eq!(
             calculate_an_internal_point(&k, &mut b, f)
                 .err()
                 .and_then(|e| e.upstream_status()),
-            Some(crate::error::SM_ERR)
+            Some(SM_ERR)
         );
         b.face_mut(f)
             .unwrap()
@@ -4106,7 +4305,7 @@ mod tests {
             calculate_an_internal_point(&k, &mut b, f)
                 .err()
                 .and_then(|e| e.upstream_status()),
-            Some(crate::error::SM_ERR)
+            Some(SM_ERR)
         );
     }
 

@@ -107,7 +107,7 @@ fn labels_and_values_sit_by_the_cell_text_rule() {
     let scene = build(&s, &d, sheet).unwrap().scene;
     let group = scene.groups.last().unwrap();
     let record = &d.sheets[0];
-    let lines = record.title_block_layout().unwrap().unwrap().paper(sheet, d.projection);
+    let lines = solidcraft_doc::drawing::projection_symbol::title_block_paper(&record.title_block_layout().unwrap().unwrap(), sheet, d.projection);
     assert_eq!(group.items[..lines.items.len()], lines.items[..]);
     assert!(group.items[lines.items.len()..].iter().all(|item| matches!(item, Item::Text(_))));
     // The drawing names no font: all of it in the built-in one, listed once.

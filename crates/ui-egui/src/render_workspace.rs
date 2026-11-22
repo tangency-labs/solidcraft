@@ -422,7 +422,7 @@ pub struct ViewState {
     dirty: bool,
     live_paused: bool,
     /// Product framing retained across Design/Render visits, never a saved setting.
-    render_camera: Option<Camera>,
+    pub(crate) render_camera: Option<Camera>,
     /// The CPU sampling choice was initialised or explicitly selected in this draft.
     cpu_sampling_initialized: bool,
     clean_setup: Option<RenderSetup>,
@@ -752,7 +752,6 @@ pub fn active(app: &SolveApp) -> bool {
 /// Whether a Render tile is visible even with the Design ribbon focused.
 pub(crate) fn tiled(app: &SolveApp) -> bool {
     app.docs.views.is_tiled()
-        && app.session.active_sketch.is_none()
         && app
             .docs
             .views
@@ -934,6 +933,12 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         cache_render_images(app, ctx);
     }
     prepare::tick(app, ctx);
+    if active(app) || tiled(app) || !app.view_windows.has_render() {
+        tick_live(app, ctx);
+    }
+}
+
+pub(crate) fn tick_live(app: &mut SolveApp, ctx: &egui::Context) {
     let canvas = app.render_workspace.tile_canvas.filter(|(uid, _)| *uid == app.session.uid);
     if !app.home.open
         && tiled(app)
@@ -2797,7 +2802,8 @@ fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn preview_signature(app: &mut SolveApp) -> (u64, usize, u64) {
     let mut visibility = std::collections::hash_map::DefaultHasher::new();
     let v = &app.session.visibility;
-    (&v.hidden_bodies, &v.hidden_occurrences, &v.hidden_folders, app.session.active_sketch).hash(&mut visibility);
+    (&v.hidden_bodies, &v.hidden_occurrences, &v.hidden_folders, app.session.sketching_view, crate::sketch_view::active_sketch(app))
+        .hash(&mut visibility);
     let (doc, world) = (app.session.doc.clone(), crate::open_meshing::session_world(&app.session));
     let signature = (Arc::as_ptr(&doc) as usize as u64, Arc::as_ptr(&world) as usize, visibility.finish());
     app.render_workspace.scene_sources = Some((doc, world));
@@ -3606,10 +3612,19 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             || app.viewport.axis_drag.is_some()
             || app.viewport.spin
             || app.cam_anim.is_some();
+        // A material dragged from the shelf is dropped on primary release without a canvas click.
+        let primary_released = ui.input(|i| i.pointer.button_released(egui::PointerButton::Primary));
         let hits = input
             .hover
             .filter(|_| image_inside && !navigating && geometry_current)
-            .map(|p| crate::viewport::pick_cached(app, &crate::viewport::projection(app, rect), p))
+            .map(|p| {
+                let proj = crate::viewport::projection(app, rect);
+                if input.primary_down || primary_released || response.clicked() || response.secondary_clicked() {
+                    crate::viewport::pick_cached(app, &proj, p)
+                } else {
+                    crate::viewport::pick_hover(app, &proj, p, ui.ctx())
+                }
+            })
             .unwrap_or_default();
         let candidate = assign::candidate(app, &hits, input.mods);
         // The view moved under a still pointer: the highlight under it stays on the face
@@ -3771,6 +3786,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
             // Product rendering has its own lighting; AO is a Design viewport setting.
             ao_radius: 0.0,
             ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+            edge_px: solidcraft_viewport_gpu::view::EDGE_PX,
             sky: [0.0; 4],
             eye: [eye.x as f32, eye.y as f32, eye.z as f32, if camera.fov > 0.0 { 1.0 } else { 0.0 }],
             ssaa: if width < full.0 { width as f32 / full.0 as f32 } else { 1.0 },
@@ -3781,8 +3797,10 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
             },
             hatch: Default::default(),
             moving: None,
+            motions: Default::default(),
+            ground: None,
         };
-        match (feedback, app.viewport.tile) {
+        match (feedback, app.viewport.scene_slot()) {
             (true, tile) => {
                 ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, solidcraft_viewport_egui::ProductHighlightCallback(frame, tile)));
             }

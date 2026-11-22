@@ -6,9 +6,7 @@ use std::collections::BTreeMap;
 
 use egui::Color32;
 use serde::{Deserialize, Serialize};
-use solidcraft_theme::{
-    AccentRamp, Custom, Environment, Fade, PublishedTab, Surfaces, TabAccent, Tokens, is_dark, set_custom, set_published, viewport_dark, vision,
-};
+use solidcraft_theme::{AccentRamp, Custom, Environment, Fade, PublishedTab, Surfaces, TabAccent, Tokens, set_custom, set_published};
 
 #[derive(Clone)]
 struct PreparedTheme {
@@ -125,10 +123,11 @@ impl TabThemeState {
                 Tokens::themed(environment.dark, environment.vision)
             };
             let accent = crate::workspace::tab_accent(&window, tab);
-            let window = if viewport_dark() == is_dark() { window } else { window.with_viewport(Tokens::themed(viewport_dark(), vision())) };
+            let own = Tokens::viewport_own(environment.vision);
+            let window = own.map_or(window, |view| window.with_viewport(view));
             let target = TabTarget {
                 tokens: window.with_background(environment.background),
-                view: Tokens::themed(viewport_dark(), vision()).with_background(environment.background),
+                view: own.unwrap_or_else(|| Tokens::themed(environment.dark, environment.vision)).with_background(environment.background),
                 accent,
             };
             self.targets.insert(tab.to_owned(), target);
@@ -168,7 +167,7 @@ impl TabThemeState {
             tokens.protect_tab_panel();
         }
         self.shown = Some(Surfaces::of(tokens));
-        let mut view = if viewport_dark() == is_dark() { tokens } else { target.view };
+        let mut view = if environment.viewport.is_none() { tokens } else { target.view };
         view.viewport_top = tokens.viewport_top;
         view.viewport_bottom = tokens.viewport_bottom;
         let tab_surfaces = self.prepared.as_ref().is_some_and(|p| p.enabled && !p.file.tabs.is_empty());
@@ -207,7 +206,7 @@ pub(crate) fn scoped_file(file: &crate::theme_files::ThemeFile) -> impl Drop {
     let restore = Restore(solidcraft_theme::custom(), crate::icon_svg::theme_palette_state());
     let values = BTreeMap::new();
     let tokens = crate::theme_files::resolve_with(file, &values);
-    set_file_palette(Some(FilePalette { dark: is_dark(), tokens, icons: crate::theme_files::resolve_icon_palette(file, &values) }));
+    set_file_palette(Some(FilePalette { dark: solidcraft_theme::is_dark(), tokens, icons: crate::theme_files::resolve_icon_palette(file, &values) }));
     restore
 }
 

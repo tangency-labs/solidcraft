@@ -15,6 +15,8 @@
 
 #[path = "../face_turn_over.rs"]
 mod face_turn_over;
+#[path = "../faces_continue.rs"]
+mod faces_continue;
 #[path = "../fork_1b016ca_cavity_floor_under_opening.rs"]
 mod fork_1b016ca_cavity_floor_under_opening;
 #[path = "../fork_2e1bb8c_four_face_vertex_split.rs"]

@@ -22,6 +22,9 @@
 //! of a control point from the chord, plus the points' rounding. A piece over several knot
 //! spans takes the points of each span's part against the one chord between its ends.
 //!
+//! At a full-multiplicity interior knot, the one-sided endpoints must coincide for a
+//! piece touching the knot to receive a tube.
+//!
 //! The converse holds too: the piece is a continuous path between the chord's ends (to
 //! their rounding `e`) within `rho` of the chord, so its projection onto the chord's line
 //! covers the chord but for `e` at each end, and the point of the piece above a point of
@@ -82,7 +85,9 @@
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::length_bound::Span;
 use crate::error::Result;
+use crate::geom::certified::{next_down, next_up};
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
@@ -91,6 +96,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::math::gamma;
 
 const OP: &str = "curve::proximity::proved_near";
+const OP_DISJOINT: &str = "curve::proximity::proved_disjoint";
 
 /// How many times a piece is halved at most.
 pub const DEPTH: usize = 32;
@@ -127,6 +133,34 @@ fn form(curve: &Curve) -> Option<Form<'_>> {
         _ => return None,
     };
     spline.nurb.is_some().then_some(Form::Spline(spline))
+}
+
+/// A whole native piece's convex hull, including each coordinate's outward
+/// rounding allowance. No sampled or approximation box participates in separation.
+fn native_piece_box(curve: &Curve, domain: &Extent1d) -> Option<Extent3d> {
+    let points = curve.piece_hull_points(domain)?;
+    let mut bounds = Extent3d::new();
+    for (p, error) in points {
+        if !(p.x.is_finite()
+            && p.y.is_finite()
+            && p.z.is_finite()
+            && error.is_finite()
+            && error >= 0.0)
+        {
+            return None;
+        }
+        bounds.add_point(Vec3::new(
+            next_down(p.x - error),
+            next_down(p.y - error),
+            next_down(p.z - error),
+        ));
+        bounds.add_point(Vec3::new(
+            next_up(p.x + error),
+            next_up(p.y + error),
+            next_up(p.z + error),
+        ));
+    }
+    bounds.is_defined().then_some(bounds)
 }
 
 /// A failed evaluation proves nothing (`None`); a cancellation and an unported callee are
@@ -206,6 +240,37 @@ fn spline_breaks(c: &BSplineCurve, a: f64, b: f64) -> Result<Vec<f64>> {
     Ok(out)
 }
 
+/// The chord-to-curve part of the tube proof requires a connected spline piece.
+/// At a knot of multiplicity degree + 1, the two one-sided limits are separate control
+/// points. Equal homogeneous points prove the limits agree; otherwise decline the tube.
+/// Check the closed interval so that a trim endpoint cannot silently use the other limit.
+fn spline_piece_connected(c: &BSplineCurve, a: f64, b: f64) -> Result<bool> {
+    let nurb = c.nurb_ref()?;
+    let knots = nurb.knots();
+    let Some((&first, &last)) = knots.first().zip(knots.last()) else {
+        return Ok(false);
+    };
+    // Use the actual knots. Grouping nearby values by a tolerance can hide a break.
+    let mut start = knots.partition_point(|&t| t < a || t == first);
+    let end = knots.partition_point(|&t| t <= b && t < last);
+    let Some(inside) = knots.get(start..end) else {
+        return Ok(false);
+    };
+    for run in inside.chunk_by(|x, y| x == y) {
+        if run.len() > nurb.degree() {
+            let endpoints = start
+                .checked_sub(1)
+                .and_then(|i| nurb.cpts().get(i))
+                .zip(nurb.cpts().get(start));
+            if run.len() - 1 != nurb.degree() || !endpoints.is_some_and(|(p, q)| p == q) {
+                return Ok(false);
+            }
+        }
+        start += run.len();
+    }
+    Ok(true)
+}
+
 impl Form<'_> {
     /// The parameters to cut `[a, b]` at so that each piece lies in one knot span.
     fn breaks(&self, a: f64, b: f64) -> Result<Vec<f64>> {
@@ -231,6 +296,9 @@ impl Form<'_> {
                 }))
             }
             Form::Spline(c) => {
+                if !spline_piece_connected(c, a, b)? {
+                    return Ok(None);
+                }
                 let cuts = spline_breaks(c, a, b)?;
                 let mut points: Vec<Vec3> = Vec::new();
                 let mut rounding = 0.0_f64;
@@ -287,6 +355,77 @@ fn angle(a: Vec3, b: Vec3) -> f64 {
 }
 
 impl Curve {
+    /// Proves that two native curves have no common point. Each parameter rectangle
+    /// is discarded only when outward native hull boxes separate it on a coordinate axis.
+    /// Subdivision changes the enclosure, never a geometric tolerance. Unsupported
+    /// definitions or exhausted work leave separation unproved.
+    ///
+    /// # Errors
+    /// The kernel's cancellation.
+    pub(crate) fn proved_disjoint(
+        &self,
+        k: &Kernel,
+        interval: Extent1d,
+        other: &Self,
+        other_interval: Extent1d,
+    ) -> Result<bool> {
+        for (curve, domain) in [(self, interval), (other, other_interval)] {
+            let natural = curve.natural_interval();
+            if !(domain.min().is_finite()
+                && domain.max().is_finite()
+                && natural.min() <= domain.min()
+                && domain.min() < domain.max()
+                && domain.max() <= natural.max())
+            {
+                return Ok(false);
+            }
+        }
+        let mut work = vec![(interval, other_interval, 0_usize)];
+        let mut visits = 0;
+        while let Some((a, b, depth)) = work.pop() {
+            k.check_cancelled(OP_DISJOINT)?;
+            visits += 1;
+            if visits > MAX_PIECES {
+                return Ok(false);
+            }
+            let (Some(x), Some(y)) = (native_piece_box(self, &a), native_piece_box(other, &b))
+            else {
+                return Ok(false);
+            };
+            let (lo, hi, other_lo, other_hi) = (x.min(), x.max(), y.min(), y.max());
+            if hi.x < other_lo.x
+                || other_hi.x < lo.x
+                || hi.y < other_lo.y
+                || other_hi.y < lo.y
+                || hi.z < other_lo.z
+                || other_hi.z < lo.z
+            {
+                continue;
+            }
+            // Twice the one-parameter depth allows alternating splits of both curves.
+            if depth >= 2 * DEPTH {
+                return Ok(false);
+            }
+            let split_first = x.size().length_squared() >= y.size().length_squared();
+            let domain = if split_first { a } else { b };
+            let mid = domain.mid();
+            if !(domain.min() < mid && mid < domain.max()) {
+                return Ok(false);
+            }
+            for piece in [
+                Extent1d::from_min_max(domain.min(), mid),
+                Extent1d::from_min_max(mid, domain.max()),
+            ] {
+                work.push(if split_first {
+                    (piece, b, depth + 1)
+                } else {
+                    (a, piece, depth + 1)
+                });
+            }
+        }
+        Ok(true)
+    }
+
     /// A cone holding every tangent direction of this curve over `[a, b]` (`a < b`), from
     /// its control points: a line's direction; for a B-spline (and a conic by its rational
     /// B-spline) the tangent of a Bezier piece with positive weights is a combination with
@@ -887,6 +1026,92 @@ mod tests {
     use crate::curve::line::Line;
     use crate::math::Point3;
 
+    #[test]
+    fn subnormal_split_rounding_cannot_prove_crossing_curves_disjoint() {
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::CPoint;
+
+        let k = Kernel::default();
+        let domain = Extent1d::from_min_max(0.0, 1.0);
+        let left = Extent1d::from_min_max(0.0, 0.5);
+        let crossing = Curve::from(Line::from_points(
+            Point3::new(3.0 / 10.0, 1.0 / 40.0, 0.0),
+            Point3::new(9.0 / 20.0, 1.0 / 40.0, 0.0),
+            3,
+        ));
+        for weight in [f64::from_bits(16), f64::MIN_POSITIVE, 1.0] {
+            // Equal weights define exactly (u, u/16, 0). At the smallest
+            // weight, splitting at 1/2 rounds the weighted y = 2^-1075 to zero.
+            let curve = Curve::from(BSplineCurve::from_nurb(
+                NurbCurve::new(
+                    vec![
+                        CPoint::new(0.0, 0.0, 0.0, weight),
+                        CPoint::new(weight, weight / 16.0, 0.0, weight),
+                    ],
+                    1,
+                    vec![0.0, 0.0, 1.0, 1.0],
+                )
+                .unwrap(),
+                3,
+                false,
+            ));
+            if let Some(bounds) = native_piece_box(&curve, &left) {
+                assert!(
+                    bounds.contains_point(Point3::new(0.5, 1.0 / 32.0, 0.0), 0.0),
+                    "weight {weight}: {bounds:?} misses the exact endpoint"
+                );
+            }
+            // At the stored horizontal y = fl(1/40), x = 16y is strictly inside
+            // both pieces. This is an exact intersection of the stored inputs.
+            assert!(!curve.proved_disjoint(&k, left, &crossing, domain).unwrap());
+        }
+    }
+
+    #[test]
+    fn disjoint_curves_need_whole_span_separation() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+
+        let k = Kernel::default();
+        let seam = Curve::from(Line::from_points(
+            Point3::new(-1.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            3,
+        ));
+        let cubic = |heights: [f64; 4]| {
+            let points = [-1.0, -1.0 / 3.0, 1.0 / 3.0, 1.0]
+                .into_iter()
+                .zip(heights)
+                .map(|(x, y)| CPoint::new(x, y, 0.0, NOW))
+                .collect();
+            Curve::from(BSplineCurve::from_nurb(
+                NurbCurve::new(points, 3, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]).unwrap(),
+                3,
+                false,
+            ))
+        };
+        let domain = Extent1d::from_min_max(0.0, 1.0);
+        // Negative controls, but y(t) = 1 - 3.3t(1-t) >= 0.175 everywhere.
+        let apart = cubic([1.0, -0.1, -0.1, 1.0]);
+        assert!(seam.proved_disjoint(&k, domain, &apart, domain).unwrap());
+        // All three stations are positive, but y(1/4) = -13/32: two crossings.
+        let crossing = cubic([1.0, -3.0, 3.0, 1.0]);
+        for t in [0.0, 0.5, 1.0] {
+            assert!(crossing.evaluate_point(&k, t).unwrap().y > 0.0);
+        }
+        assert!(!seam.proved_disjoint(&k, domain, &crossing, domain).unwrap());
+        assert!(seam
+            .proved_disjoint(&k, domain, &crossing, Extent1d::from_min_max(0.5, 1.0))
+            .unwrap());
+        assert!(!seam.proved_disjoint(&k, domain, &seam, domain).unwrap());
+        let tangent = cubic([3.0, -1.0, -1.0, 3.0]);
+        assert!(!seam.proved_disjoint(&k, domain, &tangent, domain).unwrap());
+        assert!(!seam
+            .proved_disjoint(&k, domain, &apart, Extent1d::from_min_max(-1.0, 1.0))
+            .unwrap());
+    }
+
     /// A full circle or ellipse about `centre` in the plane z = `centre.z`.
     fn ellipse(k: &Kernel, centre: Point3, rx: f64, ry: f64) -> Curve {
         circle_along(k, centre, Vec3::X, Vec3::Y, rx, ry)
@@ -956,6 +1181,57 @@ mod tests {
         assert!(!circle
             .proved_together(&k, &ic, &other, &io, 2e-6, &[])
             .unwrap());
+    }
+
+    #[test]
+    fn a_spline_with_a_gap_does_not_prove_an_unbroken_seam() {
+        use crate::nurbs::crv_basic::Curve as Nurb;
+        use crate::nurbs::math::{CPoint, NOW};
+
+        let k = Kernel::default();
+        let line = Curve::from(Line::from_points(Point3::ZERO, Vec3::X, 3));
+        let spline = |xs: &[f64], knots: &[f64]| {
+            let points = xs.iter().map(|&x| CPoint::new(x, 0.0, 0.0, NOW)).collect();
+            let nurb = Nurb::new(points, 1, knots.to_vec()).unwrap();
+            Curve::from(BSplineCurve::from_nurb(nurb, 3, true))
+        };
+        let broken = spline(&[0.0, 0.1, 0.9, 1.0], &[0.0, 0.0, 0.5, 0.5, 1.0, 1.0]);
+        let whole = Extent1d::from_min_max(0.0, 1.0);
+        // The line midpoint is 0.4 from either component.
+        assert!(matches!(
+            line.proved_overlap(&k, &whole, &broken, &whole, 0.01)
+                .unwrap(),
+            Overlap::Unproved(_)
+        ));
+        assert!(!line
+            .proved_near(&k, &whole, &broken, &whole, 0.01, &[])
+            .unwrap());
+        assert!(!broken
+            .proved_together(&k, &whole, &line, &whole, 0.01, &[])
+            .unwrap());
+
+        // A subinterval away from the break and a continuous spline still certify.
+        let first = Extent1d::from_min_max(0.0, 0.25);
+        let first_line = Extent1d::from_min_max(0.0, 0.05);
+        assert!(line
+            .proved_together(&k, &first_line, &broken, &first, 1e-8, &[])
+            .unwrap());
+        let joined = spline(&[0.0, 0.5, 1.0], &[0.0, 0.0, 0.5, 1.0, 1.0]);
+        assert!(line
+            .proved_together(&k, &whole, &joined, &whole, 1e-8, &[])
+            .unwrap());
+        // A repeated knot is also continuous when its two endpoint controls agree.
+        let touching = spline(&[0.0, 0.5, 0.5, 1.0], &[0.0, 0.0, 0.5, 0.5, 1.0, 1.0]);
+        assert!(line
+            .proved_together(&k, &whole, &touching, &whole, 1e-8, &[])
+            .unwrap());
+        let broken_form = form(&broken).unwrap();
+        assert!(broken_form.tube(0.0, 0.5).unwrap().is_none());
+        assert!(broken_form.tube(0.5, 1.0).unwrap().is_none());
+        // The last two interior knots coincide, one representable step after the first.
+        let t = 0.5_f64.next_up();
+        let clustered = spline(&[0.0, 0.1, 0.1, 0.9, 1.0], &[0.0, 0.0, 0.5, t, t, 1.0, 1.0]);
+        assert!(form(&clustered).unwrap().tube(0.0, 1.0).unwrap().is_none());
     }
 
     /// A chord of a circle strays from its arc by the sagitta, and the arc from the chord
