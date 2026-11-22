@@ -1054,6 +1054,13 @@ fn ribbon_size_label(
     }
 }
 
+/// A command's name as the ribbon says it beside its button: in its tooltip, and for a
+/// button painted over its panel. The label the command shows now, from the command's own
+/// entry ([`SolveApp::tr_command`]), so the tooltip reads as the button does.
+fn ribbon_command_name(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> &'static str {
+    app.tr_command(command.id, crate::render_workspace::interactive_command_info(app, command).label)
+}
+
 pub(crate) fn persistent_button_name(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> String {
     let info = crate::render_workspace::interactive_command_info(app, command);
     let label = crate::workspace::ribbon_button_label(command);
@@ -1086,11 +1093,7 @@ fn paint_persistent_ribbon(app: &SolveApp, ui: &egui::Ui, paints: Vec<Persistent
         .map(|paint| {
             let id = paint.command.id;
             let checkable = pressed && persistent_available(app, id);
-            let name = if checkable {
-                persistent_button_name(app, paint.command)
-            } else {
-                app.tr_label(crate::render_workspace::interactive_command_info(app, paint.command).label).to_string()
-            };
+            let name = if checkable { persistent_button_name(app, paint.command) } else { ribbon_command_name(app, paint.command).to_string() };
             let look = ribbon::DeferredLook {
                 id: id.to_string(),
                 selected: persistent_pressed(app, id),
@@ -2525,7 +2528,7 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
     }
     response.backing_on_hover_ui(|ui| {
         let t = Tokens::get();
-        let name = app.tr_label(crate::render_workspace::interactive_command_info(app, command).label);
+        let name = ribbon_command_name(app, command);
         let name_width = ui
             .painter()
             .layout_no_wrap(name.to_string(), crate::ui_kit::type_face::semibold(solidcraft_theme::Tokens::get().font_heading), t.text)
@@ -6083,6 +6086,19 @@ mod ribbon_label_tests {
         let family = crate::sketch_families::family("sketch.construction_line").unwrap();
         let first = solidcraft_engine::find_command(family.commands.first().unwrap()).unwrap();
         assert_eq!(ribbon_size_label(&h.app, first, Some(family)), h.app.tr_label(crate::workspace::ribbon_family_label(family)));
+    }
+
+    /// A ribbon button's tooltip names the command as the button does: in Spanish Ground's
+    /// reads "Fijar", and Export's "Exportar", each the command's own entry.
+    #[test]
+    fn a_ribbon_tooltip_names_its_command_as_its_button_does() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"language": "es"}));
+        for (id, name) in [("occurrence.ground", "Fijar"), ("file.export", "Exportar")] {
+            let command = solidcraft_engine::find_command(id).unwrap();
+            assert_eq!(ribbon_command_name(&h.app, command), name, "{id}");
+            assert_eq!(ribbon_command_name(&h.app, command), ribbon_size_label(&h.app, command, None), "{id}");
+        }
     }
 
     #[test]
