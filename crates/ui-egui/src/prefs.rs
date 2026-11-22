@@ -1232,6 +1232,10 @@ preference_settings! {
     /// With free orbit, mouse drags turn sideways about the world's up axis (a turntable without
     /// the pole limit) instead of the screen's.
     free_orbit_upright: bool = false, PAGE_NAVIGATION => check_tr("nav.free_orbit_upright.label");
+    /// A key that, held when a mouse orbit drag starts, makes that drag the other orbit style:
+    /// free where the orbit is turntable, turntable where `free_orbit` is on (#20917). `none`
+    /// (default), `alt` or `ctrl`. A key the mouse mapping already needs for that orbit does nothing.
+    free_orbit_key: String = "none".into(), PAGE_NAVIGATION;
     /// Off: a right drag that the mouse mapping would orbit leaves the camera alone (#6492).
     right_drag_orbits: bool = true, PAGE_NAVIGATION => check_tr("nav.right_drag_orbits.label");
     /// A middle or right drag keeps the mode it started with until its button is released, as a
@@ -2169,6 +2173,45 @@ impl MiddleDoubleClick {
 
     pub fn label(self) -> &'static str {
         Self::ALL.iter().find(|(m, _, _)| *m == self).map_or("Home", |(_, _, l)| l)
+    }
+}
+
+/// The key that turns a mouse orbit drag into the other orbit style (`free_orbit_key`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FreeOrbitKey {
+    Off,
+    Alt,
+    Ctrl,
+}
+
+impl FreeOrbitKey {
+    pub const ALL: &[(FreeOrbitKey, &str)] = &[(FreeOrbitKey::Off, "none"), (FreeOrbitKey::Alt, "alt"), (FreeOrbitKey::Ctrl, "ctrl")];
+
+    /// The preference's setting (no key for an unknown one).
+    pub fn of(app: &SolveApp) -> FreeOrbitKey {
+        Self::parse(&app.preferences.free_orbit_key).unwrap_or(FreeOrbitKey::Off)
+    }
+
+    pub fn parse(id: &str) -> Option<FreeOrbitKey> {
+        Self::ALL.iter().find(|(_, i)| *i == id).map(|(k, _)| *k)
+    }
+
+    /// Whether this key is down in `mods` (Ctrl is Cmd on macOS). No key is never held.
+    pub fn held(self, mods: Modifiers) -> bool {
+        match self {
+            FreeOrbitKey::Off => false,
+            FreeOrbitKey::Alt => mods.alt,
+            FreeOrbitKey::Ctrl => mods.ctrl || mods.command,
+        }
+    }
+
+    /// `mods` with this key let go.
+    pub fn released(self, mods: Modifiers) -> Modifiers {
+        match self {
+            FreeOrbitKey::Off => mods,
+            FreeOrbitKey::Alt => Modifiers { alt: false, ..mods },
+            FreeOrbitKey::Ctrl => Modifiers { ctrl: false, command: false, ..mods },
+        }
     }
 }
 
@@ -5004,6 +5047,9 @@ fn prepare_preferences(
     }
     if !SUPERSAMPLING.contains(&new.supersampling) {
         return Err("`supersampling` must be 1 (off), 1.5 or 2".into());
+    }
+    if FreeOrbitKey::parse(&new.free_orbit_key).is_none() {
+        return Err("`free_orbit_key` must be none, alt or ctrl".into());
     }
     if MiddleDoubleClick::parse(&new.middle_double_click).is_none() {
         return Err("`middle_double_click` must be home, fit or off".into());

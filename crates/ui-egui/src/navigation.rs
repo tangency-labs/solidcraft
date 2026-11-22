@@ -1189,9 +1189,11 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
                 Some(b) => crate::prefs::nav_mode(app, b, without_shift) == Some(NavMode::Orbit),
                 None => app.viewport.nav.is_some(),
             };
+        decide_orbit_flip(app, button, mods);
         orbit_drag(app, rect, f64::from(delta.x), f64::from(delta.y), press, snap, true);
         wrap_cursor(app, ui, rect);
     } else {
+        app.viewport.orbit_flip = None;
         if app.viewport.axis_drag.is_none() {
             app.viewport.orbit_free = None;
         }
@@ -1224,6 +1226,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         app.viewport.orbit_pivot_at = None;
         app.viewport.orbit_mark = None;
         app.viewport.orbit_from = None;
+        app.viewport.orbit_flip = None;
         app.viewport.cursor_wrap = None;
     }
     if app.viewport.spin {
@@ -1568,7 +1571,7 @@ pub(crate) fn orbit_drag(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press
     let free = app.cam;
     app.viewport.orbit_free = Some(free);
     if !snap {
-        if app.preferences.free_orbit {
+        if free_orbit_now(app) {
             app.viewport.orbit_free = None;
         }
         return;
@@ -1582,7 +1585,7 @@ pub(crate) fn orbit_drag(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press
             target.pitch = displayed.pitch;
         }
     }
-    if app.preferences.free_orbit {
+    if free_orbit_now(app) {
         target = snapped_quarter_roll(target, free);
     }
     // The cursor, origin and view-centre pivots stay still. The axis gizmo uses the origin when selected;
@@ -1639,7 +1642,7 @@ pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Opti
     let (pivot, kept) = orbit_pivot(app, rect, (app.viewport.orbit_pivot, app.viewport.orbit_pivot_at), press.unwrap_or(rect.center()));
     (app.viewport.orbit_pivot, app.viewport.orbit_pivot_at) = kept;
     app.viewport.orbit_mark = orbit_mark(app, pivot);
-    if app.preferences.free_orbit {
+    if free_orbit_now(app) {
         app.viewport.orbit_from = None;
         match pivot {
             Some(p) => orbit_about(app, rect, dx, dy, p),
@@ -2047,8 +2050,36 @@ impl TouchNavigation {
     }
 }
 
+/// Whether an orbit turns freely now: the `free_orbit` preference, turned over for a mouse drag
+/// that began with the `free_orbit_key` held (#20917).
+fn free_orbit_now(app: &SolveApp) -> bool {
+    app.preferences.free_orbit != app.viewport.orbit_flip.unwrap_or(false)
+}
+
+/// Decides, as a mouse orbit drag starts, whether the `free_orbit_key` held then turns it into the
+/// other orbit style; the drag keeps that until it ends (every frame instead, with
+/// `nav_drag_keeps_mode` off). A key the binding itself needs for the orbit (Alt for an Alt+left
+/// orbit) does nothing: the drag must still orbit with the key let go. `button` is none for the
+/// left button.
+fn decide_orbit_flip(app: &mut SolveApp, button: Option<crate::prefs::NavButton>, mods: egui::Modifiers) {
+    if app.preferences.nav_drag_keeps_mode && app.viewport.orbit_flip.is_some() {
+        return;
+    }
+    let key = crate::prefs::FreeOrbitKey::of(app);
+    let spare = key.held(mods) && {
+        let rest = key.released(mods);
+        match button {
+            Some(b) => crate::prefs::nav_mode(app, b, mods) == Some(NavMode::Orbit) && crate::prefs::nav_mode(app, b, rest) == Some(NavMode::Orbit),
+            None => {
+                app.viewport.nav == Some(NavMode::Orbit) || crate::prefs::nav_mode(app, crate::prefs::NavButton::Left, rest) == Some(NavMode::Orbit)
+            }
+        }
+    };
+    app.viewport.orbit_flip = Some(spare);
+}
+
 fn orbit_camera(app: &mut SolveApp, dx: f64, dy: f64) {
-    if !app.preferences.free_orbit {
+    if !free_orbit_now(app) {
         app.cam.orbit(dx, dy);
     } else if app.preferences.free_orbit_upright && app.preferences.upright_orbit_unrolls {
         // The same preference as the upright orbit's: the pointer is read through the view's
@@ -2962,6 +2993,159 @@ mod tests {
         h.frame_with(vec![press(false)]);
         h.frame_with(vec![Event::ModifiersChanged(egui::Modifiers::NONE)]);
         h.frames(2);
+    }
+
+    /// One drag of 80 points straight down from a view looking almost over the pole, for the
+    /// "Free orbit while holding" tests: `mods` held at the press and let go after `release_after`
+    /// of its 16 steps. Returns the view before and after.
+    fn orbit_over_the_pole(
+        h: &mut crate::scenario::Harness,
+        button: egui::PointerButton,
+        mods: egui::Modifiers,
+        release_after: Option<usize>,
+    ) -> (solidcraft_viewport::Camera, solidcraft_viewport::Camera) {
+        use egui::{Event, vec2};
+        h.app.home.open = false;
+        h.frames(2);
+        h.app.cam = solidcraft_viewport::Camera { yaw: 0.0, pitch: 1.4, ..Default::default() };
+        let before = h.app.cam;
+        let at = h.app.viewport.rect.map_or(egui::pos2(600.0, 400.0), |r| r.center());
+        let press = |pressed, pos, modifiers| Event::PointerButton { pos, button, pressed, modifiers };
+        h.frame_with(vec![Event::ModifiersChanged(mods), Event::PointerMoved(at)]);
+        h.frame_with(vec![press(true, at, mods)]);
+        let mut held = mods;
+        for i in 1..=16 {
+            let mut events = Vec::new();
+            if release_after == Some(i - 1) {
+                held = egui::Modifiers::NONE;
+                events.push(Event::ModifiersChanged(held));
+            }
+            events.push(Event::PointerMoved(at + vec2(0.0, 5.0) * i as f32));
+            h.frame_with(events);
+        }
+        h.frame_with(vec![press(false, at + vec2(0.0, 80.0), held)]);
+        h.frame_with(vec![Event::ModifiersChanged(egui::Modifiers::NONE)]);
+        h.frames(2);
+        (before, h.app.cam)
+    }
+
+    fn turn_angle(before: &solidcraft_viewport::Camera, after: &solidcraft_viewport::Camera) -> f64 {
+        before.back().dot(after.back()).clamp(-1.0, 1.0).acos()
+    }
+
+    /// The turn of the 80-point drag over the pole: free orbit turns the whole 0.64 radian, the
+    /// turntable stops at the pole.
+    const FREE_TURN: f64 = 0.64;
+
+    fn is_free_turn(before: &solidcraft_viewport::Camera, after: &solidcraft_viewport::Camera) -> bool {
+        (turn_angle(before, after) - FREE_TURN).abs() < 1e-3
+    }
+
+    #[test]
+    fn free_orbit_key_defaults_to_none_and_changes_no_orbit() {
+        use egui::{Modifiers, PointerButton};
+        assert_eq!(crate::prefs::Prefs::default().free_orbit_key, "none");
+        let mut reference = crate::scenario::Harness::new();
+        let (before, plain) = orbit_over_the_pole(&mut reference, PointerButton::Secondary, Modifiers::NONE, None);
+        assert!(!is_free_turn(&before, &plain), "the turntable stops at the pole: {}", turn_angle(&before, &plain));
+        for mods in [Modifiers::ALT, Modifiers::CTRL] {
+            let mut h = crate::scenario::Harness::new();
+            let (before, held) = orbit_over_the_pole(&mut h, PointerButton::Secondary, mods, None);
+            assert!(!is_free_turn(&before, &held), "{mods:?} with no key chosen stays a turntable orbit");
+            assert_eq!(h.app.viewport.orbit_flip, None, "nothing is left set after the drag");
+        }
+        for mods in [Modifiers::NONE, Modifiers::SHIFT, Modifiers::ALT, Modifiers::CTRL, Modifiers::COMMAND] {
+            assert!(!crate::prefs::FreeOrbitKey::Off.held(mods));
+        }
+    }
+
+    #[test]
+    fn the_free_orbit_key_makes_one_drag_free_and_the_other_way_round() {
+        use egui::{
+            Modifiers,
+            PointerButton::{Middle, Secondary},
+        };
+        // Fusion orbits on the right button; Solidworks on the plain middle one (Ctrl and Shift
+        // there pan and zoom, so only Alt is a spare key for it).
+        for (key, mods, other, button, nav) in [
+            ("alt", Modifiers::ALT, Some(Modifiers::CTRL), Secondary, "fusion"),
+            ("ctrl", Modifiers::CTRL, Some(Modifiers::ALT), Secondary, "fusion"),
+            ("alt", Modifiers::ALT, None, Middle, "solidworks"),
+        ] {
+            let run = |free: bool, mods: Modifiers, release_after: Option<usize>| {
+                let mut h = crate::scenario::Harness::new();
+                h.app.preferences.nav = nav.into();
+                h.app.preferences.free_orbit = free;
+                h.app.preferences.free_orbit_key = key.into();
+                orbit_over_the_pole(&mut h, button, mods, release_after)
+            };
+            let label = format!("{key} {button:?}");
+            let (before, turntable) = run(false, Modifiers::NONE, None);
+            assert!(!is_free_turn(&before, &turntable), "{label}: no key stays upright");
+            if let Some(other) = other {
+                let (before, other_key) = run(false, other, None);
+                assert!(!is_free_turn(&before, &other_key), "{label}: another key changes nothing");
+            }
+            let (before, free) = run(false, mods, None);
+            assert!(is_free_turn(&before, &free), "{label}: the key makes the drag free, turn {}", turn_angle(&before, &free));
+            // With Free chosen, the key gives the turntable instead.
+            let (before, free_default) = run(true, Modifiers::NONE, None);
+            assert!(is_free_turn(&before, &free_default), "{label}: Free chosen stays free");
+            let (_, upright) = run(true, mods, None);
+            assert!(upright.back().dist(turntable.back()) < 1e-9, "{label}: the key turns a Free orbit into the turntable");
+            // Let go partway: the drag keeps the style it began with.
+            let (_, kept) = run(false, mods, Some(4));
+            assert!(kept.back().dist(free.back()) < 1e-9, "{label}: the drag keeps its mode");
+        }
+        // With "A drag keeps the navigation it started with" off, the keys held decide each frame.
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.free_orbit_key = "alt".into();
+        h.app.preferences.nav_drag_keeps_mode = false;
+        let (before, partly) = orbit_over_the_pole(&mut h, Secondary, Modifiers::ALT, Some(4));
+        assert!(!is_free_turn(&before, &partly));
+    }
+
+    #[test]
+    fn the_free_orbit_key_does_nothing_where_the_binding_needs_that_key() {
+        use crate::prefs::NavButton;
+        use egui::Modifiers;
+        let flip = |nav: &str, key: &str, button: Option<NavButton>, mods: Modifiers| {
+            let mut h = crate::scenario::Harness::new();
+            h.app.preferences.nav = nav.into();
+            h.app.preferences.free_orbit_key = key.into();
+            super::decide_orbit_flip(&mut h.app, button, mods);
+            h.app.viewport.orbit_flip
+        };
+        // Alt+left orbits in the Maya mapping: Alt is what orbits, so it can't also switch.
+        assert_eq!(flip("maya", "alt", None, Modifiers::ALT), Some(false));
+        // Fusion's right drag orbits with no key, so either key is spare.
+        assert_eq!(flip("fusion", "alt", Some(NavButton::Right), Modifiers::ALT), Some(true));
+        assert_eq!(flip("fusion", "ctrl", Some(NavButton::Right), Modifiers::CTRL), Some(true));
+        assert_eq!(flip("fusion", "ctrl", Some(NavButton::Right), Modifiers::NONE), Some(false));
+        assert_eq!(flip("fusion", "none", Some(NavButton::Right), Modifiers::ALT), Some(false));
+        // Ctrl+left orbit from empty space (every mapping) is the Ctrl key's own orbit.
+        assert_eq!(flip("fusion", "ctrl", None, Modifiers::CTRL), Some(false));
+        // Shift+middle is Fusion's orbit: Shift is needed, and Alt on top of it is spare.
+        assert_eq!(flip("fusion", "alt", Some(NavButton::Middle), Modifiers::SHIFT), Some(false));
+        assert_eq!(flip("fusion", "alt", Some(NavButton::Middle), Modifiers::SHIFT | Modifiers::ALT), Some(true));
+        // Ctrl+middle pans in Solidworks: no orbit, so nothing to switch.
+        assert_eq!(flip("solidworks", "ctrl", Some(NavButton::Middle), Modifiers::CTRL), Some(false));
+        assert_eq!(flip("solidworks", "alt", Some(NavButton::Middle), Modifiers::ALT), Some(true));
+    }
+
+    #[test]
+    fn a_bad_free_orbit_key_is_refused_and_a_good_one_is_kept() {
+        let mut h = crate::scenario::Harness::new();
+        for bad in ["shift", "meta", ""] {
+            let reply = h.call("ui.prefs", serde_json::json!({"free_orbit_key": bad}));
+            assert_eq!(reply["ok"], false, "{bad}: {reply}");
+        }
+        assert_eq!(h.app.preferences.free_orbit_key, "none");
+        for good in ["alt", "ctrl", "none"] {
+            let reply = h.call("ui.prefs", serde_json::json!({"free_orbit_key": good}));
+            assert_eq!(reply["ok"], true, "{good}: {reply}");
+            assert_eq!(h.app.preferences.free_orbit_key, good);
+        }
     }
 
     #[test]
