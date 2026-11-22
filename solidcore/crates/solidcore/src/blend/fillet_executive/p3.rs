@@ -155,7 +155,7 @@ pub enum NoRoomReason {
     /// ([`Self::ConcaveOverflow`] and the others).
     RailLeavesFace,
     /// The blends take the whole of a face they roll on, some at an angle to it (the fork's
-    /// `FacesOutlastTheirBlends`; `fixes.fillet_refuse_face_consuming_blends`, WR-320).
+    /// `FacesOutlastTheirBlends`; WR-320).
     FaceConsumed,
     /// A blend's rail runs inside the band another blend takes off a face they share (the
     /// fork's `BandsClearOtherRails`; `fixes.fillet_refuse_overlapping_bands`, WR-542).
@@ -344,6 +344,13 @@ pub struct ErrorInfo<O> {
     /// unsupported before). A note that names a site clears it. Read only under that code
     /// (`FilletSession::error_site`).
     pub no_room_without_site: bool,
+    /// Not upstream: the error of the classification that failed at the vertex noted with
+    /// [`FilletErrorType::CornerUnsupported`], which is why no corner was made there (read
+    /// it with [`ErrorInfo::unsupported_corner_cause`], which ignores it under any other
+    /// code). Every note clears it, so a later note under the same code (a corner's own
+    /// refusal, a setback not built) never reads as caused by an earlier classification;
+    /// only the executive's note of the unsupported corner sets it, after its note.
+    pub corner_cause: Option<SolidError>,
 }
 
 impl<O> Default for ErrorInfo<O> {
@@ -367,6 +374,7 @@ impl<O> Default for ErrorInfo<O> {
             entity_name: "\n".into(),
             no_room: None,
             no_room_without_site: false,
+            corner_cause: None,
         }
     }
 }
@@ -386,6 +394,7 @@ impl<O: Copy> ErrorInfo<O> {
         // (not upstream: the refusal goes with the code it explains)
         self.no_room = source.no_room;
         self.no_room_without_site = source.no_room_without_site;
+        self.corner_cause.clone_from(&source.corner_cause);
     }
 }
 
@@ -396,6 +405,18 @@ impl<O> ErrorInfo<O> {
     pub fn no_room_reason(&self) -> Option<NoRoomReason> {
         if self.code == FilletErrorType::NoRoom as i32 {
             self.no_room
+        } else {
+            None
+        }
+    }
+
+    /// The error that left the noted vertex without a corner, where its classification
+    /// failed (not upstream); `None` under any code but
+    /// [`FilletErrorType::CornerUnsupported`].
+    #[must_use]
+    pub fn unsupported_corner_cause(&self) -> Option<&SolidError> {
+        if self.code == FilletErrorType::CornerUnsupported as i32 {
+            self.corner_cause.as_ref()
         } else {
             None
         }
@@ -2902,7 +2923,7 @@ pub trait SolverGeometryAccess<O: ClassObject + SolutionObject + Ord> {
         ))
     }
     /// The fork's `SmFilletExecutive::FacesOutlastTheirBlends` over `solvers` (not
-    /// upstream; opt-in `fixes.fillet_refuse_face_consuming_blends`, WR-320): `false`
+    /// upstream; WR-320): `false`
     /// when the blends take the whole of a face they roll on, some at an angle to it.
     ///
     /// # Errors
@@ -3262,11 +3283,13 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut round_into_material = false;
         let mut rolls_over = false;
         let mut wraps = false;
+        let mut touches_rim = false;
         let mut overflowing = Vec::new();
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
             index += 1;
             let judged = access.geometry_rails_fit_judged(k, solver, self)?;
+            touches_rim |= judged.touches_rim;
             let continued = !judged.continued_cliffs.is_empty();
             if continued {
                 self.continued_cliffs
@@ -3307,6 +3330,20 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             if judged.into_material && !access.geometry_generator_is_linear(solver)? {
                 round_into_material = true;
             }
+        }
+        if touches_rim {
+            // At the open fit bound a closed rail touches the rim without leaving
+            // its face (#20282). Judge every solver before refusing: another selected
+            // edge may need a smaller radius, even when its rail crosses the rim.
+            let mut index = 0;
+            while let Some(solver) = self.solvers.get(index).copied() {
+                index += 1;
+                self.note_fit_on_its_faces(k, access, solver)?;
+            }
+            return self.record_no_room(
+                NoRoomReason::RailLeavesFace,
+                "Fillet Error: a closed rail touches the boundary of the face it rolls on (the blend is as large as the faces allow)",
+            );
         }
         // whether the other blends add material (concave), when one overflows
         let mut index = 0;
@@ -3394,7 +3431,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     }
 
     /// Refuse blends that take the whole of a face they roll on, some meeting it at an angle
-    /// (not upstream; opt-in `fixes.fillet_refuse_face_consuming_blends`, WR-320, #879:
+    /// (not upstream; WR-320, #879:
     /// `SmFilletExecutive::FacesOutlastTheirBlends`). The fork calls it in `CreateFilletBrep`
     /// after the fillet faces are built and before they are stitched (the diff in #879),
     /// on the trimmed rails; here it runs once the geometry exists, which is earlier. The
@@ -3410,9 +3447,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         k: &mut Kernel,
         access: &mut impl BrepCreationAccess<O>,
     ) -> Result<()> {
-        if k.fixes.fillet_refuse_face_consuming_blends
-            && !access.geometry_faces_outlast(k, &self.solvers)?
-        {
+        if !access.geometry_faces_outlast(k, &self.solvers)? {
             // the fork's 49f393d, a3d6d81 and 5e8c9c1 (WR-696): the largest radius that leaves
             // some of the face, for a polygon with every edge blended
             // (NoteFitOfPolygonsTakenWhole) and a plane bounded by one blended circle (the ball
@@ -3436,9 +3471,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         Ok(())
     }
 
-    /// Not the fork's (#2401, with `fixes.fillet_refuse_face_consuming_blends`): a plane face bounded by straight edges,
-    /// each blended with a constant ball, is taken whole once the least of its balls reaches
-    /// the radius that leaves some of it (`NoteFitOfPolygonsTakenWhole`'s bound, the deepest
+    /// Not the fork's (#2401, with WR-320's refusal): a plane face bounded by straight
+    /// edges, each blended with a constant ball, is taken whole once the least of its balls
+    /// reaches the radius that leaves some of it (`NoteFitOfPolygonsTakenWhole`'s bound, the deepest
     /// point of the face in the balls' terms), to within the blended edge's tolerance (a face
     /// of no extent). That is the face's own event, judged from its geometry before the
     /// corners and the trace, whose rails would have no length there; the refusal is
@@ -4458,9 +4493,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         self.refuse_blends_breaking_through(k, access)?;
         // not the fork's (#2401): a polygon face its blends take whole, refused before the
         // trace that its rails of no length would fail
-        if k.fixes.fillet_refuse_face_consuming_blends {
-            self.refuse_polygons_taken_whole(k, access)?;
-        }
+        self.refuse_polygons_taken_whole(k, access)?;
 
         // Not the fork's (#2546, WR-739): a rail whose ends would be one vertex, or that
         // lies past its arc's axis

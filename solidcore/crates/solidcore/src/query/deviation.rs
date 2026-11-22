@@ -20,6 +20,7 @@
 //! Bounded: at most [`MAX_SAMPLES`] drops; no recursion.
 
 use crate::curve::curve::{Curve, CurveKind};
+use crate::error::query::QueryFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
@@ -79,10 +80,7 @@ fn of(comb: Vec<(Point3, Point3)>, bound: Option<f64>) -> Result<Deviation> {
         }
     }
     let Some((max, at, to)) = worst else {
-        return Err(SolidError::query_failed(
-            OP,
-            "no station dropped onto the other",
-        ));
+        return Err(SolidError::query(OP, QueryFailure::NoStationDropped));
     };
     Ok(Deviation {
         max,
@@ -97,8 +95,9 @@ fn of(comb: Vec<(Point3, Point3)>, bound: Option<f64>) -> Result<Deviation> {
 ///
 /// # Errors
 ///
-/// `InvalidInput` for a station count outside [`MIN_SAMPLES`]..=[`MAX_SAMPLES`]; a query failure
-/// when no station drops onto `b`; those of the evaluations and the drops.
+/// `InvalidInput` for a station count outside [`MIN_SAMPLES`]..=[`MAX_SAMPLES`];
+/// [`QueryFailure::NoStationDropped`] when no station drops onto `b`; those of the evaluations
+/// and the drops.
 pub fn curve_deviation(k: &Kernel, a: &Curve, b: &Curve, samples: usize) -> Result<Deviation> {
     of(curve_pairs(k, a, b, samples)?, certified(a, b))
 }
@@ -147,8 +146,8 @@ pub struct DistanceDeviation {
 /// # Errors
 ///
 /// `InvalidInput` for a distance not finite or negative, or a station count outside
-/// [`MIN_SAMPLES`]..=[`MAX_SAMPLES`]; a query failure when no station drops onto `from`; those
-/// of the evaluations and the drops.
+/// [`MIN_SAMPLES`]..=[`MAX_SAMPLES`]; [`QueryFailure::NoStationDropped`] when no station drops
+/// onto `from`; those of the evaluations and the drops.
 pub fn distance_deviation(
     k: &Kernel,
     c: &Curve,
@@ -170,7 +169,7 @@ pub fn distance_deviation(
             });
         }
     }
-    worst.ok_or_else(|| SolidError::query_failed(OP, "no station dropped onto the other"))
+    worst.ok_or_else(|| SolidError::query(OP, QueryFailure::NoStationDropped))
 }
 
 /// How far curve `c` strays from `surface` over its parameter box `domain`, at `samples`

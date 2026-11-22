@@ -188,6 +188,7 @@ impl ExecutiveAccess<Handle> for Access {
     fn solver_rails_fit_judged(&mut self, _: &mut Kernel, _: Handle) -> Result<RailsFit> {
         Ok(RailsFit {
             fit: true,
+            touches_rim: false,
             rolls_over: false,
             into_material: false,
             left_across: Vec::new(),
@@ -371,6 +372,10 @@ impl ExecutiveAccess<Handle> for Access {
             max_vertex_gap: 0.0,
             max_edge_gap: 0.0,
         })
+    }
+    // the fake has no blend geometry: no face is taken whole (WR-320)
+    fn solvers_faces_outlast(&mut self, _: &mut Kernel, _: &[Handle]) -> Result<bool> {
+        Ok(true)
     }
     fn piecewise_merge(&mut self, k: &mut Kernel, _: &mut FilletExecutive<Handle>) -> Result<()> {
         assert!(k.context.doing_boolean());

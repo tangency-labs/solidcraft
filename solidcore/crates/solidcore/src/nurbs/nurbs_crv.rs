@@ -1237,19 +1237,19 @@ pub fn crv_eval(cur: &Curve, u: f64, side: Side) -> Result<Vec3> {
     let mut cw = CPoint::new(0.0, 0.0, 0.0, 0.0);
     // Upstream reads Pw[spn - p + i] unchecked; a span below p (a NaN u on a curve
     // with fewer than p + 1 control points) reads before Pw (UB-288): SM_ERR instead.
-    let spn_p = span.checked_sub(p).ok_or_else(|| {
+    let short = || {
         SolidError::b_spline(
             OP,
-            BSplineFailure::Failed("the curve has fewer control points than its span needs"),
+            BSplineFailure::ControlPointsShort {
+                span,
+                degree: p,
+                count: pw.len(),
+            },
         )
-    })?;
+    };
+    let spn_p = span.checked_sub(p).ok_or_else(short)?;
     for (i, &alpha) in values.iter().enumerate().take(p + 1) {
-        let aw = pw.get(spn_p + i).copied().ok_or_else(|| {
-            SolidError::b_spline(
-                OP,
-                BSplineFailure::Failed("the curve has fewer control points than its span needs"),
-            )
-        })?;
+        let aw = pw.get(spn_p + i).copied().ok_or_else(short)?;
         // MAC_A_updcpt: skip zero weights, add without multiplying for one.
         if alpha == 1.0 {
             cw.x += aw.x;
@@ -2812,6 +2812,15 @@ mod tests {
                     assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
                     assert_eq!(e.entity(), None);
                     assert!(!e.is_nurbs_failure());
+                    assert_eq!(
+                        e.nurbs_failure(),
+                        Some(&NurbsFailure::BSpline(BSplineFailure::ControlPointsShort {
+                            span: 2,
+                            degree: 3,
+                            count: 2,
+                        }))
+                    );
+                    assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
                 }
                 other => panic!("{other:?}"),
             }
