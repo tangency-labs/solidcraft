@@ -148,7 +148,7 @@ pub(crate) fn shell(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
 
 /// A refusal a thinner wall can cure: a fold, or a result that is not a solid.
 fn shell_may_be_thinner(e: &SmError) -> bool {
-    matches!(e, SmError::WallFolds { .. } | SmError::Refused(_) | SmError::RefusedWithDiagnostic { .. } | SmError::Status(_))
+    matches!(e, SmError::WallFolds { .. } | SmError::NotSolid | SmError::Refused(_) | SmError::RefusedWithDiagnostic { .. } | SmError::Status(_))
 }
 
 /// The walls tried under a refused one of `thickness`: from just under the wall the kernel
@@ -159,10 +159,11 @@ pub(crate) fn thinner_walls(thickness: f64, largest: Option<f64>) -> Vec<f64> {
         Some(l) => (l, &[0.95, 0.75, 0.5]),
         None => (thickness, &[0.5, 0.25]),
     };
-    steps.iter().map(|k| base * k).filter(|w| *w > 1e-6 && *w < thickness).collect()
+    // Rounded to the micrometre first, so the wall tried is the wall the message names.
+    steps.iter().map(|k| (base * k * 1e6).round() / 1e6).filter(|w| *w > 1e-6 && *w < thickness).collect()
 }
 
-/// The refusal of a shell of `thickness` with a hint that has been checked: the first of the
+/// The refusal of a shell of `thickness` with a hint that has been tried: the first of the
 /// thinner walls that `builds` is the one named, so the wall the message offers does work. Where
 /// none builds, the message says the wall is not the obstacle. `first` is the refusal itself.
 pub(crate) fn thinner_shell_hint(thickness: f64, failure: &SmError, first: KernelError, mut builds: impl FnMut(f64) -> bool) -> KernelError {
@@ -179,7 +180,7 @@ pub(crate) fn thinner_shell_hint(thickness: f64, failure: &SmError, first: Kerne
         } else {
             "the walls offset from this body do not close into a solid"
         };
-        return KernelError::Invalid(format!("shell: a wall of {t} mm does not fit: {why}; a wall of {w} mm builds (checked)"));
+        return KernelError::Invalid(format!("shell: a wall of {t} mm does not fit: {why}; a wall of {w} mm builds"));
     }
     match first {
         KernelError::Invalid(_) | KernelError::Failed(_) => KernelError::Invalid(format!(

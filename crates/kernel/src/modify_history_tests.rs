@@ -589,7 +589,7 @@ mod smlib {
         let first = || crate::KernelError::Invalid("fold".into());
         // The 0.95 wall fails, the 0.75 wall builds: that is the one named.
         let e = thinner_shell_hint(2.0, &folds, first(), |w| w < 0.8 * 0.8).to_string();
-        assert!(e.contains("a wall of 0.6 mm builds (checked)"), "{e}");
+        assert!(e.contains("a wall of 0.6 mm builds"), "{e}");
         let e = thinner_shell_hint(2.0, &folds, first(), |_| false).to_string();
         assert!(e.contains("no thinner wall builds either"), "{e}");
         assert!(!e.contains("shell_brep") && !e.contains("status") && !e.contains("1001"), "{e}");
@@ -605,7 +605,7 @@ mod smlib {
             Ok(_) => {}
             Err(e) => {
                 let e = e.to_string();
-                if let Some(at) = e.rfind("a wall of ").and_then(|i| e[i + 10..].find(" mm builds (checked)").map(|j| (i + 10, i + 10 + j))) {
+                if let Some(at) = e.rfind("a wall of ").and_then(|i| e[i + 10..].find(" mm builds").map(|j| (i + 10, i + 10 + j))) {
                     let w: f64 = e[at.0..at.1].parse().unwrap();
                     assert!(offset_backend::shell(&rod, &[top], w).is_ok(), "{e}");
                 } else {
