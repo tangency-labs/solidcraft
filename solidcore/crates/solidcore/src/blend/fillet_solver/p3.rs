@@ -70,7 +70,8 @@ use crate::blend::fillet_geom::p1::{
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
-use crate::error::{ignored, EntityRef, Result, SolidError};
+use crate::error::blend::{BlendFailure, SolverFailure};
+use crate::error::{ignored, EntityRef, Failure, Result, Site, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -216,7 +217,12 @@ pub fn find_fillet_tsect_pnt_in(
             return Err(if e.is_unported_or_cancelled() {
                 e
             } else {
-                SolidError::blend_missing(OP_F, "the surface's cache")
+                Failure::new(
+                    OP_F,
+                    BlendFailure::Solver(SolverFailure::SurfaceCacheNotBuilt),
+                )
+                .caused_by(e)
+                .into_error()
             });
         }
     }
@@ -237,7 +243,7 @@ pub fn find_fillet_tsect_pnt_in(
         SolutionRequested::All,
     )?;
     let first = solutions.get(0).ok_or_else(|| {
-        SolidError::blend_failed(OP_F, "the point does not drop onto the first surface")
+        SolidError::blend_solver(OP_F, SolverFailure::PointDoesNotDropOnSurface { side: 0 })
     })?;
     // extract surface1 UVPoint
     let uv1 = Point2::new(first.start.param(0)?, first.start.param(1)?);
@@ -254,7 +260,7 @@ pub fn find_fillet_tsect_pnt_in(
         SolutionRequested::All,
     )?;
     let first = solutions.get(0).ok_or_else(|| {
-        SolidError::blend_failed(OP_F, "the point does not drop onto the second surface")
+        SolidError::blend_solver(OP_F, SolverFailure::PointDoesNotDropOnSurface { side: 1 })
     })?;
     // extract surface2 UVPoint
     let uv2 = Point2::new(first.start.param(0)?, first.start.param(1)?);
@@ -273,10 +279,10 @@ pub fn find_fillet_tsect_pnt_in(
         new_tsect,
     )?;
     if !found_solution {
-        return Err(SolidError::blend_failed(
-            OP_F,
-            "the fillet cross section has no solution",
-        ));
+        return Err(
+            SolidError::blend_solver(OP_F, SolverFailure::CrossSectionNotFound)
+                .or_at(Site::point(pnt_to_drop)),
+        );
     }
 
     // store trace direction in data structure
@@ -499,7 +505,11 @@ impl FilletSolver {
                         .variable_radius_mut()
                         .ok_or_else(|| invalid("variable-radius type without its solver"))?;
                     let curve = var_rad.curve_based.original_curve().ok_or_else(|| {
-                        SolidError::blend_missing(OP, "the variable radius law's curve")
+                        SolidError::blend_null_defect(
+                            OP,
+                            "the variable-radius solver has no law curve, though its setup \
+                             sets one before the trace steps",
+                        )
                     })?;
                     let mut ivl = var_rad.fillet_law_interval();
                     // This will usually be outside of this domain, so:
@@ -513,23 +523,16 @@ impl FilletSolver {
                         SolutionRequested::Single,
                         &GlobalPointSolveOptions::default(),
                     )?;
-                    if solutions.len() != 1 {
-                        return Err(SolidError::blend_failed(
+                    let [foot] = solutions.as_slice() else {
+                        return Err(SolidError::blend_solver(
                             OP,
-                            "the point does not drop onto the law's curve once",
+                            SolverFailure::NoSingleCurveFoot {
+                                count: solutions.len(),
+                            },
                         ));
-                    }
+                    };
                     // Parameter gets stored in here:
-                    next.user_doubles[0] = solutions
-                        .get(0)
-                        .ok_or_else(|| {
-                            SolidError::blend_failed(
-                                OP,
-                                "the point does not drop onto the law's curve once",
-                            )
-                        })?
-                        .start
-                        .param(0)?;
+                    next.user_doubles[0] = foot.start.param(0)?;
                     // Status ignored upstream; reported as for the call above (UB-252).
                     ops.setup_offset_values(next, Some(&mut radius))?;
                 }
@@ -618,7 +621,11 @@ impl FilletSolver {
                         ops.solver_mut().reload_surface_offsets()?;
 
                         if !found_solution {
-                            return Err(SolidError::blend_failed(OP_S, "the step has no solution"));
+                            return Err(SolidError::blend_solver(
+                                OP_S,
+                                SolverFailure::CrossSectionNotFound,
+                            )
+                            .or_at(Site::point(plane_orig)));
                         }
                     }
                 }
@@ -745,9 +752,11 @@ impl FilletSolver {
             // Load the other variables being solved for into the fillet point.
             for (count, &v) in x.iter().skip(surf2_index + 2).enumerate() {
                 if count == MAX_USER_DOUBLES {
-                    return Err(SolidError::blend_failed(
+                    return Err(SolidError::blend_solver(
                         OP_S,
-                        "more variables than the fillet point holds",
+                        SolverFailure::TooManySolverValues {
+                            limit: MAX_USER_DOUBLES,
+                        },
                     ));
                 }
                 if let Some(slot) = next.user_doubles.get_mut(count) {
@@ -946,7 +955,13 @@ impl FilletSolver {
                 .fillet_edge(rail)?
                 .curve_class
                 .clone()
-                .ok_or_else(|| SolidError::blend_missing(OP_T, "the rail's curve classification"))
+                .ok_or_else(|| {
+                    SolidError::blend_null_defect(
+                        OP_T,
+                        "the rail has no curve classification, though the trim classifies \
+                         both rails before it splits the fillet surface",
+                    )
+                })
         };
         let cc1 = rail_class(fillets, 0)?;
         let cc2 = rail_class(fillets, 1)?;
@@ -1217,12 +1232,12 @@ pub fn refine_rail_curve_classification_scoped_with_ops(
     // sTsectPntMin / sTsectPntMax too (RailEdgeuseIntersect writes them in place)
     let mut tsect_min = TsectPnt::default();
     let mut tsect_max = TsectPnt::default();
-    let mut failed = false;
+    let mut unremoved = 0usize;
 
     for ii in (1..=num_small_ivls).rev() {
         // The first and last intervals should have been squeezed by TestRollOver
         if ii == num_ivls {
-            failed = true;
+            unremoved += 1;
             continue;
         }
 
@@ -1233,13 +1248,13 @@ pub fn refine_rail_curve_classification_scoped_with_ops(
 
         // Must have the interval classify to the same edge on both ends.
         let Some(edge) = start_edge.filter(|_| start_edge == end_edge) else {
-            failed = true;
+            unremoved += 1;
             continue;
         };
 
         // the Edgeuse connecting the RailFace and the Edge that crosses the Rail
         let Some(side_eu) = edge::edgeuse_of_face(target, edge, rail_face)? else {
-            failed = true;
+            unremoved += 1;
             continue;
         };
 
@@ -1261,7 +1276,7 @@ pub fn refine_rail_curve_classification_scoped_with_ops(
 
         // a guess for the Edge parameter where it crosses the rail at the Ivl min
         let Some((guess_min, _)) = drop_param(k, edge_curve, &edge_ivl, pnt_min, true)? else {
-            failed = true;
+            unremoved += 1;
             continue;
         };
 
@@ -1278,7 +1293,7 @@ pub fn refine_rail_curve_classification_scoped_with_ops(
 
         // a guess for the Edge parameter at the Ivl max
         let Some((guess_max, _)) = drop_param(k, edge_curve, &edge_ivl, pnt_max, true)? else {
-            failed = true;
+            unremoved += 1;
             continue;
         };
 
@@ -1300,7 +1315,7 @@ pub fn refine_rail_curve_classification_scoped_with_ops(
 
         // Can't squeeze the interval if it's not smaller than tolerance
         if pnt_min.distance(pnt_max) > zone_tol_3d {
-            failed = true;
+            unremoved += 1;
             continue;
         }
 
@@ -1319,10 +1334,10 @@ pub fn refine_rail_curve_classification_scoped_with_ops(
         classification.remove_at(ii)?;
     }
 
-    if failed {
-        return Err(SolidError::blend_failed(
+    if unremoved > 0 {
+        return Err(SolidError::blend_solver(
             OP_R,
-            "a small classification interval could not be removed",
+            SolverFailure::ShortIntervalsNotRemoved { count: unremoved },
         ));
     }
     Ok(())
@@ -1424,9 +1439,8 @@ pub fn calc_rail_x_edge_with_ops(
             break;
         }
     }
-    let side_eu = side_eu.ok_or_else(|| {
-        SolidError::blend_missing(OP_X, "the side edge's edge use on the rail's face")
-    })?;
+    let side_eu = side_eu
+        .ok_or_else(|| SolidError::blend_solver(OP_X, SolverFailure::SideEdgeNotOnRailFace))?;
     let ivl = edge::interval(target, side_edge)?;
     let mut have_guess_t = false;
     let mut guess_param = 0.0;
@@ -1434,7 +1448,7 @@ pub fn calc_rail_x_edge_with_ops(
         let curve =
             edge::curve(target, side_edge)?.ok_or_else(|| invalid("edge without a curve"))?;
         let (t, _) = drop_param(k, curve, &ivl, g, false)?.ok_or_else(|| {
-            SolidError::blend_failed(OP_X, "the guess does not drop onto the side edge")
+            SolidError::blend_solver(OP_X, SolverFailure::GuessDoesNotDropOnSideEdge)
         })?;
         have_guess_t = true;
         guess_param = t;
@@ -1467,16 +1481,19 @@ pub fn calc_rail_x_edge_with_ops(
         }
     }
     if !found_intersection {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend_solver(
             OP_X,
-            "the rail does not cross the side edge",
+            SolverFailure::RailMissesSideEdge,
         ));
     }
 
-    let face = fillets
-        .fillet_edge(rail)?
-        .orig_face
-        .ok_or_else(|| SolidError::blend_missing(OP_X, "the rail's original face"))?;
+    let face = fillets.fillet_edge(rail)?.orig_face.ok_or_else(|| {
+        SolidError::blend_null_defect(
+            OP_X,
+            "the rail's fillet edge has no original face, though each rail is created on \
+                 its face",
+        )
+    })?;
     let uv = fillets
         .fillet_vertexuse(vu)?
         .tsect_pnt()
@@ -1493,10 +1510,13 @@ pub fn calc_rail_x_edge_with_ops(
             .geom(fillet_geom)?
             .rail(1 - rail_index)
             .ok_or_else(|| invalid("fillet geometry without rail"))?;
-        let face1 = fillets
-            .fillet_edge(rail1)?
-            .orig_face
-            .ok_or_else(|| SolidError::blend_missing(OP_X, "the other rail's original face"))?;
+        let face1 = fillets.fillet_edge(rail1)?.orig_face.ok_or_else(|| {
+            SolidError::blend_null_defect(
+                OP_X,
+                "the other rail's fillet edge has no original face, though each rail is \
+                     created on its face",
+            )
+        })?;
         let uv1 = fillets
             .fillet_vertexuse(vu)?
             .tsect_pnt()
@@ -1567,7 +1587,6 @@ impl FilletSolver {
         ownership: &mut dyn RailOwnership,
     ) -> Result<()> {
         const OP_P: &str = "blend::fillet_solver::p3::process_full_roll_over";
-        let nul = |what: &'static str| SolidError::blend_missing(OP_P, what);
         let geom = fillet_geom;
 
         let solver_eu = self
@@ -1587,18 +1606,31 @@ impl FilletSolver {
             .geom(geom)?
             .fillet_surface(None)?
             .cloned()
-            .ok_or_else(|| nul("the fillet surface"))?;
+            .ok_or_else(|| {
+                SolidError::blend_null_defect(
+                    OP_P,
+                    "the fillet geometry has no fillet surface, though the roll-over runs on \
+                     a fillet whose surface the solver has built",
+                )
+            })?;
         let mut rail = fillets
             .geom(geom)?
             .rail(roll_over_rail_index)
             .ok_or_else(|| invalid("fillet geometry without rail"))?;
-        let orig_curve = edge::curve(fillets.brep(), rail)?
-            .cloned()
-            .ok_or_else(|| nul("the rail's curve"))?;
-        let orig_face = fillets
-            .fillet_edge(rail)?
-            .orig_face
-            .ok_or_else(|| nul("the rail's original face"))?;
+        let orig_curve = edge::curve(fillets.brep(), rail)?.cloned().ok_or_else(|| {
+            SolidError::blend_null_defect(
+                OP_P,
+                "the rail has no curve, though the solver stores each rail's curve with \
+                     the fillet surface",
+            )
+        })?;
+        let orig_face = fillets.fillet_edge(rail)?.orig_face.ok_or_else(|| {
+            SolidError::blend_null_defect(
+                OP_P,
+                "the rail's fillet edge has no original face, though each rail is created \
+                     on its face",
+            )
+        })?;
         let fu = face_p2::upward_faceuse(target, orig_face)?
             .ok_or_else(|| invalid("face without upward face use"))?;
 
@@ -1627,9 +1659,9 @@ impl FilletSolver {
                 test_manifold_tangent_rollover(k, target, side_edge, self.tangency_tolerance)?;
             if tangent {
                 // Unimplemented Tangent Rollover Case
-                return Err(SolidError::blend_failed(
+                return Err(SolidError::blend_solver(
                     OP_P,
-                    "a tangent roll-over is not handled",
+                    SolverFailure::TangentRolloverUnhandled,
                 ));
             }
 
@@ -1659,8 +1691,8 @@ impl FilletSolver {
         // Get the edgeuse that goes along the rail's direction
         let mut start_eu = start_eu.ok_or_else(|| invalid("no edge nearest the rail start"))?;
         if orient != eu::orientation(target, start_eu)? {
-            start_eu =
-                eu::mate(target, start_eu)?.ok_or_else(|| nul("the start edge use's mate"))?;
+            start_eu = eu::mate(target, start_eu)?
+                .ok_or_else(|| SolidError::blend_solver(OP_P, SolverFailure::EdgeUseWithoutMate))?;
         }
 
         fillets
@@ -1677,8 +1709,8 @@ impl FilletSolver {
                 eu::edge(target, curr_eu)?.ok_or_else(|| invalid("edge use without edge"))?;
             let radial_eu =
                 eu::radial(target, curr_eu)?.ok_or_else(|| invalid("edge use without radial"))?;
-            let side_face =
-                eu::face(target, radial_eu)?.ok_or_else(|| nul("the radial edge use's face"))?;
+            let side_face = eu::face(target, radial_eu)?
+                .ok_or_else(|| SolidError::blend_solver(OP_P, SolverFailure::EdgeUseWithoutFace))?;
             let next_vu = eu::vertexuse(target, next_eu)?
                 .ok_or_else(|| invalid("edge use without vertex use"))?;
             let curr_v = target
@@ -1734,10 +1766,13 @@ impl FilletSolver {
                 .offset_distance()
                 .abs();
             // `this` is the solver of the geometry being rolled over
-            let solver_id = fillets
-                .geom(geom)?
-                .fillet_solver()
-                .ok_or_else(|| nul("the fillet geometry's solver"))?;
+            let solver_id = fillets.geom(geom)?.fillet_solver().ok_or_else(|| {
+                SolidError::blend_null_defect(
+                    OP_P,
+                    "the fillet geometry has no solver, though every fillet geometry is created \
+                     by its solver",
+                )
+            })?;
             let _new_side_fg: Option<FilletGeomId> = self.create_cliff_roll_over_side_fg(
                 k,
                 target,
@@ -1777,8 +1812,13 @@ impl FilletSolver {
                         break;
                     }
                 }
-                let edge_on_edge =
-                    edge_on_edge.ok_or_else(|| nul("the edge on the extended edge"))?;
+                let edge_on_edge = edge_on_edge.ok_or_else(|| {
+                    SolidError::blend_null_defect(
+                        OP_P,
+                        "the roll-over's new vertex has no edge on the extended edge among \
+                             its first three, though the side fillet geometry builds one there",
+                    )
+                })?;
                 compute_support_edge(
                     k,
                     fillets,
@@ -1792,10 +1832,13 @@ impl FilletSolver {
         }
 
         // Finally, trim all rails of the fillet
-        let solver_id = fillets
-            .geom(geom)?
-            .fillet_solver()
-            .ok_or_else(|| nul("the fillet geometry's solver"))?;
+        let solver_id = fillets.geom(geom)?.fillet_solver().ok_or_else(|| {
+            SolidError::blend_null_defect(
+                OP_P,
+                "the fillet geometry has no solver, though every fillet geometry is \
+                     created by its solver",
+            )
+        })?;
         fillets.trim_rail_curves_with_solver(k, geom, solver_id, self, target)
     }
 }
@@ -1803,7 +1846,6 @@ impl FilletSolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::blend::BlendFailure;
 
     /// Fork 66b02de (`SplitAndTrimFilletSurface`: `SER( sIvl.Intersect(..) )`): two
     /// intervals that do not meet. Upstream drops the status and trims to an unset
@@ -2340,9 +2382,8 @@ mod tests {
             [&Brep::new(), &Brep::new()],
         );
         let e = r.unwrap_err();
-        assert_eq!(
-            e.blend_failure(),
-            Some(&BlendFailure::Missing("the rail's curve classification")),
+        assert!(
+            matches!(e.blend_failure(), Some(BlendFailure::Defect { .. })),
             "{e:?}"
         );
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
@@ -2378,8 +2419,8 @@ mod tests {
         let e = r.unwrap_err();
         assert_eq!(
             e.blend_failure(),
-            Some(&BlendFailure::Failed(
-                "a small classification interval could not be removed"
+            Some(&BlendFailure::Solver(
+                SolverFailure::ShortIntervalsNotRemoved { count: 3 }
             )),
             "{e:?}"
         );
@@ -2402,9 +2443,7 @@ mod tests {
         let e = r.unwrap_err();
         assert_eq!(
             e.blend_failure(),
-            Some(&BlendFailure::Missing(
-                "the side edge's edge use on the rail's face"
-            )),
+            Some(&BlendFailure::Solver(SolverFailure::SideEdgeNotOnRailFace)),
             "{e:?}"
         );
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
