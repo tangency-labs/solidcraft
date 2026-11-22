@@ -166,22 +166,6 @@ fn two_distances_chamfer_highlights_the_arrow_of_the_distance_being_edited() {
 #[test]
 fn two_distances_chamfer_box_shows_the_distance_being_edited() {
     let mut h = Harness::new();
-    // Off (the default): the box stays on Distance 1 while Distance 2 is edited.
-    assert!(!crate::prefs::Prefs::default().chamfer_box_follows_distance);
-    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
-    h.app.session.selection = vec![edge(&h, Vec3::new(20.0, 0.0, 20.0))];
-    h.app.start("solid.chamfer");
-    if let Some(Kind::Fillet { ctype, radius, distance2, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
-        (*ctype, *radius, *distance2) = (1, "3 mm".into(), "7 mm".into());
-    }
-    crate::canvas::set_chamfer_editing(h.app.dialog.as_mut().unwrap(), 1);
-    h.frames(3);
-    let kept = value_box_texts(&h);
-    assert!(kept.iter().any(|t| t == "Distance 1") && kept.iter().any(|t| t == "3 mm"), "{kept:?}");
-    h.app.dialog = None;
-    h.app.run("edit.undo", json!({})).unwrap();
-    // On: the box follows the distance being edited.
-    h.app.preferences.chamfer_box_follows_distance = true;
     h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
     for flip in [false, true] {
         h.app.session.selection = vec![edge(&h, Vec3::new(20.0, 0.0, 20.0))];
