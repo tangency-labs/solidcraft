@@ -202,6 +202,10 @@ pub struct WorkCounters {
     blends_recertified: Cell<u64>,
     vertex_drops: Cell<u64>,
     seam_tests: Cell<u64>,
+    line_scratch_boxes: Cell<u64>,
+    line_roots_added: Cell<u64>,
+    line_leaves_unfinished: Cell<u64>,
+    line_roots_unshown: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -362,6 +366,34 @@ impl WorkCounters {
         self.ball_certified_roots.get()
     }
 
+    /// Parameter boxes the certified pass of the line/surface leaf solve enclosed
+    /// (`surface::surface::certified_line`), over all leaves. Not the fork's.
+    #[must_use]
+    pub fn line_scratch_boxes(&self) -> u64 {
+        self.line_scratch_boxes.get()
+    }
+
+    /// Crossings the certified pass of the line/surface leaf solve added: certified
+    /// roots that the leaf solve's guesses had not found. Not the fork's.
+    #[must_use]
+    pub fn line_roots_added(&self) -> u64 {
+        self.line_roots_added.get()
+    }
+
+    /// Leaves whose certified pass stopped at its bound on boxes
+    /// (`certified_line::MAX_SCRATCH_BOXES`) before deciding every box. Not the fork's.
+    #[must_use]
+    pub fn line_leaves_unfinished(&self) -> u64 {
+        self.line_leaves_unfinished.get()
+    }
+
+    /// Certified roots the pass did not report because the gap at the point to report
+    /// was not enclosed within the tolerance. Not the fork's.
+    #[must_use]
+    pub fn line_roots_unshown(&self) -> u64 {
+        self.line_roots_unshown.get()
+    }
+
     /// Curved intersection pieces classified as running along a face edge
     /// (`CurveClassification::classify_edge_interval`, WR-305): each one certified within the
     /// intersection tolerance of it as a whole (`curve_runs_along`, or the worst-first bound of
@@ -421,6 +453,10 @@ impl WorkCounters {
         self.classification_snapshots.set(0);
         self.orient_boxes.set(0);
         self.ball_certified_roots.set(0);
+        self.line_scratch_boxes.set(0);
+        self.line_roots_added.set(0);
+        self.line_leaves_unfinished.set(0);
+        self.line_roots_unshown.set(0);
         self.curved_edge_runs.set(0);
         self.blends_recertified.set(0);
         self.vertex_drops.set(0);
@@ -542,6 +578,25 @@ impl WorkCounters {
     pub(crate) fn add_ball_certified_root(&self) {
         self.ball_certified_roots
             .set(self.ball_certified_roots.get().saturating_add(1));
+    }
+
+    /// Counts one leaf's certified line pass: the boxes it enclosed, the roots it left
+    /// unreported, and whether it stopped at its bound.
+    pub(crate) fn add_line_pass(&self, boxes: u64, unshown: u64, finished: bool) {
+        self.line_scratch_boxes
+            .set(self.line_scratch_boxes.get().saturating_add(boxes));
+        self.line_roots_unshown
+            .set(self.line_roots_unshown.get().saturating_add(unshown));
+        if !finished {
+            self.line_leaves_unfinished
+                .set(self.line_leaves_unfinished.get().saturating_add(1));
+        }
+    }
+
+    /// Counts one crossing the certified line pass added.
+    pub(crate) fn add_line_root(&self) {
+        self.line_roots_added
+            .set(self.line_roots_added.get().saturating_add(1));
     }
 
     /// Counts one curved piece certified to run along a face edge.

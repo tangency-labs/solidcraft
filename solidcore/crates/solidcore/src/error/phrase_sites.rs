@@ -134,7 +134,7 @@ const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/blend/fillet_overflow.rs", 31),
     ("solidcore/src/blend/fillet_removal.rs", 3),
     ("solidcore/src/blend/fillet_removal/ring.rs", 5),
-    ("solidcore/src/blend/fillet_section/certificate.rs", 13),
+    ("solidcore/src/blend/fillet_section/certificate.rs", 11),
     ("solidcore/src/blend/fillet_section/continuation.rs", 2),
     ("solidcore/src/blend/fillet_section/definition.rs", 6),
     ("solidcore/src/blend/fillet_section/definition_box.rs", 12),
@@ -162,6 +162,7 @@ const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/blend/identify_fillet.rs", 4),
     ("solidcore/src/blend/law_corners.rs", 7),
     ("solidcore/src/blend/round_room.rs", 1),
+    ("solidcore/src/geom/nurbs_enclosure.rs", 2),
 ];
 
 #[cfg(test)]

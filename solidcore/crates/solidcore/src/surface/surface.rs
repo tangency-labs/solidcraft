@@ -9,6 +9,7 @@
 
 pub mod approximate;
 pub mod assert_valid;
+pub mod certified_line;
 pub mod exact_pieces;
 pub mod fold_certificate;
 pub mod p1;

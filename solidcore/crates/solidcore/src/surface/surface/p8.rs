@@ -2064,6 +2064,14 @@ impl Surface {
         gs.surface_cache = Some(cache);
         gs.face_queries = face_queries;
         gs.face_cache = face_cache;
+        // (not upstream) the net the certified pass runs on, for the kinds whose net is
+        // the surface; a net that cannot be made leaves the guesses alone, as upstream
+        let net = match super::certified_line::LineNet::of(k, cache.surface()) {
+            Ok(net) => net,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => None,
+        };
+        let mut gs = super::p10::CertifiedLsi::new(gs, net);
 
         // traverse curve and surface sub-division trees
         // for each sub-division leaf pair that has intersecting boundaries
@@ -2078,6 +2086,12 @@ impl Surface {
             },
             &mut sols,
         )?;
+        // (not upstream) the certified pass: the crossings the leaves' guesses left
+        // (`surface::surface::p10`, module docs), added to the solve's solutions
+        std::mem::swap(&mut gs.solver.base.solutions, &mut sols);
+        let certified = gs.certified_pass(k);
+        std::mem::swap(&mut gs.solver.base.solutions, &mut sols);
+        certified?;
         // restore the original scaling to solution parameters
         for ii in 0..sols.len() {
             let sol = sols

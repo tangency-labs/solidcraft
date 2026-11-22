@@ -158,6 +158,7 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::surface_silhouette::SurfaceSilhouette;
 use crate::intersect::surface_tracer::SurfaceTrace;
 use crate::kernel::Kernel;
+use std::borrow::Cow;
 
 #[cfg(test)]
 use crate::math::EFF_ZERO_DEG;
@@ -2122,20 +2123,33 @@ impl Surface {
         k: &Kernel,
         uv_domain: &Extent2d,
     ) -> Result<Option<Extent3d>> {
+        Ok(self
+            .certified_net(k)?
+            .and_then(|net| net.piece_box(uv_domain))
+            .filter(Extent3d::is_defined))
+    }
+
+    /// The net the surface is evaluated on, for the kinds whose net is the surface: a
+    /// B-spline's own, or the NURB of a cone, sphere, torus, surface of revolution or
+    /// surface of extrusion, made when missing; `None` for every other kind (not upstream;
+    /// the one list of these kinds, read by [`Surface::certified_bounding_box`] and the
+    /// certified line solve, [`super::certified_line`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of making a missing NURB.
+    pub(crate) fn certified_net(&self, k: &Kernel) -> Result<Option<Cow<'_, BSplineSurface>>> {
         Ok(match self.kind() {
-            SurfaceKind::BSpline(s) => s.piece_box(uv_domain),
+            SurfaceKind::BSpline(s) => Some(Cow::Borrowed(s)),
             SurfaceKind::Cone(_)
             | SurfaceKind::Sphere(_)
             | SurfaceKind::Torus(_)
             | SurfaceKind::SurfOfRevolution(_) => {
-                self.analytic_base_with_nurb(k)?.piece_box(uv_domain)
+                Some(Cow::Borrowed(self.analytic_base_with_nurb(k)?))
             }
-            SurfaceKind::SurfOfExtrusion(_) => {
-                self.extrusion_base_with_nurb(k)?.piece_box(uv_domain)
-            }
+            SurfaceKind::SurfOfExtrusion(_) => Some(self.extrusion_base_with_nurb(k)?),
             _ => None,
-        }
-        .filter(Extent3d::is_defined))
+        })
     }
 
     /// [`Surface::calculate_bounding_box`] with upstream's optional basis guesses

@@ -25,6 +25,7 @@ pub mod krawczyk;
 pub mod local_solve1d;
 pub mod local_solve_nd;
 pub mod matrix;
+pub mod nurbs_enclosure;
 pub mod object;
 pub mod periodic_extent1d;
 pub mod plane_height;

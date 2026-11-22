@@ -461,24 +461,24 @@
       }
     },
     "sweeps": {
-      "cases": 95,
+      "cases": 97,
       "chain": {
         "1": 34,
         "10": 2,
         "109": 1,
         "13": 1,
         "14": 1,
-        "2": 3,
+        "2": 5,
         "25": 1,
         "28": 1,
         "7": 42,
         "8": 2
       },
       "expressible": 87,
-      "not_expressible": 7,
+      "not_expressible": 9,
       "operation_expressible": 88,
       "reasons": {
-        "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 3,
+        "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 5,
         "refused or failed in SolidCraft, not in a kernel operation": 4
       },
       "ungraded": {
@@ -2059,6 +2059,18 @@
       "case": "surfaces/cov-untrim-face-without-holes-refused",
       "why": [
         "no kernel operation ran before the failure: step 5 (surface.untrim): invalid input: the face has no holes to remove (restore its outer boundary instead)"
+      ]
+    },
+    {
+      "case": "sweeps/20499-revolve-two-sided-130-40",
+      "why": [
+        "no kernel operation made a body the case ends with"
+      ]
+    },
+    {
+      "case": "sweeps/20499-revolve-two-sided-40-130",
+      "why": [
+        "no kernel operation made a body the case ends with"
       ]
     },
     {
