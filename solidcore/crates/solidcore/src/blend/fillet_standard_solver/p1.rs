@@ -54,6 +54,16 @@
 //! | [`JacobianSurfaces`]                                     | the `rpSurface1`, `rpSurface2` arguments of `LoadJacobian` |
 //!
 //! Deviations:
+//! - **The edge curve continued as its end span.** (not upstream, tangency-labs/solidcraft#20705)
+//!   [`CurveBasedFs::evaluate_base_curve`] continues the edge curve past its ends C-infinity
+//!   (its end span's polynomial, `CreateExtendedCurve`'s precise extension), where upstream
+//!   continues it G1. The variable radius solver reads the curve's parameter as the radius
+//!   law's argument, and the law is continued past the edge as its end span's polynomial
+//!   (#2706): a G1 extension keeps the curve's tangent at the joint but not its speed, so the
+//!   radius by distance along the round turned there, a corner of the balls that neither the
+//!   law nor the faces have. The skin's hold (`FlushCurve`, #15256) cannot prove a skin of
+//!   smooth spans over that corner, and split the spans about it to its station cap (minutes
+//!   of work before the refusal). A rational arc's continuation stays on its conic.
 //! - **Rails that meet end at one point.** (WR-594, the fork's tangency-labs/smlib
 //!   `5fdefb9`; no longer opt-in) `CircularCrossSectionFsg::create_surface_from_curves`
 //!   moves both rails' end control points to their midpoint at an end where they lie
@@ -1812,8 +1822,10 @@ impl CurveBasedFs {
     /// `0..=num_derivs` of the extended curve (when there is one) or the original
     /// curve at `parameter`. A parameter within `SM_EFF_ZERO * (1 + |min| + |max|)`
     /// outside that curve's interval snaps to its end; one further out extends the
-    /// original (a B-spline based curve) with `G1` continuity to twice the overshoot,
-    /// at least a tenth of the interval length past the end, and keeps the extension.
+    /// original (a B-spline based curve) as its end span's polynomial (C-infinity, not
+    /// upstream's G1: the parameter runs on past the end at the speed it has there, as the
+    /// radius law read by it does, #2706) to twice the overshoot, at least a tenth of the
+    /// interval length past the end, and keeps the extension.
     ///
     /// # Errors
     ///
@@ -1887,7 +1899,11 @@ impl CurveBasedFs {
                 } else if extend_param < ivl.max() + len / 10.0 {
                     extend_param = ivl.max() + len / 10.0;
                 }
-                let extended = bsc.create_extended_curve(extend_param, ContinuityType::G1, true)?;
+                // (not upstream's G1, which keeps the tangent but not the speed: the radius law
+                // read by this parameter would turn at the joint, a corner of the balls; the
+                // module's Deviations)
+                let extended =
+                    bsc.create_extended_curve(extend_param, ContinuityType::CInfinity, true)?;
                 // (upstream evaluates a NULL extension: it is always made here, the
                 // parameter lies outside the original's interval)
                 let extended = extended.ok_or_else(|| {
@@ -3785,6 +3801,60 @@ mod tests {
             SolidError::blend_failed(OP_BASE, "a curve that is not a B-spline cannot be extended")
         );
         assert_eq!(fs.type_string(), "SmCurveBasedFS_TYPE");
+    }
+
+    /// tangency-labs/solidcraft#20705: past an arc's end the edge curve runs on as its end
+    /// span's polynomial, so it stays on the arc's circle and its parameter keeps the speed it
+    /// has at the end. A variable round reads its radius law by that parameter: with upstream's
+    /// G1 extension (tangent kept, speed not) the radius by distance turned at the edge's end,
+    /// and the skin's hold split the spans about the turn to its station cap.
+    #[test]
+    fn base_curve_runs_on_past_an_arc_on_its_circle_at_its_end_speed() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::nurbs::b_spline_curve::NurbCircleParam;
+        let k = &Kernel::default();
+        let radius = 960.0;
+        let frame = Axis2Placement::new(p(0.0, 0.0, 720.0), Vec3::X, Vec3::Y);
+        let arc = BSplineCurve::create_circle_segment(
+            3,
+            &frame,
+            radius,
+            -90.0,
+            0.0,
+            NurbCircleParam::Quadratic,
+        )
+        .expect("arc");
+        let ivl = arc.natural_interval();
+        let at_end = arc.evaluate(ivl.max(), 1, true, true).expect("end");
+        let at_start = arc.evaluate(ivl.min(), 1, true, true).expect("start");
+        let mut fs = CurveBasedFs::new(1e-6, 0.5, 0.03);
+        fs.set_original_curve(Some(Curve::from(arc)));
+        let len = ivl.length();
+        for (t, end) in [(ivl.max(), &at_end), (ivl.min(), &at_start)] {
+            let out = if t == ivl.max() { 1.0 } else { -1.0 };
+            // well past the end: on the circle (z = 720, at the radius from its axis)
+            let far = fs
+                .evaluate_base_curve(k, t + out * 0.05 * len, 0)
+                .expect("extend");
+            let q = far[0];
+            assert!(
+                (q.z - 720.0).abs() < 1e-9 * radius,
+                "{q:?} leaves the arc's plane"
+            );
+            let off = (q.x.hypot(q.y) - radius).abs();
+            assert!(off < 1e-9 * radius, "{q:?} is {off} off the arc's circle");
+            // just past the end: the end's first derivative, its speed included
+            let near = fs
+                .evaluate_base_curve(k, t + out * 1e-7 * len, 1)
+                .expect("near");
+            let (d, d_end) = (near[1], end[1]);
+            let jump = (d - d_end).length() / d_end.length();
+            assert!(
+                jump < 1e-5,
+                "the parameter's derivative jumps by {jump} past the end: {d:?} after {d_end:?}"
+            );
+            fs.extended = None;
+        }
     }
 
     #[test]
