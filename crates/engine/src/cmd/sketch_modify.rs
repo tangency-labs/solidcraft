@@ -2624,8 +2624,8 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
         FilletResult {
             curves,
             constraints,
-            param: (!on_sheet && !param.is_empty()).then_some(param),
             expression: (on_sheet && !param.is_empty()).then_some(r_expr.to_string()),
+            param: (!on_sheet && !param.is_empty()).then_some(param),
             virtual_corners,
             moved_to_virtual_corner,
             offset_released,

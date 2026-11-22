@@ -4,6 +4,7 @@
 
 use serde_json::{Value, json};
 use solidcraft_geom::prelude::*;
+use solidcraft_sketch::CurveKind;
 
 use crate::Session;
 
