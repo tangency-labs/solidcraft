@@ -1894,6 +1894,7 @@ fn title_bar_pills_open_their_pages_and_the_x_turns_off_only_that_pill() {
     let (donate, discord) = (rect_of("titlebar:kofi").unwrap(), rect_of("titlebar:discord").unwrap());
     assert!(donate.right() < discord.left() && discord.right() < report.left(), "{donate:?} {discord:?} {report:?}");
     assert!(h.app.preferences.show_donate_button && h.app.preferences.show_discord_button, "both on by default");
+    let bar_shown = |h: &Harness, id: &str| h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == id).unwrap().shown;
     for (handle, url) in [("titlebar:kofi", "https://ko-fi.com/bherbruck"), ("titlebar:discord", "https://discord.gg/FtU4NQNVDH")] {
         h.step(&json!({"click":{"handle":handle}})).unwrap();
         assert_eq!(opened_url(&mut h).as_deref(), Some(url), "{handle}");
@@ -1903,12 +1904,19 @@ fn title_bar_pills_open_their_pages_and_the_x_turns_off_only_that_pill() {
     h.step(&json!({"click":{"handle":"titlebar:kofi:hide"}})).unwrap();
     h.settle();
     assert_eq!(opened_url(&mut h), None, "the x only hides");
-    assert!(!h.app.preferences.show_donate_button && h.app.preferences.show_discord_button);
+    // Bar dismissal now hides only its saved placement, leaving legacy preferences unchanged.
+    assert!(!bar_shown(&h, "donate") && bar_shown(&h, "discord"));
+    assert!(h.app.preferences.show_donate_button && h.app.preferences.show_discord_button);
     assert!(rect_of("titlebar:kofi").is_none() && rect_of("titlebar:discord").is_some() && rect_of("titlebar:report").is_some());
     h.step(&json!({"click":{"handle":"titlebar:discord:hide"}})).unwrap();
     h.settle();
-    assert!(!h.app.preferences.show_discord_button && rect_of("titlebar:discord").is_none());
+    assert!(!bar_shown(&h, "discord") && rect_of("titlebar:discord").is_none());
+    assert!(h.app.preferences.show_donate_button && h.app.preferences.show_discord_button);
     h.call("ui.prefs", json!({"show_donate_button": true, "show_discord_button": true}));
+    h.settle();
+    assert!(rect_of("titlebar:kofi").is_none() && rect_of("titlebar:discord").is_none(), "legacy visibility cannot undo personal bar hiding");
+    let reset = h.call("engine.execute", json!({"command":"ui.appBarReset","params":{}}));
+    assert_eq!(reset["ok"], true, "{reset}");
     h.settle();
     assert!(rect_of("titlebar:kofi").is_some() && rect_of("titlebar:discord").is_some());
 }
@@ -1934,9 +1942,11 @@ fn an_organizations_policy_says_managed_by_in_the_bar_preferences_and_about() {
     h.settle();
     let badge = rect_of("titlebar:managed").expect("the bar says it is managed");
     let report = rect_of("titlebar:report").unwrap();
-    assert!(badge.right() <= report.left(), "{badge:?} {report:?}");
     let (donate, discord) = (rect_of("titlebar:kofi").unwrap(), rect_of("titlebar:discord").unwrap());
-    assert!(badge.right() < donate.left() && badge.right() < discord.left(), "the badge sits left of the link pills: {badge:?} {donate:?}");
+    // Transients have ordinary End-stack slots; their old position before the links is no longer fixed.
+    for other in [report, donate, discord] {
+        assert!(!badge.intersects(other), "{badge:?} overlaps another bar item {other:?}");
+    }
     assert!(h.widget("Managed by ACME").is_some(), "a wide bar names the organization");
     assert!(!h.app.prefs_window.shell.open);
     h.step(&json!({"click":{"handle":"titlebar:managed"}})).unwrap();
@@ -1957,8 +1967,16 @@ fn an_organizations_policy_says_managed_by_in_the_bar_preferences_and_about() {
         h.call("ui.resize", json!({"width": width, "height": 600}));
         h.settle();
         if let Some(badge) = rect_of("titlebar:managed") {
-            let report = rect_of("titlebar:report").unwrap();
-            assert!(badge.right() <= report.left() && badge.right() <= width, "{width}: {badge:?} {report:?}");
+            assert!(badge.right() <= width, "{width}: {badge:?} leaves the bar");
+            if let Some(report) = rect_of("titlebar:report") {
+                assert!(!badge.intersects(report), "{width}: {badge:?} overlaps Report a bug {report:?}");
+            } else {
+                // A narrow bar may overflow Report a bug, but must keep it reachable through More.
+                h.step(&json!({"click":{"handle":"appbar:overflow"}})).unwrap();
+                h.frames(2);
+                assert!(rect_of("menu:appbar:overflow:report").is_some());
+                h.step(&json!({"key":"Escape"})).unwrap();
+            }
         }
     }
 }

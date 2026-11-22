@@ -4241,7 +4241,7 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Surf
         }
     }
 
-    fn surface_cache_state(
+    fn surface_cache_without_get_tree(
         &mut self,
         k: &Kernel,
         surface: &Surface,

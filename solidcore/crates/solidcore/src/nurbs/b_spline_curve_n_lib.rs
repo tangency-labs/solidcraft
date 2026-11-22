@@ -202,6 +202,10 @@ const OP_SCALE_KNOTS: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::scale_k
 const OP_SYNC: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::synchronize_knots_of_curves";
 const OP_TRIM: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::trim";
 
+/// Largest projection residual at which [`BSplineCurve::set_intersection_curve_through_point`]
+/// takes a point to lie on its surface (upstream's literal).
+const ON_SURFACE: f64 = 1e-8;
+
 /// Most span splits [`BSplineCurve::dampen_knot_spacing`] makes before giving up
 /// (upstream loops forever).
 pub const DAMPEN_SPLIT_LIMIT: usize = 1 << 14;
@@ -343,9 +347,9 @@ fn extension_continuity(continuity: ContinuityType, operation: &'static str) -> 
         ContinuityType::G1 => Ok(Continuity::G1),
         ContinuityType::G1G2 => Ok(Continuity::G2),
         ContinuityType::CInfinity => Ok(Continuity::Cmax),
-        _ => Err(SolidError::b_spline(
+        continuity => Err(SolidError::b_spline(
             operation,
-            BSplineFailure::Failed("the continuity is not one an extension keeps"),
+            BSplineFailure::ContinuityNotExtendable { continuity },
         )),
     }
 }
@@ -811,10 +815,7 @@ impl BSplineCurve {
             .is_rational()
             .map_err(SolidError::nurbs_routine(OP_RAT))?
         {
-            return Err(SolidError::b_spline(
-                OP_RAT,
-                BSplineFailure::Failed("the curve is not rational"),
-            ));
+            return Err(SolidError::b_spline(OP_RAT, BSplineFailure::NotRational));
         }
         let cur_this = nurb_of(self, OP_RAT)?;
         let deg = 3;
@@ -1049,7 +1050,7 @@ impl BSplineCurve {
         if dim != 2 && dim != 3 {
             return Err(SolidError::b_spline(
                 OP,
-                BSplineFailure::Failed("the points are neither 2D nor 3D"),
+                BSplineFailure::DimensionNot2Or3 { dim },
             ));
         }
 
@@ -1136,7 +1137,9 @@ impl BSplineCurve {
         } else {
             return Err(SolidError::b_spline(
                 OP,
-                BSplineFailure::Failed("the number of vectors is not one it interpolates"),
+                BSplineFailure::TooManyVectors {
+                    given: vectors.len(),
+                },
             ));
         };
 
@@ -1158,7 +1161,7 @@ impl BSplineCurve {
     /// # Errors
     ///
     /// `SM_ERR` for more than two vectors, a degree outside `2..=MAX_DEGREE` with two or
-    /// no vectors, no points or no control points, or when the fit fails.
+    /// no vectors, no control points asked for, or when the fit fails.
     pub fn create_approximating_curve(
         num_points: usize,
         par: ParamMethod,
@@ -1170,12 +1173,9 @@ impl BSplineCurve {
     ) -> Result<Self> {
         const OP: &str = OP_APPROX_CRV;
         // n = lNumPoints - 1 is -1 for no control points: N_FitCrvApproxDerivs' p > n
-        let n = num_points.checked_sub(1).ok_or_else(|| {
-            SolidError::b_spline(
-                OP,
-                BSplineFailure::Failed("there are no points to approximate"),
-            )
-        })?;
+        let n = num_points
+            .checked_sub(1)
+            .ok_or_else(|| SolidError::b_spline(OP, BSplineFailure::NoControlPoints))?;
         let p = degree;
 
         // option 1: given two end tangents as constraints
@@ -1233,7 +1233,9 @@ impl BSplineCurve {
             // unsupported option
             return Err(SolidError::b_spline(
                 OP,
-                BSplineFailure::Failed("the number of vectors is not one it approximates"),
+                BSplineFailure::TooManyVectors {
+                    given: vectors.len(),
+                },
             ));
         };
 
@@ -1347,11 +1349,23 @@ impl BSplineCurve {
                 .map_err(SolidError::nurbs_routine(OP_DEG_RED))?;
             match red.curve {
                 Some(c) => c,
+                // a degree 1 curve has no lower degree
+                None if cur_p.degree() <= 1 => {
+                    return Err(SolidError::b_spline(
+                        OP_DEG_RED,
+                        BSplineFailure::DegreeTooLowToReduce {
+                            degree: cur_p.degree(),
+                        },
+                    ))
+                }
                 // MSG(_T("Degree reduction failure"))
                 None => {
                     return Err(SolidError::b_spline(
                         OP_DEG_RED,
-                        BSplineFailure::Failed("the degree cannot be reduced within the tolerance"),
+                        BSplineFailure::DegreeNotReducible {
+                            error: red.max_err,
+                            tolerance: tol,
+                        },
                     ))
                 }
             }
@@ -1455,8 +1469,8 @@ impl BSplineCurve {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` for a curve that is not a cubic intersection approximation, a failed
-    /// projection or knot insertion, or an unknown case; `InvalidInput` for array
+    /// `SM_ERR` for a curve that is not a cubic intersection approximation, a point off its
+    /// surface, or a failed projection or knot insertion; `InvalidInput` for array
     /// lengths that do not match the curves; [`SolidError::Unported`] (see the module
     /// deviations).
     pub fn set_intersection_curve_through_point<S: SurfaceEvaluate>(
@@ -1476,7 +1490,7 @@ impl BSplineCurve {
         if !is_intersector_approx(self)? {
             return Err(SolidError::b_spline(
                 OP,
-                BSplineFailure::Failed("the curve is not a piecewise degree-3 intersection curve"),
+                BSplineFailure::NotIntersectionCurve,
             ));
         }
 
@@ -1673,7 +1687,8 @@ impl BSplineCurve {
                 pos_tang[4] = pos_tang[0];
                 pos_tang[5] = pos_tang[1];
             }
-            8 => {
+            // case 8: the classification above leaves only the cases 1 to 8
+            _ => {
                 let add_knot = ku(i_spn1)?
                     + (ku(i_spn1 + 1)? - ku(i_spn1)?) * (ku(i_spn1)? - *new_knot)
                         / (ku(i_spn1 + 1)? - *new_knot);
@@ -1694,12 +1709,6 @@ impl BSplineCurve {
                     eval2(self, param_array[2], true, [pos_tang[2], pos_tang[3]]);
                 pos_tang[4] = through;
                 new_tangent_index = 5;
-            }
-            _ => {
-                return Err(SolidError::b_spline(
-                    OP,
-                    BSplineFailure::Failed("the through point falls in no case it handles"),
-                ))
             }
         }
 
@@ -1775,10 +1784,13 @@ impl BSplineCurve {
                         surface_local_point_solve(k, surface, &domain, pos_jj, guess)?;
 
                     // check and store the Surface1 answer
-                    if sol_value > 1e-8 {
+                    if sol_value > ON_SURFACE {
                         return Err(SolidError::b_spline(
                             OP,
-                            BSplineFailure::Failed("the point does not lie on the surface"),
+                            BSplineFailure::PointOffSurface {
+                                residual: sol_value,
+                                tolerance: ON_SURFACE,
+                            },
                         ));
                     }
                     sol_params
@@ -2210,19 +2222,24 @@ impl BSplineCurve {
         let break_param_percent = 0.15;
         let near_param_percent = 1.0e-3;
 
-        // check input
-        if !(start_tan_type != InValueType::Specified || start_tan.is_some()) {
-            return Err(SolidError::b_spline(
-                OP,
-                BSplineFailure::Failed("the start tangent is specified but not given"),
-            ));
-        }
-        if !(end_tan_type != InValueType::Specified || end_tan.is_some()) {
-            return Err(SolidError::b_spline(
-                OP,
-                BSplineFailure::Failed("the end tangent is specified but not given"),
-            ));
-        }
+        // check input: a specified tangent is given
+        let start_tan = match (start_tan_type, start_tan) {
+            (InValueType::Specified, None) => {
+                return Err(SolidError::b_spline(
+                    OP,
+                    BSplineFailure::StartTangentNotGiven,
+                ))
+            }
+            (InValueType::Specified, tan) => tan,
+            _ => None,
+        };
+        let end_tan = match (end_tan_type, end_tan) {
+            (InValueType::Specified, None) => {
+                return Err(SolidError::b_spline(OP, BSplineFailure::EndTangentNotGiven))
+            }
+            (InValueType::Specified, tan) => tan,
+            _ => None,
+        };
 
         // increment CurrCrv degree when needed (the status is ignored upstream, e.g.
         // for a curve over a zero-length knot interval)
@@ -2378,13 +2395,7 @@ impl BSplineCurve {
             (Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, 1.0));
 
         // when asked to manage start tangent values
-        if start_tan_type == InValueType::Specified {
-            let tgt = start_tan.ok_or_else(|| {
-                SolidError::b_spline(
-                    OP,
-                    BSplineFailure::Failed("the start tangent is specified but not given"),
-                )
-            })?;
+        if let Some(tgt) = start_tan {
             let pt0 = cpt_at(curr_cpts, 0, OP)?.drop_w();
             let pt1 = cpt_at(curr_cpts, 1, OP)?.drop_w();
             let start_tan_cur = Vec3::new(pt1.x - pt0.x, pt1.y - pt0.y, pt1.z - pt0.z);
@@ -2419,13 +2430,7 @@ impl BSplineCurve {
         let (mut end_from_z, mut end_to_z) = (Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, 1.0));
 
         // when asked to manage end tangent values
-        if end_tan_type == InValueType::Specified {
-            let tgt = end_tan.ok_or_else(|| {
-                SolidError::b_spline(
-                    OP,
-                    BSplineFailure::Failed("the end tangent is specified but not given"),
-                )
-            })?;
+        if let Some(tgt) = end_tan {
             let pt_n = cpt_at(curr_cpts, curr_cpt_index, OP)?.drop_w();
             let pt_n1 = cpt_at(
                 curr_cpts,
@@ -3197,9 +3202,12 @@ mod tests {
             .create_extended_curve(0.5, ContinuityType::CInfinity, true)
             .unwrap()
             .is_none());
-        assert!(c
-            .create_extended_curve(1.5, ContinuityType::C0, true)
-            .is_err());
+        assert_eq!(
+            b_spline_cause(c.create_extended_curve(1.5, ContinuityType::C0, true)),
+            BSplineFailure::ContinuityNotExtendable {
+                continuity: ContinuityType::C0
+            }
+        );
         let line = BSplineCurve::create_interpolating_curve(
             ParamMethod::ChordLength,
             3,
@@ -3713,9 +3721,7 @@ mod tests {
                 InValueType::Same
             ),
             Err(e) if e.nurbs_failure()
-                == Some(&NurbsFailure::BSpline(BSplineFailure::Failed(
-                    "the start tangent is specified but not given"
-                )))
+                == Some(&NurbsFailure::BSpline(BSplineFailure::StartTangentNotGiven))
                 && e.sm_status() == Some(crate::error::SM_ERR)
         ));
         // degree 2: elevated to 3 first (DegreeElevate)
@@ -3746,11 +3752,97 @@ mod tests {
         assert!(matches!(
             r,
             Err(e) if e.nurbs_failure()
-                == Some(&NurbsFailure::BSpline(BSplineFailure::Failed(
-                    "the curve is not a piecewise degree-3 intersection curve"
-                )))
+                == Some(&NurbsFailure::BSpline(BSplineFailure::NotIntersectionCurve))
                 && e.sm_status() == Some(crate::error::SM_ERR)
         ));
+    }
+
+    /// The B-spline failure of `r`, after checking that it keeps the status `SM_ERR` it had
+    /// as a phrase and has the class its cause names.
+    fn b_spline_cause<T>(r: Result<T>) -> BSplineFailure {
+        match r {
+            Err(e) => {
+                assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e:?}");
+                match e.nurbs_failure() {
+                    Some(NurbsFailure::BSpline(b)) => {
+                        assert_eq!(e.kind(), b.kind(), "{e:?}");
+                        *b
+                    }
+                    other => panic!("{other:?}"),
+                }
+            }
+            Ok(_) => panic!("the call succeeded"),
+        }
+    }
+
+    /// The argument checks of the curve constructors and methods name their causes.
+    #[test]
+    fn argument_checks_name_their_causes() {
+        use crate::error::ErrorKind;
+        let pts = [
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(3.0, 1.0, 0.0),
+            Vec3::new(4.0, 0.0, 0.0),
+        ];
+        let three = [Vec3::new(1.0, 0.0, 0.0); 3];
+        let par = ParamMethod::ChordLength;
+        let b = b_spline_cause(cubic().approximate_rational_curve(0.1));
+        assert_eq!(b, BSplineFailure::NotRational);
+        assert_eq!(b.kind(), ErrorKind::Unsupported);
+        let b = b_spline_cause(BSplineCurve::create_interpolating_curve(
+            par,
+            4,
+            3,
+            &pts,
+            &[],
+            None,
+            false,
+        ));
+        assert_eq!(b, BSplineFailure::DimensionNot2Or3 { dim: 4 });
+        assert_eq!(b.kind(), ErrorKind::InvalidInput);
+        let b = b_spline_cause(BSplineCurve::create_interpolating_curve(
+            par, 3, 3, &pts, &three, None, false,
+        ));
+        assert_eq!(b, BSplineFailure::TooManyVectors { given: 3 });
+        let b = b_spline_cause(BSplineCurve::create_approximating_curve(
+            5, par, 3, 3, &pts, &three, None,
+        ));
+        assert_eq!(b, BSplineFailure::TooManyVectors { given: 3 });
+        // a count of 0 control points, though points are given
+        let b = b_spline_cause(BSplineCurve::create_approximating_curve(
+            0,
+            par,
+            3,
+            3,
+            &pts,
+            &[],
+            None,
+        ));
+        assert_eq!(b, BSplineFailure::NoControlPoints);
+        let b = b_spline_cause(cubic().deform_to_end_point_targets(
+            None,
+            None,
+            None,
+            InValueType::Same,
+            None,
+            InValueType::Specified,
+        ));
+        assert_eq!(b, BSplineFailure::EndTangentNotGiven);
+        assert_eq!(b.kind(), ErrorKind::InvalidInput);
+        match b_spline_cause(cubic().degree_reduction(1e-12, false)) {
+            b @ BSplineFailure::DegreeNotReducible { error, tolerance } => {
+                assert_eq!(tolerance, 1e-12);
+                assert!(error > tolerance, "{error}");
+                assert_eq!(b.kind(), ErrorKind::NotWithinTolerance);
+            }
+            other => panic!("{other:?}"),
+        }
+        let mut line = BSplineCurve::create_line_segment(3, pts[0], pts[1]).unwrap();
+        let b = b_spline_cause(line.degree_reduction(1.0, false));
+        assert_eq!(b, BSplineFailure::DegreeTooLowToReduce { degree: 1 });
+        assert_eq!(b.kind(), ErrorKind::InvalidInput);
     }
 
     #[test]

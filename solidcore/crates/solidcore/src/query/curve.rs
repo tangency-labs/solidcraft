@@ -11,6 +11,7 @@ use super::edge::CurveHandle;
 use crate::curve::curve::p9::CurveSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
+use crate::error::query::QueryFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -81,7 +82,7 @@ pub fn closest_point_to_ray(
     let curve_box = curve
         .calculate_bounding_box(k, interval, req, true)?
         .normal
-        .ok_or_else(|| SolidError::query_failed(OP_CLOSEST_RAY, "the curve has no box"))?;
+        .ok_or_else(|| SolidError::query(OP_CLOSEST_RAY, QueryFailure::Defect { why: "the curve's bounding box was asked for with its normal box, which the box of every curve kind computes when asked" }))?;
     let reach = curve_box.max_distance(&Extent3d::from_points(origin, origin)) + 1.0;
     let ray = Curve::from(Line::create_line_segment(
         3,

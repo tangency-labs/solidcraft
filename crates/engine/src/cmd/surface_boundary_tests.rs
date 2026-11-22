@@ -44,7 +44,12 @@ fn three_and_four_curve_loops_are_flat_patches() {
     use std::f64::consts::PI;
     let cases: Vec<(Vec<[[f64; 2]; 2]>, f64, f64)> = vec![
         (vec![[[0.0, 0.0], [20.0, 0.0]], [[20.0, 0.0], [10.0, 15.0]], [[10.0, 15.0], [0.0, 0.0]]], 150.0, 1e-6),
+        // Issue #20380: loop order holds when curves are drawn or mirrored in reverse
+        (vec![[[0.0, 0.0], [20.0, 0.0]], [[20.0, 0.0], [10.0, 15.0]], [[0.0, 0.0], [10.0, 15.0]]], 150.0, 1e-6),
+        (vec![[[20.0, 0.0], [0.0, 0.0]], [[20.0, 0.0], [10.0, 15.0]], [[10.0, 15.0], [0.0, 0.0]]], 150.0, 1e-6),
+        (vec![[[0.0, 0.0], [20.0, 0.0]], [[10.0, 15.0], [20.0, 0.0]], [[10.0, 15.0], [0.0, 0.0]]], 150.0, 1e-6),
         (vec![[[0.0, 0.0], [10.0, 0.0]], [[10.0, 0.0], [10.0, 10.0]], [[10.0, 10.0], [0.0, 10.0]], [[0.0, 10.0], [0.0, 0.0]]], 100.0, 1e-6),
+        (vec![[[0.0, 0.0], [10.0, 0.0]], [[10.0, 10.0], [10.0, 0.0]], [[10.0, 10.0], [0.0, 10.0]], [[0.0, 0.0], [0.0, 10.0]]], 100.0, 1e-6),
     ];
     for (lines, want, tol) in cases {
         for continuity in [json!("g0"), json!("g1"), json!("g3")] {
@@ -241,6 +246,18 @@ fn hostile_networks_are_refused() {
         assert!(e.to_string().contains(want), "{params}: {e}");
     }
     assert_eq!(s.world_state().unwrap().bodies.len(), bodies, "a refused network left a body behind");
+}
+
+/// Three curves that do not connect end to end are refused naming the gap.
+#[test]
+fn loops_that_do_not_connect_are_refused() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let a = line(&mut s, [0.0, 0.0], [10.0, 0.0]);
+    let b = line(&mut s, [20.0, 0.0], [30.0, 0.0]);
+    let c = line(&mut s, [30.0, 0.0], [0.0, 0.0]);
+    let err = s.execute("surface.boundary", &json!({"curves": [a, b, c]})).unwrap_err();
+    assert!(err.to_string().contains("list the curves in loop order"), "{err}");
 }
 
 /// An edit (`timeline.redefine`) may turn a loop of sketch curves into the network of the same
