@@ -111,7 +111,6 @@ fn removed(r: f64) -> f64 {
 /// or the fillet error code.
 fn round(s: f64, r: f64) -> Result<(usize, f64, bool), i32> {
     let mut k = Kernel::default();
-    k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.offset_extension_from_base = true;
     k.fixes.offset_extension_as_itself = true;

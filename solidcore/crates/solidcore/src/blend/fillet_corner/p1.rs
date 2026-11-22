@@ -1194,7 +1194,10 @@ impl FilletCorner {
 /// the two side edge uses next to the filleted edge use at the corner vertex (its
 /// clockwise neighbour and its radial's counter-clockwise neighbour; the mate of the
 /// first when they coincide, the 2x1 case) have parallel face use normals at the
-/// corner end of their edges (within `SM_EFF_ZERO_SQRT`).
+/// corner end of their edges (within `SM_EFF_ZERO_SQRT`). Anti-parallel normals are a
+/// cusp, an ordinary corner (WR-570), unless the two side edge uses are the two face
+/// uses of one face (a sheet's edge read from its two sides, or a closed face's seam
+/// read through the mate), which stay degenerate.
 ///
 /// # Errors
 ///
@@ -1288,18 +1291,21 @@ pub fn check_nx1_degeneracy_status(
         Ok(n) => n,
         Err(e) => return Ok(Err(e)),
     };
-    // Check if faceuse normals are parallel to each other. With
-    // `fillet_knife_edge_rounds` (WR-570, fork b7ec55b) anti-parallel normals are a cusp
-    // (the faces folded back on each other, a knife edge): the ball touches them back
-    // from the vertex and the fillet ends there as at any other corner
-    if k.fixes.fillet_knife_edge_rounds {
-        // (`bAntiParallel` starts FALSE; `IsParallelTo` leaves it for a zero vector)
-        let (parallel, anti) = faceuse_normal1.parallel_sense(faceuse_normal2, EFF_ZERO_SQRT);
-        return Ok(Ok(parallel && !anti.unwrap_or(false)));
-    }
-    Ok(Ok(
-        faceuse_normal1.is_parallel_to(faceuse_normal2, EFF_ZERO_SQRT)
-    ))
+    // Check if faceuse normals are parallel to each other. Anti-parallel normals of two
+    // faces are a cusp (WR-570, fork b7ec55b: the faces folded back on each other, a
+    // knife edge): the ball touches them back from the vertex and the fillet ends there
+    // as at any other corner. Not the fork's: two face uses of one face read the same
+    // surface at the same point, anti-parallel only by the face use's sign. At a sheet's
+    // edge read from its two sides no ball touches both; at a closed face's seam read
+    // through the mate the surface continues tangentially into itself, the opposite of
+    // a knife edge. Both stay a degenerate corner, as upstream
+    // (`bAntiParallel` starts FALSE; `IsParallelTo` leaves it for a zero vector)
+    let (parallel, anti) = faceuse_normal1.parallel_sense(faceuse_normal2, EFF_ZERO_SQRT);
+    let face1 = eu1::face(b, side_eu1)?;
+    let one_face = face1.is_some()
+        && face1 == eu1::face(b, side_eu2)?
+        && eu1::faceuse(b, side_eu1)? != eu1::faceuse(b, side_eu2)?;
+    Ok(Ok(parallel && (one_face || !anti.unwrap_or(false))))
 }
 
 // ---- SmFilletCorner methods: the corner geometry steps -----------------------------------

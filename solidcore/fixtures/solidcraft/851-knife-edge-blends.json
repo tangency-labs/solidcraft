@@ -2,14 +2,11 @@
  "issue": "https://github.com/tangency-labs/solidcraft/issues/851",
  "pr": "https://github.com/tangency-labs/solidcraft/pull/935",
  "test": "crates/kernel/src/issue_851_tests.rs: fillet_the_knife_edge, chamfer_the_knife_edge",
- "summary": "Fillets and chamfers failed on SolidCraft's earlier kernel where a curved wall runs out into a flat face in a knife edge (#851). The part is a 41 1/6 x 21 plate plus the corner a circle of radius 21 leaves, 10 tall: the arc wall (centre (62 1/6, -21)) meets the back face y = 0 tangentially at the knife edge x = 62 1/6. It is built three ways, as in the test (plate joined to the corner, corner joined to the plate and then cut, and one box less the cylinder), so the faces come in different orders. The knife edge is rounded and chamfered 0.5, 2 and 5; the removed volume is 10 times the area the ball or the chamfer takes off the cusp, in closed form (SolidCraft's removed_area and chamfered_area). SolidCraft checked 1e-3 relative on the whole volume through a mesh; these check the removed volume to 1e-4 mm^3. The arc-top-edge test (a numerical integral checked to 1 %) and the mirror and hostile-size tests are not ported. Every case opts in to `fillet_knife_edge_rounds` (WR-570, the SolidCraft fork's tangency-labs/smlib@b7ec55b): the pinned SMLib refuses the knife edge as a tangent edge (status 1007). A small chamfer's chord meets the flat face steeply (81 degrees at d 0.5), where the pinned `TrimOriginalSurfaces` trims nothing, leaving the part as it was with the chamfer face added; the port takes the inside piece by its best dot (WR-611, tangency-labs/solidcore#1809).",
+ "summary": "Fillets and chamfers failed on SolidCraft's earlier kernel where a curved wall runs out into a flat face in a knife edge (#851). The part is a 41 1/6 x 21 plate plus the corner a circle of radius 21 leaves, 10 tall: the arc wall (centre (62 1/6, -21)) meets the back face y = 0 tangentially at the knife edge x = 62 1/6. It is built three ways, as in the test (plate joined to the corner, corner joined to the plate and then cut, and one box less the cylinder), so the faces come in different orders. The knife edge is rounded and chamfered 0.5, 2 and 5; the removed volume is 10 times the area the ball or the chamfer takes off the cusp, in closed form (SolidCraft's removed_area and chamfered_area). SolidCraft checked 1e-3 relative on the whole volume through a mesh; these check the removed volume to 1e-4 mm^3. The arc-top-edge test (a numerical integral checked to 1 %) and the mirror and hostile-size tests are not ported. solidcore rounds and chamfers the knife edge (WR-570, as the SolidCraft fork's tangency-labs/smlib@b7ec55b does); the pinned SMLib refuses it as a tangent edge (status 1007). A small chamfer's chord meets the flat face steeply (81 degrees at d 0.5), where the pinned `TrimOriginalSurfaces` trims nothing, leaving the part as it was with the chamfer face added; the port takes the inside piece by its best dot (WR-611, tangency-labs/solidcore#1809).",
  "cases": [
   {
    "name": "fillet_knife_edge_0_5_plate_first",
    "note": "Fillet 0.5 on the knife edge at x = 62.1667, y = 0 (the part built plate first).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
    "steps": [
     {
      "op": "box",
@@ -89,9 +86,6 @@
   {
    "name": "chamfer_knife_edge_0_5_plate_first",
    "note": "Chamfer 0.5 on the knife edge at x = 62.1667, y = 0 (the part built plate first).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
    "steps": [
     {
      "op": "box",
@@ -171,9 +165,6 @@
   {
    "name": "fillet_knife_edge_2_plate_first",
    "note": "Fillet 2 on the knife edge at x = 62.1667, y = 0 (the part built plate first).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
    "steps": [
     {
      "op": "box",
@@ -253,9 +244,6 @@
   {
    "name": "chamfer_knife_edge_2_plate_first",
    "note": "Chamfer 2 on the knife edge at x = 62.1667, y = 0 (the part built plate first).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
    "steps": [
     {
      "op": "box",
@@ -335,9 +323,6 @@
   {
    "name": "fillet_knife_edge_5_plate_first",
    "note": "Fillet 5 on the knife edge at x = 62.1667, y = 0 (the part built plate first).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
    "steps": [
     {
      "op": "box",
@@ -417,9 +402,6 @@
   {
    "name": "chamfer_knife_edge_5_plate_first",
    "note": "Chamfer 5 on the knife edge at x = 62.1667, y = 0 (the part built plate first).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
    "steps": [
     {
      "op": "box",
@@ -499,9 +481,6 @@
   {
    "name": "fillet_knife_edge_0_5_corner_first",
    "note": "Fillet 0.5 on the knife edge at x = 62.1667, y = 0 (the part built corner first).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
    "steps": [
     {
      "op": "box",
@@ -581,9 +560,6 @@
   {
    "name": "chamfer_knife_edge_0_5_corner_first",
    "note": "Chamfer 0.5 on the knife edge at x = 62.1667, y = 0 (the part built corner first).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
    "steps": [
     {
      "op": "box",
@@ -663,9 +639,6 @@
   {
    "name": "fillet_knife_edge_2_corner_first",
    "note": "Fillet 2 on the knife edge at x = 62.1667, y = 0 (the part built corner first).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
    "steps": [
     {
      "op": "box",
@@ -745,9 +718,6 @@
   {
    "name": "chamfer_knife_edge_2_corner_first",
    "note": "Chamfer 2 on the knife edge at x = 62.1667, y = 0 (the part built corner first).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
    "steps": [
     {
      "op": "box",
@@ -827,9 +797,6 @@
   {
    "name": "fillet_knife_edge_5_corner_first",
    "note": "Fillet 5 on the knife edge at x = 62.1667, y = 0 (the part built corner first).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
    "steps": [
     {
      "op": "box",
@@ -909,9 +876,6 @@
   {
    "name": "chamfer_knife_edge_5_corner_first",
    "note": "Chamfer 5 on the knife edge at x = 62.1667, y = 0 (the part built corner first).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
    "steps": [
     {
      "op": "box",
@@ -991,9 +955,6 @@
   {
    "name": "fillet_knife_edge_0_5_cut_from_a_box",
    "note": "Fillet 0.5 on the knife edge at x = 62.1667, y = 0 (the part built cut from a box).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
    "steps": [
     {
      "op": "box",
@@ -1053,9 +1014,6 @@
   {
    "name": "chamfer_knife_edge_0_5_cut_from_a_box",
    "note": "Chamfer 0.5 on the knife edge at x = 62.1667, y = 0 (the part built cut from a box).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
    "steps": [
     {
      "op": "box",
@@ -1115,9 +1073,6 @@
   {
    "name": "fillet_knife_edge_2_cut_from_a_box",
    "note": "Fillet 2 on the knife edge at x = 62.1667, y = 0 (the part built cut from a box).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
    "steps": [
     {
      "op": "box",
@@ -1177,9 +1132,6 @@
   {
    "name": "chamfer_knife_edge_2_cut_from_a_box",
    "note": "Chamfer 2 on the knife edge at x = 62.1667, y = 0 (the part built cut from a box).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
    "steps": [
     {
      "op": "box",
@@ -1239,9 +1191,6 @@
   {
    "name": "fillet_knife_edge_5_cut_from_a_box",
    "note": "Fillet 5 on the knife edge at x = 62.1667, y = 0 (the part built cut from a box).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
    "steps": [
     {
      "op": "box",
@@ -1301,9 +1250,6 @@
   {
    "name": "chamfer_knife_edge_5_cut_from_a_box",
    "note": "Chamfer 5 on the knife edge at x = 62.1667, y = 0 (the part built cut from a box).",
-   "fixes": [
-    "fillet_knife_edge_rounds"
-   ],
    "steps": [
     {
      "op": "box",

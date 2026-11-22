@@ -35,9 +35,7 @@ const TIP: f64 = 62.0 + 1.0 / 6.0;
 const H: f64 = 10.0;
 
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_knife_edge_rounds = true;
-    k
+    Kernel::default()
 }
 
 fn line(a: (f64, f64), b: (f64, f64)) -> Curve {

@@ -43,7 +43,6 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "shell_edges_on_analytics_exact",
     "fillet_patch_keeps_fillet_edges",
     "fillet_refuse_overlapping_bands",
-    "fillet_knife_edge_rounds",
     "linear_sweep_arc_is_cylinder",
     "fillet_trace_reaches_rails",
     "curve_loop_normal_from_area",
