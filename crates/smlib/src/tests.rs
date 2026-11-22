@@ -800,16 +800,20 @@ fn a_token_under_another_stops_when_either_does() {
 /// dithered by a random draw, after the call has sampled the box's other faces.)
 #[test]
 fn every_call_starts_clean_on_any_kernel() {
-    fn draw(k: &mut solidcore::kernel::Kernel) -> solidcore::Result<Vec<[f64; 3]>> {
-        use solidcore::topology::face::p2::points_in_face;
-        let mut b = solidcore::primitive::api_primitives::create_box(k, solidcore::geom::vector3d::Vec3::ZERO, 1.0, 2.0, 3.0)?;
-        let faces = solidcore::topology::brep::faces(&b, None)?;
-        for &f in &faces[1..] {
-            points_in_face(k, &mut b, f, 5)?;
-        }
-        let points = points_in_face(k, &mut b, faces[0], 7)?;
-        Ok(points.pv.iter().step_by(2).map(|p| [p.x, p.y, p.z]).collect())
-    }
+    use solidcore::topology::brep::p3::brep_copy;
+    use solidcore::topology::face::p2::points_in_face;
+    let body = core::make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap();
+    let draw = |k: &mut _| {
+        brep_copy(k, &body.kernel())
+            .and_then(|mut b| {
+                let faces = b.face_list().to_vec();
+                for &f in &faces[1..] {
+                    points_in_face(k, &mut b, f, 5)?;
+                }
+                points_in_face(k, &mut b, faces[0], 7)
+            })
+            .map(|points| points.pv.iter().step_by(2).map(|p| [p.x, p.y, p.z]).collect::<Vec<_>>())
+    };
     let first = core::run("draw", draw).unwrap();
     assert_eq!(first.len(), 7);
     assert_eq!(core::run("draw", draw).unwrap(), first, "the same kernel, later");
