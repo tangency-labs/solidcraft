@@ -4149,7 +4149,7 @@ mod tests {
             e.surface_failure(),
             Some(&SurfaceFailure::TrimDomainOutside)
         );
-        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert_eq!(e.kind(), crate::error::ErrorKind::OutsideDomain);
         assert!(s.trim_with_domain(&k, &d).is_ok());
     }
 
