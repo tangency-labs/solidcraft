@@ -3503,7 +3503,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// [`VertexDefinition::set_position`], so the tolerance grows to keep every absorbed
     /// hull point covered.
     ///
-    /// With `seam_vertex_stays_on_seam` (not upstream): a definition on a vertex that ends
+    /// Not upstream (#18274): a definition on a vertex that ends
     /// a seam edge ([`vertex::seam_edge`]), or on a seam edge itself, is put onto that seam,
     /// at the seam's point under the position worked out as upstream ([`onto_seam`]). The
     /// seam edge's curve is the seam, an iso line of its face's surface, and its vertex ends
@@ -3555,14 +3555,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         self.pv(v.proto_vertex)?;
         let tol = self.tolerance(k);
 
-        // (`seam_vertex_stays_on_seam`) the seam a definition on a seam's vertex or edge keeps to
-        let seam = if k.fixes.seam_vertex_stays_on_seam {
-            match seam_curve(geometry, &v.pc1)? {
-                Some(c) => Some(c),
-                None => seam_curve(geometry, &v.pc2)?,
-            }
-        } else {
-            None
+        // (#18274) the seam a definition on a seam's vertex or edge keeps to
+        let seam = match seam_curve(geometry, &v.pc1)? {
+            Some(c) => Some(c),
+            None => seam_curve(geometry, &v.pc2)?,
         };
 
         if dist > tol && dist1 + dist2 > EFF_ZERO {
