@@ -1602,3 +1602,41 @@ fn an_assembly_with_moved_parts_lists_them_and_locating_one_finds_the_rest() {
     assert!(links["links"].as_array().unwrap().iter().all(|l| l["found"] == true), "{links}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A missing internal component (#6892): the window marks its row internal, and the file chosen
+/// for it, as Replace… does, is stored in the design again, so the component stays internal.
+#[test]
+fn a_missing_internal_component_is_marked_and_replacing_it_keeps_it_internal() {
+    solidcraft_engine::file_kinds_on_for_tests();
+    let dir = scratch("missing_internal");
+    for (name, height) in [("bracket.scprt", 2), ("spare.scprt", 4)] {
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length": 2, "width": 3, "height": height})).unwrap();
+        part.execute("file.save", &json!({"path": dir.join(name).to_string_lossy()})).unwrap();
+    }
+    let mut frame = Session::default();
+    frame.execute("file.save", &json!({"path": dir.join("frame.scasm").to_string_lossy()})).unwrap();
+    frame.execute("component.insert_design", &json!({"path": dir.join("bracket.scprt").to_string_lossy()})).unwrap();
+    frame.execute("file.save", &json!({})).unwrap();
+    std::fs::remove_file(dir.join("bracket.scprt")).unwrap();
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    app.open_path(&dir.join("frame.scasm").to_string_lossy());
+    let found = app.missing_links.as_ref().map(|m| m.rows.clone()).unwrap_or_default();
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(!found[0].internal, "a part linked to its own file is not internal");
+
+    // The reply `doc.open` gives when the design's file no longer holds an internal component.
+    let reply = json!({"missing_links": [{"component": found[0].component, "name": "bracket", "path": found[0].path, "internal": true}]});
+    crate::missing_links::offer(&mut app, &reply);
+
+    let rows = app.missing_links.as_ref().map(|m| m.rows.clone()).unwrap_or_default();
+    assert!(rows.len() == 1 && rows[0].internal, "{rows:?}");
+    crate::missing_links::located(&mut app, rows[0].component, &dir.join("spare.scprt").to_string_lossy());
+    assert!(app.missing_links.is_none(), "the part is found: the window closes");
+    assert!(!app.status.as_ref().is_some_and(|s| s.2), "{:?}", app.status);
+    let links = app.session.execute("component.links", &json!({})).unwrap();
+    let path = links["links"][0]["path"].as_str().unwrap();
+    assert!(path.starts_with(".~internal/"), "{links}");
+    assert_eq!(links["links"][0]["found"], true, "{links}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
