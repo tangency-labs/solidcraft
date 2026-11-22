@@ -238,3 +238,18 @@ fn a_limit_whose_expression_stops_working_out_is_left_out_with_the_reason() {
     assert_eq!(run(&mut s, "joint.solve", json!({}))["errors"], json!([]));
     assert_eq!(s.doc.assembly.joints.first().and_then(|j| j.limits.first().copied().flatten()), Some((4.0, 20.0)));
 }
+
+/// A limit given only one end sets no limit, so it keeps no expression either: one kept would be
+/// worked out against a missing other end and leave the joint out of the solve.
+#[test]
+fn a_limit_given_one_end_keeps_no_expression() {
+    let mut s = cubes();
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "values": [2], "limits": [["gap"]], "name": "Rail"}),
+    );
+    assert_eq!(run(&mut s, "joint.solve", json!({}))["errors"], json!([]));
+    let j = s.doc.assembly.joints.first().cloned().unwrap_or_else(|| panic!("no joint"));
+    assert!(j.exprs.is_empty() && j.limits.first().copied().flatten().is_none(), "{j:?}");
+}

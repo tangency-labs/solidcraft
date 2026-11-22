@@ -1175,7 +1175,14 @@ fn value_exprs(p: &Value) -> Vec<Option<String>> {
 /// The expressions among `limits`' minimums and maximums, by value index (#20242).
 fn limit_exprs(p: &Value) -> Vec<[Option<String>; 2]> {
     let mut out: Vec<[Option<String>; 2]> = match p.get("limits") {
-        Some(Value::Array(a)) => a.iter().map(|l| [typed(l.get(0)), typed(l.get(1))]).collect(),
+        // A pair given one end sets no limit (limits_param leaves it out), so it keeps no expression.
+        Some(Value::Array(a)) => a
+            .iter()
+            .map(|l| match (l.get(0), l.get(1)) {
+                (Some(_), Some(_)) => [typed(l.get(0)), typed(l.get(1))],
+                _ => [None, None],
+            })
+            .collect(),
         _ => Vec::new(),
     };
     while out.last().is_some_and(|l| l == &[None, None]) {
