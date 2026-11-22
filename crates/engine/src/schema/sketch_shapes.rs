@@ -17,7 +17,7 @@ use crate::params;
 /// What the coordinates of a point typed as text must be.
 const POINT_MUST: &str = "a point's coordinates must be numbers or expressions over the design's parameters";
 /// The most points a line takes.
-const MAX_LINE_POINTS: usize = 10_000;
+pub(crate) const MAX_LINE_POINTS: usize = 10_000;
 
 /// The forms of a point argument: [`SketchPoint`] and [`SnapPoint`] differ in the snaps.
 fn point_arg_schema(generator: &mut SchemaGenerator, snaps: bool) -> Schema {
@@ -110,6 +110,18 @@ impl JsonSchema for PlainPoint {
     }
 }
 
+/// Why a line of `n` points is refused, if it is: too few, or more than one line takes (the
+/// count is said, so a long polyline is not taken for a short one).
+pub(crate) fn line_points_refusal(n: usize) -> Option<String> {
+    if n < 2 {
+        Some("a line needs 2 or more points".to_string())
+    } else if n > MAX_LINE_POINTS {
+        Some(format!("a line takes at most {MAX_LINE_POINTS} points, {n} were given: draw it in several `sketch.line` calls"))
+    } else {
+        None
+    }
+}
+
 /// The points of a line: a list of [`SnapPoint`]s, 2 to 10 000.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LinePoints(pub Vec<Value>);
@@ -119,8 +131,8 @@ impl<'de> Deserialize<'de> for LinePoints {
         let Value::Array(list) = Value::deserialize(d)? else {
             return Err(D::Error::custom(whole("`points` must be a list")));
         };
-        if list.len() < 2 || list.len() > MAX_LINE_POINTS {
-            return Err(D::Error::custom(whole("a line needs 2 or more points")));
+        if let Some(why) = line_points_refusal(list.len()) {
+            return Err(D::Error::custom(whole(&why)));
         }
         for v in &list {
             crate::cmd::point_arg_form(v, true).map_err(|why| D::Error::custom(whole(why)))?;
@@ -142,14 +154,16 @@ impl JsonSchema for LinePoints {
     }
 }
 
+/// The pattern of a snap's text form in a schema, from the engine's one list of prefixes.
+fn snap_pattern() -> String {
+    format!("^({})", crate::cmd::SNAP_PREFIXES.join("|"))
+}
+
 /// Whether `v` is a snap that `sketch.point` takes as one, and if so whether it is well formed
 /// (what the design makes of it, such as a line that is not there, stays the handler's).
 fn snap_form(v: &Value) -> Option<bool> {
     let text = v.as_str();
-    let snapped = text.is_some_and(|t| ["mid:", "on:", "vertex:", "x:"].iter().any(|k| t.starts_with(k)))
-        || v.get("vertex").is_some()
-        || v.get("on_edge").is_some();
-    if !snapped {
+    if !crate::cmd::is_snap(v) {
         return None;
     }
     let numbers = |t: &str| -> Vec<f64> { t.split(',').filter_map(|x| x.trim().parse().ok()).collect() };
@@ -211,7 +225,7 @@ impl JsonSchema for PointOrSnap {
             "anyOf": [
                 point,
                 {"type": "array", "items": coordinate, "minItems": 2, "maxItems": 2},
-                {"type": "string", "pattern": "^(mid:|on:|x:|vertex:)"},
+                {"type": "string", "pattern": snap_pattern()},
                 {"type": "object", "properties": {"vertex": model}, "required": ["vertex"]},
                 {"type": "object", "properties": {"on_edge": model}, "required": ["on_edge"]}
             ]
@@ -702,6 +716,44 @@ impl JsonSchema for CornerPoint {
     }
 }
 
+/// A corner of a 2-Point Rectangle, or the centre or corner of a Center Rectangle: a
+/// [`CornerPoint`], or a snap that holds it, as `sketch.point` takes one ([`PointOrSnap`]). Not a
+/// point's id.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CornerOrSnap(pub Value);
+
+impl<'de> Deserialize<'de> for CornerOrSnap {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        match snap_form(&v) {
+            Some(true) => Ok(CornerOrSnap(v)),
+            Some(false) => Err(D::Error::custom(crate::cmd::CORNER_MUST)),
+            None => serde_json::from_value::<CornerPoint>(v).map(|c| CornerOrSnap(c.0)).map_err(D::Error::custom),
+        }
+    }
+}
+
+impl JsonSchema for CornerOrSnap {
+    fn schema_name() -> Cow<'static, str> {
+        "CornerOrSnap".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point2>();
+        let coordinate = generator.subschema_for::<LengthExpr>();
+        let model = generator.subschema_for::<Point3>();
+        json_schema!({
+            "description": "A corner: [x, y] or {x, y} in mm, or [x, y] where a coordinate is an expression over the design's parameters and the sketch's other points (\"p1.x\"), such as [\"w / 2\", 5]: the corner is then fixed and follows the parameters; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner. Or a snap that holds the corner there: \"mid:<line>\" (the line's midpoint), \"on:<curve>:x,y\" (on the curve, near x,y), \"x:<a>+<b>:x,y\" (at the crossing of two curves, near x,y), \"vertex:x,y,z\" or {vertex: [x,y,z]} (a model vertex, projected) or {on_edge: [x,y,z]} (a point on a model edge, projected). Not a point's id.",
+            "anyOf": [
+                point,
+                {"type": "array", "items": coordinate, "minItems": 2, "maxItems": 2},
+                {"type": "string", "pattern": snap_pattern()},
+                {"type": "object", "properties": {"vertex": model}, "required": ["vertex"]},
+                {"type": "object", "properties": {"on_edge": model}, "required": ["on_edge"]}
+            ]
+        })
+    }
+}
+
 /// A number as `params::num` reads it (a polygon's `radius`, `diameter`, `sides` and `angle`): a
 /// finite number, never an expression.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -732,10 +784,11 @@ pub struct RectTwoPointParams {
     /// The sketch to draw in: its feature id or name. Default: the one being edited.
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
-    /// One corner. A coordinate typed as an expression holds the corner where the parameters put it.
-    pub p0: CornerPoint,
-    /// The opposite corner. It must differ from `p0` in both x and y.
-    pub p1: CornerPoint,
+    /// One corner. A coordinate typed as an expression holds the corner where the parameters put
+    /// it; a snap holds it on the curve, midpoint, crossing or model vertex it names.
+    pub p0: CornerOrSnap,
+    /// The opposite corner, given as `p0` is. It must differ from `p0` in both x and y.
+    pub p1: CornerOrSnap,
     /// Draw construction geometry, which is not part of a profile. Default: false.
     #[serde(default)]
     pub construction: Option<bool>,
@@ -777,10 +830,12 @@ pub struct RectCenterParams {
     /// The sketch to draw in: its feature id or name. Default: the one being edited.
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
-    /// The centre. A coordinate typed as an expression holds the centre where the parameters put it.
-    pub center: CornerPoint,
-    /// One corner, in any quadrant round the centre. It must differ from `center` in both x and y.
-    pub corner: CornerPoint,
+    /// The centre. A coordinate typed as an expression holds the centre where the parameters put
+    /// it; a snap holds it on the curve, midpoint, crossing or model vertex it names.
+    pub center: CornerOrSnap,
+    /// One corner, in any quadrant round the centre, given as `center` is. It must differ from
+    /// `center` in both x and y.
+    pub corner: CornerOrSnap,
     /// Draw construction geometry, which is not part of a profile. Default: false.
     #[serde(default)]
     pub construction: Option<bool>,
@@ -830,7 +885,8 @@ pub struct RectRoundedParams {
     /// The sketch to draw in: its feature id or name. Default: the one being edited.
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
-    /// One corner of the rectangle before rounding, as `sketch.rectangle.two_point` takes it.
+    /// One corner of the rectangle before rounding. A coordinate typed as an expression holds the
+    /// corner where the parameters put it. A snap is not taken.
     pub p0: CornerPoint,
     /// The opposite corner. It must differ from `p0` in both x and y.
     pub p1: CornerPoint,

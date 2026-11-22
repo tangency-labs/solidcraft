@@ -40,7 +40,8 @@ use crate::curve::curve::p3::{compute_crvs_normal, crvs_fix_gaps};
 use crate::curve::curve::p4::fix_chain_curves_list;
 use crate::curve::curve::p5::crvs_cleanup;
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::primitive::PrimitiveFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -57,6 +58,32 @@ use crate::topology::BrepId;
 const OP: &str = "primitive::primitive_creation::p2::taper";
 const SURFACE_INTERSECTION_OP: &str =
     "primitive::primitive_creation::p2::taper::surface_intersection_method";
+
+/// A defect ([`PrimitiveFailure::Defect`]) of an object the kernel built that is not
+/// there, with the status `SM_ERR_NULL_POINTER` of the null pointer it replaces.
+#[track_caller]
+fn broken_link(why: &'static str) -> SolidError {
+    Failure::new(OP, PrimitiveFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+// Why each step that fails here is the kernel's fault (`PrimitiveFailure::Defect`).
+
+/// Why the first split curve is not there.
+const NO_FIRST_SPLIT: &str = "the first split curve is not there, though the profile made a \
+     composite curve of the split curves, and no curves make none";
+/// Why a merged wall face has no offset map.
+const FACE_NO_MAP: &str = "a face of the merged walls has no offset map, though each wall \
+     face is given the map of the offset curve it is ruled from, and the merge carries the \
+     faces' attributes";
+/// Why an offset map's curve index is negative.
+const MAP_INDEX_NEGATIVE: &str = "a wall face's offset map names a negative curve, though the \
+     offset of the profile names each curve by its index among the composite's segments";
+/// Why an offset map's curve is past the generators.
+const MAP_PAST_GENERATORS: &str = "a wall face's offset map names a curve past the generators, \
+     though the offset of the profile names each curve by its index among the composite's \
+     segments, one generator each";
 
 /// Whether two B-splines are the same split curve: equal natural intervals and end
 /// points, bit for bit.
@@ -111,8 +138,14 @@ fn ruled(
 ) -> Result<(BSplineSurface, Option<OffsetMapAttribute>)> {
     let first = current_curve(&state.split, state.links, &state.generators, 0)?;
     let second = current_curve(&state.split, state.links, &state.generators, 1)?;
-    let (first_interval, first_rational) = first
-        .ok_or_else(|| SolidError::primitive_failed(OP, "the first generator has no curve"))?;
+    let (first_interval, first_rational) = first.ok_or_else(|| {
+        SolidError::primitive(
+            OP,
+            PrimitiveFailure::Defect {
+                why: NO_FIRST_SPLIT,
+            },
+        )
+    })?;
     let second_interval = second.map_or_else(Extent1d::new, |(interval, _)| interval);
     ruled_surface_from_offset(
         k,
@@ -215,7 +248,7 @@ impl PrimitiveCreation {
         // init SmPrimitiveCreation memory
         self.init_entity_maps();
         if self.region().is_none() {
-            return Err(SolidError::primitive_missing(OP, "the target region"));
+            return Err(SolidError::primitive(OP, PrimitiveFailure::NoRegion));
         }
 
         // make output temporary for now
@@ -352,10 +385,12 @@ fn taper(
         0.0,
     )?;
     // expect one composite curve
-    let mut composite =
-        built.composites.into_iter().next().ok_or_else(|| {
-            SolidError::primitive_failed(OP, "the profile makes no composite curve")
-        })?;
+    let mut composite = built.composites.into_iter().next().ok_or_else(|| {
+        SolidError::primitive(
+            OP,
+            PrimitiveFailure::ProfileNotOneComposite { composites: 0 },
+        )
+    })?;
     let mut generators = Vec::with_capacity(composite.segments().len());
     for segment in composite.segments() {
         generators.push(
@@ -709,9 +744,9 @@ fn surface_intersection_method(
         },
     )?;
     if untrimmed.is_empty() {
-        return Err(SolidError::primitive_failed(
+        return Err(SolidError::primitive(
             OP,
-            "the untrimmed offset makes no curves",
+            PrimitiveFailure::OffsetMakesNoCurves,
         ));
     }
 
@@ -758,16 +793,15 @@ fn surface_intersection_method(
         // the map attribute of the curve that generated the face
         let map = a
             .offset_map((intersections, face))?
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the face's offset map"))?;
-        let index = usize::try_from(map.curve)
-            .map_err(|_| SolidError::primitive_missing(OP, "the offset map's curve"))?;
+            .ok_or_else(|| broken_link(FACE_NO_MAP))?;
+        let index = usize::try_from(map.curve).map_err(|_| broken_link(MAP_INDEX_NEGATIVE))?;
         let corner_offset = map.corner_offset;
 
         // Parent curve that generated this surface
         let ends = state
             .generators
             .get(index)
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the offset map's generator curve"))?
+            .ok_or_else(|| broken_link(MAP_PAST_GENERATORS))?
             .ends()?;
 
         // Compare each face vertex with the parent curve ends

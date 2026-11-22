@@ -1201,6 +1201,9 @@ mod web {
 
     impl eframe::App for Shell {
         fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+            // First: what the browser did with the last right-click (#20011). A browser may take
+            // a right-click for itself and open its own menu; the app then opens none of its own.
+            self.app.menu.browser_menu = self.mouse_buttons.borrow().menu();
             // First: a language another tab chose fetches its font this frame.
             self.load_other_tabs_prefs();
             self.tick_font(ctx);

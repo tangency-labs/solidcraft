@@ -17,11 +17,12 @@
 //!   [`PlanarSectionOptions`] and `Option` fields of the result; the curves are owned
 //!   values, so upstream's delete lists and cleanup objects have no counterpart. The
 //!   faces are [`FaceId`]s.
-//! - **Face context.** A face's surface is intersected, dropped onto and lifted as an
+//! - **Face context.** A face's surface is intersected and dropped onto as an
 //!   evaluation copy (keeping its owner and cache slot) through the B-rep's
 //!   [`BrepFaceServices`], so its trimmed cache reaches the face as upstream's does
-//!   through `GetFace()`. `smsurf_GetSurfaceCache(this)` before the intersection is that
-//!   context's [`SurfaceSolveContext::surface_cache_state`] (upstream only reads the
+//!   through `GetFace()`; its lift reads the surface's own continuities and makes no
+//!   cache. `smsurf_GetSurfaceCache(this)` before the intersection is that
+//!   context's [`SurfaceSolveContext::surface_cache_without_get_tree`] (upstream only reads the
 //!   cache's continuity there, and ignores it).
 //! - **Statuses.** A face whose surface section fails is skipped, as upstream's
 //!   `continue`; so is a face whose trimming fails. [`SolidError::Unported`] always
@@ -40,6 +41,10 @@
 //! - **Face tolerance.** A face's section with no `cpdOpt3DApproximationTol` is traced
 //!   to the face's tolerance ([`face_planar_section_curves`], WR-723); upstream passes
 //!   the null on, and the intersector traces to 1/1000 of the surface's size.
+//! - **Covers of one piece.** Trimmed in 3D, a face's pieces that lie wholly on another of
+//!   its pieces are dropped ([`distinct_pieces`]): on a surface that covers itself (a spline
+//!   winding round one circle several times) upstream returns each cover of the face's
+//!   piece, and one of them stops inside the face where the surface ends.
 //! - **Not ported here.** The `SM_DEBUG_CODE` drawing blocks and
 //!   `SM_VALIDATE_INTERSECTORS`.
 
@@ -195,7 +200,7 @@ pub fn surface_planar_section_curves(
     let use_surface_edges = [true, false];
     let found = if let Some((context, handle)) = context {
         // get surface cache (upstream then reads its continuity and ignores it)
-        context.surface_cache_state(k, surface, handle)?;
+        context.surface_cache_without_get_tree(k, surface, handle)?;
         surface.global_surface_intersect_with_context(
             k,
             [handle, None],
@@ -208,7 +213,6 @@ pub fn surface_planar_section_curves(
             ang_tol_rad,
         )?
     } else {
-        crate::surface::surface::p1::note_surface_cache(k, surface);
         surface.global_surface_intersect(
             k,
             uv_domain,
@@ -363,7 +367,9 @@ pub struct PlanarSection {
 /// curves that are degenerate stay, those coincident with a section curve of an earlier
 /// face or (on a planar face) with an embedded edge of the face are removed; with
 /// `force_uv_classify` and the UV output, a curve without UV curve gets one; the curves are
-/// then trimmed to the face (`CreateCurvesByTrimming`).
+/// then trimmed to the face (`CreateCurvesByTrimming`). Trimmed in 3D (without the UV
+/// output), a piece that lies wholly on another piece of the same face is dropped
+/// ([`distinct_pieces`]).
 ///
 /// Note: without [`PlanarSectionOptions::force_uv_classify`], requested UV curves of
 /// analytic faces (plane, cylinder, cone, sphere) are dropped; see that field.
@@ -557,6 +563,13 @@ pub fn create_planar_section_curves(
         };
         let trim_3d = trimmed.curves_3d.unwrap_or_default();
         let trim_uv = trimmed.uv_curves.unwrap_or_default();
+        // Trimmed in 3D, a section curve that covers itself gives each of its covers of the
+        // face's pieces (see [`distinct_pieces`]): keep one of each.
+        let trim_3d = if opts.outputs.uv_curves {
+            trim_3d
+        } else {
+            distinct_pieces(k, trim_3d, tol)?
+        };
 
         // add results to output
         if opts.outputs.faces {
@@ -582,6 +595,81 @@ pub fn create_planar_section_curves(
         uv_curves: opts.outputs.uv_curves.then_some(out_uv),
         faces: opts.outputs.faces.then_some(out_faces),
     })
+}
+
+/// Whether all of `curve` lies on `other` within `tol`: one of the coincidence check's
+/// ranges of values runs from `curve`'s start to its end. Other solutions, such as the
+/// touch a closed `other` reports at its closing point, do not count against it. The
+/// check's status is ignored, as the section's other coincidence checks do, except
+/// [`SolidError::Unported`] and a cancelled pass.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] and cancellation from the check; those of the solutions'
+/// parameters.
+fn lies_on(k: &Kernel, curve: &Curve, other: &Curve, tol: f64) -> Result<bool> {
+    let ivl = curve.natural_interval();
+    let param_tol = 1.0 / 100.0 * (EFF_ZERO_SQRT + ivl.length());
+    let (found, status) = curve.global_coincidence_checker_with_partial::<NoObject>(
+        k,
+        &ivl,
+        other,
+        &other.natural_interval(),
+        tol,
+        true,
+        [None, None],
+    );
+    if let Err(e) = status {
+        if e.is_unported_or_cancelled() {
+            return Err(e);
+        }
+    }
+    for s in &found.solutions {
+        if s.solution_type == SolutionType::RangeOfValues
+            && ivl.classify_point(s.start.param(0)?, param_tol) == ExtentPointType::Start
+            && ivl.classify_point(s.end.param(0)?, param_tol) == ExtentPointType::End
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// The pieces of one face's section, trimmed in 3D, with every piece that lies wholly on
+/// another dropped (of two that lie on each other, the first is kept).
+///
+/// The surface section is traced over the face's whole UV domain, and a surface can cover
+/// itself there: a spline that winds round a circle several times (as a coil's or a
+/// thread's NURBS does) is cut by the plane in a curve that runs round the same circle as
+/// often. Trimming in 3D classifies points, not parameters, so each cover of the face's
+/// piece is kept; and the cover the curve ends in, at the surface's boundary, is kept up
+/// to that end, which lies inside the face. Every piece the trimming keeps is a part of
+/// the face's section, so the pieces that lie on another are those covers.
+///
+/// # Errors
+///
+/// Those of [`lies_on`].
+fn distinct_pieces(k: &Kernel, pieces: Vec<Curve>, tol: f64) -> Result<Vec<Curve>> {
+    let mut covered = Vec::new();
+    for (i, piece) in pieces.iter().enumerate() {
+        let mut on_another = false;
+        for (j, other) in pieces.iter().enumerate() {
+            if i == j || !lies_on(k, piece, other, tol)? {
+                continue;
+            }
+            // a copy of an earlier piece, or a part of a longer one
+            if j < i || !lies_on(k, other, piece, tol)? {
+                on_another = true;
+                break;
+            }
+        }
+        covered.push(on_another);
+    }
+    Ok(pieces
+        .into_iter()
+        .zip(covered)
+        .filter_map(|(piece, on_another)| (!on_another).then_some(piece))
+        .collect())
 }
 
 /// The forced UV curves of section curve `index` (`bForceUVClassify`): the curve is
@@ -650,16 +738,7 @@ fn force_uv_curves(
         }
 
         // skip UVCurves whose 3D Approximations exceed tolerance
-        let lifted = surface.lift_curve_with_context(
-            k,
-            uv_domain,
-            &drop,
-            &drop_ivl,
-            face_tol / 3.0,
-            true,
-            &mut services,
-            handle,
-        )?;
+        let lifted = surface.lift_curve(k, uv_domain, &drop, &drop_ivl, face_tol / 3.0, true)?;
         if lifted.max_approx_dev > face_tol * 10.0 {
             continue;
         }
@@ -743,5 +822,195 @@ mod tests {
             assert!((a.distance(z) - 10.0).abs() < 1e-9);
         }
         assert!(r.uv_curves.is_none());
+    }
+
+    /// A cylinder of radius `r` and height `h` whose rational NURBS winds round its circle
+    /// `spans / 4` times (`spans` quarter arcs, one per knot span, u in [0, spans]; v in
+    /// [0, 1] is the height), as a coil's or a thread's NURBS can.
+    fn wound_cylinder(r: f64, h: f64, spans: usize) -> Surface {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as NurbSurface;
+        use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_4};
+        let net = (0..=2 * spans)
+            .map(|i| {
+                // corners of the arcs (w = 1) and the corners of their squares (w = 1/sqrt 2)
+                let (radius, w) = if i % 2 == 0 {
+                    (r, 1.0)
+                } else {
+                    (r * 2.0_f64.sqrt(), FRAC_1_SQRT_2)
+                };
+                let (sin, cos) = (i as f64 * FRAC_PI_4).sin_cos();
+                [0.0, h]
+                    .map(|z| CPoint::new(w * radius * cos, w * radius * sin, w * z, w))
+                    .to_vec()
+            })
+            .collect();
+        let mut u = vec![0.0; 3];
+        for knot in 1..spans {
+            u.extend([knot as f64; 2]);
+        }
+        u.extend([spans as f64; 3]);
+        let nurb = NurbSurface::new(net, 2, 1, u, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
+        Surface::from(BSplineSurface::from_nurb(nurb, false))
+    }
+
+    /// One face on [`wound_cylinder`] of radius `r`, height `h` and nine quarter arcs (2 1/4
+    /// turns, u in [0, 9]), bounded in UV by the quadrilateral through `corners`
+    /// (counter-clockwise), over the surface's whole UV domain, so that a section of the face
+    /// is traced over all of the surface's turns.
+    fn wound_face(k: &mut Kernel, r: f64, h: f64, corners: [(f64, f64); 4]) -> (Brep, FaceId) {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+        use crate::topology::brep::p2::ArenaNotifyState;
+        use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
+        let surface = wound_cylinder(r, h, 9);
+        let domain = surface.natural_uv_domain_with_nurb(k).unwrap();
+        let uv_curves: Vec<Curve> = (0..4)
+            .map(|i| {
+                let (a, b) = (corners[i], corners[(i + 1) % 4]);
+                let line = BSplineCurve::create_line_segment(
+                    2,
+                    Point3::new(a.0, a.1, 0.0),
+                    Point3::new(b.0, b.1, 0.0),
+                )
+                .unwrap();
+                Curve::from(line)
+            })
+            .collect();
+        let mut b = crate::topology::brep::p3::new_brep(
+            k,
+            crate::geom::tol::USE_DEFAULT,
+            crate::geom::tol::USE_DEFAULT,
+        )
+        .unwrap();
+        let mut state = ArenaNotifyState::new(&b);
+        let mut env = state.env(None);
+        let key_of = env.key_of;
+        let this_face = |f: FaceId| key_of(crate::EntityRef::Face(f));
+        let region = b.infinite_region();
+        let input = FaceCurvesInput {
+            loops: vec![4],
+            curves_3d: None,
+            uv_curves: Some(uv_curves),
+            orientations: vec![OrientType::Same; 4],
+            loop_points: Vec::new(),
+        };
+        let made = make_face_with_curves(
+            k,
+            &mut b,
+            region,
+            input,
+            surface,
+            &domain,
+            OrientType::Same,
+            None,
+            &this_face,
+            &mut env,
+        )
+        .unwrap();
+        b.refresh_cached_topology();
+        let f = made.face.unwrap();
+        assert!(face2::uv_domain(&b, f).unwrap().are_equal(&domain, 1e-12));
+        (b, f)
+    }
+
+    /// The section of `b` by the plane z = `z`: its curves' total length, and every curve
+    /// end's distance to the nearest of `ends`, after checking that every curve stays on the
+    /// circle of radius `r` about the z axis in that plane within the face's tolerance `tol`.
+    fn section_on_circle(
+        k: &Kernel,
+        b: &mut Brep,
+        r: f64,
+        z: f64,
+        tol: f64,
+        ends: &[Point3],
+    ) -> (usize, f64, Vec<f64>) {
+        let opts = PlanarSectionOptions {
+            outputs: SectionOutputs {
+                curves_3d: true,
+                ..SectionOutputs::default()
+            },
+            ..PlanarSectionOptions::default()
+        };
+        let curves = create_planar_section_curves(k, b, Point3::new(0.0, 0.0, z), Vec3::Z, &opts)
+            .unwrap()
+            .curves_3d
+            .unwrap();
+        let mut length = 0.0;
+        let mut off_ends = Vec::new();
+        for c in &curves {
+            let ivl = c.natural_interval();
+            length += c.length(k, &ivl, 1e-9).unwrap();
+            for i in 0..=64 {
+                let p = c
+                    .evaluate_point(k, ivl.evaluate(f64::from(i) / 64.0))
+                    .unwrap();
+                let off = ((p.x * p.x + p.y * p.y).sqrt() - r)
+                    .abs()
+                    .max((p.z - z).abs());
+                assert!(off <= tol, "a section point {off} off the circle");
+            }
+            for t in [ivl.min(), ivl.max()] {
+                let p = c.evaluate_point(k, t).unwrap();
+                off_ends.push(
+                    ends.iter()
+                        .map(|e| e.distance(p))
+                        .fold(f64::INFINITY, f64::min),
+                );
+            }
+        }
+        (curves.len(), length, off_ends)
+    }
+
+    /// A face on a spline that winds round its circle (as a coil's or a thread's NURBS can)
+    /// is cut in its own section once. The surface's section runs round the circle 2 1/4
+    /// times; trimmed in 3D each turn kept its own copy of the face's piece, and the last,
+    /// partial turn a copy from where the surface ends (at 0 degrees, inside the face) to
+    /// the face's side, a loose end.
+    ///
+    /// - A band one quarter turn wide that climbs two turns, the parallelogram (0, 0),
+    ///   (1, 0), (9, 1), (8, 1) in UV (u in [8 v, 8 v + 1] at height v), cut at v = 7/16:
+    ///   one quarter arc, u in [3.5, 4.5], from -45 to 45 degrees about the axis, length
+    ///   r pi / 2, both ends on the band's sides.
+    /// - A ring one turn round, the rectangle u in [4, 8], v in [0, 1] (its sides at u = 4
+    ///   and u = 8 meet in 3D along the line at 0 degrees), cut at mid-height: one full
+    ///   circle, length 2 pi r, its ends on that line.
+    ///
+    /// The curves are traced to the face's tolerance, so they are checked to it: every
+    /// sample on the circle, the ends at the sides, and the length within 2 a times it for
+    /// an arc of angle a (a curve within `tol` of a radius-r arc measures at most (r + tol) a;
+    /// twice that).
+    #[test]
+    fn a_face_on_a_spline_that_winds_round_its_circle_is_cut_once() {
+        use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI};
+        let mut k = Kernel::default();
+        let (r, h) = (2.0, 4.0);
+        let band = [(0.0, 0.0), (1.0, 0.0), (9.0, 1.0), (8.0, 1.0)];
+        let ring = [(4.0, 0.0), (8.0, 0.0), (8.0, 1.0), (4.0, 1.0)];
+        for (corners, v, angle, ends) in [
+            (
+                band,
+                7.0 / 16.0,
+                FRAC_PI_2,
+                vec![
+                    Point3::new(r * FRAC_1_SQRT_2, -r * FRAC_1_SQRT_2, h * 7.0 / 16.0),
+                    Point3::new(r * FRAC_1_SQRT_2, r * FRAC_1_SQRT_2, h * 7.0 / 16.0),
+                ],
+            ),
+            (ring, 0.5, 2.0 * PI, vec![Point3::new(r, 0.0, h * 0.5)]),
+        ] {
+            let (mut b, f) = wound_face(&mut k, r, h, corners);
+            let tol = face2::tolerance(&b, f).unwrap();
+            let (count, length, off_ends) = section_on_circle(&k, &mut b, r, h * v, tol, &ends);
+            assert!(
+                (length - r * angle).abs() <= 2.0 * angle * tol,
+                "{corners:?}: {count} curves, length {length} for {}, tolerance {tol}",
+                r * angle
+            );
+            assert!(
+                off_ends.iter().all(|d| *d <= tol),
+                "{corners:?}: ends off the face's sides: {off_ends:?}"
+            );
+        }
     }
 }

@@ -1,0 +1,1 @@
+decides whether a drill reaches material by the display mesh

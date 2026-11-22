@@ -848,6 +848,36 @@ fn emboss_text_wraps_round_a_whole_tube_outside_and_in_its_bore() {
     }
 }
 
+/// Text wraps onto the outside of a half tube, a wall that is not a whole cylinder (#12029):
+/// emboss and deboss change the volume as on a whole tube.
+#[test]
+fn emboss_text_wraps_onto_a_half_tube() {
+    let mut flat = Session::default();
+    run(&mut flat, "solid.box", json!({"length": 60, "width": 60, "height": 20, "body_name": "Flat"}));
+    let flat_before = volume(&mut flat);
+    run(&mut flat, "sketch.create", json!({"plane": {"origin": [20, 20, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Text"}));
+    run(&mut flat, "sketch.text", json!({"text": "Emboss", "at": [-10, 10], "height": 6}));
+    run(&mut flat, "sketch.finish", json!({}));
+    run(&mut flat, "solid.emboss", json!({"sketch": "Text", "depth": 1}));
+    let area = volume(&mut flat) - flat_before;
+    for (mode, rr) in [("emboss", 21.0_f64), ("deboss", 19.)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 30, "body_name": "Tube"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 16, "height": 30, "operation": "cut", "targets": ["Tube"]}));
+        run(&mut s, "solid.box", json!({"length": 50, "width": 25, "height": 40, "corner": [-25, -25, -5], "operation": "cut", "targets": ["Tube"]}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 20, 0], "x_dir": [-1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Text"}));
+        run(&mut s, "sketch.text", json!({"text": "Emboss", "at": [-10, 10], "height": 6}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = volume(&mut s);
+        run(&mut s, "solid.emboss", json!({"sketch": "Text", "face": [0.0, 20.0, 13.0], "depth": 1, "mode": mode}));
+        assert_eq!(s.model.state().body("Tube").unwrap().body.shell_count(), 1);
+        // Signed: an emboss adds material and a deboss takes it away.
+        let change = volume(&mut s) - before;
+        let want = area * (rr * rr - 400.) / 40.;
+        assert!((change - want).abs() < 1e-4 * want.abs(), "{mode}: {change} vs {want}");
+    }
+}
+
 #[test]
 fn concave_cylinder_emboss_and_deboss_with_sketch_profile_and_text() {
     let mut s = Session::default();
@@ -1911,6 +1941,142 @@ fn loft_join_does_not_fall_back_from_a_hidden_sketch_face_body() {
     let err = s.execute("solid.loft", &params).unwrap_err().to_string();
     assert!(err.contains("no visible body to join"), "{err}");
     assert_eq!(s.doc.to_json(), before);
+}
+
+/// #14476: a 10 mm cube `Stock` in component Part, a shown 10 mm cube `Block` beside it at the top
+/// level, and, with the top level active, a sketch on Stock's top face drawn by `draw` (world
+/// points in, sketch points out); then Stock (`hide` "body") or Part's placement is hidden. With
+/// `hide` "own", Stock is a top-level body too, and hidden.
+fn sketch_on_a_hidden_face(hide: &str, draw: impl FnOnce(&mut Session, &dyn Fn(f64, f64) -> [f64; 2])) -> Session {
+    let mut s = Session::default();
+    let part = if hide == "own" { Value::Null } else { run(&mut s, "component.create", json!({"name": "Part"})) };
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Stock"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [10, 0, 0], "operation": "new", "body_name": "Block"}));
+    sketch_on_face(&mut s, solidcore_record::Vec3::new(5.0, 5.0, 10.0), |s, _, plane| {
+        let at = |x: f64, y: f64| {
+            let p = plane.to_local(solidcore_record::Vec3::new(x, y, 10.0));
+            [p.x, p.y]
+        };
+        draw(s, &at);
+    });
+    if hide == "body" || hide == "own" {
+        run(&mut s, "browser.visibility", json!({"items": ["Stock"], "visible": false}));
+    } else {
+        run(&mut s, "browser.visibility", json!({"paths": [[part["occurrence"]]], "visible": false}));
+    }
+    s
+}
+
+/// The Join `cmd` names no body and is refused, leaving the design and both cubes as they were.
+fn assert_join_refused(s: &mut Session, cmd: &str, params: Value) {
+    let before = s.doc.to_json();
+    let result = s.execute(cmd, &params);
+    assert!(result.is_err(), "{cmd}: the join was made, Stock {:.1} mm3", body_volume(s, "Stock"));
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("no visible body to join") && err.contains("`Stock`"), "{cmd}: {err}");
+    assert_eq!(s.doc.to_json(), before, "{cmd}");
+    assert!((body_volume(s, "Stock") - 1000.0).abs() < 1e-6, "{cmd}");
+    assert!((body_volume(s, "Block") - 1000.0).abs() < 1e-6, "{cmd}");
+}
+
+fn rectangle_over_both_cubes(s: &mut Session, at: &dyn Fn(f64, f64) -> [f64; 2]) {
+    run(s, "sketch.rectangle.two_point", json!({"p0": at(2.0, 2.0), "p1": at(13.0, 8.0)}));
+}
+
+/// #14476, the reported case: an extrude Join that names no body, from a sketch on the face of a
+/// part whose placement is hidden, leaves that part's body alone, as Loft does.
+#[test]
+fn extrude_join_refuses_a_sketch_face_body_whose_placement_is_hidden() {
+    let mut s = sketch_on_a_hidden_face("placement", rectangle_over_both_cubes);
+    assert_join_refused(&mut s, "solid.extrude", json!({"distance": 3, "operation": "join"}));
+}
+
+#[test]
+fn extrude_join_refuses_a_hidden_sketch_face_body() {
+    let mut s = sketch_on_a_hidden_face("body", rectangle_over_both_cubes);
+    assert_join_refused(&mut s, "solid.extrude", json!({"distance": 3, "operation": "join"}));
+}
+
+/// Auto never joins or cuts the hidden body under the sketch, up from its face or down into it,
+/// whether that body is in a hidden part, hidden in a shown part, or hidden at the top level: it
+/// makes a new body and leaves both cubes as they were.
+#[test]
+fn extrude_auto_from_a_hidden_bodys_face_makes_a_new_body() {
+    for hide in ["body", "placement", "own"] {
+        for distance in [3, -3] {
+            let mut s = sketch_on_a_hidden_face(hide, |s, at| {
+                run(s, "sketch.rectangle.two_point", json!({"p0": at(2.0, 2.0), "p1": at(8.0, 8.0)}));
+            });
+            let bodies = s.model.state().bodies.len();
+            run(&mut s, "solid.extrude", json!({"distance": distance, "operation": "auto"}));
+            let case = format!("{hide} {distance}");
+            assert!((body_volume(&s, "Stock") - 1000.0).abs() < 1e-6, "{case}: Stock {:.1}", body_volume(&s, "Stock"));
+            assert!((body_volume(&s, "Block") - 1000.0).abs() < 1e-6, "{case}: Block {:.1}", body_volume(&s, "Block"));
+            assert_eq!(s.model.state().bodies.len(), bodies + 1, "{case}");
+        }
+    }
+}
+
+/// Down from a hidden body's face into the shown cube, Auto cuts only the shown cube.
+#[test]
+fn extrude_auto_cut_from_a_hidden_bodys_face_leaves_it_alone() {
+    for hide in ["body", "placement", "own"] {
+        let mut s = sketch_on_a_hidden_face(hide, |s, at| {
+            run(s, "sketch.rectangle.two_point", json!({"p0": at(8.0, 2.0), "p1": at(16.0, 8.0)}));
+        });
+        let feature = run(&mut s, "solid.extrude", json!({"distance": -3, "operation": "auto"}))["feature"].as_u64().unwrap();
+        assert_eq!(s.doc.feature(feature).unwrap().participants, ["Block"], "{hide}");
+        assert!((body_volume(&s, "Stock") - 1000.0).abs() < 1e-6, "{hide}: Stock {:.1}", body_volume(&s, "Stock"));
+        assert!(body_volume(&s, "Block") < 1000.0 - 1.0, "{hide}: Block {:.1}", body_volume(&s, "Block"));
+    }
+}
+
+#[test]
+fn extrude_join_refuses_a_hidden_top_level_sketch_face_body() {
+    let mut s = sketch_on_a_hidden_face("own", rectangle_over_both_cubes);
+    assert_join_refused(&mut s, "solid.extrude", json!({"distance": 3, "operation": "join"}));
+}
+
+/// A Join that names its target keeps it, hidden face or not.
+#[test]
+fn extrude_join_from_a_hidden_bodys_face_into_a_named_target() {
+    let mut s = sketch_on_a_hidden_face("body", rectangle_over_both_cubes);
+    run(&mut s, "solid.extrude", json!({"distance": 3, "operation": "join", "targets": ["Block"]}));
+    assert!((body_volume(&s, "Stock") - 1000.0).abs() < 1e-6, "Stock {:.1}", body_volume(&s, "Stock"));
+    assert!(body_volume(&s, "Block") > 1000.0 + 1.0, "Block {:.1}", body_volume(&s, "Block"));
+}
+
+/// Auto with explicit participants keeps them: the Join goes into the named shown cube.
+#[test]
+fn extrude_auto_from_a_hidden_bodys_face_keeps_named_participants() {
+    let mut s = sketch_on_a_hidden_face("body", rectangle_over_both_cubes);
+    run(&mut s, "solid.extrude", json!({"distance": 3, "operation": "auto", "participants": ["Block"]}));
+    assert!((body_volume(&s, "Stock") - 1000.0).abs() < 1e-6, "Stock {:.1}", body_volume(&s, "Stock"));
+    assert!(body_volume(&s, "Block") > 1000.0 + 1.0, "Block {:.1}", body_volume(&s, "Block"));
+}
+
+#[test]
+fn revolve_join_refuses_a_sketch_face_body_whose_placement_is_hidden() {
+    let mut axis = String::new();
+    let mut s = sketch_on_a_hidden_face("placement", |s, at| {
+        axis = run(s, "sketch.line", json!({"points": [at(3.0, 5.0), at(7.0, 5.0)]}))["curves"][0].as_str().unwrap().to_string();
+        run(s, "sketch.rectangle.two_point", json!({"p0": at(3.0, 5.0), "p1": at(7.0, 6.0)}));
+    });
+    assert_join_refused(&mut s, "solid.revolve", json!({"axis": axis, "operation": "join"}));
+}
+
+#[test]
+fn sweep_join_refuses_a_sketch_face_body_whose_placement_is_hidden() {
+    let mut s = sketch_on_a_hidden_face("placement", |s, at| {
+        run(s, "sketch.circle.center", json!({"center": at(5.0, 5.0), "radius": 2}));
+    });
+    let sketch = s.doc.features.iter().rev().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Sketch { .. })).unwrap().id;
+    let path = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let wire = run(&mut s, "sketch.line3d", json!({"points": [[5, 5, 10], [5, 5, 15]]}))["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    assert_join_refused(&mut s, "solid.sweep", json!({"sketch": sketch, "path_sketch": path, "path": [wire], "operation": "join"}));
 }
 
 /// A cone that takes only a 1 mm chamfer off a cylinder's top edge leaves nearly all of the
@@ -3746,4 +3912,25 @@ fn a_narrow_profile_across_a_wall_along_the_extrusion_keeps_the_trim_to_the_body
         outside * 10.0,
         0.2 * 2.0
     );
+}
+
+/// A 3° draft on a pocket wall whose vertical corners carry 4 mm rounds drafts the wall with the
+/// rounds following, or refuses and says what to do; never a bare kernel status. With sharp
+/// corners it builds; with the rounds it is "SMLib failed (status 1001)" today
+/// ([T-97](https://tickets.solidcraft.io/t/97), #17592).
+#[test]
+fn a_draft_on_a_pocket_wall_beside_rounds_never_fails_with_a_bare_status() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 90, "width": 70, "height": 50, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 50, "width": 30, "height": 36, "corner": [20, 20, 14], "operation": "cut", "targets": ["Block"]}));
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 20, 35], [70, 20, 35], [70, 50, 35], [20, 50, 35]], "radius": 4}));
+    let draft = json!({"faces": [[45, 20, 35]], "angle": "3 deg", "neutral": {"origin": [0, 0, 14], "normal": [0, 0, 1]}});
+    match s.execute("solid.draft", &draft) {
+        Ok(_) => {
+            let state = s.model.state();
+            let b = &state.body("Block").unwrap().body;
+            assert!(b.validity().is_empty(), "{:?}", b.validity());
+        }
+        Err(e) => assert!(!e.to_string().contains("status 1001"), "{e}"),
+    }
 }
