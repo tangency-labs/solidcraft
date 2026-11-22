@@ -322,7 +322,11 @@ fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::c
         }
         let (Some(ra), Some(rb)) = (runs.get(a), runs.get(b)) else { continue };
         let p0 = ra.end();
-        let crossing = refine_crossing(ra, rb, p0);
+        // A crossing at a shallow angle moves far for a small error in either curve (a line
+        // ending on a curve within the join tolerance, or a chord of the polyline): where the
+        // search finds none near the junction, the junction itself is the crossing, moved onto
+        // the exact curve.
+        let crossing = refine_crossing(ra, rb, p0).filter(|(p, ..)| p.dist(p0) < 1e-2).or_else(|| project_junction(ra, rb, p0));
         match crossing {
             Some((p, ta, tb)) if p.dist(p0) < 1e-2 => {
                 if let Some(x) = runs.get_mut(a) {
@@ -743,6 +747,30 @@ fn refine_crossing(a: &Run, b: &Run, p: Vec2) -> Option<(Vec2, f64, f64)> {
         tb -= da.cross(f) / det;
     }
     None
+}
+
+/// How far from the polyline's junction the exact curve may be moved to meet it: the chords
+/// stray from the curve by up to [`SAMPLE_TOL`].
+const JUNCTION_TOL: f64 = 2.0 * SAMPLE_TOL;
+
+/// The junction of an exact run with a plain one taken as the crossing, when it lies within
+/// [`JUNCTION_TOL`] of the exact curve: the point on the curve nearest `p` and its parameter
+/// (the plain run's end moves there). Only a line end moves: an arc's end can only turn along its
+/// own circle, which would leave the joint open. Two exact runs have no plain end to move.
+fn project_junction(a: &Run, b: &Run, p: Vec2) -> Option<(Vec2, f64, f64)> {
+    let (seg, t, within) = match (a, b) {
+        (Run::Exact { seg, t0, t1, .. }, Run::Plain(plain)) if plain.first().is_some_and(|s| matches!(s, Seg2::Line { .. })) => {
+            let t = local_param(seg, p, *t1);
+            (seg, t, t > *t0 && t <= 1.0)
+        }
+        (Run::Plain(plain), Run::Exact { seg, t0, t1, .. }) if plain.last().is_some_and(|s| matches!(s, Seg2::Line { .. })) => {
+            let t = local_param(seg, p, *t0);
+            (seg, t, t >= 0.0 && t < *t1)
+        }
+        _ => return None,
+    };
+    let q = seg.point_at(t);
+    (within && q.is_finite() && q.dist(p) <= JUNCTION_TOL).then_some((q, t, t))
 }
 
 /// Parameter of the point of `s` nearest `p`, by Newton from `t`.
@@ -1940,6 +1968,20 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
             if !ok || h != start {
                 continue;
             }
+            let keep = without_lobes_of_no_area(&segs, &edge_nodes);
+            if keep.iter().any(|k| !k) {
+                fn kept<T>(v: &mut Vec<T>, keep: &[bool]) {
+                    let mut k = keep.iter();
+                    v.retain(|_| k.next().copied().unwrap_or(true));
+                }
+                kept(&mut segs, &keep);
+                kept(&mut hs, &keep);
+                kept(&mut edge_nodes, &keep);
+                kept(&mut edge_analytic, &keep);
+                kept(&mut ids, &keep);
+                kept(&mut ptags, &keep);
+                kept(&mut coverage_tags, &keep);
+            }
             let segs = close_graph_joints(segs, &edge_nodes, &edge_analytic, TANGENT_JOIN_TOL);
             let lp = Loop2 { segs: close_line_joints(restore_exact(segs, &ptags, &exact), ENDPOINT_JOIN_TOL) };
             let area = lp.signed_area();
@@ -1983,6 +2025,40 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
         break;
     }
     Island { loops, incomplete }
+}
+
+/// Which half-edges of a traced loop stay: a lobe (a stretch back to the node it left) of no area
+/// is left out, as the lens two near-tangent crossings leave (#14182).
+fn without_lobes_of_no_area(segs: &[Seg2], edge_nodes: &[(usize, usize)]) -> Vec<bool> {
+    let n = segs.len();
+    let mut keep = vec![true; n];
+    let mut i = 0;
+    while i < n {
+        let from = edge_nodes.get(i).map(|e| e.0);
+        let back =
+            (1..n).map(|d| (i + d) % n).take_while(|j| keep.get(*j).copied().unwrap_or(false)).find(|&j| edge_nodes.get(j).map(|e| e.0) == from);
+        let lobe = back.filter(|_| keep.get(i).copied().unwrap_or(false)).and_then(|j| {
+            let idx: Vec<usize> = (0..n).map(|d| (i + d) % n).take_while(|&k| k != j).collect();
+            let lobe: Vec<Seg2> = idx.iter().filter_map(|&k| segs.get(k).copied()).collect();
+            (idx.len() < n && area_about_start(&lobe).abs() <= 1e-9).then_some(idx)
+        });
+        match lobe {
+            Some(idx) => idx.into_iter().for_each(|k| {
+                if let Some(x) = keep.get_mut(k) {
+                    *x = false;
+                }
+            }),
+            None => i += 1,
+        }
+    }
+    keep
+}
+
+/// Signed area about the loop's first point: far from the origin a loop closed only to round-off
+/// is off by the gap times the distance.
+fn area_about_start(segs: &[Seg2]) -> f64 {
+    let Some(o) = segs.first().map(Seg2::start) else { return 0.0 };
+    segs.iter().map(|s| s.area_term() - 0.5 * o.cross(s.end() - s.start())).sum()
 }
 
 /// Chord tolerance of the polylines free-form curves take part in the profile graph as.
@@ -2848,6 +2924,33 @@ mod tests {
                     assert!((end.len() - 5.0).abs() < 1e-9, "the spline's ends in the loop are its crossings: {end:?}");
                 }
             }
+        }
+    }
+
+    /// #20781: a line crossing a closed spline at a shallow angle (close to its flat top) found no
+    /// true crossing within a hundredth of the chords' one, so both loops kept the spline's chords
+    /// instead of the exact curve, and a cut along it came out as a run of planar slivers.
+    #[test]
+    fn a_line_crossing_a_spline_at_a_shallow_angle_keeps_the_exact_curve() {
+        let mut sk = Sketch::new();
+        let controls = (0..12)
+            .map(|k| {
+                let a = std::f64::consts::TAU * f64::from(k) / 12.0;
+                sk.add_point(Vec2::new(30.0 * a.cos(), 10.0 * a.sin()), None).unwrap()
+            })
+            .collect();
+        let spline = sk
+            .add_curve(CurveKind::Spline { pts: controls, control: true, degree: 3, periodic: true, nurbs: None, handles: Vec::new() }, None)
+            .unwrap();
+        let top = sk.polyline(spline).iter().map(|p| p.y).fold(f64::MIN, f64::max);
+        sk.add_line(Vec2::new(-40.0, top - 0.004), Vec2::new(40.0, top - 0.004), None, None, None).unwrap();
+        let profiles = find_profiles(&sk);
+        assert_eq!(profiles.len(), 2, "the cap above the line and the rest of the hull: {profiles:?}");
+        for p in &profiles {
+            let segs = &p.region.outer.segs;
+            let lines = segs.iter().filter(|s| matches!(s, Seg2::Line { .. })).count();
+            assert_eq!(lines, 1, "only the cutting line is straight, no chord stands in for the spline: {segs:?}");
+            assert!(p.region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-6), "{segs:?}");
         }
     }
 

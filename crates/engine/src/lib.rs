@@ -603,7 +603,8 @@ pub struct Preview {
 impl Preview {
     fn new(before: Arc<ModelState>, after: Arc<ModelState>, source: &Session, result: &Session, replies: Vec<Value>) -> Self {
         let shown_sketches = after.sketches.iter().filter(|sketch| view::sketch_shown(result, sketch.feature)).map(|sketch| sketch.feature).collect();
-        let joints = cmd::joints::posed_joints(source, result, &replies);
+        let driven = replies.iter().filter_map(|reply| reply.get("joint").and_then(Value::as_u64));
+        let joints = cmd::joints::posed_joints(&source.doc, &result.doc, driven);
         Self { before, after, shown_sketches, replies, joints, doc: result.doc.clone(), model: result.model.clone() }
     }
 
@@ -678,7 +679,7 @@ impl ComputedCommands {
         let source = &self.source;
         session.same_document_context(source)
             && session.checked_sketch_owner(self.computed.active_sketch, self.computed.sketching_view).is_ok()
-            && session.selection == source.selection
+            && self.selection_is_current(session)
             && (!self.steps.iter().any(|step| {
                 step.id.eq_ignore_ascii_case("plugin.run")
                     || step.id.split_once('.').is_some_and(|(package, _)| source.plugin_state.packages.contains_key(package))
@@ -696,6 +697,25 @@ impl ComputedCommands {
     /// the replies from its evaluation.
     pub fn preview_visible_world(&self) -> Result<Preview> {
         Preview::visible_world(&self.source, &self.computed, self.steps.iter().map(|step| step.reply.clone()).collect())
+    }
+
+    fn selection_is_current(&self, session: &Session) -> bool {
+        if session.selection == self.source.selection {
+            return true;
+        }
+        // A Model transaction keeps its captured picks when focus moves to the retained
+        // Drawing. That receiver's new picks neither change the Model inputs nor belong to
+        // the worker. Drawing/mixed transactions and same-receiver changes stay strict.
+        (self.source.model_focus || self.source.open_drawing.is_none())
+            && !session.model_focus
+            && session.open_drawing.is_some()
+            && self.steps.iter().all(|step| crate::find_command(&step.id).is_some_and(|spec| spec.part == cmd::Part::Model))
+            && session.selection.iter().all(|item| match item {
+                Sel::Drawing { drawing, object } if Some(*drawing) == session.open_drawing => {
+                    session.doc.drawing(*drawing).is_some_and(|record| record.has_object(*object))
+                }
+                _ => false,
+            })
     }
 
     /// Prepare display tessellation before returning the transaction to the window; a model that
@@ -2679,6 +2699,10 @@ impl Session {
             return self.execute("plugin.run", &call);
         }
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.into()))?;
+        self.with_sketch_exit_receiver(spec.id, |session| session.execute_registered(spec, params))
+    }
+
+    fn execute_registered(&mut self, spec: &CommandSpec, params: &Value) -> Result<Value> {
         self.check_command(spec, params)?;
         self.note_edit_entry(spec, params);
         let event = self.prepare_command_edit(spec, params)?;
@@ -3701,7 +3725,9 @@ impl Session {
         self.open_drawing = computed.open_drawing;
         self.prune_sheet_sketch_edit();
         drawing_scene::forget_closed(self);
-        self.selection = computed.selection;
+        if self.model_focus == computed.model_focus {
+            self.selection = computed.selection;
+        }
         self.revision = computed.revision;
         self.invalidate_view(previous_revision);
         self.active_component = computed.active_component;
@@ -3822,16 +3848,28 @@ impl Session {
     }
 
     fn run_script_with(&mut self, script: &Value, profile: Option<bool>, each: &mut dyn FnMut(usize, &Value)) -> Result<(Vec<Value>, Option<Value>)> {
+        let run = self.run_script_kept(script, profile, each)?;
+        match run.failure {
+            Some(f) => Err(f.into_error()),
+            None => Ok((run.results, run.timings)),
+        }
+    }
+
+    /// [`Session::run_script_each`], timing each command as [`Session::run_script_timed`] does
+    /// when `profile` is given, that keeps what ran when a step fails (#19964): the results of
+    /// the steps before it, the timings of those and of the failing one, and the failure. Only a
+    /// script that is not a list of steps is an error.
+    pub fn run_script_kept(&mut self, script: &Value, profile: Option<bool>, each: &mut dyn FnMut(usize, &Value)) -> Result<ScriptRun> {
         let list = script_steps(script)?;
-        let mut out = Vec::new();
+        let mut results = Vec::new();
         let mut steps = Vec::new();
+        let mut failure = None;
         let clock = timing::Clock::start();
         for (i, c) in list.iter().enumerate() {
-            let id = c
-                .get("command")
-                .or_else(|| c.get("id"))
-                .and_then(Value::as_str)
-                .ok_or_else(|| EngineError::Other(format!("script step {}: missing `command`", i + 1)))?;
+            let Some(id) = c.get("command").or_else(|| c.get("id")).and_then(Value::as_str) else {
+                failure = Some(StepFailure { index: i, command: None, error: EngineError::Other("missing `command`".into()) });
+                break;
+            };
             let p = c.get("params").cloned().unwrap_or(Value::Null);
             let r = match profile {
                 Some(profile) => {
@@ -3841,12 +3879,61 @@ impl Session {
                 }
                 None => self.execute(id, &p),
             };
-            let r = r.map_err(|e| EngineError::Other(format!("step {} ({id}): {e}", i + 1)))?;
-            each(i, &r);
-            out.push(r);
+            match r {
+                Ok(r) => {
+                    each(i, &r);
+                    results.push(r);
+                }
+                Err(error) => {
+                    failure = Some(StepFailure { index: i, command: Some(id.to_string()), error });
+                    break;
+                }
+            }
         }
         let timings = profile.map(|_| serde_json::json!({"timings": steps, "total_ms": timing::round_ms(clock.ms())}));
-        Ok((out, timings))
+        Ok(ScriptRun { results, timings, failure })
+    }
+}
+
+/// What [`Session::run_script_kept`] ran.
+#[derive(Debug)]
+pub struct ScriptRun {
+    /// The result of each step that worked, in order.
+    pub results: Vec<Value>,
+    /// When timed: `{"timings": [{"index", "command", "ms", "profile"?}], "total_ms"}`, the
+    /// failing step's time included.
+    pub timings: Option<Value>,
+    /// The step that failed, which ended the run; `None` when every step worked.
+    pub failure: Option<StepFailure>,
+}
+
+/// The step a script stopped at.
+#[derive(Debug)]
+pub struct StepFailure {
+    /// The step's index, from 0.
+    pub index: usize,
+    /// The command it named; `None` when it named none.
+    pub command: Option<String>,
+    /// Its error.
+    pub error: EngineError,
+}
+
+impl StepFailure {
+    /// `{"step": its number from 1, "command"?, "error": the error's words}`.
+    pub fn to_json(&self) -> Value {
+        let mut v = serde_json::json!({"step": self.index + 1, "error": self.error.to_string()});
+        if let (Some(o), Some(c)) = (v.as_object_mut(), &self.command) {
+            o.insert("command".into(), Value::String(c.clone()));
+        }
+        v
+    }
+
+    /// The error a script that stops here returns, named after the step, as it always was.
+    pub fn into_error(self) -> EngineError {
+        match self.command {
+            Some(id) => EngineError::Other(format!("step {} ({id}): {}", self.index + 1, self.error)),
+            None => EngineError::Other(format!("script step {}: {}", self.index + 1, self.error)),
+        }
     }
 }
 

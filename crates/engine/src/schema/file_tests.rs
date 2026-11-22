@@ -32,6 +32,7 @@ fn schemas_and_the_key_check_agree() {
             "model_uris",
             "name",
             "objects",
+            "options",
             "path",
             "quality",
             "solids",

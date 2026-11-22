@@ -85,12 +85,12 @@ pub(crate) use features_more::{MAX_SKETCH_ID, SidePoint, SketchFrameId, axes_mas
 pub(crate) use file::import::realign_imports;
 pub(crate) use file::mesh_crease_angle;
 pub use file::open_steps::OpenSteps;
-pub use file::runs_plugin_importer;
 pub use file::use_import_cache_dir;
 pub(crate) use file::{GEOMETRY_MESSAGE, NAMES_MESSAGE, READER_MESSAGE, UP_MESSAGE, names_form, up_form, usable_path};
+pub use file::{runs_plugin_exporter, runs_plugin_importer};
 pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};
-pub use joints::{MAX_REACH_JOINTS, reach_from, reach_preview};
+pub use joints::{MAX_REACH_JOINTS, posed_joints, reach_from, reach_preview};
 pub use parts::part_length_label;
 pub use sketch::dimension_roles;
 pub(crate) use sketch::face::face_pick_form;
@@ -487,6 +487,11 @@ pub fn in_sketch(s: &Session) -> std::result::Result<(), String> {
     } else {
         Err("no sketch is being edited (Create Sketch or Edit Sketch first)".into())
     }
+}
+
+/// Lifecycle actions address the one active edit independently of the focused receiver.
+pub fn has_sketch_edit(s: &Session) -> std::result::Result<(), String> {
+    if s.active_sketch.is_some() || s.active_sheet_sketch.is_some() { Ok(()) } else { in_sketch(s) }
 }
 
 /// The mirror of [`in_sketch`], for a command that acts on bodies and has nothing to offer the

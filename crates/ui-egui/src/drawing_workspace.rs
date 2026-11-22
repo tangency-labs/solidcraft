@@ -65,7 +65,8 @@ pub fn active(app: &SolveApp) -> bool {
 
 pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
     if drawing {
-        if app.session.active_sketch.is_some() || app.tool.is_some() || app.dialog.is_some() || app.file_load.busy() {
+        let preserved_sketch = app.preferences.workspace_follows_view && app.session.active_sketch.is_some();
+        if (!preserved_sketch && (app.session.active_sketch.is_some() || app.tool.is_some())) || app.dialog.is_some() || app.file_load.busy() {
             return Err("Finish the current operation before entering Drawing".into());
         }
         if !active(app) {
@@ -122,10 +123,14 @@ fn open_a_drawing(app: &mut SolveApp) {
 /// workspace being left: picking on a sheet never changes what Design has selected, and the
 /// reverse. Drawing's own is kept only while its objects are still there.
 pub(crate) fn swap_selection(app: &mut SolveApp) {
-    if app.drawing_workspace.selection_is_drawings == active(app) {
+    select_receiver(app, active(app));
+}
+
+pub(crate) fn select_receiver(app: &mut SolveApp, drawings: bool) {
+    if app.drawing_workspace.selection_is_drawings == drawings {
         return;
     }
-    app.drawing_workspace.selection_is_drawings = active(app);
+    app.drawing_workspace.selection_is_drawings = drawings;
     let mut back = std::mem::take(&mut app.drawing_workspace.selection_away);
     let session = &app.session;
     back.retain(|item| match item {
@@ -140,7 +145,11 @@ pub(crate) fn swap_selection(app: &mut SolveApp) {
 /// Undo and redo take the steps of the workspace shown: the open drawing's in Drawing, the
 /// model's everywhere else, a drawing open or not.
 pub(crate) fn sync_history(app: &mut SolveApp) {
-    app.session.model_focus = !active(app);
+    sync_history_for(app, active(app));
+}
+
+pub(crate) fn sync_history_for(app: &mut SolveApp, drawing: bool) {
+    app.session.model_focus = !drawing;
 }
 
 pub fn reset_document(app: &mut SolveApp) {
@@ -590,8 +599,7 @@ pub(crate) fn sheets_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let selected = active_sheet(app);
     let top = ui.next_widget_position().y;
-    let limit = t.space_24 * 9.0;
-    let body = egui::ScrollArea::vertical().id_salt(id).min_scrolled_height(0.0).max_height(limit).show(ui, |ui| {
+    let body = egui::ScrollArea::vertical().id_salt(id).min_scrolled_height(0.0).show(ui, |ui| {
         for pair in drawing.sheets.chunks(2) {
             ui.spacing_mut().item_spacing.x = t.space_4;
             ui.columns(2, |columns| {
@@ -602,7 +610,7 @@ pub(crate) fn sheets_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         }
     });
-    crate::panel_runtime::report_content_extent(ui, top, body.content_size.y.min(limit), false);
+    crate::panel_runtime::report_content_extent(ui, top, body.content_size.y, false);
 }
 
 fn sheet_card(
@@ -1297,6 +1305,7 @@ mod tests {
 
     /// A box in Drawing, with a drawing of one base view open: its id.
     fn drawing_with_a_view(h: &mut Harness) -> Option<u64> {
+        h.app.preferences.workspace_follows_view = false;
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
         crate::workspace::enter(&mut h.app, "drawing").unwrap();
@@ -1327,9 +1336,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Leaving Drawing leaves the drawing open: the model changes in Design with it open, and coming
-    /// back finds the same drawing. Undo takes the steps of the workspace shown: the drawing's in
-    /// Drawing, the model's in Design and Render.
+    /// Leaving Drawing retains its document; undo follows the workspace receiving the command.
     #[test]
     fn leaving_drawing_keeps_the_drawing_open_and_each_workspace_undoes_its_own() {
         let mut h = Harness::new();
@@ -1438,7 +1445,7 @@ mod tests {
     /// the model there, a model command ends the sheet sketch as Finish would, and undo takes the
     /// model's steps.
     #[test]
-    fn a_sheet_sketch_stays_open_in_drawing_while_design_changes_the_model() {
+    fn a_sheet_sketch_stays_open_when_leaving_drawing_then_finishes_before_a_model_edit() {
         let mut h = Harness::new();
         let drawing = drawing_with_a_view(&mut h);
         let sheet = h.app.session.drawing("test").unwrap().sheets[0].id;
@@ -1446,9 +1453,12 @@ mod tests {
         crate::workspace::enter(&mut h.app, "design").unwrap();
         assert!(!active(&h.app));
         assert_eq!(h.app.session.open_drawing, drawing);
+        assert!(h.app.session.active_sheet_sketch.is_some(), "focus changes do not finish a sketch");
         let features = h.app.session.doc.features.len();
         h.app.run("solid.box", serde_json::json!({"length":5,"width":5,"height":5})).unwrap();
-        assert_eq!(h.app.session.doc.features.len(), features + 1, "the model changes with the sheet sketch open");
+        assert!(h.app.session.active_sheet_sketch.is_none(), "slice3 one-edit authority finishes the sheet sketch");
+        assert_eq!(h.app.session.open_drawing, drawing);
+        assert_eq!(h.app.session.doc.features.len(), features + 1);
         h.app.run("edit.undo", serde_json::json!({})).unwrap();
         assert_eq!(h.app.session.doc.features.len(), features, "undo in Design takes back the model's step");
         assert!(h.app.session.active_sheet_sketch.is_none(), "and the sheet sketch stays finished");
@@ -1881,6 +1891,32 @@ mod tests {
         h.app.run("drawing.close", serde_json::json!({})).unwrap();
         h.frames(2);
         assert!(h.widget("Inspection sheet").is_none());
+    }
+
+    /// The Sheets panel grows with its sheets up to the room the window gives it (#19998): with
+    /// five sheets in a tall window every card can be clicked without scrolling.
+    #[test]
+    fn sheets_panel_grows_with_its_sheets_instead_of_stopping_at_two_rows() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_browser = true;
+        h.call("ui.resize", serde_json::json!({"width":1400,"height":1000}));
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", serde_json::json!({})).unwrap();
+        let mut ids = Vec::new();
+        for _ in 0..4 {
+            let added = h.app.run("drawing.sheet.add", serde_json::json!({})).unwrap();
+            ids.push(added["sheet"].as_str().unwrap().to_string());
+        }
+        h.frames(6);
+        assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().sheets.len(), 5);
+        for key in ids.iter().rev() {
+            h.step(&serde_json::json!({"click":{"handle":format!("drawing:sheets:sheet:{key}")}})).unwrap();
+            h.frames(3);
+            let selected = active_sheet(&h.app).map(solidcraft_engine::doc::ids::encode);
+            assert_eq!(selected.as_deref(), Some(key.as_str()), "the card of sheet {key} is on screen and takes the click");
+        }
     }
 
     #[test]
