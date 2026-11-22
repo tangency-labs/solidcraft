@@ -294,7 +294,7 @@ fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::c
             _ => false,
         };
         runs.push(match full {
-            Some(seg) if whole => Run::Exact { seg, t0: 0.0, t1: 1.0, fixed: (true, true), plain },
+            Some(seg) if whole => Run::Exact { seg, t0: 0.0, t1: 1.0, fixed: (true, true), plain, chords: (false, false) },
             Some(seg) => {
                 let (a, b) = (plain.first().map(Seg2::start).unwrap_or_default(), plain.last().map(Seg2::end).unwrap_or_default());
                 let (t0, t1) = (seg.closest_param(a), seg.closest_param(b));
@@ -302,7 +302,7 @@ fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::c
                 let snap = |t: f64, p: Vec2, at: f64| (t - at).abs() < 1e-6 && seg.point_at(at).dist(p) < 1e-6;
                 let fixed = (snap(t0, a, 0.0), snap(t1, b, 1.0));
                 let (t0, t1) = (if fixed.0 { 0.0 } else { t0 }, if fixed.1 { 1.0 } else { t1 });
-                if t1 - t0 > 1e-9 { Run::Exact { seg, t0, t1, fixed, plain } } else { Run::Plain(plain) }
+                if t1 - t0 > 1e-9 { Run::Exact { seg, t0, t1, fixed, plain, chords: (false, false) } } else { Run::Plain(plain) }
             }
             None => Run::Plain(plain),
         });
@@ -332,11 +332,13 @@ fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::c
                     x.set_start(p, tb);
                 }
             }
+            // The chords' crossing isn't the curves': only the piece holding it stays a chord.
             _ => {
-                for k in [a, b] {
-                    if let Some(x) = runs.get_mut(k) {
-                        x.give_up();
-                    }
+                if let Some(x) = runs.get_mut(a) {
+                    x.give_up_end();
+                }
+                if let Some(x) = runs.get_mut(b) {
+                    x.give_up_start();
                 }
             }
         }
@@ -361,13 +363,14 @@ enum Cut {
 enum Run {
     Plain(Vec<Seg2>),
     /// `seg` (in loop direction) between parameters `t0` and `t1`; `fixed` ends are exact;
-    /// `plain` is the polyline fallback.
+    /// `plain` is the polyline fallback; `chords` keep its first or last piece at an end given up.
     Exact {
         seg: Seg2,
         t0: f64,
         t1: f64,
         fixed: (bool, bool),
         plain: Vec<Seg2>,
+        chords: (bool, bool),
     },
 }
 
@@ -412,28 +415,62 @@ impl Run {
             Run::Exact { t0, .. } => *t0 = t,
         }
     }
-    fn give_up(&mut self) {
-        if let Run::Exact { fixed: (false, _) | (_, false), plain, .. } = self {
-            *self = Run::Plain(std::mem::take(plain));
+    /// No exact crossing at the end: the exact curve stops at the last piece's start, a chord after.
+    fn give_up_end(&mut self) {
+        if let Run::Exact { seg, t0, t1, fixed, plain, chords } = self
+            && !fixed.1
+        {
+            let t = match plain.as_slice() {
+                [_, .., last] => seg.closest_param(last.start()),
+                _ => *t0,
+            };
+            if t - *t0 > 1e-9 {
+                (*t1, fixed.1, chords.1) = (t, true, true);
+            } else {
+                *self = Run::Plain(std::mem::take(plain));
+            }
+        }
+    }
+    /// No exact crossing at the start: a chord, then the exact curve from the first piece's end.
+    fn give_up_start(&mut self) {
+        if let Run::Exact { seg, t0, t1, fixed, plain, chords } = self
+            && !fixed.0
+        {
+            let t = match plain.as_slice() {
+                [first, .., _] => seg.closest_param(first.end()),
+                _ => *t1,
+            };
+            if *t1 - t > 1e-9 {
+                (*t0, fixed.0, chords.0) = (t, true, true);
+            } else {
+                *self = Run::Plain(std::mem::take(plain));
+            }
         }
     }
     fn into_segs(self) -> Vec<Seg2> {
         match self {
             Run::Plain(v) => v,
-            Run::Exact { seg, t0, t1, .. } => {
-                if t0 <= 1e-12 && t1 >= 1.0 - 1e-12 {
-                    return vec![seg];
-                }
-                let s = if t1 < 1.0 - 1e-12 { seg.split_at(t1).0 } else { seg };
-                if t0 <= 1e-12 {
-                    return vec![s];
-                }
-                // Conic halves are reparametrised: find t0's point again on the left part.
-                let u = local_param(&s, seg.point_at(t0), if t1 > 1e-12 { t0 / t1 } else { 0.0 });
-                vec![s.split_at(u.clamp(1e-9, 1.0 - 1e-9)).1]
+            Run::Exact { seg, t0, t1, plain, chords, .. } => {
+                let head = plain.first().filter(|_| chords.0).copied();
+                let tail = plain.last().filter(|_| chords.1).copied();
+                head.into_iter().chain([exact_part(seg, t0, t1)]).chain(tail).collect()
             }
         }
     }
+}
+
+/// The part of `seg` between parameters `t0` and `t1`.
+fn exact_part(seg: Seg2, t0: f64, t1: f64) -> Seg2 {
+    if t0 <= 1e-12 && t1 >= 1.0 - 1e-12 {
+        return seg;
+    }
+    let s = if t1 < 1.0 - 1e-12 { seg.split_at(t1).0 } else { seg };
+    if t0 <= 1e-12 {
+        return s;
+    }
+    // Conic halves are reparametrised: find t0's point again on the left part.
+    let u = local_param(&s, seg.point_at(t0), if t1 > 1e-12 { t0 / t1 } else { 0.0 });
+    s.split_at(u.clamp(1e-9, 1.0 - 1e-9)).1
 }
 
 /// The segment with its end moved to `p` (lines; arcs keep their circle).
