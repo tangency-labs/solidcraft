@@ -1023,8 +1023,19 @@ impl Sketch {
         Ok(self.points.len() - 1)
     }
 
+    /// The id of a curve about to be added, refused once the sketch holds the most curves it
+    /// may ([`crate::limits::max_curves`]; past the ceiling a design file is not opened).
     pub(crate) fn curve_id(&mut self, id: Option<&str>, prefix: &str) -> Result<String> {
+        self.curve_room()?;
         self.new_id(id, prefix, None)
+    }
+
+    /// Room for one more curve under the limit in force.
+    fn curve_room(&self) -> Result<()> {
+        if self.curves.len() >= crate::limits::max_curves() {
+            return Err(SketchError::TooLarge);
+        }
+        Ok(())
     }
 
     /// The id a new entity gets: `id` if it is free, else a fresh one with `prefix`. `taken`, when
@@ -2127,7 +2138,13 @@ impl Sketch {
         }
         let prefix = match &kind {
             CurveKind::Line { .. } => "l",
-            CurveKind::Circle { .. } => "c",
+            // As `add_circle`: a radius that is not a number would save and not open again.
+            CurveKind::Circle { r, .. } => {
+                if !radius_in_range(*r) {
+                    return Err(SketchError::Invalid(format!("radius {r}")));
+                }
+                "c"
+            }
             CurveKind::Arc { .. } => "a",
             CurveKind::Ellipse { m, c, r } => {
                 if m == c || !radius_in_range(*r) {
@@ -2190,6 +2207,7 @@ impl Sketch {
                 "n"
             }
         };
+        self.curve_room()?;
         let id = self.new_id(id, prefix, taken)?;
         self.curves.push(Curve {
             id,

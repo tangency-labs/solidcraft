@@ -4555,3 +4555,20 @@ fn joint_list_filters_and_summarises_rigid_groups() {
     assert_eq!(summary["rigid_groups"][0]["name"], "Kit", "the largest first: {summary}");
     assert_eq!(summary["more_rigid_groups"], json!({"groups": 1, "joints": 1}), "{summary}");
 }
+
+/// A value given as an expression has the bound a number has: past it, the design would save
+/// and not open again.
+#[test]
+fn joint_values_given_as_expressions_are_bounded_like_numbers() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part"}));
+    let (a, b) = (json!({"occurrence": 0, "point": [0, 0, 0]}), json!({"occurrence": "Part", "point": [0, 0, 0]}));
+    for values in [json!([1e12]), json!(["1e12 mm"])] {
+        let p = json!({"type": "slider", "a": a, "b": b, "values": values});
+        assert!(s.execute("joint.create", &p).is_err(), "{p}");
+    }
+    let joint = run(&mut s, "joint.create", json!({"type": "slider", "a": a, "b": b, "values": ["5 mm"]}))["joint"].as_u64().unwrap();
+    assert!(s.execute("joint.drive", &json!({"joint": joint, "value": "1e12 mm"})).is_err());
+    assert!(s.execute("joint.edit", &json!({"joint": joint, "offset": "1e12 mm"})).is_err());
+    solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+}
