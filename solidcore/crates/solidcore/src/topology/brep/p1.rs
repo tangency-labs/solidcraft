@@ -197,11 +197,11 @@ impl Brep {
     #[must_use]
     pub fn this_model_size_estimate(&self, k: &Kernel, chase_defaults: bool) -> f64 {
         if !chase_defaults {
-            self.model_size_estimate
-        } else if self.model_size_estimate == tol::USE_DEFAULT {
+            *self.model_size_estimate
+        } else if *self.model_size_estimate == tol::USE_DEFAULT {
             k.context.this_model_size_estimate(k)
         } else {
-            self.model_size_estimate
+            *self.model_size_estimate
         }
     }
 
@@ -210,8 +210,8 @@ impl Brep {
     #[must_use]
     pub fn this_large_small_size_ratio(&self, k: &Kernel, chase_defaults: bool) -> f64 {
         if !chase_defaults {
-            self.large_small_size_ratio
-        } else if self.large_small_size_ratio == tol::USE_DEFAULT {
+            *self.large_small_size_ratio
+        } else if *self.large_small_size_ratio == tol::USE_DEFAULT {
             // SmContext::GetThisLargeSmallSizeRatio
             let ratio = k.context.stored_large_small_size_ratio();
             if ratio == tol::USE_DEFAULT {
@@ -220,7 +220,7 @@ impl Brep {
                 ratio
             }
         } else {
-            self.large_small_size_ratio
+            *self.large_small_size_ratio
         }
     }
 
@@ -233,16 +233,16 @@ impl Brep {
         k: &mut Kernel,
         model_size_estimate: f64,
     ) -> f64 {
-        self.model_size_estimate = model_size_estimate;
+        *self.model_size_estimate = model_size_estimate;
         k.context.set_this_model_size_estimate(model_size_estimate);
-        self.tolerance = tol::size_estimate_to_zone_tol_3d(self.model_size_estimate);
-        self.tolerance
+        *self.tolerance = tol::size_estimate_to_zone_tol_3d(*self.model_size_estimate);
+        *self.tolerance
     }
 
     /// `SetThisLargeSmallSizeRatio` (upstream default `SM_USE_DEFAULT`): stores the
     /// ratio and passes it to the B-rep's context (the kernel context).
     pub fn set_this_large_small_size_ratio(&mut self, k: &mut Kernel, large_small_size_ratio: f64) {
-        self.large_small_size_ratio = large_small_size_ratio;
+        *self.large_small_size_ratio = large_small_size_ratio;
         k.context
             .set_this_large_small_size_ratio(large_small_size_ratio);
     }
@@ -279,7 +279,7 @@ impl Brep {
     /// [`SolidError::InvalidInput`] otherwise.
     pub fn set_face_list(&mut self, order: Vec<FaceId>) -> Result<()> {
         check_order(&order, self.faces.ids())?;
-        self.face_list = order;
+        *self.face_list = order;
         Ok(())
     }
 
@@ -291,7 +291,7 @@ impl Brep {
     /// [`SolidError::InvalidInput`] otherwise.
     pub fn set_edge_list(&mut self, order: Vec<EdgeId>) -> Result<()> {
         check_order(&order, self.edges.ids())?;
-        self.edge_list = order;
+        *self.edge_list = order;
         Ok(())
     }
 
@@ -303,7 +303,7 @@ impl Brep {
     /// [`SolidError::InvalidInput`] otherwise.
     pub fn set_vertex_list(&mut self, order: Vec<VertexId>) -> Result<()> {
         check_order(&order, self.vertices.ids())?;
-        self.vertex_list = order;
+        *self.vertex_list = order;
         Ok(())
     }
 
@@ -311,7 +311,7 @@ impl Brep {
     /// the first region record.
     #[must_use]
     pub const fn region_list_head(&self) -> Option<RegionId> {
-        self.region_list_head
+        *self.region_list_head.inner()
     }
 
     /// Sets the head of the B-rep's region list (the friend write `m_pList = ..`). The
@@ -321,8 +321,8 @@ impl Brep {
         if let Some(pos) = region.and_then(|r| order.iter().position(|&x| x == r)) {
             order.rotate_left(pos);
         }
-        self.region_order = order;
-        self.region_list_head = region;
+        *self.region_order = order;
+        *self.region_list_head = region;
     }
 
     /// The regions on the list in link order from `Brep::region_order`'s start
@@ -352,7 +352,7 @@ impl Brep {
         {
             order.rotate_left(pos);
         }
-        self.region_order = order;
+        *self.region_order = order;
     }
 
     /// `AddDeletedSurface`: keeps a surface removed from the B-rep until the operation
