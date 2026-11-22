@@ -3409,6 +3409,21 @@ impl SolveApp {
     fn sketch_closed_in(&mut self, open: Option<u64>, owner: Option<u64>) {
         self.take_sketch_exit();
         self.tool = None;
+        // A dialog whose command works only in a sketch (Offset, Mirror, Project...) has nothing
+        // left to work on: it closes instead of staying open with a refused OK (#7424). Its picks
+        // are in the sketch that closed, so it closes too when a plugin run opened another one.
+        let sketch_only = |spec: &solidcraft_engine::cmd::CommandSpec| {
+            std::ptr::fn_addr_eq(spec.enabled, solidcraft_engine::cmd::in_sketch as solidcraft_engine::cmd::Enabled)
+        };
+        if self
+            .dialog
+            .as_ref()
+            .and_then(|d| d.command())
+            .and_then(solidcraft_engine::find_command)
+            .is_some_and(|spec| spec.disabled_refusal(&self.session).is_some() || (sketch_only(spec) && self.session.active_sketch != open))
+        {
+            dialogs::cancel(self);
+        }
         dim_view::cancel();
         // Unless another component was activated meanwhile: that one stays.
         if let Some(pre) = self.pre_sketch_component.take().filter(|pre| Some(pre.sketch) == open && pre.opened_in == self.session.active_component) {

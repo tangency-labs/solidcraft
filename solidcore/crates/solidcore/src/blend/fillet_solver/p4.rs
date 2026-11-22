@@ -3862,7 +3862,7 @@ mod tests_c5 {
             matches!(
                 e.failure().map(|f| &f.reason),
                 Some(crate::error::Reason::Topology(
-                    crate::error::topology::TopologyFailure::Missing("the edge use's face use")
+                    crate::error::topology::TopologyFailure::EdgeUseNotOnFace
                 ))
             ),
             "{e:?}"

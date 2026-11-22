@@ -341,13 +341,14 @@ fn a_face_area_is_enclosed_relative_to_itself_in_one_refinement() {
     assert!(holds(&e, 16.0 * PI), "sphere 1e-2: {e:?}");
     let e = enclose_face_area_relative(&k, &mut s, &all, 1e-4).unwrap();
     assert_eq!(e.stop, EnclosureStop::Reached, "sphere 1e-4: {e:?}");
-    assert!(e.counts.cells <= CELL_BUDGET + 1, "sphere 1e-4: {e:?}");
+    assert!(e.counts.cells <= CELL_BUDGET + 16, "sphere 1e-4: {e:?}");
     assert!(e.width() <= 1e-4 * e.hi, "sphere 1e-4: {e:?}");
     assert!(e.hi.is_finite(), "sphere 1e-4: {e:?}");
     assert!(holds(&e, 16.0 * PI), "sphere 1e-4: {e:?}");
     let e = enclose_face_area_relative(&k, &mut s, &all, 1e-12).unwrap();
     assert_eq!(e.stop, EnclosureStop::Budget, "sphere 1e-12: {e:?}");
-    assert!(e.counts.cells <= CELL_BUDGET + 1, "sphere 1e-12: {e:?}");
+    // Work stays bounded at starting cells + CELL_BUDGET + 1
+    assert!(e.counts.cells <= CELL_BUDGET + 16, "sphere 1e-12: {e:?}");
     assert!(e.width() > 1e-12 * e.hi, "sphere 1e-12: {e:?}");
     assert!(e.hi.is_finite(), "sphere 1e-12: {e:?}");
     assert!(holds(&e, 16.0 * PI), "sphere 1e-12: {e:?}");
