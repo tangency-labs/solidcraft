@@ -64,6 +64,12 @@ pub enum TraceFailure {
     /// surface generator (one built with `ConstantRadiusAssistedFs::from_parts` has none):
     /// the caller's solver ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
     SurfaceGeneratorMissing,
+    /// The solver's smoothing of a self-intersecting fillet
+    /// (`FilletSolverOps::smooth_out_intersection`) handed back fewer curves than the
+    /// fillet needs (its centre line, both rails and a uv curve on each side). The kernel's
+    /// handler writes back every curve it takes, so this is a caller's own solver breaking
+    /// the trait's contract ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    SmoothedCurveMissing,
     /// The solver could not compute a section's values: the solver's error is the
     /// failure's cause, and decides whether it is a defect or a refusal
     /// ([`ErrorKind::Failed`]).
@@ -173,6 +179,7 @@ impl TraceFailure {
             | Self::BaseSurfaceNotOnFace { .. }
             | Self::CrossSectionsIncompatible { .. }
             | Self::SurfaceGeneratorMissing
+            | Self::SmoothedCurveMissing
             | Self::EdgeFacesTangent { .. }
             | Self::RailKnotsNotRefinable { .. } => ErrorKind::InvalidInput,
             Self::RailPointsDiverged { .. } => ErrorKind::NotConverged,
@@ -202,6 +209,7 @@ impl TraceFailure {
             Self::BaseSurfaceNotOnFace { .. }
             | Self::TraceBuiltNoSurface
             | Self::SurfaceGeneratorMissing
+            | Self::SmoothedCurveMissing
             | Self::TraceHasNoPoints => SM_ERR_NULL_POINTER,
             Self::LawCornerEndMissing { .. }
             | Self::ZoneEndsCoincide { .. }
@@ -256,6 +264,9 @@ impl core::fmt::Display for TraceFailure {
             Self::TraceBuiltNoSurface => f.write_str("the trace built no fillet surface"),
             Self::SurfaceGeneratorMissing => {
                 f.write_str("the solver has no fillet surface generator")
+            }
+            Self::SmoothedCurveMissing => {
+                f.write_str("the solver's smoothing handed back fewer curves than it took")
             }
             Self::SectionValuesFailed => f.write_str("the section's values could not be computed"),
             Self::ChordTooShort { length } => write!(
