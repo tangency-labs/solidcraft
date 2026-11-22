@@ -1388,13 +1388,20 @@ fn make_internal(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "storing a part inside a design needs a folder to unpack it to, which the browser does not have"));
     }
     let comp = component_key(s, p, "component", cmd)?;
-    let link = s.doc.links.get(&comp).cloned().ok_or_else(|| bad(cmd, "that component is not linked to a design"))?;
-    if solidcraft_doc::internal::linked(&link.path).is_some() {
-        return Err(bad(cmd, "that part is already stored inside this design"));
+    if !s.doc.links.contains_key(&comp) {
+        return Err(bad(cmd, "that component is not linked to a design"));
     }
     let own = s.path.clone().ok_or_else(|| bad(cmd, "save this design first: the part is stored inside its file"))?;
     if s.read_only {
         return Err(bad(cmd, "this design was opened read-only"));
+    }
+    // With `path`: linked to that file first, in this same step (replacing an internal component).
+    if let Some(path) = str_(p, "path") {
+        relink(s, &json!({"component": comp, "path": path}))?;
+    }
+    let link = s.doc.links.get(&comp).cloned().ok_or_else(|| bad(cmd, "that component is not linked to a design"))?;
+    if solidcraft_doc::internal::linked(&link.path).is_some() {
+        return Err(bad(cmd, "that part is already stored inside this design"));
     }
     link_refused(Some(&own), &link.path).map_err(|e| bad(cmd, e.to_string()))?;
     let source = resolve(Some(&own), &link.path);

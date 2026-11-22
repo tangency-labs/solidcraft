@@ -1638,6 +1638,12 @@ fn a_missing_internal_component_is_marked_and_replacing_it_keeps_it_internal() {
     let path = links["links"][0]["path"].as_str().unwrap();
     assert!(path.starts_with(".~internal/"), "{links}");
     assert_eq!(links["links"][0]["found"], true, "{links}");
+    // Replacing it was one undo step: one undo and the component is linked as it was opened
+    // (in this test a part beside the design, whose file is gone).
+    app.run("edit.undo", json!({})).unwrap();
+    let links = app.session.execute("component.links", &json!({})).unwrap();
+    assert_eq!(links["links"][0]["path"], "bracket.scprt", "{links}");
+    assert_eq!(links["links"][0]["found"], false, "{links}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

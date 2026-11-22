@@ -58,16 +58,18 @@ pub(crate) fn offer(app: &mut SolveApp, reply: &Value) {
 /// when that fails the relink is kept and the status line says why.
 pub(crate) fn located(app: &mut SolveApp, component: u64, path: &str) {
     let internal = app.missing_links.as_ref().and_then(|m| m.rows.iter().find(|r| r.component == component)).filter(|r| r.internal).cloned();
-    if let Err(e) = app.run("component.relink", json!({"component": component, "path": path})) {
-        app.set_status(e, true);
-        return;
-    }
-    if let Some(row) = internal
-        && let Err(e) = app.run("component.make_internal", json!({"component": component}))
-    {
-        let text = solidcraft_ui_text::Locale::for_language(&app.preferences.language)
-            .format("missing_links.not_internal", &[("name", &row.name), ("path", path), ("error", &e)]);
-        app.set_status(text, true);
+    // An internal component: stored again from that file in the same undo step.
+    let stored = internal.as_ref().map(|_| app.run("component.make_internal", json!({"component": component, "path": path})));
+    if !matches!(stored, Some(Ok(_))) {
+        if let Err(e) = app.run("component.relink", json!({"component": component, "path": path})) {
+            app.set_status(e, true);
+            return;
+        }
+        if let (Some(row), Some(Err(e))) = (&internal, &stored) {
+            let text = solidcraft_ui_text::Locale::for_language(&app.preferences.language)
+                .format("missing_links.not_internal", &[("name", &row.name), ("path", path), ("error", e)]);
+            app.set_status(text, true);
+        }
     }
     let Some(missing) = app.missing_links.as_mut() else { return };
     missing.rows.retain(|r| r.component != component);

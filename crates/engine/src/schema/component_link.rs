@@ -519,6 +519,11 @@ pub struct MakeInternalParams {
     #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ComponentRef")]
     pub component: Option<ComponentRef>,
+    /// A saved design to store instead of the one the component is linked to, `.sc`, `.scprt`,
+    /// `.scasm` or `.json`: the component is linked to it first, as `component.relink` does, in
+    /// the same undo step. This is how an internal component is replaced and stays internal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 /// What `component.make_internal` returns.

@@ -1665,6 +1665,23 @@ fn a_part_stored_inside_a_design_travels_in_its_file_and_is_edited_unpacked() {
     let refused = reopened.execute("component.write_back", &json!({"component": 999})).unwrap_err().to_string();
     assert!(!refused.is_empty());
 
+    // Replaced by another file and still internal, as one undo step: one undo brings the first back.
+    let spare = away.join("spare.scprt");
+    part(&spare, 30);
+    let before_replace = volume(&mut reopened);
+    let replaced = run(&mut reopened, "component.make_internal", json!({"component": "bracket", "path": spare}));
+    assert_eq!(replaced["member"], "spare.scprt", "{replaced}");
+    assert_eq!(run(&mut reopened, "component.links", json!({}))["links"][0]["path"], ".~internal/spare.scprt");
+    assert!((volume(&mut reopened) - before_replace).abs() > 1.0, "the component shows the other file's bodies");
+    run(&mut reopened, "edit.undo", json!({}));
+    let link = run(&mut reopened, "component.links", json!({}))["links"][0].clone();
+    assert!(link["path"] == ".~internal/bracket.scprt" && link["found"] == true, "{link}");
+    assert!((volume(&mut reopened) - before_replace).abs() < 1e-6, "one undo takes the whole replace back");
+    // A file that is not a design replaces nothing.
+    std::fs::write(away.join("notes.scprt"), b"not a design").unwrap();
+    assert!(reopened.execute("component.make_internal", &json!({"component": "bracket", "path": away.join("notes.scprt")})).is_err());
+    assert_eq!(run(&mut reopened, "component.links", json!({}))["links"][0]["path"], ".~internal/bracket.scprt");
+
     // Read-only, with nothing unpacked beside it: nothing is written, and the part still reads.
     let bare = root.join("bare");
     std::fs::create_dir_all(&bare).unwrap();
