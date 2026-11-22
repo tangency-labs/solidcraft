@@ -804,6 +804,7 @@ form_case!(angle_plane, "construct.plane.at_angle", ["Angle"]);
 form_case!(path_plane, "construct.plane.along_path", ["Position (0 to 1)"]);
 form_case!(split, "solid.split_body", []);
 form_case!(scale, "solid.scale", ["Type", "Scale factor"]);
+form_case!(stretch, "solid.stretch", ["Direction", "Distance", "Cut at"]);
 
 /// Scale per axis (#10782): the dialog's X, Y and Z rows build `factors`; a Scale made with
 /// `factors` opens per axis with its three values and keeps them on OK, and switching it back to

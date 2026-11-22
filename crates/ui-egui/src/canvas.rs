@@ -137,6 +137,11 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         // A section's distance runs against the plane's normal, into the part from a face.
         Kind::Section { .. } => (at, normal.map(|n| -n)),
         Kind::OffsetPlane { .. } => (at, normal),
+        // Stretch's arrow stands on the side that moves, square to it (#20512).
+        Kind::Stretch { .. } => {
+            let frame = stretch_frame(app, d)?;
+            (frame.moving, Some(frame.n))
+        }
         // Fillet radii and chamfer distances grow the way `blend_grow_dir` gives (into the body
         // on an outside edge, into the open corner on an inside one); shell thickness grows into
         // the body.
@@ -672,6 +677,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         | Kind::Section { .. }
         | Kind::OffsetPlane { .. }
         | Kind::OffsetFaces { .. }
+        | Kind::Stretch { .. }
         | Kind::PatternRect { .. } => true,
         Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { .. } | crate::sketch_modify_ui::Mod::PatternRect { .. }) => true,
         Kind::SketchModify(crate::sketch_modify_ui::Mod::Offset { mode, .. }) => !crate::sketch_modify_ui::offset_symmetric(*mode),
@@ -786,6 +792,43 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         && let Some(q) = offset_plane_quad(proj, base + n * off, n, half_height * 0.25)
     {
         painter.extend(projected_polygon(&q, t.construction_plane, Stroke::new(1.2, t.origin_plane_edge)));
+    }
+    // Stretch: the cut plane across the body, and an arrow from the side that stays put that
+    // moves it (#20512). An empty Cut At is the body's middle; dragging writes the distance.
+    if let Some(frame) = stretch_frame(app, d)
+        && let Kind::Stretch { at, .. } = &mut d.kind
+    {
+        let cut = if at.trim().is_empty() {
+            frame.length / 2.0
+        } else {
+            crate::length_input::eval(&app.session.doc, at, ValueKind::Length).unwrap_or(frame.length / 2.0)
+        };
+        if let Some(q) = offset_plane_quad(proj, frame.fixed + frame.n * cut, frame.n, frame.width) {
+            painter.extend(projected_polygon(&q, t.construction_plane, Stroke::new(1.2, t.origin_plane_edge)));
+        }
+        if let Some(fs) = proj.to_screen(frame.fixed) {
+            let mut shown = if at.trim().is_empty() { format_len(&app.session.doc, cut) } else { at.clone() };
+            let before = shown.clone();
+            drag_arrow(
+                &app.session.doc,
+                ui,
+                painter,
+                proj,
+                frame.fixed,
+                fs,
+                frame.n,
+                cut,
+                false,
+                egui::Id::unique("sc_manipulator2"),
+                half_height,
+                0.0,
+                decimals,
+                &mut shown,
+            );
+            if shown != before {
+                *at = shown;
+            }
+        }
     }
     // Holes: the depth arrow points into the material (empty depth: through all); the
     // diameter is typed in the box.
@@ -2321,6 +2364,37 @@ pub(crate) fn projected_rotation_angle(
     }
     Some((a + b) / 2.0)
 }
+/// Where Stretch's handles stand on its picked body (#20512): the middle of the side that stays
+/// put, the middle of the side that moves, the unit direction the moving side goes, the body's
+/// length along it and half its widest size across (for the cut plane's square). From the shown
+/// body's box: these place handles, they decide nothing about the model.
+struct StretchFrame {
+    fixed: Vec3,
+    moving: Vec3,
+    n: Vec3,
+    length: f64,
+    width: f64,
+}
+
+fn stretch_frame(app: &SolveApp, d: &Dialog) -> Option<StretchFrame> {
+    let Kind::Stretch { direction, .. } = &d.kind else { return None };
+    let Some(Sel::Body { name }) = d.inputs.first()?.items.first() else { return None };
+    let st = app.session.model.state();
+    let b = st.body(name)?.mesh().bounds();
+    let n = solidcraft_engine::doc::StretchDirection::ALL.get(*direction)?.vector();
+    let c = b.center();
+    let lo = b.min.dot(n).min(b.max.dot(n));
+    let hi = b.min.dot(n).max(b.max.dot(n));
+    let length = hi - lo;
+    if !(length > 0.0) {
+        return None;
+    }
+    let centre_level = c.dot(n);
+    let size = b.max - b.min;
+    let width = (size.x.abs().max(size.y.abs()).max(size.z.abs())) * 0.6;
+    Some(StretchFrame { fixed: c + n * (lo - centre_level), moving: c + n * (hi - centre_level), n, length, width })
+}
+
 fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32) {
     let v = b - a;
     let l = v.length();

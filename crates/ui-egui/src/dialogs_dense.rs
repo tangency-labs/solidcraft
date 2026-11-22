@@ -1132,6 +1132,11 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 enter |= expr_row_positive(ui, "Scale factor", factor);
             }
         }
+        Kind::Stretch { direction, distance, at } => {
+            choice_row(ui, "Direction", "stretch_direction", direction, &crate::dialogs::STRETCH_DIRECTION_LABELS);
+            enter |= expr_row(ui, "Distance", distance);
+            enter |= hint_row(ui, "Cut at", at, "middle");
+        }
         Kind::OffsetFaces { distance } => {
             enter |= expr_row(ui, "Distance", distance);
         }

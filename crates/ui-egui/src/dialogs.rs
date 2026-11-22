@@ -63,6 +63,7 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "construct.plane.at_angle", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.split_body", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.scale", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
+    ToolModifiers { tool: "solid.stretch", scopes: SELECT_MANIP, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.offset_face", scopes: SELECT_MANIP, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.thread", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "material.assign", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
@@ -119,6 +120,13 @@ const INTERSECT_GEOMETRY: Accept = EDGES | FACES | selection::SKETCH_LINES;
 const ALIGN_PICKS: Accept = FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN | selection::POINTS | CURVES;
 const HOLE_TYPES: [&str; 3] = ["simple", "counterbore", "countersink"];
 const HOLE_LABELS: [&str; 3] = ["Simple", "Counterbore", "Countersink"];
+/// Stretch's directions as its window lists them, in `StretchDirection::ALL`'s order.
+pub(crate) const STRETCH_DIRECTION_LABELS: [&str; 6] = ["+X", "-X", "+Y", "-Y", "+Z", "-Z"];
+
+/// The `direction` Stretch's window sends for its choice `i`.
+pub(crate) fn stretch_direction_key(i: usize) -> &'static str {
+    solidcraft_engine::doc::StretchDirection::ALL.get(i).copied().unwrap_or(solidcraft_engine::doc::StretchDirection::PlusX).key()
+}
 
 crate::dialog_descriptor::dialog_descriptors! {
     #[derive(Clone, Debug)]
@@ -155,6 +163,18 @@ crate::dialog_descriptor::dialog_descriptors! {
             factor_y: String = "2".into() => factors.as_ref().map_or_else(|| factor.to_string(), |f| f[1].to_string()),
             factor_z: String = "2".into() => factors.as_ref().map_or_else(|| factor.to_string(), |f| f[2].to_string()),
         } => if *per_axis { json!({"factors": [factor, factor_y, factor_z]}) } else { json!({"factor": factor}) };
+        // Stretch (#20512): the body, the way its moving side goes (`STRETCH_DIRECTIONS`), the cut
+        // plane's distance from the side that stays put (empty: the body's middle) and how far.
+        Stretch("solid.stretch", "STRETCH", [("Body", BODIES, false)],
+            FeatureKind::Stretch { direction, at, distance, .. }) {
+            direction: usize = 0 => solidcraft_engine::doc::StretchDirection::ALL.iter().position(|d| d == direction).unwrap_or(0),
+            distance: String = "10 mm".into() => shown_expr(distance, ValueKind::Length),
+            at: String = String::new() => shown_expr(at, ValueKind::Length),
+        } => if at.trim().is_empty() {
+            json!({"direction": stretch_direction_key(*direction), "distance": distance})
+        } else {
+            json!({"direction": stretch_direction_key(*direction), "distance": distance, "at": at})
+        };
         OffsetFaces("solid.offset_face", "OFFSET FACE", [("Faces", FACES, true)],
             FeatureKind::OffsetFace { distance, .. }) {
             distance: String = "2 mm".into() => shown_expr(distance, ValueKind::Length),
@@ -1539,6 +1559,7 @@ impl Dialog {
                 | Kind::Pipe { .. }
                 | Kind::Stock { .. }
                 | Kind::Scale { .. }
+                | Kind::Stretch { .. }
                 | Kind::OffsetFaces { .. }
                 | Kind::PatternRect { .. }
                 | Kind::PatternCirc { .. }
@@ -1615,6 +1636,7 @@ impl Dialog {
             Kind::AnglePlane { angle, .. } => ("Angle", ValueKind::Angle, angle),
             Kind::Scale { per_axis: true, .. } => return None,
             Kind::Scale { factor, .. } => ("Scale", ValueKind::Unitless, factor),
+            Kind::Stretch { distance, .. } => ("Distance", ValueKind::Length, distance),
             Kind::OffsetFaces { distance } => ("Distance", ValueKind::Length, distance),
             Kind::Sheet(k) => return k.primary(&self.inputs),
             Kind::Surface(k) => return k.primary(),
@@ -4951,6 +4973,7 @@ fn rememberable(kind: &Kind) -> bool {
             | Kind::OffsetPlane { .. }
             | Kind::AnglePlane { .. }
             | Kind::Scale { .. }
+            | Kind::Stretch { .. }
             | Kind::OffsetFaces { .. }
             | Kind::Stock { .. }
             | Kind::Pipe { .. }
@@ -6064,6 +6087,10 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
     if crate::hole_folder::active(d) {
         return crate::hole_folder::commands(app, d, cmds);
     }
+    let mut before = Vec::new();
+    if matches!(d.kind, Kind::Stretch { .. }) {
+        before = stretch_parameter(app, d, &mut cmds);
+    }
     if let Some((id, _)) = d.editing {
         let (cmd, mut params) = cmds.into_iter().next().ok_or("nothing to apply")?;
         if let Some(feature) = app.session.doc.feature(id) {
@@ -6112,9 +6139,11 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
                 }
             }
         }
-        return Ok(vec![("timeline.redefine".into(), json!({"feature": id, "command": cmd, "params": params}))]);
+        before.push(("timeline.redefine".into(), json!({"feature": id, "command": cmd, "params": params})));
+        return Ok(before);
     }
-    Ok(cmds)
+    before.extend(cmds);
+    Ok(before)
 }
 
 /// A dialog highlights exactly the profile regions it picks, so its commands build exactly those:
@@ -6136,6 +6165,40 @@ fn exact_regions(d: &Dialog, cmds: &mut [(String, Value)]) {
 
 /// The commands the live preview runs: OK's, with a joint's motion while it animates, and a
 /// component Move/Copy moves by its placement drawn as its bodies moved.
+/// Stretch keeps its distance in a parameter (#20512): a plain length typed or dragged becomes
+/// a new parameter (`stretch1`, `stretch2`, …) that the step uses, and a step that already uses
+/// a parameter has that parameter changed instead. A formula is sent as it is. Returns the
+/// commands to run before the stretch; `cmds`' distance then names the parameter.
+fn stretch_parameter(app: &SolveApp, d: &Dialog, cmds: &mut [(String, Value)]) -> Vec<(String, Value)> {
+    let doc = &app.session.doc;
+    let Some((_, params)) = cmds.iter_mut().find(|(cmd, _)| cmd == "solid.stretch") else { return Vec::new() };
+    let Some(distance) = params.get("distance").and_then(Value::as_str).map(str::trim).map(str::to_owned) else { return Vec::new() };
+    if doc.param(&distance).is_some() || !plain_length(&distance) {
+        return Vec::new();
+    }
+    // Editing a step whose distance is a parameter: that parameter takes the new value.
+    let kept = d.editing.and_then(|(id, _)| match &doc.feature(id)?.kind {
+        FeatureKind::Stretch { distance, .. } => doc.param(distance.as_str().trim()).map(|p| p.name.clone()),
+        _ => None,
+    });
+    let (command, name) = match kept {
+        Some(name) => ("parameters.change", name),
+        None => {
+            let name = (1..).map(|i| format!("stretch{i}")).find(|n| doc.param(n).is_none()).unwrap_or_else(|| "stretch".into());
+            ("parameters.add", name)
+        }
+    };
+    params["distance"] = json!(name);
+    vec![(command.into(), json!({"name": name, "expression": distance}))]
+}
+
+/// A number, alone or with a length unit after it (`12`, `-3.5 mm`, `2in`): no names, no sums.
+fn plain_length(e: &str) -> bool {
+    let number = e.trim_end_matches(|c: char| c.is_ascii_alphabetic()).trim();
+    let unit = e[number.len()..].trim();
+    !number.is_empty() && number.parse::<f64>().is_ok_and(f64::is_finite) && matches!(unit, "" | "mm" | "cm" | "m" | "in" | "ft")
+}
+
 pub fn preview_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
     let mut cmds = apply_commands(app, d)?;
     if let Kind::Assembly(k) = &d.kind {
@@ -6869,6 +6932,13 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Scale { .. } => {
             need(0, "bodies")?;
             ("solid.scale", json!({"bodies": sels(d, 0).body_names()}))
+        }
+        Kind::Stretch { .. } => {
+            need(0, "the body to stretch")?;
+            match sels(d, 0).body_names().as_slice() {
+                [name] => ("solid.stretch", json!({"body": name})),
+                _ => return Err("pick one body to stretch".into()),
+            }
         }
         Kind::OffsetFaces { .. } => {
             need(0, "faces")?;
@@ -9045,6 +9115,14 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         }),
                     );
                 }
+            }
+            d
+        }
+        FeatureKind::Stretch { body, .. } => {
+            let mut d = start("solid.stretch")?;
+            d.kind = Kind::simple_restore(&f.kind)?;
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = vec![Sel::Body { name: body.to_string() }];
             }
             d
         }

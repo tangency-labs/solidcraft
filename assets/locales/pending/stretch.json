@@ -1,6 +1,7 @@
 {
   "en": {
     "cmd.solid_stretch": "Stretch",
-    "ui.feature_kind.stretch": "Stretch"
+    "ui.feature_kind.stretch": "Stretch",
+    "help.solid.stretch": "Makes a body longer, wider or taller by cutting it across and filling the gap with its own shape, so holes, rounds and walls keep their size. Use it to resize a part without going back to its sketches."
   }
 }

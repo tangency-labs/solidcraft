@@ -22,6 +22,7 @@ use crate::{
 const STRETCH_CONTRACT: TypedContract<StretchParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("solid.stretch", "Stretch", crate::checked!("solid.stretch", stretch))
+    .at("SOLID", "MODIFY")
     .icon("move")
     .contract(&STRETCH_CONTRACT)
     .output(output_schema_for::<FeatureResult>)
