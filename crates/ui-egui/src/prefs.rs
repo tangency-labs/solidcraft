@@ -3767,7 +3767,7 @@ fn button_job_label(app: &SolveApp, job: Option<&crate::space_mouse::ButtonJob>)
             ButtonKey::Alt => "Alt",
         }
         .to_string(),
-        Some(ButtonJob::Command(id)) => solidcraft_engine::find_command(id).map_or_else(|| id.clone(), |c| app.tr_label(c.label).to_string()),
+        Some(ButtonJob::Command(id)) => solidcraft_engine::find_command(id).map_or_else(|| id.clone(), |c| app.tr_command(c.id, c.label).to_string()),
     }
 }
 
