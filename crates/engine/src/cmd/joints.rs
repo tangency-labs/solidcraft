@@ -439,13 +439,12 @@ fn effective_value_list(s: &Session, id: u64) -> Option<Vec<NamedValue>> {
 /// commands changed (a motion link's follower, a joint a closed loop moved). Their values are
 /// as the solver placed them, after motion links and limits, as `joint.inspect` and
 /// `joint.drive` give them.
-pub(crate) fn posed_joints(before: &Session, after: &Session, replies: &[Value]) -> Vec<ReachedJoint> {
-    let was = joints::joint_values(&before.doc.assembly);
-    let now = joints::joint_values(&after.doc.assembly);
-    let mut ids: std::collections::BTreeSet<u64> = replies.iter().filter_map(|r| r.get("joint").and_then(Value::as_u64)).collect();
-    ids.extend(after.doc.assembly.joints.iter().filter(|j| was.get(&j.id) != now.get(&j.id)).map(|j| j.id));
+pub fn posed_joints(before: &Document, after: &Document, driven: impl IntoIterator<Item = u64>) -> Vec<ReachedJoint> {
+    let was = joints::joint_values(&before.assembly);
+    let now = joints::joint_values(&after.assembly);
+    let mut ids: std::collections::BTreeSet<u64> = driven.into_iter().collect();
+    ids.extend(after.assembly.joints.iter().filter(|j| was.get(&j.id) != now.get(&j.id)).map(|j| j.id));
     after
-        .doc
         .assembly
         .joints
         .iter()
