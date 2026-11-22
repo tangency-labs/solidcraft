@@ -1944,15 +1944,7 @@ impl GnSectionFsg {
             sides: side,
             offsets: r,
             law: law_round.map(|l| l.law),
-            order: u32::try_from(n).map_err(|_| {
-                SolidError::blend(
-                    OP,
-                    BlendFailure::Defect {
-                        why: "the section's order does not fit a u32: it was checked to be \
-                                  4 or less",
-                    },
-                )
-            })?,
+            order: n as u32,
             thumbweight: self.thumbweight,
             leader,
             seeds: [seed0, seed1],
@@ -2391,21 +2383,14 @@ impl GnSectionFsg {
         let m = center.evaluate_point(s)?;
         let mut r = [0.0_f64; 2];
         let mut side = [0.0_f64; 2];
+        let [u0, v0, u1, v1] = seed;
         let rows = r
             .iter_mut()
             .zip(side.iter_mut())
             .zip(faces)
             .zip(rail_points)
-            .zip(seed.chunks_exact(2));
-        for ((((rf, sf), face), rho), uv) in rows {
-            let (Some(&u), Some(&v)) = (uv.first(), uv.get(1)) else {
-                return Err(SolidError::blend(
-                    OP,
-                    BlendFailure::Defect {
-                        why: "a rail point has no seed pair: the seed is taken in exact pairs",
-                    },
-                ));
-            };
+            .zip([[u0, v0], [u1, v1]]);
+        for ((((rf, sf), face), rho), [u, v]) in rows {
             let nrm = unit_normal(k, face, Point2::new(u, v))?;
             let off = m - rho;
             *rf = off.length();

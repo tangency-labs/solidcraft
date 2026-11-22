@@ -71,9 +71,6 @@ pub struct DefPiece {
     s: f64,
     /// `ax`: the feet there, their first s-derivatives and second over 2.
     ax: [[f64; 4]; 3],
-    /// The tolerance the station's solve had to reach (not upstream's: kept so that a
-    /// piece whose station did not solve reports it again without re-evaluating).
-    tol: f64,
 }
 
 impl DefPiece {
@@ -82,7 +79,6 @@ impl DefPiece {
         state: 0,
         s: 0.0,
         ax: [[0.0; 4]; 3],
-        tol: 0.0,
     };
 }
 
@@ -109,6 +105,9 @@ pub struct GnDefFace<'a> {
     swapped: bool,
     /// `sPieces`: by the net's knot span along s.
     pieces: Vec<DefPiece>,
+    /// Not upstream's: by the same span, the failure a piece whose station did not solve
+    /// (`state` -1) reports on every later read, as built when it failed.
+    failed: Vec<Option<SolidError>>,
     /// Not the fork's (#14284): which of each support's directions continue past its net's
     /// ends for the feet's box, by the support's kind ([`EndContinuation::of`]).
     ends: [EndContinuation; 2],
@@ -204,6 +203,7 @@ pub fn gn_def_face_of<'a>(k: &Kernel, surface: &'a Surface) -> Result<GnDefFace<
         b,
         swapped,
         pieces: Vec::new(),
+        failed: Vec::new(),
         ends: [EndContinuation::of(s0), EndContinuation::of(s1)],
     })
 }
@@ -225,7 +225,8 @@ impl GnDefFace<'_> {
 /// # Errors
 ///
 /// `SM_ERR` for a piece that is not one (an index outside, or two equal knots) or whose
-/// station did not solve; those of the seeds' and the leader's evaluations.
+/// station did not solve; those of the seeds' and the leader's evaluations. A later read of
+/// a failed piece returns the failure recorded when it failed ([`solve_piece`]).
 fn def_piece_at(k: &Kernel, d: &mut GnDefFace<'_>, net: &Nurbs, kk: usize) -> Result<DefPiece> {
     let knots = if d.swapped { &net.v } else { &net.u };
     let (Some(&k0), Some(&k1)) = (knots.get(kk), knots.get(kk + 1)) else {
@@ -250,15 +251,66 @@ fn def_piece_at(k: &Kernel, d: &mut GnDefFace<'_>, net: &Nurbs, kk: usize) -> Re
     if d.pieces.len() < knots.len() {
         d.pieces.resize(knots.len(), DefPiece::NONE);
     }
+    if d.failed.len() < knots.len() {
+        d.failed.resize(knots.len(), None);
+    }
     let state = d.pieces.get(kk).map_or(-1, |p| p.state);
     if state == 0 {
         let mut p = DefPiece::NONE;
         p.state = -1;
+        p.s = d.a[0] + d.b[0] * 0.5 * (k0 + k1);
         if let Some(slot) = d.pieces.get_mut(kk) {
             *slot = p;
         }
-        let def = d.def;
-        p.s = d.a[0] + d.b[0] * 0.5 * (k0 + k1);
+        match solve_piece(k, d, p.s) {
+            Ok(ax) => {
+                p.ax = ax;
+                p.state = 1;
+                if let Some(slot) = d.pieces.get_mut(kk) {
+                    *slot = p;
+                }
+            }
+            // the piece stays failed (-1, as upstream), and later reads report `later`
+            Err(pair) => {
+                let (now, later) = *pair;
+                if let Some(slot) = d.failed.get_mut(kk) {
+                    *slot = Some(later);
+                }
+                return Err(now);
+            }
+        }
+    }
+    match (d.pieces.get(kk), d.failed.get(kk)) {
+        (Some(p), _) if p.state == 1 => Ok(*p),
+        // the piece's station failed on an earlier call: the failure that call recorded
+        (Some(_), Some(Some(e))) => Err(e.clone()),
+        _ => Err(SolidError::blend(
+            OP,
+            BlendFailure::Defect {
+                why: "a failed piece has no slot or no recorded failure: both are sized to \
+                      the knots above, and a piece fails only where its failure is recorded",
+            },
+        )),
+    }
+}
+
+/// `sm_DefPieceAt`'s solve: the feet at the station `s` in the middle of a piece of the
+/// net, their first s-derivatives and their second over 2.
+///
+/// # Errors
+///
+/// A pair (boxed): the error this read returns, and the one every later read of the piece returns
+/// (not upstream's, which keeps only that the piece failed). A seed's or the leader's
+/// evaluation fails with its own error now, and later as the cause of an `SM_ERR` defect of
+/// this operation (`SM_ERR` there before); the station's solve fails as
+/// `StationDidNotConverge` with the solve's error its cause, the same now and later.
+fn solve_piece(
+    k: &Kernel,
+    d: &GnDefFace<'_>,
+    s: f64,
+) -> std::result::Result<[[f64; 4]; 3], Box<(SolidError, SolidError)>> {
+    let def = d.def;
+    let set_up = || -> Result<([f64; 4], Trunc, f64)> {
         let mut seed = [0.0_f64; 4];
         for f in 0..2 {
             let w = def
@@ -272,7 +324,7 @@ fn def_piece_at(k: &Kernel, d: &mut GnDefFace<'_>, net: &Nurbs, kk: usize) -> Re
                         },
                     )
                 })?
-                .evaluate_point(p.s)?;
+                .evaluate_point(s)?;
             if let Some(x) = seed.get_mut(2 * f) {
                 *x = w.x;
             }
@@ -280,71 +332,57 @@ fn def_piece_at(k: &Kernel, d: &mut GnDefFace<'_>, net: &Nurbs, kk: usize) -> Re
                 *x = w.y;
             }
         }
-        let l = def.leader().evaluate_point(p.s)?;
+        let l = def.leader().evaluate_point(s)?;
         let tr = Trunc::new(2, 0)?;
-        let tol = 1.0e-9 * smax(1.0, l.length());
-        p.tol = tol;
-        if let Some(slot) = d.pieces.get_mut(kk) {
-            *slot = p;
-        }
-        match gn_solve_station(k, d.sup, def.leader(), p.s, seed, d.r, d.side, tr, tol) {
-            Ok(st) => {
-                for (i, row) in p.ax.iter_mut().enumerate() {
-                    for (q, x) in row.iter_mut().enumerate() {
-                        *x = st.x.get(q).map_or(f64::NAN, |sq| sq.at(i, 0));
-                    }
-                }
-                p.state = 1;
-                if let Some(slot) = d.pieces.get_mut(kk) {
-                    *slot = p;
-                }
-            }
-            Err(e) => {
-                // the piece stays failed (-1, as upstream); the solve's error is the cause,
-                // and its numbers are kept where it reports them
-                let (residual, step, iterations) = match e.blend_failure() {
-                    Some(&BlendFailure::StationDidNotConverge {
-                        residual,
-                        step,
-                        iterations,
-                        ..
-                    }) => (residual, step, iterations),
-                    _ => (None, None, None),
-                };
-                return Err(Failure::new(
-                    OP,
-                    BlendFailure::StationDidNotConverge {
-                        s: p.s,
-                        residual,
-                        tolerance: tol,
-                        step,
-                        iterations,
-                    },
-                )
-                .caused_by(e)
-                .into_error());
-            }
-        }
-    }
-    match d.pieces.get(kk) {
-        Some(p) if p.state == 1 => Ok(*p),
-        // the piece's station failed on an earlier call, which returned the solve's error
-        Some(p) => Err(SolidError::blend(
-            OP,
-            BlendFailure::StationDidNotConverge {
-                s: p.s,
-                residual: None,
-                tolerance: p.tol,
-                step: None,
-                iterations: None,
-            },
-        )),
-        None => Err(SolidError::blend(
+        Ok((seed, tr, 1.0e-9 * smax(1.0, l.length())))
+    };
+    let (seed, tr, tol) = set_up().map_err(|e| {
+        let later = Failure::new(
             OP,
             BlendFailure::Defect {
-                why: "the piece has no slot: the pieces were just sized to the knots",
+                why: "the station at a piece's middle was not set up: a seed or the leader \
+                      did not evaluate at the middle of a piece of the definition's own net",
             },
-        )),
+        )
+        .caused_by(e.clone())
+        .into_error();
+        Box::new((e, later))
+    })?;
+    match gn_solve_station(k, d.sup, def.leader(), s, seed, d.r, d.side, tr, tol) {
+        Ok(st) => {
+            let mut ax = [[0.0_f64; 4]; 3];
+            for (i, row) in ax.iter_mut().enumerate() {
+                for (q, x) in row.iter_mut().enumerate() {
+                    *x = st.x.get(q).map_or(f64::NAN, |sq| sq.at(i, 0));
+                }
+            }
+            Ok(ax)
+        }
+        Err(e) => {
+            // the solve's error is the cause, and its numbers are kept where it reports them
+            let (residual, step, iterations) = match e.blend_failure() {
+                Some(&BlendFailure::StationDidNotConverge {
+                    residual,
+                    step,
+                    iterations,
+                    ..
+                }) => (residual, step, iterations),
+                _ => (None, None, None),
+            };
+            let failed = Failure::new(
+                OP,
+                BlendFailure::StationDidNotConverge {
+                    s,
+                    residual,
+                    tolerance: tol,
+                    step,
+                    iterations,
+                },
+            )
+            .caused_by(e)
+            .into_error();
+            Err(Box::new((failed.clone(), failed)))
+        }
     }
 }
 
@@ -780,48 +818,7 @@ mod tests {
     #[test]
     #[allow(clippy::unwrap_used, clippy::expect_used)]
     fn a_round_ending_flush_with_its_pipe_is_enclosed_at_its_end() {
-        use crate::blend::fillet_executive::api::fillet_edges;
-        use crate::boolean::api_brep::boolean_union;
-        use crate::geom::axis2_placement::Axis2Placement;
-        use crate::math::{Point3, Vec3};
-        use crate::primitive::api_primitives::{create_box, create_cylinder};
-        use crate::query::api_queries::{edge_closest_point, get_edges};
-        use crate::topology::face;
-        let mut k = Kernel::default();
-        let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();
-        let mut pipe = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 60.0).unwrap();
-        let phi = 4.0_f64.to_radians();
-        let place = Axis2Placement::new(
-            Point3::new(0.0, 20.0, 16.0),
-            Vec3::new(-phi.sin(), 0.0, -phi.cos()),
-            Vec3::new(0.0, 1.0, 0.0),
-        );
-        crate::topology::brep::p5::transform(&mut k, &mut pipe, &place, None, false).unwrap();
-        let mut b = boolean_union(&mut k, plate, pipe).unwrap();
-        let q = Point3::new(30.0, 29.2, 10.0);
-        let root = get_edges(&b)
-            .unwrap()
-            .into_iter()
-            .filter_map(|e| {
-                edge_closest_point(&k, &b, e, q)
-                    .ok()
-                    .map(|c| (e, c.closest.distance))
-            })
-            .filter(|&(_, d)| d <= 1.0)
-            .min_by(|a, b| a.1.total_cmp(&b.1))
-            .expect("the root edge")
-            .0;
-        fillet_edges(&mut k, &mut b, &[root], 2.0, 1, 1, 1.0).unwrap();
-        let def = b
-            .faces()
-            .ids()
-            .filter_map(|f| face::p2::surface(&b, f).unwrap())
-            .find(|s| {
-                s.procedural_blend()
-                    .is_some_and(|d| (0..2).all(|i| d.support(i).is_some()))
-            })
-            .expect("the round, a definition on the pipe and the plate")
-            .clone();
+        let (k, def) = wr698_circle_root();
         let net = Nurbs::of(&as_b_spline(&k, &def).unwrap().unwrap()).unwrap();
         let (u0, u1) = (knot(&net.u, net.p as isize), knot(&net.u, net.nu as isize));
         let (v0, v1) = (knot(&net.v, net.q as isize), knot(&net.v, net.nv as isize));
@@ -876,5 +873,88 @@ mod tests {
             crossed >= 1,
             "no box at the round's end crosses its pipe's domain end ({u0}..{u1})"
         );
+    }
+
+    /// A piece whose station does not solve (the radii not numbers, so the solve cannot
+    /// converge) reports the same failure on every read: `StationDidNotConverge` of this
+    /// operation at the piece's middle with the solve's error its cause, `SM_ERR`. Before,
+    /// the second read dropped the cause and its numbers.
+    #[test]
+    #[allow(clippy::unwrap_used, clippy::expect_used)]
+    fn a_failed_piece_reports_the_same_failure_on_every_read() {
+        let (k, def) = wr698_circle_root();
+        let net = Nurbs::of(&as_b_spline(&k, &def).unwrap().unwrap()).unwrap();
+        let mut d = gn_def_face_of(&k, &def).unwrap();
+        d.r = [f64::NAN; 2];
+        let knots = if d.swapped { &net.v } else { &net.u };
+        let kk = (0..knots.len() - 1)
+            .find(|&i| knots[i + 1] > knots[i])
+            .expect("a piece of positive length");
+        let s = d.a[0] + d.b[0] * 0.5 * (knots[kk] + knots[kk + 1]);
+        let first = def_piece_at(&k, &mut d, &net, kk).expect_err("the solve fails");
+        let second = def_piece_at(&k, &mut d, &net, kk).expect_err("the piece stays failed");
+        assert_eq!(first, second);
+        assert_eq!(first.operation(), OP);
+        assert_eq!(
+            crate::error::upstream_status(&first),
+            Some(crate::error::SM_ERR)
+        );
+        let Some(&BlendFailure::StationDidNotConverge { s: at, .. }) = first.blend_failure() else {
+            panic!("not StationDidNotConverge: {first:?}");
+        };
+        assert_eq!(at, s);
+        assert!(
+            first.cause().is_some(),
+            "the solve's error is kept: {first:?}"
+        );
+    }
+
+    /// `wr698`'s `circle_root`: a pipe of radius 10 lying along a 60 x 40 x 10 plate 4
+    /// degrees off x, its root rounded r 2; the round, a definition on the pipe and the plate.
+    #[allow(clippy::unwrap_used, clippy::expect_used)]
+    fn wr698_circle_root() -> (Kernel, Surface) {
+        use crate::blend::fillet_executive::api::fillet_edges;
+        use crate::boolean::api_brep::boolean_union;
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::math::{Point3, Vec3};
+        use crate::primitive::api_primitives::{create_box, create_cylinder};
+        use crate::query::api_queries::{edge_closest_point, get_edges};
+        use crate::topology::face;
+        let mut k = Kernel::default();
+        let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();
+        let mut pipe = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 60.0).unwrap();
+        let phi = 4.0_f64.to_radians();
+        let place = Axis2Placement::new(
+            Point3::new(0.0, 20.0, 16.0),
+            Vec3::new(-phi.sin(), 0.0, -phi.cos()),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        crate::topology::brep::p5::transform(&mut k, &mut pipe, &place, None, false).unwrap();
+        let mut b = boolean_union(&mut k, plate, pipe).unwrap();
+        let q = Point3::new(30.0, 29.2, 10.0);
+        let root = get_edges(&b)
+            .unwrap()
+            .into_iter()
+            .filter_map(|e| {
+                edge_closest_point(&k, &b, e, q)
+                    .ok()
+                    .map(|c| (e, c.closest.distance))
+            })
+            .filter(|&(_, d)| d <= 1.0)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .expect("the root edge")
+            .0;
+        fillet_edges(&mut k, &mut b, &[root], 2.0, 1, 1, 1.0).unwrap();
+        let def = b
+            .faces()
+            .ids()
+            .filter_map(|f| face::p2::surface(&b, f).unwrap())
+            .find(|s| {
+                s.procedural_blend()
+                    .is_some_and(|d| (0..2).all(|i| d.support(i).is_some()))
+            })
+            .expect("the round, a definition on the pipe and the plate")
+            .clone();
+        (k, def)
     }
 }
