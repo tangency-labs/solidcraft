@@ -936,8 +936,9 @@ mod tests {
         run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["along"], "to": [0, 0, 10], "body_name": "ToLid"}));
         assert!((area(&s, "ToLid") - 60.0).abs() < 60.0 * 1e-6, "{}", area(&s, "ToLid"));
         assert!((bounds(&s, "ToLid").max.z - 10.0).abs() < 1e-6);
-        // 2 mm past it, in the direction travelled.
-        run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["along"], "to": [0, 0, 10], "to_offset": "2 mm", "body_name": "PastLid"}));
+        // 2 mm past it, in the direction travelled. Picked at (2, 2, 10), off ToLid's top edge
+        // (y = 0), so the point names the box's face alone.
+        run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["along"], "to": [2, 2, 10], "to_offset": "2 mm", "body_name": "PastLid"}));
         assert!((bounds(&s, "PastLid").max.z - 12.0).abs() < 1e-6);
 
         // To the rod's curved underside: the wall at x = 0 for |y| <= 3 ends at
@@ -950,11 +951,13 @@ mod tests {
         assert!(bb.min.z.abs() < 1e-6 && (bb.max.z - 16.0).abs() < 1e-4, "{bb:?}");
 
         // From a sketch 5 above the origin: the same wall, 5 shorter. Area: 6 * 15 - (3 * 4 + 25 * asin(3/5)).
+        // From here on the rod is picked at (5, 0, 15), on its underside but off ToRod's top edge
+        // (x = 0), which runs through (0, 0, 15) and would hold that point as well.
         run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Raised"}));
         run(&mut s, "sketch.create", json!({"plane": "Raised", "name": "Up"}));
         run(&mut s, "sketch.line", json!({"points": [[0, -3], [0, 3]], "ids": ["raised"]}));
         run(&mut s, "sketch.finish", json!({}));
-        run(&mut s, "surface.extrude", json!({"sketch": "Up", "curves": ["raised"], "to": [0, 0, 15], "body_name": "FromRaised"}));
+        run(&mut s, "surface.extrude", json!({"sketch": "Up", "curves": ["raised"], "to": [5, 0, 15], "body_name": "FromRaised"}));
         let want = 90.0 - (12.0 + 25.0 * (0.6f64).asin());
         assert!((area(&s, "FromRaised") - want).abs() < want * 1e-4, "{} vs {want}", area(&s, "FromRaised"));
         let bb = bounds(&s, "FromRaised");
@@ -991,9 +994,9 @@ mod tests {
         // that never meets its surface. Neither adds a feature.
         let features = s.doc.features.len();
         let err =
-            s.execute("surface.extrude", &json!({"sketch": "S", "curves": ["across"], "to": [0, 0, 15], "to_offset": 1})).unwrap_err().to_string();
+            s.execute("surface.extrude", &json!({"sketch": "S", "curves": ["across"], "to": [5, 0, 15], "to_offset": 1})).unwrap_err().to_string();
         assert!(err.contains("To offset"), "{err}");
-        let err = s.execute("surface.extrude", &json!({"sketch": "S", "curves": ["aside"], "to": [0, 0, 15]})).unwrap_err().to_string();
+        let err = s.execute("surface.extrude", &json!({"sketch": "S", "curves": ["aside"], "to": [5, 0, 15]})).unwrap_err().to_string();
         assert!(err.contains("never meets"), "{err}");
         assert_eq!(s.doc.features.len(), features);
     }
