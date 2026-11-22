@@ -5959,17 +5959,17 @@ mod tests {
         assert!(a.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).is_err(), "a design adopted over a blank one");
     }
 
-    /// Hide Origin by Default hides the Origin of designs that don't keep its eye; a design that
+    /// The Origin folder preference on Hidden hides the Origin of designs that don't keep its eye; a design that
     /// does keeps it, along with the rest of the browser's view, in its tab and in its file.
     #[test]
     fn the_browsers_view_follows_each_design_and_the_origin_preference() {
         let mut a = app();
         assert!(a.origin_shown());
-        a.preferences.hide_origin = true;
+        a.preferences.hide_origin = crate::prefs::OriginDisplay::Hidden;
         assert!(!a.origin_shown() && !a.session.is_dirty(), "the preference is not a change to the design");
         let mut b = app();
         b.load_prefs(&a.prefs());
-        assert!(b.preferences.hide_origin && !b.origin_shown(), "the preference is kept between runs");
+        assert!(b.preferences.hide_origin == crate::prefs::OriginDisplay::Hidden && !b.origin_shown(), "the preference is kept between runs");
         // This design shows its Origin and locks its body and hides its Sketches folder.
         a.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
         a.set_origin_shown(true);
@@ -5982,9 +5982,60 @@ mod tests {
         // Opened again, the design's own Origin setting wins over the preference.
         let text = a.session.design().to_json();
         let mut c = app();
-        c.preferences.hide_origin = true;
+        c.preferences.hide_origin = crate::prefs::OriginDisplay::Hidden;
         c.session = Session::new(solidcraft_engine::doc::Document::from_json(&text).unwrap());
         assert!(c.origin_shown() && c.session.visibility == a.session.visibility);
+    }
+
+    /// The Origin folder preference on Automatic: the Origin shows until the design has a body, and
+    /// again when the body is undone or rolled back. It saves nothing in the design, the Browser's
+    /// eye wins over it, and each design decides by its own bodies.
+    #[test]
+    fn an_automatic_origin_hides_once_the_design_has_a_body() {
+        let mut a = app();
+        a.preferences.hide_origin = crate::prefs::OriginDisplay::Automatic;
+        assert!(a.origin_shown(), "an empty design shows it");
+        a.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        a.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]})).unwrap();
+        a.run("sketch.finish", json!({})).unwrap();
+        assert!(a.origin_shown(), "a sketch is not a body");
+        a.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        assert!(!a.origin_shown(), "the first body hides it");
+        assert!(crate::viewport::origin_planes(&a).is_empty() && crate::viewport::origin_axes(&a).is_empty());
+        assert!(a.session.visibility.is_empty(), "nothing is saved in the design");
+        a.start("sketch.create");
+        assert_eq!(crate::viewport::origin_planes(&a).len(), 3, "Create Sketch still offers the planes");
+        a.dialog = None;
+        a.session.visibility.hidden_bodies.push("Body1".into());
+        assert!(!a.origin_shown(), "hiding the body does not bring it back");
+        a.session.visibility.hidden_bodies.clear();
+        let body = a.session.doc.features.last().unwrap().id;
+        a.edit_feature(body);
+        assert!(a.dialog.is_some() && a.session.model.state().bodies.is_empty(), "the edit rolls back before the body");
+        assert!(!a.origin_shown(), "editing the first body leaves it hidden");
+        crate::dialogs::cancel(&mut a);
+        assert!(!a.origin_shown());
+        a.run("timeline.roll_to", json!({"position": 1})).unwrap();
+        assert!(a.origin_shown(), "rolled back before the body");
+        a.run("timeline.roll_to", json!({})).unwrap();
+        assert!(!a.origin_shown());
+        let mut undone = 0;
+        while !a.session.model.state().bodies.is_empty() && undone < 5 {
+            a.run("edit.undo", json!({})).unwrap();
+            undone += 1;
+        }
+        assert!(a.origin_shown(), "undoing the body shows it again");
+        a.run("edit.redo", json!({})).unwrap();
+        assert!(!a.origin_shown(), "redoing it hides it");
+        new_design(&mut a);
+        assert!(a.origin_shown(), "another design has no body yet");
+        switch(&mut a, 0);
+        assert!(!a.origin_shown());
+        a.set_origin_shown(true);
+        assert!(a.origin_shown(), "the Browser's eye wins");
+        let text = a.session.design().to_json();
+        a.session = Session::new(solidcraft_engine::doc::Document::from_json(&text).unwrap());
+        assert!(a.origin_shown(), "and the design keeps it");
     }
 
     /// #1205: Units of new designs apply to the empty design a launch shows, to New while that
