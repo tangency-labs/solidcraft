@@ -3754,6 +3754,10 @@ fn recovery_discard(_s: &mut Session, p: &Value) -> Result<Value> {
 mod sdf_tests;
 
 #[cfg(test)]
+#[path = "mjcf_tests.rs"]
+mod mjcf_tests;
+
+#[cfg(test)]
 #[path = "urdf_tests.rs"]
 mod urdf_tests;
 

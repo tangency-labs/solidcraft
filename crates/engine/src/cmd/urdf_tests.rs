@@ -10,25 +10,25 @@ use solidcraft_io::urdf::{Step, UrdfModel, UrdfOptions, UrdfPackage};
 
 use crate::Session;
 
-fn run(s: &mut Session, id: &str, p: Value) -> Value {
+pub(super) fn run(s: &mut Session, id: &str, p: Value) -> Value {
     match s.execute(id, &p) {
         Ok(v) => v,
         Err(e) => panic!("{id} {p}: {e}"),
     }
 }
 
-fn occ(s: &Session, component: &str) -> u64 {
+pub(super) fn occ(s: &Session, component: &str) -> u64 {
     let c = s.doc.find_component(component).unwrap_or(0);
     s.doc.occurrence_of(c).map(|o| o.id).unwrap_or(0)
 }
 
-fn ground(s: &mut Session, component: &str, grounded: bool) {
+pub(super) fn ground(s: &mut Session, component: &str, grounded: bool) {
     let o = occ(s, component);
     run(s, "occurrence.ground", json!({"occurrence": o, "grounded": grounded}));
 }
 
 /// A hinge leaf: a 40 x 30 x 3 plate and an r4 knuckle along X at y = 33, z = 4.
-fn leaf(s: &mut Session, name: &str) {
+pub(super) fn leaf(s: &mut Session, name: &str) {
     run(s, "component.activate", json!({"component": "root"}));
     run(s, "component.create", json!({"name": name}));
     run(s, "solid.box", json!({"length": 40, "width": 30, "height": 3, "corner": [0, 0, 0]}));
@@ -36,7 +36,7 @@ fn leaf(s: &mut Session, name: &str) {
 }
 
 /// LeafA (grounded) and LeafB on a revolute joint "Hinge" without limits.
-fn hinge() -> Session {
+pub(super) fn hinge() -> Session {
     let mut s = Session::default();
     leaf(&mut s, "LeafA");
     leaf(&mut s, "LeafB");
@@ -50,7 +50,7 @@ fn hinge() -> Session {
 }
 
 /// 10 mm cubes in components A (grounded, at the origin) and B (at x = 20).
-fn two_cubes() -> Session {
+pub(super) fn two_cubes() -> Session {
     let mut s = Session::default();
     for (name, x) in [("A", 0), ("B", 20)] {
         run(&mut s, "component.activate", json!({"component": "root"}));
@@ -62,7 +62,7 @@ fn two_cubes() -> Session {
 }
 
 /// B's bottom face on A's top face.
-fn joint(s: &mut Session, kind: &str, name: &str, limits: Value) {
+pub(super) fn joint(s: &mut Session, kind: &str, name: &str, limits: Value) {
     run(s, "joint.create", json!({"type": kind, "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "limits": limits, "name": name}));
 }
 

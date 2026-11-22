@@ -80,6 +80,7 @@ mod legacy_dir;
 pub mod library;
 pub mod library_files;
 pub mod limits;
+pub mod mjcf;
 #[cfg(test)]
 mod mutate;
 mod native_cad;
@@ -258,6 +259,7 @@ pub use kicad_in::parse_kicad_board;
 pub use kicad_in::parse_kicad_board_with;
 pub use kicad_in::read_kicad;
 mod obj;
+pub use mjcf::{MjcfPackage, mjcf};
 pub use obj::read_obj;
 pub use sdf::SdfDecal;
 pub use sdf::SdfOptions;

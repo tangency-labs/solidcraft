@@ -128,8 +128,9 @@ pub struct UrdfJoint {
 pub enum Note {
     /// The same in every format.
     Text(String),
-    /// Joint `joint` would close a loop, so the tree leaves it out.
-    Loop { joint: String },
+    /// Joint `joint` would close a loop, so the tree leaves it out. `a` and `b` are the links of
+    /// its two sides, `frame` its A side's frame in link `a`'s frame (mm), as the design is now.
+    Loop { joint: String, kind: JointKind, a: usize, b: usize, frame: Mat },
     /// Joint `joint` is a relation whose turns follow a fixed step: fixed where it is.
     Relation { joint: String, kind: JointKind },
     /// Joint `joint` slides without a limit.
@@ -142,7 +143,7 @@ impl Note {
     fn urdf(&self) -> String {
         match self {
             Note::Text(t) => t.clone(),
-            Note::Loop { joint } => format!("joint `{joint}` closes a loop: skipped (URDF is a tree)"),
+            Note::Loop { joint, .. } => format!("joint `{joint}` closes a loop: skipped (URDF is a tree)"),
             Note::Relation { joint, kind } => format!("joint `{joint}` is a {kind:?} relation, which URDF has no joint for: written fixed as it is"),
             Note::Unlimited { joint } => format!("joint `{joint}` slides without a limit: written as ±1000 m (URDF needs one)"),
             Note::JointedCopy { link } => format!(
@@ -186,14 +187,14 @@ impl UrdfModel {
     }
 }
 
-fn translation(v: Vec3) -> Mat {
+pub(crate) fn translation(v: Vec3) -> Mat {
     let mut m = IDENTITY;
     m[3] = [v.x, v.y, v.z, 1.0];
     m
 }
 
 /// Rotation by `a` about the unit axis `u` (Rodrigues), column-major like `Mat`.
-fn rotation(u: Vec3, a: f64) -> Mat {
+pub(crate) fn rotation(u: Vec3, a: f64) -> Mat {
     let (s, c) = a.sin_cos();
     let t = 1.0 - c;
     let r = [
@@ -233,7 +234,7 @@ fn steps(kind: JointKind) -> Option<Vec<(Step, Vec3, usize)>> {
 /// SDFormat and XML. A file name is taken in Unicode NFC and also keeps `-`, any Unicode letter or
 /// digit and combining marks, so parts named in another script keep distinct, readable mesh files
 /// (#20409).
-fn sanitise(raw: &str, file: bool) -> String {
+pub(crate) fn sanitise(raw: &str, file: bool) -> String {
     use unicode_normalization::{UnicodeNormalization as _, char::is_combining_mark};
     let keep = |c: char| c.is_ascii_alphanumeric() || c == '_' || (file && (c == '-' || c.is_alphanumeric() || is_combining_mark(c)));
     let s: String =
@@ -521,7 +522,12 @@ impl<'a> Tree<'a> {
                 taken.insert(j.id);
                 let child = if j.a.occurrence == p { j.b.occurrence } else { j.a.occurrence };
                 if self.placed.contains_key(&child) {
-                    self.notes.push(Note::Loop { joint: j.name.clone() });
+                    if let (Some(&(a, af)), Some(&(b, _))) = (self.placed.get(&j.a.occurrence), self.placed.get(&j.b.occurrence))
+                        && let Some(inv) = mat_inverse(&af)
+                    {
+                        let frame = mat_mul(&inv, &mat_mul(&self.world(j.a.occurrence), fa));
+                        self.notes.push(Note::Loop { joint: j.name.clone(), kind: j.kind, a, b, frame });
+                    }
                     continue;
                 }
                 if self.attach(j, fa, p, child, values.get(&j.id).map(Vec::as_slice).unwrap_or(&[])).is_some() {
