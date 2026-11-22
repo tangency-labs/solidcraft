@@ -232,7 +232,10 @@ fn begin_refresh(
 const MAX_REFRESHES: usize = 2;
 
 pub(crate) fn refresh_model(app: &mut SolveApp) {
+    // An opening feature editor evaluates the finished sketch itself; if it is cancelled or
+    // refused, the design still needs the refresh and the next poll starts it.
     if !app.session.needs_sketch_finish_evaluation()
+        || app.pending_feature_edit.is_some()
         || app.sketch_refreshes.contains_key(&app.session.uid)
         || app.stopped_sketch_refreshes.contains(&app.session.uid)
         || app.sketch_refreshes.len() >= MAX_REFRESHES

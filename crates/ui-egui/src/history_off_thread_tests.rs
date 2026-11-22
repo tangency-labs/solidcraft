@@ -410,6 +410,30 @@ fn switching_from_a_sketch_to_a_feature_restores_partial_markers_and_sketch_chan
     }
 }
 
+/// An editor that is still opening when it is cancelled leaves the finished sketch's refresh to
+/// run afterwards: the model shows the sketch as finished, not as it was before the edit.
+#[test]
+fn a_feature_editor_cancelled_while_opening_still_refreshes_the_finished_sketch() {
+    for when in ["opening", "open"] {
+        let (mut h, sketches) = sketches_with_later_bodies();
+        let feature = h.app.session.doc.features[3].id;
+        h.app.edit_sketch(sketches[0]);
+        h.app.run("sketch.line", json!({"points": [[0, 2], [10, 2]]})).unwrap();
+        h.app.edit_feature(feature);
+        if when == "open" {
+            until_settled(&mut h);
+            assert!(h.app.dialog.is_some());
+        }
+        crate::dialogs::cancel(&mut h.app);
+        until_settled(&mut h);
+        assert!(h.app.dialog.is_none(), "{when}");
+        assert!(!h.app.session.needs_sketch_finish_evaluation(), "{when}: the finished sketch was evaluated");
+        let drawn = h.app.session.doc.sketch(sketches[0]).unwrap().curves.len();
+        let shown = h.app.session.model.state().sketch(sketches[0]).unwrap().sketch.curves.len();
+        assert_eq!(shown, drawn, "{when}: the model shows the line the sketch finished with");
+    }
+}
+
 #[test]
 fn switching_from_a_sketch_to_a_feature_rejects_replaced_or_changed_documents() {
     for action in ["new", "change"] {
