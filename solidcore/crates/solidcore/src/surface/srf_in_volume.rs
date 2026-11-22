@@ -97,6 +97,7 @@
 //!   skipped (the stream had already failed) leaves upstream's member uninitialised;
 //!   the port returns [`SolidError::InvalidInput`].
 
+use crate::error::surface::SurfaceFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -783,9 +784,9 @@ impl SrfInVolume {
             hu == 0 || hv == 0
         };
         if !supported {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_EVAL,
-                "the asked derivatives are not supported",
+                SurfaceFailure::DerivativeCombinationUnsupported { u: hu, v: hv },
             ));
         }
 
@@ -1086,15 +1087,13 @@ impl SrfInVolume {
             self.volume
                 .inv_map_point(k, point_on_surf, None, None, true)?
         };
-        if !inv.success {
-            return Err(SolidError::surface_failed(
-                OP_STEP,
-                "the volume's inversion failed",
-            ));
-        }
-        let first = inv.points.first().copied().ok_or_else(|| {
-            SolidError::surface_failed(OP_STEP, "the volume's inversion gave no point")
-        })?;
+        // upstream quits when the inversion fails; both inversions return `success`
+        // true on every `Ok` (as upstream), so only an empty answer can stop here
+        let first = inv
+            .points
+            .first()
+            .copied()
+            .ok_or_else(|| SolidError::surface(OP_STEP, SurfaceFailure::NoVolumeInverse))?;
 
         // Project the inverted volume point back through the base surface
         self.surface
@@ -1156,10 +1155,7 @@ impl SrfInVolume {
         if self.owns_surface() {
             Ok(())
         } else {
-            Err(SolidError::surface_failed(
-                OP,
-                "the surface in volume does not own its base surface",
-            ))
+            Err(SolidError::surface(OP, SurfaceFailure::BaseSurfaceNotOwned))
         }
     }
 
