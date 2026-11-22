@@ -350,6 +350,7 @@ mod tests {
         let failure = PluginFailure {
             plugin: "Dutchman".into(),
             file: Some("cube.f3d".into()),
+            exporting: false,
             error: solidcraft_engine::plugin::HostError::OverCeiling { limit: "memory_mib".into(), requested: 2048, allowed: 128 },
         };
         let _scope = scope("de");
