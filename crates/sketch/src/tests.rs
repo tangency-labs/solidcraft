@@ -3077,3 +3077,13 @@ fn a_closed_contour_repeating_an_end_position_far_in_still_fits() {
     assert!(fit.deviation <= 0.01, "deviation {}", fit.deviation);
     assert!(fit.chosen.len() >= 3);
 }
+
+/// The duplicate fold is reserved in the tolerance budget (#20048 review): a folded point is
+/// within the fold of its neighbour, and distance is 1-Lipschitz, so a fit that succeeds keeps
+/// every given point, folded ones included, within the tolerance.
+#[test]
+fn the_duplicate_fold_is_reserved_in_the_tolerance_budget() {
+    let given = [Vec2::new(0.0, 0.0), Vec2::new(5.0, 0.000099999), Vec2::new(5.0, 0.000100004), Vec2::new(10.0, 0.0)];
+    let fit = crate::fit_within_tolerance(&given, 0.0001, false).unwrap();
+    assert!(fit.deviation <= 0.0001, "deviation {}", fit.deviation);
+}

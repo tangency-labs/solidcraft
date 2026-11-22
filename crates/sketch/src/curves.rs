@@ -316,8 +316,12 @@ pub fn fit_within_tolerance(points: &[Vec2], tolerance: f64, periodic: bool) -> 
     if !tolerance.is_finite() || tolerance <= 0.0 {
         return Err(crate::SketchError::Invalid("the tolerance must be a positive number of mm".into()));
     }
-    // Duplicates would make spans of no length between the same place.
+    // Duplicates would make spans of no length between the same place. A folded point is
+    // within `eps` of the point kept in its place, and distance is 1-Lipschitz, so the fold is
+    // reserved in the budget: the fit aims a little inside the tolerance, and then every given
+    // point, folded ones included, is within it (#20048 review).
     let eps = dup_tolerance(points, tolerance);
+    let budget = tolerance - eps;
     let mut given: Vec<Vec2> = Vec::with_capacity(points.len());
     for p in points {
         if !p.is_finite() {
@@ -371,7 +375,7 @@ pub fn fit_within_tolerance(points: &[Vec2], tolerance: f64, periodic: bool) -> 
             for i in a + 1..b {
                 let d = spanned_distance(&given, &pieces, i, window);
                 worst_seen = worst_seen.max(d);
-                if d > tolerance && worst.is_none_or(|(w, _)| d > w) {
+                if d > budget && worst.is_none_or(|(w, _)| d > w) {
                     worst = Some((d, i));
                 }
             }
