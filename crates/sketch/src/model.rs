@@ -810,6 +810,9 @@ pub struct SketchView {
     /// geometry belongs to `hide_projected`, the way its colour already says it does.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub hide_construction: bool,
+    /// Hide the construction sides of spline control polygons.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub hide_control_polygons: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub hide_grid: bool,
     /// Clicks don't snap to the grid.

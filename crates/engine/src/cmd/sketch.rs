@@ -426,7 +426,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&OPTIONS_CONTRACT)
         .output(output_schema_for::<OptionsResult>)
         .params(
-        "sketch?: id|name (default active); any of show_profile, show_points, show_dimensions, show_constraints, show_projected, show_construction, grid, snap, slice, sketch_3d: bool. Returns them all",
+        "sketch?: id|name (default active); any of show_profile, show_points, show_dimensions, show_constraints, show_projected, show_construction, show_control_polygons, grid, snap, slice, sketch_3d: bool. Returns them all",
     ),
     CommandSpec::new("sketch.chain", "Chain", crate::checked!("sketch.chain", chain_cmd)).in_sketch_part().icon("chain")
         .enabled(in_sketch)
@@ -5267,6 +5267,7 @@ fn options_of(v: &solidcraft_sketch::SketchView) -> SketchOptions {
         show_constraints: !v.hide_constraints,
         show_projected: !v.hide_projected,
         show_construction: !v.hide_construction,
+        show_control_polygons: !v.hide_control_polygons,
         grid: !v.hide_grid,
         snap: !v.no_snap,
         slice: v.slice,
@@ -5283,6 +5284,7 @@ fn sketch_options(s: &mut Session, p: &Value) -> Result<Value> {
         "show_constraints",
         "show_projected",
         "show_construction",
+        "show_control_polygons",
         "grid",
         "snap",
         "slice",
@@ -5315,6 +5317,7 @@ fn sketch_options(s: &mut Session, p: &Value) -> Result<Value> {
         put("show_constraints", &mut v.hide_constraints, true);
         put("show_projected", &mut v.hide_projected, true);
         put("show_construction", &mut v.hide_construction, true);
+        put("show_control_polygons", &mut v.hide_control_polygons, true);
         put("grid", &mut v.hide_grid, true);
         put("snap", &mut v.no_snap, true);
         put("slice", &mut v.slice, false);

@@ -738,8 +738,8 @@ fn sketch_lines_in(
 /// screen is never clickable, and geometry on screen always is.
 pub fn sketch_curve_visible(sk: &Sketch, i: usize) -> bool {
     let Some(c) = sk.curves.get(i) else { return false };
-    if c.spline_handle_of.is_some() && !sk.is_control_polygon_segment(i) {
-        return false;
+    if c.spline_handle_of.is_some() {
+        return sk.is_control_polygon_segment(i) && !sk.view.hide_control_polygons && !sk.view.hide_construction;
     }
     if c.link.is_some() && !sk.is_text_curve(i) {
         return !sk.view.hide_projected;

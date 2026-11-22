@@ -3000,6 +3000,36 @@ fn control_polygon_menu_makes_the_spline_sides_pickable() {
     );
 }
 
+#[test]
+fn drawn_control_polygon_uses_the_palette_checkbox() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.options", json!({"snap":false})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.spline.control_point"})).unwrap();
+    for point in [[0, 0], [0, 30], [40, 30], [40, 0]] {
+        h.step(&json!({"click":{"sketch":point}})).unwrap();
+    }
+    h.step(&json!({"click":{"sketch":[40,0]},"button":"right"})).unwrap();
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.settle();
+    let check = |h: &crate::scenario::Harness, shown: bool| {
+        let state = h.app.session.model.state();
+        let sk = &state.sketch(sketch).unwrap().sketch;
+        let guides: Vec<_> = (0..sk.curves.len()).filter(|&index| sk.is_control_polygon_segment(index)).collect();
+        assert_eq!(guides.len(), 3);
+        assert_eq!(!sk.view.hide_control_polygons, shown);
+        assert!(guides.iter().all(|&index| solidcraft_engine::view::sketch_curve_visible(sk, index) == shown));
+    };
+    check(&h, true);
+    for shown in [false, true] {
+        h.step(&json!({"click":{"handle":"sketch_palette:toggle:show_control_polygons"}})).unwrap();
+        h.settle();
+        check(&h, shown);
+    }
+}
+
 /// A right-click menu taller than the window (a spline with stored tangent handles in a short
 /// window) stays inside the window and scrolls: its last rows start below the window's bottom
 /// edge, and a click on the full-width bar at its bottom brings them into view. A window that

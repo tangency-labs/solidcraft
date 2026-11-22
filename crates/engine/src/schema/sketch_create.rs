@@ -1156,6 +1156,9 @@ pub struct ControlPointSplineParams {
     /// Make it construction geometry. Default: false.
     #[serde(default)]
     pub construction: Option<bool>,
+    /// Create the spline's selectable construction sides in the same edit. Default: false.
+    #[serde(default)]
+    pub control_polygon: Option<bool>,
     /// The sketch (default: the one being edited).
     #[serde(default)]
     pub sketch: Option<SketchTarget>,

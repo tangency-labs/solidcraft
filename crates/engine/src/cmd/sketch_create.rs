@@ -149,7 +149,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&SPLINE_CONTROL_CONTRACT)
         .output(output_schema_for::<DrawResult>)
-        .params(concat!("points: control points (2…500), cubic; periodic?: boolean (default false): closes the control polygon into a loop (at least 4 points)", created_doc!())),
+        .params(concat!("points: control points (2…500), cubic; periodic?: boolean (default false): closes the control polygon into a loop (at least 4 points); control_polygon?: create selectable construction sides (default false)", created_doc!())),
     CommandSpec::new("sketch.spline.control_point_5", "Control Point Spline (Degree 5)", crate::checked!("sketch.spline.control_point_5", spline_cv5))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -157,7 +157,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&SPLINE_CONTROL_CONTRACT)
         .output(output_schema_for::<DrawResult>)
-        .params(concat!("points: control points (2…500), degree 5; periodic?: boolean (default false): closes the control polygon into a loop (at least 6 points)", created_doc!())),
+        .params(concat!("points: control points (2…500), degree 5; periodic?: boolean (default false): closes the control polygon into a loop (at least 6 points); control_polygon?: create selectable construction sides (default false)", created_doc!())),
     CommandSpec::new("sketch.spline.control_knots", "Control Point Spline with Knots", crate::checked!("sketch.spline.control_knots", spline_knots))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -923,6 +923,9 @@ fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8, nurb
             .add_curve(CurveKind::Spline { pts, control, degree, periodic, nurbs: nurbs.clone(), handles: Vec::new() }, None)
             .map_err(|e| if knotted { bad(cmd, e.to_string()) } else { EngineError::from(e) })?;
         mark_construction(sk, &[c], p);
+        if control && p.get("control_polygon").and_then(Value::as_bool) == Some(true) {
+            sk.add_spline_control_polygon(c)?;
+        }
         Ok((ids_of(sk, &[c]), Vec::new()))
     })?;
     drawn(out, info)
@@ -1592,6 +1595,28 @@ mod blend_tests {
         run(&mut reopened, "sketch.edit", json!({"sketch":sketch_id}));
         run(&mut reopened, "sketch.delete", json!({"entities":[spline]}));
         assert!(reopened.model.state().sketch(sketch_id).unwrap().sketch.curves.is_empty());
+    }
+
+    #[test]
+    fn control_polygon_visibility_keeps_its_dimension_and_shape() {
+        let mut s = new_sketch();
+        let spline =
+            ids(&run(&mut s, "sketch.spline.control_point", json!({"points":[[0,0],[0,20],[30,20],[30,0]],"control_polygon":true}))["curves"])[0]
+                .clone();
+        let sk = sketch(&s);
+        let (index, side) = sk.curves.iter().enumerate().find(|(_, curve)| curve.spline_handle_of.as_deref() == Some(spline.as_str())).unwrap();
+        let side = side.id.clone();
+        assert!(crate::view::sketch_curve_visible(&sk, index));
+        run(&mut s, "sketch.dimension", json!({"entities":[side],"type":"length","value":"25 mm"}));
+        let visible = sketch(&s);
+        run(&mut s, "sketch.options", json!({"show_control_polygons":false}));
+        let hidden = sketch(&s);
+        assert!(!crate::view::sketch_curve_visible(&hidden, index));
+        assert_eq!(visible.points, hidden.points);
+        assert_eq!(visible.curves, hidden.curves);
+        assert_eq!(visible.constraints, hidden.constraints);
+        run(&mut s, "sketch.options", json!({"show_control_polygons":true}));
+        assert!(crate::view::sketch_curve_visible(&sketch(&s), index));
     }
 
     /// #6502: Reset Tangent Handles takes a spline's handles, their construction lines and the

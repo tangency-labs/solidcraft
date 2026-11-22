@@ -1,4 +1,10 @@
 {
-  "en": { "cmd.sketch_spline_control_polygon": "Add Control Polygon" },
-  "it": { "cmd.sketch_spline_control_polygon": "Aggiungi poligono di controllo" }
+  "en": {
+    "cmd.sketch_spline_control_polygon": "Add Control Polygon",
+    "sketch.show_control_polygons": "Show control polygons"
+  },
+  "it": {
+    "cmd.sketch_spline_control_polygon": "Aggiungi poligono di controllo",
+    "sketch.show_control_polygons": "Mostra poligoni di controllo"
+  }
 }
