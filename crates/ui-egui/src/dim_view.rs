@@ -1133,7 +1133,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
                 segs.push([w[0], w[1]]);
             }
             if let Some(rim) = rim {
-                painter.add(Shape::line(pts.clone(), Stroke::new(3.0, rim)));
+                crate::icons::markers::rounded_rim_line(painter, &pts, 3.0, rim);
             }
             painter.add(Shape::line(pts, stroke));
         }
