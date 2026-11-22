@@ -311,9 +311,12 @@ picked in the browser, or on the first joint that moves when none is picked.
 grabbed follows the pointer in the plane through it that faces the view, the joints on the
 part's chain take the values that bring it nearest, within their limits, through motion links,
 and with closed loops kept closed, and a four-bar's rocker stops at the end of its swing. The
-whole drag is one undo step. A grounded part, or one its joints hold fixed, is not moved; a drag
-on it draws a selection box. Each frame runs `joint.reach`, which scripts and agents use
-directly to put a part's point somewhere: `joint.reach {occurrence, point}` moves the joints on
+whole drag is one undo step, and Escape puts the part back. A grounded part, or one its joints
+hold fixed, is not moved; a drag on it draws a selection box. While you drag, the part is only
+shown moving (the design, and what depends on where parts are, follow when you let go). With
+contact sets on, each step of the drag changes the design instead, so that the drag stops where
+two parts of a set touch, and Escape leaves the part where it is. The
+release runs `joint.reach` once, which scripts and agents use directly to put a part's point somewhere: `joint.reach {occurrence, point}` moves the joints on
 its chain from where they are to the nearest pose (the arm keeps its elbow up or down, and a
 linkage stays on its branch). `at` picks the part's point (the centre of its bodies by
 default), `z` with `axis` also turns one of its axes, and `joints` names the only joints to
@@ -507,6 +510,20 @@ a checkout. The parts it reads come in as one step, so one **Undo** takes them a
 that cannot be read keeps its bodies, is tried again the next time, and holds up no other.
 **Update changed linked designs when a tab comes back** (Preferences, Design,
 `update_changed_links`) turns this off.
+
+Linked files from other folders load after you allow them. When an assembly opens, the parts in
+its own folder, or below it, are read again by themselves as above. If a changed part is in
+another folder, SolidCraft asks once, naming the folders: **Load** reads those parts now and
+remembers the folders, so designs that link files from them load them as they open from then
+on; **Not now** leaves them out of date, and **Update Links** reads them whenever you choose.
+The folders you allowed are kept in your own settings, never in a design, and are listed under
+Preferences › General › Files, where you can remove one or forget them all.
+A design opened by a program (the command line, an MCP client, the control channel or the
+assistant) never asks: its parts in other folders stay out of date, also in folders you
+allowed, and running `component.update_links` (all links, or `components: [ids]`) reads them.
+The command line and a headless MCP session don't read links by themselves when a design
+opens, so there `component.update_links` is the way to bring in changed parts.
+
 To edit the source, right-click a linked component or occurrence in the Browser and choose
 **Open Linked Design**. It opens the part in another tab and reports if its file is missing.
 **Break Link** (`component.break_link`) keeps the bodies and forgets the file, and

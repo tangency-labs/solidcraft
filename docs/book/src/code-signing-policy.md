@@ -24,8 +24,19 @@ on the accounts that publish releases.
 
 ## Privacy
 
-SolidCraft sends nothing about you or your designs unless you ask it to. The one exception, which
-you can turn off, is the update check: it asks GitHub whether a newer release exists, at start
-and once a day. See [Updates and privacy](guide/updates.md) for what it sends and how to turn it
-off. Features that reach the network otherwise, such as sending a problem report or the Assistant
+SolidCraft sends nothing about you or your designs unless you ask it to, with two exceptions, both
+of which you can turn off:
+
+- **The update check** asks GitHub whether a newer release exists, at start and once a day. See
+  [Updates and privacy](guide/updates.md).
+- **Anonymous usage statistics** (release builds): once a day, a random installation ID, the
+  version, operating system and architecture, the minutes you used the app, and for each tool and
+  operation how often it was used or failed and how long it took, as counts. Never your designs,
+  file names, parameters, error messages or anything you type. Turn them off in
+  **Preferences › Privacy**, with `DO_NOT_TRACK=1` or `SOLIDCRAFT_NO_TELEMETRY=1`, or by your
+  organization's policy `UsageStatistics`
+  ([Managing SolidCraft in an organization](guide/managed-deployment.md)). The full list of what
+  is sent is in [Privacy](https://github.com/tangency-labs/solidcraft/blob/main/docs/privacy.md).
+
+Features that reach the network otherwise, such as sending a problem report or the Assistant
 with an online model, do so only when you set them up and use them.

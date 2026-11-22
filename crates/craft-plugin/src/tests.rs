@@ -10,6 +10,160 @@ fn parse(value: &Value) -> Result<Manifest> {
     parse_manifest(&serde_json::to_vec(value).unwrap(), "sample")
 }
 
+/// Synthetic pixels only: package swatches keep their colours and never affect const inputs.
+#[test]
+fn swatches_validate_package_paths_sizes_types_and_images_without_refusing_the_manifest() {
+    let mut value = manifest();
+    let paths = [
+        json!("oak.png"),
+        json!("walnut.jpg"),
+        json!("../outside.png"),
+        json!("/outside.png"),
+        json!("https://example.com/a.png"),
+        json!("large.png"),
+        json!("wide.png"),
+        json!("wrong.gif"),
+        json!("bad.png"),
+        json!(7),
+    ];
+    let options: Vec<_> = paths.iter().enumerate().map(|(i, path)| json!({"const":i.to_string(),"x-solidcraft-swatch":path})).collect();
+    value["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"finish":{"type":"string","oneOf":options}}}}]);
+    let parsed = parse(&value).expect("bad artwork never refuses a plugin");
+    let entries = &parsed.runtime.unwrap().entries;
+    let encoded = |width, height, format| {
+        let pixels = image::RgbImage::from_pixel(width, height, image::Rgb([137, 61, 23]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        pixels.write_to(&mut out, format).unwrap();
+        out.into_inner()
+    };
+    let png = encoded(128, 128, image::ImageFormat::Png);
+    let jpg = encoded(256, 256, image::ImageFormat::Jpeg);
+    let wide = encoded(257, 1, image::ImageFormat::Png);
+    let mut oversized_png = png.clone();
+    oversized_png.resize(65537, 0);
+    let report = swatches::check(entries, |path| {
+        Ok(match path {
+            "oak.png" => png.clone(),
+            "walnut.jpg" => jpg.clone(),
+            "large.png" => oversized_png.clone(),
+            "wide.png" => wide.clone(),
+            _ => b"bad image".to_vec(),
+        })
+    });
+    assert_eq!(report.images.len(), 2);
+    assert_eq!(report.images["oak.png"].size, [128, 128]);
+    assert_eq!(&report.images["oak.png"].rgba[..4], &[137, 61, 23, 255]);
+    assert_eq!(report.warnings.len(), 8, "{:?}", report.warnings);
+    assert!(swatches::decode("wrong.png", b"GIF89a").is_err());
+    assert!(swatches::decode("wrong.jpg", &png).is_err());
+    assert!(swatches::decode("tall.png", &encoded(1, 257, image::ImageFormat::Png)).is_err());
+    assert!(swatches::decode("walnut.jpeg", &jpg).is_ok());
+    let mut exact_limit = png.clone();
+    exact_limit.resize(65536, 0);
+    assert!(swatches::decode("oak.png", &exact_limit).is_ok(), "64 KiB inclusive");
+    exact_limit.push(0);
+    assert!(swatches::decode("oak.png", &exact_limit).is_err(), "a valid image one byte over the limit is omitted");
+    assert!(check_input(&entries[0].input_schema, &json!({"finish":"0"})).is_ok());
+}
+
+#[test]
+fn swatch_files_stay_inside_the_resolved_package() {
+    let root = std::env::temp_dir().join(format!("solidcraft-swatch-paths-{}", std::process::id()));
+    std::fs::create_dir_all(root.join("package")).unwrap();
+    std::fs::write(root.join("outside.png"), b"outside").unwrap();
+    let dir = root.join("package");
+    assert!(swatches::read_file(&dir, "../outside.png").is_err());
+    std::fs::write(dir.join("large.png"), vec![0; 65537]).unwrap();
+    assert!(swatches::read_file(&dir, "large.png").is_err());
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(root.join("outside.png"), dir.join("linked.png")).unwrap();
+        std::os::unix::fs::symlink(&root, dir.join("linked-dir")).unwrap();
+        assert!(swatches::read_file(&dir, "linked.png").is_err());
+        assert!(swatches::read_file(&dir, "linked-dir/outside.png").is_err());
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn conditional_selection_items_keep_shared_pick_objects() {
+    let schema = json!({"type":"object","properties":{
+        "has_pick":{"type":"boolean"},
+        "faces":{"type":"array","items":{"type":"object"},"x-solidcraft-selection":{"version":1,"accept":["face"]},
+            "x-solidcraft-visible-when":{"field":"has_pick","eq":true}}
+    }});
+    let values = json!({"has_pick":true,"faces":[{"type":"face","body":"Box","index":0,"point":[0,0,0]}]});
+    assert_eq!(prepare_input(&schema, &values).unwrap(), values);
+    assert!(
+        strict_input_schema(&schema)["properties"]["faces"]["items"].get("additionalProperties").is_none(),
+        "the MCP schema accepts the same shared pick objects"
+    );
+}
+
+#[test]
+fn selection_alternatives_preserve_strict_schema_parity() {
+    for alternative in ["oneOf", "anyOf"] {
+        for (key, annotated, selection) in [("targets", false, true), ("faces", true, true), ("records", false, false)] {
+            let mut property = json!({alternative:[{"type":"array","items":{"type":"object"}}]});
+            if annotated {
+                property["x-solidcraft-selection"] = json!({"version":1,"accept":["face"]});
+            }
+            let schema = json!({"type":"object","properties":{key:property}});
+            let value = json!({key:[{"type":"face","body":"Box","index":0,"point":[0,0,0]}]});
+            assert_eq!(check_input(&schema, &value).is_ok(), selection, "{key}/{alternative}");
+            if selection {
+                assert_eq!(prepare_input(&schema, &value).unwrap(), value);
+            }
+            let strict = strict_input_schema(&schema);
+            assert_eq!(check_input(&strict, &value).is_ok(), selection, "{key}/{alternative}: {strict}");
+            assert_eq!(strict["properties"][key][alternative][0]["items"].get("additionalProperties").is_none(), selection);
+        }
+    }
+}
+
+#[test]
+fn conditional_composition_preserves_selection_context_across_scopes() {
+    for alternative in ["oneOf", "anyOf"] {
+        for (key, annotated, selection) in [("targets", false, true), ("faces", true, true), ("records", false, false)] {
+            let mut picks = json!({alternative:[{"type":"array","items":{"type":"object"}}]});
+            if annotated {
+                picks["x-solidcraft-selection"] = json!({"version":1,"accept":["face"]});
+            }
+            let mut schema = json!({"type":"object","additionalProperties":true,"properties":{
+                "gate":{"type":"boolean"},
+                "mode":{"type":"boolean","x-solidcraft-visible-when":{"field":"gate","eq":true}},
+                key:picks
+            }});
+            schema[alternative] = json!([{"additionalProperties":true,"required":["secret"],"properties":{
+                "mode":{"type":"boolean"},
+                "secret":{"type":"integer","x-solidcraft-visible-when":{"field":"mode","eq":true}}
+            }}]);
+            let values = json!({"gate":false,"mode":true,"secret":"hidden",key:[{"type":"face","body":"Box","index":0,"point":[0,0,0]}]});
+            assert_eq!(check_input(&schema, &values).is_ok(), selection, "{key}/{alternative}");
+            assert_eq!(check_input(&strict_input_schema(&schema), &values).is_ok(), selection);
+            if selection {
+                assert_eq!(prepare_input(&schema, &values), Ok(json!({"gate":false,key:values[key]})));
+                assert!(crate::input::check_value(&schema, &values).is_err(), "Ignore still checks hidden values against their types");
+                let mut visible = values.clone();
+                visible["gate"] = json!(true);
+                visible["secret"] = json!(7);
+                assert_eq!(prepare_input(&schema, &visible), Ok(visible.clone()));
+                assert_eq!(crate::input::check_value(&schema, &visible), Ok(()));
+            }
+        }
+    }
+}
+
+#[test]
+fn forms_capability_is_additive_and_versioned() {
+    let mut value = manifest();
+    value["capabilities"] = json!(["commands@0.1", "forms@0.1"]);
+    assert!(parse(&value).is_ok());
+    value["capabilities"] = json!(["commands@0.1", "forms@0.2"]);
+    assert!(matches!(parse(&value), Err(HostError::UnsupportedCapability { .. })));
+    assert!(parse(&manifest()).is_ok(), "existing plugins still link without forms");
+}
+
 #[test]
 fn metadata_normalization_and_legacy_entries() {
     let parsed = parse(&manifest()).unwrap();
@@ -36,6 +190,182 @@ fn declared_inputs_effects_and_slots_are_readable() {
     assert_eq!(entry.input_schema["properties"]["selection"]["type"], "array");
     value["runtime"]["entries"][0]["input_schema"]["properties"]["selection"]["type"] = json!("string");
     assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field, .. }) if field.ends_with("selection")));
+}
+
+#[test]
+fn dialog_hook_requires_its_capability_and_newer_versions_are_reported_first() {
+    let mut m = manifest();
+    m["runtime"]["entries"] = json!([{"name":"make","dialog_hook":true}]);
+    assert!(matches!(parse(&m), Err(HostError::InvalidManifest { field, .. }) if field == "capabilities"));
+    m["capabilities"] = json!(["commands@0.1", "dialog@0.1"]);
+    assert!(parse(&m).unwrap().runtime.unwrap().entries[0].dialog_hook);
+    m["capabilities"] = json!(["commands@0.1", "dialog@0.2"]);
+    m["runtime"]["entries"][0]["future_hook_options"] = json!({"new":true});
+    assert!(matches!(parse(&m), Err(HostError::UnsupportedCapability { capability, .. }) if capability == "dialog@0.2"));
+}
+
+fn hook_schema() -> Value {
+    json!({"type":"object","required":["width"],"properties":{
+        "mode":{"type":"boolean","default":false},
+        "width":{"type":"number","minimum":1},
+        "locked":{"type":"number","x-solidcraft-visible-when":{"field":"mode","eq":false},"x-solidcraft-enabled-when":{"field":"mode","eq":false}},
+        "size":{"type":"string","oneOf":[{"const":"small","x-solidcraft-when":{"field":"mode","eq":false}},{"const":"large"}]}
+    }})
+}
+
+#[test]
+fn dialog_hook_applies_unconditional_schema_defaults_without_overwriting_inputs() {
+    let schema = json!({"type":"object","required":["width"],"properties":{
+        "width":{"type":"number","default":3,"minimum":1}
+    }});
+    assert!(conditions::InputConditions::parse(&schema).unwrap().order.is_empty());
+    for reply in [None, Some("{}"), Some("not JSON")] {
+        let update = dialog::apply(&schema, &json!({}), &BTreeSet::new(), reply, true).unwrap();
+        assert_eq!(update.values, json!({"width":3}));
+        assert_eq!(update.warning.is_some(), reply == Some("not JSON"));
+        let update = dialog::apply(&schema, &json!({"width":12}), &BTreeSet::from(["width".into()]), reply, true).unwrap();
+        assert_eq!(update.values, json!({"width":12}));
+    }
+    let update = dialog::apply(&schema, &json!({"width":7}), &BTreeSet::new(), Some("{}"), true).unwrap();
+    assert_eq!(update.values, json!({"width":7}));
+    // An edited, cleared field is absent from a partial form's values but remains protected.
+    let update = dialog::apply(&schema, &json!({}), &BTreeSet::from(["width".into()]), Some("{}"), false).unwrap();
+    assert_eq!(update.values, json!({}));
+}
+
+#[test]
+fn dialog_hook_defaults_and_narrowed_choices_share_input_validation() {
+    let patch = r#"{"width":{"default":24},"size":{"choices":["large"],"hint":"Available locally"}}"#;
+    let update = dialog::apply(&hook_schema(), &json!({}), &BTreeSet::new(), Some(patch), true).unwrap();
+    assert_eq!(update.values["width"], 24);
+    assert!(update.warning.is_none());
+    let input = json!({"width":12,"size":"small"});
+    let partial = dialog::apply(&hook_schema(), &input, &BTreeSet::from(["width".into(), "size".into()]), Some(patch), false).unwrap();
+    assert_eq!(partial.values["size"], "small", "forms preserve an edited choice and gate Run until it is valid");
+    assert_eq!(partial.fields["size"]["choices"], json!(["large"]));
+    let error = dialog::apply(&hook_schema(), &input, &BTreeSet::from(["width".into(), "size".into()]), Some(patch), true).unwrap_err();
+    assert!(matches!(error, HostError::InvalidInput { field, reason } if field == "params.size" && reason.contains("size")));
+    let update = dialog::apply(&hook_schema(), &json!({"width":12}), &BTreeSet::from(["width".into()]), Some(patch), true).unwrap();
+    assert_eq!(update.values["width"], 12);
+}
+
+#[test]
+fn dialog_hook_computed_controllers_recheck_declarative_defaults() {
+    let schema = json!({"type":"object","properties":{
+        "mode":{"type":"boolean","default":false},
+        "width":{"type":"number","default":3,"x-solidcraft-defaults":[{"when":{"field":"mode","eq":true},"value":6}]}
+    }});
+    let reply = r#"{"mode":{"value":true}}"#;
+    let update = dialog::apply(&schema, &json!({}), &BTreeSet::new(), Some(reply), true).unwrap();
+    assert_eq!(update.values, json!({"mode":true,"width":6}));
+    let update = dialog::apply(&schema, &json!({"width":12}), &BTreeSet::from(["width".into()]), Some(reply), true).unwrap();
+    assert_eq!(update.values["width"], 12);
+}
+
+#[test]
+fn dialog_hook_bad_reply_is_ignored_whole_and_cannot_widen_choices_or_conditions() {
+    for reply in ["not JSON", "[]", "null"] {
+        let update = dialog::apply(&hook_schema(), &json!({}), &BTreeSet::new(), Some(reply), false).unwrap();
+        assert!(update.warning.is_some());
+        assert!(update.fields.is_empty());
+        assert!(update.values.get("width").is_none());
+    }
+    for patch in [
+        json!({"width":{"default":24},"missing":{"hint":"unknown"}}),
+        json!({"width":{"default":24},"size":{"choices":["other"]}}),
+        json!({"width":{"default":24},"size":{"choices":["large","small"]}}),
+        json!({"width":{"default":24},"size":{"choices":["small"]}}),
+        json!({"width":{"type":"string"}}),
+        json!({"width":{"default":"wrong"}}),
+        json!({"width":{"default":null}}),
+        json!({"width":{"default":24},"locked":{"visible":true}}),
+        json!({"width":{"default":24},"locked":{"enabled":true}}),
+    ] {
+        let update = dialog::apply(&hook_schema(), &json!({"mode":true}), &BTreeSet::new(), Some(&patch.to_string()), false).unwrap();
+        assert!(update.warning.is_some(), "{patch}");
+        assert!(update.fields.is_empty(), "no partial patch");
+        assert!(update.values.get("width").is_none(), "no partial default");
+    }
+}
+
+#[test]
+fn design_listeners_require_a_read_entry_and_design_capability() {
+    let mut value = manifest();
+    value["capabilities"] = json!(["commands@0.1", "design@0.1"]);
+    value["runtime"]["entries"] = json!([{"name":"refresh","effect":"read"}]);
+    value["runtime"]["listeners"] = json!([{"entry":"refresh","on":["design.changed"]}]);
+    let runtime = parse(&value).unwrap().runtime.unwrap();
+    assert_eq!(runtime.listeners[0].entry, "refresh");
+    assert_eq!(runtime.listeners[0].on, ["design.changed"]);
+    for events in [json!(["design.links_changed"]), json!(["design.changed", "design.links_changed"])] {
+        let mut opted_in = value.clone();
+        opted_in["runtime"]["listeners"][0]["on"] = events.clone();
+        let runtime = parse(&opted_in).unwrap().runtime.unwrap();
+        assert_eq!(serde_json::to_value(&runtime.listeners[0].on).unwrap(), events);
+    }
+    for change in [
+        |v: &mut Value| v["capabilities"] = json!(["commands@0.1"]),
+        |v: &mut Value| v["runtime"]["entries"][0]["effect"] = json!("edit"),
+        |v: &mut Value| v["runtime"]["listeners"][0]["entry"] = json!("missing"),
+        |v: &mut Value| v["runtime"]["listeners"][0]["on"] = json!(["unknown"]),
+        |v: &mut Value| v["runtime"]["listeners"][0]["on"] = json!(["design.links_changed", "unknown"]),
+        |v: &mut Value| v["runtime"]["listeners"][0]["on"] = json!(["design.changed", "design.changed"]),
+        |v: &mut Value| v["runtime"]["listeners"][0]["on"] = json!(["design.links_changed", "design.links_changed"]),
+        |v: &mut Value| v["runtime"]["listeners"][0]["on"] = json!([]),
+        |v: &mut Value| {
+            v["runtime"]["listeners"] = json!([
+            {"entry":"refresh","on":["design.changed"]}, {"entry":"refresh","on":["design.changed"]}])
+        },
+    ] {
+        let mut invalid = value.clone();
+        change(&mut invalid);
+        assert!(matches!(parse(&invalid), Err(HostError::InvalidManifest { .. })));
+    }
+    assert!(parse(&manifest()).unwrap().runtime.unwrap().listeners.is_empty());
+}
+
+#[test]
+fn stale_revision_is_a_typed_error_naming_both_tokens() {
+    let expected = DesignToken { document_id: "design-one".into(), revision: "0123456789abcdef0123456789abcdef:3".into() };
+    let actual = DesignToken { document_id: "design-one".into(), revision: "0123456789abcdef0123456789abcdef:4".into() };
+    let error = HostError::StaleRevision { expected: expected.clone(), actual: actual.clone() };
+    assert_eq!(serde_json::to_value(&error).unwrap(), json!({"kind":"stale_revision","expected":expected,"actual":actual}));
+    assert!(error.to_string().contains("design-one@0123456789abcdef0123456789abcdef:3"));
+    assert!(error.to_string().contains("design-one@0123456789abcdef0123456789abcdef:4"));
+}
+
+#[test]
+fn design_tokens_bound_hostile_document_identities() {
+    for identity in [String::new(), "x".repeat(129), "line\nbreak".into(), "tab\t".into(), "nul\0".into(), "delete\u{7f}".into(), "café".into()] {
+        let wire = json!({"document_id":identity,"revision":"0123456789abcdef0123456789abcdef:7"});
+        assert!(serde_json::from_value::<DesignToken>(wire).is_err(), "{identity:?}");
+    }
+    for identity in ["design-one".to_string(), "x".repeat(128), " !~".into()] {
+        let wire = json!({"document_id":identity,"revision":"0123456789abcdef0123456789abcdef:7"});
+        let token: DesignToken = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(token).unwrap(), wire);
+    }
+    let schema = schemars::schema_for!(DesignToken).to_value();
+    assert_eq!(schema["properties"]["document_id"]["minLength"], 1);
+    assert_eq!(schema["properties"]["document_id"]["maxLength"], 128);
+}
+
+#[test]
+fn design_tokens_bound_hostile_revisions() {
+    for revision in [String::new(), "x".repeat(129), "line\nbreak".into(), "tab\t".into(), "nul\0".into(), "delete\u{7f}".into(), "café".into()] {
+        let wire = json!({"document_id":"design-one","revision":revision});
+        assert!(serde_json::from_value::<DesignToken>(wire).is_err(), "{revision:?}");
+    }
+    assert!(serde_json::from_value::<DesignToken>(json!({"document_id":"design-one","revision":7})).is_err());
+    for revision in ["0123456789abcdef0123456789abcdef:7".to_string(), "x".repeat(128), " !~".into()] {
+        let wire = json!({"document_id":"design-one","revision":revision});
+        let token: DesignToken = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(token).unwrap(), wire);
+    }
+    let schema = schemars::schema_for!(DesignToken).to_value();
+    assert_eq!(schema["properties"]["revision"]["type"], "string");
+    assert_eq!(schema["properties"]["revision"]["minLength"], 1);
+    assert_eq!(schema["properties"]["revision"]["maxLength"], 128);
 }
 
 #[test]
