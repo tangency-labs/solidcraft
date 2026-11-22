@@ -441,13 +441,16 @@ fn input_edge<O>(geometry: &impl ClassGeometry<O>, h: O) -> Option<EdgeId> {
     }
 }
 
-/// The face of the operation's input behind the handle `h`, where it names one (error
-/// context only).
-fn input_face<O>(geometry: &impl ClassGeometry<O>, h: O) -> Option<FaceId> {
-    match geometry.topology_entity(h) {
-        Some((_, EntityRef::Face(f))) => Some(f),
-        _ => None,
-    }
+/// The face of the caller's body behind the handle `h` has no surface (`edgeuse_offset`,
+/// `SM_ERR_NULL_POINTER`): [`OffsetFailure::FaceHasNoSurface`] at the face, where the handle
+/// names one ([`OffsetFailure::UnnamedFaceHasNoSurface`] where it does not).
+#[track_caller]
+fn face_without_surface<O>(geometry: &impl ClassGeometry<O>, h: O) -> SolidError {
+    let cause = match geometry.topology_entity(h) {
+        Some((_, EntityRef::Face(face))) => OffsetFailure::FaceHasNoSurface { face },
+        _ => OffsetFailure::UnnamedFaceHasNoSurface,
+    };
+    failed(OP_EDGEUSE, cause)
 }
 
 // Why each step that fails here is the kernel's fault (`OffsetFailure::Defect`).
@@ -7244,14 +7247,9 @@ impl OffsetGeometryCreation {
             uv_copy.trim(k, &mut edge_ivl, TrimMode::Notify)?; // may snap sIvl by tol to existing knots
 
             // make an offset surface from origEU->Face->Surface
-            let surface = brep.face_surface(orig_face)?.ok_or_else(|| {
-                failed(
-                    OP_EDGEUSE,
-                    OffsetFailure::FaceHasNoSurface {
-                        face: input_face(brep, orig_face),
-                    },
-                )
-            })?;
+            let surface = brep
+                .face_surface(orig_face)?
+                .ok_or_else(|| face_without_surface(brep, orig_face))?;
             let fu = brep
                 .edgeuse_faceuse(original_edgeuse)?
                 .ok_or(dangling("edge use without face use"))?;
@@ -7294,14 +7292,9 @@ impl OffsetGeometryCreation {
             let mut uv_copy = curve_of(brep, uv)?.copy(k)?;
             uv_copy.trim(k, &mut edge_ivl, TrimMode::Notify)?;
 
-            let surface = brep.face_surface(other_orig_face)?.ok_or_else(|| {
-                failed(
-                    OP_EDGEUSE,
-                    OffsetFailure::FaceHasNoSurface {
-                        face: input_face(brep, other_orig_face),
-                    },
-                )
-            })?;
+            let surface = brep
+                .face_surface(other_orig_face)?
+                .ok_or_else(|| face_without_surface(brep, other_orig_face))?;
             let fu = brep
                 .edgeuse_faceuse(other_original_edgeuse)?
                 .ok_or(dangling("edge use without face use"))?;

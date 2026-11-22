@@ -598,9 +598,8 @@ impl OffsetFacesExecutive {
                         return Err(no_section());
                     }
                     let on1 = rail1_curve.evaluate_point(k, d.parameter)?;
-                    let surf = crate::topology::face::p2::surface(b, blend)?.ok_or_else(|| {
-                        failed(OffsetFailure::FaceHasNoSurface { face: Some(blend) })
-                    })?;
+                    let surf = crate::topology::face::p2::surface(b, blend)?
+                        .ok_or_else(|| failed(OffsetFailure::FaceHasNoSurface { face: blend }))?;
                     let domain = surf.natural_uv_domain_with_nurb(k)?;
                     let mut normals = [crate::math::Vec3::UNDEF; 2];
                     for (normal, on) in normals.iter_mut().zip([on0, on1]) {
@@ -866,7 +865,7 @@ impl FaceOffsetBrep<MoveHandle> for MoveBrep<'_> {
                 .face(f)?
                 .surface
                 .as_ref()
-                .ok_or_else(|| failed(OffsetFailure::FaceHasNoSurface { face: Some(f) })),
+                .ok_or_else(|| failed(OffsetFailure::FaceHasNoSurface { face: f })),
             MoveHandle::NewSurface(i) => self.surfaces.get(i).ok_or_else(bad_handle),
             _ => Err(bad_handle()),
         }
@@ -1315,7 +1314,7 @@ impl OffsetFacesExecutive {
                         }
                         Some(across) if !faces.contains(&across) => {
                             let s = crate::topology::face::p2::surface(b, across)?.ok_or_else(
-                                || failed(OffsetFailure::FaceHasNoSurface { face: Some(across) }),
+                                || failed(OffsetFailure::FaceHasNoSurface { face: across }),
                             )?;
                             if !s.is_kind_of(Plane::TYPE)? {
                                 planes = false;

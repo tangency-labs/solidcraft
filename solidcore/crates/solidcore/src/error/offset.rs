@@ -32,10 +32,13 @@
 //! | [`OffsetFailure::Inconsistent`]        | `SM_ERR_ASSERT_FAILURE`                   |
 //! | [`OffsetFailure::StageFailed`]         | the site's (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`) |
 //! | [`OffsetFailure::Defect`]              | the site's (`SM_ERR`, or another through `with_status`) |
+//! | [`OffsetFailure::LoopGapPassLimit`]    | `SM_ERR`                                  |
+//! | [`OffsetFailure::LoopGapEndsAmbiguous`] | `SM_ERR`                                 |
+//! | [`OffsetFailure::SplitAtEdgeEnd`]      | `SM_ERR`                                  |
 //! | [`OffsetFailure::FacesMoveRefused`], [`OffsetFailure::BlendSectionNotFound`], [`OffsetFailure::MoveCollapses`] | `SM_ERR` (the face move's) |
 //! | [`OffsetFailure::BlendRailWithoutSupport`], [`OffsetFailure::FollowedBlendIncomplete`] | `SM_ERR_NULL_POINTER` (the face move's) |
 //! | [`OffsetFailure::FaceMoveEmpty`]       | `SM_ERR_INVALID_INPUT` (the face move's)  |
-//! | [`OffsetFailure::EdgeHasNoCurve`], [`OffsetFailure::FaceHasNoSurface`], [`OffsetFailure::FaceHasNoOuterFaceuse`], [`OffsetFailure::VertexNotGiven`], [`OffsetFailure::EdgeuseNotGiven`], [`OffsetFailure::CurveKindUnsupported`], [`OffsetFailure::EdgeuseHasNoUvTrim`] | `SM_ERR_NULL_POINTER`, or the site's through `with_status` |
+//! | [`OffsetFailure::EdgeHasNoCurve`], [`OffsetFailure::FaceHasNoSurface`], [`OffsetFailure::FaceHasNoOuterFaceuse`], [`OffsetFailure::VertexNotGiven`], [`OffsetFailure::EdgeuseNotGiven`], [`OffsetFailure::CurveKindUnsupported`], [`OffsetFailure::EdgeuseHasNoUvTrim`], [`OffsetFailure::UnnamedFaceHasNoSurface`] | `SM_ERR_NULL_POINTER`, or the site's through `with_status` |
 //! | the other causes of `offset_geometry_creation` ([`OffsetFailure::VertexCurveNotArc`] to [`OffsetFailure::VertexArcsNotOneSphere`]) | `SM_ERR` |
 //!
 //! A stage of an offset routine that fails with no reason the kernel names is an
@@ -46,7 +49,8 @@
 //! `docs/failure-codes-and-reproduction.md` §6).
 //!
 //! Deviations: not upstream. Entity ids are those of the operation's input B-rep. The
-//! last four describe, in a phrase, the failures of offset routines that returned a bare
+//! four phrase causes ([`OffsetFailure::Failed`], [`OffsetFailure::Missing`],
+//! [`OffsetFailure::InvalidValue`], [`OffsetFailure::Inconsistent`]) describe, in a phrase, the failures of offset routines that returned a bare
 //! status ([`OffsetFailure::replaces_upstream_status`]); the failure's `operation` path
 //! says which routine and its entity, where the site named one, which face. The files
 //! with open work elsewhere (`offset_executive/{p1,p2}`) do not use them yet. The causes
@@ -284,6 +288,45 @@ pub enum OffsetFailure {
         /// The step that failed, and why that is the kernel's fault.
         why: &'static str,
     },
+    /// The gap search of an offset face's loops closes one gap per pass and reached its
+    /// limit of `limit` passes before a pass found no gap (the fork's `lGuard`): the face's
+    /// loops had `limit` gaps or more, or a gap a pass did not really close was found again.
+    /// A face with fewer gaps, each closed once, passes.
+    LoopGapPassLimit {
+        /// The face, of the operation's input, whose offset left the gaps, where it comes
+        /// from one.
+        face: Option<FaceId>,
+        /// The passes the search makes.
+        limit: usize,
+    },
+    /// A gap in an offset face's loop is longer than `tolerance`, but its two ends are both
+    /// within `tolerance` of the vertex the two edge uses share, or neither is, so the gap
+    /// has no one end that the vertex closes.
+    LoopGapEndsAmbiguous {
+        /// The face, of the operation's input, whose offset left the gap, where it comes from
+        /// one.
+        face: Option<FaceId>,
+        /// How far the end of the edge use before the gap is from the shared vertex.
+        end_distance: f64,
+        /// How far the start of the edge use after the gap is from the shared vertex.
+        start_distance: f64,
+        /// The distance within which an end is at the vertex: ten times the larger of the two
+        /// edges' tolerances and the approximation tolerance.
+        tolerance: f64,
+    },
+    /// An offset edge that a loop gap's bridge or a step corner must split is not split at
+    /// the point: the edge split takes the point for one of the edge's ends (within an end
+    /// vertex's tolerance along the edge, or at an end of its parameter interval), though the
+    /// caller kept the point farther than ten times the edge's tolerance from both end
+    /// vertices. `vertex_tolerance`, the larger of the two end vertices' tolerances, says how
+    /// far along the edge an end reaches at most.
+    SplitAtEdgeEnd {
+        /// The face, of the operation's input, whose offset holds the edge, where it comes
+        /// from one.
+        face: Option<FaceId>,
+        /// The larger tolerance of the edge's two end vertices.
+        vertex_tolerance: f64,
+    },
     /// A face move ([`crate::offset::offset_faces::OffsetFacesExecutive`]) refused, for
     /// `refusal`: a blend that follows a moved face cannot be taken off, followed or put back
     /// as it was, or the move moved no face. The executive's `reason` says it in words.
@@ -314,11 +357,10 @@ pub enum OffsetFailure {
         /// The edge, of the operation's input.
         edge: Option<EdgeId>,
     },
-    /// Face `face` of the body the operation was given has no surface (`None` where the
-    /// handle names no face of the input).
+    /// Face `face` of the body the operation was given has no surface.
     FaceHasNoSurface {
         /// The face, of the operation's input.
-        face: Option<FaceId>,
+        face: FaceId,
     },
     /// Face `face` of the body the operation was given has no face use on the outside of
     /// its body: none at all, or only an inner one with no mate.
@@ -438,6 +480,10 @@ pub enum OffsetFailure {
     /// at their ends. [`ErrorKind::Failed`], neither a defect nor a refusal on its own: the
     /// sphere's error is kept as the cause and decides ([`crate::SolidError::is_defect`]).
     VertexArcsNotOneSphere,
+    /// A face of the body the operation was given has no surface, behind a handle that names
+    /// no face of the input (a backend whose handles carry no topology entity): the
+    /// [`OffsetFailure::FaceHasNoSurface`] of a face it cannot name.
+    UnnamedFaceHasNoSurface,
 }
 
 /// What a local operation's or a solid offset's built body fails ([`OffsetFailure::Unsound`]).
@@ -566,12 +612,15 @@ impl OffsetFailure {
             | Self::PastSide { face, .. }
             | Self::ReachUncertified { face }
             | Self::BlendSectionNotFound { face }
+            | Self::FaceHasNoSurface { face }
             | Self::FaceHasNoOuterFaceuse { face }
             | Self::MoveCollapses { face, .. } => Some(EntityRef::Face(face)),
             Self::WallsTouch { face, .. }
             | Self::LoopsCross { face, .. }
             | Self::LoopGapUncertified { face }
-            | Self::FaceHasNoSurface { face } => face.map(EntityRef::Face),
+            | Self::LoopGapPassLimit { face, .. }
+            | Self::LoopGapEndsAmbiguous { face, .. }
+            | Self::SplitAtEdgeEnd { face, .. } => face.map(EntityRef::Face),
             Self::EdgeVanishes { edge, face } => edge
                 .map(EntityRef::Edge)
                 .or_else(|| face.map(EntityRef::Face)),
@@ -600,6 +649,7 @@ impl OffsetFailure {
             | Self::CrossingUndecided
             | Self::LocalFaceNotListed
             | Self::VertexArcsNotOneSphere
+            | Self::UnnamedFaceHasNoSurface
             | Self::ExactCurveUncut
             | Self::TangentEndOffCurve
             | Self::TangentBranchUncertified
@@ -619,7 +669,9 @@ impl OffsetFailure {
     /// ([`OffsetFailure::Failed`], [`OffsetFailure::Missing`],
     /// [`OffsetFailure::InvalidValue`], [`OffsetFailure::Inconsistent`],
     /// [`OffsetFailure::StageFailed`], [`OffsetFailure::Defect`]), or a cause named at a site
-    /// that returned one ([`OffsetFailure::is_named_at_a_status_site`]): it answers with
+    /// that returned one ([`OffsetFailure::LoopGapPassLimit`],
+    /// [`OffsetFailure::LoopGapEndsAmbiguous`], [`OffsetFailure::SplitAtEdgeEnd`], and those of
+    /// [`OffsetFailure::is_named_at_a_status_site`]): it answers with
     /// that status as the `Upstream` it replaced did. The other refusals replaced none.
     #[must_use]
     pub const fn replaces_upstream_status(&self) -> bool {
@@ -631,6 +683,9 @@ impl OffsetFailure {
                 | Self::Inconsistent(_)
                 | Self::StageFailed
                 | Self::Defect { .. }
+                | Self::LoopGapPassLimit { .. }
+                | Self::LoopGapEndsAmbiguous { .. }
+                | Self::SplitAtEdgeEnd { .. }
         ) || self.is_named_at_a_status_site()
     }
 
@@ -669,6 +724,7 @@ impl OffsetFailure {
                 | Self::CrossingUndecided
                 | Self::LocalFaceNotListed
                 | Self::VertexArcsNotOneSphere
+                | Self::UnnamedFaceHasNoSurface
         )
     }
 
@@ -702,6 +758,9 @@ impl OffsetFailure {
             | Self::Unsound { .. }
             | Self::StageFailed
             | Self::Defect { .. }
+            | Self::LoopGapPassLimit { .. }
+            | Self::LoopGapEndsAmbiguous { .. }
+            | Self::SplitAtEdgeEnd { .. }
             | Self::FacesMoveRefused { .. }
             | Self::BlendRailWithoutSupport { .. }
             | Self::BlendSectionNotFound { .. }
@@ -728,7 +787,8 @@ impl OffsetFailure {
             | Self::ShellTangentVertexMoveTooFar { .. }
             | Self::CrossingUndecided
             | Self::LocalFaceNotListed
-            | Self::VertexArcsNotOneSphere => false,
+            | Self::VertexArcsNotOneSphere
+            | Self::UnnamedFaceHasNoSurface => false,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
                 true
             }
@@ -765,6 +825,9 @@ impl OffsetFailure {
             | Self::ReachUncertified { .. }
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
+            | Self::LoopGapPassLimit { .. }
+            | Self::LoopGapEndsAmbiguous { .. }
+            | Self::SplitAtEdgeEnd { .. }
             | Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -794,7 +857,8 @@ impl OffsetFailure {
             | Self::ShellTangentVertexMoveTooFar { .. }
             | Self::CrossingUndecided
             | Self::LocalFaceNotListed
-            | Self::VertexArcsNotOneSphere => false,
+            | Self::VertexArcsNotOneSphere
+            | Self::UnnamedFaceHasNoSurface => false,
         }
     }
 
@@ -819,6 +883,9 @@ impl OffsetFailure {
             | Self::Failed(_)
             | Self::StageFailed
             | Self::Defect { .. }
+            | Self::LoopGapPassLimit { .. }
+            | Self::LoopGapEndsAmbiguous { .. }
+            | Self::SplitAtEdgeEnd { .. }
             | Self::FacesMoveRefused { .. }
             | Self::BlendSectionNotFound { .. }
             | Self::MoveCollapses { .. }
@@ -845,7 +912,8 @@ impl OffsetFailure {
             | Self::VertexNotGiven
             | Self::EdgeuseNotGiven
             | Self::CurveKindUnsupported { .. }
-            | Self::EdgeuseHasNoUvTrim { .. } => SM_ERR_NULL_POINTER,
+            | Self::EdgeuseHasNoUvTrim { .. }
+            | Self::UnnamedFaceHasNoSurface => SM_ERR_NULL_POINTER,
             Self::FaceMoveEmpty { .. } | Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::WallsTouch { .. } => SM_ERR_OFFSET_WALLS_TOUCH,
@@ -879,6 +947,9 @@ impl OffsetFailure {
             | Self::PeriodicBranchAmbiguous
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
+            | Self::LoopGapPassLimit { .. }
+            | Self::LoopGapEndsAmbiguous { .. }
+            | Self::SplitAtEdgeEnd { .. }
             | Self::FacesMoveRefused { .. }
             | Self::BlendRailWithoutSupport { .. }
             | Self::BlendSectionNotFound { .. }
@@ -907,7 +978,8 @@ impl OffsetFailure {
             | Self::FaceMoveEmpty { .. }
             | Self::VertexNotGiven
             | Self::EdgeuseNotGiven
-            | Self::LocalFaceNotListed => ErrorKind::InvalidInput,
+            | Self::LocalFaceNotListed
+            | Self::UnnamedFaceHasNoSurface => ErrorKind::InvalidInput,
             Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
             Self::Failed(_) | Self::Missing(_) | Self::InvalidValue(_) | Self::Inconsistent(_) => {
                 ErrorKind::of_status(self.comparison_status())
@@ -1192,6 +1264,31 @@ impl core::fmt::Display for OffsetFailure {
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
             Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
+            // (these name their face through the failure's entity, said after the text)
+            Self::LoopGapPassLimit { limit, .. } => write!(
+                f,
+                "the gap search of an offset face's loops closes one gap per pass and reached \
+                 its limit of {limit} passes before a pass found no gap"
+            ),
+            Self::LoopGapEndsAmbiguous {
+                end_distance,
+                start_distance,
+                tolerance,
+                ..
+            } => write!(
+                f,
+                "a gap in an offset face's loop has no one end at the vertex its edges share: \
+                 its ends are {end_distance:e} and {start_distance:e} from it, against \
+                 {tolerance:e}"
+            ),
+            Self::SplitAtEdgeEnd {
+                vertex_tolerance, ..
+            } => write!(
+                f,
+                "an offset edge could not be split where a loop gap or a step corner needs \
+                 it: the split takes the point for an end of the edge (its end vertices' \
+                 tolerance is up to {vertex_tolerance:e})"
+            ),
             // (the ones with an entity name it through the failure's entity, said after the
             // text)
             Self::FacesMoveRefused { refusal } => write!(
@@ -1291,6 +1388,7 @@ impl core::fmt::Display for OffsetFailure {
                  no tangent or the surface no tangent plane: whether it passes through is not \
                  decided",
             ),
+            Self::UnnamedFaceHasNoSurface => f.write_str("invalid input: a face has no surface"),
             Self::VertexArcsNotOneSphere => f.write_str(
                 "the sphere through the three arcs bounding a vertex could not be made",
             ),
@@ -1329,7 +1427,10 @@ impl crate::SolidError {
 
     /// [`crate::SolidError::Failed`] for a stage of an offset routine that failed with no
     /// reason the kernel names ([`OffsetFailure::StageFailed`], a defect), with `status`, the
-    /// one the C++ reports (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`).
+    /// one the C++ reports (`SM_ERR`, or `SM_ERR_NULL_POINTER` for an `NER`). No library site
+    /// builds one any more (every offset stage site is reviewed); the tests keep it as the
+    /// unreviewed form a reviewed defect reads like.
+    #[cfg(test)]
     #[must_use]
     #[track_caller]
     pub(crate) fn offset_stage_failed(operation: &'static str, status: i32) -> Self {
@@ -1365,56 +1466,96 @@ mod tests {
     use super::*;
     use crate::SolidError;
 
-    /// The offset failures that replaced a bare status keep the status, kind, operation
-    /// and entity of the `Upstream` they replace; a sample of each converted file
-    /// (`offset_executive/crossing_loops`, `offset_executive/cavity`, `draft`).
+    /// The offset failures that replaced a bare status or a stage failure keep its status and
+    /// operation, and answer as the status did; their class is their own (a defect's is
+    /// [`ErrorKind::StageFailed`]), and so is their entity (the input face a cause names, where
+    /// the stage failure named none). A sample of each converted file
+    /// (`offset_executive/{cavity,reach,step_gaps}`, `draft`).
     #[test]
-    fn offset_failures_keep_the_status_and_kind_of_the_upstream_they_replace() {
-        let face = Some(EntityRef::Face(FaceId::from_index(3)));
+    fn offset_failures_keep_the_status_of_the_upstream_they_replace() {
+        let face = FaceId::from_index(3);
+        let defect = OffsetFailure::Defect { why: "x" };
+        // (the operation, the failure, the status kept, its class)
         let samples = [
             (
-                "offset::offset_executive::crossing_loops",
-                OffsetFailure::Inconsistent(
-                    "an edge use's UV trim curve does not span its edge's interval",
-                ),
-                SM_ERR_ASSERT_FAILURE,
-                None,
-            ),
-            (
-                "offset::offset_executive::crossing_loops",
-                OffsetFailure::Missing("an entity or curve of the offset face"),
-                SM_ERR_NULL_POINTER,
-                None,
-            ),
-            (
                 "offset::offset_executive::cavity::is_cavity_region",
-                OffsetFailure::Missing("the face's surface"),
-                SM_ERR_NULL_POINTER,
-                None,
+                defect,
+                Some(SM_ERR_NULL_POINTER),
+                ErrorKind::StageFailed,
             ),
             (
                 "offset::draft",
-                OffsetFailure::InvalidValue("the face has no surface or no outer face use"),
-                SM_ERR_INVALID_INPUT,
-                face,
+                OffsetFailure::FaceHasNoSurface { face },
+                Some(SM_ERR_INVALID_INPUT),
+                ErrorKind::InvalidInput,
             ),
-            ("offset::op", OffsetFailure::Failed("x"), SM_ERR, None),
+            (
+                "offset::draft",
+                OffsetFailure::FaceHasNoOuterFaceuse { face },
+                Some(SM_ERR_INVALID_INPUT),
+                ErrorKind::InvalidInput,
+            ),
+            (
+                "offset::offset_executive::step_gaps",
+                OffsetFailure::LoopGapPassLimit {
+                    face: Some(face),
+                    limit: 64,
+                },
+                None,
+                ErrorKind::Unsupported,
+            ),
+            (
+                "offset::offset_executive::step_gaps",
+                OffsetFailure::LoopGapEndsAmbiguous {
+                    face: None,
+                    end_distance: 1e-4,
+                    start_distance: 2e-4,
+                    tolerance: 1e-3,
+                },
+                None,
+                ErrorKind::Unsupported,
+            ),
+            (
+                "offset::offset_executive::step_gaps",
+                OffsetFailure::SplitAtEdgeEnd {
+                    face: None,
+                    vertex_tolerance: 1e-3,
+                },
+                None,
+                ErrorKind::Unsupported,
+            ),
+            (
+                "offset::op",
+                OffsetFailure::Failed("x"),
+                None,
+                ErrorKind::Failed,
+            ),
         ];
-        for (operation, failure, code, entity) in samples {
+        let statuses = [
+            SM_ERR_NULL_POINTER,
+            SM_ERR_INVALID_INPUT,
+            SM_ERR_INVALID_INPUT,
+            SM_ERR,
+            SM_ERR,
+            SM_ERR,
+            SM_ERR,
+        ];
+        for ((operation, failure, kept, class), code) in samples.into_iter().zip(statuses) {
             assert!(failure.replaces_upstream_status());
-            let typed = match entity {
-                Some(e) => Failure::new(operation, failure).at(e).into_error(),
-                None => SolidError::offset(operation, failure),
-            };
+            let typed = match kept {
+                Some(status) => Failure::new(operation, failure).with_status(status),
+                None => Failure::new(operation, failure),
+            }
+            .into_error();
             let before = SolidError::Upstream {
                 operation,
                 code,
-                entity,
+                entity: failure.entity(),
             };
             assert_eq!(typed.sm_status(), before.sm_status(), "{typed:?}");
             assert_eq!(typed.upstream_status(), Some(code), "{typed:?}");
             assert_eq!(super::super::upstream_status(&typed), Some(code));
-            assert_eq!(typed.kind(), before.kind(), "{typed:?}");
+            assert_eq!(typed.kind(), class, "{typed:?}");
             assert_eq!(typed.operation(), before.operation(), "{typed:?}");
             assert_eq!(typed.entity(), before.entity(), "{typed:?}");
             assert_eq!(typed.is_port_failure(), before.is_port_failure());
@@ -1425,15 +1566,25 @@ mod tests {
             );
             assert_eq!(typed.offset_failure(), Some(&failure));
         }
+        // the face is said once, after the text, as the bare status's entity was
         assert_eq!(
-            Failure::new(
-                "offset::draft",
-                OffsetFailure::InvalidValue("the face has no surface or no outer face use"),
+            Failure::new("offset::draft", OffsetFailure::FaceHasNoSurface { face })
+                .with_status(SM_ERR_INVALID_INPUT)
+                .into_error()
+                .to_string(),
+            "offset::draft: invalid input: the face has no surface (face 3)"
+        );
+        assert_eq!(
+            SolidError::offset(
+                "offset::op",
+                OffsetFailure::LoopGapPassLimit {
+                    face: Some(face),
+                    limit: 64,
+                },
             )
-            .at(EntityRef::Face(FaceId::from_index(3)))
-            .into_error()
             .to_string(),
-            "offset::draft: invalid input: the face has no surface or no outer face use (face 3)"
+            "offset::op: the gap search of an offset face's loops closes one gap per pass and \
+             reached its limit of 64 passes before a pass found no gap (face 3)"
         );
         assert_eq!(
             SolidError::offset_missing("offset::op", "the face's surface").to_string(),
@@ -1609,6 +1760,35 @@ mod tests {
             ),
             // a failure reviewed as the kernel's fault, with its reason
             (O::Defect { why: "x" }, ErrorKind::StageFailed, false, true),
+            (
+                O::LoopGapPassLimit {
+                    face: None,
+                    limit: 64,
+                },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
+            (
+                O::LoopGapEndsAmbiguous {
+                    face: None,
+                    end_distance: 1e-4,
+                    start_distance: 2e-4,
+                    tolerance: 1e-3,
+                },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
+            (
+                O::SplitAtEdgeEnd {
+                    face: None,
+                    vertex_tolerance: 1e-3,
+                },
+                ErrorKind::Unsupported,
+                false,
+                false,
+            ),
             // from here on: the causes named at sites of `offset_faces` and
             // `offset_geometry_creation` that returned a status, each keeping it
             (
@@ -1646,7 +1826,7 @@ mod tests {
                 false,
             ),
             (
-                O::FaceHasNoSurface { face: Some(face) },
+                O::FaceHasNoSurface { face },
                 ErrorKind::InvalidInput,
                 false,
                 false,
@@ -1752,6 +1932,12 @@ mod tests {
             (O::LocalFaceNotListed, ErrorKind::InvalidInput, false, false),
             // its cause decides
             (O::VertexArcsNotOneSphere, ErrorKind::Failed, false, false),
+            (
+                O::UnnamedFaceHasNoSurface,
+                ErrorKind::InvalidInput,
+                false,
+                false,
+            ),
         ];
         let row = |o: &O| -> usize {
             match o {
@@ -1781,33 +1967,37 @@ mod tests {
                 O::PastSide { .. } => 23,
                 O::PeriodicBranchAmbiguous => 24,
                 O::Defect { .. } => 25,
-                O::FacesMoveRefused { .. } => 26,
-                O::BlendRailWithoutSupport { .. } => 27,
-                O::BlendSectionNotFound { .. } => 28,
-                O::FollowedBlendIncomplete => 29,
-                O::EdgeHasNoCurve { .. } => 30,
-                O::FaceHasNoSurface { .. } => 31,
-                O::FaceHasNoOuterFaceuse { .. } => 32,
-                O::MoveCollapses { .. } => 33,
-                O::FaceMoveEmpty { .. } => 34,
-                O::VertexNotGiven => 35,
-                O::EdgeuseNotGiven => 36,
-                O::CurveKindUnsupported { .. } => 37,
-                O::VertexCurveNotArc => 38,
-                O::VertexArcInPlane => 39,
-                O::VertexArcMissesPlane { .. } => 40,
-                O::FaceDomainUnresolved => 41,
-                O::ExtendedEdgeUntrimmed => 42,
-                O::LaminaEdgeOtherSide => 43,
-                O::TangentGapsAtConcaveEdge => 44,
-                O::EdgeuseHasNoUvTrim { .. } => 45,
-                O::RailIntervalsDiffer { .. } => 46,
-                O::ShellTangentCurveUncertified => 47,
-                O::ShellTangentUvUnmatched => 48,
-                O::ShellTangentVertexMoveTooFar { .. } => 49,
-                O::CrossingUndecided => 50,
-                O::LocalFaceNotListed => 51,
-                O::VertexArcsNotOneSphere => 52,
+                O::LoopGapPassLimit { .. } => 26,
+                O::LoopGapEndsAmbiguous { .. } => 27,
+                O::SplitAtEdgeEnd { .. } => 28,
+                O::FacesMoveRefused { .. } => 29,
+                O::BlendRailWithoutSupport { .. } => 30,
+                O::BlendSectionNotFound { .. } => 31,
+                O::FollowedBlendIncomplete => 32,
+                O::EdgeHasNoCurve { .. } => 33,
+                O::FaceHasNoSurface { .. } => 34,
+                O::FaceHasNoOuterFaceuse { .. } => 35,
+                O::MoveCollapses { .. } => 36,
+                O::FaceMoveEmpty { .. } => 37,
+                O::VertexNotGiven => 38,
+                O::EdgeuseNotGiven => 39,
+                O::CurveKindUnsupported { .. } => 40,
+                O::VertexCurveNotArc => 41,
+                O::VertexArcInPlane => 42,
+                O::VertexArcMissesPlane { .. } => 43,
+                O::FaceDomainUnresolved => 44,
+                O::ExtendedEdgeUntrimmed => 45,
+                O::LaminaEdgeOtherSide => 46,
+                O::TangentGapsAtConcaveEdge => 47,
+                O::EdgeuseHasNoUvTrim { .. } => 48,
+                O::RailIntervalsDiffer { .. } => 49,
+                O::ShellTangentCurveUncertified => 50,
+                O::ShellTangentUvUnmatched => 51,
+                O::ShellTangentVertexMoveTooFar { .. } => 52,
+                O::CrossingUndecided => 53,
+                O::LocalFaceNotListed => 54,
+                O::VertexArcsNotOneSphere => 55,
+                O::UnnamedFaceHasNoSurface => 56,
             }
         };
         for (i, (o, class, phrase, defect)) in pinned.iter().enumerate() {
@@ -1816,7 +2006,7 @@ mod tests {
             assert_eq!(o.is_phrase(), *phrase, "{o:?}");
             assert_eq!(o.is_defect(), *defect, "{o:?}");
             // what replaced a bare status is a phrase, a stage failure built on purpose, or a
-            // cause named at a site that returned a status (the rows from 26 on)
+            // cause named at a site that returned a status (the rows from 26 on: TE-O-18, TE-O-19)
             assert_eq!(
                 o.replaces_upstream_status(),
                 *phrase || matches!(o, O::StageFailed | O::Defect { .. }) || i >= 26,
@@ -1886,7 +2076,7 @@ mod tests {
                 Some(EntityRef::Edge(edge)),
             ),
             (
-                OffsetFailure::FaceHasNoSurface { face: Some(face) },
+                OffsetFailure::FaceHasNoSurface { face },
                 SM_ERR_NULL_POINTER,
                 Some(EntityRef::Face(face)),
             ),
@@ -1917,6 +2107,11 @@ mod tests {
             (OffsetFailure::ExtendedEdgeUntrimmed, SM_ERR, None),
             (OffsetFailure::LocalFaceNotListed, SM_ERR, None),
             (OffsetFailure::VertexArcsNotOneSphere, SM_ERR, None),
+            (
+                OffsetFailure::UnnamedFaceHasNoSurface,
+                SM_ERR_NULL_POINTER,
+                None,
+            ),
         ];
         for (cause, status, entity) in samples {
             assert!(cause.replaces_upstream_status(), "{cause:?}");
@@ -2060,10 +2255,7 @@ mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/offset/draft.rs", 1),
-            ("solidcore/src/offset/offset_executive/cavity.rs", 1),
             ("solidcore/src/offset/offset_executive/crossing_loops.rs", 5),
-            ("solidcore/src/offset/offset_executive/step_gaps.rs", 5),
         ];
         assert_pinned("offset phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
