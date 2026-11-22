@@ -340,3 +340,52 @@ fn a_placed_body_is_moved_only_when_its_geometry_is_read() {
     let _ = again.mesh(&crate::MeshTolerance::chord(1e-2)).unwrap();
     assert!(again.record.pending(), "meshed from the part's display");
 }
+
+/// A body moved by a translation has its measured box moved with it (#2358): the same box SMLib
+/// measures on the moved record, to rounding. A rotation leaves the box to be measured.
+#[test]
+fn a_translated_body_keeps_its_measured_box_moved() {
+    let source = periodic_cylinder();
+    let measured = source.exact_bounds().unwrap();
+    let t = Vec3::new(13.0, -26.5, 0.25);
+    let shift = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [t.x, t.y, t.z, 1.0]];
+    let placed = crate::transform_matrix(&source, shift).unwrap();
+    let carried = (*placed.bounds.lock().unwrap()).expect("the box moved with the body");
+    assert_eq!((carried.min, carried.max), (measured.min + t, measured.max + t));
+    // Measured afresh on the moved record, from a body that carried nothing.
+    let fresh = Body::from_record(placed.record().clone()).unwrap().exact_bounds().unwrap();
+    for (a, b) in [(carried.min, fresh.min), (carried.max, fresh.max)] {
+        assert!(a.dist(b) < 1e-9, "{a:?} against {b:?}");
+    }
+    // Moved twice, by translations: still carried.
+    let twice = crate::transform_matrix(&placed, shift).unwrap();
+    let carried = (*twice.bounds.lock().unwrap()).expect("moved again");
+    assert!(carried.min.dist(measured.min + t + t) < 1e-12);
+    // A quarter turn about Z is no translation: the box is measured when asked.
+    let turn = [[0.0, 1.0, 0.0, 0.0], [-1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+    let turned = crate::transform_matrix(&source, turn).unwrap();
+    assert!(turned.bounds.lock().unwrap().is_none());
+    // Nor is a box carried that was never measured.
+    let unmeasured = crate::transform_matrix(&periodic_cylinder(), shift).unwrap();
+    assert!(unmeasured.bounds.lock().unwrap().is_none());
+}
+
+/// Bodies apart from each other, joined, have the box of their measured boxes together (#2358):
+/// the box SMLib measures on the joined record, to rounding. A piece not measured leaves the
+/// joined box to be measured when asked.
+#[test]
+fn bodies_joined_apart_keep_their_measured_boxes() {
+    let a = crate::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 5.0).unwrap();
+    let b = crate::cylinder(Vec3::new(10.0, 3.0, -1.0), Vec3::X, 1.5, 4.0).unwrap();
+    let (ba, bb) = (a.exact_bounds().unwrap(), b.exact_bounds().unwrap());
+    let joined = crate::join_apart(&[a.clone(), b.clone()]).unwrap().unwrap();
+    let carried = (*joined.bounds.lock().unwrap()).expect("the pieces' boxes together");
+    assert_eq!((carried.min, carried.max), (ba.union(&bb).min, ba.union(&bb).max));
+    let fresh = Body::from_record(joined.record().clone()).unwrap().exact_bounds().unwrap();
+    for (x, y) in [(carried.min, fresh.min), (carried.max, fresh.max)] {
+        assert!(x.dist(y) < 1e-9, "{x:?} against {y:?}");
+    }
+    let unmeasured = crate::cylinder(Vec3::new(-10.0, 0.0, 0.0), Vec3::Z, 1.0, 1.0).unwrap();
+    let joined = crate::join_apart(&[a, unmeasured]).unwrap().unwrap();
+    assert!(joined.bounds.lock().unwrap().is_none());
+}

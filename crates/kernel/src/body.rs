@@ -508,6 +508,34 @@ pub use solidcore_tess::{DISPLAY_ANGLE, MeshTolerance};
 /// How [`Body::export_mesh`] meshes (the mesh path's spec and its default smallest angle), and what it reports.
 pub use solidcore_tess::{MESH_MIN_ANGLE, MeshSpec, PlanStats};
 
+impl Body {
+    /// Takes the box of `pieces` together as this body's own, unmeasured: this body is those
+    /// pieces side by side, so its exact box is theirs. Only when each piece's box is measured
+    /// already: nothing is measured here.
+    pub(crate) fn know_bounds_of(&self, pieces: &[Body]) {
+        let mut all = Aabb3::EMPTY;
+        for p in pieces {
+            let Some(b) = *p.bounds.lock().unwrap_or_else(std::sync::PoisonError::into_inner) else { return };
+            all = all.union(&b);
+        }
+        if all.is_empty() || !all.min.is_finite() || !all.max.is_finite() {
+            return;
+        }
+        let mut slot = self.bounds.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if slot.is_none() {
+            *slot = Some(all);
+        }
+    }
+}
+
+/// The translation `m` is, when it is one exactly (its other entries the identity's), in the
+/// layout [`crate::transform_matrix`] takes: the offset in the last row.
+fn translation_of(m: &[[f64; 4]; 4]) -> Option<Vec3> {
+    let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+    let [r0, r1, r2, [x, y, z, w]] = *m;
+    ([r0, r1, r2] == identity && w == 1.0 && x.is_finite() && y.is_finite() && z.is_finite()).then(|| Vec3::new(x, y, z))
+}
+
 pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
 }
@@ -1365,6 +1393,13 @@ impl Body {
         if !movable.by(&motion) {
             return None;
         }
+        // A translation moves the box with the body: a hole's tools moved to each copy of a
+        // pattern were measured again at every copy (#2358).
+        let bounds = translation_of(&matrix).and_then(|t| {
+            let b = (*self.bounds.lock().unwrap_or_else(std::sync::PoisonError::into_inner))?;
+            let moved = Aabb3 { min: b.min + t, max: b.max + t };
+            (moved.min.is_finite() && moved.max.is_finite()).then_some(moved)
+        });
         // Moved lazily already and not moved yet: both motions from the part's record.
         // A placed copy of a part another body shows (an assembly's instance) still shows it,
         // placed by both: it is meshed and planned from the part's, not on its own.
@@ -1386,7 +1421,7 @@ impl Body {
             // A rigid motion keeps the size and the volume.
             size: self.size,
             volume: self.volume.clone(),
-            bounds: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            bounds: std::sync::Arc::new(std::sync::Mutex::new(bounds)),
             mesh: None,
             color: self.color,
             paint: self.paint.clone(),

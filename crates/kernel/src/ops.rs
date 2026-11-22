@@ -162,7 +162,11 @@ pub fn join_apart(bodies: &[Body]) -> Result<Option<Body>> {
     let (joined, part) = joined(bodies)?;
     let counts: Vec<(usize, usize)> = bodies.iter().map(|b| (b.face_count(), b.edge_count())).collect();
     let history = crate::history::of_part(&part, &counts);
-    Ok(Some(joined.with_checked_history(Some(history), &counts)))
+    let joined = joined.with_checked_history(Some(history), &counts);
+    // The pieces' boxes, when each is measured, are the joined body's: a pattern's cut tools,
+    // joined, were measured again as one (#2358).
+    joined.know_bounds_of(bodies);
+    Ok(Some(joined))
 }
 
 /// Bodies (apart from each other) as one body of several pieces, their face sources carried.
