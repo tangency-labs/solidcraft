@@ -1261,6 +1261,24 @@ fn a_confirmed_delete_runs_with_what_its_check_kept() {
     assert_eq!(kept.len(), built, "the delete built nothing the check had not kept");
 }
 
+/// A check that is not waited for leaves its reply for a later frame, even one that is already
+/// in: the frame finds it there. Read at once and not used, the reply was gone when the frame
+/// looked, and its delete was dropped as one that could not be checked (on a busy machine the
+/// worker is done before the window thread goes on). With a wait, a reply that is in is taken.
+#[test]
+fn a_reply_already_in_is_left_for_the_frame_when_the_check_is_not_waited_for() {
+    let (tx, done) = std::sync::mpsc::channel();
+    tx.send("replies").unwrap();
+    drop(tx);
+    assert_eq!(crate::deferred::reply_within(&done, Duration::ZERO), None, "not taken without a wait");
+    assert_eq!(done.try_recv(), Ok("replies"), "the frame finds the reply");
+    let (tx, done) = std::sync::mpsc::channel();
+    tx.send("replies").unwrap();
+    assert_eq!(crate::deferred::reply_within(&done, Duration::from_millis(150)), Some("replies"), "taken within a wait");
+    let (_tx, done) = std::sync::mpsc::channel::<&str>();
+    assert_eq!(crate::deferred::reply_within(&done, Duration::from_millis(1)), None, "none in time: left computing");
+}
+
 /// A design changed while its delete is checked is checked again before anything is deleted, and
 /// a second Delete meanwhile is left out.
 #[test]

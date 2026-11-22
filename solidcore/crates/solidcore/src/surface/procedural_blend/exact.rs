@@ -22,7 +22,9 @@
 //!
 //! A chamfer between planes (#2486) is the same: the chord between the feet of a line spine
 //! is the plane through them ([`ExactClass::Chord`]), kept as a `Plane` with the chamfer's
-//! sizes beside it, its section the chord (order 0).
+//! sizes beside it, its section the chord (order 0). The order-0 section may bulge: an arc
+//! between the feet at a sagitta (#15129, a weld bead), the circular cylinder through the
+//! feet's lines, kept with the sagitta beside the sizes; the chord is the arc of sagitta 0.
 //!
 //! Not upstream. Deviations: none (no upstream counterpart). No recursion: the supports
 //! are kept as surfaces without definitions of their own (a support that is an exact
@@ -30,7 +32,7 @@
 //! are walked one level.
 
 use crate::blend::fillet_exact::{
-    chord_implicit, class_surface, classify_supports, BlendSpine, ClassInputs, QuadricKind,
+    arc_section_implicit, class_surface, classify_supports, BlendSpine, ClassInputs, QuadricKind,
 };
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -42,6 +44,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::surface::implicit::{
     check_exact_net, lies_on, AnalyticSupport, ClassSurface, ExactNetCheck, Implicit, LeaderMap,
 };
+use crate::surface::procedural_blend::bead::BeadDefinition;
 use crate::surface::procedural_blend::chamfer::ChamferDefinition;
 use crate::surface::surface::Surface;
 
@@ -208,6 +211,9 @@ pub struct ExactRound {
     pub(crate) order: u32,
     /// A chamfer's sizes (the chord, #2486).
     pub(crate) chamfer: Option<ChamferDefinition>,
+    /// The order-0 section's sagitta (#15129): the arc's middle off the chord, away from the
+    /// edge for a positive one; 0 for the chord. Always 0 for a round.
+    pub(crate) sagitta: f64,
     /// The leader (the centre line), where the class's construction makes one.
     pub(crate) leader: Option<BSplineCurve>,
     /// What the class was read with beside the supports.
@@ -251,6 +257,7 @@ impl ExactRound {
             radius,
             order: 1,
             chamfer: None,
+            sagitta: 0.0,
             leader: leader.cloned(),
             inputs,
             map: LeaderMap::default(),
@@ -289,6 +296,7 @@ impl ExactRound {
             radius: 0.0,
             order: 0,
             chamfer: Some(chamfer),
+            sagitta: 0.0,
             leader: leader.cloned(),
             inputs,
             map: LeaderMap::default(),
@@ -299,6 +307,36 @@ impl ExactRound {
     #[must_use]
     pub const fn chamfer(&self) -> Option<&ChamferDefinition> {
         self.chamfer.as_ref()
+    }
+
+    /// The order-0 section bulged to an arc of `sagitta` between the feet (#15129, a weld
+    /// bead): the chord's definition with the sagitta beside its sizes. A sagitta of 0 is the
+    /// chord.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for a definition that is not the chord, and for a sagitta not finite or
+    /// past its bound at the chamfer's sizes ([`BeadDefinition::new`]).
+    pub fn with_sagitta(mut self, sagitta: f64) -> Result<Self> {
+        if sagitta == 0.0 {
+            self.sagitta = 0.0;
+            return Ok(self);
+        }
+        let (ExactClass::Chord, Some(chamfer)) = (self.class, self.chamfer) else {
+            return Err(SolidError::invalid_input(
+                "surface::procedural_blend::exact::ExactRound::with_sagitta",
+                "only the chord (order 0) bulges to an arc",
+            ));
+        };
+        BeadDefinition::new(chamfer, sagitta)?;
+        self.sagitta = sagitta;
+        Ok(self)
+    }
+
+    /// The order-0 section's sagitta: 0 for the chord and for every round.
+    #[must_use]
+    pub const fn sagitta(&self) -> f64 {
+        self.sagitta
     }
 
     /// The class.
@@ -386,7 +424,7 @@ impl ExactRound {
             let chord = blend.spine == BlendSpine::Line && planes && sized;
             (
                 chord.then_some(ExactClass::Chord.name()),
-                chord_implicit(&blend).map(ClassSurface::Implicit),
+                arc_section_implicit(&blend, self.sagitta).map(ClassSurface::Implicit),
             )
         } else {
             (
@@ -514,6 +552,7 @@ impl ExactRound {
         self.inputs.tol *= factor;
         self.radius *= factor;
         self.chamfer = self.chamfer.map(|c| c.scaled(factor));
+        self.sagitta *= factor;
         Ok(())
     }
 }

@@ -474,7 +474,8 @@ const OP_EXACT_FROM: &str = "surface::procedural_blend::convert::exact_from_reco
 /// # Errors
 ///
 /// `InvalidInput` for a surface that is not an exact round; `Unsupported` for a net of a
-/// kind with no label; those of [`to_record`]'s supports and forms.
+/// kind with no label and for a chord with a sagitta (a weld bead's, #15129, which no record
+/// holds yet); those of [`to_record`]'s supports and forms.
 pub fn exact_to_record(k: &Kernel, surface: &Surface) -> Result<ExactRoundRecord> {
     let Some(BlendRef::Exact { round, net }) = surface.procedural_blend() else {
         return Err(SolidError::invalid_input(
@@ -482,6 +483,14 @@ pub fn exact_to_record(k: &Kernel, surface: &Surface) -> Result<ExactRoundRecord
             "the surface is not an exact round",
         ));
     };
+    // a weld bead's chord with a sagitta (#15129): no record holds a sagitta yet, and one read
+    // without it would be the flat chord, so it is refused rather than dropped
+    if round.sagitta != 0.0 {
+        return Err(SolidError::Unsupported {
+            operation: OP_EXACT_TO,
+            reason: "a chord with a sagitta (a weld bead's) has no record yet",
+        });
+    }
     let [s0, s1] = &round.supports;
     let supports = [support_record(k, s0, 1)?, support_record(k, s1, 1)?];
     let kind = match net.kind() {
