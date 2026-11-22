@@ -104,7 +104,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CORNER_JOIN_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-            "covering, covered: central edge names <face>|<face>, e.g. F7:top(F1:side:l1)|F7:bend.inner(F1:side:l1); kind?: butt (default), partial_overlap or full_overlap; \
+            "covering, covered: central edge names <face>|<face>, e.g. F3:bend.inner:F2:side:l1|F3:bottom:F2:side:l1; kind?: butt (default), partial_overlap or full_overlap; \
              overlap: length expression for partial_overlap only; gap?: length expression (default: sheet rule); body?: sheet body; name?",
         ),
     CommandSpec::new("sheet.perforate", "Perforate", crate::checked!("sheet.perforate", perforate)).begins_edit()
