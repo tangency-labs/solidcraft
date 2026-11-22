@@ -16,6 +16,7 @@
 )] // test helpers
 
 use solidcore::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfCurves, SrfSrfOptions};
+use solidcore::error::blend::BlendFailure;
 use solidcore::error::ErrorKind;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent2d::Extent2d;
@@ -511,11 +512,18 @@ fn a_heading_along_neither_way_round_is_refused() {
             )
             .err()
             .unwrap_or_else(|| panic!("{from} -> {to}, {what}: an arc was built"));
+            // the heading is not the arc's own tangent at the start, which the option asks of
+            // its caller (#19810): the caller's input, keeping `SM_ERR`
             assert_eq!(
-                (e.kind(), e.is_defect()),
-                (ErrorKind::StageFailed, true),
+                (e.kind(), e.is_defect(), e.blend_failure()),
+                (
+                    ErrorKind::InvalidInput,
+                    false,
+                    Some(&BlendFailure::SrfSrfHeadingNotFollowed)
+                ),
                 "{from} -> {to}, {what}: {e:?}"
             );
+            assert_eq!(solidcore::error::upstream_status(&e), Some(1001), "{from} -> {to}, {what}");
         }
     }
     // the half cylinder from 0 to 180 degrees: from 20 to 110, heading down (towards 0)
@@ -539,10 +547,15 @@ fn a_heading_along_neither_way_round_is_refused() {
     .err()
     .unwrap_or_else(|| panic!("half circle 20 -> 110 heading down: an arc was built"));
     assert_eq!(
-        (e.kind(), e.is_defect()),
-        (ErrorKind::StageFailed, true),
+        (e.kind(), e.is_defect(), e.blend_failure()),
+        (
+            ErrorKind::InvalidInput,
+            false,
+            Some(&BlendFailure::SrfSrfHeadingNotFollowed)
+        ),
         "{e:?}"
     );
+    assert_eq!(solidcore::error::upstream_status(&e), Some(1001));
     // heading up, the half circle's arc
     let mut up = heading(20.0, 1.0);
     check_arc(
@@ -747,16 +760,19 @@ fn a_curve_through_a_closure_off_a_seam_it_crosses_keeps_the_drop_error() {
                 ends(&c)
             ),
         };
-        // the drop's failure: no finer class than a stage that failed (#15034)
+        // the drop made no UV curve on the sphere (#15034): a curve the kernel builds no UV
+        // curve for, unsupported (#19810), keeping `SM_ERR`
         assert_eq!(
-            (e.operation(), e.kind(), e.is_defect()),
+            (e.operation(), e.kind(), e.is_defect(), e.blend_failure()),
             (
                 "blend::fillet_geom::p2::srf_srf_intersection",
-                ErrorKind::StageFailed,
-                true
+                ErrorKind::Unsupported,
+                false,
+                Some(&BlendFailure::IntersectionCurveHasNoUvCurve { on_second: false })
             ),
             "{from} -> {to}: {e:?}"
         );
+        assert_eq!(solidcore::error::upstream_status(&e), Some(1001), "{from} -> {to}");
     }
     // through the closure, over no seam of the sphere: both UV curves
     let c = intersect(
