@@ -99,8 +99,9 @@ fn finish_h(i: u32, hatch: u32) -> u32 {
 }
 
 /// Palette entry `slot`'s wood grain coordinates at `p`: the offset across the fibre axis (xy, in
-/// a fixed pair of directions square to the axis, so its length is the distance from the growth
-/// axis), one more than the entry's wood kind (z, `Material::wood_kind`) and the distance along
+/// a pair of directions square to the axis that turns with the body, `Material::wood_turn`, so
+/// its length is the distance from the growth axis), one more than the entry's wood kind (z,
+/// `Material::wood_kind`) and the distance along
 /// the axis (w). An original cylindrical growth field: continuous on every face, with rings on
 /// the end faces. Zero where the entry has no wood frame, which keeps its uniform colour exactly.
 fn wood_coordinates(p: vec3<f32>, slot: u32) -> vec4<f32> {
@@ -119,7 +120,12 @@ fn wood_coordinates(p: vec3<f32>, slot: u32) -> vec4<f32> {
     let b = axis.x * axis.y * a;
     let e1 = vec3<f32>(1.0 + s * axis.x * axis.x * a, s * b, -s * axis.x);
     let e2 = vec3<f32>(b, s + axis.y * axis.y * a, -axis.y);
-    return vec4<f32>(dot(delta, e1), dot(delta, e2), (origin_kind.w + 1.0) * axis.w, along);
+    // The entry's own turn about the axis (the fraction of `origin_kind.w`, in whole turns): the
+    // figure is not round, so it must turn with a body that turns about its fibre axis.
+    let turn = fract(origin_kind.w) * 6.2831853;
+    let across = vec2<f32>(dot(delta, e1), dot(delta, e2));
+    let turned = vec2<f32>(cos(turn) * across.x + sin(turn) * across.y, cos(turn) * across.y - sin(turn) * across.x);
+    return vec4<f32>(turned, (floor(origin_kind.w) + 1.0) * axis.w, along);
 }
 
 /// A palette entry's colour bytes as byte/255 (the old Unorm8x4 conversion, bit for bit).
@@ -782,9 +788,14 @@ fn fs_tri(i: TOut) -> @location(0) vec4<f32> {
 /// A whole hovered body, lit over the model from its own plan triangles in a lifted colour.
 @fragment
 fn fs_hl_hover(i: TOut) -> @location(0) vec4<f32> {
+    let wood_dx = dpdx(i.wood);
+    let wood_dy = dpdy(i.wood);
     if (clipped(i.wp)) { discard; }
-    // An opaque body keeps its finish under the hover; a faded or see-through one stays plain.
-    return lit_color(i, 1.0, vec4<f32>(i.c.rgb + u.tint.rgb, i.c.a), i.c.a > 0.99);
+    // An opaque body keeps its finish and its wood figure under the hover; a faded or
+    // see-through one stays plain.
+    var c = i.c.rgb;
+    if (i.c.a > 0.99 && any(i.wood != vec4<f32>(0.0))) { c = wood_figure(c, i.wood, wood_dx, wood_dy); }
+    return lit_color(i, 1.0, vec4<f32>(c + u.tint.rgb, i.c.a), i.c.a > 0.99);
 }
 
 /// A whole selected body, lit over the model from its own plan triangles in the selection colour.

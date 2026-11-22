@@ -97,6 +97,10 @@ pub struct Material {
     /// Which wood the figure is drawn as, where `wood` is set: 1 to 8 are the starter woods in
     /// the starter pack's order, 0 a general hardwood (`wood_character` in the shader).
     pub wood_kind: u8,
+    /// How far the wood figure is turned about the fibre axis, in radians, from the pair of
+    /// directions the shader builds from the axis alone (`wood_coordinates`): the figure is not
+    /// round, so it turns with a body that turns about its fibre axis.
+    pub wood_turn: f32,
 }
 
 impl Material {
@@ -112,18 +116,22 @@ impl Material {
             two_sided: false,
             wood: None,
             wood_kind: 0,
+            wood_turn: 0.0,
         }
     }
 
     /// Its four texels in the material texture: base and flag, the optical parameters and the
-    /// two-sided flag, then the wood frame's origin (with the wood kind) and its fibre axis (with
-    /// a flag).
+    /// two-sided flag, then the wood frame's origin (with the wood kind plus the turn as a
+    /// fraction of a whole turn) and its fibre axis (with a flag).
     fn texels(&self) -> [[f32; 4]; 4] {
         let [origin, axis] = self.wood.unwrap_or([[0.0; 3]; 2]);
+        // The turn as a fraction of a whole turn, kept below one so that it never reads as the
+        // next wood kind.
+        let turns = (self.wood_turn / std::f32::consts::TAU).rem_euclid(1.0).min(0.9999);
         [
             [self.base[0], self.base[1], self.base[2], if self.pbr { 1.0 } else { 0.0 }],
             [self.metallic, self.roughness, self.ior, if self.two_sided { 1.0 } else { 0.0 }],
-            [origin[0], origin[1], origin[2], if self.wood.is_some() { f32::from(self.wood_kind) } else { 0.0 }],
+            [origin[0], origin[1], origin[2], if self.wood.is_some() { f32::from(self.wood_kind) + turns } else { 0.0 }],
             [axis[0], axis[1], axis[2], if self.wood.is_some() { 1.0 } else { 0.0 }],
         ]
     }
@@ -5933,8 +5941,17 @@ mod glass_tests {
             let mut b = BlockBuilder::default();
             // In z = 0, its normal away from the eye at +Z.
             b.triangle([[-20.0, -20.0, 0.0], [20.0, -20.0, 0.0], [0.0, 20.0, 0.0]], [[0.0, 0.0, -1.0]; 3], PaletteIndex(0), TriClass::Pbr);
-            let material =
-                Material { base: [0.6, 0.6, 0.6], metallic: 0.0, roughness: 0.6, ior: 1.5, pbr: true, two_sided, wood: None, wood_kind: 0 };
+            let material = Material {
+                base: [0.6, 0.6, 0.6],
+                metallic: 0.0,
+                roughness: 0.6,
+                ior: 1.5,
+                pbr: true,
+                two_sided,
+                wood: None,
+                wood_kind: 0,
+                wood_turn: 0.0,
+            };
             GpuScene {
                 palette: Arc::new(Palette::with_stable(vec![[150, 150, 150, 255]]).with_materials(vec![material])),
                 blocks: vec![SceneBlock { key: 3, bytes: b.freeze() }],
@@ -5988,6 +6005,7 @@ mod glass_tests {
             two_sided: false,
             wood: None,
             wood_kind: 0,
+            wood_turn: 0.0,
         };
         let scene = |m: Material| GpuScene {
             palette: Arc::new(Palette::with_stable(vec![[180, 120, 70, 255]]).with_materials(vec![m])),
