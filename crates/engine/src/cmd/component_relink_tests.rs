@@ -1643,6 +1643,28 @@ fn a_part_stored_inside_a_design_travels_in_its_file_and_is_edited_unpacked() {
     assert!(link.get("recovery").is_none() && link["changed"] == false, "{link}");
     assert!((volume(&mut again) - 8000.0).abs() < 1e-6);
 
+    // Written back without saving the design: the design's file holds the part's new work, nothing
+    // else in it changed, and the design does not take its own write for another program's.
+    part(&unpacked, 60);
+    let design_before = solidcraft_io::read_design(&std::fs::read(away.join("counter.sc")).unwrap()).unwrap();
+    let wrote = run(&mut again, "component.write_back", json!({"component": "bracket"}));
+    assert_eq!(wrote["member"], "bracket.scprt", "{wrote}");
+    let design_after = solidcraft_io::read_design(&std::fs::read(away.join("counter.sc")).unwrap()).unwrap();
+    assert_eq!(design_after.internal["bracket.scprt"].as_bytes(), std::fs::read(&unpacked).unwrap());
+    assert_eq!(design_after.features, design_before.features);
+    assert_eq!(design_after.links, design_before.links, "the design itself is as it was saved");
+    assert!(!again.disk_changed(), "its own write is not another program's change");
+    // Opened again: no recovery component (the file holds the work), and the part is out of date.
+    let mut reopened = Session::default();
+    let reply = run(&mut reopened, "doc.open", json!({"path": away.join("counter.sc")}));
+    assert!(reply.get("recovery_components").is_none(), "{reply}");
+    let link = run(&mut reopened, "component.links", json!({}))["links"][0].clone();
+    assert!(link["changed"] == true && link.get("recovery").is_none(), "{link}");
+    assert_eq!(run(&mut reopened, "component.update_links", json!({}))["updated"], json!(["bracket"]));
+    run(&mut reopened, "file.save", json!({}));
+    let refused = reopened.execute("component.write_back", &json!({"component": 999})).unwrap_err().to_string();
+    assert!(!refused.is_empty());
+
     // Read-only, with nothing unpacked beside it: nothing is written, and the part still reads.
     let bare = root.join("bare");
     std::fs::create_dir_all(&bare).unwrap();

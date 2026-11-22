@@ -537,6 +537,34 @@ pub struct MakeInternalResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Write an internal component back into this design's file without saving the design
+/// (experimental, #6892): the part's unpacked file replaces the copy the design's file holds, and
+/// nothing else in the file changes. Refused for a recovery component, a design opened read-only,
+/// a signed design, and a file another program or computer changed: a save stores it then.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_required)]
+pub struct WriteBackParams {
+    // Optional in the type and required in the schema (`component_required`).
+    /// The internal component, by id or name.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+}
+
+/// What `component.write_back` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct WriteBackResult {
+    /// The component, by id.
+    pub component: u64,
+    /// The internal component's name inside this design's file.
+    pub member: String,
+    /// The size of the design's file as written, in bytes.
+    pub bytes: usize,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// Settle a recovery component (experimental, #6892): `component.restore_recovery` and
 /// `component.discard_recovery` take the same parameter.
 #[derive(Debug, Deserialize, JsonSchema)]

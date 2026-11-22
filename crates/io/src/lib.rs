@@ -33,7 +33,10 @@ pub use design::{
     write_design_container_with_provenance, write_design_container_with_thumbnail, write_drawing_container,
 };
 // Experimental file kinds (#6892).
-pub use design::{DesignKind, LEGACY_SHEET_METAL, design_kind, is_legacy_sheet_metal_file, read_design_kind_file, write_design_container_as};
+pub use design::{
+    DesignKind, LEGACY_SHEET_METAL, design_kind, is_legacy_sheet_metal_file, read_design_kind_file, with_internal_component,
+    write_design_container_as,
+};
 pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, MAX_GLB_BYTES, export_glb};
 mod legacy_dir;
 pub mod library_files;

@@ -129,6 +129,17 @@ pub(crate) fn pack(design: &mut Cow<'_, Document>, own: Option<&str>, recovery: 
     }
 }
 
+/// Write the internal component `name`, holding `bytes`, back into the design file at `own`
+/// without saving the design: the file is read, that one part replaced and the file written
+/// again atomically. The size of the file written.
+pub(crate) fn write_back(own: &str, name: &str, bytes: &[u8]) -> Result<usize, String> {
+    let file = solidcraft_io::vfs::read_design_path(own, None, solidcraft_io::limits::max_design_bytes()).map_err(|e| format!("{own}: {e}"))?;
+    let written = solidcraft_io::with_internal_component(&file, name, bytes).map_err(|e| format!("{own}: {e}"))?;
+    solidcraft_io::vfs::check_new(own).map_err(|e| e.to_string())?;
+    solidcraft_io::write_atomic(Path::new(own), &written, false).map_err(|e| format!("{own}: {e}"))?;
+    Ok(written.len())
+}
+
 /// The design `doc`, saved at `own` until now (`None`: never), was written to `path`: its stored
 /// parts get work files beside the new file where they have none, so its links still find them.
 pub(crate) fn carry(doc: &Document, own: Option<&str>, path: &str) -> Vec<String> {

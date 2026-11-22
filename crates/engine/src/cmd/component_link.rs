@@ -23,7 +23,8 @@ use crate::params::{bad, str_, vec3};
 use crate::schema::component_link::{
     BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignInserted, ExtractParams, ExtractResult, InsertDesignParams,
     InsertDesignResult, JointDiagnostic, LinkFailure, LinkInfo, LinksParams, LinksResult, MakeInternalParams, MakeInternalResult, RecoveryParams,
-    RecoveryResult, RelinkParams, RelinkResult, ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
+    RecoveryResult, RelinkParams, RelinkResult, ReplaceWithLinkParams, ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult, WriteBackParams,
+    WriteBackResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -46,6 +47,7 @@ const REPLACE_WITH_LINK_CONTRACT: TypedContract<ReplaceWithLinkParams> = TypedCo
 const LINKS_CONTRACT: TypedContract<LinksParams> = TypedContract::new();
 const MAKE_INTERNAL_CONTRACT: TypedContract<MakeInternalParams> = TypedContract::new();
 const RECOVERY_CONTRACT: TypedContract<RecoveryParams> = TypedContract::new();
+const WRITE_BACK_CONTRACT: TypedContract<WriteBackParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.insert_design", "Insert Design", crate::checked!("component.insert_design", insert_design)).begins_edit()
@@ -119,6 +121,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         "component or components: [ids or names] of components that are not linked; with: a linked component, or path: a .sc design \
          (its link here, else a new linked component) → each component's history goes and its placements become placements of the linked \
          component; refused when its bodies are not the same as the link's; returns component, name, replaced and warnings",
+    ),
+    CommandSpec::new("component.write_back", "Write Back Internal Component", crate::checked!("component.write_back", write_back))
+        .icon("update")
+        .noundo()
+        .contract(&WRITE_BACK_CONTRACT)
+        .output(output_schema_for::<WriteBackResult>)
+        .params(
+        "component: id or name of an internal component — writes its unpacked file back into this design's file without saving the design: \
+         only that part of the file changes; refused for a recovery component, a read-only or signed design, and a file changed by another \
+         program or computer (a save stores it then); returns member and bytes (the file's size)",
     ),
     CommandSpec::new("component.restore_recovery", "Restore Recovery Component", crate::checked!("component.restore_recovery", restore_recovery))
         .icon("update")
@@ -1398,6 +1410,40 @@ fn make_internal(s: &mut Session, p: &Value) -> Result<Value> {
         kept.file_sha256 = Some(DesignLink::file_digest(&bytes));
     }
     reply(cmd, MakeInternalResult { component: comp, member, file: file.to_string_lossy().into_owned(), previous_path, param_warnings: Vec::new() })
+}
+
+/// `component.write_back`: the internal component's unpacked file goes into the design's file
+/// (`cmd/design_internal.rs`), which is otherwise left as it is, the design unsaved or not.
+fn write_back(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.write_back";
+    let comp = component_key(s, p, "component", cmd)?;
+    let member = s
+        .doc
+        .links
+        .get(&comp)
+        .and_then(|link| solidcraft_doc::internal::linked(&link.path))
+        .map(str::to_string)
+        .ok_or_else(|| bad(cmd, "that component is not an internal component"))?;
+    if s.recovery_components.contains(&member) {
+        return Err(bad(cmd, "that component waits as a recovery component: restore or discard it first"));
+    }
+    let own = s.path.clone().ok_or_else(|| bad(cmd, "this design has no file yet: save it to store the component"))?;
+    if s.read_only {
+        return Err(bad(cmd, "this design was opened read-only"));
+    }
+    if s.provenance_chain.as_ref().is_some_and(|chain| !chain.records.is_empty()) {
+        return Err(bad(cmd, "this design is signed: save it to store the component"));
+    }
+    if s.disk_changed() {
+        return Err(bad(cmd, "the design's file was changed by another program or computer: save the design to store the component"));
+    }
+    let file =
+        super::design_internal::work_file(Some(&own), &member).ok_or_else(|| bad(cmd, "this design's file has no folder for the component"))?;
+    let bytes = read_link(&file, Some(&own)).map_err(|e| bad(cmd, e.to_string()))?;
+    let written = super::design_internal::write_back(&own, &member, &bytes).map_err(|why| bad(cmd, why))?;
+    // The file is ours as written: the next save does not take it for another program's change.
+    s.disk = solidcraft_io::design_lock::stamp(&own);
+    reply(cmd, WriteBackResult { component: comp, member, bytes: written, param_warnings: Vec::new() })
 }
 
 fn restore_recovery(s: &mut Session, p: &Value) -> Result<Value> {

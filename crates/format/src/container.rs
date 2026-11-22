@@ -157,6 +157,25 @@ impl Writer {
         Ok(())
     }
 
+    /// Add the part `name` of the container `from` as it is stored there, neither expanded nor
+    /// compressed again: what rewriting a container around one changed part costs is that part.
+    /// A name already written is written once.
+    pub fn copy_part<R: Read + Seek>(&mut self, from: &mut Reader<R>, name: &str) -> Result<(), FormatError> {
+        let part = from.zip.by_name(name).map_err(|e| invalid(format!("required part `{name}`: {e}")))?;
+        let size = usize::try_from(part.size()).map_err(invalid)?;
+        if size > (self.limits.part_limit)(name) {
+            return Err(invalid("part too large"));
+        }
+        if !self.names.insert(name.to_owned()) {
+            return Ok(());
+        }
+        self.expanded = self.expanded.checked_add(size).ok_or_else(|| invalid("expanded size overflow"))?;
+        if self.expanded > (self.limits.max_expanded)() || self.names.len() > self.limits.max_entries {
+            return Err(invalid("package too large"));
+        }
+        self.zip.raw_copy_file(part).map_err(invalid)
+    }
+
     /// Would `entries` more optional parts of `extra` bytes, stored uncompressed, still keep the
     /// file within `budget` and its expanded size within the reader's budget?
     pub fn room(&self, entries: usize, extra: usize, budget: usize) -> bool {

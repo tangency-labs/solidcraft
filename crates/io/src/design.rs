@@ -1219,6 +1219,33 @@ fn hydrate_plugin_data<R: Read + Seek>(doc: &mut Document, reader: &mut PackageR
     }
 }
 
+/// `container`, a design file's bytes, with its internal component `name` holding `bytes`
+/// (experimental, #6892): every other part goes across as it is stored, so writing one component
+/// back costs that component, not the design. One the file has not held yet is added. A signed
+/// design is refused, since its signature covers its parts: an ordinary save stores the component.
+pub fn with_internal_component(container: &[u8], name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
+    if !solidcraft_doc::internal::valid_name(name) {
+        return Err(invalid("not an internal component's name"));
+    }
+    let mut reader = PackageReader::new(Cursor::new(container))?;
+    let names = reader.part_names();
+    if names.iter().any(|part| part.starts_with("provenance/")) {
+        return Err(invalid("the design is signed, so only a save can store the component"));
+    }
+    let target = format!("{}{name}", solidcraft_doc::internal::PREFIX);
+    let mut writer = Writer::new(SAVE_LIMITS);
+    for part in &names {
+        if *part == target {
+            writer.part(&target, bytes, false)?;
+        } else {
+            writer.copy_part(&mut reader.0, part)?;
+        }
+    }
+    // Not in the file yet: added (a name already written is written once).
+    writer.part(&target, bytes, false)?;
+    Ok(writer.finish()?)
+}
+
 /// The name of a part stored inside the file, for a container part under `internal/` that is one.
 fn internal_part(name: &str) -> Option<&str> {
     name.strip_prefix(solidcraft_doc::internal::PREFIX).filter(|member| solidcraft_doc::internal::valid_name(member))
@@ -3013,6 +3040,24 @@ mod tests {
         let refused = crate::write_design(&opened).unwrap_err().to_string();
         assert!(refused.contains("internal components") && refused.contains(".sc"), "{refused}");
         assert!(!opened.to_json().contains("Top.scprt"), "never written as text");
+
+        // One component written back: it changes, every other part is the same bytes, and the
+        // design reads as before. One the file has not held is added.
+        let file = write_design_container(&opened).unwrap();
+        let rewritten = with_internal_component(&file, "Top.scprt", b"top, edited").unwrap();
+        let (before, after) = (parts(&file), parts(&rewritten));
+        assert_eq!(after["internal/Top.scprt"], b"top, edited");
+        assert_eq!(before.keys().collect::<Vec<_>>(), after.keys().collect::<Vec<_>>());
+        for (name, bytes) in &before {
+            assert!(name == "internal/Top.scprt" || after[name] == *bytes, "{name} changed");
+        }
+        let reread = crate::read_design(&rewritten).unwrap();
+        assert_eq!(reread.features, opened.features);
+        assert_eq!(reread.internal["Shelf Bracket.scprt"], opened.internal["Shelf Bracket.scprt"]);
+        let added = parts(&with_internal_component(&file, "Leg.scprt", b"leg").unwrap());
+        assert_eq!(added["internal/Leg.scprt"], b"leg");
+        assert_eq!(added.len(), before.len() + 1);
+        assert!(with_internal_component(&file, "../Top.scprt", b"no").is_err());
     }
 
     /// Plugin data under `plugins/<plugin-id>/` opens and saves back byte for byte with no plugin

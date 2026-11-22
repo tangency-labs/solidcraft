@@ -483,6 +483,14 @@ fn finish_with(app: &mut SolveApp, save: bool) -> Result<bool, String> {
     if context.opened {
         crate::documents::close(app, part_tab, false);
     }
+    // An internal component (a part stored inside the assembly's file, #6892) goes back into that
+    // file now, so the file holds the work whether or not the assembly is saved afterwards. Where
+    // it can't (a signed or read-only assembly, a file changed elsewhere), the status line says
+    // why, and saving the assembly stores it.
+    let internal = app.session.doc.links.get(&context.component).is_some_and(|link| solidcraft_engine::doc::internal::linked(&link.path).is_some());
+    if internal && let Err(why) = app.run("component.write_back", json!({"component": context.component})) {
+        app.set_status(why, true);
+    }
     // Coming back to its tab reads what changed, unless it read nothing (`update_changed_links`
     // off, the web build without file times): then the part is read here.
     if (!app.preferences.update_changed_links || cfg!(target_arch = "wasm32")) && app.file_load.idle() {
