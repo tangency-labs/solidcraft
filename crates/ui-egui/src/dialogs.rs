@@ -6585,10 +6585,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             // both are picked.
             let face = sketch
                 .is_null()
-                .then(|| sels(d, 0).iter().find_map(|x| match x {
-                    Sel::Face { body, point, .. } => Some((body.clone(), *point)),
-                    _ => None,
-                }))
+                .then(|| {
+                    sels(d, 0).iter().find_map(|x| match x {
+                        Sel::Face { body, point, .. } => Some((body.clone(), *point)),
+                        _ => None,
+                    })
+                })
                 .flatten();
             let mut p = match face {
                 Some((body, point)) => {

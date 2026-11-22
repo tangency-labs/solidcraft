@@ -633,8 +633,12 @@ fn a_sweep_takes_a_body_face_as_its_profile() {
     assert_eq!(params["face"], json!([0.0, 0.0, 10.0]));
     app.session.execute(&command, &params).unwrap();
     let state = app.session.world_state().unwrap();
-    let column = state.bodies.iter().find(|b| b.name != "Block").expect("the sweep makes a body");
-    assert_eq!(column.body.classify_point(Vec3::new(0.0, 0.0, 30.0)).unwrap(), solidcraft_engine::kernel::PointClass::Inside);
+    // The design has a body, so the sweep joins: the column stands on the face it was swept
+    // from, and the block it stands on grows into it.
+    assert_eq!(state.bodies.len(), 1);
+    let block = state.body("Block").unwrap();
+    assert_eq!(block.body.classify_point(Vec3::new(0.0, 0.0, 30.0)).unwrap(), solidcraft_engine::kernel::PointClass::Inside);
+    assert_eq!(block.body.classify_point(Vec3::new(0.0, 0.0, 5.0)).unwrap(), solidcraft_engine::kernel::PointClass::Inside);
 }
 
 #[test]

@@ -194,7 +194,11 @@ fn a_sweep_from_a_body_face_sweeps_the_face() {
     // The XZ sketch's y runs down world Z: the line starts at the top face's centre.
     run(&mut s, "sketch.line", json!({"points": [[0, -10], [0, -50]], "ids": ["up"]}));
     run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "solid.sweep", json!({"face": [0, 0, 10], "face_body": "Block", "path_sketch": "P", "path": ["up"], "operation": "new", "body_name": "Column"}));
+    run(
+        &mut s,
+        "solid.sweep",
+        json!({"face": [0, 0, 10], "face_body": "Block", "path_sketch": "P", "path": ["up"], "operation": "new", "body_name": "Column"}),
+    );
     let m = measure(&s, "Column");
     assert!((m.volume - 4000.0).abs() < 2e-3 * 4000.0, "volume {}", m.volume);
     // The column stands on the face it was swept from and ends at the path's end.
@@ -204,7 +208,10 @@ fn a_sweep_from_a_body_face_sweeps_the_face() {
     // The face's sketch is in the timeline, and the sweep names it as its profile.
     let kind = s.doc.features.last().unwrap().kind.clone();
     let solidcraft_doc::FeatureKind::Sweep { sketch, .. } = kind else { panic!("the last feature is not a sweep") };
-    assert!(s.doc.feature(sketch.0).is_some_and(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Sketch { .. })), "the face's sketch is in the timeline");
+    assert!(
+        s.doc.feature(sketch.0).is_some_and(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Sketch { .. })),
+        "the face's sketch is in the timeline"
+    );
 }
 
 /// A face that is not a body's, a curved one, or a face given with a sketch is refused, and the
