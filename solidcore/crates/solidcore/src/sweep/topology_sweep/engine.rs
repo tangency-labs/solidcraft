@@ -408,25 +408,21 @@ impl TopologySweep {
         let second = (old.0, second);
         let mapped_first = mapped_vertex(self.get_to_same(Some(v(first))))?;
         let mapped_second = mapped_vertex(self.get_to_same(Some(v(second))))?;
-        let new_first = match mapped_first {
-            Some(new) => new,
-            None => {
-                let new = self.sweep_vertex_same(a, g, region, first)?;
-                self.set_same(Some(v(first)), Some(v(new)));
-                new
-            }
+        let new_first = if let Some(new) = mapped_first {
+            new
+        } else {
+            let new = self.sweep_vertex_same(a, g, region, first)?;
+            self.set_same(Some(v(first)), Some(v(new)));
+            new
         };
         let new_second = if edge::is_closed(a.brep(old.0)?, old.1)? {
             new_first
+        } else if let Some(new) = mapped_second {
+            new
         } else {
-            match mapped_second {
-                Some(new) => new,
-                None => {
-                    let new = self.sweep_vertex_same(a, g, region, second)?;
-                    self.set_same(Some(v(second)), Some(v(new)));
-                    new
-                }
-            }
+            let new = self.sweep_vertex_same(a, g, region, second)?;
+            self.set_same(Some(v(second)), Some(v(new)));
+            new
         };
         let interval = curve.natural_interval();
         let new = a.make_wire_edge(

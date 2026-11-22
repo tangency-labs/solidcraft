@@ -332,7 +332,7 @@ fn skin_primitive(
                     );
                     return Err(match status {
                         Err(e) => defect.caused_by(e),
-                        Ok(_) => defect,
+                        Ok(()) => defect,
                     }
                     .into_error());
                 }
