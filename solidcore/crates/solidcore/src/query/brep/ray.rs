@@ -403,6 +403,13 @@ impl FaceQueries<CacheObject> for RaySurfaceContext<'_> {
         PreparedFaceQueries::new(self.brep, id, &cache_handle)?.face_zone_tol_3d(face)
     }
 
+    fn face_has_loopuses(&self, face: CacheObject) -> Result<bool> {
+        let CacheObject::Face(id) = face else {
+            return Err(SolidError::invalid_input(OP, "expected face"));
+        };
+        crate::topology::face::p4::has_loopuses(self.brep, id)
+    }
+
     fn face_point_classify(
         &self,
         k: &Kernel,
@@ -618,6 +625,56 @@ mod tests {
         assert!(!state.point_test_enabled);
         assert!(!on(&state));
         assert_eq!(live_on, Some(false));
+    }
+
+    /// #20179: a face with loop uses tests the fast drop's points whatever mode its
+    /// cache was built in. Upstream's `BuildTree` turns point testing off when the
+    /// B-rep is being edited (the standalone branch), and its face branch's restore
+    /// brings back the value from before the build, so a cache first built while the
+    /// B-rep was edited kept every point, even one far off the face, while the same
+    /// face built outside an edit rejected it.
+    #[test]
+    fn point_test_of_a_face_with_loops_does_not_depend_on_the_build_mode() {
+        use crate::query::face::p2::{face_cache_tree, face_surface_cache};
+        let answers = |editing: bool| {
+            let mut k = Kernel::default();
+            let mut b = crate::primitive::api_primitives::create_box(
+                &mut k,
+                crate::math::Point3::ZERO,
+                10.0,
+                10.0,
+                10.0,
+            )
+            .unwrap();
+            let face = crate::topology::brep::p1::faces(&b, None).unwrap()[0];
+            assert!(crate::topology::face::p4::has_loopuses(&b, face).unwrap());
+            let domain = b.face(face).unwrap().uv_domain;
+            let inside = Point2::new(
+                0.5 * (domain.min.x + domain.max.x),
+                0.5 * (domain.min.y + domain.max.y),
+            );
+            let outside = Point2::new(
+                domain.max.x + 10.0 * (domain.max.x - domain.min.x),
+                domain.max.y + 10.0 * (domain.max.y - domain.min.y),
+            );
+            b.set_editing_enabled(editing);
+            let mut lease = face_surface_cache(&k, &mut b, face).unwrap();
+            face_cache_tree(&k, &mut b, face, &mut lease.cache).unwrap();
+            b.set_editing_enabled(false);
+            assert!(lease.trimmed);
+            let mut test = |uv| {
+                lease
+                    .cache
+                    .point_test_in(&k, &mut BrepCacheFace { b: &mut b, f: face }, uv, None)
+                    .unwrap()
+                    .0
+            };
+            let answers = (test(inside), test(outside));
+            lease.release();
+            answers
+        };
+        assert_eq!(answers(false), (true, false));
+        assert_eq!(answers(true), (true, false));
     }
 
     #[test]

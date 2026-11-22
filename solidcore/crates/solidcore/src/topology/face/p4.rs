@@ -11,6 +11,7 @@
 //! | [`edges`]                                    | `SmFace::GetEdges`                           |
 //! | [`vertices`]                                 | `SmFace::GetVertices`                        |
 //! | [`upward_loopuses`]                          | `SmFace::GetUpwardLoopuses`                  |
+//! | [`has_loopuses`]                             | (solidcore) `GetUpwardLoopuses` not empty    |
 //! | [`upward_vertexuses`]                        | `SmFace::GetUpwardVertexuses`                |
 //! | [`upward_edgeuses`]                          | `SmFace::GetUpwardEdgeuses`                  |
 //! | [`is_connected_to`]                          | `SmFace::IsConnectedTo`                      |
@@ -285,6 +286,17 @@ pub fn upward_loopuses(
     tgt_loops: Option<&[LoopId]>,
 ) -> Result<Vec<LoopuseId>> {
     selected_loopuses(b, f, tgt_loops_only, tgt_loops)
+}
+
+/// Whether face `f` has loop uses ([`upward_loopuses`] of all loops is not empty):
+/// whether it has trim boundaries. A trimmed surface cache's point test classifies a
+/// solution only on such a face; a face without loop uses keeps every solution.
+///
+/// # Errors
+///
+/// Those of [`upward_loopuses`].
+pub fn has_loopuses(b: &Brep, f: FaceId) -> Result<bool> {
+    Ok(!selected_loopuses(b, f, false, None)?.is_empty())
 }
 
 /// `GetUpwardVertexuses`: the vertex uses of each selected loop use

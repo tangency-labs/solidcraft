@@ -915,6 +915,13 @@ impl solidcore::surface::surface_cache::face_context::FaceQueries<H> for Two {
         fp2::tolerance(self.brep_r(face)?, fid(face))
     }
 
+    fn face_has_loopuses(&self, face: H) -> solidcore::Result<bool> {
+        if face.kind != K_FACE {
+            return Err(invalid("cache classifier expected a face handle"));
+        }
+        solidcore::topology::face::p4::has_loopuses(self.brep_r(face)?, fid(face))
+    }
+
     fn face_point_classify(
         &self,
         k: &Kernel,
