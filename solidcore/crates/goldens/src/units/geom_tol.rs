@@ -343,11 +343,11 @@ fn rust_brep(i: &Inputs) -> Result<Output, HarnessError> {
         .ok_or_else(|| HarnessError::new(format!("small {}", i.small)))?;
     let a = brep_args(i);
     let z = match a.set_estimate {
-        Some(est) => tol::set_brep_model_size_estimate(&mut k, &mut b, est),
+        Some(est) => tol::set_brep_model_size_estimate(&mut b, est),
         None => 0.0,
     };
     if let Some(ratio) = a.set_ratio {
-        tol::set_brep_large_small_size_ratio(&mut k, &mut b, ratio);
+        tol::set_brep_large_small_size_ratio(&mut b, ratio);
     }
     let mut r = vec![
         z,

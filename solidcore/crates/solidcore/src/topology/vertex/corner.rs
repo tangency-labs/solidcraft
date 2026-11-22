@@ -337,8 +337,9 @@ pub fn calc_corner_from_faces(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<F
         return Ok(out);
     }
 
-    let approx_tol_3d =
-        tol::context_approx_tol_3d(k, Some(&k.context), tol::SmallTopoType::NormalSize);
+    // (upstream asks the B-rep's context, there this model's: half the zone tolerance
+    // of this B-rep's own model size estimate)
+    let approx_tol_3d = tol::approx_tol3d(k, 0.5 * tol::brep_size_zone_tol_3d(k, b));
 
     let parallel = has_parallel_faces(k, b, v, Some(tol::ANG_TOL_DEG))?;
 

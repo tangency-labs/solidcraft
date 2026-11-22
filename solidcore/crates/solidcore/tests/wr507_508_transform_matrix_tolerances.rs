@@ -2,7 +2,8 @@
 //! ([`transform_matrix`]), the overload SolidCraft calls: the fork's own regression
 //! tests (`TransformKeepsEdgeTolerance`, `ScaledBodyWithoutVertices` in
 //! tangency-labs/smlib#49 and #50, `capi/tests/flat_roundtrip.cpp`) on the port. Each
-//! fails on upstream's rule.
+//! fails on upstream's rule. And the size a scale gives a body staying that body's: the
+//! kernel context and the other bodies keep theirs.
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
@@ -140,4 +141,139 @@ fn wr508_transform_matrix_sizes_a_lone_torus_from_its_box() {
             "scale {s}: volume {v}, want {want}"
         );
     }
+}
+
+/// A uniform scale by `s` about the origin, as the 4x4 `transform_matrix` takes it.
+fn scale_by(s: f64) -> [[f64; 4]; 4] {
+    [
+        [s, 0.0, 0.0, 0.0],
+        [0.0, s, 0.0, 0.0],
+        [0.0, 0.0, s, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+}
+
+/// The size a scaled body is given is that body's alone. A 100 x 100 x 10 plate X stores
+/// the default estimate, so it answers with the kernel's (50, and a zone tolerance of
+/// 1e-5 on the context). A 10 x 10 x 10 box Y scaled by 1000, scaling its tolerances as
+/// `solidcore-ops` does, has the estimate of its own box (about its diagonal, 10000 * sqrt(3))
+/// and the 1e-4 that goes with it; X's answers and the context's stay what they were.
+/// Before, the scale wrote Y's estimate to the kernel context, X answered 17320.5 and the
+/// context held 1e-4 until the next body was made.
+#[test]
+fn scaling_one_body_leaves_the_size_estimate_of_another() {
+    use solidcore::geom::tol;
+
+    let mut k = Kernel::default();
+    let x = api::create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 100.0, 100.0, 10.0).unwrap();
+    let mut y = api::create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+    let context = |k: &Kernel| {
+        (
+            k.context.stored_model_size_estimate(),
+            k.context.stored_large_small_size_ratio(),
+            k.context.this_zone_tol_3d(),
+            tol::context_zone_tol_3d(k, Some(&k.context), tol::SmallTopoType::NormalSize),
+        )
+    };
+    let of_x = |k: &Kernel| {
+        (
+            tol::brep_model_size_estimate(k, &x),
+            tol::brep_large_small_size_ratio(k, &x),
+            tol::brep_zone_tol_3d(k, &x, tol::SmallTopoType::NormalSize),
+            x.tolerance(),
+        )
+    };
+    let (context_before, x_before) = (context(&k), of_x(&k));
+    assert_eq!(
+        context_before,
+        (tol::USE_DEFAULT, tol::USE_DEFAULT, 1e-5, 1e-5)
+    );
+    assert_eq!(
+        x_before,
+        (
+            tol::MODEL_SIZE_ESTIMATE,
+            tol::LARGE_SMALL_SIZE_RATIO,
+            1e-5,
+            1e-5
+        )
+    );
+
+    transform_matrix(&mut k, &mut y, &scale_by(1000.0), true).unwrap();
+
+    // Y carries its own size: the diagonal of a box enclosing its 10000 cube, at most
+    // grown by the cube's 1e-5 tolerance on each side, in the 1e-4 band
+    let diagonal = 10000.0 * 3.0_f64.sqrt();
+    let grown = (10000.0 + 2.0 * 1e-5) * 3.0_f64.sqrt();
+    let y_size = tol::brep_model_size_estimate(&k, &y);
+    assert!(
+        y_size >= diagonal && y_size <= grown * (1.0 + 1e-12),
+        "Y's estimate {y_size}, its cube's diagonal {diagonal}, grown {grown}"
+    );
+    assert_eq!(y.this_model_size_estimate(&k, false), y_size);
+    assert_eq!(
+        tol::brep_zone_tol_3d(&k, &y, tol::SmallTopoType::NormalSize),
+        1e-4
+    );
+    assert_eq!(y.tolerance(), 1e-4);
+    // X and the kernel context are as before the scale
+    assert_eq!(of_x(&k), x_before);
+    assert_eq!(context(&k), context_before);
+}
+
+/// The healer sizes a body from that body. The same plate X is healed through its
+/// tolerance step twice: on a kernel where nothing else happened, and on one where another
+/// box was scaled by 1000 first. Both leave X storing the default estimate with every
+/// tolerance at 1e-5. Before, the second history compared X with the scaled box's
+/// estimate left on the kernel context and stored 50 on X in place of the default (a
+/// value a saved body then carries).
+#[test]
+fn healing_a_body_after_scaling_another_is_as_on_a_fresh_kernel() {
+    use solidcore::geom::tol;
+    use solidcore::heal::face_props::HealerOpType;
+
+    let healed_plate = |scale_another_first: bool| {
+        let mut k = Kernel::default();
+        let mut x =
+            api::create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 100.0, 100.0, 10.0).unwrap();
+        if scale_another_first {
+            let mut y =
+                api::create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+            transform_matrix(&mut k, &mut y, &scale_by(1000.0), true).unwrap();
+        }
+        p1::heal_brep(
+            &mut k,
+            &mut x,
+            HealerOpType::FixTolsizes,
+            None,
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+        let mut tolerances = vec![x.tolerance()];
+        tolerances.extend(
+            p1::vertices(&x, None)
+                .unwrap()
+                .into_iter()
+                .map(|v| vertex::tolerance(&x, v).unwrap()),
+        );
+        tolerances.extend(
+            p1::edges(&x, None)
+                .unwrap()
+                .into_iter()
+                .map(|e| edge::tolerance(&x, e).unwrap()),
+        );
+        (
+            x.this_model_size_estimate(&k, false),
+            x.this_large_small_size_ratio(&k, false),
+            tol::brep_model_size_estimate(&k, &x),
+            tolerances,
+        )
+    };
+    let fresh = healed_plate(false);
+    assert_eq!(fresh.0, tol::USE_DEFAULT);
+    assert_eq!(fresh.1, tol::USE_DEFAULT);
+    assert_eq!(fresh.2, tol::MODEL_SIZE_ESTIMATE);
+    assert_eq!(fresh.3, vec![1e-5; 1 + 8 + 12]);
+    assert_eq!(healed_plate(true), fresh);
 }
