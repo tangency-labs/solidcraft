@@ -1367,7 +1367,7 @@ fn failing_at(stage: &'static str, error: SolidError) -> (FilletExecutive<Handle
 fn stage_errors() -> [SolidError; 5] {
     use crate::error::blend::BlendFailure;
     let over = |cause: SolidError| {
-        crate::error::Failure::new("test::stage", BlendFailure::Failed("the stage failed"))
+        Failure::new("test::stage", BlendFailure::Failed("the stage failed"))
             .caused_by(cause)
             .into_error()
     };
@@ -1391,7 +1391,7 @@ fn assert_failure_keeps(e: &SolidError, cause: &SolidError) {
     let bare = failure();
     assert_eq!(e.operation(), OP, "{e:?}");
     assert_eq!(e.blend_failure(), bare.blend_failure(), "{e:?}");
-    assert_eq!(e.sm_status(), Some(crate::error::SM_ERR), "{e:?}");
+    assert_eq!(e.sm_status(), Some(SM_ERR), "{e:?}");
     assert_eq!(e.upstream_status(), bare.upstream_status(), "{e:?}");
     assert_eq!(e.kind(), bare.kind(), "{e:?}");
     assert_eq!(e.entity(), None, "{e:?}");
