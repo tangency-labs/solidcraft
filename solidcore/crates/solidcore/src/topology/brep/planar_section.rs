@@ -54,7 +54,7 @@ use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::SolverOperation;
-use crate::geom::solution_array::SolutionType;
+use crate::geom::solution_array::{Solution, SolutionType};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::surface_drop_lib::p3::DropSolveContext;
@@ -598,35 +598,56 @@ pub fn create_planar_section_curves(
     })
 }
 
-/// Whether all of `curve` lies on `other` within `tol`: one of the coincidence check's
-/// ranges of values runs from `curve`'s start to its end. A range's end counts as the
-/// curve's end only where the curve's point at it is within `tol` of the curve's own end
-/// point, so a range that stops short by more than `tol` does not cover the curve. Other
-/// solutions, such as the touch a closed `other` reports at its closing point, do not
-/// count against it.
+/// Whether all of `curve` lies on `other` within `tol`: the coincidence check of `curve`
+/// against `other`, read by [`covers`].
 ///
 /// # Errors
 ///
-/// The check's error when it failed and none of the ranges it found covers the curve;
-/// those of the curve's evaluations and of the solutions' parameters.
+/// Those of [`covers`].
 fn lies_on(k: &Kernel, curve: &Curve, other: &Curve, tol: f64) -> Result<bool> {
-    let ivl = curve.natural_interval();
-    let param_tol = 1.0 / 100.0 * (EFF_ZERO_SQRT + ivl.length());
     let (found, status) = curve.global_coincidence_checker_with_partial::<NoObject>(
         k,
-        &ivl,
+        &curve.natural_interval(),
         other,
         &other.natural_interval(),
         tol,
         true,
         [None, None],
     );
+    covers(k, curve, &found.solutions, status, tol)
+}
+
+/// Whether the solutions of a coincidence check of `curve` (`status` its result) cover it
+/// within `tol`: one of their ranges of values runs from `curve`'s start to its end. A
+/// range's end counts as the curve's end only where the curve's point at it is within `tol`
+/// of the curve's own end point, so a range that stops short by more than `tol` does not
+/// cover the curve. Other solutions, such as the touch a closed curve reports at its closing
+/// point, do not count against it. The check keeps the solutions it found before an error,
+/// so a failed check covers the curve when one of them does.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] and cancellation from the check, whatever it found; any other
+/// error of the check when none of its ranges covers the curve; those of the curve's
+/// evaluations and of the solutions' parameters.
+fn covers(
+    k: &Kernel,
+    curve: &Curve,
+    solutions: &[Solution<NoObject>],
+    status: Result<()>,
+    tol: f64,
+) -> Result<bool> {
+    let status = match status {
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        status => status,
+    };
+    let ivl = curve.natural_interval();
+    let param_tol = 1.0 / 100.0 * (EFF_ZERO_SQRT + ivl.length());
     let (start, end) = (
         curve.evaluate_point(k, ivl.min())?,
         curve.evaluate_point(k, ivl.max())?,
     );
-    // (the check keeps the solutions it found before an error)
-    for s in &found.solutions {
+    for s in solutions {
         if s.solution_type != SolutionType::RangeOfValues {
             continue;
         }
@@ -1118,5 +1139,37 @@ mod tests {
             (got[0] - 5.0).abs() < 1e-9 && (got[1] - 10.0).abs() < 1e-9,
             "{got:?}"
         );
+    }
+
+    /// The range of values of a coincidence check from `t0` to `t1` on the checked curve.
+    fn range(t0: f64, t1: f64) -> Solution<NoObject> {
+        let mut s = Solution::new();
+        s.solution_type = SolutionType::RangeOfValues;
+        s.num_variables = 1;
+        s.start.parameters[0] = t0;
+        s.end.parameters[0] = t1;
+        s
+    }
+
+    /// How a coincidence check's result is read, on an arc of radius 10 and angle 1 (on
+    /// [0, 1]): a range over all of it covers it, also when the check then failed (the check
+    /// keeps what it found before an error); with no such range a failed check passes its
+    /// error on instead of reading as "not covered"; and an unported or cancelled check
+    /// passes its error on whatever it found.
+    #[test]
+    fn a_failed_coincidence_check_is_not_read_as_not_covered() {
+        let k = Kernel::default();
+        let tol = 1e-5;
+        let piece = arc(10.0, 1.0);
+        let failed = || Err(SolidError::invalid_input("test", "the check failed"));
+        let unported = || Err(SolidError::unported("test", "test"));
+        let whole = [range(0.0, 1.0)];
+        assert!(covers(&k, &piece, &whole, Ok(()), tol).unwrap());
+        assert!(!covers(&k, &piece, &[], Ok(()), tol).unwrap());
+        assert!(covers(&k, &piece, &whole, failed(), tol).unwrap());
+        assert!(covers(&k, &piece, &[], failed(), tol).is_err());
+        assert!(covers(&k, &piece, &[range(0.0, 0.5)], failed(), tol).is_err());
+        assert!(covers(&k, &piece, &whole, unported(), tol).is_err());
+        assert!(covers(&k, &piece, &[], unported(), tol).is_err());
     }
 }
