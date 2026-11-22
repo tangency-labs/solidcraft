@@ -2754,7 +2754,7 @@ mod tests {
         assert_eq!(literals("fn live() { let tr = crate::i18n::tr; tr(\"Preferences\"); }"), id);
     }
 
-#[test]
+    #[test]
     fn lao_catalog_is_registered_and_translates_keys() {
         install();
         let lo = Locale::for_language("lo");
