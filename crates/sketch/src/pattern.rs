@@ -322,7 +322,9 @@ impl Sketch {
         let curves: std::collections::HashSet<_> = self.curves.iter().map(|c| c.id.as_str()).collect();
         let points: std::collections::HashSet<_> = self.points.iter().map(|p| p.id.as_str()).collect();
         let constraint_ids: std::collections::HashSet<_> = self.constraints.iter().map(|c| c.id.as_str()).collect();
-        let retired: Vec<_> = self
+        // A set, since each pattern is looked up in it twice below. With a list, a design with
+        // many patterns to drop took minutes at every solve.
+        let retired: std::collections::HashSet<_> = self
             .patterns
             .iter()
             .filter(|pattern| {

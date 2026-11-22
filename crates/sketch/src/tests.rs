@@ -2562,6 +2562,54 @@ fn pattern_checks_do_not_search_ids_per_reference() {
     assert!(searches.iter().all(|(_, count)| *count <= 1), "id searches in one check of the patterns {searches:?}");
 }
 
+/// Pruning drops each pattern that names a curve the sketch no longer has, with the relations
+/// its copies made, and keeps every other pattern and constraint. It once looked each pattern up
+/// in a list of the dropped ones, so a design with many patterns to drop took minutes at its
+/// first solve.
+#[test]
+fn pruning_drops_exactly_the_patterns_that_lost_a_curve() {
+    let m = 20_000;
+    let mut sk = Sketch::new();
+    let a = sk.add_point(v(1.0, 0.0), None).unwrap();
+    let line = sk.add_line_pts(0, a, None).unwrap();
+    let c = sk.curves[line].id.clone();
+    let before = sk.constraints.len();
+    sk.constraints.extend((0..m).map(|i| Constraint {
+        id: format!("f{i}"),
+        kind: ConstraintKind::Fix { p: a },
+        param: None,
+        driven: false,
+        text: None,
+    }));
+    sk.patterns.extend((0..m).map(|i| SketchPattern {
+        id: format!("pat{i}"),
+        // Every other pattern copies a curve that is gone.
+        entities: vec![if i % 2 == 0 { c.clone() } else { "gone".into() }],
+        kind: SketchPatternKind::Rectangular {
+            dir: v(1.0, 0.0),
+            dir2: None,
+            direction: Some(c.clone()),
+            direction2: None,
+            count: 2,
+            spacing: 1.0,
+            count2: 1,
+            spacing2: 1.0,
+            alignment: PatternAlignment::Right,
+            alignment2: PatternAlignment::Right,
+            reversed: false,
+            reversed2: false,
+        },
+        count_expression: None,
+        instances: vec![PatternInstance { index: [1, 0], curves: vec![], points: vec![], constraints: vec![format!("f{i}")] }],
+        expressions: Default::default(),
+    }));
+    sk.prune_patterns();
+    let kept: Vec<_> = sk.patterns.iter().map(|p| p.id.clone()).collect();
+    assert_eq!(kept, (0..m).step_by(2).map(|i| format!("pat{i}")).collect::<Vec<_>>());
+    let fixes: Vec<_> = sk.constraints[before..].iter().map(|k| k.id.clone()).collect();
+    assert_eq!(fixes, (0..m).step_by(2).map(|i| format!("f{i}")).collect::<Vec<_>>());
+}
+
 /// Inserting a dense drawing searched the whole sketch for every new id, so the insert took time
 /// in proportion to the square of its size (about 40 s for 60000 lines). A batch searches no
 /// sketch for an id, and gives the points and curves exactly the ids, checks and refusals that
