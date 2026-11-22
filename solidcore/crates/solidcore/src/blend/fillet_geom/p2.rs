@@ -146,13 +146,18 @@
 //!   heading no curve follows is an empty search ([`BlendFailure::SrfSrfHeadingNotFollowed`],
 //!   the heading is the kernel's own); an edge without its curve or a face without its
 //!   surface ([`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::FaceHasNoSurface`]) and a
-//!   split face recorded without its faces are the caller's input. The rest are reviewed
-//!   defects
-//!   ([`BlendFailure::Defect`]) whose reasons are the `const`s at the end of the file: an
-//!   object the kernel built or linked that is not there (`SM_ERR_NULL_POINTER` for a
-//!   `NER`), an evaluation without the derivatives it was asked for, a vertex without the
-//!   geometries its kind joins, and a drop or closest point over a bounded domain, which
-//!   has a minimum, finding none (`SM_ERR`).
+//!   split face recorded without its faces are the caller's input. So is every link of
+//!   the fillet structures the routines are given, which a caller can build with the
+//!   public API (`FilletBrep::new`, `insert_fillet_vertex`, `set_fillet_corner`,
+//!   `add_geom`, a caller's solvers and corners): a vertex without its corner
+//!   ([`BlendFailure::FilletVertexWithoutCorner`]) and any other link that is not there or
+//!   not as its kind needs ([`BlendFailure::FilletSetUpInvalid`], naming the link;
+//!   `SM_ERR_NULL_POINTER` for a `NER`, else `SM_ERR`). The rest are reviewed defects
+//!   ([`BlendFailure::Defect`]) whose reasons are the `const`s at the end of the file, each
+//!   about state the kernel itself just built or computed: an evaluation without the
+//!   derivatives it was asked for, an index or element that the code before it guarantees,
+//!   a curve the kernel built of a kind it always builds, and a drop or closest point over a
+//!   bounded domain, which has a minimum, finding none.
 //! - **Fillet corners.** A vertex's or edge's `SmFilletCorner*` is a [`FilletCornerId`]
 //!   that the caller's [`CornerLookup`] resolves to the [`FilletCorner`] (unit
 //!   `blend.fillet_corner_p1`) whose filleted vertex, set-back distance, flags, fillet
@@ -195,7 +200,7 @@ use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, FilletSurfa
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::blend::BlendFailure;
+use crate::error::blend::{BlendFailure, FilletSetUp};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -549,7 +554,7 @@ impl RailSolvers<'_> {
     fn geom_solver(fb: &FilletBrep, g: FilletGeomId) -> Result<FilletSolverId> {
         fb.geom(g)?
             .fillet_solver()
-            .ok_or_else(|| broken_link(OP_RAIL_EU, NO_GEOM_SOLVER))
+            .ok_or_else(|| missing_set_up(OP_RAIL_EU, FilletSetUp::GeomSolver))
     }
 
     fn offset_surface<'a>(
@@ -573,17 +578,17 @@ impl RailSolvers<'_> {
     }
 }
 
-/// `SmFilletSolver::GetEdgeuse(i)`, dereferenced (`NULL` is a [`broken_link`] at the
+/// `SmFilletSolver::GetEdgeuse(i)`, dereferenced (`NULL` is a [`missing_set_up`] at the
 /// caller's line: `SM_ERR_NULL_POINTER`).
 #[track_caller]
 fn solver_edgeuse(fs: &FilletSolver, i: usize, op: &'static str) -> Result<EdgeuseId> {
     match fs.edgeuse(i)? {
         Some(eu) => Ok(eu),
-        None => Err(broken_link(op, NO_SOLVER_EDGEUSE)),
+        None => Err(missing_set_up(op, FilletSetUp::SolverEdgeUse)),
     }
 }
 
-/// `SmFilletSolver::GetSurface(i)`, dereferenced (`NULL` is a [`broken_link`] at the
+/// `SmFilletSolver::GetSurface(i)`, dereferenced (`NULL` is a [`missing_set_up`] at the
 /// caller's line).
 #[track_caller]
 fn solver_surface<'s>(
@@ -593,7 +598,7 @@ fn solver_surface<'s>(
 ) -> Result<&'s crate::surface::offset_surface::OffsetSurface> {
     match fs.surface(i)? {
         Some(slot) => Ok(&slot.surface.surface),
-        None => Err(broken_link(op, NO_SOLVER_SURFACE)),
+        None => Err(missing_set_up(op, FilletSetUp::SolverOffsetSurface)),
     }
 }
 
@@ -639,6 +644,38 @@ fn face_without_surface(op: &'static str, f: FaceId) -> SolidError {
 #[track_caller]
 fn broken_link(op: &'static str, why: &'static str) -> SolidError {
     Failure::new(op, BlendFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// `NER(p)` of a link of the fillet structures the routine is given (the fillet body, its
+/// corners and solvers, which a caller can build with the public API and leave without it):
+/// [`BlendFailure::FilletSetUpInvalid`] naming the link, keeping upstream's
+/// `SM_ERR_NULL_POINTER` (guide section 6, rule 12).
+#[track_caller]
+fn missing_set_up(op: &'static str, part: FilletSetUp) -> SolidError {
+    Failure::new(op, BlendFailure::FilletSetUpInvalid(part))
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// [`missing_set_up`] where upstream returns `SM_ERR`: a set-up the routine is given that
+/// is not as its kind needs (a vertex without the geometries its kind joins, an edge
+/// outside its corner, ...).
+#[track_caller]
+fn invalid_set_up(op: &'static str, part: FilletSetUp) -> SolidError {
+    Failure::new(op, BlendFailure::FilletSetUpInvalid(part))
+        .with_status(SM_ERR)
+        .into_error()
+}
+
+/// The fillet vertex a vertex calculator runs on has no fillet corner (`NER` of
+/// `GetFilletCorner()`): [`BlendFailure::FilletVertexWithoutCorner`], keeping upstream's
+/// `SM_ERR_NULL_POINTER`. The calculators are public, and a caller's fillet vertex need not
+/// have a corner.
+#[track_caller]
+fn no_corner(op: &'static str) -> SolidError {
+    Failure::new(op, BlendFailure::FilletVertexWithoutCorner)
         .with_status(SM_ERR_NULL_POINTER)
         .into_error()
 }
@@ -2214,8 +2251,10 @@ fn plane_rail_crossings(a: PlaneRail, b: PlaneRail) -> [Option<Point2>; 2] {
 /// the side face, read from that face's offset surface and taken within the common face.
 ///
 /// # Errors
-/// A [`BlendFailure::Defect`] for a missing end or edge curve, an edge curve without a
-/// second derivative or a point that drops onto a face nowhere; those of the evaluations, drops and unitisations.
+/// A [`BlendFailure::Defect`] for a missing end, an edge curve without a second derivative
+/// or a point that drops onto a face nowhere; [`BlendFailure::EdgeWithoutCurve`] for an edge
+/// without its curve and [`BlendFailure::FilletSetUpInvalid`] for no common face; those of
+/// the evaluations, drops and unitisations.
 fn second_order_rail_guess(
     k: &Kernel,
     target: &Brep,
@@ -2286,7 +2325,7 @@ fn face_surface<'b>(
     face: Option<FaceId>,
     op: &'static str,
 ) -> Result<&'b Surface> {
-    let f = face.ok_or_else(|| broken_link(op, FACE_NOT_GIVEN))?;
+    let f = face.ok_or_else(|| missing_set_up(op, FilletSetUp::PointClassFace))?;
     face2::surface(target, f)?.ok_or_else(|| face_without_surface(op, f))
 }
 
@@ -2295,7 +2334,7 @@ impl FilletBrep {
     fn geom_solver_id(&self, g: FilletGeomId, op: &'static str) -> Result<FilletSolverId> {
         self.geom(g)?
             .fillet_solver()
-            .ok_or_else(|| broken_link(op, NO_GEOM_SOLVER))
+            .ok_or_else(|| missing_set_up(op, FilletSetUp::GeomSolver))
     }
 
     /// `GetVUAtRailEnd(pFG)->GetTsectPnt()`, dereferenced: the vertex use and a copy of
@@ -2310,7 +2349,7 @@ impl FilletBrep {
         // pVU->GetTsectPnt() of a NULL vertex use is dereferenced
         let vu = self
             .vu_at_rail_end(v, g, exclude, None)?
-            .ok_or_else(|| broken_link(op, NO_RAIL_END_VU))?;
+            .ok_or_else(|| missing_set_up(op, FilletSetUp::RailEndVertexUse))?;
         Ok((vu, self.fillet_vertexuse(vu)?.tsect_pnt().clone()))
     }
 
@@ -2391,10 +2430,10 @@ impl FilletBrep {
         let corner = self
             .fillet_vertex(v)?
             .fillet_corner()
-            .ok_or_else(|| broken_link(OP, NO_CORNER))?;
+            .ok_or_else(|| no_corner(OP))?;
         let geoms = self.vertex_fillet_geoms(v)?;
         let [fillet_geom1, fillet_geom2] = *geoms.as_slice() else {
-            return Err(defect(OP, NO_GEOM_AT_VERTEX));
+            return Err(invalid_set_up(OP, FilletSetUp::VertexGeoms));
         };
 
         let cp_vertex = corners.corner(corner)?.filleted_vertex();
@@ -2417,12 +2456,14 @@ impl FilletBrep {
         for ((slot, end), (fs, index)) in uv.iter_mut().zip(ends.iter_mut()).zip(pairs) {
             let offset_distance = solver_surface(fs, index, OP)?.offset_distance().abs();
             let eu = solver_edgeuse(fs, index, OP)?;
-            let e = eu1::edge(target, eu)?.ok_or_else(|| broken_link(OP, NO_EDGE))?;
+            let e = eu1::edge(target, eu)?
+                .ok_or_else(|| missing_set_up(OP, FilletSetUp::EdgeUseEdge))?;
             let ivl = edge::interval(target, e)?;
             let curve = edge::curve(target, e)?.ok_or_else(|| edge_without_curve(OP, e))?;
             let owner_zone_tol_3d = Some(edge::tolerance(target, e)?);
 
-            let vu = eu1::vertexuse(target, eu)?.ok_or_else(|| broken_link(OP, NO_VERTEXUSE))?;
+            let vu = eu1::vertexuse(target, eu)?
+                .ok_or_else(|| missing_set_up(OP, FilletSetUp::EdgeUseVertexUse))?;
             let pv = vertexuse_unit::vertex(target, vu)?;
             let orient = eu1::orientation(target, eu)?;
             let from_min = (pv == cp_vertex && orient == OrientType::Same)
@@ -2454,7 +2495,7 @@ impl FilletBrep {
             let trim_curve = eu1::uv_trim_curve(target, eu)?
                 .0
                 .filter(|c| is_b_spline_kind(c))
-                .ok_or_else(|| broken_link(OP, NO_UV_TRIM))?;
+                .ok_or_else(|| missing_set_up(OP, FilletSetUp::UvTrimCurve))?;
             *slot = trim_curve.evaluate_point(k, offset_param)?;
         }
 
@@ -2511,7 +2552,7 @@ impl FilletBrep {
                     .at(EntityRef::Face(face))
                     .into_error(),
                 // no common face: a stop of the solve all the same, keeping `SM_ERR`
-                None => defect(OP, RAIL_RAIL_FACE),
+                None => invalid_set_up(OP, FilletSetUp::PointClassFace),
             });
         }
 
@@ -2652,7 +2693,7 @@ impl FilletBrep {
         let corner = self
             .fillet_vertex(v)?
             .fillet_corner()
-            .ok_or_else(|| broken_link(OP, NO_CORNER))?;
+            .ok_or_else(|| no_corner(OP))?;
 
         // get original Brep vertex (or the side edge's near end)
         let cp_vertex = match near {
@@ -2665,7 +2706,9 @@ impl FilletBrep {
 
         // check state - at least 1 railEdge must be connected to this vertex
         let total_geoms = geoms.len();
-        let first = *geoms.first().ok_or_else(|| defect(OP, NO_GEOM_AT_VERTEX))?;
+        let first = *geoms
+            .first()
+            .ok_or_else(|| invalid_set_up(OP, FilletSetUp::VertexGeoms))?;
         let mut fillet_geom1 = Some(first);
         let mut fillet_geom2 = if total_geoms == 2 {
             geoms.get(1).copied()
@@ -2680,8 +2723,10 @@ impl FilletBrep {
         let vu1 = self.vu_at_rail_end(v, Some(first), None, None)?;
 
         // Set dGuessEdgeParameters to run from one edgeEnd to the other
-        let side_eu1 = side_eu1.ok_or_else(|| broken_link(OP, NO_SIDE_EDGEUSE))?;
-        let side_edge = eu1::edge(target, side_eu1)?.ok_or_else(|| broken_link(OP, NO_EDGE))?;
+        let side_eu1 =
+            side_eu1.ok_or_else(|| missing_set_up(OP, FilletSetUp::PointClassEdgeUse))?;
+        let side_edge = eu1::edge(target, side_eu1)?
+            .ok_or_else(|| missing_set_up(OP, FilletSetUp::EdgeUseEdge))?;
         let ivl = edge::interval(target, side_edge)?;
 
         // side edgeuse was carefully selected based on its orientation
@@ -2840,7 +2885,7 @@ impl FilletBrep {
                 }
             }
 
-            let vu1 = vu1.ok_or_else(|| broken_link(OP, NO_RAIL_END_VU))?;
+            let vu1 = vu1.ok_or_else(|| missing_set_up(OP, FilletSetUp::RailEndVertexUse))?;
             let mut tsect1 = self.fillet_vertexuse(vu1)?.tsect_pnt().clone();
             // Not upstream (#13538): the rail's end continues the round from its section at
             // the corner, so the search starts where that section touches the side edge, not
@@ -3051,7 +3096,7 @@ impl FilletBrep {
             let uv = tsect1.uv_pos(srf(rail_index, OP)?);
             let base = solvers
                 .offset_surface(self, g1, rail_index)?
-                .ok_or_else(|| broken_link(OP, NO_OFFSET_SURFACE))?
+                .ok_or_else(|| missing_set_up(OP, FilletSetUp::RailOffsetSurface))?
                 .base_surface();
             // Not upstream (WR-630;
             // the fork's tangency-labs/smlib@3f22e97): on the base surface continued, as
@@ -3061,7 +3106,8 @@ impl FilletBrep {
             let pnt = with_out_of_bounds_enabled_in_place(base, || base.evaluate_point(k, uv))?;
 
             // project it onto the side edge's curve
-            let side_e = eu1::edge(target, side_eu1)?.ok_or_else(|| broken_link(OP, NO_EDGE))?;
+            let side_e = eu1::edge(target, side_eu1)?
+                .ok_or_else(|| missing_set_up(OP, FilletSetUp::EdgeUseEdge))?;
             let curve =
                 edge::curve(target, side_e)?.ok_or_else(|| edge_without_curve(OP, side_e))?;
             let (_found, solution) = curve.local_point_solve::<()>(
@@ -3092,7 +3138,7 @@ impl FilletBrep {
                 let other_index = other_srf(rail_index, OP)?.index();
                 let other_surf = solvers
                     .offset_surface(self, g1, other_index)?
-                    .ok_or_else(|| broken_link(OP, NO_OFFSET_SURFACE))?
+                    .ok_or_else(|| missing_set_up(OP, FilletSetUp::RailOffsetSurface))?
                     .base_surface();
                 let mut other_uv = tsect1.uv_pos(srf(other_index, OP)?);
                 adjust_uv_on_seam(k, other_surf, bin.binormal, &mut other_uv)?;
@@ -3109,7 +3155,7 @@ impl FilletBrep {
                     continue;
                 }
                 let face = as_face(self.fillet_vertex(mate)?.point_class_object(), OP)?
-                    .ok_or_else(|| broken_link(OP, NO_POINT_CLASS_FACE))?;
+                    .ok_or_else(|| missing_set_up(OP, FilletSetUp::PointClassFace))?;
                 let other_index = other_srf(rail_index, OP)?;
                 let face = rolled_face_of(self, solvers, g1, other_index.index())?.unwrap_or(face);
                 let uv1 = tsect1.uv_pos(other_index);
@@ -3127,7 +3173,8 @@ impl FilletBrep {
             let side_eu2 = eu1::radial(target, side_eu1)?;
             // its status is ignored upstream; fork 9b7cd48 passes this on (SER)
             // upstream dereferences a NULL side edge use there
-            let side_eu2 = side_eu2.ok_or_else(|| broken_link(OP, NO_RADIAL))?;
+            let side_eu2 =
+                side_eu2.ok_or_else(|| missing_set_up(OP, FilletSetUp::RadialEdgeUse))?;
             let other_rail_index =
                 self.rail_index_of_side_eu_resolved(g2, side_eu2, target, &|id| {
                     solvers.solver(id)
@@ -3193,7 +3240,7 @@ impl FilletBrep {
                 let other_index = other_srf(other_rail_index, OP)?.index();
                 let other_surf = solvers
                     .offset_surface(self, g2, other_index)?
-                    .ok_or_else(|| broken_link(OP, NO_OFFSET_SURFACE))?
+                    .ok_or_else(|| missing_set_up(OP, FilletSetUp::RailOffsetSurface))?
                     .base_surface();
                 let mut other_uv = tsect2.uv_pos(srf(other_index, OP)?);
                 adjust_uv_on_seam(k, other_surf, bin.binormal, &mut other_uv)?;
@@ -3213,7 +3260,7 @@ impl FilletBrep {
                     continue;
                 }
                 let face = as_face(self.fillet_vertex(mate)?.point_class_object(), OP)?
-                    .ok_or_else(|| broken_link(OP, NO_POINT_CLASS_FACE))?;
+                    .ok_or_else(|| missing_set_up(OP, FilletSetUp::PointClassFace))?;
                 let other_index = other_srf(other_rail_index, OP)?;
                 let face = rolled_face_of(self, solvers, g2, other_index.index())?.unwrap_or(face);
                 let uv1 = tsect2.uv_pos(other_index);
@@ -3299,17 +3346,20 @@ impl FilletBrep {
         let corner = self
             .fillet_vertex(v)?
             .fillet_corner()
-            .ok_or_else(|| broken_link(OP, NO_CORNER))?;
+            .ok_or_else(|| no_corner(OP))?;
         let cp_vertex = corners.corner(corner)?.filleted_vertex();
 
         // Determine where the cross-sectional plane is
         let geoms = self.vertex_fillet_geoms(v)?;
         let total_geoms = geoms.len();
-        let fillet_geom1 = *geoms.first().ok_or_else(|| defect(OP, NO_GEOM_AT_VERTEX))?;
+        let fillet_geom1 = *geoms
+            .first()
+            .ok_or_else(|| invalid_set_up(OP, FilletSetUp::VertexGeoms))?;
         let s1 = self.geom_solver_id(fillet_geom1, OP)?;
         let fs1 = solvers.solver(s1)?;
         let eu = solver_edgeuse(fs1, 0, OP)?;
-        let e = eu1::edge(target, eu)?.ok_or_else(|| broken_link(OP, NO_EDGE))?;
+        let e =
+            eu1::edge(target, eu)?.ok_or_else(|| missing_set_up(OP, FilletSetUp::EdgeUseEdge))?;
         let ivl = edge::interval(target, e)?;
         let owner_zone_tol_3d = Some(edge::tolerance(target, e)?);
         let mut vert_at_edge_start = true;
@@ -3337,14 +3387,14 @@ impl FilletBrep {
         // the vertex's UV points on the solver's two faces
         let vertexuses = match cp_vertex {
             Some(cv) => vertex::vertexuses(target, cv)?,
-            None => return Err(broken_link(OP, NO_FILLETED_VERTEX)),
+            None => return Err(missing_set_up(OP, FilletSetUp::CornerVertex)),
         };
         let mut uvs = [Point2::new(0.0, 0.0); 2];
         for (i, slot) in uvs.iter_mut().enumerate() {
             let face = eu1::face(target, solver_edgeuse(fs1, i, OP)?)?;
             for &vu in &vertexuses {
                 let fu = vertexuse_unit::faceuse(target, vu)?
-                    .ok_or_else(|| broken_link(OP, NO_FACEUSE))?;
+                    .ok_or_else(|| missing_set_up(OP, FilletSetUp::VertexUseFaceUse))?;
                 if target.faceuse(fu)?.face == face {
                     // its status is ignored upstream (the point is then whatever the
                     // call left; here the previous value); fork 9b7cd48 passes this on
@@ -3555,26 +3605,26 @@ impl FilletBrep {
         let corner = self
             .fillet_vertex(v)?
             .fillet_corner()
-            .ok_or_else(|| broken_link(OP, NO_CORNER))?;
+            .ok_or_else(|| no_corner(OP))?;
         let mate = self
             .fillet_vertex(v)?
             .mate(0)
-            .ok_or_else(|| broken_link(OP, NO_MATE))?;
+            .ok_or_else(|| missing_set_up(OP, FilletSetUp::Mate))?;
         let first_face = as_face(self.fillet_vertex(v)?.point_class_object(), OP)?
-            .ok_or_else(|| broken_link(OP, NO_POINT_CLASS_FACE))?;
+            .ok_or_else(|| missing_set_up(OP, FilletSetUp::PointClassFace))?;
         let other_face = as_face(self.fillet_vertex(mate)?.point_class_object(), OP)?
-            .ok_or_else(|| broken_link(OP, NO_POINT_CLASS_FACE))?;
+            .ok_or_else(|| missing_set_up(OP, FilletSetUp::PointClassFace))?;
         let owner = corners.corner(corner)?;
         let at_cliff = owner
             .blend
             .is_some_and(crate::blend::blend_corner::BlendCorner::is_cliff_join);
         let cp_vertex = owner
             .filleted_vertex()
-            .ok_or_else(|| broken_link(OP, NO_FILLETED_VERTEX))?;
+            .ok_or_else(|| missing_set_up(OP, FilletSetUp::CornerVertex))?;
 
         let geoms = self.vertex_fillet_geoms(v)?;
         if geoms.is_empty() {
-            return Err(defect(OP, NO_GEOM_AT_VERTEX));
+            return Err(invalid_set_up(OP, FilletSetUp::VertexGeoms));
         }
 
         // the plane: through the vertex, square to the first blend's edge
@@ -3591,7 +3641,8 @@ impl FilletBrep {
             let sid = self.geom_solver_id(g, OP)?;
             let fs = solvers.solver(sid)?;
             let eu = solver_edgeuse(fs, 0, OP)?;
-            let e = eu1::edge(target, eu)?.ok_or_else(|| broken_link(OP, NO_EDGE))?;
+            let e = eu1::edge(target, eu)?
+                .ok_or_else(|| missing_set_up(OP, FilletSetUp::EdgeUseEdge))?;
             let curve = edge::curve(target, e)?
                 .ok_or_else(|| edge_without_curve(OP, e))?
                 .clone();
@@ -3648,7 +3699,7 @@ impl FilletBrep {
                     let tangency = fs.tangency_tolerance;
                     let foot = b.point + bin;
                     let Some(from) = eu1::face(target, side_eu)? else {
-                        return Err(defect(OP, EDGEUSE_NOT_IN_FACE));
+                        return Err(invalid_set_up(OP, FilletSetUp::EdgeUseFace));
                     };
                     let seed = crate::blend::fillet_tangent_rollover::rolled_edge_point(
                         k, target, from, onto, foot, tangency,
@@ -3883,17 +3934,18 @@ impl FilletBrep {
         let corner = self
             .fillet_vertex(v)?
             .fillet_corner()
-            .ok_or_else(|| broken_link(OP, NO_CORNER))?;
+            .ok_or_else(|| no_corner(OP))?;
         let cp_vertex = corners.corner(corner)?.filleted_vertex();
 
         let geoms = self.vertex_fillet_geoms(v)?;
         let [fillet_geom] = *geoms.as_slice() else {
-            return Err(defect(OP, NO_GEOM_AT_VERTEX));
+            return Err(invalid_set_up(OP, FilletSetUp::VertexGeoms));
         };
         let si = self.geom_solver_id(fillet_geom, OP)?;
         let fs = solvers.solver(si)?;
         let eu = solver_edgeuse(fs, 0, OP)?;
-        let e = eu1::edge(target, eu)?.ok_or_else(|| broken_link(OP, NO_EDGE))?;
+        let e =
+            eu1::edge(target, eu)?.ok_or_else(|| missing_set_up(OP, FilletSetUp::EdgeUseEdge))?;
         // each edge's own (the fork's 61547af, GetSetBackDistAlong; the corner's one setback
         // elsewhere)
         let set_back_dist = corners.corner(corner)?.set_back_dist_along(target, e)?;
@@ -3958,7 +4010,7 @@ impl FilletBrep {
             return Ok(());
         }
         let face1 = as_face(self.fillet_vertex(v)?.point_class_object(), OP)?
-            .ok_or_else(|| broken_link(OP, NO_POINT_CLASS_FACE))?;
+            .ok_or_else(|| missing_set_up(OP, FilletSetUp::PointClassFace))?;
         let mut rail_index = 1;
         if eu1::face(target, eu)? == Some(face1) {
             rail_index = 0;
@@ -4088,24 +4140,24 @@ impl FilletBrep {
                 let index = fillet_edges
                     .iter()
                     .position(|&x| x == e)
-                    .ok_or_else(|| defect(OP, EDGE_NOT_AT_CORNER))?;
+                    .ok_or_else(|| invalid_set_up(OP, FilletSetUp::InterpolationEdgeAtCorner))?;
                 let test_edge = *fillet_edges
                     .get((index + 2) % total_edges)
                     .ok_or_else(|| defect(OP, INDEX_IN_LIST))?;
                 if self.fillet_edge(test_edge)?.fillet_edge_type() != FilletEdgeType::CrossSection {
-                    return Err(defect(OP, OPPOSITE_NOT_SECTION));
+                    return Err(invalid_set_up(OP, FilletSetUp::OppositeCrossSection));
                 }
                 let prim_eu = primary_edgeuse(self.brep(), test_edge)?
-                    .ok_or_else(|| broken_link(OP, NO_PRIMARY_EDGEUSE))?;
+                    .ok_or_else(|| missing_set_up(OP, FilletSetUp::PrimaryEdgeUse))?;
                 let fillet_geom = self
                     .fillet_edgeuse(prim_eu)?
                     .fillet_geom()
-                    .ok_or_else(|| broken_link(OP, NO_FILLET_GEOM_OF_EU))?;
+                    .ok_or_else(|| missing_set_up(OP, FilletSetUp::CrossSectionGeom))?;
                 let id = self.geom_solver_id(fillet_geom, OP)?;
                 let fsg = solvers
                     .solver(id, OP)?
                     .fillet_surface_generator()
-                    .ok_or_else(|| broken_link(OP, NO_GENERATOR))?;
+                    .ok_or_else(|| missing_set_up(OP, FilletSetUp::SurfaceGenerator))?;
                 fsg_type = fsg.fillet_surface_generator_type();
                 num_derivatives = match fsg_type {
                     FilletSurfaceGeneratorType::Linear => 0,
@@ -4131,15 +4183,15 @@ impl FilletBrep {
         // sPntVec[4]: at most three derivatives are read
         let num_derivatives = num_derivatives.min(3);
 
-        let start_fv =
-            edge::vertex(self.brep(), e)?.ok_or_else(|| broken_link(OP, NO_EDGE_VERTEX))?;
+        let start_fv = edge::vertex(self.brep(), e)?
+            .ok_or_else(|| missing_set_up(OP, FilletSetUp::EdgeVertices))?;
         let end_fv = edge::other_vertex(self.brep(), e, Some(start_fv))?
-            .ok_or_else(|| broken_link(OP, NO_EDGE_VERTEX))?;
+            .ok_or_else(|| missing_set_up(OP, FilletSetUp::EdgeVertices))?;
 
         let face = self
             .fillet_edge(e)?
             .original_face()
-            .ok_or_else(|| broken_link(OP, NO_ORIGINAL_FACE))?;
+            .ok_or_else(|| missing_set_up(OP, FilletSetUp::OriginalFace))?;
         // the face's own surface (evaluated as a copy that keeps its owner and the face
         // tolerance: the drops below make its trimmed surface cache on `target`
         // through the face, as `smsurf_GetSurfaceCache` reaches `GetFace()`; the cubic
@@ -4186,10 +4238,10 @@ impl FilletBrep {
         // Get "incoming" rail-curve parameter at start vertex
         let rail1 = self
             .first_rail_at(start_fv)?
-            .ok_or_else(|| broken_link(OP, NO_FIRST_RAIL))?;
+            .ok_or_else(|| missing_set_up(OP, FilletSetUp::InterpolationEndRail))?;
         let eu1_id = primary_edgeuse(self.brep(), rail1)?
             .and_then(|p| eu1::mate(self.brep(), p).ok().flatten())
-            .ok_or_else(|| broken_link(OP, NO_RAIL_MATE_EU))?;
+            .ok_or_else(|| missing_set_up(OP, FilletSetUp::PrimaryEdgeUseMate))?;
         let mut curve1: Option<Curve> = eu1::uv_trim_curve(self.brep(), eu1_id)?.0.cloned();
         if !create_crv_on_3d && curve1.is_none() {
             create_crv_on_3d = true;
@@ -4204,7 +4256,7 @@ impl FilletBrep {
             let uv = self.fillet_vertex(start_fv)?.original_uv();
             start_pnt = Point3::new(uv.x, uv.y, 0.0);
         }
-        let curve1 = curve1.ok_or_else(|| broken_link(OP, NO_RAIL_CURVE))?;
+        let curve1 = curve1.ok_or_else(|| missing_set_up(OP, FilletSetUp::RailCurve))?;
 
         let mut dropping_tol = tol;
         if !create_crv_on_3d {
@@ -4228,7 +4280,7 @@ impl FilletBrep {
                 }
                 scale *= 10.0;
             }
-            Err(defect(OP, RAIL_END_NO_DROP))
+            Err(invalid_set_up(OP, FilletSetUp::RailEndOffRail))
         };
         let param1 = drop_onto(&curve1, start_pnt)?;
 
@@ -4240,10 +4292,10 @@ impl FilletBrep {
         // Get "incoming" rail-curve parameter at end vertex
         let rail2 = self
             .first_rail_at(end_fv)?
-            .ok_or_else(|| broken_link(OP, NO_FIRST_RAIL))?;
+            .ok_or_else(|| missing_set_up(OP, FilletSetUp::InterpolationEndRail))?;
         let eu2_id = primary_edgeuse(self.brep(), rail2)?
             .and_then(|p| eu1::mate(self.brep(), p).ok().flatten())
-            .ok_or_else(|| broken_link(OP, NO_RAIL_MATE_EU))?;
+            .ok_or_else(|| missing_set_up(OP, FilletSetUp::PrimaryEdgeUseMate))?;
         let mut curve2: Option<Curve> = eu1::uv_trim_curve(self.brep(), eu2_id)?.0.cloned();
         if !create_crv_on_3d && curve2.is_none() {
             create_crv_on_3d = true;
@@ -4259,7 +4311,7 @@ impl FilletBrep {
             let uv = self.fillet_vertex(end_fv)?.original_uv();
             end_pnt = Point3::new(uv.x, uv.y, 0.0);
         }
-        let curve2 = curve2.ok_or_else(|| broken_link(OP, NO_RAIL_CURVE))?;
+        let curve2 = curve2.ok_or_else(|| missing_set_up(OP, FilletSetUp::RailCurve))?;
         let param2 = drop_onto(&curve2, end_pnt)?;
 
         let orient2 = eu1::orientation(self.brep(), eu2_id)?;
@@ -4386,8 +4438,19 @@ impl FilletBrep {
                         handle,
                     },
                 )?;
+                // the UV curve may cross the seam of a closed surface or leave its
+                // domain (the 2D interpolant is built in UV), so the re-drop need not
+                // give one curve
                 if uv_curves.len() != 1 {
-                    return Err(defect(OP, REDROP_NOT_ONE));
+                    return Err(Failure::new(
+                        OP,
+                        BlendFailure::InterpolantDropsToCurves {
+                            face,
+                            curves: uv_curves.len(),
+                        },
+                    )
+                    .at(EntityRef::Face(face))
+                    .into_error());
                 }
                 uv_curve = uv_curves.into_iter().next();
             }
@@ -4412,7 +4475,7 @@ impl FilletBrep {
                         |fb: &Self, fv: VertexId| -> Result<FilletSolverId> {
                             let geoms = fb.vertex_fillet_geoms(fv)?;
                             let [g] = *geoms.as_slice() else {
-                                return Err(defect(OP, NOT_ONE_GEOM_AT_END));
+                                return Err(invalid_set_up(OP, FilletSetUp::VertexGeoms));
                             };
                             let id = fb.geom_solver_id(g, OP)?;
                             solvers.solver(id, OP)?;
@@ -4447,7 +4510,7 @@ impl FilletBrep {
                     let corner_vertex = corners
                         .corner(corner)?
                         .filleted_vertex()
-                        .ok_or_else(|| broken_link(OP, NO_FILLETED_VERTEX))?;
+                        .ok_or_else(|| missing_set_up(OP, FilletSetUp::CornerVertex))?;
                     // WR-300 (the fork's tangency-labs/smlib@465b62b): the rails' meeting
                     // point holds the radii only at a corner calculated as constant radius.
                     let hold_end_radii = the_corner.is_calc_as_const_rad();
@@ -4494,7 +4557,7 @@ impl FilletBrep {
         set_edge_curve(self.brep_mut(), e, Some(curve_3d))?;
         let mate_eu = primary_edgeuse(self.brep(), e)?
             .and_then(|p| eu1::mate(self.brep(), p).ok().flatten())
-            .ok_or_else(|| broken_link(OP, NO_RAIL_MATE_EU))?;
+            .ok_or_else(|| missing_set_up(OP, FilletSetUp::PrimaryEdgeUseMate))?;
         self.set_edgeuse_uv_curve(mate_eu, uv_curve, true, true)?;
         Ok(())
     }
@@ -4584,67 +4647,14 @@ fn find_stepoff_uv(
 
 // The reviewed defects' reasons (TE-B-02, #19810), one per reason, shared by its sites.
 
-/// A fillet geometry's solver.
-const NO_GEOM_SOLVER: &str =
-    "a fillet geometry's solver is set when the geometry is built for it, so it has one";
-/// A solver's edge use.
-const NO_SOLVER_EDGEUSE: &str =
-    "a fillet solver's two edge uses are set when it is built for its fillet edge";
-/// A solver's offset surface.
-const NO_SOLVER_SURFACE: &str =
-    "a fillet solver's two offset surfaces are set when it is built for its fillet edge";
-/// A rail's offset surface through the geometry or its solver.
-const NO_OFFSET_SURFACE: &str =
-    "a fillet geometry's rails each have an offset surface, its own or its solver's";
 /// A derivative list shorter than its evaluation's order.
 const SHORT_DERIVATIVES: &str =
     "the rails' derivative lists hold the point and each derivative their evaluations were asked for";
 /// An evaluation without what it was asked for.
 const SHORT_EVALUATION: &str =
     "an evaluation asked for n derivatives returns the point and n derivatives";
-/// An edge use without its edge.
-const NO_EDGE: &str = "an edge use of the body belongs to an edge";
-/// An edge use without its vertex use.
-const NO_VERTEXUSE: &str = "an edge use of the body starts at a vertex use";
-/// A vertex use without its face use.
-const NO_FACEUSE: &str = "a vertex use of a face's loop lies in that face's face use";
-/// A solver's edge use outside every face.
-const EDGEUSE_NOT_IN_FACE: &str = "a fillet solver's edge use lies in a face of the body";
-/// A vertex the calculators run on without its corner.
-const NO_CORNER: &str =
-    "the fillet vertex calculators run on the vertices of a corner, whose build records it on each";
-/// A corner without the body vertex it rounds.
-const NO_FILLETED_VERTEX: &str = "a fillet corner records the body vertex it rounds";
-/// A rail/rail vertex without the face its rails share.
-const RAIL_RAIL_FACE: &str =
-    "a rail/rail vertex is classified on the face both rails lie on when the corner sets it up";
-/// A face asked for that the caller did not resolve.
-const FACE_NOT_GIVEN: &str =
-    "the face whose surface is read is the vertex's point class or the rails' common face, set with the vertex";
-/// A rail's end without its vertex use.
-const NO_RAIL_END_VU: &str =
-    "a fillet vertex at a rail's end has the vertex use the rail's edge ends at";
-/// An edge use's UV trim curve that was just made.
-const NO_UV_TRIM: &str =
-    "the edge use's UV trim curve was just fetched or made, and the made ones are B-spline curves";
-/// A vertex without the fillet geometries its kind joins.
-const NO_GEOM_AT_VERTEX: &str =
-    "a fillet vertex is given its kind by the fillet geometries that end at it, so it has the ones its kind joins";
 /// The second of the geometries counted above.
 const SECOND_GEOM: &str = "a vertex with more than one fillet geometry has a second";
-/// An interpolation end without its one geometry.
-const NOT_ONE_GEOM_AT_END: &str =
-    "an end of a rail/rail interpolation curve at an N by N concave corner is a rail's end, with its one fillet geometry";
-/// A vertex on a side edge without that edge use.
-const NO_SIDE_EDGEUSE: &str = "a fillet vertex on a side edge has that edge use as its point class";
-/// A vertex on a face without that face.
-const NO_POINT_CLASS_FACE: &str =
-    "a fillet vertex on a face (and its mate's) has that face as its point class";
-/// A Join's vertex without its mate.
-const NO_MATE: &str = "a Join's fillet vertex has its mate on the section's other face";
-/// A side edge use without its radial.
-const NO_RADIAL: &str =
-    "a side edge shared by two fillet geometries has an edge use on each of their faces";
 /// A drop over a bounded domain that found no point.
 const FOOT_NO_DROP: &str =
     "a drop onto a surface over its natural domain minimises the distance over a bounded domain, which has a minimum";
@@ -4653,41 +4663,10 @@ const NO_CLOSEST_POINT: &str =
     "the closest points on an offset surface over its natural domain include its minimum, which exists";
 /// A rail's edge end not recorded before the guess.
 const NO_RAIL_END: &str = "both rails' edge ends are recorded before their crossing is guessed";
-/// The interpolated edge outside its corner's edges.
-const EDGE_NOT_AT_CORNER: &str =
-    "a rail/rail interpolation edge is one of its corner's fillet edges";
 /// An index modulo the list's length.
 const INDEX_IN_LIST: &str = "an index modulo a list's length is in the list";
-/// The edge opposite an interpolation edge that is not a cross-section.
-const OPPOSITE_NOT_SECTION: &str =
-    "at a corner of at most four fillet edges the edge opposite a rail/rail interpolation edge is a cross-section";
-/// A cross-section without its geometry.
-const NO_FILLET_GEOM_OF_EU: &str =
-    "a cross-section's primary edge use has the fillet geometry it spans";
-/// A solver without its surface generator.
-const NO_GENERATOR: &str = "a fillet solver has its surface generator once built";
-/// A primary edge use not there.
-const NO_PRIMARY_EDGEUSE: &str = "a fillet edge has its primary edge use";
-/// A fillet edge without its vertices.
-const NO_EDGE_VERTEX: &str = "a fillet edge joins two fillet vertices";
-/// An interpolation edge without its face.
-const NO_ORIGINAL_FACE: &str = "a rail/rail interpolation edge records the face it lies on";
-/// An interpolation end that is no rail's end.
-const NO_FIRST_RAIL: &str =
-    "a fillet vertex at an end of a rail/rail interpolation edge is a rail's end";
-/// A primary edge use without its mate.
-const NO_RAIL_MATE_EU: &str = "a fillet edge's primary edge use has its mate";
-/// A rail without the curve the path reads.
-const NO_RAIL_CURVE: &str =
-    "a rail edge has its 3D curve, and its UV trim curve where the 2D path reads it";
-/// A rail end that does not drop onto its rail.
-const RAIL_END_NO_DROP: &str =
-    "the fillet vertex is the rail's end, so it lies on the rail's curve within the hundredfold tolerance";
 /// A lift that is not a B-spline curve.
 const LIFT_NOT_BSPLINE: &str = "a lifted curve, and the curve built from it, is a B-spline curve";
-/// A re-drop of the kernel's own lifted curve that is not one curve.
-const REDROP_NOT_ONE: &str =
-    "a curve lifted from a UV curve on the surface lies on it, so it drops back as one UV curve";
 /// The interpolant's UV curve not set.
 const NO_UV_CURVE: &str = "the interpolant's UV curve is set on both of its paths";
 /// The interpolant's 3D curve not set.
@@ -5105,15 +5084,16 @@ mod tests {
         fb.insert_fillet_vertex(v, super::super::p1::FilletVertex::new(&k, None));
         let mut target = Brep::new();
         let mut solvers: Vec<FilletSolver> = Vec::new();
-        // #13790, #15034, #19810: each is a reviewed defect (the corner's build records it
-        // on each of its vertices) that keeps the status of the bare `Upstream` it replaced
+        // #13790, #15034, #19810: the caller's input (this vertex, built with the public
+        // API, has no corner), keeping the status of the bare `Upstream` it replaced
         let no_corner = |r: Result<()>, op: &'static str| {
             let e = r.unwrap_err();
             assert_eq!(
                 (e.operation(), e.blend_failure()),
-                (op, Some(&BlendFailure::Defect { why: NO_CORNER }))
+                (op, Some(&BlendFailure::FilletVertexWithoutCorner))
             );
-            assert!(e.is_defect());
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+            assert!(!e.is_defect());
             assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         };
         let none = CornerLookup::default();
@@ -5145,11 +5125,10 @@ mod tests {
             (e.operation(), e.blend_failure()),
             (
                 OP_RAIL_RAIL,
-                Some(&BlendFailure::Defect {
-                    why: NO_GEOM_AT_VERTEX
-                })
+                Some(&BlendFailure::FilletSetUpInvalid(FilletSetUp::VertexGeoms))
             )
         );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(e.upstream_status(), Some(1001));
         let e = fb
             .calc_rail_int_edgeuse(&k, v, None, none, &mut solvers, &mut target)
@@ -5206,12 +5185,11 @@ mod tests {
                 (e.operation(), e.blend_failure()),
                 (
                     expected,
-                    Some(&BlendFailure::Defect {
-                        why: NO_GEOM_AT_VERTEX
-                    })
+                    Some(&BlendFailure::FilletSetUpInvalid(FilletSetUp::VertexGeoms))
                 )
             );
-            assert!(e.is_defect());
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+            assert!(!e.is_defect());
             assert_eq!(e.upstream_status(), Some(1001));
         }
     }
