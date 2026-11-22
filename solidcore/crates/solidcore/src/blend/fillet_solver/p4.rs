@@ -4442,10 +4442,7 @@ mod tests_c6 {
             };
             let mut p = TsectPnt::new();
             let _ = run(&mut ops, k, 1.0, &mut p, previous);
-            assert_eq!(
-                p.point_type == IntersectionPointType::TangentPoint,
-                tangent
-            );
+            assert_eq!(p.point_type == IntersectionPointType::TangentPoint, tangent);
             let g = ops.guesses.first().expect("a finite-difference solve ran");
             (g[0] - 0.5).hypot(g[1] - 0.25)
         };
