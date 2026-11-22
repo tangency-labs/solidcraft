@@ -3609,3 +3609,186 @@ fn a_fin_top_round_whose_seam_lies_in_the_fin_s_side_stays_refused_at_0_93() {
     }
     assert_eq!(b.volume(1e-9).unwrap().to_bits(), before.to_bits());
 }
+
+/// SolidCraft #15767 (j4py's repro): a bar 32 long along y whose section in the xz plane is the
+/// rectangle x = 0..10, z = 0..7 with its corner (10, 7) rounded R3 (axis x = 7, z = 4), the arc
+/// tangent to the wall x = 10 at z = 4; everything below the plane z = 1.9 + 0.11875 y cut away.
+/// The flat wall's height above the bottom falls from 4 at y = -16 to 0.2 at y = 16.
+fn narrowing_wall() -> Body {
+    use solidcore_ops::prism::extrude_planar_regions;
+    use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
+    let v = Vec2::new;
+    let section = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Arc {
+                    center: v(7.0, -4.0),
+                    radius: 3.0,
+                    start: -PI / 2.0,
+                    sweep: PI / 2.0,
+                },
+                Seg2::Line {
+                    a: v(10.0, -4.0),
+                    b: v(10.0, 0.0),
+                },
+                Seg2::Line {
+                    a: v(10.0, 0.0),
+                    b: v(0.0, 0.0),
+                },
+                Seg2::Line {
+                    a: v(0.0, 0.0),
+                    b: v(0.0, -7.0),
+                },
+                Seg2::Line {
+                    a: v(0.0, -7.0),
+                    b: v(7.0, -7.0),
+                },
+            ],
+        },
+        holes: vec![],
+    };
+    let bar = extrude_planar_regions(&Plane::XZ, &[section], -16.0, 16.0).unwrap();
+    let below = Region2 {
+        outer: Loop2::polygon(&[v(-16.0, 0.0), v(-16.0, -2.0), v(16.0, -2.0), v(16.0, 3.8)]),
+        holes: vec![],
+    };
+    let cutter = extrude_planar_regions(&Plane::YZ, &[below], -20.0, 20.0).unwrap();
+    boolean(bar, cutter, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// The slope of [`narrowing_wall`]'s cut, and `q = sqrt(1 + s^2)`: a point `d` above the cut
+/// plane, along its normal `(0, -s, 1) / q`, stands `d q` above it vertically.
+const SLOPE: f64 = 0.11875;
+
+fn slope_q() -> f64 {
+    (1.0 + SLOPE * SLOPE).sqrt()
+}
+
+/// [`narrowing_wall`]'s volume: the section's area `70 - 9 (1 - pi / 4)` times 32, less the cut
+/// away below the plane, whose mean height over the bar is 1.9 (the plane is 1.9 high at
+/// y = 0, and odd in y about it), over the bar's x = 0..10 and 32 length: `10 * 1.9 * 32`.
+fn narrowing_wall_volume() -> f64 {
+    32.0 * (70.0 - 9.0 * (1.0 - PI / 4.0)) - 10.0 * 1.9 * 32.0
+}
+
+/// The round `r`'s two vertices on the end face y = 16 of [`narrowing_wall`], in closed form.
+/// The cut's normal `(0, -s, 1) / q` and the wall's `(-1, 0, 0)` are square, and the cylinder's
+/// axis is x = 7, z = 4, radius 3, so a ball of radius r touching the cut and the cylinder from
+/// inside has its centre `r q` above the plane vertically and `3 - r` from the axis.
+/// - On the cylinder: the corner's section in the end face y = 16, its centre at
+///   `z = 3.8 + r q` (the cut is 3.8 high there), `x = 7 + sqrt((3 - r)^2 - (z - 4)^2)`; its
+///   contact is the axis's point plus `3 / (3 - r)` of the way to the centre.
+/// - On the cut: the round's section square to its edge through the edge's end (10, 16, 3.8),
+///   whose centre lies `s r / q` back along y; its contact is the centre's foot on the plane,
+///   at (x, 16, 3.8).
+fn end_vertices(r: f64) -> [[f64; 3]; 2] {
+    let q = slope_q();
+    let x_at = |z: f64| 7.0 + ((3.0 - r).powi(2) - (z - 4.0).powi(2)).sqrt();
+    let zc = 3.8 + q * r;
+    let xc = x_at(zc);
+    let f = 3.0 / (3.0 - r);
+    let on_cylinder = [7.0 + f * (xc - 7.0), 16.0, 4.0 + f * (zc - 4.0)];
+    let yb = 16.0 - SLOPE * r / q;
+    let zb = 1.9 + SLOPE * yb + q * r;
+    let on_cut = [x_at(zb), 16.0, 3.8];
+    [on_cylinder, on_cut]
+}
+
+/// A lower bound on the material the round `r` takes off [`narrowing_wall`]: in each section
+/// square to the edge whose wall contact lies on the flat wall (`z <= 4`) and which lies wholly
+/// in the bar (`y >= -16`), the round takes `(1 - pi / 4) r^2` (the faces are square). That
+/// section through the edge's point at y spans y down to `y - s r / q` and has its wall contact
+/// `r / q` above the edge's `1.9 + s y`, so y runs from `-16 + s r / q` to `(2.1 - r / q) / s`;
+/// along the edge that is `q` times as long (Cavalieri over the parallel sections).
+fn flat_wall_removal(r: f64) -> f64 {
+    let q = slope_q();
+    let from = -16.0 + SLOPE * r / q;
+    let to = (2.1 - r / q) / SLOPE;
+    (1.0 - PI / 4.0) * r * r * q * (to - from)
+}
+
+/// SolidCraft #15767 (j4py's repro): the round of the edge between the sloped cut and the wall
+/// x = 10. Its contact on the wall stands `r q` above the cut vertically, and the flat wall is
+/// lower than that from y = (2.1 - r q) / s on (9.204 for r = 1), so from there its contact
+/// line runs on the R3 cylinder across the smooth edge at z = 4, partway along the round's
+/// edge. It rolls over (before the fix: refused as too large at 0.1914, the rail leaving the
+/// wall). The round's end vertices are the closed-form ones ([`end_vertices`]) and it takes at
+/// least the flat wall's part ([`flat_wall_removal`]).
+#[test]
+fn a_round_whose_wall_contact_crosses_a_tangent_edge_partway_rolls_onto_the_cylinder() {
+    fixes();
+    for r in [0.5, 1.0, 1.5] {
+        let b = narrowing_wall();
+        let v0 = b.volume(1e-9).unwrap();
+        let want = narrowing_wall_volume();
+        assert!((v0 - want).abs() <= 1e-9 * want, "{v0} against {want}");
+        let e = edge_at(&b, [10.0, 0.0, 1.9]);
+        blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled)
+            .unwrap_or_else(|err| panic!("r {r}: {err:?}"));
+        let report = b.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "r {r}: {report}");
+        let (_, brep) = common::kernel_copy(&b);
+        let points: Vec<[f64; 3]> = brep
+            .vertex_list()
+            .iter()
+            .map(|&v| {
+                let p = solidcore::topology::vertex::point(&brep, v).unwrap();
+                [p.x, p.y, p.z]
+            })
+            .collect();
+        for want in end_vertices(r) {
+            let near = points
+                .iter()
+                .map(|p| {
+                    ((p[0] - want[0]).powi(2) + (p[1] - want[1]).powi(2) + (p[2] - want[2]).powi(2))
+                        .sqrt()
+                })
+                .fold(f64::INFINITY, f64::min);
+            assert!(near <= 1e-6, "r {r}: no vertex at {want:?} ({near})");
+        }
+        let taken = v0 - b.volume(1e-9).unwrap();
+        let least = flat_wall_removal(r);
+        assert!(taken > least, "r {r}: takes {taken}, at least {least}");
+    }
+}
+
+/// The fit margin: a thousand of the edge's tolerance, 1e-5.
+const NARROWING_FIT_MARGIN: f64 = 1000.0 * 1e-5;
+
+/// SolidCraft #15767: a round of [`narrowing_wall`] whose rail, rolled onto the R3 cylinder,
+/// cannot be rolled (the rollover recovery fails: from r 2 on, past the largest radius
+/// `3.2 q / (1 + q)` = 1.605601 at which the ball, square to the edge at its end y = 16, still
+/// touches the cylinder short of its edge x = 7, z = 7 onto the top) stays refused as too large
+/// (with the fix's rollover alone, r 2 to 3.5 failed instead), naming the largest radius at
+/// which its rail stays on the wall: the ball touching the wall's top edge z = 4 and the cut, in
+/// the section square to the edge through its end (10, 16, 3.8). Its centre is r from the wall
+/// at z = 4 and that section's plane `(y - 16) + s (z - 3.8) = 0` puts it at y = 16 - 0.2 s,
+/// where the cut is `1.9 + s y` high: `(4 - 1.9 - s y) / q = (0.2 + 0.2 s^2) / q = 0.2 q`. Less
+/// the fit margin, as on main (0.1914). The named size builds.
+#[test]
+fn a_round_whose_rolled_rail_cannot_be_rolled_is_refused_naming_the_radius_on_the_wall() {
+    fixes();
+    let want = 0.2 * slope_q() - NARROWING_FIT_MARGIN;
+    for r in [2.0, 2.5, 3.0, 3.5, 5.0] {
+        let b = narrowing_wall();
+        let before = b.volume(1e-9).unwrap();
+        let e = edge_at(&b, [10.0, 0.0, 1.9]);
+        match blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled) {
+            Err(Error::TooLarge { size, why, .. }) => {
+                assert_eq!(why, Some(RoomReason::RailLeavesFace), "r {r}");
+                // the search keeps the ball's centre 1e-9 (1 + 32 q) of the edge's parameter
+                // inside its end, 3.3e-8 along it, where the radius changes about s / q
+                // (0.12) per unit: 4e-9, and its 60 golden-section steps
+                assert!((size - want).abs() <= 1e-7, "r {r}: {size} against {want}");
+            }
+            Err(err) => panic!("r {r}: {err:?}"),
+            Ok(_) => panic!("r {r}: built"),
+        }
+        assert_eq!(b.volume(1e-9).unwrap().to_bits(), before.to_bits(), "r {r}");
+    }
+    let b = narrowing_wall();
+    let e = edge_at(&b, [10.0, 0.0, 1.9]);
+    blend(&b, Blend::Round, &[e], &[want], &[], Corners::Filled).unwrap();
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+}

@@ -21,6 +21,7 @@
 //! | [`create_end_cap_patch`]          | `SmBlendCorner::CreateEndPatchOfEnd`'s `SM_BEND_AT_SMOOTH` branch |
 //! | [`end_awaits_rollover`], [`end_can_await_rollover`], [`end_past_tangent_edge`], `end_rolls_over`, `ends_in_tangent_edge` (private) | none (#2406: the End's rail rolls over a tangent edge first) |
 //! | [`side_edgeuse_across_rolled_edge`] | none (solidcore-native tangent rollover: a rail rolled over a tangent edge the whole length ends on the next side edge) |
+//! | `rail_rolls_on_past_side_edge` (private) | none (#15767: a rail past a side edge's end that rolls on over a smooth edge there) |
 //! | [`place_rolled_rail_end`]         | none (#2406: a rail end not reached on the End's plane before the rollover) |
 //! | `side_edge_in_cap` (private)      | none (#2406: a cap edge along a side edge in the cap's plane) |
 //! | [`EndEdges`], `end_face_runs_on_past_side_edge`, `rail_face` (private) | none: an end face running on tangentially past the side edge is the global merge's, not refused |
@@ -700,6 +701,43 @@ fn end_face_runs_on_past_side_edge(
     }
     let eu = eu1::primary_edgeuse(target, e3)?.ok_or_else(nul)?;
     check_tangential_edgeuse_at_vertex(k, target, eu, far, rad_to_deg(corner.tangency_tol_radians))
+}
+
+/// Not the fork's (#15767): whether the rail's face F (`rail_face`) runs on tangentially past
+/// the side edge's far end P onto a face X, so that a rail past P rolls over that tangent
+/// edge onto X (the solver's `ProcessRollOver`, after the corners' edges) and ends on the
+/// edge between X and the end face ([`side_edgeuse_across_rolled_edge`]), not past the side
+/// edge. The rail continued on F's surface past P is what the corner sees before the roll-over.
+///
+/// # Errors
+/// `SM_ERR_NULL_POINTER` without side edge or far vertex; those of the continuation.
+fn rail_rolls_on_past_side_edge(
+    k: &Kernel,
+    target: &mut Brep,
+    corner: &FilletCorner,
+    side_eu: EdgeuseId,
+    rail_face: FaceId,
+) -> Result<bool> {
+    let side_edge = eu1::edge(target, side_eu)?.ok_or_else(nul)?;
+    let far = if edge::start_vertex(target, side_edge)? == corner.vertex {
+        edge::end_vertex(target, side_edge)?
+    } else {
+        edge::start_vertex(target, side_edge)?
+    }
+    .ok_or_else(nul)?;
+    let Some(beyond) = side_edgeuse_across_rolled_edge(
+        k,
+        target,
+        side_eu,
+        far,
+        None,
+        corner.tangency_tol_radians,
+    )?
+    else {
+        return Ok(false);
+    };
+    // the continuation lies on the end face: the face rolled over is F's neighbour
+    Ok(eu1::face(target, beyond)? != Some(rail_face))
 }
 
 /// Not the fork's (SolidCraft's `smooth_edges_and_unfinished_tangent_chains_are_refused_saying_why`,
@@ -1594,6 +1632,11 @@ pub fn fit_of_end_past_side_edges(
         let fil_faces = [face_of(target, fil_eu)?, radial_face(target, fil_eu)?];
         let rail = rail_face(fil_faces, side_faces);
         if past && end_face_runs_on_past_side_edge(k, target, corner, side_eu, rail)? {
+            continue;
+        }
+        // Not the fork's (#15767): past a tangent edge of the rail's face the rail rolls on
+        // onto the face beyond (`rail_rolls_on_past_side_edge`)
+        if past && rail_rolls_on_past_side_edge(k, target, corner, side_eu, rail)? {
             continue;
         }
         if past && found.is_none_or(|(least, _)| fit < least) {
@@ -2608,6 +2651,21 @@ pub fn calc_end_edge_geom(
         pseudo.delete_wire_fillet_edge(k, rib)?;
         corner.edges.clear();
         return Ok(EndEdges::GlobalMerge);
+    } else if !runs_on
+        && !both_miss
+        && rail_rolls_on_past_side_edge(
+            k,
+            target,
+            corner,
+            side_eu,
+            rail_face(fil_faces, side_faces),
+        )?
+    {
+        // Not the fork's (#15767): the rail runs past P because the rail's face runs on
+        // tangentially there; it rolls over that edge onto the face beyond and ends on its
+        // edge with the end face, which `ProcessRollOver` solves after the corners' edges
+        // (the TangentRollover corner vertex, recomputed there)
+        return Ok(EndEdges::Built);
     } else if !runs_on && !both_miss {
         // The rail runs past its side edge's far end P onto the faces beyond. Refused,
         // naming the radius at which the rail reaches P: the ball touching the rail's face

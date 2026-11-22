@@ -10,7 +10,9 @@ use crate::geom::attribute::ObjectKey;
 use crate::geom::object::ObjectRef;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::plane::Plane;
-use crate::topology::{Edgeuse, EdgeuseOwner, Faceuse, Loopuse, ShellId, Vertexuse};
+use crate::topology::{
+    Edgeuse, EdgeuseOwner, Faceuse, Loopuse, ShellId, Vertexuse, VertexuseOwner,
+};
 
 fn plane() -> Surface {
     Plane::from_normal(Point3::ZERO, Vec3::Z).into()
@@ -50,6 +52,7 @@ fn rail(k: &Kernel, fb: &mut FilletBrep, ends: &[f64], unknown: bool) -> EdgeId 
                 ..Edgeuse::default()
             })
             .unwrap();
+        fb.brep_mut().vertexuse_mut(vu).unwrap().owner = VertexuseOwner::Edgeuse(Some(eu));
         fb.insert_fillet_edgeuse(eu, FilletEdgeuse::default());
         eus.push(eu);
     }
@@ -468,6 +471,9 @@ fn tangent_split_rebuilds_both_segments_and_restores_offset_identity_and_orienta
             "split_geom",
             "copy_offset",
             "rail_x_edge",
+            // #15767: both rail starts are unmated ends at corner 41, each on its own side
+            // edge; the second is solved again from the first's ball after the roll-over
+            "corner",
             "corner",
             "recalc",
             "trim",
@@ -489,6 +495,48 @@ fn tangent_split_rebuilds_both_segments_and_restores_offset_identity_and_orienta
     assert_eq!(
         f.fb.geom(id).unwrap().geom_type,
         FilletGeomType::TangentRollover
+    );
+}
+/// #15767: a rail end with a mate at the corner is solved once (its mate is reset by the
+/// mate's own solve), as upstream: only an unmated end leaves the other rail's end to be
+/// solved again.
+#[test]
+fn tangent_split_solves_a_mated_rail_end_once() {
+    let mut f = Fixture::new([&[0.4, 1.0], &[1.0]], true);
+    let id = f.geom;
+    let ends: Vec<VertexId> = (0..2)
+        .map(|which| {
+            let rail = f.fb.geom(id).unwrap().rail(which).unwrap();
+            f.fb.brep().edge(rail).unwrap().vertices[0]
+        })
+        .collect();
+    f.fb.fillet_vertex_mut(ends[0])
+        .unwrap()
+        .set_mate(0, Some(ends[1]));
+    let mut script = Script {
+        side: Some(f.side),
+        tangent: true,
+        ..Script::default()
+    };
+    let mut adjusted = vec![FilletCornerId(41), FilletCornerId(41)];
+    f.context().process(id, &mut adjusted, &mut script).unwrap();
+    assert_eq!(
+        script.calls,
+        [
+            "convex",
+            "find0",
+            "split_geom",
+            "copy_offset",
+            "rail_x_edge",
+            "corner",
+            "recalc",
+            "trim",
+            "find1",
+            "tangent",
+            "rail_x_edge",
+            "recalc",
+            "trim"
+        ]
     );
 }
 #[test]
@@ -1088,8 +1136,7 @@ fn rollover_topology_split_preserves_actual_solver_id_and_partial_edits() {
                 .unwrap()
                 .vertexuses
                 .push(vu);
-            f.fb.brep_mut().vertexuse_mut(vu).unwrap().owner =
-                crate::topology::VertexuseOwner::Edgeuse(Some(eu));
+            f.fb.brep_mut().vertexuse_mut(vu).unwrap().owner = VertexuseOwner::Edgeuse(Some(eu));
             f.fb.insert_fillet_vertexuse(vu, crate::blend::fillet_geom::p1::FilletVertexuse::new());
         }
     }

@@ -13,9 +13,12 @@
 //! Deviations: the fork's `sm_SrfSrfIntersection` takes two `SmFilletVertex` objects
 //! holding the crossings; [`srf_srf_intersection`] takes the points. The section, a curve
 //! in no body, is classified through [`RailClassificationContext::classify_free_curve`]
-//! (`SmFace::CurveOnClassify`). There is no recursion.
+//! (`SmFace::CurveOnClassify`). Not the fork's (#15767): a rail leaving its face across a
+//! smooth edge at a side edge's far end rolls on over it and judges no end section
+//! (`leaves_across_tangent_edge_at`). There is no recursion.
 
 use super::{RailClassificationContext, OP};
+use crate::blend::fillet_classification::FilletClassObject;
 use crate::blend::fillet_geom::p1::{FilletBrep, FilletGeomType};
 use crate::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfOptions};
 use crate::blend::fillet_solver::p1::{
@@ -27,7 +30,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
-use crate::intersect::curve_class::p1::CurveClassification;
+use crate::intersect::curve_class::p1::{CurveClassification, CurveInterval};
 use crate::intersect::curve_class::p2::ResetOptions;
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
@@ -242,6 +245,45 @@ fn boundary_requires_cut_at(
     Ok(false)
 }
 
+/// Whether a rail, classified on its face as `intervals`, leaves that face (a run off it,
+/// `PointClassType::Unknown`) across an edge that ends at `at` and is tangent to the face
+/// beyond within `tangency_tol` (`sm_TestManifoldTangentRollover`): the rail rolls over that
+/// edge there, as `RailsFitTheirFaces` judges it (#15767).
+///
+/// # Errors
+/// Those of the topology queries and of the tangency test.
+fn leaves_across_tangent_edge_at(
+    k: &Kernel,
+    target: &mut Brep,
+    intervals: &[CurveInterval<FilletClassObject>],
+    at: VertexId,
+    tangency_tol: f64,
+) -> Result<bool> {
+    for ivl in intervals {
+        if ivl.mid.point_class() != PointClassType::Unknown {
+            continue;
+        }
+        for pc in [&ivl.start, &ivl.end] {
+            if pc.point_class() != PointClassType::Edge {
+                continue;
+            }
+            let Some(o) = pc.object() else {
+                continue;
+            };
+            let EntityRef::Edge(e) = o.target_entity()? else {
+                continue;
+            };
+            if !edge::vertices(target, e, None)?.contains(&Some(at)) {
+                continue;
+            }
+            if test_manifold_tangent_rollover(k, target, e, tangency_tol)?.0 {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 impl FilletSolver {
     /// The fork's `SmFilletSolver::EndSectionsFitTheirFaces` (tangency-labs/smlib
     /// `a307480`): whether the fillet's end section at each Nx1 end lies on the end
@@ -450,6 +492,20 @@ impl FilletSolver {
                                 None => None,
                             };
                             for &(_, far) in &run {
+                                // #15767: a rail that leaves its face across a smooth edge
+                                // ending at P rolls on over that edge onto the face beyond
+                                // (`RailsFitTheirFaces`' rollover, `ProcessRollOver`): its
+                                // crossing past P is the rail continued on its face's
+                                // surface, not the rolled rail, and judges no end section
+                                if leaves_across_tangent_edge_at(
+                                    k,
+                                    target,
+                                    &intervals,
+                                    far,
+                                    tangency_tol,
+                                )? {
+                                    continue;
+                                }
                                 let p = vertex::point(target, far)?;
                                 if let Some(x) = crossing.filter(|x| {
                                     crossing_past_side_edge_end(*x, v_point, p, approx_tol)
