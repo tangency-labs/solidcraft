@@ -127,7 +127,7 @@ fn fail(cause: SolverFailure) -> SolidError {
 
 /// An edge use of the caller's body without an edge: [`BlendFailure::EdgeUseWithoutEdge`]
 /// at the edge use, status `SM_ERR_NULL_POINTER`.
-fn edge_use_without_edge(edgeuse: crate::topology::EdgeuseId) -> SolidError {
+fn edge_use_without_edge(edgeuse: EdgeuseId) -> SolidError {
     SolidError::blend_at(
         OP,
         BlendFailure::EdgeUseWithoutEdge,
