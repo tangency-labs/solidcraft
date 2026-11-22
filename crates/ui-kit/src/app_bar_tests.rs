@@ -197,22 +197,12 @@ fn app_bar_old_canonical_quick_layout_loses_only_its_automatic_third_divider() {
     assert_eq!(Layout::from_value(&value, &defaults), old, "custom layout objects are preserved");
 }
 
+/// The kit's own Dark and Light. The look's crate checks its Onyx theme the same way
+/// (`app_bar_edit_palette_reads_on_onyx`), since the theme files are the look's.
 #[test]
 fn app_bar_edit_palette_has_three_distinct_levels_and_readable_foreground() {
     use solidcraft_theme::contrast_ratio;
-    let mut onyx = Tokens::dark();
-    let source: serde_json::Value = serde_json::from_str(include_str!("../../look/themes/onyx.json")).unwrap();
-    let color = |name: &str| {
-        let text = source["colors"][name].as_str().unwrap().trim_start_matches('#');
-        egui::Color32::from_rgb(
-            u8::from_str_radix(&text[..2], 16).unwrap(),
-            u8::from_str_radix(&text[2..4], 16).unwrap(),
-            u8::from_str_radix(&text[4..6], 16).unwrap(),
-        )
-    };
-    onyx.app_bar = color("app_bar");
-    onyx.app_bar_text = color("app_bar_text");
-    for (name, t) in [("dark", Tokens::dark()), ("light", Tokens::light()), ("Onyx", onyx)] {
+    for (name, t) in [("dark", Tokens::dark()), ("light", Tokens::light())] {
         let p = edit_palette(t);
         let a = contrast_ratio(p.card, p.item);
         let b = contrast_ratio(p.item, p.hover);
