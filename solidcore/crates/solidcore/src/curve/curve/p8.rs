@@ -1327,14 +1327,7 @@ impl Curve {
             }
 
             if !needs_more_work {
-                self.drop_ranges_of_tangencies(
-                    k,
-                    &mut sols,
-                    other,
-                    interval,
-                    other_interval,
-                    dist_tol,
-                )?;
+                self.drop_ranges_of_tangencies(k, &mut sols, other, interval, other_interval)?;
                 return Ok(sols);
             }
         }
@@ -1451,7 +1444,7 @@ impl Curve {
         // Not upstream (#18064): a range with exact ends on the flank of a tangency is no
         // coincidence. Dropped before the contacts move to the curve ends, as a range
         // there would stop the flank's point solutions moving to the touch past it.
-        self.drop_ranges_of_tangencies(k, &mut sols, other, interval, other_interval, dist_tol)?;
+        self.drop_ranges_of_tangencies(k, &mut sols, other, interval, other_interval)?;
         let self_intersect = core::ptr::eq(tree1, tree2);
         // Not for a self intersection: there the "other" curve is this curve, so the
         // stretch test compares the curve with itself and always passes, and the move
@@ -2221,12 +2214,15 @@ impl Curve {
     /// touching point lies beyond one end on both curves (a point solution, or the
     /// point where an end of each curve's interval meets the other's within the scaled
     /// zero), where the two curves are tangent, and from which the gap grows faster
-    /// than linearly up to the range's far end: the gap at the touch is no larger than
-    /// at this curve's midpoint between it and the far end (dropped onto the other
-    /// curve), and the gap there is less than half the far end's. The gap of a tangency
-    /// grows at least as the square of the distance from the touch, so at the midpoint
-    /// it is at most a quarter of the far end's, and growth that is linear or slower is
-    /// no tangency.
+    /// than linearly across the range: the gap at the touch is less than at the range's
+    /// near end, and the gap divided by the straight distance from the touch on this
+    /// curve is less at the near end than at the far end. The gap of a tangency grows at
+    /// least as the square of the distance from the touch, so that ratio grows with the
+    /// distance, and growth that is linear or slower is no tangency. The gap is taken at the
+    /// range's two ends, the exact intersections the solve found, and not between the
+    /// range and the touch: an intersection curve fitted to its surfaces strays from the
+    /// other curve there by up to its fit tolerance, which can be larger than the
+    /// flank's own gap (#18064's insert with a flatter top).
     ///
     /// Three things tell such a flank from a coincidence, whose gap along the range is
     /// only the rounding of the evaluations and says nothing of growth:
@@ -2238,7 +2234,7 @@ impl Curve {
     ///   stops (a seam edge along its surface's seam curve, a cone's edge along its
     ///   ruling);
     /// - the far end's two parameters give points within the scaled zero of each other,
-    ///   as an exact end does, and the gap at the midpoint is larger than at the touch.
+    ///   as an exact end does, and the gap at the near end is larger than at the touch.
     ///
     /// # Errors
     ///
@@ -2250,7 +2246,6 @@ impl Curve {
         other: &Self,
         interval: &Extent1d,
         other_interval: &Extent1d,
-        dist_tol: f64,
     ) -> Result<()> {
         let gap_at = |a: f64, b: f64| -> Result<f64> {
             Ok(self
@@ -2339,26 +2334,19 @@ impl Curve {
                         continue;
                     }
                     let g_touch = gap_at(touch[0], touch[1])?;
-                    // this curve's midpoint between the touch and the far end, dropped onto
-                    // the other curve between them
-                    let mut span = Extent1d::from_value(touch[1]);
-                    span.add_value(far[1]);
-                    let mid = self.evaluate_point(k, (touch[0] + far[0]) / 2.0)?;
-                    let dropped = other.drop_point(
-                        k,
-                        &span,
-                        mid,
-                        None,
-                        dist_tol,
-                        Some(span.mid()),
-                        SolverOperation::Minimize,
-                    )?;
-                    if !dropped.success {
-                        continue;
-                    }
-                    let g_mid = mid.distance(other.evaluate_point(k, dropped.parameter)?);
+                    let g_near = gap_at(near[0], near[1])?;
                     let g_far = gap_at(far[0], far[1])?;
-                    if g_far < scaled_zero && g_touch < g_mid && 2.0 * g_mid < g_far {
+                    // the distances of the range's ends from the touch along this curve
+                    let at_touch = self.evaluate_point(k, touch[0])?;
+                    let d_near = at_touch.distance(self.evaluate_point(k, near[0])?);
+                    let d_far = at_touch.distance(far_self);
+                    // the far end lies farther from the touch than the near end, which lies
+                    // off it (short_of_touch), and g_near / d_near < g_far / d_far
+                    if g_far < scaled_zero
+                        && g_touch < g_near
+                        && d_near < d_far
+                        && g_near * d_far < g_far * d_near
+                    {
                         flank = true;
                     }
                 }
