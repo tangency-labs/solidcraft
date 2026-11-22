@@ -244,8 +244,7 @@ fn a_sweep_refuses_a_face_it_cannot_sweep() {
 /// projects references as construction, or the sketch would have no profile to sweep.
 #[test]
 fn a_sweep_from_a_body_face_works_with_construction_projections() {
-    let mut s = Session::default();
-    s.project_construction = true;
+    let mut s = Session { project_construction: true, ..Session::default() };
     run(&mut s, "solid.box", json!({"corner": [-5, -5, 0], "length": 10, "width": 10, "height": 10, "body_name": "Block"}));
     run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "P"}));
     run(&mut s, "sketch.line", json!({"points": [[0, -10], [0, -50]], "ids": ["up"]}));
