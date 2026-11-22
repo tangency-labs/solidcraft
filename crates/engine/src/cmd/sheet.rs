@@ -1586,12 +1586,8 @@ impl FlatDrawing {
         loops.sort_by_key(|(pass, ..)| *pass);
         // Slits (two lines each), rolls and cross break creases (one line each) are planned like
         // bends: at most two entities and a bend's few values apiece.
-        let lines = self
-            .bends
-            .len()
-            .saturating_add(self.rolls.len())
-            .saturating_add(self.creases.len())
-            .saturating_add(self.slits.len().saturating_mul(2));
+        let lines =
+            self.bends.len().saturating_add(self.rolls.len()).saturating_add(self.creases.len()).saturating_add(self.slits.len().saturating_mul(2));
         let mut file = DxfFile::for_flat_pattern_export(loops.len(), lines, self.perforation.len())?;
         if !o.one_layer {
             // These four baseline roles exist even without matching geometry. The
