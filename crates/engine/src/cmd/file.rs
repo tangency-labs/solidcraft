@@ -388,11 +388,19 @@ struct DesignSnapshot {
     revision: u64,
     evaluations: usize,
     active_sketch: Option<u64>,
+    sketching_view: Option<u64>,
 }
 
 impl DesignSnapshot {
     fn of(s: &Session) -> Self {
-        Self { doc: s.doc.clone(), model: s.model.clone(), revision: s.revision, evaluations: s.evaluations, active_sketch: s.active_sketch }
+        Self {
+            doc: s.doc.clone(),
+            model: s.model.clone(),
+            revision: s.revision,
+            evaluations: s.evaluations,
+            active_sketch: s.active_sketch,
+            sketching_view: s.sketching_view,
+        }
     }
 
     fn restore(self, s: &mut Session) {
@@ -401,6 +409,7 @@ impl DesignSnapshot {
         s.revision = self.revision;
         s.evaluations = self.evaluations;
         s.active_sketch = self.active_sketch;
+        s.sketching_view = self.sketching_view;
     }
 }
 

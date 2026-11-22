@@ -3,6 +3,7 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use solidcraft_views::{CardHeaders, InterfaceSize, TopBar, WindowOptions};
 
 /// The destination can be a new pop-out or the id of an open window.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -83,6 +84,44 @@ pub struct TabWindowCleanParams {
     pub on: Option<bool>,
 }
 
+/// Select a pop-out. With no id, use the current or last focused pop-out.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TabWindowOptionParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<u32>,
+}
+
+/// Update one or more of a pop-out's options.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TabWindowSetOptionsParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_headers: Option<CardHeaders>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_on_top: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interface_size: Option<InterfaceSize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ribbon: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panels: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ribbon_auto_hide: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_bar: Option<TopBar>,
+}
+
+/// The checked request from the engine or the current state from its host.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum TabWindowOptionsReply {
+    Current { window: u32, options: WindowOptions },
+    Requested(TabWindowSetOptionsParams),
+}
+
 /// List the windows of the active design.
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -159,4 +198,20 @@ pub struct TabWindowCloseResult {
 pub enum TabWindowCloseReply {
     Completed(TabWindowCloseResult),
     Requested(TabWindowIdParams),
+}
+
+/// Set a native view window's display name.
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TabWindowRenameParams {
+    pub window: u32,
+    pub name: String,
+}
+
+/// Move a native view window to a numbered display.
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TabWindowDisplayParams {
+    pub window: u32,
+    pub display: u32,
 }
