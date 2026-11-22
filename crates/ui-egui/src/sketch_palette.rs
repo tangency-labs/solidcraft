@@ -536,11 +536,17 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         section_alias("sketch_palette:options_fold", more);
     };
     let mut draw_footer = |ui: &mut egui::Ui| {
-        let button = crate::ui_kit::wide_primary_button(ui, "Finish Sketch");
+        // Cancel Sketch beside Finish Sketch, Cancel left of OK as in every dialog footer; the same
+        // discard as the ribbon's X (#19961). "Cancel Sketch", not "Cancel": an open dialog's Cancel
+        // stays the only one.
+        let (cancel_button, button) = crate::ui_kit::wide_secondary_and_primary(ui, solidcraft_ui_text::tr("cmd.sketch_cancel"), "Finish Sketch");
         crate::panel_runtime::register_content_focus(ui.ctx(), &button);
-        crate::scenario::publish_rect("sketch_palette:finish", button.rect);
-        crate::scenario::publish_handle("sketch_palette:finish", button.rect.center());
+        for (name, response) in [("sketch_palette:finish", &button), ("sketch_palette:cancel", &cancel_button)] {
+            crate::scenario::publish_rect(name, response.rect);
+            crate::scenario::publish_handle(name, response.rect.center());
+        }
         finish = button.clicked();
+        cancel = cancel_button.clicked();
         let (at, slice) = crate::ui_kit::button_pair(
             ui,
             "sketch_palette",
@@ -552,14 +558,6 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         );
         look = at;
         slice_changed = slice;
-        // Its own row, so Finish Sketch keeps its look; the same discard as the ribbon's X (#19961).
-        // "Cancel Sketch", not "Cancel": an open dialog's Cancel stays the only one.
-        let [cancel_clicked] = crate::ui_kit::button_row_in_card(
-            ui,
-            "sketch_palette",
-            [crate::ui_kit::PairButton { key: "cancel", label: solidcraft_ui_text::tr("cmd.sketch_cancel"), icon: None }],
-        );
-        cancel = cancel_clicked;
     };
     let at_top = crate::ui_kit::DialogButtons::current(&ctx) == crate::ui_kit::DialogButtons::Top;
     crate::ui_kit::scope(ui, |ui| {
@@ -567,7 +565,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             draw_footer(ui);
             0.0
         } else {
-            crate::ui_kit::Panel::pinned_footer(ui, "shared_sketch_palette_footer", 4, draw_footer).response.rect.height()
+            crate::ui_kit::Panel::pinned_footer(ui, "shared_sketch_palette_footer", 2, draw_footer).response.rect.height()
         };
         let top = ui.cursor().top();
         let options =
@@ -747,7 +745,8 @@ mod tests {
         let look = crate::scenario::rect_of("sketch_palette:look_at").expect("Look At | Slice stay");
         let slice = crate::scenario::rect_of("sketch_palette:slice").unwrap();
         let finish = crate::scenario::rect_of("sketch_palette:finish").unwrap();
-        assert_eq!((finish.left(), finish.right()), (look.left(), slice.right()), "Finish {finish:?} shares the pair's inset");
+        let cancel = crate::scenario::rect_of("sketch_palette:cancel").expect("Cancel Sketch beside it (#19961)");
+        assert_eq!((cancel.left(), finish.right()), (look.left(), slice.right()), "Cancel {cancel:?} | Finish {finish:?} share the pair's inset");
         assert_eq!(finish.height(), Tokens::get().form_button_height);
         assert!(look.top() - finish.bottom() >= Tokens::get().space_6, "the footer rows remain distinct");
         assert!(crate::scenario::handle_at("button:sketch.finish").is_some(), "and so does the ribbon's Finish");

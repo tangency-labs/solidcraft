@@ -483,11 +483,11 @@ fn sketch_panel_finish_row_follows_dialog_buttons() {
     }
 }
 
-/// The Cancel row (#19961) follows Dialog buttons too; at the bottom the pinned footer holds all
-/// three rows inside the panel (four `control_height` units: each row is a 28 px button in a
-/// 6 px inset), and no row covers another or the options.
+/// Cancel Sketch (#19961) sits beside Finish Sketch, left of it as Cancel sits left of OK in every
+/// dialog footer, and follows Dialog buttons with it; the footer keeps its two rows and no row
+/// covers another or the options.
 #[test]
-fn sketch_panel_cancel_row_follows_dialog_buttons_and_overlaps_nothing() {
+fn sketch_panel_cancel_sits_beside_finish_and_follows_dialog_buttons() {
     for (placement, on_top) in [("top", true), ("bottom", false)] {
         let mut h = fixture();
         h.call("ui.prefs", json!({"dialog_buttons": placement}));
@@ -496,15 +496,17 @@ fn sketch_panel_cancel_row_follows_dialog_buttons_and_overlaps_nothing() {
         let (finish, look, slice, cancel) =
             (rect("sketch_palette:finish"), rect("sketch_palette:look_at"), rect("sketch_palette:slice"), rect("sketch_palette:cancel"));
         let first = rect("sketch_palette:toggle:show_constraints");
-        assert!(finish.bottom() <= look.top() && look.bottom() <= cancel.top(), "{placement}: rows {finish:?} {look:?} {cancel:?}");
+        assert_eq!((cancel.top(), cancel.bottom()), (finish.top(), finish.bottom()), "{placement}: Cancel shares Finish's row");
+        assert!(cancel.right() <= finish.left(), "{placement}: Cancel {cancel:?} left of Finish {finish:?}");
+        assert!((cancel.width() - finish.width()).abs() < 1.0, "{placement}: equal halves {cancel:?} {finish:?}");
+        assert!(finish.bottom() <= look.top(), "{placement}: rows {finish:?} {look:?}");
         assert!(look.right() <= slice.left() && (slice.top(), slice.bottom()) == (look.top(), look.bottom()), "{placement}: Look At | Slice");
-        assert_eq!((cancel.left(), cancel.right()), (finish.left(), finish.right()), "{placement}: Cancel shares Finish's inset");
         if on_top {
-            assert!(cancel.bottom() <= first.top(), "top: Cancel {cancel:?} above the first option {first:?}");
+            assert!(look.bottom() <= first.top(), "top: Look At {look:?} above the first option {first:?}");
         } else {
             let palette = h.app.viewport.palette_rect.unwrap();
             assert!(first.bottom() <= finish.top(), "bottom: options {first:?} above Finish {finish:?}");
-            assert!(cancel.bottom() <= palette.bottom(), "bottom: Cancel {cancel:?} inside the panel {palette:?}");
+            assert!(look.bottom() <= palette.bottom(), "bottom: Look At {look:?} inside the panel {palette:?}");
         }
     }
 }
