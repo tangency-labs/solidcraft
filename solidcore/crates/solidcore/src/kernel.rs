@@ -208,6 +208,11 @@ pub struct WorkCounters {
     line_leaves_finished: Cell<u64>,
     line_leaves_at_limit: Cell<u64>,
     line_roots_unshown: Cell<u64>,
+    line_exclusion_boxes: Cell<u64>,
+    line_exclusions_out_of_budget: Cell<u64>,
+    line_solves: Cell<u64>,
+    line_solves_at_limit: Cell<u64>,
+    line_components: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -411,6 +416,41 @@ impl WorkCounters {
         self.line_roots_unshown.get()
     }
 
+    /// Enclosures the exclusion phases of the certified line pass made, over all leaves
+    /// (`certified_line`, "The exclusion phase"). Not the fork's.
+    #[must_use]
+    pub fn line_exclusion_boxes(&self) -> u64 {
+        self.line_exclusion_boxes.get()
+    }
+
+    /// Exclusion phases that stopped at their budget, keeping what they had not decided.
+    /// Not the fork's.
+    #[must_use]
+    pub fn line_exclusions_out_of_budget(&self) -> u64 {
+        self.line_exclusions_out_of_budget.get()
+    }
+
+    /// Line/surface solves the certified pass searched (a solve of a kind whose net is the
+    /// surface, its line not of zero length). Not the fork's.
+    #[must_use]
+    pub fn line_solves(&self) -> u64 {
+        self.line_solves.get()
+    }
+
+    /// Of [`WorkCounters::line_solves`], those with a leaf whose pass stopped at its bound.
+    /// Not the fork's.
+    #[must_use]
+    pub fn line_solves_at_limit(&self) -> u64 {
+        self.line_solves_at_limit.get()
+    }
+
+    /// Components of what the certified passes of a solve kept (`certified_line`,
+    /// "Components"), over all solves. Not the fork's.
+    #[must_use]
+    pub fn line_components(&self) -> u64 {
+        self.line_components.get()
+    }
+
     /// Curved intersection pieces classified as running along a face edge
     /// (`CurveClassification::classify_edge_interval`, WR-305): each one certified within the
     /// intersection tolerance of it as a whole (`curve_runs_along`, or the worst-first bound of
@@ -476,6 +516,11 @@ impl WorkCounters {
         self.line_leaves_finished.set(0);
         self.line_leaves_at_limit.set(0);
         self.line_roots_unshown.set(0);
+        self.line_exclusion_boxes.set(0);
+        self.line_exclusions_out_of_budget.set(0);
+        self.line_solves.set(0);
+        self.line_solves_at_limit.set(0);
+        self.line_components.set(0);
         self.curved_edge_runs.set(0);
         self.blends_recertified.set(0);
         self.vertex_drops.set(0);
@@ -618,6 +663,30 @@ impl WorkCounters {
             Stop::AtLimit => &self.line_leaves_at_limit,
         };
         leaves.set(leaves.get().saturating_add(1));
+    }
+
+    /// Counts one leaf's exclusion phase: the enclosures it made, and whether it stopped
+    /// at its budget.
+    pub(crate) fn add_line_exclusion(&self, boxes: u64, out_of_budget: bool) {
+        self.line_exclusion_boxes
+            .set(self.line_exclusion_boxes.get().saturating_add(boxes));
+        if out_of_budget {
+            self.line_exclusions_out_of_budget
+                .set(self.line_exclusions_out_of_budget.get().saturating_add(1));
+        }
+    }
+
+    /// Counts one solve the certified line pass searched: its components, and whether a
+    /// leaf of it stopped at its bound.
+    pub(crate) fn add_line_solve(&self, components: u64, at_limit: bool) {
+        self.line_solves
+            .set(self.line_solves.get().saturating_add(1));
+        self.line_components
+            .set(self.line_components.get().saturating_add(components));
+        if at_limit {
+            self.line_solves_at_limit
+                .set(self.line_solves_at_limit.get().saturating_add(1));
+        }
     }
 
     /// Counts one crossing the certified line pass added.

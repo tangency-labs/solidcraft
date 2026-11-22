@@ -70,6 +70,9 @@
 //! ([`crate::geom::solution_array::Contact`]): the line solve's removal of repeated
 //! solutions leaves the one kept with the [`Contact::merged`] of both, and its join
 //! across a coincident stretch makes the range it builds [`Contact::Unclassified`].
+//! The solutions of the line solve carry the side record of its certified pass
+//! ([`crate::geom::solution_array::SideRecord`]), scaled back with them and, for a ray,
+//! kept to what starts before the one solution it keeps; nothing reads it yet.
 //! Unported callees return [`SolidError::Unported`], also where upstream ignores the
 //! status. Recursion: none.
 
@@ -2092,10 +2095,11 @@ impl Surface {
         )?;
         // (not upstream) the certified pass: the crossings the leaves' guesses left
         // (`surface::surface::p10`, module docs), added to the solve's solutions
+        // with what it left undecided beside them, the side record
         std::mem::swap(&mut gs.solver.base.solutions, &mut sols);
         let certified = gs.certified_pass(k);
         std::mem::swap(&mut gs.solver.base.solutions, &mut sols);
-        certified?;
+        sols.set_side_record(certified?);
         // restore the original scaling to solution parameters
         for ii in 0..sols.len() {
             let sol = sols
@@ -2106,10 +2110,17 @@ impl Surface {
                 *sol.end.param_mut(0)? /= scale;
             }
         }
+        // (not upstream) and to the side record's
+        let record = sols.take_side_record().unscaled(scale);
+        sols.set_side_record(record);
 
         // If we are rayfiring then we need only the solution closest to the start of
         // the line.
         if fire_ray && !sols.is_empty() {
+            // (not upstream) the side record keeps what starts before that solution
+            let first = sols.get_at(0)?.start.param(0)?;
+            let record = sols.take_side_record().before(first);
+            sols.set_side_record(record);
             sols.set_size(1);
         }
 

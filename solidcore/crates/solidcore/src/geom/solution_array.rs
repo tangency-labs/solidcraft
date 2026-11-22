@@ -10,6 +10,7 @@
 //! | [`SolutionType`]                              | `SmSolutionType`                                           |
 //! | [`SortKey`]                                   | `SmSortKeyType`                                            |
 //! | [`Contact`], [`Contact::merged`], `Solution::contact` | (not upstream) how a solution meets the surface     |
+//! | [`SideRecord`], [`SolutionArray::side_record`] | (not upstream) what a line solve left undecided          |
 //! | [`SolutionEnd`], [`SolutionEnd::new`]         | `SmSolutionEnd`, `SmSolutionEnd()`                         |
 //! | `Clone`/`Copy` for [`SolutionEnd`]            | `SmSolutionEnd::operator=`                                 |
 //! | `Drop` (implicit)                             | `~SmSolutionEnd`                                           |
@@ -106,6 +107,7 @@
 //!   not ported; the `SM_DEBUG_CODE`/`GWC` blocks and `ERR` on an unknown sort key
 //!   (impossible with the [`SortKey`] enum) have no counterpart.
 
+use crate::blend::fillet_section::interval::{round_down, round_up};
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::object;
@@ -192,6 +194,84 @@ impl Contact {
             (Self::Crossing, Self::Crossing) => Self::Crossing,
             (Self::Touching, Self::Touching) => Self::Touching,
             _ => Self::Undecided,
+        }
+    }
+}
+
+/// What a line solve has not decided along the line, beside its solutions (not upstream):
+/// the side record a line/surface solve of a certified kind fills
+/// (`surface::surface::certified_line`, "Components"), in the line's parameter. Three
+/// states, never a list that may be empty: an empty record is never read as complete.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum SideRecord {
+    /// No certified pass ran (no exact net, a kind it does not run on, or no leaf it
+    /// could search): the solutions mean what they always did.
+    #[default]
+    NotRun,
+    /// Every part of the line the solve looked at is decided.
+    Complete,
+    /// The line parameters of what is not decided: closed intervals, ascending and apart.
+    Undecided(Vec<[f64; 2]>),
+}
+
+impl SideRecord {
+    /// The record undecided over `spans` (in any order, overlapping or not), merged into
+    /// ascending intervals apart; undecided over the whole line when `spans` is empty, so
+    /// that no list built empty reads as decided.
+    #[must_use]
+    pub fn undecided(mut spans: Vec<[f64; 2]>) -> Self {
+        if spans.is_empty() {
+            return Self::Undecided(vec![[f64::NEG_INFINITY, f64::INFINITY]]);
+        }
+        spans.sort_by(|[a, _], [b, _]| a.total_cmp(b));
+        let mut merged: Vec<[f64; 2]> = Vec::new();
+        for [lo, hi] in spans {
+            match merged.last_mut() {
+                Some([_, end]) if lo <= *end => *end = end.max(hi),
+                _ => merged.push([lo, hi]),
+            }
+        }
+        Self::Undecided(merged)
+    }
+
+    /// The record with the line parameter divided by `scale` (a solve that ran on the line
+    /// scaled by it), each interval rounded outward; undecided over the whole line for a
+    /// scale that is not a positive number.
+    #[must_use]
+    pub fn unscaled(self, scale: f64) -> Self {
+        let Self::Undecided(spans) = self else {
+            return self;
+        };
+        let usable = scale > 0.0 && scale.is_finite();
+        if !usable {
+            return Self::undecided(Vec::new());
+        }
+        Self::undecided(
+            spans
+                .into_iter()
+                .map(|[lo, hi]| [round_down(lo / scale), round_up(hi / scale)])
+                .collect(),
+        )
+    }
+
+    /// The record of a ray that keeps only its solution at line parameter `first`: an
+    /// interval that starts after it goes with the solutions the ray drops; one that starts
+    /// at or before it stays. Complete when none stays: everything before the hit the ray
+    /// keeps is decided.
+    #[must_use]
+    pub fn before(self, first: f64) -> Self {
+        let Self::Undecided(spans) = self else {
+            return self;
+        };
+        // (a NaN keeps every interval)
+        let kept: Vec<[f64; 2]> = spans
+            .into_iter()
+            .filter(|&[lo, _]| lo.partial_cmp(&first) != Some(core::cmp::Ordering::Greater))
+            .collect();
+        if kept.is_empty() {
+            Self::Complete
+        } else {
+            Self::Undecided(kept)
         }
     }
 }
@@ -1441,6 +1521,8 @@ fn poly_vertex_point<O: SolutionObject>(poly_vertex: &O) -> Result<Point3> {
 pub struct SolutionArray<O> {
     /// `m_pData[0 .. m_lSize]`.
     data: Vec<Solution<O>>,
+    /// (Not upstream) what a line solve left undecided beside its solutions.
+    side_record: SideRecord,
 }
 
 impl<O: SolutionObject> Default for SolutionArray<O> {
@@ -1456,7 +1538,10 @@ impl<O: SolutionObject> SolutionArray<O> {
     /// An empty array (`SmSolutionArray()`).
     #[must_use]
     pub const fn new() -> Self {
-        Self { data: Vec::new() }
+        Self {
+            data: Vec::new(),
+            side_record: SideRecord::NotRun,
+        }
     }
 
     /// An empty array (`SmSolutionArray(nDataSize, NULL)`).
@@ -1546,9 +1631,27 @@ impl<O: SolutionObject> SolutionArray<O> {
         }
     }
 
-    /// Removes every solution (`ReSet`).
+    /// Removes every solution (`ReSet`), and the side record with them.
     pub fn reset(&mut self) {
         self.data.clear();
+        self.side_record = SideRecord::NotRun;
+    }
+
+    /// (Not upstream) What a line solve left undecided beside its solutions
+    /// ([`SideRecord`]); [`SideRecord::NotRun`] for every other array.
+    #[must_use]
+    pub fn side_record(&self) -> &SideRecord {
+        &self.side_record
+    }
+
+    /// Sets the side record.
+    pub fn set_side_record(&mut self, record: SideRecord) {
+        self.side_record = record;
+    }
+
+    /// Takes the side record, leaving [`SideRecord::NotRun`].
+    pub fn take_side_record(&mut self) -> SideRecord {
+        std::mem::take(&mut self.side_record)
     }
 
     /// The solutions (`GetDataArray`).
@@ -1654,6 +1757,8 @@ impl<O: SolutionObject> SolutionArray<O> {
                 contact: s.contact,
             });
         }
+        // (the same solve's: the record names no object)
+        out.side_record = self.side_record.clone();
         out
     }
 
@@ -2442,5 +2547,54 @@ mod tests {
                 Err(SolidError::InvalidInput { .. })
             ));
         }
+    }
+
+    /// The side record of a line solve: not run by default and after a reset; an
+    /// undecided record built from intervals merges them, and is never empty (built from
+    /// none, it is the whole line); scaled back, each interval is rounded outward; a ray
+    /// that keeps its first hit keeps the intervals starting at or before it, and is
+    /// complete when none does.
+    #[test]
+    fn the_side_record_has_three_states_and_follows_the_line_parameter() {
+        let mut a: SolutionArray<Obj> = SolutionArray::new();
+        assert_eq!(a.side_record(), &SideRecord::NotRun);
+        assert_eq!(SideRecord::default(), SideRecord::NotRun);
+        a.set_side_record(SideRecord::Complete);
+        a.reset();
+        assert_eq!(a.side_record(), &SideRecord::NotRun);
+
+        let r = SideRecord::undecided(vec![[4.0, 5.0], [0.0, 1.0], [0.5, 2.0]]);
+        assert_eq!(r, SideRecord::Undecided(vec![[0.0, 2.0], [4.0, 5.0]]));
+        assert_eq!(
+            SideRecord::undecided(Vec::new()),
+            SideRecord::Undecided(vec![[f64::NEG_INFINITY, f64::INFINITY]])
+        );
+
+        let SideRecord::Undecided(scaled) = r.clone().unscaled(10.0) else {
+            panic!();
+        };
+        assert_eq!(scaled.len(), 2);
+        for ([lo, hi], [a0, a1]) in scaled.iter().zip([[0.0, 2.0], [4.0, 5.0]]) {
+            assert!(*lo <= a0 / 10.0 && *hi >= a1 / 10.0);
+            assert!(a0 / 10.0 - lo < 1.0e-15 && hi - a1 / 10.0 < 1.0e-15);
+        }
+        assert_eq!(
+            r.clone().unscaled(f64::NAN),
+            SideRecord::Undecided(vec![[f64::NEG_INFINITY, f64::INFINITY]])
+        );
+        assert_eq!(SideRecord::Complete.unscaled(10.0), SideRecord::Complete);
+        assert_eq!(SideRecord::NotRun.unscaled(10.0), SideRecord::NotRun);
+
+        assert_eq!(
+            r.clone().before(3.0),
+            SideRecord::Undecided(vec![[0.0, 2.0]])
+        );
+        assert_eq!(r.clone().before(4.0), r);
+        assert_eq!(
+            SideRecord::Undecided(vec![[4.0, 5.0]]).before(3.0),
+            SideRecord::Complete
+        );
+        assert_eq!(r.clone().before(f64::NAN), r);
+        assert_eq!(SideRecord::NotRun.before(3.0), SideRecord::NotRun);
     }
 }

@@ -59,7 +59,11 @@
 //!   leaf whose guesses ran; after the traversal each is searched by
 //!   [`super::certified_line::isolate`] ([`CertifiedLsi::certified_pass`]), and every
 //!   certified crossing that no solution of the whole solve already stands for is added.
-//!   Nothing is removed, and no solution a guess found is solved again.
+//!   Nothing is removed, and no solution a guess found is solved again. The traversal also
+//!   counts the leaves and subtrees it culls by the line's distance or parameter, and the
+//!   pass returns the solve's side record ([`crate::geom::solution_array::SideRecord`])
+//!   from the components of what the leaves' passes kept
+//!   ([`super::certified_line::components`]); nothing reads it yet.
 
 use super::certified_line;
 use super::p1::{is_node_valid, is_surface_cache_owner, surface_to_evaluate};
@@ -78,7 +82,7 @@ use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::global_solver::{Branch, GlobalSolve, SolverOperation};
 use crate::geom::pseudo_box::LineHit as PseudoHit;
 use crate::geom::solution_array::{
-    Solution, SolutionArray, SolutionEnd, SolutionObject, SolutionType, SortKey,
+    SideRecord, Solution, SolutionArray, SolutionEnd, SolutionObject, SolutionType, SortKey,
 };
 use crate::geom::tol::{are_same, scaled_zero2};
 use crate::geom::tree::{AuxDataType, NodeId, Tree};
@@ -321,6 +325,32 @@ struct CertifiedLeaf<O> {
     nodes: [Option<NodeId>; 2],
 }
 
+/// What the traversal of a solve with the certified pass keeps (not upstream): the leaves
+/// whose guesses ran, and how many leaves and subtrees it culled by the line's distance or
+/// parameter (a slab or sphere test of boxes, no proof: their strips are not enclosed).
+/// A leaf outside the face or the solve's domain is no cull here: no hit there counts.
+#[derive(Debug, Clone, PartialEq)]
+struct Kept<O> {
+    leaves: Vec<CertifiedLeaf<O>>,
+    culled: usize,
+}
+
+impl<O> Default for Kept<O> {
+    fn default() -> Self {
+        Self {
+            leaves: Vec::new(),
+            culled: 0,
+        }
+    }
+}
+
+/// Counts one cull of `keep` (when kept).
+fn count_cull<O>(keep: &mut Option<&mut Kept<O>>) {
+    if let Some(kept) = keep.as_deref_mut() {
+        kept.culled = kept.culled.saturating_add(1);
+    }
+}
+
 /// Read-only state of one leaf solve.
 struct LsiLeaf<'s, O> {
     cache: &'s SurfaceCache<O>,
@@ -428,13 +458,14 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
     }
 
     /// [`LsiGlobalSolver::local_solve_branch`], the leaf pushed to `keep` (when given)
-    /// as its guesses start: the leaves [`CertifiedLsi::certified_pass`] searches.
+    /// as its guesses start: the leaves [`CertifiedLsi::certified_pass`] searches; and a
+    /// leaf culled by the line's distance or parameter counted there.
     #[allow(clippy::too_many_lines)]
     fn local_solve_branch_keeping(
         &mut self,
         k: &Kernel,
         branch: &Branch,
-        keep: Option<&mut Vec<CertifiedLeaf<O>>>,
+        mut keep: Option<&mut Kept<O>>,
     ) -> Result<bool> {
         // locals - apBranch[0] is SurfaceNode
         let surface_node = *self.base.branch_node(branch, 0)?;
@@ -529,6 +560,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             box_hit(&Ok(bbox.intersect_line(self.line_point, self.line_vector)?))
         else {
             // no work - no BBox intersection
+            count_cull(&mut keep);
             return Ok(false);
         };
 
@@ -537,11 +569,13 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             pseudo_box.intersect_line(self.line_point, self.line_vector)?
         )) else {
             // no work - no Pseudo intersection
+            count_cull(&mut keep);
             return Ok(false);
         };
 
         // no work - BBox/Pseudo intersection segments don't overlap
         if max2(bbox_enter, pseudo_enter) > min2(bbox_exit, pseudo_exit) {
+            count_cull(&mut keep);
             return Ok(false);
         }
 
@@ -556,7 +590,10 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         if let Some(line_ivl) = &self.line_interval {
             bound_ivl = match bound_ivl.intersect(line_ivl) {
                 Ok(i) => i,
-                Err(e) if !e.is_unported_or_cancelled() => return Ok(false),
+                Err(e) if !e.is_unported_or_cancelled() => {
+                    count_cull(&mut keep);
+                    return Ok(false);
+                }
                 Err(_) => Extent1d::new(),
             };
         }
@@ -564,6 +601,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         // when firing rays only look at positive line parameters
         if self.ray_fire && bound_ivl.max() <= 0.0 {
             // no work - ray casting and no positive intersection segment
+            count_cull(&mut keep);
             return Ok(false);
         }
 
@@ -605,6 +643,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         // no work - if given, m_cpLineInterval doesn't overlap sBoxIvl
         if let Some(line_ivl) = &self.line_interval {
             if line_ivl.are_disjoint(&bound_ivl, 0.0) {
+                count_cull(&mut keep);
                 return Ok(false);
             }
         }
@@ -688,7 +727,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
 
         // (not upstream) the certified pass searches this leaf after the traversal
         if let Some(keep) = keep {
-            keep.push(CertifiedLeaf {
+            keep.leaves.push(CertifiedLeaf {
                 owner: leaf.owner,
                 parent: leaf.parent,
                 domain: leaf.domain,
@@ -867,24 +906,25 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         Ok(false)
     }
 
-    /// The crossings [`certified_line::isolate`] certifies on each of `leaves`, added
-    /// ([`CertifiedLsi::certified_pass`]).
+    /// The crossings [`certified_line::isolate`] certifies on each leaf `kept` holds, added
+    /// ([`CertifiedLsi::certified_pass`]), and the solve's side record built from the
+    /// components of what the passes kept ([`certified_line::components`]).
     fn add_certified_roots(
         &mut self,
         k: &Kernel,
         net: &certified_line::LineNet,
-        leaves: &[CertifiedLeaf<O>],
-    ) -> Result<()> {
+        kept: &Kept<O>,
+    ) -> Result<SideRecord> {
         // (without the cache no leaf was solved, and none is kept)
         let Some(cache) = self.surface_cache else {
-            return Ok(());
+            return Ok(SideRecord::NotRun);
         };
         let tol = self.base.tolerance_3d;
         let speed = self.line_vector.length();
         // (a line of no length has no parameter to tell two hits apart by)
         let moving = speed > 0.0;
         if !moving {
-            return Ok(());
+            return Ok(SideRecord::NotRun);
         }
         // the line's own interval, as `add_certified_root` bounds it: the solve's line
         // interval, and a ray's hits from just behind its start
@@ -904,12 +944,20 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             solve_domain: self.uv_domain,
             tol,
         };
-        for job in leaves {
+        let leaves = &kept.leaves;
+        let domains: Vec<Extent2d> = leaves.iter().map(|job| job.domain).collect();
+        let sides = certified_line::leaf_sides(&domains, &self.uv_domain);
+        let mut searched: Vec<certified_line::SearchedLeaf> = Vec::new();
+        // the records the components read, bounded (`certified_line::MAX_SOLVE_BOXES`)
+        let mut records = 0_usize;
+        let mut over_budget = false;
+        for (job, job_sides) in leaves.iter().zip(&sides) {
             let found = certified_line::isolate(
                 net,
                 &line,
                 &job.domain,
                 &job.interval,
+                job_sides,
                 self.base.cancel.as_ref(),
             )?;
             k.work_counters.add_line_pass(
@@ -917,31 +965,60 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                 u64::try_from(found.unshown).unwrap_or(u64::MAX),
                 found.stop,
             );
+            k.work_counters.add_line_exclusion(
+                u64::try_from(found.exclusion.boxes).unwrap_or(u64::MAX),
+                found.exclusion.out_of_budget,
+            );
             // Only a leaf the pass finished adds crossings: one stopped at the limit may
             // hold a crossing the pass never reached, and adding one of two crossings it
             // did reach would turn the guesses' even count (a ray passing near a crown
             // seam, both crossings missed) into an odd one. Its answer stays the guesses'.
-            if found.roots.is_empty() || found.stop != certified_line::Stop::Finished {
-                continue;
+            if !found.roots.is_empty() && found.stop == certified_line::Stop::Finished {
+                let leaf = LsiLeaf {
+                    cache,
+                    owner: job.owner,
+                    parent: job.parent,
+                    eval: cache.surface(),
+                    domain: job.domain,
+                    line: Curve::from(Line::infinite(self.line_point, self.line_vector, 3, false)),
+                    interval: job.interval,
+                    conts: job.conts,
+                    nodes: job.nodes,
+                };
+                for root in &found.roots {
+                    // a root whose evaluation, filter or point test fails is not added: the
+                    // solve's answer without it is the guesses', as it was
+                    ignored(self.add_certified_root(k, &leaf, root, tol / speed))?;
+                }
             }
-            let leaf = LsiLeaf {
-                cache,
-                owner: job.owner,
-                parent: job.parent,
-                eval: cache.surface(),
+            records = records.saturating_add(found.floor.len());
+            over_budget |= records > certified_line::MAX_SOLVE_BOXES;
+            searched.push(certified_line::SearchedLeaf {
                 domain: job.domain,
-                line: Curve::from(Line::infinite(self.line_point, self.line_vector, 3, false)),
-                interval: job.interval,
-                conts: job.conts,
-                nodes: job.nodes,
-            };
-            for root in &found.roots {
-                // a root whose evaluation, filter or point test fails is not added: the
-                // solve's answer without it is the guesses', as it was
-                ignored(self.add_certified_root(k, &leaf, root, tol / speed))?;
-            }
+                stop: found.stop,
+                // (past the bound the records are not kept: the components are not built)
+                floor: if over_budget { Vec::new() } else { found.floor },
+                roots: found.roots,
+            });
         }
-        Ok(())
+        let components = if over_budget {
+            certified_line::Components::over_budget()
+        } else {
+            certified_line::components(&searched, &sides, span)
+        };
+        let at_limit = searched
+            .iter()
+            .any(|l| l.stop == certified_line::Stop::AtLimit);
+        k.work_counters.add_line_solve(
+            u64::try_from(components.list.len()).unwrap_or(u64::MAX),
+            at_limit,
+        );
+        Ok(certified_line::side_record(
+            &searched,
+            &components,
+            kept.culled > 0,
+            span,
+        ))
     }
 
     /// One certified root of `leaf`, added as a guess's hit is, unless a solution of the
@@ -1129,8 +1206,8 @@ pub(crate) struct CertifiedLsi<'t, 's, O> {
     /// The surface's exact net ([`certified_line::LineNet::of`]), `None` for a surface
     /// the pass does not run on.
     net: Option<certified_line::LineNet>,
-    /// The leaves whose guesses ran.
-    leaves: Vec<CertifiedLeaf<O>>,
+    /// The leaves whose guesses ran, and the culls.
+    kept: Kept<O>,
 }
 
 impl<'t, 's, O: SolutionObject + 't> CertifiedLsi<'t, 's, O> {
@@ -1142,7 +1219,7 @@ impl<'t, 's, O: SolutionObject + 't> CertifiedLsi<'t, 's, O> {
         Self {
             solver,
             net,
-            leaves: Vec::new(),
+            kept: Kept::default(),
         }
     }
 
@@ -1151,18 +1228,19 @@ impl<'t, 's, O: SolutionObject + 't> CertifiedLsi<'t, 's, O> {
     /// ray's negative parameters skipped, the filter, the trim boundary) unless a solution
     /// of the solve already stands for it. Run by the caller after the traversal, with the
     /// solve's solutions in the solver's `base.solutions`, so that a root some other
-    /// leaf's guess found is never solved a second time. Nothing without a net.
+    /// leaf's guess found is never solved a second time. Returns the solve's side record
+    /// (in the solver's scaled line parameter), [`SideRecord::NotRun`] without a net.
     ///
     /// # Errors
     ///
     /// A cancel, or an unported dependency of the evaluation, the filter or the point
     /// test.
-    pub(crate) fn certified_pass(&mut self, k: &Kernel) -> Result<()> {
+    pub(crate) fn certified_pass(&mut self, k: &Kernel) -> Result<SideRecord> {
         let Some(net) = self.net.take() else {
-            return Ok(());
+            return Ok(SideRecord::NotRun);
         };
-        let leaves = std::mem::take(&mut self.leaves);
-        let added = self.solver.add_certified_roots(k, &net, &leaves);
+        let kept = std::mem::take(&mut self.kept);
+        let added = self.solver.add_certified_roots(k, &net, &kept);
         self.net = Some(net);
         added
     }
@@ -1178,12 +1256,17 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for CertifiedLsi<'t, '_, O> 
     }
 
     fn branch_may_contain_answers(&mut self, branch: &Branch) -> Result<bool> {
-        self.solver.may_contain_answers(branch)
+        let may = self.solver.may_contain_answers(branch)?;
+        // (a subtree pruned by its sphere bound is a cull: no proof)
+        if !may && self.net.is_some() {
+            self.kept.culled = self.kept.culled.saturating_add(1);
+        }
+        Ok(may)
     }
 
     fn local_solve(&mut self, branch: &Branch) -> Result<bool> {
         let k = self.solver.kernel;
-        let keep = self.net.is_some().then_some(&mut self.leaves);
+        let keep = self.net.is_some().then_some(&mut self.kept);
         self.solver.local_solve_branch_keeping(k, branch, keep)
     }
 
@@ -2231,5 +2314,70 @@ mod tests {
         assert!(k.work_counters.line_leaves_at_limit() > 0);
         assert!(k.work_counters.line_leaves_finished() > 0);
         assert_eq!(k.work_counters.line_leaves_not_run(), 0);
+    }
+
+    /// The side record a solve returns is in the line's own parameter: the solver runs on
+    /// the line scaled to length about 1 (here 20 times shorter), and the record is scaled
+    /// back with the solutions before a ray keeps its first. On a line of length 20 through
+    /// the torus near its crown, over the line interval [5, 5.2]: every interval of the
+    /// record lies in that interval, rounded outward, and holds every solution. The same
+    /// line fired as a ray keeps its first hit, and only what starts before it.
+    #[test]
+    fn the_side_record_is_scaled_back_before_a_ray_keeps_its_first_hit() {
+        let k = Kernel::default();
+        let s = torus(&k);
+        let p = Vec3::new(82.388_988_497_226_59, 82.388_988_497_226_59, 10.000_04);
+        let d = 20.0
+            * Vec3::new(
+                -0.850_300_871_283_819_5,
+                -0.523_935_376_527_776_1,
+                -0.049_801_099_552_871_67,
+            );
+        let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let interval = Extent1d::from_min_max(5.0, 5.2);
+        let sols = s
+            .base_global_line_intersect::<H>(
+                &k,
+                H(0),
+                &domain,
+                p,
+                d,
+                Some(&interval),
+                false,
+                2.0e-5,
+            )
+            .unwrap();
+        let t: Vec<f64> = sols
+            .as_slice()
+            .iter()
+            .map(|x| x.start.parameters[0])
+            .collect();
+        assert_eq!(t.len(), 2, "{t:?}");
+        let SideRecord::Undecided(spans) = sols.side_record() else {
+            panic!("{:?}", sols.side_record());
+        };
+        for &[lo, hi] in spans {
+            assert!(lo >= 5.0 - 1.0e-12 && hi <= 5.2 + 1.0e-12, "{spans:?}");
+        }
+        for x in &t {
+            assert!(
+                spans.iter().any(|&[lo, hi]| lo <= *x && *x <= hi),
+                "{x} {spans:?}"
+            );
+        }
+
+        let ray = s
+            .base_global_line_intersect::<H>(&k, H(0), &domain, p, d, None, true, 2.0e-5)
+            .unwrap();
+        assert_eq!(ray.len(), 1);
+        let first = ray.as_slice()[0].start.parameters[0];
+        assert!((first - t[0]).abs() < 1.0e-9, "{first} {t:?}");
+        match ray.side_record() {
+            SideRecord::Undecided(spans) => {
+                assert!(spans.iter().all(|&[lo, _]| lo <= first), "{spans:?}");
+            }
+            SideRecord::Complete => {}
+            SideRecord::NotRun => panic!("not run"),
+        }
     }
 }
