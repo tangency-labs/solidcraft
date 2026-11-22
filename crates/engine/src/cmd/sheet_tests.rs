@@ -10518,3 +10518,68 @@ fn a_fold_line_sketched_outside_a_moved_component_acts_where_it_lies() {
     assert!(min_x > 240.0 && min_x < 250.0, "min_x: {min_x}");
     assert!(max_x > 310.0 && max_x < 325.0, "max_x: {max_x}");
 }
+
+/// #20720: walls on the side edges of a ramp and of the run past it, on the outside of the bend
+/// between the two (where the walls part as they rise), are left open, with the Flange saying
+/// so, as the flat-first sheet left them: closed, each would grow past its end into the V over
+/// the bend, and laid flat the two growths would cover the same material. Each wall ends square
+/// at the bend's tangent line, (R + T)·tan(15°) = 2·tan 15° = 0.535898 back from its sharp, so
+/// that in the flat the walls stand apart beside the bend's zone. Unfold, which failed with
+/// "sew: ambiguous edge contact", then lays the sheet out in one valid piece, and Refold gives
+/// the part back.
+#[test]
+fn walls_on_the_outside_of_a_bend_are_left_open_and_unfold() {
+    let mut s = Session::default();
+    riser(&mut s);
+    // Walls 30 high on the left edge of the ramp and of the run, on the outside of the bend
+    // between them (the points are on those edges, halfway along each).
+    run(&mut s, "sheet.flange", json!({"edges":[[0, 134.141016, 20.866025], [0, 219.282032, 40.866025]],"height":30}));
+    let said = last_warning(&s);
+    assert!(said.contains(solidcraft_doc::OUTSIDE_BEND_OPEN), "{said}");
+    assert_eq!(said.matches(solidcraft_doc::OUTSIDE_BEND_OPEN).count(), 1, "{said}");
+    // No rip parts the two walls: the V stays open.
+    let rips = s.model.state().surface_sheets[0].sheet.joints.iter().filter(|j| matches!(j.kind, solidcraft_develop::JointKind::Rip(_))).count();
+    assert_eq!(rips, 0);
+    // Each wall's bend is (R + T)·tan(15°) = 2·tan 15° = 0.5358983848622454 shorter than the
+    // same wall made alone, where no other wall meets it over the bend.
+    let setback = 0.535_898_384_862_245_4;
+    let both = wall_bends(&s);
+    for (k, edge) in [json!([0, 134.141016, 20.866025]), json!([0, 219.282032, 40.866025])].into_iter().enumerate() {
+        let mut alone = Session::default();
+        riser(&mut alone);
+        run(&mut alone, "sheet.flange", json!({"edges":[edge],"height":30}));
+        let one = wall_bends(&alone);
+        assert_eq!(one.len(), 1, "{one:?}");
+        assert!((both[k] - (one[0] - setback)).abs() < 1e-6, "wall {k}: {both:?} vs alone {one:?}");
+    }
+    let formed = volume(&mut s);
+    let body = &s.model.state().bodies[0].body;
+    assert!(body.validity().is_empty() && body.shell_count() == 1);
+    assert_eq!(flat_pieces(&s).len(), 1);
+    run(&mut s, "sheet.unfold", json!({}));
+    let laid = &s.model.state().bodies[0].body;
+    assert!(laid.validity().is_empty() && laid.shell_count() == 1);
+    run(&mut s, "sheet.refold", json!({}));
+    assert!(rel(volume(&mut s), formed) < 1e-6);
+}
+
+/// A 60 x 100 x 1 mm plate (R 1, K 0.4) with a ramp 80 long at 30° on its far edge, then a run
+/// 100 long bent back 30°: a Z-shaped riser.
+fn riser(s: &mut Session) {
+    run(s, "sheet.manage_rules", json!({"name":"Steel 1mm","thickness":"1 mm","bend_radius":"1 mm","k_factor":"0.4","active":true}));
+    base(s, 60.0, 100.0);
+    run(s, "sheet.flange", json!({"edges":[[30, 100, 1]],"height":80,"angle":"30 deg","then":[{"angle":"30 deg","height":100,"flip":true}]}));
+}
+
+/// The lengths of a sheet's 90° bends (its walls'), in the order of their joints.
+fn wall_bends(s: &Session) -> Vec<f64> {
+    s.model.state().surface_sheets[0]
+        .sheet
+        .joints
+        .iter()
+        .filter_map(|j| match &j.kind {
+            solidcraft_develop::JointKind::Bend(b) if (b.angle - FRAC_PI_2).abs() < 1e-9 => Some(b.length),
+            _ => None,
+        })
+        .collect()
+}
