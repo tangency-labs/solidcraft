@@ -2073,10 +2073,8 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
     };
     for title_block in [None, Some(solidcraft_geom::title_block::default_block())] {
         let record = Sheet { title_block, ..(**d.sheets.iter().find(|x| x.id == sheet).unwrap()).clone() };
-        let (empty, ..) = assemble(&record, Projection::Third, &labels(&record), &[], &[], &[], std::iter::empty::<(u64, Vec2, Drawn)>())
-            .unwrap()
-            .finish()
-            .unwrap();
+        let (empty, ..) =
+            assemble(&record, Projection::Third, &labels(&record), &[], &[], std::iter::empty::<(u64, Vec2, Drawn)>()).unwrap().finish().unwrap();
         assert_eq!(empty.groups.len(), if record.title_block.is_some() { 4 } else { 3 });
         // The block's text and its fonts count too.
         let fonts = |scene: &Scene| Scene::new(scene.size_mm, Vec::new()).font_records_beyond(&scene.fonts);
@@ -2085,7 +2083,7 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
         let views = [lines(left - 22), lines(30), lines(18)];
         let centre = Vec2::new(100.0, 100.0);
         let views = views.iter().enumerate().map(|(i, v)| (i as u64, centre, v));
-        let (scene, states, ..) = assemble(&record, Projection::Third, &labels(&record), &[], &[], &[], views).unwrap().finish().unwrap();
+        let (scene, states, ..) = assemble(&record, Projection::Third, &labels(&record), &[], &[], views).unwrap().finish().unwrap();
         let statuses: Vec<&'static str> = states.iter().map(|v| v.status.name()).collect();
         assert_eq!(statuses, ["drawn", "failed", "drawn"]);
         let records = scene.groups.iter().map(Group::records).sum::<usize>() + fonts(&scene);
@@ -2458,7 +2456,7 @@ fn a_views_box_is_what_it_draws() {
             why: None,
         };
         let (_, _, objects, _, _, _) =
-            assemble(&record, Projection::Third, &labels(&record), &[], &[], &[], [(7, centre, &drawn)].into_iter()).unwrap().finish().unwrap();
+            assemble(&record, Projection::Third, &labels(&record), &[], &[], [(7, centre, &drawn)].into_iter()).unwrap().finish().unwrap();
         let object = objects.iter().find(|o| o.object == 7).unwrap();
         assert!(near(&object.bounds_mm, min, max), "{object:?}");
     }
@@ -2866,7 +2864,7 @@ fn a_sheet_note_paints_over_view_annotations_whatever_order_they_join_in() {
     let (notes, _) = sheet_texts(&s, &d, sheet, &lettering, true);
     let mut prepared = PreparedBodies::default();
     let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(&s, &[], &shown, &mut prepared, *id, view)));
-    let mut assembly = assemble(record, d.projection, &text, &[], &[], &[], drawn).unwrap();
+    let mut assembly = assemble(record, d.projection, &text, &[], &[], drawn).unwrap();
     let frames: BTreeMap<_, _> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
     let line_group = |view: u64| on.iter().find(|(id, ..)| *id == view).map(|(_, v, _)| v.line_group.value);
     let wanted = dimensions_on(&d, on.iter().map(|(id, ..)| *id));
@@ -2996,7 +2994,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
         why: None,
     };
     let mut assembly =
-        assemble(record, Projection::Third, &labels(record), &[], &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
+        assemble(record, Projection::Third, &labels(record), &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
     let stroke = |to: Vec2| Item::Stroke { path: vec![Seg2::Line { a: Vec2::ZERO, b: to }], closed: false, width_mm: 0.25, pattern: None };
     let dimension = |id, items| DrawnDimension {
         dimension: id,
@@ -3061,7 +3059,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
     let (a, b, too_big) = (text(1, "11", 0), text(2, "22", 0), text(3, "77", MAX_RECORDS));
     let shared = glyphs(&a) + glyphs(&b);
     let mut assembly =
-        assemble(record, Projection::Third, &labels(record), &[], &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view.clone()))).unwrap();
+        assemble(record, Projection::Third, &labels(record), &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view.clone()))).unwrap();
     assembly.add_dimensions([&a, &too_big, &b].into_iter());
     let (scene, _, objects, states, _, _) = assembly.finish().unwrap();
     assert!(states[0].drawn && !states[1].drawn && states[2].drawn, "{states:?}");
@@ -3073,7 +3071,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
 
     // Past the limit only with its font's records: its group alone would fit. Without them, it joins.
     let mut assembly =
-        assemble(record, Projection::Third, &labels(record), &[], &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
+        assemble(record, Projection::Third, &labels(record), &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
     let room = MAX_RECORDS - assembly.records;
     let records = |one: &DrawnDimension| one.group.as_ref().unwrap().records();
     let (bare, per_line) = (text(4, "8", 0), records(&text(4, "8", 1)) - records(&text(4, "8", 0)));
@@ -5027,6 +5025,99 @@ fn sheet_centerline_refusal_preserves_exportable_strokes_and_history() {
         let svg = solidcraft_io::paper::paper_svg(&scene.prepare().unwrap(), &NoPictures, DEFAULT_DPI).unwrap().0;
         assert!(String::from_utf8(svg).unwrap().contains("data-kind=\"sketch\""));
     }
+}
+
+/// [`front_and_top`] with the top view placed apart at (300, 220), so it has its label: the session,
+/// the sheet and the top view.
+fn top_apart() -> (Session, u64, u64) {
+    let (mut s, sheet, [_, top]) = front_and_top();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"place": {"at": [300.0, 220.0]}}}));
+    (s, sheet, top)
+}
+
+/// A linear dimension on view `view` from `a` to `b` (model mm), `offset` from them: its id.
+fn linear_on(s: &mut Session, view: u64, a: [f64; 3], b: [f64; 3], offset: f64) -> u64 {
+    let added = run(s, "drawing.dimension.add", json!({"view": ids::encode(view), "kind": {"linear": {"a": a, "b": b}}}));
+    let id = ids::decode(added["dimension"].as_str().unwrap()).unwrap();
+    run(s, "drawing.dimension.edit", json!({"dimension": ids::encode(id), "set": {"offset_mm": offset}}));
+    id
+}
+
+/// The box of `kind` `object` among `shown`'s objects.
+fn box_of(shown: &SheetScene, kind: ObjectKind, object: u64) -> Aabb2 {
+    shown.objects.iter().find(|o| o.kind == kind && o.object == object).map(|o| o.bounds_mm).unwrap()
+}
+
+/// A view's label keeps clear of what is drawn for its view (#17853): with the length of the top
+/// view's back edge dimensioned above it, where the label went, the label sits above that dimension,
+/// still centred on the view; with a second dimension stacked above the first, above both. `build`
+/// and the provider give the same bytes, and `drawing.view.inspect` gives the box the sheet draws.
+#[test]
+fn a_views_label_sits_above_the_dimensions_over_its_view() {
+    let (mut s, sheet, top) = top_apart();
+    let alone = box_of(&built(&s, sheet), ObjectKind::ViewLabel, top);
+    let near = linear_on(&mut s, top, [0.0, 50.0, 20.0], [100.0, 50.0, 20.0], 6.0);
+    let shown = built(&s, sheet);
+    let (label, dimension) = (box_of(&shown, ObjectKind::ViewLabel, top), box_of(&shown, ObjectKind::Dimension, near));
+    assert!(dimension.overlaps(&alone), "the case: the dimension {dimension:?} is where the label {alone:?} went");
+    // Its gap above the dimension, as above a view: the same distance, as where it went alone.
+    assert!(
+        label.min.y >= dimension.max.y + LABEL_GAP_MM - 1e-9 && (label.center().x - alone.center().x).abs() < 1e-9,
+        "{label:?} over {dimension:?}"
+    );
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&shown.scene));
+    let inspected = run(&mut s, "drawing.view.inspect", json!({"view": ids::encode(top)}));
+    let corner = |at: &Value| Vec2::new(at[0].as_f64().unwrap(), at[1].as_f64().unwrap());
+    let reported = Aabb2 { min: corner(&inspected["label"]["box_mm"]["min"]), max: corner(&inspected["label"]["box_mm"]["max"]) };
+    assert!(reported.min.dist(label.min) < 1e-6 && reported.max.dist(label.max) < 1e-6, "inspect {reported:?}, drawn {label:?}");
+
+    let far = linear_on(&mut s, top, [0.0, 50.0, 20.0], [100.0, 50.0, 20.0], 16.0);
+    let shown = built(&s, sheet);
+    let label = box_of(&shown, ObjectKind::ViewLabel, top);
+    let highest = [near, far].map(|id| box_of(&shown, ObjectKind::Dimension, id).max.y).into_iter().fold(f64::MIN, f64::max);
+    assert!(label.min.y > highest, "{label:?} under a dimension reaching {highest}");
+}
+
+/// What doesn't lie under a view's label leaves it where it was (#17853): a dimension right of the
+/// view, and a note of the view right of the label at its height, don't lift it. A label moved to an
+/// offset stays at its offset over a dimension.
+#[test]
+fn a_views_label_stays_put_beside_dimensions_and_at_its_offset() {
+    let (mut s, sheet, top) = top_apart();
+    let alone = box_of(&built(&s, sheet), ObjectKind::ViewLabel, top);
+    let beside = linear_on(&mut s, top, [100.0, 0.0, 20.0], [100.0, 50.0, 20.0], 6.0);
+    let note = id_in(run(&mut s, "drawing.note.add", json!({"anchor": {"view": ids::encode(top)}, "at": [45, 17], "content": "Side"})), "note");
+    let shown = built(&s, sheet);
+    let noted = box_of(&shown, ObjectKind::Note, note);
+    assert!(!box_of(&shown, ObjectKind::Dimension, beside).overlaps(&alone), "the case: beside, not under");
+    assert!(!noted.overlaps(&alone) && noted.min.y < alone.max.y && noted.max.y > alone.min.y, "the case: {noted:?} level with {alone:?}");
+    assert_eq!(box_of(&shown, ObjectKind::ViewLabel, top), alone);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"label": {"offset": [0.0, 15.0]}}}));
+    let moved = box_of(&built(&s, sheet), ObjectKind::ViewLabel, top);
+    linear_on(&mut s, top, [0.0, 50.0, 20.0], [100.0, 50.0, 20.0], 6.0);
+    assert_eq!(box_of(&built(&s, sheet), ObjectKind::ViewLabel, top), moved);
+}
+
+/// A detail view's label keeps clear of the detail's own dimensions, and `drawing.view.inspect` gives
+/// the box the sheet draws: both lay the dimensions out through the detail's frame, centred on its
+/// region, not on the model (#17853). A detail of the front view's top edge, its region centred 10 mm
+/// above the model's middle, with that edge's length dimensioned above the region, where the label went.
+#[test]
+fn a_detail_views_label_box_is_where_the_sheet_draws_it() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let region = json!({"rectangle": {"min": [-5.0, 10.0], "max": [105.0, 30.0]}});
+    let made = run(&mut s, "drawing.view.detail", json!({"parent": ids::encode(front), "boundary": region, "place": {"at": [300.0, 100.0]}}));
+    let detail = ids::decode(made["view"].as_str().unwrap()).unwrap();
+    let alone = box_of(&built(&s, sheet), ObjectKind::ViewLabel, detail);
+    let near = linear_on(&mut s, detail, [0.0, 0.0, 20.0], [100.0, 0.0, 20.0], 12.0);
+    let shown = built(&s, sheet);
+    let (label, dimension) = (box_of(&shown, ObjectKind::ViewLabel, detail), box_of(&shown, ObjectKind::Dimension, near));
+    assert!(dimension.overlaps(&alone), "the case: the dimension {dimension:?} is where the label {alone:?} went");
+    assert!(label.min.y >= dimension.max.y, "{label:?} over {dimension:?}");
+    let inspected = run(&mut s, "drawing.view.inspect", json!({"view": ids::encode(detail)}));
+    let corner = |at: &Value| Vec2::new(at[0].as_f64().unwrap(), at[1].as_f64().unwrap());
+    let reported = Aabb2 { min: corner(&inspected["label"]["box_mm"]["min"]), max: corner(&inspected["label"]["box_mm"]["max"]) };
+    assert!(reported.min.dist(label.min) < 1e-6 && reported.max.dist(label.max) < 1e-6, "inspect {reported:?}, drawn {label:?}");
 }
 
 /// A rule's K-factor changes the flat pattern: after the change, the plate's flat view is out of date
