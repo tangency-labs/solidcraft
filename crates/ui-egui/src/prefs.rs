@@ -1735,6 +1735,9 @@ preference_settings! {
     hole_group: bool = false, PAGE_TOOLS => check_id("prefs.design_tools.hole_group");
     /// The browser's Origin folder starts hidden in designs that don't keep its eye themselves.
     hide_origin: bool = false, PAGE_DESIGN => check_tr("ui.hide_origin_by_default");
+    /// Model Parameters listed under the component each feature belongs to (#20648); off keeps
+    /// the flat list in listing order.
+    params_group_by_component: bool = true, PAGE_DESIGN => check_tr("prefs.params_group_by_component");
     /// The X, Y and Z origin axes run through the origin to the edges of the view, both ways, so
     /// they stay in sight as references wherever the view is (#11123). Off by default: short axes
     /// from the origin, solid then dashed, as before.
