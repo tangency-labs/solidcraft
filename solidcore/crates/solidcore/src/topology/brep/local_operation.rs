@@ -833,10 +833,12 @@ fn refuse_kept_edges_not_clear(
             moved_faces.push(face);
         }
     }
-    let kept: Vec<KeptEdge> = kept
+    // (the maintainer's directive) the ids stay on the kept edges: the band's
+    // exemption is per edge/face pairing, never an original's every pairing
+    let kept: Vec<(crate::topology::EdgeId, KeptEdge)> = kept
         .iter()
         .filter(|(e, _)| !reconstruction.reconstructed_kept().contains(e))
-        .map(|(_, edge)| edge.clone())
+        .map(|(e, edge)| (*e, edge.clone()))
         .collect();
     // a reconstructed kept edge's crossing is certified by its recorded endpoint
     // contacts (`Reconstruction::proofs`, the records the gate is wired to): every
@@ -876,7 +878,7 @@ fn refuse_kept_edges_not_clear(
     }
     // (the trim curves a face lacks are made on a private copy)
     let mut copy = b.clone_standing_for_self()?;
-    let mut faces = Vec::new();
+    let mut faces: Vec<(FaceId, MovedFace)> = Vec::new();
     for face in moved_faces {
         let surface = face_ops::surface(&copy, face)?
             .ok_or_else(|| null("the face's surface"))?
@@ -889,23 +891,44 @@ fn refuse_kept_edges_not_clear(
             };
             uv_box = Some(uv_box.map_or(span, |u| u.union(&span)));
         }
-        faces.push(MovedFace {
-            surface,
-            uv_box,
-            tolerance: copy.face(face)?.tolerance.max(copy.tolerance()),
-        });
-    }
-    if clearance::all_clear(k, &kept, &faces)? {
-        Ok(())
-    } else {
-        Err(Failure::new(
-            OP,
-            OffsetFailure::Unsound {
-                what: Unsoundness::KeptEdgeNotClear,
+        faces.push((
+            face,
+            MovedFace {
+                surface,
+                uv_box,
+                tolerance: copy.face(face)?.tolerance.max(copy.tolerance()),
             },
-        )
-        .into_error())
+        ));
     }
+    // the certified gate per edge/face pairing: a pairing the band left alone is
+    // exempt (the legacy path), and where the classification engaged pairings, a
+    // pairing it never saw takes the old path too (the maintainer's directive). An
+    // empty engaged set is the pre-reconstruction contract (a direct gate call, no
+    // classification ran): every non-band pairing is certified as before.
+    let scoped = !reconstruction.engaged_pairs().is_empty();
+    for (edge, kept_edge) in &kept {
+        let allowed: Vec<MovedFace> = faces
+            .iter()
+            .filter(|(id, _)| {
+                (!scoped || reconstruction.engaged_pairs().contains(&(*edge, *id)))
+                    && !reconstruction.band_left_pairs().contains(&(*edge, *id))
+            })
+            .map(|(_, f)| f.clone())
+            .collect();
+        if allowed.is_empty() {
+            continue;
+        }
+        if !clearance::all_clear(k, std::slice::from_ref(kept_edge), &allowed)? {
+            return Err(Failure::new(
+                OP,
+                OffsetFailure::Unsound {
+                    what: Unsoundness::KeptEdgeNotClear,
+                },
+            )
+            .into_error());
+        }
+    }
+    Ok(())
 }
 
 /// (not upstream) The local operation's final gate: the body it built is refused when it
@@ -2296,6 +2319,13 @@ pub enum CrossEvent {
     /// The edge is untouched: proved clear of the face, or the face's surface meets its
     /// curve only off the face's trimmed region (the surface's extension).
     Clear,
+    /// The edge is untouched because the cut is in the coplanar band and the certified
+    /// strict predicate could not confirm it: the old path's legacy exemption (the
+    /// maintainer's directive, 2026-11-22: a case that builds on the base must not
+    /// become a refusal), NOT a certified clearance. The edge stays exactly as the
+    /// executive built it, and the kept-edge gate exempts exactly this edge/face
+    /// pairing.
+    BandLeftAlone,
     /// The face's cut trims the edge: `clip` (at `clip_t` of the edge's interval) is the
     /// cut's certified point on the face, and the retained interval keeps the far side
     /// (`removes_low`: the interval's low end goes).
@@ -2352,6 +2382,61 @@ fn classify_edge_crossing(
     tolerance: f64,
     edge: crate::topology::EdgeId,
 ) -> Result<EdgeCrossing> {
+    // (the maintainer's directive, 2026-11-22) the coplanar band keeps the old path:
+    // where the band cannot be certified the edge stays exactly as the executive built
+    // it (an uncertified legacy exemption recorded as [`CrossEvent::BandLeftAlone`],
+    // not a clearance), never a refusal and never a reconstruction event the base did
+    // not need. The certified strict predicate can still confirm the band
+    // (`clearance::separated` over the trimmed region) and then the edge is proved
+    // `Clear`. Anything past the band is a cut below with its certified clip path and
+    // typed refusals — a kept island the ends cannot see is not a band (its samples
+    // leave the tolerance) and still refuses typed.
+    let (t0, t1) = (interval.min(), interval.max());
+    let mut band = 0.0_f64;
+    for t in [
+        t0,
+        t0 + 0.25 * (t1 - t0),
+        t0 + 0.5 * (t1 - t0),
+        t0 + 0.75 * (t1 - t0),
+        t1,
+    ] {
+        let p = curve.evaluate_point(k, t)?;
+        let Some(plane) = face.plane else {
+            break;
+        };
+        band = band.max(plane.side(p).abs());
+    }
+    let bounds_face = face.plane.is_some() && band <= tolerance;
+    if bounds_face {
+        if clearance::separated(
+            k,
+            curve,
+            interval,
+            &face.moved.surface,
+            face.moved.uv_box.as_ref(),
+            tolerance,
+        )? {
+            return Ok(EdgeCrossing {
+                event: CrossEvent::Clear,
+                proof: None,
+            });
+        }
+        return Ok(EdgeCrossing {
+            event: CrossEvent::BandLeftAlone,
+            proof: None,
+        });
+    }
+    classify_edge_crossing_inner(k, curve, interval, face, tolerance, edge)
+}
+
+fn classify_edge_crossing_inner(
+    k: &Kernel,
+    curve: &Curve,
+    interval: &crate::geom::extent1d::Extent1d,
+    face: &MovedFaceCut,
+    tolerance: f64,
+    edge: crate::topology::EdgeId,
+) -> Result<EdgeCrossing> {
     use crate::geom::extent1d::Extent1d;
     let clear = EdgeCrossing {
         event: CrossEvent::Clear,
@@ -2393,24 +2478,6 @@ fn classify_edge_crossing(
     // samples alone. Without that certificate and without an endpoint contact to
     // certify below, the edge is not clear: the event logic decides (the clip/rebuild
     // path or a typed refusal). Anything past the band is a cut below.
-    let mut band = g0.abs().max(g1.abs());
-    for f in [0.25, 0.5, 0.75] {
-        let t = t0 + (t1 - t0) * f;
-        band = band.max(end_side(t)?.abs());
-    }
-    let bounds_face = band <= tolerance;
-    if bounds_face
-        && clearance::separated(
-            k,
-            curve,
-            interval,
-            &face.moved.surface,
-            face.moved.uv_box.as_ref(),
-            tolerance,
-        )?
-    {
-        return Ok(clear);
-    }
     // lambda: the fraction of the interval where the side is zero
     let lambda = if g0 == g1 {
         if g0 <= 0.0 {
@@ -2451,7 +2518,8 @@ fn classify_edge_crossing(
     // review) — a narrower claim than tolerance clearance — and without one it goes to
     // the clip path below, where the certificate decides or the operation refuses
     // typed
-    if !bounds_face && (1.0 - width) * chord <= tolerance {
+    // (the band is decided above; the inner sees only cuts past it)
+    if (1.0 - width) * chord <= tolerance {
         // the cut trims off no part of the edge the model resolves (the clip is at its
         // very end, or the whole edge is clear of it): the edge is untouched
         // the cut trims off no part of the edge the model resolves (the clip is at its
@@ -2827,6 +2895,15 @@ pub struct Reconstruction {
     /// typed ([`ReconstructionRefusal::VanishUnresolved`]), so a returned record's set
     /// is exhausted.
     discharged_vanishes: BTreeSet<crate::topology::EdgeId>,
+    /// The edge/face pairings the coplanar band left alone (the maintainer's
+    /// legacy-path exemption): the kept-edge gate exempts exactly these pairings.
+    band_left: BTreeSet<(crate::topology::EdgeId, FaceId)>,
+    /// The edge/face pairings the classification engaged (the reconstruction's own
+    /// scope: "it engages only with the events that fire"). The kept-edge gate
+    /// certifies exactly these; a pairing it never saw takes the old path (the
+    /// maintainer's directive: a case that builds on the base must not become a
+    /// refusal).
+    engaged: BTreeSet<(crate::topology::EdgeId, FaceId)>,
 }
 
 impl Reconstruction {
@@ -2881,7 +2958,11 @@ impl Reconstruction {
     }
 
     /// An empty record (a pass that found no crossing).
-    fn empty(map: EdgeMap) -> Self {
+    fn empty(
+        map: EdgeMap,
+        band_left: BTreeSet<(crate::topology::EdgeId, FaceId)>,
+        engaged: BTreeSet<(crate::topology::EdgeId, FaceId)>,
+    ) -> Self {
         Self {
             events: Vec::new(),
             proofs: Vec::new(),
@@ -2890,7 +2971,21 @@ impl Reconstruction {
             bridges: Vec::new(),
             tolerances: Vec::new(),
             discharged_vanishes: BTreeSet::new(),
+            band_left,
+            engaged,
         }
+    }
+
+    /// The pairings the classification engaged (the gate's scope).
+    #[must_use]
+    pub(crate) fn engaged_pairs(&self) -> &BTreeSet<(crate::topology::EdgeId, FaceId)> {
+        &self.engaged
+    }
+
+    /// The edge/face pairings the band left alone (the gate's exemptions).
+    #[must_use]
+    pub(crate) fn band_left_pairs(&self) -> &BTreeSet<(crate::topology::EdgeId, FaceId)> {
+        &self.band_left
     }
 }
 
@@ -3776,13 +3871,22 @@ fn reconstruct_crossed_boundaries(
         if let Some(&edge) = vanished.iter().next() {
             return Err(deferred_edge_vanish(edge));
         }
-        return Ok(Reconstruction::empty(map.clone()));
+        return Ok(Reconstruction::empty(
+            map.clone(),
+            BTreeSet::new(),
+            BTreeSet::new(),
+        ));
     }
     // 1. the events per original edge (map order is deterministic) and the clips with
     //    their endpoint-contact proofs
     let mut events: Vec<EdgeEventRecord> = Vec::new();
     let mut clips: Vec<ClipRecord> = Vec::new();
     let mut reconstructed_kept: BTreeSet<crate::topology::EdgeId> = BTreeSet::new();
+    // (the maintainer's directive) the edge/face pairings the band left alone: the
+    // kept-edge gate exempts exactly these pairings, never an original's unrelated
+    // ones
+    let mut band_left: BTreeSet<(crate::topology::EdgeId, FaceId)> = BTreeSet::new();
+    let mut engaged: BTreeSet<(crate::topology::EdgeId, FaceId)> = BTreeSet::new();
     // a cut the endpoint certificate's scope cannot decide (a non-planar moved face):
     // the reconstruction engages only with the events that fire, and refuses then
     let mut undecided: Option<SolidError> = None;
@@ -3837,7 +3941,7 @@ fn reconstruct_crossed_boundaries(
                         }
                     };
                 match crossing.event {
-                    CrossEvent::Clear => {}
+                    CrossEvent::Clear | CrossEvent::BandLeftAlone => {}
                     CrossEvent::Removed { .. } => removal = true,
                     CrossEvent::Trimmed { .. } => return Err(deferred_edge_vanish(pending)),
                 }
@@ -3885,13 +3989,21 @@ fn reconstruct_crossed_boundaries(
                                 ))
                             );
                             if uncertified {
+                                engaged.insert((original, face.face));
                                 undecided = Some(e);
                                 continue;
                             }
                             return Err(e);
                         }
                     };
-                if !matches!(crossing.event, CrossEvent::Clear) {
+                engaged.insert((original, face.face));
+                if matches!(crossing.event, CrossEvent::BandLeftAlone) {
+                    band_left.insert((original, face.face));
+                }
+                if !matches!(
+                    crossing.event,
+                    CrossEvent::Clear | CrossEvent::BandLeftAlone
+                ) {
                     // one cut per edge is the reconstruction's pattern: two moved faces
                     // cutting one edge is not certified here
                     if event.is_some() {
@@ -3989,8 +4101,10 @@ fn reconstruct_crossed_boundaries(
             return Err(deferred_edge_vanish(edge));
         }
         // no reconstruction is engaged: the operation behaves as it always did (the
-        // gates decide), even where a non-planar cut left a group undecided
-        return Ok(Reconstruction::empty(map.clone()));
+        // gates decide), even where a non-planar cut left a group undecided. The band
+        // pairings the classification recorded survive this return: a band-only run is
+        // a successful one and the gate exempts exactly those pairings
+        return Ok(Reconstruction::empty(map.clone(), band_left, engaged));
     }
     if let Some(e) = undecided {
         // the reconstruction engaged, but a cut is outside the endpoint certificate's
@@ -4119,7 +4233,7 @@ fn reconstruct_crossed_boundaries(
     // removed edge's clip (issue #13622)
     clip_points.extend(events.iter().filter_map(|record| match record.event {
         CrossEvent::Removed { clip } => Some(clip),
-        CrossEvent::Clear | CrossEvent::Trimmed { .. } => None,
+        CrossEvent::Clear | CrossEvent::BandLeftAlone | CrossEvent::Trimmed { .. } => None,
     }));
     clip_points.sort_by(|p, q| {
         (p.x, p.y, p.z)
@@ -4373,6 +4487,8 @@ fn reconstruct_crossed_boundaries(
         bridges,
         tolerances,
         discharged_vanishes: vanished.clone(),
+        band_left,
+        engaged,
     })
 }
 
@@ -4810,7 +4926,7 @@ mod tests {
                 &mut k,
                 &mut b,
                 &[(crate::topology::EdgeId::from_index(0), kept_through(x, y))],
-                &Reconstruction::empty(BTreeMap::new()),
+                &Reconstruction::empty(BTreeMap::new(), BTreeSet::new(), BTreeSet::new()),
             );
             if refused {
                 let e = r.unwrap_err();
@@ -7126,6 +7242,8 @@ mod tests {
             bridges: Vec::new(),
             tolerances: Vec::new(),
             discharged_vanishes: BTreeSet::new(),
+            band_left: BTreeSet::new(),
+            engaged: BTreeSet::new(),
         };
         let r = refuse_kept_edges_not_clear(&mut k, &mut b, &[], &reconstruction);
         assert!(
@@ -7148,6 +7266,8 @@ mod tests {
             bridges: Vec::new(),
             tolerances: Vec::new(),
             discharged_vanishes: BTreeSet::new(),
+            band_left: BTreeSet::new(),
+            engaged: BTreeSet::new(),
         };
         refuse_kept_edges_not_clear(&mut k, &mut b, &[], &reconstruction).unwrap();
     }
@@ -7541,13 +7661,16 @@ mod tests {
 
     /// The "bounds the face" class (issue #13622's review, S2): an edge whose sampled
     /// tolerance band lies in the moved face's surface is never classified `Clear` on
-    /// the samples alone. The certified strict predicate must confirm it
-    /// (`clearance::separated` over the trimmed region); where that certificate fails
-    /// and no endpoint contact certifies, the event logic refuses the uncertifiable
-    /// clip typed (`ClipUncertified`) — where the sampled band used to return `Clear`.
+    /// the samples alone — it reads [`CrossEvent::BandLeftAlone`], the old path's
+    /// legacy exemption. Test change (the maintainer's directive, 2026-11-22: "where
+    /// the coplanar band can't be certified, keep the old path for that band instead of
+    /// refusing"): this line lies identically on z = x + y - 1 and the sampled band
+    /// used to return `Clear`; review S2 turned that into a `ClipUncertified` refusal
+    /// (pinned here until the directive), and the directive now routes the class to the
+    /// old path instead. The input is unchanged; the event is the exemption, still not
+    /// a clearance.
     #[test]
     fn an_edge_that_bounds_the_moved_face_is_not_clear_on_the_sampled_band() {
-        use crate::error::offset::ReconstructionRefusal;
         use crate::geom::extent1d::Extent1d;
         let k = Kernel::default();
         let surface = Surface::from(Plane::from_normal(
@@ -7573,17 +7696,12 @@ mod tests {
             &face,
             2.0e-5,
             crate::topology::EdgeId::from_index(0),
-        );
+        )
+        .unwrap();
         assert!(
-            matches!(
-                r.unwrap_err().failure().map(|f| &f.reason),
-                Some(crate::error::Reason::Offset(
-                    OffsetFailure::Reconstruction {
-                        why: ReconstructionRefusal::ClipUncertified { .. }
-                    }
-                ))
-            ),
-            "the sampled band was accepted without a certificate"
+            matches!(r.event, CrossEvent::BandLeftAlone),
+            "the sampled band was not left on the old path: {:?}",
+            r.event
         );
     }
 
@@ -7691,12 +7809,13 @@ mod tests {
     }
 
     /// The endpoint-rounding rule's other side (issue #13622): a displacement beyond
-    /// the tolerance the length model resolves is a real beyond-end cut. It is never
-    /// clamped and the clip stays refused typed (`ClipUncertified`), nothing uncertain
-    /// built.
+    /// the tolerance the length model resolves is a real beyond-end cut. Test change
+    /// (the maintainer's directive, 2026-11-22): this input lies 1e-9 to 2e-9 above
+    /// the plane and is band-qualified (within the 2e-5 tolerance), so the class takes
+    /// the old path's exemption instead of the beyond-end refusal — the input is
+    /// unchanged and the non-band sibling below keeps the refusal the rule pins.
     #[test]
     fn a_cut_beyond_the_tolerance_before_an_end_stays_refused_typed() {
-        use crate::error::offset::ReconstructionRefusal;
         use crate::geom::extent1d::Extent1d;
         let k = Kernel::default();
         let surface = Surface::from(Plane::from_normal(Point3::ZERO, Vec3::Z));
@@ -7716,6 +7835,45 @@ mod tests {
         let r = classify_edge_crossing(
             &k,
             &band,
+            &Extent1d::from_min_max(0.0, 1.0),
+            &face,
+            2.0e-5,
+            crate::topology::EdgeId::from_index(0),
+        )
+        .unwrap();
+        assert!(
+            matches!(r.event, CrossEvent::BandLeftAlone),
+            "the band's beyond-end cut was not left on the old path: {:?}",
+            r.event
+        );
+    }
+
+    /// The endpoint-rounding rule's other side off the band: a real beyond-end cut on
+    /// an edge the sampled band does not cover is never clamped and the clip stays
+    /// refused typed (`ClipUncertified`), nothing uncertain built (the refusal the
+    /// test above derives away for the band alone).
+    #[test]
+    fn a_beyond_end_cut_off_the_band_stays_refused_typed() {
+        use crate::error::offset::ReconstructionRefusal;
+        use crate::geom::extent1d::Extent1d;
+        let k = Kernel::default();
+        let surface = Surface::from(Plane::from_normal(Point3::ZERO, Vec3::Z));
+        let face = cut_face(
+            FaceId::from_index(0),
+            surface,
+            Extent2d::from_bounds(-10.0, -10.0, 10.0, 10.0),
+        );
+        // the same beyond-end geometry off the band: 1e-3 to 2e-3 above the plane,
+        // past the 2e-5 tolerance the samples resolve, so the model's cut is a whole
+        // chord before the start end (|lambda| * chord = 100 mm) and nothing bands it
+        let off = Curve::from(crate::curve::line::Line::from_points(
+            Point3::new(0.0, 0.0, 1.0e-3),
+            Point3::new(100.0, 0.0, 2.0e-3),
+            3,
+        ));
+        let r = classify_edge_crossing(
+            &k,
+            &off,
             &Extent1d::from_min_max(0.0, 1.0),
             &face,
             2.0e-5,
