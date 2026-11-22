@@ -452,6 +452,94 @@ fn holed_plate_dimensioning() -> (Harness, String) {
     (h, front)
 }
 
+/// The same face-on plate in a nested component. STEP imports also put their bodies in
+/// components, so their picks need a nonempty occurrence path all the way to the command.
+fn component_plate_dimensioning() -> (Harness, Value) {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width": 1400, "height": 900}));
+    let assembly = h.app.run("component.create", json!({"name": "Assembly"})).unwrap()["occurrence"].clone();
+    let part = h.app.run("component.create", json!({"name": "Part"})).unwrap()["occurrence"].clone();
+    h.app.run("solid.box", json!({"length": 100, "width": 80, "height": 20, "body_name": "Plate"})).unwrap();
+    h.app
+        .run("solid.cylinder", json!({"radius": 6, "height": 100, "base": [50, -10, 10], "axis": "Y", "operation": "cut", "targets": ["Plate"]}))
+        .unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    h.app.run("drawing.create", json!({"first_sheet_paper": {"size": {"standard": "a3"}, "orientation": "landscape", "dpi": 300}})).unwrap();
+    let drawing = h.app.run("drawing.inspect", json!({})).unwrap();
+    assert_eq!(drawing["sheets"][0]["size_mm"], json!([420.0, 297.0]), "the paper coordinates below are A3 landscape");
+    h.app.run("drawing.view.base", json!({"sheet": "Sheet 1", "view": "front", "scale": "1:2", "position_mm": [140, 180]})).unwrap();
+    crate::drawing_workspace::enter(&mut h.app, true).unwrap();
+    settle(&mut h);
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.dimension"));
+    h.frames(4);
+    (h, json!([assembly, part]))
+}
+
+#[test]
+fn dimension_tool_measures_a_nested_component_edge() {
+    let (mut h, path) = component_plate_dimensioning();
+    click_paper(&mut h, 125.0, 175.0);
+    click_paper(&mut h, 140.0, 160.0);
+    let read = added_dimension(&mut h, &[]);
+    assert_eq!(read["status"], "ok", "{read}");
+    assert!((number(&read["value"]) - 100.0).abs() < 1e-6, "{read}");
+    assert_eq!(read["record"]["kind"]["length"]["edge"]["path"], path, "{read}");
+}
+
+#[test]
+fn dimension_tool_measures_a_nested_component_hole() {
+    let (mut h, path) = component_plate_dimensioning();
+    click_paper(&mut h, 143.0, 180.0);
+    click_paper(&mut h, 150.0, 192.0);
+    let read = added_dimension(&mut h, &[]);
+    assert_eq!(read["text"], "Ø12.00", "{read}");
+    assert!((number(&read["value"]) - 12.0).abs() < 1e-6, "{read}");
+    assert_eq!(read["record"]["kind"]["radial"]["edge"]["path"], path, "{read}");
+}
+
+#[test]
+fn dimension_tool_measures_a_nested_component_centre_to_edge() {
+    let (mut h, path) = component_plate_dimensioning();
+    click_paper(&mut h, 143.0, 180.0);
+    click_paper(&mut h, 115.0, 180.0);
+    click_paper(&mut h, 125.0, 160.0);
+    let read = added_dimension(&mut h, &[]);
+    assert_eq!(read["status"], "ok", "{read}");
+    assert!((number(&read["value"]) - 50.0).abs() < 1e-6, "{read}");
+    for point in ["a", "b"] {
+        assert_eq!(read["record"]["kind"]["linear"][point]["path"], path, "{point}: {read}");
+    }
+}
+
+/// The silhouette's face needs the same occurrence path as a component's edges.
+#[test]
+fn dimension_tool_measures_a_nested_component_cylinder_outline() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width": 1400, "height": 900}));
+    let assembly = h.app.run("component.create", json!({"name": "Assembly"})).unwrap()["occurrence"].clone();
+    let part = h.app.run("component.create", json!({"name": "Part"})).unwrap()["occurrence"].clone();
+    h.app.run("solid.cylinder", json!({"radius": 6, "height": 100, "base": [0, 0, 0], "axis": "X", "body_name": "Rod"})).unwrap();
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    h.app.run("drawing.create", json!({"first_sheet_paper": {"size": {"standard": "a3"}, "orientation": "landscape", "dpi": 300}})).unwrap();
+    h.app.run("drawing.view.base", json!({"sheet": "Sheet 1", "view": "front", "scale": "1:2", "position_mm": [140, 180]})).unwrap();
+    crate::drawing_workspace::enter(&mut h.app, true).unwrap();
+    settle(&mut h);
+    let sheet = solidcraft_engine::doc::ids::encode(h.app.session.drawing("drawing.inspect").unwrap().sheets[0].id);
+    let line = h.app.run("drawing.scene.line", json!({"sheet": sheet, "point_mm": [140, 183], "band_mm": 0.5})).unwrap();
+    assert_eq!(line["line"]["source"]["kind"], "silhouette", "{line}");
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.dimension"));
+    h.frames(4);
+    click_paper(&mut h, 140.0, 183.0);
+    click_paper(&mut h, 100.0, 180.0);
+    let read = added_dimension(&mut h, &[]);
+    assert_eq!(read["status"], "ok", "{read}");
+    assert!((number(&read["value"]) - 12.0).abs() < 1e-6, "{read}");
+    assert_eq!(read["text"], "Ø12.00", "{read}");
+    assert_eq!(read["record"]["kind"]["cylinder"]["face"]["path"], json!([assembly, part]), "{read}");
+}
+
 /// A click at paper millimetres (`x`, `y`) of the A3 sheet, a frame drawn after it.
 fn click_paper(h: &mut Harness, x: f32, y: f32) {
     let paper = crate::scenario::rect_of("sheet:paper").unwrap();
