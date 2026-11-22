@@ -231,11 +231,28 @@ fn a_sweep_refuses_a_face_it_cannot_sweep() {
     };
     // No body face at the point.
     assert!(sweep_with(&mut s, json!({"face": [0, 0, 50]})).is_err());
+    // A face that is not a point.
+    assert!(sweep_with(&mut s, json!({"face": [0, 0]})).is_err());
     // A face of another body than the one named.
     assert!(sweep_with(&mut s, json!({"face": [0, 0, 10], "face_body": "Other"})).is_err());
     // A face and a sketch profile at once.
     assert!(sweep_with(&mut s, json!({"face": [0, 0, 10], "face_body": "Block", "sketch": "P"})).is_err());
     assert_eq!(s.doc.features.len(), before);
+}
+
+/// The face's boundary is the profile: it stays profile geometry even when the design
+/// projects references as construction, or the sketch would have no profile to sweep.
+#[test]
+fn a_sweep_from_a_body_face_works_with_construction_projections() {
+    let mut s = Session::default();
+    s.project_construction = true;
+    run(&mut s, "solid.box", json!({"corner": [-5, -5, 0], "length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "P"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, -10], [0, -50]], "ids": ["up"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.sweep", json!({"face": [0, 0, 10], "face_body": "Block", "path_sketch": "P", "path": ["up"], "operation": "new", "body_name": "Column"}));
+    let m = measure(&s, "Column");
+    assert!((m.volume - 4000.0).abs() < 2e-3 * 4000.0, "volume {}", m.volume);
 }
 
 /// #3345: a 4 x 3 profile drawn at the middle of the bottom line of a closed rounded rectangle

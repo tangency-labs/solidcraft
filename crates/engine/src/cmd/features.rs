@@ -4337,8 +4337,9 @@ fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "a sweep's profile is either a face or a sketch, not both"));
     }
     // A planar body face sweeps like a profile (its edges projected into a sketch on it).
-    let (sketch, face_profile, face_body) = match face.and_then(vec3) {
+    let (sketch, face_profile, face_body) = match face {
         Some(fp) => {
+            let fp = vec3(fp).ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z] on the face"))?;
             let (id, inside, body) = super::face::sketch_of_face(s, fp, cmd, str_(p, "face_body"), fixed_param(p, cmd)?)?;
             s.active_sketch = None;
             s.sketching_view = None;
