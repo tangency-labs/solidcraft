@@ -5875,3 +5875,41 @@ fn a_coil_spring_wire_with_its_surface_a_little_off_its_edges_imports_in_bounded
         }
     }
 }
+
+/// #20686: the closely wound wire whose surface lies 0.2 % outside its edges, cut by the flat end
+/// at the bottom of its second turn, measures the volume of the wire below that plane, not more
+/// and not less: about 67.7 mm³ (the control with another pitch and cut is a different wire, so
+/// its 81 mm³ is not this one's). The expected volume is the wire's tube integrated below
+/// `z = const`: over the helix angle, the radius and the angle round the wire, with the wire's
+/// own `(R + s cos f) s` measure.
+#[test]
+fn a_coil_spring_wire_with_a_surface_off_its_edges_measures_the_wire_below_its_end_plane() {
+    use std::f64::consts::PI;
+    let (pitch, radius, tube) = (1.125_f64, 7.5_f64, 0.55_f64);
+    let c = pitch / (2.0 * PI);
+    let z_end = 1.7_f64;
+    let (nt, ns, nf) = (800_usize, 16_usize, 48_usize);
+    let mut sum = 0.0;
+    for i in 0..nt {
+        let z0 = c * (i as f64 + 0.5) / nt as f64 * 4.0 * PI;
+        for j in 0..ns {
+            let s = (j as f64 + 0.5) / ns as f64 * tube;
+            for k in 0..nf {
+                let f = (k as f64 + 0.5) / nf as f64 * 2.0 * PI;
+                if z0 + s * f.sin() < z_end {
+                    sum += (radius + s * f.cos()) * s;
+                }
+            }
+        }
+    }
+    let expected = sum * (4.0 * PI / nt as f64) * (tube / ns as f64) * (2.0 * PI / nf as f64);
+    let imported = step_import(&coil_wire_file(pitch, 22, 1.002, z_end / c)).unwrap();
+    assert!(imported.bodies.len() <= 1, "{:?}", imported.warnings);
+    if let Some(body) = imported.bodies.first() {
+        // A body must be the right one (the surface's 0.2 % makes it 0.4 % larger); a refusal
+        // that says why is the other answer.
+        assert!(body.closed, "{:?}", imported.warnings);
+        let volume = measure(&body.body).unwrap().volume;
+        assert!(rel(volume, expected) < 0.01, "{volume} against {expected}");
+    }
+}
