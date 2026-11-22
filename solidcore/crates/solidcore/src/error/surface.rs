@@ -197,13 +197,6 @@ impl SurfaceFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_)
-            | Self::Defect { .. }
-            | Self::ScaleNotUniform
-            | Self::BallDefinitionUnreadable
-            | Self::PointOnAxis
-            | Self::IsoCircleUndefined
-            | Self::ExtensionNotMadeInBracket => SM_ERR,
             Self::Missing(_) | Self::NoNurb | Self::NoInputStream => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
