@@ -644,11 +644,17 @@ fn fit_run(raw: &Raw, run: &[(usize, f64, f64)], first: Vec2, last: Vec2, period
         })
         .collect::<Result<Vec<_>>>()?;
     let homogeneous = segs.iter().map(H::from_seg).collect::<Result<Vec<_>>>()?;
+    // A periodic fit needs three distinct samples before returning to its first point.
+    let divisions = if periodic && run.len() == 1 { 4 } else { 2 };
     // Spans as (piece of the run, from, to) in that piece's parameter.
     let mut spans: Vec<(usize, f64, f64)> = run
         .iter()
         .enumerate()
-        .flat_map(|(k, (_, from, to))| (0..2).map(move |j| (k, from + (to - from) * j as f64 / 2.0, from + (to - from) * (j + 1) as f64 / 2.0)))
+        .flat_map(|(k, (_, from, to))| {
+            (0..divisions).map(move |j| {
+                (k, from + (to - from) * f64::from(j) / f64::from(divisions), from + (to - from) * f64::from(j + 1) / f64::from(divisions))
+            })
+        })
         .collect();
     let mut failure = bad("offset arc could not be fitted");
     for _ in 0..32 {
@@ -1382,6 +1388,19 @@ mod tests {
         sk.refresh_freeform_chain_offsets().unwrap();
         sk.validate_periodic_splines().unwrap();
         assert_periodic(&sk);
+    }
+
+    #[test]
+    fn a_single_closed_bezier_piece_can_make_a_periodic_offset() {
+        let mut sk = Sketch::new();
+        let mut pts: Vec<_> =
+            [(0., 0.), (20., 0.), (0., 40.), (-20., 0.)].into_iter().map(|(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap()).collect();
+        pts.push(pts[0]);
+        let source =
+            sk.add_curve(CurveKind::Spline { pts, control: true, degree: 4, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+        let output = sk.offset_freeform_chain(&[(source, true)], -1.0).unwrap();
+        let &[rim] = output.as_slice() else { panic!("one smooth rim") };
+        assert!(matches!(sk.curves[rim].kind, CurveKind::Spline { periodic: true, .. }));
     }
 
     /// An outline like an imported SVG: real corners both ways, a joint with a tiny kink,
