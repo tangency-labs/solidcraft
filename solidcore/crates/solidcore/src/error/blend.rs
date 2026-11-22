@@ -754,12 +754,13 @@ pub enum SolverFailure {
     /// The caller's fillet geometry has no rail on side `side`: the caller's solver set-up
     /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
     FilletGeomWithoutRail {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
         /// The rail side, 0 or 1.
         side: usize,
     },
-    /// The caller's fillet geometry has no fillet surface (the trace stores none without a
-    /// surface generator): the caller's solver set-up ([`ErrorKind::InvalidInput`]); status
-    /// `SM_ERR_NULL_POINTER`.
+    /// The caller's fillet geometry has no fillet surface: the caller's solver set-up
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
     FilletGeomWithoutSurface {
         /// The fillet geometry.
         fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
@@ -890,8 +891,11 @@ impl core::fmt::Display for SolverFailure {
                     "the solver has no edge use {index} of the edge to fillet"
                 )
             }
-            Self::FilletGeomWithoutRail { side } => {
-                write!(f, "the fillet geometry has no rail on side {side}")
+            Self::FilletGeomWithoutRail { fillet_geom, side } => {
+                write!(
+                    f,
+                    "fillet geometry {fillet_geom:?} has no rail on side {side}"
+                )
             }
             Self::FilletGeomWithoutSurface { fillet_geom } => {
                 write!(f, "fillet geometry {fillet_geom:?} has no fillet surface")

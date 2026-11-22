@@ -358,11 +358,15 @@ fn without_corner(op: &'static str, v: VertexId) -> SolidError {
         .into_error()
 }
 
-/// The caller's fillet geometry has no rail on side `side`, which upstream dereferences
+/// The caller's fillet geometry `fillet_geom` has no rail on side `side`, which upstream
+/// dereferences
 /// ([`SolverFailure::FilletGeomWithoutRail`], status `SM_ERR_NULL_POINTER`).
 #[track_caller]
-fn no_rail(op: &'static str, side: usize) -> SolidError {
-    SolidError::blend_solver(op, SolverFailure::FilletGeomWithoutRail { side })
+fn no_rail(op: &'static str, fillet_geom: FilletGeomId, side: usize) -> SolidError {
+    SolidError::blend_solver(
+        op,
+        SolverFailure::FilletGeomWithoutRail { fillet_geom, side },
+    )
 }
 
 /// The caller's fillet geometry `g` names no fillet solver, which upstream dereferences
@@ -2333,7 +2337,7 @@ impl FilletBrep {
                     .get(ii)
                     .copied()
                     .flatten()
-                    .ok_or_else(|| no_rail(OP_FACE, ii))?;
+                    .ok_or_else(|| no_rail(OP_FACE, g, ii))?;
                 let prim = self.primary_of(this_rail, OP_FACE)?;
                 let uv_curve = eu1::uv_trim_curve(self.brep(), prim)?.0.ok_or_else(|| {
                     set_up(
@@ -2388,7 +2392,7 @@ impl FilletBrep {
             .get(start_rail_indx)
             .copied()
             .flatten()
-            .ok_or_else(|| no_rail(OP_FACE, start_rail_indx))?;
+            .ok_or_else(|| no_rail(OP_FACE, g, start_rail_indx))?;
         let mut prim = self.primary_of(rail0, OP_FACE)?;
         let uv_curve0 = if use_uv_curves {
             eu_uv_curve(self, prim)?
@@ -2436,7 +2440,7 @@ impl FilletBrep {
             .get(1 - start_rail_indx)
             .copied()
             .flatten()
-            .ok_or_else(|| no_rail(OP_FACE, 1 - start_rail_indx))?;
+            .ok_or_else(|| no_rail(OP_FACE, g, 1 - start_rail_indx))?;
         let mut start_fv1 = edge::vertex(self.brep(), rail1)?;
         let mut end_fv1 = edge::other_vertex(self.brep(), rail1, start_fv1)?;
         let other_rails1 = if start_rail_indx == 1 {
@@ -2830,7 +2834,7 @@ impl FilletBrep {
 
         for ii in 0..2 {
             let geom = self.geom(g)?;
-            let mut rails = vec![geom.rail(ii).ok_or_else(|| no_rail(OP_INSERT, ii))?];
+            let mut rails = vec![geom.rail(ii).ok_or_else(|| no_rail(OP_INSERT, g, ii))?];
             rails.extend_from_slice(if ii == 0 {
                 &geom.other_rails1
             } else {
@@ -2965,7 +2969,10 @@ impl FilletBrep {
         approx_tol_3d: f64,
         target: &mut Brep,
     ) -> Result<EdgeId> {
-        let rail = self.geom(g)?.rail(i).ok_or_else(|| no_rail(OP_BLEND, i))?;
+        let rail = self
+            .geom(g)?
+            .rail(i)
+            .ok_or_else(|| no_rail(OP_BLEND, g, i))?;
         if self.fillet_edge(rail)?.fillet_edge_type() != FilletEdgeType::BlendingRail {
             return Err(
                 Failure::new(OP_BLEND, BlendFailure::RailNotBlending { rail })
