@@ -8,8 +8,10 @@
 //! control points mapped); a circle about the axis of a cylinder, cone, sphere or torus (v
 //! constant, u the circle's angle plus a constant, or minus it where the circle turns the other
 //! way); a line along a ruling of a cylinder or cone (u constant, v linear). Each exact pcurve is
-//! checked by lifting it. On a spline face, a straight (u, v) line is taken where it lifts onto
-//! the edge within the tolerance. Anything else, and any exact one that misses, is refused
+//! checked by lifting it. On a spline face, an edge that is a whole boundary curve of a polynomial
+//! patch is taken as the straight (u, v) line along that boundary where a certified bound
+//! ([`boundary_iso`]) puts it within the tolerance of the edge; any other straight (u, v) line
+//! is taken where it lifts onto the edge within the tolerance. Anything else, and any exact one that misses, is refused
 //! (`Failed`, "no exact pcurve"): nothing is fitted.
 //!
 //! Periodic parameters are unwrapped along each curve, and each loop's uses are moved by whole
@@ -28,11 +30,16 @@
 //!
 //! Deviations: the B-spline cut and the knot span search are kept here ([`segment`],
 //! [`find_span`]) as the routine had them.
-use super::spline::EvalSurface;
+use super::spline::{EvalSurface, Nurbs};
 use super::uv::{self, Domain};
 use super::vec::{v3, VecExt};
 use super::{Axes, Curve, Curve2, CurveEval, EvalError, Surface, SurfaceEval};
 use crate::math::Vec3;
+use crate::nurbs::crv_basic::Curve as NlCurve;
+use crate::nurbs::crv_deviation::certified_distance;
+use crate::nurbs::math::{gamma, CPoint, NOW};
+use crate::nurbs::srf_basic::Direction;
+use crate::nurbs::srf_tool::p1::extract_iso_crv;
 use crate::SolidError;
 
 /// Why no pcurves: the records are malformed or out of bounds (`Invalid`), no pcurve within
@@ -241,6 +248,278 @@ pub fn exact_pcurves(
         .into_iter()
         .map(|l| l.into_iter().map(Result::ok).collect())
         .collect())
+}
+
+/// The most control points along a direction of a patch or an edge [`boundary_iso`] proves
+/// anything of: the proof refines both nets over their common knots.
+const MAX_BOUNDARY_POINTS: usize = 4096;
+
+/// A pcurve running along a whole boundary curve of a spline patch, and the bound that proves it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BoundaryIso {
+    /// The straight line in (u, v) along the boundary, on the edge's interval.
+    pub pcurve: Curve2,
+    /// A proved bound (mm) on how far the edge is from the surface at the pcurve's lift, at
+    /// every parameter: the largest distance between the edge and the boundary curve at the
+    /// same parameters.
+    pub gap: f64,
+}
+
+/// The pcurve of an edge that is a whole boundary curve of the polynomial patch `surface`, with
+/// a proved bound on its gap, or `None` where that cannot be proved within `cap` mm (another
+/// surface, a rational or periodic patch, an edge that is not a whole line or B-spline curve,
+/// one that lies on no boundary or runs on it at another pace than a straight (u, v) line).
+///
+/// The four boundary curves of the patch are its end iso-curves, which are copies of control
+/// rows. Each is put on the edge's interval by an affine map of its knots (a B-spline's own
+/// reparametrisation, exact up to the rounding of the knots, which is added to the bound),
+/// in each direction, and the edge is compared with it at the same parameters by
+/// [`certified_distance`] (a convex-hull bound over common Bézier pieces, every rounding of it
+/// included). The pcurve is then the straight (u, v) line between the boundary's ends on the
+/// edge's own parameter, the lift of which is that curve. A bound past `cap` is not a proof.
+///
+/// # Errors
+/// [`Error::Invalid`] for a malformed surface or curve, an interval that is not finite and
+/// increasing, or a `cap` that is not positive and finite. Nothing else is an error: a proof that
+/// fails is `Ok(None)`, and the caller carries on as it would without one.
+pub fn boundary_iso(
+    surface: &Surface,
+    curve: &Curve,
+    interval: [f64; 2],
+    cap: f64,
+) -> Result<Option<BoundaryIso>> {
+    let [t0, t1] = interval;
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing
+    if !(t0.is_finite() && t1.is_finite() && t0 < t1 && cap.is_finite() && cap > 0.0) {
+        return Err(Error::Invalid(format!(
+            "boundary pcurve of [{t0}, {t1}] within {cap}"
+        )));
+    }
+    super::check::surface(surface).map_err(|e| Error::Invalid(e.to_string()))?;
+    super::check::curve(curve).map_err(|e| Error::Invalid(e.to_string()))?;
+    let finite = match curve {
+        Curve::Line { start, end } => start.iter().chain(end).all(|x| x.is_finite()),
+        Curve::Spline { knots, points } => {
+            knots.iter().all(|x| x.is_finite()) && points.iter().flatten().all(|x| x.is_finite())
+        }
+        _ => true,
+    };
+    if !finite {
+        return Err(Error::Invalid(
+            "boundary pcurve of a curve with a number not finite".into(),
+        ));
+    }
+    Ok(match SurfaceEval::new(surface)? {
+        SurfaceEval::Eval(EvalSurface::Nurbs(n), _) => {
+            let finite = n.ctrl().iter().flatten().all(|x| x.is_finite())
+                && n.knots().iter().flatten().all(|x| x.is_finite());
+            if !finite {
+                return Err(Error::Invalid(
+                    "boundary pcurve on a patch with a number not finite".into(),
+                ));
+            }
+            boundary_of(&n, curve, interval, cap)
+        }
+        _ => None,
+    })
+}
+
+/// [`boundary_iso`] on a patch already evaluated, the numbers checked.
+fn boundary_of(n: &Nurbs, curve: &Curve, [t0, t1]: [f64; 2], cap: f64) -> Option<BoundaryIso> {
+    // A periodic direction has no boundary to be the edge of (its two ends are one curve, and
+    // the loop's pcurves run round it), a rational patch no polynomial control net.
+    if n.closed().iter().any(|c| *c) || n.ctrl().iter().any(|h| h[3] != 1.0) {
+        return None;
+    }
+    if n.count().iter().any(|c| *c > MAX_BOUNDARY_POINTS) {
+        return None;
+    }
+    let nl = n.nl_surface()?;
+    let (edge, moved) = edge_form(curve, [t0, t1])?;
+    let (p, q) = nl.degrees();
+    let ends = |k: &[f64], d: usize| -> Option<[f64; 2]> {
+        let (a, b) = (*k.first()?, *k.last()?);
+        // Clamped, so the boundary is the knots' ends and its extraction a copy.
+        let clamped =
+            k.get(d) == Some(&a) && k.len().checked_sub(d + 1).and_then(|i| k.get(i)) == Some(&b);
+        (clamped && a < b).then_some([a, b])
+    };
+    let [u0, u1] = ends(nl.u_knots(), p)?;
+    let [v0, v1] = ends(nl.v_knots(), q)?;
+    let sides = [
+        (Direction::U, v0, [u0, v0], [u1, v0]),
+        (Direction::U, v1, [u0, v1], [u1, v1]),
+        (Direction::V, u0, [u0, v0], [u0, v1]),
+        (Direction::V, u1, [u1, v0], [u1, v1]),
+    ];
+    let (e0, e1) = (
+        point_of(edge.cpts().first()?),
+        point_of(edge.cpts().last()?),
+    );
+    let mut best: Option<BoundaryIso> = None;
+    for (dir, at, a, b) in sides {
+        let Ok(iso) = extract_iso_crv(nl, at, dir) else {
+            continue;
+        };
+        let (i0, i1) = (point_of(iso.cpts().first()?), point_of(iso.cpts().last()?));
+        for reversed in [false, true] {
+            // Ends first: a boundary whose ends are not the edge's is not proved.
+            let (s, e) = if reversed { (i1, i0) } else { (i0, i1) };
+            if !(s.dist(e0) <= cap && e.dist(e1) <= cap) {
+                continue;
+            }
+            let Some(gap) = boundary_gap_of(&edge, moved, &iso, reversed, [t0, t1], p.max(q))
+            else {
+                continue;
+            };
+            if gap <= cap && best.as_ref().is_none_or(|b| gap < b.gap) {
+                let (from, to) = if reversed { (b, a) } else { (a, b) };
+                best = Some(BoundaryIso {
+                    pcurve: Curve2::Spline {
+                        knots: vec![t0, t0, t1, t1],
+                        points: vec![from, to],
+                    },
+                    gap,
+                });
+            }
+        }
+    }
+    best
+}
+
+fn point_of(p: &CPoint) -> Vec3 {
+    Vec3::new(p.x, p.y, p.z)
+}
+
+/// The edge's curve as a polynomial NLib curve over exactly `[t0, t1]`, and the most (mm) that
+/// forming it moved it. A line is the degree-1 spline through its points at `t0` and `t1`
+/// (where `t` is 0 or 1 the line's own end, so a whole line is exact; any other parameter is
+/// `start + t (end − start)`, each coordinate off by at most `γ₄` of the ends' size times
+/// `1 + 2 |t|`). A spline is its own, and must cover its whole domain. `None` for any other
+/// record.
+fn edge_form(curve: &Curve, [t0, t1]: [f64; 2]) -> Option<(NlCurve, f64)> {
+    let (knots, points, moved) = match curve {
+        Curve::Line { start, end } => {
+            let at = |t: f64| -> [f64; 3] {
+                if t == 0. {
+                    *start
+                } else if t == 1. {
+                    *end
+                } else {
+                    std::array::from_fn(|k| {
+                        let (a, b) = (
+                            start.get(k).copied().unwrap_or(0.),
+                            end.get(k).copied().unwrap_or(0.),
+                        );
+                        a + t * (b - a)
+                    })
+                }
+            };
+            let size = start.iter().chain(end).fold(0.0_f64, |m, x| m.max(x.abs()));
+            let reach = 1.0 + 2.0 * t0.abs().max(t1.abs());
+            let moved = if [t0, t1].iter().all(|t| *t == 0. || *t == 1.) {
+                0.0
+            } else {
+                // Per coordinate, and the norm of three of them.
+                2.0 * gamma(4) * size * reach
+            };
+            (vec![t0, t0, t1, t1], vec![at(t0), at(t1)], moved)
+        }
+        Curve::Spline { knots, points } => (knots.clone(), points.clone(), 0.0),
+        _ => return None,
+    };
+    if points.len() > MAX_BOUNDARY_POINTS {
+        return None;
+    }
+    let degree = knots.len().checked_sub(points.len() + 1)?;
+    if degree == 0 || knots.first() != Some(&t0) || knots.last() != Some(&t1) {
+        return None;
+    }
+    let pw = points
+        .iter()
+        .map(|&[x, y, z]| CPoint::new(x, y, z, NOW))
+        .collect();
+    Some((NlCurve::new(pw, degree, knots).ok()?, moved))
+}
+
+/// A proved bound of the distance between `edge` and the boundary curve `iso` put on `edge`'s
+/// interval (reversed, or as it runs), at every parameter; `None` where it cannot be formed.
+///
+/// The bound is [`certified_distance`] of the two curves on one domain, plus the rounding of
+/// what is done to the curves first: the edge's own formation (`moved`, [`edge_form`]), the
+/// extraction of `iso` (a copy of a control row, still given the extraction's allowance) and its
+/// knots' affine map. Each mapped knot is off by at most
+/// `δ = γ₅ (|t|max + (t₁ − t₀))`, and a B-spline's point depends on `2 p` consecutive knots, each
+/// moving it by at most the largest derivative-control magnitude `p |ΔP| / (knot gap)` per unit,
+/// `L`, so the curve is off its exactly mapped self by at most `2 p L δ`. The sum is rounded up.
+fn boundary_gap_of(
+    edge: &NlCurve,
+    moved: f64,
+    iso: &NlCurve,
+    reversed: bool,
+    [t0, t1]: [f64; 2],
+    surface_degree: usize,
+) -> Option<f64> {
+    let k = iso.knots();
+    let (a, b) = (*k.first()?, *k.last()?);
+    let span = t1 - t0;
+    // The ends are the interval's own, so both curves share one domain exactly.
+    let map = |x: f64| {
+        if x == a {
+            if reversed {
+                t1
+            } else {
+                t0
+            }
+        } else if x == b {
+            if reversed {
+                t0
+            } else {
+                t1
+            }
+        } else if reversed {
+            t0 + (b - x) / (b - a) * span
+        } else {
+            t0 + (x - a) / (b - a) * span
+        }
+    };
+    let knots: Vec<f64> = if reversed {
+        k.iter().rev().map(|x| map(*x)).collect()
+    } else {
+        k.iter().map(|x| map(*x)).collect()
+    };
+    let pw: Vec<CPoint> = if reversed {
+        iso.cpts().iter().rev().copied().collect()
+    } else {
+        iso.cpts().to_vec()
+    };
+    let p = iso.degree();
+    let placed = NlCurve::new(pw, p, knots).ok()?;
+    let certified = certified_distance(edge, &placed).ok()?;
+    // The size of what the roundings are counted on.
+    let size = [edge, &placed]
+        .iter()
+        .flat_map(|c| c.cpts().iter())
+        .flat_map(|c| [c.x.abs(), c.y.abs(), c.z.abs()])
+        .fold(0.0_f64, f64::max);
+    let extraction = 4.0 * gamma(12 * (surface_degree + 1)) * size;
+    // The derivative's control points, per mapped unit: the steepest the curve goes.
+    let ks = placed.knots();
+    let mut lipschitz = 0.0_f64;
+    for (i, w) in placed.cpts().windows(2).enumerate() {
+        let gap = ks.get(i + p + 1)? - ks.get(i + 1)?;
+        let [c, d] = [w.first()?, w.get(1)?];
+        let step = point_of(c).dist(point_of(d));
+        if gap > 0.0 {
+            lipschitz = lipschitz.max(p as f64 * step / gap);
+        } else if step > 0.0 {
+            return None;
+        }
+    }
+    let delta = gamma(5) * (t0.abs().max(t1.abs()) + span);
+    let knot_map = 2.0 * p as f64 * lipschitz * delta;
+    let bound = (certified + extraction + knot_map + moved) * (1.0 + gamma(3));
+    bound.is_finite().then_some(bound)
 }
 
 fn check_size(loops: &[Vec<EdgeUse<'_>>], tolerance: f64) -> Result<()> {
@@ -618,7 +897,22 @@ impl On {
                 let u = b.atan2(a);
                 Some(segment([u, height(t0)?], [u, height(t1)?]))
             }
-            (SurfaceEval::Eval(..), _) => self.along(curve, [t0, t1], tol),
+            (SurfaceEval::Eval(surface, _), _) => {
+                // A whole boundary curve of a polynomial patch first, by its proved bound: the
+                // one closed form that does not test the pcurve against a tolerance it was
+                // never raised to (the importer raises an edge's tolerance to cover the proved
+                // bound before it asks).
+                let proved = match surface {
+                    EvalSurface::Nurbs(n) => boundary_of(n, record, [t0, t1], 0.5 * tol)
+                        .map(|b| b.pcurve)
+                        .filter(|pc| self.lifts(pc, curve, [t0, t1], 0.5 * tol)),
+                    _ => None,
+                };
+                match proved {
+                    Some(pc) => Some(pc),
+                    None => self.along(curve, [t0, t1], tol),
+                }
+            }
             _ => None,
         })
     }

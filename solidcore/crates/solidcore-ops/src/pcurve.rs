@@ -163,6 +163,29 @@ pub fn exact_pcurves(
         .collect())
 }
 
+/// A proved bound (mm) of how far a B-spline edge `curve` on its `interval` lies from the
+/// boundary curve of the polynomial spline patch `surface` it is a whole copy of, `None` where
+/// it is not proved within `cap` ([`solidcore::eval::pcurve::boundary_iso`]): the importer's edge
+/// covers it before the edge's pcurve is asked for.
+///
+/// # Errors
+/// [`Error::Invalid`] for a malformed record, an interval or a `cap` that is not valid.
+pub fn boundary_gap(
+    surface: &Surface,
+    curve: &Curve,
+    interval: [f64; 2],
+    cap: f64,
+) -> Result<Option<f64>> {
+    let invalid = |e: solidcore_record::brep::Invalid| Error::Invalid(e.to_string());
+    let mut budget = Budget::input();
+    check_surface(surface, &mut budget).map_err(invalid)?;
+    check_curve(curve, &mut budget).map_err(invalid)?;
+    check_interval(&interval, curve.natural()).map_err(invalid)?;
+    let surface = solidcore_convert::surface(surface).map_err(invalid)?;
+    let curve = solidcore_convert::curve(curve).map_err(invalid)?;
+    Ok(k::boundary_iso(&surface, &curve, interval, cap)?.map(|b| b.gap))
+}
+
 /// The pcurve on a cylinder or cone face `label` (on its NURBS form `form` when the face has
 /// one) of a B-spline edge `curve` folded across it, on the edge's `interval`
 /// ([`solidcore::eval::folded::folded_pcurve`]). `None` for another face or curve, a record

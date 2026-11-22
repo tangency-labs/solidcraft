@@ -504,6 +504,9 @@ impl<'t> Assembly<'t> {
         // gap the edge does not have (2.9 mm on Poppy Humanoid's leg shells, whose edges lie within
         // 0.003 mm), widening tolerances past what SMLib takes. A spline face's gaps are measured
         // on the pcurves its kernel makes (`raise_edges`).
+        if matches!(surface, BSurface::Spline { .. }) {
+            return self.measure_boundary_edges(surface, edge_loops);
+        }
         if !matches!(
             surface,
             BSurface::Plane { .. }
@@ -534,6 +537,30 @@ impl<'t> Assembly<'t> {
                     gap = gap.max(s.dist(p));
                 }
                 self.cover_edge(e, gap, pcurve::SURFACE_GAP_MARGIN)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// A whole polynomial spline patch's edge that runs along one of the patch's boundary curves
+    /// holds the bound a proof of that puts on its distance from them ([`pcurve::boundary_gap`]),
+    /// before the pcurves are asked for: the pcurve is then the straight line along the boundary,
+    /// whatever the few micrometres the file's edge stands off it, with no kernel in between.
+    /// Nothing else is measured on a spline (see [`Self::measure_edges`]); an edge the proof does
+    /// not cover is left as it is, and its pcurve is made as it was.
+    fn measure_boundary_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>]) -> R<()> {
+        for l in edge_loops {
+            for &(e, _) in l {
+                let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                let (curve, interval) = match &edge.form {
+                    Some((c, i)) => (c, *i),
+                    None => (&edge.curve, edge.interval),
+                };
+                // Within what the edge's tolerance can be raised to, with its margin.
+                let cap = MAX_TOLERANCE / pcurve::SURFACE_GAP_MARGIN;
+                if let Ok(Some(gap)) = pcurve::boundary_gap(surface, curve, interval, cap) {
+                    self.cover_edge(e, gap, pcurve::SURFACE_GAP_MARGIN)?;
+                }
             }
         }
         Ok(())

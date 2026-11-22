@@ -4103,3 +4103,86 @@ fn a_rational_curve_that_resolves_its_edges_keeps_its_knots() {
     assert_eq!(scale, 2f64.powi(scale.log2().round() as i32), "{scale}");
     assert!(scaled.iter().zip(&fast).all(|(s, f)| *s == f * scale), "{scaled:?}");
 }
+
+/// A kernel that counts the pcurves it is asked for and makes none.
+struct Counting(std::sync::atomic::AtomicUsize);
+
+impl Trims for Counting {
+    fn trims(&self, _: &TrimFace<'_>) -> std::result::Result<Vec<Vec<Curve2>>, String> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Err("no trims".into())
+    }
+}
+
+/// A 10 x 10 x 5 block whose top is a bilinear patch twisted 1 mm at one corner (so 525 mm3 under it) (not a plane),
+/// its four top edges the straight lines between the block's own corners, and the patch's control
+/// points `off` mm above them: the edges lie `off` mm off the patch's boundary.
+fn block_with_a_twisted_patch(off: f64) -> p21::Exchange {
+    let mut w = W::default();
+    let top = [5.0, 5.0, 6.0, 5.0];
+    let bottom: Vec<(u64, V)> =
+        [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]].iter().map(|p| (w.vertex([p[0], p[1], 0.0]), [p[0], p[1], 0.0])).collect();
+    let high: Vec<(u64, V)> =
+        [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]].iter().zip(top).map(|(p, z)| (w.vertex([p[0], p[1], z]), [p[0], p[1], z])).collect();
+    let edge = |w: &mut W, a: (u64, V), b: (u64, V)| w.line_edge(a, b, true, len3(sub3(b.1, a.1)));
+    let low: Vec<u64> = (0..4).map(|i| edge(&mut w, bottom[i], bottom[(i + 1) % 4])).collect();
+    let up: Vec<u64> = (0..4).map(|i| edge(&mut w, bottom[i], high[i])).collect();
+    let rim: Vec<u64> = (0..4).map(|i| edge(&mut w, high[i], high[(i + 1) % 4])).collect();
+    let face = |w: &mut W, uses: &[(u64, bool)], surface: u64| {
+        let oes: Vec<u64> = uses.iter().map(|&(e, o)| w.oe(e, o)).collect();
+        let bound = w.bound(&oes, true, true);
+        w.face(&[bound], surface, true)
+    };
+    let floor = w.plane([0.0; 3], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+    let walls = [
+        w.plane([0.0; 3], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]),
+        w.plane([10.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+        w.plane([0.0, 10.0, 0.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]),
+        w.plane([0.0; 3], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+    ];
+    let mut faces = vec![face(&mut w, &[(low[3], false), (low[2], false), (low[1], false), (low[0], false)], floor)];
+    for i in 0..4 {
+        // Along the bottom edge, up one corner, back along the top edge, down the other.
+        faces.push(face(&mut w, &[(low[i], true), (up[(i + 1) % 4], true), (rim[i], false), (up[i], false)], walls[i]));
+    }
+    // The patch's control points (i along u, that is x; j along v, that is y), `off` above.
+    let mut at = |k: usize| w.pt([high[k].1[0], high[k].1[1], high[k].1[2] + off]);
+    let (p00, p01, p10, p11) = (at(0), at(3), at(1), at(2));
+    let patch = w.add(format!(
+        "B_SPLINE_SURFACE_WITH_KNOTS('',1,1,((#{p00},#{p01}),(#{p10},#{p11})),.UNSPECIFIED.,.F.,.F.,.F.,(2,2),(2,2),(0.,1.),(0.,1.),.UNSPECIFIED.)"
+    ));
+    faces.push(face(&mut w, &[(rim[0], true), (rim[1], true), (rim[2], true), (rim[3], true)], patch));
+    let shell = closed_shell(&mut w, &faces);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('',#{shell})"));
+    w.file_with_uncertainty(&[solid], 1e-5)
+}
+
+/// A whole spline patch whose four edges lie within a few micrometres of its boundary curves
+/// (0, 20 and 75 micrometres, in a file that states 10) gets its pcurves from the closed form the
+/// proved gap allows, with no call to the kernel, and the edges' tolerances cover the gap; a patch
+/// whose edges stand 0.5 mm off it (past what a tolerance may be raised to) goes to the kernel.
+#[test]
+fn a_whole_spline_patch_with_edges_off_its_boundary_by_micrometres_needs_no_kernel() {
+    for off in [0.0, 2e-5, 7.5e-5] {
+        let ex = block_with_a_twisted_patch(off);
+        let kernel = Counting(Default::default());
+        let r = read_solids_with(&ex, &kernel);
+        assert!(r.failures.is_empty(), "{off}: {:?}", r.failures);
+        assert_eq!(kernel.0.load(std::sync::atomic::Ordering::Relaxed), 0, "{off}: the kernel was asked for pcurves");
+        // And with no kernel at all.
+        let s = one_solid(&ex);
+        assert_eq!(counts(&s.brep), [2, 1, 6, 12, 8], "{off}");
+        // The top edges' tolerance covers the gap (with the margin that covers an analytic one).
+        if off > 0.0 {
+            let raised = s.brep.edges.iter().filter(|e| e.tolerance >= 3.0 * off).count();
+            assert_eq!(raised, 4, "{off}: only the patch's four edges are raised");
+        }
+        let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+        let volume = body.mass_properties(1e-6).unwrap().volume;
+        assert!((volume - 525.0).abs() < 0.05, "{off}: {volume}");
+    }
+    let ex = block_with_a_twisted_patch(0.5);
+    let kernel = Counting(Default::default());
+    let _ = read_solids_with(&ex, &kernel);
+    assert!(kernel.0.load(std::sync::atomic::Ordering::Relaxed) > 0, "past the cap, the kernel is asked");
+}
