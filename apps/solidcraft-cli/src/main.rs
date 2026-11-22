@@ -70,7 +70,7 @@ struct Command {
 }
 
 /// `run`'s lines in the usage.
-const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors] [--validation each_step|each_feature|off]\n                     [--param-check off|warn|strict] [--quality standard|fine|finest] [--script-relative]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (--quality: how closely an STL, OBJ or 3MF --out follows curved faces, as file.export's quality: a chord of\n       2e-4, 5e-5 or 1e-5 of each body's size, never under 1 µm, default standard)\n      (--validation: when SMLib's full check runs on the features computed (diagnostics.validation), default each_feature)\n      (--param-check checks each step against its command's contract: warn reports on stderr, strict stops the run)\n      (--script-relative runs command file paths from the positional script's folder; command-line file paths\n       stay relative to the caller's folder, which remains the default for scripts without this option)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
+const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors] [--validation each_step|each_feature|off]\n                     [--param-check off|warn|strict] [--quality standard|fine|finest] [--script-relative]\n                     [--param NAME=EXPR]... [--params-file FILE.json]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (--quality: how closely an STL, OBJ or 3MF --out follows curved faces, as file.export's quality: a chord of\n       2e-4, 5e-5 or 1e-5 of each body's size, never under 1 µm, default standard)\n      (--validation: when SMLib's full check runs on the features computed (diagnostics.validation), default each_feature)\n      (--param-check checks each step against its command's contract: warn reports on stderr, strict stops the run)\n      (--param NAME=EXPR sets an existing parameter as parameters.change does, before the script's own commands run and without\n       touching the file; repeat it to set several, applied in the order given. --params-file FILE.json holds {\"NAME\": \"EXPR\", ...},\n       applied before any --param. Needs a design (the positional one, or --in); an unknown name, a missing `=` or a bad\n       expression fails the run. Also taken by eval)\n      (--script-relative runs command file paths from the positional script's folder; command-line file paths\n       stay relative to the caller's folder, which remains the default for scripts without this option)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
 /// `eval`'s lines in the usage.
 const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--allow-errors] [--profile] [--profile-out trace.json] [--validation each_step|each_feature|off]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n      (--profile, --profile-out and --validation as for run)\n";
 /// `check`'s lines in the usage.
@@ -637,12 +637,13 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     known_args(
         "run",
         args,
-        &["--in", "--out", "--save", "--json-out", "--param-check", "--profile-out", "--validation", "--quality"],
+        &["--in", "--out", "--save", "--json-out", "--param-check", "--profile-out", "--validation", "--quality", "--param", "--params-file"],
         &["--quiet", "--results", "--timings", "--profile", "--allow-errors", "--script-relative"],
         true,
     )?;
     let validation = validation_flag("run", args)?;
     let quality = export_quality("run", args)?;
+    let overrides = param_overrides("run", args)?;
     if args.iter().any(|a| a == "--script-relative") {
         return run_from_script_directory(args);
     }
@@ -661,7 +662,14 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     let (mut s, results) = if want_results || timings {
         // Collect every command's result or time (scripts only), then process requested files too.
         let mut s = match base {
-            Some(b) => load_with(b, check, validation)?,
+            // A command script as `--in` runs as it loads, before any override could be set.
+            Some(b) if !overrides.is_empty() && is_script(b) => return Err(overrides_need_design("run")),
+            Some(b) => {
+                let mut s = load_with(b, check, validation)?;
+                apply_overrides("run", &mut s, &overrides)?;
+                s
+            }
+            None if !overrides.is_empty() => return Err(overrides_need_design("run")),
             None => {
                 let mut s = Session::default();
                 s.set_validation(validation);
@@ -683,7 +691,7 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         };
         (s, Some(out))
     } else {
-        (open_validating(base, path, check, validation)?, None)
+        (open_overriding(base, path, check, validation, "run", &overrides)?, None)
     };
     // A feature that fails leaves the bodies as they were before it (a parameter change can
     // break a feature without failing the command that made it): writing them would hand out
@@ -743,7 +751,7 @@ fn run_from_script_directory(args: &[String]) -> Result<(), String> {
         let file_option = i
             .checked_sub(1)
             .and_then(|j| args.get(j))
-            .is_some_and(|previous| matches!(previous.as_str(), "--in" | "--out" | "--save" | "--json-out" | "--profile-out"));
+            .is_some_and(|previous| matches!(previous.as_str(), "--in" | "--out" | "--save" | "--json-out" | "--profile-out" | "--params-file"));
         let value = if i == script_index || file_option {
             std::path::absolute(arg)
                 .map_err(|e| format!("run: {arg}: {e}"))?
@@ -775,17 +783,102 @@ fn open_validating(
     check: solidcraft_engine::schema::ParamCheck,
     validation: solidcraft_engine::kernel::Validation,
 ) -> Result<Session, String> {
+    open_overriding(base, path, check, validation, "", &[])
+}
+
+/// [`open_validating`] with `overrides` (`--param`, `--params-file`) set on the design before the
+/// script's own commands run. They need a design to act on: a script alone has none yet.
+fn open_overriding(
+    base: Option<&str>,
+    path: Option<&String>,
+    check: solidcraft_engine::schema::ParamCheck,
+    validation: solidcraft_engine::kernel::Validation,
+    cmd: &str,
+    overrides: &[(String, String)],
+) -> Result<Session, String> {
     let load = |p: &str| load_with(p, check, validation);
     match (base, path) {
+        // A command script as `--in` runs as it loads, before any override could be set.
+        (Some(b), _) if !overrides.is_empty() && is_script(b) => Err(overrides_need_design(cmd)),
         (Some(b), Some(p)) => {
             let mut s = load(b)?;
+            apply_overrides(cmd, &mut s, overrides)?;
             run_script_warning(&mut s, p, &read_json(p)?)?;
             Ok(s)
         }
-        (Some(b), None) => load(b),
-        (None, Some(p)) => load(p),
+        (Some(b), None) => {
+            let mut s = load(b)?;
+            apply_overrides(cmd, &mut s, overrides)?;
+            Ok(s)
+        }
+        (None, Some(p)) => {
+            if !overrides.is_empty() && is_script(p) {
+                return Err(overrides_need_design(cmd));
+            }
+            let mut s = load(p)?;
+            apply_overrides(cmd, &mut s, overrides)?;
+            Ok(s)
+        }
         (None, None) => Err(usage()),
     }
+}
+
+fn overrides_need_design(cmd: &str) -> String {
+    format!(
+        "{cmd}: --param and --params-file set parameters of a design before a script runs; give the design (or --in DESIGN with the script), since a script alone has none yet"
+    )
+}
+
+/// The parameters `--params-file` (an object of names and expressions, applied first) and each
+/// `--param NAME=EXPR` (in the order given) set. A number in the file is taken as its text.
+fn param_overrides(cmd: &str, args: &[String]) -> Result<Vec<(String, String)>, String> {
+    let mut out = Vec::new();
+    if flags(args, "--params-file").len() > 1 {
+        return Err(format!("{cmd}: --params-file is given more than once"));
+    }
+    if let Some(file) = flag(args, "--params-file") {
+        let v = read_json(file)?;
+        let Some(object) = v.as_object() else { return Err(format!("{cmd}: {file}: --params-file wants a JSON object of NAME: EXPR")) };
+        for (name, value) in object {
+            let expr = match value {
+                Value::String(e) => e.clone(),
+                Value::Number(n) => n.to_string(),
+                _ => return Err(format!("{cmd}: {file}: `{name}` wants an expression as text or a number")),
+            };
+            out.push(checked_override(cmd, name, &expr)?);
+        }
+    }
+    for arg in flags(args, "--param") {
+        let Some((name, expr)) = arg.split_once('=') else { return Err(format!("{cmd}: --param wants NAME=EXPR, not `{arg}`")) };
+        out.push(checked_override(cmd, name, expr)?);
+    }
+    Ok(out)
+}
+
+fn checked_override(cmd: &str, name: &str, expr: &str) -> Result<(String, String), String> {
+    let (name, expr) = (name.trim(), expr.trim());
+    if name.is_empty() {
+        return Err(format!("{cmd}: --param `={expr}` has no parameter name"));
+    }
+    if expr.is_empty() {
+        return Err(format!("{cmd}: --param {name}= has no expression"));
+    }
+    Ok((name.to_string(), expr.to_string()))
+}
+
+/// Sets each override as `parameters.change` does, in order; the first refusal (an unknown name,
+/// an expression that does not evaluate) fails the run, naming the parameter.
+fn apply_overrides(cmd: &str, s: &mut Session, overrides: &[(String, String)]) -> Result<(), String> {
+    for (name, expr) in overrides {
+        // `parameters.change` would add an unknown name as a new parameter; an override only sets one the design has.
+        let known =
+            s.doc.param(name).is_some() || s.doc.text_param(name).is_some() || s.doc.features.iter().any(|f| f.param_names.iter().any(|n| n == name));
+        if !known {
+            return Err(format!("{cmd}: --param {name}: no parameter `{name}` in the design"));
+        }
+        s.execute("parameters.change", &json!({"name": name, "expression": expr})).map_err(|e| format!("{cmd}: --param {name}: {e}"))?;
+    }
+    Ok(())
 }
 
 /// `--quality standard|fine|finest`: how closely the meshes `--out` writes (STL, OBJ, 3MF)
@@ -852,9 +945,16 @@ fn timeline_ok(s: &Session, skip_newer_features: bool, what_now: &str) -> Result
 /// Runs `solidcraft-cli eval` (and its `inspect` alias), opening the input design or script with the requested `--validation` mode and reporting both `inspect.measure` and `document.inspect`.
 fn cmd_eval(args: &[String]) -> Result<(), String> {
     let json_out = json_out(args)?;
-    known_args("eval", args, &["--in", "--json-out", "--profile-out", "--validation"], &["--profile", "--allow-errors"], true)?;
+    known_args(
+        "eval",
+        args,
+        &["--in", "--json-out", "--profile-out", "--validation", "--param", "--params-file"],
+        &["--profile", "--allow-errors"],
+        true,
+    )?;
     let validation = validation_flag("eval", args)?;
-    let mut s = open_validating(flag(args, "--in"), positional(args), solidcraft_engine::schema::ParamCheck::Off, validation)?;
+    let overrides = param_overrides("eval", args)?;
+    let mut s = open_overriding(flag(args, "--in"), positional(args), solidcraft_engine::schema::ParamCheck::Off, validation, "eval", &overrides)?;
     let m = s.execute("inspect.measure", &json!({})).map_err(|e| e.to_string())?;
     let d = s.execute("document.inspect", &json!({})).map_err(|e| e.to_string())?;
     let mut out = json!({
