@@ -2578,8 +2578,11 @@ pub(crate) fn close_corners_on(
                 let back = reach_of(&mbend);
                 let cut = |e: f64, len: f64| if e == 0.0 { back } else { len - back };
                 let (s_f, s_w) = (cut(e1, nb.length), cut(e2, ob.length));
+                // Left as they are, the two would overlap in the flat: a flange that can't be cut
+                // back (shorter than the setback, or with a side at the corner that is no straight
+                // edge from its bend) is refused, never left to overlap.
                 if !(s_f > 1e-9 && s_f < nb.length - 1e-9 && s_w > 1e-9 && s_w < ob.length - 1e-9) {
-                    continue;
+                    return err(OUTSIDE_BEND_UNCUT);
                 }
                 let (Some(rf), Some(rw)) = (sheet.panels.get(f).map(|x| x.region.clone()), sheet.panels.get(w).map(|x| x.region.clone())) else {
                     continue;
@@ -2587,7 +2590,7 @@ pub(crate) fn close_corners_on(
                 let (Some((rf, _)), Some((rw, _))) =
                     (to_line(&rf, &on_f, -1.0, e1, s_f, -on_f.dir.perp())?, to_line(&rw, &on_w, side_w, e2, s_w, on_w.dir.perp() * side_w)?)
                 else {
-                    continue;
+                    return err(OUTSIDE_BEND_UNCUT);
                 };
                 if let Some(x) = sheet.panels.get_mut(f) {
                     x.region = rf;
@@ -2688,6 +2691,9 @@ pub(crate) fn close_corners_on(
 
 /// What a Flange says of a corner [`close_corners_on`] leaves open on the outside of a bend.
 pub const OUTSIDE_BEND_OPEN: &str = "are left open: closed, the flanges would overlap in the flat pattern";
+/// Two flanges on the outside of a bend that can't be cut back to it, so that they would overlap
+/// in the flat.
+const OUTSIDE_BEND_UNCUT: &str = "not supported yet: flanges on the outside of a bend that can't end at it (a flange shorter than the bend's setback, or a side at the corner that is not straight); they would overlap in the flat pattern";
 
 /// Whether panels `i` and `k` meet at a rip (two walls mitred at a corner).
 fn ripped(sheet: &Sheet, i: usize, k: usize) -> bool {

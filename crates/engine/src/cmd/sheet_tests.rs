@@ -10540,9 +10540,9 @@ fn walls_on_the_outside_of_a_bend_are_left_open_and_unfold() {
     // No rip parts the two walls: the V stays open.
     let rips = s.model.state().surface_sheets[0].sheet.joints.iter().filter(|j| matches!(j.kind, solidcraft_develop::JointKind::Rip(_))).count();
     assert_eq!(rips, 0);
-    // Each wall's bend is 0.535898 shorter than the same wall made alone, where no other wall
-    // meets it over the bend.
-    let setback = 2.0 * 15f64.to_radians().tan();
+    // Each wall's bend is (R + T)·tan(15°) = 2·tan 15° = 0.5358983848622454 shorter than the
+    // same wall made alone, where no other wall meets it over the bend.
+    let setback = 0.535_898_384_862_245_4;
     let both = wall_bends(&s);
     for (k, edge) in [json!([0, 134.141016, 20.866025]), json!([0, 219.282032, 40.866025])].into_iter().enumerate() {
         let mut alone = Session::default();
