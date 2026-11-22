@@ -438,8 +438,11 @@ impl IntersectionTopologyContext for LiveGeometryInsertion<'_> {
         // off the removed face. The kept boundary visits the shared vertex twice
         // in one loop (docs/validity-and-tolerances.md, section 4). Ignoring the
         // contact instead leaves two touching loops, which fail Face 38.
+        // Only a face with a hole has a hole's edge to touch; any other face
+        // keeps ignoring tangent contacts as before.
         let open_rail = pseudo.fillet_edge(edge)?.fillet_edge_type() == FilletEdgeType::Rail
-            && !crate::topology::edge::is_closed(pseudo.brep(), edge)?;
+            && !crate::topology::edge::is_closed(pseudo.brep(), edge)?
+            && crate::topology::face::p2::loops(target, face, false, None)?.len() > 1;
         let ignore_tangency = self.ti.ignore_tangency;
         if open_rail {
             self.ti.ignore_tangency = false;
