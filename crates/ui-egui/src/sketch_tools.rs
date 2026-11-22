@@ -746,6 +746,15 @@ pub fn refine_snap(
     {
         best = Some((i.dist, i.label(), i.at));
     }
+    // 3-Point Arc: the centre lands on a sketch point (#20719); the click keeps it there.
+    if !mid_only
+        && best.is_none()
+        && arc_snap
+        && let [start, end] = own[..]
+        && let Some(i) = crate::inference::arc_centre(sk, start, end, lp, tol)
+    {
+        best = Some((i.dist, i.label(), i.at));
+    }
     // On a curve (coincident with it). A spline, ellipse or conic has no exact shape here: the
     // nearest point of the polyline it is drawn with, which the click's point-on-curve
     // constraint then puts on the curve itself (#9321).

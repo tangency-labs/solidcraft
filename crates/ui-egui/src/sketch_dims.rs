@@ -132,6 +132,16 @@ pub(crate) fn three_point_circle(s: Vec2, e: Vec2, t: Vec2) -> Option<(Vec2, f64
     Some((centre, r, if long { std::f64::consts::TAU - minor } else { minor }))
 }
 
+/// The dotted guides of a 3-Point Arc whose centre is `centre`: one from the centre to each end
+/// that it is level with (the same height) or plumb with (the same place across), within `tol`.
+/// Display only; the centre itself sits at the arc's own centre, not on the guide's line (#20719).
+pub(crate) fn centre_guides(centre: Vec2, ends: [Vec2; 2], tol: f64) -> Vec<(Vec2, Vec2)> {
+    ends.into_iter()
+        .filter(|e| e.dist(centre) > tol && ((e.y - centre.y).abs() <= tol || (e.x - centre.x).abs() <= tol))
+        .map(|e| (centre, e))
+        .collect()
+}
+
 /// The third point of the 3-Point Arc from `s` to `e` for the cursor `h` with a typed radius or
 /// sweep (radians; the sweep wins when both are typed): on the arc of that size whose middle is
 /// nearest the cursor. A radius picks among the minor and major arcs on either side of the chord;
@@ -839,6 +849,14 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
         ui.painter().line_segment([at - vec2(arm, 0.0), at + vec2(arm, 0.0)], stroke);
         ui.painter().line_segment([at - vec2(0.0, arm), at + vec2(0.0, arm)], stroke);
         crate::scenario::publish_count("arc_centre_marker", 1.0);
+        // With the arc's snaps on: dotted lines from the centre to the ends it lines up with.
+        let guides = if app.preferences.sketch_arc_tangent_snap { centre_guides(centre, [start.0, end.0], 3.0 * px) } else { Vec::new() };
+        for (from, to) in &guides {
+            if let (Some(a), Some(b)) = (proj.to_screen(plane.to_world(*from)), proj.to_screen(plane.to_world(*to))) {
+                ui.painter().extend(crate::ui_kit::dashed_line(&[a, b], ui.painter().clip_rect(), egui::Stroke::new(1.0, tk.rubber_band), 2.0, 3.0));
+            }
+        }
+        crate::scenario::publish_count("arc_centre_guides", guides.len() as f64);
     }
     let focus = std::mem::take(&mut t.dims_focus);
     // Egui processes ordinary Tab navigation before these floating text edits are drawn.

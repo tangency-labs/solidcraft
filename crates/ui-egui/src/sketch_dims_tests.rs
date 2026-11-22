@@ -1316,3 +1316,18 @@ fn a_tiny_typed_sweep_keeps_the_third_point_off_the_chord() {
     let tiny = super::arc_through(s, e, h, None, Some(1e-8)).unwrap();
     assert!((tiny.y - 1.25e-9).abs() < 1e-14, "{tiny:?}");
 }
+
+/// #20719: the dotted guides of a 3-Point Arc go from its centre to each end it is level or plumb
+/// with, and only those.
+#[test]
+fn the_arc_centre_guides_join_the_ends_it_lines_up_with() {
+    use solidcore_record::Vec2;
+    let at = Vec2::new;
+    // The corner of an L: level with one end and plumb with the other.
+    let l = super::centre_guides(at(0.0, 0.0), [at(0.0, 50.0), at(50.0, 0.0)], 0.1);
+    assert_eq!(l, vec![(at(0.0, 0.0), at(0.0, 50.0)), (at(0.0, 0.0), at(50.0, 0.0))]);
+    // Level with the start only.
+    assert_eq!(super::centre_guides(at(10.0, 5.0), [at(-20.0, 5.05), at(30.0, 40.0)], 0.1), vec![(at(10.0, 5.0), at(-20.0, 5.05))]);
+    // Lined up with neither, or too far off the line.
+    assert!(super::centre_guides(at(10.0, 5.0), [at(0.0, 9.0), at(30.0, 40.0)], 0.1).is_empty());
+}

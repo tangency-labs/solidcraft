@@ -106,6 +106,23 @@ fn a_three_point_arc_takes_a_typed_radius_and_sweep() {
     assert!(sketch(&asked).constraints.is_empty());
 }
 
+/// #20719: the quarter circle round the corner of an L, drawn through its outer point, is R 50 over
+/// 90 deg with its centre on the corner, and a Coincident constraint keeps the centre there.
+#[test]
+fn a_three_point_arc_round_the_corner_of_an_l_keeps_its_centre_on_the_corner() {
+    let mut s = session();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[0,50]]}));
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[50,0]]}));
+    let k = 50.0 * 0.5f64.sqrt();
+    let out = run(&mut s, "sketch.arc.three_point", json!({"start":[0,50],"end":[50,0],"through":[k,k]}));
+    let arc = out["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{arc}.center"), "b": "origin", "if_redundant": "refuse"}));
+    let sk = sketch(&s);
+    let i = sk.curves.iter().position(|c| c.id == arc).unwrap();
+    assert!(sk.center(i).unwrap().len() < 1e-6);
+    close(sk.radius(i).unwrap(), 50.0);
+}
+
 /// #6645: a clicked end with `clockwise` sweeps from the start the other way round, keeps the
 /// start's radius and its `.start`/`.end` names, with and without a typed radius.
 #[test]

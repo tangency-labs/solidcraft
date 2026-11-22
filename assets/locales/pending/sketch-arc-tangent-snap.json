@@ -1,26 +1,26 @@
 {
   "ar": {
-    "ui.palette_arc_tangent_snap": "تثبيت مماسّ"
+    "ui.palette_arc_tangent_snap": "تثبيت المماس والمركز"
   },
   "de": {
-    "ui.palette_arc_tangent_snap": "Tangential fangen"
+    "ui.palette_arc_tangent_snap": "Tangente und Mittelpunkt fangen"
   },
   "en": {
-    "ui.palette_arc_tangent_snap": "Snap tangent"
+    "ui.palette_arc_tangent_snap": "Snap tangent and centre"
   },
   "he": {
-    "ui.palette_arc_tangent_snap": "הצמדה משיקה"
+    "ui.palette_arc_tangent_snap": "הצמדה למשיק ולמרכז"
   },
   "ja": {
-    "ui.palette_arc_tangent_snap": "接線にスナップ"
+    "ui.palette_arc_tangent_snap": "接線と中心にスナップ"
   },
   "ko": {
-    "ui.palette_arc_tangent_snap": "접선 스냅"
+    "ui.palette_arc_tangent_snap": "접선·중심 스냅"
   },
   "vi": {
-    "ui.palette_arc_tangent_snap": "Bắt tiếp xúc"
+    "ui.palette_arc_tangent_snap": "Bắt tiếp xúc và tâm"
   },
   "zh": {
-    "ui.palette_arc_tangent_snap": "吸附相切"
+    "ui.palette_arc_tangent_snap": "吸附相切和圆心"
   }
 }

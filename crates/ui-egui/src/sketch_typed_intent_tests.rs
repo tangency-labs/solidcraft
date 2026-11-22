@@ -552,3 +552,48 @@ fn three_point_arc_click_commits_the_tangent_point_the_hover_showed() {
     assert!(centre.dist(Vec2::new(10.0, 50.5)) < 1e-3 && (radius - 50.5).abs() < 1e-3, "{centre:?} {radius}");
     assert!(constraints(&h).iter().any(|k| matches!(k, ConstraintKind::Tangent { .. })));
 }
+
+/// #20719: the arc from one free end of the L to the other, drawn on the outside of the corner. The
+/// pointer brings the arc's centre to the corner, so the arc is the exact quarter circle (R 50,
+/// 90 deg) and the click keeps its centre on the corner. A pointer with no point near its centre
+/// gets the plain arc, and with the tool's snaps off nothing is snapped or added.
+#[test]
+fn three_point_arc_centre_snaps_to_the_corner_of_the_l() {
+    let near_corner = [35.4, 35.3];
+    let mut h = l_with_arc_ends(true);
+    h.step(&json!({"move":{"sketch":near_corner}})).unwrap();
+    h.frames(2);
+    let hover = h.app.tool.as_ref().unwrap().hover.clone().unwrap();
+    assert!((hover.0.len() - 50.0).abs() < 1e-9, "on the R50 circle round the corner: {:?}", hover.0);
+    h.step(&json!({"click":{"sketch":near_corner}})).unwrap();
+    h.frames(2);
+    let (radius, chord, middle) = arc_numbers(&h);
+    assert!((radius - 50.0).abs() < 1e-6, "{radius}");
+    assert!((chord - 50.0 * 2f64.sqrt()).abs() < 1e-6, "a quarter circle: {chord}");
+    assert!(middle.x + middle.y > 50.0, "the outside of the corner: {middle:?}");
+    let st = h.app.session.world_state().unwrap();
+    let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let arc = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Arc { .. })).expect("the arc");
+    assert!(sk.center(arc).unwrap().len() < 1e-6, "{:?}", sk.center(arc));
+    assert!(constraints(&h).iter().any(|k| matches!(k, ConstraintKind::Coincident { .. })), "the centre is held on the corner");
+
+    // No point near the arc's centre: the plain arc through the pointer, and no constraint.
+    let mut plain = l_with_arc_ends(true);
+    plain.step(&json!({"move":{"sketch":[60.0, 60.0]}})).unwrap();
+    plain.frames(2);
+    let hover = plain.app.tool.as_ref().unwrap().hover.clone().unwrap();
+    assert!(hover.0.dist(Vec2::new(60.0, 60.0)) < 0.5, "{:?}", hover.0);
+    plain.step(&json!({"click":{"sketch":[60.0, 60.0]}})).unwrap();
+    plain.frames(2);
+    assert!(!constraints(&plain).iter().any(|k| matches!(k, ConstraintKind::Coincident { .. })));
+
+    // The tool's snaps off: the corner pulls nothing.
+    let mut off = l_with_arc_ends(false);
+    off.step(&json!({"move":{"sketch":near_corner}})).unwrap();
+    off.frames(2);
+    let hover = off.app.tool.as_ref().unwrap().hover.clone().unwrap();
+    assert!((hover.0.len() - 50.0).abs() > 1e-6 || hover.0.dist(Vec2::new(near_corner[0], near_corner[1])) < 0.5, "{:?}", hover.0);
+    off.step(&json!({"click":{"sketch":near_corner}})).unwrap();
+    off.frames(2);
+    assert!(!constraints(&off).iter().any(|k| matches!(k, ConstraintKind::Coincident { .. })));
+}

@@ -24,6 +24,8 @@ pub enum Kind {
     Tangent,
     /// The new line passes through the centre of a circle or arc.
     Center,
+    /// The 3-Point Arc's centre lands on an existing sketch point (`curve` is the point's id).
+    ArcCentre,
 }
 
 /// A snap taken from existing geometry: what, to which curve, where the point goes, how far the
@@ -47,7 +49,7 @@ impl Inference {
             Kind::Perpendicular => "\u{22a5}",
             Kind::Extension => "Ext",
             Kind::Tangent => "T",
-            Kind::Center => "Ctr",
+            Kind::Center | Kind::ArcCentre => "Ctr",
         }
     }
 }
@@ -187,13 +189,59 @@ pub fn arc_tangent(sk: &Sketch, start: Vec2, end: Vec2, lp: Vec2, tol: f64) -> O
     keep(best)
 }
 
+/// The centre of the 3-Point Arc from `start` to `end` that lies on the perpendicular bisector of
+/// the chord and nearest `p`; None when `start` and `end` coincide.
+fn bisector_centre(start: Vec2, end: Vec2, p: Vec2) -> Option<Vec2> {
+    let mid = (start + end) * 0.5;
+    let n = (end - start).normalized()?.perp();
+    Some(mid + n * n.dot(p - mid))
+}
+
+/// A 3-Point Arc from `start` to `end` whose third point is near the cursor `lp`: when the centre
+/// the cursor gives the arc comes within `tol` of an existing sketch point (or the origin), the
+/// arc whose centre is on that point, or on the nearest point of the chord's perpendicular
+/// bisector. The third point is the nearest point of that circle to the cursor, so the cursor's
+/// side of the chord picks which of its two arcs is drawn. `curve` holds the point's id (#20719).
+pub fn arc_centre(sk: &Sketch, start: Vec2, end: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
+    let now = crate::tools::preview_circumcentre(start, lp, end)?;
+    let visible = solidcraft_engine::view::SketchPointVisibility::new(sk);
+    let origin = ("origin".to_string(), Vec2::new(0.0, 0.0));
+    let mut best: Option<Inference> = None;
+    for (id, p) in sk.points.iter().filter(|p| visible.takes(p)).map(|p| (p.id.clone(), p.pos)).chain(std::iter::once(origin)) {
+        let off = now.dist(p);
+        if off.is_nan() || off >= tol || best.as_ref().is_some_and(|b| off >= b.dist) {
+            continue;
+        }
+        let Some(centre) = bisector_centre(start, end, p) else { continue };
+        let r = centre.dist(start);
+        let v = lp - centre;
+        let d = v.len();
+        if d <= 1e-12 || !r.is_finite() || r <= 1e-9 {
+            continue;
+        }
+        let at = centre + v * (r / d);
+        if at.dist(start) > tol && at.dist(end) > tol {
+            best = Some(Inference { kind: Kind::ArcCentre, curve: id, at, dist: off, guide: (centre, at), arg: None });
+        }
+    }
+    keep(best)
+}
+
 /// The 3-Point Arc `arc` was placed from `start` to `end` through `through`: when its third point
 /// was the tangent snap, add a Tangent constraint with each line or arc that ends at `start` or
-/// `end` and meets the arc there at a tangent. One that the sketch already implies or would
-/// conflict with is not kept. The drawing's undo step takes them in.
+/// `end` and meets the arc there at a tangent; when it was the centre snap, a Coincident
+/// constraint that keeps the arc's centre on the point. One that the sketch already implies or
+/// would conflict with is not kept. The drawing's undo step takes them in.
 pub fn commit_arc(app: &mut SolveApp, arc: &str, start: Vec2, end: Vec2, through: Vec2) {
-    let Some(_) = current().filter(|i| i.kind == Kind::Tangent && i.at.dist(through) < 1e-9) else { return };
+    let Some(snap) = current().filter(|i| matches!(i.kind, Kind::Tangent | Kind::ArcCentre) && i.at.dist(through) < 1e-9) else { return };
     clear();
+    if snap.kind == Kind::ArcCentre {
+        let history = std::mem::take(&mut app.session.undo);
+        let _ =
+            app.session.execute("sketch.constraint.coincident", &json!({"a": format!("{arc}.center"), "b": snap.curve, "if_redundant": "refuse"}));
+        app.session.undo = history;
+        return;
+    }
     let curves: Vec<String> = {
         let st = crate::open_meshing::session_world(&app.session);
         let Some(sk) = app.session.active_sketch.and_then(|s| st.sketch(s)).map(|s| &s.sketch) else { return };
@@ -342,6 +390,8 @@ pub fn commit(app: &mut SolveApp, line: &str, end: Vec2) {
         Kind::Tangent => ("sketch.constraint.tangent", json!({"a": i.curve, "b": line})),
         Kind::Extension => ("sketch.constraint.coincident", json!({"a": format!("{line}.end"), "b": i.curve})),
         Kind::Center => ("sketch.constraint.coincident", json!({"a": format!("{}.center", i.curve), "b": line})),
+        // Only the 3-Point Arc takes this one.
+        Kind::ArcCentre => return,
     };
     // An inference only adds what the sketch does not already have: one that is already implied
     // (redundant) or would conflict is simply not kept.
