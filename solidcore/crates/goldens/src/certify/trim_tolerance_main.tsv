@@ -9,6 +9,7 @@
 # offset.offset_executive_p2, surface.surface_cache_p1: main's files with the three rows the retired zero-row-batch flags move (surface_cache_p1 gen0168 and gen0222, the lowest continuity of the V knots; offset_executive_p2 boolean_domain_problemShell12_face0_round, result.geometry[3] by 1.3e-16)
 # surface.surface_point_solve_p2: main's file without the lines of gen0072 and gen0546, Solve maxima a witness grid refutes, now known failing (#13684)
 # surface.surface_point_solve_p3: main's file without the lines of 51 global point solves a witness grid refutes, now known failing (#13684)
+# blend.fillet_executive_p3, corpus.parity, surface.trim_srf_cache, topology.brep_p10, topology.face_p3: the point test follows the face (#20179): the digests are this branch's files with the rows put back. Lines moved against this main: fillet_executive_p3's 6 sphere_diff_3cylinders rows (UV trims on five edges, 1 to 2; wr493_rows proves them), surface.trim_srf_cache's 7 editing-mode native_face rows (point tests agree with the face's classification), and the Fillet/sphere_diff_3cylinders.smb reads of corpus.parity (1), topology.face_p3 (22) and topology.brep_p10 (read_Fillet_sphere_diff_3cylinders and gen0026: +5 classified trims), each main's row hash once tolsub::replay puts the trims back (CLASSIFIED_READ_ROWS). gen0026's row moves to the same 12 values 85 places on (a uniform shift: each new value occurs exactly at its row's 12 positions; brep_p10's certificate re-checks every entity on the new body)
 blend.feature_executive	2a4bd65805caa498
 blend.fillet_corner_p1	b2b709c01153c4b4
 blend.fillet_corner_p2	6d62684209753123
@@ -16,7 +17,7 @@ blend.fillet_corner_p3	41ff3e1d687449c4
 blend.fillet_custom_solver	d5a7b6227772dc0a
 blend.fillet_executive_p1	86854330a700f392
 blend.fillet_executive_p2	68a6e765f600c883
-blend.fillet_executive_p3	01bd061d3eaea1f0
+blend.fillet_executive_p3	cbbebab5eb15b9d8
 blend.fillet_geom_p1	82c1f975f967a59d
 blend.fillet_geom_p2	b536f37946629dc4
 blend.fillet_geom_p3	15646cd3bfb41d7e
@@ -43,7 +44,7 @@ boolean.merge_p5	bdfc40139f7e400b
 boolean.topology_intersector_p1	d480c2ec4731fa77
 boolean.topology_intersector_p2	35e1425fea2f8feb
 boolean.topology_intersector_p3	6047fab1fddd550d
-corpus.parity	8acf1f90618ef76c
+corpus.parity	6b612bf10f3da914
 curve.composite_curve_p1	1b0a64a4a148983b
 curve.composite_curve_p2	4fa0f15e4b4a048b
 curve.conic	4955fffee7af9409
@@ -241,7 +242,7 @@ surface.surface_point_solve_p1	4c854434083b74bd
 surface.surface_point_solve_p2	44853fdb11f55ee8
 surface.surface_point_solve_p3	47b41b54631f9cd9
 surface.torus	3bc22a9cc79e4e78
-surface.trim_srf_cache	655dddeca4f5ba3b
+surface.trim_srf_cache	adfcec4a0fa8d7ed
 surface.twist_volume	185622854f391b03
 surface.unbend_volume	94c42caa7f6f0475
 surface.volume_p1	abd24d71681331bd
@@ -261,7 +262,7 @@ topology.brep_data	cd9a3471ed924772
 topology.brep_local_operation	00c1f7e94a38480a
 topology.brep_mirror	718965df3039bddd
 topology.brep_p1	5f0dfd9dc7c0575b
-topology.brep_p10	f99cdbfd5bb734b6
+topology.brep_p10	6dd00b33b159482a
 topology.brep_p2	3243a0a3d5597f36
 topology.brep_p3	55661c22ae62a97f
 topology.brep_p4	2b2814e782d110c9
@@ -279,7 +280,7 @@ topology.edgeuse_p2	4b628e0b414efcc0
 topology.edgeuse_p3	2fa671be5fe983ba
 topology.face_p1	eae7279ae1704f4d
 topology.face_p2	3d9f19f33644771c
-topology.face_p3	100eae05c5608203
+topology.face_p3	206f5808b3388073
 topology.face_p4	539b264456215c71
 topology.loopuse	a5205f3ad278e686
 topology.part_file	059f0c49211cb6c3
