@@ -148,7 +148,8 @@ pub enum Mod {
     /// of the three chamfer commands runs (0 equal distance, 1 two distances, 2 distance and
     /// angle). `size` is the radius or the first distance, `distance2` the second distance and
     /// `angle` the angle from the first line. `flip` names the two lines in the other order, so
-    /// the first distance lands on the other leg of the corner.
+    /// the first distance lands on the other leg of the corner. For a fillet of two parallel
+    /// lines, `flip` joins them at the other end (the half circle's side).
     Corner { chamfer: bool, ctype: usize, size: String, distance2: String, angle: String, flip: bool },
     /// `sketch.equation_curve` (or `.edit` on the curve the window's `curve` extra names): the
     /// form (an index into [`EQUATION_FORMS`]), x(t) and y(t) (or y(x)), the variable's range and
@@ -710,6 +711,10 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             if *chamfer && *ctype > 0 {
                 ui_kit::options(ui, "corner_options", &mut [("Flip", flip)]);
             }
+            // Two parallel lines are joined by a half circle at one of their ends (#16238).
+            if !*chamfer {
+                ui_kit::options(ui, "corner_options", &mut [("Other end", flip)]);
+            }
         }
     }
     enter
@@ -1152,7 +1157,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 json!({"entities": entities, "center": center, "count": count, "angle": angle, "alignment": alignment, "reversed": reversed}),
             )
         }
-        Mod::Corner { chamfer: false, size, .. } => {
+        Mod::Corner { chamfer: false, size, flip, .. } => {
             let corners = corner_ids(app, inputs, 0);
             let lines = line_ids(inputs, 0);
             // The engine keeps its millimetre API; bare UI values use the design unit.
@@ -1162,7 +1167,9 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 (true, []) => return Err("select the corners to round first".into()),
                 (false, []) => ("sketch.fillet", json!({"points": corners, "radius": radius})),
                 // Two lines name their corner even where other lines end at its point (#1824).
-                (true, [a, b]) => ("sketch.fillet", json!({"a": a, "b": b, "radius": radius})),
+                // `end` only matters for two parallel lines, which a half circle joins at the
+                // start of the first line, or at its end with "Other end" (#16238).
+                (true, [a, b]) => ("sketch.fillet", json!({"a": a, "b": b, "radius": radius, "end": if *flip { "end" } else { "start" }})),
                 _ => return Err("select corner points, or the two lines of one corner".into()),
             }
         }
