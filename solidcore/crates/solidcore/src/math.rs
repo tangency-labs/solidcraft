@@ -599,6 +599,23 @@ pub fn picture_frame(
     Some([bl, br, br + up, bl + up])
 }
 
+/// Not upstream: how a picture `aspect` (height over width) times as high as wide fits a frame
+/// pinned at `bl`, `br` and `tl`: its width (the bottom edge's length), and whether `tl` lies off
+/// the picture's own top-left corner, square to the bottom edge on the frame's plane, by more
+/// than a millionth of (1 + its larger side): the frame stretches it. `None` when the frame gives
+/// no area, as [`picture_frame`] refuses it.
+#[must_use]
+pub fn picture_fit(bl: Point3, br: Point3, tl: Point3, aspect: f64) -> Option<(f64, bool)> {
+    let (along, up) = (br - bl, tl - bl);
+    let normal = along.cross(up).unitize().ok()?;
+    picture_frame(bl, br, Some(tl), normal, aspect)?;
+    let width = along.length();
+    let height = width * aspect;
+    let own = bl + normal.cross(along) * aspect;
+    let stretched = (tl - own).length() > 1e-6 * (1.0 + width.max(height));
+    Some((width, stretched))
+}
+
 /// Not upstream: a quad lifted clear of its own plane on both sides, as a decal is drawn just
 /// off the face it lies on so the face never hides it. `corners` are bottom-left, bottom-right,
 /// top-right and top-left; the normal is the unit cross product of the bottom edge with the left

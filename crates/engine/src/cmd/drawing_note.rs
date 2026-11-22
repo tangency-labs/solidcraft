@@ -11,7 +11,7 @@ use solidcraft_doc::bom::Tree;
 use solidcraft_doc::drawing::fields::{FieldState, Values, no_field};
 use solidcraft_doc::drawing::note::{Anchor, Branch, End, Note, leaders_refused};
 use solidcraft_doc::ids;
-use solidcraft_geom::cell::{Content, Part};
+use solidcraft_geom::cell::{Content, HAlign, Part};
 
 use super::CommandSpec;
 use super::drawing_dimension::status_words;
@@ -40,7 +40,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "anchor: {sheet: id or name}, {view: id}, {edge: {view, edge}} or {corner: {view, corner}} (an edge or a corner as drawing.dimension.add \
              takes it; its leader ends there); at: [x, y] on paper in mm, from the sheet's lower-left corner or the view's centre; content: text, \
-             or [{text} or {field: {source: component|drawing|sheet|revision, key, format?}}]; cap_mm?: 0.5..100, its text height; branches?: [{edge} or \
+             or [{text} or {field: {source: component|drawing|sheet|revision, key, format?}}]; cap_mm?: 0.5..100, its text height; align?: left (default: the text starts at `at`), centre (the text is centred on `at`) or right (the text ends at `at`), each line of several standing the same way; branches?: [{edge} or \
              {corner}], more leaders of a note on a view, 16 leaders in all, its anchor's included → what drawing.note.inspect answers \
              for it. Saved by name, never the point picked; an edge or a corner on a part its view doesn't \
              draw is refused. One undo step; no model is evaluated.",
@@ -52,7 +52,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<EditResult>)
         .params(
-            "note: its id; set: {at?: [x, y], content?, cap_mm?: a height, or null for the drawing's, branches?: {remove?: [numbers from 0 \
+            "note: its id; set: {at?: [x, y], content?, cap_mm?: a height, or null for the drawing's, align?: left, centre or right, branches?: {remove?: [numbers from 0 \
              as the list is now, each once], add?: [{edge} or {corner}], after those that stay}} → {note, changed: [fields]}. What it \
              belongs to stays: to point at something else, add a new one. One undo step, none when nothing changes; no model is evaluated.",
         ),
@@ -64,12 +64,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<NoteResult>)
         .params(
-            "note: its id → {note, record: as saved, status: ok, ambiguous, suppressed or lost, why?, point?: where its leader ends, in the \
+            "note: its id → {note, align?: left, centre or right (none for a note saved before alignments, whose block is centred on at), record: as saved, status: ok, ambiguous, suppressed or lost, why?, point?: where its leader ends, in the \
              design's frame, exact, candidates?: [{edge: {body, index}}], branches?: [{status, why?, point?, exact, candidates?}] \
              (a lost one loses only its own leader), text: what it says now, its fields read for its sheet, \
              fields?: [{source, key, state: shown, empty, lost (its sheet documents a component the design no longer has) or unknown \
              (its source has no such field), value?, why?}], \
-             warnings?: its view edited since to leave out a part a leader points at, or its text, centred on at, running off the paper}. A lost reference keeps the note and its text in place, without a \
+             warnings?: its view edited since to leave out a part a leader points at, or its text, by its alignment at `at`, running off the paper}. A lost reference keeps the note and its text in place, without a \
              leader. Read-only; no model is evaluated.",
         ),
 ];
@@ -100,7 +100,8 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         },
     };
     let branches = request.branches.iter().map(|pick| branch(s, pick, ADD)).collect::<Result<Vec<_>>>()?;
-    let mut note = Note { id: 0, anchor, at: request.at, content: request.content.0, cap_mm: request.cap_mm, branches };
+    let align = Some(request.align.unwrap_or(HAlign::Left));
+    let mut note = Note { id: 0, anchor, at: request.at, content: request.content.0, cap_mm: request.cap_mm, align, branches };
     if let Some(view) = note.anchor.view() {
         check_drawn(&record, view, note.paths(), ADD)?;
     }
@@ -132,6 +133,10 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(cap) = request.set.cap_mm.filter(|cap| *cap != note.cap_mm) {
             note.cap_mm = cap;
             changed.push("cap_mm".to_string());
+        }
+        if let Some(align) = request.set.align.filter(|align| note.align != Some(*align)) {
+            note.align = Some(align);
+            changed.push("align".to_string());
         }
         if let Some(branches) = branches.filter(|branches| *branches != note.branches) {
             note.branches = branches;
@@ -208,6 +213,7 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     warnings.extend(off_paper(d, note, &text, at));
     let reply = NoteResult {
         note: ids::encode(id),
+        align: note.align,
         record: serde_json::to_value(note).map_err(|e| EngineError::Other(e.to_string()))?,
         status: status.to_string(),
         why,
@@ -223,8 +229,8 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
-/// A warning when `note`'s text, reading `text`, runs off the paper of sheet `at` of `d`: its text is
-/// centred on its place, so a note placed near the paper's edge can run past it. None while its
+/// A warning when `note`'s text, reading `text`, runs off the paper of sheet `at` of `d`: its text
+/// starts at, is centred on or ends at its place, so a note placed near the paper's edge can run past it. None while its
 /// text isn't set, as while a font to fall back to is still being found.
 fn off_paper(d: &solidcraft_doc::drawing::Drawing, note: &Note, text: &str, at: usize) -> Option<String> {
     const EPS: f64 = 1e-6;
@@ -237,9 +243,14 @@ fn off_paper(d: &solidcraft_doc::drawing::Drawing, note: &Note, text: &str, at: 
     let text_box = crate::drawing_note_paper::text_box(note, text, &fonts)?;
     let (min, max) = (text_box.min + offset, text_box.max + offset);
     let on = min.x >= -EPS && min.y >= -EPS && max.x <= size.x + EPS && max.y <= size.y + EPS;
+    let stands = match note.align {
+        Some(HAlign::Left) => "starting at",
+        Some(HAlign::Centre) | None => "centred on",
+        Some(HAlign::Right) => "ending at",
+    };
     (!on).then(|| {
         format!(
-            "its text runs off the paper: it spans {:.1} to {:.1} mm across and {:.1} to {:.1} mm up a {:.0} x {:.0} mm sheet, centred on its place (move it with drawing.note.edit)",
+            "its text runs off the paper: it spans {:.1} to {:.1} mm across and {:.1} to {:.1} mm up a {:.0} x {:.0} mm sheet, {stands} its place (move it with drawing.note.edit)",
             min.x, max.x, min.y, max.y, size.x, size.y
         )
     })
