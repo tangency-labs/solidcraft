@@ -447,9 +447,17 @@ mod tests {
     use crate::dialogs::apply_commands;
     use crate::scenario::Harness;
 
-    fn insert_tilted_cloud(h: &mut Harness) -> (u64, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("solidcraft-ui-scan-align-{}", std::process::id()));
+    fn unique_tmp_dir(tag: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let seq = NEXT.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("solidcraft-ui-scan-align-{tag}-{}-{seq}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn insert_tilted_cloud(h: &mut Harness) -> (u64, std::path::PathBuf) {
+        let dir = unique_tmp_dir("cloud");
         let ply = dir.join("tilted_scan.ply");
         // 4 points on a 30°-tilted plane + 1 off-plane origin point (+10 mm along tilted +Z above pt 0)
         let text = "\
@@ -573,8 +581,7 @@ end_header
     fn context_menu_targets_clicked_cloud_and_mesh_face_picks_feed_datum_inputs() {
         let mut h = Harness::new();
         let (c1, dir1) = insert_tilted_cloud(&mut h);
-        let dir2 = std::env::temp_dir().join(format!("solidcraft-ui-scan-align-2-{}", std::process::id()));
-        std::fs::create_dir_all(&dir2).unwrap();
+        let dir2 = unique_tmp_dir("second");
         let ply2 = dir2.join("second.ply");
         std::fs::write(
             &ply2,
