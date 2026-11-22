@@ -35,6 +35,8 @@ mod colour_vision_tests;
 pub mod command_help;
 pub mod context_menu;
 pub mod control;
+#[cfg(test)]
+mod control_click_view_tests;
 pub mod control_job;
 mod control_joint_drive;
 mod control_joint_pose;
