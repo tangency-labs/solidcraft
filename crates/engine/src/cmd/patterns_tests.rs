@@ -1987,7 +1987,6 @@ fn placing_a_part_many_times_moves_no_record_until_one_is_needed() {
     for k in 1..=10 {
         run(&mut s, "occurrence.copy", json!({"component": c["component"], "translate": [0, 40 * k, 0]}));
     }
-    let before = solidcraft_kernel::lazy_moves_made();
     let world = s.world_state().unwrap();
     assert_eq!(world.bodies.len(), 3 * 11);
     // Their shapes are drawn, named and framed from the part's: meshes, face counts, outlines,
@@ -1995,11 +1994,11 @@ fn placing_a_part_many_times_moves_no_record_until_one_is_needed() {
     for b in &world.bodies {
         let _ = (b.body.face_count(), b.mesh_in_place(), b.outline_bounds(), b.is_closed());
     }
-    assert_eq!(solidcraft_kernel::lazy_moves_made(), before, "no placement's record moved to place or draw it");
+    assert!(world.bodies.iter().all(|b| !b.body.lazy_move_made()), "no placement's record moved to place or draw it");
     // A measure of one placement needs its own geometry: that one is moved, once.
     let placed = world.bodies.iter().find(|b| b.placed_definition().is_some()).unwrap();
     let _ = placed.body.record();
-    assert_eq!(solidcraft_kernel::lazy_moves_made(), before + 1);
+    assert!(placed.body.lazy_move_made());
 }
 
 /// Review of #18732: a per-edge fillet whose picks include a smooth edge (dropped, with a note)
@@ -2021,4 +2020,125 @@ fn a_mirror_of_a_per_edge_fillet_with_a_dropped_smooth_pick_keeps_each_edges_rad
     run(&mut s, "solid.mirror", json!({"features": ["Each"], "plane": {"origin": [0, 20, 0], "normal": [0, 1, 0]}}));
     let v = volume(&mut s);
     assert!((v - 71575.08836352694).abs() < 1e-6 * v, "{v}");
+}
+
+// The test below and its helpers are kaievns's, from their branch for #19451 (review of #20119):
+// a root mirror of a mirror made in a placed part, which main gets right and a first version of
+// #20119 broke.
+
+/// A body's volume, its face count and the ends of its pockets (planar faces square to Z under
+/// 1000 mm²) as (area, centroid) where it is shown, in x order.
+fn pockets(s: &mut Session, body: &str) -> (f64, usize, Vec<(f64, [f64; 3])>) {
+    let v = s.model.state().body(body).map_or(f64::NAN, |b| b.measure().unwrap().volume);
+    let r = run(s, "model.faces", json!({"body": body}));
+    let faces = r["faces"].as_array().unwrap();
+    let mut ends: Vec<(f64, [f64; 3])> = faces
+        .iter()
+        .filter(|f| f["plane_normal"][2].as_f64().is_some_and(|z| z.abs() > 0.999) && f["area"].as_f64().is_some_and(|a| a < 1000.0))
+        .map(|f| (f["area"].as_f64().unwrap(), std::array::from_fn(|i| f["centroid"][i].as_f64().unwrap())))
+        .collect();
+    ends.sort_by(|a, b| a.1[0].total_cmp(&b.1[0]));
+    (v, faces.len(), ends)
+}
+
+/// What a 2 mm round takes off an upright 10 mm edge of a box.
+const ROUND: f64 = (4.0 - PI) * 10.0;
+
+/// Part, placed turned 180° about Z and lifted 20, and in it Base, 40 × 40 × 10 at x −10..30,
+/// y −20..20, z 0..10, with Boss, a join of x 20..26, y 5..10 on its top, 5 high, and Round, a 2 mm
+/// round of its upright edge at x 30, y 20. Where it is shown, Base is at x −30..10, y −20..20,
+/// z 20..30.
+fn part_with_a_boss_and_a_round() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-10, -20, 0], "body_name": "Base"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "BossSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [20, 5], "p1": [26, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "join", "targets": ["Base"], "name": "Boss"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[30, 20, 5]], "radius": 2, "name": "Round"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let turn = json!({"occurrence": "Part:1", "axis": [0, 0, 1], "angle": "180 deg", "origin": [0, 0, 0], "translate": [0, 0, 20]});
+    run(&mut s, "occurrence.move", turn);
+    run(&mut s, "component.capture_position", json!({}));
+    s
+}
+
+/// The (x, y) of the axes of `body`'s rounds of `radius` where they are shown, in x then y order
+/// (to the micrometre).
+fn round_axes(s: &mut Session, body: &str, radius: f64) -> Vec<[f64; 2]> {
+    let r = run(s, "model.faces", json!({"body": body}));
+    let mut axes: Vec<[f64; 2]> = r["faces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["cylinder"]["radius"].as_f64().is_some_and(|r| (r - radius).abs() < 1e-9))
+        .map(|f| [f["cylinder"]["origin"][0].as_f64().unwrap(), f["cylinder"]["origin"][1].as_f64().unwrap()])
+        .collect();
+    axes.sort_by_key(micrometres);
+    axes
+}
+
+/// (x, y) to the micrometre, to sort points that rounding leaves a hair apart.
+fn micrometres(p: &[f64; 2]) -> (i64, i64) {
+    ((p[0] * 1e3).round() as i64, (p[1] * 1e3).round() as i64)
+}
+
+fn near2(p: [f64; 2], q: [f64; 2]) -> bool {
+    (p[0] - q[0]).hypot(p[1] - q[1]) < 1e-6
+}
+
+/// The centroids (x, y) of the ends of `body`'s pockets at height `z` ([`pockets`]), in x then
+/// y order.
+fn pocket_ends_at(s: &mut Session, body: &str, z: f64) -> Vec<[f64; 2]> {
+    let mut at: Vec<[f64; 2]> = pockets(s, body).2.iter().filter(|(_, c)| (c[2] - z).abs() < 1e-6).map(|(_, c)| [c[0], c[1]]).collect();
+    at.sort_by_key(micrometres);
+    at
+}
+
+/// #19451 review: a root mirror across XZ of a mirror made in the part copies that mirror's copies
+/// at their world images, as main does: the inner mirror's copies are placed through the part's
+/// frame already. A third boss at x 0..6, y 5..10, its top at x 3, y 7.5, and a third round about
+/// x 8, y 18.
+#[test]
+fn a_root_mirror_of_a_mirror_in_a_turned_part_copies_its_copies_at_their_world_images() {
+    let mut s = part_with_a_boss_and_a_round();
+    run(&mut s, "component.activate", json!({"component": "Part"}));
+    let plane = json!({"origin": [-10, 0, 0], "normal": [1, 0, 0]});
+    run(&mut s, "solid.mirror", json!({"features": ["Boss", "Round"], "plane": plane, "name": "PartMirror"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let r = run(&mut s, "solid.mirror", json!({"features": ["PartMirror"], "plane": "XZ"}));
+    assert!(r["warning"].is_null(), "{r}");
+    let v = pockets(&mut s, "Base").0;
+    let tops = pocket_ends_at(&mut s, "Base", 35.0);
+    let axes = round_axes(&mut s, "Base", 2.0);
+    assert!(rel(v, 16000.0 + 3.0 * 150.0 - 3.0 * ROUND) < 1e-9, "{v}");
+    let want = [[-23.0, -7.5], [3.0, -7.5], [3.0, 7.5]];
+    assert!(tops.len() == 3 && tops.iter().zip(want).all(|(a, w)| near2(*a, w)), "{tops:?}");
+    let want = [[-28.0, -18.0], [8.0, -18.0], [8.0, 18.0]];
+    assert!(axes.len() == 3 && axes.iter().zip(want).all(|(a, w)| near2(*a, w)), "{axes:?}");
+}
+
+/// #14407: copies of a split pipe surface (2 faces, 6 edges) showed 1 face and 2 edges, their split
+/// lines dropped by the move.
+#[test]
+fn a_body_pattern_of_a_split_surface_copies_its_split_faces() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Round"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [30, 0], "radius": 12.5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "Round", "distance": "20 mm", "name": "Pipe", "body_name": "Pipe"}));
+    run(&mut s, "solid.split_face", json!({"body": "Pipe", "faces": [[42.5, 0, 10]], "plane": {"origin": [30, 0, 0], "normal": [1, 0, 0]}}));
+    run(&mut s, "solid.pattern.circular", json!({"bodies": ["Pipe"], "axis": "Z", "count": 3}));
+    let st = s.model.state();
+    let shown: Vec<(String, usize, usize)> = st
+        .bodies
+        .iter()
+        .map(|b| {
+            let t = solidcraft_kernel::merged_topology(&b.body).unwrap();
+            (b.name.clone(), t.faces, t.edges)
+        })
+        .collect();
+    assert_eq!(shown.len(), 3, "{shown:?}");
+    assert!(shown.iter().all(|(_, faces, edges)| (*faces, *edges) == (2, 6)), "{shown:?}");
 }

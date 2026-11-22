@@ -164,6 +164,7 @@ impl StraightPreview {
             points: Vec::new(),
             placed: None,
             report: None,
+            centrelines: Vec::new(),
             tapered: Vec::new(),
             replaced: Vec::new(),
             outlines: Vec::new(),
@@ -171,6 +172,7 @@ impl StraightPreview {
             bounds,
             layer: None,
             joints: Vec::new(),
+            plugin_view: None,
         }))
     }
 }

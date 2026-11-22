@@ -23,6 +23,7 @@ const HELP_TAIL: &str = " cells in one operation; not for sheet metal (use sheet
 const HELP: &str = help_with_cap!(HELP_HEAD, MAX_CUT_CELLS, HELP_TAIL);
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("solid.cell_grid", "Cell Grid", crate::checked!("solid.cell_grid", cell_grid))
+    .begins_edit()
     .icon("perforate")
     .contract(&CELL_GRID_CONTRACT)
     .output(output_schema_for::<FeatureResult>)

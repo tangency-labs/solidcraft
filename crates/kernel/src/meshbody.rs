@@ -2,7 +2,8 @@
 //! export; B-rep features refuse them.
 
 use solidcraft_geom::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::Entry};
+use std::hash::{Hash, Hasher};
 
 use solidcore_record::Vec3;
 use solidcraft_geom::Mesh;
@@ -72,7 +73,7 @@ impl TriMesh {
         let mut set = std::collections::HashSet::new();
         for t in &self.triangles {
             for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
-                set.insert((a.min(b), a.max(b)));
+                set.insert(MeshEdge::new(a, b));
             }
         }
         set.len()
@@ -85,6 +86,22 @@ impl TriMesh {
             .filter_map(|t| Some((self.positions.get(t[0] as usize)?, self.positions.get(t[1] as usize)?, self.positions.get(t[2] as usize)?)))
             .map(|(a, b, c)| a.dot(b.cross(*c)))
             .sum()
+    }
+}
+
+#[derive(PartialEq, Eq)]
+struct MeshEdge(u32, u32);
+
+impl MeshEdge {
+    fn new(a: u32, b: u32) -> Self {
+        Self(a.min(b), a.max(b))
+    }
+}
+
+impl Hash for MeshEdge {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // Hash both indices in one write while keeping the table entries aligned to u32.
+        state.write_u64((u64::from(self.0) << 32) | u64::from(self.1));
     }
 }
 
@@ -103,9 +120,17 @@ pub fn mesh_body_with_normals(positions: &[Vec3], triangles: &[[u32; 3]], normal
 fn build_mesh(
     positions: impl ExactSizeIterator<Item = Vec3> + Clone,
     triangles: &[[u32; 3]],
-    mut normals: impl ExactSizeIterator<Item = [Vec3; 3]> + Clone,
+    normals: impl ExactSizeIterator<Item = [Vec3; 3]> + Clone,
 ) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "mesh_body");
+    weld_mesh(positions, triangles, normals).map(finish_mesh)
+}
+
+fn weld_mesh(
+    positions: impl ExactSizeIterator<Item = Vec3> + Clone,
+    triangles: &[[u32; 3]],
+    mut normals: impl ExactSizeIterator<Item = [Vec3; 3]> + Clone,
+) -> Result<TriMesh> {
     if triangles.len() > MAX_TRIANGLES {
         return Err(KernelError::Invalid(format!("mesh with {} triangles (limit {MAX_TRIANGLES})", triangles.len())));
     }
@@ -148,6 +173,10 @@ fn build_mesh(
     if out.triangles.is_empty() {
         return Err(KernelError::Invalid("mesh has no triangles".into()));
     }
+    Ok(out)
+}
+
+fn finish_mesh(mut out: TriMesh) -> Body {
     out.closed = unify_winding(&mut out);
     if out.closed && out.volume6() < 0.0 {
         for (i, t) in out.triangles.iter_mut().enumerate() {
@@ -157,36 +186,50 @@ fn build_mesh(
             }
         }
     }
-    Ok(Body::of_mesh(out))
-}
-
-#[derive(Clone, Copy)]
-enum EdgeTriangles {
-    One(u32),
-    Two(u32, u32),
-    Many,
+    Body::of_mesh(out)
 }
 
 /// Wind every connected piece one way: a triangle that runs a side in the same direction as
 /// its neighbour is turned over (files with stray inverted facets). Sides shared by more than
-/// two triangles are left alone. Returns whether every side has two opposite runs
-/// after repair, using the same adjacency table as the walk.
+/// two triangles are left alone. Returns whether every side has two opposite runs after repair.
 fn unify_winding(m: &mut TriMesh) -> bool {
-    let mut sides = HashMap::new();
-    // The mesh builder caps the triangle count at MAX_TRIANGLES.
+    const UNPAIRED: u32 = u32::MAX;
+    // A side fits in a u32 because construction caps the mesh at MAX_TRIANGLES.
+    const _: () = assert!(MAX_TRIANGLES < (u32::MAX / 3) as usize);
+    let mut links = vec![[UNPAIRED; 3]; m.triangles.len()];
+    let side_links = links.as_flattened_mut();
+    let mut first_sides = HashMap::new();
     for (triangle, &[a, b, c]) in (0u32..).zip(&m.triangles) {
-        for (a, b) in [(a, b), (b, c), (c, a)] {
-            sides
-                .entry((a.min(b), a.max(b)))
-                .and_modify(|uses| {
-                    *uses = match *uses {
-                        EdgeTriangles::One(first) => EdgeTriangles::Two(first, triangle),
-                        _ => EdgeTriangles::Many,
-                    }
-                })
-                .or_insert(EdgeTriangles::One(triangle));
+        for (side, (a, b)) in (0u32..).zip([(a, b), (b, c), (c, a)]) {
+            let current = triangle * 3 + side;
+            let first = match first_sides.entry(MeshEdge::new(a, b)) {
+                Entry::Vacant(entry) => {
+                    entry.insert(current);
+                    continue;
+                }
+                Entry::Occupied(entry) => entry.into_mut(),
+            };
+            if *first == UNPAIRED {
+                continue;
+            }
+            let Some(previous) = side_links.get_mut(*first as usize) else { continue };
+            if *previous == UNPAIRED {
+                *previous = current;
+                if let Some(link) = side_links.get_mut(current as usize) {
+                    *link = *first;
+                }
+            } else {
+                // The third use disconnects the first two; further uses stay disconnected.
+                let second = std::mem::replace(previous, UNPAIRED);
+                if let Some(link) = side_links.get_mut(second as usize) {
+                    *link = UNPAIRED;
+                }
+                *first = UNPAIRED;
+            }
         }
     }
+    // The walk follows contiguous per-triangle links without visiting the edge table again.
+    drop(first_sides);
     let runs = |&[u, v, w]: &[u32; 3], a, b| [(u, v), (v, w), (w, u)].contains(&(a, b));
     let mut done = vec![false; m.triangles.len()];
     let mut stack = Vec::new();
@@ -199,12 +242,13 @@ fn unify_winding(m: &mut TriMesh) -> bool {
         stack.push(start);
         while let Some(i) = stack.pop() {
             let Some(&[a, b, c]) = m.triangles.get(i) else { continue };
-            for (a, b) in [(a, b), (b, c), (c, a)] {
-                let Some(&EdgeTriangles::Two(left, right)) = sides.get(&(a.min(b), a.max(b))) else {
+            let Some(&sides) = links.get(i) else { continue };
+            for ((a, b), side) in [(a, b), (b, c), (c, a)].into_iter().zip(sides) {
+                if side == UNPAIRED {
                     closed = false;
                     continue;
-                };
-                let neighbor = if left as usize == i { right as usize } else { left as usize };
+                }
+                let neighbor = (side / 3) as usize;
                 let Some(visited) = done.get_mut(neighbor) else { continue };
                 if *visited {
                     // A visited triangle has its final winding. Two equal runs here mean
@@ -217,6 +261,10 @@ fn unify_winding(m: &mut TriMesh) -> bool {
                     && runs(triangle, a, b)
                 {
                     triangle.swap(1, 2);
+                    if let Some(links) = links.get_mut(neighbor) {
+                        // [a,b], [b,c], [c,a] become the reversed sides in reverse order.
+                        links.swap(0, 2);
+                    }
                     if let Some(normals) = m.corner_normals.get_mut(neighbor) {
                         normals.swap(1, 2);
                     }
@@ -247,6 +295,18 @@ impl Body {
         let positions = positions.iter().copied().map(Vec3::from);
         let normals = normals.iter().map(|&[ax, ay, az, bx, by, bz, cx, cy, cz]| [[ax, ay, az], [bx, by, bz], [cx, cy, cz]].map(Vec3::from));
         build_mesh(positions, triangles, normals)
+    }
+
+    /// Make a flat imported body and the same source with shared vertex indices. The source
+    /// retains its facet order and winding, so it can be rebuilt or shaded the usual way.
+    pub fn from_packed_flat_mesh_indexed(positions: std::sync::Arc<[f64]>, triangles: std::sync::Arc<[u32]>) -> Result<(Self, Vec<f64>, Vec<u32>)> {
+        let _span = solidcraft_profile::span("kernel", "mesh_body");
+        let mesh = weld_mesh(positions.as_chunks::<3>().0.iter().copied().map(Vec3::from), triangles.as_chunks::<3>().0, std::iter::empty())?;
+        drop(positions);
+        drop(triangles);
+        let points = mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect();
+        let facets = mesh.triangles.iter().flatten().copied().collect();
+        Ok((finish_mesh(mesh), points, facets))
     }
 
     /// Shared-vertex triangles of a mesh body.

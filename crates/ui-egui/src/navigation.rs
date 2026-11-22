@@ -78,7 +78,10 @@ impl WebWheelGestures {
     /// `WHEEL_STEP_MIN` points is a wheel notch (browsers report about 100 points per notch,
     /// scaled by page zoom and display scaling); smaller point deltas and horizontal input
     /// start a swipe. Once started, larger deltas and momentum belong to that swipe too.
-    pub fn update(&mut self, raw: &mut egui::RawInput, now: f64) -> Option<std::time::Duration> {
+    /// `Always zoom` also treats a bare vertical step of any size as a wheel step, so a
+    /// smooth-scrolling mouse wheel zooms; Shift and the navigation modifiers still pan. The other
+    /// two choices route as before (`wheel_hint` only asks whether to offer `Always zoom`).
+    pub fn update(&mut self, raw: &mut egui::RawInput, now: f64, mode: crate::prefs::BrowserScrollWheel) -> Option<std::time::Duration> {
         use egui::{Event, Modifiers, MouseWheelUnit, TouchPhase, Vec2};
         const IDLE: f64 = 0.1;
         const WHEEL_STEP_MIN: f32 = 40.0;
@@ -100,7 +103,8 @@ impl WebWheelGestures {
                 Event::MouseWheel { unit, delta, modifiers, .. } => {
                     let point = *unit == MouseWheelUnit::Point;
                     let valid_delta = delta.is_finite() && *delta != Vec2::ZERO;
-                    let step = delta.x == 0.0 && delta.y.abs() >= WHEEL_STEP_MIN;
+                    let always_zoom = mode == crate::prefs::BrowserScrollWheel::AlwaysZoom && *modifiers == Modifiers::NONE;
+                    let step = delta.x == 0.0 && (delta.y.abs() >= WHEEL_STEP_MIN || always_zoom);
                     let swipe = valid_time && point && valid_delta && !modifiers.ctrl && (self.last_scroll.is_some() || !step);
                     if swipe {
                         if self.last_scroll.is_none() {
@@ -727,9 +731,61 @@ pub(crate) struct CameraInput {
 /// selectable, so a press that would start a selection navigates as on empty space; with
 /// `caps.orbit` off, bindings that orbit do nothing and pan and zoom work as usual.
 pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::Response, caps: NavCaps) -> CameraInput {
+    consume_middle_paste(app, ui, rect, resp);
     let input = handle_input(app, ui, rect, resp, caps);
     hold_perspective_distance(app);
     input
+}
+
+/// Navigation runs before tool dialogs. Keep a middle press's clipboard side effects out of
+/// their focused editors, including on release after the pointer has crossed a field.
+fn consume_middle_paste(app: &SolveApp, ui: &egui::Ui, rect: Rect, resp: &egui::Response) {
+    let ctx = ui.ctx();
+    let id = resp.id.with("middle_paste_owned");
+    let modifiers = ui.input(|i| i.modifiers);
+    let (mut owned, previous_modifiers) = ctx.data(|data| data.get_temp::<(bool, egui::Modifiers)>(id).unwrap_or((false, modifiers)));
+    let mut suppress = owned;
+    // Hit-testing needs the context too, so do it outside the input lock. Process presses in
+    // order: a slow frame can contain a viewport click followed by a legitimate field click.
+    let mut events = ui.input_mut(|i| std::mem::take(&mut i.events));
+    let middle_transition = events.iter().any(|event| matches!(event, egui::Event::PointerButton { button: egui::PointerButton::Middle, .. }));
+    // egui-winit emits Paste without a V key event; the web integration emits both. Track
+    // modifiers in event order too, so releasing Ctrl/Cmd later in this frame loses no paste.
+    // InputState.modifiers is already the final state of this frame. Start with the previous
+    // pass's state so a later modifier change cannot alter the provenance of an earlier Paste.
+    let mut command = previous_modifiers.command_only();
+    let mut keyboard_paste = false;
+    events.retain(|event| {
+        match event {
+            egui::Event::ModifiersChanged(modifiers) => command = modifiers.command_only(),
+            egui::Event::Key { key, pressed: true, modifiers, .. }
+                if *key == egui::Key::Paste || (*key == egui::Key::V && modifiers.command) || (*key == egui::Key::Insert && modifiers.shift) =>
+            {
+                keyboard_paste = true;
+            }
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Middle, pressed: true, .. } => {
+                owned = ui.is_enabled()
+                    && rect.contains(*pos)
+                    && !crate::shell::covered(app, *pos)
+                    && ctx.widget_hits_at(*pos).drag.is_some_and(|widget| widget.id == resp.id);
+                suppress = owned;
+            }
+            egui::Event::PointerButton { button: egui::PointerButton::Middle, pressed: false, .. } => {
+                // Keep suppressing through release, when browsers can send an ordinary Paste.
+                owned = false;
+            }
+            // Browser PRIMARY paste accompanies a middle press/release. A Paste on a held
+            // frame alone is not evidence of middle-click paste and must reach the editor.
+            egui::Event::Paste(_) => return !suppress || !middle_transition || command || keyboard_paste,
+            egui::Event::MiddleClickPaste { .. } => return !suppress,
+            _ => {}
+        }
+        true
+    });
+    // Leave pointer input intact for the camera; only its clipboard side effects are consumed.
+    ui.input_mut(|i| i.events = events);
+    let held = ui.input(|i| i.focused && i.pointer.button_down(egui::PointerButton::Middle));
+    ctx.data_mut(|data| data.insert_temp(id, (owned && held, modifiers)));
 }
 
 /// The one place a perspective eye is kept off the target, whichever input moved the camera (#16628).
@@ -1028,17 +1084,27 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         let drag = secondary_down && !i.pointer.could_any_button_be_click();
         (drag, i.pointer.press_origin().zip(i.pointer.latest_pos()).map(|(from, to)| to - from))
     });
+    // A side button the user mapped to a drag in Preferences works the same way: it navigates once
+    // the press can no longer be a click, so a plain click on it still goes Back.
+    let extra_drag = [(egui::PointerButton::Extra1, crate::prefs::NavButton::Extra1), (egui::PointerButton::Extra2, crate::prefs::NavButton::Extra2)]
+        .into_iter()
+        .find(|(pointer, nav)| {
+            ui.input(|i| i.pointer.button_down(*pointer) && !i.pointer.could_any_button_be_click())
+                && (crate::prefs::nav_mode(app, *nav, mods).is_some() || app.viewport.button_nav.is_some_and(|(held, _)| held == *nav))
+        })
+        .map(|(_, nav)| nav);
+    let side_drag = right_drag || extra_drag.is_some();
     let delta = match travel {
-        Some(travel) if right_drag && !app.viewport.right_drag && !middle && travel.is_finite() => travel,
+        Some(travel) if side_drag && !app.viewport.right_drag && !middle && travel.is_finite() => travel,
         _ => delta,
     };
-    app.viewport.right_drag = right_drag;
+    app.viewport.right_drag = side_drag;
     let button = if middle {
         Some(crate::prefs::NavButton::Middle)
     } else if right_drag {
         Some(crate::prefs::NavButton::Right)
     } else {
-        None
+        extra_drag
     };
     // The full canvas response can report a drag whose press belonged to a panel above it.
     // A camera drag that started in free space keeps its capture when it crosses a panel.
@@ -1301,6 +1367,7 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
     }
     let sketch_turns = app.preferences.space_mouse_sketch_orbit;
     let sketch_view_is_initial = !sketch_turns
+        && crate::sketch_view::active_sketch(app).is_some()
         && solidcraft_engine::view::open_sketch_plane(&app.session).ok().flatten().is_some_and(|plane| {
             let normal = plane.normal();
             let mut initial = app.cam.looking_from(normal);
@@ -1706,18 +1773,30 @@ fn screen_middle(app: &SolveApp, mut cam: Camera, bounds: &solidcraft_engine::ge
     at.is_finite().then_some(at)
 }
 
-/// What orbit around the view's centre turns about: the point at the camera target's depth under
-/// the middle of the part of the view the panels leave free (`Layout::middle`). Home and Fit move
-/// the model towards that middle, as far as the compass and the navigation bar leave room (with the
-/// navigators' Fit on, Home puts it where [`navigator_home_centre`] says, see [`home_centre`]). With
-/// the Browser open the middle lies beside the window's centre, and turning about the window's
-/// centre swung the model off to one side (#14651). `None`, so that the camera turns about its
-/// target, when the middle is within half a point of the window's centre, before the view is
-/// first laid out, in the Render workspace (which frames its own picture), and when the camera
-/// gives no finite point.
+/// What orbit around the view's centre turns about: the middle of the model the view shows, the
+/// point a pan moves and a fit frames. Right after a Home or a Fit that middle is where Home puts
+/// the model, the framing point of the view: the middle of the part of the view the panels leave
+/// free (`Layout::middle`), which with the Browser open lies beside the window's centre, and
+/// turning about the window's centre swung the model off to one side (#14651). A zoom and a pan
+/// move the model away from that point, and a pivot left there turns the view about a place the
+/// model is not at, so the model swings around the view's centre instead of turning in place
+/// (#17815). With no model in the view the framing point stands in for it. `None`, so that the
+/// camera turns about its target, before the view is first laid out, in the Render workspace (which
+/// frames its own picture), when the framing point is within half a point of the window's centre,
+/// and when the camera gives no finite point.
 pub(crate) fn view_middle(app: &SolveApp, rect: Rect) -> Option<Vec3> {
     if crate::render_workspace::active(app) {
         return None;
+    }
+    // The middle of the model the view shows: the turn keeps it still on screen, so the model
+    // turns in place. It is only a pivot while the view shows it.
+    let bounds = crate::viewport::view_bounds(app);
+    if !bounds.is_empty() && bounds.min.is_finite() && bounds.max.is_finite() {
+        let middle = bounds.center();
+        let shown = projection(app, rect).to_screen(middle);
+        if shown.is_some_and(|at| rect.contains(at)) {
+            return Some(middle);
+        }
     }
     let middle = home_centre(app)?;
     if !middle.is_finite() || middle.distance(rect.center()) < 0.5 {
@@ -2030,7 +2109,7 @@ mod tests {
         gesture: &mut bool,
     ) -> (super::RawWheel, Vec<egui::Event>) {
         let mut raw = egui::RawInput { time: Some(time), events, focused: true, ..Default::default() };
-        let _ = state.update(&mut raw, time);
+        let _ = state.update(&mut raw, time, crate::prefs::BrowserScrollWheel::Automatic);
         let events = raw.events.clone();
         let mut input = egui::InputState::default();
         input.events = raw.events;
@@ -2231,6 +2310,39 @@ mod tests {
     }
 
     #[test]
+    fn web_always_zoom_makes_small_bare_steps_zoom_and_keeps_shift_panning() {
+        use egui::{Modifiers, MouseWheelUnit::Point, vec2};
+        for (mode, modifiers, zooms) in [
+            (crate::prefs::BrowserScrollWheel::AlwaysZoom, Modifiers::NONE, true),
+            (crate::prefs::BrowserScrollWheel::AlwaysZoom, Modifiers::SHIFT, false),
+            (crate::prefs::BrowserScrollWheel::Automatic, Modifiers::NONE, false),
+            (crate::prefs::BrowserScrollWheel::AlwaysPan, Modifiers::NONE, false),
+        ] {
+            let mut state = super::WebWheelGestures::default();
+            let mut gesture = false;
+            for index in 0..4 {
+                let time = f64::from(index) * 0.016;
+                let mut raw = egui::RawInput { time: Some(time), events: vec![web_wheel(Point, vec2(0.0, 3.0), modifiers)], ..Default::default() };
+                state.update(&mut raw, time, mode);
+                let mut input = egui::InputState::default();
+                input.events = raw.events;
+                let wheel = super::immediate_wheel(
+                    &input,
+                    egui::InputOptions::default(),
+                    600.0,
+                    &mut gesture,
+                    &mut false,
+                    &mut Default::default(),
+                    crate::prefs::TrackpadScroll::Pans,
+                    Some(Modifiers::COMMAND),
+                );
+                assert_eq!(wheel.zoom != 0.0, zooms, "{mode:?} {modifiers:?}");
+                assert_eq!(gesture, !zooms, "{mode:?} {modifiers:?}");
+            }
+        }
+    }
+
+    #[test]
     fn web_swipes_pan_from_the_first_delta_and_end_after_idle() {
         use egui::{Modifiers, MouseWheelUnit::Point, TouchPhase, vec2};
         let mut state = super::WebWheelGestures::default();
@@ -2243,7 +2355,9 @@ mod tests {
             let starts = events.iter().filter(|e| matches!(e, egui::Event::MouseWheel { phase: TouchPhase::Start, .. })).count();
             assert_eq!(starts, usize::from(time == 0.0));
         }
-        let delay = state.update(&mut egui::RawInput::default(), 0.10).expect("schedule the idle end even without more input");
+        let delay = state
+            .update(&mut egui::RawInput::default(), 0.10, crate::prefs::BrowserScrollWheel::Automatic)
+            .expect("schedule the idle end even without more input");
         assert!((delay.as_secs_f64() - 0.09).abs() < 1e-9);
         web_frame(&mut state, 0.18, vec![], &mut gesture);
         assert!(gesture);
@@ -2479,6 +2593,35 @@ mod tests {
             orbit(&mut app, rect, 10.0, 20.0, None);
             assert!(app.cam.back().dist(next.back()) < 1e-9);
         }
+    }
+
+    /// #17815: a zoom and a pan move the model away from the point the view was framed on, and
+    /// the turn that follows has to be about the model itself: the point the view turns about
+    /// stays where it is on screen, so the model turns in place instead of swinging around the
+    /// view's centre.
+    #[test]
+    fn the_orbit_pivot_stays_on_screen_after_a_zoom_and_a_pan() {
+        use super::*;
+        let mut h = crate::scenario::Harness::new();
+        h.app.session.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.settle();
+        h.app.animate_view("home");
+        h.settle();
+        let rect = h.app.viewport.rect.expect("the viewport");
+        let model = crate::viewport::view_bounds(&h.app).center();
+        // The wheel zooms to the cursor, away from the view's centre.
+        let at = pos2(rect.left() + 500.0, rect.top() + 250.0);
+        h.call("ui.scroll", json!({"x": at.x, "y": at.y, "delta": 120.0}));
+        h.settle();
+        // A pan slides the model further away from the view's centre.
+        h.call("ui.drag", json!({"x0": rect.left() + 300.0, "y0": rect.top() + 300.0, "x1": rect.left() + 360.0, "y1": rect.top() + 340.0, "button": "middle", "steps": 6}));
+        h.settle();
+        let before = projection(&h.app, rect).to_screen(model).expect("the model is on screen");
+        for _ in 0..10 {
+            orbit(&mut h.app, rect, 6.0, 3.0, None);
+        }
+        let after = projection(&h.app, rect).to_screen(model).expect("the model is on screen");
+        assert!(after.distance(before) < 0.5, "the model swung from {before:?} to {after:?}");
     }
 
     fn touchpad_frame(app: &mut crate::SolveApp, ctx: &egui::Context, caps: super::NavCaps, at: egui::Pos2, mods: egui::Modifiers, time: &mut f64) {
@@ -2806,6 +2949,101 @@ mod tests {
         }
     }
 
+    /// A mouse button drag on the model, from the viewport's middle: press, move, release.
+    fn drag_with(h: &mut crate::scenario::Harness, button: egui::PointerButton, mods: egui::Modifiers) {
+        use egui::{Event, vec2};
+        let at = h.app.viewport.rect.map_or(egui::pos2(600.0, 400.0), |r| r.center());
+        let press = |pressed| Event::PointerButton { pos: at, button, pressed, modifiers: mods };
+        h.frame_with(vec![Event::ModifiersChanged(mods), Event::PointerMoved(at)]);
+        h.frame_with(vec![press(true)]);
+        for i in 1..=8 {
+            h.frame_with(vec![Event::PointerMoved(at + vec2(9.0, 6.0) * i as f32)]);
+        }
+        h.frame_with(vec![press(false)]);
+        h.frame_with(vec![Event::ModifiersChanged(egui::Modifiers::NONE)]);
+        h.frames(2);
+    }
+
+    #[test]
+    fn side_buttons_do_nothing_until_a_drag_is_chosen_and_the_presets_are_unchanged() {
+        use crate::prefs::{NAV_PRESETS, NavButton, nav_mode};
+        use egui::{Modifiers, PointerButton};
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(2);
+        assert!(h.app.preferences.nav_button_map.is_empty(), "nothing is mapped by default");
+        for preset in NAV_PRESETS {
+            h.app.preferences.nav = preset.id.into();
+            for mods in [Modifiers::NONE, Modifiers::SHIFT, Modifiers::CTRL, Modifiers::ALT, Modifiers::SHIFT | Modifiers::ALT] {
+                for button in NavButton::ALL {
+                    if !crate::mouse_gesture::active(&h.app) || button != NavButton::Right {
+                        assert_eq!(nav_mode(&h.app, button, mods), preset.mode(button, mods), "{}: {button:?} {mods:?}", preset.id);
+                    }
+                }
+                assert_eq!(nav_mode(&h.app, NavButton::Extra1, mods), None, "{}: the side buttons do nothing", preset.id);
+                assert_eq!(nav_mode(&h.app, NavButton::Extra2, mods), None, "{}: the side buttons do nothing", preset.id);
+            }
+        }
+        h.app.preferences.nav = "fusion".into();
+        let before = h.app.cam;
+        drag_with(&mut h, PointerButton::Extra1, Modifiers::NONE);
+        drag_with(&mut h, PointerButton::Extra2, Modifiers::NONE);
+        assert_eq!(h.app.cam, before, "an unmapped side-button drag leaves the view alone");
+    }
+
+    #[test]
+    fn a_mapped_side_button_drags_the_view_on_the_model_and_still_clicks() {
+        use crate::viewport::NavMode;
+        use egui::{Modifiers, PointerButton};
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":30,"height":20})).unwrap();
+        h.frames(2);
+        let reply = h.call("ui.prefs", serde_json::json!({"nav_button_map": {"extra1": "orbit", "extra2": "shift+pan"}}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(crate::prefs::nav_mode(&h.app, crate::prefs::NavButton::Extra1, Modifiers::NONE), Some(NavMode::Orbit));
+        assert_eq!(crate::prefs::nav_mode(&h.app, crate::prefs::NavButton::Extra2, Modifiers::NONE), None, "Shift is needed");
+        assert_eq!(crate::prefs::nav_mode(&h.app, crate::prefs::NavButton::Extra2, Modifiers::SHIFT), Some(NavMode::Pan));
+        let before = h.app.cam;
+        drag_with(&mut h, PointerButton::Extra1, Modifiers::NONE);
+        assert_ne!(h.app.cam.back(), before.back(), "the side button orbits");
+        assert!((h.app.cam.distance - before.distance).abs() < 1e-9, "and does not zoom");
+        let orbited = h.app.cam;
+        drag_with(&mut h, PointerButton::Extra2, Modifiers::NONE);
+        assert_eq!(h.app.cam, orbited, "without Shift the second side button does nothing");
+        drag_with(&mut h, PointerButton::Extra2, Modifiers::SHIFT);
+        assert!(h.app.cam.target.dist(orbited.target) > 1e-6, "with Shift it pans");
+        assert_eq!(h.app.cam.back(), orbited.back());
+        // The other buttons keep the preset.
+        let before = h.app.cam;
+        drag_with(&mut h, PointerButton::Secondary, Modifiers::NONE);
+        assert_ne!(h.app.cam.back(), before.back(), "the right button still orbits");
+        // Choosing "Nothing" for a preset button turns its drag off.
+        h.call("ui.prefs", serde_json::json!({"nav_button_map": {"extra1": "orbit", "right": "none"}}));
+        let before = h.app.cam;
+        drag_with(&mut h, PointerButton::Secondary, Modifiers::NONE);
+        assert_eq!(h.app.cam, before);
+        // Reset: back to the preset, the side buttons idle again.
+        h.call("ui.prefs", serde_json::json!({"nav_button_map": {}}));
+        drag_with(&mut h, PointerButton::Extra1, Modifiers::NONE);
+        assert_eq!(h.app.cam, before);
+        drag_with(&mut h, PointerButton::Secondary, Modifiers::NONE);
+        assert_ne!(h.app.cam.back(), before.back());
+    }
+
+    #[test]
+    fn a_bad_button_mapping_is_refused() {
+        let mut h = crate::scenario::Harness::new();
+        for bad in [serde_json::json!({"extra3": "orbit"}), serde_json::json!({"extra1": "spin"}), serde_json::json!({"extra1": "meta+pan"})] {
+            let reply = h.call("ui.prefs", serde_json::json!({"nav_button_map": bad}));
+            assert_eq!(reply["ok"], false, "{reply}");
+        }
+        assert!(h.app.preferences.nav_button_map.is_empty());
+        for choice in ["orbit", "pan", "zoom", "none", "shift+ctrl+orbit", "alt+zoom"] {
+            assert_eq!(crate::prefs::NavChoice::parse(choice).map(|c| c.text()).as_deref(), Some(choice));
+        }
+    }
+
     #[test]
     fn right_drag_orbits_off_leaves_the_camera_to_the_middle_button() {
         use serde_json::json;
@@ -2981,6 +3219,8 @@ mod tests {
                     NavButton::Left => PointerButton::Primary,
                     NavButton::Middle => PointerButton::Middle,
                     NavButton::Right => PointerButton::Secondary,
+                    NavButton::Extra1 => PointerButton::Extra1,
+                    NavButton::Extra2 => PointerButton::Extra2,
                 };
                 let keys = binding.keys;
                 let mods = Modifiers { shift: keys.shift, ctrl: keys.ctrl, command: keys.ctrl, alt: keys.alt, ..Default::default() };
@@ -3129,7 +3369,8 @@ mod tests {
 
     /// Continuous orbit turns about what Orbit around names (#1044): around the cursor, the model
     /// point in the middle of the view stays still on screen for the whole spin, even when the
-    /// view's centre has been left far behind the model; around the view's centre, as before.
+    /// view's centre has been left far behind the model; around the view's centre, the model the
+    /// view shows, which keeps its place on screen while the view's centre follows it (#17815).
     #[test]
     fn continuous_orbit_turns_about_the_orbit_around_point() {
         use crate::prefs::OrbitAround;
@@ -3169,7 +3410,8 @@ mod tests {
                 let held = match around {
                     OrbitAround::Cursor => crate::prefs::pivot_under(&app, &super::projection(&app, rect), rect.center()),
                     OrbitAround::Origin => super::Vec3::ZERO,
-                    OrbitAround::ViewCentre => app.cam.target,
+                    // The view turns about the model the view shows (#17815).
+                    OrbitAround::ViewCentre => super::view_middle(&app, rect).unwrap_or(app.cam.target),
                 };
                 let start = super::projection(&app, rect).to_screen(held).unwrap();
                 let (yaw, target) = (app.cam.yaw, app.cam.target);
@@ -3187,7 +3429,13 @@ mod tests {
                         let middle = crate::prefs::pivot_under(&app, &super::projection(&app, rect), rect.center());
                         assert!(middle.dist(held) < 30.0, "fov {fov}: the model is still in the middle: {middle:?} vs {held:?}");
                     }
-                    OrbitAround::ViewCentre => assert!((app.cam.target - target).len() < 1e-9, "the view's centre stays as before"),
+                    OrbitAround::ViewCentre => {
+                        // The pivot is chosen once and the view's centre follows the model it turns
+                        // about: the target is the centre of the projection, and the model keeps
+                        // its place on screen (#17815).
+                        assert_eq!(app.viewport.spin_pivot, Some(held), "the point is chosen once");
+                        assert!(app.cam.target.dist(target) > 1e-6, "the view's centre follows the model");
+                    }
                     OrbitAround::Origin => assert!(app.viewport.spin_pivot.is_none()),
                 }
                 app.viewport.spin = false;
@@ -3637,6 +3885,8 @@ mod tests {
                         NavButton::Left => "left",
                         NavButton::Middle => "middle",
                         NavButton::Right => "right",
+                        NavButton::Extra1 => "extra1",
+                        NavButton::Extra2 => "extra2",
                     };
                     let drag = |h: &mut crate::scenario::Harness, dx: f32, dy: f32| {
                         let out = h.call(

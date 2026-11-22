@@ -84,6 +84,20 @@ fn volume(s: &Session, body: &str) -> f64 {
     s.model.state().body(body).map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).unwrap_or(0.0)
 }
 
+/// #14182: a region bounded in part by two arcs that cross almost tangentially, 0.44 micron apart,
+/// was found with the lens between the two crossings in it, so its loop used one arc twice and
+/// SMLib's check refused the extrude (Bad Gap). The lens is no part of the region: the extrude builds.
+#[test]
+fn a_region_by_two_arcs_crossing_almost_tangentially_extrudes() {
+    let mut s = Session::default();
+    s.set_validation(solidcraft_kernel::Validation::EachStep);
+    s.run_script(&serde_json::from_str(include_str!("../../../examples/regressions/near_tangent_arcs_lens_profile.json")).unwrap()).unwrap();
+    let errors: Vec<_> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let v = volume(&s, "Body3");
+    assert!((v - 1_733_713.898_7).abs() < 1e-3, "{v}");
+}
+
 /// #18039: a 360° revolve cut whose sketch is in the same plane as the body it cuts (a body
 /// revolved a whole turn in that plane) was refused: SMLib's boolean split the two seam edges
 /// the solids of revolution share and left an edge near the seam, which its check refuses ("Face
@@ -1952,6 +1966,42 @@ fn cut_removes_a_target_inside_its_tools() {
             assert!((volume(&s, tool) - kept).abs() < 1e-6, "{tool} is kept as it was: {cut}");
         }
     }
+}
+
+/// #15727: a 2 mm cut up into the underside of a disc 1.5 thick with a 0.5 deep recess inside
+/// r 12.3, from a rounded rectangle whose sketch plane is tilted 9e-12 off the underside, as a
+/// sketch on a revolved body's face is. One rounded corner crosses the recess wall. The cut came
+/// back empty and was refused as removing all of the body; it takes what the flat cut takes.
+#[test]
+fn cut_from_a_plane_a_hair_off_a_recessed_underside_keeps_the_body() {
+    let cut = |tilt: f64| {
+        let mut s = Session::default();
+        for (command, params) in [
+            ("solid.cylinder", json!({"center": [0, 0, 0], "radius": 17.3, "height": 1.5, "body_name": "Body1"})),
+            ("solid.cylinder", json!({"center": [0, 0, 0], "radius": 12.3, "height": 0.5, "operation": "cut", "targets": ["Body1"]})),
+            ("sketch.create", json!({"name": "C", "plane": {"origin": [0, 0, 0], "x_dir": [1.0, 0.0, tilt], "y_dir": [0, -1, 0]}})),
+            ("sketch.rectangle.rounded", json!({"p0": [-7.9, -28.5], "p1": [7.9, -8.5], "radius": 1})),
+            ("sketch.finish", json!({})),
+        ] {
+            s.execute(command, &params).unwrap();
+        }
+        let before = volume(&s, "Body1");
+        let r = s.execute("solid.extrude", &json!({"sketch": "C", "distance": 2, "direction": "negative", "operation": "cut", "targets": ["Body1"]}));
+        (s, before, r)
+    };
+    let (flat, before, r) = cut(0.0);
+    r.unwrap();
+    let want = volume(&flat, "Body1");
+    assert!(want > 0.0 && want < before - 100.0, "the flat cut takes the notch: {before} -> {want} mm³");
+    let (s, _, r) = cut(-8.95794308348415e-12);
+    assert!(r.is_ok(), "{r:?}");
+    let state = s.model.state();
+    let names: Vec<&str> = state.bodies.iter().map(|b| b.name.as_str()).collect();
+    assert_eq!(names, ["Body1"]);
+    let body = &state.body("Body1").unwrap().body;
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    let got = volume(&s, "Body1");
+    assert!((got - want).abs() < 1e-6 * want, "the tilted cut leaves {got} mm³, the flat one {want}");
 }
 
 /// A long thin ellipse extruded off a flipped plane is a solid with positive volume. Its sketch
