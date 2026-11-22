@@ -273,6 +273,24 @@ pub enum IntersectFailure {
     /// The basic intersector was asked for a law point's delta step, which only the
     /// advanced intersectors compute. [`ErrorKind::Unsupported`].
     DeltaStepUnsupported,
+    /// A silhouette point coincides with the perspective eye point, where the view direction
+    /// it is classified by has no length. [`ErrorKind::Degenerate`].
+    PointAtEye,
+    /// The tracer does not compute point values: the base tracer leaves the step to the
+    /// tracers that override it. [`ErrorKind::Unsupported`].
+    TracerHasNoPointValues,
+    /// The tracer does not solve for a next point: the base tracer leaves the step to the
+    /// tracers that override it. [`ErrorKind::Unsupported`].
+    TracerHasNoPointSolve,
+    /// The tracer does not drop a boundary curve for start points: the base tracer and the
+    /// drop-curve tracer leave it to the tracers that override it. [`ErrorKind::Unsupported`].
+    TracerHasNoBoundaryDrop,
+    /// A boundary iso curve dropped onto `found` UV curves, neither one nor two (two along a
+    /// seam). Class `failed`.
+    BoundaryDropNotOneOrTwo {
+        /// The number of UV curves the drop gave.
+        found: usize,
+    },
 }
 
 impl IntersectFailure {
@@ -316,7 +334,12 @@ impl IntersectFailure {
             | Self::ApproachStepNotFound { .. }
             | Self::ApproachHitBoundary
             | Self::ApproachNotCertified { .. }
-            | Self::DeltaStepUnsupported => SM_ERR,
+            | Self::DeltaStepUnsupported
+            | Self::PointAtEye
+            | Self::TracerHasNoPointValues
+            | Self::TracerHasNoPointSolve
+            | Self::TracerHasNoBoundaryDrop
+            | Self::BoundaryDropNotOneOrTwo { .. } => SM_ERR,
             Self::Missing(_)
             | Self::CurveCacheNotBuilt
             | Self::FaceWithoutSurface
@@ -372,12 +395,16 @@ impl IntersectFailure {
             | Self::SelfIntersectionUnsupported
             | Self::TraceTooLong { .. }
             | Self::SurfaceNotOffset { .. }
-            | Self::DeltaStepUnsupported => ErrorKind::Unsupported,
+            | Self::DeltaStepUnsupported
+            | Self::TracerHasNoPointValues
+            | Self::TracerHasNoPointSolve
+            | Self::TracerHasNoBoundaryDrop => ErrorKind::Unsupported,
             Self::PointOutsideDomain { .. } => ErrorKind::OutsideDomain,
             Self::NoSurfaceNormal
             | Self::DegenerateTangent
             | Self::TangentAlongNormal { .. }
-            | Self::DegenerateDomain => ErrorKind::Degenerate,
+            | Self::DegenerateDomain
+            | Self::PointAtEye => ErrorKind::Degenerate,
             Self::CurveCacheNotBuilt => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
@@ -507,6 +534,18 @@ impl core::fmt::Display for IntersectFailure {
                 "no trace step toward the snapped point passes in {tries} tries"
             ),
             Self::NoCurveToReverse => f.write_str("the traced curve has no points to reverse"),
+            Self::PointAtEye => f.write_str("the surface point is at the eye point"),
+            Self::TracerHasNoPointValues => {
+                f.write_str("this tracer does not compute point values")
+            }
+            Self::TracerHasNoPointSolve => f.write_str("this tracer does not step to a next point"),
+            Self::TracerHasNoBoundaryDrop => {
+                f.write_str("this tracer does not drop a boundary curve")
+            }
+            Self::BoundaryDropNotOneOrTwo { found } => write!(
+                f,
+                "the boundary curve dropped onto {found} uv curves, neither one nor two"
+            ),
             Self::DeltaStepUnsupported => {
                 f.write_str("the basic intersector does not compute a law point's delta step")
             }
@@ -871,6 +910,11 @@ pub(super) mod tests {
             (F::ApproachNotCertified { points: 16 }, SM_ERR, K::Failed),
             (F::NoCurveToReverse, SM_ERR_NULL_POINTER, K::Missing),
             (F::DeltaStepUnsupported, SM_ERR, K::Unsupported),
+            (F::PointAtEye, SM_ERR, K::Degenerate),
+            (F::TracerHasNoPointValues, SM_ERR, K::Unsupported),
+            (F::TracerHasNoPointSolve, SM_ERR, K::Unsupported),
+            (F::TracerHasNoBoundaryDrop, SM_ERR, K::Unsupported),
+            (F::BoundaryDropNotOneOrTwo { found: 3 }, SM_ERR, K::Failed),
         ];
         for (failure, status, kind) in cases {
             let e = SolidError::intersect(op, failure);
@@ -934,7 +978,6 @@ pub(super) mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/intersect/adv_surface_intersector.rs", 10),
             ("solidcore/src/intersect/curve_class/p1.rs", 9),
             ("solidcore/src/intersect/curve_class/p2.rs", 7),
             ("solidcore/src/intersect/curve_class/p3.rs", 19),
@@ -944,8 +987,6 @@ pub(super) mod tests {
             ("solidcore/src/intersect/curve_class/p7.rs", 17),
             ("solidcore/src/intersect/curve_class/p8.rs", 17),
             ("solidcore/src/intersect/curve_class/p9.rs", 17),
-            ("solidcore/src/intersect/surface_silhouette.rs", 7),
-            ("solidcore/src/intersect/surface_tracer.rs", 6),
             ("solidcore/src/intersect/topology_solver/p1.rs", 12),
             ("solidcore/src/intersect/topology_solver/p2.rs", 24),
         ];

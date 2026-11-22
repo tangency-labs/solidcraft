@@ -98,7 +98,8 @@ use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::p5::make_curve_cache;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::intersect::IntersectFailure;
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -482,10 +483,15 @@ impl<'s> SurfaceTracer<'s> {
     /// `SM_ERR_NULL_POINTER` for an empty curve.
     pub fn reverse_curve_direction(&mut self) -> Result<()> {
         if self.curve_points.is_empty() {
-            return Err(SolidError::intersect_missing(
+            return Err(Failure::new(
                 OP_REVERSE,
-                "the traced curve's points",
-            ));
+                IntersectFailure::Defect {
+                    why: "the boundary-start trace reverses the curve its forward trace left \
+                          empty; the kernel emptied it itself",
+                },
+            )
+            .with_status(crate::error::SM_ERR_NULL_POINTER)
+            .into_error());
         }
 
         // Grab points in m_vCurvePoints list into an array, and empty the list.
@@ -596,9 +602,9 @@ pub trait SurfaceTrace<'s> {
         step_size: Option<f64>,
     ) -> Result<()> {
         let _ = (k, uv, pnt, prev, step_size);
-        Err(SolidError::intersect_failed(
+        Err(SolidError::intersect(
             OP_HOOK,
-            "this tracer does not compute point values",
+            IntersectFailure::TracerHasNoPointValues,
         ))
     }
 
@@ -616,9 +622,9 @@ pub trait SurfaceTrace<'s> {
         next: &mut TracePoint,
     ) -> Result<Option<Point2>> {
         let _ = (k, curr, guess, next);
-        Err(SolidError::intersect_failed(
+        Err(SolidError::intersect(
             OP_HOOK,
-            "this tracer does not step to a next point",
+            IntersectFailure::TracerHasNoPointSolve,
         ))
     }
 
@@ -639,9 +645,9 @@ pub trait SurfaceTrace<'s> {
         param: SurfParamType,
     ) -> Result<SolutionArray<BoundaryCurve>> {
         let _ = (k, boundary, interval, side, param);
-        Err(SolidError::intersect_failed(
+        Err(SolidError::intersect(
             OP_HOOK,
-            "this tracer does not drop a boundary curve",
+            IntersectFailure::TracerHasNoBoundaryDrop,
         ))
     }
 
@@ -1751,9 +1757,11 @@ where
                 } else if uv_curves.len() == 1 {
                     out.uv_curves.extend(uv_curves);
                 } else {
-                    return Err(SolidError::intersect_failed(
+                    return Err(SolidError::intersect(
                         OP_BOUNDARY,
-                        "the boundary curve dropped onto neither one nor two uv curves",
+                        IntersectFailure::BoundaryDropNotOneOrTwo {
+                            found: uv_curves.len(),
+                        },
                     ));
                 }
 
@@ -2052,7 +2060,15 @@ where
 
             t.tracer_mut().curve_trace_direction = -1.0;
             let back_start = *t.tracer().curve_points.last().ok_or_else(|| {
-                SolidError::intersect_missing(OP_REVERSE, "the traced curve's last point")
+                Failure::new(
+                    OP_REVERSE,
+                    IntersectFailure::Defect {
+                        why: "the reversal just succeeded, which it does only on a curve with \
+                              points, so the reversed curve has a last point",
+                    },
+                )
+                .with_status(crate::error::SM_ERR_NULL_POINTER)
+                .into_error()
             })?;
             ignore_status(t.trace_curve(k, back_start, &out.curves_3d))?;
             ignore_status(t.reverse_curve_direction())?;
@@ -2235,7 +2251,9 @@ mod tests {
         let s = plane();
         let d = Extent2d::from_bounds(0.0, 0.0, 10.0, 10.0);
         let mut t = SurfaceTracer::new(k, &s, &d).unwrap();
-        assert!(t.reverse_curve_direction().is_err());
+        let e = t.reverse_curve_direction().unwrap_err();
+        assert!(e.is_defect());
+        assert_eq!(e.upstream_status(), Some(1006));
         for (i, param) in [0.0, 1.0, 3.0].into_iter().enumerate() {
             let mut p = TracePoint::new();
             p.curve_parameter = param;
