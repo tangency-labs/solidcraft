@@ -1178,6 +1178,29 @@ pub fn ball_is_regular(
                     ..BallStation::default()
                 });
             }
+            // The same proof for a ball wider than a face: an analytic cylinder, sphere or
+            // torus of a radius less than the ball's with the ball on its inner side curves
+            // toward the ball more than the ball does at every point, so no ball of that
+            // radius touches it without cutting into it, and none rolls along the edge (the
+            // stations found none). A radius below the face's fits it.
+            if radius > EFF_ZERO {
+                if let Some(width) =
+                    crate::blend::fillet_exact::ball_wider_than_a_face_along_the_edge(
+                        ops_of(solver),
+                        k,
+                        target,
+                        radius,
+                    )?
+                {
+                    return Ok(BallStation {
+                        check: BallCheck::NotEnclosed,
+                        radius,
+                        works: width,
+                        fits: width,
+                        ..BallStation::default()
+                    });
+                }
+            }
         }
     }
 

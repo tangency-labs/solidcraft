@@ -1968,6 +1968,20 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
             if !ok || h != start {
                 continue;
             }
+            let keep = without_lobes_of_no_area(&segs, &edge_nodes);
+            if keep.iter().any(|k| !k) {
+                fn kept<T>(v: &mut Vec<T>, keep: &[bool]) {
+                    let mut k = keep.iter();
+                    v.retain(|_| k.next().copied().unwrap_or(true));
+                }
+                kept(&mut segs, &keep);
+                kept(&mut hs, &keep);
+                kept(&mut edge_nodes, &keep);
+                kept(&mut edge_analytic, &keep);
+                kept(&mut ids, &keep);
+                kept(&mut ptags, &keep);
+                kept(&mut coverage_tags, &keep);
+            }
             let segs = close_graph_joints(segs, &edge_nodes, &edge_analytic, TANGENT_JOIN_TOL);
             let lp = Loop2 { segs: close_line_joints(restore_exact(segs, &ptags, &exact), ENDPOINT_JOIN_TOL) };
             let area = lp.signed_area();
@@ -2011,6 +2025,40 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
         break;
     }
     Island { loops, incomplete }
+}
+
+/// Which half-edges of a traced loop stay: a lobe (a stretch back to the node it left) of no area
+/// is left out, as the lens two near-tangent crossings leave (#14182).
+fn without_lobes_of_no_area(segs: &[Seg2], edge_nodes: &[(usize, usize)]) -> Vec<bool> {
+    let n = segs.len();
+    let mut keep = vec![true; n];
+    let mut i = 0;
+    while i < n {
+        let from = edge_nodes.get(i).map(|e| e.0);
+        let back =
+            (1..n).map(|d| (i + d) % n).take_while(|j| keep.get(*j).copied().unwrap_or(false)).find(|&j| edge_nodes.get(j).map(|e| e.0) == from);
+        let lobe = back.filter(|_| keep.get(i).copied().unwrap_or(false)).and_then(|j| {
+            let idx: Vec<usize> = (0..n).map(|d| (i + d) % n).take_while(|&k| k != j).collect();
+            let lobe: Vec<Seg2> = idx.iter().filter_map(|&k| segs.get(k).copied()).collect();
+            (idx.len() < n && area_about_start(&lobe).abs() <= 1e-9).then_some(idx)
+        });
+        match lobe {
+            Some(idx) => idx.into_iter().for_each(|k| {
+                if let Some(x) = keep.get_mut(k) {
+                    *x = false;
+                }
+            }),
+            None => i += 1,
+        }
+    }
+    keep
+}
+
+/// Signed area about the loop's first point: far from the origin a loop closed only to round-off
+/// is off by the gap times the distance.
+fn area_about_start(segs: &[Seg2]) -> f64 {
+    let Some(o) = segs.first().map(Seg2::start) else { return 0.0 };
+    segs.iter().map(|s| s.area_term() - 0.5 * o.cross(s.end() - s.start())).sum()
 }
 
 /// Chord tolerance of the polylines free-form curves take part in the profile graph as.
