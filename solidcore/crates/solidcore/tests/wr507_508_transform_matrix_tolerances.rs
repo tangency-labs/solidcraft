@@ -4,6 +4,7 @@
 //! tangency-labs/smlib#49 and #50, `capi/tests/flat_roundtrip.cpp`) on the port. Each
 //! fails on upstream's rule. And the size a scale gives a body staying that body's: the
 //! kernel context and the other bodies keep theirs.
+#![allow(clippy::unwrap_used)] // test helpers
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
@@ -276,4 +277,215 @@ fn healing_a_body_after_scaling_another_is_as_on_a_fresh_kernel() {
     assert_eq!(fresh.2, tol::MODEL_SIZE_ESTIMATE);
     assert_eq!(fresh.3, vec![1e-5; 1 + 8 + 12]);
     assert_eq!(healed_plate(true), fresh);
+}
+
+/// What the healer's property pass flags on each edge, vertex and face of `b`: too small a
+/// tolerance and too large a tolerance for the zone tolerance it is measured with.
+fn heal_property_flags(
+    k: &Kernel,
+    b: &mut solidcore::topology::Brep,
+) -> Vec<[solidcore::heal::face_props::Tri; 2]> {
+    use solidcore::heal::face_props::{FaceProps, HealerOpType, PropStage};
+    use solidcore::heal::heal_data::p2::{EdgeProps, VertexProps};
+
+    let mut flags = Vec::new();
+    for (i, e) in p1::edges(b, None).unwrap().into_iter().enumerate() {
+        let mut p = EdgeProps::new();
+        p.set_props(k, b, e, i as u64, None, None, 0).unwrap();
+        flags.push([p.bad_small_zone_tol_3d, p.bad_large_zone_tol_3d]);
+    }
+    for (i, v) in p1::vertices(b, None).unwrap().into_iter().enumerate() {
+        let mut p = VertexProps::new();
+        p.set_props(k, b, v, i as u64, None, None).unwrap();
+        flags.push([p.bad_small_zone_tol_3d, p.bad_large_zone_tol_3d]);
+    }
+    for (i, f) in p1::faces(b, None).unwrap().into_iter().enumerate() {
+        let mut p: FaceProps<p1::HealLoopHandle> = FaceProps::new();
+        p.set_props(
+            k,
+            b,
+            PropStage::Gaps,
+            f,
+            i as u64,
+            HealerOpType::FixTolsizes,
+        )
+        .unwrap();
+        flags.push([p.bad_small_zone_tol_3d, p.bad_large_zone_tol_3d]);
+    }
+    flags
+}
+
+/// The tolerances of `b`, its vertices and its edges, in that order.
+fn body_tolerances(b: &solidcore::topology::Brep) -> Vec<f64> {
+    let mut tolerances = vec![b.tolerance()];
+    tolerances.extend(
+        p1::vertices(b, None)
+            .unwrap()
+            .into_iter()
+            .map(|v| vertex::tolerance(b, v).unwrap()),
+    );
+    tolerances.extend(
+        p1::edges(b, None)
+            .unwrap()
+            .into_iter()
+            .map(|e| edge::tolerance(b, e).unwrap()),
+    );
+    tolerances
+}
+
+/// A 1000 cube Y scaled by 2 with its tolerances (as `solidcore-ops` always scales): its
+/// own estimate, about its 2000 cube's diagonal (3464), is past the default's band, so
+/// its zone tolerance is 1e-4 (the default's is 1e-5), and the scale leaves its
+/// tolerances at 1e-4. With `make_another`, an unrelated small box is made after the
+/// scale. The kernel also holds a 400 cube Z over Y's far corner, made before the scale.
+fn scaled_box_history(
+    make_another: bool,
+) -> (Kernel, solidcore::topology::Brep, solidcore::topology::Brep) {
+    let mut k = Kernel::default();
+    let z = api::create_box(
+        &mut k,
+        Point3::new(1800.0, 1800.0, 1800.0),
+        400.0,
+        400.0,
+        400.0,
+    )
+    .unwrap();
+    let mut y =
+        api::create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 1000.0, 1000.0, 1000.0).unwrap();
+    transform_matrix(&mut k, &mut y, &scale_by(2.0), true).unwrap();
+    if make_another {
+        another_box(&mut k);
+    }
+    (k, y, z)
+}
+
+fn another_box(k: &mut Kernel) {
+    api::create_box(k, Point3::new(-100.0, -100.0, -100.0), 1.0, 1.0, 1.0).unwrap();
+}
+
+/// The corner `calc_corner_from_faces` finds (as a Boolean merge asks it for a vertex off
+/// its faces) at the origin corner of the scaled box Y once Y's z = 0 face is replaced by
+/// the plane x = -2e-5, parallel to the x = 0 face: found, the point, the largest gap.
+fn scaled_parallel_corner(make_another: bool) -> (bool, [f64; 3], f64) {
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::math::{Point2, Vec3};
+    use solidcore::nurbs::knots::Side;
+    use solidcore::surface::{plane::Plane, surface::Surface};
+    use solidcore::topology::{face::p2 as face, vertexuse};
+
+    let (mut k, mut y, _) = scaled_box_history(false);
+    let v = y
+        .vertices()
+        .ids()
+        .find(|&v| y.vertex(v).unwrap().point.distance(Vec3::ZERO) == 0.0)
+        .unwrap();
+    let normal_of = |b: &solidcore::topology::Brep, f| {
+        face::surface(b, f)
+            .unwrap()
+            .unwrap()
+            .evaluate_normal(&k, Point2::new(0.0, 0.0), Side::Left, Side::Left)
+            .unwrap()
+    };
+    let fz = vertex::faces(&y, v)
+        .unwrap()
+        .into_iter()
+        .find(|&f| normal_of(&y, f).dot(Vec3::Z).abs() > 0.5)
+        .unwrap();
+    let frame = Axis2Placement::new(Vec3::new(-2e-5, 0.0, 0.0), Vec3::Z, Vec3::Y);
+    y.face_mut(fz).unwrap().surface = Some(Surface::from(Plane::create_canonical(&frame).unwrap()));
+    for vu in vertex::vertexuses(&y, v).unwrap() {
+        vertexuse::init_vertex_face_gap(&mut y, vu).unwrap();
+    }
+    if make_another {
+        another_box(&mut k);
+    }
+    let c = vertex::corner::calc_corner_from_faces(&k, &mut y, v).unwrap();
+    let p = c.best_point;
+    (c.found_point, [p.x, p.y, p.z], c.max_gap_3d)
+}
+
+/// The scaled box Y is measured by the healer's property pass, healed through its
+/// tolerance step, united with Z, and searched for a corner between two faces 2e-5 apart;
+/// each once straight after the scale and once after an unrelated box was made in
+/// between. Making a box elsewhere does not change how Y is measured, so both histories
+/// give the same answer. Before, making any body reset the kernel context to the
+/// default, so Y was measured at its own 1e-4 straight after the scale and at the
+/// default's 1e-5 after another body was made: there every edge, vertex and face of Y was
+/// flagged as having too large a tolerance, and the corner search took the two faces as
+/// parting (2e-5 against a threshold of 5e-6 in place of 5e-5) and moved the corner to
+/// their midpoint.
+#[test]
+fn a_scaled_body_is_measured_the_same_whether_or_not_another_body_was_made() {
+    use solidcore::heal::face_props::HealerOpType;
+
+    let history = |make_another: bool| {
+        let (k, mut y, _) = scaled_box_history(make_another);
+        let flags = heal_property_flags(&k, &mut y);
+
+        let (mut k, mut y, _) = scaled_box_history(make_another);
+        p1::heal_brep(
+            &mut k,
+            &mut y,
+            HealerOpType::FixTolsizes,
+            None,
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+        let healed = (y.this_model_size_estimate(&k, false), body_tolerances(&y));
+
+        let (mut k, y, z) = scaled_box_history(make_another);
+        let mut union = solidcore::boolean::api_brep::boolean_union(&mut k, y, z).unwrap();
+        let store = AttributeStore::new();
+        let key_of = |_| ObjectKey(0);
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &key_of,
+        };
+        let volume = brep_volume(&k, &mut union, 1e-3, &attrs).unwrap();
+        let union_faces = p1::faces(&union, None).unwrap().len();
+
+        (
+            flags,
+            healed,
+            volume,
+            union_faces,
+            scaled_parallel_corner(make_another),
+        )
+    };
+    let straight_after = history(false);
+    assert_eq!(history(true), straight_after);
+}
+
+/// The scaled box Y is measured at the zone tolerance of its own size (1e-4) after another
+/// body was made, while the kernel context keeps the default (1e-5): the healer's property
+/// pass flags nothing on it, its tolerance step leaves every tolerance at 1e-4, and the
+/// corner search takes half of 1e-4 as its parallel-face threshold, so two faces 2e-5
+/// apart are not taken as parting and the corner stays where the faces meet.
+#[test]
+fn a_scaled_body_is_measured_at_its_own_zone_tolerance() {
+    use solidcore::geom::tol;
+    use solidcore::heal::face_props::{HealerOpType, Tri};
+
+    let (mut k, mut y, _) = scaled_box_history(true);
+    assert_eq!(k.context.this_zone_tol_3d(), 1e-5);
+    assert_eq!(tol::brep_size_zone_tol_3d(&k, &y), 1e-4);
+    assert_eq!(body_tolerances(&y), vec![1e-4; 1 + 8 + 12]);
+    let flags = heal_property_flags(&k, &mut y);
+    assert_eq!(flags, vec![[Tri::False; 2]; 12 + 8 + 6]);
+
+    p1::heal_brep(
+        &mut k,
+        &mut y,
+        HealerOpType::FixTolsizes,
+        None,
+        None,
+        None,
+        false,
+    )
+    .unwrap();
+    assert_eq!(body_tolerances(&y), vec![1e-4; 1 + 8 + 12]);
+
+    assert_eq!(scaled_parallel_corner(true), (true, [0.0; 3], 0.0));
 }
