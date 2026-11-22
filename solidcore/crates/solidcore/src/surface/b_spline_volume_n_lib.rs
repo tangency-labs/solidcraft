@@ -44,6 +44,7 @@
 //!   ([`Curve::calculate_tight_bounding_box`], [`Curve::is_on_positive_side_of_planes`]).
 
 use crate::curve::curve::p2::{Curve, CurveKind};
+use crate::error::surface::SurfaceFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -151,9 +152,9 @@ impl BSplineVolume {
 
         // check state - nonDegenerate knot vectors must have 2 or more knots
         if knot_cnt <= 1 {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_CONTS,
-                "the knot vector has fewer than two knots",
+                SurfaceFailure::TooFewKnots { knots: knot_cnt },
             ));
         }
 
