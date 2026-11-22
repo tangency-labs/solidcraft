@@ -810,21 +810,22 @@ fn rails(
         let geom = pseudo.geom(g)?;
         let it = fs.find_index_of_rail_on_face(target, Some(mixed.ring.t))?;
         let iw = fs.find_index_of_rail_on_face(target, Some(wall))?;
-        let rail_curve = |idx| -> Result<Curve> {
-            let rail = geom.rail(idx).ok_or_else(|| {
-                solver_input(
-                    op,
-                    SolverFailure::FilletGeomWithoutRail {
-                        fillet_geom: g,
-                        side: idx,
-                    },
-                    None,
-                )
-            })?;
-            pseudo.brep().edge(rail)?.curve.clone().ok_or_else(|| {
-                bad_setup(op, FilletSetUp::RailCurve, Some(EntityRef::Edge(rail)))
-            })
-        };
+        let rail_curve =
+            |idx| -> Result<Curve> {
+                let rail = geom.rail(idx).ok_or_else(|| {
+                    solver_input(
+                        op,
+                        SolverFailure::FilletGeomWithoutRail {
+                            fillet_geom: g,
+                            side: idx,
+                        },
+                        None,
+                    )
+                })?;
+                pseudo.brep().edge(rail)?.curve.clone().ok_or_else(|| {
+                    bad_setup(op, FilletSetUp::RailCurve, Some(EntityRef::Edge(rail)))
+                })
+            };
         let at = |side| RailAt {
             fillet_geom: g,
             side,
