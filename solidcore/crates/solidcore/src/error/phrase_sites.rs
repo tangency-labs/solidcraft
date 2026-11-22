@@ -84,7 +84,6 @@ const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/blend/blend_corner/setback.rs", 27),
     ("solidcore/src/blend/blend_corner/swept.rs", 7),
     ("solidcore/src/blend/blend_setback.rs", 29),
-    ("solidcore/src/blend/feature_executive.rs", 32),
     ("solidcore/src/blend/fillet_cliff_overflow.rs", 16),
     ("solidcore/src/blend/fillet_corner/p1.rs", 45),
     ("solidcore/src/blend/fillet_corner/p2.rs", 17),
@@ -128,8 +127,6 @@ const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/blend/fillet_standard_solver/p2.rs", 28),
     ("solidcore/src/blend/fillet_standard_solver/surface_surface.rs", 2),
     ("solidcore/src/blend/fillet_standard_solver/touch_circle.rs", 1),
-    ("solidcore/src/blend/hcr.rs", 2),
-    ("solidcore/src/blend/identify_fillet.rs", 4),
     ("solidcore/src/blend/law_corners.rs", 7),
 ];
 
