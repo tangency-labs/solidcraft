@@ -490,6 +490,25 @@ fn entries_share_field_definitions_through_defs_and_ref() {
 }
 
 #[test]
+fn shared_definitions_expand_at_the_schema_root_and_under_keyword_named_fields() {
+    let choice = json!({"type":"string","enum":["a","b"]});
+    let schema_of = |input_schema: Value| {
+        let mut value = manifest();
+        value["$defs"] = json!({"choice":choice,"options":{"type":"object","properties":{"pick":choice}}});
+        value["runtime"]["entries"] = json!([{"name":"make","input_schema":input_schema}]);
+        parse(&value).unwrap().runtime.unwrap().entries.remove(0).input_schema
+    };
+    // A whole entry's inputs can be one shared definition.
+    assert_eq!(schema_of(json!({"$ref":"#/$defs/options"})), json!({"type":"object","properties":{"pick":choice}}));
+    // A field may be called "default" or "enum": under `properties` those are names, not literals.
+    let fields = schema_of(json!({"type":"object","properties":{"default":{"$ref":"#/$defs/choice"},"enum":{"$ref":"#/$defs/choice"}}}));
+    assert_eq!(fields, json!({"type":"object","properties":{"default":choice,"enum":choice}}));
+    // A schema's own `default` stays data, even when it holds a "$ref" key.
+    let literal = json!({"type":"object","properties":{"p":{"type":"object","default":{"$ref":"#/$defs/choice"}}}});
+    assert_eq!(schema_of(literal.clone()), literal);
+}
+
+#[test]
 fn host_limits_have_typed_failures() {
     let limits = HostLimits::default();
     assert!(limits.check(&Limits::default()).is_ok());

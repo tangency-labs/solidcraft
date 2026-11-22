@@ -21,14 +21,13 @@ pub(crate) fn expand(manifest: &mut Value) -> Result<bool> {
     let entries = object.get_mut("runtime").and_then(|r| r.get_mut("entries")).and_then(Value::as_array_mut);
     for entry in entries.into_iter().flatten() {
         let name = entry.get("name").and_then(Value::as_str).unwrap_or_default().to_string();
-        let Some(schema) = entry.get_mut("input_schema").and_then(Value::as_object_mut) else { continue };
+        let Some(schema) = entry.get_mut("input_schema").filter(|s| s.is_object()) else { continue };
         let field = format!("runtime.entries.{name}.input_schema");
-        let local = definitions(schema.remove("$defs"), &format!("{field}.$defs"))?;
+        let local = definitions(schema.as_object_mut().and_then(|s| s.remove("$defs")), &format!("{field}.$defs"))?;
         changed |= local.is_some();
         let scope = Scope { local: local.as_ref(), shared: shared.as_ref(), field: &field };
-        for value in schema.values_mut() {
-            changed |= scope.resolve(value, &mut Vec::new(), &mut expansions)?;
-        }
+        // The whole schema, so a `$ref` at its root expands too.
+        changed |= scope.resolve(schema, false, &mut Vec::new(), &mut expansions)?;
     }
     Ok(changed)
 }
@@ -49,17 +48,21 @@ struct Scope<'a> {
 
 impl Scope<'_> {
     /// Inline the refs in `value`; `trail` names the definitions being expanded, to find cycles.
-    fn resolve(&self, value: &mut Value, trail: &mut Vec<String>, expansions: &mut usize) -> Result<bool> {
+    /// `names` is true for a map of names to schemas (`properties`), whose keys are not keywords.
+    fn resolve(&self, value: &mut Value, names: bool, trail: &mut Vec<String>, expansions: &mut usize) -> Result<bool> {
+        let mut changed = false;
         match value {
             Value::Array(items) => {
-                let mut changed = false;
                 for item in items {
-                    changed |= self.resolve(item, trail, expansions)?;
+                    changed |= self.resolve(item, false, trail, expansions)?;
                 }
-                Ok(changed)
+            }
+            Value::Object(object) if names => {
+                for child in object.values_mut() {
+                    changed |= self.resolve(child, false, trail, expansions)?;
+                }
             }
             Value::Object(object) => {
-                let mut changed = false;
                 if let Some(Value::String(reference)) = object.get("$ref") {
                     let reference = reference.clone();
                     object.remove("$ref");
@@ -71,14 +74,16 @@ impl Scope<'_> {
                 }
                 for (key, child) in object.iter_mut() {
                     // Literal values are data, not schemas, even when they hold a "$ref" key.
-                    if !matches!(key.as_str(), "const" | "default" | "enum" | "examples" | "x-solidcraft-defaults") {
-                        changed |= self.resolve(child, trail, expansions)?;
+                    if matches!(key.as_str(), "const" | "default" | "enum" | "examples" | "x-solidcraft-defaults") {
+                        continue;
                     }
+                    let names = matches!(key.as_str(), "properties" | "patternProperties" | "dependentSchemas" | "$defs" | "definitions");
+                    changed |= self.resolve(child, names, trail, expansions)?;
                 }
-                Ok(changed)
             }
-            _ => Ok(false),
+            _ => {}
         }
+        Ok(changed)
     }
 
     fn definition(&self, reference: &str, trail: &mut Vec<String>, expansions: &mut usize) -> Result<Map<String, Value>> {
@@ -98,7 +103,7 @@ impl Scope<'_> {
         };
         let mut definition = Value::Object(definition.clone());
         trail.push(name.to_string());
-        self.resolve(&mut definition, trail, expansions)?;
+        self.resolve(&mut definition, false, trail, expansions)?;
         trail.pop();
         Ok(match definition {
             Value::Object(definition) => definition,
