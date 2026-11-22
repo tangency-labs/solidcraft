@@ -1259,9 +1259,9 @@ impl<A: Ord + Copy, B: Ord + Copy> Relation<A, B> {
             Cardinality::ManyToMany => false,
         };
         if violates {
-            return Err(SolidError::geom_failed(
+            return Err(SolidError::geom(
                 "geom::tol::Relation::relate_pair",
-                "the pair would break the relation's cardinality",
+                GeomFailure::PairBreaksCardinality,
             ));
         }
         self.first_to_second
@@ -1303,9 +1303,9 @@ impl<A: Ord + Copy, B: Ord + Copy> Relation<A, B> {
     pub fn remove_pair(&mut self, first: A, second: B) -> Result<()> {
         if !self.first_to_second.contains_key(&first) || !self.second_to_first.contains_key(&second)
         {
-            return Err(SolidError::geom_failed(
+            return Err(SolidError::geom(
                 "geom::tol::Relation::remove_pair",
-                "the pair is not related",
+                GeomFailure::PairNotRelated,
             ));
         }
         if let Some(seconds) = self.first_to_second.get_mut(&first) {
