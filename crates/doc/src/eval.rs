@@ -11458,9 +11458,11 @@ fn replay(
         // mirror of a right-hand M8 hole is a right-hand M8 hole, not a left-hand one.
         if let FeatureKind::Thread { face, target_bodies, .. } = &src.kind {
             let picks = PickFrames::new(doc, st, own, src);
-            let named = |b: &ModelBody, q: Vec3| target_bodies.first().is_none_or(|n| *n == b.name).then(|| box_dist(b, q));
-            for m in mats {
-                let (m, _) = picks.copy(st, m, face.0, named)?;
+            // Each further face is kept in its own target body's frame, where the thread finds it.
+            let further: Vec<PickFrames> = target_bodies.iter().skip(1).map(|n| PickFrames::on_body(doc, st, own, n)).collect();
+            let named = |n: Option<&crate::BodyName>, b: &ModelBody, q: Vec3| n.is_none_or(|n| *n == b.name).then(|| box_dist(b, q));
+            for each in mats {
+                let (m, _) = picks.copy(st, each, face.0, |b, q| named(target_bodies.first(), b, q))?;
                 let m = &m;
                 let mut copy = (*src).clone();
                 copy.id = f.id;
@@ -11468,8 +11470,12 @@ fn replay(
                 if let FeatureKind::Thread { face, additional_faces, from, up_to, .. } = &mut copy.kind {
                     face.0 = crate::apply_point(m, face.0);
                     // Keep each explicit target body while moving its picked point.
-                    for q in additional_faces {
-                        q.0 = crate::apply_point(m, q.0);
+                    for (i, q) in additional_faces.iter_mut().enumerate() {
+                        let at = match further.get(i) {
+                            Some(picks) => picks.copy(st, each, q.0, |b, p| named(target_bodies.get(i + 1), b, p))?.0,
+                            None => *m,
+                        };
+                        q.0 = crate::apply_point(&at, q.0);
                     }
                     if let Some(q) = from {
                         q.0 = crate::apply_point(m, q.0);
@@ -11733,6 +11739,16 @@ impl PickFrames {
     /// whose copies' transforms are taken into its tools' frame before.
     fn new(doc: &Document, st: &ModelState, own: u64, src: &Feature) -> PickFrames {
         let at = if tools_component(doc, src).is_some() { None } else { kept_in(doc, st, own, src) };
+        PickFrames::kept_at(doc, st, own, at)
+    }
+
+    /// For picks kept in the frame of body `name`.
+    fn on_body(doc: &Document, st: &ModelState, own: u64, name: &str) -> PickFrames {
+        let at = st.bodies.iter().find(|b| b.name == name).and_then(|b| body_in(doc, own, b));
+        PickFrames::kept_at(doc, st, own, at)
+    }
+
+    fn kept_at(doc: &Document, st: &ModelState, own: u64, at: Option<Mat>) -> PickFrames {
         let bodies = if at.is_some() { st.bodies.iter().map(|b| body_in(doc, own, b)).collect() } else { Vec::new() };
         PickFrames { at, bodies }
     }

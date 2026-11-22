@@ -1874,6 +1874,34 @@ fn a_pattern_of_a_moved_copy_follows_the_part_its_second_copy_was_moved_into() {
     assert!(later.len() == 2 && later.iter().zip(&moved_first).all(|(a, b)| near(*a, *b)), "moved after {later:?}, before {moved_first:?}");
 }
 
+/// #20208 review: a mirror of a Thread of two holes on two plates threads each copy on its own
+/// plate, though the second plate's geometry is kept in another frame. PlateA at x 0..40, y 0..30
+/// and PlateB, made at x −40..0, y 50..80 and offset 40 along x, each have holes at x 10 and
+/// x 30 where they are shown; the Thread is on the holes at x 10, the mirror across x = 20. The
+/// second face's copy was moved by the mirror in PlateB's own frame, to x 66.6 there, off it.
+#[test]
+fn a_mirror_of_a_thread_on_two_bodies_threads_each_where_its_body_is_kept() {
+    let mut s = Session::default();
+    for (name, x, y) in [("PlateA", 0, 0), ("PlateB", -40, 50)] {
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": [x, y, 0], "operation": "new", "body_name": name}));
+        for hx in [x + 10, x + 30] {
+            run(&mut s, "solid.hole", json!({"position": [hx, y + 15, 10], "diameter": 6.8, "depth": 10, "targets": [name]}));
+        }
+    }
+    let faces = json!([{"body": "PlateA", "point": [13.4, 15, 5]}, {"body": "PlateB", "point": [-26.6, 65, 5]}]);
+    run(&mut s, "solid.thread", json!({"faces": faces, "designation": "M8", "name": "Thread"}));
+    let mut offset = solidcraft_doc::IDENTITY;
+    offset[3][0] = 40.0;
+    s.doc_mut().body_offsets.insert("PlateB".into(), offset);
+    let r = s.execute("solid.mirror", &json!({"features": ["Thread"], "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}}));
+    assert!(r.as_ref().is_ok_and(|r| r["warning"].is_null()), "{r:?}");
+    let st = s.model.state();
+    let mut axes: Vec<(&str, f64)> = st.threads.iter().map(|t| (t.body.as_str(), t.axis_point.x)).collect();
+    axes.sort_by(|a, b| a.0.cmp(b.0).then(a.1.total_cmp(&b.1)));
+    let want = [("PlateA", 10.0), ("PlateA", 30.0), ("PlateB", -30.0), ("PlateB", -10.0)];
+    assert!(axes.len() == 4 && axes.iter().zip(want).all(|(a, w)| a.0 == w.0 && (a.1 - w.1).abs() < 1e-6), "{axes:?}");
+}
+
 /// A disc with an off-centre hole whose top and bottom edges are chamfered.
 fn disc_with_chamfered_hole() -> Session {
     let mut s = Session::default();
