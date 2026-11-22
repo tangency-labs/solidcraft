@@ -600,6 +600,12 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             if let Some(o) = Output::unported(&e) {
                 return Ok(o);
             }
+            // `IsConvexRadialSector` refuses an edge use whose binormal fails (an edge use
+            // outside a loop: status 1007) where upstream's `SER` reads the status as
+            // `TRUE` (WR-84, #18928): the status, in place of the result
+            if let (OpIn::Convex { .. }, Some(code)) = (&i.op, solidcore::error::upstream_status(&e)) {
+                return Ok(Output::new().int("status", i64::from(code)));
+            }
             match e {
                 SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(Output::err("null_deref")),
                 e => Err(harness(format!("rust: {e}"))),

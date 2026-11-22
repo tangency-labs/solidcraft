@@ -461,6 +461,18 @@ fn run(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(()) => 0,
         Err(e) => match crate::output::blend_status(&e) {
             Some(code) => code,
+            // the convexity query refuses the rail's edge use, which lies outside any
+            // loop in this pseudo-B-rep (status 1007; WR-84, #18928)
+            None if matches!(
+                e.topology_failure(),
+                Some(solidcore::error::topology::TopologyFailure::InvalidValue(_))
+            ) =>
+            {
+                match solidcore::error::upstream_status(&e) {
+                    Some(code) => code,
+                    None => return Err(harness(e)),
+                }
+            }
             None => return Err(harness(e)),
         },
     };

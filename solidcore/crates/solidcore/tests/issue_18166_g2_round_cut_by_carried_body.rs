@@ -52,7 +52,6 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "simple_coincidence_crossing_is_point",
     "ssi_proto_topology_statuses_pass_on",
     "fillet_exact_round_classes",
-    "edgeuse_convexity_propagates_step_off_failure",
     "keep_exact_pcurves",
     "closed_smooth_pole_tangent_limit",
     "fillet_chamfer_corner",
