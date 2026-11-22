@@ -166,12 +166,6 @@ const OP_DELTA: &str = "blend::fillet_intersector::FilletIntersector::compute_po
 const OP_SPAN: &str = "blend::fillet_intersector::FilletIntersector::test_span_accuracy";
 const OP_NEXT: &str = "blend::fillet_intersector::FilletIntersector::compute_next_point";
 const OP_FLUSH: &str = "blend::fillet_intersector::FilletIntersector::flush_curve";
-/// Why a curve `FlushCurve` pops after its step 9 is there: step 8 (`flush_crv`) built
-/// the centre line, both rails and both UV curves from two or more points, and the
-/// smoothing handler writes back every curve it takes.
-const POPPED_CURVE: &str =
-    "flush_crv built each curve from two or more points and smoothing writes back every curve";
-
 /// `SOLV_BASE_TYPE`.
 const SOLV_BASE_TYPE: i64 = 19000;
 
@@ -2980,22 +2974,21 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             }
         }
 
-        // get (the potentially modified) rail curves, their UVTrimCurves, and the Centerline
+        // get (the potentially modified) rail curves, their UVTrimCurves, and the Centerline.
+        // Step 8 (flush_crv) built each from two or more points and the kernel's smoothing
+        // handler writes back every curve it takes, but `smooth_out_intersection` is a
+        // method of the pub trait a caller's solver implements
+        let smoothed_curve_missing =
+            || SolidError::blend_trace(OP_FLUSH, TraceFailure::SmoothedCurveMissing);
         let mut uv1 = surface1_uv_curves
             .pop()
-            .ok_or_else(|| SolidError::blend_null_defect(OP_FLUSH, POPPED_CURVE))?;
+            .ok_or_else(smoothed_curve_missing)?;
         let mut uv2 = surface2_uv_curves
             .pop()
-            .ok_or_else(|| SolidError::blend_null_defect(OP_FLUSH, POPPED_CURVE))?;
-        let mut curve2 = curves_3d
-            .pop()
-            .ok_or_else(|| SolidError::blend_null_defect(OP_FLUSH, POPPED_CURVE))?;
-        let mut curve1 = curves_3d
-            .pop()
-            .ok_or_else(|| SolidError::blend_null_defect(OP_FLUSH, POPPED_CURVE))?;
-        let mut center_line = curves_3d
-            .pop()
-            .ok_or_else(|| SolidError::blend_null_defect(OP_FLUSH, POPPED_CURVE))?;
+            .ok_or_else(smoothed_curve_missing)?;
+        let mut curve2 = curves_3d.pop().ok_or_else(smoothed_curve_missing)?;
+        let mut curve1 = curves_3d.pop().ok_or_else(smoothed_curve_missing)?;
+        let mut center_line = curves_3d.pop().ok_or_else(smoothed_curve_missing)?;
 
         // 10. Generate the fillet surface from the rail curves and centerline
         let mut fillet_surface = None;
@@ -4108,6 +4101,7 @@ mod tests {
         calls: usize,
         starts: Vec<[Point2; 2]>,
         skin: Option<Surface>,
+        drop_curves: bool,
     }
 
     impl SkinMock {
@@ -4120,6 +4114,7 @@ mod tests {
                 calls: 0,
                 starts: Vec::new(),
                 skin,
+                drop_curves: false,
             }
         }
     }
@@ -4241,7 +4236,7 @@ mod tests {
         }
 
         fn self_intersection_handler(&self) -> Result<Option<HandlingAlgorithmType>> {
-            Ok(None)
+            Ok(self.drop_curves.then_some(HandlingAlgorithmType::Smoothing))
         }
 
         fn smooth_out_intersection(
@@ -4249,10 +4244,14 @@ mod tests {
             _k: &Kernel,
             _pseudo: &mut FilletBrep,
             _geom: &(),
-            _curves_3d: &mut Vec<BSplineCurve>,
+            curves_3d: &mut Vec<BSplineCurve>,
             _uv_curves1: &mut Vec<BSplineCurve>,
             _uv_curves2: &mut Vec<BSplineCurve>,
         ) -> Result<()> {
+            // a caller's smoothing that breaks the contract: it keeps only the centre line
+            if self.drop_curves {
+                curves_3d.truncate(1);
+            }
             Ok(())
         }
 
@@ -4366,6 +4365,22 @@ mod tests {
         }
         let mut out = TsectCurves::default();
         fi.flush_curve(&mut mock, k, &mut FilletBrep::new(), &mut out)
+    }
+
+    /// A caller's solver whose smoothing hands back fewer curves than it took is the
+    /// caller's input, not a kernel defect.
+    #[test]
+    fn smoothing_that_drops_curves_is_the_callers_input() {
+        let mut mock = SkinMock::new(1.0, 0.0, Some(chord_skin(1.0, 0.0)));
+        mock.drop_curves = true;
+        let e = flush_with(mock).unwrap_err();
+        assert_eq!(
+            e,
+            SolidError::blend_trace(OP_FLUSH, TraceFailure::SmoothedCurveMissing)
+        );
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        assert!(!e.is_defect());
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR_NULL_POINTER));
     }
 
     #[test]
