@@ -98,7 +98,8 @@ fn set_interval_clears_the_gaps_of_the_old_interval() {
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
     let e = b.edge_list()[0];
     let uses = b.edge(e).unwrap().edgeuses.clone();
-    assert_eq!(uses.len(), 2);
+    // (two faces, each with its two sides)
+    assert_eq!(uses.len(), 4);
     let gaps = |k: &Kernel, b: &mut Brep, force: bool| -> Vec<String> {
         let mut out = Vec::new();
         for &eu in &uses {
