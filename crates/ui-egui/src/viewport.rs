@@ -4949,8 +4949,10 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
             && raw_cloud.len() > crate::pick_index::CLOUD_AT_ONCE
             && index.is_none()
         {
+            // No partial answer while the index builds: a hover result without this cloud would
+            // be cached under a key that does not change when the index is ready.
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
-            continue;
+            return None;
         }
         let playing = |k: usize| app.tree.cloud_panel.as_ref().and_then(|p| p.playing(raw_cloud.id, k));
         let cloud = crate::point_clouds::as_drawn(raw_cloud, playing);
