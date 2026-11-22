@@ -428,6 +428,7 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
         ("canvas.insert", Some("file")),
         ("library.export", Some("file")),
         ("doc.open", Some("doc")),
+        ("doc.info", Some("doc")),
         ("settings.get", Some("app")),
         ("plugin.run", Some("plugin")),
     ] {
@@ -2117,6 +2118,50 @@ mod native {
         assert!(s.doc.features.is_empty());
     }
 
+    #[test]
+    fn doc_info_in_a_plugin_run_needs_the_doc_grant_and_names_the_users_design() {
+        let f = Fixture::new("call $box");
+        let source = component_template()
+            .replace(
+                "      call $box\n      call $box\n",
+                "      call $box i32.const 2048 i32.const 8 i32.const 3072 i32.const 2 i32.const 0 call $run\n",
+            )
+            .replace("file.export", "doc.info\")\n    (data (i32.const 3072) \"{}");
+        std::fs::write(f.0.join("sample/plugin.wasm"), wat::parse_str(&source).unwrap()).unwrap();
+        let mut m = manifest();
+        m["runtime"]["commands"] = json!(["solid.box", "doc.info"]);
+        m["runtime"]["permissions"] = json!({"command_groups":["doc"]});
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let file = f.0.join("Bracket.sc").to_string_lossy().into_owned();
+        let mut s = Session::default();
+        s.execute("file.save_as", &json!({"path": file})).unwrap();
+        let bytes = std::fs::read(&file).unwrap();
+        let before = s.execute("doc.info", &json!({})).unwrap();
+        let error = f.run(&mut s).unwrap_err();
+        assert!(matches!(error.host_error(), Some(HostError::PermissionDenied { permission }) if permission.contains("`doc`")), "{error}");
+        assert!(s.doc.features.is_empty() && s.undo.is_empty());
+        let approval = read_package(&f.path()).unwrap().approval;
+        s.plugin_state.grants.insert(
+            "sample".into(),
+            Grants { package_hash: Some(approval.clone()), command_groups: BTreeSet::from(["doc".to_string()]), ..Default::default() },
+        );
+        assert_eq!(f.run(&mut s).unwrap()["result"], before, "saved before the run, though the run's box came first");
+        assert_eq!((s.doc.features.len(), s.path.as_deref()), (1, Some(file.as_str())));
+        assert_eq!(std::fs::read(&file).unwrap(), bytes, "the run wrote nothing to the file");
+        // What the run was told stays in the run: the user's session keeps none of it.
+        assert_eq!((s.plugin_state.caller_design.as_ref(), s.source_path.as_deref()), (None, None));
+        // The desktop's worker: a copy of a copy, neither with a `path`.
+        let now = s.execute("doc.info", &json!({})).unwrap();
+        assert_eq!(now["unsaved"], true);
+        let params = json!({"path": f.path(), "approval": approval, "entry": "make", "params": {}});
+        let prepared = s.scratch().compute_commands(&[("plugin.run".into(), params)], None).unwrap();
+        assert!(prepared.is_current(&s));
+        let replies = s.accept_commands(prepared).unwrap();
+        assert_eq!(replies[0].1["result"], now, "{replies:?}");
+        assert_eq!(s.doc.features.len(), 2);
+        assert_eq!((s.plugin_state.caller_design.as_ref(), s.source_path.as_deref()), (None, None));
+    }
+
     /// `plugin.check` finds what Install and a call would refuse, with a fix for each, and runs
     /// no plugin code: the fixture's component would trap if it ran.
     #[test]
@@ -2827,6 +2872,7 @@ fn command_effects_are_explicit_and_independent_of_undo() {
         "inspect.measure",
         "sketch.inspect",
         "sketch.solve",
+        "doc.info",
     ] {
         assert_eq!(catalog.iter().find(|c| c.name == command).unwrap().effect, Effect::Read, "{command}");
     }
