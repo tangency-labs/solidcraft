@@ -7,7 +7,6 @@
 
 use egui::RichText;
 use serde_json::{Value, json};
-use solidcraft_engine::Sel;
 use solidcraft_ui_text::{format as trf, tr};
 
 use crate::SolveApp;
@@ -50,8 +49,10 @@ pub(crate) fn copy_for_agent(app: &mut SolveApp) {
 /// The panel's content.
 pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui) {
     if app.notes.document != app.session.document_id {
+        // Requests made before the first frame (Add Note focusing the draft, a copy) survive.
         let copy_pending = app.notes.copy_pending.take();
-        app.notes = State { document: app.session.document_id.clone(), copy_pending, ..State::default() };
+        let focus_draft = app.notes.focus_draft;
+        app.notes = State { document: app.session.document_id.clone(), copy_pending, focus_draft, ..State::default() };
     }
     if let Some(text) = app.notes.copy_pending.take() {
         ui.ctx().copy_text(text);
@@ -252,13 +253,8 @@ fn target_text(kind: &str, body: &str, index: Option<usize>) -> String {
 
 /// What a note made now would be on: the item the engine takes the anchor from.
 fn selection_target(app: &SolveApp) -> Option<String> {
-    app.session.selection.iter().rev().find_map(|sel| match sel {
-        Sel::Face { body, index, .. } => Some(target_text("face", body, Some(*index))),
-        Sel::Edge { body, index, .. } => Some(target_text("edge", body, Some(*index))),
-        Sel::Vertex { body, .. } => Some(target_text("vertex", body, None)),
-        Sel::Body { name } => Some(target_text("body", name, None)),
-        _ => None,
-    })
+    // The engine's rule, so the label names what `note.add` will save as the target.
+    solidcraft_engine::cmd::note_target_from_selection(&app.session).map(|t| target_text(&t.kind, &t.body, t.index))
 }
 
 /// The open notes, numbered, with what each is on, the design and how to tick them off.

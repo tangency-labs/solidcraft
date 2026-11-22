@@ -10242,7 +10242,8 @@ fn draw_notes(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         painter.rect_stroke(note.text_rect, 4.0, Stroke::new(1.0, edge), egui::StrokeKind::Inside);
         // The wrapped layout the box was sized from, not a fresh single-line one: a long note
         // wraps inside its box instead of running out of it.
-        painter.galley(note.text_rect.min + vec2(6.0, 4.0), note.galley.clone(), ink);
+        // The galley was laid out in the normal text colour; a done note overrides it.
+        painter.galley_with_override_text_color(note.text_rect.min + vec2(6.0, 4.0), note.galley.clone(), ink);
     }
 }
 

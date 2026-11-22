@@ -69,6 +69,7 @@ pub(crate) use component::follow_expressed_moves;
 pub(crate) use component::{path_ids, refuse_filled_virtual};
 pub(crate) use config::put_row;
 pub use construct::picked_plane_refs;
+pub use selection::target_from_selection as note_target_from_selection;
 pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis, picked_plane};
 pub use construct_auto::{construct_method, construct_methods, is_construct_tool};
 pub use design_link::{LinkProblem, LinkState};

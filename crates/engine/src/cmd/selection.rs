@@ -271,7 +271,7 @@ pub(super) fn anchor_from_selection(s: &Session) -> Vec3 {
 
 /// The element the item `anchor_from_selection` takes its point from refers to, when that item
 /// is a body or a face, edge or vertex of one: what a note made on the selection is about.
-pub(super) fn target_from_selection(s: &Session) -> Option<solidcraft_doc::NoteTarget> {
+pub fn target_from_selection(s: &Session) -> Option<solidcraft_doc::NoteTarget> {
     let sel = s.selection.iter().rev().find(|sel| anchor_of(s, sel).is_some())?;
     let (kind, body, index) = match sel {
         Sel::Face { body, index, .. } => ("face", body, Some(*index)),

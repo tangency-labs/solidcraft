@@ -97,6 +97,19 @@ mod tests {
     }
 
     #[test]
+    fn a_note_target_follows_its_body_when_the_body_is_renamed() {
+        let mut doc = crate::Document::new("Noted");
+        let target = |body: &str| Some(NoteTarget { kind: "face".into(), body: body.into(), index: Some(3) });
+        doc.notes.push(Note { target: target("Plate"), ..note(1) });
+        doc.notes.push(Note { target: target("Bracket"), ..note(2) });
+        doc.notes.push(note(3));
+        doc.rename_body_keys("Plate", "Base plate");
+        assert_eq!(doc.notes[0].target, target("Base plate"));
+        assert_eq!(doc.notes[1].target, target("Bracket"), "a note on another body keeps its target");
+        assert_eq!(doc.notes[2].target, None);
+    }
+
+    #[test]
     fn note_text_must_be_non_empty_and_bounded() {
         assert!(Note::text_is_valid("Extra thickness added for strength."));
         assert!(!Note::text_is_valid("   "));
