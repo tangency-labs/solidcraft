@@ -546,7 +546,7 @@ pub(crate) fn iso_curve(m: &Mesh, f: u32, p: Vec3, dir: &str) -> Vec<Vec<Vec3>> 
     let nudge = m.bounds().diagonal().max(1e-9) * 1e-8;
     let cut = |off: f64| -> Vec<Vec<Vec3>> {
         let Some(pl) = Plane::from_normal(p + cut_n * off, cut_n) else { return Vec::new() };
-        let geom = crate::project::section(&pl, m, Some(f));
+        let geom = crate::project::section(&pl, m, Some(f), false);
         let pieces: Vec<Vec<Vec3>> =
             geom.iter().map(|g| link_polyline(g).into_iter().map(|q| pl.to_world(q)).collect()).filter(|w: &Vec<Vec3>| w.len() >= 2).collect();
         join_wires(pieces, m.bounds().diagonal().max(1e-9) * 1e-6)

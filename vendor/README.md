@@ -4,17 +4,83 @@ Copies of third-party crates that SolidCraft builds with local fixes, wired in w
 `[patch.crates-io]` in the workspace `Cargo.toml`. They keep their own licence; changed lines
 are marked `SolidCraft:` in the source.
 
-## egui-wgpu 0.37.0 (MIT OR Apache-2.0, Emil Ernerfeldt and contributors)
+## egui 0.37.0 (MIT OR Apache-2.0, Emil Ernerfeldt and contributors)
 
-Original package sources from https://github.com/emilk/egui/tree/0.37.0/crates/egui-wgpu,
-with both original licence texts retained. No images or bundled documentation are copied.
+`vendor/egui` is egui's whole repository at tag 0.37.0 (commit `841a328ba2`, https://github.com/emilk/egui),
+added with `git subtree add --squash`, so SolidCraft can carry its own changes to egui, eframe and
+egui-wgpu. Nothing of it is reorganised: SolidCraft's changes, listed below and marked `SolidCraft:`
+in the source, and the images left out (below) are the only difference from upstream, so a
+`git subtree pull` of a newer egui meets nothing but them. It keeps its own licences (both texts are
+in it), tooling and rules: SolidCraft's checks do not apply to it, and the workspace excludes
+`vendor/`.
 
-The shared viewport crate `solidcraft-viewport-egui` draws through it and relies on these fixes
-(above all, the drawable acquired before paint callbacks are prepared: without it the cached
-offscreen picture is never drawn). Another workspace that uses that crate patches egui-wgpu to
-this copy the same way, with `[patch.crates-io] egui-wgpu = { path = ".../vendor/egui-wgpu" }`.
+Every egui crate SolidCraft builds is patched to it in the workspace `Cargo.toml`: `ecolor`,
+`eframe`, `egui`, `egui-wgpu`, `egui-winit`, `egui_glow`, `emath`, `epaint` and
+`epaint_default_fonts`. egui's own crates build and test there, for example
+`cargo test --manifest-path vendor/egui/Cargo.toml -p egui -p eframe --lib`.
 
-SolidCraft changes:
+### Images upstream keeps in Git LFS
+
+The vendored tree is plain files; SolidCraft uses no Git LFS. Upstream keeps some images in Git
+LFS (screenshot-test references, demo and media pictures, example screenshots, and the `images`
+example's `ferris.gif`), and a subtree import brings them as LFS pointer files whose contents only
+egui's own LFS storage has. They are left out of `vendor/egui`, with the `filter=lfs` lines of its
+`.gitattributes`. None is in a crate SolidCraft builds; the images those crates use
+(`crates/eframe/data`, `crates/egui/assets`) are plain files upstream too. Without them egui's
+screenshot tests have nothing to compare against and its `images` example does not build.
+
+### Updating egui
+
+```sh
+GIT_LFS_SKIP_SMUDGE=1 git subtree pull --prefix=vendor/egui https://github.com/emilk/egui <tag> --squash
+# Leave out the LFS images again (if the pull stops on a conflict, run these to resolve it):
+git grep -lz 'git-lfs.github.com/spec' -- vendor/egui | xargs -0 -r git rm -q --
+sed -i -e '/filter=lfs/d' -e '/LFS:$/d' -e '/!filter !diff !merge/d' vendor/egui/.gitattributes
+git add vendor/egui/.gitattributes
+git commit -m "vendor/egui: leave out the images upstream keeps in Git LFS"
+git grep -l 'git-lfs.github.com/spec' -- vendor/egui   # prints nothing
+```
+
+`GIT_LFS_SKIP_SMUDGE=1` keeps Git LFS, where it is installed, from fetching the images while the
+pull checks them out.
+
+Conflicts can only come from SolidCraft's own changes and the images left out. Land the pull request
+that does this with a merge commit, not a squash or a rebase: `git subtree` finds the last import by
+its squash commit, and a squash merge rewrites it away. SolidCraft's changes can go back to a fork
+of egui the same way, with `git subtree split --prefix=vendor/egui` or `git subtree push
+--prefix=vendor/egui <egui fork> <branch>`.
+
+The shared viewport crate `solidcraft-viewport-egui` draws through egui-wgpu and relies on the
+fixes below (above all, the drawable acquired before paint callbacks are prepared: without it the
+cached offscreen picture is never drawn). Another workspace that uses that crate patches the egui
+crates to this tree the same way, with
+`[patch.crates-io] egui-wgpu = { path = ".../vendor/egui/crates/egui-wgpu" }` and the same for the others.
+
+SolidCraft changes to egui and eframe:
+- `crates/egui/src/data/input/raw_input.rs`, `crates/egui/src/input_state/mod.rs`,
+  `crates/eframe/src/epi.rs`, `crates/eframe/src/native/{winit,wgpu,glow}_integration.rs`:
+  backport of emilk/egui#8768 (open upstream, against egui's `main`). `RawInput::repaint_on_pointer_move`
+  (default true) lets pointer motion alone ask for no further frame, and
+  `App::repaint_on_window_event` / `App::repaint_on_device_event` let a native app answer
+  `Some(false)` to process a winit event without painting. The motion is still delivered with
+  the next frame. Tests: `pointer_motion_repaints_unless_asked_not_to` (egui) and
+  `the_app_can_override_the_repaint_an_event_asks_for` (eframe). SolidCraft only: the two hooks
+  are asked about the root viewport's events alone, since the event does not name its window;
+  another window's events keep eframe's answer.
+- `crates/egui-winit/src/lib.rs`: while no pointer button is held, queued pointer motion joins
+  the motion of the same kind at the end of the queue (`PointerMoved` keeps the last position,
+  `MouseMoved` sums), so frames skipped for pointer motion do not pile up one event per platform
+  report. Test: `queued_pointer_motion_collapses_between_other_events`.
+- `crates/egui/src/context.rs`, `crates/egui/src/lib.rs`: `Context::widget_hits_at(pos)`, the
+  hit test the next pass would start with, run between passes against the last pass's widgets
+  (`begin_pass` and it share `prev_pass_hits`); `WidgetHits` is exported for it. Test:
+  `widget_hits_at_matches_the_next_pass`.
+
+The SolidCraft 3D view uses both to skip frames for pointer motion that changes nothing it
+draws (`viewport::follow_pointer_without_frame` in `crates/ui-egui`).
+
+SolidCraft changes to egui-wgpu (paths relative to `crates/egui-wgpu`; these lived in a
+separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
 - `src/setup.rs`, `src/lib.rs`: let a named adapter selector defer to the normal wgpu
   request when the requested card is unavailable or incompatible with the window surface.
 - `src/lib.rs`: use 1x MSAA on the selected OpenGL adapter before creating pipelines,
@@ -113,3 +179,37 @@ SolidCraft changes:
   (the `wp::pointer_gestures` module); drop the example and test targets.
 - `src/event.rs`, `src/changelog/unreleased.md`: the platform notes of both events and the
   changelog entry.
+- `src/platform_impl/windows/event_loop.rs`, `window_state.rs`, `mod.rs`, `src/platform/windows.rs`
+  (`set_quiet_window_move`): a process-wide switch with which Windows' modal move and size loop
+  (`WM_ENTERSIZEMOVE` … `WM_EXITSIZEMOVE`, entered when the title bar is dragged) no longer makes
+  the app render once per move step. It is off by default, which is winit's own behaviour, so
+  anything built on this copy is unchanged until it opts in; SolidCraft turns it on only when
+  Preferences > Layout's `windows_smooth_window_drag` is on (off by default). It is read at each
+  message, so a change applies at once, and a paint or a move held back before it is turned off is
+  still sent when the loop ends. With it on, while the window only moves (its size unchanged):
+  `Moved` is coalesced and sent once, with the final position, at `WM_EXITSIZEMOVE`; `WM_PAINT`
+  is validated without `RedrawRequested`, and one paint is requested when the loop ends; relative
+  raw mouse motion is not sent as device events. Off, as in winit, every `WM_WINDOWPOSCHANGED`
+  becomes `Moved`, egui-winit asks for a repaint on `Moved`, and the redraw arrives as `WM_PAINT`
+  inside the loop, so each step runs a full frame that blocks on the swapchain (acquire waits of
+  50-110 ms were measured on D3D12), and a frame that asked for the next one (eframe repaints on
+  raw motion while it believes the press that started the drag is still held) keeps a paint loop
+  spinning for the whole drag: the window moves at 10-40 fps. A resize, a snap or a DPI change
+  inside the loop (a size change) paints live either way.
+- `src/platform_impl/windows/event_loop.rs` (`raw_motion`): relative raw mouse motion is summed
+  while more raw input is waiting in the queue (`GetQueueStatus(QS_RAWINPUT)`) and sent once
+  per burst, so a high-rate mouse (8 kHz: about 7,000 `WM_INPUT` a second) no longer makes three
+  device events (`Motion` x, `Motion` y, `MouseMotion`) per report on the window thread. The
+  summed motion is exact; motion is flushed before a button or wheel change in the same report
+  stream, so the order of events is kept.
+- `src/platform_impl/windows/event_loop.rs`, `dark_mode.rs`: on Windows 11, `WM_DPICHANGED`
+  applies the rect Windows suggests (`takes_suggested_rect`), for a window that isn't maximized
+  or fullscreen. The nudge loop took the monitor the window was still on for the new one and
+  pushed the rect back, so a window moved to a monitor with another scale stayed on the
+  boundary and its size drifted (#9336). Same behaviour as rust-windowing/winit#4341 (winit 0.31
+  only; the 0.30 backport rust-windowing/winit#4637 was closed), except that the maximized path
+  stays as it was. On this path a size the application writes through the `InnerSizeWriter` of
+  `ScaleFactorChanged` is not applied; nothing in SolidCraft writes one. The version query in
+  `dark_mode.rs` passes the structure size to `RtlGetVersion`, as its documentation requires,
+  since this choice depends on the build number it returns. eframe 0.37 requires
+  winit 0.30, so this cannot come from a newer winit.

@@ -11,6 +11,11 @@
 //! | [`HealFailure::Missing`]         | `SM_ERR_NULL_POINTER`     |
 //! | [`HealFailure::Inconsistent`]    | `SM_ERR_ASSERT_FAILURE`   |
 //! | [`HealFailure::NotYetHealable`]  | `SM_ERR_NOTYET_HEAL_FACE` |
+//! | [`HealFailure::Defect`]          | `SM_ERR` (or the site's, through `with_status`) |
+//!
+//! [`HealFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
+//! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
+//! not yet converted (the conversion guide: `docs/failure-codes-and-reproduction.md` §6).
 //!
 //! Deviations: not upstream. A failure says in a phrase (or by its variant) what went
 //! wrong; the failure's `operation` path says which routine. No failure names an
@@ -37,13 +42,21 @@ pub enum HealFailure {
     /// The face has problems the healer does not handle yet; the heal sequence sets it
     /// aside.
     NotYetHealable,
+    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
+    /// `why` names the step that failed and why that is the kernel's fault, not the
+    /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
+    /// says otherwise.
+    Defect {
+        /// The step that failed, and why that is the kernel's fault.
+        why: &'static str,
+    },
 }
 
 impl HealFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) => SM_ERR,
+            Self::Failed(_) | Self::Defect { .. } => SM_ERR,
             Self::Missing(_) => SM_ERR_NULL_POINTER,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::NotYetHealable => SM_ERR_NOTYET_HEAL_FACE,
@@ -52,9 +65,13 @@ impl HealFailure {
 
     /// The failure's stable [`ErrorKind`]: [`ErrorKind::Missing`] for
     /// [`HealFailure::Missing`], [`ErrorKind::Failed`] otherwise.
+    /// [`HealFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
-        ErrorKind::of_status(self.comparison_status())
+        match self {
+            Self::Defect { .. } => ErrorKind::StageFailed,
+            _ => ErrorKind::of_status(self.comparison_status()),
+        }
     }
 }
 
@@ -63,6 +80,7 @@ impl core::fmt::Display for HealFailure {
         match self {
             Self::Failed(what) => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::NotYetHealable => {
                 f.write_str("the face has problems the healer does not handle yet")
@@ -163,5 +181,63 @@ mod tests {
             let library = super::super::bare_scan::library_text(&text);
             assert!(!library.contains("\"SmApi"), "\"SmApi in {rel}");
         }
+    }
+
+    /// A reviewed defect is of class 127 with the status of the phrase cause it replaces,
+    /// and says why.
+    #[test]
+    fn a_reviewed_defect_is_class_127_with_its_reason() {
+        let why =
+            "the stitcher lost the edge pairing it had just made, which its own matching keeps";
+        let defect = HealFailure::Defect { why };
+        let op = "heal::op";
+        super::super::tests::assert_defect(
+            &SolidError::heal(op, defect),
+            &SolidError::heal(op, HealFailure::Failed("x")),
+            op,
+            SM_ERR,
+            &format!("{op}: stage_failed: {why}"),
+        );
+        let missing = Failure::new(op, defect)
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error();
+        super::super::tests::assert_defect(
+            &missing,
+            &SolidError::heal(op, HealFailure::Missing("x")),
+            op,
+            SM_ERR_NULL_POINTER,
+            &format!("{op}: stage_failed: {why}"),
+        );
+        assert_eq!(missing.heal_failure(), Some(&defect));
+    }
+
+    /// The sites that build a healing phrase cause only fall:
+    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
+    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
+    /// files' counts here, and a file at 0 loses its line (the conversion guide:
+    /// `docs/failure-codes-and-reproduction.md` §6).
+    #[test]
+    fn the_heal_phrase_cause_sites_only_shrink() {
+        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
+        const PHRASES: Scan = Scan {
+            builders: &[
+                Builder::Variant("HealFailure", "Failed"),
+                Builder::Variant("HealFailure", "Missing"),
+                Builder::Variant("HealFailure", "Inconsistent"),
+                Builder::Method("heal_failed", Some(1)),
+                Builder::Method("heal_missing", Some(1)),
+            ],
+            wrappers: Wrappers::Phrase,
+        };
+        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
+        const PINNED: &[(&str, usize)] = &[
+            ("solidcore/src/heal/face_props.rs", 2),
+            ("solidcore/src/heal/gap.rs", 2),
+            ("solidcore/src/heal/heal_data/p2.rs", 2),
+            ("solidcore/src/heal/heal_data/p3.rs", 3),
+            ("solidcore/src/heal/stitch/p1.rs", 34),
+            ("solidcore/src/heal/stitch/p2.rs", 4),
+        ];
+        assert_pinned("healing phrase-cause sites", &crate_sites(&PHRASES), PINNED);
     }
 }

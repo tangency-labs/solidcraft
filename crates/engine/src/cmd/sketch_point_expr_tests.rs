@@ -36,6 +36,85 @@ fn reopened(s: &Session) -> Session {
     Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap())
 }
 
+/// A point placed by an expression that reads another point's coordinate follows it (#19232):
+/// the expression names the point and the coordinate (`p1.x`).
+#[test]
+fn a_point_expression_reads_another_points_coordinate() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "W", "expression": "40 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    // A base point, placed by a parameter.
+    run(&mut s, "sketch.point", json!({"point": ["W", 0], "id": "base"}));
+    // A point derived from it: 10 mm to its right, and at its height.
+    run(&mut s, "sketch.point", json!({"point": ["base.x + 10 mm", "base.y"], "id": "derived"}));
+    run(&mut s, "sketch.finish", json!({}));
+    no_trouble(&s);
+    assert_eq!(solved(&s, "base"), Vec2::new(40.0, 0.0));
+    assert_eq!(solved(&s, "derived"), Vec2::new(50.0, 0.0));
+    // The base point moves with its parameter: the derived point follows it.
+    run(&mut s, "parameters.change", json!({"name": "W", "expression": "70 mm"}));
+    no_trouble(&s);
+    assert_eq!(solved(&s, "base"), Vec2::new(70.0, 0.0));
+    assert_eq!(solved(&s, "derived"), Vec2::new(80.0, 0.0));
+    // The design file keeps the expressions, and the points follow after it is opened again.
+    let r = reopened(&s);
+    no_trouble(&r);
+    assert_eq!(solved(&r, "derived"), Vec2::new(80.0, 0.0));
+}
+
+/// A point that reads another point's coordinate is placed where that point is, and the two
+/// are worked out in the order the names allow: a point read by another waits for it.
+#[test]
+fn a_point_reads_a_point_that_reads_another_one() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.point", json!({"point": [10, 20], "id": "a"}));
+    run(&mut s, "sketch.point", json!({"point": ["a.x + 5 mm", "a.y - 5 mm"], "id": "b"}));
+    // The last point reads the one before it, whatever the order they were made in.
+    run(&mut s, "sketch.point", json!({"point": ["b.x - 5 mm", "b.y + 5 mm"], "id": "c"}));
+    run(&mut s, "sketch.finish", json!({}));
+    no_trouble(&s);
+    assert_eq!(solved(&s, "b"), Vec2::new(15.0, 15.0));
+    assert_eq!(solved(&s, "c"), Vec2::new(10.0, 20.0));
+}
+
+/// An expression that names no point is refused, and the point is not made.
+#[test]
+fn a_point_expression_that_names_no_point_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.point", json!({"point": [10, 0], "id": "a"}));
+    for bad in [json!(["nope.x", 0]), json!(["a.z", 0]), json!([0, "nope.y"])] {
+        let e = s.execute("sketch.point", &json!({"point": bad})).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(!e.is_empty(), "{bad}");
+    }
+    let f = s.doc.find_feature("S").unwrap().id;
+    assert_eq!(s.doc.sketch(f).unwrap().points.len(), 2, "the origin and the one point");
+}
+
+/// Two points whose expressions read each other's coordinate are a cycle: the sketch is in
+/// error, naming the points in it.
+#[test]
+fn two_points_reading_each_other_are_refused() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.point", json!({"point": [10, 0], "id": "a"}));
+    run(&mut s, "sketch.point", json!({"point": [20, 0], "id": "b"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let mut doc = (*s.doc).clone();
+    let f = doc.find_feature("S").unwrap().id;
+    {
+        let sk = doc.sketch_mut(f).unwrap();
+        let a = sk.points.iter_mut().find(|p| p.id == "a").unwrap();
+        a.exprs = Some(Box::new(solidcraft_sketch::PointExprs { x: Some("b.x".into()), y: None }));
+        let b = sk.points.iter_mut().find(|p| p.id == "b").unwrap();
+        b.exprs = Some(Box::new(solidcraft_sketch::PointExprs { x: Some("a.x".into()), y: None }));
+    }
+    let r = Session::new(doc);
+    let errors: Vec<String> = r.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.iter().any(|e| e.contains("circular reference")), "{errors:?}");
+}
+
 #[test]
 fn an_outline_through_points_typed_as_expressions_follows_its_parameters() {
     let mut s = Session::default();
@@ -267,6 +346,63 @@ fn a_circle_size_typed_as_an_expression_is_a_dimension_that_follows_its_paramete
     run(&mut s, "sketch.circle.center", json!({"center": [150, 0], "radius": 5, "diameter": "R * 2", "id": "d"}));
     run(&mut s, "sketch.finish", json!({}));
     assert!((circle_radius(&s, "c") - 9.0).abs() < 1e-9 && (circle_radius(&s, "d") - 5.0).abs() < 1e-9);
+}
+
+/// A slot's `width` typed as an expression is a dimension driven by the parameters it names, as a
+/// circle's radius is; a number typed as text reads in the design's unit (#15857).
+#[test]
+fn a_slot_width_typed_as_an_expression_is_a_dimension_that_follows_its_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "slot_w", "expression": "6 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let slots = [
+        ("sketch.slot.overall", json!({"p0": [0, 0], "p1": [30, 0], "width": "slot_w"})),
+        ("sketch.slot.center_to_center", json!({"p0": [0, 20], "p1": [30, 20], "width": "slot_w"})),
+        ("sketch.slot.center_point", json!({"center": [15, 40], "end": [30, 40], "width": "slot_w"})),
+        ("sketch.slot.arc_center", json!({"center": [100, 0], "start": [120, 0], "end": [100, 20], "width": "slot_w"})),
+        ("sketch.slot.arc_three_point", json!({"start": [150, 0], "through": [170, 20], "end": [190, 0], "width": "slot_w"})),
+    ];
+    let mut caps = Vec::new();
+    for (command, params) in &slots {
+        let out = run(&mut s, command, params.clone());
+        caps.push(out["curves"][1].as_str().unwrap_or_default().to_string());
+    }
+    let text = run(&mut s, "sketch.slot.overall", json!({"p0": [0, 60], "p1": [30, 60], "width": "6"}));
+    let text_cap = text["curves"][1].as_str().unwrap_or_default().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    no_trouble(&s);
+    for cap in &caps {
+        assert!((arc_radius(&s, cap) - 3.0).abs() < 1e-6, "{cap}: {}", arc_radius(&s, cap));
+    }
+    run(&mut s, "parameters.change", json!({"name": "slot_w", "expression": "10 mm"}));
+    no_trouble(&s);
+    for cap in &caps {
+        assert!((arc_radius(&s, cap) - 5.0).abs() < 1e-6, "{cap}: {}", arc_radius(&s, cap));
+    }
+    // "6" names no parameter: the slot is 6 mm wide and follows nothing.
+    assert!((arc_radius(&s, &text_cap) - 3.0).abs() < 1e-6);
+    // A width that is no size is refused with its own message, and draws nothing.
+    run(&mut s, "sketch.edit", json!({"sketch": "S"}));
+    let curves = s.doc.sketch(s.doc.find_feature("S").unwrap().id).unwrap().curves.len();
+    for (bad, why) in
+        [(json!("nope"), "width"), (json!("0 mm"), "must be positive"), (json!(-2), "must be positive"), (json!(true), "must be a number")]
+    {
+        let e =
+            s.execute("sketch.slot.overall", &json!({"p0": [0, 80], "p1": [30, 80], "width": bad})).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains(why), "{bad}: {e}");
+    }
+    assert_eq!(s.doc.sketch(s.doc.find_feature("S").unwrap().id).unwrap().curves.len(), curves);
+}
+
+/// The radius of arc `id` of sketch `S` in the evaluated model.
+fn arc_radius(s: &Session, id: &str) -> f64 {
+    let f = s.doc.find_feature("S").unwrap().id;
+    let st = s.model.state();
+    let sk = &st.sketch(f).unwrap().sketch;
+    match sk.curves.iter().find(|c| c.id == id).map(|c| &c.kind) {
+        Some(solidcraft_sketch::CurveKind::Arc { c, a, .. }) => sk.points[*c].pos.dist(sk.points[*a].pos),
+        _ => f64::NAN,
+    }
 }
 
 fn circle_radius(s: &Session, id: &str) -> f64 {

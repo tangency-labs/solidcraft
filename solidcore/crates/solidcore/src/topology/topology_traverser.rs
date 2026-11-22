@@ -34,9 +34,8 @@
 //! ray (the build is deterministic, so a retry fails the same way).
 //! Existing co-ported accessors are reused.
 //! `ClosureTraversalFromBothSides` is not in the pinned upstream: it is the fork's
-//! (tangency-labs/smlib@69c5198), used only under
-//! [`UpstreamFixes::boolean_new_face_closure_both_sides`](crate::kernel::UpstreamFixes::boolean_new_face_closure_both_sides)
-//! (WR-584). Its `std::unordered_map` side table becomes a vector indexed by face-use
+//! (tangency-labs/smlib@69c5198), used by `SmBrep::TestClosureSplitRegion` in place of
+//! `ClosureTraversal` (WR-584). Its `std::unordered_map` side table becomes a vector indexed by face-use
 //! arena slot (lookups only, as the fork; no iteration).
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -390,12 +389,15 @@ pub fn closure_traversal(
 /// radials, one from `start` and one from its mate, expanding one face use of each in
 /// turn. The searches meet (the mate is reachable: not closed) or one side runs out
 /// first (closed). Visits at most twice the face uses on the smaller side; marks
-/// nothing and claims no mark. A face with a lamina edge is not closed. A missing
-/// radial or radial face use is skipped, as the fork does.
+/// nothing and claims no mark. A face with a lamina edge is not closed. Not the fork:
+/// a missing radial or radial face use on an edge use the search expands fails, as in
+/// [`closure_traversal`]'s walk, where the fork skips it and could report a broken
+/// shell closed. In `TestClosureSplitRegion` the search runs before anything is added.
 ///
 /// # Errors
 ///
-/// A missing face or mate (`NER` upstream), dangling ids, or those of the lamina test.
+/// A missing face or mate (`NER` upstream), a missing radial or radial face use on an
+/// expanded edge use, dangling ids, or those of the lamina test.
 pub fn closure_traversal_from_both_sides(b: &Brep, start: FaceuseId) -> Result<bool> {
     // A face with any lamina edges is not closed (as ClosureTraversal).
     let f = required(b.faceuse(start)?.face)?;
@@ -438,12 +440,9 @@ pub fn closure_traversal_from_both_sides(b: &Brep, start: FaceuseId) -> Result<b
             let mut found = Vec::new();
             for &lu in &b.faceuse(fu)?.loopuses {
                 for edgeuse in eu::loopuse_edgeuses(b, lu)? {
-                    let Some(radial) = eu::radial(b, edgeuse)? else {
-                        continue;
-                    };
-                    let Some(neighbor) = eu::faceuse(b, radial)? else {
-                        continue;
-                    };
+                    // a missing link fails, as in faceuse_traversal (the fork skips it)
+                    let radial = required(eu::radial(b, edgeuse)?)?;
+                    let neighbor = required(eu::faceuse(b, radial)?)?;
                     match side.get(neighbor.index() as usize).copied().flatten() {
                         None => {
                             set_side(&mut side, neighbor, k);

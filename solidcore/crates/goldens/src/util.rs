@@ -1,6 +1,8 @@
 //! Small conversions shared by the unit runners in [`crate::units`].
 
 pub mod assert_reports;
+#[cfg(test)]
+pub(crate) mod contact_certificate;
 pub mod primitive;
 pub(crate) mod trim_curve;
 

@@ -1,9 +1,9 @@
 //! WR-605 (the fork's tangency-labs/smlib 52bfef0): `SmBrep::DeleteFilletFace` takes a
 //! four-sided fillet only (`SmFilletRemoval::CollectFilletTopology`), so a round all the
 //! way round a boss's foot, whose rails are closed edges with one vertex each and no
-//! ends, cannot be removed. With `UpstreamFixes::fillet_removal_takes_ring_fillets` the
-//! fork's `SmRingFilletRemoval` removes it: the sharp edge is the intersection of the
-//! plate's top and the boss's wall (the circle r 10), and the body is the plate and the
+//! ends, cannot be removed. The fork's `SmRingFilletRemoval` (formerly the opt-in
+//! `UpstreamFixes::fillet_removal_takes_ring_fillets`, now the only path) removes it: the
+//! sharp edge is the intersection of the plate's top and the boss's wall (the circle r 10), and the body is the plate and the
 //! boss again, 24000 + 1000 pi = 27141.592653590, eight faces, check clean. The fork's
 //! probe gave the same. As 661f79c (WR-607), the shells are joined by the glue instead of
 //! `JoinShellsAtVertex`. A copy its caller names (`NamingScheme::Caller`) gives the same, check clean.
@@ -20,18 +20,22 @@ mod offset_fixture;
 use offset_fixture::volume;
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::blend::fillet_removal::delete_fillet_face;
-use solidcore::boolean::api_brep::boolean_union;
+use solidcore::blend::fillet_removal::ring::RingFilletRemoval;
+use solidcore::boolean::api_brep::{boolean_intersection, boolean_union};
 use solidcore::geom::attribute::ObjectKey;
 use solidcore::geom::object::ObjectRef;
 use solidcore::math::{Point3, Vec3};
-use solidcore::primitive::api_primitives::{create_box, create_cylinder};
+use solidcore::primitive::api_primitives::{
+    create_box, create_cylinder, create_sphere, create_torus,
+};
 use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::surface::plane::Plane;
+use solidcore::topology::brep::is_outward_solid;
 use solidcore::topology::brep::p2::ArenaNotifyState;
 use solidcore::topology::brep::p3;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::face::p2 as face2;
-use solidcore::topology::{edge, vertex, Brep, FaceId, NamingScheme};
+use solidcore::topology::{edge, vertex, Brep, EdgeId, FaceId, NamingScheme};
 use solidcore::Kernel;
 
 /// 24000 + 1000 pi: the 60 x 40 x 10 plate and the boss r 10, 10 high.
@@ -109,10 +113,9 @@ fn vertex_heights(b: &Brep, f: FaceId) -> Vec<f64> {
     out
 }
 
-/// `DeleteFilletFace` of the boss's foot round, with the ring fix as given.
-fn remove_round(ring: bool) -> (Kernel, Brep, solidcore::Result<()>, usize) {
+/// `DeleteFilletFace` of the boss's foot round.
+fn remove_round() -> (Kernel, Brep, solidcore::Result<()>, usize) {
     let mut k = Kernel::default();
-    k.fixes.fillet_removal_takes_ring_fillets = ring;
     let mut b = boss_with_foot_round(&mut k);
     let faces_before = b.face_list().len();
     let f = round(&b);
@@ -135,21 +138,8 @@ fn assert_plate_and_boss(k: &mut Kernel, b: &mut Brep) {
 }
 
 #[test]
-fn ring_fillet_removal_is_off_by_default() {
-    let k = Kernel::default();
-    assert!(!k.fixes.fillet_removal_takes_ring_fillets);
-}
-
-#[test]
-fn upstream_refuses_a_ring_fillet() {
-    let (_, b, r, faces_before) = remove_round(false);
-    assert!(r.is_err(), "upstream removes four-sided fillets only");
-    assert_eq!(b.face_list().len(), faces_before, "left as it was");
-}
-
-#[test]
 fn ring_fillet_is_removed_to_the_sharp_edge() {
-    let (mut k, mut b, r, _) = remove_round(true);
+    let (mut k, mut b, r, _) = remove_round();
     r.unwrap();
     assert_plate_and_boss(&mut k, &mut b);
 }
@@ -159,11 +149,96 @@ fn ring_fillet_is_removed_to_the_sharp_edge() {
 #[test]
 fn ring_fillet_is_removed_on_a_body_its_caller_names() {
     let mut k = Kernel::default();
-    k.fixes.fillet_removal_takes_ring_fillets = true;
     let rounded = boss_with_foot_round(&mut k);
     let mut b = caller_named_copy(&mut k, &rounded, 100_000_000);
     let f = round(&b);
     b.set_editing_enabled(true);
     delete_fillet_face(&mut k, &mut b, f, None).unwrap();
     assert_plate_and_boss(&mut k, &mut b);
+}
+
+/// The one closed edge whose vertex lies at this radius and height.
+fn rim(b: &Brep, radius: f64, z: f64) -> EdgeId {
+    let rims: Vec<_> = b
+        .edge_list()
+        .iter()
+        .copied()
+        .filter(|&e| {
+            if !edge::is_closed(b, e).unwrap() {
+                return false;
+            }
+            let v = edge::start_vertex(b, e).unwrap().unwrap();
+            let p = vertex::point(b, v).unwrap();
+            (p.z - z).abs() < 1e-6 && (p.x.hypot(p.y) - radius).abs() < 1e-6
+        })
+        .collect();
+    let [edge] = rims.as_slice() else {
+        panic!("expected one rim of radius {radius} at z {z}, got {rims:?}");
+    };
+    *edge
+}
+
+fn round_and_restore_rim(
+    k: &mut Kernel,
+    b: &mut Brep,
+    radius: f64,
+    z: f64,
+    fillet_radius: f64,
+    expected_volume: f64,
+) {
+    let faces = b.face_list().len();
+    let sharp = rim(b, radius, z);
+    fillet_edges(k, b, &[sharp], fillet_radius, 1, 1, 1.0).unwrap();
+    let rounds: Vec<_> = b
+        .face_list()
+        .to_vec()
+        .into_iter()
+        .filter(|&f| RingFilletRemoval::is_ring(k, b, Some(f), 2.0).unwrap())
+        .collect();
+    let [round] = rounds.as_slice() else {
+        panic!("expected one ring fillet, got {rounds:?}");
+    };
+    assert!(volume(k, b).unwrap() < expected_volume - 0.1);
+
+    b.set_editing_enabled(true);
+    delete_fillet_face(k, b, *round, None).unwrap();
+
+    assert_eq!(b.face_list().len(), faces);
+    assert!(is_outward_solid(k, b).unwrap());
+    assert!(edge::is_manifold(b, rim(b, radius, z)).unwrap());
+    let lines = check_brep(k, b, CheckLevel::Level2).unwrap().lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    let measured = volume(k, b).unwrap();
+    assert!(
+        (measured - expected_volume).abs() <= 1e-6,
+        "volume {measured}, expected {expected_volume}"
+    );
+}
+
+/// The spherical seam ends on the round. The sharp rim is below that end.
+#[test]
+fn ring_fillet_is_removed_beside_a_spherical_seam() {
+    let mut k = Kernel::default();
+    let stem = create_cylinder(&mut k, Point3::ZERO, 4.0, 6.0).unwrap();
+    let sphere = create_sphere(&mut k, Point3::new(0.0, 0.0, 3.0), 5.0).unwrap();
+    let clip = create_box(&mut k, Point3::new(-6.0, -6.0, 6.0), 12.0, 12.0, 3.0).unwrap();
+    let cap = boolean_intersection(&mut k, sphere, clip).unwrap();
+    let mut post = boolean_union(&mut k, stem, cap).unwrap();
+
+    // The cylinder contributes 96π and the spherical cap of height 2 contributes 52π/3.
+    let expected = 340.0 * std::f64::consts::PI / 3.0;
+    round_and_restore_rim(&mut k, &mut post, 4.0, 6.0, 1.0, expected);
+}
+
+/// A torus has a circular seam in the meridian plane as well.
+#[test]
+fn ring_fillet_is_removed_beside_a_toroidal_seam() {
+    let mut k = Kernel::default();
+    let torus = create_torus(&mut k, Point3::ZERO, 6.0, 2.0).unwrap();
+    let clip = create_box(&mut k, Point3::new(-9.0, -9.0, 0.0), 18.0, 18.0, 3.0).unwrap();
+    let mut half = boolean_intersection(&mut k, torus, clip).unwrap();
+
+    // The upper half takes half the tube's area around a circle of radius 6.
+    let expected = 24.0 * std::f64::consts::PI.powi(2);
+    round_and_restore_rim(&mut k, &mut half, 8.0, 0.0, 0.5, expected);
 }
