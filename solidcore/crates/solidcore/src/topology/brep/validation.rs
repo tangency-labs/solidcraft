@@ -33,6 +33,7 @@ pub use assert_valid::{
 };
 pub(crate) use pointers::validate_geometry;
 pub(crate) use pointers::validate_pointers_excluding;
+pub(crate) use pointers::GROWTH_PAST_RATIO;
 pub use pointers::{edge_tube_reaches, validate_pointers, vertex_ball_reaches};
 pub(crate) use soundness::lost_manifold;
 pub use soundness::{soundness, standing, volume_sign, Soundness, Standing};
