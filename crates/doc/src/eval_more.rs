@@ -49,9 +49,9 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                     crate::name_lookup::locate_face(&scoped, name, at).ok_or_else(|| DocError::reselect(name.as_str()))?
                 };
                 let signed = if *deboss { -d } else { d };
-                // A sketch tangent to a complete cylinder wall, outside or a bore, takes the wrap
-                // (whose refusals stand); a partial wall, a sketch off the wall and every other
-                // face are projected.
+                // A sketch tangent to a cylinder wall, outside or a bore, takes the wrap (whose
+                // refusals stand): a complete wall, or any other wall face bounded by two arcs and
+                // two lines (#12029); a sketch off the wall and every other face are projected.
                 let result = match kernel::cylinder_emboss_anchor(&mb.body, hit.face, hit.point) {
                     Ok(at) if kernel::infer_cylinder_emboss(&mb.body, &plane, &regions, signed)?.is_some() => {
                         kernel::emboss_cylinder_at(&mb.body, at, &plane, &regions, signed)?
@@ -1324,8 +1324,14 @@ pub(super) fn sheet_eval(
                 }
                 made.push(joints);
             }
+            let mut open = Vec::new();
             for (k, joints) in made.iter().enumerate() {
-                sk.close_flange_corners(joints).map_err(named(k))?;
+                open.extend(sk.close_flange_corners(joints).map_err(named(k))?);
+            }
+            // The corners on the outside of a bend that stay open (#20720): each pair of bends is
+            // met once, so each corner once.
+            for at in open {
+                append_warning(warning, format!("the flanges at ({:.3}, {:.3}, {:.3}) {}", at.x, at.y, at.z, crate::OUTSIDE_BEND_OPEN));
             }
             let made: Vec<usize> = made.into_iter().flatten().collect();
             sk.clear_of_neighbours(&made)?;
