@@ -376,9 +376,9 @@ pub enum BlendFailure {
     /// kept cause decides ([`crate::SolidError::is_defect`]); status `SM_ERR`.
     ExecutiveStepFailed,
     /// A face or edge a blend's overflow reads lacks the input named (a face's surface, an
-    /// edge's curve or one of its vertices); the failure is at the entity. The overflows'
-    /// helpers, which the trims at creases and the kept features share, read the caller's
-    /// body and the sheet the executive built alike, so the cause
+    /// edge's curve or one of its vertices). The overflows' helpers, which the trims at
+    /// creases and the kept features share, read the caller's body and the sheet the
+    /// executive built alike, so the failure names no entity, and the cause
     /// names what is missing and leaves the blame open, as [`BlendFailure::CliffInputMissing`]
     /// does: status `SM_ERR_NULL_POINTER` (upstream `NER`) and the kind of that status
     /// ([`ErrorKind::Missing`]), neither a defect nor a refusal.
@@ -389,7 +389,7 @@ pub enum BlendFailure {
     OverflowPointDoesNotDrop(OverflowDrop),
     /// The end of a kept rail's run past a face's boundary lies on the lines of two side
     /// edges of the face (straight edges that are not blended), and the extension joins the
-    /// end to one side line only; the failure is at the face. A construction the overflow
+    /// end to one side line only. A construction the overflow
     /// does not build ([`ErrorKind::Unsupported`]); status `SM_ERR`.
     ExtensionEndOnTwoSideLines,
     /// No blended edge's curve takes the drop of the middle of an extension's chain, so the

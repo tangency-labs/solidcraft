@@ -137,10 +137,9 @@ impl SessionObjects<'_> {
         let target = &*self.target;
         let e = eu1::edge(target, eu)?.ok_or_else(|| null_defect(SOLVER_EDGE))?;
         let curve = edge::curve(target, e)?.ok_or_else(|| {
-            SolidError::blend_at(
+            SolidError::blend(
                 OP,
                 BlendFailure::OverflowInputMissing(OverflowInput::EdgeCurve),
-                EntityRef::Edge(e),
             )
         })?;
         if !curve.is_linear(k, EFF_ZERO, false)?.linear {

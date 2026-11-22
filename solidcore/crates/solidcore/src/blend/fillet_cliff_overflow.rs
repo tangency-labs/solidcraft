@@ -120,10 +120,11 @@ fn refuse<T>(note: &mut Option<Refusal>, reason: NoRoomReason, comment: &'static
     Err(SolidError::blend(OP, BlendFailure::NoRoom(reason)))
 }
 
-/// A face or edge the overflow reads lacks `input`
-/// ([`BlendFailure::OverflowInputMissing`]), at `at`.
-fn input_missing(input: OverflowInput, at: EntityRef) -> SolidError {
-    SolidError::blend_at(OP, BlendFailure::OverflowInputMissing(input), at)
+/// A face or edge the overflow reads lacks `input` ([`BlendFailure::OverflowInputMissing`]).
+/// The helpers read the caller's body and the executive's sheet alike, so the failure names
+/// no entity: the executive's refusal carries the error's entity as the target's.
+fn input_missing(input: OverflowInput) -> SolidError {
+    SolidError::blend(OP, BlendFailure::OverflowInputMissing(input))
 }
 
 /// A step that cannot fail did ([`BlendFailure::Defect`], status `SM_ERR`), `why` saying
@@ -187,8 +188,7 @@ fn add_curve(
 
 /// `sm_EdgeCurve`: a copy of the edge's curve over the edge's interval.
 pub(crate) fn edge_curve(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Curve> {
-    let curve = edge::curve(b, e)?
-        .ok_or_else(|| input_missing(OverflowInput::EdgeCurve, EntityRef::Edge(e)))?;
+    let curve = edge::curve(b, e)?.ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?;
     let mut copy = curve.copy(k)?;
     let mut ivl = edge::interval(b, e)?;
     if ivl != copy.natural_interval() {
@@ -310,8 +310,7 @@ pub fn continued_surface(
     points: &[Point3],
     tol: f64,
 ) -> Result<ContinuedSurface> {
-    let base = face::p2::surface(b, f)?
-        .ok_or_else(|| input_missing(OverflowInput::FaceSurface, EntityRef::Face(f)))?;
+    let base = face::p2::surface(b, f)?.ok_or_else(|| input_missing(OverflowInput::FaceSurface))?;
     let domain = base.natural_uv_domain_with_nurb(k)?;
     let size = domain.size();
     let as_itself = OffsetSurface::continues_as_itself(base);
@@ -416,8 +415,8 @@ pub fn continued_surface(
 /// [`BlendFailure::OverflowInputMissing`] (`SM_ERR_NULL_POINTER`) for a face without
 /// surface; those of the drop.
 pub fn distance_to_surface(k: &Kernel, b: &Brep, f: FaceId, point: Point3) -> Result<f64> {
-    let surface = face::p2::surface(b, f)?
-        .ok_or_else(|| input_missing(OverflowInput::FaceSurface, EntityRef::Face(f)))?;
+    let surface =
+        face::p2::surface(b, f)?.ok_or_else(|| input_missing(OverflowInput::FaceSurface))?;
     if let Some(frame) = plane_of(k, surface)? {
         return Ok((point - frame.origin).dot(frame.z).abs());
     }
@@ -488,7 +487,7 @@ pub fn cut_fillet_at_open_end(
             continue;
         };
         let surface = face::p2::surface(region, f)?
-            .ok_or_else(|| input_missing(OverflowInput::FaceSurface, EntityRef::Face(f)))?
+            .ok_or_else(|| input_missing(OverflowInput::FaceSurface))?
             .clone_for_evaluation()?;
         let uv_domain = face::p2::uv_domain(region, f)?;
         let dropped = surface.drop_point::<NoObject>(
@@ -498,10 +497,9 @@ pub fn cut_fillet_at_open_end(
             &DropPointOptions::default(),
         )?;
         if !dropped.success {
-            return Err(SolidError::blend_at(
+            return Err(SolidError::blend(
                 OP,
                 BlendFailure::OverflowPointDoesNotDrop(OverflowDrop::EdgeMiddleOntoFilletFace),
-                EntityRef::Face(f),
             ));
         }
         let keep = surface.evaluate_point(k, dropped.result_uv)?;
@@ -752,11 +750,11 @@ pub fn section_end_face(
     let (a, b) = edge::start_end_vertices(region, section)?;
     let a = vertex::point(
         region,
-        a.ok_or_else(|| input_missing(OverflowInput::EdgeStartVertex, EntityRef::Edge(section)))?,
+        a.ok_or_else(|| input_missing(OverflowInput::EdgeStartVertex))?,
     )?;
     let b = vertex::point(
         region,
-        b.ok_or_else(|| input_missing(OverflowInput::EdgeEndVertex, EntityRef::Edge(section)))?,
+        b.ok_or_else(|| input_missing(OverflowInput::EdgeEndVertex))?,
     )?;
     let mut lp: Vec<LoopCurve> = Vec::new();
     add_curve(k, &mut lp, edge_curve(k, region, section)?, a, b)?;
@@ -817,7 +815,7 @@ pub fn section_end(
         interval.max()
     };
     let derivs = edge::curve(target, fil_edge)?
-        .ok_or_else(|| input_missing(OverflowInput::EdgeCurve, EntityRef::Edge(fil_edge)))?
+        .ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?
         .evaluate(k, t, 1, true, true)?;
     let tangent = derivs.get(1).copied().ok_or_else(|| {
         null_defect(

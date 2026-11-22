@@ -76,10 +76,11 @@ use crate::topology::{edge, face, vertex, Brep, BrepId, EdgeId, FaceId, VertexId
 
 const OP: &str = "blend::fillet_overflow";
 
-/// A face or edge the overflow reads lacks `input`
-/// ([`BlendFailure::OverflowInputMissing`]), at `at`.
-fn input_missing(input: OverflowInput, at: EntityRef) -> SolidError {
-    SolidError::blend_at(OP, BlendFailure::OverflowInputMissing(input), at)
+/// A face or edge the overflow reads lacks `input` ([`BlendFailure::OverflowInputMissing`]).
+/// The helpers read the caller's body and the executive's sheet alike, so the failure names
+/// no entity: the executive's refusal carries the error's entity as the target's.
+fn input_missing(input: OverflowInput) -> SolidError {
+    SolidError::blend(OP, BlendFailure::OverflowInputMissing(input))
 }
 
 /// A step that cannot fail did ([`BlendFailure::Defect`], status `SM_ERR`), `why` saying
@@ -179,8 +180,8 @@ pub(crate) fn outward_plane(k: &Kernel, body: &Brep, f: FaceId) -> Result<(Point
 /// [`BlendFailure::OverflowInputMissing`] (`SM_ERR_NULL_POINTER`) for a face without
 /// surface; those of the drop.
 pub fn distance_to_surface(k: &Kernel, b: &Brep, f: FaceId, point: Point3) -> Result<f64> {
-    let surface = face::p2::surface(b, f)?
-        .ok_or_else(|| input_missing(OverflowInput::FaceSurface, EntityRef::Face(f)))?;
+    let surface =
+        face::p2::surface(b, f)?.ok_or_else(|| input_missing(OverflowInput::FaceSurface))?;
     if let Some((at, normal)) = plane_of(k, surface)? {
         return Ok((point - at).dot(normal).abs());
     }
@@ -208,8 +209,7 @@ pub fn edge_on_surface(
     f: FaceId,
     tol: f64,
 ) -> Result<bool> {
-    let curve = edge::curve(eb, e)?
-        .ok_or_else(|| input_missing(OverflowInput::EdgeCurve, EntityRef::Edge(e)))?;
+    let curve = edge::curve(eb, e)?.ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?;
     let ivl = edge::interval(eb, e)?;
     let mut on = true;
     let mut i = 0_u32;
@@ -254,10 +254,10 @@ pub fn creases(
     tol: f64,
 ) -> Result<Vec<Curve>> {
     let sheet_surface = face::p2::surface(sheet_b, sheet)?
-        .ok_or_else(|| input_missing(OverflowInput::FaceSurface, EntityRef::Face(sheet)))?
+        .ok_or_else(|| input_missing(OverflowInput::FaceSurface))?
         .clone_for_evaluation()?;
     let other = face::p2::surface(fb, f)?
-        .ok_or_else(|| input_missing(OverflowInput::FaceSurface, EntityRef::Face(f)))?
+        .ok_or_else(|| input_missing(OverflowInput::FaceSurface))?
         .clone_for_evaluation()?;
     let sheet_domain = face::p2::uv_domain(sheet_b, sheet)?;
     if let Some((at, normal)) = plane_of(k, &other)? {
@@ -502,8 +502,7 @@ fn add_curve(
 /// [`BlendFailure::OverflowInputMissing`] (`SM_ERR_NULL_POINTER`) for an edge without curve;
 /// those of the copy and the trim.
 pub fn edge_curve(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Curve> {
-    let curve = edge::curve(b, e)?
-        .ok_or_else(|| input_missing(OverflowInput::EdgeCurve, EntityRef::Edge(e)))?;
+    let curve = edge::curve(b, e)?.ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?;
     let mut copy = curve.copy(k)?;
     let ivl = edge::interval(b, e)?;
     if ivl != copy.natural_interval() {
@@ -515,10 +514,9 @@ pub fn edge_curve(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Curve> {
 
 /// The start and end vertices of an edge (`GetStartVertex`, `GetEndVertex`).
 fn ends_of(b: &Brep, e: EdgeId) -> Result<(VertexId, VertexId)> {
-    let s = edge::start_vertex(b, e)?
-        .ok_or_else(|| input_missing(OverflowInput::EdgeStartVertex, EntityRef::Edge(e)))?;
-    let t = edge::end_vertex(b, e)?
-        .ok_or_else(|| input_missing(OverflowInput::EdgeEndVertex, EntityRef::Edge(e)))?;
+    let s =
+        edge::start_vertex(b, e)?.ok_or_else(|| input_missing(OverflowInput::EdgeStartVertex))?;
+    let t = edge::end_vertex(b, e)?.ok_or_else(|| input_missing(OverflowInput::EdgeEndVertex))?;
     Ok((s, t))
 }
 
@@ -559,10 +557,9 @@ fn side_line_through(
             continue;
         }
         if found.is_some() {
-            return Err(SolidError::blend_at(
+            return Err(SolidError::blend(
                 OP,
                 BlendFailure::ExtensionEndOnTwoSideLines,
-                EntityRef::Face(f),
             ));
         }
         let foot = if point.distance(a) <= point.distance(bb) {
@@ -895,8 +892,8 @@ pub fn extend(
         return Ok(ExtendOutcome::Extended(Vec::new()));
     }
 
-    let surface = face::p2::surface(target, f)?
-        .ok_or_else(|| input_missing(OverflowInput::FaceSurface, EntityRef::Face(f)))?;
+    let surface =
+        face::p2::surface(target, f)?.ok_or_else(|| input_missing(OverflowInput::FaceSurface))?;
     let Some((at, normal)) = plane_of(k, surface)? else {
         return Ok(ExtendOutcome::Refused(
             "Fillet Error: a blend's rail runs past the boundary of a face that is not planar into the material",
@@ -1096,9 +1093,8 @@ pub fn extend(
                         break;
                     }
                     way.edges.push(e);
-                    at_v = edge::other_vertex(target, e, Some(at_v))?.ok_or_else(|| {
-                        input_missing(OverflowInput::EdgeOtherVertex, EntityRef::Edge(e))
-                    })?;
+                    at_v = edge::other_vertex(target, e, Some(at_v))?
+                        .ok_or_else(|| input_missing(OverflowInput::EdgeOtherVertex))?;
                     way.verts.push(at_v);
                     from = Some(e);
                     next = None;
@@ -1308,8 +1304,8 @@ fn takes_off(
     let mut nearest = BIG_DOUBLE;
     let mut toward = Vec3::UNDEF;
     for &e in blended {
-        let curve = edge::curve(target, e)?
-            .ok_or_else(|| input_missing(OverflowInput::EdgeCurve, EntityRef::Edge(e)))?;
+        let curve =
+            edge::curve(target, e)?.ok_or_else(|| input_missing(OverflowInput::EdgeCurve))?;
         let dropped = curve.drop_point(
             k,
             &edge::interval(target, e)?,
