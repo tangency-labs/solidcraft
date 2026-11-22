@@ -239,8 +239,9 @@ impl BallPatch {
         rel_tol: f64,
     ) -> Result<bool> {
         // the caller's curve
-        let form = curve_form(curve)
-            .ok_or_else(|| SolidError::surface(OP_CURVE_ON_SPHERE, SurfaceFailure::CurveNoNurb))?;
+        let form = curve_form(curve).ok_or_else(|| {
+            SolidError::surface(OP_CURVE_ON_SPHERE, SurfaceFailure::CurveWithoutNurb)
+        })?;
         Ok(eval::sphere::curve_on_sphere(&form, xyz(centre), radius, rel_tol).is_ok())
     }
 

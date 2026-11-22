@@ -190,7 +190,7 @@ fn curve_record(c: &BSplineCurve) -> Result<NurbsCurveRecord> {
     let nurb = c
         .nurb
         .as_ref()
-        .ok_or_else(|| SolidError::surface(OP_TO, SurfaceFailure::CurveNoNurb))?;
+        .ok_or_else(|| SolidError::surface(OP_TO, SurfaceFailure::CurveWithoutNurb))?;
     let rational = nurb.is_rational();
     let points_3d = nurb.is_3d();
     let cpts = nurb.cpts();
@@ -1508,8 +1508,8 @@ mod tests {
         let samples = [
             (no_nurb, SurfaceFailure::NoNurb, SM_ERR),
             (
-                SolidError::surface(OP_TO, SurfaceFailure::CurveNoNurb),
-                SurfaceFailure::CurveNoNurb,
+                SolidError::surface(OP_TO, SurfaceFailure::CurveWithoutNurb),
+                SurfaceFailure::CurveWithoutNurb,
                 SM_ERR,
             ),
             (

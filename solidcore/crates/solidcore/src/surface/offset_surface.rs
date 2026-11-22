@@ -1472,7 +1472,7 @@ impl OffsetSurface {
             _ => {
                 return Err(SolidError::surface(
                     OP_EVAL,
-                    SurfaceFailure::DerivativeOrderTooHigh,
+                    SurfaceFailure::DerivativeOrderTooHigh { max: MAX_DERIVS },
                 ))
             }
         }
@@ -4889,7 +4889,7 @@ mod tests {
         check(
             e,
             OP_EVAL,
-            SurfaceFailure::DerivativeOrderTooHigh,
+            SurfaceFailure::DerivativeOrderTooHigh { max: MAX_DERIVS },
             ErrorKind::InvalidInput,
         );
         // a non-uniform scale
