@@ -770,4 +770,15 @@ mod tests {
             None
         );
     }
+
+    /// The radial sector test at a crossing refuses a non-finite dot product, which a
+    /// negated convex check would classify as concave and so as material-bounding.
+    #[test]
+    fn a_non_finite_radial_sector_dot_is_refused_not_concave() {
+        assert_eq!(rails_fit::concave_from_dots(0.5, 0.5).ok(), Some(false));
+        assert_eq!(rails_fit::concave_from_dots(-0.5, 0.5).ok(), Some(true));
+        assert!(rails_fit::concave_from_dots(f64::NAN, 0.5).is_err());
+        assert!(rails_fit::concave_from_dots(0.5, f64::NAN).is_err());
+        assert!(rails_fit::concave_from_dots(f64::INFINITY, 0.5).is_err());
+    }
 }
