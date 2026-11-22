@@ -1551,6 +1551,87 @@ mod moved_rows {
         assert!(check_brep(k, &mut b, CheckLevel::Level2).unwrap().is_valid());
     }
 
+    /// (row, entry point). The rows that became an `InvalidInput` refusal when the sphere
+    /// builders began to refuse a radius that is not above zero
+    /// (tangency-labs/solidcraft#20227): 40 spheres of negative radius. Main built the
+    /// ordinary sphere of the radius's magnitude for them (for -3 the volume +113.097 of
+    /// the sphere of 3, clean at check level 2), which is the answer to the positive
+    /// radius and not the inside-out sphere a negative radius stood for upstream.
+    /// `gen0976` (-6.7e-8) was refused on main too, deeper in, with status 1001; its
+    /// status is now 1007.
+    const SPHERES: [(&str, OpName); 40] = [
+        ("gen0102", OpName::Sphere),
+        ("gen0176", OpName::Sphere),
+        ("gen0230", OpName::Sphere),
+        ("gen0241", OpName::Sphere),
+        ("gen0244", OpName::SphereNoPole),
+        ("gen0298", OpName::Sphere),
+        ("gen0352", OpName::SphereNoPole),
+        ("gen0397", OpName::Sphere),
+        ("gen0416", OpName::SphereNoPole),
+        ("gen0419", OpName::SphereNoPole),
+        ("gen0468", OpName::Sphere),
+        ("gen0497", OpName::Sphere),
+        ("gen0569", OpName::Sphere),
+        ("gen0585", OpName::SphereNoPole),
+        ("gen0598", OpName::SphereNoPole),
+        ("gen0621", OpName::SphereNoPole),
+        ("gen0654", OpName::Sphere),
+        ("gen0672", OpName::Sphere),
+        ("gen0676", OpName::Sphere),
+        ("gen0684", OpName::Sphere),
+        ("gen0710", OpName::Sphere),
+        ("gen0769", OpName::SphereNoPole),
+        ("gen0790", OpName::SphereNoPole),
+        ("gen0800", OpName::Sphere),
+        ("gen0802", OpName::Sphere),
+        ("gen0860", OpName::Sphere),
+        ("gen0893", OpName::SphereNoPole),
+        ("gen0897", OpName::SphereNoPole),
+        ("gen0957", OpName::SphereNoPole),
+        ("gen0976", OpName::Sphere),
+        ("gen0991", OpName::Sphere),
+        ("gen1094", OpName::SphereNoPole),
+        ("gen1117", OpName::Sphere),
+        ("gen1206", OpName::SphereNoPole),
+        ("gen1252", OpName::SphereNoPole),
+        ("gen1426", OpName::Sphere),
+        ("gen1497", OpName::Sphere),
+        ("sphere_negative", OpName::Sphere),
+        ("sphere_no_pole_inside_out", OpName::SphereNoPole),
+        ("sphere_no_pole_r_3e8", OpName::SphereNoPole),
+    ];
+
+    /// No sphere has a negative radius: each row's radius is below zero, and its entry
+    /// point refuses it as invalid input before it builds anything.
+    #[test]
+    fn each_moved_sphere_row_is_refused_for_its_negative_radius() {
+        for (name, op) in SPHERES {
+            let i: Inputs = crate::case::regression_case(&Runner, name).parse().unwrap();
+            assert_eq!(i.op, op, "{name}");
+            let radius = i.arg(3).unwrap();
+            assert!(radius < 0.0, "{name}: {radius}");
+            let k = &mut Kernel::default();
+            let (built, site) = match op {
+                OpName::Sphere => (
+                    api::create_sphere(k, i.point(0).unwrap(), radius),
+                    "primitive::api_primitives::create_sphere",
+                ),
+                OpName::SphereNoPole => (
+                    api::create_sphere_no_pole(k, i.point(0).unwrap(), radius),
+                    "primitive::api_primitives::create_sphere_no_pole",
+                ),
+                op => panic!("{op:?}"),
+            };
+            let error = built.expect_err(name);
+            assert!(
+                matches!(error, SolidError::InvalidInput { .. }),
+                "{name}: {error:?}"
+            );
+            assert_eq!(error.operation(), site, "{name}: {error:?}");
+        }
+    }
+
     /// (row, refusal site)
     const BLENDS: [(&str, &str); 12] = [
         ("blend_corner_opposite_dir", SAMPLE),

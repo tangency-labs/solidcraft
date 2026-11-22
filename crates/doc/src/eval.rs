@@ -960,6 +960,36 @@ fn append_warning(warning: &mut Option<String>, note: String) {
     });
 }
 
+/// The refusal of a sketch that makes no closed profile, saying where it is open: how many of its
+/// profile curves' ends touch nothing, and where the first of them are (two ends a hair apart
+/// show a rounding gap a coincident constraint closes), so the curves to join are found without
+/// hunting. Positions are in the sketch's own coordinates. No geometry is computed here: the
+/// ends are the sketch's own report ([`SolvedSketch::ends`]).
+pub(crate) fn no_closed_profiles(ss: &SolvedSketch) -> DocError {
+    const NAMED: usize = 4;
+    // (a coordinate a hair below zero reads 0, not -0)
+    let coordinate = |v: f64| if v.abs() < 5e-7 { "0".to_string() } else { show_mm(v) };
+    let named: Vec<String> =
+        ss.ends.open.iter().filter_map(|&p| ss.sketch.point(p)).take(NAMED).map(|v| format!("({}, {})", coordinate(v.x), coordinate(v.y))).collect();
+    let count = ss.ends.open.len();
+    let at = match named.as_slice() {
+        [] => String::new(),
+        [one] => one.clone(),
+        [first @ .., last] if count <= named.len() => format!("{} and {last}", first.join(", ")),
+        all => format!("{} and {} more", all.join(", "), count - all.len()),
+    };
+    let where_open = match (named.len(), count) {
+        (0, _) => String::new(),
+        (_, 1) => {
+            format!(": an end of its curves touches no other curve, at {at} in the sketch (after sketch.edit, sketch.loose_ends lists the open ends)")
+        }
+        _ => format!(
+            ": {count} ends of its curves touch no other curve, at {at} in the sketch (after sketch.edit, sketch.loose_ends lists them and sketch.constraint.coincident joins two ends)"
+        ),
+    };
+    DocError::Invalid(format!("{} has no closed profiles{where_open}", ss.name))
+}
+
 /// A length in mm, without trailing zeros.
 fn show_mm(v: f64) -> String {
     let s = format!("{v:.6}");
@@ -3511,8 +3541,10 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 reads.placed_body(st, &b.0);
             }
         }
-        // Joins, cuts and intersects meet their targets where those are placed (#3383).
+        // Joins, cuts and intersects meet their targets where those are placed (#3383), and so
+        // do the copies of a mirror or pattern of features made in its own frame (#19451).
         kind if drawn_tools_change_bodies(kind) => reads.drawn_targets(st, f),
+        _ if copies_in_own_frame(doc, f) => reads.drawn_targets(st, f),
         // So does a hole at sketch points, in its sketch's frame (#17623).
         FeatureKind::Hole { points: Some(sp), .. } => {
             frame = doc.feature(sp.sketch.0).map(|s| doc.component_transform(s.component));
@@ -4976,7 +5008,7 @@ fn draft_corner_for(ss: &SolvedSketch, r: &Region2, distance: f64, taper: f64, n
 pub fn select_profiles(ss: &SolvedSketch, sel: &ProfileSel) -> Result<Vec<Region2>> {
     let ps = &ss.profiles;
     if ps.is_empty() {
-        return Err(DocError::Invalid(format!("{} has no closed profiles", ss.name)));
+        return Err(no_closed_profiles(ss));
     }
     let out: Vec<Region2> = match sel {
         // "All" means what was drawn: projected reference geometry (a face's auto-projected
@@ -7631,6 +7663,28 @@ struct HoleBuilt {
 /// large body elsewhere in the model changes neither the tool's reach above the face nor its
 /// depth. A hole whose axis meets no body is sized by the
 /// largest body of the model, as before.
+/// Whether `p` may lie in or on `b`: within its exact box grown by the display tolerance, as
+/// [`hole_axis_size`] reads it. A point beyond is outside the body.
+fn may_hold(b: &ModelBody, p: Vec3) -> bool {
+    let Ok(bb) = b.body.exact_bounds() else { return true };
+    let pad = 2.0 * b.display_tol();
+    !bb.is_empty()
+        && (bb.min.x - pad..=bb.max.x + pad).contains(&p.x)
+        && (bb.min.y - pad..=bb.max.y + pad).contains(&p.y)
+        && (bb.min.z - pad..=bb.max.z + pad).contains(&p.z)
+}
+
+/// Where a hole meets the part at `p`: the exact class of `p` in each body that [`may_hold`] it.
+/// The other bodies are outside and are not classified: in a design of many parts, classifying
+/// `p` in each one cost far more than the hole (#19946).
+fn hole_point_classes(st: &ModelState, p: Vec3) -> impl Iterator<Item = kernel::Result<kernel::PointClass>> + '_ {
+    st.bodies.iter().filter(move |b| may_hold(b, p)).map(move |b| {
+        #[cfg(test)]
+        cost_tests::count(|c| c.hole_points += 1);
+        b.body.classify_point(p)
+    })
+}
+
 fn hole_axis_size(st: &ModelState, position: &Vec3, dir: Vec3) -> f64 {
     let along = |b: &ModelBody| {
         // The axis (an unbounded line) against the body's exact box, grown by the display tolerance.
@@ -7813,7 +7867,7 @@ fn hole_reach(
     // #11538) starts there: the reach above a face, there so the tool's top never lies on that
     // face, would cut the material above the plane. Judged at the spot itself, so a plane just
     // under a face keeps the thin roof above it.
-    if kept_inside && st.bodies.iter().any(|b| matches!(b.body.classify_point(*position), Ok(kernel::PointClass::Inside))) {
+    if kept_inside && hole_point_classes(st, *position).any(|c| matches!(c, Ok(kernel::PointClass::Inside))) {
         top = size * 1e-4;
     }
     // Tools are cylinders and cones made by (tapered) extrudes along the axis, cut one
@@ -7840,13 +7894,13 @@ fn hole_reach(
         return Err(DocError::Invalid("hole depth must be positive".into()));
     }
     // A hole exactly as deep as the material (To Object on the face it exits by, or a depth of
-    // the wall's thickness) is a through hole. Exact classification against every body: material
+    // the wall's thickness) is a through hole. Exact classification in the bodies there: material
     // just above the bottom, air just past it; a point within a body's tolerance of its boundary
     // is neither, and the hole is then not taken to exit there; nor is it where the kernel
     // cannot tell.
     let at = |h: f64| *position + dir * (-h);
     let eps = size * 1e-6;
-    let classes = |h: f64| st.bodies.iter().map(|b| b.body.classify_point(at(h))).collect::<std::result::Result<Vec<_>, _>>();
+    let classes = |h: f64| hole_point_classes(st, at(h)).collect::<std::result::Result<Vec<_>, _>>();
     let exits = depth.is_some()
         && classes(bottom + eps).is_ok_and(|c| c.contains(&kernel::PointClass::Inside))
         && classes(bottom - eps).is_ok_and(|c| c.iter().all(|c| *c == kernel::PointClass::Outside));
@@ -7958,7 +8012,7 @@ fn hole_tools_reaching(
                 // must end inside a body (exact classification), short of the exit face.
                 if depth.is_none() {
                     let past = *position + dir * (dc + 2.0 * layer + size * 1e-6);
-                    let classes = st.bodies.iter().map(|b| b.body.classify_point(past)).collect::<std::result::Result<Vec<_>, _>>()?;
+                    let classes = hole_point_classes(st, past).collect::<std::result::Result<Vec<_>, _>>()?;
                     if !classes.contains(&kernel::PointClass::Inside) {
                         return Err(bridge_too_deep(layer, "make the counterbore shallower or the bridge thinner"));
                     }
@@ -8395,6 +8449,62 @@ pub(crate) fn thin_regions(vals: &BTreeMap<String, Value>, ss: &SolvedSketch, th
 /// How far apart (mm) profiles must stay for their extruded tools to be cut as one.
 const APART_GAP: f64 = 1e-3;
 
+/// The most shells one tool of profiles apart holds: a body's record takes no more, so a sketch
+/// of 1369 separate squares, joined into one tool, failed with "shell count" (#20398).
+const MAX_JOINED_SHELLS: usize = solidcore_record::brep::MAX_SHELLS;
+
+#[cfg(test)]
+thread_local! {
+    /// [`MAX_JOINED_SHELLS`] for this thread's tests: a test splits a few profiles into groups.
+    static JOINED_SHELLS_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(MAX_JOINED_SHELLS) };
+}
+
+#[cfg(test)]
+fn joined_shells_limit() -> usize {
+    JOINED_SHELLS_LIMIT.with(std::cell::Cell::get)
+}
+
+#[cfg(not(test))]
+fn joined_shells_limit() -> usize {
+    MAX_JOINED_SHELLS
+}
+
+/// Tools apart from each other (extruded from profiles apart in the sketch) as one tool, so the
+/// body is cut or joined once rather than once per profile. Tools of more than
+/// [`MAX_JOINED_SHELLS`] shells together are joined in even groups, one tool for each, and the
+/// body is cut or joined once per group (#20398). Tools the kernel does not join (meshes) are
+/// left as they are.
+fn join_apart_tools(tools: Vec<Traced>) -> Result<Vec<Traced>> {
+    let limit = joined_shells_limit().max(1);
+    let shells: Vec<usize> = tools.iter().map(|t| t.body.record().shells.len().max(1)).collect();
+    let total: usize = shells.iter().sum();
+    // Even groups: as many as the limit asks for, each holding about as many shells.
+    let most = total.div_ceil(total.div_ceil(limit).max(1));
+    let mut groups: Vec<Vec<Traced>> = Vec::new();
+    let mut held = 0;
+    for (tool, n) in tools.into_iter().zip(shells) {
+        match groups.last_mut() {
+            Some(group) if held + n <= most => {
+                group.push(tool);
+                held += n;
+            }
+            _ => {
+                groups.push(vec![tool]);
+                held = n;
+            }
+        }
+    }
+    let mut out = Vec::with_capacity(groups.len());
+    for group in groups {
+        let bodies: Vec<Body> = group.iter().map(|t| t.body.clone()).collect();
+        match kernel::join_apart(&bodies)? {
+            Some(one) => out.push(Traced::step(one, &group.iter().collect::<Vec<_>>())),
+            None => out.extend(group),
+        }
+    }
+    Ok(out)
+}
+
 /// The tool bodies a feature adds or removes (extrude, revolve, primitives), in the current state.
 /// `to_body` is the body a To Object extent runs to (an extrude), when it found one.
 fn feature_tools_with_constructor(
@@ -8637,10 +8747,7 @@ fn feature_tools_with_constructor(
                     _ => false,
                 };
                 if at_once && tools.len() > 1 && regions_apart(&regions, APART_GAP + 2.0 * growth) {
-                    let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
-                    if let Some(one) = kernel::join_apart(&bodies)? {
-                        tools = vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())];
-                    }
+                    tools = join_apart_tools(tools)?;
                 }
                 if let Some(((tb, (_, fi)), p)) = target {
                     tools = trim_to_curved_face(tools, tb, fi, p.0, to_offset, &ss.plane, base, base + sign * len)?;
@@ -8776,10 +8883,7 @@ fn feature_tools_with_constructor(
                 _ => false,
             };
             if at_once && tools.len() > 1 && !is_symmetric_offset && regions_apart(&regions, APART_GAP) {
-                let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
-                if let Some(one) = kernel::join_apart(&bodies)? {
-                    tools = vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())];
-                }
+                tools = join_apart_tools(tools)?;
             }
             if let Some(tb) = curved.and_then(|bi| tst.bodies.get(bi))
                 && let Some((_, fi)) = to_face
@@ -11015,6 +11119,10 @@ fn replay(
             for m in mats {
                 let moved: Vec<Vec3> = picked.iter().map(|p| crate::apply_point(m, *p)).collect();
                 let i = body_at(st, body, &moved)?;
+                // A distance of 0 leaves the faces where they are (#20496).
+                if d.abs() < 1e-9 {
+                    continue;
+                }
                 let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
                 let nb = mb.traced().then(kernel::offset_faces(&mb.body, &moved, d)?);
                 if let Some(slot) = st.bodies.get_mut(i) {
@@ -13322,6 +13430,11 @@ fn eval_feature_kind(
         FeatureKind::OffsetFace { faces, distance, body } => {
             let d = val(vals, distance, Kind::Length)?;
             let i = body_at(st, body, &crate::plain(faces))?;
+            // A distance of 0 leaves the faces where they are, as Offset Plane does; a parameter
+            // can pass through 0 without the design failing to rebuild (#20496).
+            if d.abs() < 1e-9 {
+                return Ok(());
+            }
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let nb = Traced::step(kernel::offset_faces(&mb.body, &crate::plain(faces), d)?, &[&mb.traced()]);
             if let Some(slot) = st.bodies.get_mut(i) {
@@ -13903,14 +14016,33 @@ fn drawn_tools_change_bodies(kind: &FeatureKind) -> bool {
 
 /// The component whose frame a feature's drawn tools are made in: its own for a feature with
 /// drawn tools (see [`drawn_tools_change_bodies`]), and its sketch's for a hole at sketch points,
-/// whose points are kept in that sketch's frame (#17623), and for a rib (#17655). `None` for every other feature: a hole
-/// at a picked position is kept in the frame of the body it was picked on.
+/// whose points are kept in that sketch's frame (#17623), and for a rib (#17655), and its own for
+/// a mirror or pattern of features made in its own component ([`copies_in_own_frame`]). `None`
+/// for every other feature: a hole at a picked position is kept in the frame of the body it was
+/// picked on.
 fn tools_component(doc: &Document, f: &Feature) -> Option<u64> {
     match &f.kind {
         FeatureKind::Hole { points: Some(sp), .. } => doc.feature(sp.sketch.0).map(|s| s.component),
         FeatureKind::Rib { sketch, .. } => doc.feature(sketch.0).map(|s| s.component),
+        _ if copies_in_own_frame(doc, f) => Some(f.component),
         kind if drawn_tools_change_bodies(kind) => Some(f.component),
         _ => None,
+    }
+}
+
+/// Whether `f` is a mirror or pattern of features (no bodies) whose every copied feature is made
+/// in `f`'s own component: its copies' tools are then made in that component's frame, as a
+/// feature drawn there makes its tools, and are taken into the frame of each body they meet
+/// where it is placed differently: a root mirror of a root cut lands in a body of a part placed
+/// turned or lifted where the copy is shown (#19451). A copied feature of another component (a
+/// mirror made in a part, mirrored again from the root) is placed through that component's own
+/// frame already, and is left so.
+fn copies_in_own_frame(doc: &Document, f: &Feature) -> bool {
+    match &f.kind {
+        FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } => {
+            !features.is_empty() && bodies.is_empty() && features.iter().all(|id| doc.feature(id.0).is_some_and(|g| g.component == f.component))
+        }
+        _ => false,
     }
 }
 
