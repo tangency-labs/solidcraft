@@ -1993,7 +1993,8 @@ pub(crate) fn command(app: &mut SolveApp, id: &str, p: &Value) -> Result<Value, 
             .map(|(i, s)| OpenDocument {
                 document_id: s.document_id.clone(),
                 name: tab_name(app, s),
-                path: s.path.clone(),
+                // A caller kept to some folders is not told where a design outside them lives.
+                path: s.path.clone().filter(|p| solidcraft_engine::io::vfs::check(p).is_ok()),
                 active: i == app.docs.active,
                 dirty: s.is_dirty(),
             })
@@ -2009,6 +2010,13 @@ pub(crate) fn command(app: &mut SolveApp, id: &str, p: &Value) -> Result<Value, 
         .iter()
         .position(|s| s.document_id == request.document_id)
         .ok_or("document.activate: no open design has that document_id (document.list names the open designs)")?;
+    // The folder limits that opening the file would meet, as `reuse_path` applies them.
+    if let Some(path) = open_sessions(app)[at].path.as_deref() {
+        solidcraft_engine::io::vfs::check(path).map_err(|e| e.to_string())?;
+    }
+    if app.agent_chat.following_document && at != app.docs.active {
+        return Err("the design is already open in another tab; select that tab to continue in its own conversation".into());
+    }
     if at != app.docs.active {
         if app.docs.group.is_some() || app.docs.closing.is_some() || app.docs.quitting.is_some() || app.docs.batch.is_some() {
             return Err("finish the save prompt before showing another design".into());
@@ -5942,6 +5950,58 @@ mod tests {
         }
         a.run("document.activate", json!({"document_id": ids[1]})).unwrap();
         assert_eq!(a.docs.active, 1);
+    }
+
+    /// A caller kept to some folders sees no path for a design saved outside them and cannot show
+    /// it; a design inside them, or one never saved, is listed and shown as before.
+    #[test]
+    fn a_scoped_caller_neither_sees_nor_shows_a_design_from_outside_its_folders() {
+        use solidcraft_engine::io::vfs::{self, PathScope};
+        let base = std::env::temp_dir().join(format!("solidcraft-doc-list-scope-{}", std::process::id()));
+        let (inside, outside) = (base.join("inside"), base.join("outside"));
+        std::fs::create_dir_all(&inside).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let (mine, theirs) = (inside.join("a.solidcraft"), outside.join("b.solidcraft"));
+        let text = |p: &std::path::Path| p.to_string_lossy().into_owned();
+
+        let (mut a, ids) = three_sheets();
+        for (i, p) in [(0, &mine), (1, &theirs)] {
+            switch(&mut a, i);
+            a.session.path = Some(text(p));
+        }
+        switch(&mut a, 2);
+
+        let scope = || Some(PathScope::new([inside.clone()]));
+        let listed = vfs::scoped(scope(), || a.run("document.list", json!({}))).unwrap();
+        let rows = listed["documents"].as_array().unwrap();
+        assert_eq!(rows[0]["path"], json!(text(&mine)), "{listed}");
+        assert!(rows[1]["path"].is_null(), "an outside path is not told: {listed}");
+        assert!(rows[2]["path"].is_null(), "{listed}");
+        assert_eq!(rows[1]["document_id"], json!(ids[1]), "the design itself is still listed");
+        assert_eq!(rows[1]["name"], json!("b"), "a saved design is named by its file");
+
+        assert!(vfs::scoped(scope(), || a.run("document.activate", json!({"document_id": ids[1]}))).is_err());
+        assert_eq!(a.docs.active, 2, "a refused design is not shown");
+        vfs::scoped(scope(), || a.run("document.activate", json!({"document_id": ids[0]}))).unwrap();
+        assert_eq!(a.docs.active, 0);
+        // The unsaved design has no file to refuse, and an unscoped caller is not limited.
+        vfs::scoped(scope(), || a.run("document.activate", json!({"document_id": ids[2]}))).unwrap();
+        a.run("document.activate", json!({"document_id": ids[1]})).unwrap();
+        assert_eq!(a.docs.active, 1);
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    /// While the assistant follows its own conversation's design, another tab is not shown.
+    #[test]
+    fn document_activate_keeps_to_the_design_the_assistant_follows() {
+        let (mut a, ids) = three_sheets();
+        a.agent_chat.following_document = true;
+        assert!(a.run("document.activate", json!({"document_id": ids[0]})).is_err());
+        assert_eq!(a.docs.active, 2);
+        assert!(a.run("document.activate", json!({"document_id": ids[2]})).is_ok(), "the design shown stays shown");
+        a.agent_chat.following_document = false;
+        a.run("document.activate", json!({"document_id": ids[0]})).unwrap();
+        assert_eq!(a.docs.active, 0);
     }
 
     /// `doc.open` with `new_tab` opens the file in a tab of its own, keeps the design that was
