@@ -12695,7 +12695,8 @@ fn eval_feature_kind(
             // not enclosed.
             let mut cut_planes: Vec<Plane> = Vec::new();
             for pr in planes {
-                cut_planes.push(doc.resolve_plane_in(vals, pr, 0, f.component, Some(&*st))?);
+                // A construction plane of another component is stored in that component's frame.
+                cut_planes.push(doc.resolve_plane_in(vals, &*construction_planes_in_frame(doc, st, f.component, pr)?, 0, f.component, Some(&*st))?);
             }
             let universe = match cells.first() {
                 Some(first) if !cut_planes.is_empty() => {

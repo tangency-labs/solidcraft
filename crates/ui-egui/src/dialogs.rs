@@ -937,7 +937,7 @@ impl Dialog {
                 }
             }
         }
-        let Some(inp) = d.inputs.iter_mut().find(|i| i.accept == BODIES && (i.multi || i.items.is_empty())) else {
+        let Some(inp) = d.inputs.iter_mut().find(|i| takes_only_bodies(i) && (i.multi || i.items.is_empty())) else {
             return;
         };
         for name in names {
@@ -1030,10 +1030,9 @@ impl Dialog {
                 vec![SelInput::new("Faces", PLANAR_FACES, true), SelInput::new("Target", PLANES | PLANAR_FACES, false)],
             ),
             "face.delete" => Dialog::new(Kind::DeleteFaces, vec![SelInput::new("Faces", FACES, true)]),
-            "solid.boundary_fill" => Dialog::new(
-                Kind::BoundaryFill { operation: 0, cells: Vec::new(), of: Vec::new() },
-                vec![SelInput::new("Tools", BODIES | PLANES, true)],
-            ),
+            "solid.boundary_fill" => {
+                Dialog::new(Kind::BoundaryFill { operation: 0, cells: Vec::new(), of: Vec::new() }, vec![SelInput::new("Tools", FILL_TOOLS, true)])
+            }
             "solid.align" => {
                 let components = s.selection.iter().any(|x| matches!(x, Sel::Occurrence { .. }));
                 // Bodies also take sketch points and circles: a frame the bodies follow (#6257).
@@ -1317,7 +1316,7 @@ impl Dialog {
                 _ => None,
             };
             if let Some(b) = as_body
-                && let Some(inp) = d.inputs.iter_mut().find(|i| i.accept == BODIES && (i.multi || i.items.is_empty()))
+                && let Some(inp) = d.inputs.iter_mut().find(|i| takes_only_bodies(i) && (i.multi || i.items.is_empty()))
             {
                 if !inp.items.contains(&b) {
                     inp.items.push(b);
@@ -1327,7 +1326,7 @@ impl Dialog {
             // A selected component is its bodies when the command takes bodies. One selected
             // placement still starts component Move before this dialog is built.
             if let Sel::Occurrence { path } = sel
-                && let Some(inp) = d.inputs.iter_mut().find(|i| i.accept == BODIES && (i.multi || i.items.is_empty()))
+                && let Some(inp) = d.inputs.iter_mut().find(|i| takes_only_bodies(i) && (i.multi || i.items.is_empty()))
             {
                 if let Ok(names) = s.occurrence_bodies(path, true) {
                     for name in names {
@@ -4110,6 +4109,16 @@ pub(crate) fn fill_cells(
         .collect()
 }
 
+/// What Boundary Fill's Tools take: bodies, and planes that close them.
+const FILL_TOOLS: selection::Accept = BODIES | PLANES;
+
+/// An input that takes bodies and nothing else a pick could be but a body's face, edge, vertex or
+/// component, which stand for their body there. Boundary Fill's Tools also take planes, and keep
+/// that.
+fn takes_only_bodies(i: &SelInput) -> bool {
+    i.accept == BODIES || i.accept == FILL_TOOLS
+}
+
 /// The origin and construction planes among the Boundary Fill tools, by name, as they lie.
 fn fill_planes(s: &Session, tools: &[Sel]) -> Vec<(String, solidcore_record::Plane)> {
     tools
@@ -4127,6 +4136,42 @@ pub(crate) fn fill_plane_names(tools: &[Sel]) -> Vec<String> {
     tools.iter().filter_map(|t| if let Sel::Plane { name } = t { Some(name.clone()) } else { None }).collect()
 }
 
+/// Which tools hold a point (the low bits) and which side of each plane it is on (from bit 16).
+fn fill_signature(indexes: &[solidcraft_engine::geom::InsideIndex<'_>], planes: &[(String, solidcore_record::Plane)], p: Vec3) -> u32 {
+    let held = indexes.iter().enumerate().fold(0u32, |acc, (t, ix)| if ix.contains(p) { acc | (1 << t) } else { acc });
+    planes.iter().enumerate().fold(held, |acc, (t, (_, pl))| if pl.height(p) > 0.0 { acc | (1 << (16 + t)) } else { acc })
+}
+
+/// The label of the found cell each stored point lies in: the cell with the point's own signature
+/// (the tools that hold it and its side of each plane), the nearest of those to the point. A point
+/// in no found cell takes the nearest cell.
+pub(crate) fn fill_cells_holding(
+    st: &solidcraft_engine::doc::ModelState,
+    tools: &[String],
+    planes: &[(String, solidcore_record::Plane)],
+    stored: &[Vec3],
+    found: &[(Vec3, String)],
+) -> Vec<String> {
+    let bodies: Vec<_> = tools.iter().filter_map(|n| st.body(n).map(|b| b.mesh())).take(16).collect();
+    let indexes: Vec<_> = bodies.iter().map(|m| m.inside_index()).collect();
+    let reps: Vec<u32> = found.iter().map(|(p, _)| fill_signature(&indexes, planes, *p)).collect();
+    stored
+        .iter()
+        .filter_map(|c| {
+            let sig = fill_signature(&indexes, planes, *c);
+            let nearest = |same: bool| {
+                found
+                    .iter()
+                    .zip(&reps)
+                    .filter(|(_, r)| !same || **r == sig)
+                    .min_by(|a, b| a.0.0.dist(*c).total_cmp(&b.0.0.dist(*c)))
+                    .map(|(x, _)| x.1.clone())
+            };
+            nearest(true).or_else(|| nearest(false))
+        })
+        .collect()
+}
+
 /// [`fill_cells`] with plane tools: a plane cuts space like an infinite plane, so the cells are the
 /// connected regions of one signature (the tools that hold a point and its side of each plane).
 /// A region outside every tool is a cell only when it does not reach the edge of the sampled box
@@ -4140,12 +4185,14 @@ fn fill_cells_between(
 ) -> Vec<(Vec3, String)> {
     let at = |i: usize, lo: f64, hi: f64| lo + (hi - lo) * (i as f64 + 0.5) / n as f64;
     let cell_count = n * n * n;
-    let point = |c: usize| Vec3::new(at(c / (n * n), bb.min.x, bb.max.x), at(c / n % n, bb.min.y, bb.max.y), at(c % n, bb.min.z, bb.max.z));
+    // The box reaches past the tools, so a cavity a plane closes at the tools' own edge stays inside
+    // it, and only a region open to the outside reaches the box's edge.
+    let pad = ((bb.max.x - bb.min.x).max(bb.max.y - bb.min.y).max(bb.max.z - bb.min.z) * 0.25).max(1e-3);
+    let lo = Vec3::new(bb.min.x - pad, bb.min.y - pad, bb.min.z - pad);
+    let hi = Vec3::new(bb.max.x + pad, bb.max.y + pad, bb.max.z + pad);
+    let point = |c: usize| Vec3::new(at(c / (n * n), lo.x, hi.x), at(c / n % n, lo.y, hi.y), at(c % n, lo.z, hi.z));
     // Which tools hold a point (the low bits) and which side of each plane it is on (from bit 16).
-    let signature = |p: Vec3| {
-        let held = indexes.iter().enumerate().fold(0u32, |acc, (t, ix)| if ix.contains(p) { acc | (1 << t) } else { acc });
-        planes.iter().enumerate().fold(held, |acc, (t, (_, pl))| if pl.to_local(p).z > 0.0 { acc | (1 << (16 + t)) } else { acc })
-    };
+    let signature = |p: Vec3| fill_signature(indexes, planes, p);
     let sigs: Vec<u32> = (0..cell_count).map(|c| signature(point(c))).collect();
     let mut seen = vec![false; cell_count];
     let mut out: Vec<(Vec3, String)> = Vec::new();
@@ -8748,10 +8795,16 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             // The cells again, ticked where a stored cell point lies in the same cell.
             let before = s.model.state_before(f.id);
             let mut items: Vec<Sel> = tools.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
-            items.extend(planes.iter().filter_map(|pl| plane_sel(s, pl)));
-            let found = fill_cells(&before, &solidcraft_engine::doc::plain(tools), &fill_planes(s, &items));
-            let filled: Vec<String> =
-                cells.iter().filter_map(|c| found.iter().min_by(|a, b| a.0.dist(c.0).total_cmp(&b.0.dist(c.0))).map(|x| x.1.clone())).collect();
+            // A component's origin plane is kept by its datum key, as Offset Plane refills it.
+            items.extend(planes.iter().filter_map(|pl| match pl {
+                PlaneRef::Datum { datum } => Some(Sel::Plane { name: datum.key() }),
+                other => plane_sel(s, other),
+            }));
+            let tool_names = solidcraft_engine::doc::plain(tools);
+            let fill_on = fill_planes(s, &items);
+            let found = fill_cells(&before, &tool_names, &fill_on);
+            let stored: Vec<Vec3> = cells.iter().map(|c| c.0).collect();
+            let filled: Vec<String> = fill_cells_holding(&before, &tool_names, &fill_on, &stored, &found);
             d.kind = Kind::BoundaryFill {
                 operation: op_index(operation),
                 cells: found.into_iter().map(|(p, l)| (p, l.clone(), filled.contains(&l))).collect(),

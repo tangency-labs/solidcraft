@@ -202,10 +202,11 @@ fn fill_planes<'de, D: Deserializer<'de>>(d: D) -> Result<Option<NameList>, D::E
 }
 
 fn fill_planes_schema(_: &mut SchemaGenerator) -> Schema {
-    names_schema(
-        "Planes that also bound the cells, by name: an origin plane (XY, XZ, YZ) or a construction plane. A plane cuts space like an infinite plane, so it can close an open end of a tool body; a cell lies on the side of each plane its point is on. Up to 64 with the tools.",
-        MAX_TOOLS,
-    )
+    // Unlike the tools, no planes at all is allowed: the handler reads `[]` as none.
+    json_schema!({
+        "description": "Planes that also bound the cells, by name: an origin plane (XY, XZ, YZ) or a construction plane. A plane cuts space like an infinite plane, so it can close an open end of a tool body; a cell lies on the side of each plane its point is on. Up to 64 with the tools.",
+        "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "minItems": 0, "maxItems": MAX_TOOLS}]
+    })
 }
 
 fn fill_tools_schema(_: &mut SchemaGenerator) -> Schema {
