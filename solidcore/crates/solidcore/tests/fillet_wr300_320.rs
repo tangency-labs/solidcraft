@@ -387,21 +387,17 @@ fn top_rim(k: &Kernel, b: &Brep) -> EdgeId {
 /// top's centre (the fork's `FacesOutlastTheirBlends`, WR-320, refuses a blend meeting the
 /// face it takes whole at an angle). A chamfer of 10 on the top rim of a cylinder of
 /// radius 10 is a cone with its apex there, the top's one closed edge closing to a point
-/// (#17198), and builds with `fillet_refuse_face_consuming_blends`. A round of
-/// 10 closes the top as a hemisphere tangent to it, as the fork's amendment
-/// (tangency-labs/smlib `8bffb23`) lets it, and builds either way, as does everything
-/// below the full width.
+/// (#17198), and builds with that refusal on. A round of 10 closes the top as a
+/// hemisphere tangent to it, as the fork's amendment (tangency-labs/smlib `8bffb23`) lets
+/// it, and builds, as does everything below the full width.
 #[test]
 fn chamfer_as_wide_as_its_face_is_a_cone() {
     // the chamfer of 10: the cylinder (pi 100 20) less the ring between the r 10, h 10
     // cylinder and the cone in it (2/3 pi 1000)
     let cone = std::f64::consts::PI * (2000.0 - 2000.0 / 3.0);
     // with the fixes SolidCraft runs (the cone's rail of no length needs more of them than
-    // the refusal's flag: upstream's own build fails to find the cone's edge)
-    let mut k = kernel(|f| {
-        *f = UpstreamFixes::all();
-        f.fillet_refuse_face_consuming_blends = true;
-    });
+    // the refusal: upstream's own build fails to find the cone's edge)
+    let mut k = kernel(|f| *f = UpstreamFixes::all());
     let got = cylinder_rim(&mut k, 10.0, 0);
     let Outcome::Built { volume, manifold } = got else {
         panic!("the chamfer of 10: {got:?}");
@@ -415,24 +411,19 @@ fn chamfer_as_wide_as_its_face_is_a_cone() {
 
     // the round of 10: the cylinder (pi 100 10) and a hemisphere (2/3 pi 1000)
     let hemisphere = std::f64::consts::PI * (1000.0 + 2000.0 / 3.0);
-    for on in [false, true] {
-        let mut k = kernel(|f| f.fillet_refuse_face_consuming_blends = on);
-        let Outcome::Built { volume, manifold } = cylinder_rim(&mut k, 10.0, 1) else {
-            panic!("on {on}: refused");
-        };
+    let mut k = Kernel::default();
+    let Outcome::Built { volume, manifold } = cylinder_rim(&mut k, 10.0, 1) else {
+        panic!("refused");
+    };
+    assert!(manifold && near(volume, hemisphere, 5e-3), "{volume}");
+    for xsect in [0, 1] {
         assert!(
-            manifold && near(volume, hemisphere, 5e-3),
-            "on {on}: {volume}"
+            matches!(
+                cylinder_rim(&mut k, 9.99, xsect),
+                Outcome::Built { manifold: true, .. }
+            ),
+            "xsect {xsect}"
         );
-        for xsect in [0, 1] {
-            assert!(
-                matches!(
-                    cylinder_rim(&mut k, 9.99, xsect),
-                    Outcome::Built { manifold: true, .. }
-                ),
-                "on {on} xsect {xsect}"
-            );
-        }
     }
 }
 
@@ -518,7 +509,7 @@ fn no_room_reason(
 /// below.)
 #[test]
 fn no_room_refusals_are_named() {
-    let mut k = kernel(|f| f.fillet_refuse_face_consuming_blends = true);
+    let mut k = Kernel::default();
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
     let top = [
         edge_between(&k, &b, [0.0, 0.0, 10.0], [10.0, 0.0, 10.0]),

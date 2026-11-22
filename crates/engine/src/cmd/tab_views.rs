@@ -1,4 +1,4 @@
-//! The views of a design (Model, Sketch, Sheet, Render, Animation) as sub-tabs of its tab. The
+//! The views of a design (Model, Sheet, Render, Animation) as sub-tabs of its tab. The
 //! engine holds one design and no tabs, so, as with `view.next_tab`, each command checks its
 //! parameters and echoes them, and the window makes the change (`ui-egui`'s `documents`).
 use serde::de::DeserializeOwned;
@@ -47,7 +47,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("view: the id of an open 3D view; on: whether its compass is visible → view, on"),
     CommandSpec::new("tab.view.open", "Open Another View", crate::checked!("tab.view.open", open))
         .icon("new").noundo().doc_only().key("Ctrl+T").contract(&OPEN_CONTRACT).output(output_schema_for::<TabViewReply>)
-        .params("kind?: model|sketch|sheet|render|animation (default: the active view's kind); subject?: the sketch or sheet id; reuse?: bool (default: true with a subject); window?: id (default: last focused) → the request, id: the view now shown; the window opens a sub-tab of the shown design; never edits the design or opens a dialog"),
+        .params("kind?: model|sheet|render|animation (default: the active view's kind); subject?: the sheet id; reuse?: bool (default: true with a subject); window?: id (default: last focused) → the request, id: the view now shown; the window opens a sub-tab of the shown design; never edits the design or opens a dialog"),
     CommandSpec::new("tab.view.close", "Close View", crate::checked!("tab.view.close", close))
         .icon("close").noundo().doc_only().contract(&ID_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("id?: the view (default: the active one) → id; closes it, which Reopen Closed View undoes; the last view of a design never closes (an error); never opens a dialog"),

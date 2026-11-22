@@ -1399,12 +1399,14 @@ pub enum ViewState {
 pub struct ViewTab<'a> {
     pub compass: Option<bool>,
     pub name: &'a str,
-    /// What its icon draws: `model`, `sketch`, `sheet`, `render` or `animation` ([`paint_view_glyph`]).
+    /// What its icon draws: `model`, `sheet`, `render` or `animation` ([`paint_view_glyph`]).
     pub icon: &'a str,
     /// The icon's stroke colour.
     pub accent: egui::Color32,
     /// The colour of the shown view's underline.
     pub underline: egui::Color32,
+    /// Preserve the sketch accent underline in every visibility state.
+    pub sketch_mode: bool,
     pub state: ViewState,
     /// The design shows this view.
     pub active: bool,
@@ -1414,7 +1416,7 @@ pub struct ViewTab<'a> {
     pub window_number: Option<u32>,
     /// A view listed here that belongs to another window.
     pub to_window: Option<u32>,
-    /// Its hover text ("Sketch 2 · Design workspace · Ctrl+2").
+    /// Its hover text ("Model 2 · Design workspace · Ctrl+2").
     pub tip: &'a str,
 }
 
@@ -2115,7 +2117,6 @@ fn glyph_lines(icon: &str) -> &'static [&'static [(f32, f32)]] {
             &[(4.0, 7.0), (12.0, 11.0), (20.0, 7.0)],
             &[(12.0, 11.0), (12.0, 21.0)],
         ],
-        "sketch" => &[&[(4.0, 20.0), (5.0, 16.0), (16.0, 5.0), (19.0, 8.0), (8.0, 19.0), (4.0, 20.0)], &[(14.0, 7.0), (17.0, 10.0)]],
         "sheet" => &[
             &[(6.0, 3.0), (15.0, 3.0), (19.0, 7.0), (19.0, 21.0), (6.0, 21.0), (6.0, 3.0)],
             &[(15.0, 3.0), (15.0, 7.0), (19.0, 7.0)],
@@ -2136,7 +2137,7 @@ fn glyph_lines(icon: &str) -> &'static [&'static [(f32, f32)]] {
     }
 }
 
-/// Draws a view's icon (`model`, `sketch`, `sheet`, `render` or `animation`, or the menu glyphs
+/// Draws a view's icon (`model`, `sheet`, `render` or `animation`, or the menu glyphs
 /// `rename`, `window`, `close`, `duplicate`, `tiles` and `reopen`; another name draws nothing) as strokes of `ink` in `r`.
 pub fn paint_view_glyph(p: &Painter, r: Rect, icon: &str, ink: egui::Color32) {
     if matches!(icon, "window_here" | "window_other") {
@@ -2151,6 +2152,45 @@ pub fn paint_view_glyph(p: &Painter, r: Rect, icon: &str, ink: egui::Color32) {
     }
     for line in glyph_lines(icon) {
         p.add(egui::Shape::line(line.iter().map(|&point| at(point)).collect(), stroke));
+    }
+}
+
+/// Draw the common sketch-mode title, original pencil glyph and Editing chip.
+/// The caller supplies a rectangle excluding its menu and window controls.
+pub fn paint_sketch_header(painter: &Painter, rect: Rect, name: &str, editing: &str) {
+    if !rect.is_finite() || !rect.is_positive() {
+        return;
+    }
+    let t = Tokens::get();
+    let painter = painter.with_clip_rect(rect);
+    painter.rect_filled(rect, 0, t.sketch_soft);
+    let chip = painter.layout_no_wrap(editing.to_owned(), crate::type_face::semibold(t.font_small), t.text);
+    let chip_width = (chip.size().x + 16.0).min(rect.width());
+    let leading = (rect.width() - chip_width - 6.0).max(0.0);
+    let glyph_width = if leading >= 23.0 { 23.0 } else { 0.0 };
+    if glyph_width > 0.0 {
+        paint_view_glyph(&painter, Rect::from_center_size(pos2(rect.left() + 7.5, rect.center().y), vec2(15.0, 15.0)), "rename", t.sketch_accent);
+    }
+    let name_x = rect.left() + glyph_width;
+    let name_width = (leading - glyph_width).max(0.0);
+    let mut after = name_x;
+    if name_width > 0.0 {
+        let mut job = egui::text::LayoutJob::simple_singleline(name.to_owned(), crate::type_face::semibold(t.font_body), t.sketch_ink);
+        job.wrap = egui::text::TextWrapping { max_width: name_width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+        let name = painter.layout_job(job);
+        after += name.size().x.min(name_width);
+        painter.galley(pos2(name_x, rect.center().y - name.size().y / 2.0), name, t.sketch_ink);
+    }
+    let chip_x = (after + 6.0).min(rect.right() - chip_width);
+    let chip_rect = Rect::from_min_size(pos2(chip_x, rect.center().y - 9.0), vec2(chip_width, 18.0));
+    painter.rect_filled(chip_rect, 9, t.chip);
+    let padding = 8.0_f32.min(chip_width / 2.0);
+    let text_width = (chip_width - 2.0 * padding).max(0.0);
+    if text_width > 0.0 {
+        let mut job = egui::text::LayoutJob::simple_singleline(editing.to_owned(), crate::type_face::semibold(t.font_small), t.text);
+        job.wrap = egui::text::TextWrapping { max_width: text_width, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+        let chip = painter.layout_job(job);
+        painter.with_clip_rect(chip_rect).galley(chip_rect.left_center() + vec2(padding, -chip.size().y / 2.0), chip, t.text);
     }
 }
 
@@ -2414,6 +2454,7 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
         } else {
             std::borrow::Cow::Borrowed(view.name)
         };
+        let name = if view.sketch_mode { solidcraft_ui_text::format("sketch_mode.announcement", &[("view", &name)]).into() } else { name };
         egui::WidgetInfo::selected(egui::Role::Tab, true, view.active, name)
     });
     if !detached && pen.drag.is_none() && !pen.rename.as_ref().is_some_and(|(index, _)| *index == k) {
@@ -2478,7 +2519,7 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
         paint_view_glyph(&painter, rect, crate::icons::window_icon(false), ink);
         solidcraft_ui_registry::publish_target(&format!("{}{k}:window", h.view), rect);
     }
-    if view.active {
+    if view.active || view.sketch_mode {
         let underline = Rect::from_min_max(pos2(vr.left() + 7.0, vr.bottom() - 2.0), pos2(vr.right() - 7.0, vr.bottom()));
         painter.rect_filled(underline, 2u8, view.underline);
     }
@@ -2643,6 +2684,7 @@ fn draw_clear_view(
     } else {
         format!("{}, {}", view.name, view_status(view))
     };
+    let title = if view.sketch_mode { solidcraft_ui_text::format("sketch_mode.announcement", &[("view", &title)]) } else { title };
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, view.active, title.as_str()));
     solidcraft_ui_registry::publish_target(&format!("{}{k}", strip.handles.view), rect);
     if let Some(window) = view.to_window {
@@ -2716,7 +2758,7 @@ fn draw_clear_view(
             painter.text(pos2(mark.right() + 4.0, rect.center().y), Align2::LEFT_CENTER, badge, crate::type_face::semibold(t.font_small), badge_ink);
         }
     }
-    if look == ViewLook::Ground {
+    if look == ViewLook::Ground || view.sketch_mode {
         let underline = Rect::from_min_max(pos2(rect.left() + 8.0, rect.bottom() - 2.0), pos2(rect.right() - 8.0, rect.bottom()));
         painter.rect_filled(underline, 1, view.underline);
     }
@@ -2753,6 +2795,7 @@ fn draw_clear_view(
     } else if response.secondary_clicked()
         || (response.has_focus() && ui.input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::F10)))
     {
+        claim_tab_context_click(ui.ctx());
         pen.popup = Some((Popup::View(k), pos2(rect.left(), pen.below), rect, ui.ctx().cumulative_frame_nr()));
     } else if response.clicked() || key(egui::Key::Enter) {
         response.request_focus();

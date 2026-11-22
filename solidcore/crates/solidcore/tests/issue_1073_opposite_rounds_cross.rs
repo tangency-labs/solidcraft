@@ -109,12 +109,17 @@ fn issue_1073_the_default_kernels_open_body_is_refused() {
                 b.face_list().len()
             );
         };
-        assert_eq!(error.kind(), ErrorKind::Failed, "{name}: {error:?}");
+        // #19823: an open result the construction built instead of refusing is the
+        // kernel's defect (it keeps the status 1001)
+        assert_eq!(error.kind(), ErrorKind::StageFailed, "{name}: {error:?}");
+        assert!(
+            matches!(error.blend_failure(), Some(BlendFailure::Defect { .. })),
+            "{name}: {error:?}"
+        );
+        assert!(error.is_defect(), "{name}: {error:?}");
         assert_eq!(
-            error.blend_failure(),
-            Some(&BlendFailure::Failed(
-                "the result is not a closed manifold solid"
-            )),
+            solidcore::error::upstream_status(&error),
+            Some(1001),
             "{name}: {error:?}"
         );
         assert_eq!(error.operation(), "blend::fillet_executive::api", "{name}");
