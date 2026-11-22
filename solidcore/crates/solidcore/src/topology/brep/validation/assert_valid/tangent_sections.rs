@@ -485,7 +485,7 @@ fn section(
 fn clearance(k: &Kernel, b: &Brep, e: EdgeId, p: Point3, faces: &[FaceId]) -> Result<Option<f64>> {
     let at = Extent3d::from_points(p, p);
     let mut free = f64::INFINITY;
-    let mut vertex_free = |b: &Brep, edge: EdgeId, free: &mut f64| -> Result<()> {
+    let vertex_free = |b: &Brep, edge: EdgeId, free: &mut f64| -> Result<()> {
         for v in tedge::vertices(b, edge, None)?.into_iter().flatten() {
             let v = b.vertex(v)?;
             *free = free.min(v.point.distance(p) - v.tolerance);
