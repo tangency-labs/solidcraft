@@ -93,7 +93,7 @@ use crate::blend::fillet_solver::p1::FilletSolver;
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
-use crate::error::blend::BlendFailure;
+use crate::error::blend::{BlendFailure, CornerStep};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
@@ -734,7 +734,7 @@ pub fn classify_chamfer(
             edge::other_vertex(b, e, Some(start))?.ok_or_else(|| {
                 missing_defect(
                     OP_CLASSIFY,
-                    "a chamfered edge at the vertex has no other vertex, though the edge's curve is a line, which is not closed",
+                    "a chamfered edge at the vertex has no other vertex: its primary edge use, its mate or their vertex uses are missing, though the B-rep makes every edge with two edge uses, each on a vertex use",
                 )
             })?
         } else {
@@ -1216,10 +1216,12 @@ pub fn chamfer_corner_edge_geom(
                     )
                 })?
                 .clone();
+            // the chamfer's surface is its solver's; its feet are searches and its
+            // parameters need not be affine along the line
             let uv = uv_line(k, &surface, p, q, span, solved)?.ok_or_else(|| {
-                defect(
+                SolidError::blend(
                     OP_EDGES,
-                    "a chamfer's surface does not hold the corner edge's exact line within the corner's tolerance, though the solver traces the chamfer to that tolerance",
+                    BlendFailure::CornerUnbuildable(CornerStep::ChamferSurfaceOffEdgeLine),
                 )
             })?;
             pseudo.set_edgeuse_uv_curve(eu, Some(uv), true, true)?;

@@ -801,6 +801,9 @@ impl BezierCurveRecord {
             return Err(refuse(field, "a curve has one break more than segments"));
         }
         let degree = self.seg.first().map_or(0, Vec::len);
+        if self.seg.first().is_some_and(Vec::is_empty) {
+            return Err(refuse(field, "a curve's segments have control points"));
+        }
         if self.seg.iter().any(|s| s.len() != degree)
             || !all_finite(&self.brk)
             || self.seg.iter().flatten().any(|q| !all_finite(q))
@@ -809,6 +812,16 @@ impl BezierCurveRecord {
                 field,
                 "a curve's segments are of one degree and finite",
             ));
+        }
+        Ok(())
+    }
+
+    /// [`BezierCurveRecord::validate`], and a curve: one segment or more (an empty curve
+    /// is refused where the rule reads the field).
+    fn validate_read(&self, field: &'static str) -> Result<(), RecordError> {
+        self.validate(field)?;
+        if self.seg.is_empty() {
+            return Err(refuse(field, "a curve the rule reads has a segment"));
         }
         Ok(())
     }
@@ -938,10 +951,20 @@ impl CornerRecord {
                 if r.sides.len() != 4 || r.blend > 1 || r.trim_side > 3 || r.conic_side > 3 {
                     return Err(refuse("sides", "a mixed face has four sides on two blends"));
                 }
+                // the rule reads every side, and the Coons rule (not the chamfer's) its
+                // field and, where it has one, its cross field too
                 for side in &r.sides {
-                    side.c.validate("sides")?;
-                    side.dir.validate("sides")?;
-                    side.t.validate("sides")?;
+                    side.c.validate_read("sides")?;
+                    if r.bilinear {
+                        side.dir.validate("sides")?;
+                    } else {
+                        side.dir.validate_read("sides")?;
+                    }
+                    if side.has_t && !r.bilinear {
+                        side.t.validate_read("sides")?;
+                    } else {
+                        side.t.validate("sides")?;
+                    }
                     let numbers = side.val.iter().chain(&side.der).flatten();
                     let fields = side
                         .dir_val
@@ -953,7 +976,7 @@ impl CornerRecord {
                         return Err(refuse("sides", "a side's numbers are finite"));
                     }
                 }
-                r.trim_uv.validate("trim_uv")?;
+                r.trim_uv.validate_read("trim_uv")?;
                 if !(r.tol.is_finite() && r.tol > 0.0) {
                     return Err(refuse(
                         "tol",

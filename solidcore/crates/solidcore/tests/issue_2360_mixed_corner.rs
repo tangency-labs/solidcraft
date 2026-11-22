@@ -652,3 +652,115 @@ fn a_mixed_chamfer_face_round_trips_through_its_record() {
         assert!(why.contains("rule's patch"), "{why}");
     }
 }
+
+// ---- #19817: a Mixed record's curves the rule reads are checked as the caller's input ----
+
+use solidcore::error::ErrorKind;
+
+/// Puts a curve into one slot of a mixed corner record.
+type SetCurve = fn(&mut MixedCornerRecord, BezierCurveRecord);
+use solidcore::surface::procedural_blend::record::{BezierCurveRecord, MixedCornerRecord};
+
+/// A record whose curve the rule reads is empty or has an empty segment is refused as
+/// the caller's input, before the rule's algebra reads it: not reported as the kernel's
+/// defect (the four cases #20725's review reproduced).
+#[test]
+fn a_mixed_record_with_an_empty_curve_the_rule_reads_is_invalid_input() {
+    let (k, b, res) = blended(2.0, 1);
+    res.unwrap();
+    let face = corner_faces(&b, CornerKind::Mixed).remove(0);
+    let CornerRecord::Mixed(rec) = corner_to_record(&k, &face).unwrap() else {
+        panic!("not a mixed record");
+    };
+    assert!(!rec.bilinear, "the Coons rule");
+    let empty = || BezierCurveRecord {
+        brk: Vec::new(),
+        seg: Vec::new(),
+    };
+    let hollow = || BezierCurveRecord {
+        brk: vec![0.0, 1.0],
+        seg: vec![Vec::new()],
+    };
+    let cases: [(&str, SetCurve); 3] = [
+        ("sides[0].c", |r, c| r.sides[0].c = c),
+        ("sides[1].c", |r, c| r.sides[1].c = c),
+        ("trim_uv", |r, c| r.trim_uv = c),
+    ];
+    let mut tried = Vec::new();
+    for (name, set) in cases {
+        for (shape, curve) in [("emptied", empty()), ("[[]]", hollow())] {
+            let mut off = rec.clone();
+            set(&mut off, curve);
+            let e = corner_rebuild(&k, &CornerRecord::Mixed(off)).unwrap_err();
+            assert_eq!(e.kind(), ErrorKind::InvalidInput, "{name} {shape}: {e}");
+            assert!(!e.is_defect(), "{name} {shape}: {e}");
+            tried.push((name, shape));
+        }
+    }
+    assert_eq!(tried.len(), 6);
+}
+
+/// Every field of every side, emptied, hollowed or cut to one control point, and the
+/// trimline's uv likewise: the record is rebuilt or refused, and never reaches a defect
+/// of the rule's algebra (whose tables are sound only for curves of control points).
+#[test]
+fn no_mixed_record_curve_shape_reaches_a_defect() {
+    for xsect in [1, 0] {
+        let (k, b, res) = blended(2.0, xsect);
+        res.unwrap();
+        for face in corner_faces(&b, CornerKind::Mixed) {
+            let CornerRecord::Mixed(rec) = corner_to_record(&k, &face).unwrap() else {
+                panic!("not a mixed record");
+            };
+            let shapes = |c: &BezierCurveRecord| {
+                let point = c.seg.first().and_then(|s| s.first()).copied();
+                let mut out = vec![
+                    BezierCurveRecord {
+                        brk: Vec::new(),
+                        seg: Vec::new(),
+                    },
+                    BezierCurveRecord {
+                        brk: vec![0.0, 1.0],
+                        seg: vec![Vec::new()],
+                    },
+                ];
+                if let Some(p) = point {
+                    out.push(BezierCurveRecord {
+                        brk: vec![0.0, 1.0],
+                        seg: vec![vec![p]],
+                    });
+                }
+                out
+            };
+            let mut variants = Vec::new();
+            for i in 0..rec.sides.len() {
+                for field in 0..3 {
+                    let curve = match field {
+                        0 => &rec.sides[i].c,
+                        1 => &rec.sides[i].dir,
+                        _ => &rec.sides[i].t,
+                    };
+                    for shape in shapes(curve) {
+                        let mut off = rec.clone();
+                        match field {
+                            0 => off.sides[i].c = shape,
+                            1 => off.sides[i].dir = shape,
+                            _ => off.sides[i].t = shape,
+                        }
+                        variants.push((format!("sides[{i}] field {field}"), off));
+                    }
+                }
+            }
+            for shape in shapes(&rec.trim_uv) {
+                let mut off = rec.clone();
+                off.trim_uv = shape;
+                variants.push(("trim_uv".to_string(), off));
+            }
+            for (name, off) in variants {
+                if let Err(e) = corner_rebuild(&k, &CornerRecord::Mixed(off)) {
+                    assert!(!e.is_defect(), "xsect {xsect} {name}: {e}");
+                }
+            }
+        }
+    }
+}

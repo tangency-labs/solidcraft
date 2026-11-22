@@ -57,7 +57,7 @@ use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverType, FilletSurfaceGeneratorType};
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
-use crate::error::blend::BlendFailure;
+use crate::error::blend::{BlendFailure, CornerStep};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::krawczyk::{contraction, k_operator};
 use crate::intersect::surface_intersector::p1::SrfIndex;
@@ -793,9 +793,11 @@ fn ball_centre(
             let disc = qb * qb - qa * qc;
             if disc < 0.0 || (qa.abs() <= EFF_ZERO * dd && qb.abs() <= EFF_ZERO * dd) {
                 // the rounds' ball is on all three offsets, so the line meets the quadric
-                return Err(defect(
+                // but for rounding: where the line is tangent to the offset, or in it,
+                // the computed discriminant can fall below zero
+                return Err(SolidError::blend(
                     OP_CENTRE,
-                    "the line of the two offset planes misses the third face's offset quadric, though the rounds' ball lies on all three offsets",
+                    BlendFailure::CornerUnbuildable(CornerStep::BallCentreLineMissesOffset),
                 ));
             }
             let mut roots = [0.0; 2];
@@ -836,11 +838,12 @@ fn ball_centre(
         k.work_counters.add_ball_certified_root();
         let (root, proved) = ball_certified_root(&f, 1e-12 * max(size, 1.0));
         if !proved {
-            // the rounds' ball lies on the three offsets, whose normals there are
-            // independent
-            return Err(defect(
+            // classify_ball checked the normals' independence at the vertex, not at the
+            // ball, and only to EFF_ZERO_SQRT: nearly dependent normals leave the box too
+            // small for the proof, though a root is there
+            return Err(SolidError::blend(
                 OP_CENTRE,
-                "the Krawczyk test did not prove the three offsets' meeting near the rounds' ball, though the ball lies on all three and their normals there are independent",
+                BlendFailure::CornerUnbuildable(CornerStep::BallCentreNotProved),
             ));
         }
         x = root;

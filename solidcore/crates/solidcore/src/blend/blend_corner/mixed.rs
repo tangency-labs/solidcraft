@@ -167,10 +167,17 @@ fn unbuildable(op: &'static str, step: MixedStep) -> SolidError {
 /// A curve or surface kind with no B-spline form at `step`, with the
 /// `SM_ERR_NULL_POINTER` status of the null cast it replaces.
 #[track_caller]
-fn not_bspline(op: &'static str, step: MixedStep) -> SolidError {
+fn not_bspline(op: &'static str, step: MixedStep, at: EntityRef) -> SolidError {
     Failure::new(op, BlendFailure::MixedCornerUnbuildable(step))
         .with_status(SM_ERR_NULL_POINTER)
+        .at(at)
         .into_error()
+}
+
+/// Blend `i`'s blended edge use at the corner: B1's (the convex one) for 0, B2's (the
+/// concave one) otherwise; where a failure of that blend's geometry is reported.
+fn blend_edgeuse(ring: &MixedRing, i: usize) -> EntityRef {
+    EntityRef::Edgeuse(if i == 0 { ring.convex } else { ring.concave })
 }
 
 /// `SmMixedRing`: the Mixed corner's parts at its vertex, read off the ring: the convex
@@ -594,12 +601,10 @@ fn param_of(k: &Kernel, curve: &Curve, pnt: Point3, tol: f64, op: &'static str) 
             ..Default::default()
         },
     )?;
-    let first = sols.get(0).ok_or_else(|| {
-        defect(
-            op,
-            "the closest-point solve over the rail's whole interval returned no point, though the distance to a point has a least value on a closed interval",
-        )
-    })?;
+    // the tree solve's own failures are dropped, so the solve can end empty
+    let first = sols
+        .get(0)
+        .ok_or_else(|| unbuildable(op, MixedStep::NoClosestPointOnRail))?;
     first.start.param(0)
 }
 
@@ -638,8 +643,14 @@ fn curve_surface(
 /// `sm_MixedRailWall`: the surface swept by a rail on the plane T along T's normal,
 /// reaching `reach` either side; the rail first continued past both ends as itself (its
 /// end spans' own polynomials) by a quarter of `reach`.
-fn rail_wall(rail: &Curve, normal: Vec3, reach: f64, op: &'static str) -> Result<Surface> {
-    let b0 = bspline_curve(rail).ok_or_else(|| not_bspline(op, MixedStep::RailNotBSpline))?;
+fn rail_wall(
+    rail: &Curve,
+    normal: Vec3,
+    reach: f64,
+    op: &'static str,
+    at: EntityRef,
+) -> Result<Surface> {
+    let b0 = bspline_curve(rail).ok_or_else(|| not_bspline(op, MixedStep::RailNotBSpline, at))?;
     let b1 = b0
         .create_extended_curve_by_distance(
             0.25 * reach,
@@ -802,7 +813,13 @@ pub fn calc_mixed_vert_geom(
 
     // A and B: each wall rail meets the other blend's rail on T swept along T's normal
     for ii in 0..2 {
-        let wall = rail_wall(of2(&rails.on_t, 1 - ii), normal, reach, OP_VERT)?;
+        let wall = rail_wall(
+            of2(&rails.on_t, 1 - ii),
+            normal,
+            reach,
+            OP_VERT,
+            blend_edgeuse(&mixed.ring, 1 - ii),
+        )?;
         let pnt = curve_surface(k, of2(&rails.on_wall, ii), &wall, sx, tol, OP_VERT)?;
         let fv = if ii == 0 { a } else { bv };
         pseudo.set_vertex_point(fv, pnt)?;
@@ -1071,7 +1088,13 @@ pub fn calc_mixed_edge_geom(
     let mut trim_t: [Crv; 2] = [Crv::default(), Crv::default()];
     let mut pcs: [Crv; 2] = [Crv::default(), Crv::default()];
     for ii in 0..2 {
-        let wall = rail_wall(of2(&rails.on_t, 1 - ii), normal, reach, OP_EDGE)?;
+        let wall = rail_wall(
+            of2(&rails.on_t, 1 - ii),
+            normal,
+            reach,
+            OP_EDGE,
+            blend_edgeuse(&ring, 1 - ii),
+        )?;
         let to = if ii == 0 { a } else { bv };
         let s_to = pseudo.vertex_point(to)?;
         let mut sdir = s_to - sx;
@@ -1094,12 +1117,20 @@ pub fn calc_mixed_edge_geom(
                 "the trimline's intersection returned no parameter curve on the blend, though srf_srf_intersection drops the curve onto both surfaces where the intersector gave none",
             )
         })?;
-        let round_b = bspline_surface(round)
-            .ok_or_else(|| not_bspline(OP_EDGE, MixedStep::BlendSurfaceNotBSpline))?;
-        let mut pc = algebra::from_bspline(
-            bspline_curve(&uv1)
-                .ok_or_else(|| not_bspline(OP_EDGE, MixedStep::TrimlineNotBSpline))?,
-        )?;
+        let round_b = bspline_surface(round).ok_or_else(|| {
+            not_bspline(
+                OP_EDGE,
+                MixedStep::BlendSurfaceNotBSpline,
+                blend_edgeuse(&ring, ii),
+            )
+        })?;
+        let mut pc = algebra::from_bspline(bspline_curve(&uv1).ok_or_else(|| {
+            not_bspline(
+                OP_EDGE,
+                MixedStep::TrimlineNotBSpline,
+                blend_edgeuse(&ring, ii),
+            )
+        })?)?;
         // which end is at X
         let end0 = {
             let q0 = algebra::eval(
@@ -1174,14 +1205,12 @@ pub fn calc_mixed_edge_geom(
 
     // the rail pieces A-P (B1's), B-Q (B2's), the lines V-P, V-Q, and the arc X-V
     let (ap, bq) = {
-        let r0 = algebra::from_bspline(
-            bspline_curve(&rails.on_wall[0])
-                .ok_or_else(|| not_bspline(OP_EDGE, MixedStep::RailNotBSpline))?,
-        )?;
-        let r1 = algebra::from_bspline(
-            bspline_curve(&rails.on_wall[1])
-                .ok_or_else(|| not_bspline(OP_EDGE, MixedStep::RailNotBSpline))?,
-        )?;
+        let r0 = algebra::from_bspline(bspline_curve(&rails.on_wall[0]).ok_or_else(|| {
+            not_bspline(OP_EDGE, MixedStep::RailNotBSpline, blend_edgeuse(&ring, 0))
+        })?)?;
+        let r1 = algebra::from_bspline(bspline_curve(&rails.on_wall[1]).ok_or_else(|| {
+            not_bspline(OP_EDGE, MixedStep::RailNotBSpline, blend_edgeuse(&ring, 1))
+        })?)?;
         let da = param_of(k, &rails.on_wall[0], sa, tol, OP_EDGE)?;
         let dp = param_of(k, &rails.on_wall[0], pseudo.vertex_point(p)?, tol, OP_EDGE)?;
         let db = param_of(k, &rails.on_wall[1], sb, tol, OP_EDGE)?;
