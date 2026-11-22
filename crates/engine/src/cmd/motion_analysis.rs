@@ -325,7 +325,7 @@ fn shared_volume(s: &Session, doc: &Document, a: u64, b: u64, booleans: &mut usi
         };
         for body in st.bodies.iter().filter(|x| doc.model_body_component(x) == comp && !x.body.is_mesh()) {
             let frame = doc.model_body_offset(body).map(|o| mat_mul(&m, o)).unwrap_or(m);
-            let local = body.mesh().bounds();
+            let local = body.body.exact_bounds().unwrap_or_else(|_| body.outline_bounds());
             let mut world = Aabb3::EMPTY;
             for c in 0..8 {
                 let pick = |bit: usize, lo: f64, hi: f64| if c & bit == 0 { lo } else { hi };

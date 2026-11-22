@@ -4,21 +4,21 @@
 //!
 //! Each rail on the 10 high face lies `r - 10` below the face's bottom edge, so it meets
 //! the vertical side edge at each end of the round on the edge's line, `r - 10` past the
-//! edge's end (found there by `fillet_trace_reaches_rails`, WR-610). Without
-//! `fillet_rail_end_on_continued_surface`, `CalcRailIntEdgeuse` evaluates that end on the
-//! face's surface clamped to its domain: it lands on the side edge's bottom vertex, off the
+//! edge's end (found there by `fillet_trace_reaches_rails`, WR-610). Upstream's
+//! `CalcRailIntEdgeuse` evaluates that end on the face's surface clamped to its domain: it lands on the side edge's bottom vertex, off the
 //! fillet by `(r - 10)^2 / 2r` (1.24e-4 at r10.05), under the corner's ten tolerances, so
 //! the Nx1 corner takes it as meeting the side edge and builds an end rib off the fillet,
-//! which fails (error 3). With the flag the rail end stays on the rail, misses the side
-//! edge (`CalcCornerEdgeGeom`'s miss test, part of `fillet_cliff_overflow`), and the
+//! which fails (error 3). On the continued surface (WR-630) the rail end stays on the
+//! rail, misses the side edge (`CalcCornerEdgeGeom`'s miss test, part of the cliff
+//! overflow), and the
 //! overflow removes the round's corner region: the expected volumes are in closed form.
 //!
 //! Both top edges along x are rounded. On the front one (y = 0) the side edges' UV trims
 //! are lines and the run-on finds the rail ends with the flags of #960 alone. On the back
 //! one (y = 20, `wr631_cliff_overflow_construction`'s #1467 case) the trims are exact
-//! degree-1 B-splines, which the run-on continues only with `fillet_run_on_bspline_trims`
-//! (WR-654); without it the rail ends are not found, the corner takes them as misses
-//! anyway, and that case never reaches the placement this tests.
+//! degree-1 B-splines, which the run-on continues along their lines (WR-654, formerly behind
+//! `fillet_run_on_bspline_trims`); without that the rail ends were not found, the
+//! corner took them as misses anyway, and that case never reached the placement this tests.
 
 #![allow(
     clippy::unwrap_used,
@@ -36,14 +36,10 @@ use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::edge;
 use solidcore::Kernel;
 
-/// The flags of the fork's cliff overflow (#960), with or without WR-630's.
-fn kernel(rail_end_on_continued_surface: bool) -> Kernel {
+/// The flags the fork's cliff overflow (#960) runs with here.
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_run_on_bspline_trims = true;
-    k.fixes.fillet_cliff_overflow = true;
-    k.fixes.fillet_rail_end_on_continued_surface = rail_end_on_continued_surface;
     k
 }
 
@@ -71,8 +67,8 @@ enum Outcome {
 }
 
 /// Rounds the box's top edge along x at `y` by `r`.
-fn round(rail_end_on_continued_surface: bool, y: f64, r: f64) -> Outcome {
-    let mut k = kernel(rail_end_on_continued_surface);
+fn round(y: f64, r: f64) -> Outcome {
+    let mut k = kernel();
     let mut b = create_box(&mut k, Point3::ZERO, 40.0, 20.0, 10.0).unwrap();
     let e = b
         .edges()
@@ -115,7 +111,7 @@ fn a_round_just_past_the_face_keeps_its_rail_ends_on_the_rails() {
     for y in [0.0, 20.0] {
         for r in [10.05, 10.06, 10.07, 12.0] {
             let expected = 8000.0 - 40.0 * removed_area(r, 20.0, 10.0);
-            match round(true, y, r) {
+            match round(y, r) {
                 Outcome::Built(v) => assert!(
                     (v - expected).abs() <= 1e-8 * expected,
                     "y {y} r {r}: volume {v} against {expected}"

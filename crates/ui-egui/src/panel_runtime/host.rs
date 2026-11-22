@@ -16,6 +16,8 @@ pub struct PanelContext {
     pub flow: Flow,
     pub size_class: SizeClass,
     pub focused: bool,
+    /// Paint-only geometry during a live drag; do not publish measurements or input.
+    pub preview_geometry: bool,
     pub direction: Direction,
     pub motion: Motion,
 }
@@ -204,6 +206,8 @@ pub enum ContentSlot {
     Footer,
     /// One total short-wide row, sharing its height with the host controls.
     Inline,
+    /// In the title's place, after the header's grip, folded or not (`set_header_content`).
+    Title,
 }
 
 /// A frame-scoped content binding. Application bodies may borrow their existing

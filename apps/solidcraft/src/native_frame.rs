@@ -13,7 +13,9 @@
 //! DPI (the same logical size, as winit computes it), so the rect Windows suggests while the
 //! title bar is dragged onto a monitor with another scale is the rect winit then applies: the
 //! window rescales once at the crossing and stays under the pointer, instead of the OS's move
-//! loop and winit disagreeing about a frame the window doesn't have.
+//! loop and winit disagreeing about a frame the window doesn't have. A snapped window leaves the
+//! answer to Windows: it derives the size to restore to from this one, so the snapped size would
+//! replace the size from before the snap (#9336).
 //!
 //! Replacing a window procedure and setting a window class's icon have no safe API, hence the
 //! `unsafe_code` allowance on this module (the app crate denies it; see `native_crash.rs` and
@@ -23,6 +25,10 @@
 //!
 //! [`set_class_icon`] gives the window's class the exe's icon, so the taskbar button shows the
 //! mark even when the window is too busy to answer the taskbar's request for its icon.
+//!
+//! [`WindowMove`] passes Preferences › Layout's `windows_smooth_window_drag` to winit: on, the app
+//! draws nothing while the window is dragged by its title bar and catches up when the drag ends;
+//! off (the default), it keeps drawing during the drag, as before.
 #![allow(unsafe_code)]
 
 use std::sync::atomic::{AtomicIsize, Ordering};
@@ -34,9 +40,10 @@ use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEARES
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallWindowProcW, GCLP_HICON, GCLP_HICONSM, GWL_STYLE, GWLP_WNDPROC, GetClientRect, GetWindowLongPtrW, GetWindowRect, HTBOTTOM, HTBOTTOMLEFT,
-    HTBOTTOMRIGHT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, IMAGE_ICON, IsIconic, IsZoomed, LR_DEFAULTCOLOR, LoadImageW, SM_CXICON,
-    SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SM_CXSMICON, SetWindowLongPtrW, WM_GETDPISCALEDSIZE, WM_NCDESTROY, WM_NCHITTEST, WNDPROC, WS_THICKFRAME,
+    CallWindowProcW, GCLP_HICON, GCLP_HICONSM, GWL_STYLE, GWLP_WNDPROC, GetClientRect, GetWindowLongPtrW, GetWindowPlacement, GetWindowRect,
+    HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, IMAGE_ICON, IsIconic, IsZoomed, LR_DEFAULTCOLOR,
+    LoadImageW, SM_CXICON, SM_CXPADDEDBORDER, SM_CXSIZEFRAME, SM_CXSMICON, SetWindowLongPtrW, WINDOWPLACEMENT, WM_GETDPISCALEDSIZE, WM_NCDESTROY,
+    WM_NCHITTEST, WNDPROC, WS_THICKFRAME,
 };
 // windows-sys has SetClassLongPtrW only on 64-bit targets; on 32-bit Windows it is SetClassLongW.
 #[cfg(target_pointer_width = "64")]
@@ -153,7 +160,7 @@ unsafe extern "system" fn frame_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
         WM_GETDPISCALEDSIZE => {
             let new_dpi = wparam as u32;
             // SAFETY: for this message lParam points to a SIZE the system reads back.
-            match (resizable(hwnd), client_size(hwnd), unsafe { (lparam as *mut SIZE).as_mut() }) {
+            match (resizable(hwnd) && !snapped(hwnd), client_size(hwnd), unsafe { (lparam as *mut SIZE).as_mut() }) {
                 (true, Some(size), Some(out)) => {
                     // SAFETY: a window handle the system passed in.
                     let old_dpi = unsafe { GetDpiForWindow(hwnd) };
@@ -188,6 +195,28 @@ fn resizable(hwnd: HWND) -> bool {
         let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
         style & WS_THICKFRAME != 0 && IsZoomed(hwnd) == 0 && IsIconic(hwnd) == 0
     }
+}
+
+/// The window is snapped (Aero Snap, Win+arrows): it is not the size it will restore to.
+fn snapped(hwnd: HWND) -> bool {
+    let empty = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    let mut window = empty;
+    // SAFETY: both structs are valid to fill, and WINDOWPLACEMENT has its length set, as
+    // GetWindowPlacement requires.
+    let normal = unsafe {
+        let mut placement: WINDOWPLACEMENT = std::mem::zeroed();
+        placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+        if GetWindowPlacement(hwnd, &mut placement) == 0 || GetWindowRect(hwnd, &mut window) == 0 {
+            return false;
+        }
+        placement.rcNormalPosition
+    };
+    differs_in_size(window, normal)
+}
+
+/// Sizes only: the restored rect is in work-area coordinates, the window's in screen coordinates.
+fn differs_in_size(a: RECT, b: RECT) -> bool {
+    (a.right - a.left, a.bottom - a.top) != (b.right - b.left, b.bottom - b.top)
 }
 
 /// The client area's size in pixels (the whole window: winit gives it no frame).
@@ -237,14 +266,74 @@ fn hit_code(d: egui::ResizeDirection) -> u32 {
     }
 }
 
+/// Passes Preferences › Layout's `windows_smooth_window_drag` to the vendored winit, at start and
+/// whenever it changes; winit reads it at each message, so it applies at once.
+#[derive(Default)]
+pub struct WindowMove {
+    /// The value winit was given last (`set_quiet_window_move`); `None` before the first.
+    quiet: Option<bool>,
+}
+
+impl WindowMove {
+    /// Give winit `smooth_window_drag` if it differs from what it was given last, or nothing was.
+    pub fn follow(&mut self, smooth_window_drag: bool) {
+        if let Some(quiet) = self.change(smooth_window_drag) {
+            winit::platform::windows::set_quiet_window_move(quiet);
+        }
+    }
+
+    /// The value to give winit for `smooth_window_drag` (remembered as given), `None` when winit
+    /// has it already.
+    fn change(&mut self, smooth_window_drag: bool) -> Option<bool> {
+        let quiet = quiet_window_move(smooth_window_drag);
+        (self.quiet != Some(quiet)).then(|| {
+            self.quiet = Some(quiet);
+            quiet
+        })
+    }
+}
+
+/// winit's switch for the preference: a quiet move (nothing drawn while the title bar is dragged,
+/// the picture catches up when the drag ends) only when the preference is on. Off, winit keeps its
+/// own behaviour: the app draws during the drag, as before.
+fn quiet_window_move(smooth_window_drag: bool) -> bool {
+    smooth_window_drag
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Off (the default) leaves winit as it is: the app draws during the drag, as before. On
+    /// gives winit a quiet move. Each value is given once, at start and whenever it changes. The
+    /// pure part only: the switch itself is one per process, which the tests running in it share.
+    #[test]
+    fn window_move_gives_winit_the_preference_once_per_change() {
+        assert!(!quiet_window_move(false), "the default: drawing goes on during the drag, as before");
+        assert!(quiet_window_move(true), "the preference on: nothing drawn while the window is dragged");
+        let mut m = WindowMove::default();
+        assert_eq!(m.change(false), Some(false), "at start, whatever the value");
+        assert_eq!(m.change(false), None, "unchanged: winit has it");
+        assert_eq!(m.change(true), Some(true), "turned on");
+        assert_eq!(m.change(true), None);
+        assert_eq!(m.change(false), Some(false), "and off again");
+        let mut on = WindowMove::default();
+        assert_eq!(on.change(true), Some(true), "a saved `true` is given at start too");
+    }
 
     #[test]
     fn every_direction_has_its_own_hit_code() {
         use egui::ResizeDirection::*;
         let codes: Vec<u32> = [North, South, West, East, NorthWest, NorthEast, SouthWest, SouthEast].into_iter().map(hit_code).collect();
         assert_eq!(codes, vec![HTTOP, HTBOTTOM, HTLEFT, HTRIGHT, HTTOPLEFT, HTTOPRIGHT, HTBOTTOMLEFT, HTBOTTOMRIGHT]);
+    }
+
+    #[test]
+    fn only_a_different_size_counts_as_snapped() {
+        let rect = |left, top, w, h| RECT { left, top, right: left + w, bottom: top + h };
+        // The restored rect is in work-area coordinates, so its position may differ when restored.
+        assert!(!differs_in_size(rect(2187, 133, 1500, 1000), rect(267, 133, 1500, 1000)));
+        assert!(differs_in_size(rect(1920, 0, 1280, 1380), rect(267, 133, 1500, 1000)));
+        assert!(differs_in_size(rect(0, 0, 1500, 1380), rect(0, 0, 1500, 1000)));
     }
 }

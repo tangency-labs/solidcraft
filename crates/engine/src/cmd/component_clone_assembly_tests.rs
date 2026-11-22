@@ -23,13 +23,23 @@ fn joint(id: u64, a: u64, b: u64) -> Joint {
         angle: 0.1,
         suppressed: false,
         exprs: Default::default(),
+        offset_xy: [3.0, -4.0],
         captured: None,
         constraint: None,
     }
 }
 
 fn occurrence(id: u64) -> Occurrence {
-    Occurrence { id, component: id, parent: 0, name: format!("Occurrence{id}"), transform: IDENTITY, grounded: false }
+    Occurrence {
+        id,
+        component: id,
+        parent: 0,
+        name: format!("Occurrence{id}"),
+        transform: IDENTITY,
+        grounded: false,
+        expressed_moves: Vec::new(),
+        bom_type: None,
+    }
 }
 
 fn documents() -> (Document, Document) {
@@ -88,6 +98,7 @@ fn internal_relationships_receive_independent_ids_and_remapped_typed_references(
     assert_eq!((a.joints[4].a.occurrence, a.joints[4].b.occurrence), (101, 102));
     assert_eq!(a.joints[4].values, source.assembly.joints[0].values);
     assert_eq!(a.joints[4].limits, source.assembly.joints[0].limits);
+    assert_eq!(a.joints[4].offset_xy, source.assembly.joints[0].offset_xy);
     assert_eq!(a.joints[4].name, "Joint1 (2)");
     assert_eq!(a.origins.len(), 4);
     // Its x reference's face is the copy's too.

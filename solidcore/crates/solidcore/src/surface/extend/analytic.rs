@@ -407,6 +407,107 @@ fn length(f: &Frame, iso: Iso, (x_far, x_half): (Vec3, Vec3), x0: Vec3, x1: Vec3
     Ok(radius * phi)
 }
 
+/// The widened analytic path measures the distance in the side's own frame, from the
+/// STEP parameters the construction widened: the closed-form radius and arc keep the
+/// result the same at any position. The parameters come through the polar converters, so
+/// their own rounding is in the angle and radius bounds, and a conversion that could only
+/// be solved numerically is refused as not exact.
+pub(super) fn widened_across(
+    k: &Kernel,
+    (source, source_dom, source_side): (&Surface, &crate::geom::extent2d::Extent2d, BoxSide),
+    (s, dom, side): (&Surface, &crate::geom::extent2d::Extent2d, BoxSide),
+) -> Result<Across> {
+    let support = AnalyticSupport::check(k, s)?;
+    let form = crate::blend::fillet_section::station::as_b_spline(k, s)?
+        .ok_or_else(|| SolidError::surface_failed(OP, "the surface has no B-spline form"))?;
+    let middle = side.point(dom, 0.5);
+    let end = side.at(&knot_box(&form)?);
+    let to = if side.is_u() {
+        Point2::new(end, middle.y)
+    } else {
+        Point2::new(middle.x, end)
+    };
+    let from = source_side.point(source_dom, 0.5);
+    let parallel = round_the_axis(s, side) == Some(true);
+    // a straight iso (a cone's ruling, a plane) is its chord, on the form
+    let circular = match support.implicit() {
+        Implicit::Cone { .. } => parallel,
+        Implicit::Sphere { .. } | Implicit::Torus { .. } => true,
+        Implicit::Plane { .. } => false,
+    };
+    if !circular {
+        return Ok(super::measure::across(super::measure::chord(
+            &form, middle, to,
+        )?));
+    }
+    let (a, a_exact) = source.convert_uv_from_nurbs_to_step_exact(k, from)?;
+    let (b, b_exact) = s.convert_uv_from_nurbs_to_step_exact(k, to)?;
+    // A numerical inverse is no closed form: its angle is not bounded by the conversion's
+    // rounding, so the distance across cannot be certified here.
+    if !(a_exact && b_exact) {
+        return Err(super::not_exact(None));
+    }
+    // The polar converters' own rounding, in degrees: it scales with the angles converted
+    // (up to a turn), so it is taken from both ends rather than from the difference alone.
+    let conv_x = gamma(8) * (a.x.abs() + b.x.abs());
+    let conv_y = gamma(8) * (a.y.abs() + b.y.abs());
+    let (radius, radius_err, delta, conv) = match support.implicit() {
+        Implicit::Cone {
+            radius, tan_angle, ..
+        } => {
+            let term = tan_angle * a.y;
+            let r = radius + term;
+            (
+                r,
+                gamma(4) * (radius.abs() + term.abs()) + tan_angle.abs() * conv_y.to_radians(),
+                b.x - a.x,
+                conv_x,
+            )
+        }
+        Implicit::Sphere { radius, .. } => {
+            if parallel {
+                let latitude = a.y.to_radians();
+                let r = radius * latitude.cos();
+                (
+                    r,
+                    gamma(8) * radius * (1.0 + latitude.abs())
+                        + radius * latitude.sin().abs() * conv_y.to_radians(),
+                    b.x - a.x,
+                    conv_x,
+                )
+            } else {
+                (radius, 0.0, b.y - a.y, conv_y)
+            }
+        }
+        Implicit::Torus { major, minor, .. } => {
+            if parallel {
+                let latitude = a.y.to_radians();
+                let term = minor * latitude.cos();
+                (
+                    major + term,
+                    gamma(12) * (major.abs() + minor * (1.0 + latitude.abs()))
+                        + minor * latitude.sin().abs() * conv_y.to_radians(),
+                    b.x - a.x,
+                    conv_x,
+                )
+            } else {
+                (minor, 0.0, b.y - a.y, conv_y)
+            }
+        }
+        Implicit::Plane { .. } => {
+            return Ok(super::measure::across(super::measure::chord(
+                &form, middle, to,
+            )?));
+        }
+    };
+    let angle = delta.to_radians().abs();
+    let angle_err = gamma(4) * angle + conv.to_radians();
+    Ok(super::measure::across(super::measure::circle_from_angle(
+        (radius, radius_err),
+        (angle, angle_err),
+    )?))
+}
+
 /// `cur` continued Natural past `side` by `distance` across it, capped (module docs): the
 /// result, its across length, whether the cap stopped it, and its construction bound;
 /// `None` where the (capped) distance is below the side's resolution ([`below_resolution`]).

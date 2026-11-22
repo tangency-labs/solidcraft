@@ -77,11 +77,13 @@ fn look(s: &Session) -> Look {
     }
     // In its own part's frame: an origin that turns over on its part is a lost reference; a part
     // the joints place anew is only its consequence.
-    let frame = |o: &solidcraft_doc::joints::JointOrigin| -> std::result::Result<Frame, String> {
+    let frame = |o: &solidcraft_doc::joints::JointOrigin, joint: Option<&solidcraft_doc::joints::Joint>| -> std::result::Result<Frame, String> {
         let f = solidcraft_doc::joints::resolve_origin(&s.doc, &st, o).map_err(|e| e.to_string())?;
+        let f = joint.map_or(f, |j| j.offset_frame_a(f));
         Ok((Vec3::new(f[3][0], f[3][1], f[3][2]), Vec3::new(f[2][0], f[2][1], f[2][2])))
     };
-    let joints = s.doc.assembly.joints.iter().filter(|j| !j.suppressed).map(|j| (j.id, (j.name.clone(), frame(&j.a), frame(&j.b)))).collect();
+    let joints =
+        s.doc.assembly.joints.iter().filter(|j| !j.suppressed).map(|j| (j.id, (j.name.clone(), frame(&j.a, Some(j)), frame(&j.b, None)))).collect();
     let unsolved = if s.doc.assembly.joints.is_empty() {
         BTreeMap::new()
     } else {

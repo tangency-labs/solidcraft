@@ -20,6 +20,7 @@ fn projection(scale: f64) -> Proj {
         cam: Camera::default(),
         vp: Mat4([[scale / 700.0, 0.0, 0.0, 0.0], [0.0, scale / 450.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.5, 1.0]]),
         rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0)),
+        bounds: None,
     }
 }
 fn screen_error(paths: &[Vec<Vec3>], point: Vec3, proj: &Proj, ppp: f32) -> f32 {

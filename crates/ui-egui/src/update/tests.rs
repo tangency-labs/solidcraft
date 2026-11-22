@@ -27,6 +27,16 @@ fn nightlies_count_as_the_release_they_follow() {
     assert!(is_newer("v0.10.0", "0.9.0-nightly.20261014.36.1"));
 }
 
+#[test]
+fn test_builds_are_recognised() {
+    assert!(is_test_version("0.43.0-test+abc1234"));
+    assert!(is_test_version("0.43.0-test"));
+    assert!(!is_test_version("0.43.0"));
+    assert!(!is_test_version("0.43.0-rc.1"));
+    assert!(!is_test_version("0.43.0-nightly.20261115.7.1"));
+    assert!(!is_test_version("not a version"));
+}
+
 fn probe(os: &str, release: bool, env: &[(&str, &str)], exe: &str, files: &[&str]) -> InstallKind {
     let env: BTreeMap<String, String> = env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
     let files: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
@@ -358,6 +368,88 @@ fn turning_off_automatic_checks_stops_the_launch_check() {
     assert!(h.app.updater.release.is_none());
 }
 
+/// A computer whose administrator set `CheckForUpdates` to `on` (#10260).
+fn update_policy(on: bool) -> crate::policy::Policy {
+    crate::policy::Policy { mandatory: crate::policy::Layer { check_for_updates: Some(on), ..Default::default() }, ..Default::default() }
+}
+
+#[test]
+fn an_organizations_policy_turns_update_checks_off_whatever_the_preference_says() {
+    let dir = scratch();
+    let (feed, _) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    assert_eq!(h.app.policy, crate::policy::Policy::default(), "no policy unless the host loads one");
+    h.app.preferences.check_updates = true;
+    h.app.updater.feed = Some(feed);
+    h.app.policy = update_policy(false);
+    h.frames(3);
+    assert!(!available(&mut h.app));
+    assert_eq!(h.app.updater.status, Status::Idle);
+    // Check now (Help, Preferences) asks nobody either.
+    let ctx = h.ctx.clone();
+    check_now(&mut h.app, &ctx);
+    h.frames(3);
+    assert!(h.app.updater.rx.is_none() && h.app.updater.release.is_none());
+    assert!(h.app.preferences.check_updates, "the person's own choice is kept for when the policy goes");
+}
+
+#[test]
+fn an_organizations_policy_keeps_update_checks_on_whatever_the_preference_says() {
+    let dir = scratch();
+    let (feed, version) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    h.app.updater.feed = Some(feed);
+    h.app.policy = update_policy(true);
+    h.frame();
+    wait_for_check(&mut h);
+    assert_eq!(h.app.updater.release.as_ref().map(|r| r.version().to_string()), Some(version));
+    assert!(!h.app.preferences.check_updates);
+}
+
+#[test]
+fn a_setting_under_policy_shows_the_organizations_value_and_cannot_be_changed() {
+    use egui::accesskit::{Role, Toggled};
+    let _language = solidcraft_ui_text::scope("en");
+    for on in [false, true] {
+        let dir = scratch();
+        let (feed, _) = next_release_feed(&dir.0);
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        h.app.preferences.check_updates = !on;
+        h.app.updater.feed = Some(feed);
+        h.app.policy = update_policy(on);
+        let reply = h.call("ui.prefs", json!({"open":"General"}));
+        assert_eq!(reply["result"]["policy"], json!({"locked": ["check_updates"], "check_updates": on}), "{reply}");
+        assert_eq!(reply["result"]["check_updates"], json!(!on), "the stored preference is reported as stored");
+        crate::prefs::reveal_preference(&mut h, "prefs:check_updates");
+        let tree = h.output.accesskit_update.as_ref().unwrap();
+        let boxes: Vec<_> =
+            tree.nodes.iter().filter(|(_, n)| n.role() == Role::CheckBox && n.label() == Some("Check at start and once a day")).collect();
+        assert_eq!(boxes.len(), 1);
+        assert!(boxes[0].1.is_disabled(), "policy {on}: the checkbox is locked");
+        assert_eq!(boxes[0].1.toggled(), Some(if on { Toggled::True } else { Toggled::False }), "it shows the organization's value");
+        assert!(h.widget("Set by your organization").is_some(), "the row says who set it");
+        assert_eq!(h.widget("Your organization turned off update checks on this computer.").is_some(), !on);
+        // The control channel cannot change it; sending back what it read is not a change.
+        let refused = h.call("ui.prefs", json!({"check_updates": on}));
+        assert_eq!(refused["ok"], json!(false), "{refused}");
+        assert!(refused["error"].as_str().unwrap().contains("set by your organization's policy"), "{refused}");
+        assert_eq!(h.call("ui.prefs", json!({"check_updates": !on}))["ok"], json!(true));
+        assert_eq!(h.app.preferences.check_updates, !on);
+        // Restore page defaults leaves it too: the person's choice outlives the policy.
+        assert_eq!(h.call("ui.prefs", json!({"button":"defaults"}))["ok"], json!(true));
+        assert_eq!(h.app.preferences.check_updates, !on, "policy {on}: defaults keep the stored choice");
+    }
+    // Without a policy the reply names none, and the setting changes as before.
+    let mut h = crate::scenario::Harness::new();
+    let reply = h.call("ui.prefs", json!({"check_updates": false}));
+    assert_eq!(reply["ok"], json!(true));
+    assert!(reply["result"].get("policy").is_none());
+    assert!(!h.app.preferences.check_updates);
+}
+
 #[test]
 fn help_menu_checks_with_automatic_checks_off_and_offers_installation() {
     let dir = scratch();
@@ -512,15 +604,17 @@ fn the_title_bar_offers_the_new_version_and_opens_the_update_window() {
     h.frame();
     wait_for_check(&mut h);
     h.frames(2);
-    // An accent pill reading "Update to <version>", left of the Settings/Help/Report cluster.
+    // The transient Update pill follows the saved End items, rather than preceding Assistant.
     let label = format!("Update to {version}");
     let at = h.widget(&label).unwrap_or_else(|| panic!("no `{label}` in the title bar"));
     let pill = crate::scenario::rect_of("titlebar:update").unwrap();
     assert!(pill.contains(egui::pos2(at[0] as f32, at[1] as f32)));
-    let assistant = crate::scenario::rect_of("titlebar:assistant").unwrap();
-    assert!(pill.right() < assistant.left() && assistant.left() - pill.right() < 12.0, "beside Assistant: {pill:?} {assistant:?}");
+    let version_rect = crate::scenario::rect_of("titlebar:version").unwrap();
+    assert!((pill.left() - version_rect.right() - crate::ui_kit::app_bar_layout::application::GAP).abs() < 0.5);
     assert!((pill.center().y - report.center().y).abs() < 1.0 && pill.height() <= report.height());
-    assert_eq!(crate::scenario::rect_of("titlebar:report"), Some(report), "Report a bug stays where it was");
+    let shifted_report = crate::scenario::rect_of("titlebar:report").unwrap();
+    assert_eq!(shifted_report.size(), report.size(), "adding a transient keeps the Report control's size");
+    assert!(!shifted_report.intersects(pill), "End-stack neighbours move aside for the update pill");
     assert!(!h.app.updater.open, "no window pops up by itself");
     assert!(crate::scenario::rect_of("update:window").is_none());
     // Clicking it opens the Update window (not a modal: the bar stays usable).
@@ -547,24 +641,29 @@ fn the_pill_shortens_in_a_narrow_title_bar() {
     let wide = crate::scenario::rect_of("titlebar:update").unwrap();
     let label = format!("Update to {version}");
     assert!(h.widget(&label).is_some());
-    // Narrower and narrower: the pill never grows, never reaches Report a bug, and its label gives
+    // Narrower and narrower: the pill never grows or overlaps Report a bug, and its label gives
     // way (to "Update", then the icon alone) before the document tabs run out of room.
     let mut last = wide.width();
     let mut shortened = false;
     for width in [1000.0, 800.0, 700.0, 600.0, 520.0, 440.0] {
         h.call("ui.resize", json!({"width": width, "height": 600}));
         h.frames(3);
-        let report = crate::scenario::rect_of("titlebar:report").unwrap();
+        // Report a bug itself may now sit behind the More menu in a very narrow bar.
+        let report = crate::scenario::rect_of("titlebar:report");
         // Icon alone, it keeps the full text for screen readers.
         let pill = crate::scenario::rect_of("titlebar:update").filter(|_| h.widget(&label).is_some() || h.widget("Update").is_some());
         if let Some(p) = pill {
             assert!(p.width() <= last + 0.5, "at {width}: {p:?} grew from {last}");
-            assert!(p.right() <= report.left(), "at {width}: {p:?} overlaps Report a bug {report:?}");
+            if let Some(report) = report {
+                // Saved-list End order puts the transient after Report, so check separation in either direction.
+                assert!(!p.intersects(report), "at {width}: {p:?} overlaps Report a bug {report:?}");
+            }
             last = p.width();
         }
         shortened |= pill.is_none_or(|p| p.width() < wide.width());
         if width == 1000.0 {
-            assert!(h.widget("Update").is_some() && h.widget(&label).is_none(), "the short label keeps room for the tabs");
+            // The bar now gives parts up only when they do not fit: at 1000 the full label still has room.
+            assert!(h.widget(&label).is_some(), "the full label still fits at 1000");
         }
     }
     assert!(shortened, "the long label gives way in a narrow bar");
@@ -753,10 +852,10 @@ fn unavailable_preferences_show_disabled_update_controls_and_real_values() {
                 _ => solidcraft_ui_text::format("update.prefs_dev", &[("version", current_version())]),
             };
             assert!(
-                tree.nodes.iter().any(|(_, node)| node.role() == Role::Label && node.value() == Some(note.as_str())),
-                "the platform help stays accessible"
+                tree.nodes.iter().any(|(_, node)| node.role() == Role::Button && node.label() == Some(note.as_str()) && !node.is_disabled()),
+                "the platform help stays accessible as an enabled help button"
             );
-            assert!(!texts.contains(&note.as_str()), "the longer explanation stays in hover help");
+            assert!(!texts.contains(&note.as_str()), "the longer explanation stays behind the help icon");
             assert!(crate::scenario::rect_of("prefs:updates_help").is_some());
             h.step(&json!({"click":{"handle":"prefs:check_now"}})).unwrap();
             h.step(&json!({"widget":"Check at start and once a day"})).unwrap();

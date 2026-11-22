@@ -37,14 +37,14 @@ const MAX_FACES: usize = 1000;
 /// A list of names read as `params::string_list` reads it (through [`NameList`], with its
 /// messages), then held to `range` items with the handler's whole `message` for any other count.
 /// `string_list` reads `null` as no names, so `null` gets that message too.
-fn names_in<'de, D: Deserializer<'de>>(d: D, range: std::ops::RangeInclusive<usize>, message: &str) -> Result<Option<NameList>, D::Error> {
+pub(super) fn names_in<'de, D: Deserializer<'de>>(d: D, range: std::ops::RangeInclusive<usize>, message: &str) -> Result<Option<NameList>, D::Error> {
     let v = Value::deserialize(d)?;
     let names = if v.is_null() { NameList::default() } else { NameList::deserialize(v).map_err(D::Error::custom)? };
     if range.contains(&names.0.len()) { Ok(Some(names)) } else { Err(D::Error::custom(whole(message))) }
 }
 
 /// A list of 1 to `max` names: one name as text, or a list.
-fn names_schema(description: &str, max: usize) -> Schema {
+pub(super) fn names_schema(description: &str, max: usize) -> Schema {
     json_schema!({
         "description": description,
         "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": max}]
@@ -90,6 +90,10 @@ pub struct RibParams {
     pub flip: Option<bool>,
     #[serde(default)]
     pub direction: Option<RibDirectionParam>,
+    /// True: the curves' open ends run on in their own direction until they meet the part, so
+    /// the wall reaches the face beyond them. Default: false.
+    #[serde(default)]
+    pub extend: Option<bool>,
     /// What the join makes of pieces that share no face. Default: separate.
     #[serde(default)]
     pub touching: Option<TouchingParam>,
@@ -348,7 +352,7 @@ pub struct EmbossParams {
     /// The bodies to emboss, by name. With `face`, only these are searched for it.
     #[serde(default)]
     pub targets: Option<NameList>,
-    /// A world point selecting a planar face or a complete exterior cylindrical wall. Default:
+    /// A world point on the face to emboss: planar, a cylinder wall (either side) or another curved face. Default:
     /// inferred when exactly one supported tangent cylinder matches the selected profiles.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "EmbossFacePoint")]

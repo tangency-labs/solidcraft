@@ -3,8 +3,8 @@ use solidcraft_doc::FeatureKind;
 use solidcraft_doc::frame::{self, MAX_MEMBERS};
 
 use super::{
-    FrameMemberParams, ProfileInsertParams, ProfileInsertResult, ProfileListParams, ProfileListResult, ProfilePropertiesParams,
-    ProfilePropertiesResult,
+    FrameMemberParams, MultiTrimParams, ProfileInsertParams, ProfileInsertResult, ProfileListParams, ProfileListResult, ProfilePropertiesParams,
+    ProfilePropertiesResult, RemoveMemberParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -45,11 +45,20 @@ fn schemas_and_the_key_check_agree() {
             "anchor",
             "angle",
             "body_name",
+            "coped",
+            "corner",
+            "corners",
             "exact_regions",
+            "fit_ends",
+            "flip",
+            "gap",
             "lines",
+            "locate",
             "mirror",
             "name",
             "names",
+            "next_pair",
+            "pairs",
             "participants",
             "profile",
             "profile_sketch",
@@ -57,9 +66,10 @@ fn schemas_and_the_key_check_agree() {
             "sketch",
         ],
     );
-    assert_keys(input_schema_for::<ProfileListParams>(), &[]);
+    assert_keys(input_schema_for::<ProfileListParams>(), &["family"]);
     assert_keys(input_schema_for::<ProfilePropertiesParams>(), &["density", "profile"]);
     assert_keys(input_schema_for::<ProfileInsertParams>(), &["anchor", "angle", "at", "fixed", "profile", "sketch"]);
+    assert_keys(input_schema_for::<RemoveMemberParams>(), &["members"]);
 }
 
 #[test]
@@ -110,6 +120,11 @@ fn strict_keeps_todays_errors() {
         member(json!({"profile": {"kind": "bar", "width": " ", "height": 5}})),
         member(json!({"profile": {"kind": "rect_tube", "width": 10, "height": 10, "wall": 5}})),
         member(json!({"profile": {"kind": "bar", "width": "nonsense(", "height": 5}})),
+        member(json!({"profile": {"size": "RSC 999x99"}})),
+        member(json!({"profile": {"size": 5}})),
+        member(json!({"profile": {"size": "RSC 203x89", "height": 200}})),
+        member(json!({"profile": {"size": "RSC 203x89", "kind": "angle"}})),
+        member(json!({"profile": {"kind": "channel", "height": 100, "width": 50, "web": 6, "flange": 8, "flange_slope": 45}})),
         member(json!({"lines": []})),
         member(json!({"lines": "l1"})),
         member(json!({"lines": [1]})),
@@ -136,6 +151,10 @@ fn strict_keeps_todays_errors() {
         member(json!({"participants": 5})),
         member(json!({"participants": [5]})),
         member(json!({"participants": ["Nobody"]})),
+        // frame.profile.list
+        ("frame.profile.list", json!({"family": "XYZ"})),
+        ("frame.profile.list", json!({"family": 5})),
+        ("frame.profile.list", json!({"family": "rsc"})),
         // frame.profile.properties
         ("frame.profile.properties", json!({})),
         ("frame.profile.properties", json!({"profile": null})),
@@ -166,6 +185,21 @@ fn strict_keeps_todays_errors() {
         insert(json!({"sketch": "Nowhere"})),
         // No sketch is being edited, and none is named.
         insert(json!({})),
+        // frame.remove_member
+        ("frame.remove_member", json!({})),
+        ("frame.remove_member", json!({"members": null})),
+        ("frame.remove_member", json!({"members": []})),
+        ("frame.remove_member", json!({"members": "pair1"})),
+        ("frame.remove_member", json!({"members": [{"feature": 1}]})),
+        ("frame.remove_member", json!({"members": [{"feature": true, "line": "pair1"}]})),
+        ("frame.remove_member", json!({"members": [{"feature": 1, "line": "pair1", "extra": 1}]})),
+        ("frame.remove_member", json!({"members": (0..=MAX_MEMBERS).map(|_| json!({"feature": 1, "line": "l"})).collect::<Vec<_>>()})),
+        ("frame.remove_member", json!({"members": [{"feature": "Nowhere", "line": "pair1"}]})),
+        // frame.multi_trim (the design has no Frame Member: the feature is what is wrong)
+        ("frame.multi_trim", json!({})),
+        ("frame.multi_trim", json!({"feature": true, "members": ["a", "b"]})),
+        ("frame.multi_trim", json!({"feature": "Nowhere", "members": ["a", "b"]})),
+        ("frame.multi_trim", json!({"feature": sketch, "members": ["a", "b"], "kind": "butt"})),
     ]);
 }
 
@@ -306,7 +340,7 @@ fn a_section_sketchs_keys_count_only_with_a_section_sketch() {
     assert_eq!(messages(json!({"sketch": 1, "profile_sketch": 2, "exact_regions": "yes"})), ["`exact_regions` must be true or false"]);
 }
 
-/// The schemas say what the handlers need: `sketch` and a profile are required, `profile` and
+/// The schemas say what the handlers need: `sketch` or `pairs` and a profile are required, `profile` and
 /// `profile_sketch` are alternatives, and values have the shape the handlers read.
 #[test]
 fn the_schemas_take_what_the_handlers_read() {
@@ -331,6 +365,14 @@ fn the_schemas_take_what_the_handlers_read() {
                 }),
                 true,
             ),
+            (json!({"profile": tube(), "pairs": [{"a": {"vertex": [0, 0, 0]}, "b": {"sketch": 3, "point": "p2"}}]}), true),
+            (
+                json!({"sketch": 3, "profile": tube(), "pairs": [{"id": "pair2", "a": {"type": "origin"}, "b": {"construct_point": "P"}}], "next_pair": 3}),
+                true,
+            ),
+            (json!({"profile": tube(), "pairs": []}), false),
+            (json!({"profile": tube(), "pairs": [{"a": {"vertex": [0, 0, 0]}, "b": {"vertex": [1, 0, 0]}, "c": 1}]}), false),
+            (json!({"profile": tube(), "pairs": [{"a": {"vertex": [0, 0, 0]}, "b": {"vertex": [1, 0, 0]}}], "next_pair": -1}), false),
             (json!({"profile": tube()}), false),
             (json!({"sketch": "Frame"}), false),
             (json!({"sketch": "Frame", "profile": tube(), "profile_sketch": "Section"}), false),
@@ -343,9 +385,26 @@ fn the_schemas_take_what_the_handlers_read() {
             (json!({"sketch": "Frame", "profile": tube(), "anchor": "middle"}), false),
             (json!({"sketch": "Frame", "profile": tube(), "angle": true}), false),
             (json!({"sketch": "Frame", "profile": tube(), "body_names": ["a"]}), false),
+            (json!({"sketch": "Frame", "profile": {"size": "RSC 203x89"}}), true),
+            (json!({"sketch": "Frame", "profile": {"size": "RSC 203x89", "kind": "channel"}}), true),
+            (json!({"sketch": "Frame", "profile": {"size": "RSC 203x89", "height": 200}}), false),
+            (json!({"sketch": "Frame", "profile": {"size": ""}}), false),
+            // A corner override needs its type, as `kind` or an older `corner`, one of them.
+            (json!({"sketch": "Frame", "profile": tube(), "corners": [{"members": ["l1", "l2"], "kind": "butt", "gap": "2 mm"}]}), true),
+            (json!({"sketch": "Frame", "profile": tube(), "corners": [{"members": ["l1", {"line": "l2"}], "corner": "mitre", "flip": true}]}), true),
+            (json!({"sketch": "Frame", "profile": tube(), "corners": [{"members": ["l1", "l2"]}]}), false),
+            (json!({"sketch": "Frame", "profile": tube(), "corners": [{"members": ["l1", "l2"], "flip": false}]}), false),
+            (json!({"sketch": "Frame", "profile": tube(), "corners": [{"members": ["l1", "l2"], "kind": "butt", "corner": "butt"}]}), false),
+            (
+                json!({"sketch": "Frame", "profile": {"kind": "channel", "height": 100, "width": 50, "web": 6, "flange": 8, "flange_slope": "5 deg"}}),
+                true,
+            ),
         ],
     );
-    takes(input_schema_for::<ProfileListParams>(), &[(json!({}), true), (json!({"kind": "bar"}), false)]);
+    takes(
+        input_schema_for::<ProfileListParams>(),
+        &[(json!({}), true), (json!({"family": "RSC"}), true), (json!({"family": "rsc"}), false), (json!({"kind": "bar"}), false)],
+    );
     takes(
         input_schema_for::<ProfilePropertiesParams>(),
         &[
@@ -373,6 +432,101 @@ fn the_schemas_take_what_the_handlers_read() {
     );
 }
 
+// ---------------------------------------------------------------------------------------------
+// Corner entries and frame.multi_trim (#17854)
+
+#[test]
+fn a_corner_entry_reads_both_shapes() {
+    let lines = |c: &frame::CornerOverride| c.lines().map(str::to_string).collect::<Vec<_>>();
+    // Members as ids or objects, `kind` or an older `corner`, the gap a number or an expression.
+    for (entry, gap) in [
+        (json!({"members": ["l1", "l2"], "kind": "butt"}), None),
+        (json!({"members": [{"line": "l1"}, {"feature": "Frame Member1", "line": "l2"}], "kind": "butt"}), None),
+        (json!({"members": ["l1", {"line": "l2"}], "corner": "butt", "gap": 2}), Some("2")),
+        (json!({"members": ["l1", "l2"], "kind": "butt", "gap": "g + 1 mm"}), Some("g + 1 mm")),
+        (json!({"members": ["l1", "l2"], "kind": "butt", "gap": null, "flip": null}), None),
+    ] {
+        let (c, flip) = super::corner_entry(&entry).unwrap_or_else(|| panic!("{entry}"));
+        assert_eq!(lines(&c), ["l1", "l2"], "{entry}");
+        assert_eq!((c.kind, c.gap.as_deref(), flip), (frame::CornerType::Butt, gap, None), "{entry}");
+        assert!(serde_json::from_value::<super::CornersParam>(json!([entry])).is_ok(), "{entry}");
+    }
+    let (_, flip) = super::corner_entry(&json!({"members": ["l1", "l2"], "kind": "auto", "flip": true})).unwrap();
+    assert_eq!(flip, Some(true));
+    // A Flip that isn't true or false, `kind` and `corner` both, no type, a member that is no id: refused.
+    for entry in [
+        json!({"members": ["l1", "l2"], "kind": "butt", "flip": "yes"}),
+        json!({"members": ["l1", "l2"], "kind": "butt", "flip": 1}),
+        json!({"members": ["l1", "l2"], "kind": "butt", "corner": "butt"}),
+        json!({"members": ["l1", "l2"]}),
+        json!({"members": ["l1", 2], "kind": "butt"}),
+        json!({"members": ["l1", "l2"], "kind": "butt", "gap": [1]}),
+        json!("l1"),
+    ] {
+        assert!(super::corner_entry(&entry).is_none(), "{entry}");
+        let e = serde_json::from_value::<super::CornersParam>(json!([entry])).unwrap_err().to_string();
+        assert!(e.contains("`corners` entries must be"), "{entry}: {e}");
+    }
+}
+
+#[test]
+fn the_multi_trim_schema_takes_what_the_handler_reads() {
+    assert_keys(input_schema_for::<MultiTrimParams>(), &["feature", "flip", "gap", "kind", "members", "remove"]);
+    let schema = input_schema_for::<MultiTrimParams>();
+    let schema = schema.as_value();
+    for (p, takes) in [
+        (json!({"feature": "Frame Member1", "members": ["l1", "l2"], "kind": "mitre", "gap": "2 mm"}), true),
+        (json!({"feature": 3, "members": ["l2", {"line": "l1"}], "kind": "butt", "flip": true}), true),
+        (json!({"feature": "F", "members": [{"feature": "F", "line": "l1"}, "l2"], "remove": true}), true),
+        (json!({"feature": "F", "members": ["l1", "l2"], "gap": 2}), true),
+        (json!({"feature": "F", "members": ["l1"]}), false),
+        (json!({"feature": "F", "members": ["l1", 2]}), false),
+        (json!({"feature": "F", "members": ["l1", "l2"], "kind": "coped_butt"}), false),
+        (json!({"feature": "F", "members": ["l1", "l2"], "flip": "yes"}), false),
+        (json!({"feature": "F", "members": ["l1", "l2"], "corner": "butt"}), false),
+        (json!({"members": ["l1", "l2"]}), false),
+        (json!({"feature": "F"}), false),
+        (json!(["F", "l1", "l2"]), false),
+        (json!("F"), false),
+    ] {
+        assert_eq!(conforms(schema, schema, &p), takes, "{p}");
+    }
+}
+
+#[test]
+fn the_multi_trim_types_read_each_key_as_the_handler_does() {
+    let (_, lines) = frame_session(ParamCheck::Off);
+    let (a, b) = (lines.first().cloned().unwrap_or_default(), lines.get(1).cloned().unwrap_or_default());
+    let trim = |extra: Value| {
+        let mut p = json!({"feature": "Rect", "members": [a, b]});
+        for (k, v) in extra.as_object().into_iter().flatten() {
+            p[k] = v.clone();
+        }
+        p
+    };
+    for (p, takes) in [
+        (trim(json!({})), true),
+        (trim(json!({"kind": "mitre", "gap": "2 mm"})), true),
+        (trim(json!({"kind": null, "flip": null, "gap": null, "remove": null})), true),
+        (trim(json!({"flip": true})), true),
+        (trim(json!({"members": [{"line": b}, a]})), true),
+        (trim(json!({"kind": "weld"})), false),
+        (trim(json!({"kind": "coped_butt"})), false),
+        (trim(json!({"flip": 1})), false),
+        (trim(json!({"gap": [2]})), false),
+        (trim(json!({"remove": "yes"})), false),
+        (trim(json!({"members": [a]})), false),
+        (trim(json!({"members": "l1"})), false),
+    ] {
+        let (mut s, _) = frame_session(ParamCheck::Off);
+        s.execute("frame.member", &json!({"sketch": "Frame", "profile": tube(), "corner": "mitre", "name": "Rect"}))
+            .unwrap_or_else(|e| panic!("{e}"));
+        let outcome = s.execute("frame.multi_trim", &p);
+        assert_eq!(outcome.is_ok(), takes, "{p}: {outcome:?}");
+        assert_eq!(issues("frame.multi_trim", &p).is_empty(), takes, "{p}: {:?}", issues("frame.multi_trim", &p));
+    }
+}
+
 /// The "not blank" patterns are the shared one, which `conforms` doesn't read: pin where they are.
 #[test]
 fn the_name_patterns_are_the_blank_pattern() {
@@ -385,7 +539,8 @@ fn the_name_patterns_are_the_blank_pattern() {
     let properties = input_schema_for::<ProfilePropertiesParams>();
     let properties = properties.as_value();
     let kinds = properties["$defs"]["ProfileParam"]["anyOf"].as_array().cloned().unwrap_or_default();
-    assert_eq!(kinds.len(), frame::profile_kinds().len());
+    // One schema per kind, and one for a standard size by name.
+    assert_eq!(kinds.len(), frame::profile_kinds().len() + 1);
     assert_eq!(kinds[0]["properties"]["width"]["anyOf"][1]["pattern"], json!(blank));
 }
 
@@ -442,7 +597,15 @@ fn profile_library_replies_match_the_output_schema() {
     let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
     let listed = run("frame.profile.list", json!({}));
     matches(output_schema_for::<ProfileListResult>(), "frame.profile.list", &listed);
-    assert_eq!(listed, json!({"kinds": frame::profile_kinds()}));
+    assert_eq!(listed["kinds"], json!(frame::profile_kinds()));
+    let families: Vec<&str> = listed["sizes"].as_array().into_iter().flatten().filter_map(|f| f["family"].as_str()).collect();
+    assert_eq!(families, ["RSC", "PFC", "RSA", "SHS", "RHS", "CHS"]);
+    let only = run("frame.profile.list", json!({"family": "CHS"}));
+    matches(output_schema_for::<ProfileListResult>(), "frame.profile.list", &only);
+    assert_eq!(only["sizes"].as_array().map(Vec::len), Some(1), "{only}");
+    let sized = run("frame.profile.properties", json!({"profile": {"size": "RSC 203x89"}}));
+    matches(output_schema_for::<ProfilePropertiesResult>(), "frame.profile.properties", &sized);
+    assert_eq!(sized["size"], json!("RSC 203x89"));
     let kinds = listed["kinds"].as_array().cloned().unwrap_or_default();
     assert_eq!(kinds.len(), 7);
     for kind in &kinds {

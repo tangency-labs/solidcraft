@@ -524,16 +524,6 @@ pub fn evaluate_definition(
         } else {
             0
         };
-        let opts = StationOptions {
-            law,
-            top,
-            sides: None,
-            before,
-        };
-        let (solved, steps) =
-            gn_solve_station_with(k, faces, &def.leader, s, seed, r, def.sides, tr, tol, opts);
-        count_solve(k, steps);
-        let mut st = solved?.0;
         // a foot on a knot line of its support: the support's partials there on the
         // piece the foot moves into along s (comes from, `before`), as the stations'
         // series were taken; the way it moves is the seed's (the stations' feet and
@@ -552,9 +542,28 @@ pub fn evaluate_definition(
                 *x = w1.y;
             }
         }
+        // a seed that stands on such a line (at one of the definition's stations, placed
+        // where a foot crosses the line) names its pieces before the solve: a support is
+        // only as smooth across the line as its knot allows, and where its normal differs
+        // on the two sides a solve that takes the piece each iterate's value is in has
+        // no fixed point on the line (each piece's foot lies on the other's side)
+        let (seeded, _) = feet_on_knots(k, faces, seed, dir, before, tr.s() + tr.e() + 1)?;
+        let pinned = seeded.iter().any(|&q| q != 0);
+        let opts = StationOptions {
+            law,
+            top,
+            sides: pinned.then_some(seeded),
+            before,
+        };
+        let (solved, steps) =
+            gn_solve_station_with(k, faces, &def.leader, s, seed, r, def.sides, tr, tol, opts);
+        count_solve(k, steps);
+        let mut st = solved?.0;
         let on = st.x.map(|x| x.at(0, 0));
         let (sides, other) = feet_on_knots(k, faces, on, dir, before, tr.s() + tr.e() + 1)?;
-        if other {
+        // (solved again where the feet's pieces are not the ones the solve took: the
+        // spans of their values without sides, the seed's with them)
+        if if pinned { sides != seeded } else { other } {
             let opts = StationOptions {
                 law,
                 top,

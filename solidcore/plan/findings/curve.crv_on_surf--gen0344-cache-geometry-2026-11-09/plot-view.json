@@ -1,0 +1,26 @@
+{
+  "kind": "Orthographic plots of the actual stored cache curves and the supplied surface composed with the supplied UV curve; no schematic geometry.",
+  "projection_origin": [
+    1.8402126280935223,
+    1.072849372374724,
+    -0.4773282878397878
+  ],
+  "horizontal_axis": [
+    -0.7913786712488603,
+    0.20382307326434793,
+    -0.576347077287171
+  ],
+  "vertical_axis": [
+    -0.5748135552929404,
+    0.07284770263051653,
+    0.8150353298311342
+  ],
+  "view_selection": "The horizontal follows the true curve tangent at t=3.8944; the vertical follows the component of the before/after cache displacement perpendicular to that tangent. This exposes the measured cache change.",
+  "same_projection_and_frame_before_after": true,
+  "point_counts": {
+    "whole": 1501,
+    "detail": 601
+  },
+  "detail_interval_outside_requested_drop_interval": true,
+  "source_data": "plot-points.csv, inputs.json, before-decoded.json, after-decoded.json"
+}

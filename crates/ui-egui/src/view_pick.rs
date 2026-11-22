@@ -19,6 +19,7 @@ use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::{Value, json};
 
 use solidcore_record::Vec3;
+use solidcraft_engine::SectionPlane;
 use solidcraft_engine::doc::{apply_point, is_identity};
 use solidcraft_engine::geom::Mesh;
 
@@ -76,6 +77,22 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     };
     let edges_on = p.get("edges").and_then(Value::as_bool).unwrap_or(true);
     let edge_px = f("edge_px").filter(|x| *x > 0.0).unwrap_or(6.0) as f32;
+    let point_px = match p.get("point_px") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(
+            v.as_f64()
+                .filter(|x| x.is_finite() && *x >= 0.0 && *x <= 1024.0)
+                .ok_or("view.pick: `point_px` must be a number from 0 to 1024".to_string())? as f32,
+        ),
+    };
+    let cloud_radius = match p.get("cloud_radius") {
+        None | Some(Value::Null) => solidcraft_engine::point_cloud_pick::DEFAULT_CLOUD_RADIUS_MM,
+        Some(v) => {
+            v.as_f64().filter(|x| x.is_finite() && (0.0..=solidcraft_engine::point_cloud_pick::MAX_CLOUD_RADIUS_MM).contains(x)).ok_or_else(|| {
+                format!("view.pick: `cloud_radius` must be a number from 0 to {}", solidcraft_engine::point_cloud_pick::MAX_CLOUD_RADIUS_MM)
+            })?
+        }
+    };
     let all = p.get("all").and_then(Value::as_bool).unwrap_or(false);
     let include_ghosted = p.get("include_ghosted").and_then(Value::as_bool).unwrap_or(false);
 
@@ -88,7 +105,7 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
         let h = f("height").unwrap_or(DEFAULT_MODEL_H).clamp(16.0, 8192.0);
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(w as f32, h as f32));
         let cam = app.cam;
-        (crate::viewport::Proj { cam, vp: cam.view_proj(w / h, crate::viewport::scene_radius(app)), rect }, 1.0)
+        (crate::viewport::Proj { cam, vp: cam.view_proj(w / h, crate::viewport::scene_radius(app)), rect, bounds: None }, 1.0)
     };
 
     let mut inputs: Vec<Input> = Vec::new();
@@ -132,7 +149,7 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     let bounds = crate::viewport::body_bounds(app, &st);
     let active_bodies = crate::viewport::active_body_names(app);
     let replaced: &[String] = app.preview.effective_replaced();
-    let section = crate::viewport::section_plane(app);
+    let section = crate::viewport::section_planes(app);
     let wireframe = app.ui.visual_style == 2;
     let slack = crate::viewport::scene_pick_slack(app);
     let occ = occurrence_map(app);
@@ -142,15 +159,11 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     for input in &inputs {
         let mut cands = face_candidates(app, &st, &bounds, input, &active_bodies, replaced, include_ghosted);
         cands.sort_by(|a, b| a.t.total_cmp(&b.t));
-        // A section hides the material its normal points away from: faces on the removed
-        // side do not stop a pick, and the cut cap answers where the plane crosses material.
-        let kept: Vec<&Cand> = match section {
-            Some((so, sn)) => cands.iter().filter(|c| sn.dot(c.point) <= sn.dot(so) + SECTION_EPS).collect(),
-            None => cands.iter().collect(),
-        };
-        let cap = section
-            .and_then(|(so, sn)| section_cap(app, &st, &bounds, input, so, sn, kept.first().map(|c| c.t), include_ghosted, replaced, &active_bodies));
-        let face_t = kept.first().map(|c| c.t).or(cap.as_ref().map(|(t, _, _)| *t));
+        // A section hides the material on the side any plane's normal points at: faces there do
+        // not stop a pick, and the cut cap answers where the cut crosses material.
+        let kept: Vec<&Cand> = cands.iter().filter(|c| section_keeps(&section, c.point)).collect();
+        let cap = section_cap(app, &st, &bounds, input, &section, kept.first().map(|c| c.t), include_ghosted, replaced, &active_bodies);
+        let face_t = kept.first().map(|c| c.t).or(cap.as_ref().map(|c| c.t));
         let (edge, vertex) = match (edges_on, input.pixel) {
             (true, Some(pos)) => near_edges(
                 app,
@@ -166,34 +179,43 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
                 include_ghosted,
                 wireframe,
                 slack,
-                section,
+                &section,
             ),
             _ => (None, None),
         };
+        let cloud_max = if all || wireframe { None } else { face_t.map(|t| t + slack) };
+        let cloud_hits = cloud_candidates(app, &proj, input, cloud_max, point_px, cloud_radius, &section, all);
         hits.push(match (all, cap, kept) {
             (true, cap, kept) => {
-                let mut row: Vec<Value> = Vec::new();
-                if let Some((t, body, sn)) = cap {
-                    row.push(cap_json(input, &body, t, input.o + input.d * t, sn));
+                let mut rows: Vec<(f64, Value)> = Vec::new();
+                if let Some(cap) = &cap {
+                    rows.push((cap.t, cap_json(input, cap)));
                 }
-                row.extend(kept.iter().map(|c| hit_json(input, c, &occ, &comps, None, None)));
-                Value::Array(row)
+                rows.extend(kept.iter().map(|c| (c.t, hit_json(input, c, &occ, &comps, None, None))));
+                rows.extend(cloud_hits.into_iter().map(|(h, px)| (h.depth, cloud_json(input, &h, px))));
+                rows.sort_by(|a, b| a.0.total_cmp(&b.0));
+                Value::Array(rows.into_iter().map(|(_, v)| v).collect())
             }
-            (false, Some((t, body, sn)), kept) => match kept.first() {
-                // The cap is nearer than any kept face: the pick lands on the cut.
-                Some(c) if c.t < t => hit_json(input, c, &occ, &comps, edge.as_ref(), vertex.as_ref()),
-                _ => cap_json(input, &body, t, input.o + input.d * t, sn),
-            },
-            (false, None, kept) => match kept.first() {
-                Some(c) => hit_json(input, c, &occ, &comps, edge.as_ref(), vertex.as_ref()),
-                None => match (&edge, &vertex) {
-                    (None, None) => Value::Null,
-                    _ => json!({
-                        "pixel": input.raw, "body": null, "face": null,
-                        "edge": edge.as_ref().map(edge_json), "vertex": vertex.as_ref().map(vertex_json),
-                    }),
-                },
-            },
+            (false, cap, kept) => {
+                let surface = match (cap, kept.first()) {
+                    (Some(cap), Some(c)) if c.t < cap.t => Some((c.t, hit_json(input, c, &occ, &comps, edge.as_ref(), vertex.as_ref()))),
+                    (Some(cap), _) => Some((cap.t, cap_json(input, &cap))),
+                    (None, Some(c)) => Some((c.t, hit_json(input, c, &occ, &comps, edge.as_ref(), vertex.as_ref()))),
+                    (None, None) => None,
+                };
+                match (cloud_hits.into_iter().next(), surface) {
+                    (Some((ch, px)), Some((st_t, _))) if wireframe || ch.depth <= st_t + slack => cloud_json(input, &ch, px),
+                    (Some((ch, px)), None) => cloud_json(input, &ch, px),
+                    (_, Some((_, v))) => v,
+                    (None, None) => match (&edge, &vertex) {
+                        (None, None) => Value::Null,
+                        _ => json!({
+                            "pixel": input.raw, "body": null, "face": null,
+                            "edge": edge.as_ref().map(edge_json), "vertex": vertex.as_ref().map(vertex_json),
+                        }),
+                    },
+                }
+            }
         });
     }
     Ok(json!({
@@ -225,7 +247,8 @@ fn face_candidates(
             continue;
         }
         let ghosted = crate::viewport::body_faded(app, b, active_bodies);
-        if ghosted && !include_ghosted {
+        // Ghost Frame Members lets clicks through a member's faces, as the mouse picker does.
+        if (ghosted && !include_ghosted) || crate::viewport::frame_ghosted(app, b) {
             continue;
         }
         if let Some((_, bb)) = bounds.get(i) {
@@ -298,32 +321,82 @@ fn barycentric(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> (f64, f64, f64) {
     (1.0 - v - w, v, w)
 }
 
-/// Whether the section plane crosses material at the ray (where a cut cap answers): the
-/// plane crossing lies inside a body, told by an odd number of mesh crossings before it.
-/// The walk re-raycasts each body past every crossing it finds, bounded per body.
+/// Whether the section keeps `p`: every plane keeps it (the section hides what lies on the
+/// positive side of any of them), within [`SECTION_EPS`].
+pub(crate) fn section_keeps(planes: &[SectionPlane], p: Vec3) -> bool {
+    planes.iter().all(|c| c.keeps(p, SECTION_EPS))
+}
+
+/// Where the ray `o + d·t` comes into what the section keeps (inside every plane) ahead of `o`:
+/// `t` and the index of the plane it comes in through, where its cut face is.
+pub(crate) fn section_entry(planes: &[SectionPlane], o: Vec3, d: Vec3) -> Option<(f64, usize)> {
+    let (mut lo, mut hi, mut through) = (f64::NEG_INFINITY, f64::INFINITY, None);
+    for (i, c) in planes.iter().enumerate() {
+        // n·(o + d·t) <= n·origin: t·dn <= s.
+        let (dn, s) = (c.normal.dot(d), c.normal.dot(c.origin - o));
+        if dn.abs() < 1e-12 {
+            if s < 0.0 {
+                return None;
+            }
+        } else if dn > 0.0 {
+            hi = hi.min(s / dn);
+        } else if s / dn > lo {
+            (lo, through) = (s / dn, Some(i));
+        }
+    }
+    let i = through?;
+    (lo > 0.0 && lo < hi).then_some((lo, i))
+}
+
+/// A cut cap under a pick: where, in which body, and the plane it is a cut face of.
+pub(crate) struct CapHit {
+    pub t: f64,
+    pub body: String,
+    pub plane: SectionPlane,
+}
+
+/// Whether the section's cut crosses material at the ray (where a cut cap answers): where the
+/// ray comes into what the section keeps lies inside a body, told by an odd number of mesh crossings
+/// before it. The walk re-raycasts each body past every crossing it finds, bounded per body.
 #[allow(clippy::too_many_arguments)]
 fn section_cap(
     app: &SolveApp,
     st: &solidcraft_engine::doc::ModelState,
     bounds: &[(String, solidcraft_engine::geom::Aabb3)],
     input: &Input,
-    so: Vec3,
-    sn: Vec3,
+    planes: &[SectionPlane],
     first_kept: Option<f64>,
     include_ghosted: bool,
     replaced: &[String],
     active_bodies: &Option<crate::viewport::ActiveBodyNames>,
-) -> Option<(f64, String, Vec3)> {
-    let den = sn.dot(input.d);
-    if den.abs() < 1e-12 {
+) -> Option<CapHit> {
+    let (t, i) = section_entry(planes, input.o, input.d)?;
+    if t >= first_kept.unwrap_or(f64::INFINITY) {
         return None;
     }
-    let t_cap = (sn.dot(so) - sn.dot(input.o)) / den;
-    if !(t_cap > 0.0) || t_cap >= first_kept.unwrap_or(f64::INFINITY) {
+    let body = body_cut_at(app, st, bounds, input.o, input.d, t, include_ghosted, replaced, active_bodies)?;
+    Some(CapHit { t, body, plane: *planes.get(i)? })
+}
+
+/// The section plane whose cut face lies under the viewport point `pos` (window points), nearer
+/// than any face the section keeps.
+pub(crate) fn section_plane_at(app: &SolveApp, pos: Pos2) -> Option<SectionPlane> {
+    let section = crate::viewport::section_planes(app);
+    if section.is_empty() {
         return None;
     }
-    let body = body_cut_at(app, st, bounds, input.o, input.d, t_cap, include_ghosted, replaced, active_bodies)?;
-    Some((t_cap, body, sn))
+    let proj = crate::viewport::projection(app, app.viewport.rect?);
+    let (o, d) = proj.ray(pos);
+    let raw = Value::Null;
+    let input = Input { raw: &raw, pixel: Some(pos), o, d };
+    let st = crate::open_meshing::shown_world(app);
+    let bounds = crate::viewport::body_bounds(app, &st);
+    let active_bodies = crate::viewport::active_body_names(app);
+    let replaced = app.preview.effective_replaced();
+    let mut cands = face_candidates(app, &st, &bounds, &input, &active_bodies, replaced, false);
+    cands.sort_by(|a, b| a.t.total_cmp(&b.t));
+    let first_kept = cands.iter().find(|c| section_keeps(&section, c.point)).map(|c| c.t);
+    section_cap(app, &st, &bounds, &input, &section, first_kept, false, replaced, &active_bodies).map(|c| c.plane)
 }
 
 /// The body the ray `o + d·t` is inside of at `t_cap` (where it crosses the section plane): an
@@ -348,6 +421,15 @@ pub(crate) fn body_cut_at(
             continue;
         }
         if !include_ghosted && crate::viewport::body_faded(app, b, active_bodies) {
+            continue;
+        }
+        // Ghost Frame Members lets picks through a member, its cut too, as `face_candidates` does.
+        if crate::viewport::frame_ghosted(app, b) {
+            continue;
+        }
+        // A sheet or an open shell has no inside to cut: a ray crossing it once is not within
+        // material, so it must not raise a cap that hides what lies behind (#17177).
+        if !b.is_closed() {
             continue;
         }
         if let Some((_, bb)) = bounds.get(i) {
@@ -397,13 +479,13 @@ fn near_edges(
     include_ghosted: bool,
     wireframe: bool,
     slack: f64,
-    section: Option<(Vec3, Vec3)>,
+    section: &[SectionPlane],
 ) -> (Option<EdgeHit>, Option<VertexHit>) {
     let reach = crate::pick_index::reach(proj, pos, edge_px.max(6.0));
-    // The section removes a half-space and nothing there is drawn, so the mouse picker skips
-    // edges and vertices in it; a pick must not answer with what the user cannot see (#10704,
-    // the same `kept` test `viewport::pick` applies).
-    let kept = |p: Vec3| section.is_none_or(|(so, sn)| sn.dot(p) <= sn.dot(so) + SECTION_EPS);
+    // Nothing the section hides is drawn, so the mouse picker skips edges and vertices there; a
+    // pick must not answer with what the user cannot see (#10704, the same `kept` test
+    // `viewport::pick` applies).
+    let kept = |p: Vec3| section_keeps(section, p);
     // `slack` is the body's own: what counts as lying on the face in front depends on how
     // coarsely that body is meshed, never on where the camera stands.
     let visible = |p: Vec3, slack: f64| kept(p) && (wireframe || face_t.is_none_or(|t| (p - input.o).dot(input.d) <= t + slack));
@@ -416,6 +498,8 @@ fn near_edges(
         if !include_ghosted && crate::viewport::body_faded(app, b, active_bodies) {
             continue;
         }
+        // A frame member Ghost Frame Members draws see-through: its vertices, not its edges.
+        let frame_ghosted = crate::viewport::frame_ghosted(app, b);
         let mut body_slack = slack;
         if let Some((_, bb)) = bounds.get(i) {
             if crate::viewport::screen_box(proj, bb, edge_px).is_some_and(|r| !r.contains(pos)) {
@@ -444,6 +528,9 @@ fn near_edges(
                         }
                     }
                 }
+            }
+            if frame_ghosted {
+                continue;
             }
             let (Some(p0), Some(p1)) = (e.get(si).map(|p| at(*p)), e.get(si + 1).map(|p| at(*p))) else { continue };
             let (Some(a), Some(c)) = (proj.to_screen(p0), proj.to_screen(p1)) else { continue };
@@ -546,8 +633,12 @@ fn hit_json(
     j
 }
 
-fn cap_json(input: &Input, body: &str, t: f64, point: Vec3, normal: Vec3) -> Value {
-    json!({ "pixel": input.raw, "body": body, "face": null, "section_cap": true, "point": v3(point), "normal": v3(normal), "depth": t })
+fn cap_json(input: &Input, cap: &CapHit) -> Value {
+    let point = input.o + input.d * cap.t;
+    json!({
+        "pixel": input.raw, "body": cap.body, "face": null, "section_cap": true, "section_plane": cap.plane.id,
+        "point": v3(point), "normal": v3(cap.plane.normal), "depth": cap.t,
+    })
 }
 
 fn edge_json(e: &EdgeHit) -> Value {
@@ -556,6 +647,89 @@ fn edge_json(e: &EdgeHit) -> Value {
 
 fn vertex_json(v: &VertexHit) -> Value {
     json!({ "point": v3(v.point), "distance_px": v.dist_px })
+}
+
+fn cloud_json(input: &Input, h: &solidcraft_engine::point_cloud_pick::CloudPickHit, dist_px: Option<f32>) -> Value {
+    let mut j = json!({
+        "pixel": input.raw,
+        "body": null,
+        "face": null,
+        "cloud": h.cloud,
+        "cloud_name": h.cloud_name,
+        "point_index": h.index,
+        "point": v3(h.point),
+        "depth": h.depth,
+    });
+    if let Some(px) = dist_px {
+        j["distance_px"] = json!(px);
+    } else {
+        j["distance_mm"] = json!(h.ray_dist);
+    }
+    j
+}
+
+/// Pick visible point-cloud points along `input`, nearest first. For a pixel, uses screen-space
+/// distance within `point_px` (or each cloud's dot radius + 2 px, minimum 6 px); for a world ray,
+/// uses perpendicular distance within `cloud_radius` mm.
+#[allow(clippy::too_many_arguments)]
+fn cloud_candidates(
+    app: &SolveApp,
+    proj: &crate::viewport::Proj,
+    input: &Input,
+    max_depth: Option<f64>,
+    point_px: Option<f32>,
+    cloud_radius: f64,
+    section: &[SectionPlane],
+    all: bool,
+) -> Vec<(solidcraft_engine::point_cloud_pick::CloudPickHit, Option<f32>)> {
+    if input.pixel.is_some() && point_px.is_some_and(|p| p <= 0.0) {
+        return Vec::new();
+    }
+    if input.pixel.is_none() && cloud_radius <= 0.0 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut best_depth = max_depth;
+    for raw_cloud in solidcraft_engine::view::shown_point_clouds(&app.session) {
+        if raw_cloud.is_empty() {
+            continue;
+        }
+        let playing = |k: usize| app.tree.cloud_panel.as_ref().and_then(|p| p.playing(raw_cloud.id, k));
+        let cloud = crate::point_clouds::as_drawn(raw_cloud, playing);
+        let index = app.viewport.cloud_pick_index.of(raw_cloud.points.values());
+        let hit = match input.pixel {
+            Some(pos) => {
+                let px = point_px.unwrap_or_else(|| ((cloud.point_size as f32) * 0.5 + 2.0).max(6.0));
+                let (a, b) = crate::pick_index::reach(proj, pos, px);
+                solidcraft_engine::point_cloud_pick::pick_cloud_screen(&cloud, index.as_deref(), input.o, input.d, a, b, best_depth, section, |w| {
+                    proj.to_screen(w).map(|sp| sp.distance(pos)).filter(|d| *d <= px)
+                })
+                .map(|(h, dpx)| (h, Some(dpx)))
+            }
+            None => solidcraft_engine::point_cloud_pick::pick_cloud_ray(
+                &cloud,
+                index.as_deref(),
+                input.o,
+                input.d,
+                cloud_radius,
+                0.0,
+                best_depth,
+                section,
+            )
+            .map(|h| (h, None)),
+        };
+        if let Some((h, dpx)) = hit {
+            if !all {
+                best_depth = Some(best_depth.map_or(h.depth, |cur| cur.min(h.depth)));
+            }
+            out.push((h, dpx));
+        }
+    }
+    out.sort_by(|a, b| a.0.depth.total_cmp(&b.0.depth));
+    if !all {
+        out.truncate(1);
+    }
+    out
 }
 
 #[cfg(test)]

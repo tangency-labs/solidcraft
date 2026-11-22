@@ -17,11 +17,12 @@
 //!   [`PlanarSectionOptions`] and `Option` fields of the result; the curves are owned
 //!   values, so upstream's delete lists and cleanup objects have no counterpart. The
 //!   faces are [`FaceId`]s.
-//! - **Face context.** A face's surface is intersected, dropped onto and lifted as an
+//! - **Face context.** A face's surface is intersected and dropped onto as an
 //!   evaluation copy (keeping its owner and cache slot) through the B-rep's
 //!   [`BrepFaceServices`], so its trimmed cache reaches the face as upstream's does
-//!   through `GetFace()`. `smsurf_GetSurfaceCache(this)` before the intersection is that
-//!   context's [`SurfaceSolveContext::surface_cache_state`] (upstream only reads the
+//!   through `GetFace()`; its lift reads the surface's own continuities and makes no
+//!   cache. `smsurf_GetSurfaceCache(this)` before the intersection is that
+//!   context's [`SurfaceSolveContext::surface_cache_without_get_tree`] (upstream only reads the
 //!   cache's continuity there, and ignores it).
 //! - **Statuses.** A face whose surface section fails is skipped, as upstream's
 //!   `continue`; so is a face whose trimming fails. [`SolidError::Unported`] always
@@ -37,11 +38,9 @@
 //! - **Forced UV curves.** As upstream, the replacement of a 3D section curve by the
 //!   lift of its first drop is tied to the first drop curve (`kk == 0`), even when that
 //!   one is rejected and a later one is kept (that one is then added).
-//! - **Face tolerance (opt-in).** With
-//!   [`crate::kernel::UpstreamFixes::planar_section_face_tolerance`] a face's section
-//!   with no `cpdOpt3DApproximationTol` is traced to the face's tolerance
-//!   ([`face_planar_section_curves`], WR-723, #2451); upstream passes the null on, and
-//!   the intersector traces to 1/1000 of the surface's size.
+//! - **Face tolerance.** A face's section with no `cpdOpt3DApproximationTol` is traced
+//!   to the face's tolerance ([`face_planar_section_curves`], WR-723); upstream passes
+//!   the null on, and the intersector traces to 1/1000 of the surface's size.
 //! - **Not ported here.** The `SM_DEBUG_CODE` drawing blocks and
 //!   `SM_VALIDATE_INTERSECTORS`.
 
@@ -197,7 +196,7 @@ pub fn surface_planar_section_curves(
     let use_surface_edges = [true, false];
     let found = if let Some((context, handle)) = context {
         // get surface cache (upstream then reads its continuity and ignores it)
-        context.surface_cache_state(k, surface, handle)?;
+        context.surface_cache_without_get_tree(k, surface, handle)?;
         surface.global_surface_intersect_with_context(
             k,
             [handle, None],
@@ -210,7 +209,6 @@ pub fn surface_planar_section_curves(
             ang_tol_rad,
         )?
     } else {
-        crate::surface::surface::p1::note_surface_cache(k, surface);
         surface.global_surface_intersect(
             k,
             uv_domain,
@@ -272,9 +270,8 @@ pub fn face_plane_section_curves(
 /// the face's UV domain; the box is the surface's `CalculateBoundingBox(uv_domain)` and
 /// the solves run through the B-rep's [`BrepFaceServices`].
 ///
-/// The section curves are traced to `approx_tol_3d`; with
-/// [`crate::kernel::UpstreamFixes::planar_section_face_tolerance`], to the face's
-/// tolerance when it is `None` (WR-723, #2451). Upstream passes `None` on, and the
+/// The section curves are traced to `approx_tol_3d`, or to the face's tolerance when it
+/// is `None` (WR-723). Upstream passes `None` on, and the
 /// intersector then traces to 1/1000 of the surface's size, which on a round left the
 /// curve up to 32 times the face's tolerance off it.
 ///
@@ -294,7 +291,7 @@ pub fn face_planar_section_curves(
     ang_tol_rad: Option<f64>,
 ) -> Result<SurfaceSection> {
     let approx_tol_3d = match approx_tol_3d {
-        None if k.fixes.planar_section_face_tolerance => Some(face2::tolerance(b, f)?),
+        None => Some(face2::tolerance(b, f)?),
         tol => tol,
     };
     let bbox = surface_bounding_box(k, b, f, surface, uv_domain)?;
@@ -328,10 +325,9 @@ pub struct SectionOutputs {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PlanarSectionOptions {
     /// `cpdOpt3DApproximationTol`: the largest distance between a section curve and the
-    /// surface. `None` takes each face's tolerance for the coincidence checks, and for
-    /// the section itself with
-    /// [`crate::kernel::UpstreamFixes::planar_section_face_tolerance`] (upstream's
-    /// intersector default otherwise, 1/1000 of the surface's size).
+    /// surface. `None` takes each face's tolerance, for the coincidence checks and for
+    /// the section itself (WR-723; upstream's intersector default is 1/1000 of the
+    /// surface's size).
     pub approx_tol_3d: Option<f64>,
     /// `cpdOptAngleTolRadians`.
     pub ang_tol_rad: Option<f64>,
@@ -654,16 +650,7 @@ fn force_uv_curves(
         }
 
         // skip UVCurves whose 3D Approximations exceed tolerance
-        let lifted = surface.lift_curve_with_context(
-            k,
-            uv_domain,
-            &drop,
-            &drop_ivl,
-            face_tol / 3.0,
-            true,
-            &mut services,
-            handle,
-        )?;
+        let lifted = surface.lift_curve(k, uv_domain, &drop, &drop_ivl, face_tol / 3.0, true)?;
         if lifted.max_approx_dev > face_tol * 10.0 {
             continue;
         }

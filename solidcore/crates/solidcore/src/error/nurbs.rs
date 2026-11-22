@@ -35,7 +35,15 @@
 //! built on those routines (`BSplineCurve`, `BSplineSurface`: fitting, skinning, Coons
 //! patches, trimming, evaluation); upstream they return an `SmStatus` (`SER(SM_ERR)`,
 //! `NER(...)`), which each records as its comparison status. A method whose NLib call
-//! fails keeps that call's failure as its cause ([`BSplineFailure::RoutineFailed`]).
+//! fails keeps that call's failure as its cause ([`BSplineFailure::RoutineFailed`]). A
+//! check that refuses builds a typed cause with its numbers ([`BSplineFailure::EndsApart`],
+//! ...); a stage that fails with no reason the kernel names is a
+//! [`BSplineFailure::StageFailed`], a defect ([`ErrorKind::StageFailed`], #15034), keeping
+//! the error of the call it made as its cause where it has one. That is the form not yet
+//! reviewed: a stage reviewed as the kernel's fault is a [`BSplineFailure::Defect`] with its
+//! reason, of the same class and status. [`BSplineFailure::Failed`] and
+//! [`BSplineFailure::Missing`] are sites not yet converted (the conversion guide:
+//! `docs/failure-codes-and-reproduction.md` §6).
 //!
 //! Deviations: not upstream. A failure of a routine that has the data (a degree, an
 //! index, a parameter and its domain) carries it; the others are unit variants, and the
@@ -44,6 +52,7 @@
 //! routine of the port stores them.
 
 use super::{ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER};
+use crate::geom::geom_utility::p2::ContinuityType;
 
 /// Why a NURBS routine fails.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -168,8 +177,131 @@ pub enum BSplineFailure {
         /// The end of the domain.
         hi: f64,
     },
-    /// The method failed, as the phrase says (e.g. "the end tangent is not given").
+    /// The method failed, as the phrase says (e.g. "the end tangent is not given"): a site
+    /// not yet converted to a typed cause.
     Failed(&'static str),
+    /// The curve's ends coincide (it is closed), so no scaling takes one end to the other.
+    EndsCoincide,
+    /// The ends to join are `distance` apart, farther than the tolerance.
+    EndsApart {
+        /// The distance between the ends.
+        distance: f64,
+        /// The tolerance they must be within.
+        tolerance: f64,
+    },
+    /// A stage of the method failed with no reason the kernel names: a defect
+    /// ([`ErrorKind::StageFailed`]). The failure holds the operation, the status the C++
+    /// reports (for the goldens only), where it was built, and the error of the call it made
+    /// where it has one. The form not yet reviewed: new code builds
+    /// [`BSplineFailure::Defect`], a named cause or a refusal instead.
+    StageFailed,
+    /// A failure that is the kernel's fault, reviewed at its site, with the written reason:
+    /// `why` names the step that failed and why that is the kernel's fault, not the
+    /// geometry's. A defect ([`ErrorKind::StageFailed`]); status `SM_ERR` unless its site
+    /// says otherwise.
+    Defect {
+        /// The step that failed, and why that is the kernel's fault.
+        why: &'static str,
+    },
+    /// The continuity asked of a curve extension is not one it keeps (G1, G1G2 or
+    /// C-infinity). [`ErrorKind::InvalidInput`].
+    ContinuityNotExtendable {
+        /// The continuity asked for.
+        continuity: ContinuityType,
+    },
+    /// The method takes only a rational curve, and this one is not.
+    /// [`ErrorKind::Unsupported`].
+    NotRational,
+    /// The points are said to be of dimension `dim`; the method takes 2 or 3.
+    /// [`ErrorKind::InvalidInput`].
+    DimensionNot2Or3 {
+        /// The dimension given.
+        dim: u64,
+    },
+    /// `given` end vectors are given; the fit takes at most two (a start and an end
+    /// derivative), or, when interpolating more than two points, one per point.
+    /// [`ErrorKind::InvalidInput`].
+    TooManyVectors {
+        /// The number of vectors given.
+        given: usize,
+    },
+    /// The fit is asked for no control points (a count of 0). [`ErrorKind::InvalidInput`].
+    NoControlPoints,
+    /// The degree cannot be reduced by one within the `tolerance` asked for: the reduction's
+    /// error bound reached `error` (for a rational curve the bound is that of the homogeneous
+    /// points, measured against the tolerance scaled by the weights), or a weight is outside
+    /// the range the reduction takes. [`ErrorKind::NotWithinTolerance`].
+    DegreeNotReducible {
+        /// The error bound of the reduction.
+        error: f64,
+        /// The tolerance asked for.
+        tolerance: f64,
+    },
+    /// The curve is of degree `degree`, 1 or less, and has no lower degree to reduce to.
+    /// [`ErrorKind::InvalidInput`].
+    DegreeTooLowToReduce {
+        /// The curve's degree.
+        degree: usize,
+    },
+    /// The method works only on a surface-intersection approximation (a piecewise C0 curve
+    /// of degree 3), and the curve is not one. [`ErrorKind::Unsupported`].
+    NotIntersectionCurve,
+    /// The projection onto its surface of a point the method puts on the curve leaves the
+    /// residual `residual` (the surface point solve's value), more than `tolerance`.
+    /// [`ErrorKind::NotWithinTolerance`].
+    PointOffSurface {
+        /// The residual of the point's projection onto the surface.
+        residual: f64,
+        /// The residual allowed.
+        tolerance: f64,
+    },
+    /// The start tangent is asked to be the one given, and none is given.
+    /// [`ErrorKind::InvalidInput`].
+    StartTangentNotGiven,
+    /// The end tangent is asked to be the one given, and none is given.
+    /// [`ErrorKind::InvalidInput`].
+    EndTangentNotGiven,
+    /// The spans the interval meets hold no control point of the curve (for example a point
+    /// interval at an interior knot of multiplicity degree + 1). [`ErrorKind::InvalidInput`].
+    IntervalSelectsNoControlPoints,
+    /// An end weight of the curves to join is zero, so no scaling makes the weights at the
+    /// joint agree. [`ErrorKind::InvalidInput`].
+    JoinEndWeightZero,
+    /// The curves must have the same number of control points: this one has `ours`, the
+    /// other `theirs`. [`ErrorKind::InvalidInput`].
+    ControlPointCountsDiffer {
+        /// This curve's control points.
+        ours: usize,
+        /// The other curve's control points.
+        theirs: usize,
+    },
+    /// The degree `given` is below the curve's degree `current`; an elevation only raises
+    /// it. [`ErrorKind::InvalidInput`].
+    DegreeBelowCurrent {
+        /// The degree asked for.
+        given: usize,
+        /// The curve's degree.
+        current: usize,
+    },
+    /// The control point `index` is past the last of the `count` control points.
+    /// [`ErrorKind::InvalidInput`].
+    ControlPointIndex {
+        /// The index given.
+        index: usize,
+        /// The number of control points.
+        count: usize,
+    },
+    /// The span `span` of a degree-`degree` curve reads control points `span - degree` to
+    /// `span`, and the curve has only `count`: its control points, knots and degree do not
+    /// agree. [`ErrorKind::InvalidInput`].
+    ControlPointsShort {
+        /// The span the parameter falls in.
+        span: usize,
+        /// The curve's degree.
+        degree: usize,
+        /// The curve's number of control points.
+        count: usize,
+    },
 }
 
 impl BSplineFailure {
@@ -182,10 +314,35 @@ impl BSplineFailure {
         }
     }
 
-    /// The failure's stable [`ErrorKind`].
+    /// The failure's stable [`ErrorKind`]: [`ErrorKind::StageFailed`] for
+    /// [`BSplineFailure::StageFailed`] and [`BSplineFailure::Defect`], a defect;
+    /// [`ErrorKind::InvalidInput`] for a check of the caller's arguments or curve,
+    /// [`ErrorKind::Unsupported`] for a curve the method does not take,
+    /// [`ErrorKind::NotWithinTolerance`] for a result outside the tolerance asked for; the
+    /// kind of its status otherwise.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
-        ErrorKind::of_status(self.comparison_status())
+        match self {
+            Self::StageFailed | Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::ContinuityNotExtendable { .. }
+            | Self::DimensionNot2Or3 { .. }
+            | Self::TooManyVectors { .. }
+            | Self::NoControlPoints
+            | Self::DegreeTooLowToReduce { .. }
+            | Self::StartTangentNotGiven
+            | Self::EndTangentNotGiven
+            | Self::IntervalSelectsNoControlPoints
+            | Self::JoinEndWeightZero
+            | Self::ControlPointCountsDiffer { .. }
+            | Self::DegreeBelowCurrent { .. }
+            | Self::ControlPointIndex { .. }
+            | Self::ControlPointsShort { .. } => ErrorKind::InvalidInput,
+            Self::NotRational | Self::NotIntersectionCurve => ErrorKind::Unsupported,
+            Self::DegreeNotReducible { .. } | Self::PointOffSurface { .. } => {
+                ErrorKind::NotWithinTolerance
+            }
+            _ => ErrorKind::of_status(self.comparison_status()),
+        }
     }
 }
 
@@ -206,6 +363,75 @@ impl core::fmt::Display for BSplineFailure {
                 )
             }
             Self::Failed(what) => f.write_str(what),
+            Self::EndsCoincide => f.write_str("the curve's ends coincide"),
+            Self::EndsApart {
+                distance,
+                tolerance,
+            } => write!(
+                f,
+                "the ends to join are {distance} apart, farther than the tolerance {tolerance}"
+            ),
+            Self::StageFailed => write!(f, "{}", ErrorKind::StageFailed),
+            Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
+            Self::ContinuityNotExtendable { continuity } => write!(
+                f,
+                "an extension keeps G1, G1G2 or C-infinity continuity, not {continuity:?}"
+            ),
+            Self::NotRational => f.write_str("the curve is not rational"),
+            Self::DimensionNot2Or3 { dim } => {
+                write!(f, "the points are of dimension {dim}, not 2 or 3")
+            }
+            Self::TooManyVectors { given } => {
+                write!(f, "{given} end vectors are given, more than two")
+            }
+            Self::NoControlPoints => f.write_str("no control points are asked for"),
+            Self::DegreeNotReducible { error, tolerance } => write!(
+                f,
+                "the degree cannot be reduced by one within the tolerance {tolerance} (error \
+                 bound {error})"
+            ),
+            Self::DegreeTooLowToReduce { degree } => {
+                write!(f, "a curve of degree {degree} has no lower degree")
+            }
+            Self::NotIntersectionCurve => {
+                f.write_str("the curve is not a piecewise degree-3 intersection curve")
+            }
+            Self::PointOffSurface {
+                residual,
+                tolerance,
+            } => write!(
+                f,
+                "a point projects onto its surface with residual {residual}, more than \
+                 {tolerance}"
+            ),
+            Self::StartTangentNotGiven => {
+                f.write_str("the start tangent is specified but not given")
+            }
+            Self::EndTangentNotGiven => f.write_str("the end tangent is specified but not given"),
+            Self::IntervalSelectsNoControlPoints => {
+                f.write_str("the interval selects no control point")
+            }
+            Self::JoinEndWeightZero => f.write_str("an end weight of the curves to join is zero"),
+            Self::ControlPointCountsDiffer { ours, theirs } => write!(
+                f,
+                "the curves have {ours} and {theirs} control points, not the same number"
+            ),
+            Self::DegreeBelowCurrent { given, current } => {
+                write!(f, "degree {given} is below the curve's degree {current}")
+            }
+            Self::ControlPointIndex { index, count } => write!(
+                f,
+                "control point {index} is past the last of {count} control points"
+            ),
+            Self::ControlPointsShort {
+                span,
+                degree,
+                count,
+            } => write!(
+                f,
+                "span {span} of a degree-{degree} curve needs more than its {count} control \
+                 points"
+            ),
         }
     }
 }
@@ -353,8 +579,9 @@ impl crate::SolidError {
     /// [`crate::SolidError::Failed`] for a B-spline curve or surface method that fails
     /// with `failure`.
     #[must_use]
+    #[track_caller]
     pub(crate) fn b_spline(operation: &'static str, failure: BSplineFailure) -> Self {
-        Self::nurbs(operation, NurbsFailure::BSpline(failure))
+        Failure::new(operation, NurbsFailure::BSpline(failure)).into_error()
     }
 
     /// Maps the error of a failed NLib call inside a B-spline method (upstream
@@ -396,6 +623,124 @@ pub use super::upstream_status;
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::SolidError;
+
+    #[test]
+    fn a_stage_failure_is_a_defect_and_a_typed_cause_keeps_its_status() {
+        super::super::tests::assert_stage_failure(
+            &SolidError::b_spline("nurbs::op", BSplineFailure::StageFailed),
+            "nurbs::op",
+            SM_ERR,
+        );
+        for cause in [
+            BSplineFailure::EndsCoincide,
+            BSplineFailure::EndsApart {
+                distance: 0.5,
+                tolerance: 0.01,
+            },
+        ] {
+            let e = SolidError::b_spline("nurbs::op", cause);
+            assert_eq!(e.upstream_status(), Some(SM_ERR), "{cause:?}");
+            assert_eq!(e.kind(), ErrorKind::Failed, "{cause:?}");
+            assert!(!e.is_defect() && e.is_status_answer(), "{cause:?}");
+        }
+    }
+
+    /// The named causes that replace phrase sites keep the phrase's status, so
+    /// `upstream_status()` reads as before, and carry the class of what they check.
+    #[test]
+    fn the_named_causes_keep_the_phrase_status_and_name_their_class() {
+        let invalid = [
+            BSplineFailure::ContinuityNotExtendable {
+                continuity: ContinuityType::C0,
+            },
+            BSplineFailure::DimensionNot2Or3 { dim: 4 },
+            BSplineFailure::TooManyVectors { given: 3 },
+            BSplineFailure::NoControlPoints,
+            BSplineFailure::DegreeTooLowToReduce { degree: 1 },
+            BSplineFailure::StartTangentNotGiven,
+            BSplineFailure::EndTangentNotGiven,
+            BSplineFailure::IntervalSelectsNoControlPoints,
+            BSplineFailure::JoinEndWeightZero,
+            BSplineFailure::ControlPointCountsDiffer { ours: 5, theirs: 2 },
+            BSplineFailure::DegreeBelowCurrent {
+                given: 2,
+                current: 3,
+            },
+            BSplineFailure::ControlPointIndex { index: 9, count: 5 },
+            BSplineFailure::ControlPointsShort {
+                span: 2,
+                degree: 3,
+                count: 2,
+            },
+        ];
+        let unsupported = [
+            BSplineFailure::NotRational,
+            BSplineFailure::NotIntersectionCurve,
+        ];
+        let tolerance = [
+            BSplineFailure::DegreeNotReducible {
+                error: 0.5,
+                tolerance: 0.01,
+            },
+            BSplineFailure::PointOffSurface {
+                residual: 0.5,
+                tolerance: 1e-8,
+            },
+        ];
+        for (causes, kind) in [
+            (&invalid[..], ErrorKind::InvalidInput),
+            (&unsupported[..], ErrorKind::Unsupported),
+            (&tolerance[..], ErrorKind::NotWithinTolerance),
+        ] {
+            for &cause in causes {
+                let e = SolidError::b_spline("nurbs::op", cause);
+                assert_eq!(e.upstream_status(), Some(SM_ERR), "{cause:?}");
+                assert_eq!(e.sm_status(), Some(SM_ERR), "{cause:?}");
+                assert_eq!(e.kind(), kind, "{cause:?}");
+                assert!(!e.is_defect() && !e.is_refusal(), "{cause:?}");
+                assert_eq!(nlib_number(&e), None, "{cause:?}");
+            }
+        }
+        // the numbers land in the text in their order
+        assert_eq!(
+            BSplineFailure::ControlPointCountsDiffer { ours: 5, theirs: 2 }.to_string(),
+            "the curves have 5 and 2 control points, not the same number"
+        );
+        assert_eq!(
+            BSplineFailure::ControlPointIndex { index: 9, count: 5 }.to_string(),
+            "control point 9 is past the last of 5 control points"
+        );
+    }
+
+    /// A reviewed defect is of class 127 with the stage failure's status, and says why.
+    #[test]
+    fn a_reviewed_defect_is_class_127_with_its_reason() {
+        let why = "the knot vector the insertion just built does not rise, which insertion keeps";
+        let defect = BSplineFailure::Defect { why };
+        let e = SolidError::b_spline("nurbs::op", defect);
+        super::super::tests::assert_defect(
+            &e,
+            &SolidError::b_spline("nurbs::op", BSplineFailure::StageFailed),
+            "nurbs::op",
+            SM_ERR,
+            &format!("nurbs::op: stage_failed: {why}"),
+        );
+        assert_eq!(e.nurbs_failure(), Some(&NurbsFailure::BSpline(defect)));
+        assert_eq!(nlib_number(&e), None);
+        let missing = Failure::new("nurbs::op", NurbsFailure::BSpline(defect))
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error();
+        super::super::tests::assert_defect(
+            &missing,
+            &SolidError::b_spline("nurbs::op", BSplineFailure::Missing("x")),
+            "nurbs::op",
+            SM_ERR_NULL_POINTER,
+            &format!("nurbs::op: stage_failed: {why}"),
+        );
+    }
+
     /// The NURBS routines describe their failures: their library code builds no bare
     /// `Upstream` status, except the files listed (with the bare sites each may still hold)
     /// whose conversion waits on other open work.
@@ -403,10 +748,37 @@ mod tests {
     fn the_nurbs_routines_build_no_bare_statuses() {
         assert_eq!(
             super::super::query::tests::bare_statuses_in("nurbs", 60),
-            [
-                ("nurbs/b_spline_curve/p1.rs".to_owned(), 23),
-                ("nurbs/b_spline_curve/p3.rs".to_owned(), 5),
-            ]
+            [("nurbs/b_spline_curve/p1.rs".to_owned(), 23)]
+        );
+    }
+
+    /// The sites that build a B-spline phrase cause only fall:
+    /// per file, in the library code of `solidcore` and `solidcore-ops`, as
+    /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
+    /// files' counts here, and a file at 0 loses its line (the conversion guide:
+    /// `docs/failure-codes-and-reproduction.md` §6).
+    #[test]
+    fn the_bspline_phrase_cause_sites_only_shrink() {
+        use super::super::site_scan::{assert_pinned, crate_sites, Builder, Scan, Wrappers};
+        const PHRASES: Scan = Scan {
+            builders: &[
+                Builder::Variant("BSplineFailure", "Failed"),
+                Builder::Variant("BSplineFailure", "Missing"),
+            ],
+            wrappers: Wrappers::Phrase,
+        };
+        #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
+        const PINNED: &[(&str, usize)] = &[
+            ("solidcore/src/nurbs/b_spline_surface/p1.rs", 2),
+            ("solidcore/src/nurbs/b_spline_surface/p2.rs", 16),
+            ("solidcore/src/nurbs/b_spline_surface_n_lib/approx.rs", 3),
+            ("solidcore/src/nurbs/b_spline_surface_n_lib/p1.rs", 7),
+            ("solidcore/src/nurbs/b_spline_surface_n_lib/p2.rs", 33),
+        ];
+        assert_pinned(
+            "B-spline phrase-cause sites",
+            &crate_sites(&PHRASES),
+            PINNED,
         );
     }
 }

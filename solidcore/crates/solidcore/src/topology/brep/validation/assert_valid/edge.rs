@@ -18,9 +18,8 @@
 //! evaluation propagates its error. Loop membership of an edge use (test 14) and wire
 //! membership (test 13) read sets built once per loop use / shell. `SmHyperbola` and
 //! `SmParabola` use the inherited `SmBSplineCurve` check with their own `MakeNurb`,
-//! `IsAnalytic` and `IsBounded`. Opt-in (WR-540,
-//! `Kernel::fixes.edge_check_orders_tangent_faces`, #383): where two faces round an edge
-//! leave it within `SM_ANG_TOL_DEG` of each other, test 9 orders every face by the
+//! `IsAnalytic` and `IsBounded`. Not upstream (WR-540, #383): where two faces round an
+//! edge leave it within `SM_ANG_TOL_DEG` of each other, test 9 orders every face by the
 //! direction to its point 20 edge tolerances into the face, square to the edge (the
 //! fork's tangency-labs/smlib@5533bbb). Not upstream (WR-668, tangency-labs/smlib
 //! ecf1963, the default since its flag was retired): the edge check and edge-use
@@ -55,7 +54,7 @@ use crate::topology::{
 /// `m_pCurve->AssertValid(pAList, eTestLevel, SM_NO_WALK)` dispatched on the curve's
 /// class: the curve object reports as `key`, an ellipse's polar converter as
 /// `polar_key`. `trim_surface` is the face's surface of a UV trim (WR-560, read by the
-/// `SmBSplineCurve` checks with `Kernel::fixes.uv_trim_checks_on_surface`).
+/// `SmBSplineCurve` checks).
 /// `edge_ends` is the edge the curve is the 3D curve or a UV trim of (WR-668, read by
 /// the `SmBSplineCurve` checks; see [`edge_ends`]).
 #[allow(clippy::too_many_arguments)]
@@ -442,41 +441,37 @@ fn radial_order(
     // Must watch out for zero sectors: coincident faces.
     let mut have_nonzero_angle = false;
 
-    // Not upstream (WR-540), opt-in `Kernel::fixes.edge_check_orders_tangent_faces` (the
-    // fork's tangency-labs/smlib@5533bbb, #383): a sector between faces tangent along the
-    // edge (a cylinder touching a plane it rests on, left by a boolean as a non-manifold
-    // edge) has binormals that agree to first order, so the binormal angles tie (or differ
-    // by rounding, either way round) and cannot show the order. Where any sector is that
-    // narrow, every face is measured by the direction from the edge to its point a short
-    // step into the face (20 edge tolerances, as IsConvexRadialSector steps).
+    // Not upstream (WR-540; the fork's tangency-labs/smlib@5533bbb, #383): a sector
+    // between faces tangent along the edge (a cylinder touching a plane it rests on, left
+    // by a boolean as a non-manifold edge) has binormals that agree to first order, so the
+    // binormal angles tie (or differ by rounding, either way round) and cannot show the
+    // order. Where any sector is that narrow, every face is measured by the direction from
+    // the edge to its point a short step into the face (20 edge tolerances, as
+    // IsConvexRadialSector steps).
     let seq_param = extent.evaluate(0.456);
     let mut step_off = false;
-    let mut step_off_dist = 0.0;
-    if k.fixes.edge_check_orders_tangent_faces {
-        step_off_dist = 20.0 * tedge::tolerance(b, e)?;
-        let tie_dot = (ANG_TOL_DEG * PI / 180.0).cos();
-        let num_eus = b.edge(e)?.edgeuses.len();
-        let mut eu = target;
-        let mut sectors = 0usize;
-        while let Some(rad) = eu1::radial(b, eu)? {
-            if !eu1::is_loop_edgeuse(b, eu)? || !eu1::is_loop_edgeuse(b, rad)? {
-                break;
-            }
-            let b0 = crate::error::ignored(evaluate_binormal(k, b, eu, seq_param, true, &options))?;
-            let b1 =
-                crate::error::ignored(evaluate_binormal(k, b, rad, seq_param, true, &options))?;
-            if let (Some(b0), Some(b1)) = (b0, b1) {
-                if let (Ok(u0), Ok(u1)) = (b0.binormal.unitize(), b1.binormal.unitize()) {
-                    if u0.dot(u1) > tie_dot {
-                        step_off = true;
-                    }
+    let step_off_dist = 20.0 * tedge::tolerance(b, e)?;
+    let tie_dot = (ANG_TOL_DEG * PI / 180.0).cos();
+    let num_eus = b.edge(e)?.edgeuses.len();
+    let mut eu = target;
+    let mut sectors = 0usize;
+    while let Some(rad) = eu1::radial(b, eu)? {
+        if !eu1::is_loop_edgeuse(b, eu)? || !eu1::is_loop_edgeuse(b, rad)? {
+            break;
+        }
+        let b0 = crate::error::ignored(evaluate_binormal(k, b, eu, seq_param, true, &options))?;
+        let b1 = crate::error::ignored(evaluate_binormal(k, b, rad, seq_param, true, &options))?;
+        if let (Some(b0), Some(b1)) = (b0, b1) {
+            if let (Ok(u0), Ok(u1)) = (b0.binormal.unitize(), b1.binormal.unitize()) {
+                if u0.dot(u1) > tie_dot {
+                    step_off = true;
                 }
             }
-            sectors += 1;
-            match eu1::mate(b, rad)? {
-                Some(next) if !step_off && next != target && sectors < num_eus => eu = next,
-                _ => break,
-            }
+        }
+        sectors += 1;
+        match eu1::mate(b, rad)? {
+            Some(next) if !step_off && next != target && sectors < num_eus => eu = next,
+            _ => break,
         }
     }
 
@@ -907,20 +902,16 @@ pub(super) fn edgeuse(
     // when Edgeuse has a UVTrimCurve - Check that it's valid
     if has_trim {
         let level = cx.rep.level;
-        // not upstream (WR-560, opt-in): the trim is measured on its face's surface
+        // not upstream (WR-560): the trim is measured on its face's surface
         // (`GetEdgeuse()->GetFace()->GetSurface()`)
-        let trim_surface = if k.fixes.uv_trim_checks_on_surface {
-            match eu1::face(b, eu)? {
-                Some(f) => b
-                    .face(f)?
-                    .surface
-                    .as_ref()
-                    .map(Surface::clone_for_evaluation)
-                    .transpose()?,
-                None => None,
-            }
-        } else {
-            None
+        let trim_surface = match eu1::face(b, eu)? {
+            Some(f) => b
+                .face(f)?
+                .surface
+                .as_ref()
+                .map(Surface::clone_for_evaluation)
+                .transpose()?,
+            None => None,
         };
         // not upstream (WR-668): the trim's edge (`GetEdgeuse()->GetEdge()`)
         let ends = match eu1::edge(b, eu)? {

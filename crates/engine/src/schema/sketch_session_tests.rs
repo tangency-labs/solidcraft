@@ -2,8 +2,8 @@ use serde_json::{Value, json};
 
 use super::{
     ChainParams, ChainResult, ConstructionParams, ConstructionResult, CreateParams, CreateResult, DeleteParams, DeleteResult, DimensionTextParams,
-    DimensionTextResult, DragEndParams, DragEndResult, DragParams, DragResult, MovePointParams, MovePointResult, OptionsParams, OptionsReply,
-    OptionsResult, SketchOptions, SolveParams, SolveResult,
+    DimensionTextResult, DragEndParams, DragEndResult, DragParams, DragResult, MovePointParams, MovePointResult, MovePointsParams, MovePointsResult,
+    OptionsParams, OptionsReply, OptionsResult, SketchOptions, SolveParams, SolveResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, conforms};
@@ -47,11 +47,12 @@ fn messages(id: &str, p: Value) -> Vec<String> {
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<CreateParams>(),
-        &["activate_part", "face", "flip", "frame", "name", "offset", "origin", "plane", "project_edges", "x_dir", "y_dir"],
+        &["activate_part", "face", "flip", "frame", "name", "offset", "origin", "plane", "project_edges", "view", "x_dir", "y_dir"],
     );
     assert_keys(input_schema_for::<ConstructionParams>(), &["curves", "sketch", "value"]);
     assert_keys(input_schema_for::<DeleteParams>(), &["entities", "sketch"]);
     assert_keys(input_schema_for::<MovePointParams>(), &["point", "sketch", "to"]);
+    assert_keys(input_schema_for::<MovePointsParams>(), &["moves", "sketch", "tolerance"]);
     assert_keys(input_schema_for::<DragParams>(), &["entity", "from", "live", "sketch", "to", "with"]);
     assert_keys(input_schema_for::<DragEndParams>(), &["constraint", "sketch"]);
     assert_keys(input_schema_for::<DimensionTextParams>(), &["at", "dimension", "reset", "sketch"]);
@@ -97,6 +98,9 @@ fn strict_keeps_todays_errors() {
         ("sketch.create", json!({"plane": {"y_dir": [1, 0, 0]}})),
         ("sketch.create", json!({"plane": {"x_dir": [1, 0, 0], "y_dir": [2, 0, 0]}})),
         ("sketch.create", json!({"plane": {"origin": "x", "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}})),
+        ("sketch.create", json!({"plane": {"origin": [0, true, "dy"], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}})),
+        ("sketch.create", json!({"plane": {"origin": [0, "nope", 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}})),
+        ("sketch.create", json!({"plane": {"origin": [0, "30 deg", 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}})),
         ("sketch.create", json!({"plane": {"face": 5}})),
         ("sketch.create", json!({"plane": {"face": [0, 0, 0], "fixed": "yes"}})),
         ("sketch.create", json!({"plane": {"face": [0, 0, 0], "body": ""}})),
@@ -129,6 +133,25 @@ fn strict_keeps_todays_errors() {
         ("sketch.move_point", json!({"to": null, "point": "origin"})),
         ("sketch.move_point", json!({"to": [1], "point": "origin"})),
         ("sketch.move_point", json!({"to": [1, 2], "point": "nope"})),
+        ("sketch.move_points", json!({})),
+        ("sketch.move_points", json!({"moves": []})),
+        ("sketch.move_points", json!({"moves": null})),
+        ("sketch.move_points", json!({"moves": "origin"})),
+        ("sketch.move_points", json!({"moves": [{"point": "origin"}]})),
+        ("sketch.move_points", json!({"moves": [{"to": "x", "point": "origin"}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1], "point": "origin"}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2]}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": 5}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": null}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "near": null}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "near": [1]}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "near": [1, 2], "point": 5}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": "nope"}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": "origin"}], "tolerance": 0})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": "origin"}], "tolerance": -1})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": "origin"}], "tolerance": "a bit"})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": "origin"}], "sketch": 99})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": "origin"}], "sketch": "nope"})),
         ("sketch.drag", json!({})),
         ("sketch.drag", json!({"to": [1, 2]})),
         ("sketch.drag", json!({"to": [1, 2], "entity": 3})),
@@ -164,6 +187,14 @@ fn strict_keeps_todays_errors() {
         ("sketch.solve", json!({"sketch": true})),
         ("sketch.solve", json!({"sketch": 99})),
         ("sketch.solve", json!({"sketch": "nope"})),
+    ]);
+    // What only the design can tell keeps its message too: two points as close to `near`, none
+    // within `tolerance`, and more moves than the sketch has points. The last is not a length the
+    // schema could state: it is the number of points of the sketch being edited.
+    assert_strict_keeps_todays_errors(&[
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "near": [0, -10]}]})),
+        ("sketch.move_points", json!({"moves": [{"to": [1, 2], "near": [0, -10]}], "tolerance": 10.5})),
+        ("sketch.move_points", json!({"moves": (0..9).map(|_| json!({"to": [1, 2], "point": "origin"})).collect::<Vec<_>>()})),
     ]);
 }
 
@@ -236,6 +267,28 @@ fn the_types_read_each_key_as_the_handler_does() {
     assert!(messages("sketch.drag", json!({"entity": "l1", "to": {"x": 1, "y": 2}, "from": [0, 0], "with": ["l2", "p3"], "live": false})).is_empty());
     assert_eq!(messages("sketch.drag", json!({"entity": "l1", "to": [1, 2], "live": 1})), ["`live` must be true or false"]);
 
+    // sketch.move_points: every entry needs `to`; the point is `near` when that key is there, and
+    // the handler never looks at `point` then.
+    assert!(messages("sketch.move_points", json!({"moves": [{"point": "origin", "to": [0, 0]}]})).is_empty());
+    assert!(
+        messages("sketch.move_points", json!({"moves": [{"near": [1, 2], "to": {"x": 3, "y": 4}}], "tolerance": null, "sketch": null})).is_empty()
+    );
+    assert!(messages("sketch.move_points", json!({"moves": [{"near": [1, 2], "to": [3, 4], "point": 5}], "tolerance": 0.2})).is_empty());
+    assert!(messages("sketch.move_points", json!({"moves": [{"point": "origin", "to": [0, 0], "bogus": 1}]})).is_empty());
+    assert_eq!(messages("sketch.move_points", json!({"moves": []})), ["`moves` must be a list of {point | near, to}"]);
+    assert_eq!(messages("sketch.move_points", json!({"moves": "origin"})), ["`moves` must be a list of {point | near, to}"]);
+    assert_eq!(messages("sketch.move_points", json!({"moves": [{"point": "origin"}]})), ["moves[0]: `to` must be a point [x, y]"]);
+    assert_eq!(messages("sketch.move_points", json!({"moves": [{"to": [1], "point": "origin"}]})), ["moves[0]: `to` must be a point [x, y]"]);
+    assert_eq!(messages("sketch.move_points", json!({"moves": [{"to": [1, 2], "near": null}]})), ["moves[0]: `near` must be a point [x, y]"]);
+    assert_eq!(messages("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": 5}]})), ["`point` must be a point reference"]);
+    assert_eq!(
+        messages("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": "origin"}, {"to": [1, 2], "point": 5}]})),
+        ["`point` must be a point reference"],
+    );
+    assert_eq!(messages("sketch.move_points", json!({"moves": [{"to": [1, 2]}], "tolerance": 0})), ["`tolerance` must be a positive length (mm)"]);
+    assert_eq!(messages("sketch.move_points", json!({"moves": [{"to": [1, 2]}], "tolerance": 1e9})), ["`tolerance` must be a positive length (mm)"]);
+    assert!(messages("sketch.move_points", json!({"moves": [{"to": [1, 2], "point": "origin"}], "tolerance": 999_999_999.0})).is_empty());
+
     // sketch.drag_end: a constraint only when it is not `null`; its params are the command's own.
     assert!(messages("sketch.drag_end", json!({"constraint": null, "sketch": null})).is_empty());
     assert!(messages("sketch.drag_end", json!({"constraint": {"command": "sketch.constraint.fix", "params": {"point": "origin"}}})).is_empty());
@@ -269,6 +322,7 @@ fn what_the_types_accept_the_handlers_run() {
         ("sketch.options", json!({"show_points": null, "grid": null})),
         ("sketch.construction", json!({"curves": bottom, "value": null})),
         ("sketch.move_point", json!({"point": "origin", "to": {"x": 0, "y": 0}})),
+        ("sketch.move_points", json!({"moves": [{"point": "origin", "to": [0, 0]}, {"near": [10, -10], "to": [10, -10]}], "tolerance": null})),
         ("sketch.drag", json!({"entity": bottom, "to": [0, -10], "from": null, "with": null, "live": null})),
         ("sketch.drag_end", json!({"constraint": null})),
         ("sketch.create", json!({"plane": "XY", "frame": null, "flip": false, "project_edges": "ignored"})),
@@ -333,6 +387,21 @@ fn the_schemas_take_what_the_handlers_read() {
             (json!({"to": [1, 2]}), false),
             (json!({"point": "p1"}), false),
             (json!({"point": 3, "to": [1, 2]}), false),
+        ],
+    );
+    takes(
+        input_schema_for::<MovePointsParams>(),
+        &[
+            (json!({"moves": [{"point": "p1", "to": [1, 2]}]}), true),
+            (json!({"moves": [{"near": [1, 2], "to": {"x": 3, "y": 4}}], "tolerance": 0.2, "sketch": "S"}), true),
+            (json!({"moves": [{"point": "p1", "to": [1, 2]}], "tolerance": null}), true),
+            (json!({"moves": [{"point": "p1", "to": [1, 2], "near": [1, 2]}]}), true),
+            (json!({}), false),
+            (json!({"moves": []}), false),
+            (json!({"moves": [{"point": "p1"}]}), false),
+            (json!({"moves": [{"to": [1, 2]}]}), false),
+            (json!({"moves": [{"point": "p1", "to": [1, 2]}], "tolerance": 0}), false),
+            (json!({"moves": [{"point": "p1", "to": [1, 2]}], "tolerance": -0.5}), false),
         ],
     );
     takes(
@@ -485,6 +554,21 @@ fn editing_replies_match_the_output_schema() {
     assert!(r["construction"] == false && r["changed"] == 1, "{r}");
     matches(output_schema_for::<ConstructionResult>(), "sketch.construction", &r);
 
+    let r = run(
+        &mut s,
+        "sketch.move_points",
+        json!({"moves": [{"point": "origin", "to": [0, 0]}, {"near": [10, -10], "to": [10, -10]}], "tolerance": 0.5}),
+    );
+    let moved = r["moved"].as_array().cloned().unwrap_or_default();
+    assert_eq!(moved.len(), 2, "{r}");
+    assert_eq!(moved[0]["point"], json!("origin"), "{r}");
+    assert!(moved[1]["point"].is_string(), "{r}");
+    assert!(moved.iter().all(|m| m["to"].is_array() && m["at"].is_array() && m["reached"].is_boolean()), "{r}");
+    assert!(r["sketch"].is_object(), "{r}");
+    matches(output_schema_for::<MovePointsResult>(), "sketch.move_points", &r);
+    let r = run(&mut s, "sketch.move_points", json!({"moves": [{"point": "origin", "to": [0, 0]}], "sketch": sketch}));
+    matches(output_schema_for::<MovePointsResult>(), "sketch.move_points", &r);
+
     let r = run(&mut s, "sketch.move_point", json!({"point": format!("{bottom}.start"), "to": [-12, -10]}));
     assert!(r["sketch"].is_object(), "{r}");
     matches(output_schema_for::<MovePointResult>(), "sketch.move_point", &r);
@@ -590,4 +674,146 @@ fn a_misspelt_key_is_reported() {
     assert_eq!(e.as_deref(), Some("invalid parameters for `sketch.solve`: unknown key `skech`; did you mean `sketch`?"));
     let e = strict.execute("sketch.options", &json!({"show_profil": true})).err().map(|e| e.to_string());
     assert!(e.is_some_and(|e| e.contains("unknown key `show_profil`")));
+}
+
+fn model_view_context(focused: u64, recent: Vec<u64>) -> crate::ViewContext {
+    use solidcraft_views::ViewKind;
+    crate::ViewContext::new(
+        vec![
+            crate::ViewDescriptor { id: 1, kind: ViewKind::Model, window: 0, subject: None },
+            crate::ViewDescriptor { id: 2, kind: ViewKind::Model, window: 1, subject: None },
+            crate::ViewDescriptor { id: 3, kind: ViewKind::Render, window: 0, subject: None },
+            crate::ViewDescriptor { id: 4, kind: ViewKind::Sheet, window: 0, subject: Some("sheet1".into()) },
+        ],
+        focused,
+        recent,
+    )
+    .unwrap()
+}
+
+#[test]
+fn model_sketch_targets_are_validated_and_returned_at_every_check_level() {
+    use crate::schema::sketch::EditResult;
+    for level in ParamCheck::ALL {
+        let mut s = Session { param_check: level, ..Session::default() };
+        s.set_view_context(model_view_context(3, vec![3, 2, 1])).unwrap();
+        let created = run(&mut s, "sketch.create", json!({"plane":"XY"}));
+        assert_eq!(created["sketching_view"], 2);
+        assert_eq!(s.sketching_view, Some(2));
+        assert!(conforms(output_schema_for::<CreateResult>().as_value(), output_schema_for::<CreateResult>().as_value(), &created));
+        let sketch = created["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.finish", json!({}));
+        assert_eq!(s.sketching_view, None);
+        let edited = run(&mut s, "sketch.edit", json!({"sketch":sketch,"view":1}));
+        assert_eq!(edited["sketching_view"], 1);
+        assert_eq!((s.active_sketch, s.sketching_view), (Some(sketch), Some(1)));
+        assert!(conforms(output_schema_for::<EditResult>().as_value(), output_schema_for::<EditResult>().as_value(), &edited));
+        let before = (s.doc.to_json(), s.active_sketch, s.sketching_view, s.undo.len());
+        for target in [json!(0), json!(-1), json!(1.5), json!("2"), json!(true), json!([]), json!(3), json!(4), json!(99), json!(u64::MAX)] {
+            for command in ["sketch.create", "sketch.edit"] {
+                let params = if command == "sketch.create" { json!({"plane":"XY","view":target}) } else { json!({"sketch":sketch,"view":target}) };
+                assert!(s.execute(command, &params).is_err(), "{level:?} {command} {target}");
+                assert_eq!((s.doc.to_json(), s.active_sketch, s.sketching_view, s.undo.len()), before);
+            }
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        assert_eq!((s.active_sketch, s.sketching_view), (None, None));
+        run(&mut s, "sketch.create", json!({"plane":"XZ","view":2}));
+        run(&mut s, "sketch.cancel", json!({}));
+        assert_eq!((s.active_sketch, s.sketching_view), (None, None));
+    }
+}
+
+#[test]
+fn view_context_targets_only_real_models_and_caps_hostile_metadata() {
+    use crate::{ViewContext, ViewDescriptor};
+    use solidcraft_views::{MAX_VIEWS, ViewKind};
+    let context = model_view_context(3, vec![3, 2, 1]);
+    assert_eq!(context.resolve_sketch_target(None).unwrap(), 2);
+    assert_eq!(context.resolve_sketch_target(Some(1)).unwrap(), 1);
+    assert_eq!(model_view_context(1, vec![2, 1]).resolve_sketch_target(None).unwrap(), 1);
+    assert_eq!(model_view_context(4, vec![4, 2, 1]).resolve_sketch_target(None).unwrap(), 2);
+    assert_eq!(ViewContext::default().resolve_sketch_target(None).unwrap(), 1);
+    for target in [0, 3, 4, 99, u64::MAX] {
+        assert!(context.resolve_sketch_target(Some(target)).is_err());
+    }
+    let render = ViewDescriptor { id: 3, kind: ViewKind::Render, window: 0, subject: None };
+    let context = ViewContext::new(vec![render.clone()], 3, vec![3]).unwrap();
+    assert!(context.resolve_sketch_target(None).is_err(), "the engine must never invent a fallback Model ID");
+    let mut s = Session::default();
+    s.set_view_context(context).unwrap();
+    let before = s.doc.to_json();
+    assert!(s.execute("sketch.create", &json!({})).is_err());
+    assert_eq!(s.doc.to_json(), before);
+    assert!(ViewContext::new(vec![], 1, vec![]).is_err());
+    assert!(ViewContext::new(vec![render.clone(); MAX_VIEWS + 1], 3, vec![]).is_err());
+    assert!(ViewContext::new(vec![render.clone(), render.clone()], 3, vec![]).is_err());
+    assert!(ViewContext::new(vec![render.clone()], 99, vec![]).is_err());
+    assert!(ViewContext::new(vec![render.clone()], 3, vec![3, 3]).is_err());
+    assert!(ViewContext::new(vec![render.clone()], 3, vec![99]).is_err());
+    assert!(ViewContext::new(vec![render.clone()], 3, vec![3; MAX_VIEWS + 1]).is_err());
+    for id in [0, (1 << 53) + 1, u64::MAX] {
+        assert!(ViewContext::new(vec![ViewDescriptor { id, ..render.clone() }], id, vec![]).is_err());
+    }
+    assert!(ViewContext::new(vec![ViewDescriptor { window: u64::MAX, ..render.clone() }], 3, vec![]).is_err());
+    assert!(ViewContext::new(vec![ViewDescriptor { subject: Some("x".repeat(257)), ..render.clone() }], 3, vec![]).is_err());
+    let too_many_windows = (1..=10).map(|id| ViewDescriptor { id, window: id - 1, ..render.clone() }).collect();
+    assert!(ViewContext::new(too_many_windows, 1, vec![1]).is_err());
+    let popouts_without_root = (1..=9).map(|id| ViewDescriptor { id, window: id, ..render.clone() }).collect();
+    assert!(ViewContext::new(popouts_without_root, 1, vec![1]).is_err(), "omitting root descriptors cannot grant an extra pop-out");
+    let maximum_popouts = (1..=8).map(|id| ViewDescriptor { id, window: id, ..render.clone() }).collect();
+    assert!(ViewContext::new(maximum_popouts, 1, vec![1]).is_ok(), "a root-less snapshot may still contain eight pop-outs");
+    let maximum_open = (1..=MAX_VIEWS as u64).map(|id| ViewDescriptor { id, ..render.clone() }).collect();
+    assert!(ViewContext::new(maximum_open, 1, vec![1]).is_ok());
+    assert!(ViewContext::new(vec![ViewDescriptor { id: 1 << 53, ..render }], 1 << 53, vec![]).is_ok());
+}
+
+#[test]
+fn model_sketch_owner_survives_history_and_normalizes_when_its_view_closes() {
+    use crate::{ViewContext, ViewDescriptor};
+    use solidcraft_views::ViewKind;
+    let mut s = Session::default();
+    s.set_view_context(model_view_context(2, vec![2, 1])).unwrap();
+    let created = run(&mut s, "sketch.create", json!({"plane":"XY","view":2}));
+    let sketch = created["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
+    let checkpoint = s.checkpoint();
+    let root_only = ViewContext::new(vec![ViewDescriptor { id: 1, kind: ViewKind::Model, window: 0, subject: None }], 1, vec![1]).unwrap();
+    assert!(s.set_view_context(root_only.clone()).is_err(), "a live owner cannot silently disappear");
+    assert_eq!(s.view_context.focused(), 2);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!((s.active_sketch, s.sketching_view), (Some(sketch), Some(2)));
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!((s.active_sketch, s.sketching_view), (Some(sketch), Some(2)));
+    run(&mut s, "sketch.finish", json!({}));
+    s.set_view_context(root_only.clone()).unwrap();
+    let completed = s.doc.to_json();
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!((s.active_sketch, s.sketching_view), (None, None), "geometry undo never resurrects a closed owner");
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.to_json(), completed);
+    assert_eq!((s.active_sketch, s.sketching_view), (None, None));
+    s.restore_checkpoint(checkpoint).unwrap();
+    assert_eq!(s.doc.to_json(), completed);
+    assert_eq!((s.active_sketch, s.sketching_view), (None, None));
+    assert_eq!(s.view_context, root_only, "history never restores stale host placement metadata");
+}
+
+#[test]
+fn restoring_a_closed_owner_checkpoint_finalizes_its_temporary_marker() {
+    let mut s = Session::default();
+    s.set_view_context(model_view_context(2, vec![2, 1])).unwrap();
+    let sketch = run(&mut s, "sketch.create", json!({"plane":"XY","view":2}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.box", json!({"length":2,"width":3,"height":4}));
+    run(&mut s, "sketch.edit", json!({"sketch":sketch,"view":2}));
+    assert!(s.doc.marker.is_some());
+    let checkpoint = s.checkpoint();
+    run(&mut s, "sketch.finish", json!({}));
+    s.set_view_context(crate::ViewContext::default()).unwrap();
+    s.restore_checkpoint(checkpoint).unwrap();
+    assert_eq!(s.doc.marker, None, "a vanished editor does not leave later features rolled away");
+    assert_eq!((s.active_sketch, s.sketching_view), (None, None));
+    assert_eq!(s.doc.features.len(), 2);
 }

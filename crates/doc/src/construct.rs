@@ -415,7 +415,7 @@ fn edge_circle(b: &ModelBody, index: usize, pts: &[Vec3]) -> Option<(Vec3, Vec3)
 }
 
 /// The most edge names a vertex reference keeps.
-const MAX_VERTEX_EDGES: usize = 16;
+pub(crate) const MAX_VERTEX_EDGES: usize = 16;
 
 /// Where the edges named `names` meet: the end every one of them has, nearest `at` (two edges
 /// between the same two vertices share both). `None` when an edge is gone or they share no end.
@@ -432,9 +432,12 @@ fn named_vertex(st: &ModelState, at: Vec3, names: &[String]) -> Option<Vec3> {
             // it, so a vertex took that edge's end (#8650).
             bodies(st).find_map(|b| {
                 let hit = crate::name_lookup::locate_edge(b, n, at).ok()?;
-                let m = b.mesh();
-                let pts = m.edges.get(hit.edge)?;
-                Some((std::ptr::from_ref(b), hit.edge, [*pts.first()?, *pts.last()?]))
+                let rec = b.body.record();
+                let edge = rec.edges.get(hit.edge)?;
+                let [v0, v1] = edge.vertices;
+                let p0 = rec.vertices.get(v0 as usize).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]))?;
+                let p1 = rec.vertices.get(v1 as usize).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2]))?;
+                Some((std::ptr::from_ref(b), hit.edge, [p0, p1]))
             })
         })
         .collect::<Option<_>>()?;
@@ -444,17 +447,32 @@ fn named_vertex(st: &ModelState, at: Vec3, names: &[String]) -> Option<Vec3> {
         return None;
     }
     let ends: Vec<[Vec3; 2]> = found.into_iter().map(|(_, _, ends)| ends).collect();
-    let (first, rest) = ends.split_first()?;
-    let tol = |p: Vec3| 1e-6 * (1.0 + p.len());
-    first
-        .iter()
-        .copied()
-        .filter(|p| p.is_finite() && rest.iter().all(|e| e.iter().any(|q| q.dist(*p) <= tol(*p))))
-        .min_by(|p, q| p.dist(at).total_cmp(&q.dist(at)))
+    shared_ends(&ends).into_iter().min_by(|p, q| p.dist(at).total_cmp(&q.dist(at)))
+}
+
+/// How near two points of a body are the same point: a millionth of their distance from the
+/// origin, and at least a millionth of a millimetre.
+pub(crate) fn point_tolerance(p: Vec3) -> f64 {
+    1e-6 * (1.0 + p.len())
+}
+
+/// Where edges meet: the ends in `ends[0]` that every other list in `ends` has too (to
+/// [`point_tolerance`]), each once. Empty when they share none.
+pub(crate) fn shared_ends<E: AsRef<[Vec3]>>(ends: &[E]) -> Vec<Vec3> {
+    let tol = point_tolerance;
+    let Some((first, rest)) = ends.split_first() else { return Vec::new() };
+    let mut shared: Vec<Vec3> = Vec::new();
+    for p in first.as_ref().iter().copied() {
+        let everywhere = rest.iter().all(|e| e.as_ref().iter().any(|q| q.dist(p) <= tol(p)));
+        if p.is_finite() && everywhere && !shared.iter().any(|q| q.dist(p) <= tol(p)) {
+            shared.push(p);
+        }
+    }
+    shared
 }
 
 /// A polyline that is straight: its line.
-fn as_line(pts: &[Vec3]) -> Option<(Vec3, Vec3)> {
+pub(crate) fn as_line(pts: &[Vec3]) -> Option<(Vec3, Vec3)> {
     let (a, b) = (*pts.first()?, *pts.last()?);
     let d = (b - a).normalized()?;
     let len = (b - a).len();
@@ -462,7 +480,7 @@ fn as_line(pts: &[Vec3]) -> Option<(Vec3, Vec3)> {
 }
 
 /// A polyline on a circle: (centre, unit normal, radius).
-fn as_circle(pts: &[Vec3]) -> Option<(Vec3, Vec3, f64)> {
+pub(crate) fn as_circle(pts: &[Vec3]) -> Option<(Vec3, Vec3, f64)> {
     let n = pts.len();
     if n < 4 {
         return None;
@@ -659,6 +677,8 @@ pub fn model_axis_in(doc: Option<&Document>, st: &ModelState, g: &GeoRef, compon
                 _ => Err(bad("the datum is not an axis (pick the X, Y or Z of a component)")),
             }
         }
+        // A construction axis by name: where it is on each evaluation, so what turns about it follows it.
+        GeoRef::Axis { name } => crate::eval::construction_axis_in(doc, st, name, component),
         _ => model_axis(st, g),
     }
 }
@@ -672,6 +692,19 @@ pub fn canonical_dir(d: Vec3) -> Vec3 {
         Some(v) if *v < 0.0 => -d,
         _ => d,
     }
+}
+
+/// The direction of a straight line a feature is turned parallel to: a straight model edge, a
+/// sketch line, a world, construction or component origin axis. Not a round edge or face (whose
+/// axis [`model_axis`] would give).
+pub fn straight_direction(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, g: &GeoRef) -> Result<Vec3> {
+    let ctx = Ctx { doc, vals, st, depth: 0, component: 0 };
+    let (_, d) = match g {
+        GeoRef::Edge { at, name } => as_line(&edge_points(st, *at, name)?).ok_or_else(|| bad("the edge is not straight"))?,
+        GeoRef::Face { .. } => return Err(bad("pick a straight edge, line or axis")),
+        _ => line(&ctx, g)?,
+    };
+    d.normalized().filter(|d| d.is_finite()).ok_or_else(|| bad("the line has no direction"))
 }
 
 /// A reference as a line (origin, unit direction).
@@ -1026,13 +1059,36 @@ fn line_plane(o: Vec3, d: Vec3, p: &Plane) -> Option<Vec3> {
 pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
     let degenerate = || bad("degenerate plane");
     match p {
-        PlaneRef::Midplane { a, b } => {
+        PlaneRef::Midplane { a, b, old_frame } => {
             let (pa, pb) = (plane(ctx, a)?, plane(ctx, b)?);
             let (na, nb) = (pa.normal(), pb.normal());
             if na.cross(nb).len() < 1e-9 {
-                // Parallel: halfway between, facing as the first.
+                // Parallel: half way between them.
                 let half = nb * ((pb.origin - pa.origin).dot(nb) * 0.5);
-                return Plane::new(pa.origin + half, pa.x, pa.y).ok_or_else(degenerate);
+                let center = pa.origin + half;
+                // A design saved before the midplane took a world plane's frame keeps the
+                // frame it was saved with: the first plane's own origin and axes (#18260).
+                if *old_frame {
+                    return Plane::new(center, pa.x, pa.y).ok_or_else(degenerate);
+                }
+                // Two planes that are parallel to a world plane give a midplane in that world
+                // plane's frame: its origin on the world axis and not at the point the planes
+                // were picked, and its axes the world's. A sketch on it then keeps its world
+                // place when it is moved onto the midplane (#18260).
+                let frame = if na.z.abs() > 1.0 - 1e-6 {
+                    Some(Plane::XY)
+                } else if na.x.abs() > 1.0 - 1e-6 {
+                    Some(Plane::YZ)
+                } else if na.y.abs() > 1.0 - 1e-6 {
+                    Some(Plane::XZ)
+                } else {
+                    None
+                };
+                return match frame {
+                    Some(frame) => Ok(frame.offset(center.dot(frame.normal()))),
+                    // Not parallel to a world plane: the midplane keeps the first plane's axes.
+                    None => Plane::new(center, pa.x, pa.y).ok_or_else(degenerate),
+                };
             }
             // Meeting at an angle: the plane through their line that halves the angle.
             let (o, dir) = plane_plane(&pa, &pb).ok_or_else(degenerate)?;
@@ -1076,7 +1132,9 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
             let delta = p - origin;
             let across = delta - dir * delta.dot(dir);
             if !across.len().is_finite() || across.len() < 1e-9 {
-                return Err(bad("the point is on the axis: pick a point off the axis to define a unique plane"));
+                return Err(bad(
+                    "the point is on the axis: pick a point off the axis to define a unique plane. For a plane square to the axis through this point, use Plane Through Point, Square To Line",
+                ));
             }
             Plane::new(origin, dir, across).ok_or_else(degenerate)
         }
@@ -1108,6 +1166,11 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
                 .normalized()
                 .ok_or_else(|| bad("the line is square to the plane: every plane through it is perpendicular; pick a line in or along the plane"))?;
             Plane::new(o, d, n.cross(d)).ok_or_else(degenerate)
+        }
+        PlaneRef::SquareToLine { line: l, point: at } => {
+            let (_, d) = line(ctx, l)?;
+            let d = d.normalized().ok_or_else(|| bad("the line has no direction"))?;
+            Plane::from_normal(point(ctx, at)?, d).ok_or_else(degenerate)
         }
         PlaneRef::AlongPath { path, t } => {
             let t = Document::eval_in(ctx.vals, t, Kind::Unitless)?;
@@ -1174,10 +1237,15 @@ impl GeoRef {
             GeoRef::Vertex { at, edges: edges @ None } => {
                 for b in bodies(st) {
                     let tol = (b.body.size() * 1e-3).max(1e-3);
-                    let m = b.mesh();
-                    let ends_here = |e: &Vec<Vec3>| [e.first(), e.last()].into_iter().flatten().any(|q| q.dist(*at) <= tol);
+                    let rec = b.body.record();
+                    let ends_here = |e: &solidcore_record::brep::Edge| {
+                        [e.vertices[0], e.vertices[1]]
+                            .into_iter()
+                            .filter_map(|v| rec.vertices.get(v as usize).map(|pt| Vec3::new(pt.point[0], pt.point[1], pt.point[2])))
+                            .any(|q| q.dist(*at) <= tol)
+                    };
                     let mut meet: Vec<String> =
-                        m.edges.iter().zip(crate::naming::edge_names(b)).filter(|(e, n)| !n.is_empty() && ends_here(e)).map(|(_, n)| n).collect();
+                        rec.edges.iter().zip(crate::naming::edge_names(b)).filter(|(e, n)| !n.is_empty() && ends_here(e)).map(|(_, n)| n).collect();
                     if meet.is_empty() {
                         continue;
                     }
@@ -1249,7 +1317,10 @@ impl PlaneRef {
     /// The references of a plane built from model geometry.
     pub fn refs_mut(&mut self) -> Vec<&mut GeoRef> {
         match self {
-            PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } | PlaneRef::AxisPoint { axis: a, point: b } => vec![a.as_mut(), b.as_mut()],
+            PlaneRef::Midplane { a, b, .. }
+            | PlaneRef::TwoEdges { a, b }
+            | PlaneRef::AxisPoint { axis: a, point: b }
+            | PlaneRef::SquareToLine { line: a, point: b } => vec![a.as_mut(), b.as_mut()],
             PlaneRef::Perpendicular { plane, line } => vec![plane.as_mut(), line.as_mut()],
             PlaneRef::ThreePoints { a, b, c } => vec![a.as_mut(), b.as_mut(), c.as_mut()],
             PlaneRef::Tangent { face, reference, .. } => {

@@ -509,7 +509,6 @@ fn capture_changes<T>(
         let value = edit(k, b)?;
         return Ok((value, Changes::default()));
     }
-    let stop_checks_own = k.fixes.stop_tracking_checks_own_callback;
     k.context
         .set_sys_notify_callback(Some(Box::new(TopologyChangeCallback::new(1))));
     let result = edit(k, b);
@@ -518,9 +517,9 @@ fn capture_changes<T>(
         .sys_notify_callback()
         .and_then(NotifyCallback::as_any)
         .and_then(|a| a.downcast_ref::<TopologyChangeCallback>())
-        .filter(|callback| !stop_checks_own || callback.tracker() == 1)
+        .filter(|callback| callback.tracker() == 1)
         .map(|callback| (callback.lists(), callback.failure()));
-    if !stop_checks_own || captured.is_some() {
+    if captured.is_some() {
         k.context.set_sys_notify_callback(None);
     }
     let value = result?;
@@ -594,8 +593,7 @@ fn tracked_edit<R>(
     use crate::topology::brep::p3 as brep_p3;
     let lent = brep_p3::with_lent_context(k, |k, ctx| {
         // (the tracker reads its B-rep only to tell it from null)
-        let mut tracker = TrackTopologyChanges::new_with_kernel(
-            k,
+        let mut tracker = TrackTopologyChanges::new(
             Some(crate::topology::BrepId::from_index(0)),
             EDIT_TRACKER,
             true,
@@ -1928,5 +1926,32 @@ mod tests {
             .unwrap();
         assert_eq!(callback.tracker(), 27);
         assert!(callback.lists().notify_events.is_empty());
+    }
+
+    /// WR-17: an edit that replaces the capture's tracker with another one is refused,
+    /// and the replacing tracker stays installed; its lists are not taken as the edit's.
+    #[test]
+    fn capture_refuses_a_replaced_tracker_and_leaves_it_installed() {
+        use crate::geom::context::NotifyCallback;
+        use crate::topology::topology::TopologyChangeCallback;
+        let mut k = Kernel::default();
+        let mut b = Brep::new();
+        let r = capture_changes(&mut k, &mut b, |k, _| {
+            k.context
+                .set_sys_notify_callback(Some(Box::new(TopologyChangeCallback::new(5))));
+            Ok(())
+        });
+        let err = r.err();
+        assert!(
+            matches!(err, Some(SolidError::InvalidInput { .. })),
+            "{err:?}"
+        );
+        let callback = k
+            .context
+            .sys_notify_callback()
+            .and_then(NotifyCallback::as_any)
+            .and_then(|a| a.downcast_ref::<TopologyChangeCallback>())
+            .unwrap();
+        assert_eq!(callback.tracker(), 5);
     }
 }

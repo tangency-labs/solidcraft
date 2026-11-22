@@ -54,7 +54,7 @@ impl Refusal {
 /// The first of `steps` (`{command | id, params?}`) that would be refused at its turn whatever
 /// the steps before it do, checked against the command registry and, at `level`
 /// [`ParamCheck::Strict`], the commands' typed contracts. `host` names ids the runner answers
-/// itself, outside the registry (the app's `view.pick`).
+/// itself (the app's pixel `view.pick`, ahead of the registry's headless one).
 pub fn check(steps: &[Value], level: ParamCheck, host: &[&str]) -> Option<Refusal> {
     for (index, step) in steps.iter().enumerate() {
         let Some(id) = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str) else {
@@ -145,8 +145,8 @@ mod tests {
         let steps = vec![step("solid.box", json!({"length": 1, "width": 1, "height": 1})), json!({"params": {}}), step("nope.nope", json!({}))];
         assert_eq!(check(&steps, ParamCheck::Off, &[]), Some(Refusal { index: 1, command: None, error: "missing `command`".into() }));
         // `id` is read as `command` is, and an id the runner answers itself passes.
-        let steps = vec![json!({"id": "solid.box", "params": {"length": 1, "width": 1, "height": 1}}), step("view.pick", json!({"x": 1, "y": 1}))];
-        assert_eq!(check(&steps, ParamCheck::Off, &["view.pick"]), None);
+        let steps = vec![json!({"id": "solid.box", "params": {"length": 1, "width": 1, "height": 1}}), step("app.only", json!({"x": 1, "y": 1}))];
+        assert_eq!(check(&steps, ParamCheck::Off, &["app.only"]), None);
         assert_eq!(check(&steps, ParamCheck::Off, &[]).map(|r| r.index), Some(1), "outside the registry without the runner");
     }
 
