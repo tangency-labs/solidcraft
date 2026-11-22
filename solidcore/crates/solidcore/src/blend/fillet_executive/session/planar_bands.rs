@@ -46,7 +46,39 @@ pub(super) struct BandContact {
     pub edge: EdgeId,
     pub face: FaceId,
     pub at: Point3,
-    pub overlapping: bool,
+    /// The squared distance between the contact's original-edge feet, exact.
+    gap_squared: interval::Scalar,
+    /// The sum of the two bands' widths on the shared plane, exact.
+    widths: interval::Scalar,
+}
+
+impl BandContact {
+    /// Whether the bands overlap by more than `tol` on the shared plane: their feet lie
+    /// closer than their widths' sum less `tol`. Bands whose widths add up to their
+    /// edges' separation, or exceed it by at most `tol`, only touch (#20450): a rounding
+    /// of the edges' lines or of a setback must not make two chamfers that meet exactly
+    /// in the middle of a face count as overlapping. This is the band rail check's own
+    /// threshold, which refuses a rail lying inside another band by more than `tol`.
+    /// The comparison is exact: `|Q - P|^2 < (a + b - tol)^2` with `a + b > tol`.
+    ///
+    /// # Errors
+    /// `InvalidInput` where a value leaves the exact arithmetic range.
+    pub fn overlaps_by_more_than(&self, tol: f64) -> Result<bool> {
+        if !(tol.is_finite() && tol >= 0.0) {
+            return Err(SolidError::invalid_input(
+                OP,
+                "invalid band overlap tolerance",
+            ));
+        }
+        let reach = interval::sub(&self.widths, &[tol])?;
+        if exact::sign(&reach) <= 0 {
+            return Ok(false);
+        }
+        Ok(exact::sign(&interval::sub(
+            &self.gap_squared,
+            &interval::mul(&reach, &reach)?,
+        )?) < 0)
+    }
 }
 
 /// A selected neighbor can trim an interior witness at either endpoint. Only a
@@ -592,10 +624,6 @@ pub(super) fn retained_contact(
         gap_squared = interval::add(&gap_squared, &interval::mul(&delta, &delta)?)?;
     }
     let exact_widths = interval::add(&[a.width], &[b.width])?;
-    let overlapping = exact::sign(&interval::sub(
-        &gap_squared,
-        &interval::mul(&exact_widths, &exact_widths)?,
-    )?) < 0;
     let rho = a
         .offsets
         .first()
@@ -627,7 +655,8 @@ pub(super) fn retained_contact(
         edge: a.edge,
         face: a.face,
         at: contact_at,
-        overlapping,
+        gap_squared,
+        widths: exact_widths,
     }))
 }
 

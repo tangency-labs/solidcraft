@@ -464,6 +464,8 @@ impl SessionObjects<'_> {
     /// An additional parallel-line overlap certificate, including when current
     /// rails have passed completely beyond the opposite edges. A missing
     /// certificate leaves the independent rail checks to decide their geometry.
+    /// Bands that overlap by at most `tol`, the rail checks' own threshold, only
+    /// touch (#20450).
     fn planar_bands_overlap(
         &mut self,
         k: &Kernel,
@@ -471,6 +473,7 @@ impl SessionObjects<'_> {
         face: FaceId,
         blended: &[EdgeId],
         solvers: &[FilletObject],
+        tol: f64,
     ) -> Result<bool> {
         let [FilletObject::Solver(ia), FilletObject::Solver(ib)] = pair else {
             return Err(invalid("object is not a solver"));
@@ -524,7 +527,7 @@ impl SessionObjects<'_> {
         if sample_off_face(k, self.target, contact.face, contact.at)? {
             return Ok(false);
         }
-        Ok(contact.overlapping)
+        contact.overlaps_by_more_than(tol)
     }
     /// `pFilletSolver->CalcFilletGeom()`; the solver's `RecordFilletError` notes are
     /// replayed into the executive's record (`m_pExecutive->NoteFilletError`).
@@ -6446,6 +6449,7 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                             *face_a,
                             &edge_ids,
                             solvers,
+                            tol,
                         )? {
                             return Ok(false);
                         }

@@ -64,11 +64,16 @@ struct Run {
 }
 
 fn run(d: [f64; 2]) -> Run {
+    run_at(0.0, d)
+}
+
+/// [`run`] with the block's near side at `y0` instead of 0 (its top edges at `y0` and `y0 + 2`).
+fn run_at(y0: f64, d: [f64; 2]) -> Run {
     let mut k = kernel();
-    let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 30.0, 2.0, 10.0).unwrap();
+    let mut b = create_box(&mut k, Point3::new(0.0, y0, 0.0), 30.0, 2.0, 10.0).unwrap();
     let edges = [
-        pick(&k, &b, [15.0, 0.0, 10.0]),
-        pick(&k, &b, [15.0, 2.0, 10.0]),
+        pick(&k, &b, [15.0, y0, 10.0]),
+        pick(&k, &b, [15.0, y0 + 2.0, 10.0]),
     ];
     let tol = edge::tolerance(&b, edges[0])
         .unwrap()
@@ -159,6 +164,59 @@ fn unequal_chamfers_too_large_name_the_scale_that_leaves_the_margin() {
     );
     println!("RES unequal above: {:?}, {}", above.fit, above.comment);
     println!("RES unequal: lambda {lambda}, setbacks {sum}, margin {margin}, apart {apart}, check {check}, top face left {left}");
+}
+
+/// #20450: two chamfers whose setbacks add up to exactly the width of the face they share
+/// meet in its middle and take the whole face off; they only touch, so they build. With the
+/// block's near side at y = 0.3 its far top edge lies at the binary64 sum 0.3 + 2, so the edges
+/// are 2 less one ulp apart: the bands' widths, 1 + 1, exceed that by 2.2e-16 mm, far below the
+/// solvers' tolerance, the band rail check's own threshold. The exact parallel-band certificate
+/// took that rounding for an overlap and refused, naming 0.999. At y = 0 the edges are exactly
+/// 2 apart (control). Each built block lost two 1 x 1 x 30 prisms of 15 mm^3 each:
+/// 600 - 30 = 570 mm^3. Chamfers of 1.01 still overlap and are refused.
+#[test]
+fn chamfers_that_exactly_use_up_their_shared_face_build() {
+    let near = std::hint::black_box(0.3_f64);
+    assert_eq!(
+        ((near + 2.0) - near).to_bits(),
+        (2.0 - f64::EPSILON).to_bits(),
+        "the far edge is not one ulp nearer"
+    );
+    let store = AttributeStore::new();
+    let key_of = |_| ObjectKey(0);
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &key_of,
+    };
+    for y0 in [0.0, 0.3] {
+        let mut k = kernel();
+        let mut b = create_box(&mut k, Point3::new(0.0, y0, 0.0), 30.0, 2.0, 10.0).unwrap();
+        let edges = [
+            pick(&k, &b, [15.0, y0, 10.0]),
+            pick(&k, &b, [15.0, y0 + 2.0, 10.0]),
+        ];
+        let result = {
+            let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+            s.prepare_chamfers_along(&k, &edges, &[ChamferSize::Distances([1.0, 1.0]); 2], &[])
+                .unwrap();
+            s.create_corners(&k, None).unwrap();
+            for corner in s.fillet_corners().unwrap() {
+                s.set_corner_bevel(corner, true).unwrap();
+            }
+            let result = s.do_filleting(&mut k, None);
+            result.map_err(|e| (e, s.fit_size().map(|f| (f.size, f.kind))))
+        };
+        if let Err((e, fit)) = &result {
+            panic!("y0 = {y0}: refused: {e:?}, fit {fit:?}");
+        }
+        let v = brep_volume(&k, &mut b, 1e-9, &attrs).unwrap();
+        assert!(
+            ((v - 570.0) / 570.0).abs() <= 1e-6,
+            "y0 = {y0}: volume {v} against 570"
+        );
+        let above = run_at(y0, [1.01, 1.01]);
+        assert!(above.result.is_err(), "y0 = {y0}: 1.01 built");
+    }
 }
 
 /// The same with the distances the other way round, (3, 1.5): a scale again.
