@@ -791,7 +791,7 @@ fn rail_not_bspline(op: &'static str, at: RailAt, rail: &Curve, entity: EntityRe
         SolverFailure::RailNotBSpline {
             fillet_geom: at.fillet_geom,
             side: at.side,
-            kind: Some(rail.type_string()),
+            kind: rail.type_string(),
         },
         Some(entity),
     )

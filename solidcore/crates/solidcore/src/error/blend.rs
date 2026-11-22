@@ -1478,16 +1478,16 @@ pub enum SolverFailure {
         /// The fillet geometry.
         fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
     },
-    /// Rail `side` of the caller's fillet geometry has no curve, or one not of a B-spline
-    /// class: the caller's solver set-up ([`ErrorKind::InvalidInput`]); status
-    /// `SM_ERR_NULL_POINTER`.
+    /// Rail `side` of the caller's fillet geometry has a curve not of a B-spline class (a
+    /// rail edge with no curve is [`FilletSetUp::RailCurve`]): the caller's solver set-up
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
     RailNotBSpline {
         /// The fillet geometry.
         fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
         /// The rail side, 0 or 1.
         side: usize,
-        /// The curve's kind (its type string), `None` when the rail has no curve.
-        kind: Option<&'static str>,
+        /// The curve's kind (its type string).
+        kind: &'static str,
     },
 }
 
@@ -1544,17 +1544,11 @@ impl core::fmt::Display for SolverFailure {
                 fillet_geom,
                 side,
                 kind,
-            } => match kind {
-                Some(kind) => write!(
-                    f,
-                    "rail {side} of fillet geometry {fillet_geom:?} has a {kind} curve, not of a \
-                     B-spline class"
-                ),
-                None => write!(
-                    f,
-                    "rail {side} of fillet geometry {fillet_geom:?} has no curve"
-                ),
-            },
+            } => write!(
+                f,
+                "rail {side} of fillet geometry {fillet_geom:?} has a {kind} curve, not of a \
+                 B-spline class"
+            ),
         }
     }
 }
@@ -1584,7 +1578,7 @@ pub enum FilletSetUp {
     VertexGeoms,
     /// A Join's fillet vertex's mate.
     Mate,
-    /// The edge use of a shared side edge on each of the two fillet geometries' faces.
+    /// The radial edge use of a side edge's edge use.
     RadialEdgeUse,
     /// A rail/rail interpolation edge among its corner's fillet edges.
     InterpolationEdgeAtCorner,
@@ -1633,9 +1627,7 @@ impl FilletSetUp {
             }
             Self::VertexGeoms => "a fillet vertex lacks the fillet geometries its kind joins",
             Self::Mate => "a Join's fillet vertex has no mate",
-            Self::RadialEdgeUse => {
-                "a side edge shared by two fillet geometries has no edge use on one of their faces"
-            }
+            Self::RadialEdgeUse => "an edge use of a side edge has no radial edge use",
             Self::InterpolationEdgeAtCorner => {
                 "the rail/rail interpolation edge is not one of its corner's fillet edges"
             }
