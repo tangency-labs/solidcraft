@@ -73,8 +73,8 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 ///   `u = 71.94`, `v` from 0 to 139.4, far outside the face's B-spline domain
 ///   `[-0.05, 1.05]^2`, so its image is the surface's extrapolation; the trim is in another
 ///   parameterisation than its face's, in both kernels, and no tolerance covers it);
-/// - `rounding-bound`: a vertex of `primitive.api_primitives`' `gen0244`, `gen0893` and
-///   `gen1157`, about 8e8 from the origin, where the evaluation's own error bound at that
+/// - `rounding-bound`: a vertex of `primitive.api_primitives`' `gen1157`, about 8e8 from
+///   the origin, where the evaluation's own error bound at that
 ///   scale exceeds what the tolerance can show: its edge ends evaluate onto its point, but
 ///   their curves' error bounds (1.4e-5 to 2.4e-5 a coordinate, times `sqrt 3`) exceed both
 ///   tolerances;
@@ -442,8 +442,8 @@ fn use_bound(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId) -> UseBound {
 /// curve and the surface moved by `-T`, where the move is exact: every distance of the copy
 /// is the original's, so its bound is a bound of the original pair (#18166: a body built at
 /// the origin, its tolerances proved there, then moved about 8e8 away, where the enclosures
-/// widen with the coordinates: `primitive.api_primitives`' `gen0244`, `gen0893` and `gen1157`,
-/// whose moved edges the body as built leaves uncertified are certified on this copy).
+/// widen with the coordinates: `primitive.api_primitives`' `gen1157`, whose moved edges the
+/// body as built leaves uncertified are certified on this copy).
 ///
 /// `T` is a sum of steps, each exact on its own, so the whole move is exact. A step is, per
 /// axis, the power of two at most the middle of the moved curve's control points' coordinate
