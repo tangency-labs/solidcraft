@@ -120,6 +120,17 @@ fn a_back_side_model_is_turned_over_under_the_board() {
 }
 
 #[test]
+fn a_back_side_model_offset_is_turned_over_with_the_model() {
+    let model = KicadModel { path: String::new(), at: [-24.6, -12.8, 0.5], scale: [1.0; 3], rotate: [0.0; 3] };
+    let origin = solidcraft_doc::apply_point(&model_local_matrix(&model, true), Vec3::ZERO);
+    // KiCad 10.0.1 turns a back-side footprint's model over together with its offset: X stays,
+    // Y is reversed, and a positive Z offset moves the model away from the board, which is down.
+    assert!((origin.x + 24.6).abs() < 1e-9 && (origin.y - 12.8).abs() < 1e-9 && (origin.z + 0.5).abs() < 1e-9, "{origin:?}");
+    let front = solidcraft_doc::apply_point(&model_local_matrix(&model, false), Vec3::ZERO);
+    assert!((front.x + 24.6).abs() < 1e-9 && (front.y + 12.8).abs() < 1e-9 && (front.z - 0.5).abs() < 1e-9, "{front:?}");
+}
+
+#[test]
 fn builds_a_closed_mesh_from_a_concave_outline() {
     let source = r#"(kicad_pcb (general (thickness 1.6))
       (gr_line (start 0 0) (end 20 0) (layer "Edge.Cuts"))
@@ -136,6 +147,86 @@ fn builds_a_closed_mesh_from_a_concave_outline() {
     let measure = solidcraft_kernel::measure(&body).unwrap();
     assert!((measure.volume - 300.0 * 1.6).abs() < 1.0, "{measure:?}");
     assert!((measure.bbox.min.y + 20.0).abs() < 1e-9, "KiCad's Y is mapped to -Y: {measure:?}");
+}
+
+#[test]
+fn an_outline_whose_lines_miss_each_other_by_nanometres_is_closed() {
+    // A 20 x 10 board as KiCad can save it: every corner has a gap of 1 to 6 nm between the end of
+    // one line and the start of the next. KiCad reads this outline as closed.
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_line (start 0 0) (end 20 0) (layer "Edge.Cuts"))
+      (gr_line (start 20.000006 0) (end 20 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 10.000001) (end 0.000002 10) (layer "Edge.Cuts"))
+      (gr_line (start 0 10) (end 0 0.000004) (layer "Edge.Cuts")))"#;
+    let board = parse_kicad_board(source.as_bytes(), "gaps.kicad_pcb").unwrap();
+    assert!(board.warnings.is_empty(), "{:?}", board.warnings);
+    let [outline] = board.outlines.as_slice() else { panic!("expected one outline: {:?}", board.outlines) };
+    assert_eq!(outline.len(), 4, "one point per corner: {outline:?}");
+    let mesh = kicad_board_mesh(&board, board.thickness).unwrap();
+    let body = solidcraft_kernel::mesh_body(&mesh.positions, &mesh.triangles).unwrap();
+    let measure = solidcraft_kernel::measure(&body).unwrap();
+    assert!((measure.volume - 200.0 * 1.6).abs() < 1e-3, "{measure:?}");
+}
+
+#[test]
+fn an_outline_piece_shorter_than_the_joining_distance_is_kept() {
+    // The outline's last piece is 0.005 mm long, so the corner before it is already within the
+    // joining distance of the start. The piece still belongs to the outline: five corners, and
+    // nothing left over.
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_line (start 0 0) (end 20 0) (layer "Edge.Cuts"))
+      (gr_line (start 20 0) (end 20 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 10) (end 0 10) (layer "Edge.Cuts"))
+      (gr_line (start 0 10) (end 0 0.005) (layer "Edge.Cuts"))
+      (gr_line (start 0 0.005) (end 0 0) (layer "Edge.Cuts")))"#;
+    let board = parse_kicad_board(source.as_bytes(), "short.kicad_pcb").unwrap();
+    assert!(board.warnings.is_empty(), "{:?}", board.warnings);
+    let [outline] = board.outlines.as_slice() else { panic!("expected one outline: {:?}", board.outlines) };
+    assert_eq!(outline.len(), 5, "{outline:?}");
+    // Short pieces right after the start do not close on themselves either.
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_line (start 0 0) (end 0.003 0) (layer "Edge.Cuts"))
+      (gr_line (start 0.003 0) (end 0.006 0) (layer "Edge.Cuts"))
+      (gr_line (start 0.006 0) (end 0.009 0) (layer "Edge.Cuts"))
+      (gr_line (start 0.009 0) (end 20 0) (layer "Edge.Cuts"))
+      (gr_line (start 20 0) (end 20 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 10) (end 0 10) (layer "Edge.Cuts"))
+      (gr_line (start 0 10) (end 0 0) (layer "Edge.Cuts")))"#;
+    let board = parse_kicad_board(source.as_bytes(), "short-start.kicad_pcb").unwrap();
+    assert!(board.warnings.is_empty(), "{:?}", board.warnings);
+    let [outline] = board.outlines.as_slice() else { panic!("expected one outline: {:?}", board.outlines) };
+    assert_eq!(outline.len(), 7, "{outline:?}");
+}
+
+#[test]
+fn an_outline_with_a_real_gap_stays_open() {
+    // The last line stops 0.02 mm short of the first corner: more than the 0.01 mm KiCad joins.
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_line (start 0 0) (end 20 0) (layer "Edge.Cuts"))
+      (gr_line (start 20 0) (end 20 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 10) (end 0 10) (layer "Edge.Cuts"))
+      (gr_line (start 0 10) (end 0 0.02) (layer "Edge.Cuts")))"#;
+    let board = parse_kicad_board(source.as_bytes(), "open.kicad_pcb").unwrap();
+    assert!(board.outlines.is_empty(), "{:?}", board.outlines);
+    assert_eq!(board.warnings, ["skipped an open Edge.Cuts contour"]);
+}
+
+#[test]
+fn an_exact_continuation_is_joined_before_one_across_a_gap() {
+    // Two squares whose corners are 5 nm apart: each closes on its own lines, not on the other's.
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_line (start 0 0) (end 10 0) (layer "Edge.Cuts"))
+      (gr_line (start 10.000005 0) (end 20 0) (layer "Edge.Cuts"))
+      (gr_line (start 10 0) (end 10 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 0) (end 20 10) (layer "Edge.Cuts"))
+      (gr_line (start 10 10) (end 0 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 10) (end 10.000005 10) (layer "Edge.Cuts"))
+      (gr_line (start 0 10) (end 0 0) (layer "Edge.Cuts"))
+      (gr_line (start 10.000005 10) (end 10.000005 0) (layer "Edge.Cuts")))"#;
+    let board = parse_kicad_board(source.as_bytes(), "pair.kicad_pcb").unwrap();
+    assert!(board.warnings.is_empty(), "{:?}", board.warnings);
+    assert_eq!(board.outlines.len(), 2, "{:?}", board.outlines);
+    assert!(board.outlines.iter().all(|outline| outline.len() == 4), "{:?}", board.outlines);
 }
 
 #[test]
@@ -444,6 +535,68 @@ fn one_model_named_in_both_formats_is_placed_once() {
     assert_eq!(meshes.len(), 1, "one file, one model: {meshes:?}");
     assert_eq!(imported.plan.slots, vec!["U1".to_string()]);
     assert_eq!(imported.plan.places.len(), 1, "placed once, not once per reference");
+}
+
+/// KiCad 10's 3D library ships `….stpZ`: a zip archive holding one STEP file.
+fn stpz(step: &str) -> Vec<u8> {
+    use std::io::Write;
+    let mut out = std::io::Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(&mut out);
+    zip.start_file("part.step", zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated)).unwrap();
+    zip.write_all(step.as_bytes()).unwrap();
+    zip.finish().unwrap();
+    out.into_inner()
+}
+
+#[test]
+fn a_zipped_stpz_model_is_read_as_step() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+        (model "${KICAD10_3DMODEL_DIR}/Package.3dshapes/part.stpZ")))"#;
+    let bytes = stpz(include_str!("../../../tests/step-conformance/cylinder.step"));
+    let mut load = |path: &str| Ok(KicadModelFile { path: path.to_string(), bytes: bytes.clone() });
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    assert_eq!(meshes.len(), 1, "the zipped STEP comes in: {meshes:?} {:?}", imported.feature.warnings);
+    assert_eq!(imported.plan.slots, vec!["U1".to_string()]);
+    // The model is placed for U1, and its mesh goes into U1's component, not the board's.
+    assert_eq!(imported.plan.places.len(), 1, "{:?}", imported.plan.places);
+    assert_eq!(imported.plan.places[0].slot, 0);
+    assert_eq!(imported.plan.bodies, vec![Some(0)], "{:?}", imported.plan.bodies);
+    assert!(imported.feature.warnings.iter().all(|w| !w.contains("part.stpZ")), "{:?}", imported.feature.warnings);
+}
+
+/// A `….wrl` reference that the installed library only has as `….stpZ` (KiCad 10) is answered
+/// by the zipped STEP: the format follows the file that was read.
+#[test]
+fn a_wrl_reference_answered_by_an_stpz_file_is_read_as_step() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+        (model "part.wrl")))"#;
+    let bytes = stpz(include_str!("../../../tests/step-conformance/cylinder.step"));
+    let mut load = |_: &str| Ok(KicadModelFile { path: "part.stpZ".to_string(), bytes: bytes.clone() });
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    assert_eq!(meshes.len(), 1, "{:?}", imported.feature.warnings);
+    // The model is placed for U1, and its mesh goes into U1's component, not the board's.
+    assert_eq!(imported.plan.slots, vec!["U1".to_string()]);
+    assert_eq!(imported.plan.places.len(), 1, "{:?}", imported.plan.places);
+    assert_eq!(imported.plan.places[0].slot, 0);
+    assert_eq!(imported.plan.bodies, vec![Some(0)], "{:?}", imported.plan.bodies);
+}
+
+#[test]
+fn a_corrupt_stpz_is_warned_and_the_board_is_kept() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+        (model "part.stpZ")))"#;
+    let mut load = |path: &str| Ok(KicadModelFile { path: path.to_string(), bytes: b"not a zip".to_vec() });
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    assert!(imported.plan.slots.is_empty());
+    assert!(imported.feature.warnings.iter().any(|w| w.starts_with("part.stpZ: not imported")), "{:?}", imported.feature.warnings);
 }
 
 #[test]

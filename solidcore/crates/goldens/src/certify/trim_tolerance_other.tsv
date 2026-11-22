@@ -42,12 +42,6 @@ offset.offset_executive_p2	api_shell_cylinder_top_extend_merge_in	result.geometr
 offset.offset_executive_p2	api_shell_cylinder_top_extend_merge_in	result.geometry	2	vertex-box	0
 offset.offset_executive_p2	api_shell_cylinder_top_face	result.geometry	1	vertex-box	0
 offset.offset_executive_p2	api_shell_cylinder_top_face	result.geometry	2	vertex-box	0
-offset.offset_executive_p2	issue1795_plate_api_shell_2_top	result.geometry	6	rounding	0
-offset.offset_executive_p2	issue1795_plate_api_shell_2_top_offset_solid	result.geometry	6	rounding	0
-offset.offset_executive_p2	issue1795_plate_static_shell_2_top	result.geometry	6	rounding	0
-offset.offset_executive_p2	issue1795_plate_static_shell_2_top	source.after.geometry	6	rounding	0
-offset.offset_executive_p2	issue1795_plate_static_shell_2_top_offset_solid	result.geometry	6	rounding	0
-offset.offset_executive_p2	issue1795_plate_static_shell_2_top_offset_solid	source.after.geometry	6	rounding	0
 query.brep	gen0269	steps	38	padding	0
 query.brep	gen0269	steps	39	padding	0
 query.brep	gen0269	steps	41	padding	0

@@ -1616,7 +1616,8 @@ fn constructs(s: &Session) -> Vec<(u64, String, solidcraft_doc::construct::Const
         .iter()
         .filter_map(|c| {
             let f = s.doc.feature(c.feature).filter(|f| !f.suppressed)?;
-            let m = s.doc.component_transform(f.component);
+            // With a joint drag's shown frame, so it follows its part while that is dragged.
+            let m = s.shown_component_transform(f.component);
             if solidcraft_doc::is_identity(&m) {
                 return Some((c.feature, c.name.clone(), c.geom.clone()));
             }
@@ -1922,6 +1923,26 @@ mod tests {
                 }
                 assert!(wrong.is_empty(), "fov {fov}, angled {angled}, post first {post_first}: not the post's cap at {wrong:?}");
             }
+        }
+    }
+
+    #[test]
+    fn preview_sketch_visibility_uses_the_state_after_the_commands() {
+        let mut s = Session::default();
+        let sketch = s.execute("sketch.create", &json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+        s.execute("sketch.line", &json!({"points":[[100,20],[120,30]],"construction":true})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        assert!(sketch_shown(&s, sketch));
+        assert_eq!(sketch_bounds(s.world_state().unwrap().sketch(sketch).unwrap()).max.x, 120.0);
+        for command in [
+            ("browser.visibility".into(), json!({"items":[sketch],"visible":false})),
+            ("solid.extrude".into(), json!({"sketch":sketch,"distance":10})),
+        ] {
+            let preview = s.preview_visible_world(std::slice::from_ref(&command)).unwrap();
+            assert!(preview.after.sketch(sketch).is_some(), "{} retains geometry for the preview diff", command.0);
+            assert!(!preview.shown_sketches.contains(&sketch), "{} leaves the sketch hidden after the run", command.0);
+            assert!(sketch_shown(&s, sketch), "the live session is unchanged");
         }
     }
 

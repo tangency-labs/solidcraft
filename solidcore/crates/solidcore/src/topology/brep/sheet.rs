@@ -269,7 +269,9 @@ pub fn merged_faces(k: &mut Kernel, b: &Brep) -> Result<Merged> {
 
     let live_edges = edges(&c, None)?;
     let live_faces = faces(&c, None)?;
-    let near = 10.0 * c.tolerance().max(1e-9);
+    // A removed edge is the live edge it was joined to only within the body's tolerance. A seam
+    // between two faces can lie inside the old ten-tolerance window and is not that edge (#16634).
+    let near = c.tolerance().max(1e-9);
     // each edge: itself, else the edge through its middle, else gone
     let mut edge_map = Vec::new();
     let mut removed: Vec<&[FaceId]> = Vec::new();
@@ -1021,6 +1023,38 @@ mod tests {
 
     fn mapped(m: &Merged, e: EdgeId) -> Option<EdgeId> {
         m.edges.iter().find(|(o, _)| *o == e).unwrap().1
+    }
+
+    /// tangency-labs/solidcraft#16634: a seam 5e-6 mm from the sheet's boundary, on a body with a
+    /// 1e-6 tolerance, is not the boundary edge. It is gone, so the two faces it joined merge.
+    #[test]
+    fn a_seam_within_ten_tolerances_of_a_boundary_edge_is_gone_and_its_faces_merge() {
+        let mut k = Kernel::default();
+        let s = spline(&[(0.0, 0.0), (10.0, 0.0)], &[0.0, 0.0, 1.0, 1.0]);
+        let (b, _) = sheet_of(&mut k, of(&s), &[5e-7], &[], 1e-6).unwrap();
+        assert_eq!(b.face_list().len(), 2);
+        let m = merged_faces(&mut k, &b).expect("the seam is gone, so the two faces merge");
+        assert_eq!(faces(&m.brep, None).unwrap().len(), 1);
+    }
+
+    /// A real join still maps after the ten-tolerance window is narrowed (#16634). The tiny
+    /// boundary pieces of a sheet cut ten tolerances from its edge are five tolerances from that
+    /// edge's start; they lie on the joined edge, so they map to it. Only the parallel seam, ten
+    /// tolerances from the boundary, is gone.
+    #[test]
+    fn a_joined_boundary_piece_at_five_tolerances_still_maps_to_its_joined_edge() {
+        let mut k = Kernel::default();
+        let s = spline(&[(0.0, 0.0), (10.0, 0.0)], &[0.0, 0.0, 1.0, 1.0]);
+        let (b, _) = sheet_of(&mut k, of(&s), &[1e-6], &[], 1e-6).unwrap();
+        let tiny_bottom = edge_through(&k, &b, [5e-6, 0.0, 0.0]);
+        let tiny_top = edge_through(&k, &b, [5e-6, 4.0, 0.0]);
+        let seam = edge_through(&k, &b, [1e-5, 2.0, 0.0]);
+        let m = merged_faces(&mut k, &b).unwrap();
+        let bottom = edge_through(&k, &m.brep, [5.0, 0.0, 0.0]);
+        let top = edge_through(&k, &m.brep, [5.0, 4.0, 0.0]);
+        assert_eq!(mapped(&m, tiny_bottom), Some(bottom));
+        assert_eq!(mapped(&m, tiny_top), Some(top));
+        assert_eq!(mapped(&m, seam), None);
     }
 
     #[test]

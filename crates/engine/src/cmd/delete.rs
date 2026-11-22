@@ -20,7 +20,7 @@ use crate::{EngineError, Result, Sel, Session};
 const DELETE_CONTRACT: TypedContract<SelectionDeleteParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "Delete", crate::checked!("selection.delete", delete))
-    .open_part()
+    .open_part().selection_edit()
     .icon("delete")
     .contract(&DELETE_CONTRACT)
     .output(output_schema_for::<SelectionDeleteResult>)
@@ -222,6 +222,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                 None => faces.push((body.clone(), vec![*point])),
             },
             Sel::Edge { .. } | Sel::Vertex { .. } => skip("edges and vertices are deleted with their body or face".into()),
+            Sel::PointCloudPoint { .. } => skip("points belong to their point cloud".into()),
             // In the sketch being edited, a profile stands for the curves around it (#7107);
             // its holes are shapes of their own and stay. A letter's outline stands for its
             // whole text, so no counters are left behind.
@@ -891,6 +892,17 @@ mod tests {
         assert_eq!(s.open_drawing, open);
         assert_eq!(s.undo.last().unwrap().part, None, "the model's step");
         assert_eq!(s.drawing("test").unwrap(), &drawing);
+    }
+
+    #[test]
+    fn explicit_ui_drawing_selection_keeps_its_drawing_history_owner() {
+        let (mut s, _, dimension, _, drawing) = sheet_objects();
+        s.selection = vec![Sel::Drawing { drawing, object: dimension }];
+        let items = serde_json::to_value(&s.selection).unwrap();
+        run(&mut s, "selection.delete", json!({"items":items}));
+        assert_eq!(s.undo.last().unwrap().part, Some(drawing));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.drawing("test").unwrap().has_object(dimension));
     }
 
     /// Seeded selections of the drawing's objects, deleted or dry-run in turn with undos between:
