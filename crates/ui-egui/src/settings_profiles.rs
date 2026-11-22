@@ -84,6 +84,7 @@ const PROFILE_KEYS: &[&str] = &[
     "mouse_gestures",
     "nav",
     "nav_bridge_enabled",
+    "nav_button_map",
     "nav_bridge_port",
     "navigation_bar",
     "navigator_fit",
