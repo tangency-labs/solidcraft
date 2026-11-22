@@ -15,9 +15,10 @@
 //!
 //! # The geometry
 //!
-//! A spot sits on the *faying face*, the face where the two sheets touch. `normal` points
-//! from the lower sheet into the upper one; the upper sheet's outer face lies
-//! `upper_thickness` along it, the lower sheet's outer face `lower_thickness` against it.
+//! A spot joins a stack of two or more sheets. It sits on the *faying face* where the
+//! first two touch; `normal` points from the first sheet into the next, and the sheets'
+//! thicknesses are listed in that order. The first sheet's outer face lies its thickness
+//! against `normal`, the last sheet's outer face the other thicknesses along it.
 //! A [`SpotStyle`] gives every size as a fraction: of the spot diameter `d` (marks, ball,
 //! pin), or of a sheet's thickness (a pin's dish), so a style keeps its proportions at any
 //! diameter. Named styles (looks) and which one a user picked are not the kernel's: they
@@ -37,7 +38,8 @@
 //! # Not covered
 //!
 //! Flat sheets only: the marks are flat or revolved and the pins straight, so the outer
-//! faces must be planes square to `normal` at the spot. Until the kernel's site query
+//! faces must be planes square to `normal` at the spot. A ball only for two sheets: in a
+//! stack every faying face has its own nugget, which no look draws. Until the kernel's site query
 //! (#18407) measures the sheets and checks their faces, the caller passes the thicknesses;
 //! this module does not see the parts.
 
@@ -104,7 +106,7 @@ pub struct SpotMarks {
 
 /// The ball of a [`SpotStyle`]: a sphere of diameter `diameter` (a fraction of `d`)
 /// centred on the faying face. It shows on an outer face only where its radius is more
-/// than that sheet's thickness.
+/// than that sheet's thickness. Two sheets only.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpotBall {
     /// The ball's diameter, as a fraction of `d`.
@@ -112,12 +114,12 @@ pub struct SpotBall {
 }
 
 /// The pin of a [`SpotStyle`]: a cylinder of diameter `diameter` (a fraction of `d`)
-/// through both sheets, flush with the outer faces, each end dished in when `dish` is set.
+/// through every sheet, flush with the outer faces, each end dished in when `dish` is set.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpotPin {
     /// The pin's diameter, as a fraction of `d`.
     pub diameter: f64,
-    /// Each end's dish depth as a fraction of the thickness of the sheet that end lies in,
+    /// Each end's dish depth as a fraction of the thickness of the outer sheet that end lies in,
     /// held to the pin's radius: a deeper dish would need a sphere wider than the pin, so
     /// it is held at a half sphere, whose rim meets the pin's wall tangentially (a knife
     /// edge on the outer face).
@@ -131,7 +133,7 @@ pub struct SpotStyle {
     pub marks: Option<SpotMarks>,
     /// A ball centred on the faying face.
     pub ball: Option<SpotBall>,
-    /// A pin through both sheets.
+    /// A pin through every sheet.
     pub pin: Option<SpotPin>,
 }
 
@@ -151,9 +153,9 @@ pub enum SpotZone {
 /// Which outer face a mark lies on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SpotSide {
-    /// The upper sheet's outer face (along `normal`).
+    /// The last sheet's outer face (along `normal`).
     Upper,
-    /// The lower sheet's outer face (against `normal`).
+    /// The first sheet's outer face (against `normal`).
     Lower,
     /// Neither: a body through or between the sheets.
     Through,
@@ -171,23 +173,21 @@ pub struct SpotPiece {
 }
 
 /// One spot weld.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SpotWeld {
-    /// The spot's centre on the faying face.
+    /// The spot's centre on the faying face between the first two sheets.
     pub at: Point3,
-    /// The faying face's normal, from the lower sheet into the upper one (need not be unit).
+    /// That face's normal, from the first sheet into the next (need not be unit).
     pub normal: Vec3,
-    /// Distance from the faying face to the upper sheet's outer face, along `normal`.
-    pub upper_thickness: f64,
-    /// Distance from the faying face to the lower sheet's outer face, against `normal`.
-    pub lower_thickness: f64,
+    /// Every sheet's thickness, in stack order along `normal`: at least two.
+    pub thicknesses: Vec<f64>,
     /// The spot diameter: a user setting; [`proposed_spot_diameter`] is a tool's proposal.
     pub diameter: f64,
     /// What the spot is drawn with.
     pub style: SpotStyle,
 }
 
-/// The spot diameter a weld tool proposes: `5 √t`, `t` the thinner sheet in mm.
+/// The spot diameter a weld tool proposes: `5 √t`, `t` the thinnest sheet in mm.
 ///
 /// Sources: TWI's FAQ on interface failures in resistance spot welds gives `5 √t` as the
 /// typical target diameter; the AWS C1.1 guidelines take the thinner sheet's parameters
@@ -195,36 +195,46 @@ pub struct SpotWeld {
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] for a thickness that is not finite and positive.
-pub fn proposed_spot_diameter(upper_thickness: f64, lower_thickness: f64) -> Result<f64> {
-    if !positive(upper_thickness) || !positive(lower_thickness) {
+/// [`SolidError::InvalidInput`] for fewer than two sheets, or a thickness that is not
+/// finite and positive.
+pub fn proposed_spot_diameter(thicknesses: &[f64]) -> Result<f64> {
+    check_sheets(thicknesses)?;
+    Ok(5.0
+        * thicknesses
+            .iter()
+            .fold(f64::INFINITY, |m, &t| m.min(t))
+            .sqrt())
+}
+
+/// The first and the last sheet's thickness; refuses fewer than two sheets, or a thickness
+/// that is not finite and positive.
+fn check_sheets(thicknesses: &[f64]) -> Result<(f64, f64)> {
+    let [first, .., last] = *thicknesses else {
+        return Err(SolidError::invalid_input(OP_SPOT, "fewer than two sheets"));
+    };
+    if !thicknesses.iter().all(|&t| positive(t)) {
         return Err(SolidError::invalid_input(
             OP_SPOT,
             "a sheet thickness that is not finite and positive",
         ));
     }
-    Ok(5.0 * upper_thickness.min(lower_thickness).sqrt())
+    Ok((first, last))
 }
 
 /// The bodies of `spot`, placed at the spot.
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] for a non-finite point, a zero or non-finite normal, a
-/// thickness or diameter that is not finite and positive, a style with no piece or a
-/// fraction out of its range (see [`SpotStyle`]), and for sizes the model cannot hold: a
+/// [`SolidError::InvalidInput`] for a non-finite point, a zero or non-finite normal, fewer
+/// than two sheets, a thickness or diameter that is not finite and positive, a style with
+/// no piece or a fraction out of its range (see [`SpotStyle`]), a ball on more than two
+/// sheets, and for sizes the model cannot hold: a
 /// diameter or sheet so small that a piece is thinner than the zone tolerance, or so large
 /// that the spot passes [`MAX_COORDINATE_MAGNITUDE`]. The errors of the sweeps, the sphere
 /// and the placement otherwise.
 pub fn spot_weld(k: &mut Kernel, spot: &SpotWeld) -> Result<Vec<SpotPiece>> {
-    let (t_u, t_l, d) = (spot.upper_thickness, spot.lower_thickness, spot.diameter);
-    if !positive(t_u) || !positive(t_l) {
-        return Err(SolidError::invalid_input(
-            OP_SPOT,
-            "a sheet thickness that is not finite and positive",
-        ));
-    }
-    if !positive(d) {
+    let (first, last) = check_sheets(&spot.thicknesses)?;
+    if !positive(spot.diameter) {
         return Err(SolidError::invalid_input(
             OP_SPOT,
             "a spot diameter that is not finite and positive",
@@ -241,7 +251,13 @@ pub fn spot_weld(k: &mut Kernel, spot: &SpotWeld) -> Result<Vec<SpotPiece>> {
         return Err(SolidError::invalid_input(OP_SPOT, "a zero normal"));
     }
     check_style(&spot.style)?;
-    let layout = Layout::of(spot);
+    if spot.style.ball.is_some() && spot.thicknesses.len() > 2 {
+        return Err(SolidError::invalid_input(
+            OP_SPOT,
+            "a spot ball on more than two sheets",
+        ));
+    }
+    let layout = Layout::of(spot, first, last);
     check_sizes(k, spot, &layout)?;
     let mut pieces = local_pieces(k, &layout)?;
     let mut placement = Axis2Placement::default();
@@ -307,11 +323,13 @@ enum Top {
     },
 }
 
-/// Every size of a spot in model units, local frame: faying face `z = 0`, upper outer face
-/// `z = t_u`, lower outer face `z = -t_l`.
+/// Every size of a spot in model units, local frame: the first faying face `z = 0`, the
+/// last sheet's outer face `z = t_u`, the first sheet's outer face `z = -t_l`.
 struct Layout {
     t_u: f64,
     t_l: f64,
+    /// The thinnest sheet.
+    thinnest: f64,
     /// Zone radii: core, band, edge.
     zones: Option<[f64; 3]>,
     /// The marks' top.
@@ -330,8 +348,10 @@ struct PinLayout {
 }
 
 impl Layout {
-    fn of(spot: &SpotWeld) -> Self {
-        let (d, t_u, t_l) = (spot.diameter, spot.upper_thickness, spot.lower_thickness);
+    /// `first` and `last` are the outer sheets' thicknesses.
+    fn of(spot: &SpotWeld, first: f64, last: f64) -> Self {
+        let (d, t) = (spot.diameter, &spot.thicknesses);
+        let (t_l, t_u) = (first, t.iter().skip(1).sum::<f64>());
         let style = &spot.style;
         let ball = style.ball.map(|b| b.diameter * d / 2.0);
         let zones = style
@@ -356,7 +376,7 @@ impl Layout {
         let marks_on = match style.marks.map(|m| m.faces) {
             None => [false, false],
             Some(MarkFaces::Both) => [true, true],
-            Some(MarkFaces::WhereBallHidden) => [!shows(t_u), !shows(t_l)],
+            Some(MarkFaces::WhereBallHidden) => [!shows(last), !shows(first)],
         };
         let pin = style.pin.map(|p| {
             let r = p.diameter * d / 2.0;
@@ -368,12 +388,13 @@ impl Layout {
             };
             PinLayout {
                 r,
-                ends: [end(t_u), end(t_l)],
+                ends: [end(last), end(first)],
             }
         });
         Self {
             t_u,
             t_l,
+            thinnest: t.iter().fold(f64::INFINITY, |m, &v| m.min(v)),
             zones,
             mark_top,
             marks_on,
@@ -384,7 +405,7 @@ impl Layout {
 
     /// Every length the spot builds with: its pieces' radii, heights, widths and depths.
     fn lengths(&self) -> Vec<f64> {
-        let mut out = vec![self.t_u, self.t_l];
+        let mut out = vec![self.t_u, self.t_l, self.thinnest];
         if let Some([core, band, edge]) = self.zones {
             out.extend([core, band - core, edge - band, edge]);
         }

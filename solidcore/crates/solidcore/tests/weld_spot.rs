@@ -1,6 +1,7 @@
 //! Spot welds (`weld::spot`): every style's bodies against their closed-form volumes at
 //! several sizes, the kernel's B-rep check on every body, the ball that does not reach a
-//! face, the pin's dishes, the placement at any spot and normal, and the refusals.
+//! face, the pin's dishes, the placement at any spot and normal, stacks of three
+//! and four sheets, and the refusals.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -117,8 +118,7 @@ fn spot(style: SpotStyle) -> SpotWeld {
     SpotWeld {
         at: Point3::new(0.0, 0.0, 0.0),
         normal: Vec3::new(0.0, 0.0, 1.0),
-        upper_thickness: T_U,
-        lower_thickness: T_L,
+        thicknesses: vec![T_L, T_U],
         diameter: D,
         style,
     }
@@ -126,8 +126,7 @@ fn spot(style: SpotStyle) -> SpotWeld {
 
 fn sized(style: SpotStyle, (t_u, t_l, d): (f64, f64, f64)) -> SpotWeld {
     SpotWeld {
-        upper_thickness: t_u,
-        lower_thickness: t_l,
+        thicknesses: vec![t_l, t_u],
         diameter: d,
         ..spot(style)
     }
@@ -290,7 +289,7 @@ fn extent(k: &Kernel, b: &Brep) -> (f64, f64) {
 /// and the marks stand in on the lower. Its extent is checked against both faces.
 #[test]
 fn a_ball_that_does_not_reach_a_face_gets_marks_there() {
-    let d = proposed_spot_diameter(8.0, 8.0).unwrap();
+    let d = proposed_spot_diameter(&[8.0, 8.0]).unwrap();
     for ((t_u, t_l), want) in [
         ((8.0, 8.0), vec![SpotSide::Upper, SpotSide::Lower]),
         ((1.0, 8.0), vec![SpotSide::Lower]),
@@ -409,23 +408,37 @@ fn refused(s: &SpotWeld) {
 fn bad_sizes_normals_and_styles_are_refused_as_invalid_input() {
     let s = spot(STYLES[0]);
     for t in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        for thicknesses in [vec![t, T_U], vec![T_L, t], vec![T_L, T_U, t]] {
+            refused(&SpotWeld {
+                thicknesses,
+                ..s.clone()
+            });
+        }
         refused(&SpotWeld {
-            upper_thickness: t,
-            ..s
+            diameter: t,
+            ..s.clone()
         });
+    }
+    for thicknesses in [vec![], vec![T_L]] {
         refused(&SpotWeld {
-            lower_thickness: t,
-            ..s
+            thicknesses,
+            ..s.clone()
         });
-        refused(&SpotWeld { diameter: t, ..s });
+    }
+    // a ball (looks B and C) only on two sheets
+    for style in [STYLES[1], STYLES[2]] {
+        refused(&SpotWeld {
+            thicknesses: vec![T_L, T_U, T_U],
+            ..spot(style)
+        });
     }
     refused(&SpotWeld {
         normal: Vec3::new(0.0, 0.0, 0.0),
-        ..s
+        ..s.clone()
     });
     refused(&SpotWeld {
         at: Point3::new(f64::NAN, 0.0, 0.0),
-        ..s
+        ..s.clone()
     });
     let none = SpotStyle {
         marks: None,
@@ -467,7 +480,7 @@ fn bad_sizes_normals_and_styles_are_refused_as_invalid_input() {
         ..none
     }));
     for style in styles {
-        refused(&SpotWeld { style, ..s });
+        refused(&SpotWeld { style, ..s.clone() });
     }
 }
 
@@ -494,20 +507,66 @@ fn finite_sizes_the_model_cannot_hold_are_refused() {
     });
 }
 
-/// The proposed diameter is `5 √t` of the thinner sheet; a thickness that is not finite
-/// and positive is refused instead of giving NaN.
+/// The proposed diameter is `5 √t` of the thinnest sheet; fewer than two sheets, or a
+/// thickness that is not finite and positive, is refused instead of giving NaN.
 #[test]
-fn the_proposed_diameter_is_five_root_t_of_the_thinner_sheet() {
-    assert!((proposed_spot_diameter(1.0, 1.5).unwrap() - 5.0).abs() < 1e-12);
-    assert!((proposed_spot_diameter(4.0, 2.25).unwrap() - 7.5).abs() < 1e-12);
+fn the_proposed_diameter_is_five_root_t_of_the_thinnest_sheet() {
+    assert!((proposed_spot_diameter(&[1.0, 1.5]).unwrap() - 5.0).abs() < 1e-12);
+    assert!((proposed_spot_diameter(&[4.0, 2.25]).unwrap() - 7.5).abs() < 1e-12);
+    assert!((proposed_spot_diameter(&[2.0, 1.0, 4.0]).unwrap() - 5.0).abs() < 1e-12);
+    let refused = |t: &[f64]| {
+        matches!(
+            proposed_spot_diameter(t),
+            Err(SolidError::InvalidInput { .. })
+        )
+    };
+    assert!(refused(&[]) && refused(&[1.0]));
     for t in [0.0, -1.0, f64::NAN, f64::INFINITY] {
-        assert!(matches!(
-            proposed_spot_diameter(t, 1.0),
-            Err(SolidError::InvalidInput { .. })
-        ));
-        assert!(matches!(
-            proposed_spot_diameter(1.0, t),
-            Err(SolidError::InvalidInput { .. })
-        ));
+        assert!(refused(&[t, 1.0]) && refused(&[1.0, t]) && refused(&[1.0, 1.0, t]));
+    }
+}
+
+/// Through three and four stacked sheets, every look without a ball: the marks lie on the
+/// first and the last sheet's outer faces, the pin runs from face to face with each end
+/// dished from its own outer sheet, every body has its closed-form volume and passes the
+/// B-rep check.
+#[test]
+fn a_spot_through_a_stack_reaches_both_outer_faces() {
+    let stacks: [&[f64]; 2] = [&[1.0, 1.5, 1.0], &[2.0, 0.8, 1.2, 3.0]];
+    for t in stacks {
+        let (first, last) = (t[0], t[t.len() - 1]);
+        let above: f64 = t.iter().skip(1).sum();
+        let d = proposed_spot_diameter(t).unwrap();
+        for (i, style) in STYLES.iter().enumerate().filter(|(_, s)| s.ball.is_none()) {
+            let mut k = kernel();
+            let s = SpotWeld {
+                thicknesses: t.to_vec(),
+                diameter: d,
+                ..spot(*style)
+            };
+            let mut got = pieces(&mut k, &s);
+            // the two outer sheets as a two-sheet spot, plus the pin through the middle
+            let middle = above - last;
+            let pin = style
+                .pin
+                .map_or(0.0, |p| PI * (p.diameter * d / 2.0).powi(2) * middle);
+            let want = style_volume(style, (last, first, d)) + pin;
+            let mut sum = 0.0;
+            for piece in &mut got {
+                let (lo, hi) = extent(&k, &piece.body);
+                let ok = match piece.side {
+                    SpotSide::Upper => lo >= above - 1e-9,
+                    SpotSide::Lower => hi <= -first + 1e-9,
+                    SpotSide::Through => (lo + first).abs() < 1e-9 && (hi - above).abs() < 1e-9,
+                };
+                assert!(ok, "style {i} on {t:?} {:?}: {lo}..{hi}", piece.side);
+                let lines = check_brep(&mut k, &mut piece.body, CheckLevel::Level2)
+                    .unwrap()
+                    .lines();
+                assert!(lines.is_empty(), "style {i} on {t:?}: {lines:?}");
+                sum += volume(&k, &mut piece.body);
+            }
+            close(sum, want, &format!("style {i} on {t:?}"));
+        }
     }
 }

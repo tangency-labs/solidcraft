@@ -25,15 +25,16 @@ pub enum SpotLook {
     /// The marks on both outer faces, nothing else (the default, [`SpotLook::DEFAULT`]).
     Marks,
     /// A ball of the spot diameter centred on the faying face; the marks only on an outer
-    /// face the ball does not reach, so the spot always shows on both faces.
+    /// face the ball does not reach, so the spot always shows on both faces. Two sheets
+    /// only: the kernel refuses a ball on a stack of more.
     Ball,
-    /// The marks and a ball of `0.6 d` centred on the faying face.
+    /// The marks and a ball of `0.6 d` centred on the faying face. Two sheets only.
     MarksSmallBall,
-    /// The marks and a pin of the core's diameter through both sheets, flush with the
+    /// The marks and a pin of the core's diameter through every sheet, flush with the
     /// outer faces.
     MarksThinPin,
-    /// The marks and a pin of the spot diameter through both sheets, each end dished in by
-    /// `0.3` of the sheet it lies in (at most a half sphere).
+    /// The marks and a pin of the spot diameter through every sheet, each end dished in by
+    /// `0.3` of the outer sheet it lies in (at most a half sphere).
     MarksPinConcaveEnds,
     /// The marks dished into a shallow inverted dome on each outer face: `0.04 d` high at
     /// the rim, `0.004 d` in the middle, read as the electrode's dent.
