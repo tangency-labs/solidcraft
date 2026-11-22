@@ -2142,7 +2142,8 @@ fn a_cone_lying_on_a_face_along_a_generator_touches_it_along_that_line() {
 /// cylinder sqrt(2d - d^2) (3.2e-3 at 5e-6) from the line, inside the band where the two
 /// faces are within the tolerance of each other, and Level 2 read their order at 20 edge
 /// tolerances, inside that band, as the box face lying inside the cylinder (`SmEdge` test 9).
-/// The test asks for the body of d = 0, clean at Level 2, in both operand orders.
+/// The test asks for the body of d = 0, clean at Level 2, in both operand orders, and that
+/// the same body with the box face moved 4e-5 further in still fails test 9.
 #[test]
 fn issue_18639_box_face_inside_a_cylinder_wall_unions_as_tangent() {
     fn union(d: f64, cylinder_first: bool) -> (Kernel, Brep) {
@@ -2180,6 +2181,32 @@ fn issue_18639_box_face_inside_a_cylinder_wall_unions_as_tangent() {
             assert!(
                 (v - want).abs() <= VOLUME_REL_TOL * want,
                 "{case}: {v} against {want}"
+            );
+            // A real defect is still caught: the box face moved 4e-5 further into the
+            // cylinder lies inside it over a band wider than the tolerance (twice the edge
+            // tolerance of 1e-5 apart at the first step), and its order is read there.
+            let line = solidcore::topology::brep::p1::edges(&u, None)
+                .unwrap()
+                .into_iter()
+                .find(|&e| u.edge(e).unwrap().edgeuses.len() == 8)
+                .unwrap();
+            let inward = Axis2Placement::new(Point3::new(-4e-5, 0.0, 0.0), Vec3::X, Vec3::Y);
+            for f in solidcore::topology::edge::faces(&u, line, None).unwrap() {
+                let face = u.face_mut(f).unwrap();
+                let surface = face.surface.as_mut().unwrap();
+                if matches!(
+                    surface.kind(),
+                    solidcore::surface::surface::SurfaceKind::Plane(_)
+                ) {
+                    surface.transform(&k, &inward, None).unwrap();
+                }
+            }
+            let lines = check_brep(&mut k, &mut u, CheckLevel::Level2)
+                .unwrap()
+                .lines();
+            assert!(
+                lines.iter().any(|l| l.starts_with("SmEdge::Test #9 ")),
+                "{case}, box face moved in: {lines:?}"
             );
         }
     }
