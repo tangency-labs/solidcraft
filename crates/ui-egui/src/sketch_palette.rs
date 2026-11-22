@@ -351,9 +351,6 @@ fn constraint_status(remaining: usize, solved: bool, geometry: bool) -> String {
 
 /// The active sketch supplies presentation while the host retains placement.
 pub(crate) fn shared_presentation(app: &SolveApp) -> Option<crate::panel_runtime::PanelPresentation> {
-    if !editing(app) {
-        return None;
-    }
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     if !editing(app) {
         return image_tool_presentation(app);
@@ -374,9 +371,6 @@ pub(crate) fn shared_presentation(app: &SolveApp) -> Option<crate::panel_runtime
 }
 
 pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
-    if !editing(app) {
-        return;
-    }
     let ctx = ui.ctx().clone();
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     if !editing(app) {
