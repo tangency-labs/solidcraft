@@ -41,6 +41,49 @@
 //! | [`TopologyFailure::RadialCapWithoutPlane`] | `SM_ERR` |
 //! | [`TopologyFailure::RadialRimsOffEndPlane`] | `SM_ERR` |
 //! | [`TopologyFailure::RadialSweepNotOutward`] | `SM_ERR` |
+//! | [`TopologyFailure::FaceWithoutSurface`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::EdgeWithoutCurve`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::NoStartEdgeUse`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::NotAnEdgeVertexUse`] | `SM_ERR` |
+//! | [`TopologyFailure::EdgeUseNotInLoop`] | `SM_ERR_INVALID_INPUT` |
+//! | [`TopologyFailure::NewPrimaryNotOnEdge`] | `SM_ERR_INVALID_INPUT` |
+//! | [`TopologyFailure::NotFourEdgeUses`] | `SM_ERR_INVALID_INPUT` |
+//! | [`TopologyFailure::ZeroLengthVector`] | `SM_ERR_INVALID_INPUT` |
+//! | [`TopologyFailure::NoFaceUses`] | `SM_ERR` |
+//! | [`TopologyFailure::NoCurvesAskedFor`] | `SM_ERR` |
+//! | [`TopologyFailure::LoopIsOuter`] | `SM_ERR` |
+//! | [`TopologyFailure::LoopNotOnFace`] | `SM_ERR` |
+//! | [`TopologyFailure::LoopEdgeNotLamina`] | `SM_ERR` |
+//! | [`TopologyFailure::FaceUseNotInShell`] | `SM_ERR` |
+//! | [`TopologyFailure::RecipientIsVertexShell`] | `SM_ERR` |
+//! | [`TopologyFailure::SourceIsVertexShell`] | `SM_ERR` |
+//! | [`TopologyFailure::EdgeUseNotOnLoopUse`] | `SM_ERR` |
+//! | [`TopologyFailure::EdgesNotChained`] | `SM_ERR` |
+//! | [`TopologyFailure::DegenerateEdgeInterval`] | `SM_ERR` |
+//! | [`TopologyFailure::DegenerateUvDomain`] | `SM_ERR` |
+//! | [`TopologyFailure::TooManyTangentFaces`] | `SM_ERR` |
+//! | [`TopologyFailure::LoopTooLong`] | `SM_ERR` |
+//! | [`TopologyFailure::NoRadialCandidate`] | `SM_ERR` |
+//! | [`TopologyFailure::NoRadialSectorBetween`] | `SM_ERR` |
+//! | [`TopologyFailure::EdgeUseNotClassified`] | `SM_ERR` |
+//! | [`TopologyFailure::ShellSideUndecided`] | `SM_ERR` |
+//! | [`TopologyFailure::NoInteriorPoint`] | `SM_ERR` |
+//! | [`TopologyFailure::NoIsoLineCrossesFace`] | `SM_ERR` |
+//! | [`TopologyFailure::IsoLineNotMade`] | `SM_ERR` |
+//! | [`TopologyFailure::NoSampleOnSurface`] | `SM_ERR` |
+//! | [`TopologyFailure::SteppedOffFace`] | `SM_ERR` |
+//! | [`TopologyFailure::SteppedOutsideUvDomain`] | `SM_ERR` |
+//! | [`TopologyFailure::NoStepInsideInterval`] | `SM_ERR` |
+//! | [`TopologyFailure::BinormalStaysZero`] | `SM_ERR` |
+//! | [`TopologyFailure::ZeroSurfaceTangent`] | `SM_ERR` |
+//! | [`TopologyFailure::RayHitsAtStart`] | `SM_ERR` |
+//! | [`TopologyFailure::TrimBoundaryNotBuilt`] | `SM_ERR` |
+//! | [`TopologyFailure::SeamSplitFailed`] | `SM_ERR` |
+//! | [`TopologyFailure::VertexUseNotOnFace`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::EdgeUseNotOnFace`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::FaceUseWithoutShell`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::ShellHasNoFaceUses`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::UvTrimCurveNotMade`] | `SM_ERR_NULL_POINTER` |
 //!
 //! A named cause keeps the status of the phrase it replaced, unless its site overrides it
 //! through `with_status`.
@@ -189,6 +232,150 @@ pub enum TopologyFailure {
     /// The closed body a radial sweep stitched is not an outward solid. Class `failed`,
     /// status `SM_ERR`.
     RadialSweepNotOutward,
+    /// A face of the body as supplied has no surface, which the routine needs: the caller's body,
+    /// so of kind [`ErrorKind::InvalidInput`]. `SM_ERR_NULL_POINTER`, or the site's status.
+    FaceWithoutSurface,
+    /// An edge of the body as supplied has no curve, which the routine needs: the caller's body,
+    /// so of kind [`ErrorKind::InvalidInput`].
+    EdgeWithoutCurve,
+    /// The caller gave no edge use to start the loop walk from: its argument, so of kind
+    /// [`ErrorKind::InvalidInput`].
+    NoStartEdgeUse,
+    /// The caller asked for the curve parameter of a vertex use that is not on an edge use; only
+    /// an edge vertex use has one. Its argument, so of kind [`ErrorKind::InvalidInput`].
+    NotAnEdgeVertexUse,
+    /// The caller asked for the binormal of an edge use that is not in a loop; only an edge use in
+    /// a loop has one.
+    EdgeUseNotInLoop,
+    /// The edge use the caller gave as the edge's new primary is not one of the edge's.
+    NewPrimaryNotOnEdge,
+    /// The routine works on a manifold edge, which has four edge uses, and the caller's edge has
+    /// `found`.
+    NotFourEdgeUses {
+        /// The number of edge uses the edge has.
+        found: usize,
+    },
+    /// A vector the routine is given, or computes from what it is given, has zero length, so it
+    /// has no direction and no angle (upstream's vector operation returns `SM_ERR_INVALID_INPUT`).
+    ZeroLengthVector,
+    /// The caller gave an empty list of face uses to decide a shell's side from. Its argument, so
+    /// of kind [`ErrorKind::InvalidInput`].
+    NoFaceUses,
+    /// The caller asked for neither the 3D nor the UV curves of the face, so there is nothing to
+    /// make. Its argument, so of kind [`ErrorKind::InvalidInput`].
+    NoCurvesAskedFor,
+    /// The loop the caller asked to delete as an inner loop is the face's outer loop. Its
+    /// argument, so of kind [`ErrorKind::InvalidInput`].
+    LoopIsOuter,
+    /// The loop the caller named is not one of the face's loops, or is on no face at all (its loop
+    /// uses lie on no face use: `SM_ERR_NULL_POINTER` at those sites). Its argument, so of kind
+    /// [`ErrorKind::InvalidInput`].
+    LoopNotOnFace,
+    /// An edge of the inner loop the caller asked to delete is shared with another face (it is not
+    /// a lamina edge), so the loop cannot be deleted alone. Its argument, so of kind
+    /// [`ErrorKind::InvalidInput`].
+    LoopEdgeNotLamina,
+    /// The face use the caller asked to remove from a shell belongs to another shell, or to none.
+    /// Its argument, so of kind [`ErrorKind::InvalidInput`].
+    FaceUseNotInShell,
+    /// The shell the caller asked to move members into is a vertex shell, which holds only its
+    /// vertex, and the source has members to move. Its argument, so of kind
+    /// [`ErrorKind::InvalidInput`].
+    RecipientIsVertexShell,
+    /// The shell the caller asked to move members out of is a vertex shell, whose vertex cannot
+    /// move to a shell of faces or wires. Its argument, so of kind [`ErrorKind::InvalidInput`].
+    SourceIsVertexShell,
+    /// The edge use the caller gave as the loop use's first is not on that loop use. Its argument,
+    /// so of kind [`ErrorKind::InvalidInput`].
+    EdgeUseNotOnLoopUse,
+    /// The caller's sequence of edges is not a chain: the edge at `index` shares no vertex with
+    /// the end of the edge before it. Its argument, so of kind [`ErrorKind::InvalidInput`].
+    EdgesNotChained {
+        /// The index, in the caller's sequence, of the edge that does not continue from the one
+        /// before it.
+        index: usize,
+    },
+    /// The edge's parameter interval is a single point, so there is no length of it to measure a
+    /// gap along. A fact of the body as supplied, so of kind [`ErrorKind::InvalidInput`].
+    DegenerateEdgeInterval,
+    /// The face's UV domain has no extent in u or in v, so no point can be sampled inside it. A
+    /// fact of the body as supplied, so of kind [`ErrorKind::InvalidInput`].
+    DegenerateUvDomain,
+    /// The corner calculation handles a vertex where up to three tangent faces meet, and this
+    /// vertex has more.
+    TooManyTangentFaces,
+    /// A walk round a loop visited more than `limit` edge uses without closing (upstream's bound
+    /// against a loop that never returns to its start).
+    LoopTooLong {
+        /// The most edge uses a loop walk visits.
+        limit: u64,
+    },
+    /// No radial edge use of the edge has the region and orientation asked for, so there is no
+    /// sector to look between: an empty search, not a missing link.
+    NoRadialCandidate,
+    /// No sample along the edge classifies the given edge use between two radial neighbours: an
+    /// empty search, which upstream calls a valid case.
+    NoRadialSectorBetween,
+    /// Classifying the given edge use against a radial candidate failed; the classification's own
+    /// error is kept as the cause.
+    EdgeUseNotClassified,
+    /// The rays fired from the shell's faces do not decide whether the shell is inner: `forward`
+    /// and `backward` hits are neither all one way nor odd in number.
+    ShellSideUndecided {
+        /// The rays that left through a face seen from its front.
+        forward: u64,
+        /// The rays that left through a face seen from its back.
+        backward: u64,
+    },
+    /// No sampled line across the face's UV domain has an interval that classifies inside the
+    /// face: an empty search.
+    NoInteriorPoint,
+    /// No sampled iso-parameter line crosses the inside of the face: an empty search.
+    NoIsoLineCrossesFace,
+    /// The UV line segment across the face's domain at one iso-parameter could not be made; the
+    /// segment constructor's error is kept as the cause.
+    IsoLineNotMade,
+    /// None of the sample points of the edge's curve drops onto the face's surface, so no UV trim
+    /// curve can be fitted through their feet.
+    NoSampleOnSurface,
+    /// The point stepped off the edge into the face has no foot on the face's surface: the step
+    /// left the surface.
+    SteppedOffFace,
+    /// The point stepped off the edge into the face drops outside the face's UV domain.
+    SteppedOutsideUvDomain,
+    /// Neither a step forward nor a step back from the parameter stays inside the edge's interval,
+    /// so no second point gives the binormal's direction.
+    NoStepInsideInterval,
+    /// The binormal is still of zero length after every step-off into the face: the surface's
+    /// normal and the edge's tangent give no direction there.
+    BinormalStaysZero,
+    /// The surface has a zero-length first derivative at the point where the edge's gap to the
+    /// face is measured (a pole or a degenerate patch), so the gap function has no value there.
+    ZeroSurfaceTangent,
+    /// The ray fired at the shell hits it at the ray's own start, so the hit does not say which
+    /// side the start is on.
+    RayHitsAtStart,
+    /// The face's oriented trim boundary could not be built; the builder's error is kept as the
+    /// cause.
+    TrimBoundaryNotBuilt,
+    /// The surface could not be split at the new seam parameter; the split's error is kept as the
+    /// cause.
+    SeamSplitFailed,
+    /// The caller asked for the face parameters of a vertex use that lies on no face (a shell or
+    /// wire vertex use). Its argument, so of kind [`ErrorKind::InvalidInput`].
+    VertexUseNotOnFace,
+    /// The routine works in a face, and the caller's edge use lies on none (an edge use of a
+    /// wire). Its argument, so of kind [`ErrorKind::InvalidInput`].
+    EdgeUseNotOnFace,
+    /// The face use the caller asked to move to another shell is in no shell (it was taken out of
+    /// its shell before). Its argument, so of kind [`ErrorKind::InvalidInput`].
+    FaceUseWithoutShell,
+    /// The shell the caller gave as the outer shell is a shell of faces that lists no face use.
+    /// Its argument, so of kind [`ErrorKind::InvalidInput`].
+    ShellHasNoFaceUses,
+    /// The edge use has no UV trim curve and making one failed; the error of the fetch that tried
+    /// is kept as the cause.
+    UvTrimCurveNotMade,
 }
 
 impl TopologyFailure {
@@ -214,14 +401,58 @@ impl TopologyFailure {
             | Self::RadialRimsNotAnnulus
             | Self::RadialCapWithoutPlane
             | Self::RadialRimsOffEndPlane
-            | Self::RadialSweepNotOutward => SM_ERR,
+            | Self::RadialSweepNotOutward
+            | Self::NotAnEdgeVertexUse
+            | Self::NoFaceUses
+            | Self::NoCurvesAskedFor
+            | Self::LoopIsOuter
+            | Self::LoopNotOnFace
+            | Self::LoopEdgeNotLamina
+            | Self::FaceUseNotInShell
+            | Self::RecipientIsVertexShell
+            | Self::SourceIsVertexShell
+            | Self::EdgeUseNotOnLoopUse
+            | Self::EdgesNotChained { .. }
+            | Self::DegenerateEdgeInterval
+            | Self::DegenerateUvDomain
+            | Self::TooManyTangentFaces
+            | Self::LoopTooLong { .. }
+            | Self::NoRadialCandidate
+            | Self::NoRadialSectorBetween
+            | Self::EdgeUseNotClassified
+            | Self::ShellSideUndecided { .. }
+            | Self::NoInteriorPoint
+            | Self::NoIsoLineCrossesFace
+            | Self::IsoLineNotMade
+            | Self::NoSampleOnSurface
+            | Self::SteppedOffFace
+            | Self::SteppedOutsideUvDomain
+            | Self::NoStepInsideInterval
+            | Self::BinormalStaysZero
+            | Self::ZeroSurfaceTangent
+            | Self::RayHitsAtStart
+            | Self::TrimBoundaryNotBuilt
+            | Self::SeamSplitFailed => SM_ERR,
             Self::Missing(_)
             | Self::RadialFaceWithoutSurface
             | Self::RadialRimWithoutEdge
             | Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
-            | Self::CurveNotApproximated => SM_ERR_NULL_POINTER,
-            Self::InvalidValue(_) | Self::NoBrepGiven => SM_ERR_INVALID_INPUT,
+            | Self::CurveNotApproximated
+            | Self::FaceWithoutSurface
+            | Self::EdgeWithoutCurve
+            | Self::NoStartEdgeUse
+            | Self::VertexUseNotOnFace
+            | Self::EdgeUseNotOnFace
+            | Self::FaceUseWithoutShell
+            | Self::ShellHasNoFaceUses
+            | Self::UvTrimCurveNotMade => SM_ERR_NULL_POINTER,
+            Self::InvalidValue(_)
+            | Self::NoBrepGiven
+            | Self::EdgeUseNotInLoop
+            | Self::NewPrimaryNotOnEdge
+            | Self::NotFourEdgeUses { .. }
+            | Self::ZeroLengthVector => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) | Self::GatheredBothSides => SM_ERR_ASSERT_FAILURE,
             Self::OutOfMemory(_) => SM_ERR_OUT_OF_MEMORY,
             Self::DropFailed { status } => *status,
@@ -245,7 +476,31 @@ impl TopologyFailure {
             | Self::NotInBrep
             | Self::VertexNotOnEdge
             | Self::ClosedEdge
-            | Self::VertexHasEdges => ErrorKind::InvalidInput,
+            | Self::VertexHasEdges
+            | Self::FaceWithoutSurface
+            | Self::EdgeWithoutCurve
+            | Self::NoStartEdgeUse
+            | Self::NotAnEdgeVertexUse
+            | Self::EdgeUseNotInLoop
+            | Self::NewPrimaryNotOnEdge
+            | Self::NotFourEdgeUses { .. }
+            | Self::ZeroLengthVector
+            | Self::NoFaceUses
+            | Self::NoCurvesAskedFor
+            | Self::LoopIsOuter
+            | Self::LoopNotOnFace
+            | Self::LoopEdgeNotLamina
+            | Self::FaceUseNotInShell
+            | Self::RecipientIsVertexShell
+            | Self::SourceIsVertexShell
+            | Self::EdgeUseNotOnLoopUse
+            | Self::EdgesNotChained { .. }
+            | Self::DegenerateEdgeInterval
+            | Self::DegenerateUvDomain
+            | Self::VertexUseNotOnFace
+            | Self::EdgeUseNotOnFace
+            | Self::FaceUseWithoutShell
+            | Self::ShellHasNoFaceUses => ErrorKind::InvalidInput,
             Self::CurveNotBSpline { .. }
             | Self::SurfaceWithoutNurbs { .. }
             | Self::FaceWithoutEdges
@@ -253,7 +508,8 @@ impl TopologyFailure {
             | Self::EdgeNotDeletable
             | Self::InnerLoopsOnBothSides
             | Self::LaminaEdgeIsStrut
-            | Self::RadialSweepNeedsCones => ErrorKind::Unsupported,
+            | Self::RadialSweepNeedsCones
+            | Self::TooManyTangentFaces => ErrorKind::Unsupported,
             Self::CurveNotApproximated => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
@@ -337,6 +593,77 @@ impl core::fmt::Display for TopologyFailure {
                 f.write_str("the radial circles leave the exact end plane")
             }
             Self::RadialSweepNotOutward => f.write_str("the radial sweep is not an outward solid"),
+            Self::FaceWithoutSurface => f.write_str("the face has no surface"),
+            Self::EdgeWithoutCurve => f.write_str("the edge has no curve"),
+            Self::NoStartEdgeUse => f.write_str("no edge use to start the loop from was given"),
+            Self::NotAnEdgeVertexUse => {
+                f.write_str("only an edge vertex use has a curve parameter")
+            }
+            Self::EdgeUseNotInLoop => f.write_str("only an edge use in a loop has a binormal"),
+            Self::NewPrimaryNotOnEdge => {
+                f.write_str("the new primary edge use is not one of the edge's")
+            }
+            Self::NotFourEdgeUses { found } => write!(
+                f,
+                "the edge has {found} edge uses, not the four of a manifold edge"
+            ),
+            Self::ZeroLengthVector => f.write_str("a vector of zero length has no direction"),
+            Self::NoFaceUses => f.write_str("there are no face uses"),
+            Self::NoCurvesAskedFor => f.write_str("neither 3D nor UV curves are asked for"),
+            Self::LoopIsOuter => f.write_str("the loop is the face's outer loop"),
+            Self::LoopNotOnFace => f.write_str("the loop is not one of the face's loops"),
+            Self::LoopEdgeNotLamina => f.write_str("an edge of the loop is not a lamina edge"),
+            Self::FaceUseNotInShell => f.write_str("the face use is not in the shell"),
+            Self::RecipientIsVertexShell => {
+                f.write_str("the recipient is a vertex shell and the source is not empty")
+            }
+            Self::SourceIsVertexShell => f.write_str("the source is a vertex shell"),
+            Self::EdgeUseNotOnLoopUse => f.write_str("the edge use is not on this edge loop use"),
+            Self::EdgesNotChained { index } => write!(
+                f,
+                "edge {index} of the sequence does not continue from the edge before it"
+            ),
+            Self::DegenerateEdgeInterval => f.write_str("the edge's interval is a single point"),
+            Self::DegenerateUvDomain => f.write_str("the face's UV domain is degenerate"),
+            Self::TooManyTangentFaces => f.write_str("the vertex has more than three faces"),
+            Self::LoopTooLong { limit } => write!(f, "the loop has more than {limit} edge uses"),
+            Self::NoRadialCandidate => f.write_str("no radial edge use is left after culling"),
+            Self::NoRadialSectorBetween => f.write_str("no radial sector lies between the faces"),
+            Self::EdgeUseNotClassified => f.write_str("an edge use could not be classified"),
+            Self::ShellSideUndecided { forward, backward } => write!(
+                f,
+                "the rays do not decide whether the shell is inner ({forward} forward, \
+                 {backward} backward)"
+            ),
+            Self::NoInteriorPoint => f.write_str("no line interval classifies into the face"),
+            Self::NoIsoLineCrossesFace => f.write_str("no iso-parameter line crosses the face"),
+            Self::IsoLineNotMade => f.write_str("the iso-parameter UV line could not be made"),
+            Self::NoSampleOnSurface => {
+                f.write_str("no sample point of the curve drops onto the surface")
+            }
+            Self::SteppedOffFace => f.write_str("the stepped-off point does not lie on the face"),
+            Self::SteppedOutsideUvDomain => {
+                f.write_str("the stepped-off point is outside the face's UV domain")
+            }
+            Self::NoStepInsideInterval => {
+                f.write_str("no step from the parameter stays inside the edge's interval")
+            }
+            Self::BinormalStaysZero => f.write_str("the binormal stays zero after every step-off"),
+            Self::ZeroSurfaceTangent => f.write_str("the surface has a zero-length tangent"),
+            Self::RayHitsAtStart => f.write_str("the ray hits the shell at its start"),
+            Self::TrimBoundaryNotBuilt => {
+                f.write_str("the face's trim boundary could not be built")
+            }
+            Self::SeamSplitFailed => {
+                f.write_str("the surface could not be split at the new seam parameter")
+            }
+            Self::VertexUseNotOnFace => f.write_str("the vertex use is not on a face"),
+            Self::EdgeUseNotOnFace => f.write_str("the edge use is not on a face"),
+            Self::FaceUseWithoutShell => f.write_str("the face use is in no shell"),
+            Self::ShellHasNoFaceUses => f.write_str("the outer shell has no face uses"),
+            Self::UvTrimCurveNotMade => {
+                f.write_str("the edge use's UV trim curve could not be made")
+            }
         }
     }
 }
@@ -681,6 +1008,239 @@ mod tests {
         assert_eq!(missing.topology_failure(), Some(&defect));
     }
 
+    /// The named causes of the topology entity routines (edges, edge uses, faces, loop uses,
+    /// shells, vertex uses, the traverser) keep the status of the phrase cause each replaced,
+    /// answer with it the way an `Upstream` does, and have the kind their doc says.
+    #[test]
+    fn the_topology_entity_causes_keep_their_statuses() {
+        let op = "topology::op";
+        let cases = [
+            (
+                TopologyFailure::FaceWithoutSurface,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::EdgeWithoutCurve,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::NoStartEdgeUse,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::NotAnEdgeVertexUse,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::EdgeUseNotInLoop,
+                SM_ERR_INVALID_INPUT,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::NewPrimaryNotOnEdge,
+                SM_ERR_INVALID_INPUT,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::NotFourEdgeUses { found: 5 },
+                SM_ERR_INVALID_INPUT,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::ZeroLengthVector,
+                SM_ERR_INVALID_INPUT,
+                ErrorKind::InvalidInput,
+            ),
+            (TopologyFailure::NoFaceUses, SM_ERR, ErrorKind::InvalidInput),
+            (
+                TopologyFailure::NoCurvesAskedFor,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::LoopIsOuter,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::LoopNotOnFace,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::LoopEdgeNotLamina,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::FaceUseNotInShell,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::RecipientIsVertexShell,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::SourceIsVertexShell,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::EdgeUseNotOnLoopUse,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::EdgesNotChained { index: 5 },
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::DegenerateEdgeInterval,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::DegenerateUvDomain,
+                SM_ERR,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::TooManyTangentFaces,
+                SM_ERR,
+                ErrorKind::Unsupported,
+            ),
+            (
+                TopologyFailure::LoopTooLong { limit: 5 },
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (
+                TopologyFailure::NoRadialCandidate,
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (
+                TopologyFailure::NoRadialSectorBetween,
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (
+                TopologyFailure::EdgeUseNotClassified,
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (
+                TopologyFailure::ShellSideUndecided {
+                    forward: 5,
+                    backward: 5,
+                },
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (TopologyFailure::NoInteriorPoint, SM_ERR, ErrorKind::Failed),
+            (
+                TopologyFailure::NoIsoLineCrossesFace,
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (TopologyFailure::IsoLineNotMade, SM_ERR, ErrorKind::Failed),
+            (
+                TopologyFailure::NoSampleOnSurface,
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (TopologyFailure::SteppedOffFace, SM_ERR, ErrorKind::Failed),
+            (
+                TopologyFailure::SteppedOutsideUvDomain,
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (
+                TopologyFailure::NoStepInsideInterval,
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (
+                TopologyFailure::BinormalStaysZero,
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (
+                TopologyFailure::ZeroSurfaceTangent,
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (TopologyFailure::RayHitsAtStart, SM_ERR, ErrorKind::Failed),
+            (
+                TopologyFailure::TrimBoundaryNotBuilt,
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (TopologyFailure::SeamSplitFailed, SM_ERR, ErrorKind::Failed),
+            (
+                TopologyFailure::VertexUseNotOnFace,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::EdgeUseNotOnFace,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::FaceUseWithoutShell,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::ShellHasNoFaceUses,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::InvalidInput,
+            ),
+            (
+                TopologyFailure::UvTrimCurveNotMade,
+                SM_ERR_NULL_POINTER,
+                ErrorKind::Missing,
+            ),
+        ];
+        for (failure, status, kind) in cases {
+            let e = SolidError::topology(op, failure);
+            assert_eq!(e.sm_status(), Some(status), "{failure:?}");
+            assert_eq!(
+                super::super::upstream_status(&e),
+                Some(status),
+                "{failure:?}"
+            );
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.operation(), op, "{failure:?}");
+            assert_eq!(e.topology_failure(), Some(&failure));
+            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+            assert!(e.is_status_answer(), "{failure:?}");
+            assert!(e.to_string().starts_with("topology::op: "), "{failure:?}");
+        }
+        // A site whose phrase cause had another status than the named cause's keeps it.
+        let at_site = Failure::new(op, TopologyFailure::FaceWithoutSurface)
+            .with_status(SM_ERR)
+            .into_error();
+        assert_eq!(at_site.sm_status(), Some(SM_ERR));
+        assert_eq!(super::super::upstream_status(&at_site), Some(SM_ERR));
+        assert_eq!(at_site.kind(), ErrorKind::InvalidInput);
+        // A reviewed consistency defect keeps the assertion status of the check it replaced.
+        let asserted = Failure::new(op, TopologyFailure::Defect { why: "x" })
+            .with_status(SM_ERR_ASSERT_FAILURE)
+            .into_error();
+        assert_eq!(asserted.sm_status(), Some(SM_ERR_ASSERT_FAILURE));
+        assert_eq!(asserted.kind(), ErrorKind::StageFailed);
+        assert!(asserted.is_defect());
+    }
+
     /// The sites that build a topology phrase cause only fall:
     /// per file, in the library code of `solidcore` and `solidcore-ops`, as
     /// [`super::super::site_scan`] counts them. A PR that converts sites lowers its
@@ -733,25 +1293,14 @@ mod tests {
             ("solidcore/src/topology/brep_data.rs", 5),
             ("solidcore/src/topology/brep_data_write.rs", 5),
             ("solidcore/src/topology/database_io.rs", 3),
-            ("solidcore/src/topology/edge.rs", 7),
-            ("solidcore/src/topology/edgeuse/p1.rs", 2),
-            ("solidcore/src/topology/edgeuse/p2.rs", 4),
-            ("solidcore/src/topology/edgeuse/p3.rs", 12),
-            ("solidcore/src/topology/face/p1.rs", 24),
-            ("solidcore/src/topology/face/p2.rs", 10),
             ("solidcore/src/topology/geometry_write.rs", 2),
-            ("solidcore/src/topology/loopuse.rs", 9),
             ("solidcore/src/topology/part_file.rs", 1),
             ("solidcore/src/topology/proto_topology/p1/owning_topology.rs", 6),
             ("solidcore/src/topology/proto_topology/p1/proto.rs", 16),
             ("solidcore/src/topology/proto_topology/p2.rs", 8),
             ("solidcore/src/topology/proto_topology/p3.rs", 6),
-            ("solidcore/src/topology/shell.rs", 15),
-            ("solidcore/src/topology/topology_traverser.rs", 3),
             ("solidcore/src/topology/trimming_tools.rs", 22),
             ("solidcore/src/topology/trimming_tools/curve_loops.rs", 12),
-            ("solidcore/src/topology/vertex/corner.rs", 1),
-            ("solidcore/src/topology/vertexuse.rs", 10),
         ];
         assert_pinned(
             "topology phrase-cause sites",
