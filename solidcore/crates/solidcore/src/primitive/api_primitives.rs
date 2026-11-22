@@ -1108,9 +1108,9 @@ mod tests {
             failures,
             [
                 SolidError::invalid_input("geom::vector2d::Vec2::unitize", "zero-length vector"),
-                SolidError::surface_failed(
+                SolidError::surface(
                     "surface::surface::p6::DerivSurfDefinition::sample_values",
-                    "the reference curve point lies on the boundary curve"
+                    crate::error::surface::SurfaceFailure::ReferencePointOnBoundary
                 ),
             ]
         );
@@ -1118,7 +1118,7 @@ mod tests {
             failures.iter().map(SolidError::kind).collect::<Vec<_>>(),
             [
                 crate::error::ErrorKind::InvalidInput,
-                crate::error::ErrorKind::Failed
+                crate::error::ErrorKind::Degenerate
             ]
         );
 

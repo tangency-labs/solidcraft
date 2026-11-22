@@ -14,7 +14,7 @@
 //! | [`SurfaceFailure::OutsideDomain`]  | `SM_ERR_OUTSIDE_OF_DOMAIN`     |
 //! | [`SurfaceFailure::OffSurface`]     | `SM_ERR_NOT_WITHIN_TOLERANCE`  |
 //! | [`SurfaceFailure::Defect`]         | `SM_ERR` (or the site's, through `with_status`) |
-//! | [`SurfaceFailure::NoNurb`], [`SurfaceFailure::InputNotGiven`], [`SurfaceFailure::TrimmedCacheHasNoFace`] | `SM_ERR_NULL_POINTER` (class [`ErrorKind::InvalidInput`]) |
+//! | [`SurfaceFailure::NoNurb`], [`SurfaceFailure::InputNotGiven`], [`SurfaceFailure::TrimmedCacheHasNoFace`], [`SurfaceFailure::SurfaceCacheHasNoTree`] | `SM_ERR_NULL_POINTER` (class [`ErrorKind::InvalidInput`]) |
 //! | [`SurfaceFailure::SurfaceCacheNotBuilt`], [`SurfaceFailure::SurfaceCacheTreeNotBuilt`], [`SurfaceFailure::CurveCacheNotBuilt`], [`SurfaceFailure::CurveCacheTreeNotBuilt`] | `SM_ERR_NULL_POINTER` (class [`ErrorKind::Failed`]; defect-ness follows the cause) |
 //! | [`SurfaceFailure::NormalsCancel`]  | `SM_ERR_INVALID_INPUT` (class [`ErrorKind::Degenerate`]) |
 //! | every other named cause            | `SM_ERR`, with the class its doc names |
@@ -55,14 +55,14 @@ pub enum SurfaceFailure {
     /// A point is farther from the surface than the tolerance, as the phrase says (for
     /// example "the point is off the surface"): an inversion's answer.
     OffSurface(&'static str),
-    /// A derivative order above the highest the routine evaluates was asked for: the
-    /// caller's argument ([`ErrorKind::InvalidInput`], `SM_ERR`).
+    /// A derivative of an order above `max` was asked of a form that evaluates up to `max`.
+    /// [`ErrorKind::InvalidInput`].
     DerivativeOrderTooHigh {
-        /// The highest order the routine evaluates.
+        /// The highest order the form evaluates.
         max: usize,
     },
-    /// The caller's surface has no NURB form for the routine to work on
-    /// ([`ErrorKind::InvalidInput`], `SM_ERR_NULL_POINTER`).
+    /// The surface given has no NURB form, which the routine reads.
+    /// [`ErrorKind::InvalidInput`].
     NoNurb,
     /// The surface cache is of a kind that does not do this: the base cache answers the
     /// trimmed cache's queries with a refusal ([`ErrorKind::Unsupported`], `SM_ERR`).
@@ -74,13 +74,17 @@ pub enum SurfaceFailure {
     /// The surface cache's tree could not be built; the failure that stopped it, where
     /// there was one, is the cause (`SM_ERR_NULL_POINTER`, class [`ErrorKind::Failed`]).
     SurfaceCacheTreeNotBuilt,
+    /// The surface cache the caller gave has no tree to solve on
+    /// ([`ErrorKind::InvalidInput`], `SM_ERR_NULL_POINTER`).
+    SurfaceCacheHasNoTree,
     /// The curve's cache could not be made; the failure that stopped it is the cause
     /// (`SM_ERR_NULL_POINTER`, class [`ErrorKind::Failed`]).
     CurveCacheNotBuilt,
     /// The curve cache has no tree (`SM_ERR_NULL_POINTER`, class [`ErrorKind::Failed`]).
     CurveCacheTreeNotBuilt,
     /// The cubic approximation of a surface was still farther from it than the tolerance
-    /// after the last subdivision pass ([`ErrorKind::NotConverged`], `SM_ERR`).
+    /// after the last subdivision pass: a solve that stops with its numbers, a defect
+    /// (guide §6 rule 3; class [`ErrorKind::StageFailed`], `SM_ERR`).
     ApproximationNotConverged {
         /// The largest distance of the approximation from the surface it sampled.
         achieved: f64,
@@ -228,7 +232,8 @@ impl SurfaceFailure {
             | Self::CurveCacheNotBuilt
             | Self::CurveCacheTreeNotBuilt
             | Self::InputNotGiven { .. }
-            | Self::TrimmedCacheHasNoFace => SM_ERR_NULL_POINTER,
+            | Self::TrimmedCacheHasNoFace
+            | Self::SurfaceCacheHasNoTree => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) | Self::NormalsCancel => SM_ERR_INVALID_INPUT,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::OffSurface(_) => SM_ERR_NOT_WITHIN_TOLERANCE,
@@ -242,13 +247,14 @@ impl SurfaceFailure {
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
-            Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::Defect { .. } | Self::ApproximationNotConverged { .. } => ErrorKind::StageFailed,
             Self::DerivativeOrderTooHigh { .. }
             | Self::NoNurb
             | Self::ParameterOutsideInterval { .. }
             | Self::TooFewSolverVariables { .. }
             | Self::InputNotGiven { .. }
             | Self::TrimmedCacheHasNoFace
+            | Self::SurfaceCacheHasNoTree
             | Self::EndPointOutsideDomain
             | Self::InvalidDerivativeSurface => ErrorKind::InvalidInput,
             Self::UnsupportedCacheKind | Self::UnsupportedTangencyType | Self::AtPole => {
@@ -261,7 +267,6 @@ impl SurfaceFailure {
             | Self::PointDoesNotDrop
             | Self::NoParameterDirection
             | Self::NoTangentTowardDirection => ErrorKind::Failed,
-            Self::ApproximationNotConverged { .. } => ErrorKind::NotConverged,
             Self::ZeroLengthTangent
             | Self::NoNormal
             | Self::ParallelNormals
@@ -284,7 +289,7 @@ impl core::fmt::Display for SurfaceFailure {
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
             Self::DerivativeOrderTooHigh { max } => {
-                write!(f, "the derivative order is above {max}")
+                write!(f, "a derivative order above {max} was asked")
             }
             Self::NoNurb => f.write_str("the surface has no NURB form"),
             Self::UnsupportedCacheKind => {
@@ -294,6 +299,7 @@ impl core::fmt::Display for SurfaceFailure {
             Self::SurfaceCacheTreeNotBuilt => {
                 f.write_str("the surface cache's tree could not be built")
             }
+            Self::SurfaceCacheHasNoTree => f.write_str("the surface cache given has no tree"),
             Self::CurveCacheNotBuilt => f.write_str("the curve's cache could not be made"),
             Self::CurveCacheTreeNotBuilt => f.write_str("the curve cache has no tree"),
             Self::ApproximationNotConverged {
@@ -472,6 +478,11 @@ mod tests {
                 K::Failed,
             ),
             (
+                SurfaceFailure::SurfaceCacheHasNoTree,
+                SM_ERR_NULL_POINTER,
+                K::InvalidInput,
+            ),
+            (
                 SurfaceFailure::CurveCacheNotBuilt,
                 SM_ERR_NULL_POINTER,
                 K::Failed,
@@ -487,7 +498,7 @@ mod tests {
                     tolerance: 1e-3,
                 },
                 SM_ERR,
-                K::NotConverged,
+                K::StageFailed,
             ),
             (
                 SurfaceFailure::ParameterOutsideInterval { param: 2.0 },
@@ -552,7 +563,7 @@ mod tests {
             assert_eq!(typed.upstream_status(), Some(code), "{failure:?}");
             assert_eq!(typed.kind(), kind, "{failure:?}");
             assert!(typed.is_status_answer(), "{failure:?}");
-            assert!(!typed.is_defect(), "{failure:?}");
+            assert_eq!(typed.is_defect(), kind == K::StageFailed, "{failure:?}");
             assert_eq!(typed.surface_failure(), Some(&failure));
             assert!(!typed.to_string().is_empty());
         }

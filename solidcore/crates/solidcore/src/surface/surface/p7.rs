@@ -1712,6 +1712,7 @@ impl Surface {
         requested: SolutionRequested,
     ) -> Result<SolutionArray<O>> {
         // get surface spatial decomposition tree from Surface's cache
+        let cache_from_caller = cache.is_some();
         let mut owned;
         let cache = if let Some(c) = cache {
             if point_test_off {
@@ -1732,7 +1733,19 @@ impl Surface {
             &owned
         };
         let surface_tree = cache.tree().ok_or_else(|| {
-            SolidError::surface(OP_SOLVE, SurfaceFailure::SurfaceCacheTreeNotBuilt)
+            if cache_from_caller {
+                SolidError::surface(OP_SOLVE, SurfaceFailure::SurfaceCacheHasNoTree)
+            } else {
+                Failure::new(
+                    OP_SOLVE,
+                    SurfaceFailure::Defect {
+                        why: "the cache this solve made returned only after its tree was \
+                              built, so a made cache without a tree is the kernel's",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            }
         })?;
 
         // put point into a single node PointTree
@@ -5788,9 +5801,9 @@ mod tests {
         let samples: [(&'static str, SurfaceFailure, i32, ErrorKind); 3] = [
             (
                 OP_SOLVE,
-                SurfaceFailure::SurfaceCacheTreeNotBuilt,
+                SurfaceFailure::SurfaceCacheHasNoTree,
                 SM_ERR_NULL_POINTER,
-                ErrorKind::Failed,
+                ErrorKind::InvalidInput,
             ),
             (
                 OP_SEAM,
