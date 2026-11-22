@@ -94,7 +94,8 @@
 //!   its tolerance (WR-679, `SmBrep` Tests #0-#3), and upstream's `gain * gap / 2` and
 //!   `gain * gap - def` are under twice the gap. As the check's own tolerance update, it grows
 //!   no further than the limit past which Test #82 refuses a vertex (a misplaced vertex, not a
-//!   gap to absorb).
+//!   gap to absorb). From that limit up it grows only where the check's clearance proof of
+//!   Test #82 shows the ball reaching no topology the vertex does not bound.
 //! - No recursion; no allocation from caller counts beyond the target lists given.
 
 use crate::error::{Result, SolidError};
@@ -115,7 +116,7 @@ use crate::heal::face_props::{
 };
 use crate::kernel::Kernel;
 use crate::math::{BIG_DOUBLE, EFF_ZERO, UNDEF_DOUBLE};
-use crate::topology::brep::validation::GROWTH_PAST_RATIO;
+use crate::topology::brep::validation::{vertex_ball_reaches, GROWTH_PAST_RATIO};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face_p2;
 use crate::topology::{
@@ -3217,10 +3218,15 @@ impl<O: LoopObject> HealData<O> {
             // vertex failed a gap its tolerance had covered. The tolerance covers twice the gap
             // with the gap gain, as the edge branch above covers the edge/face gap, unless that
             // passes the limit past which Test #82 refuses the vertex (as `validate_and_update`).
+            // From the limit up, Test #82 also refuses a ball that reaches topology the vertex
+            // does not bound (validity-and-tolerances.md §8: a tolerance grows only while it
+            // stays clear), so the cover is taken there only where the check proves it clear.
             let twice_gap = 2.0 * max_vertex_edge_gap_3d_length.max(max_vertex_face_gap_3d_length);
             let covered = zone_tol3d(k, gap_gain(k) * twice_gap);
+            let limit = LARGE_SMALL_SIZE_RATIO * b.tolerance();
             let zone_tol_3d = if twice_gap > zone_tol_3d
-                && covered < GROWTH_PAST_RATIO * LARGE_SMALL_SIZE_RATIO * b.tolerance()
+                && covered < GROWTH_PAST_RATIO * limit
+                && (covered < limit || ball_clears(k, b, bad_tol_vertex, covered)?)
             {
                 covered
             } else {
@@ -3512,6 +3518,26 @@ impl<O: LoopObject> HealData<O> {
     /// `Fix_BadGaps` (not implemented upstream: does nothing).
     pub fn fix_bad_gaps(&self, this_healer_op: HealerOpType) {
         let _ = this_healer_op;
+    }
+}
+
+/// Whether vertex `v` at tolerance `radius` passes the clearance half of Test #82
+/// ([`vertex_ball_reaches`]): its ball provably reaches no face or edge it does not bound. The
+/// vertex keeps its tolerance; a query that cannot be had proves nothing, so the ball counts as
+/// reaching, as in the check.
+///
+/// # Errors
+///
+/// A cancelled pass and a dangling vertex.
+fn ball_clears(k: &Kernel, b: &mut Brep, v: VertexId, radius: f64) -> Result<bool> {
+    let kept = vertex::tolerance(b, v)?;
+    vertex::set_tolerance(b, v, radius, false, false)?;
+    let reaches = vertex_ball_reaches(k, b, v);
+    vertex::set_tolerance(b, v, kept, false, false)?;
+    match reaches {
+        Ok(reaches) => Ok(!reaches),
+        Err(error) if error.is_cancelled() => Err(error),
+        Err(_) => Ok(false),
     }
 }
 
