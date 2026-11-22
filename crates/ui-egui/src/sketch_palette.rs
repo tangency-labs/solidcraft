@@ -540,6 +540,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         // discard as the ribbon's X (#19961). "Cancel Sketch", not "Cancel": an open dialog's Cancel
         // stays the only one.
         let (cancel_button, button) = crate::ui_kit::wide_secondary_and_primary(ui, solidcraft_ui_text::tr("cmd.sketch_cancel"), "Finish Sketch");
+        crate::panel_runtime::register_content_focus(ui.ctx(), &cancel_button);
         crate::panel_runtime::register_content_focus(ui.ctx(), &button);
         for (name, response) in [("sketch_palette:finish", &button), ("sketch_palette:cancel", &cancel_button)] {
             crate::scenario::publish_rect(name, response.rect);
