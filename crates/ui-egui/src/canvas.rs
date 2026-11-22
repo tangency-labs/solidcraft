@@ -392,6 +392,7 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
 
 /// Draw the manipulator and the value box (called by the viewport after the model is drawn).
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj) {
+    let _tool_window = ToolWindow::enter(app);
     crate::extrude_face_snap::set(None);
     // While OK computes, the inputs hold what it computes: no arrow to drag, no box to type in.
     if app.applying.is_some() {
@@ -1056,8 +1057,32 @@ pub(crate) fn boxes_shown(ctx: &egui::Context) -> bool {
 
 /// Whether the command's value box takes the keyboard this frame: as the window opens, and after
 /// a pick. Without boxes in the view, it is left for the command window's value field (#9479).
+/// Only the window that shows the command has value boxes (see [`ToolWindow`]).
 fn take_focus(ctx: &egui::Context, d: &mut Dialog) -> bool {
-    boxes_shown(ctx) && std::mem::take(&mut d.focus)
+    boxes_shown(ctx) && TOOL_WINDOW.get() && std::mem::take(&mut d.focus)
+}
+
+thread_local! {
+    /// Whether the window being drawn shows the open command (always, with one window).
+    static TOOL_WINDOW: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// While it lives, value boxes are drawn only if the window being drawn shows the open command.
+/// The keyboard is in that window. Views of the design in other windows draw the manipulator
+/// alone: their box would share its field's text state, and its keyboard, with the real one.
+struct ToolWindow;
+
+impl ToolWindow {
+    fn enter(app: &SolveApp) -> ToolWindow {
+        TOOL_WINDOW.set(crate::view_windows::shows_tool(app));
+        ToolWindow
+    }
+}
+
+impl Drop for ToolWindow {
+    fn drop(&mut self) {
+        TOOL_WINDOW.set(true);
+    }
 }
 
 /// The command's main value in the viewport, next to the geometry: the keyboard goes here while
@@ -1116,7 +1141,7 @@ fn value_box_full(
     place: BoxPlace,
 ) -> Option<egui::Rect> {
     // Off in Preferences: the value is typed in the command window only (#9479).
-    if !boxes_shown(ui.ctx()) {
+    if !boxes_shown(ui.ctx()) || !TOOL_WINDOW.get() {
         return None;
     }
     let t = Tokens::get();

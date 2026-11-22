@@ -25,6 +25,152 @@ are lists. Entries may declare named menu or ribbon slots; each app decides
 which slots exist and draws forms from the input schemas. Plugins ship no UI
 code. SolidCraft retains approval, cancellation and plugin preferences.
 
+## Design revisions and notifications
+
+Declare `design@0.1` alongside `commands@0.2` to import the optional
+`craft:plugin/design-state@0.2.0` interface. Its read-only `get-token()` returns
+JSON `{ "document_id": "…", "revision": "0123456789abcdef0123456789abcdef:42" }`,
+or `null` without an open design.
+Existing plugins need no new imports or capabilities.
+
+The host keeps the identity and revision in the open document's session, outside
+the authored document, saved files and undo snapshots. Every committed edit,
+undo and redo gets a fresh token, including a redo that restores earlier content.
+Tokens never identify different history states. Saving does not change the token.
+Opening or importing a design creates a fresh identity and token, including when
+reopening the same file; switching between open tabs retains each tab's identity.
+Different open documents have different identities. Display-only changes do not
+invalidate calculations. These observations add no metadata to saved designs and
+do not alter the authored bytes restored by cancellation or undo.
+
+Both fields are bounded opaque strings. Compare the complete token for equality
+and pass it back unchanged. A token is valid only for its open document session;
+discard cached tokens after closing or reopening a design. Revisions do not order
+edits across sessions.
+Use this token for edit preconditions; `document.revision` reports the separate
+observation revision, which also follows visibility and uncaptured positions.
+
+An editing call may pass `expected_design` beside `entry` and `params` to
+`plugin.run`, or beside `approval` and `params` to `<plugin>.<entry>`:
+
+```json
+{
+  "path": "/plugins/example",
+  "approval": "PACKAGE_HASH",
+  "entry": "apply",
+  "expected_design": {
+    "document_id": "DESIGN_ID",
+    "revision": "0123456789abcdef0123456789abcdef:42"
+  },
+  "params": {}
+}
+```
+
+The host checks the token inside the edit transaction before invoking the guest.
+A mismatch refuses the entire edit with typed `stale_revision` data containing
+both `expected` and `actual` tokens. No history step is added. Omitting the token
+preserves unconditional calls.
+MCP clients can supply this precondition through `execute` with the wrapped
+command arguments. Direct plugin tools keep the plugin's declared input schema.
+
+A command plugin can declare invalidation listeners under the same capability:
+
+```json
+"listeners": [{"entry": "refresh", "on": ["design.changed"]}]
+```
+
+Place this in `runtime`; `refresh` must name a declared command entry with
+`"effect": "read"`. Approval covers the exact declaration and component. Disabled,
+unapproved or replaced packages receive no background calls.
+
+The window sends whole-document invalidations after finished host edits,
+undo/redo, and active-document switches, opens and closes. A burst is coalesced
+into the latest state, at most about ten deliveries a second. The entry receives
+`{"design":{"document_id":"…","revision":"0123456789abcdef0123456789abcdef:42"}}`,
+or `{"design":null}` without an active design. Closing the window's last tab
+creates a blank design, so that notification names the new active design.
+Events carry no file contents and are not an edit log.
+
+A listener can also opt in to linked-file observations:
+
+```json
+"listeners": [{"entry": "refresh", "on": ["design.changed", "design.links_changed"]}]
+```
+
+`on` must be a nonempty list of distinct events from `design.changed` and
+`design.links_changed`; either event can be declared alone. Both use the existing
+`design@0.1` capability and read-only command entries. No WIT world or interface
+changes are needed. The separate event preserves the exact payload and delivery
+conditions of existing `design.changed` listeners.
+
+When a declared `design.links_changed` event is pending, the entry receives:
+
+```json
+{
+  "design": {"document_id": "…", "revision": "0123456789abcdef0123456789abcdef:42"},
+  "links": [{"component": 7, "name": "Bracket", "path": "/parts/bracket.sc", "read": false}]
+}
+```
+
+`design` is the active design's token, or `null` without an active design.
+Each link names the numeric component id, its name (`null` if absent) and absolute
+source path. `read: false` means a `component.links` check found a file differing
+from the version the design has read. `read: true` means the design already read that version, including after
+Update Links (`component.update_links`) or Relink Source (`component.relink`)
+successfully read the changed source into the design. A disk-only observation does
+not advance the design token or trigger `design.changed`.
+Unread (`read: false`) entries require a source inside the plugin's approved read folders; `read: true` entries remain visible without that grant.
+
+The host observes files only when it already checks links, including the window's
+focus check, and after Update Links; it adds no filesystem watcher. A burst retains
+the latest observation per component, so this is an invalidation, not a history of
+every disk change. A listener declaring both events gets one invocation for the
+coalesced state, including `links` only when a linked-file observation is pending.
+A design-only invalidation still has exactly the `{"design":…}` payload. A listener
+declaring only `design.links_changed` receives no design-only invalidations, and a
+listener declaring only `design.changed` never receives `links` or disk-only
+notifications.
+
+Handlers run on the command worker, away from the window thread, with their own
+budget: at most 1,000,000 fuel, 16 MiB memory, 512 KiB stack and 100 ms execution time, further
+limited by their requested budgets. They may refresh caches or panel data.
+Editing, file writes and starting jobs are refused with existing typed permission
+errors. A failure is shown in Preferences › Plugins and never fails the action
+that triggered the notification. Each invocation uses a fresh guest instance.
+Handler results use the existing 1 MiB JSON reply limit; retained panel data is
+limited to 16 MiB in total. Exceeding either limit reports a typed limit error.
+
+Panel support from #19516 is not present here. The host keeps the handler's
+bounded JSON result through a plain function for a future panel adapter.
+
+## Classifying points and reading surface normals
+
+A plugin entry with `"effect": "read"` can call `inspect.classify_points` through
+the `commands.run` WIT import, without a command-group grant. MCP callers use the existing `execute`
+tool with the same command and parameters:
+
+```json
+{"body":"Block","points":[[5,5,5],[10,23,20]],"face":"F2:bore"}
+```
+
+`body` is the name used by `model.faces`, including a placed copy's name. `points`
+contains 1–256 world-space points in millimetres (each coordinate finite and less
+than 1e9 in magnitude). Omit `face` to find each boundary point's face automatically;
+when supplied it is a face name from `model.faces` or a point on that face.
+The example face name must be replaced with one from the inspected body.
+
+The reply is `{body, results}`, with one result per point in input order:
+`{"class":"inside"}`, `{"class":"outside"}`, or
+`{"class":"on","face":"…","normal":[nx,ny,nz]}`. Classification uses exact trimmed
+geometry at the body's modelling tolerance. Holes and cavities are outside material;
+a hole wall's unit normal points into the hole and a boss wall's points away from
+its axis. Face names use the persistent naming system shared with `model.faces`.
+At an edge or vertex, `face` selects which incident face supplies the normal;
+otherwise the first containing face in `model.faces` order is used. Every `on`
+point must lie on the selected face when one is supplied. Mesh bodies, invalid
+references and points where a normal is undefined return an error. This command
+leaves the design and undo history unchanged.
+
 ## Installing
 
 **Install plugin…** in **Preferences > Plugins** (desktop only) picks a plugin `.zip`.
@@ -212,6 +358,69 @@ themselves; to show words instead, list the options as `oneOf`, each `{"const": 
 ]}
 ```
 
+### Edit a stored operation through its normal form
+
+This host adds `forms@0.1` alongside the existing `commands@0.1` and `commands@0.2`
+capabilities. Require a host advertising `forms@0.1`; older hosts reject that capability
+before executing the plugin. Existing plugins link unchanged and can keep making explicit
+entry calls without adding the capability. A plugin that needs populated forms declares
+`"capabilities": ["commands@0.2", "forms@0.1"]` and imports
+`craft:plugin/forms@0.2.0.open(entry, params) -> result<_, plugin-error>`.
+`params` is JSON with the target entry's normal input schema, including the selection objects
+returned by selection fields. The target must be a command entry of the same plugin.
+At most eight forms may be requested in one run; parameters are limited to 1 MiB.
+The host opens requested forms only after a successful interactive run, on the design tab that
+ran the entry. If another tab is active when the reply arrives, the reply waits until the original
+tab is active again. Preview discards form requests.
+A failed or cancelled run discards every request.
+
+The application opening path is `plugin_menu::open_form(app, plugin_id, entry, params)`.
+It draws the usual form filled with the supplied values and picks. Opening it only validates
+inputs; the entry runs on Apply, or on a scratch design when Preview is explicitly enabled.
+From the application control surface, use:
+
+```json
+{"method":"ui.start","params":{"command":"plugin.edit","params":{
+  "plugin":"my_cam","entry":"pocket_edit","params":{"depth":5,"edges":[]}
+}}}
+```
+
+Plugins-menu entry forms use this same form implementation. The panel work in #19516 is not
+on main yet: its future Edit row action can call the plain opening function or `ui.start` above.
+An entry that already has an unsubmitted form is refused rather than replacing its values.
+
+Scripts and MCP use explicit parameters to call `<plugin>.<entry>` or `plugin.run`.
+`engine.execute("plugin.edit", ...)` returns typed `interactive_required`, with the instruction
+to call the entry with params instead. Control replies expose `plugin_error.kind: "interactive_required"`;
+MCP exposes the same data in `structuredContent.plugin_error`, with `entry` and
+`action: "call_entry_with_params"`. The `forms.open` import returns that same typed host
+refusal for programmatic invocations (represented by WIT `unsupported`); it never opens a window.
+The capability grants no permission to edit another plugin's form or bypass execution approval.
+
+Stored values are treated as user edits: conditional defaults do not replace them, and the
+conditions below apply immediately. Schema-allowed extra properties are preserved in Preview
+and Apply. Invalid values and missing geometry appear beside the
+corresponding fields and keep Apply off. Validation runs on a cancellable worker; the form
+shows “Checking inputs…” until the current inputs and model have been checked. Results for
+older inputs or models are discarded. A stored edge or face must still match its exact
+indexed geometry and point. Approximate hit coordinates have an allowance of 0.1% of the
+exact body bounds diagonal, at least 0.001 mm and the body modelling tolerance. Only the
+supplied face or edge index is tested using exact geometry; there is no nearest-entity fallback.
+Display settings do not change this allowance.
+These selection objects are the current selection contract, not a new persistent naming format.
+
+Preview starts off for a populated form. Enabling it computes on a scratch design; Cancel discards it and leaves the design equal to its
+previous state. Apply invokes the entry once through the ordinary `plugin.run` transaction.
+The plugin replaces its own saved operation using its operation id in `params`; the host does
+not invent or reorder operations. One Undo restores the previous state, and Redo reapplies it.
+
+The form captures `document.revision` and document identity on opening. Apply carries these in
+`plugin.run.form_guard`; checking and execution happen in the same command transaction. If the
+revision changed, the entry does not run: the form revalidates against the current design,
+reports missing picks beside their fields, and asks the person to review and Apply again.
+If the design changes while a worker computes, atomic command acceptance rejects its result.
+No stale result can overwrite the current design.
+
 ### Conditional fields, choices and defaults
 
 Command dialogs evaluate declarative conditions on sibling scalar properties. Changing a field
@@ -319,6 +528,56 @@ These numeric defaults are plugin arguments: the plugin decides how to interpret
 units. Every conditional default must satisfy the property's base schema. Defaults and option
 filters also participate in cycle detection.
 
+### Computed fields with an optional dialog hook
+
+Use declarative rules above for visibility, availability and defaults expressible as sibling
+conditions. For computed defaults or lookups, add `"dialog@0.1"` to `capabilities` and
+`"dialog_hook": true` to the individual entry. Export the additive `dialog-provider` interface:
+
+```wit
+update-fields: func(entry: string, values: string) -> result<string, plugin-error>;
+```
+
+Both strings containing values are JSON objects. Existing command worlds keep their exports;
+plugins without this capability need no new export and continue to link and run. The interface
+is available alongside both supported `craft:plugin` WIT versions (0.1 and 0.2); use the
+`command-dialog-plugin` world when building a command plugin with the hook.
+
+A reply maps existing property names to patches, for example:
+
+```json
+{
+  "clearance": {"default": 6.5, "hint": "Computed from the selected size"},
+  "size": {"choices": ["metric"], "enabled": true},
+  "details": {"visible": false}
+}
+```
+
+Only `visible`, `enabled`, `choices`, `default`, `value` and `hint` are accepted. Choices must be
+an ordered subset of that property's own `oneOf` constants, satisfying declarative option
+conditions. The hook cannot add properties, change types, enable or reveal a declaratively
+unavailable field, or bypass the input schema. A malformed reply is ignored **whole** with a
+warning. Defaults and values must satisfy the field schema and the narrowed choices. Hints are
+at most 1024 bytes of printable text; input and reply are at most 1 MiB each.
+
+Declarative conditions run first, then the validated patch, then the same input check used by
+programmatic calls. The hook never edits: it runs as a read entry, with no edit command or file
+write grants, in a fresh sandbox. Its independent budgets are at most 10,000,000 fuel, 16 MiB
+memory and 250 ms, further capped by the entry's approved runtime limits and host ceilings.
+Compilation and execution happen on the command worker, outside the window thread.
+
+The dialog debounces changes for 120 ms. It remains interactive while waiting and drops replies
+from older generations. Run uses the current fields: valid inputs remain runnable while the hook
+is pending, and an invalid or missing value keeps Run off. A user's edited field is
+never overwritten by the hook's `value` or `default`. A timeout, trap or error leaves the
+declarative fields in place with a quiet note.
+
+Scripts, `plugin.run` and namespaced MCP plugin tools call the same hook once before executing
+the entry. Tool schemas accept omitted keys for hook defaults; the original required fields are
+checked after the hook. Defaults fill omitted keys; supplied values are preserved. A value outside narrowed
+choices fails with `invalid_input` naming `params.<field>`. An exhausted time/fuel budget returns
+a typed `exhausted` error, and the entry does not run. Programmatic calls never open a dialog.
+
 ### Selection fields
 
 A field can take geometry picked in the viewport, with the same pick control as Extrude's
@@ -360,11 +619,12 @@ key is the argument the plugin receives. The design follows the
   picks and the hover highlight work as in the native tools. One tool picks at a time: while a
   native tool is open, clicking a plugin field says to finish or cancel it first (a sketch tool too).
   Escape and Cancel close the dialog and stop the picking.
-- **References stay true.** The picks belong to the design they were made on. Any change to the
-  design while the dialog is open (an edit, an undo) clears them and the dialog says so; turning
+- **References stay true.** In ordinary plugin forms, picks belong to the design they were made on.
+  Any change to the design while the dialog is open (an edit, an undo) clears them and the dialog says so; turning
   the view or changing the selection does not. Picking runs no plugin code; Run sends the picks
   through the same `plugin.run` request. Programs calling `plugin.run` pass the same references
-  themselves; nothing fills them from the selection.
+  themselves; nothing fills them from the selection. Populated forms for editing stored operations
+  retain stale picks and validate them beside their fields, so they can be corrected.
 
 ### Seating a custom fastener
 
@@ -405,6 +665,27 @@ relative path to an `.svg` file inside the package:
   and the command works as before.
 - Images are not part of the `approval` hash: changing one changes only what is drawn.
 
+An option may also name a material swatch with `x-solidcraft-swatch`. This is a separate
+annotation for PNG or JPEG artwork whose own colours are preserved, including transparency;
+the icon palette rules do not apply. For example:
+
+```json
+{"const": "oak", "title": "Natural oak", "x-solidcraft-swatch": "swatches/oak.png"}
+```
+
+Ship the image inside the plugin package. Paths follow the icon rules: plain relative paths,
+no `.` or `..`, no absolute paths or links, and nothing fetched from the network. Use `.png`,
+`.jpg` or `.jpeg`, at most 64 KiB and at most 256 × 256 decoded pixels. **128 × 128 pixels is
+recommended.** A package may name at most 256 distinct swatches. The host draws fixed-size
+tiles and loads and decodes each distinct image once
+when it loads the package, then caches its texture. A missing, corrupt, wrongly typed or oversized
+swatch is omitted with a warning in `plugin check` and the install review; the plugin still works.
+
+A partially illustrated choice shows tiles beside the option titles in its dropdown. When every
+available option has a usable swatch, the dialog offers a grid with a search box; search matches a
+case-insensitive substring of the title. Choosing either presentation still sends the option's
+`const` value. MCP and scripts use exactly the same input values as before.
+
 ### View commands
 
 After Run commits the result, the app applies the run's last view command. `view.fit`
@@ -413,10 +694,13 @@ A run with no view command leaves the camera unchanged.
 
 ### Preview
 
-A command entry that edits the design is previewed the way native tools are: while its dialog's
-fields make parameters, the host runs the entry on a scratch copy of the design and draws what
-it would change in the viewport (new material tinted, removed material as a see-through ghost).
-The dialog has a **Preview** box, on when it opens; with it off, nothing runs until Run.
+In an ordinary plugin form, a command entry that edits the design is previewed the way native
+tools are: while its fields make parameters, the host runs the entry on a scratch copy of the
+design and draws what it would change in the viewport (new material tinted, removed material
+as a see-through ghost).
+An ordinary plugin form has a **Preview** box, on when it opens; with it off, nothing runs until Run.
+A populated form for editing a stored operation starts with Preview off and retains stale picks
+for field validation. Nothing runs until Apply or an explicit Preview request.
 
 - The preview is a dry run of the same `plugin.run`: the plugin's code is unchanged and declares
   nothing new. It runs on a scratch session that is thrown away, so the design, the undo history
@@ -639,12 +923,13 @@ saved back untouched when the plugin is missing, and opening a design never fail
 is missing.
 
 A command plugin keeps its own data there with the `storage@0.1` capability and a data format
-number. Its manifest lists the `storage.*` commands it calls, like any other command:
+number. Its manifest lists the `storage.*` commands it calls, like any other command, and it
+reads and writes its files' bytes through the `storage` interface (`plugin.wit`), never as text:
 
 ```json
-{"id": "gears", "name": "Gears", "version": "1.4.0", "capabilities": ["commands@0.1", "storage@0.1"],
+{"id": "gears", "name": "Gears", "version": "1.4.0", "capabilities": ["commands@0.2", "storage@0.1"],
  "runtime": {"module": "gears.wasm", "entries": ["make"], "data_format": 3,
-   "commands": ["solid.box", "storage.get", "storage.patch", "storage.put_blob"]}}
+   "commands": ["solid.box", "storage.get", "storage.patch"]}}
 ```
 
 - **What it keeps.** One main JSON document (`data.json`, at most 16 MiB) and files of its own
@@ -652,23 +937,17 @@ number. Its manifest lists the `storage.*` commands it calls, like any other com
   256 MiB per plugin per design, and all plugin data in a design at most 256 MiB.
   SolidCraft writes `meta.json` beside them: the plugin's id, name and version and the data's format.
 - **Reading.** `storage.get` returns the main document, the data's `format`, the running plugin's
-  `plugin_format`, `read_only` and the list of files. To read a large main document within the
-  plugin host's 1 MiB result limit, supply `offset` or `len`: `storage.get {offset: 0}` returns
-  `{plugin, data, offset, bytes}`, with `data` holding base64 of up to 512 KiB of the saved JSON
-  bytes and `bytes` the whole document size. Advance `offset` by the number of decoded bytes,
-  concatenate the decoded parts, then parse the JSON. `len` defaults to 524288 and accepts
-  1 through 524288; `offset` defaults to 0. Parts omit metadata and the file list. Past the end,
-  or without a saved document, `data` is empty (`bytes` is 0 without a document). Documents
-  still accept up to 16 MiB; plugins should use parts when the full reply could exceed 1 MiB.
-  `storage.get_blob {name, offset?, len?}`
-  returns up to 512 KiB of a file, base64, so a reply stays inside a plugin's 1 MiB. Inside a
-  plugin's run these reach only that plugin's own data. Agents and scripts read any plugin's
-  data by naming it: `storage.get {"plugin": "gears"}`.
+  `plugin_format`, `read_only` and the list of files with their sizes. A main document larger
+  than the 1 MiB a command result may be is read in parts as its saved JSON bytes:
+  `storage.get-document(plugin?, offset, len)`, up to 1 MiB each; join them and parse. A file is
+  read the same way, `storage.get-blob(plugin?, name, offset, len)`, its bytes as they are; past
+  its end the bytes are empty. Inside a plugin's run these reach only that plugin's own data.
+  Agents and scripts read any plugin's data by naming it: `storage.get {"plugin": "gears"}`.
 - **Writing.** `storage.set {document}`, `storage.patch {patch}` (an RFC 7396 merge patch),
-  `storage.put_blob {name, data, cache?, append?}` (base64; `append` writes a large file in
-  parts) and `storage.delete_blob {name}` change only the running plugin's own data, and only
-  from its run: the whole run is one undo step, and a failed run changes nothing. Called from
-  anywhere else they are refused. A `read` entry can't call them.
+  `storage.put-blob(name, data, cache, append)` (the file's bytes, up to 1 MiB a call; `append`
+  writes a large file in parts) and `storage.delete_blob {name}` change only the running plugin's
+  own data, and only from its run: the whole run is one undo step, and a failed run changes
+  nothing. Called from anywhere else they are refused. A `read` entry can't call them.
 - **Formats.** Every write saves the data in the plugin's `data_format`. When `storage.get` says
   `format` is lower than `plugin_format`, the data is from an older version of the plugin: the
   plugin reads it, converts it and writes it back, which saves it in the new format as one undo

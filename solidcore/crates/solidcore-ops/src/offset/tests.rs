@@ -74,6 +74,70 @@ fn a_block_shells_to_its_closed_forms() {
     assert!(rel(volume(&b), 32.0 * 22.0 * 11.0 - ABC) < 1e-9);
 }
 
+/// A shell keeps its rounds by their definitions. The shell's working copy is the body
+/// itself, definitions included, so a round's offset is the round of the moved radius on the
+/// offset supports (`Surface::create_offset_surface`, solidcore #2487), not a generic offset of
+/// its net. A cylinder r 20, z -20..20 with its bottom rim rounded r 10.3, shelled 2 in and
+/// open at the top: both round faces stay blends, the outer one r 10.3 and the cavity's r 8.3.
+#[test]
+fn a_shell_keeps_its_rounds_as_blends_of_the_moved_radius() {
+    all_fixes();
+    let body = make_cylinder([0.0, 0.0, -20.0], 20.0, 40.0).unwrap();
+    // the bottom rim, away from the cylinder's seam at x = 20, y = 0
+    let rim = edge_at(&body, [0.0, 20.0, -20.0]);
+    blend(&body, Blend::Round, &[rim], &[10.3], &[], Corners::Filled).unwrap();
+    let o = order(&body);
+    let open = face(&body, &o, |bx| {
+        (bx.min().z - 20.0).abs() < 1e-9 && (bx.max().z - 20.0).abs() < 1e-9
+    });
+    shell(&body, &o, &[open], -2.0).unwrap();
+    let (record, _) = body.to_record().unwrap();
+    let kinds: Vec<&str> = record
+        .faces
+        .iter()
+        .map(|f| match &f.surface {
+            solidcore_record::brep::Surface::Plane { .. } => "plane",
+            solidcore_record::brep::Surface::Cylinder { .. } => "cylinder",
+            solidcore_record::brep::Surface::Torus { .. } => "torus",
+            solidcore_record::brep::Surface::Spline { .. } => "spline",
+            solidcore_record::brep::Surface::RationalSpline { .. } => "rational_spline",
+            solidcore_record::brep::Surface::Blend { .. } => "blend",
+            _ => "other",
+        })
+        .collect();
+    let mut radii = Vec::new();
+    for f in &record.faces {
+        let solidcore_record::brep::Surface::Blend { definition } = &f.surface else {
+            continue;
+        };
+        radii.push(match definition.as_ref() {
+            solidcore_record::brep::blend::BlendDefinition::Procedural(d) => match &d.radius {
+                solidcore_record::brep::blend::RadiusRecord::Constant { offsets } => {
+                    offsets[0].abs()
+                }
+                solidcore_record::brep::blend::RadiusRecord::Law(_) => continue,
+            },
+            solidcore_record::brep::blend::BlendDefinition::ExactRound(d) => d.radius,
+        });
+    }
+    radii.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    assert_eq!(
+        radii.len(),
+        2,
+        "round faces kept as blends, radii {radii:?}; face kinds {kinds:?}"
+    );
+    assert!(
+        (radii[0] - 8.3).abs() < 1e-9,
+        "cavity round radius {} for 8.3",
+        radii[0]
+    );
+    assert!(
+        (radii[1] - 10.3).abs() < 1e-9,
+        "outer round radius {} for 10.3",
+        radii[1]
+    );
+}
+
 #[test]
 fn a_cylinder_shells_open_at_its_top() {
     all_fixes();

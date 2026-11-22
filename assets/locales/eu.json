@@ -170,5 +170,8 @@
   "ui.material_review.title": "Berrikusi material fisikoaren datuak",
   "ui.material_review.unknown": "Ezezaguna",
   "ui.material_review.yield_strength": "Jariakortasun-muga",
-  "ui.needs_design": "{command}: ireki lehenik diseinu bat"
+  "ui.needs_design": "{command}: ireki lehenik diseinu bat",
+  "ui.plugin_hook_unavailable": "Ezin dira pluginaren eremuak eguneratu. Adierazitako eremuak erabiltzen dira.",
+  "ui.plugin_hook_waiting": "Pluginaren eremuak eguneratzen…",
+  "ui.plugin_swatch_search": "Bilatu akaberak"
 }
