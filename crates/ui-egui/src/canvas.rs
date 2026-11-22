@@ -915,27 +915,29 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     if let Kind::SketchModify(crate::sketch_modify_ui::Mod::Offset { distance2, mode, .. }) = &mut d.kind
         && crate::sketch_modify_ui::offset_two_sides(*mode)
         && let Some(n) = dir
-        && let Some(l2) = app.session.doc.eval(distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
     {
         let before = distance2.clone();
-        if let Some(ts) = drag_arrow(
-            &app.session.doc,
-            ui,
-            painter,
-            proj,
-            base,
-            bs,
-            -n,
-            l2.abs(),
-            false,
-            egui::Id::unique("sc_manipulator_offset2"),
-            half_height,
-            0.0,
-            decimals,
-            distance2,
-        ) {
-            secondary_box = Some((ts + vec2(14.0, 8.0), *distance2 != before));
-        }
+        // While its text does not evaluate (cleared, or a `-` typed first) there is no arrow,
+        // but the box stays below the base so the typing can be finished there.
+        let ts = app.session.doc.eval(distance2, ValueKind::Length).ok().filter(|v| v.is_finite()).and_then(|l2| {
+            drag_arrow(
+                &app.session.doc,
+                ui,
+                painter,
+                proj,
+                base,
+                bs,
+                -n,
+                l2.abs(),
+                false,
+                egui::Id::unique("sc_manipulator_offset2"),
+                half_height,
+                0.0,
+                decimals,
+                distance2,
+            )
+        });
+        secondary_box = Some((ts.unwrap_or(bs + vec2(16.0, 14.0)) + vec2(14.0, 8.0), *distance2 != before));
     }
     // A placement marker at the base: the arrow stands above it and the base dot is the marker's.
     let clear = crate::place_gizmo::arrow_clearance(app, d);
