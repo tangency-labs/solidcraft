@@ -1132,7 +1132,9 @@ fn shows_body_name(h: &Harness) -> bool {
 /// The `body_name` the open dialog's OK sends, if any.
 fn sent_body_name(h: &Harness) -> Option<String> {
     // A refusal (a Cut with nothing to cut) sends nothing, so no name either.
-    let (_, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).ok()?.into_iter().next()?;
+    let (cmd, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).ok()?.into_iter().next()?;
+    // An edit is a `timeline.redefine` with the feature's parameters under `params`.
+    let params = if cmd == "timeline.redefine" { params.get("params")?.clone() } else { params };
     params.get("body_name").and_then(Value::as_str).map(str::to_string)
 }
 

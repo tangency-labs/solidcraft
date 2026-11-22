@@ -1507,7 +1507,9 @@ fn extrude_body_name_row_shows_for_new_body_and_a_typed_name_is_sent() {
     };
     let sent = |h: &Harness| {
         // A refusal (a Cut with nothing to cut) sends nothing, so no name either.
-        let (_, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).ok()?.into_iter().next()?;
+        let (cmd, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).ok()?.into_iter().next()?;
+        // An edit is a `timeline.redefine` with the feature's parameters under `params`.
+        let params = if cmd == "timeline.redefine" { params.get("params")?.clone() } else { params };
         params.get("body_name").and_then(Value::as_str).map(str::to_string)
     };
     let mut h = make(json!({}));

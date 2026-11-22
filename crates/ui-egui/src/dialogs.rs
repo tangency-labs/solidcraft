@@ -106,16 +106,18 @@ pub(crate) fn typed_body_name(d: &Dialog) -> Option<&str> {
 }
 
 /// Send the typed body name as `body_name` when the operation is New Body, and no stale one
-/// (from a feature opened for editing, then switched to Join or Cut) otherwise.
+/// (from a feature opened for editing, then switched to Join or Cut) otherwise. Every command the
+/// dialog made loses any copied name, and only the first, the one that makes the body, gets the
+/// typed one. An edit's `timeline.redefine` holds the feature's parameters under `params`.
 fn apply_body_name(d: &Dialog, cmds: &mut [(String, Value)]) {
     let Some(new_body) = body_name_slot(&d.kind) else { return };
-    let Some(map) = cmds.first_mut().and_then(|(_, params)| params.as_object_mut()) else { return };
-    match typed_body_name(d).filter(|_| new_body) {
-        Some(name) => {
+    let name = typed_body_name(d).filter(|_| new_body);
+    for (i, (cmd, params)) in cmds.iter_mut().enumerate() {
+        let target = if cmd == "timeline.redefine" { params.get_mut("params") } else { Some(params) };
+        let Some(map) = target.and_then(Value::as_object_mut) else { continue };
+        map.remove("body_name");
+        if let (0, Some(name)) = (i, name) {
             map.insert("body_name".into(), json!(name));
-        }
-        None => {
-            map.remove("body_name");
         }
     }
 }
