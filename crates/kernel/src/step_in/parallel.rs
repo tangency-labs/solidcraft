@@ -178,8 +178,7 @@ pub(super) fn record_part(record: &solidcore_record::brep::Brep, face_origin: &[
             }
         }
     }
-    let mut split_edges = 0;
-    let (body, of_record) = if reversed.iter().any(|r| *r) {
+    let (body, of_record, split_edges) = if reversed.iter().any(|r| *r) {
         let turn = |body: &Body, by: &dyn Fn(usize) -> bool| -> crate::Result<(Body, Vec<usize>)> {
             let picked: Vec<(usize, bool)> = (0..body.face_count()).map(|f| (f, by(f))).collect();
             let turned = crate::surfaces::taken(body, body.record(), &picked)?;
@@ -193,15 +192,13 @@ pub(super) fn record_part(record: &solidcore_record::brep::Brep, face_origin: &[
         // SMLib names a face it refuses by its index in the record it was given, `natural`'s.
         let natural_origin: Vec<u64> = to_record.iter().map(|f| face_origin.get(*f).copied()).collect::<Option<_>>().unwrap_or_default();
         let (smlib, of_natural, split) = smlib_body(natural.record()).map_err(|f| Failure { msg: name_record_face(&f.msg, &natural_origin), ..f })?;
-        split_edges = split;
         let record_of = |k: usize| of_natural.get(k).and_then(|j| to_record.get(*j)).copied();
         let (back, from) = turn(&smlib, &|k| record_of(k).and_then(|f| reversed.get(f)).copied().unwrap_or(false)).map_err(failed)?;
         let of_record = from.iter().map(|k| record_of(*k)).collect::<Option<Vec<usize>>>().ok_or_else(renumbered)?;
-        (back.without_history(), of_record)
+        (back.without_history(), of_record, split)
     } else {
         let (body, of_record, split) = smlib_body(r).map_err(|f| Failure { msg: name_record_face(&f.msg, face_origin), ..f })?;
-        split_edges = split;
-        (body, of_record)
+        (body, of_record, split)
     };
     // The file's faces are the record's, however many faces SMLib's body has.
     let file_faces = face_origin.len();
