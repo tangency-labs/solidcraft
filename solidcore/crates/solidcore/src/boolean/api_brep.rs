@@ -94,6 +94,7 @@
 //!   [`Brep::refresh_cached_topology`]; nothing else changes.
 
 use crate::boolean::merge::MergeOptions;
+use crate::error::boolean::BooleanStage;
 use crate::error::{Result, SolidError};
 use crate::geom::a_object::BooleanOperation;
 use crate::kernel::Kernel;
@@ -619,7 +620,12 @@ fn merge_boolean_by(
         )?
     };
     let mut result = result.ok_or_else(|| {
-        SolidError::entity_missing(OP_BOOLEAN, "the Boolean made no result B-rep")
+        SolidError::boolean_null_defect(
+            OP_BOOLEAN,
+            BooleanStage::Merge,
+            "the Boolean returned no result B-rep, though it leaves the result unset only \
+             for an extraction, which the operand checks refused before it ran",
+        )
     })?;
     // (not upstream: the port's cached topology fields, true again for the caller)
     result.refresh_cached_topology();
@@ -829,9 +835,11 @@ pub fn piecewise_merge(
     let result_id = merged?;
     if result_id != PrimitiveModel::MAIN {
         // PiecewiseMerge's result is its first operand
-        return Err(SolidError::stage_failed(
+        return Err(SolidError::boolean_defect(
             OP_PIECEWISE,
-            "the piecewise merge did not return its first operand",
+            BooleanStage::Tree,
+            "the piecewise merge returned another B-rep than its first operand, though it \
+             always merges into its first operand and returns it",
         ));
     }
     let mut other = model.take_brep(other_id)?;
