@@ -1611,6 +1611,7 @@ impl SurfaceSheet {
         let first = self.sheet.panels.len();
         let mut moves: Vec<FoldPiece> = Vec::new();
         let mut bent_chords: Vec<usize> = Vec::new();
+        let mut cornered: Vec<usize> = Vec::new();
         for k in order {
             let (Some(piece), Some(cs)) = (pieces.get(k), hangs.get(k)) else { continue };
             // Where material of the panel lies between two of the chords it hangs from (the root
@@ -1638,6 +1639,13 @@ impl SurfaceSheet {
             let mut bend = bend.clone();
             bend.length = hi - lo;
             bend.ends = ZoneEnds { near: (0.0, hi - lo), far: (0.0, hi - lo) };
+            // A corner of the outline in the zone of a piece the line is drawn across the whole of
+            // is the user's to fold: a stepped end or a notch wraps its corners onto the bend, the
+            // zone's material as the outline has it (what it lacks of its reach is cut from the
+            // flat below). Only a piece the zone reaches past the line as drawn is refused for one.
+            if !(lo >= drawn.0 - tol && hi <= drawn.1 + tol) {
+                cornered.extend(cs);
+            }
             moves.push(FoldPiece { panel: first + moves.len(), region: piece.clone(), bend, start: lo, span: (lo.min(plo), hi.max(phi)) });
             bent_chords.extend(cs);
         }
@@ -1664,7 +1672,7 @@ impl SurfaceSheet {
                 return err("not supported yet: material in the fold's bend zone that only one side of the bend holds");
             }
         }
-        if let Some(why) = corner_error(&bent_chords, false) {
+        if let Some(why) = corner_error(&cornered, false) {
             return err(why);
         }
         // What each zone lacks of its reach (the outline past a slanted or a curved end, a cut-out
