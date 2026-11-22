@@ -1483,7 +1483,7 @@ pub(crate) fn panel_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if !crate::render_workspace::browser_mode(app, ui) {
         crate::edit_in_place::browser_strip(app, ui);
-        browser_rows_hugging(app, ui);
+        browser_rows(app, ui, !holds_compact_history(app));
     }
     if render {
         ui.ctx().data_mut(|data| data.remove::<bool>(egui::Id::unique("sc_compact_tree")));
@@ -1504,6 +1504,13 @@ pub(crate) fn magnifier(app: &mut SolveApp) {
     } else {
         show_search(app);
     }
+}
+
+/// In the compact layout with the History shown in the Browser, the Browser is the only side panel
+/// and holds the whole History, so it fills the window's height instead of hugging its rows (#14566).
+/// The panel host still folds it to its header when the user folds it.
+pub(crate) fn holds_compact_history(app: &SolveApp) -> bool {
+    app.ui.layout == crate::ui_kit::LayoutMode::Docked && app.preferences.history_in_browser && !crate::render_workspace::active(app)
 }
 
 fn prepare_model(app: &mut SolveApp) {
@@ -1577,12 +1584,13 @@ fn model_feature_indices(app: &SolveApp, component: u64, sketches: bool) -> Vec<
 /// The design's Origin, Bodies and Construction rows as the browser draws them (a click picks
 /// for an open dialog as there), for the design tree over the view while a dialog holds the left
 /// column (`dialog_tree`, #6710).
-fn browser_rows_hugging(app: &mut SolveApp, ui: &mut egui::Ui) {
+/// `shrink_height` hugs the rows; otherwise they take the whole height they're given.
+fn browser_rows(app: &mut SolveApp, ui: &mut egui::Ui, shrink_height: bool) {
     crate::semantic_content::show(
         app,
         ui,
         crate::semantic_content::ContentOwner::BROWSER,
-        crate::semantic_content::ContentRequest::Browser { shrink_height: true },
+        crate::semantic_content::ContentRequest::Browser { shrink_height },
     );
 }
 
