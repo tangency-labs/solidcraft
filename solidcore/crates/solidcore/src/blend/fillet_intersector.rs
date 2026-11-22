@@ -129,8 +129,7 @@ use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
-use crate::error::blend::trace::null_defect;
-use crate::error::blend::{BlendFailure, TraceFailure};
+use crate::error::blend::{BlendFailure, SolverFailure, TraceFailure};
 use crate::error::Failure;
 use crate::error::{Result, SolidError};
 use crate::geom::certified::above;
@@ -876,7 +875,7 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         let sur0 = Surface::from(self.surface(0)?.surface.clone());
         let sur1 = Surface::from(self.surface(1)?.surface.clone());
         let generator = self.solver.fillet_surface_generator_mut().ok_or_else(|| {
-            null_defect(
+            SolidError::blend_null_defect(
                 "blend::fillet_intersector::create_fillet_surface",
                 "FlushCurve skins the surface only after has_surface_generator found the generator",
             )
@@ -2707,9 +2706,9 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
     ) -> Result<TsectPnt> {
         self.try_solve_mid_point(solver, k, pj, pj1, frac)?
             .ok_or_else(|| {
-                SolidError::blend_trace(
+                SolidError::blend_solver(
                     OP_FLUSH,
-                    TraceFailure::MidSectionNotFound {
+                    SolverFailure::CrossSectionPointNotFound {
                         t: (1.0 - frac) * pj.curve_parameter + frac * pj1.curve_parameter,
                     },
                 )
@@ -2982,19 +2981,19 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         // get (the potentially modified) rail curves, their UVTrimCurves, and the Centerline
         let mut uv1 = surface1_uv_curves
             .pop()
-            .ok_or_else(|| null_defect(OP_FLUSH, POPPED_CURVE))?;
+            .ok_or_else(|| SolidError::blend_null_defect(OP_FLUSH, POPPED_CURVE))?;
         let mut uv2 = surface2_uv_curves
             .pop()
-            .ok_or_else(|| null_defect(OP_FLUSH, POPPED_CURVE))?;
+            .ok_or_else(|| SolidError::blend_null_defect(OP_FLUSH, POPPED_CURVE))?;
         let mut curve2 = curves_3d
             .pop()
-            .ok_or_else(|| null_defect(OP_FLUSH, POPPED_CURVE))?;
+            .ok_or_else(|| SolidError::blend_null_defect(OP_FLUSH, POPPED_CURVE))?;
         let mut curve1 = curves_3d
             .pop()
-            .ok_or_else(|| null_defect(OP_FLUSH, POPPED_CURVE))?;
+            .ok_or_else(|| SolidError::blend_null_defect(OP_FLUSH, POPPED_CURVE))?;
         let mut center_line = curves_3d
             .pop()
-            .ok_or_else(|| null_defect(OP_FLUSH, POPPED_CURVE))?;
+            .ok_or_else(|| SolidError::blend_null_defect(OP_FLUSH, POPPED_CURVE))?;
 
         // 10. Generate the fillet surface from the rail curves and centerline
         let mut fillet_surface = None;

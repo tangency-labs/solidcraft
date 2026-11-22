@@ -86,7 +86,7 @@ use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p5::is_arc_base;
 use crate::curve::curve::Curve;
 use crate::error::blend::trace::defect;
-use crate::error::blend::TraceFailure;
+use crate::error::blend::{SolverFailure, TraceFailure};
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::{Extent1d, ExtentNd};
@@ -938,9 +938,9 @@ impl EiffelTowerFs {
             )?
         };
         if !found {
-            return Err(SolidError::blend_trace(
+            return Err(SolidError::blend_solver(
                 OP,
-                TraceFailure::CrossSectionNotFound,
+                SolverFailure::CrossSectionNotFound,
             ));
         }
         let fs = &self.base;
@@ -1334,7 +1334,7 @@ impl EiffelTowerCrossSectionFsg {
         let (Some(first), Some(last)) = (cross_sections.first(), cross_sections.last()) else {
             return Err(defect(
                 OP,
-                "a B-spline rail has two or more knots, one cross section at each",
+                "a B-spline rail has at least one knot, and one cross section is built at each",
             ));
         };
 
@@ -1542,9 +1542,9 @@ impl SecantConstantRadiusFs {
             )?
         };
         if !found {
-            return Err(SolidError::blend_trace(
+            return Err(SolidError::blend_solver(
                 OP,
-                TraceFailure::CrossSectionNotFound,
+                SolverFailure::CrossSectionNotFound,
             ));
         }
         let fs = &self.base;

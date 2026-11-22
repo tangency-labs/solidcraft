@@ -57,7 +57,7 @@
 
 use crate::curve::curve::Curve;
 use crate::error::blend::trace::defect;
-use crate::error::blend::TraceFailure;
+use crate::error::blend::{SolverFailure, TraceFailure};
 use crate::error::{Result, SolidError};
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::vector2d::Point2;
@@ -184,9 +184,9 @@ impl LawCornerPieces {
                 ));
             };
             if along.length() <= EFF_ZERO {
-                return Err(SolidError::blend_trace(
+                return Err(SolidError::blend_solver(
                     OP_CLASSIFY,
-                    TraceFailure::RailTangentZero { t },
+                    SolverFailure::RailTangentZero { t },
                 ));
             }
             let along = along / along.length();

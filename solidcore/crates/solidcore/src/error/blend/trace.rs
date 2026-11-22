@@ -5,8 +5,8 @@
 //!
 //! Upstream: none. Each cause names its class ([`TraceFailure::class`]) and keeps the
 //! status the site it replaces returned. None is a defect: the trace's defects are
-//! [`super::BlendFailure::Defect`], with their reason, built by the crate's `defect` and
-//! `null_defect` here.
+//! [`super::BlendFailure::Defect`], with their reason, built by the crate's `defect` here
+//! (status `SM_ERR`) and `SolidError::blend_null_defect` (status `SM_ERR_NULL_POINTER`).
 //!
 //! Deviations: not upstream.
 
@@ -19,17 +19,11 @@ use crate::SolidError;
 #[non_exhaustive]
 pub enum TraceFailure {
     /// The law corners' classification was given no end parameter for the corner after
-    /// piece `piece`: its `ends` hold fewer than one parameter per piece and one more. The
+    /// piece `piece`: its `ends` hold fewer parameters than there are pieces. The
     /// caller's input ([`ErrorKind::InvalidInput`]); status `SM_ERR`.
     LawCornerEndMissing {
         /// The piece before the corner.
         piece: usize,
-    },
-    /// A law corner's rail has no tangent at its parameter `t`, so whether its corner dips
-    /// or peaks along the rail is not defined there ([`ErrorKind::Degenerate`]).
-    RailTangentZero {
-        /// The rail's parameter at the corner.
-        t: f64,
     },
     /// The two points a law dip's sphere zone runs between are `distance` apart, within
     /// the effective zero: the zone has no circles to run between
@@ -86,12 +80,6 @@ pub enum TraceFailure {
     /// The trace's curve has no points to flush into a curve: the trace found none
     /// ([`ErrorKind::NotFound`]); status `SM_ERR_NULL_POINTER`.
     TraceHasNoPoints,
-    /// The solve of the section in the middle of a span, at curve parameter `t`, found no
-    /// section on its plane: an empty search ([`ErrorKind::NotFound`]).
-    MidSectionNotFound {
-        /// The curve parameter the section was solved at.
-        t: f64,
-    },
     /// The self-intersecting fillet's curves could not be smoothed: the smoothing
     /// handler's error is the failure's cause ([`ErrorKind::Failed`]).
     SmoothingFailed,
@@ -107,9 +95,6 @@ pub enum TraceFailure {
         /// The feet found.
         solutions: usize,
     },
-    /// The custom solver's solve for the fillet cross section on its plane found no
-    /// section: an empty search ([`ErrorKind::NotFound`]).
-    CrossSectionNotFound,
     /// A base surface's first partial derivative has no length at the custom solver's
     /// current solution, so its equations have no Jacobian there
     /// ([`ErrorKind::Degenerate`]).
@@ -150,8 +135,7 @@ impl TraceFailure {
             Self::LawCornerEndMissing { .. }
             | Self::BaseSurfaceNotOnFace { .. }
             | Self::CrossSectionsIncompatible { .. } => ErrorKind::InvalidInput,
-            Self::RailTangentZero { .. }
-            | Self::ZoneEndsCoincide { .. }
+            Self::ZoneEndsCoincide { .. }
             | Self::ZoneFootAtPole
             | Self::ChordTooShort { .. }
             | Self::SectionTangentZero { .. }
@@ -162,9 +146,7 @@ impl TraceFailure {
             }
             Self::TraceBuiltNoSurface
             | Self::TraceHasNoPoints
-            | Self::MidSectionNotFound { .. }
             | Self::PointDropNotSingle { .. }
-            | Self::CrossSectionNotFound
             | Self::BisectorMissesSegment { .. } => ErrorKind::NotFound,
             Self::SectionValuesFailed | Self::SmoothingFailed | Self::SkinningFailed => {
                 ErrorKind::Failed
@@ -179,7 +161,6 @@ impl TraceFailure {
             | Self::TraceBuiltNoSurface
             | Self::TraceHasNoPoints => SM_ERR_NULL_POINTER,
             Self::LawCornerEndMissing { .. }
-            | Self::RailTangentZero { .. }
             | Self::ZoneEndsCoincide { .. }
             | Self::ZoneFootAtPole
             | Self::ZoneWedgeNearHalfTurn { .. }
@@ -187,11 +168,9 @@ impl TraceFailure {
             | Self::SectionValuesFailed
             | Self::ChordTooShort { .. }
             | Self::SectionTangentZero { .. }
-            | Self::MidSectionNotFound { .. }
             | Self::SmoothingFailed
             | Self::SkinningFailed
             | Self::PointDropNotSingle { .. }
-            | Self::CrossSectionNotFound
             | Self::BaseDerivativeZero
             | Self::BaseNormalZero { .. }
             | Self::BisectorMissesSegment { .. }
@@ -205,9 +184,6 @@ impl core::fmt::Display for TraceFailure {
         match self {
             Self::LawCornerEndMissing { piece } => {
                 write!(f, "the law corner after piece {piece} has no end parameter")
-            }
-            Self::RailTangentZero { t } => {
-                write!(f, "the rail's tangent has no length at t = {t}")
             }
             Self::ZoneEndsCoincide { distance } => write!(
                 f,
@@ -239,12 +215,6 @@ impl core::fmt::Display for TraceFailure {
                 write!(f, "the next section's tangent has no length at t = {t}")
             }
             Self::TraceHasNoPoints => f.write_str("the trace has no points to flush"),
-            Self::MidSectionNotFound { t } => {
-                write!(
-                    f,
-                    "no section was found in the middle of the span at t = {t}"
-                )
-            }
             Self::SmoothingFailed => {
                 f.write_str("the self-intersecting fillet could not be smoothed")
             }
@@ -261,7 +231,6 @@ impl core::fmt::Display for TraceFailure {
                     "second surface"
                 }
             ),
-            Self::CrossSectionNotFound => f.write_str("the fillet cross section has no solution"),
             Self::BaseDerivativeZero => f.write_str("a base surface has a zero derivative"),
             Self::BaseNormalZero { side: Some(side) } => {
                 write!(f, "base surface {side}'s normal is zero")
@@ -299,20 +268,7 @@ impl SolidError {
 #[must_use]
 #[track_caller]
 pub(crate) fn defect(operation: &'static str, why: &'static str) -> SolidError {
-    Failure::new(operation, BlendFailure::Defect { why })
-        .with_status(SM_ERR)
-        .into_error()
-}
-
-/// [`SolidError::Failed`] for a value the kernel built itself and then did not find
-/// (upstream `NER(ptr)` on a `NULL` pointer), as `why` says: [`BlendFailure::Defect`],
-/// keeping the status `SM_ERR_NULL_POINTER`.
-#[must_use]
-#[track_caller]
-pub(crate) fn null_defect(operation: &'static str, why: &'static str) -> SolidError {
-    Failure::new(operation, BlendFailure::Defect { why })
-        .with_status(SM_ERR_NULL_POINTER)
-        .into_error()
+    Failure::new(operation, BlendFailure::Defect { why }).into_error()
 }
 
 #[cfg(test)]
@@ -342,11 +298,31 @@ mod tests {
             let b = e.blend_failure().unwrap();
             assert!(!b.is_phrase() && b.replaces_upstream_status(), "{cause:?}");
         }
-        let d = null_defect("blend::op", "why");
+        let d = SolidError::blend_null_defect("blend::op", "why");
         assert!(d.is_defect());
         assert_eq!(d.sm_status(), Some(SM_ERR_NULL_POINTER));
         let d = defect("blend::op", "why");
         assert!(d.is_defect());
         assert_eq!(d.upstream_status(), Some(SM_ERR));
+    }
+
+    /// The three wrapping causes keep `SM_ERR` and carry the caught error as their cause,
+    /// as the sites in `fillet_intersector` build them.
+    #[test]
+    fn wrapping_causes_keep_the_caught_error() {
+        for cause in [
+            TraceFailure::SectionValuesFailed,
+            TraceFailure::SmoothingFailed,
+            TraceFailure::SkinningFailed,
+        ] {
+            let inner = SolidError::blend_null_defect("blend::inner", "why");
+            let e = Failure::new("blend::op", BlendFailure::Trace(cause))
+                .caused_by(inner.clone())
+                .into_error();
+            assert_eq!(e.sm_status(), Some(SM_ERR), "{cause:?}");
+            assert_eq!(e.kind(), ErrorKind::Failed, "{cause:?}");
+            assert_eq!(e.cause(), Some(&inner), "{cause:?}");
+            assert!(!e.is_defect(), "{cause:?}");
+        }
     }
 }
