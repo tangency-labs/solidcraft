@@ -312,6 +312,9 @@ it at install:
 - `command_groups`: commands that reach past the open design are grouped: `file` (save, export,
   import, libraries), `doc` (open, create or switch designs), `app` (settings, the window) and
   `plugin` (other plugins). A listed command of a group needs the group here, and the user's grant.
+  A `file` or `doc` command may name a file in a granted folder as `grant:<name>/<path>`, where
+  `<name>` is one of the `files` names below; any command but a known input reader (such as
+  `file.insert_step`) needs that folder with both `read` and `write`.
 - `files`: named folders the plugin reads (`read`) or writes (`write`) through the `files`
   interface, by name and a relative path. The user picks each folder at install; the plugin never
   sees where it is. Writes appear only when the run succeeds.
