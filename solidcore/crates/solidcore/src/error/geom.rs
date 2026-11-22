@@ -188,7 +188,7 @@ pub enum GeomFailure {
     /// A line, ray or direction has no direction: its length is below the kernel's zero.
     /// [`ErrorKind::Degenerate`].
     ZeroDirection {
-        /// The direction's length (squared where the check squares it).
+        /// The direction's length.
         length: f64,
     },
     /// Two directions (lines, a line and a plane, or two derivatives) are parallel: the
@@ -469,12 +469,15 @@ impl crate::SolidError {
     /// A map from a callee's error to the failure of `operation` that keeps it as its
     /// cause ([`GeomFailure::CallFailed`], status [`SM_ERR`], as upstream's
     /// `if (status) SER(SM_ERR)` after the call). Use as
-    /// `.map_err(SolidError::geom_call(OP))`.
+    /// `.map_err(SolidError::geom_call(OP))`. [`crate::SolidError::Unported`],
+    /// [`crate::SolidError::Cancelled`] and [`crate::SolidError::PreparationRequired`] pass
+    /// through unchanged, as in `nurbs_routine`.
     pub(crate) fn geom_call(operation: &'static str) -> impl Fn(Self) -> Self {
-        move |e| {
-            Failure::new(operation, GeomFailure::CallFailed)
+        move |e| match e {
+            Self::Unported { .. } | Self::Cancelled { .. } | Self::PreparationRequired { .. } => e,
+            _ => Failure::new(operation, GeomFailure::CallFailed)
                 .caused_by(e)
-                .into_error()
+                .into_error(),
         }
     }
 

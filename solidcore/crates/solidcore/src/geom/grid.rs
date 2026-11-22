@@ -960,7 +960,7 @@ impl<O: Copy> Grid<O> {
             return Err(SolidError::geom(
                 OP,
                 GeomFailure::ZeroDirection {
-                    length: vector.length_squared(),
+                    length: vector.length(),
                 },
             ));
         }

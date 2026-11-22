@@ -376,7 +376,7 @@ pub fn line_line_closest_point(
     const OP: &str = "geom::geom_utility::p1::line_line_closest_point";
     // err - zero length vectors
     if line_vec1.length_squared() < EFF_ZERO_SQ || line_vec2.length_squared() < EFF_ZERO_SQ {
-        let length = line_vec1.length_squared().min(line_vec2.length_squared());
+        let length = line_vec1.length().min(line_vec2.length());
         return Err(SolidError::geom(OP, GeomFailure::ZeroDirection { length }));
     }
 
