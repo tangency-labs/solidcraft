@@ -577,8 +577,9 @@ impl Cone {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` unless this is a cylinder with a NURB whose radius stays positive; those of
-    /// the control point edits and of the rebuild.
+    /// `SM_ERR` unless this is a cylinder with a NURB whose radius stays positive and finite
+    /// under a finite `slope` and `neutral_height`; those of the control point edits and of
+    /// the rebuild.
     pub fn lean_cylinder(&self, k: &Kernel, slope: f64, neutral_height: f64) -> Result<Cone> {
         const OP_LEAN: &str = "surface::cone::p2::Cone::lean_cylinder";
         let canonical = self.canonical();
@@ -586,6 +587,10 @@ impl Cone {
             || canonical.radius.partial_cmp(&EFF_ZERO) != Some(core::cmp::Ordering::Greater)
         {
             return Err(SolidError::surface(OP_LEAN, SurfaceFailure::NotACylinder));
+        }
+        // a NaN or infinite radius law is the caller's, not a cone that crosses its axis
+        if !(slope.is_finite() && neutral_height.is_finite()) {
+            return Err(SolidError::surface(OP_LEAN, SurfaceFailure::LeanNotFinite));
         }
         let origin = canonical.origin.origin();
         let axis = canonical.origin.x_axis().cross(canonical.origin.y_axis());
@@ -609,6 +614,10 @@ impl Cone {
                 let d = p - origin;
                 let height = d.dot(axis);
                 let radius = canonical.radius + slope * (height - neutral_height);
+                // finite factors whose product overflows
+                if !radius.is_finite() {
+                    return Err(SolidError::surface(OP_LEAN, SurfaceFailure::LeanNotFinite));
+                }
                 if radius.partial_cmp(&EFF_ZERO) != Some(core::cmp::Ordering::Greater) {
                     return Err(SolidError::surface(
                         OP_LEAN,
@@ -3430,6 +3439,25 @@ mod tests {
             e.surface_failure(),
             Some(&SurfaceFailure::ConeClosesWithinSpan)
         );
+        assert_eq!(e.kind(), crate::error::ErrorKind::Degenerate);
+        // a NaN or infinite slope or neutral height, or a finite pair whose radius law
+        // overflows, is the caller's: invalid input, not a cone through the axis
+        for (s, h) in [
+            (f64::NAN, 4.0),
+            (slope, f64::NAN),
+            (f64::INFINITY, 4.0),
+            (slope, f64::NEG_INFINITY),
+            (1e308, -1e308),
+        ] {
+            let e = cylinder.lean_cylinder(&k, s, h).unwrap_err();
+            assert_eq!(e.sm_status(), Some(crate::error::SM_ERR), "{s} {h}");
+            assert_eq!(
+                e.surface_failure(),
+                Some(&SurfaceFailure::LeanNotFinite),
+                "{s} {h}"
+            );
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput, "{s} {h}");
+        }
         let e = cone.lean_cylinder(&k, slope, 4.0).unwrap_err();
         assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
         assert_eq!(e.surface_failure(), Some(&SurfaceFailure::NotACylinder));

@@ -311,8 +311,12 @@ pub enum SurfaceFailure {
     /// routine takes. [`ErrorKind::Unsupported`].
     NotACylinder,
     /// The cone the routine would build passes its apex within the surface's span: its
-    /// radius at a control point of the net is not above the kernel's zero. Class `failed`.
+    /// radius at a control point of the net is not above the kernel's zero.
+    /// [`ErrorKind::Degenerate`].
     ConeClosesWithinSpan,
+    /// The lean's slope or neutral height is NaN or infinite, or the radius law they give
+    /// overflows at a control point of the net. [`ErrorKind::InvalidInput`].
+    LeanNotFinite,
     /// The NURB is not of the analytic kind the routine tests it for or rebuilds from it
     /// (an edited NURB that is no longer its surface's kind, or a NURB recognised as one):
     /// `check` says which test it failed. [`ErrorKind::Unsupported`].
@@ -439,7 +443,8 @@ impl SurfaceFailure {
             | Self::ScaleNotUniform
             | Self::RadiusNotPositive
             | Self::SurfaceWithoutGenerator
-            | Self::DegenerateIsoCurve => ErrorKind::InvalidInput,
+            | Self::DegenerateIsoCurve
+            | Self::LeanNotFinite => ErrorKind::InvalidInput,
             Self::BoxOutsideBendHalfSpace { .. }
             | Self::BoxOutsideZeroPeriod { .. }
             | Self::PointOutsideVolumeDomain { .. }
@@ -458,7 +463,8 @@ impl SurfaceFailure {
             | Self::ZeroVolumeTangent { .. }
             | Self::LineCrossingSingular
             | Self::NurbAxesParallel
-            | Self::PlaneTangentUnmeasurable => ErrorKind::Degenerate,
+            | Self::PlaneTangentUnmeasurable
+            | Self::ConeClosesWithinSpan => ErrorKind::Degenerate,
             Self::SolveCacheNotMade
             | Self::BlendSurfaceNotMade
             | Self::MergedRangeReversed { .. }
@@ -636,6 +642,9 @@ impl core::fmt::Display for SurfaceFailure {
             }
             Self::ConeClosesWithinSpan => {
                 f.write_str("the cone would pass its apex within the surface's span")
+            }
+            Self::LeanNotFinite => {
+                f.write_str("the lean's slope, neutral height or radius is not finite")
             }
             Self::NurbNotAnalytic { check } => {
                 write!(f, "the NURB is not of the analytic kind: {check}")
@@ -1074,7 +1083,12 @@ mod tests {
             (
                 SurfaceFailure::ConeClosesWithinSpan,
                 SM_ERR,
-                ErrorKind::Failed,
+                ErrorKind::Degenerate,
+            ),
+            (
+                SurfaceFailure::LeanNotFinite,
+                SM_ERR,
+                ErrorKind::InvalidInput,
             ),
             (
                 SurfaceFailure::NurbNotAnalytic {
