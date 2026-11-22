@@ -533,11 +533,14 @@ fn evaluate_binormal_step_off(
 
 /// The status of a vector operation upstream checks with `SER` (`Unitize`,
 /// `AngleBetween` of a zero-length vector): both return `SM_ERR_INVALID_INPUT` as a
-/// status (not a null dereference), which `SER` passes on unchanged.
+/// status (not a null dereference), which `SER` passes on unchanged. The operation's
+/// error stays the cause, so a port invariant below still reads as one.
 fn vec_status<T>(r: Result<T>, operation: &'static str) -> Result<T> {
     r.map_err(|e| match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => {
-            SolidError::query(operation, QueryFailure::ZeroLengthVector)
+            crate::error::Failure::new(operation, QueryFailure::ZeroLengthVector)
+                .caused_by(e)
+                .into_error()
         }
         e => e,
     })
@@ -1659,5 +1662,27 @@ mod tests {
         );
         assert_eq!(RadialSectorClass::ZeroSectorMate.code(), 7);
         assert_eq!(CurveSectorClass::CoincidentRadial.code(), 3);
+    }
+
+    #[test]
+    fn a_vector_operations_error_stays_the_cause() {
+        // a zero-length vector: the status `SER` passes on, over the operation's error
+        let unit = Vec3::ZERO.unitize().unwrap_err();
+        let e = vec_status(Vec3::ZERO.unitize(), OP_RADIAL).unwrap_err();
+        assert_eq!(e.query_failure(), Some(&QueryFailure::ZeroLengthVector));
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR_INVALID_INPUT));
+        assert_eq!(e.cause(), Some(&unit));
+        assert!(e.is_status_answer(), "{e:?}");
+        let angle = Vec3::X.angle_between(Vec3::ZERO).unwrap_err();
+        let e = vec_status(Vec3::X.angle_between(Vec3::ZERO), OP_RADIAL_CURVE).unwrap_err();
+        assert_eq!(e.cause(), Some(&angle));
+        // a port invariant below keeps its class: the status is no answer
+        let port = SolidError::port_invariant("inner", "an adapter failed");
+        let e = vec_status::<f64>(Err(port.clone()), OP_RADIAL).unwrap_err();
+        assert_eq!(e.cause(), Some(&port));
+        assert!(e.is_port_failure() && !e.is_status_answer(), "{e:?}");
+        // any other error passes through unchanged
+        let other = SolidError::cancelled("inner");
+        assert_eq!(vec_status::<f64>(Err(other.clone()), OP_RADIAL), Err(other));
     }
 }

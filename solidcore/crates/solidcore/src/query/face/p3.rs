@@ -207,21 +207,24 @@ fn null(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::invalid_input(operation, reason)
 }
 
-/// `return(SM_ERR_INVALID_INPUT)`.
-fn invalid_status(operation: &'static str) -> SolidError {
-    SolidError::query(operation, QueryFailure::ZeroLengthVector)
+/// `return(SM_ERR_INVALID_INPUT)` over the vector operation's error `cause`, which stays
+/// the cause.
+fn invalid_status(operation: &'static str, cause: SolidError) -> SolidError {
+    crate::error::Failure::new(operation, QueryFailure::ZeroLengthVector)
+        .caused_by(cause)
+        .into_error()
 }
 
 /// `SER(v.Unitize())`: the unit vector, or the `SM_ERR_INVALID_INPUT` status of a zero
 /// vector.
 fn unitize_ser(v: Vec3, operation: &'static str) -> Result<Vec3> {
-    v.unitize().map_err(|_| invalid_status(operation))
+    v.unitize().map_err(|e| invalid_status(operation, e))
 }
 
 /// `SER(a.AngleBetween(b, ang))`: the angle, or the `SM_ERR_INVALID_INPUT` status of a
 /// zero vector.
 fn angle_ser(a: Vec3, b: Vec3, operation: &'static str) -> Result<f64> {
-    a.angle_between(b).map_err(|_| invalid_status(operation))
+    a.angle_between(b).map_err(|e| invalid_status(operation, e))
 }
 
 /// The point and first derivative of an evaluation (`sPV[0]`, `sPV[1]`).
@@ -5043,5 +5046,18 @@ mod tests {
         )
         .unwrap();
         assert_eq!(c.containment, PointContainment::Outside);
+    }
+
+    #[test]
+    fn a_zero_vectors_status_keeps_the_operations_error() {
+        let unit = Vec3::ZERO.unitize().unwrap_err();
+        let e = unitize_ser(Vec3::ZERO, OP_SECTOR).unwrap_err();
+        assert_eq!(e.query_failure(), Some(&QueryFailure::ZeroLengthVector));
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR_INVALID_INPUT));
+        assert_eq!(e.cause(), Some(&unit));
+        let angle = Vec3::ZERO.angle_between(Vec3::X).unwrap_err();
+        let e = angle_ser(Vec3::ZERO, Vec3::X, OP_SECTOR).unwrap_err();
+        assert_eq!(e.query_failure(), Some(&QueryFailure::ZeroLengthVector));
+        assert_eq!(e.cause(), Some(&angle));
     }
 }
