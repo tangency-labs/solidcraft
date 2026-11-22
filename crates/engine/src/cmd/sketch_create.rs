@@ -22,11 +22,11 @@ use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list};
 use crate::schema::sketch_create::{
     ArcSlotCenterParams, ArcSlotResult, ArcSlotThreePointParams, ArcTangentParams, BlendCurveParams, CenterlineParams, ConicParams,
-    ControlPointSplineParams, DrawResult, EditTextParams, EditTextResult, EllipseParams, FitPointSplineParams, InfiniteLineParams, LineTypeResult,
-    MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineHandlesParams, SplineHandlesResult, SplineInsertPointParams,
-    SplineInsertPointResult, SplineRemovePointParams, SplineRemovePointResult, SplineResetHandlesParams, SplineResetHandlesResult,
-    SplineReverseParams, SplineReverseResult, TextChange, TextEditsResult, TextExpressions, TextResult, ThreeTangentCircleParams,
-    TwoTangentCircleParams,
+    ControlKnotsSplineParams, ControlPointSplineParams, DrawResult, EditTextParams, EditTextResult, EllipseParams, FitPointSplineParams,
+    InfiniteLineParams, LineTypeResult, MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineHandlesParams, SplineHandlesResult,
+    SplineInsertPointParams, SplineInsertPointResult, SplineRemovePointParams, SplineRemovePointResult, SplineResetHandlesParams,
+    SplineResetHandlesResult, SplineReverseParams, SplineReverseResult, TextChange, TextEditsResult, TextExpressions, TextResult,
+    ThreeTangentCircleParams, TwoTangentCircleParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -49,6 +49,7 @@ const ARC_SLOT_CENTER_CONTRACT: TypedContract<ArcSlotCenterParams> = TypedContra
 const ELLIPSE_CONTRACT: TypedContract<EllipseParams> = TypedContract::new();
 const SPLINE_FIT_CONTRACT: TypedContract<FitPointSplineParams> = TypedContract::new();
 const SPLINE_CONTROL_CONTRACT: TypedContract<ControlPointSplineParams> = TypedContract::new();
+const SPLINE_KNOTS_CONTRACT: TypedContract<ControlKnotsSplineParams> = TypedContract::new();
 const CONIC_CONTRACT: TypedContract<ConicParams> = TypedContract::new();
 const BLEND_CONTRACT: TypedContract<BlendCurveParams> = TypedContract::new();
 const CENTERLINE_CONTRACT: TypedContract<CenterlineParams> = TypedContract::new();
@@ -129,7 +130,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ELLIPSE_CONTRACT)
         .output(output_schema_for::<DrawResult>)
         .params(concat!(
-        "center, major: end of the major axis [x,y] (a coordinate of either may be an expression over the design's parameters: the point follows them), minor: a point the ellipse passes through on the minor side [x,y] | minor_radius: number or expression (an expression naming a parameter is a dimension driven by it). Also adds its major and minor axes as construction lines through the centre (their ends: the major end and the point opposite it, and the two ends of the minor axis on the ellipse), held by midpoint, perpendicular and point-on-curve constraints, so a half-axis is the distance from the centre to an axis end and an axis line's length is a full axis; axes?: bool (default true; false: the ellipse alone, as the Ellipse tool draws it with Draw ellipses with their axes off)",
+        "center, major: end of the major axis [x,y] (a coordinate of either may be an expression over the design's parameters and the sketch's other points (\"p1.x\"): the point follows them), minor: a point the ellipse passes through on the minor side [x,y] | minor_radius: number or expression (an expression naming a parameter is a dimension driven by it). Also adds its major and minor axes as construction lines through the centre (their ends: the major end and the point opposite it, and the two ends of the minor axis on the ellipse), held by midpoint, perpendicular and point-on-curve constraints, so a half-axis is the distance from the centre to an axis end and an axis line's length is a full axis; axes?: bool (default true; false: the ellipse alone, as the Ellipse tool draws it with Draw ellipses with their axes off)",
         created_doc!()
     )),
     CommandSpec::new("sketch.spline.fit_point", "Fit Point Spline", crate::checked!("sketch.spline.fit_point", spline_fit))
@@ -147,7 +148,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&SPLINE_CONTROL_CONTRACT)
         .output(output_schema_for::<DrawResult>)
-        .params(concat!("points: control points (2…500), cubic", created_doc!())),
+        .params(concat!("points: control points (2…500), cubic; periodic?: boolean (default false): closes the control polygon into a loop (at least 4 points)", created_doc!())),
     CommandSpec::new("sketch.spline.control_point_5", "Control Point Spline (Degree 5)", crate::checked!("sketch.spline.control_point_5", spline_cv5))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -155,7 +156,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&SPLINE_CONTROL_CONTRACT)
         .output(output_schema_for::<DrawResult>)
-        .params(concat!("points: control points (2…500), degree 5", created_doc!())),
+        .params(concat!("points: control points (2…500), degree 5; periodic?: boolean (default false): closes the control polygon into a loop (at least 6 points)", created_doc!())),
+    CommandSpec::new("sketch.spline.control_knots", "Control Point Spline with Knots", crate::checked!("sketch.spline.control_knots", spline_knots))
+        .in_sketch_part()
+        .at("SKETCH", "CREATE")
+        .icon("spline_cv")
+        .enabled(in_sketch)
+        .contract(&SPLINE_KNOTS_CONTRACT)
+        .output(output_schema_for::<DrawResult>)
+        .params(concat!("points: control points (2…500); degree: 1…9; knots: the clamped knot vector, points + degree + 1 non-decreasing numbers (the first and last degree + 1 equal to its ends, no interior knot more than degree times): the curve is exactly this B-spline, drawn and extruded as given; weights?: one positive number per point (none: all 1), with degree 2 only (a rational quadratic, exact as conics)", created_doc!())),
     CommandSpec::new("sketch.spline.insert_point", "Add Spline Point", crate::checked!("sketch.spline.insert_point", spline_insert_point))
         .icon("spline")
         .enabled(in_sketch)
@@ -677,7 +686,7 @@ fn joint_derivatives(sk: &Sketch, ci: usize, pi: usize, order: usize, leaving: b
 fn blend(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.blend_curve";
     let order = blend_order(p, cmd)?;
-    let on_sheet = s.open_drawing.is_some();
+    let on_sheet = s.sheet_sketching();
     if on_sheet && order > 2 {
         return Err(bad(cmd, "sheet sketches support G1/G2 blends; higher-order splines need their own bounded record contract"));
     }
@@ -782,8 +791,10 @@ fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.ellipse";
     // The centre and the major end follow the parameters a coordinate typed as an expression
     // names, and a minor radius typed as one is a dimension driven by them, as for a circle.
+    // A coordinate may read another point's coordinate: it is worked out against the sketch.
+    let sk = sketch_store::read_for_command(s, p, cmd)?;
     let ((c, ec), (m, em)) =
-        (corner_arg(&s.doc, p, "center", cmd, s.open_drawing.is_some())?, corner_arg(&s.doc, p, "major", cmd, s.open_drawing.is_some())?);
+        (corner_arg(&s.doc, &sk, p, "center", cmd, s.sheet_sketching())?, corner_arg(&s.doc, &sk, p, "major", cmd, s.sheet_sketching())?);
     let u = (m - c).normalized().ok_or_else(|| bad(cmd, "the major axis end must differ from the centre"))?;
     let a = c.dist(m);
     let typed = if p.get("minor_radius").is_some_and(Value::is_string) { Some(length_expr(s, p, "minor_radius", cmd)?) } else { None };
@@ -869,26 +880,31 @@ fn point_list(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value, cmd: &
     Ok(out)
 }
 
-fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8) -> Result<Value> {
-    let on_sheet = s.open_drawing.is_some();
+fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8, nurbs: Option<solidcraft_sketch::Nurbs>) -> Result<Value> {
+    let on_sheet = s.sheet_sketching();
     let periodic = match p.get("periodic") {
         None => false,
         Some(Value::Bool(v)) => *v,
         _ => return Err(bad(cmd, "periodic must be boolean")),
     };
-    if periodic && (control || degree != 3) {
+    if periodic && !control && degree != 3 {
         return Err(bad(cmd, "periodic mode requires a cubic fit spline"));
     }
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let mut pts = point_list(sk, doc, p, cmd, on_sheet)?;
         if periodic
+            && !control
             && sk.point(*pts.first().ok_or_else(|| bad(cmd, "missing first point"))?)
                 != sk.point(*pts.last().ok_or_else(|| bad(cmd, "missing last point"))?)
         {
             pts.push(*pts.first().ok_or_else(|| bad(cmd, "missing first point"))?);
         }
-        let c = sk.add_curve(CurveKind::Spline { pts, control, degree, periodic, nurbs: None, handles: Vec::new() }, None)?;
+        // A spline given its own knots refuses them as bad parameters, naming what does not fit.
+        let knotted = nurbs.is_some();
+        let c = sk
+            .add_curve(CurveKind::Spline { pts, control, degree, periodic, nurbs: nurbs.clone(), handles: Vec::new() }, None)
+            .map_err(|e| if knotted { bad(cmd, e.to_string()) } else { EngineError::from(e) })?;
         mark_construction(sk, &[c], p);
         Ok((ids_of(sk, &[c]), Vec::new()))
     })?;
@@ -896,13 +912,48 @@ fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8) -> R
 }
 
 fn spline_fit(s: &mut Session, p: &Value) -> Result<Value> {
-    spline(s, p, "sketch.spline.fit_point", false, 3)
+    spline(s, p, "sketch.spline.fit_point", false, 3, None)
 }
 fn spline_cv3(s: &mut Session, p: &Value) -> Result<Value> {
-    spline(s, p, "sketch.spline.control_point", true, 3)
+    spline(s, p, "sketch.spline.control_point", true, 3, None)
 }
 fn spline_cv5(s: &mut Session, p: &Value) -> Result<Value> {
-    spline(s, p, "sketch.spline.control_point_5", true, 5)
+    spline(s, p, "sketch.spline.control_point_5", true, 5, None)
+}
+
+/// A list of numbers under `key`, each finite (a JSON number is).
+fn number_list(p: &Value, key: &str, cmd: &str) -> Result<Vec<f64>> {
+    p.get(key)
+        .and_then(Value::as_array)
+        .ok_or_else(|| bad(cmd, format!("`{key}` must be a list of numbers")))?
+        .iter()
+        .map(|x| x.as_f64().ok_or_else(|| bad(cmd, format!("`{key}` must be a list of numbers"))))
+        .collect()
+}
+
+/// `sketch.spline.control_knots`: a control spline of the degree, knots and weights it is given.
+/// A weighted spline is exact only at degree 2, where each span is a conic: a higher degree with
+/// unequal weights has no exact profile, so it is refused rather than drawn as a polyline.
+fn spline_knots(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.spline.control_knots";
+    let degree = p
+        .get("degree")
+        .and_then(Value::as_u64)
+        .and_then(|d| u8::try_from(d).ok())
+        .filter(|d| (1..=solidcore_record::MAX_BEZIER_DEGREE as u8).contains(d))
+        .ok_or_else(|| bad(cmd, "`degree` must be a whole number from 1 to 9"))?;
+    let knots = number_list(p, "knots", cmd)?;
+    let weights = match p.get("weights") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(_) => number_list(p, "weights", cmd)?,
+    };
+    if weights.windows(2).any(|w| w[0] != w[1]) && degree != 2 {
+        return Err(bad(
+            cmd,
+            "a weighted spline has an exact profile only at degree 2 (a rational quadratic); give equal weights or none at this degree",
+        ));
+    }
+    spline(s, p, cmd, true, degree, Some(solidcraft_sketch::Nurbs { knots, weights }))
 }
 
 fn spline_insert_point(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1010,7 +1061,7 @@ fn spline_reverse(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn conic(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.conic";
-    let on_sheet = s.open_drawing.is_some();
+    let on_sheet = s.sheet_sketching();
     let rho = num(p, "rho").unwrap_or(0.5);
     if !(rho > 1e-6 && rho < 1.0 - 1e-6) {
         return Err(bad(cmd, "`rho` must be between 0 and 1"));
@@ -1038,7 +1089,7 @@ fn conic(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn midpoint_line(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.line.midpoint";
-    let on_sheet = s.open_drawing.is_some();
+    let on_sheet = s.sheet_sketching();
     let end = req_vec2(cmd, p, "end")?;
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
@@ -1170,7 +1221,7 @@ pub fn tangent_arc_starts_at(sk: &Sketch, start: &str) -> bool {
 
 fn arc_tangent(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.arc.tangent";
-    let on_sheet = s.open_drawing.is_some();
+    let on_sheet = s.sheet_sketching();
     // An id ends the arc on that point, so a chain can close; coordinates make a new point.
     let end_ref = p.get("end").and_then(Value::as_str);
     let at = if end_ref.is_some() { None } else { Some(req_vec2(cmd, p, "end")?) };
@@ -1274,7 +1325,7 @@ fn tangent_curves(sk: &Sketch, p: &Value, cmd: &str, n: usize) -> Result<Vec<usi
 /// A circle tangent to `curves`, solved from a start near `near`.
 fn tangent_circle(s: &mut Session, p: &Value, cmd: &str, n: usize, radius: Option<String>) -> Result<Value> {
     let near = req_vec2(cmd, p, "near")?;
-    let on_sheet = s.open_drawing.is_some();
+    let on_sheet = s.sheet_sketching();
     let (out, info) = edit(s, p, cmd, true, |sk, doc| {
         let cs = tangent_curves(sk, p, cmd, n)?;
         let r0 = match &radius {
@@ -1945,3 +1996,7 @@ mod blend_tests {
         assert!(m["bodies"][0]["faces"].as_u64().unwrap_or(0) >= 3, "a solid with the blend as a side: {m}");
     }
 }
+
+#[cfg(test)]
+#[path = "sketch_knots_tests.rs"]
+mod knots_tests;

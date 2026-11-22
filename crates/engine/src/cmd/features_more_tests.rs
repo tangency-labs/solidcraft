@@ -278,6 +278,25 @@ fn a_revolve_from_a_turned_sub_components_face_joins_and_cuts_it_from_the_top_le
     }
 }
 
+/// A fixed face keeps no attachment, so the Cut's scope is the picked face's body (#5679): a
+/// quarter cylinder of radius 10 comes out of the turned part and the top level's body stays.
+#[test]
+fn a_fixed_face_revolve_from_the_top_level_cuts_the_picked_faces_body() {
+    let (mut s, placed) = turned_part(true);
+    let at = |x: f64, y: f64, z: f64| solidcraft_doc::apply_point(&placed, solidcore_record::Vec3::new(x, y, z));
+    let (top, origin, along) = (at(5.0, 5.0, 10.0), at(0.0, 0.0, 10.0), at(1.0, 0.0, 10.0));
+    let dir = along - origin;
+    run(
+        &mut s,
+        "solid.revolve",
+        json!({"face": [top.x, top.y, top.z], "fixed": true, "axis": {"origin": [origin.x, origin.y, origin.z], "dir": [dir.x, dir.y, dir.z]},
+               "angle": "180 deg", "direction": "symmetric", "operation": "cut"}),
+    );
+    let quarter = std::f64::consts::PI * 100.0 / 4.0 * 10.0;
+    assert!((body_volume(&s, "Stock") - (1000.0 - quarter)).abs() < 1e-3 * quarter, "Stock {}", body_volume(&s, "Stock"));
+    assert!((body_volume(&s, "Base") - 2000.0).abs() < 1e-6);
+}
+
 /// #5679 for Loft (and Sweep, through the same join target): with the top level active, a loft
 /// from a circle on the turned part's top face to one 5 mm above joins the part, in one piece.
 #[test]
@@ -648,6 +667,24 @@ fn emboss_and_deboss_on_a_face() {
 }
 
 #[test]
+fn emboss_on_a_face_refuses_a_profile_off_it_and_leaves_the_design() {
+    // Two squares over a 40 x 40 top, one of them beside it: the emboss is refused as a whole
+    // rather than raising one square and leaving the other out.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 30], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Marks"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [15, 15]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [50, 10], "p1": [55, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let saved = s.doc.to_json();
+    let v = volume(&mut s);
+    let e = s.execute("solid.emboss", &json!({"sketch": "Marks", "profiles": "all", "depth": 1, "face": [20, 20, 20]})).unwrap_err().to_string();
+    assert!(e.contains("not fitting the selected target face") && e.contains("profile 2 of 2 lies off it"), "{e}");
+    assert_eq!(s.doc.to_json(), saved);
+    assert_eq!(volume(&mut s), v);
+}
+
+#[test]
 fn emboss_face_off_the_part_says_how_far() {
     // #392: a point beside the face was refused with "`face` must identify exactly one target
     // body surface", which didn't say the point was off the face.
@@ -709,19 +746,32 @@ fn cylinder_emboss_persists_selection_and_replays_radial_depth() {
 }
 
 #[test]
-fn cylinder_deboss_is_connected_and_unsupported_profile_failure_is_atomic() {
+fn cylinder_deboss_is_connected_a_circle_wraps_and_a_profile_past_the_wall_fails_atomically() {
     let mut s = cylinder_badge();
     let before = exact_cylinder_volume(&s);
     run(&mut s, "solid.emboss", json!({"sketch":"Badge","face":[0,10,7.5],"depth":1,"mode":"deboss","targets":["Sleeve"]}));
     assert!((exact_cylinder_volume(&s) - before + 19.0).abs() < 0.02);
     assert_eq!(s.model.state().body("Sleeve").unwrap().body.shell_count(), 1);
+    // A circle wraps round the wall (#5358): its area times (11² - 10²) / 20.
+    let mut round = cylinder_badge();
+    run(&mut round, "sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[-1,0,0],"y_dir":[0,0,1]},"name":"Circle Badge"}));
+    run(&mut round, "sketch.circle.center", json!({"center":[0,7.5],"radius":1}));
+    run(&mut round, "sketch.finish", json!({}));
+    let v = exact_cylinder_volume(&round);
+    run(&mut round, "solid.emboss", json!({"sketch":"Circle Badge","face":[0,10,7.5],"depth":1,"targets":["Sleeve"]}));
+    let added = exact_cylinder_volume(&round) - v;
+    assert!((added - std::f64::consts::PI * 21. / 20.).abs() < 0.02, "{added}");
+    assert_eq!(round.model.state().body("Sleeve").unwrap().body.shell_count(), 1);
+    // A profile running past the top endcap is refused, leaving the design as it was.
     let mut bad = cylinder_badge();
-    run(&mut bad, "sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[-1,0,0],"y_dir":[0,0,1]},"name":"Circle Badge"}));
-    run(&mut bad, "sketch.circle.center", json!({"center":[0,7.5],"radius":1}));
+    run(&mut bad, "sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[-1,0,0],"y_dir":[0,0,1]},"name":"Tall Badge"}));
+    run(&mut bad, "sketch.rectangle.two_point", json!({"p0":[-2,15],"p1":[2,25]}));
     run(&mut bad, "sketch.finish", json!({}));
     let saved = bad.doc.to_json();
     let v = exact_cylinder_volume(&bad);
-    assert!(bad.execute("solid.emboss", &json!({"sketch":"Circle Badge","face":[0,10,7.5],"depth":1,"targets":["Sleeve"]})).is_err());
+    let error =
+        bad.execute("solid.emboss", &json!({"sketch":"Tall Badge","face":[0,10,7.5],"depth":1,"targets":["Sleeve"]})).unwrap_err().to_string();
+    assert!(error.contains("endcap"), "{error}");
     assert_eq!(bad.doc.to_json(), saved);
     assert_eq!(exact_cylinder_volume(&bad), v);
 }
@@ -768,6 +818,294 @@ fn cylinder_small_chord_pick_is_saved_on_the_exact_surface() {
     };
     assert!(((face.at.x * face.at.x + face.at.y * face.at.y).sqrt() - 0.1).abs() < 1e-12);
     assert_eq!(s.model.state().bodies.first().unwrap().body.shell_count(), 1);
+}
+
+/// Text wraps round a whole tube, outside and in its bore (#5358): each way it adds or removes
+/// the flat text's volume times `|rr² - r²| / 2r` per unit depth, the wrap keeping arc length.
+#[test]
+fn emboss_text_wraps_round_a_whole_tube_outside_and_in_its_bore() {
+    let mut flat = Session::default();
+    run(&mut flat, "solid.box", json!({"length": 60, "width": 60, "height": 20, "body_name": "Flat"}));
+    let flat_before = volume(&mut flat);
+    run(&mut flat, "sketch.create", json!({"plane": {"origin": [20, 20, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Text"}));
+    run(&mut flat, "sketch.text", json!({"text": "Emboss", "at": [-10, 10], "height": 6}));
+    run(&mut flat, "sketch.finish", json!({}));
+    run(&mut flat, "solid.emboss", json!({"sketch": "Text", "depth": 1}));
+    let area = volume(&mut flat) - flat_before;
+    for (r, mode, rr) in [(20.0_f64, "emboss", 21.0_f64), (20., "deboss", 19.), (16., "emboss", 15.), (16., "deboss", 17.)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 30, "body_name": "Tube"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 16, "height": 30, "operation": "cut", "targets": ["Tube"]}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, r, 0], "x_dir": [-1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Text"}));
+        run(&mut s, "sketch.text", json!({"text": "Emboss", "at": [-10, 10], "height": 6}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = volume(&mut s);
+        run(&mut s, "solid.emboss", json!({"sketch": "Text", "face": [0.0, r, 13.0], "depth": 1, "mode": mode}));
+        assert_eq!(s.model.state().body("Tube").unwrap().body.shell_count(), 1);
+        let change = (volume(&mut s) - before).abs();
+        let want = area * (rr * rr - r * r).abs() / (2. * r);
+        assert!((change - want).abs() < 1e-4 * want, "{mode} at {r}: {change} vs {want}");
+    }
+}
+
+/// Text wraps onto the outside of a half tube, a wall that is not a whole cylinder (#12029):
+/// emboss and deboss change the volume as on a whole tube.
+#[test]
+fn emboss_text_wraps_onto_a_half_tube() {
+    let mut flat = Session::default();
+    run(&mut flat, "solid.box", json!({"length": 60, "width": 60, "height": 20, "body_name": "Flat"}));
+    let flat_before = volume(&mut flat);
+    run(&mut flat, "sketch.create", json!({"plane": {"origin": [20, 20, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Text"}));
+    run(&mut flat, "sketch.text", json!({"text": "Emboss", "at": [-10, 10], "height": 6}));
+    run(&mut flat, "sketch.finish", json!({}));
+    run(&mut flat, "solid.emboss", json!({"sketch": "Text", "depth": 1}));
+    let area = volume(&mut flat) - flat_before;
+    for (mode, rr) in [("emboss", 21.0_f64), ("deboss", 19.)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 30, "body_name": "Tube"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 16, "height": 30, "operation": "cut", "targets": ["Tube"]}));
+        run(&mut s, "solid.box", json!({"length": 50, "width": 25, "height": 40, "corner": [-25, -25, -5], "operation": "cut", "targets": ["Tube"]}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 20, 0], "x_dir": [-1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Text"}));
+        run(&mut s, "sketch.text", json!({"text": "Emboss", "at": [-10, 10], "height": 6}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = volume(&mut s);
+        run(&mut s, "solid.emboss", json!({"sketch": "Text", "face": [0.0, 20.0, 13.0], "depth": 1, "mode": mode}));
+        assert_eq!(s.model.state().body("Tube").unwrap().body.shell_count(), 1);
+        // Signed: an emboss adds material and a deboss takes it away.
+        let change = volume(&mut s) - before;
+        let want = area * (rr * rr - 400.) / 40.;
+        assert!((change - want).abs() < 1e-4 * want.abs(), "{mode}: {change} vs {want}");
+    }
+}
+
+#[test]
+fn concave_cylinder_emboss_and_deboss_with_sketch_profile_and_text() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 60, "height": 40, "body_name": "Part"}));
+    run(
+        &mut s,
+        "solid.cylinder",
+        json!({
+            "axis": [0.0, 1.0, 0.0],
+            "base": [30, -5, 40],
+            "height": 70,
+            "radius": 20,
+            "operation": "cut",
+            "targets": ["Part"]
+        }),
+    );
+    let concave_vol = volume(&mut s);
+    let state = s.model.state();
+    let body = &state.body("Part").unwrap().body;
+    assert_eq!(body.shell_count(), 1);
+
+    // Pick a point on the concave cylinder surface: at x=30, z=20, y=30
+    let concave_face_pt = [30.0, 30.0, 20.0];
+
+    // Sketch a profile on a work plane above the groove
+    run(
+        &mut s,
+        "sketch.create",
+        json!({
+            "plane": {"origin": [0, 0, 45], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]},
+            "name": "Mark"
+        }),
+    );
+    run(&mut s, "sketch.text", json!({"text": "19.1", "at": [22, 25], "height": 6}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    // Emboss onto the concave cylindrical face
+    run(
+        &mut s,
+        "solid.emboss",
+        json!({
+            "sketch": "Mark",
+            "face": concave_face_pt,
+            "depth": 1,
+            "mode": "emboss",
+            "name": "Raised"
+        }),
+    );
+    let embossed_vol = volume(&mut s);
+    assert!(embossed_vol > concave_vol);
+    assert_eq!(s.model.state().body("Part").unwrap().body.shell_count(), 1);
+
+    // Verify replay / serialization
+    let saved = s.doc.to_json();
+    let mut loaded = Session { doc: solidcraft_doc::Document::from_json(&saved).unwrap().into(), ..Default::default() };
+    loaded.refresh();
+    assert!(loaded.model.results.iter().all(|f| f.error.is_none()), "{:?}", loaded.model.results);
+    assert!((volume(&mut loaded) - embossed_vol).abs() < 0.05);
+
+    // Deboss with text on the concave surface
+    let mut s2 = Session::default();
+    run(&mut s2, "solid.box", json!({"length": 60, "width": 60, "height": 40, "body_name": "Part"}));
+    run(
+        &mut s2,
+        "solid.cylinder",
+        json!({
+            "axis": [0.0, 1.0, 0.0],
+            "base": [30, -5, 40],
+            "height": 70,
+            "radius": 20,
+            "operation": "cut",
+            "targets": ["Part"]
+        }),
+    );
+    run(
+        &mut s2,
+        "sketch.create",
+        json!({
+            "plane": {"origin": [0, 0, 45], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]},
+            "name": "TextSketch"
+        }),
+    );
+    run(&mut s2, "sketch.text", json!({"text": "19.1", "at": [22, 25], "height": 6}));
+    run(&mut s2, "sketch.finish", json!({}));
+
+    run(
+        &mut s2,
+        "solid.emboss",
+        json!({
+            "sketch": "TextSketch",
+            "face": concave_face_pt,
+            "depth": 0.5,
+            "mode": "deboss",
+            "name": "Engraved"
+        }),
+    );
+    let debossed_vol = volume(&mut s2);
+    assert!(debossed_vol < concave_vol);
+    assert_eq!(s2.model.state().body("Part").unwrap().body.shell_count(), 1);
+}
+
+#[test]
+fn half_cylinder_interior_emboss_text() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 30, "body_name": "Tube"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 16, "height": 30, "operation": "cut", "targets": ["Tube"]}));
+    run(&mut s, "solid.box", json!({"corner": [-25, -50, -5], "length": 50, "width": 50, "height": 40, "operation": "cut", "targets": ["Tube"]}));
+
+    run(
+        &mut s,
+        "sketch.create",
+        json!({
+            "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]},
+            "name": "Text"
+        }),
+    );
+    run(&mut s, "sketch.text", json!({"text": "Emboss", "at": [-10, 10], "height": 6}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    let before = volume(&mut s);
+    let inner_pt = [0.0, 16.0, 15.0];
+    run(
+        &mut s,
+        "solid.emboss",
+        json!({
+            "sketch": "Text",
+            "face": inner_pt,
+            "depth": 1,
+            "mode": "emboss",
+        }),
+    );
+
+    let v_wrap = volume(&mut s);
+    assert_eq!(s.model.state().body("Tube").unwrap().body.shell_count(), 1);
+    // The same text raised 1 on a flat face: the wrapped text adds about as much (a little less,
+    // its cap lying on a smaller radius than its base).
+    let mut flat = Session::default();
+    run(&mut flat, "solid.box", json!({"length": 60, "width": 60, "height": 20, "body_name": "Flat"}));
+    let flat_before = volume(&mut flat);
+    run(&mut flat, "sketch.create", json!({"plane": {"origin": [20, 20, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Text"}));
+    run(&mut flat, "sketch.text", json!({"text": "Emboss", "at": [-10, 10], "height": 6}));
+    run(&mut flat, "sketch.finish", json!({}));
+    run(&mut flat, "solid.emboss", json!({"sketch": "Text", "depth": 1}));
+    let flat_added = volume(&mut flat) - flat_before;
+    let added = v_wrap - before;
+    assert!(added > 0.85 * flat_added && added < 1.02 * flat_added, "wrapped {added}, flat {flat_added}");
+
+    // Also test deboss
+    let mut s2 = Session::default();
+    run(&mut s2, "solid.cylinder", json!({"radius": 20, "height": 30, "body_name": "Tube"}));
+    run(&mut s2, "solid.cylinder", json!({"radius": 16, "height": 30, "operation": "cut", "targets": ["Tube"]}));
+    run(&mut s2, "solid.box", json!({"corner": [-25, -50, -5], "length": 50, "width": 50, "height": 40, "operation": "cut", "targets": ["Tube"]}));
+
+    run(
+        &mut s2,
+        "sketch.create",
+        json!({
+            "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]},
+            "name": "Text"
+        }),
+    );
+    run(&mut s2, "sketch.text", json!({"text": "Emboss", "at": [-10, 10], "height": 6}));
+    run(&mut s2, "sketch.finish", json!({}));
+
+    run(
+        &mut s2,
+        "solid.emboss",
+        json!({
+            "sketch": "Text",
+            "face": inner_pt,
+            "depth": 1,
+            "mode": "deboss",
+        }),
+    );
+    let v_deboss = volume(&mut s2);
+    assert!(v_deboss > 0.0);
+    assert!(v_deboss < v_wrap);
+}
+
+#[test]
+fn target_planar_face_with_adjacent_fillets_is_not_hijacked() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Profile"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]]}));
+    run(&mut s, "sketch.line", json!({"points": [[40, 0], [40, 40]]}));
+    run(&mut s, "sketch.line", json!({"points": [[40, 40], [20, 40]]}));
+    run(&mut s, "sketch.line", json!({"points": [[20, 40], [0, 20]]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [0, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Profile", "distance": 40, "body_name": "Part"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 20, -40], [0, 20, -20]], "radius": 2, "targets": ["Part"]}));
+
+    let v_before = volume(&mut s);
+
+    run(
+        &mut s,
+        "sketch.create",
+        json!({
+            "plane": {
+                "origin": [10, 20, -30],
+                "x_dir": [0, 1, 0],
+                "y_dir": [std::f64::consts::FRAC_1_SQRT_2, 0.0, -std::f64::consts::FRAC_1_SQRT_2]
+            },
+            "name": "Badge"
+        }),
+    );
+    run(&mut s, "sketch.text", json!({"text": "19.1 mm", "at": [-10, -2], "height": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    let target_pt = [10.0, 20.0, -30.0];
+    run(
+        &mut s,
+        "solid.emboss",
+        json!({
+            "sketch": "Badge",
+            "face": target_pt,
+            "depth": 0.4,
+            "mode": "deboss",
+            "targets": ["Part"]
+        }),
+    );
+
+    let v_after = volume(&mut s);
+    assert!(v_after < v_before, "deboss must remove volume: {v_after} vs {v_before}");
+    // The text's area times the depth, as the same text debossed on a flat face removes: the
+    // cut stays on the planar face and none of it lands on the fillets beside it.
+    let diff = v_before - v_after;
+    assert!((diff - 9.2267).abs() < 0.01, "deboss volume difference unexpected: {diff}");
 }
 
 #[test]
@@ -1413,7 +1751,7 @@ fn cylinder_auto_inference_retains_selected_holes_and_nested_islands() {
 }
 
 #[test]
-fn cylinder_auto_inference_refuses_ambiguity_curves_and_seam_crossing_atomically() {
+fn cylinder_auto_inference_refuses_ambiguity_and_seam_crossing_atomically_and_wraps_curves() {
     let mut s = cylinder_badge();
     run(&mut s, "solid.cylinder", json!({"radius":10,"height":20,"body_name":"Coincident"}));
     let before = s.doc.to_json();
@@ -1433,8 +1771,15 @@ fn cylinder_auto_inference_refuses_ambiguity_curves_and_seam_crossing_atomically
         run(&mut s, "sketch.finish", json!({}));
         let before = s.doc.to_json();
         let volume = exact_cylinder_volume(&s);
+        if circle {
+            // A circle wraps round the wall (#5358): its area times (11² - 10²) / 20.
+            run(&mut s, "solid.emboss", json!({"sketch":"Unsupported","depth":1}));
+            let want = std::f64::consts::PI * 21. / 20.;
+            assert!((exact_cylinder_volume(&s) - volume - want).abs() < 0.02, "{}", exact_cylinder_volume(&s) - volume);
+            continue;
+        }
         let error = s.execute("solid.emboss", &json!({"sketch":"Unsupported","depth":1})).unwrap_err().to_string();
-        assert!(error.contains(if circle { "orthogonal line" } else { "seam" }), "{error}");
+        assert!(error.contains("seam"), "{error}");
         assert_eq!(s.doc.to_json(), before);
         assert_eq!(exact_cylinder_volume(&s), volume);
     }
@@ -3054,6 +3399,36 @@ fn a_converted_meshs_face_extrudes_on_a_fixed_plane_when_asked() {
     assert!(not_a_bool.contains("`fixed` must be true or false"), "{not_a_bool}");
 }
 
+/// #6612: a Join that names no body joins the picked face's body, as an extrude from a face
+/// does, and stores it as the target.
+#[test]
+fn a_converted_meshs_face_revolved_on_a_fixed_plane_joins_that_body() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-6612-revolve-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("Block.stl");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    run(&mut s, "file.export", json!({"path": stl.to_string_lossy()}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    let [name] = names.as_slice() else { panic!("{names:?}") };
+    run(&mut s, "mesh.convert", json!({"body": name}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "body_name": "Other"}));
+    run(
+        &mut s,
+        "solid.revolve",
+        json!({"face": [10, 10, 10], "fixed": true, "axis": {"origin": [0, 0, 10], "dir": [1, 0, 0]}, "angle": "90 deg", "operation": "join"}),
+    );
+    let Some(solidcraft_doc::Feature { kind: solidcraft_doc::FeatureKind::Revolve { targets, .. }, .. }) = s.doc.features.last() else {
+        panic!("a revolve")
+    };
+    let targets: Vec<&str> = targets.iter().map(|t| t.0.as_str()).collect();
+    assert_eq!(targets, [name.as_str()], "the join keeps to the picked face's body");
+}
+
 /// A 40 x 10 stadium (two lines, two tangent arcs) extruded 10 mm. The top rim runs on smoothly
 /// through the points where a line meets an arc, so picking one of those points names the rim,
 /// not an ambiguous corner (#12215).
@@ -3401,4 +3776,25 @@ fn a_narrow_profile_across_a_wall_along_the_extrusion_keeps_the_trim_to_the_body
         outside * 10.0,
         0.2 * 2.0
     );
+}
+
+/// A 3° draft on a pocket wall whose vertical corners carry 4 mm rounds drafts the wall with the
+/// rounds following, or refuses and says what to do; never a bare kernel status. With sharp
+/// corners it builds; with the rounds it is "SMLib failed (status 1001)" today
+/// ([T-97](https://tickets.solidcraft.io/t/97), #17592).
+#[test]
+fn a_draft_on_a_pocket_wall_beside_rounds_never_fails_with_a_bare_status() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 90, "width": 70, "height": 50, "body_name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 50, "width": 30, "height": 36, "corner": [20, 20, 14], "operation": "cut", "targets": ["Block"]}));
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 20, 35], [70, 20, 35], [70, 50, 35], [20, 50, 35]], "radius": 4}));
+    let draft = json!({"faces": [[45, 20, 35]], "angle": "3 deg", "neutral": {"origin": [0, 0, 14], "normal": [0, 0, 1]}});
+    match s.execute("solid.draft", &draft) {
+        Ok(_) => {
+            let state = s.model.state();
+            let b = &state.body("Block").unwrap().body;
+            assert!(b.validity().is_empty(), "{:?}", b.validity());
+        }
+        Err(e) => assert!(!e.to_string().contains("status 1001"), "{e}"),
+    }
 }

@@ -48,14 +48,12 @@ use solidcore::topology::face::p2 as face;
 use solidcore::topology::{vertex, EdgeId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `geometric_g2_continuity` (as `wr697_end_and_join.rs`).
+/// Every fix (as `wr697_end_and_join.rs`).
 fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k

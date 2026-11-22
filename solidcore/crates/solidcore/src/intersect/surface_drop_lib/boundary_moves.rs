@@ -71,8 +71,10 @@
 //! along `n`, over `|N|`), from the net's second partials with `|N|` proved positive, and
 //! only over the net's own domain and over boxes holding no C0 knot of the net inside
 //! them (the normal jumps across one). A surface, or an offset's base, that carries a
-//! procedural definition is evaluated exactly, not through its net, so it has no bound
-//! and keeps upstream's fix-up. The budget is the drop's 3D tolerance less the largest
+//! procedural definition is evaluated exactly, not through its net, so it has no bound.
+//! Its drop instead preserves the traced Hermite jets and proves the whole UV control
+//! polygon inside the domain (`p2::BoundaryPolicy::Preserve`, #17016); it never uses an
+//! unbounded boundary flattening. The budget is the drop's 3D tolerance less the largest
 //! deviation it measured while tracing (that deviation is sampled, as upstream's span test
 //! samples it; only the moves are bounded).
 //!
@@ -82,11 +84,12 @@
 //! here, and its move is not part of the bound.
 //!
 //! Deviations: not upstream (above). Used for B-spline surfaces and offsets of them;
-//! elsewhere the drop keeps upstream's [`super::p1::fix_boundary_curves`].
+//! other nonprocedural surfaces keep upstream's [`super::p1::fix_boundary_curves`].
 
 use crate::blend::fillet_section::interval::{round_down, round_up, Ivl};
 use crate::blend::fillet_section::series::V3;
 use crate::blend::fillet_section::station::Nurbs;
+use crate::error::intersect::IntersectFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector3d::Point3;
@@ -192,7 +195,9 @@ impl MoveBound {
     /// its net's); `None` for any other kind, a net that does not agree, or a surface (or
     /// an offset's base) that carries a procedural definition: the kernel evaluates that
     /// exactly, not its net, so a bound on the net would not hold for it (as
-    /// `offset_executive::face` guards). Without a bound the drop keeps upstream's fix-up.
+    /// `offset_executive::face` guards). The procedural drop preserves its traced jets
+    /// with a whole-polygon domain proof; other surfaces without a bound keep the
+    /// upstream fix-up.
     #[must_use]
     pub fn of(k: &Kernel, surface: &Surface, budget: f64) -> Option<Self> {
         if surface.procedural_definition().is_some() {
@@ -388,19 +393,21 @@ pub fn fix_boundary_curves_bounded(
             "a breakpoint count other than the polygon's knot points",
         ));
     }
-    let refuse = |reason: &'static str| {
+    let refuse = |cause: IntersectFailure| {
         bound.refused.set(true);
-        SolidError::intersect_failed(OP, reason)
+        SolidError::intersect(OP, cause)
     };
     let (dlo, dhi) = (uv_domain.min(), uv_domain.max());
     if !(dlo.x <= dhi.x && dlo.y <= dhi.y) {
-        return Err(refuse("a domain that is empty or not a number"));
+        // the caller's domain (rule 9)
+        return Err(refuse(IntersectFailure::EmptyDomain));
     }
     if ctrl_poly
         .iter()
         .any(|p| !(p.x.is_finite() && p.y.is_finite()))
     {
-        return Err(refuse("a control point that is not a finite number"));
+        // the caller's polygon (rule 9)
+        return Err(refuse(IntersectFailure::NotFinite));
     }
     let bad = || SolidError::invalid_input(OP, "control point index");
     let (lo, hi) = (uv_domain.min(), uv_domain.max());
@@ -495,9 +502,10 @@ pub fn fix_boundary_curves_bounded(
 
     // 6. the total move of every span, against the traced polygon
     let Some(spent) = polygon_bound(k, bound, &traced, ctrl_poly, uv_domain, bound.budget)? else {
-        return Err(refuse(
-            "a span's move is not proved within the tolerance left",
-        ));
+        // a measured refusal: the move does not fit what is left of the tolerance
+        return Err(refuse(IntersectFailure::MoveNotProved {
+            budget: bound.budget,
+        }));
     };
     bound.spent.set(bound.spent.get().max(spent));
     Ok(changed)
@@ -866,7 +874,12 @@ mod tests {
     fn a_nan_control_point_is_refused() {
         let b = plane(1.0, 1.0, 1e-5);
         let mut p = poly(0, (0.45, f64::NAN), (0.5, 0.0), (0.55, 0.3));
-        assert!(bounded(&mut p, &[0.0, 1.0, 2.0], &DOM, &b).is_err());
+        let e = bounded(&mut p, &[0.0, 1.0, 2.0], &DOM, &b).unwrap_err();
+        assert_eq!(e.intersect_failure(), Some(&IntersectFailure::NotFinite));
+        assert_eq!(
+            crate::error::upstream_status(&e),
+            Some(crate::error::SM_ERR)
+        );
         assert!(b.refused());
     }
 
@@ -891,7 +904,18 @@ mod tests {
             assert!(b.spent() > 0.0);
             let small = plane(100.0, 100.0, 1e-6);
             let mut p = poly(side, (0.45, -1e-5), (0.5, 1e-7), (0.55, 5e-6));
-            assert!(bounded(&mut p, &[0.0, 1.0, 2.0], &DOM, &small).is_err());
+            let e = bounded(&mut p, &[0.0, 1.0, 2.0], &DOM, &small).unwrap_err();
+            assert_eq!(
+                e.intersect_failure(),
+                Some(&IntersectFailure::MoveNotProved {
+                    budget: small.budget
+                }),
+                "side {side}"
+            );
+            assert_eq!(
+                crate::error::upstream_status(&e),
+                Some(crate::error::SM_ERR)
+            );
             assert!(small.refused(), "side {side}");
         }
     }
@@ -1000,7 +1024,12 @@ mod tests {
         let b = plane(1.0, 1.0, 1e-5);
         let mut p = poly(0, (0.4, 0.2), (0.5, 0.25), (0.6, 0.2));
         let dom = Extent2d::from_bounds(0.0, f64::NAN, 1.0, 1.0);
-        assert!(bounded(&mut p, &[0.0, 1.0, 2.0], &dom, &b).is_err());
+        let e = bounded(&mut p, &[0.0, 1.0, 2.0], &dom, &b).unwrap_err();
+        assert_eq!(e.intersect_failure(), Some(&IntersectFailure::EmptyDomain));
+        assert_eq!(
+            crate::error::upstream_status(&e),
+            Some(crate::error::SM_ERR)
+        );
         assert!(b.refused());
     }
 

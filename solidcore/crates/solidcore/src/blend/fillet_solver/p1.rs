@@ -1061,6 +1061,26 @@ impl FilletSolver {
         Ok(slot.as_ref())
     }
 
+    /// Angular budget for treating two supports as one rollover section. The offset
+    /// sections must meet within the body's existing intersection tolerance. Read the
+    /// fixed solver data, not offset surfaces temporarily zeroed during construction.
+    pub(crate) fn constant_offset_rollover_tolerance(
+        &self,
+        k: &Kernel,
+        b: &Brep,
+        offsets: [f64; 2],
+    ) -> f64 {
+        let [o0, o1] = offsets;
+        let size = o0.abs().max(o1.abs());
+        let tolerance = vertex::corner::xsect_tol_3d_of_brep(k, b);
+        crate::blend::blend_corner::join_within_xsect_tolerance_deg(
+            size,
+            tolerance,
+            self.tangency_tolerance.to_degrees(),
+        )
+        .to_radians()
+    }
+
     pub(crate) fn surface_mut(&mut self, rail: usize) -> Result<Option<&mut OffsetSurfaceSlot>> {
         let with_geometry = self.fg_for_surfaces.is_some();
         let slot = self.addressed_slot_mut(rail)?;
@@ -2180,6 +2200,23 @@ pub trait FilletSolverOps: AsFilletSolverOps {
     /// default is false and only the ordinary constant-offset solvers opt in.
     fn uses_constant_offset_equations(&self) -> bool {
         false
+    }
+
+    /// Tangency policy for rail crossings. Fixed-offset equations use the section-gap
+    /// budget; varying offsets retain their existing angular policy. A last evaluated
+    /// varying radius is not a bound on the law at another event.
+    fn rollover_tolerance(&self, k: &Kernel, b: &Brep) -> Result<f64> {
+        if self.uses_constant_offset_equations() {
+            if let Some([r0, r1]) = self.constant_radii() {
+                let [o0, o1] = self.solver().orientations;
+                return Ok(self.solver().constant_offset_rollover_tolerance(
+                    k,
+                    b,
+                    [r0 * o0, r1 * o1],
+                ));
+            }
+        }
+        Ok(self.solver().tangency_tolerance)
     }
 
     /// `SetupOffsetValues(rTsectPnt, pOffsetDist)`: the base returns `SM_ERR`.
@@ -3491,8 +3528,22 @@ pub fn test_manifold_tangent_rollover(
     e: EdgeId,
     tangency_tol_rad: f64,
 ) -> Result<(bool, bool)> {
-    let edge_use = eu::primary_edgeuse(b, e)?.ok_or_else(|| invalid("edge without edge use"))?;
     let test_param = edge::interval(b, e)?.evaluate(0.34);
+    test_manifold_tangent_rollover_at(k, b, e, test_param, tangency_tol_rad)
+}
+
+/// Test support tangency at the rail's actual crossing of the edge.
+///
+/// # Errors
+/// As [`test_manifold_tangent_rollover`].
+pub(crate) fn test_manifold_tangent_rollover_at(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    test_param: f64,
+    tangency_tol_rad: f64,
+) -> Result<(bool, bool)> {
+    let edge_use = eu::primary_edgeuse(b, e)?.ok_or_else(|| invalid("edge without edge use"))?;
     // SE(EvaluateBinormal(dTestParam, FALSE, sPnt, sBinVec, NULL, &sFaceuseNormal))
     let (_pnt, _bin_vec, mut faceuse_normal) = binormal_status_ignored(k, b, edge_use, test_param)?;
     let fu = eu::faceuse(b, edge_use)?.ok_or_else(|| invalid("edge use without face use"))?;
@@ -3637,7 +3688,9 @@ pub fn trim_rail(k: &Kernel, b: &mut Brep, rail: EdgeId, trim_interval: &Extent1
 
 #[path = "p1/rails.rs"]
 pub(crate) mod rails;
-pub use rails::{compute_support_edge, split_rail, RailOwnership, RetainedRailOwnership};
+pub use rails::{
+    compute_support_edge, split_rail, split_rail_along, RailOwnership, RetainedRailOwnership,
+};
 
 #[cfg(test)]
 mod tests {

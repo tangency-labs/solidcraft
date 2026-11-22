@@ -2468,6 +2468,7 @@ mod tests {
                 error: "radius too large".into(),
                 origin: None,
                 code: None,
+                failure_code: None,
             }),
             log: vec!["[error] radius too large".into()],
             screenshot: Some(vec![1, 2, 3]),
@@ -2574,7 +2575,14 @@ mod tests {
 
         // A failed modeling command still offers its design. A successful import step
         // also does not suppress design attachments to a later report.
-        let failed = payload::Failing { command: Some("solid.fillet".into()), params: None, error: "too large".into(), origin: None, code: None };
+        let failed = payload::Failing {
+            command: Some("solid.fillet".into()),
+            params: None,
+            error: "too large".into(),
+            origin: None,
+            code: None,
+            failure_code: None,
+        };
         assert!(ticket::evidence(&app, None, Some(failed), None).design.is_some());
         app.issue_report.steps.back_mut().unwrap()["ok"] = json!(true);
         assert!(ticket::evidence(&app, None, None, None).design.is_some());
@@ -2813,6 +2821,57 @@ mod tests {
         assert!(app.issue_report.draft.as_ref().unwrap().ticket.is_none(), "the GitHub draft, as before");
     }
 
+    /// #17926: a report of a fillet the kernel refuses carries, as `repro.failing.code`, the
+    /// stable code of the kernel call the failure came from: the same code the failed command's
+    /// error has, and the same for a fillet of the timeline that fails so. A failure made from no
+    /// kernel call sends none.
+    #[test]
+    fn a_failed_fillets_report_carries_its_kernel_code() {
+        let wall = || {
+            let mut s = Session::default();
+            for (c, p) in [
+                ("parameters.change", json!({"name":"top_radius", "expression":"0.5 mm"})),
+                ("sketch.create", json!({"plane":"XY", "name":"Wall"})),
+                ("sketch.rectangle.two_point", json!({"p0":[0,0], "p1":[30,2]})),
+                ("sketch.finish", json!({})),
+                ("solid.extrude", json!({"distance":"10 mm", "body_name":"Wall"})),
+            ] {
+                s.execute(c, &p).unwrap();
+            }
+            s
+        };
+        let edges = json!([[15, 0, 10], [15, 2, 10]]);
+        let sent = |app: &mut SolveApp, error: &str| {
+            let draft = draft_for(app, None, Some(error));
+            let t = ticket::new_ticket(app, &draft, None);
+            let all = payload::Ticks { system: true, repro: true, log: true, screenshot: true, design: true, crash: true };
+            payload::build(&t.form, all, &t.evidence, "solidcraft test").ticket["repro"]["failing"].clone()
+        };
+        let as_json = |c: &solidcraft_engine::kernel::ErrorCode| json!({"call": c.call, "kind": c.kind, "operation": c.operation});
+
+        // a new fillet the kernel refuses: its command's error
+        let mut s = wall();
+        let e = s.execute("solid.fillet", &json!({"edges": edges, "radius": "1.5 mm"})).unwrap_err();
+        let code = e.error_code().cloned().expect("a kernel code");
+        let mut app = SolveApp::new(s, Default::default());
+        let failing = sent(&mut app, &e.to_string());
+        assert_eq!(failing["code"], as_json(&code), "{failing}");
+
+        // a fillet of the timeline that fails so after a parameter change: its result's
+        let mut s = wall();
+        s.execute("solid.fillet", &json!({"edges": edges, "radius": "top_radius"})).unwrap();
+        let _ = s.execute("parameters.change", &json!({"name":"top_radius", "expression":"1.8 mm"}));
+        let r = s.model.results.iter().find(|r| r.error.is_some()).cloned().unwrap();
+        assert_eq!(r.error_code.as_ref(), Some(&code), "one failure, one code");
+        let mut app = SolveApp::new(s, Default::default());
+        let failing = sent(&mut app, r.error.as_deref().unwrap());
+        assert_eq!(failing["code"], as_json(&code), "{failing}");
+
+        // a failure no kernel call made
+        let failing = sent(&mut app, "Synthetic command error");
+        assert!(failing.get("code").is_none(), "{failing}");
+    }
+
     #[test]
     fn report_issue_from_an_agent_opens_a_draft_and_never_sends_the_design_on_its_word() {
         let ctx = crate::fonts::test_context();
@@ -2957,7 +3016,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let mut crashed = Session::default();
         crashed.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
-        let bytes = solidcraft_engine::io::write_design(&crashed.doc);
+        let bytes = solidcraft_engine::io::write_design(&crashed.doc).unwrap();
         let design = dir.join("design.sc");
         std::fs::write(&design, &bytes).unwrap();
         let report = json!({
@@ -2976,7 +3035,7 @@ mod tests {
         let t = ticket::new_ticket(&mut app, &draft, None);
         let ev = &t.evidence;
         assert_eq!(ev.design.as_ref().map(|(n, b)| (n.as_str(), b.as_slice())), Some(("Vent Panel.sc", bytes.as_slice())));
-        assert_ne!(ev.design.as_ref().unwrap().1, solidcraft_engine::io::write_design(&app.session.doc), "not the design open now");
+        assert_ne!(ev.design.as_ref().unwrap().1, solidcraft_engine::io::write_design(&app.session.doc).unwrap(), "not the design open now");
         assert_eq!(ev.design_from, Some("report.design_from_crash"));
         assert_eq!(ev.session["session_start"], "crashed");
         assert_eq!(ev.session["design_sha256"], json!(tickets::api::sha256_hex(&bytes)));
@@ -3030,7 +3089,8 @@ mod tests {
         let draft = draft_for(&app, None, None);
         let t = ticket::new_ticket(&mut app, &draft, None);
         assert_eq!(t.evidence.design_from, None);
-        assert_eq!(t.evidence.design.unwrap().1, solidcraft_engine::io::write_design(&app.session.doc));
+        let attached = solidcraft_engine::io::read_design(&t.evidence.design.unwrap().1).unwrap();
+        assert_eq!(attached.features, app.session.doc.features);
         if let Some(a) = app.autosave.take() {
             drop(a);
         }
