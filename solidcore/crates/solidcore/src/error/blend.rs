@@ -68,8 +68,8 @@
 //! | [`BlendFailure::PassedOn`]             | the status of the stage passed on |
 //! | [`BlendFailure::NotCertified`]         | `SM_ERR`                          |
 //! | [`BlendFailure::SectionNotProved`], [`BlendFailure::SectionDegenerate`], [`BlendFailure::SectionUnsupported`], [`BlendFailure::RadiusLawNotPositive`], [`BlendFailure::SectionInputInvalid`] | `SM_ERR` |
-//! | [`BlendFailure::WeldNotBuilt`]         | `SM_ERR`                          |
 //! | [`BlendFailure::Solver`]               | `SM_ERR`, `SM_ERR_NULL_POINTER` for [`SolverFailure::GnSideInputMissing`], [`SolverFailure::ExtensionCornerMissing`], [`SolverFailure::EdgeUseWithoutFace`], [`SolverFailure::SolverEdgeUseMissing`], [`SolverFailure::FilletGeomWithoutRail`], [`SolverFailure::FilletGeomWithoutSurface`] and [`SolverFailure::FilletGeomWithoutSolver`] |
+//! | [`BlendFailure::WeldNotBuilt`]         | `SM_ERR`                          |
 //!
 //! **The phrase causes** ([`BlendFailure::Failed`] to [`BlendFailure::PassedOn`]) are the
 //! shape the blend sites were converted to before the record, some of them refusals not yet
@@ -712,14 +712,14 @@ pub enum BlendFailure {
     /// station): a check on the caller's input ([`ErrorKind::InvalidInput`]), status
     /// `SM_ERR`.
     SectionInputInvalid(SectionInput),
-    /// A weld bead the kernel does not build yet (#15129, [`crate::blend::weld_bead`]), for
-    /// the gap named: not a fact of the geometry and not a defect, so no size is named. Its
-    /// class is [`ErrorKind::Unsupported`]. Not upstream.
-    WeldNotBuilt(WeldGap),
     /// A failure of the fillet solver (`crate::blend::fillet_solver`): its class and status
     /// are the cause's ([`SolverFailure::class`], status `SM_ERR` unless the cause says
     /// otherwise). Typed, so not a phrase cause ([`BlendFailure::is_phrase`]).
     Solver(SolverFailure),
+    /// A weld bead the kernel does not build yet (#15129, [`crate::blend::weld_bead`]), for
+    /// the gap named: not a fact of the geometry and not a defect, so no size is named. Its
+    /// class is [`ErrorKind::Unsupported`]. Not upstream.
+    WeldNotBuilt(WeldGap),
 }
 
 /// What the exact round at a radius law's corner looked for and did not find
@@ -771,6 +771,140 @@ impl CrossingInput {
             Self::MaterialEdgeUseRadial => "the material edge use's radial",
             Self::SideEdgeCurve => "the side edge's curve",
             Self::CrossingOnSideEdge => "the rollover event on the side edge",
+        }
+    }
+}
+
+/// What a G^n section's certificate could not prove ([`BlendFailure::SectionNotProved`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SectionProof {
+    /// A face's weights positive over a box.
+    FaceWeightPositive,
+    /// A curve's weight positive over a span.
+    CurveWeightPositive,
+    /// The section's weight positive over an extension.
+    SectionWeightPositive,
+    /// The ball's radius positive over a box.
+    RadiusPositive,
+    /// The definition's enclosure over a box.
+    Enclosure,
+    /// A bound or a box the certificate computes finite.
+    BoundFinite,
+}
+
+impl SectionProof {
+    /// What was not proved, as a phrase.
+    #[must_use]
+    pub const fn what(self) -> &'static str {
+        match self {
+            Self::FaceWeightPositive => "a face's weights positive over the box",
+            Self::CurveWeightPositive => "the curve's weight positive over the span",
+            Self::SectionWeightPositive => "the section's weight positive over the extension",
+            Self::RadiusPositive => "the ball's radius positive over the box",
+            Self::Enclosure => "the definition's enclosure over the box",
+            Self::BoundFinite => "a bound of the certificate finite",
+        }
+    }
+}
+
+/// How a G^n section degenerates ([`BlendFailure::SectionDegenerate`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SectionDegeneracy {
+    /// The section's area does not fall as its thumbweight grows, so no thumbweight is the
+    /// equal area one.
+    AreaDoesNotFall,
+    /// A weight or a length of the section is zero at the point.
+    WeightOrLengthZero,
+    /// A section of the ball's circle is a half turn or more.
+    ArcHalfTurn,
+    /// The varying balls' centres stand still.
+    CentresStandStill,
+    /// A vector the section normalises vanishes (a face's normal at a foot, the leader's
+    /// tangent).
+    VectorVanishes,
+    /// The blend's system is singular at a station: its faces' normals agree there.
+    NormalsAgree,
+    /// The rails, or the round's stations, have no length.
+    NoLength,
+    /// The ball has no radius at the rails' start.
+    BallHasNoRadius,
+    /// A span to be halved has no parameter strictly inside it.
+    SpanCannotSplit,
+    /// The parameter interval lies in no span of the curve (a curve whose knots are all
+    /// one value).
+    NoSpanCoversInterval,
+}
+
+impl SectionDegeneracy {
+    /// How it degenerates, as a phrase.
+    #[must_use]
+    pub const fn what(self) -> &'static str {
+        match self {
+            Self::AreaDoesNotFall => "the section's area does not fall with its thumbweight",
+            Self::WeightOrLengthZero => "a weight or a length of the section is zero",
+            Self::ArcHalfTurn => "a section of the ball's circle is a half turn or more",
+            Self::CentresStandStill => "the balls' centres stand still",
+            Self::VectorVanishes => {
+                "a vector the section normalises vanishes (a face's normal at a foot, or the leader's tangent)"
+            }
+            Self::NormalsAgree => {
+                "the blend's system is singular at a station (its faces' normals agree there)"
+            }
+            Self::NoLength => "the rails or the round's stations have no length",
+            Self::BallHasNoRadius => "the ball has no radius at the rails' start",
+            Self::SpanCannotSplit => "a span has no midpoint inside it to be split at",
+            Self::NoSpanCoversInterval => "no span of the curve covers the parameter",
+        }
+    }
+}
+
+/// What a G^n section does not handle ([`BlendFailure::SectionUnsupported`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SectionLimit {
+    /// A face that is not a NURBS surface: its section of order 2 and up, and its
+    /// certificate, need one.
+    FaceNotNurbs,
+    /// A curve or face of degree 0 in a direction.
+    DegreeBelowOne,
+    /// A face's weight that is not positive.
+    FaceWeightNotPositive,
+    /// A curve's weight that is not positive.
+    CurveWeightNotPositive,
+    /// A face that is a blend by its definition, enclosed only for a round of one radius on
+    /// a round of one radius between NURBS faces.
+    DefinitionFaceNotOneRadius,
+    /// A derivative order past the most the series hold.
+    OrderPastSeries {
+        /// The order asked.
+        order: usize,
+        /// The most the series hold.
+        most: usize,
+    },
+}
+
+/// Which inputs of a G^n section do not fit together ([`BlendFailure::SectionInputInvalid`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SectionInput {
+    /// The round's range is not within its stations.
+    RangeOutsideStations,
+    /// The rails and the centre line run over different intervals.
+    IntervalsDiffer,
+    /// The span asked for starts at or past the definition's last station.
+    SpanPastLastStation,
+}
+
+impl SectionInput {
+    /// What does not fit, as a phrase.
+    #[must_use]
+    pub const fn what(self) -> &'static str {
+        match self {
+            Self::RangeOutsideStations => "the round's range is not within its stations",
+            Self::IntervalsDiffer => "the rails and the centre line run over different intervals",
+            Self::SpanPastLastStation => "the span asked for is past the definition's last station",
         }
     }
 }
@@ -1157,140 +1291,6 @@ impl FilletSetUp {
             Self::CornerExtendedSurface => {
                 "the fillet corner has no extended surface of the side face"
             }
-        }
-    }
-}
-
-/// What a G^n section's certificate could not prove ([`BlendFailure::SectionNotProved`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum SectionProof {
-    /// A face's weights positive over a box.
-    FaceWeightPositive,
-    /// A curve's weight positive over a span.
-    CurveWeightPositive,
-    /// The section's weight positive over an extension.
-    SectionWeightPositive,
-    /// The ball's radius positive over a box.
-    RadiusPositive,
-    /// The definition's enclosure over a box.
-    Enclosure,
-    /// A bound or a box the certificate computes finite.
-    BoundFinite,
-}
-
-impl SectionProof {
-    /// What was not proved, as a phrase.
-    #[must_use]
-    pub const fn what(self) -> &'static str {
-        match self {
-            Self::FaceWeightPositive => "a face's weights positive over the box",
-            Self::CurveWeightPositive => "the curve's weight positive over the span",
-            Self::SectionWeightPositive => "the section's weight positive over the extension",
-            Self::RadiusPositive => "the ball's radius positive over the box",
-            Self::Enclosure => "the definition's enclosure over the box",
-            Self::BoundFinite => "a bound of the certificate finite",
-        }
-    }
-}
-
-/// How a G^n section degenerates ([`BlendFailure::SectionDegenerate`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum SectionDegeneracy {
-    /// The section's area does not fall as its thumbweight grows, so no thumbweight is the
-    /// equal area one.
-    AreaDoesNotFall,
-    /// A weight or a length of the section is zero at the point.
-    WeightOrLengthZero,
-    /// A section of the ball's circle is a half turn or more.
-    ArcHalfTurn,
-    /// The varying balls' centres stand still.
-    CentresStandStill,
-    /// A vector the section normalises vanishes (a face's normal at a foot, the leader's
-    /// tangent).
-    VectorVanishes,
-    /// The blend's system is singular at a station: its faces' normals agree there.
-    NormalsAgree,
-    /// The rails, or the round's stations, have no length.
-    NoLength,
-    /// The ball has no radius at the rails' start.
-    BallHasNoRadius,
-    /// A span to be halved has no parameter strictly inside it.
-    SpanCannotSplit,
-    /// The parameter interval lies in no span of the curve (a curve whose knots are all
-    /// one value).
-    NoSpanCoversInterval,
-}
-
-impl SectionDegeneracy {
-    /// How it degenerates, as a phrase.
-    #[must_use]
-    pub const fn what(self) -> &'static str {
-        match self {
-            Self::AreaDoesNotFall => "the section's area does not fall with its thumbweight",
-            Self::WeightOrLengthZero => "a weight or a length of the section is zero",
-            Self::ArcHalfTurn => "a section of the ball's circle is a half turn or more",
-            Self::CentresStandStill => "the balls' centres stand still",
-            Self::VectorVanishes => {
-                "a vector the section normalises vanishes (a face's normal at a foot, or the leader's tangent)"
-            }
-            Self::NormalsAgree => {
-                "the blend's system is singular at a station (its faces' normals agree there)"
-            }
-            Self::NoLength => "the rails or the round's stations have no length",
-            Self::BallHasNoRadius => "the ball has no radius at the rails' start",
-            Self::SpanCannotSplit => "a span has no midpoint inside it to be split at",
-            Self::NoSpanCoversInterval => "no span of the curve covers the parameter",
-        }
-    }
-}
-
-/// What a G^n section does not handle ([`BlendFailure::SectionUnsupported`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum SectionLimit {
-    /// A face that is not a NURBS surface: its section of order 2 and up, and its
-    /// certificate, need one.
-    FaceNotNurbs,
-    /// A curve or face of degree 0 in a direction.
-    DegreeBelowOne,
-    /// A face's weight that is not positive.
-    FaceWeightNotPositive,
-    /// A curve's weight that is not positive.
-    CurveWeightNotPositive,
-    /// A face that is a blend by its definition, enclosed only for a round of one radius on
-    /// a round of one radius between NURBS faces.
-    DefinitionFaceNotOneRadius,
-    /// A derivative order past the most the series hold.
-    OrderPastSeries {
-        /// The order asked.
-        order: usize,
-        /// The most the series hold.
-        most: usize,
-    },
-}
-
-/// Which inputs of a G^n section do not fit together ([`BlendFailure::SectionInputInvalid`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum SectionInput {
-    /// The round's range is not within its stations.
-    RangeOutsideStations,
-    /// The rails and the centre line run over different intervals.
-    IntervalsDiffer,
-    /// The span asked for starts at or past the definition's last station.
-    SpanPastLastStation,
-}
-
-impl SectionInput {
-    /// What does not fit, as a phrase.
-    #[must_use]
-    pub const fn what(self) -> &'static str {
-        match self {
-            Self::RangeOutsideStations => "the round's range is not within its stations",
-            Self::IntervalsDiffer => "the rails and the centre line run over different intervals",
-            Self::SpanPastLastStation => "the span asked for is past the definition's last station",
         }
     }
 }
@@ -3975,8 +3975,8 @@ mod tests {
             BlendFailure::SectionUnsupported(_) => (64, None),
             BlendFailure::RadiusLawNotPositive { .. } => (65, None),
             BlendFailure::SectionInputInvalid(_) => (66, None),
-            BlendFailure::WeldNotBuilt(_) => (67, None),
-            BlendFailure::Solver(_) => (68, None),
+            BlendFailure::Solver(_) => (67, None),
+            BlendFailure::WeldNotBuilt(_) => (68, None),
             BlendFailure::SeamCornersBothCut => (69, None),
             BlendFailure::SeamCutOffRib { .. } => (70, None),
             BlendFailure::UvCurveEndOffSurface { .. } => (71, None),
