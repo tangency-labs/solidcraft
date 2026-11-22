@@ -250,7 +250,11 @@ fn a_sweep_from_a_body_face_works_with_construction_projections() {
     run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "P"}));
     run(&mut s, "sketch.line", json!({"points": [[0, -10], [0, -50]], "ids": ["up"]}));
     run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "solid.sweep", json!({"face": [0, 0, 10], "face_body": "Block", "path_sketch": "P", "path": ["up"], "operation": "new", "body_name": "Column"}));
+    run(
+        &mut s,
+        "solid.sweep",
+        json!({"face": [0, 0, 10], "face_body": "Block", "path_sketch": "P", "path": ["up"], "operation": "new", "body_name": "Column"}),
+    );
     let m = measure(&s, "Column");
     assert!((m.volume - 4000.0).abs() < 2e-3 * 4000.0, "volume {}", m.volume);
 }
