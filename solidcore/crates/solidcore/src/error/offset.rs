@@ -1030,7 +1030,7 @@ mod tests {
         // (the operation, the failure, the status kept, its class)
         let samples = [
             (
-                "offset::offset_executive::crossing_loops",
+                "offset::offset_executive::crossing_loops::resolve_crossing_loops",
                 defect,
                 Some(SM_ERR_ASSERT_FAILURE),
                 ErrorKind::StageFailed,
@@ -1042,7 +1042,7 @@ mod tests {
                 ErrorKind::StageFailed,
             ),
             (
-                "offset::offset_executive::crossing_loops",
+                "offset::offset_executive::crossing_loops::resolve_crossing_loops",
                 OffsetFailure::FaceHasNoSurface { face },
                 None,
                 ErrorKind::InvalidInput,

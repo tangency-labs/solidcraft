@@ -182,7 +182,7 @@ struct LoopContact {
 /// The first derivative of `curve` at `t` (`Evaluate(t, 1, from_left, aEval)`, `aEval[1]`).
 fn curve_tangent(k: &Kernel, curve: &Curve, t: f64, from_left: bool) -> Result<Vec3> {
     let eval = curve.evaluate(k, t, 1, from_left, true)?;
-    Ok(*at(&eval, 1)?)
+    Ok(*present(eval.get(1), EVAL_1ST)?)
 }
 
 /// The directions in which a loop (its edge uses `loop_edgeuses`) leaves the point `p`
@@ -520,6 +520,11 @@ fn present<T>(value: Option<T>, why: &'static str) -> Result<T> {
 /// Why an index into the routine's own lists is past their end.
 const INDEX_PAST_END: &str = "an index into the crossings' own lists is past their end, though \
                               every index is taken from those lists";
+
+/// Why a curve's evaluation to the first derivative gave no tangent (the words of
+/// `intersect::curve_class::p1`).
+const EVAL_1ST: &str = "the curve's evaluation to the first derivative returned fewer than two \
+                        vectors, though it returns the point and each derivative asked for";
 
 #[track_caller]
 fn at<T>(v: &[T], i: usize) -> Result<&T> {
@@ -2221,5 +2226,52 @@ mod tests {
         // long enough
         assert!(!stretch_too_short(0, 1, 0.02, tol));
         assert!(!stretch_too_short(-2, -3, 0.02, tol));
+    }
+
+    /// The helpers' defects keep the status of the check each replaces and say their own
+    /// reason: the trim interval mismatch `SM_ERR_ASSERT_FAILURE`, a missing link, a list
+    /// index past the end and a missing tangent `SM_ERR_NULL_POINTER`; all are defects of
+    /// this routine with no entity.
+    #[test]
+    fn the_helpers_defects_keep_the_status_they_replace() {
+        use crate::error::ErrorKind;
+        let short = [0_u8];
+        let cases = [
+            (
+                trim_interval_mismatch(),
+                SM_ERR_ASSERT_FAILURE,
+                "an offset edge use's UV trim curve does not span its edge's interval, though \
+                 the kernel keeps an edge use's trim curve over its edge's interval",
+            ),
+            (
+                present(None::<u8>, FU_NO_MATE).unwrap_err(),
+                SM_ERR_NULL_POINTER,
+                FU_NO_MATE,
+            ),
+            (
+                at(&short, 1).unwrap_err(),
+                SM_ERR_NULL_POINTER,
+                INDEX_PAST_END,
+            ),
+            (
+                present(None::<u8>, EVAL_1ST).unwrap_err(),
+                SM_ERR_NULL_POINTER,
+                EVAL_1ST,
+            ),
+        ];
+        for (error, status, why) in cases {
+            assert_eq!(error.upstream_status(), Some(status), "{error:?}");
+            assert_eq!(error.kind(), ErrorKind::StageFailed, "{error:?}");
+            assert!(error.is_defect(), "{error:?}");
+            assert_eq!(error.operation(), OP, "{error:?}");
+            assert_eq!(error.entity(), None, "{error:?}");
+            assert_eq!(
+                error.offset_failure(),
+                Some(&OffsetFailure::Defect { why }),
+                "{error:?}"
+            );
+        }
+        assert_eq!(at(&short, 0).ok(), Some(&0));
+        assert_eq!(present(Some(7_u8), FU_NO_MATE).ok(), Some(7));
     }
 }
