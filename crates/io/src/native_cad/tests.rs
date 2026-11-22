@@ -965,6 +965,17 @@ fn keyword_text_in_a_header_field_does_not_hide_the_header_end() {
     assert_eq!((got.system.as_str(), got.preprocessor.as_str()), ("SolidWorks 2021", "Example CAD"));
 }
 
+/// A header comment may hold the `ENDSEC` keyword too: each ends nothing, so the header's real
+/// end is still found and the program named, and the keyword text does not use up the tries.
+#[test]
+fn keyword_text_in_a_header_comment_does_not_hide_the_header_end() {
+    let noise = format!("/* {} */", "ENDSEC ".repeat(super::STEP_HEADER_ENDS + 8));
+    let text = box_step("Part", "Example CAD", "SolidWorks 2021");
+    let text = text.replacen("FILE_DESCRIPTION(", &format!("{noise}FILE_DESCRIPTION("), 1);
+    let got = super::step_producer(text.as_bytes());
+    assert_eq!((got.system.as_str(), got.preprocessor.as_str()), ("SolidWorks 2021", "Example CAD"));
+}
+
 /// Every STEP file of the conformance set and the import kernel cases: its header read alone is
 /// the header SolidCraft's parser reads with the whole file.
 #[test]

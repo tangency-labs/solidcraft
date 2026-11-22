@@ -94,8 +94,9 @@ fn step_producer(bytes: &[u8]) -> Producer {
 }
 
 /// The offset just past the next `ENDSEC` keyword in `text` at or after `from` that is not
-/// inside a quoted string, the keyword included. A header field's text can hold the keyword,
-/// and one that ends nothing must not be tried as the header's end or use up the tries.
+/// inside a quoted string or a comment, the keyword included. A header field's text or a comment
+/// can hold the keyword, and one that ends nothing must not be tried as the header's end or use
+/// up the tries.
 fn next_end_section(text: &str, from: usize) -> Option<usize> {
     let bytes = text.as_bytes();
     let (mut at, mut quoted) = (from, false);
@@ -106,6 +107,12 @@ fn next_end_section(text: &str, from: usize) -> Option<usize> {
             b'\'' => {
                 quoted = !quoted;
                 at += 1;
+            }
+            // A comment runs to its `*/` and may hold the keyword; one never closed leaves no
+            // keyword after it.
+            b'/' if !quoted && bytes.get(at + 1) == Some(&b'*') => {
+                let comment = text.get(at + 2..)?;
+                at = at + 2 + comment.find("*/")? + "*/".len();
             }
             b'E' if !quoted && text.get(at..).is_some_and(|rest| rest.starts_with("ENDSEC")) => return Some(at + "ENDSEC".len()),
             _ => at += 1,
