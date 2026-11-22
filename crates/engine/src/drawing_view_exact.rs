@@ -443,7 +443,7 @@ fn prepare(
                 // A worker that panicked lost its body: it is read as one `hlr` can't draw.
                 let made = match made.next().flatten() {
                     Some(Some(Made::Def(def))) => {
-                        prepared.defs.push(def);
+                        prepared.defs.push(*def);
                         Ok(prepared.defs.len() - 1)
                     }
                     Some(Some(Made::Fallback(why))) => Err(why),
@@ -471,7 +471,7 @@ fn prepare(
 
 /// A body prepared for `hlr`, or why it can't be drawn exact whatever the view.
 enum Made {
-    Def(hlr::Prepared),
+    Def(Box<hlr::Prepared>),
     Fallback(Fallback),
 }
 
@@ -482,7 +482,7 @@ fn prepare_body(record: Option<&Brep>, opts: &hlr::Options, cancel: &(dyn Fn() -
         Err(HlrError::Cancelled) => return None,
         Err(_) => Made::Fallback(Fallback::Unread),
         Ok(def) if !(def.report.freeform_faces.is_empty() && def.report.unsupported_trims.is_empty()) => Made::Fallback(Fallback::Unsupported),
-        Ok(def) => Made::Def(def),
+        Ok(def) => Made::Def(Box::new(def)),
     })
 }
 
