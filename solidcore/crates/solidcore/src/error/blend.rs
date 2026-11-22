@@ -25,7 +25,10 @@
 //! | [`BlendFailure::PlaneCurveLeavesDomain`] | [`ErrorKind::OutsideDomain`] (8)           |
 //! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
 //! | [`BlendFailure::CreasePieceEndUnbuildable`] | [`ErrorKind::Unsupported`] (5)           |
-//! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
+//! | [`BlendFailure::NotCertified`], [`BlendFailure::SectionNotProved`] | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
+//! | [`BlendFailure::SectionDegenerate`]    | [`ErrorKind::Degenerate`] (3)                |
+//! | [`BlendFailure::SectionUnsupported`]   | [`ErrorKind::Unsupported`] (5)               |
+//! | [`BlendFailure::RadiusLawNotPositive`], [`BlendFailure::SectionInputInvalid`] | [`ErrorKind::InvalidInput`] (1): neither defect nor refusal |
 //! | [`BlendFailure::BandInputMissing`]     | [`ErrorKind::Missing`]: neither defect nor refusal |
 //! | [`BlendFailure::Solver`]               | its cause's ([`SolverFailure::class`])       |
 //! | the fillet executive's checks of the caller's arguments and body ([`BlendFailure::NoEdgesGiven`], [`BlendFailure::SizeBelowResolution`], [`BlendFailure::PerEdgeListLength`], [`BlendFailure::ParameterListSizes`], [`BlendFailure::FaceHasNoSurface`], [`BlendFailure::NoFirstBody`], [`BlendFailure::TargetNotGiven`], [`BlendFailure::EdgeNotInTarget`], [`BlendFailure::EdgeNotFilletable`], [`BlendFailure::GnSectionInvalid`], [`BlendFailure::CrossSectionTypeUnknown`], [`BlendFailure::RadiusTypeNotForEdges`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::VariableRadiusLawMissing`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::LawIntervalEmpty`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::EdgeUseWithoutEdge`], [`BlendFailure::BoundSurfaceRemoved`]) | [`ErrorKind::InvalidInput`] (1) |
@@ -37,6 +40,7 @@
 //! | [`BlendFailure::EaseNotBuilt`] | its stop's kind ([`EaseStop`]): [`ErrorKind::NotFound`] (2), [`ErrorKind::Degenerate`] (3), [`ErrorKind::Unsupported`] (5) or [`ErrorKind::OutsideDomain`] (8) |
 //! | [`BlendFailure::EaseGeometryNotBSpline`] | [`ErrorKind::Unsupported`] (5) |
 //! | [`BlendFailure::ArcLengthNotConverged`] | [`ErrorKind::NotConverged`] (4) |
+//! | [`BlendFailure::WeldNotBuilt`]         | [`ErrorKind::Unsupported`] (5): neither defect nor refusal |
 //! | [`BlendFailure::Trace`]               | the cause's ([`TraceFailure::class`])         |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
@@ -63,6 +67,8 @@
 //! | [`BlendFailure::NotWithinTolerance`]   | `SM_ERR_NOT_WITHIN_TOLERANCE`     |
 //! | [`BlendFailure::PassedOn`]             | the status of the stage passed on |
 //! | [`BlendFailure::NotCertified`]         | `SM_ERR`                          |
+//! | [`BlendFailure::SectionNotProved`], [`BlendFailure::SectionDegenerate`], [`BlendFailure::SectionUnsupported`], [`BlendFailure::RadiusLawNotPositive`], [`BlendFailure::SectionInputInvalid`] | `SM_ERR` |
+//! | [`BlendFailure::WeldNotBuilt`]         | `SM_ERR`                          |
 //! | [`BlendFailure::Solver`]               | its cause's ([`SolverFailure`]: `SM_ERR`, or `SM_ERR_NULL_POINTER` for a missing input of the caller's, a centre line with no B-spline form, a surface cache not built, a side surface that misses its end plane and a side edge not on the rail's face) |
 //!
 //! **The phrase causes** ([`BlendFailure::Failed`] to [`BlendFailure::PassedOn`]) are the
@@ -245,7 +251,8 @@ pub enum BlendFailure {
         minimum: f64,
     },
     /// The crossing's Hermite fit still has spans farther than a tenth of the tolerance
-    /// from the exact curve when its station cap or its 20 refinement passes ran out.
+    /// from the exact curve when its station cap or its 20 refinement passes ran out, or
+    /// when a pass found no point to split any of them at.
     /// Not within tolerance ([`ErrorKind::NotWithinTolerance`]); status `SM_ERR`.
     PlaneCurveFitCap {
         /// The stations held when fitting stopped.
@@ -538,6 +545,40 @@ pub enum BlendFailure {
     /// crossing) was not a finite number, so the crossing is neither classed concave nor
     /// convex (#17016). A defect ([`ErrorKind::StageFailed`]), status `SM_ERR`.
     CrossingNotFinite,
+    /// A G^n section's certificate could not prove what it must (a weight or the radius
+    /// positive over a box, an enclosure, a bound finite): its
+    /// interval enclosures were too wide. Not a fact of the geometry, which a narrower box
+    /// may prove, nor the kernel's fault: [`ErrorKind::NotWithinTolerance`], neither defect
+    /// nor refusal, like [`BlendFailure::NotCertified`]. Status `SM_ERR`; a certificate
+    /// that reads it (with its operation) subdivides the box.
+    SectionNotProved(SectionProof),
+    /// A G^n section, its system or its stations degenerate where they are built (the
+    /// section's area does not fall with its thumbweight, a weight or a length is zero, an
+    /// arc is a half turn or more, a normal or tangent vanishes, the faces' normals agree, the
+    /// rails or stations have no length, ...): [`ErrorKind::Degenerate`], status `SM_ERR`.
+    SectionDegenerate(SectionDegeneracy),
+    /// A G^n section's construction or certificate does not handle its input (a face that
+    /// is not a NURBS surface, a weight that is not positive, a blend face whose definition
+    /// it does not enclose, an order past the series it holds): [`ErrorKind::Unsupported`],
+    /// status `SM_ERR`.
+    SectionUnsupported(SectionLimit),
+    /// The radius law of a round is not positive at `s`, where the section is built on it:
+    /// a check on the caller's law ([`ErrorKind::InvalidInput`]), status `SM_ERR`.
+    RadiusLawNotPositive {
+        /// The law's parameter.
+        s: f64,
+        /// The radius the law gives there.
+        radius: f64,
+    },
+    /// A G^n section's inputs do not fit together (a range past the round's stations, rails
+    /// and a centre line over different intervals, a span past the definition's last
+    /// station): a check on the caller's input ([`ErrorKind::InvalidInput`]), status
+    /// `SM_ERR`.
+    SectionInputInvalid(SectionInput),
+    /// A weld bead the kernel does not build yet (#15129, [`crate::blend::weld_bead`]), for
+    /// the gap named: not a fact of the geometry and not a defect, so no size is named. Its
+    /// class is [`ErrorKind::Unsupported`]. Not upstream.
+    WeldNotBuilt(WeldGap),
     /// A failure of the fillet solver (`crate::blend::fillet_solver`): its class and status
     /// are the cause's ([`SolverFailure::class`], status `SM_ERR` unless the cause says
     /// otherwise). Typed, so not a phrase cause ([`BlendFailure::is_phrase`]).
@@ -1108,6 +1149,140 @@ impl CrossingInput {
     }
 }
 
+/// What a G^n section's certificate could not prove ([`BlendFailure::SectionNotProved`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SectionProof {
+    /// A face's weights positive over a box.
+    FaceWeightPositive,
+    /// A curve's weight positive over a span.
+    CurveWeightPositive,
+    /// The section's weight positive over an extension.
+    SectionWeightPositive,
+    /// The ball's radius positive over a box.
+    RadiusPositive,
+    /// The definition's enclosure over a box.
+    Enclosure,
+    /// A bound or a box the certificate computes finite.
+    BoundFinite,
+}
+
+impl SectionProof {
+    /// What was not proved, as a phrase.
+    #[must_use]
+    pub const fn what(self) -> &'static str {
+        match self {
+            Self::FaceWeightPositive => "a face's weights positive over the box",
+            Self::CurveWeightPositive => "the curve's weight positive over the span",
+            Self::SectionWeightPositive => "the section's weight positive over the extension",
+            Self::RadiusPositive => "the ball's radius positive over the box",
+            Self::Enclosure => "the definition's enclosure over the box",
+            Self::BoundFinite => "a bound of the certificate finite",
+        }
+    }
+}
+
+/// How a G^n section degenerates ([`BlendFailure::SectionDegenerate`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SectionDegeneracy {
+    /// The section's area does not fall as its thumbweight grows, so no thumbweight is the
+    /// equal area one.
+    AreaDoesNotFall,
+    /// A weight or a length of the section is zero at the point.
+    WeightOrLengthZero,
+    /// A section of the ball's circle is a half turn or more.
+    ArcHalfTurn,
+    /// The varying balls' centres stand still.
+    CentresStandStill,
+    /// A vector the section normalises vanishes (a face's normal at a foot, the leader's
+    /// tangent).
+    VectorVanishes,
+    /// The blend's system is singular at a station: its faces' normals agree there.
+    NormalsAgree,
+    /// The rails, or the round's stations, have no length.
+    NoLength,
+    /// The ball has no radius at the rails' start.
+    BallHasNoRadius,
+    /// A span to be halved has no parameter strictly inside it.
+    SpanCannotSplit,
+    /// The parameter interval lies in no span of the curve (a curve whose knots are all
+    /// one value).
+    NoSpanCoversInterval,
+}
+
+impl SectionDegeneracy {
+    /// How it degenerates, as a phrase.
+    #[must_use]
+    pub const fn what(self) -> &'static str {
+        match self {
+            Self::AreaDoesNotFall => "the section's area does not fall with its thumbweight",
+            Self::WeightOrLengthZero => "a weight or a length of the section is zero",
+            Self::ArcHalfTurn => "a section of the ball's circle is a half turn or more",
+            Self::CentresStandStill => "the balls' centres stand still",
+            Self::VectorVanishes => {
+                "a vector the section normalises vanishes (a face's normal at a foot, or the leader's tangent)"
+            }
+            Self::NormalsAgree => {
+                "the blend's system is singular at a station (its faces' normals agree there)"
+            }
+            Self::NoLength => "the rails or the round's stations have no length",
+            Self::BallHasNoRadius => "the ball has no radius at the rails' start",
+            Self::SpanCannotSplit => "a span has no midpoint inside it to be split at",
+            Self::NoSpanCoversInterval => "no span of the curve covers the parameter",
+        }
+    }
+}
+
+/// What a G^n section does not handle ([`BlendFailure::SectionUnsupported`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SectionLimit {
+    /// A face that is not a NURBS surface: its section of order 2 and up, and its
+    /// certificate, need one.
+    FaceNotNurbs,
+    /// A curve or face of degree 0 in a direction.
+    DegreeBelowOne,
+    /// A face's weight that is not positive.
+    FaceWeightNotPositive,
+    /// A curve's weight that is not positive.
+    CurveWeightNotPositive,
+    /// A face that is a blend by its definition, enclosed only for a round of one radius on
+    /// a round of one radius between NURBS faces.
+    DefinitionFaceNotOneRadius,
+    /// A derivative order past the most the series hold.
+    OrderPastSeries {
+        /// The order asked.
+        order: usize,
+        /// The most the series hold.
+        most: usize,
+    },
+}
+
+/// Which inputs of a G^n section do not fit together ([`BlendFailure::SectionInputInvalid`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SectionInput {
+    /// The round's range is not within its stations.
+    RangeOutsideStations,
+    /// The rails and the centre line run over different intervals.
+    IntervalsDiffer,
+    /// The span asked for starts at or past the definition's last station.
+    SpanPastLastStation,
+}
+
+impl SectionInput {
+    /// What does not fit, as a phrase.
+    #[must_use]
+    pub const fn what(self) -> &'static str {
+        match self {
+            Self::RangeOutsideStations => "the round's range is not within its stations",
+            Self::IntervalsDiffer => "the rails and the centre line run over different intervals",
+            Self::SpanPastLastStation => "the span asked for is past the definition's last station",
+        }
+    }
+}
+
 /// A face input required to trim a blend at a cliff.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -1374,6 +1549,24 @@ impl BandInput {
     }
 }
 
+/// What a weld bead the kernel does not build yet needs ([`BlendFailure::WeldNotBuilt`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum WeldGap {
+    /// Beads that meet at a vertex need a corner piece (#17916); the failure's site names the
+    /// vertex.
+    BeadsMeetAtVertex,
+    /// A joint that is not a straight edge between two planes: only the exact planar bead is
+    /// built so far; the bead on any joint (the foot blend) comes with its certificate
+    /// (#18028). The failure's site names the edge.
+    CurvedJoint,
+    /// A bead whose toe on one face is obtuse (its second leg at most its first times the
+    /// cosine of the angle between the faces, or the other way round): the exact planar
+    /// bead's surface is read through the chamfer's ball, which such legs fold. The failure's
+    /// site names the edge.
+    ObtuseToe,
+}
+
 /// The class of a blend larger than its faces allow, for `reason`: one of the blend's
 /// refusal classes 101 to 124 (the cliff overflow's own refusals grouped by what decides
 /// them), [`ErrorKind::TangentContinuationEnd`] (128) or [`ErrorKind::OverflowKeepsNothing`]
@@ -1420,6 +1613,8 @@ pub const fn no_room_class(reason: NoRoomReason) -> ErrorKind {
         R::EndAtSeamVertex => ErrorKind::EndAtSeamVertex,
         R::TangentContinuationEndUnsupported => ErrorKind::TangentContinuationEnd,
         R::OverflowKeepsNothing => ErrorKind::OverflowKeepsNothing,
+        // a weld bead larger than its faces take: the error names the size that builds
+        R::LegPastFace | R::NoToeAtLeg | R::BeadCutsFace => ErrorKind::FilletTooLarge,
     }
 }
 
@@ -1539,6 +1734,7 @@ impl BlendFailure {
             | Self::PlaneCurveStepVanished { .. }
             | Self::PlaneCurveFitCap { .. }
             | Self::NotCertified { .. }
+            | Self::WeldNotBuilt(_)
             | Self::LawIntervalEmpty
             | Self::LawHasNoValue
             | Self::FilletCrossesItself { .. }
@@ -1546,6 +1742,11 @@ impl BlendFailure {
             | Self::ExecutiveStepFailed
             | Self::EdgeSplitDeclined { .. }
             | Self::EaseNotBuilt(_)
+            | Self::SectionNotProved(_)
+            | Self::SectionDegenerate(_)
+            | Self::SectionUnsupported(_)
+            | Self::RadiusLawNotPositive { .. }
+            | Self::SectionInputInvalid(_)
             | Self::Failed(_) => SM_ERR,
             Self::Trace(t) => t.comparison_status(),
             Self::Missing(_)
@@ -1618,8 +1819,12 @@ impl BlendFailure {
             | Self::CrossingNotFinite => ErrorKind::StageFailed,
             Self::SkinPastStationCap { .. }
             | Self::NotCertified { .. }
+            | Self::SectionNotProved(_)
             | Self::PlaneCurveFitCap { .. } => ErrorKind::NotWithinTolerance,
-            Self::PlaneCurveTouches { .. } => ErrorKind::Degenerate,
+            Self::PlaneCurveTouches { .. } | Self::SectionDegenerate(_) => ErrorKind::Degenerate,
+            Self::RadiusLawNotPositive { .. } | Self::SectionInputInvalid(_) => {
+                ErrorKind::InvalidInput
+            }
             Self::PlaneCurveEndOff { .. }
             | Self::LawCornerNotFound { .. }
             | Self::CornerPatchFaceNotFound { .. } => ErrorKind::NotFound,
@@ -1629,7 +1834,9 @@ impl BlendFailure {
             | Self::LawHasNoValue
             | Self::SequenceCurveNotBSpline { .. }
             | Self::FilletCrossesItself { .. }
-            | Self::EaseGeometryNotBSpline(_) => ErrorKind::Unsupported,
+            | Self::SectionUnsupported(_)
+            | Self::EaseGeometryNotBSpline(_)
+            | Self::WeldNotBuilt(_) => ErrorKind::Unsupported,
             Self::ArcLengthNotConverged { .. } => ErrorKind::NotConverged,
             Self::BandInputMissing(_)
             | Self::CliffInputMissing { .. }
@@ -1733,8 +1940,14 @@ impl BlendFailure {
             | Self::EaseNotBuilt(_)
             | Self::EaseGeometryNotBSpline(_)
             | Self::ArcLengthNotConverged { .. }
+            | Self::SectionNotProved(_)
+            | Self::SectionDegenerate(_)
+            | Self::SectionUnsupported(_)
+            | Self::RadiusLawNotPositive { .. }
+            | Self::SectionInputInvalid(_)
             | Self::Trace(_)
-            | Self::NotCertified { .. } => false,
+            | Self::NotCertified { .. }
+            | Self::WeldNotBuilt(_) => false,
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -1820,7 +2033,13 @@ impl BlendFailure {
             | Self::EdgeUseWithoutEdge
             | Self::BoundSurfaceRemoved
             | Self::CornerPatchFaceNotFound { .. }
-            | Self::NotCertified { .. } => true,
+            | Self::SectionNotProved(_)
+            | Self::SectionDegenerate(_)
+            | Self::SectionUnsupported(_)
+            | Self::RadiusLawNotPositive { .. }
+            | Self::SectionInputInvalid(_)
+            | Self::NotCertified { .. }
+            | Self::WeldNotBuilt(_) => true,
         }
     }
 }
@@ -2075,6 +2294,21 @@ impl core::fmt::Display for BlendFailure {
             | Self::NotWithinTolerance(what)
             | Self::PassedOn { what, .. } => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
+            Self::WeldNotBuilt(WeldGap::BeadsMeetAtVertex) => write!(
+                f,
+                "{}: weld beads that meet at a vertex are not built yet (their corner, #17916)",
+                self.class()
+            ),
+            Self::WeldNotBuilt(WeldGap::CurvedJoint) => write!(
+                f,
+                "{}: a weld bead is built only along a straight edge between two planes so far",
+                self.class()
+            ),
+            Self::WeldNotBuilt(WeldGap::ObtuseToe) => write!(
+                f,
+                "{}: a weld bead with an obtuse toe (one leg at most the other's cosine of the angle between the faces) is not built yet",
+                self.class()
+            ),
             Self::BandInputMissing(input) => write!(f, "{} is missing", input.what()),
             Self::CliffInputMissing { face, input } => {
                 write!(f, "cliff face {face:?} is missing its {}", input.what())
@@ -2092,6 +2326,45 @@ impl core::fmt::Display for BlendFailure {
                 "the blend could not be certified within its tolerance in the work allowed \
                  ({halvings} spans halved, {stations} stations)"
             ),
+            Self::SectionNotProved(what) => write!(
+                f,
+                "{}: the section's certificate did not prove {}",
+                self.class(),
+                what.what()
+            ),
+            Self::SectionDegenerate(what) => write!(f, "{}: {}", self.class(), what.what()),
+            Self::SectionUnsupported(limit) => match limit {
+                SectionLimit::FaceNotNurbs => write!(
+                    f,
+                    "{}: a face is not a NURBS surface: its section of order 2 and up cannot be built or certified",
+                    self.class()
+                ),
+                SectionLimit::DegreeBelowOne => {
+                    write!(f, "{}: a curve or face is of degree 0", self.class())
+                }
+                SectionLimit::FaceWeightNotPositive => {
+                    write!(f, "{}: a face's weights are not positive", self.class())
+                }
+                SectionLimit::CurveWeightNotPositive => {
+                    write!(f, "{}: a curve's weights are not positive", self.class())
+                }
+                SectionLimit::DefinitionFaceNotOneRadius => write!(
+                    f,
+                    "{}: only a round of one radius between NURBS faces is certified by its definition",
+                    self.class()
+                ),
+                SectionLimit::OrderPastSeries { order, most } => write!(
+                    f,
+                    "{}: the order {order} is past the most the series hold ({most})",
+                    self.class()
+                ),
+            },
+            Self::RadiusLawNotPositive { s, radius } => write!(
+                f,
+                "{}: the radius law is {radius} at s = {s}, not positive",
+                self.class()
+            ),
+            Self::SectionInputInvalid(what) => write!(f, "{}: {}", self.class(), what.what()),
         }
     }
 }
@@ -2477,6 +2750,32 @@ mod tests {
                 BlendFailure::NoRoom(R::OverflowKeepsNothing),
                 ErrorKind::OverflowKeepsNothing,
             ),
+            // a weld bead's (#15129): too large, naming the size that builds
+            (
+                BlendFailure::NoRoom(R::LegPastFace),
+                ErrorKind::FilletTooLarge,
+            ),
+            (
+                BlendFailure::NoRoom(R::NoToeAtLeg),
+                ErrorKind::FilletTooLarge,
+            ),
+            (
+                BlendFailure::NoRoom(R::BeadCutsFace),
+                ErrorKind::FilletTooLarge,
+            ),
+            // a weld bead not built yet: neither a defect nor a refusal
+            (
+                BlendFailure::WeldNotBuilt(WeldGap::BeadsMeetAtVertex),
+                ErrorKind::Unsupported,
+            ),
+            (
+                BlendFailure::WeldNotBuilt(WeldGap::CurvedJoint),
+                ErrorKind::Unsupported,
+            ),
+            (
+                BlendFailure::WeldNotBuilt(WeldGap::ObtuseToe),
+                ErrorKind::Unsupported,
+            ),
             (
                 BlendFailure::StationDidNotConverge {
                     s: 0.42,
@@ -2750,6 +3049,48 @@ mod tests {
         );
     }
 
+    /// The G^n section's causes: each class, status `SM_ERR`, and wording with its numbers.
+    #[test]
+    fn the_section_causes_name_their_class_and_numbers() {
+        let rows = [
+            (
+                BlendFailure::SectionNotProved(SectionProof::FaceWeightPositive),
+                ErrorKind::NotWithinTolerance,
+                "the section's certificate did not prove a face's weights positive over the box",
+            ),
+            (
+                BlendFailure::SectionDegenerate(SectionDegeneracy::AreaDoesNotFall),
+                ErrorKind::Degenerate,
+                "the section's area does not fall with its thumbweight",
+            ),
+            (
+                BlendFailure::SectionUnsupported(SectionLimit::OrderPastSeries {
+                    order: 9,
+                    most: 7,
+                }),
+                ErrorKind::Unsupported,
+                "the order 9 is past the most the series hold (7)",
+            ),
+            (
+                BlendFailure::RadiusLawNotPositive {
+                    s: 0.5,
+                    radius: -0.25,
+                },
+                ErrorKind::InvalidInput,
+                "the radius law is -0.25 at s = 0.5, not positive",
+            ),
+            (
+                BlendFailure::SectionInputInvalid(SectionInput::RangeOutsideStations),
+                ErrorKind::InvalidInput,
+                "the round's range is not within its stations",
+            ),
+        ];
+        for (cause, class, message) in rows {
+            assert_plane_curve_cause(cause, class, message);
+            assert!(!class.is_defect());
+        }
+    }
+
     #[test]
     fn a_stage_failure_keeps_its_operation_status_and_origin_but_shows_neither() {
         let before = line!();
@@ -2876,7 +3217,7 @@ mod tests {
     /// none.
     #[test]
     fn the_blend_routines_build_no_bare_statuses() {
-        const WAITING: &[(&str, usize)] = &[("blend/fillet_section/recertify.rs", 14)];
+        const WAITING: &[(&str, usize)] = &[];
         let found = super::super::query::tests::bare_statuses_in("blend", 100);
         let waiting: Vec<(String, usize)> = WAITING
             .iter()
@@ -3191,7 +3532,7 @@ mod tests {
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 64;
+    const VARIANTS: usize = 70;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -3260,8 +3601,14 @@ mod tests {
             BlendFailure::EaseNotBuilt(_) => (59, None),
             BlendFailure::EaseGeometryNotBSpline(_) => (60, None),
             BlendFailure::ArcLengthNotConverged { .. } => (61, None),
-            BlendFailure::Solver(_) => (62, None),
-            BlendFailure::Trace(_) => (63, None),
+            BlendFailure::SectionNotProved(_) => (62, None),
+            BlendFailure::SectionDegenerate(_) => (63, None),
+            BlendFailure::SectionUnsupported(_) => (64, None),
+            BlendFailure::RadiusLawNotPositive { .. } => (65, None),
+            BlendFailure::SectionInputInvalid(_) => (66, None),
+            BlendFailure::WeldNotBuilt(_) => (67, None),
+            BlendFailure::Solver(_) => (68, None),
+            BlendFailure::Trace(_) => (69, None),
         }
     }
 
@@ -3338,10 +3685,19 @@ mod tests {
             BlendFailure::Solver(SolverFailure::JacobianNotLoaded),
             BlendFailure::StageFailed,
             BlendFailure::Defect { why: "x" },
+            BlendFailure::SectionNotProved(SectionProof::Enclosure),
+            BlendFailure::SectionDegenerate(SectionDegeneracy::NoLength),
+            BlendFailure::SectionUnsupported(SectionLimit::FaceNotNurbs),
+            BlendFailure::RadiusLawNotPositive {
+                s: 0.0,
+                radius: 0.0,
+            },
+            BlendFailure::SectionInputInvalid(SectionInput::IntervalsDiffer),
             BlendFailure::NotCertified {
                 halvings: 0,
                 stations: 0,
             },
+            BlendFailure::WeldNotBuilt(WeldGap::BeadsMeetAtVertex),
             BlendFailure::Failed("x"),
             BlendFailure::Missing("x"),
             BlendFailure::InvalidValue("x"),
