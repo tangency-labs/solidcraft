@@ -63,9 +63,16 @@ impl ViewKind {
     }
 }
 
+/// A model sketch being edited in one view. Runtime state, never saved with a layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SketchSession {
+    pub sketch: u64,
+}
+
 /// One view of a design.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DesignView {
+    pub editing: Option<SketchSession>,
     pub compass: bool,
     /// Unique within its design for as long as the set lives; never reused.
     pub id: u64,
@@ -292,7 +299,15 @@ impl Default for ViewSet {
 impl ViewSet {
     /// A design's first views: one Model view, active.
     pub fn new() -> Self {
-        let model = DesignView { id: 1, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None, compass: true };
+        let model = DesignView {
+            editing: None,
+            id: 1,
+            kind: ViewKind::Model,
+            name: ViewKind::Model.label().into(),
+            subject: None,
+            spec: None,
+            compass: true,
+        };
         Self::strip(vec![model], 1, 2, 0)
     }
 
@@ -699,6 +714,36 @@ impl ViewSet {
         self.closed.drain(..excess);
     }
 
+    /// Reflect the engine's single sketch owner across this design's open windows. A missing or
+    /// unsupported target leaves the previous state intact. Closing or duplicating a view never
+    /// creates a second editing session; moving the original carries its state with it.
+    pub fn set_editing(&mut self, editing: Option<(u64, SketchSession)>) -> bool {
+        if let Some((id, _)) = editing
+            && !self
+                .window_of(id)
+                .and_then(|window| self.views_of(window))
+                .and_then(|views| views.get(id))
+                .is_some_and(|view| view.kind == ViewKind::Model)
+        {
+            return false;
+        }
+        for view in &mut self.views {
+            view.editing = editing.filter(|(id, _)| *id == view.id).map(|(_, state)| state);
+        }
+        for (_, view) in &mut self.closed {
+            view.editing = None;
+        }
+        for window in &mut self.windows {
+            for view in &mut window.views.views {
+                view.editing = editing.filter(|(id, _)| *id == view.id).map(|(_, state)| state);
+            }
+            for (_, view) in &mut window.views.closed {
+                view.editing = None;
+            }
+        }
+        true
+    }
+
     /// The views in tab order (never empty).
     pub fn views(&self) -> &[DesignView] {
         &self.views
@@ -757,7 +802,7 @@ impl ViewSet {
         }
         let Some(id) = self.take_id() else { return self.active };
         let name = self.default_name(kind);
-        self.views.push(DesignView { id, kind, name, subject, spec: None, compass: true });
+        self.views.push(DesignView { editing: None, id, kind, name, subject, spec: None, compass: true });
         self.active = id;
         id
     }
@@ -844,7 +889,15 @@ impl ViewSet {
         let fallback = self.views.iter().take(left).rev().find(|view| keep(view)).map(|view| view.id);
         self.views.retain(keep);
         if let Some(id) = replacement {
-            self.views.push(DesignView { id, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None, compass: true });
+            self.views.push(DesignView {
+                editing: None,
+                id,
+                kind: ViewKind::Model,
+                name: ViewKind::Model.label().into(),
+                subject: None,
+                spec: None,
+                compass: true,
+            });
         }
         if self.get(self.active).is_none() {
             self.active = fallback.or_else(|| self.views.first().map(|view| view.id)).unwrap_or(self.active);
@@ -941,7 +994,7 @@ impl ViewSet {
         }
         let (kind, subject, spec) = (self.views[i].kind, self.views[i].subject.clone(), self.views[i].spec);
         let compass = self.views[i].compass;
-        let copy = DesignView { id: self.take_id()?, kind, name: self.default_name(kind), subject, spec, compass };
+        let copy = DesignView { editing: None, id: self.take_id()?, kind, name: self.default_name(kind), subject, spec, compass };
         self.active = copy.id;
         self.views.insert(i + 1, copy);
         Some(self.active)
@@ -1497,7 +1550,7 @@ fn view_from_json(value: &Value) -> Option<DesignView> {
     // then starts from where the design looks.
     let spec = value.get("spec").and_then(|spec| serde_json::from_value::<ViewSpec>(spec.clone()).ok()).filter(ViewSpec::is_valid);
     let compass = value.get("compass").and_then(Value::as_bool).unwrap_or(true);
-    Some(DesignView { id, kind, name, subject, spec, compass })
+    Some(DesignView { editing: None, id, kind, name, subject, spec, compass })
 }
 
 #[cfg(test)]
@@ -1687,6 +1740,30 @@ mod tests {
             migrate_sketch_views(&json!({"views": vec![Value::Null; MAX_VIEWS + 1]})).is_none(),
             "oversized open lists are refused before scanning for legacy kinds"
         );
+    }
+
+    #[test]
+    fn sketch_editing_is_runtime_only_and_follows_the_original_view() {
+        let mut set = ViewSet::new();
+        let original = set.active().id;
+        let editing = SketchSession { sketch: 42 };
+        assert!(set.set_editing(Some((original, editing))));
+        let copy = set.duplicate(original).unwrap();
+        assert_eq!(set.get(original).unwrap().editing, Some(editing));
+        assert_eq!(set.get(copy).unwrap().editing, None);
+        assert_eq!(ViewSet::from_json(&set.to_json()).unwrap().get(original).unwrap().editing, None);
+        assert!(set.to_json()["views"].as_array().unwrap().iter().all(|view| view.get("editing").is_none()));
+        let moved = set.move_to_window(original, WindowTarget::New { placement: None }).unwrap();
+        assert_eq!(set.views_of(moved.window).unwrap().get(original).unwrap().editing, Some(editing));
+        assert!(set.set_editing(Some((copy, SketchSession { sketch: 43 }))));
+        assert_eq!(set.views_of(moved.window).unwrap().get(original).unwrap().editing, None);
+        assert_eq!(set.get(copy).unwrap().editing, Some(SketchSession { sketch: 43 }));
+        let render = set.open(ViewKind::Render, None, false);
+        assert!(!set.set_editing(Some((render, editing))));
+        assert!(!set.set_editing(Some((999, editing))));
+        assert_eq!(set.get(copy).unwrap().editing, Some(SketchSession { sketch: 43 }));
+        assert!(set.set_editing(None));
+        assert_eq!(set.get(copy).unwrap().editing, None);
     }
 
     fn sheets(n: usize) -> ViewSet {

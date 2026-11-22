@@ -2940,7 +2940,9 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     } else {
         crate::edit_clipboard::flush(app, ctx);
     }
-    for (k, repeat, mods) in keys {
+    // The keys that ran a command: the character each one typed is dropped below.
+    let mut ran = Vec::new();
+    for (index, (k, repeat, mods)) in keys.into_iter().enumerate() {
         use egui::Key;
         if drawing && k == Key::S && !mods.command && !mods.shift && !mods.alt {
             app.start("ui.palette");
@@ -3048,6 +3050,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         // Dimension key (D by default, or the key it was rebound to) starts Dimension.
         if let Some(tool) = sheet_tool(app, drawing_history, &crate::keymap::key_name(k, mods)) {
             app.start(tool);
+            ran.push(index);
             continue;
         }
         if !shown {
@@ -3128,9 +3131,44 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     crate::viewport::delete_selection(app);
                 }
             }
-            _ => crate::keymap::press(app, &crate::keymap::key_name(k, mods), repeat),
+            _ => {
+                let key = crate::keymap::key_name(k, mods);
+                if !crate::keymap::commands_for(app, &key).is_empty() {
+                    ran.push(index);
+                }
+                crate::keymap::press(app, &key, repeat);
+            }
         }
     }
+    drop_shortcut_text(ctx, &ran);
+}
+
+/// A key that ran a command is not typing: the character it typed goes nowhere. Else the field
+/// the command opens could take it later in the frame, as a window drawn after this one does.
+/// `ran` counts the frame's key presses from 0, in order.
+fn drop_shortcut_text(ctx: &egui::Context, ran: &[usize]) {
+    if ran.is_empty() {
+        return;
+    }
+    let strip = |events: &mut Vec<egui::Event>| {
+        let (mut presses, mut typed_by_shortcut) = (0, false);
+        events.retain(|event| match event {
+            egui::Event::Key { pressed: true, .. } => {
+                typed_by_shortcut = ran.contains(&presses);
+                presses += 1;
+                true
+            }
+            egui::Event::Text(_) if typed_by_shortcut => {
+                typed_by_shortcut = false;
+                false
+            }
+            _ => true,
+        });
+    };
+    ctx.input_mut(|input| {
+        strip(&mut input.events);
+        strip(&mut input.raw.events);
+    });
 }
 
 /// The place (0 first) of the view a digit key shows: 1 to 9.

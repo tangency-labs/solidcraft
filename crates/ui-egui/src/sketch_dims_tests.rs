@@ -666,7 +666,7 @@ fn rectangle_boxes_sit_beside_it_between_the_panels_too() {
 fn rectangle_boxes_stay_near_their_edges_at_window_borders() {
     for command in ["sketch.rectangle.two_point", "sketch.rectangle.center", "sketch.rectangle.rounded"] {
         for (a, b, dimension) in
-            [(egui::pos2(400.0, 170.0), egui::pos2(900.0, 450.0), 0usize), (egui::pos2(450.0, 650.0), egui::pos2(10.0, 850.0), 1usize)]
+            [(egui::pos2(400.0, 230.0), egui::pos2(900.0, 450.0), 0usize), (egui::pos2(450.0, 650.0), egui::pos2(10.0, 850.0), 1usize)]
         {
             let mut h = Harness::new();
             h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -696,21 +696,21 @@ fn small_rounded_rectangle_boxes_at_borders_fit_without_overlap() {
         h.call("ui.view", json!({"view":"top"}));
         h.step(&json!({"start":"sketch.rectangle.rounded"})).unwrap();
         // Keep the corners left of the axes navigator in the narrow window.
-        for point in [egui::pos2(300.0, 170.0), egui::pos2(380.0, 210.0)] {
+        for point in [egui::pos2(300.0, 230.0), egui::pos2(380.0, 270.0)] {
             assert!(in_open_view(&h, egui::Rect::from_center_size(point, egui::vec2(1.0, 1.0))), "{width}x{height}: {point:?} is drawable");
         }
-        h.step(&json!({"click":[300,170]})).unwrap();
-        h.step(&json!({"move":[380,210]})).unwrap();
+        h.step(&json!({"click":[300,230]})).unwrap();
+        h.step(&json!({"move":[380,270]})).unwrap();
         h.frames(3);
         let fields: Vec<_> =
             (0..3usize).map(|i| h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).expect("dimension is visible")).collect();
         for (i, field) in fields.iter().enumerate() {
             assert!(in_open_view(&h, *field), "{width}x{height}: {field:?} leaves the open view");
-            assert!(!field.expand(2.0).contains(egui::pos2(380.0, 210.0)), "{width}x{height}: {field:?} covers the next corner");
+            assert!(!field.expand(2.0).contains(egui::pos2(380.0, 270.0)), "{width}x{height}: {field:?} covers the next corner");
             assert!(fields[..i].iter().all(|previous| !previous.intersects(*field)), "{width}x{height}: fields overlap: {fields:?}");
         }
         // The preview's final click must still reach the sketch.
-        h.step(&json!({"click":[380,210]})).unwrap();
+        h.step(&json!({"click":[380,270]})).unwrap();
         let state = h.app.session.world_state().unwrap();
         let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         assert_eq!(sketch.profiles.len(), 1, "{width}x{height}: the click finishes the rectangle");
