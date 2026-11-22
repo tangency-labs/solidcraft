@@ -234,3 +234,6 @@ import
 mesh_convert
 mesh_import
 repair
+stretch
+  moves: from[0], from[1], from[2]
+  face points: [1, 2, 3]

@@ -464,3 +464,8 @@ repair
   inputs:
     Gap = repair.gap (Length)
   expressions: repair.gap
+stretch
+  inputs:
+    Cut at = stretch.at (Length)
+    Distance = stretch.distance (Length)
+  expressions: stretch.at, stretch.distance
