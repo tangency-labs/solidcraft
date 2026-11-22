@@ -4465,10 +4465,7 @@ mod tests {
         let err = off.swap_uv(&k).unwrap_err();
         assert_eq!(err.operation(), OP_EDIT);
         assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR));
-        assert_eq!(
-            err.surface_failure(),
-            Some(&crate::error::surface::SurfaceFailure::BaseNotOwned)
-        );
+        assert_eq!(err.surface_failure(), Some(&SurfaceFailure::BaseNotOwned));
         assert_eq!(off.offset_distance(), -0.4);
         assert!(off.extended_base_surface().is_some());
     }

@@ -29,8 +29,8 @@
 //! files that still build bare statuses are listed in this module's ratchet test.
 
 use super::{
-    EntityRef, ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT,
-    SM_ERR_NOT_WITHIN_TOLERANCE, SM_ERR_NULL_POINTER, SM_ERR_OUTSIDE_OF_DOMAIN,
+    ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NOT_WITHIN_TOLERANCE,
+    SM_ERR_NULL_POINTER, SM_ERR_OUTSIDE_OF_DOMAIN,
 };
 
 /// Why a surface routine fails.
@@ -286,17 +286,6 @@ impl crate::SolidError {
         Failure::new(operation, failure).into_error()
     }
 
-    /// [`crate::SolidError::Failed`] for a surface routine that fails with `failure` about
-    /// `entity`.
-    #[must_use]
-    pub(crate) fn surface_at(
-        operation: &'static str,
-        failure: SurfaceFailure,
-        entity: EntityRef,
-    ) -> Self {
-        Failure::new(operation, failure).at(entity).into_error()
-    }
-
     /// [`crate::SolidError::Failed`] for a surface routine that could not continue, as the
     /// phrase says, with status [`SM_ERR`] (upstream `return SE(SM_ERR)`).
     #[must_use]
@@ -329,6 +318,7 @@ impl crate::SolidError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::EntityRef;
     use crate::SolidError;
 
     #[test]
