@@ -339,6 +339,19 @@ pub enum SurfaceFailure {
     /// No step from the pole toward the domain's middle, in either direction, gives a first
     /// derivative longer than the tolerance. Class `failed`.
     NoNonsingularStepoff,
+    /// The boundary curves of a plane on ellipses are not all ellipses, so they have no
+    /// common ellipse plane to take. Class `failed`, status `SM_ERR`.
+    NoCommonEllipsePlane,
+    /// A curve of a plane on ellipses has no certified bounding box, so the plane's canvas
+    /// cannot enclose it. Class `failed`, status `SM_ERR`.
+    EllipseBoundsNotCertified,
+    /// The ellipses of a plane's boundary do not all lie in the first one's stored plane,
+    /// exactly: they are refused rather than fitted within a tolerance. Class `failed`,
+    /// status `SM_ERR`.
+    EllipsesNotOnOneExactPlane,
+    /// The canvas that encloses an analytic plane's boundary curves is degenerate or not
+    /// finite. Class `failed`, status `SM_ERR`.
+    PlaneCanvasNotFinite,
 }
 
 /// What a solver lacks ([`SurfaceFailure::SolverWithout`]).
@@ -591,6 +604,18 @@ impl core::fmt::Display for SurfaceFailure {
             Self::AsItselfWeightNotPositive => f.write_str("a weight of the extension as itself is not positive"),
             Self::RotationSenseUndefined => f.write_str("the end rows give no sense to turn about the axis"),
             Self::NoNonsingularStepoff => f.write_str("neither direction gives a nonsingular stepoff"),
+            Self::NoCommonEllipsePlane => {
+                f.write_str("the boundary curves are not all ellipses with a common plane")
+            }
+            Self::EllipseBoundsNotCertified => {
+                f.write_str("a boundary curve has no certified bounding box")
+            }
+            Self::EllipsesNotOnOneExactPlane => {
+                f.write_str("the ellipse boundaries do not have one exact plane")
+            }
+            Self::PlaneCanvasNotFinite => {
+                f.write_str("the analytic plane's bounding canvas is not finite")
+            }
         }
     }
 }
@@ -1030,6 +1055,24 @@ mod tests {
             assert_eq!(e.kind(), kind, "{failure:?}");
             assert_eq!(e.surface_failure(), Some(&failure));
             assert!(!e.is_defect(), "{failure:?}");
+        }
+    }
+
+    /// The named causes of a plane on ellipses have status `SM_ERR` and class `failed`.
+    #[test]
+    fn the_plane_on_ellipses_causes_have_their_status_and_class() {
+        let op = "surface::op";
+        for failure in [
+            SurfaceFailure::NoCommonEllipsePlane,
+            SurfaceFailure::EllipseBoundsNotCertified,
+            SurfaceFailure::EllipsesNotOnOneExactPlane,
+            SurfaceFailure::PlaneCanvasNotFinite,
+        ] {
+            let e = SolidError::surface(op, failure);
+            assert_eq!(e.upstream_status(), Some(SM_ERR), "{failure:?}");
+            assert_eq!(e.kind(), ErrorKind::Failed, "{failure:?}");
+            assert_eq!(e.surface_failure(), Some(&failure));
+            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
         }
     }
 
