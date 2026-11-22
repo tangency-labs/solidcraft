@@ -26,6 +26,7 @@
 //! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
 //! | [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::CornerShapeNotBuilt`] | [`ErrorKind::Unsupported`] (5) |
 //! | [`BlendFailure::CornerPointDropUnresolved`] | [`ErrorKind::NotFound`] (2)             |
+//! | [`BlendFailure::CornerPatchNotMade`]   | the miss's ([`CornerPatchMiss::class`])       |
 //! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
 //! | [`BlendFailure::BandInputMissing`]     | [`ErrorKind::Missing`]: neither defect nor refusal |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
@@ -39,6 +40,7 @@
 //! |----------------------------------------|-----------------------------------|
 //! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::PlaneCurveTouches`], [`BlendFailure::PlaneCurveEndOff`], [`BlendFailure::PlaneCurveLeavesDomain`], [`BlendFailure::PlaneCurveStepVanished`], [`BlendFailure::PlaneCurveFitCap`], [`BlendFailure::CornerPointDropUnresolved`] | `SM_ERR` |
 //! | [`BlendFailure::CornerShapeNotBuilt`]  | the shape's ([`CornerShape::upstream_status`]) |
+//! | [`BlendFailure::CornerPatchNotMade`]   | the miss's ([`CornerPatchMiss::upstream_status`]) |
 //! | [`BlendFailure::Failed`]               | `SM_ERR`                          |
 //! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`] | `SM_ERR_NULL_POINTER` |
 //! | [`BlendFailure::InvalidValue`]        | `SM_ERR_INVALID_INPUT`            |
@@ -310,6 +312,10 @@ pub enum BlendFailure {
         /// The points the drop found.
         solutions: usize,
     },
+    /// A fillet corner's surface, patch or face that the corner does not make: the miss
+    /// named. Its class and status are the miss's ([`CornerPatchMiss::class`],
+    /// [`CornerPatchMiss::upstream_status`]).
+    CornerPatchNotMade(CornerPatchMiss),
 }
 
 /// A shape of the edges at a filleted vertex that the fillet corner topology
@@ -348,6 +354,10 @@ pub enum CornerShape {
     /// A corner of two edges alone at the vertex whose first blended edge does not lie
     /// between exactly two faces: the blends' crossing has an end on each of its faces.
     EdgeNotBetweenTwoFaces,
+    /// A Roll-over's cap across the cliff's tangent seam whose end face cannot take the side
+    /// face's extended surface (the other side edge does not lie on it): the cap is closed
+    /// only by that end patch.
+    SeamCapEndFaceNotExtended,
 }
 
 impl CornerShape {
@@ -365,7 +375,163 @@ impl CornerShape {
             | Self::BevelNotOfThreeEdges
             | Self::RingEdgeOffClosedBlendFaces
             | Self::EndSideEdgesShareNoFace
-            | Self::EdgeNotBetweenTwoFaces => SM_ERR,
+            | Self::EdgeNotBetweenTwoFaces
+            | Self::SeamCapEndFaceNotExtended => SM_ERR,
+        }
+    }
+}
+
+/// What a fillet corner's surface, patch or face step (`crate::blend::fillet_corner`) did not
+/// make ([`BlendFailure::CornerPatchNotMade`]). The variable-radius misses stop the corner's
+/// conversion to a variable-radius fillet (`MakeVariableRadiusFillet`), which the analytic
+/// corner surface reads as no surface made, so the corner gets its patch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CornerPatchMiss {
+    /// A corner for the variable-radius fillet that does not have four edges.
+    VariableRadiusNotFourSides,
+    /// A corner for the variable-radius fillet with no rail-rail interpolating edge.
+    VariableRadiusWithoutInterpolation,
+    /// An edge beside the variable-radius corner's interpolating edge that is not a cross
+    /// section.
+    VariableRadiusSideNotCrossSection,
+    /// The variable-radius corner's two cross sections come from surface generators of
+    /// different kinds.
+    VariableRadiusGeneratorsDiffer,
+    /// The variable-radius corner's two cross sections come from blend-curve generators with
+    /// different thumbweights or continuities.
+    VariableRadiusBlendCurvesDiffer,
+    /// A cross section of the variable-radius corner whose blend has no centre line (a
+    /// section that is not an arc about one).
+    CrossSectionWithoutCentreLine,
+    /// An end of a cross section of the variable-radius corner drops onto its blend's centre
+    /// line at other than one point.
+    CentreLineFootNotUnique,
+    /// A cross section of the variable-radius corner whose ends lie at different distances
+    /// from its blend's centre line: not a circular arc about it.
+    CrossSectionRadiusVaries,
+    /// A cross section of the variable-radius corner whose ends point the same or opposite
+    /// ways from the centre line: its arc has no axis.
+    CrossSectionEndsAligned,
+    /// The edge opposite the variable-radius corner's interpolating edge is not a cross
+    /// section.
+    OppositeEdgeNotCrossSection,
+    /// A rail at the interpolating edge's vertex that its fillet geometry does not name as
+    /// either of its rails.
+    RailNotNamedByItsGeometry,
+    /// No rail meets the interpolating edge's start vertex.
+    NoRailAtInterpolationStart,
+    /// An end of the opposite edge drops onto the opposite fillet's surface at other than one
+    /// point.
+    OppositeFootNotUnique,
+    /// The opposite edge's ends do not lie across the opposite fillet's parameter domain.
+    OppositeEndsNotAcrossFillet,
+    /// The opposite fillet's normal vanishes at the opposite edge's end.
+    OppositeNormalVanished,
+    /// The opposite fillet is a chamfer (a linear generator): no variable-radius law is made
+    /// against it.
+    LinearOppositeFillet,
+    /// The opposite fillet's radius is not larger than both cross sections' radii.
+    OppositeRadiusNotLarger,
+    /// The re-solve of the variable-radius fillet failed (its error is kept as the cause).
+    VariableRadiusReSolveFailed,
+    /// The variable-radius fillet's rail-rail curve crosses the concave corner.
+    RailRailCurveCrossesCorner,
+    /// The variable-radius fillet's rail that replaces the opposite edge leaves the opposite
+    /// fillet's surface.
+    RailLeavesOppositeFillet,
+    /// A corner edge's curve (or a curve the corner joins) has no B-spline form.
+    CurveNotBSpline,
+    /// The corner's patch has fewer than four boundary curves.
+    TooFewBoundaryCurves {
+        /// The boundary curves the patch has.
+        curves: usize,
+    },
+    /// The corner's face could not be made on its surface (its error is kept as the cause
+    /// where the step reports one).
+    FaceNotMade,
+    /// A corner of mixed convexity (3x2) that does not have four edges when its patch is made.
+    MixedCornerNotFourEdges {
+        /// The edges the corner has.
+        edges: usize,
+    },
+    /// The mixed corner's extended edge does not drop onto its original face as one curve.
+    ExtendedEdgeDropNotOneCurve {
+        /// The curves the drop gave.
+        curves: usize,
+    },
+    /// The patch of a mitre's gap (WR-644) does not have four edges.
+    GapPatchNotFourEdges {
+        /// The edges the gap's patch has.
+        edges: usize,
+    },
+}
+
+impl CornerPatchMiss {
+    /// The miss's class: [`ErrorKind::NotFound`] for a search that found no single answer,
+    /// [`ErrorKind::Degenerate`] for a vanished direction, [`ErrorKind::Failed`] for a step
+    /// that failed, else [`ErrorKind::Unsupported`] (a corner the step does not make).
+    #[must_use]
+    pub const fn class(self) -> ErrorKind {
+        match self {
+            Self::CentreLineFootNotUnique
+            | Self::NoRailAtInterpolationStart
+            | Self::OppositeFootNotUnique
+            | Self::ExtendedEdgeDropNotOneCurve { .. } => ErrorKind::NotFound,
+            Self::CrossSectionEndsAligned | Self::OppositeNormalVanished => ErrorKind::Degenerate,
+            Self::VariableRadiusReSolveFailed | Self::FaceNotMade => ErrorKind::Failed,
+            Self::VariableRadiusNotFourSides
+            | Self::VariableRadiusWithoutInterpolation
+            | Self::VariableRadiusSideNotCrossSection
+            | Self::VariableRadiusGeneratorsDiffer
+            | Self::VariableRadiusBlendCurvesDiffer
+            | Self::CrossSectionWithoutCentreLine
+            | Self::CrossSectionRadiusVaries
+            | Self::OppositeEdgeNotCrossSection
+            | Self::RailNotNamedByItsGeometry
+            | Self::OppositeEndsNotAcrossFillet
+            | Self::LinearOppositeFillet
+            | Self::OppositeRadiusNotLarger
+            | Self::RailRailCurveCrossesCorner
+            | Self::RailLeavesOppositeFillet
+            | Self::CurveNotBSpline
+            | Self::TooFewBoundaryCurves { .. }
+            | Self::MixedCornerNotFourEdges { .. }
+            | Self::GapPatchNotFourEdges { .. } => ErrorKind::Unsupported,
+        }
+    }
+
+    /// The status the site the miss replaces returned unless the site says otherwise:
+    /// `SM_ERR_NULL_POINTER` for a centre line the C++ does not find (`NER`),
+    /// `SM_ERR_INVALID_INPUT` for a vanished direction (`SER(v.Unitize())`), else `SM_ERR`.
+    #[must_use]
+    pub const fn upstream_status(self) -> i32 {
+        match self {
+            Self::CrossSectionWithoutCentreLine => SM_ERR_NULL_POINTER,
+            Self::CrossSectionEndsAligned | Self::OppositeNormalVanished => SM_ERR_INVALID_INPUT,
+            Self::VariableRadiusNotFourSides
+            | Self::VariableRadiusWithoutInterpolation
+            | Self::VariableRadiusSideNotCrossSection
+            | Self::VariableRadiusGeneratorsDiffer
+            | Self::VariableRadiusBlendCurvesDiffer
+            | Self::CentreLineFootNotUnique
+            | Self::CrossSectionRadiusVaries
+            | Self::OppositeEdgeNotCrossSection
+            | Self::RailNotNamedByItsGeometry
+            | Self::NoRailAtInterpolationStart
+            | Self::OppositeFootNotUnique
+            | Self::OppositeEndsNotAcrossFillet
+            | Self::LinearOppositeFillet
+            | Self::OppositeRadiusNotLarger
+            | Self::VariableRadiusReSolveFailed
+            | Self::RailRailCurveCrossesCorner
+            | Self::RailLeavesOppositeFillet
+            | Self::CurveNotBSpline
+            | Self::TooFewBoundaryCurves { .. }
+            | Self::FaceNotMade
+            | Self::MixedCornerNotFourEdges { .. }
+            | Self::ExtendedEdgeDropNotOneCurve { .. }
+            | Self::GapPatchNotFourEdges { .. } => SM_ERR,
         }
     }
 }
@@ -628,6 +794,7 @@ impl BlendFailure {
                 SM_ERR_NULL_POINTER
             }
             Self::CornerShapeNotBuilt(shape) => shape.upstream_status(),
+            Self::CornerPatchNotMade(miss) => miss.upstream_status(),
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
             Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
             Self::BadIntersections(_) => SM_ERR_BAD_INTERSECTIONS,
@@ -654,7 +821,8 @@ impl BlendFailure {
     /// [`BlendFailure::BallsNest`], and
     /// [`ErrorKind::Unsupported`] for [`BlendFailure::CreasePieceEndUnbuildable`] and
     /// [`BlendFailure::CornerShapeNotBuilt`], [`ErrorKind::NotFound`] for
-    /// [`BlendFailure::CornerPointDropUnresolved`]. A phrase
+    /// [`BlendFailure::CornerPointDropUnresolved`], the miss's class
+    /// ([`CornerPatchMiss::class`]) for [`BlendFailure::CornerPatchNotMade`]. A phrase
     /// cause keeps the kind of its status ([`ErrorKind::Failed`], [`ErrorKind::Missing`],
     /// [`ErrorKind::InvalidInput`], ...), as before the record ([`BlendFailure::is_phrase`]).
     #[must_use]
@@ -682,6 +850,7 @@ impl BlendFailure {
                 ErrorKind::Unsupported
             }
             Self::BandInputMissing(_) | Self::CliffInputMissing { .. } => ErrorKind::Missing,
+            Self::CornerPatchNotMade(miss) => miss.class(),
             Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -723,6 +892,7 @@ impl BlendFailure {
             | Self::CliffInputMissing { .. }
             | Self::CornerShapeNotBuilt(_)
             | Self::CornerPointDropUnresolved { .. }
+            | Self::CornerPatchNotMade(_)
             | Self::NotCertified { .. } => false,
             Self::Failed(_)
             | Self::Missing(_)
@@ -767,6 +937,7 @@ impl BlendFailure {
             | Self::CliffInputMissing { .. }
             | Self::CornerShapeNotBuilt(_)
             | Self::CornerPointDropUnresolved { .. }
+            | Self::CornerPatchNotMade(_)
             | Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -884,6 +1055,7 @@ impl core::fmt::Display for BlendFailure {
             Self::CliffInputMissing { face, input } => write!(f, "cliff face {face:?} is missing its {}", input.what()),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
             Self::CornerShapeNotBuilt(shape) => write!(f, "{}: {shape:?}", self.class()),
+            Self::CornerPatchNotMade(miss) => write!(f, "{}: {miss:?}", self.class()),
             Self::CornerPointDropUnresolved { solutions } => write!(
                 f,
                 "{}: the corner's vertex drops onto the surface at {solutions} points, not one",
@@ -1339,6 +1511,7 @@ mod tests {
             (S::SideEdgeNotBesideBlend, SM_ERR_NULL_POINTER),
             (S::EndSideEdgesShareNoFace, SM_ERR),
             (S::EdgeNotBetweenTwoFaces, SM_ERR),
+            (S::SeamCapEndFaceNotExtended, SM_ERR),
         ];
         for (shape, status) in shapes {
             let cause = BlendFailure::CornerShapeNotBuilt(shape);
@@ -1362,6 +1535,56 @@ mod tests {
         assert_eq!(e.kind(), ErrorKind::NotFound);
         assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert!(!e.is_defect());
+    }
+
+    #[test]
+    fn a_corner_patch_not_made_takes_its_misss_class_and_status() {
+        use CornerPatchMiss as M;
+        use ErrorKind as K;
+        let misses = [
+            (M::VariableRadiusNotFourSides, K::Unsupported, SM_ERR),
+            (M::VariableRadiusWithoutInterpolation, K::Unsupported, SM_ERR),
+            (M::VariableRadiusSideNotCrossSection, K::Unsupported, SM_ERR),
+            (M::VariableRadiusGeneratorsDiffer, K::Unsupported, SM_ERR),
+            (M::VariableRadiusBlendCurvesDiffer, K::Unsupported, SM_ERR),
+            (M::CrossSectionWithoutCentreLine, K::Unsupported, SM_ERR_NULL_POINTER),
+            (M::CentreLineFootNotUnique, K::NotFound, SM_ERR),
+            (M::CrossSectionRadiusVaries, K::Unsupported, SM_ERR),
+            (M::CrossSectionEndsAligned, K::Degenerate, SM_ERR_INVALID_INPUT),
+            (M::OppositeEdgeNotCrossSection, K::Unsupported, SM_ERR),
+            (M::RailNotNamedByItsGeometry, K::Unsupported, SM_ERR),
+            (M::NoRailAtInterpolationStart, K::NotFound, SM_ERR),
+            (M::OppositeFootNotUnique, K::NotFound, SM_ERR),
+            (M::OppositeEndsNotAcrossFillet, K::Unsupported, SM_ERR),
+            (M::OppositeNormalVanished, K::Degenerate, SM_ERR_INVALID_INPUT),
+            (M::LinearOppositeFillet, K::Unsupported, SM_ERR),
+            (M::OppositeRadiusNotLarger, K::Unsupported, SM_ERR),
+            (M::VariableRadiusReSolveFailed, K::Failed, SM_ERR),
+            (M::RailRailCurveCrossesCorner, K::Unsupported, SM_ERR),
+            (M::RailLeavesOppositeFillet, K::Unsupported, SM_ERR),
+            (M::CurveNotBSpline, K::Unsupported, SM_ERR),
+            (M::TooFewBoundaryCurves { curves: 3 }, K::Unsupported, SM_ERR),
+            (M::FaceNotMade, K::Failed, SM_ERR),
+            (M::MixedCornerNotFourEdges { edges: 3 }, K::Unsupported, SM_ERR),
+            (M::ExtendedEdgeDropNotOneCurve { curves: 2 }, K::NotFound, SM_ERR),
+            (M::GapPatchNotFourEdges { edges: 3 }, K::Unsupported, SM_ERR),
+        ];
+        for (miss, kind, status) in misses {
+            let cause = BlendFailure::CornerPatchNotMade(miss);
+            assert!(!cause.is_phrase() && cause.replaces_upstream_status());
+            let e = SolidError::blend("blend::fillet_corner", cause);
+            assert_eq!(e.kind(), kind, "{miss:?}");
+            assert_eq!(e.upstream_status(), Some(status), "{miss:?}");
+            assert!(!e.is_defect() && !e.is_refusal(), "{miss:?}");
+        }
+        assert_eq!(
+            SolidError::blend(
+                "blend::op",
+                BlendFailure::CornerPatchNotMade(M::TooFewBoundaryCurves { curves: 3 })
+            )
+            .to_string(),
+            "blend::op: unsupported: TooFewBoundaryCurves { curves: 3 }"
+        );
     }
 
     #[test]
@@ -1698,7 +1921,7 @@ mod tests {
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 31;
+    const VARIANTS: usize = 32;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -1736,6 +1959,7 @@ mod tests {
             BlendFailure::CliffInputMissing { .. } => (28, None),
             BlendFailure::CornerShapeNotBuilt(_) => (29, None),
             BlendFailure::CornerPointDropUnresolved { .. } => (30, None),
+            BlendFailure::CornerPatchNotMade(_) => (31, None),
         }
     }
 
@@ -1809,6 +2033,7 @@ mod tests {
             },
             BlendFailure::CornerShapeNotBuilt(CornerShape::MoreThanFourEdges),
             BlendFailure::CornerPointDropUnresolved { solutions: 0 },
+            BlendFailure::CornerPatchNotMade(CornerPatchMiss::FaceNotMade),
             BlendFailure::StageFailed,
             BlendFailure::Defect { why: "x" },
             BlendFailure::NotCertified {

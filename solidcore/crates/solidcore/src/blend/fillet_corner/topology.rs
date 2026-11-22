@@ -152,14 +152,14 @@ const NO_SOLVER_SURFACE: &str = "a blend's solver has no offset surface for a ra
 /// 4): `why` names the step and why it is the kernel's fault. Status `SM_ERR`, as the
 /// `SE(SM_ERR)` it replaces.
 #[track_caller]
-fn defect(op: &'static str, why: &'static str) -> SolidError {
+pub(super) fn defect(op: &'static str, why: &'static str) -> SolidError {
     SolidError::blend(op, BlendFailure::Defect { why })
 }
 
 /// [`defect`] with the status `SM_ERR_NULL_POINTER` of the `NER` it replaces: something the
 /// kernel built, or found, before the corner is not there (guide rule 2).
 #[track_caller]
-fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
+pub(super) fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
     Failure::new(op, BlendFailure::Defect { why })
         .with_status(SM_ERR_NULL_POINTER)
         .into_error()
@@ -169,7 +169,7 @@ fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
 /// build ([`BlendFailure::CornerShapeNotBuilt`], guide rule 8), with the status of the site
 /// it replaces.
 #[track_caller]
-fn shape_not_built(op: &'static str, shape: CornerShape) -> SolidError {
+pub(super) fn shape_not_built(op: &'static str, shape: CornerShape) -> SolidError {
     SolidError::blend(op, BlendFailure::CornerShapeNotBuilt(shape))
 }
 
