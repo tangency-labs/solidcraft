@@ -162,6 +162,19 @@ fn spline_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error>
     }
 }
 
+/// Expose an editable control point spline’s polygon as construction segments.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SplineControlPolygonParams {
+    /// The spline's curve id.
+    #[serde(deserialize_with = "spline_id")]
+    pub curve: String,
+    /// The sketch (default: the one being edited).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
+}
+
 /// Give a fit point spline a tangent handle at each fit point, where the curve already runs.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]

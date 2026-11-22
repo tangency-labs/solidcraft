@@ -1661,13 +1661,30 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     {
         v.push(cmd(app, "sketch.spline.reverse", "Reverse Spline Direction").with(json!({ "curve": curve })));
     }
+    if let [curve] = curves.as_slice()
+        && ss
+            .sketch
+            .curve_index(curve)
+            .and_then(|index| ss.sketch.curves.get(index))
+            .is_some_and(|c| c.link.is_none() && matches!(c.kind, CurveKind::Spline { control: true, .. }))
+        && !ss.sketch.curves.iter().any(|c| c.spline_handle_of.as_deref() == Some(curve.as_str()))
+    {
+        v.push(
+            cmd(app, "sketch.spline.control_polygon", &solidcraft_ui_text::tr("cmd.sketch_spline_control_polygon")).with(json!({ "curve": curve })),
+        );
+    }
     // #6502: a selected fit point spline shows its tangent handles and a drag stores them; the
     // spline, or one of its tangent guides, puts edited handles back where they started.
     if let [curve] = curves.as_slice()
         && let Some(c) = ss.sketch.curve_index(curve).and_then(|i| ss.sketch.curves.get(i))
         && let Some(spline) = match &c.kind {
             CurveKind::Spline { handles, .. } if !handles.is_empty() => Some(c.id.clone()),
-            _ => c.spline_handle_of.clone(),
+            _ => c.spline_handle_of.clone().filter(|parent| {
+                ss.sketch
+                    .curve_index(parent)
+                    .and_then(|index| ss.sketch.curves.get(index))
+                    .is_some_and(|owner| matches!(owner.kind, CurveKind::Spline { control: false, .. }))
+            }),
         }
     {
         v.push(cmd(app, "sketch.spline.reset_handles", "Reset Tangent Handles").with(json!({ "curve": spline })));

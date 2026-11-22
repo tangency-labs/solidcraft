@@ -273,9 +273,14 @@ pub struct Curve {
     /// a profile (it is construction too).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub infinite: bool,
-    /// The spline id owning a construction line used as one of its tangent handles.
+    /// The spline owning a tangent guide or a segment of its control polygon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spline_handle_of: Option<String>,
+}
+
+fn control_polygon_sides(points: &[usize], periodic: bool) -> impl Iterator<Item = (usize, usize)> + '_ {
+    let closing = points.last().copied().zip(points.first().copied()).filter(|(last, first)| periodic && last != first);
+    points.iter().copied().zip(points.iter().copied().skip(1)).chain(closing)
 }
 
 /// How two circles lie, for a [`ConstraintKind::CircleCircleDistance`]: which gap between their
@@ -2215,6 +2220,46 @@ impl Sketch {
         Ok(())
     }
 
+    /// Whether this curve is an owned side of a control spline.
+    pub fn is_control_polygon_segment(&self, index: usize) -> bool {
+        self.curves
+            .get(index)
+            .and_then(|guide| guide.spline_handle_of.as_deref())
+            .and_then(|parent| self.curve_index(parent))
+            .and_then(|parent| self.curves.get(parent))
+            .is_some_and(|owner| matches!(owner.kind, CurveKind::Spline { control: true, .. }))
+    }
+
+    /// Add selectable construction segments that share the spline's actual control points.
+    pub fn add_spline_control_polygon(&mut self, index: usize) -> Result<Vec<usize>> {
+        let Some(Curve { id, link: None, kind: CurveKind::Spline { pts, control: true, periodic, .. }, .. }) = self.curves.get(index) else {
+            return Err(SketchError::Invalid("a control polygon requires an editable control point spline".into()));
+        };
+        let sides: Vec<_> = control_polygon_sides(pts, *periodic).collect();
+        let id = id.clone();
+        self.spline_handles_allowed(&id)?;
+        if self.curves.iter().any(|c| c.spline_handle_of.as_deref() == Some(id.as_str())) {
+            return Err(SketchError::Invalid("the spline already has a control polygon".into()));
+        }
+        if self.curves.len().saturating_add(sides.len()) > crate::limits::max_curves() {
+            return Err(SketchError::TooLarge);
+        }
+        let mut candidate = self.clone();
+        let mut created = Vec::with_capacity(sides.len());
+        for (a, b) in sides {
+            let name = candidate.fresh("h")?;
+            let line = candidate.add_line_pts(a, b, Some(&name))?;
+            if let Some(segment) = candidate.curves.get_mut(line) {
+                segment.construction = true;
+                segment.spline_handle_of = Some(id.clone());
+            }
+            created.push(line);
+        }
+        candidate.validate_spline_handles()?;
+        *self = candidate;
+        Ok(created)
+    }
+
     /// The fit splines whose tangent handles all still lie where a fresh spline through their fit
     /// points puts them: nobody has turned one, so the curve is the natural interpolant.
     pub fn natural_handle_splines(&self) -> Vec<usize> {
@@ -2365,7 +2410,7 @@ impl Sketch {
         Ok(())
     }
 
-    /// Refuse malformed persisted tangent handles before they reach sketch evaluation.
+    /// Refuse malformed persisted spline guides before they reach sketch evaluation.
     pub fn validate_spline_handles(&self) -> Result<()> {
         let mut work = 0usize;
         let mut helper_lines_by_parent = std::collections::BTreeMap::<&str, Vec<&Curve>>::new();
@@ -2381,6 +2426,27 @@ impl Sketch {
         for spline in &self.curves {
             let CurveKind::Spline { pts, control, periodic, handles, .. } = &spline.kind else { continue };
             let helper_lines = helper_lines_by_parent.get(spline.id.as_str()).map_or(&[][..], Vec::as_slice);
+            if *control && !helper_lines.is_empty() {
+                work = work.saturating_add(pts.len()).saturating_add(helper_lines.len());
+                if work > 1_000_000 || !handles.is_empty() {
+                    return Err(SketchError::Invalid("invalid spline control polygon".into()));
+                }
+                let undirected = |(a, b): (usize, usize)| (a.min(b), a.max(b));
+                let mut expected: Vec<_> = control_polygon_sides(pts, *periodic).map(undirected).collect();
+                let mut actual: Vec<_> = helper_lines
+                    .iter()
+                    .filter_map(|line| match line.kind {
+                        CurveKind::Line { a, b } if line.construction && !line.centerline && !line.infinite && a != b => Some(undirected((a, b))),
+                        _ => None,
+                    })
+                    .collect();
+                expected.sort_unstable();
+                actual.sort_unstable();
+                if actual != expected || actual.len() != helper_lines.len() {
+                    return Err(SketchError::Invalid("invalid spline control polygon segments".into()));
+                }
+                continue;
+            }
             if handles.is_empty() {
                 if !helper_lines.is_empty() {
                     return Err(SketchError::Invalid("spline has tangent lines without handle points".into()));
@@ -2605,7 +2671,7 @@ impl Sketch {
         let dead_splines: std::collections::BTreeSet<String> = dead_curves
             .iter()
             .filter_map(|i| self.curves.get(*i))
-            .filter(|c| matches!(&c.kind, CurveKind::Spline { handles, .. } if !handles.is_empty()))
+            .filter(|c| matches!(&c.kind, CurveKind::Spline { .. }))
             .map(|c| c.id.clone())
             .collect();
         for (i, c) in self.curves.iter().enumerate() {

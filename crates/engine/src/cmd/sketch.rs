@@ -4915,6 +4915,9 @@ fn construction(s: &mut Session, p: &Value) -> Result<Value> {
         // unless all of it already is. Projected curves may switch too. A centerline that
         // becomes construction stops being a centerline (one line type at a time).
         let to = want.unwrap_or_else(|| !cs.iter().all(|c| sk.curves.get(*c).is_some_and(|c| c.construction)));
+        if !to && cs.iter().any(|&curve| sk.is_control_polygon_segment(curve)) {
+            return Err(bad(cmd, "control polygon segments stay construction lines"));
+        }
         let mut n = 0;
         for c in cs {
             if let Some(cu) = sk.curves.get_mut(c)

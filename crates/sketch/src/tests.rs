@@ -1558,6 +1558,31 @@ fn rebuilt_projection_keeps_the_lines_drawn_on_it() {
 }
 
 #[test]
+fn closed_control_polygon_shares_points_including_the_closing_side() {
+    let mut sketch = Sketch::default();
+    let pts = [v(10.0, 10.0), v(30.0, 10.0), v(30.0, 30.0), v(10.0, 30.0)].map(|point| sketch.add_point(point, None).unwrap()).to_vec();
+    let spline = sketch
+        .add_curve(CurveKind::Spline { pts: pts.clone(), control: true, degree: 3, periodic: true, nurbs: None, handles: Vec::new() }, None)
+        .unwrap();
+    let sides = sketch.add_spline_control_polygon(spline).unwrap();
+    assert_eq!(sides.len(), 4);
+    assert_eq!(sketch.points.len(), 5);
+    assert!(matches!(sketch.curves[sides[3]].kind, CurveKind::Line { a, b } if a == pts[3] && b == pts[0]));
+    assert!(sketch.validate_spline_handles().is_ok());
+    assert!(sketch.add_spline_control_polygon(spline).is_err());
+    sketch.add_constraint(ConstraintKind::Horizontal { l: sides[0] }, None).unwrap();
+    sketch.add_constraint(ConstraintKind::Length { l: sides[0], value: 26.0 }, None).unwrap();
+    let solved = solve(&mut sketch);
+    assert!(solved.ok(), "{solved:?}");
+    let a = sketch.point(pts[0]).unwrap();
+    let b = sketch.point(pts[1]).unwrap();
+    assert!((a.dist(b) - 26.0).abs() < 1e-6 && (a.y - b.y).abs() < 1e-6);
+    sketch.remove_points(&[pts[0]]);
+    assert!(sketch.curves.is_empty());
+    assert!(sketch.validate_spline_handles().is_ok());
+}
+
+#[test]
 fn a_degree_nine_control_spline_stays_exact_and_closes_a_profile_exactly() {
     // A G4 blend curve is one degree-9 Bézier; a sketch keeps it as a control spline whose exact
     // piece is that Bézier, and profile measurement must keep using the curve, not its chords.
