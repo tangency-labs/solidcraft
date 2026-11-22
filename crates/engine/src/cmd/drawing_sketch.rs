@@ -12,11 +12,11 @@ use solidcraft_sketch::Sketch;
 use std::sync::Arc;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("drawing.sketch.create", "Create Sheet Sketch", crate::checked!("drawing.sketch.create", create))
+    CommandSpec::new("drawing.sketch.create", "Create Sheet Sketch", crate::checked!("drawing.sketch.create", create)).begins_edit()
         .in_drawing().doc_only().icon("sketch")
         .contract(&contract::CREATE).output(output_schema_for::<contract::Reading>)
         .params("owner: exact sheet id in the open drawing; name?: text. Creates and enters one sheet sketch in paper XY millimetres; one drawing undo step."),
-    CommandSpec::new("drawing.sketch.edit", "Edit Sheet Sketch", crate::checked!("drawing.sketch.edit", edit))
+    CommandSpec::new("drawing.sketch.edit", "Edit Sheet Sketch", crate::checked!("drawing.sketch.edit", edit)).begins_edit()
         .in_drawing().doc_only().noundo().icon("sketch")
         .contract(&contract::EDIT).output(output_schema_for::<contract::Reading>)
         .params("sketch: exact encoded sketch id in the open drawing. Enters that sheet sketch without changing its data or the source design."),

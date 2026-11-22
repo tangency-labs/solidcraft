@@ -44,6 +44,7 @@ const EXTRUDE_DISTANCE: &str = "Distance";
 
 pub static COMMANDS: &[CommandSpec] =
     &[CommandSpec::new(FROM_MODEL, "Model Dimensions", crate::checked!("drawing.dimension.from_model", from_model))
+        .begins_edit()
         .icon("dimension")
         .in_drawing()
         .doc_only()

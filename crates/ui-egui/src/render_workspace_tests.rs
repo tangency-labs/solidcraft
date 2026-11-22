@@ -5913,6 +5913,38 @@ fn render_workspace_pick_stage_tools_filter_sample_clicks_with_shots_shown_and_h
     assert!(h.app.tool.is_none() && h.app.dialog.is_none());
 }
 
+/// Whatever Modelling's selection mode, even one Render's filter has no button for (Features,
+/// Sketch geometry, Components), a click in Render picks what Render's own filter shows (#17512).
+/// Leaving Render, the mode is what it was.
+#[test]
+fn render_picks_as_its_filter_shows_and_keeps_the_mode() {
+    use solidcraft_engine::{PickMode, Sel};
+    let (mut h, occurrence) = render_pick_sample();
+    for (mode, filter) in [(PickMode::Features, "face"), (PickMode::Sketch, "component"), (PickMode::Components, "body")] {
+        enter(&mut h.app, false).unwrap();
+        h.frames(2);
+        crate::selection_mode::set(&mut h.app, mode);
+        enter(&mut h.app, true).unwrap();
+        h.settle();
+        h.step(&json!({"click":{"handle":format!("render:pick:{filter}")}})).unwrap();
+        assert_eq!(h.app.pick_mode(), filter);
+        let at = product_pick_point(&h);
+        h.step(&json!({"move":[at.x,at.y]})).unwrap();
+        h.step(&json!({"click":[at.x,at.y]})).unwrap();
+        match (filter, h.app.session.selection.as_slice()) {
+            ("body", [Sel::Body { name }]) => assert_eq!(name, "Plate"),
+            ("face", [Sel::Face { body, .. }]) => assert_eq!(body, "Plate"),
+            ("component", [Sel::Occurrence { path }]) => assert_eq!(path, &[occurrence]),
+            (_, other) => panic!("{mode:?}: the filter shows {filter}, a click picked {other:?}"),
+        }
+        enter(&mut h.app, false).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.ui.pick_mode, mode, "Render leaves the setting as it was");
+        enter(&mut h.app, true).unwrap();
+        h.settle();
+    }
+}
+
 #[test]
 fn render_pick_choice_stays_in_render_and_modelling_keeps_picking_faces() {
     // Render's Body / Face / Component switches used to write Modelling's pick mode: a Body or
@@ -5930,9 +5962,9 @@ fn render_pick_choice_stays_in_render_and_modelling_keeps_picking_faces() {
         enter(&mut h.app, false).unwrap();
         h.settle();
         assert_eq!(h.app.pick_mode(), "face", "Modelling keeps picking faces after Render {render_choice}");
-        assert!(!h.app.ui.pick_bodies && !h.app.ui.pick_components);
+        assert_eq!(h.app.ui.pick_mode, solidcraft_engine::PickMode::Faces);
         let prefs: serde_json::Value = serde_json::from_str(&h.app.prefs()).unwrap();
-        assert_eq!(prefs["pick_bodies"], false, "Render's choice must not reach the preferences file");
+        assert_eq!(prefs["pick_mode"], "faces", "Render's choice must not reach the preferences file");
 
         // With no command running, hovering a face lights that face and a click picks it.
         let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
@@ -5960,7 +5992,10 @@ fn render_pick_choice_stays_in_render_and_modelling_keeps_picking_faces() {
         h.step(&json!({"click":{"handle":"tab:VIEW"}})).unwrap();
         h.step(&json!({"click":{"handle":"panel:VIEW:SELECT"}})).unwrap();
         let check = |h: &Harness, body: bool, component: bool| {
-            assert_eq!((h.app.ui.pick_bodies, h.app.ui.pick_components), (body, component));
+            assert_eq!(
+                (h.app.ui.pick_mode == solidcraft_engine::PickMode::Bodies, h.app.ui.pick_mode == solidcraft_engine::PickMode::Parts),
+                (body, component)
+            );
             let tree = h.output.accesskit_update.as_ref().unwrap();
             for (label, on) in [(BODY, body), (COMPONENT, component)] {
                 let node = tree.nodes.iter().find(|(_, n)| n.role() == Role::CheckBox && n.label() == Some(label));
@@ -6053,14 +6088,22 @@ fn render_workspace_selection_overlay_never_changes_started_frames_png_or_retain
 fn render_workspace_pick_filter_rejects_invalid_requests_atomically() {
     let mut h = Harness::new();
     let doc = h.app.session.doc.clone();
-    for mode in ["body", "face", "component"] {
+    // The filter sets the one selection mode (#4255): a component is the innermost placement,
+    // the Parts mode, as Render picked before; and the mode reads back as the same filter.
+    for (mode, pick) in [
+        ("body", solidcraft_engine::PickMode::Bodies),
+        ("face", solidcraft_engine::PickMode::Faces),
+        ("component", solidcraft_engine::PickMode::Parts),
+    ] {
+        h.app.ui.pick_off = vec!["faces".into()];
         assert_eq!(h.app.run("select.filter", json!({"mode":mode})).unwrap()["mode"], mode);
-        assert_eq!(h.app.ui.pick_bodies, mode == "body");
-        assert_eq!(h.app.ui.pick_components, mode == "component");
+        assert_eq!(h.app.ui.pick_mode, pick);
+        assert!(h.app.ui.pick_off.is_empty(), "every filter picks through faces");
+        assert_eq!(crate::selection_mode::render_filter(h.app.ui.pick_mode), mode);
     }
     for request in [json!({}), json!({"mode":"edge"}), json!({"mode":"body","extra":true})] {
         assert!(h.app.run("select.filter", request).is_err());
-        assert!(!h.app.ui.pick_bodies && h.app.ui.pick_components);
+        assert_eq!(h.app.ui.pick_mode, solidcraft_engine::PickMode::Parts);
     }
     assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
     assert!(h.app.session.undo.is_empty());
@@ -7818,6 +7861,8 @@ fn render_assign_gestures_grid_drag_modifiers_cancel_and_context_menu() {
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(h.app.session.doc.to_json(), doc.to_json());
     assign::tile(&mut h.app, json!({"appearance":"ABS - Red"}), true).unwrap();
+    // The undo left no walk of the placements; the drag's start makes the one a Ctrl-drop needs.
+    assert_eq!(crate::selection_mode::part_of(&h.app, "Plate"), solidcraft_engine::Sel::Occurrence { path: vec![occurrence] });
     h.step(&json!({"move":[at.x,at.y]})).unwrap();
     h.step(&json!({"key":"Escape"})).unwrap();
     assert!(assign::preview(&h.app).is_none());
@@ -16543,4 +16588,63 @@ fn render_backend_save_failure_does_not_schedule_a_restart() {
     assert_eq!(h.app.preferences.graphics_backend, "auto");
     assert!(!h.app.quit_requested && h.app.docs.quitting.is_none());
     assert!(crate::update::take_launch(&mut h.app).is_none());
+}
+
+#[test]
+fn render_canvas_tab_can_reach_the_finished_sketch_notice_without_toggling_focus_mode() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    let owner = h.app.docs.views.active().id;
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[10,0]]})).unwrap();
+    assert!(h.app.run("solid.extrude", json!({"distance":0})).is_err());
+    let event = h.app.sketch_notices.latest_for(h.app.session.uid, 0).unwrap().clone();
+    enter(&mut h.app, true).unwrap();
+    h.app.sketch_notices.enqueue(h.app.session.uid, 0, event);
+    h.frames(3);
+    let link = h
+        .output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .find(|(_, node)| node.role() == egui::accesskit::Role::Link && node.label() == Some(h.app.tr("sketch_finish.edit")))
+        .map(|(id, _)| *id)
+        .expect("visible notice exposes a link");
+    h.ctx.memory_mut(|memory| {
+        if let Some(id) = memory.focused() {
+            memory.surrender_focus(id);
+        }
+    });
+    let buttons = h.output.accesskit_update.as_ref().unwrap().nodes.iter().filter(|(_, node)| node.role() == egui::accesskit::Role::Button).count();
+    assert!(buttons > 120, "the real appearance catalogue makes sequential traversal too long for a six-second notice");
+    let tap = |h: &mut Harness, modifiers| {
+        h.frame_with(vec![
+            egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers },
+            egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: false, repeat: false, modifiers },
+        ]);
+    };
+    tap(&mut h, egui::Modifiers::NONE);
+    assert!(!h.app.shell.render_focus, "Tab enters the notice while it is visible");
+    assert!(
+        h.ctx.memory(|memory| memory.focused().is_some_and(|id| id.accesskit_id() == link)),
+        "the first Tab from the canvas reaches the actual notice link"
+    );
+    // Once a widget owns focus, normal traversal resumes: go to the preceding
+    // control and back to the exact same accessible notice link.
+    tap(&mut h, egui::Modifiers::SHIFT);
+    h.frame();
+    assert!(
+        h.ctx.memory(|memory| memory.focused().is_some_and(|id| id.accesskit_id() != link)),
+        "Shift+Tab leaves the notice through ordinary widget order"
+    );
+    tap(&mut h, egui::Modifiers::NONE);
+    assert!(
+        h.ctx.memory(|memory| memory.focused().is_some_and(|id| id.accesskit_id() == link)),
+        "ordinary Tab returns from the preceding control to the notice"
+    );
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.active_sketch, Some(sketch));
+    assert_eq!(h.app.session.sketching_view, Some(owner));
 }
