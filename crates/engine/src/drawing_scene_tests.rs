@@ -3534,15 +3534,6 @@ fn cube_on_block() -> (Session, u64, Value) {
     (s, sheet, cube)
 }
 
-/// Runs model command `id` with the drawing closed, as the model can only be changed then, and
-/// opens the drawing again.
-fn in_the_model(s: &mut Session, id: &str, p: Value) {
-    let drawing = ids::encode(s.open_drawing.unwrap());
-    run(s, "drawing.close", json!({}));
-    run(s, id, p);
-    run(s, "drawing.open", json!({"drawing": drawing}));
-}
-
 fn two_live_drawing_pages() -> (Session, [(u64, u64); 2]) {
     let (s, first_sheet, _) = front_and_top();
     let first = s.open_drawing.unwrap();
