@@ -2410,6 +2410,74 @@ fn pattern_upkeep_does_not_search_ids_per_copy() {
     assert!(sk.curves.iter().all(|c| c.reversed));
 }
 
+/// A sketch shaped like a hostile design file. One circular pattern copy names, at every
+/// reference, the last of `n` points, `n` curves and `2n` constraints, the last a pattern relation.
+fn sketch_naming_its_last_ids(n: usize) -> Sketch {
+    let mut sk = Sketch::new();
+    let a = sk.add_point(v(1.0, 0.0), None).unwrap();
+    let line = sk.add_line_pts(0, a, None).unwrap();
+    let (point, curve) = (sk.points[a].clone(), sk.curves[line].clone());
+    sk.points.extend((0..n).map(|i| SPoint { id: format!("q{i}"), ..point.clone() }));
+    sk.curves.extend((0..n).map(|i| Curve { id: format!("c{i}"), ..curve.clone() }));
+    let constraint = |id: String, kind| Constraint { id, kind, param: None, driven: false, text: None };
+    sk.constraints.extend((0..2 * n - 1).map(|i| constraint(format!("k{i}"), ConstraintKind::Fix { p: a })));
+    let relation = ConstraintKind::PatternPoint { p: 0, q: a, center: Some(0), angle: PI, offset: Vec2::ZERO, directions: [None, None] };
+    sk.constraints.push(constraint("kz".into(), relation));
+    let (p, c) = (format!("q{}", n - 1), format!("c{}", n - 1));
+    let instance =
+        PatternInstance { index: [1, 0], curves: vec![c.clone(); n], points: vec![(p.clone(), p); n], constraints: vec!["kz".into(); 2 * n] };
+    let kind = SketchPatternKind::Circular { center: "origin".into(), count: 2, angle: 180.0, alignment: PatternAlignment::Right, reversed: false };
+    sk.patterns.push(SketchPattern {
+        id: "pat".into(),
+        entities: vec![c],
+        kind,
+        count_expression: None,
+        instances: vec![instance],
+        expressions: Default::default(),
+    });
+    sk
+}
+
+/// Reading a design checks that each pattern copy names curves, points and pattern relations its
+/// sketch has. Each was once found by a linear search over the sketch's ids, so a hostile file
+/// within the size limits (a copy naming the last of 200 000 curves, 200 000 points and 400 000
+/// constraints at every reference) took many minutes per sketch to read. The checks must not
+/// search per reference, and they accept and refuse exactly what they did.
+#[test]
+fn pattern_checks_do_not_search_ids_per_reference() {
+    fn changed(sk: &Sketch, change: impl FnOnce(&mut Sketch)) -> Sketch {
+        let mut sk = sk.clone();
+        change(&mut sk);
+        sk
+    }
+    let n = 20_000;
+    let sk = sketch_naming_its_last_ids(n);
+    let refused = || Err("invalid value: invalid sketch pattern instance".to_string());
+    let cases = [
+        ("every reference found", sk.clone(), Ok(())),
+        ("an unknown curve", changed(&sk, |sk| sk.patterns[0].instances[0].curves[n / 2] = "c-1".into()), refused()),
+        ("an unknown point", changed(&sk, |sk| sk.patterns[0].instances[0].points[n / 2].1 = "q-1".into()), refused()),
+        ("a constraint that is no pattern relation", changed(&sk, |sk| sk.patterns[0].instances[0].constraints[n] = "k0".into()), refused()),
+        // An id two constraints share counts when either of them is a pattern relation.
+        ("an id a fix shares with the relation", changed(&sk, |sk| sk.constraints[0].id = "kz".into()), Ok(())),
+        // The relations themselves are checked after the copies. The hostile file's pattern
+        // radius between a line and itself is refused there.
+        (
+            "a pattern radius between a line and itself",
+            changed(&sk, |sk| sk.constraints[2 * n - 1].kind = ConstraintKind::PatternRadius { a: 0, b: 0 }),
+            Err("invalid value: pattern radius needs two circles or ellipses".to_string()),
+        ),
+    ];
+    let mut most = 0;
+    for (what, sk, expected) in cases {
+        ID_SEARCHES.with(|c| c.set(0));
+        assert_eq!(sk.validate_patterns().map_err(|e| e.to_string()), expected, "{what}");
+        most = most.max(ID_SEARCHES.with(std::cell::Cell::get));
+    }
+    // Only the circular pattern's centre is found by a search.
+    assert!(most <= 1, "{most} id searches in one check of the patterns");
+}
+
 /// Inserting a dense drawing searched the whole sketch for every new id, so the insert took time
 /// in proportion to the square of its size (about 40 s for 60000 lines). A batch searches no
 /// sketch for an id, and gives the points and curves exactly the ids, checks and refusals that

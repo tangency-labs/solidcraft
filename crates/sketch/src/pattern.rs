@@ -402,6 +402,18 @@ impl Sketch {
         if self.patterns.len() > crate::CEILING_CONSTRAINTS {
             return Err(SketchError::TooLarge);
         }
+        // The ids pattern copies may name, each set built once at its first use. A linear search
+        // per reference cost references × ids comparisons, about 3e11 and many minutes per sketch
+        // for a hostile design file within the size limits, paid by everything that reads designs.
+        let curves = std::cell::LazyCell::new(|| self.curves.iter().map(|c| c.id.as_str()).collect::<std::collections::HashSet<_>>());
+        let points = std::cell::LazyCell::new(|| self.points.iter().map(|p| p.id.as_str()).collect::<std::collections::HashSet<_>>());
+        let relations = std::cell::LazyCell::new(|| {
+            self.constraints
+                .iter()
+                .filter(|c| matches!(c.kind, crate::ConstraintKind::PatternPoint { .. } | crate::ConstraintKind::PatternRadius { .. }))
+                .map(|c| c.id.as_str())
+                .collect::<std::collections::HashSet<_>>()
+        });
         let mut ids = std::collections::BTreeSet::new();
         for pattern in &self.patterns {
             if pattern.expressions.len() > 5
@@ -469,18 +481,12 @@ impl Sketch {
                     || instance.points.len() > crate::CEILING_POINTS
                     || instance.curves.len() > crate::CEILING_CURVES
                     || instance.constraints.len() > crate::CEILING_CONSTRAINTS
-                    || instance.curves.iter().any(|id| !valid_id(id) || self.curve_index(id).is_none())
+                    || instance.curves.iter().any(|id| !valid_id(id) || !curves.contains(id.as_str()))
                     || instance
                         .points
                         .iter()
-                        .any(|(p, q)| !valid_id(p) || !valid_id(q) || self.point_index(p).is_none() || self.point_index(q).is_none())
-                    || instance.constraints.iter().any(|id| {
-                        !valid_id(id)
-                            || !self.constraints.iter().any(|c| {
-                                c.id == *id
-                                    && matches!(c.kind, crate::ConstraintKind::PatternPoint { .. } | crate::ConstraintKind::PatternRadius { .. })
-                            })
-                    })
+                        .any(|(p, q)| !valid_id(p) || !valid_id(q) || !points.contains(p.as_str()) || !points.contains(q.as_str()))
+                    || instance.constraints.iter().any(|id| !valid_id(id) || !relations.contains(id.as_str()))
                 {
                     return Err(SketchError::Invalid("invalid sketch pattern instance".into()));
                 }
