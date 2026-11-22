@@ -275,21 +275,6 @@ impl SurfaceFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_)
-            | Self::Defect { .. }
-            | Self::EmptyDomain
-            | Self::BlendDefinitionNotFromBoundary
-            | Self::BlendSurfaceNotMade
-            | Self::MergedRangeReversed { .. }
-            | Self::KnotsAndContinuitiesDisagree { .. }
-            | Self::DegenerateParameterNotFound
-            | Self::DistanceNotEnclosed
-            | Self::FartherThanGuess { .. }
-            | Self::SingularBoundaryNotPole { .. }
-            | Self::RecursionPastBound { .. }
-            | Self::IsoCurveKindNotLiftable
-            | Self::NoContinuousDomain
-            | Self::NothingLifted => SM_ERR,
             Self::Missing(_)
             | Self::SolverWithout { .. }
             | Self::SolveCacheNotMade
@@ -313,20 +298,8 @@ impl SurfaceFailure {
             Self::SolverWithout { .. }
             | Self::LineDirectionZero
             | Self::EmptyDomain
-            | Self::BlendDefinitionNotFromBoundary => ErrorKind::InvalidInput,
-            Self::IsoCurveKindNotLiftable => ErrorKind::Unsupported,
-            Self::SolveCacheNotMade
-            | Self::BlendSurfaceNotMade
-            | Self::MergedRangeReversed { .. }
-            | Self::KnotsAndContinuitiesDisagree { .. }
-            | Self::DegenerateParameterNotFound
-            | Self::DistanceNotEnclosed
-            | Self::FartherThanGuess { .. }
-            | Self::SingularBoundaryNotPole { .. }
-            | Self::RecursionPastBound { .. }
-            | Self::NoContinuousDomain
-            | Self::NothingLifted => ErrorKind::Failed,
-            Self::TooFewKnots { .. }
+            | Self::BlendDefinitionNotFromBoundary
+            | Self::TooFewKnots { .. }
             | Self::BendBoxMalformed
             | Self::BaseSurfaceNotOwned
             | Self::DerivativeOrderTooHigh { .. }
@@ -340,11 +313,24 @@ impl SurfaceFailure {
             | Self::PointOutsideGivenDomain { .. }
             | Self::BoxOutsideParamDomain
             | Self::PseudoBoxOutsideDomain => ErrorKind::OutsideDomain,
-            Self::DerivativeCombinationUnsupported { .. }
+            Self::IsoCurveKindNotLiftable
+            | Self::DerivativeCombinationUnsupported { .. }
             | Self::PlainVolume
             | Self::BSplineVolumeUnsupported => ErrorKind::Unsupported,
             Self::PointInBendSingularity | Self::ZeroVolumeTangent { .. } => ErrorKind::Degenerate,
-            Self::NoVolumeInverse | Self::CallFailed => ErrorKind::Failed,
+            Self::SolveCacheNotMade
+            | Self::BlendSurfaceNotMade
+            | Self::MergedRangeReversed { .. }
+            | Self::KnotsAndContinuitiesDisagree { .. }
+            | Self::DegenerateParameterNotFound
+            | Self::DistanceNotEnclosed
+            | Self::FartherThanGuess { .. }
+            | Self::SingularBoundaryNotPole { .. }
+            | Self::RecursionPastBound { .. }
+            | Self::NoContinuousDomain
+            | Self::NothingLifted
+            | Self::NoVolumeInverse
+            | Self::CallFailed => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
