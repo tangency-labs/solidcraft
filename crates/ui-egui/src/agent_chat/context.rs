@@ -359,12 +359,6 @@ pub fn current_sels(session: &Session, entry: &Entry, names: &mut NameCache) -> 
     lit
 }
 
-/// The message as the agent gets it: the text, then what was selected.
-pub fn with_context(text: &str, context: &Context) -> String {
-    let block = context.prompt_block();
-    if block.is_empty() { text.to_string() } else { format!("{text}\n\n{block}") }
-}
-
 /// Describe what the session has selected, as what was clicked: see [`clicked`].
 pub fn describe_selection(session: &mut Session) -> Context {
     let groups = clicked(session, &session.selection.clone());

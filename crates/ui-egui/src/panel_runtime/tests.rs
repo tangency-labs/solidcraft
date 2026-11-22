@@ -13712,7 +13712,7 @@ fn production_assistant_actions_use_the_existing_confirmation_and_close_retains_
     h.app.agent_chat.items.push(crate::agent_chat::Item::Agent { thought: false, text: "retained transcript".into() });
     h.app.agent_chat.pending.push(crate::agent_chat::Pending {
         text: "queued instruction".into(),
-        image: false,
+        view: None,
         context: Default::default(),
         files: Vec::new(),
     });

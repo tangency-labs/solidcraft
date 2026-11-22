@@ -196,6 +196,12 @@ impl std::fmt::Debug for Picture {
     }
 }
 
+impl PartialEq for Picture {
+    fn eq(&self, other: &Self) -> bool {
+        self.note == other.note && self.view == other.view && self.bytes == other.bytes
+    }
+}
+
 /// Which chips point at things that are no longer in the design (shown struck through), worked out
 /// again when the design or the chips change.
 #[derive(Default)]
@@ -260,7 +266,7 @@ pub enum Item {
     User {
         text: String,
         image: bool,
-        /// The view's picture, kept once it is taken (when the agent starts on the message).
+        /// The view and file pictures kept with this message.
         pictures: Vec<Picture>,
         /// What was selected or picked in the model when it was sent ("Attach selection", Pick context).
         context: Context,
@@ -387,7 +393,7 @@ struct Turn {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Pending {
     pub text: String,
-    pub image: bool,
+    pub view: Option<Picture>,
     pub context: Context,
     /// The files attached to it (they go with it).
     pub files: Vec<attach::Attachment>,
@@ -402,6 +408,14 @@ impl Pending {
         self.text = text;
         self.context = std::mem::take(&mut self.context).regrouped(&order);
     }
+}
+
+/// One backend turn, with its original messages and their place in the transcript. Keep the
+/// messages together through startup and sign-in so a retry sends the same attachments.
+struct Submission {
+    messages: Vec<Pending>,
+    at: Option<usize>,
+    interrupted: bool,
 }
 
 /// A request held for Allow or Deny.
@@ -456,6 +470,8 @@ pub struct AgentChat {
     /// creating/opening a design may carry the conversation, but a person's tab switch may not.
     pub(crate) following_document: bool,
     pub items: Vec<Item>,
+    /// How many items were trimmed from the front of the transcript.
+    items_trimmed: usize,
     /// When each item came in, beside it (`times[n]` is `items[n]`'s); shorter when items were
     /// added without one, which then show no time.
     pub(crate) times: Vec<times::Stamp>,
@@ -499,9 +515,8 @@ pub struct AgentChat {
     input_chars: usize,
     auth: Vec<acp::AuthMethod>,
     auth_status: Option<String>,
-    /// A message typed before the agent was ready: its text, whether the view goes with it, its
-    /// place in the conversation, and its files.
-    queued: Option<(String, bool, Option<usize>, Vec<attach::Attachment>)>,
+    /// The turn waiting for startup or sign-in.
+    queued: Option<Submission>,
     /// Messages typed while the agent works, in order. They go as one prompt when the turn ends
     /// (or at once with Send now); after Stop they wait for Send.
     pub pending: Vec<Pending>,
@@ -529,8 +544,8 @@ pub struct AgentChat {
     keyboard_owned: bool,
     /// Select All (Ctrl+A) in the transcript took the whole conversation (#10676).
     all_selected: bool,
-    /// The last message sent, kept to send again after a sign-in (its files too).
-    last: Option<(String, bool, Option<usize>, Vec<attach::Attachment>)>,
+    /// The last turn sent, kept to send again after a sign-in.
+    last: Option<Submission>,
     /// Files for the next message (pictures, text files, imported parts), shown as chips.
     pub(crate) attachments: Vec<attach::Attachment>,
     /// Pictures pasted so far, to name the next one.
@@ -808,6 +823,7 @@ impl AgentChat {
     fn push(&mut self, item: Item) {
         if self.items.len() >= MAX_ITEMS {
             self.items.drain(..MAX_ITEMS / 10);
+            self.items_trimmed += MAX_ITEMS / 10;
             self.chips_version += 1;
             self.times.drain(..self.times.len().min(MAX_ITEMS / 10));
         }
@@ -832,17 +848,6 @@ impl AgentChat {
     /// While the agent works on a message: when it last said or did something.
     pub(crate) fn heard_at(&self) -> Option<f64> {
         self.turn.as_ref().filter(|_| self.state() == State::Busy).map(|t| t.heard)
-    }
-    /// Keep the picture just sent with the message at `at` in the conversation (the user can open
-    /// it). A message sent again (after a sign-in) has its picture already: nothing is added, and
-    /// never to another message.
-    fn keep_picture(&mut self, at: Option<usize>, png: Vec<u8>) {
-        if let Some(Item::User { image: true, pictures, .. }) = at.and_then(|i| self.items.get_mut(i))
-            && !pictures.iter().any(|p| p.view)
-            && png.len() <= MAX_PICTURE_BYTES
-        {
-            pictures.push(Picture::shared(Arc::new(png), "", true));
-        }
     }
     /// Say that the agent refused a model, and in its words why.
     fn model_refused(&mut self, model: &str, error: &str) {
@@ -1477,12 +1482,17 @@ pub(crate) fn leave_document(app: &mut SolveApp) {
     chat.last = None;
     // A prompt waiting for startup or sign-in has not reached the backend yet. Keep it
     // with the explicit queue so a late Ready event cannot send it on returning to the tab.
-    if let Some((text, image, at, files)) = chat.queued.take() {
-        if let Some(at) = at.filter(|&at| matches!(chat.items.get(at), Some(Item::User { .. }))) {
-            chat.remove_item(at);
+    if let Some(submission) = chat.queued.take() {
+        if let Some(at) = submission.at {
+            for item in (at..at + submission.messages.len()).rev() {
+                if let Some(index) = item.checked_sub(chat.items_trimmed)
+                    && matches!(chat.items.get(index), Some(Item::User { .. }))
+                {
+                    chat.remove_item(index);
+                }
+            }
         }
-        // The text already carries the selection, so there is no context to show again.
-        chat.pending.insert(0, Pending { text, image, context: Context::default(), files });
+        chat.pending.splice(0..0, submission.messages);
     }
     if !chat.pending.is_empty() {
         chat.stopped = true;
@@ -1734,7 +1744,8 @@ pub fn send(app: &mut SolveApp, ctx: &egui::Context, text: String) {
     }
     let text = if text.trim().is_empty() { String::new() } else { text };
     // No room in the queue: the words (and their picks) stay in the box.
-    if app.agent_chat.state() == State::Busy && app.agent_chat.pending.len() >= MAX_PENDING {
+    let waiting = app.agent_chat.state() == State::Busy || app.agent_chat.queued.is_some();
+    if waiting && app.agent_chat.pending.len() >= MAX_PENDING {
         if app.agent_chat.input.trim().is_empty() {
             app.agent_chat.input = text;
         }
@@ -1742,8 +1753,8 @@ pub fn send(app: &mut SolveApp, ctx: &egui::Context, text: String) {
         app.agent_chat.notice(tr("ui.agent_chat_queue_full"), false);
         return;
     }
-    let image = app.agent_chat.attach_view && app.agent_chat.images;
-    // The selection is read now, when the user sends, not when a queued message finally goes.
+    // The view and selection belong to this message, even when dispatch has to wait.
+    let view = take_view(app);
     // What was picked goes first, then what is selected (without what was picked twice).
     let (text, mut context) = place_pills(&mut app.agent_chat, text);
     if app.agent_chat.attach_selection {
@@ -1757,50 +1768,66 @@ pub fn send(app: &mut SolveApp, ctx: &egui::Context, text: String) {
         selected.items.retain(|i| !context.items.iter().any(|c| c.same_item(i)));
         context.merge(selected);
     }
-    if app.agent_chat.state() == State::Busy {
-        let chat = &mut app.agent_chat;
-        let files = std::mem::take(&mut chat.attachments);
-        chat.pending.push(Pending { text, image, context, files });
+    let files = std::mem::take(&mut app.agent_chat.attachments);
+    let message = Pending { text, view, context, files };
+    if waiting {
+        app.agent_chat.pending.push(message);
+        #[cfg(not(target_arch = "wasm32"))]
+        if !app.agent_chat.state().running() {
+            connect(app, ctx);
+        }
         return;
     }
-    let files = std::mem::take(&mut app.agent_chat.attachments);
     // Messages left waiting by Stop go first, in one prompt with this one.
     if !app.agent_chat.pending.is_empty() {
-        app.agent_chat.pending.push(Pending { text, image, context, files });
+        app.agent_chat.pending.push(message);
         send_queue(app, ctx, false);
         return;
     }
-    submit(app, ctx, text, image, context, files, false);
+    submit(app, ctx, vec![message], false);
 }
 
-/// Put `text` in the conversation and send it with its files (`interrupted`: the agent is told it
-/// cut in on its previous step).
-fn submit(app: &mut SolveApp, ctx: &egui::Context, text: String, image: bool, context: Context, files: Vec<attach::Attachment>, interrupted: bool) {
-    // Attached pictures show as thumbnails with the viewer, as the view's picture does; the other
-    // files are listed by name.
-    let pictures = files
-        .iter()
-        .filter_map(|f| match &f.content {
-            attach::Content::Picture { bytes, .. } => Some(Picture::shared(Arc::clone(bytes), f.name.clone(), false)),
-            _ => None,
-        })
-        .collect();
-    app.agent_chat.push(Item::User {
-        text: text.clone(),
-        image,
-        pictures,
-        context: context.clone(),
-        files: files.iter().filter(|f| !f.is_picture()).map(|f| f.name.clone()).collect(),
-    });
+fn take_view(app: &mut SolveApp) -> Option<Picture> {
+    if !app.agent_chat.attach_view || !app.agent_chat.images {
+        return None;
+    }
+    match crate::control::view_png(app, VIEW_IMAGE.0, VIEW_IMAGE.1) {
+        Ok(png) if png.len() <= MAX_PICTURE_BYTES => Some(Picture::shared(Arc::new(png), "", true)),
+        result => {
+            log::warn!("the view's picture could not be attached: {}", result.err().as_deref().unwrap_or("picture exceeds the size limit"));
+            app.agent_chat.notice(tr("ui.agent_chat_view_capture_failed"), true);
+            None
+        }
+    }
+}
+
+/// Show each message with its own attachments, and send the messages as one turn.
+fn submit(app: &mut SolveApp, ctx: &egui::Context, messages: Vec<Pending>, interrupted: bool) {
+    let at = app.agent_chat.items_trimmed + app.agent_chat.items.len();
+    for message in &messages {
+        let pictures: Vec<_> = message
+            .files
+            .iter()
+            .filter_map(|f| match &f.content {
+                attach::Content::Picture { bytes, .. } => Some(Picture::shared(Arc::clone(bytes), f.name.clone(), false)),
+                _ => None,
+            })
+            .chain(message.view.iter().cloned())
+            .collect();
+        app.agent_chat.push(Item::User {
+            text: message.text.clone(),
+            image: pictures.iter().any(|picture| picture.view),
+            pictures,
+            context: message.context.clone(),
+            files: message.files.iter().filter(|f| !f.is_picture()).map(|f| f.name.clone()).collect(),
+        });
+    }
     app.agent_chat.chips_version += 1;
-    // The message's place in the conversation: its picture is kept there when it is taken.
-    let at = app.agent_chat.items.len().checked_sub(1);
-    // The agent gets the selection as text after the message; the conversation shows chips.
-    let text = context::with_context(&text, &context);
+    let submission = Submission { messages, at: Some(at), interrupted };
     match app.agent_chat.state() {
-        State::Ready => start_turn_with(app, text, image, at, files, interrupted.then_some(INTERRUPT_NOTE)),
+        State::Ready => start_turn(app, submission),
         s => {
-            app.agent_chat.queued = Some((text, image, at, files));
+            app.agent_chat.queued = Some(submission);
             #[cfg(not(target_arch = "wasm32"))]
             if !s.running() {
                 connect(app, ctx);
@@ -1814,33 +1841,30 @@ fn submit(app: &mut SolveApp, ctx: &egui::Context, text: String, image: bool, co
 /// Send the queued messages as one prompt, in order.
 fn send_queue(app: &mut SolveApp, ctx: &egui::Context, interrupted: bool) {
     let chat = &mut app.agent_chat;
+    if chat.queued.is_some() {
+        #[cfg(not(target_arch = "wasm32"))]
+        if !chat.state().running() {
+            connect(app, ctx);
+        }
+        return;
+    }
     chat.pending_edit = None;
     if chat.pending.is_empty() {
         return;
     }
-    let all = std::mem::take(&mut chat.pending);
-    let image = all.iter().any(|p| p.image);
-    let mut files = Vec::new();
-    let mut context = Context::default();
-    let mut texts = Vec::new();
-    for p in all {
-        // Each message's pills are numbered from 1: the later ones follow the earlier ones' numbers.
-        let by = context.last_group();
-        files.extend(p.files);
-        context.merge(p.context.shifted(by));
-        if !p.text.trim().is_empty() {
-            texts.push(pills::shift(&p.text, by));
-        }
+    let mut messages = std::mem::take(&mut chat.pending);
+    let mut remaining = attach::MAX_FILES;
+    let mut left = Vec::new();
+    for message in &mut messages {
+        left.extend(message.files.drain(remaining.min(message.files.len())..).map(|f| f.name));
+        remaining -= message.files.len();
     }
-    // One message carries at most MAX_FILES files; the rest are named, not sent.
-    if files.len() > attach::MAX_FILES {
-        let left: Vec<String> = files.split_off(attach::MAX_FILES).into_iter().map(|f| f.name).collect();
+    if !left.is_empty() {
         let max = attach::MAX_FILES.to_string();
         chat.notice(trf("ui.agent_chat_files_left_out", &[("max", &max), ("files", &left.join(", "))]), true);
+        messages.retain(|message| !message.text.is_empty() || message.view.is_some() || !message.context.is_empty() || !message.files.is_empty());
     }
-    let text = texts.join("\n\n");
-    let text: String = text.chars().take(MAX_PROMPT).collect();
-    submit(app, ctx, text, image, context, files, interrupted);
+    submit(app, ctx, messages, interrupted);
 }
 
 /// Send now: stop the running step and send the queue as the next prompt once the agent has said
@@ -1871,6 +1895,7 @@ pub fn new_chat(app: &mut SolveApp) {
     let chat = &mut app.agent_chat;
     chat.confirm_new = false;
     chat.items.clear();
+    chat.items_trimmed = 0;
     chat.all_selected = false;
     chat.times.clear();
     chat.turn_warning = None;
@@ -1929,37 +1954,94 @@ fn after_turn(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
-fn start_turn(app: &mut SolveApp, text: String, image: bool, at: Option<usize>, files: Vec<attach::Attachment>) {
-    start_turn_with(app, text, image, at, files, None);
+/// Keep the parts of each queued message together on the wire. Adjacent text parts can share one
+/// block, since an agent can accept an entire batch as one prompt.
+fn prompt_parts(submission: &Submission, changed: Option<&str>, pictures: bool, documents: bool) -> Vec<PromptPart> {
+    let notes: Vec<&str> = submission.interrupted.then_some(INTERRUPT_NOTE).into_iter().chain(changed).collect();
+    let mut lead = notes.join("\n");
+    let grouped = submission.messages.len() > 1
+        && submission.messages.iter().any(|message| message.view.is_some() || !message.context.is_empty() || !message.files.is_empty());
+    let mut group = 0;
+    let mut context_room = context::MAX_ITEMS;
+    let texts: Vec<_> = submission
+        .messages
+        .iter()
+        .enumerate()
+        .map(|(index, message)| {
+            let text = pills::shift(&message.text, group);
+            let mut context = message.context.clone().shifted(group);
+            group = group.max(context.last_group());
+            let kept = context.items.len().min(context_room);
+            context.omitted += context.items.len() - kept;
+            context.items.truncate(kept);
+            context_room -= kept;
+            let header = if grouped { format!("[Queued message {}]\n", index + 1) } else { String::new() };
+            let view_hint =
+                if grouped && pictures && message.view.is_some() { "\n\nThe next image is the view attached to this message." } else { "" };
+            let selection = context.prompt_block();
+            let selection = if selection.is_empty() { selection } else { format!("\n\n{selection}") };
+            (header, text, selection, view_hint)
+        })
+        .collect();
+    // Reserve message labels and selection descriptions before older text can use the space.
+    // In particular, each image keeps its label even in a batch that fills the prompt.
+    let separators = 2 * (texts.len().saturating_sub(1) + usize::from(!lead.is_empty()));
+    let fixed = lead.chars().count() + separators + texts.iter().map(|(header, _, _, hint)| header.len() + hint.len()).sum::<usize>();
+    let room = MAX_PROMPT.saturating_sub(fixed);
+    let mut selection_room = texts.iter().map(|(_, _, selection, _)| selection.chars().count()).sum::<usize>().min(room);
+    let mut text_room = room - selection_room;
+    let text_len = texts.iter().map(|(_, text, _, _)| text.chars().count()).sum::<usize>();
+    let mut file_room = text_room.saturating_sub(text_len + FILE_NAMES_ROOM);
+    let mut parts = Vec::new();
+    for ((header, text, selection, view_hint), message) in texts.into_iter().zip(&submission.messages) {
+        if !lead.is_empty() {
+            lead.push_str("\n\n");
+        }
+        lead.push_str(&header);
+        append_prompt_text(&mut lead, &text, &mut text_room);
+        append_prompt_text(&mut lead, &selection, &mut selection_room);
+        let about_files = attach::note(&message.files, pictures, documents, file_room);
+        file_room = file_room.saturating_sub(about_files.chars().count());
+        append_prompt_text(&mut lead, &about_files, &mut text_room);
+        lead.push_str(view_hint);
+        let files = attach::parts(&message.files, pictures, documents);
+        let view = message.view.as_ref().filter(|_| pictures);
+        if view.is_some() || !files.is_empty() {
+            if !lead.is_empty() {
+                parts.push(PromptPart::Text(std::mem::take(&mut lead)));
+            }
+            if let Some(view) = view {
+                parts.push(PromptPart::Image { mime: "image/png".into(), base64: backend::base64(&view.bytes) });
+            }
+            parts.extend(files);
+        }
+    }
+    if !lead.is_empty() {
+        parts.push(PromptPart::Text(lead));
+    }
+    parts
 }
 
-/// Start a message; `note` goes before the text for the agent, not into the conversation, and so
-/// does what changed in the design since the agent's last turn ([`changed_note`]). The
-/// files are named after the text (text files in full), and pictures go as images to an agent
-/// that takes them. `at` is the message's place in the conversation, where its picture is kept.
-fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usize>, files: Vec<attach::Attachment>, note: Option<&str>) {
+fn append_prompt_text(to: &mut String, text: &str, room: &mut usize) {
+    for ch in text.chars().take(*room) {
+        to.push(ch);
+        *room -= 1;
+    }
+}
+
+/// Start one agent turn with the captured attachments and any current design-change notice.
+fn start_turn(app: &mut SolveApp, submission: Submission) {
     let (pictures, documents) = (app.agent_chat.images, app.agent_chat.documents);
     let seen = app.agent_chat.seen.as_ref().and_then(Revision::get::<solidcraft_engine::doc::Document>);
     let changed = seen.and_then(|seen| changed_note(&seen, &app.session.doc));
-    let notes: Vec<&str> = note.into_iter().chain(changed.as_deref()).collect();
-    let lead = if notes.is_empty() { text.clone() } else { format!("{}\n\n{text}", notes.join("\n")) };
-    // The whole message stays within the cap: the files' text gets what the words leave.
-    let budget = MAX_PROMPT.saturating_sub(lead.chars().count() + FILE_NAMES_ROOM);
-    let about_files = attach::note(&files, pictures, documents, budget);
-    let sent: String = format!("{lead}{about_files}").chars().take(MAX_PROMPT).collect();
-    let mut parts = vec![PromptPart::Text(sent)];
-    if image {
-        match crate::control::view_png(app, VIEW_IMAGE.0, VIEW_IMAGE.1) {
-            Ok(png) => {
-                parts.push(PromptPart::Image { mime: "image/png".into(), base64: backend::base64(&png) });
-                app.agent_chat.keep_picture(at, png);
-            }
-            Err(e) => log::warn!("the view's picture is left out of the prompt: {e}"),
-        }
-    }
-    parts.extend(attach::parts(&files, pictures, documents));
+    let parts = prompt_parts(&submission, changed.as_deref(), pictures, documents);
     // The undo step is named after the message, or its first file when it has no words.
-    let first_line = text.lines().find(|l| !l.trim().is_empty()).or_else(|| files.first().map(|f| f.name.as_str())).unwrap_or("");
+    let first_text = submission.messages.iter().find(|message| !message.text.trim().is_empty()).map_or("", |message| message.text.as_str());
+    let first_line = first_text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .or_else(|| submission.messages.iter().find_map(|message| message.files.first()).map(|f| f.name.as_str()))
+        .unwrap_or("");
     let label: String = first_line.chars().take(48).collect();
     app.agent_chat.turn_warning = None;
     let now = crate::now_ms();
@@ -1974,11 +2056,11 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
         tools_available: app.agent_chat.tools_available.unwrap_or(app.agent_chat.tools_port.is_some()),
         tool_called: false,
         replied: false,
-        edit_requested: requests_edit(&text),
+        edit_requested: requests_edit(first_text),
         began: now,
         heard: now,
     });
-    app.agent_chat.last = Some((text, image, at, files));
+    app.agent_chat.last = Some(submission);
     app.agent_chat.state = Some(State::Busy);
     app.agent_chat.stopped = false;
     app.agent_chat.steering = false;
@@ -2525,9 +2607,9 @@ pub fn poll(app: &mut SolveApp, ctx: &egui::Context) {
                 set_mode(app, &mode);
             }
             if !app.agent_chat.config_pending
-                && let Some((text, image, at, files)) = app.agent_chat.queued.take()
+                && let Some(submission) = app.agent_chat.queued.take()
             {
-                start_turn(app, text, image, at, files);
+                start_turn(app, submission);
             }
         }
     }
@@ -3091,7 +3173,7 @@ pub fn status(app: &SolveApp) -> Value {
         "toolsPort": c.tools_port,
         "pid": pid,
         "waiting": c.waiting(),
-        "pending": c.pending.iter().map(|p| json!({"text": p.text, "image": p.image, "context": p.context.total(), "files": p.files.iter().map(|f| f.name.clone()).collect::<Vec<_>>()})).collect::<Vec<_>>(),
+        "pending": c.pending.iter().map(|p| json!({"text": p.text, "image": p.view.is_some(), "context": p.context.total(), "files": p.files.iter().map(|f| f.name.clone()).collect::<Vec<_>>()})).collect::<Vec<_>>(),
         "attachments": c.attachments.iter().map(|f| f.name.clone()).collect::<Vec<_>>(),
         "loading": c.loading.iter().map(|f| f.name.clone()).collect::<Vec<_>>(),
         "stopped": c.stopped,

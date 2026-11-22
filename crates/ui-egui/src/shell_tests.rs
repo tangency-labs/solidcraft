@@ -315,7 +315,7 @@ fn host_retains_the_existing_popped_assistant_window_path() {
         h.app.agent_chat.items.push(crate::agent_chat::Item::Agent { thought: false, text: "Retained transcript before New Chat".into() });
         h.app.agent_chat.pending.push(crate::agent_chat::Pending {
             text: "Retained queued message".into(),
-            image: false,
+            view: None,
             context: Default::default(),
             files: Vec::new(),
         });

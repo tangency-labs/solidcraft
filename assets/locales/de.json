@@ -5432,7 +5432,7 @@
   "ui.agent_chat_attach_selection": "Auswahl anhängen",
   "ui.agent_chat_attach_selection_tip": "Das im Modell Ausgewählte (Flächen, Kanten, Merkmale, Körper) mit der Nachricht senden, damit der Agent weiß, was Sie meinen",
   "ui.agent_chat_attach_view": "Ansicht anhängen",
-  "ui.agent_chat_attach_view_tip": "Ein Bild der aktuellen Ansicht mit der Nachricht senden",
+  "ui.agent_chat_attach_view_tip": "Die aktuelle Ansicht beim Senden oder Einreihen der Nachricht als Bild festhalten",
   "ui.agent_chat_attachable": "Bilder, PDFs, Text- und CAD-Dateien",
   "ui.agent_chat_auth_agent": "Mit {name} anmelden",
   "ui.agent_chat_auth_env": "Setzen Sie {vars} in Ihrer Umgebung und starten Sie SolidCraft neu.",

@@ -27,9 +27,8 @@ const MAX_TOOL_TEXT: usize = 20_000;
 const MODEL_NAME_CAP: usize = 256;
 /// Messages kept in the conversation (the system note stays).
 const MAX_HISTORY: usize = 240;
-/// Pictures of the view kept in the conversation. The whole history goes with every request
-/// (up to `MAX_REQUESTS_PER_TURN` per message), so older views are swapped for a short note:
-/// otherwise each attached view makes every later request bigger, until the endpoint refuses it.
+/// Budget for pictures sent back with the conversation. The new prompt keeps all its pictures
+/// through its tool rounds. Older pictures are swapped for a note when they exceed the budget.
 const MAX_HISTORY_IMAGES: usize = 2;
 /// What an older view becomes in the history.
 const DROPPED_VIEW_NOTE: &str = "[an earlier picture of the view, removed to keep the request small]";
@@ -926,8 +925,9 @@ impl Worker {
     fn turn(&mut self, parts: Vec<PromptPart>) {
         // A failed refresh keeps the previous listing: the turn still runs with the tools it had.
         let _ = self.refresh_tools();
+        let current_images = parts.iter().filter(|p| matches!(p, PromptPart::Image { .. })).count();
+        let dropped = drop_old_views(&mut self.history, MAX_HISTORY_IMAGES.saturating_sub(current_images));
         self.history.push(user_message(self.cfg.protocol, &parts));
-        let dropped = drop_old_views(&mut self.history, MAX_HISTORY_IMAGES);
         let trimmed = self.trim_history();
         if (dropped || trimmed) && self.cfg.protocol == Protocol::Anthropic {
             drop_thinking(&mut self.history);
@@ -2863,6 +2863,27 @@ mod tests {
             no_reasoning: Default::default(),
         };
         (w, seen)
+    }
+
+    #[test]
+    fn a_new_prompt_keeps_all_its_pictures_through_tool_rounds() {
+        let tool_call = json!({"choices": [{"message": {"role": "assistant", "tool_calls": [
+            {"id": "c1", "type": "function", "function": {"name": "measure", "arguments": "{}"}}
+        ]}}]});
+        let done = json!({"choices": [{"message": {"role": "assistant", "content": "Done."}}]});
+        let (mut worker, seen) = scripted_worker(vec![(200, tool_call), (200, done.clone()), (200, done)]);
+        worker.history.push(view(0));
+        let image = |n| PromptPart::Image { mime: "image/png".into(), base64: format!("V{n}") };
+        let text = |n| PromptPart::Text(format!("look {n}"));
+        worker.turn(vec![text(1), image(1), text(2), image(2), text(3), image(3)]);
+        worker.turn(vec![text(4), image(4)]);
+
+        let sent = seen.lock().unwrap();
+        assert_eq!(sent.len(), 3);
+        let images = |i: usize| pictures(sent[i]["messages"].as_array().unwrap());
+        assert_eq!(images(0), ["data:image/png;base64,V1", "data:image/png;base64,V2", "data:image/png;base64,V3"]);
+        assert_eq!(images(1), images(0), "the tool follow-up still carries the entire new prompt");
+        assert_eq!(images(2), ["data:image/png;base64,V3", "data:image/png;base64,V4"], "older pictures share the usual budget");
     }
 
     fn refusal() -> (u16, Value) {

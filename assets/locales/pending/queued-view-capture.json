@@ -1,0 +1,8 @@
+{
+  "en": {
+    "ui.agent_chat_view_capture_failed": "Could not attach a picture of the current view."
+  },
+  "de": {
+    "ui.agent_chat_view_capture_failed": "Die aktuelle Ansicht konnte nicht als Bild angehängt werden."
+  }
+}
