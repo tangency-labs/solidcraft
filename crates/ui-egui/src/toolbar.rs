@@ -1039,6 +1039,21 @@ pub(crate) fn persistent_pressed(app: &SolveApp, id: &str) -> bool {
         }
 }
 
+/// The text a ribbon button's width is measured from. A command's is its own label, as the
+/// button draws it ([`SolveApp::tr_command`]), so a translation wider than another entry's
+/// with the same English text is not cut short; a sketch family's is its family label,
+/// whichever of its commands the button shows.
+fn ribbon_size_label(
+    app: &SolveApp,
+    c: &'static solidcraft_engine::CommandSpec,
+    family: Option<&'static crate::sketch_families::Family>,
+) -> &'static str {
+    match family {
+        Some(family) => app.tr_label(crate::workspace::ribbon_family_label(family)),
+        None => app.tr_command(c.id, crate::workspace::ribbon_button_label(c)),
+    }
+}
+
 pub(crate) fn persistent_button_name(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> String {
     let info = crate::render_workspace::interactive_command_info(app, command);
     let label = crate::workspace::ribbon_button_label(command);
@@ -1502,8 +1517,7 @@ impl RibbonPanels {
                     let info = crate::render_workspace::interactive_command_info(app, selected);
                     let persistent = persistent_available(app, selected.id);
                     let size = if labels {
-                        let label = family.map_or_else(|| crate::workspace::ribbon_button_label(c), crate::workspace::ribbon_family_label);
-                        ButtonSize { width: ribbon::button_width(painter, app.tr_label(label)), min_width: BUTTON_MIN_WIDTH }
+                        ButtonSize { width: ribbon::button_width(painter, ribbon_size_label(app, c, family)), min_width: BUTTON_MIN_WIDTH }
                     } else {
                         let width = if family.is_some() { 50.0 } else { 40.0 };
                         ButtonSize { width, min_width: width }
@@ -6054,6 +6068,22 @@ mod app_bar_tests {
 #[cfg(test)]
 mod ribbon_label_tests {
     use super::*;
+
+    /// A ribbon button is sized from the label it draws: a command's own translation, not
+    /// another entry's with the same English text. In Spanish the Ground button is measured
+    /// as "Fijar", the text it shows; a sketch family's button keeps its family label's
+    /// width, whichever of its commands it shows.
+    #[test]
+    fn a_ribbon_button_is_sized_from_the_label_it_draws() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"language": "es"}));
+        let ground = solidcraft_engine::find_command("occurrence.ground").unwrap();
+        assert_eq!(ribbon_size_label(&h.app, ground, None), "Fijar");
+        assert_eq!(ribbon_size_label(&h.app, ground, None), h.app.tr_command(ground.id, crate::workspace::ribbon_button_label(ground)));
+        let family = crate::sketch_families::family("sketch.construction_line").unwrap();
+        let first = solidcraft_engine::find_command(family.commands.first().unwrap()).unwrap();
+        assert_eq!(ribbon_size_label(&h.app, first, Some(family)), h.app.tr_label(crate::workspace::ribbon_family_label(family)));
+    }
 
     #[test]
     fn translated_workspace_captions_fit_with_room_for_the_arrow() {
