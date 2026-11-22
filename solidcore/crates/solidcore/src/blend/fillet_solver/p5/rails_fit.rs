@@ -806,7 +806,14 @@ impl FilletSolver {
                 })?;
                 let curve = edge::curve(fillets.brep(), rail)?
                     .ok_or_else(|| {
-                        SolidError::blend_solver(OP, SolverFailure::RailWithoutCurve { rail })
+                        SolidError::blend_solver(
+                            OP,
+                            SolverFailure::RailNotBSpline {
+                                fillet_geom: id,
+                                side: ii,
+                                kind: None,
+                            },
+                        )
                     })?
                     .clone();
                 let face = fillets.fillet_edge(rail)?.original_face().ok_or_else(|| {

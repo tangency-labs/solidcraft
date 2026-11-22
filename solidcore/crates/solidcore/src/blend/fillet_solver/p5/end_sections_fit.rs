@@ -303,7 +303,10 @@ impl FilletSolver {
                 .geom(id)?
                 .fillet_surface(None)?
                 .ok_or_else(|| {
-                    SolidError::blend_solver(OP, SolverFailure::FilletGeomWithoutSurface)
+                    SolidError::blend_solver(
+                        OP,
+                        SolverFailure::FilletGeomWithoutSurface { fillet_geom: id },
+                    )
                 })?
                 .clone();
             let (start, end) = edge::start_end_vertices(target, fil_edge)?;
@@ -342,7 +345,14 @@ impl FilletSolver {
                     })?;
                     let curve = edge::curve(fillets.brep(), rail)?
                         .ok_or_else(|| {
-                            SolidError::blend_solver(OP, SolverFailure::RailWithoutCurve { rail })
+                            SolidError::blend_solver(
+                                OP,
+                                SolverFailure::RailNotBSpline {
+                                    fillet_geom: id,
+                                    side: ii,
+                                    kind: None,
+                                },
+                            )
                         })?
                         .clone();
                     let face = fillets.fillet_edge(rail)?.original_face().ok_or_else(|| {

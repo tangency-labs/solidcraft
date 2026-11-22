@@ -175,7 +175,7 @@ pub(super) trait RecoveryOps {
     fn topology_split(&mut self, c: &mut Recovery<'_>, geom: FilletGeomId) -> Result<FilletGeomId> {
         let solver_id = caller(
             c.fillets.geom(geom)?.fillet_solver(),
-            Solver::FilletGeomWithoutSolver,
+            Solver::FilletGeomWithoutSolver { fillet_geom: geom },
         )?;
         c.fillets.topology_split(
             c.k,
@@ -234,7 +234,7 @@ pub(super) trait RecoveryOps {
         // `this` is the solver of the geometry being processed
         let solver_id = caller(
             c.fillets.geom(geom)?.fillet_solver(),
-            Solver::FilletGeomWithoutSolver,
+            Solver::FilletGeomWithoutSolver { fillet_geom: geom },
         )?;
         // upstream passes a NULL pAdjFace through; the side face is dereferenced there
         let side_face = adjacent_face.ok_or_else(|| {
@@ -254,7 +254,7 @@ pub(super) trait RecoveryOps {
         // is the solver identified by geom.fillet_solver().
         let solver_id = caller(
             c.fillets.geom(geom)?.fillet_solver(),
-            Solver::FilletGeomWithoutSolver,
+            Solver::FilletGeomWithoutSolver { fillet_geom: geom },
         )?;
         // CalcRailIntEdgeuse reads the vertex's corner in the executive's table
         c.fillets.calc_rail_int_edgeuse_with_solver_ops(
@@ -278,7 +278,7 @@ pub(super) trait RecoveryOps {
     ) -> Result<()> {
         let id = caller(
             c.fillets.geom(geom)?.fillet_solver(),
-            Solver::FilletGeomWithoutSolver,
+            Solver::FilletGeomWithoutSolver { fillet_geom: geom },
         )?;
         let context = OwnSolver {
             id,
@@ -351,7 +351,7 @@ pub(super) trait RecoveryOps {
     fn trim_rails(&mut self, c: &mut Recovery<'_>, geom: FilletGeomId) -> Result<()> {
         let solver_id = caller(
             c.fillets.geom(geom)?.fillet_solver(),
-            Solver::FilletGeomWithoutSolver,
+            Solver::FilletGeomWithoutSolver { fillet_geom: geom },
         )?;
         c.fillets
             .trim_rail_curves_with_solver(c.k, geom, solver_id, c.solver.solver(), c.target)
@@ -501,7 +501,11 @@ impl Recovery<'_> {
         let count = required(self.fillets.fillet_edge(rail)?.curve_class(), CLASSIFIED)?.size();
         let curve = caller(
             edge::curve(self.fillets.brep(), rail)?,
-            Solver::RailWithoutCurve { rail },
+            Solver::RailNotBSpline {
+                fillet_geom: geom,
+                side: which,
+                kind: None,
+            },
         )?
         .copy(self.k)?;
         let primary = caller(
@@ -826,7 +830,7 @@ impl Recovery<'_> {
         let convex = ops.convex(self, solver_eu, 10, false, 0.0)?;
         let surface = caller(
             self.fillets.geom(id)?.fillet_surface(None)?,
-            Solver::FilletGeomWithoutSurface,
+            Solver::FilletGeomWithoutSurface { fillet_geom: id },
         )?;
         let analytic = if surface.is_kind_of(crate::surface::surface::p2::B_SPLINE_SURFACE_TYPE)? {
             SurfOfRevolution::is_nurb_surface_surf_of_revolution(self.k, surface, 1.0)?.is_some()
@@ -836,7 +840,7 @@ impl Recovery<'_> {
         let mut rails = [self.rail_copy(id, 0)?, self.rail_copy(id, 1)?];
         let original_surface = caller(
             self.fillets.geom(id)?.fillet_surface(None)?,
-            Solver::FilletGeomWithoutSurface,
+            Solver::FilletGeomWithoutSurface { fillet_geom: id },
         )?
         .copy(self.k)?;
         let mut processing_rollover = false;
