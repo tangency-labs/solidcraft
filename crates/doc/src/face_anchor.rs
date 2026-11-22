@@ -222,10 +222,10 @@ impl Document {
             for anchor in targets {
                 // The anchor's coordinates are measured from the face's own plane, whose origin
                 // moves with the source. Keep the sketch where it was when the face stays in its plane.
-                let old = doc.anchor_canonical_plane(anchor, f.id, before);
+                let old = doc.anchor_canonical_plane(anchor, f.component, before);
                 if renew(&mut anchor.target, &format!("feature {}", f.name)) {
                     if let Some(old) = old {
-                        if let Some(new) = doc.anchor_canonical_plane(anchor, f.id, after) {
+                        if let Some(new) = doc.anchor_canonical_plane(anchor, f.component, after) {
                             if old.normal().dot(new.normal()) > 1. - 1e-8 && (old.origin - new.origin).dot(new.normal()).abs() < 1e-7 {
                                 let origin = old.origin + old.x * anchor.coordinates[0] + old.y * anchor.coordinates[1];
                                 let x = old.x * anchor.x_axis[0] + old.y * anchor.x_axis[1];
