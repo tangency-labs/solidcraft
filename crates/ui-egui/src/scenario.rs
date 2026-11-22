@@ -324,6 +324,7 @@ impl Harness {
             || self.app.saving.is_some()
             || crate::open_meshing::active(&self.app)
             || self.app.op_check.busy()
+            || crate::pattern_skip::busy(&self.app)
             || !crate::drawing_jobs::idle(&self.app))
             && began.elapsed() < std::time::Duration::from_secs(120)
         {

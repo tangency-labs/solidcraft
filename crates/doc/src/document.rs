@@ -3054,6 +3054,84 @@ pub struct HoleReference {
     pub distance: Expr,
 }
 
+/// A placement in a rectangular grid or along a row, followed by any nested pattern steps.
+/// Every step stores its source pattern feature ID (0 for the first step), and its two
+/// zero-based indices. A one-direction layout uses the first index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct PatternStep(pub FeatureId, pub usize, pub usize);
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PatternAddress {
+    /// An authoring selector, resolved to `Steps` before the feature is stored.
+    /// Instance 1 is the original; the first copy is 2.
+    Ordinal(usize),
+    Steps(Vec<PatternStep>),
+}
+
+/// A copy's stable placement, source feature, and semantic source member.
+/// For body patterns the source feature is 0; the key stores the body and occurrence path.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct PatternMember(pub PatternAddress, pub FeatureId, pub PatternMemberKey);
+
+/// A numeric command selector is resolved once, before the feature is stored.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PatternMemberKey {
+    Index(usize),
+    Stable(PatternMemberIdentity),
+}
+
+/// Persistent source identity, independent of the current ordering of tools or bodies.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PatternMemberIdentity {
+    Single,
+    SketchPoint { sketch: SketchId, point: String },
+    Profile { sketch: SketchId, curves: Vec<String> },
+    Body { body: BodyName, path: Vec<u64> },
+}
+
+/// A placement exists even when all its source members are temporarily unavailable.
+#[derive(Clone, Debug)]
+pub struct PatternGroupChoice {
+    pub number: usize,
+    pub address: PatternAddress,
+}
+
+#[derive(Clone, Debug)]
+pub struct PatternMemberChoice {
+    pub member: PatternMember,
+    pub index: usize,
+    pub number: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PatternCatalogue {
+    pub groups: Vec<PatternGroupChoice>,
+    pub members: Vec<PatternMemberChoice>,
+    /// Source tools with no certified persistent per-opening identity.
+    pub unavailable_members: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PatternMarkerInfo {
+    /// Active instance addresses, including instances with no individually selectable member.
+    pub groups: Vec<PatternGroupChoice>,
+    pub markers: Vec<PatternMarker>,
+    pub unavailable_members: usize,
+}
+
+/// The selectable positions of one copy. Some cuts have two entrances.
+#[derive(Clone, Debug)]
+pub struct PatternMarker {
+    pub member: PatternMember,
+    /// Current source selector, for display only; persistent selections use `member`.
+    pub index: usize,
+    pub slot: usize,
+    pub positions: [Vec3; 2],
+}
+
 /// Pattern layouts.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -3072,6 +3150,11 @@ pub enum PatternKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Spacing 2")]
         spacing2: Option<Expr>,
+        /// Persistent whole-placement exclusions. The original always stays.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        skip: Vec<PatternAddress>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        skip_members: Vec<PatternMember>,
         #[serde(default, skip_serializing_if = "default_pattern_alignment")]
         alignment: solidcraft_sketch::PatternAlignment,
         #[serde(default, skip_serializing_if = "default_pattern_alignment")]
@@ -3106,6 +3189,10 @@ pub enum PatternKind {
         /// `origin` and `axis` are where it was when the pattern was made.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         axis_feature: Option<FeatureName>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        skip: Vec<PatternAddress>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        skip_members: Vec<PatternMember>,
     },
     /// Copies along a chain of sketch curves: instance k moves by path(k·spacing) − path(0),
     /// measured along the path from its start.
@@ -3126,6 +3213,10 @@ pub enum PatternKind {
         /// Turn copies with the path's direction (else they keep their orientation).
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         orient: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        skip: Vec<PatternAddress>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        skip_members: Vec<PatternMember>,
     },
 }
 
@@ -3688,9 +3779,16 @@ impl Feature {
     /// skipped file bodies keep the names stored for them, and so do the solids its reader left
     /// out, whose names it keeps after its bodies (#16857). The copies of the sources a body
     /// Pattern left out keep theirs too (`left_out`, see [`Self::pattern_pins`]).
-    pub fn pin_body_names(&mut self, made: &[String], left_out: &[usize]) {
-        if let Some((names, _)) = self.pattern_pins(made, left_out) {
+    pub fn pin_body_names(&mut self, made: &[String], left_out: &[usize], layout: Option<&crate::PatternBodyLayout>) {
+        let ordered_by_layout = layout.is_some_and(|layout| {
+            layout.made_slots.len() == made.len()
+                && layout.copies_per_source <= made.len().saturating_add(self.body_names.len()).saturating_add(crate::MAX_PATTERN_INSTANCES)
+        });
+        if let Some((names, _)) = self.pattern_pins(made, left_out, layout) {
             self.body_names = names;
+            if ordered_by_layout {
+                self.pattern_names_in_order = false;
+            }
             return;
         }
         let slots = self.body_name_slots(made.len());
@@ -3711,7 +3809,7 @@ impl Feature {
         matches!(&self.kind, FeatureKind::Pattern { bodies, .. } if bodies.len() > 1)
     }
 
-    /// The names a body Pattern of several bodies stores when it made the copies `made` (in the
+    /// The names a Pattern stores when it made the copies `made` (in the
     /// order it made them) and could not copy the sources `left_out` (indices into its bodies),
     /// with the slot each of `made` takes among them. The names are stored source by source,
     /// one for every copy of every source (`eval::pattern_name_slot`): a left-out source's copies
@@ -3719,9 +3817,34 @@ impl Feature {
     /// one after another instead, the next source's copies would take a left-out source's
     /// places, and its copies the next source's names once it is back. `None` when the pattern
     /// left none out (or `made` does not split evenly into the sources it copied).
-    pub fn pattern_pins(&self, made: &[String], left_out: &[usize]) -> Option<(Vec<String>, Vec<usize>)> {
+    pub fn pattern_pins(&self, made: &[String], left_out: &[usize], layout: Option<&crate::PatternBodyLayout>) -> Option<(Vec<String>, Vec<usize>)> {
         let FeatureKind::Pattern { bodies, .. } = &self.kind else { return None };
         let sources = bodies.len();
+        if let Some(layout) = layout.filter(|layout| {
+            layout.made_slots.len() == made.len()
+                && layout.copies_per_source <= made.len().saturating_add(self.body_names.len()).saturating_add(crate::MAX_PATTERN_INSTANCES)
+        }) {
+            // Feature patterns that make separate bodies have one ordered sequence of output slots.
+            let sources = sources.max(1);
+            let copies = layout.copies_per_source;
+            // A single source has one sequence of names. Keep its temporarily absent tail,
+            // as ordinary name pinning does when the quantity is reduced.
+            let per = if sources == 1 { copies.max(self.body_names.len()) } else { copies };
+            let mut names: Vec<_> = (0..sources)
+                .flat_map(|source| {
+                    (0..per).map(move |copy| {
+                        crate::eval::pattern_name_slot(self.body_names.len(), sources, copies, source, copy, self.pattern_names_in_order)
+                            .and_then(|slot| self.body_names.get(slot))
+                            .cloned()
+                            .unwrap_or_default()
+                    })
+                })
+                .collect();
+            for (name, &slot) in made.iter().zip(&layout.made_slots) {
+                names.get_mut(slot)?.clone_from(name);
+            }
+            return Some((names, layout.made_slots.clone()));
+        }
         let left: std::collections::BTreeSet<usize> = left_out.iter().copied().filter(|s| *s < sources).collect();
         let copied = sources.checked_sub(left.len()).filter(|c| *c > 0)?;
         if sources < 2 || left.is_empty() || !made.len().is_multiple_of(copied) {

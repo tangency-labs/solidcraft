@@ -1,0 +1,58 @@
+{
+  "en": {
+    "ui.pattern_skip_computing": "Computing pattern markers…",
+    "ui.pattern_skip_failed": "Pattern markers could not be computed. {error}",
+    "ui.pattern_skip_restore_instance": "Restore instance {number}",
+    "ui.pattern_skip_restore_whole_note": "Restore the whole instance when some of its source members cannot be selected individually.",
+    "ui.pattern_skip_unavailable": "Individual selection is unavailable for some source members."
+  },
+  "ar": {
+    "ui.pattern_skip_computing": "جارٍ حساب علامات النمط…",
+    "ui.pattern_skip_failed": "تعذّر حساب علامات النمط. {error}",
+    "ui.pattern_skip_restore_instance": "استعادة النسخة {number}",
+    "ui.pattern_skip_restore_whole_note": "استعد النسخة كاملة عندما يتعذر تحديد بعض عناصر المصدر فيها بشكل فردي.",
+    "ui.pattern_skip_unavailable": "التحديد الفردي غير متاح لبعض عناصر المصدر."
+  },
+  "de": {
+    "ui.pattern_skip_computing": "Mustermarkierungen werden berechnet…",
+    "ui.pattern_skip_failed": "Die Mustermarkierungen konnten nicht berechnet werden. {error}",
+    "ui.pattern_skip_restore_instance": "Instanz {number} wiederherstellen",
+    "ui.pattern_skip_restore_whole_note": "Stellen Sie die ganze Instanz wieder her, wenn einige Quellelemente nicht einzeln ausgewählt werden können.",
+    "ui.pattern_skip_unavailable": "Einige Quellelemente können nicht einzeln ausgewählt werden."
+  },
+  "he": {
+    "ui.pattern_skip_computing": "מחשב סמני תבנית…",
+    "ui.pattern_skip_failed": "לא ניתן לחשב את סמני התבנית. {error}",
+    "ui.pattern_skip_restore_instance": "שחזור מופע {number}",
+    "ui.pattern_skip_restore_whole_note": "יש לשחזר את המופע כולו כאשר לא ניתן לבחור חלק מרכיבי המקור שלו בנפרד.",
+    "ui.pattern_skip_unavailable": "חלק מרכיבי המקור אינם זמינים לבחירה נפרדת."
+  },
+  "ja": {
+    "ui.pattern_skip_computing": "パターンのマーカーを計算中…",
+    "ui.pattern_skip_failed": "パターンのマーカーを計算できませんでした。{error}",
+    "ui.pattern_skip_restore_instance": "インスタンス {number} を復元",
+    "ui.pattern_skip_restore_whole_note": "一部のソースメンバーを個別に選択できない場合は、インスタンス全体を復元してください。",
+    "ui.pattern_skip_unavailable": "一部のソースメンバーは個別に選択できません。"
+  },
+  "ko": {
+    "ui.pattern_skip_computing": "패턴 마커 계산 중…",
+    "ui.pattern_skip_failed": "패턴 마커를 계산할 수 없습니다. {error}",
+    "ui.pattern_skip_restore_instance": "인스턴스 {number} 복원",
+    "ui.pattern_skip_restore_whole_note": "일부 원본 멤버를 개별적으로 선택할 수 없는 경우 전체 인스턴스를 복원하세요.",
+    "ui.pattern_skip_unavailable": "일부 원본 멤버는 개별적으로 선택할 수 없습니다."
+  },
+  "vi": {
+    "ui.pattern_skip_computing": "Đang tính các dấu đánh của mẫu…",
+    "ui.pattern_skip_failed": "Không thể tính các dấu đánh của mẫu. {error}",
+    "ui.pattern_skip_restore_instance": "Khôi phục bản sao {number}",
+    "ui.pattern_skip_restore_whole_note": "Khôi phục toàn bộ bản sao khi không thể chọn riêng một số thành phần nguồn của nó.",
+    "ui.pattern_skip_unavailable": "Không thể chọn riêng một số thành phần nguồn."
+  },
+  "zh": {
+    "ui.pattern_skip_computing": "正在计算阵列标记…",
+    "ui.pattern_skip_failed": "无法计算阵列标记。{error}",
+    "ui.pattern_skip_restore_instance": "恢复实例 {number}",
+    "ui.pattern_skip_restore_whole_note": "部分源成员无法单独选择时，请恢复整个实例。",
+    "ui.pattern_skip_unavailable": "部分源成员无法单独选择。"
+  }
+}

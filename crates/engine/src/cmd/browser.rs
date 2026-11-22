@@ -1675,7 +1675,8 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
     let made = s.model.result(fid).map_or(&st.bodies, |r| &r.state.bodies);
     let siblings: Vec<String> = made.iter().filter(|x| x.feature == fid).map(|x| x.name.clone()).collect();
     let k = siblings.iter().position(|n| *n == old).unwrap_or(0);
-    let own_left_out = s.model.result(fid).map(|r| r.state.pattern_left_out(fid).to_vec()).unwrap_or_default();
+    let (own_left_out, own_layout) =
+        s.model.result(fid).map(|r| (r.state.pattern_left_out(fid).to_vec(), r.state.pattern_body_layout(fid).cloned())).unwrap_or_default();
     // A body numbered by the counter (`BodyN`) gives its number back once it has a name of its
     // own, and every counted body after it would move down one (`Body3` becoming `Body1`) and
     // break what names it. Those later features keep the names they made too (#1109): each one's
@@ -1685,7 +1686,7 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
     let derived = format!("{old} (");
     let at = s.doc.features.iter().position(|f| f.id == fid);
     let counts = at.and_then(|at| s.doc.features.get(at)).is_some_and(|f| counted(f, k));
-    let later: Vec<(u64, Vec<String>, Vec<usize>)> = match at {
+    let later: Vec<_> = match at {
         Some(at) => s
             .doc
             .features
@@ -1695,27 +1696,27 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
                 let state = &s.model.result(f.id)?.state;
                 let made: Vec<String> = state.bodies.iter().filter(|x| x.feature == f.id).map(|x| x.name.clone()).collect();
                 let keep = (counts && (0..made.len()).any(|i| counted(f, i))) || made.iter().any(|n| n.starts_with(&derived));
-                keep.then(|| (f.id, made, state.pattern_left_out(f.id).to_vec()))
+                keep.then(|| (f.id, made, state.pattern_left_out(f.id).to_vec(), state.pattern_body_layout(f.id).cloned()))
             })
             .collect(),
         None => Vec::new(),
     };
     // Frame members are named by their lines (#4003): each keeps the name it has now on its
     // line, whichever lines come and go later, and the renamed one takes its new name.
-    let later_pins: Vec<Option<BTreeMap<String, String>>> = later.iter().map(|(id, _, _)| member_pins(s, *id)).collect();
+    let later_pins: Vec<Option<BTreeMap<String, String>>> = later.iter().map(|(id, _, _, _)| member_pins(s, *id)).collect();
     let own_pins = member_pins(s, fid).and_then(|mut pins| {
         let line = pins.iter().find(|(_, n)| **n == old).map(|(line, _)| line.clone())?;
         pins.insert(line, name.to_string());
         Some(pins)
     });
     let d = s.doc_mut();
-    for ((id, made, left_out), pins) in later.iter().zip(later_pins) {
+    for ((id, made, left_out, layout), pins) in later.iter().zip(later_pins) {
         if let Some(f) = d.feature_mut(*id) {
             if let (Some(pins), FeatureKind::FrameMember { names, .. }) = (pins, &mut f.kind) {
                 *names = pins;
                 f.body_names.clear();
             } else {
-                f.pin_body_names(made, left_out);
+                f.pin_body_names(made, left_out, layout.as_ref());
             }
         }
     }
@@ -1723,8 +1724,8 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
     if let (Some(pins), FeatureKind::FrameMember { names, .. }) = (own_pins, &mut f.kind) {
         *names = pins;
         f.body_names.clear();
-    } else if let Some((names, slots)) = f.pattern_pins(&siblings, &own_left_out) {
-        // A body Pattern keeps the names of the copies of the sources it left out, in their places.
+    } else if let Some((names, slots)) = f.pattern_pins(&siblings, &own_left_out, own_layout.as_ref()) {
+        // A body Pattern keeps the names of the skipped copies and left-out sources in their places.
         f.body_names = names;
         if let Some(stored) = slots.get(k).and_then(|slot| f.body_names.get_mut(*slot)) {
             *stored = name.to_string();

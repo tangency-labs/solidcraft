@@ -12,7 +12,7 @@ use solidcraft_doc::{Dir, FacePick, Position};
 use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
-use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, str_, string_list, string_list_or_default, vec2, vec3};
+use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, pattern_skip, req_expr, str_, string_list, string_list_or_default, vec2, vec3};
 use crate::schema::face_edits::{DeleteFaceParams, OffsetFaceParams};
 use crate::schema::features::SweepParams;
 use crate::schema::features::{
@@ -131,19 +131,19 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("pattern_rect")
         .contract(&PATTERN_RECTANGULAR_CONTRACT)
         .output(output_schema_for::<PatternResult>)
-        .params("features: [names] | bodies: [names] | components: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?; alignment?, alignment2?: left|center|right (default right; counts include the original); reversed?, reversed2?: bool (Flip)"),
+        .params("features: [names] | bodies: [names] | components: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?; alignment?, alignment2?: left|center|right (default right; counts include the original); reversed?, reversed2?: bool (Flip); skip?: [instance numbers] omits whole placements; skip_members?: [[instance, feature name or ID, zero-based member]] omits individual openings (features and bodies only; 1 is the original and always stays, 2 is the first copy; numbers advance along direction 2 before direction 1). Saved placement steps and stable member identities can be sent back unchanged"),
     CommandSpec::new("solid.pattern.circular", "Circular Pattern", crate::checked!("solid.pattern.circular", pattern_circ)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("pattern_circ")
         .contract(&PATTERN_CIRCULAR_CONTRACT)
         .output(output_schema_for::<PatternResult>)
-        .params("features: [names] | bodies: [names] | components: [names]; axis: X|Y|Z | construction axis name (followed when edited) | {origin, dir} (origin coordinates may be length expressions; the pattern follows them) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); count; angle? (default 360 deg; partial arcs include both ends); alignment?: left|center|right (default right; original stays fixed); reversed?: bool (Flip; selects the extra side for even centered counts)"),
+        .params("features: [names] | bodies: [names] | components: [names]; axis: X|Y|Z | construction axis name (followed when edited) | {origin, dir} (origin coordinates may be length expressions; the pattern follows them) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); count; angle? (default 360 deg; partial arcs include both ends); alignment?: left|center|right (default right; original stays fixed); reversed?: bool (Flip; selects the extra side for even centered counts); skip?: [instance numbers] omits whole placements; skip_members?: [[instance, feature name or ID, zero-based member]] omits individual openings (features and bodies only; instance 1 is the original and always stays, 2 is the first copy). Saved placement steps and stable member identities can be sent back unchanged"),
     CommandSpec::new("solid.pattern.path", "Pattern on Path", crate::checked!("solid.pattern.path", pattern_path)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("pattern_path")
         .contract(&PATTERN_PATH_CONTRACT)
         .output(output_schema_for::<PatternResult>)
-        .params("features: [names] | bodies: [names]; path_sketch: sketch; path: [curve ids in order]; count; spacing (between instances) | distance (first to last); orientation?: identical|path; flip?: bool"),
+        .params("features: [names] | bodies: [names]; path_sketch: sketch; path: [curve ids in order]; count; spacing (between instances) | distance (first to last); orientation?: identical|path; flip?: bool; skip?: [instance numbers] omits whole placements; skip_members?: [[instance, feature name or ID, zero-based member]] omits individual openings (features and bodies only; instance 1 is the original and always stays, 2 is the first copy). Saved placement steps and stable member identities can be sent back unchanged"),
     CommandSpec::new("solid.mirror", "Mirror", crate::checked!("solid.mirror", mirror)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("mirror")
@@ -980,7 +980,9 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
     // `body_name`) has the rest numbered after the first by the evaluator: `Ribs`, `Ribs (2)`,
     // `Ribs (3)`… (#266, #373). They are stored on the feature, so recomputes and saved designs
     // keep them even when the profiles are later picked in another order.
-    if names.first().is_some_and(|n| !n.trim().is_empty()) {
+    // Pattern layouts pin each made name in its own slot after this command. Compacting
+    // them here would give a skipped copy the next copy's name on a fresh evaluation.
+    if names.first().is_some_and(|n| !n.trim().is_empty()) && s.model.state().pattern_body_layout(id).is_none() {
         let made: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
         if made.len() > names.len()
             && let Some(f) = s.doc_mut().feature_mut(id)
@@ -2862,25 +2864,35 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(reply)
 }
 
-/// A copy keeps the look and the material of the body it came from (#6423): the copy is the same
-/// part in another place, so it looks the same. A feature makes the same number of copies of each
-/// source (a Move copy one, a Pattern its count less one), the sources' copies together and in
-/// the sources' order.
+/// A copy keeps the look and material of its source body (#6423). The copies are grouped by
+/// source, and a pattern with omitted members records which source made each remaining copy.
 fn copy_keeps_appearance(s: &mut Session, reply: &Value, sources: &[String], cmd: &str) -> Result<()> {
     let id = reply.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "the copy has no feature id"))?;
-    let copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
+    let state = s.model.state();
+    let copies: Vec<&str> = state.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.as_str()).collect();
+    let mut keep_appearance = |copy: &str, source: &str| {
+        if let Some(look) = s.doc.appearances.bodies.get(source).cloned() {
+            s.doc_mut().appearances.bodies.insert(copy.to_owned(), look);
+        }
+        if let Some(material) = s.doc.materials.get(source).cloned() {
+            s.doc_mut().materials.insert(copy.to_owned(), material);
+        }
+    };
+    if let Some(layout) = state.pattern_body_layout(id) {
+        for (copy, source) in copies.into_iter().zip(layout.sources()) {
+            if let Some(source) = sources.get(source) {
+                keep_appearance(copy, source);
+            }
+        }
+        return Ok(());
+    }
     let each = copies.len().checked_div(sources.len()).filter(|each| *each > 0 && each * sources.len() == copies.len());
     let Some(each) = each else {
         return Err(bad(cmd, "the copy did not make the same number of bodies for each body it copied"));
     };
     for (source, copies) in sources.iter().zip(copies.chunks(each)) {
         for copy in copies {
-            if let Some(look) = s.doc.appearances.bodies.get(source).cloned() {
-                s.doc_mut().appearances.bodies.insert(copy.clone(), look);
-            }
-            if let Some(material) = s.doc.materials.get(source).cloned() {
-                s.doc_mut().materials.insert(copy.clone(), material);
-            }
+            keep_appearance(copy, source);
         }
     }
     Ok(())
@@ -2954,16 +2966,22 @@ fn finish_pattern(
     p: &Value,
     features: Vec<solidcraft_doc::FeatureId>,
     pattern: solidcraft_doc::PatternKind,
-    (bodies, placements): (Vec<String>, Vec<Vec<u64>>),
+    (bodies, placements): PatternBodies,
 ) -> Result<Value> {
     let comps = string_list(UNKNOWN_COMMAND, p, "components")?;
     let paths = pattern_occurrences(p, "pattern (components)")?;
     if comps.is_empty() && paths.is_empty() {
         let copied = bodies.clone();
-        let reply = add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies: bodies.into_iter().map(BodyName).collect(), placements })?;
-        // The pattern is added either way: when it made no copies (the feature failed to
-        // evaluate) or an uneven number of them, there is nothing to tell the copies apart by
-        // and they keep no look, as before.
+        let mut kind = FeatureKind::Pattern { features, pattern, bodies: bodies.into_iter().map(BodyName).collect(), placements };
+        let previous = s.pattern_edit.and_then(|id| s.doc.feature(id)).map(|feature| &feature.kind);
+        let command = match &kind {
+            FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Rectangular { .. }, .. } => RECTANGULAR_PATTERN,
+            FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Circular { .. }, .. } => CIRCULAR_PATTERN,
+            _ => PATH_PATTERN,
+        };
+        normalize_pattern_exclusions(s, &mut kind, s.active_component, &s.model.state(), previous, command, true)?;
+        let reply = add_feature(s, p, kind)?;
+        // Preserve the pattern even when its evaluation produced no copies to give an appearance.
         if !copied.is_empty() {
             let _ = copy_keeps_appearance(s, &reply, &copied, "pattern");
         }
@@ -3049,12 +3067,170 @@ fn pattern_sources(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<solidcraft_
 }
 
 fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "solid.pattern.rectangular";
+    let (features, pattern, bodies) = rectangular_pattern_input(s, p)?;
+    // Timeline edits call the constructor directly. Its directions and picks are still in
+    // world coordinates because this command has no frame mapping table entry.
+    let _world = crate::frames::world_geometry();
+    finish_pattern(s, p, features, pattern, bodies)
+}
+
+const RECTANGULAR_PATTERN: &str = "solid.pattern.rectangular";
+const CIRCULAR_PATTERN: &str = "solid.pattern.circular";
+const PATH_PATTERN: &str = "solid.pattern.path";
+
+type PatternInput = (Vec<solidcraft_doc::FeatureId>, solidcraft_doc::PatternKind, PatternBodies);
+
+/// Resolve command selectors against the unskipped source catalogue. Existing dormant
+/// identities survive an edit, but a new selection must identify a current copy.
+pub(super) fn normalize_pattern_exclusions(
+    s: &Session,
+    kind: &mut FeatureKind,
+    component: u64,
+    state: &solidcraft_doc::ModelState,
+    previous: Option<&FeatureKind>,
+    command: &str,
+    world: bool,
+) -> Result<()> {
+    use solidcraft_doc::{PatternAddress, PatternKind, PatternMember, PatternMemberKey};
+    fn exclusions(pattern: &PatternKind) -> (&[PatternAddress], &[PatternMember]) {
+        match pattern {
+            PatternKind::Rectangular { skip, skip_members, .. }
+            | PatternKind::Circular { skip, skip_members, .. }
+            | PatternKind::Path { skip, skip_members, .. } => (skip, skip_members),
+        }
+    }
+    let FeatureKind::Pattern { pattern, .. } = kind else { return Ok(()) };
+    let (skip, members) = exclusions(pattern);
+    if skip.is_empty() && members.is_empty() {
+        return Ok(());
+    }
+    let (skip, members) = (skip.to_vec(), members.to_vec());
+    let previous = match previous {
+        Some(FeatureKind::Pattern { pattern: old, .. }) if std::mem::discriminant(old) == std::mem::discriminant(pattern) => Some(exclusions(old)),
+        _ => None,
+    };
+    let mut local = kind.clone();
+    if world {
+        let frame = s.active_component_frame();
+        if !solidcraft_doc::is_identity(&frame) {
+            let inv = solidcraft_doc::mat_inverse(&frame).ok_or_else(|| bad(command, "the component placement has no inverse"))?;
+            local.transform_geometry(&inv);
+        }
+        if s.doc.units.trim() != "mm" {
+            for (_, expr, unit) in local.inputs_mut() {
+                *expr = s.doc.with_design_unit(expr, unit).into();
+            }
+        }
+    }
+    let FeatureKind::Pattern { features, pattern, bodies, placements } = &local else { return Err(bad(command, "the selection is not a pattern")) };
+    let catalogue = solidcraft_doc::pattern_member_catalogue(&s.doc, state, component, pattern, features, bodies, placements)?;
+    use std::collections::{BTreeMap, BTreeSet};
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum Placement<'a> {
+        Number(usize),
+        Steps(&'a [solidcraft_doc::PatternStep]),
+    }
+    fn placement(address: &PatternAddress) -> Placement<'_> {
+        match address {
+            PatternAddress::Ordinal(number) => Placement::Number(*number),
+            PatternAddress::Steps(steps) => Placement::Steps(steps),
+        }
+    }
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum Member<'a> {
+        Index(usize),
+        Stable(&'a solidcraft_doc::PatternMemberIdentity),
+    }
+    fn member(key: &PatternMemberKey) -> Member<'_> {
+        match key {
+            PatternMemberKey::Index(index) => Member::Index(*index),
+            PatternMemberKey::Stable(identity) => Member::Stable(identity),
+        }
+    }
+    let by_number = catalogue.groups.iter().map(|choice| (choice.number, choice)).collect::<BTreeMap<_, _>>();
+    let by_address = catalogue.groups.iter().map(|choice| (&choice.address, choice)).collect::<BTreeMap<_, _>>();
+    let old_groups = previous.into_iter().flat_map(|(groups, _)| groups).collect::<BTreeSet<_>>();
+    let old_members = previous.into_iter().flat_map(|(_, members)| members).collect::<BTreeSet<_>>();
+    // Borrow identities: the catalogue can contain many copies of a multi-profile seed.
+    // Lookups stay logarithmic without duplicating their curve-name vectors.
+    let mut choices = BTreeMap::new();
+    for choice in &catalogue.members {
+        for address in [Placement::Number(choice.number), placement(&choice.member.0)] {
+            for key in [Member::Index(choice.index), member(&choice.member.2)] {
+                choices.entry((address, choice.member.1, key)).and_modify(|found| *found = None).or_insert(Some(choice));
+            }
+        }
+    }
+    let mut groups = Vec::new();
+    for address in skip {
+        let found = match &address {
+            PatternAddress::Ordinal(number) => by_number.get(number),
+            PatternAddress::Steps(_) => by_address.get(&address),
+        };
+        if let Some(choice) = found {
+            groups.push(choice.address.clone());
+        } else if old_groups.contains(&address) {
+            groups.push(address);
+        } else {
+            return Err(bad(command, "`skip` names a placement that is not a current copy of this pattern"));
+        }
+    }
+    let mut kept_members = Vec::new();
+    for selection in members {
+        match choices.get(&(placement(&selection.0), selection.1, member(&selection.2))) {
+            Some(Some(choice)) => kept_members.push(choice.member.clone()),
+            Some(None) => return Err(bad(command, "`skip_members` matches several nested copies; use the saved placement steps to select one")),
+            None if old_members.contains(&selection) => kept_members.push(selection),
+            None => return Err(bad(command, "`skip_members` names a placement, source or member that is not a current copy of this pattern")),
+        }
+    }
+    // Keep group exclusions separate from individual identities.
+    let FeatureKind::Pattern { pattern, .. } = kind else { return Err(bad(command, "the selection is not a pattern")) };
+    match pattern {
+        PatternKind::Rectangular { skip, skip_members, .. }
+        | PatternKind::Circular { skip, skip_members, .. }
+        | PatternKind::Path { skip, skip_members, .. } => {
+            groups.sort_unstable();
+            groups.dedup();
+            kept_members.sort_unstable();
+            kept_members.dedup();
+            *skip = groups;
+            *skip_members = kept_members;
+        }
+    }
+    Ok(())
+}
+
+fn pattern_member_exclusions(s: &Session, p: &Value, cmd: &str) -> Result<Vec<solidcraft_doc::PatternMember>> {
+    let parsed = p.get("skip_members").map(crate::params::pattern_skip_members).transpose().map_err(|why| bad(cmd, why))?.unwrap_or_default();
+    let mut members = parsed
+        .into_iter()
+        .map(|item| {
+            let source = if let Some(id) = item.source.as_u64() {
+                solidcraft_doc::FeatureId(id)
+            } else {
+                let name = item.source.as_str().ok_or_else(|| bad(cmd, "the skipped source must be a feature name or ID"))?;
+                solidcraft_doc::FeatureId(s.doc.seed_feature(name).ok_or_else(|| bad(cmd, format!("no feature `{name}`")))?.id)
+            };
+            Ok(solidcraft_doc::PatternMember(item.address, source, item.member))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    members.sort_unstable();
+    members.dedup();
+    Ok(members)
+}
+
+fn pattern_placement_exclusions(p: &Value, cmd: &str) -> Result<Vec<solidcraft_doc::PatternAddress>> {
+    p.get("skip").map(pattern_skip).transpose().map_err(|why| bad(cmd, why)).map(Option::unwrap_or_default)
+}
+
+fn rectangular_pattern_input(s: &Session, p: &Value) -> Result<PatternInput> {
+    let cmd = RECTANGULAR_PATTERN;
     let (features, bodies) = pattern_sources(s, p, cmd)?;
     let dir1 = p.get("dir1").and_then(vec3).ok_or_else(|| bad(cmd, "`dir1` must be [x, y, z]"))?;
     let count1 = req_expr(cmd, p, "count1")?;
-    let spacing1 = req_expr(cmd, p, "spacing1")?;
     check_count(s, &count1, cmd, "count1")?;
+    let spacing1 = req_expr(cmd, p, "spacing1")?;
     check_expr(s, &spacing1, Kind::Length, cmd, "spacing1")?;
     let dir2 = p.get("dir2").and_then(vec3);
     let (count2, spacing2) = (expr(p, "count2"), expr(p, "spacing2"));
@@ -3063,6 +3239,11 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if let Some(c) = &spacing2 {
         check_expr(s, c, Kind::Length, cmd, "spacing2")?;
+    }
+    let skip = pattern_placement_exclusions(p, cmd)?;
+    let skip_members = pattern_member_exclusions(s, p, cmd)?;
+    if (!skip.is_empty() || !skip_members.is_empty()) && features.is_empty() && bodies.0.is_empty() {
+        return Err(bad(cmd, "skipping instances is available for features and bodies"));
     }
     let pattern = solidcraft_doc::PatternKind::Rectangular {
         dir1: Dir(dir1),
@@ -3075,8 +3256,51 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
         alignment2: super::alignment_param(p, "alignment2", cmd)?,
         reversed: super::reversed_param(p, "reversed", cmd)?,
         reversed2: super::reversed_param(p, "reversed2", cmd)?,
+        skip,
+        skip_members,
     };
-    finish_pattern(s, p, features, pattern, bodies)
+    Ok((features, pattern, bodies))
+}
+
+impl Session {
+    /// Copy centers for the rectangular, circular and path pattern forms, in world coordinates.
+    /// Include skipped copies so a second click can restore them. The original has no marker.
+    pub fn pattern_markers(&self, command: &str, p: &Value) -> Result<Vec<solidcraft_doc::PatternMarker>> {
+        self.pattern_marker_info(command, p).map(|info| info.markers)
+    }
+
+    /// Marker positions and the number of source members without a safe individual identity.
+    pub fn pattern_marker_info(&self, command: &str, p: &Value) -> Result<solidcraft_doc::PatternMarkerInfo> {
+        let (features, pattern, (bodies, placements)) = match command {
+            RECTANGULAR_PATTERN => rectangular_pattern_input(self, p)?,
+            CIRCULAR_PATTERN => circular_pattern_input(self, p)?,
+            PATH_PATTERN => path_pattern_input(self, p)?,
+            _ => return Err(bad(command, "this command has no selectable pattern copies")),
+        };
+        if features.is_empty() && bodies.is_empty() {
+            return Ok(solidcraft_doc::PatternMarkerInfo::default());
+        }
+        let mut kind = FeatureKind::Pattern { features, pattern, bodies: bodies.into_iter().map(BodyName).collect(), placements };
+        let frame = self.active_component_frame();
+        if !solidcraft_doc::is_identity(&frame) {
+            let inv = solidcraft_doc::mat_inverse(&frame).ok_or_else(|| bad(command, "the component placement has no inverse"))?;
+            kind.transform_geometry(&inv);
+        }
+        if self.doc.units.trim() != "mm" {
+            for (_, expr, unit) in kind.inputs_mut() {
+                *expr = self.doc.with_design_unit(expr, unit).into();
+            }
+        }
+        let FeatureKind::Pattern { features, pattern, bodies, placements } = &kind else {
+            return Err(bad(command, "the selection is not a pattern"));
+        };
+        let mut info =
+            solidcraft_doc::pattern_marker_info(&self.doc, &self.model.state(), self.active_component, pattern, features, bodies, placements)?;
+        for marker in &mut info.markers {
+            marker.positions = marker.positions.map(|point| solidcraft_doc::apply_point(&frame, point));
+        }
+        Ok(info)
+    }
 }
 
 /// The line a circular pattern or a plane at an angle turns about, as [`axis_line`] reads it,
@@ -3097,13 +3321,25 @@ fn axis_line_exprs(s: &Session, p: &Value, cmd: &str) -> Result<(PointExpr, Vec3
 }
 
 fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "solid.pattern.circular";
+    let (features, pattern, bodies) = circular_pattern_input(s, p)?;
+    // Direct commands and edits both supply a world axis, and the pattern owns its mapping.
+    let _world = crate::frames::world_geometry();
+    finish_pattern(s, p, features, pattern, bodies)
+}
+
+fn circular_pattern_input(s: &Session, p: &Value) -> Result<PatternInput> {
+    let cmd = CIRCULAR_PATTERN;
     let (features, bodies) = pattern_sources(s, p, cmd)?;
     let (origin, axis, axis_ref, axis_feature) = axis_line_exprs(s, p, cmd)?;
     let count = req_expr(cmd, p, "count")?;
     check_count(s, &count, cmd, "count")?;
     let angle = expr(p, "angle").unwrap_or_else(|| "360 deg".into());
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
+    let skip = pattern_placement_exclusions(p, cmd)?;
+    let skip_members = pattern_member_exclusions(s, p, cmd)?;
+    if (!skip.is_empty() || !skip_members.is_empty()) && features.is_empty() && bodies.0.is_empty() {
+        return Err(bad(cmd, "skipping instances is available for features and bodies"));
+    }
     let pattern = solidcraft_doc::PatternKind::Circular {
         origin,
         axis: Dir(axis),
@@ -3113,12 +3349,19 @@ fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {
         reversed: super::reversed_param(p, "reversed", cmd)?,
         axis_ref,
         axis_feature,
+        skip,
+        skip_members,
     };
-    finish_pattern(s, p, features, pattern, bodies)
+    Ok((features, pattern, bodies))
 }
 
 fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "solid.pattern.path";
+    let (features, pattern, bodies) = path_pattern_input(s, p)?;
+    finish_pattern(s, p, features, pattern, bodies)
+}
+
+fn path_pattern_input(s: &Session, p: &Value) -> Result<PatternInput> {
+    let cmd = PATH_PATTERN;
     let (features, bodies) = pattern_sources(s, p, cmd)?;
     let path_sketch = sketch_id(s, p.get("path_sketch").or_else(|| p.get("sketch")), cmd, "path_sketch")?;
     let path = string_list(cmd, p, "path")?;
@@ -3139,8 +3382,14 @@ fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
         Some(o) => return Err(bad(cmd, format!("unknown orientation `{o}` (identical or path)"))),
     };
     let flip = bool_(p, "flip").unwrap_or(false);
-    let pattern = solidcraft_doc::PatternKind::Path { path_sketch: SketchId(path_sketch), path, count, spacing, extent, flip, orient };
-    finish_pattern(s, p, features, pattern, bodies)
+    let skip = pattern_placement_exclusions(p, cmd)?;
+    let skip_members = pattern_member_exclusions(s, p, cmd)?;
+    if (!skip.is_empty() || !skip_members.is_empty()) && features.is_empty() && bodies.0.is_empty() {
+        return Err(bad(cmd, "skipping instances is available for features and bodies"));
+    }
+    let pattern =
+        solidcraft_doc::PatternKind::Path { path_sketch: SketchId(path_sketch), path, count, spacing, extent, flip, orient, skip, skip_members };
+    Ok((features, pattern, bodies))
 }
 
 fn mirror(s: &mut Session, p: &Value) -> Result<Value> {

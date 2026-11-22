@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 use solidcore_record::{Vec2, Vec3};
-use solidcraft_doc::Expr;
+use solidcraft_doc::{Expr, FeatureId, PatternAddress, PatternMemberIdentity, PatternMemberKey, PatternStep};
 
 use crate::{EngineError, Result, kernel};
 
@@ -99,6 +99,95 @@ pub fn expr_problem(v: Option<&Value>) -> &'static str {
 
 pub fn req_expr(cmd: &str, p: &Value, k: &str) -> Result<Expr> {
     expr(p, k).ok_or_else(|| bad(cmd, format!("`{k}` {}", expr_problem(p.get(k)))))
+}
+
+/// A pattern can place at most this many instances.
+pub(crate) const MAX_PATTERN_SKIP: usize = solidcraft_doc::MAX_PATTERN_INSTANCES;
+pub(crate) const MAX_PATTERN_MEMBERS: usize = 100_000;
+pub(crate) const MAX_PATTERN_STEPS: usize = 9;
+
+/// A public placement number or a saved canonical placement address.
+fn pattern_address(v: &Value) -> Option<PatternAddress> {
+    if let Some(number) = v.as_u64() {
+        let number = usize::try_from(number).ok()?;
+        return (2..=MAX_PATTERN_SKIP).contains(&number).then_some(PatternAddress::Ordinal(number));
+    }
+    let entries = v.as_array()?;
+    if !(1..=MAX_PATTERN_STEPS).contains(&entries.len()) {
+        return None;
+    }
+    let coordinate = |v: &Value| usize::try_from(v.as_u64()?).ok().filter(|&n| n < MAX_PATTERN_SKIP);
+    let mut steps = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let [feature, row, column] = entry.as_array()?.as_slice() else { return None };
+        let feature = FeatureId(feature.as_u64()?);
+        let (row, column) = (coordinate(row)?, coordinate(column)?);
+        if (index == 0) != (feature == FeatureId::DANGLING) || (row == 0 && column == 0) {
+            return None;
+        }
+        steps.push(PatternStep(feature, row, column));
+    }
+    Some(PatternAddress::Steps(steps))
+}
+
+/// Whole placements to skip. The original is number 1 and cannot be omitted.
+pub(crate) fn pattern_skip(v: &Value) -> std::result::Result<Vec<PatternAddress>, &'static str> {
+    let items = v.as_array().ok_or("`skip` must list instance numbers, such as [2, 5], or saved placement addresses")?;
+    if items.len() > MAX_PATTERN_SKIP {
+        return Err("`skip` must contain at most 10000 entries");
+    }
+    let mut skip = items
+        .iter()
+        .map(|item| {
+            pattern_address(item).ok_or(
+                "`skip` must list whole instance numbers from 2 to 10000 or valid placement addresses. Instance 1 is the original and always stays",
+            )
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    skip.sort_unstable();
+    skip.dedup();
+    Ok(skip)
+}
+
+/// Sources are resolved against the document after structural contract validation.
+#[derive(Debug)]
+pub(crate) struct PatternMemberParam {
+    pub address: PatternAddress,
+    pub source: Value,
+    pub member: PatternMemberKey,
+}
+
+pub(crate) fn pattern_skip_members(v: &Value) -> std::result::Result<Vec<PatternMemberParam>, &'static str> {
+    const WRONG: &str = "`skip_members` must list [placement, source feature name or ID, member] triples. Placements start at 2; members are zero-based indices or saved stable identities";
+    let entries = v.as_array().ok_or(WRONG)?;
+    if entries.len() > MAX_PATTERN_MEMBERS {
+        return Err("`skip_members` lists too many copies");
+    }
+    entries
+        .iter()
+        .map(|entry| {
+            let [address, source, member] = entry.as_array().ok_or(WRONG)?.as_slice() else { return Err(WRONG) };
+            let address = pattern_address(address).ok_or(WRONG)?;
+            if !(source.as_u64().is_some() || source.as_str().is_some_and(|name| !name.trim().is_empty() && name.len() <= 4096)) {
+                return Err(WRONG);
+            }
+            let member: PatternMemberKey = serde_json::from_value(member.clone()).map_err(|_| WRONG)?;
+            let name = |text: &str| !text.is_empty() && text.len() <= 4096;
+            let valid = match &member {
+                PatternMemberKey::Index(index) => *index < MAX_PATTERN_MEMBERS,
+                PatternMemberKey::Stable(PatternMemberIdentity::Single) => true,
+                PatternMemberKey::Stable(PatternMemberIdentity::SketchPoint { point, .. }) => name(point),
+                PatternMemberKey::Stable(PatternMemberIdentity::Profile { curves, .. }) => {
+                    !curves.is_empty() && curves.len() <= MAX_STRING_LIST && curves.iter().all(|curve| name(curve))
+                }
+                PatternMemberKey::Stable(PatternMemberIdentity::Body { body, path }) => name(body) && path.len() <= 64,
+            };
+            if !valid {
+                return Err(WRONG);
+            }
+            Ok(PatternMemberParam { address, source: source.clone(), member })
+        })
+        .collect()
 }
 
 /// The most names a list parameter may carry.

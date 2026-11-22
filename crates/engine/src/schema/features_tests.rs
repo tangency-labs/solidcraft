@@ -1247,7 +1247,23 @@ fn ring_with(key: &str, value: Value) -> Value {
 fn circular_pattern_schema_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<PatternCircularParams>(),
-        &["alignment", "angle", "axis", "bodies", "body_name", "body_names", "components", "count", "features", "name", "participants", "reversed"],
+        &[
+            "alignment",
+            "angle",
+            "axis",
+            "bodies",
+            "body_name",
+            "body_names",
+            "components",
+            "count",
+            "features",
+            "name",
+            "occurrences",
+            "participants",
+            "reversed",
+            "skip",
+            "skip_members",
+        ],
     );
 }
 
@@ -1273,6 +1289,7 @@ fn circular_pattern_contract_keeps_the_handlers_errors() {
         ring_with("alignment", json!(null)),
         ring_with("reversed", json!("yes")),
         ring_with("reversed", json!(null)),
+        ring_with("skip_members", json!([[0, 1, 0]])),
     ];
     for p in &cases {
         let error = |level| ring_rig(level).execute("solid.pattern.circular", p).err().map(|e| e.to_string());
@@ -1298,6 +1315,7 @@ fn circular_pattern_replies_match_the_output_schema() {
         ring_with("angle", json!("180 deg")),
         ring_with("alignment", json!("center")),
         ring_with("reversed", json!(true)),
+        ring_with("skip_members", json!([[2, "Post", 0]])),
         json!({"components": ["Part"], "axis": "Z", "count": 3}),
     ];
     for p in &calls {
@@ -1379,9 +1397,12 @@ fn pattern_schemas_and_the_key_check_agree() {
             "dir2",
             "features",
             "name",
+            "occurrences",
             "participants",
             "reversed",
             "reversed2",
+            "skip",
+            "skip_members",
             "spacing1",
             "spacing2",
         ],
@@ -1398,11 +1419,14 @@ fn pattern_schemas_and_the_key_check_agree() {
             "features",
             "flip",
             "name",
+            "occurrences",
             "orientation",
             "participants",
             "path",
             "path_sketch",
             "sketch",
+            "skip",
+            "skip_members",
             "spacing",
         ],
     );
@@ -1442,6 +1466,7 @@ fn rectangular_pattern_contract_keeps_the_handlers_errors() {
             with(row(), json!({"reversed": "yes"})),
             with(row(), json!({"reversed2": "yes"})),
             with(row(), json!({"reversed2": null})),
+            with(row(), json!({"skip": [1]})),
         ],
     );
     for p in [

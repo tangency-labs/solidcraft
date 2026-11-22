@@ -18,6 +18,15 @@ Repeat a hole, a boss or a whole body around an axis: the bolt circle on a flang
 | Quantity | How many in total, counting the original. | 6 for a 6-hole bolt circle. |
 | Total angle | The angle the pattern covers. At 360 deg the copies are spaced evenly all the way round. Under 360 deg, the first and last copies sit at the two ends of the angle. | 360 deg for a full bolt circle. 90 deg with Quantity 4 puts holes at 0, 30, 60 and 90 deg. |
 | Alignment (Features only) | Flip direction turns the pattern the other way. Center puts copies on both sides of the original: an odd Quantity splits evenly, an even Quantity puts one extra copy on one side, and Flip moves the extra copy to the other side. Quantity 4 over 90 deg with Center gives −30, 0, 30 and 60 deg. | Flip a partial pattern that went the wrong way around. |
+| Instances to skip | Pick individual copies by marker. Green copies stay and red copies are left out. | Skip one hole at an angle even when the source feature cuts several holes there. |
+
+#### Skipping copies
+
+Turn on **Instances to skip** to show the copies' markers. Instance 1 is the original and always stays; instance 2 is the first copy. Each opening in a copied feature has its own marker, so you can leave out one hole without removing the other holes at that placement. Openings at the same placement share its instance number.
+
+Green markers stay and red markers are skipped. Click a marker, or drag a box or lasso around several, to change the selection. Use **Restore** beside a skipped item to bring it back, or **Clear skipped instances** to restore all. Editing the pattern shows skipped copies again so they can be restored.
+
+An exclusion follows its opening or body when the source list changes order. Reducing Quantity can temporarily remove a saved placement: the pattern warns, keeps the exclusion and applies it again when the placement returns. A newly drawn replacement for a deleted opening does not inherit the deleted opening's exclusion.
 
 #### Try it: a 6-hole bolt circle
 
