@@ -752,7 +752,6 @@ pub fn active(app: &SolveApp) -> bool {
 /// Whether a Render tile is visible even with the Design ribbon focused.
 pub(crate) fn tiled(app: &SolveApp) -> bool {
     app.docs.views.is_tiled()
-        && app.session.active_sketch.is_none()
         && app
             .docs
             .views
@@ -2803,7 +2802,8 @@ fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn preview_signature(app: &mut SolveApp) -> (u64, usize, u64) {
     let mut visibility = std::collections::hash_map::DefaultHasher::new();
     let v = &app.session.visibility;
-    (&v.hidden_bodies, &v.hidden_occurrences, &v.hidden_folders, app.session.active_sketch).hash(&mut visibility);
+    (&v.hidden_bodies, &v.hidden_occurrences, &v.hidden_folders, app.session.sketching_view, crate::sketch_view::active_sketch(app))
+        .hash(&mut visibility);
     let (doc, world) = (app.session.doc.clone(), crate::open_meshing::session_world(&app.session));
     let signature = (Arc::as_ptr(&doc) as usize as u64, Arc::as_ptr(&world) as usize, visibility.finish());
     app.render_workspace.scene_sources = Some((doc, world));
