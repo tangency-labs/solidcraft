@@ -690,9 +690,10 @@ pub fn refine_snap(
             }
         }
     }
-    // The two most recent midpoints or centres: snap where their axes meet. A free coordinate,
-    // so placing it adds no constraint. Off unless Sketch preferences ask for it. One reference
-    // stays a visual guide. Shift skips this.
+    // The two most recent midpoints or centres: snap where their axes meet. Off unless Sketch
+    // preferences ask for it. One reference stays a visual guide. Shift skips this. With
+    // `sketch_align_points` on, the point lines up with both references below, as it would
+    // without this snap (#20859); otherwise it is a free coordinate and adds no constraint.
     if !mid_only
         && app.preferences.sketch_recent_snap
         && best.is_none()
@@ -772,6 +773,15 @@ pub fn refine_snap(
         targets.extend(app.viewport.tracking.line_midpoints(sk).into_iter().map(|(line, at)| (Some(format!("mid:{line}")), at)));
     }
     let mut lined = Vec::new();
+    // Where two guides meet, the point keeps the coordinates of the points the guides come from:
+    // level with one and plumb with the other (#20859).
+    if let Some((_, "+", at)) = best
+        && app.preferences.sketch_align_points
+    {
+        let (level, plumb) = line_up(&targets, at, tol);
+        lined.extend(level.filter(|l| (l.at.y - at.y).abs() < 1e-9));
+        lined.extend(plumb.filter(|p| (p.at.x - at.x).abs() < 1e-9));
+    }
     if !mid_only
         && best.is_none()
         && let Some(prev) = prev
