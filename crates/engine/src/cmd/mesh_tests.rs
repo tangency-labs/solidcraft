@@ -686,3 +686,33 @@ fn a_range_outside_the_body_is_refused() {
     let why = refusal(&mut s, json!({"body": "Mesh", "plane": "XY", "from": 40, "to": 50, "spacing": 5}));
     assert!(why.contains("0 mm to 30 mm"), "{why}");
 }
+
+/// A thin last slab runs on through the end plane only where the mesh goes on there. Two boxes
+/// (z 0…6.5 and 15…20) cut from 0.001 to 7 every 3 mm: the planes are 0.001, 3.001, 6.001 and 7,
+/// and 7 misses the mesh (in the gap). The slab of 6.001 stops at 7 (0.999 mm), not 3.999 mm on
+/// to 10 inside the gap.
+#[test]
+fn a_thin_last_slab_stops_at_a_plane_that_misses_the_mesh() {
+    let mut s = mesh_session(&[boxed([0., 0., 0.], [10., 20., 6.5]), boxed([0., 0., 15.], [10., 20., 20.])]);
+    let r = run(&mut s, "mesh.section_stack", json!({"body": "Mesh", "plane": "XY", "from": 0.001, "to": 7, "spacing": 3, "extrude": true}));
+    assert_eq!((r["planes"].as_u64(), r["empty"].as_u64()), (Some(4), Some(1)), "{r}");
+    let want = 200.0 * (3.0 + 3.0 + 0.999);
+    let got = slab_volume(&mut s, &r);
+    assert!((got - want).abs() < 1e-6 * want, "{got} vs {want}: {r}");
+}
+
+/// A second extruded stack on the same mesh names its slabs on from the first's (`Mesh slab 6`
+/// after `Mesh slab 1`…`5`), and each name it reports is a body of the design.
+#[test]
+fn a_second_stack_of_slabs_numbers_its_slabs_on() {
+    let mut s = box_mesh();
+    let call = json!({"body": "Mesh", "plane": "XY", "from": 5, "to": 13, "spacing": 2, "extrude": true});
+    let first = run(&mut s, "mesh.section_stack", call.clone());
+    let second = run(&mut s, "mesh.section_stack", call);
+    let names = |r: &Value| r["bodies"].as_array().unwrap().iter().map(|b| b.as_str().unwrap().to_string()).collect::<Vec<_>>();
+    // Planes at 5, 7, 9, 11 and 13 mm, each slab 2 mm (the box goes on past 13): five slabs each.
+    assert_eq!(names(&first), ["Mesh slab 1", "Mesh slab 2", "Mesh slab 3", "Mesh slab 4", "Mesh slab 5"], "{first}");
+    assert_eq!(names(&second), ["Mesh slab 6", "Mesh slab 7", "Mesh slab 8", "Mesh slab 9", "Mesh slab 10"], "{second}");
+    let st = s.model.state();
+    assert!(names(&second).iter().all(|n| st.body(n).is_some()), "{second}");
+}

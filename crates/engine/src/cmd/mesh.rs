@@ -327,11 +327,23 @@ fn section_stack(s: &mut Session, p: &Value) -> Result<Value> {
         // Every plane's slab, empty planes included: a section's slab runs to the next plane,
         // whether or not that plane met the mesh, never on through the gap after it.
         let heights = stack_extrudes(&offsets, spacing, reach[1] - STACK_EDGE);
+        // A plane that missed the mesh ends the slab below it, even where a thin last slab
+        // would otherwise run on through it.
+        let met: std::collections::BTreeSet<usize> = made.iter().map(|(_, i)| *i).collect();
+        // Slab bodies are named `<body> slab N`, N the first number no body has yet (a second
+        // stack on the same mesh carries on from the first).
+        let mut taken: std::collections::BTreeSet<String> = state.bodies.iter().map(|b| b.name.clone()).collect();
+        let mut number = 0usize;
         for (sketch, i) in &made {
-            let Some(height) = heights.get(*i).copied().flatten() else {
+            let Some(mut height) = heights.get(*i).copied().flatten() else {
                 skipped.push(SkippedSection { sketch: *sketch, reason: "the stack's end: drawn, not extruded".into() });
                 continue;
             };
+            if let (Some(at), Some(next)) = (offsets.get(*i), offsets.get(i + 1))
+                && !met.contains(&(i + 1))
+            {
+                height = height.min(next - at);
+            }
             // Read from the sketch itself: the model is evaluated once the whole stack is made.
             let outlines =
                 super::sketch_store::read(&s.doc, *sketch).map(|sk| material_outlines(&solidcraft_sketch::find_profiles(sk))).unwrap_or_default();
@@ -345,7 +357,15 @@ fn section_stack(s: &mut Session, p: &Value) -> Result<Value> {
             // fitted section by section, differ by a hair: joining them asks the boolean to
             // merge nearly coincident faces, which fails on ordinary parts.
             call["operation"] = json!("new");
-            call["body_name"] = json!(format!("{body} slab {}", slabs.len() + 1));
+            let slab_name = loop {
+                number += 1;
+                let name = format!("{body} slab {number}");
+                if !taken.contains(&name) {
+                    break name;
+                }
+            };
+            taken.insert(slab_name.clone());
+            call["body_name"] = json!(slab_name);
             // A slab that cannot be built (a scan's outline crossing itself) is left out, with
             // why: the other sections and slabs stand.
             let (doc, model) = (s.doc.clone(), s.model.clone());
