@@ -2426,6 +2426,44 @@ mod tests {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    /// #20578: a Sheet tab shows its sheet. Activating it brings the Drawing workspace and ribbon,
+    /// and a Sheet view popped out to a new window opens on the sheet, not on the model in Design.
+    #[test]
+    fn a_sheet_tab_and_a_popped_out_sheet_show_the_sheet() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.design_views_as_tabs = true;
+        let model = h.app.docs.views.active().id;
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":5})).unwrap();
+        h.app.run("drawing.create", json!({})).unwrap();
+        let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+        let (drawing, sheet) = (drawing.id, drawing.sheets[0].id);
+        crate::documents::view_activate(&mut h.app, model);
+        h.frames(4);
+        assert!(!crate::drawing_workspace::active(&h.app), "the Model tab shows the model");
+        let view =
+            crate::documents::view_open(&mut h.app, solidcraft_views::ViewKind::Sheet, Some(crate::sheet_views::subject(drawing, sheet)), true);
+        h.frames(4);
+        assert_eq!(h.app.docs.views.active().id, view);
+        assert!(crate::drawing_workspace::active(&h.app), "the active Sheet tab shows its sheet");
+        assert!(h.app.ui.tab.starts_with("DRAWING"), "and the Drawing ribbon: {}", h.app.ui.tab);
+        crate::documents::view_activate(&mut h.app, model);
+        h.frames(4);
+        assert!(!crate::drawing_workspace::active(&h.app), "back on the Model tab, the model shows");
+        h.app.run("tab.view.move_to_window", json!({"view":view})).unwrap();
+        let window = h.app.docs.views.window_of(view).unwrap();
+        crate::view_windows::focus_view(&mut h.app, view, Some(window)).unwrap();
+        crate::sketch_view::sync(&mut h.app).unwrap();
+        h.frames(4);
+        crate::view_windows::with_strip(&mut h.app, Some(window), |app| {
+            assert_eq!(app.docs.views.active().id, view);
+            assert!(crate::drawing_workspace::active(app), "the popped-out Sheet opens on its sheet");
+            Ok(())
+        })
+        .unwrap();
+    }
+
     #[test]
     fn control_history_uses_focused_child_sheet_after_the_model_ribbon_is_restored() {
         use serde_json::json;
