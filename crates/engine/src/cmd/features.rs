@@ -5348,7 +5348,9 @@ fn pipe(s: &mut Session, p: &Value) -> Result<Value> {
     check_expr(s, &diameter, Kind::Length, cmd, "diameter")?;
     let wall = expr(p, "wall");
     if let Some(w) = &wall {
-        check_expr(s, w, Kind::Length, cmd, "wall")?;
+        // A wall is a thickness. A word such as "hollow" is not one, and the message says so
+        // instead of naming an unknown parameter (#18344).
+        check_expr(s, w, Kind::Length, cmd, "wall").map_err(|_| bad(cmd, "the wall must be a thickness, such as 2 mm"))?;
     }
     add_feature(
         s,

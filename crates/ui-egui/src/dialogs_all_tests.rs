@@ -943,7 +943,36 @@ fn align_components_mode_switches_and_aligns_only_selected_instance() {
 }
 form_case!(remove, "solid.remove", []);
 form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing", "pattern.start_point", "Orientation"]);
-form_case!(pipe, "solid.pipe", ["Diameter", "Wall", "Operation"]);
+form_case!(pipe, "solid.pipe", ["Diameter", "Type", "Operation"]);
+
+/// #18344: the Pipe window asks for a wall only when the pipe is hollow.
+#[test]
+fn the_pipe_window_shows_a_wall_only_for_a_hollow_pipe() {
+    let mut h = fixture();
+    let mut d = representative(&h, "solid.pipe");
+    let render = |h: &mut Harness, d: &mut Dialog| {
+        scenario::clear_handles();
+        let mut out = h.ctx.run_ui(
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 1600.0))), ..Default::default() },
+            |ui| {
+                ui.set_width(264.0);
+                ui_kit::scope(ui, |ui| {
+                    ui_kit::header(ui, "pipe", tr("Pipe"), || {});
+                    rows(&mut h.app, &h.ctx, d, ui);
+                    ui_kit::footer(ui, "OK", "Cancel", true, ui_kit::Footer::default());
+                });
+            },
+        );
+        out.textures_delta.clear();
+        h.output = out.platform_output;
+    };
+    render(&mut h, &mut d);
+    assert!(scenario::rect_of("dialog:row:Wall").is_none(), "a solid pipe has no wall row");
+    let Kind::Pipe { hollow, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
+    *hollow = 1;
+    render(&mut h, &mut d);
+    assert!(scenario::rect_of("dialog:row:Wall").is_some(), "a hollow pipe has a wall row");
+}
 form_case!(stock, "solid.bounding_solid", ["Margin"]);
 form_case!(frame_plate, "frame.plate", ["Shape", "Width", "Height", "Thickness", "Offset", "Bolt Pattern"]);
 form_case!(frame_member, "frame.member", ["All Lines", "Anchor", "Angle", "Mirror", "Name"]);

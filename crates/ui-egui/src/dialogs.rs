@@ -86,6 +86,8 @@ pub const MODIFIERS: &[ToolModifiers] = &[
 
 pub(crate) const OPS: [&str; 4] = ["new", "join", "cut", "intersect"];
 pub(crate) const OP_LABELS: [&str; 4] = ["New Body", "Join", "Cut", "Intersect"];
+/// A pipe's section: a solid rod or a hollow tube, which has a wall (#18344).
+pub(crate) const PIPE_TYPES: [&str; 2] = ["Solid", "Hollow"];
 const DIRS: [&str; 5] = ["positive", "negative", "symmetric", "positive", "negative"];
 /// The "Two sides" direction (a second distance the other way).
 pub const TWO_SIDES: usize = 3;
@@ -176,6 +178,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::Pipe { diameter, wall, operation, .. }) {
             diameter: String = "5 mm".into() => shown_expr(diameter, ValueKind::Length),
             wall: String = String::new() => wall.as_deref().map(|e| shown_expr(e, ValueKind::Length)).unwrap_or_default(),
+            // A pipe is a solid rod or a hollow tube: a tube has a wall (#18344).
+            hollow: usize = 0 => usize::from(wall.is_some()),
             operation: usize = 0 => op_index(operation),
         } => json!({"diameter": diameter, "operation": OPS.get(*operation).copied().unwrap_or("new")});
         Emboss("solid.emboss", "EMBOSS", [("Profiles", PROFILES, true), ("Target Face (optional)", FACES, false)],
@@ -7021,12 +7025,18 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             pattern_objects(s, sels(d, 0), &mut p);
             ("solid.pattern.path", p)
         }
-        Kind::Pipe { wall, .. } => {
+        Kind::Pipe { wall, hollow, .. } => {
             need(0, "the path")?;
             let path = sels(d, 0).curve_ids();
             let sketch = picks_sketch(app, sels(d, 0), None).ok_or("the path curves must be in one sketch")?;
             let mut p = json!({"path_sketch": sketch, "path": path});
-            put(&mut p, &[("wall", wall)]);
+            // A hollow pipe is a tube: it has a wall, and a solid rod has none (#18344).
+            if *hollow == 1 {
+                if wall.trim().is_empty() {
+                    return Err("type a wall thickness for a hollow pipe".into());
+                }
+                p["wall"] = json!(wall);
+            }
             ("solid.pipe", p)
         }
         Kind::Stock { .. } => {

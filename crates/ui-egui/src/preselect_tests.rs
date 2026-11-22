@@ -4556,6 +4556,32 @@ fn a_pipe_cuts_from_its_window_and_keeps_the_cut_when_edited() {
     assert_eq!(p["params"]["operation"], "cut", "{p}");
 }
 
+/// #18344: the Pipe window has a Type row, so a hollow pipe is a choice and not a word in the
+/// Wall field. A solid pipe has no wall; a hollow one has the thickness the window shows.
+#[test]
+fn a_pipe_is_hollow_when_its_window_says_so() {
+    let mut app = app_with(json!([
+        {"command": "sketch.create", "params": {"plane": "XY", "name": "Path"}},
+        {"command": "sketch.circle.center", "params": {"center": [0, 0], "radius": 20, "id": "c"}},
+        {"command": "sketch.finish", "params": {}},
+    ]));
+    let mut d = start(&mut app, vec![Sel::SketchCurve { id: "c".into(), sketch: None }], "solid.pipe");
+    assert!(matches!(d.kind, Kind::Pipe { hollow: 0, .. }), "{:?}", d.kind);
+    // A solid pipe has no wall.
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert!(cmds[0].1.get("wall").is_none(), "{:?}", cmds[0].1);
+    // A hollow one has one.
+    let Kind::Pipe { hollow, wall, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
+    *hollow = 1;
+    *wall = "2 mm".into();
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].1["wall"], "2 mm", "{:?}", cmds[0].1);
+    // A hollow pipe with no wall is refused: it would be a solid rod.
+    let Kind::Pipe { wall, .. } = &mut d.kind else { panic!("{:?}", d.kind) };
+    wall.clear();
+    assert!(apply_commands(&app, &d).is_err(), "a hollow pipe without a wall");
+}
+
 #[test]
 fn construction_points_fill_three_point_plane_dialog() {
     let mut h = crate::scenario::Harness::new();

@@ -1202,9 +1202,13 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             });
             extra_options(ui, "feature_options", &mut d.extra, &[("Flip direction", "flip")]);
         }
-        Kind::Pipe { diameter, wall, operation } => {
+        Kind::Pipe { diameter, wall, hollow, operation } => {
             enter |= expr_row(ui, "Diameter", diameter);
-            enter |= hint_row(ui, "Wall", wall, tr("solid"));
+            // A pipe is a solid rod or a hollow tube: the Wall row follows the choice (#18344).
+            choice_row(ui, "Type", "pipe_type", hollow, &PIPE_TYPES);
+            if *hollow == 1 {
+                enter |= hint_row(ui, "Wall", wall, tr("ui.thickness"));
+            }
             choice_row(ui, "Operation", "pp_op", operation, &OP_LABELS);
         }
         Kind::Stock { margin } => {
