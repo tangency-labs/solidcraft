@@ -130,6 +130,7 @@ fn open_windows(app: &SolveApp) -> Vec<&'static str> {
         (app.params.is_some(), "parameters.change"),
         (app.design_properties.is_some(), "document.metadata"),
         (app.sketch_report.is_some(), "sketch.inspect"),
+        (app.design_report.is_some(), "document.inspect"),
         (app.bom.is_some(), "assembly.bom"),
         (app.material_card_review.is_some(), "material.properties.validate"),
         (app.help.about, "about"),

@@ -1899,6 +1899,22 @@ mod tests {
         h.call("ui.prefs", json!({"hidden_toolbar_tabs": []}));
     }
 
+    /// Inspect on the ribbon (#20662) opens a window with the design's summary; it used to run
+    /// `document.inspect` for nobody to see.
+    #[test]
+    fn the_inspect_button_opens_a_window() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.ui.tab = "INSPECT".into();
+        h.frames(3);
+        let at = crate::scenario::handle_at("toolbar:document.inspect").expect("Inspect is on the ribbon");
+        h.step(&json!({"click": [at.x, at.y]})).unwrap();
+        h.frames(2);
+        let windows = h.call("ui.inspect", json!({}))["result"]["windows"].clone();
+        assert!(windows.as_array().is_some_and(|w| w.iter().any(|x| x == "document.inspect")), "{windows}");
+    }
+
     #[test]
     fn specialty_tabs_show_by_default_and_stay_hidden_for_features() {
         let mut h = crate::scenario::Harness::new();
