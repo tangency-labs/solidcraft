@@ -1817,7 +1817,7 @@ fn selection_item(s: &Session, value: Value) -> Result<Sel> {
     Ok(if face { Sel::Face { body, index, point } } else { Sel::Edge { body, index, point } })
 }
 
-fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
     let items = p.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
     if items.len() > 10_000 {
         return Err(bad("select.set", "too many items"));

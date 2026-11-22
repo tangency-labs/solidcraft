@@ -3956,6 +3956,9 @@ pub struct Document {
     /// Named views: saved cameras.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub named_views: Vec<NamedView>,
+    /// Named selections: saved selections to select again in one click (#18716).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub named_selections: Vec<NamedSelection>,
     /// Notes: text anchored to points in model space, drawn as screen-facing callouts (#1631).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<crate::notes::Note>,
@@ -4053,6 +4056,17 @@ pub struct NamedView {
     pub roll: f64,
     #[serde(default)]
     pub up: solidcraft_viewport::UpAxis,
+}
+
+/// A named selection (#18716): what was selected, kept under a name to select again in one
+/// click. Each item is a selection entry as `select.set` takes it (`{"type": "occurrence",
+/// "path": […]}`, `{"type": "body", "name": …}`, `{"type": "feature", "id": …}`…); an item
+/// that no longer exists is skipped when the selection is applied.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NamedSelection {
+    pub name: String,
+    #[serde(default)]
+    pub items: Vec<serde_json::Value>,
 }
 
 /// A browser group: items of one folder (`bodies`, `sketches` or `construction`) of a
@@ -4275,6 +4289,7 @@ impl Document {
             timeline_groups: Vec::new(),
             browser_order: Default::default(),
             named_views: Vec::new(),
+            named_selections: Vec::new(),
             notes: Vec::new(),
             visibility: Visibility::default(),
             drawings: Vec::new(),
