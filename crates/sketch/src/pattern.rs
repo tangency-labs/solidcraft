@@ -398,22 +398,41 @@ impl Sketch {
         }
     }
 
+    /// The ids of the sketch's pattern relations (the constraints that keep a pattern copy
+    /// following its original), in order. Each call walks every constraint, so many lookups
+    /// belong in a set built from one call.
+    pub(crate) fn pattern_relation_ids(&self) -> impl Iterator<Item = &str> {
+        #[cfg(test)]
+        crate::tests::count_id_search();
+        self.constraints
+            .iter()
+            .filter(|c| matches!(c.kind, ConstraintKind::PatternPoint { .. } | ConstraintKind::PatternRadius { .. }))
+            .map(|c| c.id.as_str())
+    }
+
     pub fn validate_patterns(&self) -> Result<(), SketchError> {
         if self.patterns.len() > crate::CEILING_CONSTRAINTS {
             return Err(SketchError::TooLarge);
         }
-        // The ids pattern copies may name, each set built once at its first use. A linear search
-        // per reference cost references × ids comparisons, about 3e11 and many minutes per sketch
-        // for a hostile design file within the size limits, paid by everything that reads designs.
-        let curves = std::cell::LazyCell::new(|| self.curves.iter().map(|c| c.id.as_str()).collect::<std::collections::HashSet<_>>());
-        let points = std::cell::LazyCell::new(|| self.points.iter().map(|p| p.id.as_str()).collect::<std::collections::HashSet<_>>());
-        let relations = std::cell::LazyCell::new(|| {
-            self.constraints
-                .iter()
-                .filter(|c| matches!(c.kind, crate::ConstraintKind::PatternPoint { .. } | crate::ConstraintKind::PatternRadius { .. }))
-                .map(|c| c.id.as_str())
-                .collect::<std::collections::HashSet<_>>()
+        // The ids patterns and their copies may name, each index built once at its first use. A
+        // linear search per reference or per pattern cost references × ids comparisons, up to
+        // about 3e11 and many minutes per sketch for a hostile design file within the size
+        // limits, paid by everything that reads designs. Each curve id maps to its first curve,
+        // the one `curve_index` finds.
+        let curves = std::cell::LazyCell::new(|| {
+            let mut first = std::collections::HashMap::with_capacity(self.curves.len());
+            for curve in &self.curves {
+                first.entry(curve.id.as_str()).or_insert(curve);
+            }
+            first
         });
+        let points = std::cell::LazyCell::new(|| self.points.iter().map(|p| p.id.as_str()).collect::<std::collections::HashSet<_>>());
+        let relations = std::cell::LazyCell::new(|| self.pattern_relation_ids().collect::<std::collections::HashSet<_>>());
+        // What `resolve_point` finds, a point id first, else `<curve>.<role>` on the first curve of that id.
+        let resolves = |r: &str| {
+            points.contains(r) || r.rsplit_once('.').is_some_and(|(id, role)| curves.get(id).is_some_and(|c| Self::curve_point(c, role).is_some()))
+        };
+        let line = |id: &str| curves.get(id).is_some_and(|c| matches!(c.kind, CurveKind::Line { .. }));
         let mut ids = std::collections::BTreeSet::new();
         for pattern in &self.patterns {
             if pattern.expressions.len() > 5
@@ -443,7 +462,7 @@ impl Sketch {
             let finite = |v: f64| v.is_finite() && v.abs() <= crate::MAX_COORD;
             let valid = match &pattern.kind {
                 SketchPatternKind::Circular { count, angle, center, .. } => {
-                    valid_count(*count) && angle.is_finite() && angle.abs() > 1e-9 && angle.abs() <= 360.0 && self.resolve_point(center).is_some()
+                    valid_count(*count) && angle.is_finite() && angle.abs() > 1e-9 && angle.abs() <= 360.0 && resolves(center)
                 }
                 SketchPatternKind::Rectangular { count, count2, spacing, spacing2, dir, dir2, direction, direction2, .. } => {
                     valid_count(*count)
@@ -455,9 +474,7 @@ impl Sketch {
                         && finite(dir.y)
                         && (dir.len() - 1.0).abs() < 1e-6
                         && dir2.is_none_or(|d| finite(d.x) && finite(d.y) && (d.len() - 1.0).abs() < 1e-6)
-                        && direction.iter().chain(direction2).all(|id| {
-                            self.curve_index(id).is_some_and(|l| matches!(self.curves.get(l).map(|c| &c.kind), Some(CurveKind::Line { .. })))
-                        })
+                        && direction.iter().chain(direction2).all(|id| line(id))
                 }
             };
             if !valid {
@@ -481,7 +498,7 @@ impl Sketch {
                     || instance.points.len() > crate::CEILING_POINTS
                     || instance.curves.len() > crate::CEILING_CURVES
                     || instance.constraints.len() > crate::CEILING_CONSTRAINTS
-                    || instance.curves.iter().any(|id| !valid_id(id) || !curves.contains(id.as_str()))
+                    || instance.curves.iter().any(|id| !valid_id(id) || !curves.contains_key(id.as_str()))
                     || instance
                         .points
                         .iter()

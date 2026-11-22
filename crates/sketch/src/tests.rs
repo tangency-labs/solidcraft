@@ -30,7 +30,8 @@ thread_local! {
     static ID_SEARCHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-/// A linear search for a point or curve by id on this thread.
+/// A linear search of a sketch's points, curves or pattern relations on this thread (a call of
+/// `point_index`, `curve_index` or `pattern_relation_ids`).
 pub(crate) fn count_id_search() {
     ID_SEARCHES.with(|c| c.set(c.get() + 1));
 }
@@ -2412,7 +2413,9 @@ fn pattern_upkeep_does_not_search_ids_per_copy() {
 
 /// A sketch shaped like a hostile design file. One circular pattern copy names, at every
 /// reference, the last of `n` points, `n` curves and `2n` constraints, the last a pattern relation.
-fn sketch_naming_its_last_ids(n: usize) -> Sketch {
+/// Then `m` patterns that need no copies (a circular one of count 1 and a 1 by 1 rectangular one
+/// in turn) each name the last curve, by its start point as the centre or as both directions.
+fn sketch_naming_its_last_ids(n: usize, m: usize) -> Sketch {
     let mut sk = Sketch::new();
     let a = sk.add_point(v(1.0, 0.0), None).unwrap();
     let line = sk.add_line_pts(0, a, None).unwrap();
@@ -2429,20 +2432,50 @@ fn sketch_naming_its_last_ids(n: usize) -> Sketch {
     let kind = SketchPatternKind::Circular { center: "origin".into(), count: 2, angle: 180.0, alignment: PatternAlignment::Right, reversed: false };
     sk.patterns.push(SketchPattern {
         id: "pat".into(),
-        entities: vec![c],
+        entities: vec![c.clone()],
         kind,
         count_expression: None,
         instances: vec![instance],
         expressions: Default::default(),
     });
+    sk.patterns.extend((0..m).map(|i| {
+        let kind = if i % 2 == 0 {
+            SketchPatternKind::Circular { center: format!("{c}.start"), count: 1, angle: 180.0, alignment: PatternAlignment::Right, reversed: false }
+        } else {
+            SketchPatternKind::Rectangular {
+                dir: v(1.0, 0.0),
+                dir2: None,
+                direction: Some(c.clone()),
+                direction2: Some(c.clone()),
+                count: 1,
+                spacing: 1.0,
+                count2: 1,
+                spacing2: 1.0,
+                alignment: PatternAlignment::Right,
+                alignment2: PatternAlignment::Right,
+                reversed: false,
+                reversed2: false,
+            }
+        };
+        SketchPattern {
+            id: format!("pat{i}"),
+            entities: vec![c.clone()],
+            kind,
+            count_expression: None,
+            instances: vec![],
+            expressions: Default::default(),
+        }
+    }));
     sk
 }
 
-/// Reading a design checks that each pattern copy names curves, points and pattern relations its
-/// sketch has. Each was once found by a linear search over the sketch's ids, so a hostile file
-/// within the size limits (a copy naming the last of 200 000 curves, 200 000 points and 400 000
-/// constraints at every reference) took many minutes per sketch to read. The checks must not
-/// search per reference, and they accept and refuse exactly what they did.
+/// Reading a design checks each sketch pattern's centre or direction lines, and that each pattern
+/// copy names curves, points and pattern relations its sketch has. Each was once found by a
+/// linear search over the sketch's ids, so a hostile file within the size limits took many
+/// minutes per sketch to read. One such file has a copy naming the last of 200 000 curves,
+/// 200 000 points and 400 000 constraints at every reference. Another has 400 000 patterns that
+/// need no copies, each naming the last curve. The checks must not search per reference or per
+/// pattern, and they accept and refuse exactly what they did.
 #[test]
 fn pattern_checks_do_not_search_ids_per_reference() {
     fn changed(sk: &Sketch, change: impl FnOnce(&mut Sketch)) -> Sketch {
@@ -2450,9 +2483,27 @@ fn pattern_checks_do_not_search_ids_per_reference() {
         change(&mut sk);
         sk
     }
+    // The centre of the last circular pattern and the second direction of the last rectangular one.
+    fn centre(sk: &mut Sketch) -> &mut String {
+        sk.patterns
+            .iter_mut()
+            .rev()
+            .find_map(|p| if let SketchPatternKind::Circular { center, .. } = &mut p.kind { Some(center) } else { None })
+            .unwrap()
+    }
+    fn direction(sk: &mut Sketch) -> &mut Option<String> {
+        sk.patterns
+            .iter_mut()
+            .rev()
+            .find_map(|p| if let SketchPatternKind::Rectangular { direction2, .. } = &mut p.kind { Some(direction2) } else { None })
+            .unwrap()
+    }
     let n = 20_000;
-    let sk = sketch_naming_its_last_ids(n);
+    let sk = sketch_naming_its_last_ids(n, n);
+    let last = format!("c{}", n - 1);
     let refused = || Err("invalid value: invalid sketch pattern instance".to_string());
+    let unset = || Err("invalid value: invalid sketch pattern settings".to_string());
+    let circle = |sk: &mut Sketch| sk.curves[0].kind = CurveKind::Circle { c: 0, r: 1.0 };
     let cases = [
         ("every reference found", sk.clone(), Ok(())),
         ("an unknown curve", changed(&sk, |sk| sk.patterns[0].instances[0].curves[n / 2] = "c-1".into()), refused()),
@@ -2467,15 +2518,48 @@ fn pattern_checks_do_not_search_ids_per_reference() {
             changed(&sk, |sk| sk.constraints[2 * n - 1].kind = ConstraintKind::PatternRadius { a: 0, b: 0 }),
             Err("invalid value: pattern radius needs two circles or ellipses".to_string()),
         ),
+        ("a centre on an unknown curve", changed(&sk, |sk| *centre(sk) = "c-1.start".into()), unset()),
+        ("a centre a line does not have", changed(&sk, |sk| *centre(sk) = format!("{last}.center")), unset()),
+        // A point id comes first, even one named like a curve's point.
+        (
+            "a point named like a centre a line does not have",
+            changed(&sk, |sk| {
+                sk.points[1].id = format!("{last}.center");
+                *centre(sk) = format!("{last}.center");
+            }),
+            Ok(()),
+        ),
+        ("the origin as a centre", changed(&sk, |sk| *centre(sk) = "origin".into()), Ok(())),
+        // Of two curves with one id, the first decides, as `curve_index` finds it. A circle has
+        // no start point.
+        (
+            "a circle before the last curve with its id",
+            changed(&sk, |sk| {
+                circle(sk);
+                sk.curves[0].id.clone_from(&last);
+            }),
+            unset(),
+        ),
+        ("a direction on an unknown curve", changed(&sk, |sk| *direction(sk) = Some("c-1".into())), unset()),
+        (
+            "a direction that is no line",
+            changed(&sk, |sk| {
+                circle(sk);
+                let id = sk.curves[0].id.clone();
+                *direction(sk) = Some(id);
+            }),
+            unset(),
+        ),
     ];
-    let mut most = 0;
+    let mut searches = Vec::new();
     for (what, sk, expected) in cases {
         ID_SEARCHES.with(|c| c.set(0));
         assert_eq!(sk.validate_patterns().map_err(|e| e.to_string()), expected, "{what}");
-        most = most.max(ID_SEARCHES.with(std::cell::Cell::get));
+        searches.push((what, ID_SEARCHES.with(std::cell::Cell::get)));
     }
-    // Only the circular pattern's centre is found by a search.
-    assert!(most <= 1, "{most} id searches in one check of the patterns");
+    // One walk of the constraints builds the set of pattern relations. Nothing else searches,
+    // neither per reference nor per pattern.
+    assert!(searches.iter().all(|(_, count)| *count <= 1), "id searches in one check of the patterns {searches:?}");
 }
 
 /// Inserting a dense drawing searched the whole sketch for every new id, so the insert took time
