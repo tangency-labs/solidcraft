@@ -51,7 +51,7 @@
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::line::Line;
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR_OUTSIDE_OF_DOMAIN};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::{line_point_distance, StartPlanePoint};
@@ -99,10 +99,7 @@ pub(crate) fn is_off_generator(e: &SolidError) -> bool {
 /// The off-surface failure of `operation` (status `SM_ERR_NOT_WITHIN_TOLERANCE`): an
 /// analytic inversion's answer that the point is off the surface (tangency-labs/smlib dfc7cb6).
 pub(crate) fn not_within_tolerance(operation: &'static str) -> SolidError {
-    SolidError::surface(
-        operation,
-        SurfaceFailure::OffSurface("the point is off the surface"),
-    )
+    SolidError::surface(operation, SurfaceFailure::PointOffSurface)
 }
 
 /// The solution object of solves whose solutions name no object.
@@ -188,10 +185,9 @@ impl SurfOfRevolution {
         // accepts it, so a rejected generator edit does not change the surface's
         // advertised domain (upstream stores it first).
         let v_ivl = new_step_uv_domain.v_interval();
-        let gen = self
-            .gen_curve
-            .as_mut()
-            .ok_or_else(|| SolidError::surface_missing(OP_ADJUST, "the generator curve"))?;
+        let gen = self.gen_curve.as_mut().ok_or_else(|| {
+            SolidError::surface(OP_ADJUST, SurfaceFailure::SurfaceWithoutGenerator)
+        })?;
         gen_adjust_step_interval(k, gen, &v_ivl)?;
         self.anal_uv_domain = *new_step_uv_domain;
 
@@ -296,12 +292,9 @@ impl SurfOfRevolution {
 
         // check input - new trim UV domain must be inside current natural UV domain
         if !new_nurb_uv_domain.is_contained_by(&current, EFF_ZERO_PARAM) {
-            return Err(SolidError::surface(
-                OP_TRIM,
-                SurfaceFailure::OutsideDomain(
-                    "the trim domain is outside the surface's natural domain",
-                ),
-            ));
+            return Err(Failure::new(OP_TRIM, SurfaceFailure::TrimDomainOutside)
+                .with_status(SM_ERR_OUTSIDE_OF_DOMAIN)
+                .into_error());
         }
 
         // no work - new and current domains are same size
@@ -373,7 +366,9 @@ impl SurfOfRevolution {
             {
                 Ok(r) => r,
                 Err(e) if is_off_generator(&e) => {
-                    return Err(not_within_tolerance(OP_STEP_INV));
+                    return Err(Failure::new(OP_STEP_INV, SurfaceFailure::PointOffSurface)
+                        .caused_by(e)
+                        .into_error());
                 }
                 Err(e) => return Err(e),
             };
@@ -383,7 +378,7 @@ impl SurfOfRevolution {
             // the fork (tangency-labs/smlib dfc7cb6): outside the sweep is an answer
             Err(SolidError::surface(
                 OP_STEP_INV,
-                SurfaceFailure::OutsideDomain("the point is outside the sweep"),
+                SurfaceFailure::PointOutsideSweep,
             ))
         }
     }
@@ -495,9 +490,9 @@ impl SurfOfRevolution {
         // `is_off_generator`; the public inversion answers it, with the fork's fix, as
         // SM_ERR_NOT_WITHIN_TOLERANCE)
         let Some((sp, (gen, ivl, solutions))) = on_generator else {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_STEP_INV,
-                "the rotated point is not on the generator",
+                SurfaceFailure::PointNotOnGenerator,
             ));
         };
         let num_angles = sp.angles_deg.len();
@@ -544,7 +539,13 @@ impl SurfOfRevolution {
 
         // set output V coordinate
         let first = solutions.first().ok_or_else(|| {
-            SolidError::surface_failed(OP_STEP_INV, "the generator inversion found no solution")
+            SolidError::surface(
+                OP_STEP_INV,
+                SurfaceFailure::Defect {
+                    why: "the generator inversion's solutions are empty, though the side \
+                          was chosen above only for a non-empty solve",
+                },
+            )
         })?;
         let mut v = first.start.param(0)?;
 

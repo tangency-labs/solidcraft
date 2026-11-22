@@ -103,7 +103,8 @@ use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::{Curve, CurveKind, CurvePropertyType};
 use crate::curve::ellipse::p2::set_up_polar_conversion;
 use crate::curve::ellipse::{Ellipse, EllipseOptions, PolarConversion};
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::surface::{AnalyticCheck, SurfaceFailure};
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -564,9 +565,9 @@ impl SurfOfRevolution {
         // a tolerance is a finite distance, never negative (a NaN would fall through to
         // the default and an infinite one would put every point on the axis)
         if !on_axis_tol.is_finite() || on_axis_tol < 0.0 {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_CANONICAL,
-                "the on-axis tolerance is not a finite, non-negative distance",
+                SurfaceFailure::ToleranceNotADistance,
             ));
         }
 
@@ -622,9 +623,9 @@ impl SurfOfRevolution {
 
         // sYVec can be 0,0,0 if revolving a line coincident with the axis
         if y_vec.length_squared() < crate::math::EFF_ZERO_SQ {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_CANONICAL,
-                "the generator line lies on the axis",
+                SurfaceFailure::GeneratorOnAxis,
             ));
         }
         let y_vec = y_vec.unitize()?;
@@ -702,10 +703,17 @@ impl SurfOfRevolution {
             || !gen_curve_step_ivl.is_contained_by(&surf_gen_step_ivl, 0.0)
         {
             // Trimming is needed.
-            let own = self
-                .gen_curve
-                .as_mut()
-                .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the generator curve"))?;
+            let own = self.gen_curve.as_mut().ok_or_else(|| {
+                Failure::new(
+                    OP_GEN,
+                    SurfaceFailure::Defect {
+                        why: "the generator is missing, though self.gen() read it at the top \
+                              of this routine and nothing since takes it",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            })?;
             gen_adjust_step_interval(k, own, &surf_gen_step_ivl)?;
             gen_adjust_step_interval(k, &mut gen_curve, &surf_gen_step_ivl)?;
         }
@@ -815,10 +823,9 @@ impl SurfOfRevolution {
 
         // update PolarConverter
         if iso_degenerate {
-            return Err(SolidError::surface_failed(
-                OP_REBUILD,
-                "the sweep iso curve is degenerate",
-            ));
+            return Err(Failure::new(OP_REBUILD, SurfaceFailure::DegenerateIsoCurve)
+                .with_status(crate::error::SM_ERR)
+                .into_error());
         }
         let CurveKind::Ellipse(circle) = sweep_iso.kind_mut() else {
             return Err(SolidError::invalid_input(
@@ -842,7 +849,7 @@ impl SurfOfRevolution {
     pub(crate) fn gen(&self) -> Result<&Curve> {
         self.gen_curve
             .as_ref()
-            .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the generator curve"))
+            .ok_or_else(|| SolidError::surface(OP_GEN, SurfaceFailure::SurfaceWithoutGenerator))
     }
 
     /// The generating curve (`GetGenCurve`).
@@ -1213,9 +1220,9 @@ impl SurfOfRevolution {
         // Get GeneratorPoint for given Param
         let generator_domain = gen.natural_interval();
         if !generator_domain.contains_value(gen_param, 0.0) {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_DIRECTRIX,
-                "the generator parameter is outside the generator's interval",
+                SurfaceFailure::ParameterOutsideGenerator,
             ));
         }
         let generator_point = gen.evaluate_point(k, gen_param)?;
@@ -1343,9 +1350,9 @@ impl SurfOfRevolution {
         // when polar conversion is possible
         let mut exact_conversion = false;
         if self.have_polar_conversion() {
-            let circle = self.polar_curve().ok_or_else(|| {
-                SolidError::surface_missing(OP_GEN, "the polar conversion circle")
-            })?;
+            let circle = self
+                .polar_curve()
+                .ok_or_else(|| SolidError::surface(OP_GEN, SurfaceFailure::NoPolarConverter))?;
             let (x, exact) = self
                 .polar
                 .convert_to_polar_parameter(k, circle, swapped.x)?;
@@ -1440,9 +1447,9 @@ impl SurfOfRevolution {
     ) -> Result<()> {
         // check input
         if hu > 3 || hv > 3 {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_EVAL_STEP,
-                "a derivative order above 3 was asked",
+                SurfaceFailure::DerivativeOrderTooHigh { max: 3 },
             ));
         }
 
@@ -1761,11 +1768,10 @@ impl SurfOfRevolution {
                 }
                 let mut angle_rad = axis
                     .ccw_angle_between(self.position.x_axis(), target_vec)
-                    .map_err(|_| {
-                        SolidError::surface_failed(
-                            OP_XPLANE,
-                            "the angle to the plane's direction could not be measured",
-                        )
+                    .map_err(|e| {
+                        Failure::new(OP_XPLANE, SurfaceFailure::AngleNotMeasured)
+                            .caused_by(e)
+                            .into_error()
                     })?;
                 if angle_rad < 0.0 {
                     angle_rad += 2.0 * PI;
@@ -2215,9 +2221,11 @@ pub fn test_for_iso_circles(
 
     // all done
     if n_degen == test_vals.len() {
-        return Err(SolidError::surface_failed(
+        return Err(SolidError::surface(
             OP_ISO_CIRCLES,
-            "every test iso curve is degenerate",
+            SurfaceFailure::NurbNotAnalytic {
+                check: AnalyticCheck::IsoCurvesDegenerate,
+            },
         ));
     }
     Ok(out)
@@ -2338,7 +2346,14 @@ mod tests {
         // Du at u = 0 on radius 2: 2 * PI / 180 along Y
         let du = d.get(2).copied().unwrap();
         assert!((du - Vec3::new(0.0, 2.0 * PI / 180.0, 0.0)).length() < 1e-12);
-        assert!(s.evaluate_step(&k(), Point2::new(0.0, 0.0), 4, 4).is_err());
+        let e = s
+            .evaluate_step(&k(), Point2::new(0.0, 0.0), 4, 4)
+            .unwrap_err();
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::DerivativeOrderTooHigh { max: 3 })
+        );
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
         // Boundary iso curves request pure U derivatives, despite C++'s
         // debug-only equal-order assertion. These are all defined in release.
         let sweep = s.evaluate_step(&k(), Point2::new(0.0, 0.0), 3, 0).unwrap();
@@ -2362,7 +2377,14 @@ mod tests {
         let d = s.create_directrix_at_generator_param(&k(), 0.5).unwrap();
         assert!((d.radius - 1.5).abs() < 1e-12);
         assert!((d.axis_point - Vec3::new(0.0, 0.0, 1.5)).length() < 1e-12);
-        assert!(s.create_directrix_at_generator_param(&k(), 1.5).is_err());
+        let e = s
+            .create_directrix_at_generator_param(&k(), 1.5)
+            .unwrap_err();
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::ParameterOutsideGenerator)
+        );
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
         // the generator direction is a B-spline
         let gen = s
             .create_iso_parametric_curve(&k(), SurfParamType::U, 0.5, None)
