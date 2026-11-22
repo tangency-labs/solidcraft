@@ -293,10 +293,10 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "a drawing keeps at least one sheet"));
         }
         let Some(sheet) = d.sheets.get(at).cloned() else { return Ok(()) };
-        if editing.as_ref().is_some_and(|entry| entry.drawing == d.id && entry.sheet == sheet.id) {
+        let on = d.on_sheet(sheet.id);
+        if editing.as_ref().is_some_and(|entry| entry.goes_with(d.id, &on)) {
             return Err(bad(cmd, "finish or cancel the sheet sketch before deleting its sheet"));
         }
-        let on = d.on_sheet(sheet.id);
         if !on.is_empty() && !with_contents {
             let what = listed(&on);
             return Err(bad(cmd, format!("sheet `{}` has {what} on it: give `\"contents\": \"delete\"` to delete them with it", sheet.name)));
