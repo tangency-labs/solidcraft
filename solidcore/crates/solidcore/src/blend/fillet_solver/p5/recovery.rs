@@ -1216,8 +1216,11 @@ impl Recovery<'_> {
                         // Not upstream (#15767): a corner whose two rail ends are each on
                         // their own side edge (no mates; an open end's Nx2 corner) has both
                         // solved from the round's ball, which the roll-over changed: the
-                        // other rail's end is solved again too, not left at the ball before it
+                        // other rail's end is solved again too, not left at the ball before it.
+                        // Only an end solved here seeds it: one that found no side edge
+                        // (`NoIntRailEu`) keeps its point from before the roll-over
                         if solved_corner.is_none()
+                            && self.fillets.fillet_vertex(vertex)?.is_processed()
                             && self.fillets.fillet_vertex(vertex)?.mate(0).is_none()
                         {
                             solved_corner = Some((corner, vertex));

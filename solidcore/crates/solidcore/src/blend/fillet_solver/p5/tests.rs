@@ -220,6 +220,8 @@ struct Script {
     stalled: bool,
     fail: Option<&'static str>,
     find_count: usize,
+    /// The status `corner_vertex` leaves the end in (`Processed` where `None`)
+    corner_status: Option<FilStatus>,
 }
 impl Script {
     fn call(&mut self, name: &'static str) -> Result<()> {
@@ -383,7 +385,12 @@ impl RecoveryOps for Script {
 
     fn corner_vertex(&mut self, c: &mut Recovery<'_>, v: VertexId, _: FilletGeomId) -> Result<()> {
         assert_eq!(c.fillets.fillet_vertex(v)?.status(), FilStatus::Unprocessed);
-        self.call("corner")
+        self.call("corner")?;
+        // as `CalcRailIntEdgeuse` leaves the end it solved, or found no side edge for
+        c.fillets
+            .fillet_vertex_mut(v)?
+            .set_status(self.corner_status.unwrap_or(FilStatus::Processed));
+        Ok(())
     }
     fn recalc(
         &mut self,
@@ -495,6 +502,28 @@ fn tangent_split_rebuilds_both_segments_and_restores_offset_identity_and_orienta
     assert_eq!(
         f.fb.geom(id).unwrap().geom_type,
         FilletGeomType::TangentRollover
+    );
+}
+/// #15767: a rolled rail end that finds no side edge (`NoIntRailEu`) does not seed the other
+/// unmated end at the corner: that end keeps its point from before the roll-over and is not
+/// solved again (one `corner`, where a solved end gives two).
+#[test]
+fn a_rolled_end_without_a_side_edge_does_not_seed_the_other_end() {
+    let mut f = Fixture::new([&[0.4, 1.0], &[1.0]], true);
+    let id = f.geom;
+    let mut script = Script {
+        side: Some(f.side),
+        tangent: true,
+        corner_status: Some(FilStatus::NoIntRailEu),
+        ..Script::default()
+    };
+    let mut adjusted = vec![FilletCornerId(41), FilletCornerId(41)];
+    f.context().process(id, &mut adjusted, &mut script).unwrap();
+    assert_eq!(
+        script.calls.iter().filter(|c| *c == "corner").count(),
+        1,
+        "{:?}",
+        script.calls
     );
 }
 /// #15767: a rail end with a mate at the corner is solved once (its mate is reset by the

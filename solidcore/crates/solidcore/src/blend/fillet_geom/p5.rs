@@ -1491,10 +1491,15 @@ impl FilletBrep {
         else {
             return Ok(());
         };
+        // `TopologySplit` gives the rolled piece the split solver; a geometry without one is
+        // only a caller's (`add_geom`, `set_fillet_geom_type` are public)
         let solver = self
             .geom(rolled)?
             .fillet_solver()
-            .ok_or_else(|| missing(OP_CROSS))?;
+            .ok_or(SolidError::invalid_input(
+                OP_CROSS,
+                "a tangent roll-over's rolled piece has no fillet solver",
+            ))?;
         let tol = resolve(solver)?.approx_tol_3d;
         let uv =
             super::p4::create_uv_curve(k, self, start_fv, end_fv, false, &surface, 50.0 * tol)?;

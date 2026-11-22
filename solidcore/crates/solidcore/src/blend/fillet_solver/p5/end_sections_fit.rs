@@ -266,9 +266,10 @@ fn boundary_requires_cut_at(
 /// back or collapses there (the ball inside a convex cylinder narrower than itself:
 /// `1 - 3.5 / 3 < 0`): no ball of the round touches the face beyond next to the edge, the
 /// rail does not roll over it, and the end section is judged as on main (the app-built
-/// narrowing wall at radius 3.5, #20757's review). A crossing that does not drop onto
-/// either surface, or a solver without the rail's face's offset (`ball` `None`), proves
-/// nothing and keeps the roll-over.
+/// narrowing wall at radius 3.5, #20757's review). The roll-over is taken only where every
+/// factor is proved positive: a crossing that does not drop onto either surface, cannot be
+/// evaluated there, or a solver without the rail's face's offset (`ball` `None`) proves
+/// nothing, and the end section is judged as on main.
 ///
 /// # Errors
 /// Those of the topology queries, of the tangency test and of the surface evaluations.
@@ -309,9 +310,9 @@ fn leaves_across_tangent_edge_at(
                 Some(ball) => {
                     ball_folds_beyond(k, target, e, face, ball, curve.evaluate_point(k, t)?)?
                 }
-                None => false,
+                None => None,
             };
-            if !folds {
+            if folds == Some(false) {
                 return Ok(true);
             }
         }
@@ -322,23 +323,56 @@ fn leaves_across_tangent_edge_at(
 /// Whether the ball, offset `ball.1` along the natural normal of the rail's face's surface
 /// `ball.0`, cannot touch the face across tangent edge `e` from `face` at the crossing `x`:
 /// the face beyond's offset by it folds or collapses there (see
-/// [`leaves_across_tangent_edge_at`]).
+/// [`leaves_across_tangent_edge_at`]). `Some(true)` where it folds, `Some(false)` where every
+/// factor is positive (the ball rolls onto the face beyond), `None` where the crossing proves
+/// neither: no face or surface beyond, a drop that fails, an evaluation that fails there (a
+/// pole or an apex of the face beyond on the tangent edge), or a factor that is NaN.
+///
+/// # Errors
+/// Cancellation and unported callees only; any other failure of the drops and evaluations
+/// at the crossing is `None`.
 fn ball_folds_beyond(
+    k: &Kernel,
+    target: &Brep,
+    e: EdgeId,
+    face: FaceId,
+    ball: (&Surface, f64),
+    x: Point3,
+) -> Result<Option<bool>> {
+    match fold_factors_beyond(k, target, e, face, ball, x) {
+        Ok(Some(factors)) => Ok(if factors.iter().any(|&f| f <= 0.0) {
+            Some(true)
+        } else if factors.iter().all(|&f| f > 0.0) {
+            Some(false)
+        } else {
+            None
+        }),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Ok(None) | Err(_) => Ok(None),
+    }
+}
+
+/// The factors `1 - d_b k_i` of [`ball_folds_beyond`] at the crossing `x`, `None` where the
+/// face beyond, its surface or a drop onto either surface is missing.
+///
+/// # Errors
+/// Those of the topology queries, the drops and the evaluations.
+fn fold_factors_beyond(
     k: &Kernel,
     target: &Brep,
     e: EdgeId,
     face: FaceId,
     (base, d): (&Surface, f64),
     x: Point3,
-) -> Result<bool> {
+) -> Result<Option<[f64; 2]>> {
     let Some(beyond) = edge::faces(target, e, None)?
         .into_iter()
         .find(|f| *f != face)
     else {
-        return Ok(false);
+        return Ok(None);
     };
     let Some(surface) = crate::topology::face::p2::surface(target, beyond)? else {
-        return Ok(false);
+        return Ok(None);
     };
     let on_f = base.drop_point::<NoObject>(
         k,
@@ -353,15 +387,16 @@ fn ball_folds_beyond(
         &DropPointOptions::default(),
     )?;
     if !on_f.success || !on_b.success {
-        return Ok(false);
+        return Ok(None);
     }
     let n_f = base.evaluate_normal(k, on_f.result_uv, Side::Left, Side::Left)?;
     let n_b = surface.evaluate_normal(k, on_b.result_uv, Side::Left, Side::Left)?;
     let g = surface.evaluate_geometric(k, on_b.result_uv, Side::Left, Side::Left)?;
     let d_b = if n_f.dot(n_b) < 0.0 { -d } else { d };
-    Ok([g.principle_curvature1, g.principle_curvature2]
-        .into_iter()
-        .any(|kappa| 1.0 - d_b * kappa <= 0.0))
+    Ok(Some([
+        1.0 - d_b * g.principle_curvature1,
+        1.0 - d_b * g.principle_curvature2,
+    ]))
 }
 
 impl FilletSolver {
