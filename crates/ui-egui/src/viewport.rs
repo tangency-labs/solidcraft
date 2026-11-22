@@ -1589,6 +1589,29 @@ fn wood_finish_frame(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> O
     Some([origin.to_f32(), axis.to_f32()])
 }
 
+/// How far the wood figure of `b` is turned about its fibre axis `axis` (`Material::wood_turn`),
+/// in radians: the figure is not round, so it turns with a body that turns about its grain. The
+/// turn is measured from the pair of directions the shader builds from the axis alone
+/// (`wood_coordinates` in the viewport shader, the same arithmetic here) to that pair as built
+/// in the body's construction coordinates and carried along by its placement.
+fn wood_finish_turn(b: &solidcraft_engine::doc::ModelBody, axis: [f32; 3]) -> f32 {
+    use solidcraft_engine::doc::{apply_vector, mat_inverse};
+    fn across(a: [f32; 3]) -> [[f32; 3]; 2] {
+        let s = if a[2] >= -1e-4 { 1.0 } else { -1.0 };
+        let k = -1.0 / (s + a[2]);
+        let b = a[0] * a[1] * k;
+        [[1.0 + s * a[0] * a[0] * k, s * b, -s * a[0]], [b, s + a[1] * a[1] * k, -a[1]]]
+    }
+    let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let wide = |v: [f32; 3]| Vec3::new(f64::from(v[0]), f64::from(v[1]), f64::from(v[2]));
+    let Some(frame) = b.grain_frame.as_ref() else { return 0.0 };
+    let Some(local) = mat_inverse(&frame.matrix).and_then(|inverse| apply_vector(&inverse, wide(axis)).normalized()) else { return 0.0 };
+    let carried = apply_vector(&frame.matrix, wide(across(local.to_f32())[0])).to_f32();
+    let [e1, e2] = across(axis);
+    let turn = dot(carried, e2).atan2(dot(carried, e1));
+    if turn.is_finite() { turn } else { 0.0 }
+}
+
 /// The kind of wood `look` is drawn as (`Material::wood_kind`), if it carries a built-in wood
 /// recipe: its colour, opacity and optical parameters equal a starter wood preset (kinds 1 to 8,
 /// in the starter pack's order) or a library wood (kind 0, a general hardwood). A look's name is
@@ -2794,7 +2817,8 @@ fn body_scene(
                     // placement.
                     let look = wood_finish_frame(app, b).map_or(look, |grain| {
                         let mut h = std::collections::hash_map::DefaultHasher::new();
-                        (look, grain.map(|v| v.map(f32::to_bits))).hash(&mut h);
+                        let turn = wood_finish_turn(b, grain[1]);
+                        (look, grain.map(|v| v.map(f32::to_bits)), turn.to_bits()).hash(&mut h);
                         h.finish()
                     });
                     (definition, look)
@@ -2873,8 +2897,9 @@ fn body_scene(
         if let Some(frame) = wood_frame
             && let Some(kind) = body_look.as_ref().and_then(wood_kind)
         {
-            arena.set_wood(slots.body, frame, kind);
-            arena.set_wood(slots.instance, frame, kind);
+            let turn = wood_finish_turn(b, frame[1]);
+            arena.set_wood(slots.body, frame, kind, turn);
+            arena.set_wood(slots.instance, frame, kind, turn);
         }
         let faces = b.body.face_count();
         // A face falls back to the body's own slot only when its face slots run short (the arena
@@ -2912,7 +2937,7 @@ fn body_scene(
                     if let Some(frame) = wood_frame
                         && let Some(kind) = look.or(body_look.as_ref()).and_then(wood_kind)
                     {
-                        arena.set_wood(slot, frame, kind);
+                        arena.set_wood(slot, frame, kind, wood_finish_turn(b, frame[1]));
                     }
                     face_colors.push(slot);
                     face_classes.push(class);
@@ -3076,6 +3101,7 @@ fn finish(color: Color32, pbr: Option<solidcraft_engine::doc::pbr_appearance::Pb
         two_sided: false,
         wood: None,
         wood_kind: 0,
+        wood_turn: 0.0,
     })
 }
 

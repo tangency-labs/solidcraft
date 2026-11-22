@@ -1126,6 +1126,29 @@ fn wood_finish_images_follow_grain_in_light_and_dark_themes() {
     solidcraft_theme::set_dark(original_dark);
 }
 
+/// The figure is not round, so it turns with a board that turns about its own grain: a quarter
+/// turn about the fibre axis leaves the axis as it was and turns the figure a quarter turn.
+#[test]
+fn wood_finish_figure_turns_with_a_board_turned_about_its_grain() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("solid.box", json!({"length":100,"width":30,"height":10,"body_name":"Board"})).unwrap();
+    app.run("appearance.assign", json!({"bodies":["Board"],"appearance":"starter.wood.oak-honey"})).unwrap();
+    app.run("wood.grain", json!({"body":"Board","direction":[1,0,0]})).unwrap();
+    let turn = |app: &SolveApp| {
+        let scene = build_scene(app);
+        let material = scene.palette.materials().iter().find(|m| m.wood.is_some()).copied().unwrap();
+        (material.wood.unwrap()[1], material.wood_turn)
+    };
+    let (axis, before) = turn(&app);
+    assert!(before.abs() < 1e-5, "{before}");
+    app.run("solid.move", json!({"bodies":["Board"],"axis":[1,0,0],"angle":"90 deg"})).unwrap();
+    let (turned_axis, after) = turn(&app);
+    for (actual, expected) in turned_axis.into_iter().zip(axis) {
+        assert!((actual - expected).abs() < 1e-6);
+    }
+    assert!((after.abs() - std::f32::consts::FRAC_PI_2).abs() < 1e-4, "{after}");
+}
+
 /// Each starter wood is drawn in its own character, and a library wood as a general hardwood.
 #[test]
 fn wood_finish_gives_each_starter_wood_its_own_kind() {
