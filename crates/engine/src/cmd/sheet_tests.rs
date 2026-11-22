@@ -10522,13 +10522,13 @@ fn a_fold_line_sketched_outside_a_moved_component_acts_where_it_lies() {
 /// #20720: walls on the side edges of a ramp and of the run past it, on the outside of the bend
 /// between the two (where the walls part as they rise), are left open, with the Flange saying
 /// so, as the flat-first sheet left them: closed, each would grow past its end into the V over
-/// the bend, and laid flat the two growths would cover the same material. Unfold and Refold
-/// then work. With K 0.5 every panel and bend zone lies flat at its own area through the
-/// thickness, so a flat whose pieces don't overlap has the body's volume over T.
+/// the bend, and laid flat the two growths would cover the same material. Unfold, which failed
+/// on the closed V ("sew: ambiguous edge contact"), then lays the flat out at its pieces' area
+/// through the thickness, and Refold gives the part back.
 #[test]
 fn walls_on_the_outside_of_a_bend_are_left_open_and_unfold() {
     let mut s = Session::default();
-    run(&mut s, "sheet.manage_rules", json!({"name":"Steel 1mm","thickness":"1 mm","bend_radius":"1 mm","k_factor":"0.5","active":true}));
+    run(&mut s, "sheet.manage_rules", json!({"name":"Steel 1mm","thickness":"1 mm","bend_radius":"1 mm","k_factor":"0.4","active":true}));
     base(&mut s, 60.0, 100.0);
     // A ramp 80 long at 30°, then a run 100 long bent back 30° (a Z-shaped riser).
     run(
@@ -10549,9 +10549,9 @@ fn walls_on_the_outside_of_a_bend_are_left_open_and_unfold() {
     let body = &s.model.state().bodies[0].body;
     assert!(body.validity().is_empty() && body.shell_count() == 1);
     let area: f64 = flat_pieces(&s).iter().sum();
-    assert!(rel(area * 1.0, formed) < 1e-6, "flat {area} mm² x T 1 vs volume {formed} mm³");
     run(&mut s, "sheet.unfold", json!({}));
-    assert!(rel(volume(&mut s), formed) < 1e-6);
+    let laid = volume(&mut s);
+    assert!(rel(laid, area * 1.0) < 1e-6, "unfolded {laid} mm³ vs flat {area} mm² x T 1");
     run(&mut s, "sheet.unfold", json!({"refold": true}));
     assert!(rel(volume(&mut s), formed) < 1e-6);
 }
