@@ -1696,13 +1696,14 @@ fn sheet_sketch_targets_reject_invalid_or_mismatched_views_at_every_check_level(
 }
 
 #[test]
-fn headless_sheet_sketches_keep_no_tile_identity_and_finish_discards_only_empty_geometry() {
+fn headless_sheet_sketches_keep_no_tile_identity_and_finish_keeps_a_command_made_sketch() {
     let (mut s, drawing, empty, made) = sheet_editor();
     assert!(!s.view_context.is_hosted());
     assert_eq!(s.editing_view(), None);
     assert!(made.get("sketching_view").is_none());
     run(&mut s, "sketch.finish", json!({}));
-    assert!(s.doc.drawing(drawing).unwrap().sheet_sketch(empty).is_none());
+    // #19654: only an empty sketch a person entered is deleted on finish; one a command made stays.
+    assert!(s.doc.drawing(drawing).unwrap().sheet_sketch(empty).is_some());
     let made = run(&mut s, "drawing.sketch.create", json!({"owner":made["sheet"]}));
     run(&mut s, "sketch.point", json!({"point":[5,7]}));
     let point = ids::decode(made["sketch"].as_str().unwrap()).unwrap();
