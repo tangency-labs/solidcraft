@@ -413,10 +413,9 @@ fn busy_message_at(app: &SolveApp, now: std::time::Instant) -> String {
         None => job.command.to_owned(),
     };
     let running = now.saturating_duration_since(job.started).as_secs().to_string();
-    solidcraft_ui_text::format(
-        "prefs.plugin_busy_running",
-        &[("what", &what), ("seconds", &running), ("limit", &PACKAGE_DEADLINE.as_secs().to_string())],
-    )
+    // The saved language, as `SolveApp::tr` reads it: the control channel has no render scope.
+    solidcraft_ui_text::Locale::for_language(&app.preferences.language)
+        .format("prefs.plugin_busy_running", &[("what", &what), ("seconds", &running), ("limit", &PACKAGE_DEADLINE.as_secs().to_string())])
 }
 
 pub(crate) fn busy(app: &SolveApp) -> bool {
@@ -487,10 +486,8 @@ fn tick_at(app: &mut SolveApp, ctx: &egui::Context, wait: bool, now: std::time::
                 ctx.request_repaint_after(std::time::Duration::from_millis(50));
                 return;
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => Err(solidcraft_ui_text::format(
-                "prefs.plugin_job_abandoned",
-                &[("command", job.command), ("seconds", &PACKAGE_DEADLINE.as_secs().to_string())],
-            )),
+            Err(std::sync::mpsc::TryRecvError::Empty) => Err(solidcraft_ui_text::Locale::for_language(&app.preferences.language)
+                .format("prefs.plugin_job_abandoned", &[("command", job.command), ("seconds", &PACKAGE_DEADLINE.as_secs().to_string())])),
             Err(error) => Err(error.to_string()),
         }
     };
@@ -541,7 +538,7 @@ fn tick_at(app: &mut SolveApp, ctx: &egui::Context, wait: bool, now: std::time::
         Ok(reply)
     });
     let result = app.command_completed(job.command, result);
-    if let PackageAction::Control { request, level } = job.action {
+    if let PackageAction::Control { request, level } = &job.action {
         let mut reply = match result {
             Ok(value) => serde_json::json!({"ok":true,"result":value}),
             Err(error) => serde_json::json!({"ok":false,"error":error}),
@@ -1173,6 +1170,24 @@ mod tests {
             restored.load_prefs(&h.app.prefs());
             assert_eq!(restored.session.plugin_state.grants, h.app.session.plugin_state.grants, "{change}: reload preserves the merge");
         }
+    }
+
+    /// #20814: the refusal follows the saved language even where no render scope is set, as the control
+    /// channel has none.
+    #[test]
+    fn the_busy_message_follows_the_saved_language_without_a_render_scope() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "de".into();
+        let (request, _reply) = crate::control::ControlRequest::new("engine.execute", serde_json::json!({"command":"plugin.remove"}));
+        let (_send, done) = std::sync::mpsc::channel();
+        let job =
+            PackageJob::new("plugin.remove", Some("gears".into()), PackageAction::Control { request, level: None }, Default::default(), 0, done);
+        let started = job.started;
+        h.app.prefs_window.plugin_job = Some(job);
+        let message = busy_message_at(&h.app, started + std::time::Duration::from_secs(7));
+        assert!(message.contains("Plugin-Paketauftrag") && message.contains("plugin.remove (gears)"), "{message}");
+        h.app.preferences.language = "en".into();
+        assert!(busy_message_at(&h.app, started).contains("plugin package job"), "English still reads English");
     }
 
     /// #20814: a package job whose thread never answers must not leave the app refusing installs for good.
