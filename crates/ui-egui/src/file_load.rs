@@ -765,7 +765,9 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         options.retain(|_, v| !v.is_null());
     }
     // `new_tab` is for where the design lands: the engine, which has no tabs, never sees it.
-    let new_tab = id == "doc.open" && options.remove("new_tab").and_then(|v| v.as_bool()) == Some(true);
+    // A value that is no boolean stays in the options, for the engine's own check of them.
+    let new_tab =
+        id == "doc.open" && matches!(options.get("new_tab"), Some(serde_json::Value::Bool(_))) && options.remove("new_tab") == Some(json!(true));
     let request = Request {
         path: path.into(),
         kind,

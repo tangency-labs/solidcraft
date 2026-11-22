@@ -4647,7 +4647,7 @@ impl SolveApp {
                 }
                 continue;
             }
-            if (waits && control_job::changes_the_design(&req.method))
+            if (waits && control_job::changes_the_design(&req.method) && !control_job::lists_designs(&req))
                 || (self.file_picker_busy() && matches!(req.method.as_str(), "ui.file" | "ui.home"))
                 // A screenshot shows the whole design: it waits until an opened one is meshed.
                 || (open_meshing::active(self) && req.method == "ui.screenshot")

@@ -1928,6 +1928,17 @@ pub fn adopt_in_new_tab(app: &mut SolveApp, session: Session) -> bool {
 /// command fails the tab closes again and the design that was shown comes back, as nothing had
 /// happened. `new_tab` is taken off the parameters: the engine has no tabs.
 pub(crate) fn run_in_new_tab(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String> {
+    // A design already open in a tab is shown, as the control channel's loader shows it: opening
+    // it again would make a second copy and could lose the unsaved edits of the first.
+    if id == "doc.open"
+        && let Some(path) = params.get("path").and_then(Value::as_str)
+        && params.as_object().is_some_and(|p| p.iter().all(|(key, value)| key == "path" || value.is_null()))
+        && reuse_path(app, path)?
+    {
+        let s = &app.session;
+        return Ok(json!({"path": path, "features": s.doc.features.len(),
+            "errors": s.model.results.iter().filter(|r| r.error.is_some()).count(), "name": s.doc.name}));
+    }
     let before = app.docs.active;
     open_tab(app, Session::default())?;
     crate::prefs::apply_new_design(app);
@@ -1951,9 +1962,14 @@ pub(crate) fn run_in_new_tab(app: &mut SolveApp, id: &str, params: Value) -> Res
 }
 
 /// `new_tab` of a `file.new` or `doc.open`: whether it is true, taken off `params` (the engine
-/// refuses it, as it has one design and no tabs).
+/// refuses it, as it has one design and no tabs). Left out, null or false it changes nothing. A
+/// value that is no boolean stays in `params`, so the engine's own contract check sees it.
 pub(crate) fn take_new_tab(params: &mut Value) -> bool {
-    params.as_object_mut().and_then(|p| p.remove("new_tab")).and_then(|v| v.as_bool()) == Some(true)
+    let Some(p) = params.as_object_mut() else { return false };
+    match p.get("new_tab") {
+        Some(Value::Bool(_) | Value::Null) => p.remove("new_tab") == Some(Value::Bool(true)),
+        _ => false,
+    }
 }
 
 /// `p` as the contract type `T`; no parameters at all (`null`) is the empty object.
@@ -5950,11 +5966,42 @@ mod tests {
         assert_eq!(a.session.document_id, first);
         assert!((shown_volume(&mut a) - 1000.0).abs() < 1e-6, "the design that was open is as it was");
 
+        // The file is open in the second tab already: it is shown, not opened a second time.
+        let shown = a.run("doc.open", json!({"path": file, "new_tab": true})).unwrap();
+        assert_eq!((a.docs.count(), a.docs.active), (2, 1), "{shown}");
+        assert_eq!(shown["path"], json!(file));
+        switch(&mut a, 0);
+
         let missing = dir.join("missing.solidcraft").to_string_lossy().into_owned();
         assert!(a.run("doc.open", json!({"path": missing, "new_tab": true})).is_err());
         assert_eq!((a.docs.count(), a.docs.active), (2, 0), "no stray tab");
         assert_eq!(a.session.document_id, first);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// `new_tab` is taken off the parameters only when it is a boolean or null: any other value
+    /// stays, for the engine's contract check to see. `document.list` is told from the commands
+    /// that change the design, in any spelling, so it is not held while a file loads.
+    #[test]
+    fn new_tab_values_and_the_list_request_are_read_exactly() {
+        for (given, taken, kept) in [
+            (json!({"new_tab": true}), true, false),
+            (json!({"new_tab": false}), false, false),
+            (json!({"new_tab": null}), false, false),
+            (json!({"new_tab": "yes"}), false, true),
+            (json!({"new_tab": 1}), false, true),
+            (json!({}), false, false),
+        ] {
+            let mut params = given.clone();
+            assert_eq!(take_new_tab(&mut params), taken, "{given}");
+            assert_eq!(params.get("new_tab").is_some(), kept, "{given}");
+        }
+        let request = |method: &str, params: Value| crate::ControlRequest::new(method, params).0;
+        assert!(crate::control_job::lists_designs(&request("engine.execute", json!({"command": "document.list"}))));
+        assert!(crate::control_job::lists_designs(&request("command", json!({"id": "DOCUMENT.LIST", "params": null}))));
+        assert!(!crate::control_job::lists_designs(&request("engine.execute", json!({"command": "document.activate"}))));
+        assert!(!crate::control_job::lists_designs(&request("engine.execute", json!({"command": "file.new"}))));
+        assert!(!crate::control_job::lists_designs(&request("document.inspect", json!({}))));
     }
 
     /// The tabs are the window's: a batch or a script that opens or shows one would roll back, or
