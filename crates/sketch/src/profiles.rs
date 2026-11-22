@@ -1006,7 +1006,7 @@ impl IslandLoop {
 
     /// Rough size, for bounding the cache.
     fn weight(&self) -> usize {
-        self.lp.segs.len() + self.ids.len() + 1
+        self.lp.segs.len() + self.ids.len() + self.alternates.iter().map(Vec::len).sum::<usize>() + 1
     }
 }
 
@@ -2652,6 +2652,18 @@ mod tests {
 
     /// An infinite or huge box spans more cells than an `i64` holds; it is checked against all
     /// shapes instead of wrapping the count and filling memory (solidcraft#5020).
+    /// The island cache bounds itself by each loop's weight: the curves a loop keeps as
+    /// alternates of its pieces (#20503) are held too, so they count.
+    #[test]
+    fn a_loops_weight_counts_the_alternates_of_its_pieces() {
+        let square = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.0), Vec2::new(1.0, 1.0), Vec2::new(0.0, 1.0)]);
+        let ids: Vec<String> = ["l1", "l2", "l3", "l4"].map(String::from).to_vec();
+        let plain = IslandLoop::new(square.clone(), ids.clone(), 0, None, (1, 0, 0));
+        let alternates = vec![vec!["p1".to_string(), "p2".to_string()], Vec::new(), Vec::new(), Vec::new()];
+        let with = IslandLoop::new(square, ids, 0, None, (1, 0, 0)).with_alternates(alternates);
+        assert_eq!(with.weight(), plain.weight() + 2);
+    }
+
     #[test]
     fn grid_cells_refuse_infinite_and_huge_boxes() {
         let small = Aabb2 { min: Vec2::new(0.0, 0.0), max: Vec2::new(10.0, 10.0) };
