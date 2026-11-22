@@ -1,6 +1,6 @@
 {
   "en": {
-    "recovery_components.title": "Recovered work",
+    "recovery_components.title": "Recovery components",
     "recovery_components.detail": "These internal components have work saved after this design was last saved, as a crash leaves it. Restore brings that work into the design. Discard goes back to what the design's file holds and keeps the dropped work beside it as a .bak file. Until you decide, the design shows and saves what its file holds.",
     "recovery_components.restore": "Restore",
     "recovery_components.restore_tip": "Bring this work into the design",
@@ -14,7 +14,7 @@
     "cmd.component_discard_recovery": "Discard Recovery Component"
   },
   "ar": {
-    "recovery_components.title": "عمل مُستعاد",
+    "recovery_components.title": "مكوّنات الاسترداد",
     "recovery_components.detail": "لهذه المكوّنات الداخلية عمل حُفظ بعد آخر حفظ لهذا التصميم، كما يتركه التعطل. الاستعادة تُدخل ذلك العمل في التصميم. التجاهل يعود إلى ما يحتويه ملف التصميم ويُبقي العمل المتروك بجانبه كملف ‎.bak. إلى أن تقرر، يعرض التصميم ويحفظ ما يحتويه ملفه.",
     "recovery_components.restore": "استعادة",
     "recovery_components.restore_tip": "أدخل هذا العمل في التصميم",
@@ -28,7 +28,7 @@
     "cmd.component_discard_recovery": "تجاهل مكوّن الاسترداد"
   },
   "de": {
-    "recovery_components.title": "Wiederhergestellte Arbeit",
+    "recovery_components.title": "Wiederherstellungskomponenten",
     "recovery_components.detail": "Diese internen Komponenten enthalten Arbeit, die nach dem letzten Speichern dieses Entwurfs gespeichert wurde, wie nach einem Absturz. Wiederherstellen übernimmt diese Arbeit in den Entwurf. Verwerfen kehrt zu dem zurück, was die Entwurfsdatei enthält, und behält die verworfene Arbeit daneben als .bak-Datei. Bis Sie entscheiden, zeigt und speichert der Entwurf, was seine Datei enthält.",
     "recovery_components.restore": "Wiederherstellen",
     "recovery_components.restore_tip": "Diese Arbeit in den Entwurf übernehmen",
@@ -42,7 +42,7 @@
     "cmd.component_discard_recovery": "Wiederherstellungskomponente verwerfen"
   },
   "he": {
-    "recovery_components.title": "עבודה ששוחזרה",
+    "recovery_components.title": "רכיבי שחזור",
     "recovery_components.detail": "לרכיבים הפנימיים האלה יש עבודה שנשמרה אחרי השמירה האחרונה של התכן, כפי שקריסה משאירה. שחזור מכניס את העבודה הזו לתכן. ביטול חוזר למה שקובץ התכן מכיל ושומר את העבודה שנזנחה לצידו כקובץ ‎.bak. עד שתחליט, התכן מציג ושומר את מה שהקובץ שלו מכיל.",
     "recovery_components.restore": "שחזר",
     "recovery_components.restore_tip": "הכנס את העבודה הזו לתכן",
@@ -56,7 +56,7 @@
     "cmd.component_discard_recovery": "בטל רכיב שחזור"
   },
   "ja": {
-    "recovery_components.title": "回復された作業",
+    "recovery_components.title": "回復コンポーネント",
     "recovery_components.detail": "これらの内部コンポーネントには、このデザインを最後に保存した後に保存された作業があります（クラッシュ後の状態）。復元すると、その作業がデザインに取り込まれます。破棄すると、デザインのファイルの内容に戻り、破棄した作業は .bak ファイルとして横に残ります。決めるまで、デザインはファイルの内容を表示し保存します。",
     "recovery_components.restore": "復元",
     "recovery_components.restore_tip": "この作業をデザインに取り込む",
@@ -70,7 +70,7 @@
     "cmd.component_discard_recovery": "回復コンポーネントを破棄"
   },
   "ko": {
-    "recovery_components.title": "복구된 작업",
+    "recovery_components.title": "복구 구성요소",
     "recovery_components.detail": "이 내부 구성요소에는 이 설계를 마지막으로 저장한 뒤에 저장된 작업이 있습니다(충돌 후의 상태). 복원하면 그 작업이 설계에 들어옵니다. 버리면 설계 파일의 내용으로 돌아가고, 버린 작업은 옆에 .bak 파일로 남습니다. 결정할 때까지 설계는 파일의 내용을 표시하고 저장합니다.",
     "recovery_components.restore": "복원",
     "recovery_components.restore_tip": "이 작업을 설계에 가져오기",
@@ -84,7 +84,7 @@
     "cmd.component_discard_recovery": "복구 구성요소 버리기"
   },
   "vi": {
-    "recovery_components.title": "Công việc được khôi phục",
+    "recovery_components.title": "Thành phần khôi phục",
     "recovery_components.detail": "Các thành phần nội bộ này có công việc được lưu sau lần lưu thiết kế gần nhất, như sau một sự cố. Khôi phục đưa công việc đó vào thiết kế. Hủy bỏ quay lại nội dung tệp thiết kế đang giữ và giữ phần công việc bị bỏ bên cạnh dưới dạng tệp .bak. Cho đến khi bạn quyết định, thiết kế hiển thị và lưu nội dung tệp của nó đang giữ.",
     "recovery_components.restore": "Khôi phục",
     "recovery_components.restore_tip": "Đưa công việc này vào thiết kế",
@@ -98,7 +98,7 @@
     "cmd.component_discard_recovery": "Hủy bỏ thành phần khôi phục"
   },
   "zh": {
-    "recovery_components.title": "已恢复的工作",
+    "recovery_components.title": "恢复组件",
     "recovery_components.detail": "这些内部组件含有在本设计上次保存之后保存的工作，如同崩溃后留下的那样。恢复会把这些工作带入设计。放弃会回到设计文件中保存的内容，并把被放弃的工作以 .bak 文件留在旁边。在你决定之前，设计显示并保存其文件中的内容。",
     "recovery_components.restore": "恢复",
     "recovery_components.restore_tip": "把这些工作带入设计",
