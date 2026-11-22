@@ -1,0 +1,378 @@
+{
+  "case": "20421-round-ending-on-a-side-a-hair-inside-its-cylinders-tangent-plane",
+  "area": "fillets",
+  "sources": [
+    "tangency-labs/solidcraft#20421"
+  ],
+  "what": "a cylinder of radius 12.5 and height 50 joined to a box 50 x 24.9999999 x 25 whose one side lies in the cylinder's tangent plane and whose other side is 1e-7 inside the tangent plane opposite, the join's seam there one line at the touch; a 2 mm round on the edge between the box's top and the cylinder, ending on both sides: one valid solid",
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 50.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "end": 6.896285307179586,
+              "radius": 12.5,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 25.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                50.0,
+                -12.4999999,
+                0.0
+              ],
+              "start": [
+                0.0,
+                -12.4999999,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                50.0,
+                12.499999999999998,
+                0.0
+              ],
+              "start": [
+                50.0,
+                -12.4999999,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                12.499999999999998,
+                0.0
+              ],
+              "start": [
+                50.0,
+                12.499999999999998,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                -12.4999999,
+                0.0
+              ],
+              "start": [
+                0.0,
+                12.499999999999998,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "union"
+      }
+    },
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  10.223352414474716,
+                  7.192570153252173,
+                  25.0
+                ],
+                [
+                  0.0,
+                  12.499999999999998,
+                  25.0
+                ]
+              ],
+              "index": 4
+            },
+            {
+              "at": [
+                [
+                  0.0,
+                  -12.4999999,
+                  25.0
+                ],
+                [
+                  10.223352414474716,
+                  7.192570153252173,
+                  25.0
+                ]
+              ],
+              "index": 2
+            }
+          ],
+          "points": [
+            [
+              5.752035444693272,
+              11.07475560165628,
+              25.0
+            ],
+            [
+              11.084219724581699,
+              -5.755892200869941,
+              25.0
+            ]
+          ],
+          "tolerance": 4.193627457812107
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "records": "20421-round-ending-on-a-side-a-hair-inside-its-cylinders-tangent-plane.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b16"
+    }
+  ],
+  "expected": {
+    "body_count": 1,
+    "faces": 9,
+    "method": "cylinder pi * 12.5^2 * 50, plus box 50 * (25 - d) * 25, less what they share ((pi * 12.5^2 / 2 less half the segment of sagitta d) * 25), plus the round: over the radius rho from 12.5 to 14.5 the spandrel's height 2 - sqrt(4 - (14.5 - rho)^2), over the angles the box's top holds there, asin(12.5 / rho) + asin((12.5 - d) / rho), integrated with rho = 14.5 - 2 sin(phi) by Gauss-Legendre (5 points on 400 panels; 800 panels move it by 1.4e-14). d = 1e-7: V = 49687.360001906 (the round 29.590672275). At d = 0 the same form gives 49687.360127462. The round's end on the side 1e-7 off moves the volume by at most 1e-7 over an end face under 15 mm2, 3e-11 of it. 9 faces: the cylinder's top, wall and bottom, the box's top, end and two sides, and one round on each of the edge's two arcs",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#20421"
+    ],
+    "tolerance": {
+      "rel": 1e-09
+    },
+    "volume_mm3": 49687.360001906,
+    "what": "a cylinder of radius 12.5 and height 50 joined to a box 50 x 24.9999999 x 25 whose one side lies in the cylinder's tangent plane and whose other side is 1e-7 inside the tangent plane opposite, the join's seam there one line at the touch; a 2 mm round on the edge between the box's top and the cylinder, ending on both sides: one valid solid"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 20,
+      "faces": 9,
+      "vertices": 13
+    }
+  },
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 9034.822649635329,
+      "body_count": 1,
+      "edges": 20,
+      "faces": 9,
+      "vertices": 13,
+      "volume_mm3": 49687.360001902445
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "why_not": []
+}

@@ -1160,11 +1160,34 @@ fn ao_samples(app: &mut SolveApp, ctx: &egui::Context, view_proj: [[f32; 4]; 4],
     }
 }
 
-/// Whether the frame on screen is the full-quality one a screenshot should wait for: with
-/// ambient occlusion drawn, the view has held still for [`SS_SETTLE`], so the picture has all
-/// its samples (#7165). Reads the state the last painted frame left.
+/// How far (pixels) an instanced part's edges may stray where drawn this frame: the fine
+/// [`EDGE_PX`](solidcraft_viewport_gpu::view::EDGE_PX) once the view has held still for a moment,
+/// the coarser [`EDGE_PX_MOVING`](solidcraft_viewport_gpu::view::EDGE_PX_MOVING) while it moves,
+/// so orbiting a large assembly draws far fewer edge segments; the fine edges follow by
+/// themselves once it stops ([`view_settled`]). A style without instanced edges ([`draws_instanced_edges`])
+/// keeps the fine value: no repaint is asked for it, and the cached picture stays valid.
+fn edge_px(app: &mut SolveApp, ctx: &egui::Context, view_proj: [[f32; 4]; 4], size_px: [f32; 2]) -> f32 {
+    if !draws_instanced_edges(app) || view_settled(app, ctx, view_proj, size_px) {
+        solidcraft_viewport_gpu::view::EDGE_PX
+    } else {
+        solidcraft_viewport_gpu::view::EDGE_PX_MOVING
+    }
+}
+
+/// Whether the frame on screen is the full-quality one a screenshot should wait for: the view
+/// has held still for [`SS_SETTLE`], so the picture has all its ambient occlusion samples
+/// (#7165) and its fine edges ([`edge_px`]); with neither drawn (no AO and no instanced edges:
+/// Shaded, or wireframe) any frame is. Reads the state the last painted frame left.
 pub(crate) fn ao_settled(app: &SolveApp, ctx: &egui::Context) -> bool {
-    !crate::safe_graphics::ambient_occlusion(app) || app.ui.visual_style == 2 || ctx.input(|i| i.time) - app.viewport.ss_view.1 >= SS_SETTLE
+    let fine_already = (!crate::safe_graphics::ambient_occlusion(app) || app.ui.visual_style == 2) && !draws_instanced_edges(app);
+    fine_already || ctx.input(|i| i.time) - app.viewport.ss_view.1 >= SS_SETTLE
+}
+
+/// Whether the visual style draws placements' edges from their shared edges, whose level
+/// [`edge_px`] picks: the shaded styles with edges. Shaded draws no edges, and wireframe draws
+/// no instances ([`Instances::new`]), so its edges are the bodies' own lines.
+fn draws_instanced_edges(app: &SolveApp) -> bool {
+    matches!(app.ui.visual_style, 0 | 3)
 }
 
 /// Whether the view (its view-projection and pixels) has held still for [`SS_SETTLE`]. Until it
@@ -4926,8 +4949,10 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
             && raw_cloud.len() > crate::pick_index::CLOUD_AT_ONCE
             && index.is_none()
         {
+            // No partial answer while the index builds: a hover result without this cloud would
+            // be cached under a key that does not change when the index is ready.
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
-            continue;
+            return None;
         }
         let playing = |k: usize| app.tree.cloud_panel.as_ref().and_then(|p| p.playing(raw_cloud.id, k));
         let cloud = crate::point_clouds::as_drawn(raw_cloud, playing);
@@ -5752,7 +5777,7 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
         d.extra.remove("path");
     }
     // Split Body's sketch line keeps the sketch it was picked in (curve ids repeat across sketches).
-    if matches!(d.kind, crate::dialogs::Kind::Split) {
+    if matches!(d.kind, crate::dialogs::Kind::Split { .. }) {
         if let Hit::SketchCurve { sketch, .. } = hit {
             d.extra.insert("tool_sketch".into(), serde_json::json!(sketch));
         } else {
@@ -7676,11 +7701,13 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         let paint_vp = framed_in_paint(&proj.vp, rect, paint);
         let ssaa = supersampling(app, ui.ctx(), paint_vp.to_f32(), size_px);
         let ao_samples = ao_samples(app, ui.ctx(), paint_vp.to_f32(), size_px);
+        let edge_px = edge_px(app, ui.ctx(), paint_vp.to_f32(), size_px);
         let (clip, clip_hatch) = section_clip(app);
         let frame = Frame {
             product_lights: None,
             ssaa,
             ao_samples,
+            edge_px,
             product: false,
             upload_error: None,
             key: published_key(app),
@@ -8627,6 +8654,18 @@ fn quick_measure_readout(app: &mut SolveApp, ui: &egui::Ui, viewport: Rect) -> O
     crate::quick_measure::show(app, ui, view, &taken)
 }
 
+/// Window messages clear every tile's bottom navigation, independent of the last tile painted.
+fn window_message_rect(app: &SolveApp, viewport: Rect) -> Rect {
+    let mut view = crate::shell::bottom_readout_rect(app, crate::shell::content_rect(app, viewport));
+    if app.preferences.navigation_bar.edge == crate::ui_kit::NavigationEdge::Bottom {
+        let clearance = crate::ui_kit::NavigationMetrics::for_size(app.preferences.navigation_bar.size).height()
+            + crate::ui_kit::NAV_BOTTOM
+            + Tokens::get().space_8;
+        view.max.y = (view.bottom() - clearance).max(view.top());
+    }
+    view
+}
+
 /// A single visual pattern for ongoing work, the existing six-second status, the 3D mouse
 /// calibration offer and the stand-up note, stacked from the bottom of the free view. Returns the toasts' rects.
 /// The usage statistics notice is to show (`usage_stats::notice_pending`).
@@ -8672,7 +8711,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
     }
     obstacles.extend(readout);
     obstacles.extend(app.operations.rect);
-    let view = crate::shell::content_rect(app, viewport);
+    let view = window_message_rect(app, viewport);
     let mut free = crate::viewport_layout::free_rect(view, &obstacles).shrink(t.space_8);
     if ToastPlace::current(ui.ctx()) == ToastPlace::Corner {
         free = corner_free(view, &obstacles);
@@ -8805,7 +8844,9 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
         obstacles.push(r);
         free.max.y = r.top() - t.space_8;
     }
-    if let Some((msg, at, error)) = app.status.clone() {
+    if let Some((msg, at, error)) =
+        app.status.clone().filter(|(_, _, error)| *error || !app.status_is_tool_hint || crate::workspace::tool_receives_input(app))
+    {
         let shown_ms = crate::now_ms() - at;
         if shown_ms < STATUS_TOAST_MS {
             let undo = app.status_undo;
@@ -9929,8 +9970,7 @@ fn midpoint_marker(painter: &egui::Painter, at: Pos2, color: Color32) {
 
 /// The standalone points of the finished sketches shown (placed with Point, not a curve's
 /// ends or centres), in world space: they can still be picked (a hole's centre), so they are
-/// drawn too (#3267). Not the sketch's origin, projected points, or a sketch's points while it
-/// hides them.
+/// drawn too (#3267). Not the sketch's origin, or its points while it hides them.
 pub(crate) fn standalone_points(app: &SolveApp) -> Vec<Vec3> {
     let st = crate::open_meshing::shown_world(app);
     let mut out = Vec::new();
@@ -9949,7 +9989,7 @@ pub(crate) fn standalone_points(app: &SolveApp) -> Vec<Vec3> {
         let used: std::collections::HashSet<usize> = sk.curves.iter().flat_map(|c| c.kind.point_ids()).collect();
         let visible = solidcraft_engine::view::SketchPointVisibility::new(sk);
         for (i, p) in sk.points.iter().enumerate().skip(1) {
-            if !used.contains(&i) && p.link.is_none() && visible.takes(p) {
+            if !used.contains(&i) && !(p.link.is_some() && sk.view.hide_projected) && visible.takes(p) {
                 out.push(ss.plane.to_world(p.pos));
             }
         }
@@ -11851,6 +11891,47 @@ mod tests {
         assert_eq!(at(&mut app, 1.45, 3.0), (AO_SAMPLES, false), "wireframe draws no AO");
     }
 
+    /// A placement's edges are drawn coarser while the view moves and at full detail once it
+    /// has held still, the moving frame asking for the still one; a screenshot waits for the
+    /// still frame even without ambient occlusion, as long as the style draws edges.
+    #[test]
+    fn edges_are_drawn_coarser_while_the_view_moves_and_screenshots_wait_for_the_fine_ones() {
+        use solidcraft_viewport_gpu::view::{EDGE_PX, EDGE_PX_MOVING};
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.preferences.ambient_occlusion = false;
+        let ctx = egui::Context::default();
+        let size = [800.0, 600.0];
+        let view = |x: f32| {
+            let mut m = [[0.0; 4]; 4];
+            (0..4).for_each(|i| m[i][i] = 1.0);
+            m[3][0] = x;
+            m
+        };
+        // The edge tolerance drawn, whether the frame asks to be drawn again by the time the view
+        // will have settled, and whether a screenshot would take it.
+        let at = |app: &mut SolveApp, time: f64, x: f32| {
+            let (mut px, mut settled) = (0.0, false);
+            let mut out = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
+                px = edge_px(app, ui.ctx(), view(x), size);
+                settled = ao_settled(app, ui.ctx());
+            });
+            out.textures_delta.clear();
+            let delay = out.viewport_output.get(&egui::ViewportId::ROOT).map_or(std::time::Duration::MAX, |v| v.repaint_delay);
+            (px, delay <= std::time::Duration::from_secs_f64(SS_SETTLE + 0.02), settled)
+        };
+        for _ in 0..3 {
+            ctx.run_ui(egui::RawInput { time: Some(0.0), ..Default::default() }, |_| {}).textures_delta.clear();
+        }
+        assert_eq!(at(&mut app, 1.0, 1.0), (EDGE_PX_MOVING, true, false), "the view just moved");
+        assert_eq!(at(&mut app, 1.1, 1.0), (EDGE_PX_MOVING, true, false), "still for less than the settling time");
+        assert_eq!(at(&mut app, 1.0 + SS_SETTLE + 0.01, 1.0), (EDGE_PX, false, true), "settled: the fine edges, and a screenshot takes them");
+        assert_eq!(at(&mut app, 1.4, 2.0), (EDGE_PX_MOVING, true, false), "moved again");
+        app.ui.visual_style = 1;
+        assert_eq!(at(&mut app, 1.45, 3.0), (EDGE_PX, false, true), "shaded without edges or AO: any frame is the full one");
+        app.ui.visual_style = 2;
+        assert_eq!(at(&mut app, 1.5, 4.0), (EDGE_PX, false, true), "wireframe draws no instanced edges: any frame is the full one");
+    }
+
     #[test]
     fn neighbouring_views_settle_their_ambient_occlusion_independently() {
         use solidcraft_viewport_gpu::view::{AO_SAMPLES, AO_SAMPLES_MOVING};
@@ -13439,6 +13520,7 @@ mod tests {
                     eye: [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }],
                     ao_radius: 0.0,
                     ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+                    edge_px: solidcraft_viewport_gpu::view::EDGE_PX,
                     sky: [0.0; 4],
                     ssaa: 1.0,
                     hover_tint: [0.0; 3],
@@ -20433,6 +20515,26 @@ mod standalone_point_tests {
         assert!(points[0].dist(Vec3::new(5.0, 4.0, 0.0)) < 1e-9, "{points:?}");
         app.session.visibility.hidden_folders.push("c0/sketches".into());
         assert!(standalone_points(&app).is_empty(), "sketches hidden");
+    }
+
+    /// #15796: Intersect's points stay drawn after Finish Sketch, as they stay pickable.
+    #[test]
+    fn a_finished_sketch_shows_its_intersect_points() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.run("sketch.create", json!({"plane": "XY", "name": "Source"})).unwrap();
+        let arc = app.run("sketch.arc.three_point", json!({"start": [-10, 0], "end": [10, 0], "through": [0, 10]})).unwrap();
+        let curve = arc["curves"][0].as_str().unwrap().to_string();
+        app.run("sketch.finish", json!({})).unwrap();
+        let section = app.run("sketch.create", json!({"plane": "XZ"})).unwrap()["sketch"].as_u64().unwrap();
+        app.run("sketch.intersect", json!({"refs": [{"sketch": "Source", "curve": curve}]})).unwrap();
+        app.run("sketch.finish", json!({})).unwrap();
+        let points = standalone_points(&app);
+        assert_eq!(points.len(), 2, "{points:?}");
+        for x in [-10.0, 10.0] {
+            assert!(points.iter().any(|p| p.dist(Vec3::new(x, 0.0, 0.0)) < 1e-9), "{points:?}");
+        }
+        app.run("sketch.options", json!({"sketch": section, "show_projected": false})).unwrap();
+        assert!(standalone_points(&app).is_empty(), "projected geometry hidden");
     }
 }
 

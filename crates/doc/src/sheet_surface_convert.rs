@@ -3493,6 +3493,13 @@ struct Pushed {
     ends: [[Vec2; 2]; 2],
 }
 
+impl Pushed {
+    /// Whether the piece is a roll: a circular arc's panel is a cylinder, a line's a plane.
+    fn roll(&self) -> bool {
+        matches!(self.surface, Surface::Cylinder { .. })
+    }
+}
+
 /// Piece `seg` of a contour flange's profile in `plane` pushed out `width` along the plane's
 /// normal, the piece as drawn the sheet's surface and its material on the right of the travel (on
 /// the left when `flip`); the joints at its ends run from the height `z0` above the plane to `z1`.
@@ -3705,6 +3712,15 @@ impl SurfaceSheet {
             // How far the profile turns where the two meet, from their own ways there.
             let (da, db) = (a.ways[1], b.ways[0]);
             let angle = da.cross(db).len().atan2(da.dot(db));
+            // A roll's edge cannot take a bend (the develop lays out no bend on one), so an arc
+            // that does not run on into the curve beside it is refused here, naming the arc: the
+            // sheet would bend on the edge of the roll.
+            if angle > SMOOTH && (a.roll() || b.roll()) {
+                let id = if a.roll() { curves.get(i) } else { curves.get(i + 1) }.map_or("", |(c, _)| c.as_str());
+                return err(format!(
+                    "not supported yet: the arc `{id}` is not tangent to the curve beside it: make it tangent, or draw a line there for a bend (#15576)"
+                ));
+            }
             // The joint on each panel, as its chart has it, from where it starts.
             let anchor = |panel: usize, [from, to]: [Vec2; 2]| (to - from).normalized().map(|dir| Anchor { panel, origin: from, dir });
             let (Some(on_a), Some(on_b)) = (anchor(i, a.ends[1]), anchor(i + 1, b.ends[0])) else {
@@ -4193,9 +4209,15 @@ impl SurfaceSheet {
     /// `body` with the sheet's recesses cut from it, each from its panel where `frames` put it.
     fn recessed(&self, mut body: Body, frames: &[Option<Rigid3>]) -> Result<Body> {
         let t = self.sheet.thickness;
-        // Past the face it opens from, a hair, so that no face of the cut lies on the sheet's.
-        let margin = t * 1e-3;
         for r in &self.recesses {
+            // Past the face it opens from, a hair, so that no face of the cut lies on the sheet's:
+            // a thousandth of the thickness clear of both bodies' tolerances. Within the larger of
+            // them two places are one, and the tool's corners, as far off the sheet's edges as the
+            // hair, must stay off their balls: twice the body's tolerance covers the tool's own,
+            // made at the kernel's (2e-5), no larger. A sheet's body is held to a millionth of
+            // its size (1.02e-3 for a 1000 x 200 plate), past a thousandth of a 1 mm thickness
+            // (#20769).
+            let margin = t * 1e-3 + 2.0 * body.record().tolerance;
             let frame = frames.get(r.panel).copied().flatten().ok_or_else(|| DocError::Invalid("a recessed panel has no place".into()))?;
             let plane = Plane::new(frame.shift, frame.x, frame.y).ok_or_else(|| DocError::Invalid("a recessed panel has no plane".into()))?;
             let (from, to) = if r.far { (t - r.depth, t + margin) } else { (-margin, r.depth) };

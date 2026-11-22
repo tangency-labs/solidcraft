@@ -99,27 +99,27 @@ const POLYGON_CIRCUMSCRIBED_CONTRACT: TypedContract<PolygonCircumscribedParams> 
 const POLYGON_EDGE_CONTRACT: TypedContract<PolygonEdgeParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sketch.create", "Create Sketch", crate::checked!("sketch.create", create_sketch))
+    CommandSpec::new("sketch.create", "Create Sketch", crate::checked!("sketch.create", create_sketch)).begins_edit()
         .at("SOLID", "CREATE")
         .icon("sketch")
         .from_selection(super::model_selection::sketch_plane)
         .contract(&CREATE_CONTRACT)
         .output(output_schema_for::<CreateResult>)
         .params("plane: XY|XZ|YZ (sketch x, y along world +X, +Y on XY; +X, -Z on XZ; +Y, +Z on YZ) | construction plane name or id | {origin?: [x,y,z] in mm, default [0,0,0], each a number or a length expression (an origin whose expressions name parameters is kept, and the sketch follows them when they change), x_dir, y_dir} (in world coordinates unless frame says otherwise; a named plane is the active component's own) | {face: [world x,y,z], body?: exact world body, index?: face index, path?: complete occurrence ids, fixed?: bool}; new face attachments require a unique certified source (a flat face of a sheet metal body attaches to its panel instead, in the flat pattern's coordinates), fixed:true explicitly freezes the selected plane; offset?: expr, flip?: bool | \"x\" | \"y\" (not on a face: sketch the plane from its other side, so the normal and the default extrude direction are reversed; a half turn about the plane's own x or y axis, true picks the one keeping the sketch's y axis upward; offset still moves along the unflipped normal), frame?: world (default) | component (which coordinates an explicit plane is in; the reply's `frame` says which, with a `note` when the active component is moved or turned), view?: open Model view id (defaults to focused or most recent Model), project_edges?: bool, activate_part?: bool (default false; on a face of a body of another component than the active one: activate that component at the picked placement first, as component.activate would, and make the sketch there; it stays active afterwards and the reply's `activated` names it), name?"),
-    CommandSpec::new("sketch.edit", "Edit Sketch", crate::checked!("sketch.edit", edit_sketch))
+    CommandSpec::new("sketch.edit", "Edit Sketch", crate::checked!("sketch.edit", edit_sketch)).begins_edit()
         .noundo().icon("sketch")
         .contract(&EDIT_CONTRACT).output(output_schema_for::<EditResult>)
         .params("sketch: id or name; view?: open Model view id; restore_marker?: nonnegative timeline position, null (end) or false. A position or null: temporarily roll to this sketch and restore that position on Finish or Cancel; Finish groups the edit into one Undo step. Omitted: the same with the current position when features come after the sketch, so they rebuild once at Finish rather than after every sketch command. false: leave the timeline in place (later features rebuild after every sketch command)"),
     CommandSpec::new("sketch.finish", "Finish Sketch", crate::checked!("sketch.finish", finish_sketch))
         .in_sketch_part()
-        .at("SKETCH", "FINISH SKETCH").icon("finish").enabled(in_sketch).noundo()
+        .at("SKETCH", "FINISH SKETCH").icon("finish").enabled(super::has_sketch_edit).noundo()
         .contract(&EXIT_CONTRACT).output(output_schema_for::<crate::schema::drawing_sketch::FinishResult>)
         .params("restore_marker?: bool (default true); false transfers the temporary marker directly to another editor without rebuilding the intervening timeline"),
     CommandSpec::new("sketch.cancel", "Cancel Sketch", crate::checked!("sketch.cancel", cancel_sketch))
         .in_sketch_part()
         .at("SKETCH", "FINISH SKETCH")
         .icon("sketch_cancel")
-        .enabled(in_sketch)
+        .enabled(super::has_sketch_edit)
         .contract(&EXIT_CONTRACT).output(output_schema_for::<crate::schema::drawing_sketch::CancelResult>)
         .params("Leaves the sketch without keeping what changed since it was created or opened for editing: the design goes back to how it was then (a new sketch is removed), as one step that Undo brings back. Refused when the undo history no longer leads back to that point (use Undo instead). restore_marker?: bool (default true); false transfers the temporary marker to another editor"),
     CommandSpec::new("sketch.line", "Line", crate::checked!("sketch.line", draw_line))
@@ -229,7 +229,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&POLYGON_CIRCUMSCRIBED_CONTRACT)
         .output(output_schema_for::<PolygonResult>)
-        .params(concat!("center, radius (to edge midpoints), sides, angle?: deg", connect_doc!(), created_doc!())),
+        .params(concat!("center, radius | diameter (to edge midpoints): number or expression (an expression naming a parameter is a dimension driven by it, so the polygon follows the parameter), sides: number or expression (read when drawn, it does not follow a later change), angle?: deg", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.polygon.edge", "Edge Polygon", crate::checked!("sketch.polygon.edge", polygon_edge))
         .in_sketch_part()
         .at("SKETCH", "CREATE")
@@ -1518,7 +1518,11 @@ fn edit_sketch(s: &mut Session, p: &Value) -> Result<Value> {
         s.active_component = component;
         s.active_occurrence_path = (!path.is_empty()).then_some(path);
     }
-    if s.active_sketch != Some(id) || s.sketch_entry.as_ref().is_none_or(|entry| entry.sketch != id) {
+    // An entry copied from a longer history than this session has (a worker's scratch copy starts with
+    // none) can never lead back, so opening the sketch again takes a fresh one, as a scratch session did
+    // before it copied the entry: Cancel Sketch then works after a plugin's or agent's Edit Sketch.
+    let outlives_history = s.sketch_entry.as_ref().is_some_and(|entry| entry.sketch == id && entry.undo_len > s.undo.len());
+    if s.active_sketch != Some(id) || outlives_history || s.sketch_entry.as_ref().is_none_or(|entry| entry.sketch != id) {
         let restore_marker = match requested {
             Some(crate::schema::sketch::EditMarker::Restore(marker)) => Some(marker),
             Some(crate::schema::sketch::EditMarker::InPlace) => None,
@@ -1630,6 +1634,11 @@ fn finish_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     if s.sheet_sketching() {
         return super::drawing_sketch::finish(s, p);
     }
+    finish_model_edit(s, restore)
+}
+
+/// Finish the model receiver even when another window has a drawing open.
+pub(crate) fn finish_model_edit(s: &mut Session, restore: bool) -> Result<Value> {
     let id = s.active_sketch.take();
     s.sketching_view = None;
     let profiles = id.and_then(|i| s.model.state().sketch(i).map(|ss| ss.profiles.len())).unwrap_or(0);
@@ -1644,6 +1653,15 @@ fn finish_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
         s.selection.clear();
+    }
+    // Only a sketch a person entered from the UI goes when nothing was drawn in it; one a script or an
+    // agent made stays, so a command that creates it and edits it later still finds it.
+    let by_person = s.sketch_by_person.take();
+    if let Some(id) = id
+        && by_person == Some(id)
+        && sketch_store::read(&s.doc, id).is_ok_and(crate::edit_start::empty_geometry)
+    {
+        s.doc_mut().delete_feature(id)?;
     }
     s.revision += 1;
     Ok(json!({"sketch": id, "profiles": profiles}))
@@ -1723,8 +1741,8 @@ fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
     // The shared preprocessor refuses model snaps before a sheet tool reads them.
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let list = p.get("points").and_then(Value::as_array).cloned().ok_or_else(|| bad(cmd, "`points` must be a list"))?;
-    if list.len() < 2 || list.len() > 10_000 {
-        return Err(bad(cmd, "a line needs 2 or more points"));
+    if let Some(why) = crate::schema::sketch_shapes::line_points_refusal(list.len()) {
+        return Err(bad(cmd, why));
     }
     let closed = bool_(p, "closed").unwrap_or(false);
     let infer = bool_(p, "infer").unwrap_or(false);
@@ -2632,9 +2650,23 @@ fn arc_center(s: &mut Session, p: &Value) -> Result<Value> {
     draw_reply(out, info)
 }
 
-fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, start: f64, n: usize, inscribed: bool) -> Result<Value> {
+/// A polygon's corners on a circle of `r_vertex` round `center`, `n` of them, the first at angle
+/// `start`. `size` is the expression the size was typed as when it names parameters (with whether
+/// it is a diameter): the construction circle that holds the polygon to its centre then gets a
+/// dimension driven by it, so the polygon follows the parameters (#20920).
+fn polygon(
+    s: &mut Session,
+    p: &Value,
+    cmd: &str,
+    center: Vec2,
+    r_vertex: f64,
+    start: f64,
+    n: usize,
+    inscribed: bool,
+    size: Option<(String, bool)>,
+) -> Result<Value> {
     let mut support_circle = String::new();
-    let (out, info) = draw(s, p, cmd, |sk, _| {
+    let (out, info) = draw(s, p, cmd, |sk, doc| {
         let corners: Vec<Vec2> = (0..n).map(|i| center + Vec2::from_angle(start + std::f64::consts::TAU * i as f64 / n as f64) * r_vertex).collect();
         let (l, pts) = polygon_lines(sk, &corners)?;
         let mut cons = Vec::new();
@@ -2671,6 +2703,12 @@ fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, s
                 cons.push(add_c(sk, ConstraintKind::Tangent { a: *first, b: circ })?);
             }
         }
+        if let Some((e, diameter)) = &size {
+            let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
+            let pname = doc.new_model_param(e, &unit);
+            let kind = if *diameter { ConstraintKind::Diameter { c: circ, value: 2.0 * rc } } else { ConstraintKind::Radius { c: circ, value: rc } };
+            cons.push(sk.add_constraint(kind, Some(pname))?);
+        }
         Ok((ids_of(sk, &l), cons))
     })?;
     let reply = PolygonResult { curves: out.0, constraints: out.1, sketch: info, support_circle, created: None, param_warnings: Vec::new() };
@@ -2678,7 +2716,22 @@ fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, s
 }
 
 fn sides(p: &Value, cmd: &str) -> Result<usize> {
-    let n = num(p, "sides").unwrap_or(6.0);
+    sides_count(num(p, "sides").unwrap_or(6.0), cmd)
+}
+
+/// `sides` of a polygon typed as an expression over the design's parameters, or as a number. The
+/// count is read when the polygon is drawn: the sketch has no way to add or remove sides when a
+/// parameter changes later (a circular sketch pattern's `count` is what follows one).
+fn sides_expr(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
+    if !p.get("sides").is_some_and(Value::is_string) {
+        return sides(p, cmd);
+    }
+    let e = req_expr(cmd, p, "sides")?;
+    let n = s.doc.eval(&e, Kind::Unitless).map_err(|e| bad(cmd, format!("sides: {e}")))?;
+    sides_count(n, cmd)
+}
+
+fn sides_count(n: f64, cmd: &str) -> Result<usize> {
     if !(3.0..=200.0).contains(&n) || n.fract() != 0.0 {
         return Err(bad(cmd, "sides must be an integer from 3 to 200"));
     }
@@ -2691,16 +2744,16 @@ fn polygon_inscribed(s: &mut Session, p: &Value) -> Result<Value> {
     let r = radius_arg(p, cmd)?;
     let n = sides(p, cmd)?;
     let a = num(p, "angle").unwrap_or(90.0).to_radians();
-    polygon(s, p, cmd, c, r, a, n, true)
+    polygon(s, p, cmd, c, r, a, n, true, None)
 }
 
 fn polygon_circumscribed(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.polygon.circumscribed";
     let c = req_vec2(cmd, p, "center")?;
-    let r = radius_arg(p, cmd)?;
-    let n = sides(p, cmd)?;
+    let (r, size) = circle_size(s, p, cmd)?;
+    let n = sides_expr(s, p, cmd)?;
     let a = num(p, "angle").unwrap_or(90.0).to_radians();
-    polygon(s, p, cmd, c, r / (std::f64::consts::PI / n as f64).cos(), a + std::f64::consts::PI / n as f64, n, false)
+    polygon(s, p, cmd, c, r / (std::f64::consts::PI / n as f64).cos(), a + std::f64::consts::PI / n as f64, n, false, size)
 }
 
 fn polygon_edge(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2717,7 +2770,7 @@ fn polygon_edge(s: &mut Session, p: &Value) -> Result<Value> {
     let dir = (b - a).normalized().unwrap_or(Vec2::X);
     let center = mid + dir.perp() * apothem;
     let start = (a - center).angle();
-    polygon(s, p, cmd, center, rv, start, n, true)
+    polygon(s, p, cmd, center, rv, start, n, true, None)
 }
 
 /// The centre point of arc `a` (`None`: not an arc).

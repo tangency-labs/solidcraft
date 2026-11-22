@@ -380,7 +380,12 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::links::run(ui.ctx(), id);
                     }
                     app_bar::BarAction::HidePill { id } => {
-                        crate::app_bar_custom::run(app, &json!({"item":if id == "kofi" { "donate" } else { id },"action":"hide"}));
+                        // A pill the organization's policy shows stays: say why instead.
+                        if crate::links::by_id(id).is_some_and(|link| app.policy.locks(link.pref)) {
+                            app.set_status(solidcraft_ui_text::tr("policy.set_by_organization").to_string(), false);
+                        } else {
+                            crate::app_bar_custom::run(app, &json!({"item":if id == "kofi" { "donate" } else { id },"action":"hide"}));
+                        }
                     }
                     app_bar::BarAction::Version => ui.ctx().open_url(egui::OpenUrl::new_tab(&url)),
                     app_bar::BarAction::App { id } => run_overflow_control(app, id),
@@ -756,6 +761,10 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown));
     rows.push(row("file.export_sdf", app.tr_label("Export SDF Model…"), &key("file.export_sdf"), "export", shown));
     rows.push(row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true));
+    // Each installed export slot is a format of its own, labelled with the plugin's name.
+    for (format, label) in crate::plugin_slots::export_slots(app) {
+        rows.push(row(&format!("{PLUGIN_EXPORT}{format}"), &label, "", "export", shown));
+    }
     // Print the drawing shown: only in Drawing, where Ctrl+P does the same.
     if crate::drawing_workspace::active(app) && app.session.open_drawing.is_some() {
         rows.push(row("drawing.print", &format!("{}…", app.tr("ui.drawing_print.menu")), &key("drawing.print"), "export", true));
@@ -787,6 +796,9 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows
 }
 
+/// The File menu row of an export slot: this, then its `plugin_id.entry`.
+const PLUGIN_EXPORT: &str = "plugin_export:";
+
 /// Runs the File menu's row `id` ([`file_rows`]).
 pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
     if id == "plugins.preferences" {
@@ -795,6 +807,11 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
     }
     if crate::plugin_slots::items(app, crate::plugin_slots::Slot::Menu("File")).iter().any(|item| item.command == id) {
         crate::plugin_slots::begin(app, id);
+        return;
+    }
+    // An export slot opens its dialog: the options, then where to save.
+    if let Some(format) = id.strip_prefix(PLUGIN_EXPORT) {
+        crate::plugin_slots::begin(app, format);
         return;
     }
     if let Some(i) = id.strip_prefix("recent:").and_then(|i| i.parse::<usize>().ok()) {
@@ -1063,6 +1080,14 @@ fn ribbon_command_name(app: &SolveApp, command: &solidcraft_engine::CommandSpec)
     app.tr_command(command.id, crate::render_workspace::interactive_command_info(app, command).label)
 }
 
+/// The effect of a command with a tool (Section: pick a plane, OK) stays on after the tool closed.
+fn persistent_kept(app: &SolveApp, id: &str) -> bool {
+    KEPT_WITH_TOOL.contains(&id) && persistent_pressed(app, id) && running_command(app).as_deref() != Some(id)
+}
+
+/// The persistent commands whose effect is made in a tool confirmed with OK.
+const KEPT_WITH_TOOL: &[&str] = &["inspect.section"];
+
 pub(crate) fn persistent_button_name(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> String {
     let info = crate::render_workspace::interactive_command_info(app, command);
     let label = crate::workspace::ribbon_button_label(command);
@@ -1099,6 +1124,7 @@ fn paint_persistent_ribbon(app: &SolveApp, ui: &egui::Ui, paints: Vec<Persistent
             let look = ribbon::DeferredLook {
                 id: id.to_string(),
                 selected: persistent_pressed(app, id),
+                kept: persistent_kept(app, id),
                 // Resolve the genuine live tool after dispatch too: a click may have ended it.
                 // The compatibility presentation keeps its original transient recipe.
                 running: pressed && app.tool.as_ref().is_some_and(|tool| tool.cmd == id),
@@ -1800,7 +1826,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             crate::context_menu::open_for(app, bg.interact_pointer_pos().unwrap_or(r.left_bottom()), crate::context_menu::Target::Toolbar);
         }
         let render = crate::render_workspace::active(app);
-        let drawing = crate::drawing_workspace::active(app);
+        let drawing = crate::drawing_workspace::active(app) || crate::workspace::sheet_scope(app);
         let switcher = app_bar::Switcher {
             name: if render {
                 app.tr("ui.render")
@@ -2824,7 +2850,22 @@ pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
 
 /// Global keyboard shortcuts (when no text field has focus).
 pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
+    let sketch = (app.session.active_sketch, app.session.active_sheet_sketch.as_ref().map(|entry| (entry.drawing, entry.sketch)));
+    let held = if !crate::workspace::tool_receives_input(app) { app.tool.take() } else { None };
+    shortcuts_focused(app, ctx);
+    if let Some(tool) = held
+        && (app.session.active_sketch, app.session.active_sheet_sketch.as_ref().map(|entry| (entry.drawing, entry.sketch))) == sketch
+        && app.tool.is_none()
+    {
+        app.tool = Some(tool);
+    }
+}
+
+fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
     if crate::view_window_drag::keyboard_active(app, ctx) {
+        return;
+    }
+    if app.sketch_notices.focus_shortcut(ctx, app.session.uid, app.view_windows.current_window()) {
         return;
     }
     if crate::view_windows::is_clean(app) && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -3109,7 +3150,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     && !(crate::viewport_status::enabled(app) && crate::viewport_status::owns_escape(app))
                     && app.tool.is_none()
                     && app.dialog.is_none()
-                    && let Some(sketch) = app.session.active_sketch
+                    && let Some(sketch) = crate::workspace::focused_sketch(app)
                 {
                     app.last_escape = None;
                     // A sketch left blank is taken away instead, in one undo step, so no empty
@@ -6915,7 +6956,7 @@ mod persistent_ribbon_tests {
         if check_fill {
             assert_eq!(
                 shapes.iter().any(|s| matches!(s, egui::Shape::Rect(s) if s.rect == r && s.fill == t.selected_bg)),
-                selected,
+                selected && !persistent_kept(&h.app, id),
                 "{id} selected fill"
             );
         }
@@ -6932,6 +6973,22 @@ mod persistent_ribbon_tests {
             assert_eq!(*font, if selected { crate::ui_kit::type_face::semibold(t.font_body) } else { FontId::proportional(t.font_body) });
             assert_eq!(text.galley.job.sections[0].format.color, if selected { t.selected_ink } else { t.text });
         }
+    }
+
+    #[test]
+    fn a_section_kept_after_ok_is_marked_on_without_looking_like_a_running_tool() {
+        let mut h = harness();
+        h.app.preferences.viewport_section_status = true;
+        h.app.preferences.persistent_ribbon_pressed = true;
+        h.app.session.execute("inspect.section", &json!({"plane":"XY","at":4})).unwrap();
+        h.frame();
+        let r = scenario::rect_of("button:inspect.section").unwrap();
+        let t = Tokens::get();
+        let filled = |h: &Harness| {
+            button_shapes(h, "inspect.section").iter().any(|s| matches!(s, egui::Shape::Rect(s) if s.rect == r && s.fill == t.selected_bg))
+        };
+        assert!(!filled(&h), "a kept section has no pressed fill");
+        assert_presentation(&h, "inspect.section", true, false);
     }
 
     fn tap(h: &mut Harness, id: &str) {
@@ -7015,11 +7072,14 @@ mod persistent_ribbon_tests {
         for shape in &h.shapes {
             shapes(&shape.shape, &mut drawn);
         }
-        assert_eq!(
-            drawn.iter().any(|shape| matches!(shape, egui::Shape::Rect(s) if s.rect == rect && s.fill == t.selected_bg)),
-            selected,
-            "{id} grid fill"
-        );
+        // A kept section has no pressed fill, but a focused cell's own background may share its colour.
+        if !persistent_kept(&h.app, id) {
+            assert_eq!(
+                drawn.iter().any(|shape| matches!(shape, egui::Shape::Rect(s) if s.rect == rect && s.fill == t.selected_bg)),
+                selected,
+                "{id} grid fill"
+            );
+        }
         assert_eq!(drawn.iter().any(|shape| matches!(shape, egui::Shape::LineSegment { points, stroke } if stroke.width == 2.0 && stroke.color == t.accent && points[0].y == rect.bottom() - t.space_4 && rect.contains(points[0]))), selected, "{id} grid underline");
         let command = solidcraft_engine::find_command(id).unwrap();
         let label = if toggled.is_some() { persistent_button_name(&h.app, command) } else { h.app.tr_label(command.label).to_string() };
@@ -7086,10 +7146,18 @@ mod persistent_ribbon_tests {
                 for clipped in &output.shapes {
                     let mut drawn = Vec::new();
                     shapes(&clipped.shape, &mut drawn);
-                    if drawn
-                        .iter()
-                        .any(|shape| matches!(shape, egui::Shape::Rect(rect) if rect.rect == cell && rect.fill == Tokens::get().selected_bg))
-                    {
+                    if drawn.iter().any(|shape| match shape {
+                        egui::Shape::Rect(rect) => rect.rect == cell && rect.fill == Tokens::get().selected_bg,
+                        // A kept section is marked by its underline alone (#20663).
+                        egui::Shape::LineSegment { points, stroke } => {
+                            id == "inspect.section"
+                                && stroke.color == Tokens::get().accent
+                                && points[0].y == cell.bottom() - Tokens::get().space_4
+                                && cell.x_range().contains(points[0].x)
+                                && cell.x_range().contains(points[1].x)
+                        }
+                        _ => false,
+                    }) {
                         backgrounds.push(clipped.clip_rect);
                     }
                 }
