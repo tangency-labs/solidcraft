@@ -3095,7 +3095,7 @@ impl CircularCrossSectionFsg {
 
         // build a skin surface to interpolate all crossSection curves and option end
         // crossTangent values
-        if sections.len() < 2 {
+        let [first_section, .., last_section] = sections.as_slice() else {
             // [B448]
             return Err(SolidError::blend_trace(
                 OP,
@@ -3103,7 +3103,7 @@ impl CircularCrossSectionFsg {
                     sections: sections.len(),
                 },
             ));
-        }
+        };
         let mut deriv_surfs: [Option<BSplineSurface>; 2] = [None, None];
 
         // when asked for G1 continuity
@@ -3114,12 +3114,10 @@ impl CircularCrossSectionFsg {
                 // We need to provide cross-boundary derivative surface
                 // for skinned-surface creation.
                 let (gen_curve, t) = if kkk == 1 {
-                    (sections.last(), ivl.max())
+                    (last_section, ivl.max())
                 } else {
-                    (sections.first(), ivl.min())
+                    (first_section, ivl.min())
                 };
-                let gen_curve = gen_curve
-                    .ok_or_else(|| defect(OP, "there are two or more sections, checked above"))?;
 
                 // get railCurve endTangents
                 let st = tangent_at(rail1, t, OP)?;
