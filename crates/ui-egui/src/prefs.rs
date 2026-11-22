@@ -53,6 +53,84 @@ pub enum NavButton {
     Left,
     Middle,
     Right,
+    /// The side "back" button (it still goes Back on a plain click).
+    Extra1,
+    /// The side "forward" button.
+    Extra2,
+}
+
+impl NavButton {
+    pub const ALL: [NavButton; 5] = [NavButton::Left, NavButton::Middle, NavButton::Right, NavButton::Extra1, NavButton::Extra2];
+
+    /// The name the setting and the control channel use.
+    pub fn id(self) -> &'static str {
+        match self {
+            NavButton::Left => "left",
+            NavButton::Middle => "middle",
+            NavButton::Right => "right",
+            NavButton::Extra1 => "extra1",
+            NavButton::Extra2 => "extra2",
+        }
+    }
+}
+
+/// A drag the user chose for a button in Preferences › Navigation: the action and the keys that
+/// must be held. `mode: None` is "Nothing".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NavChoice {
+    pub keys: NavKeys,
+    pub mode: Option<NavMode>,
+}
+
+impl NavChoice {
+    /// The setting's text: `orbit`, `pan`, `zoom` or `none`, after the keys (`shift+`, `ctrl+`, `alt+`).
+    pub fn parse(text: &str) -> Option<NavChoice> {
+        let mut keys = NavKeys::NONE;
+        let mut rest = text;
+        loop {
+            if let Some(r) = rest.strip_prefix("shift+") {
+                keys.shift = true;
+                rest = r;
+            } else if let Some(r) = rest.strip_prefix("ctrl+") {
+                keys.ctrl = true;
+                rest = r;
+            } else if let Some(r) = rest.strip_prefix("alt+") {
+                keys.alt = true;
+                rest = r;
+            } else {
+                break;
+            }
+        }
+        let mode = match rest {
+            "orbit" => Some(NavMode::Orbit),
+            "pan" => Some(NavMode::Pan),
+            "zoom" => Some(NavMode::Zoom),
+            "none" => None,
+            _ => return None,
+        };
+        Some(NavChoice { keys, mode })
+    }
+
+    pub fn text(self) -> String {
+        let mut out = String::new();
+        for (on, name) in [(self.keys.shift, "shift+"), (self.keys.ctrl, "ctrl+"), (self.keys.alt, "alt+")] {
+            if on {
+                out.push_str(name);
+            }
+        }
+        out.push_str(match self.mode {
+            Some(NavMode::Orbit) => "orbit",
+            Some(NavMode::Pan) => "pan",
+            Some(NavMode::Zoom) => "zoom",
+            None => "none",
+        });
+        out
+    }
+}
+
+/// What the user chose for dragging `button` in Preferences, if anything (the preset decides otherwise).
+pub fn nav_choice(prefs: &Prefs, button: NavButton) -> Option<NavChoice> {
+    prefs.nav_button_map.get(button.id()).and_then(|text| NavChoice::parse(text))
 }
 
 /// Modifier keys a binding needs held (others may be held too).
@@ -1516,22 +1594,20 @@ preference_settings! {
     /// A double-click on a design tab renames the design in the tab; off, it maximizes the window
     /// as the rest of the title bar does, as before.
     tab_double_click_renames: bool = true, PAGE_LAYOUT;
-    /// A design's views (Model, Sketch, Sheet, Render, Animation) are tabs inside its tab; off, the
+    /// A design's views (Model, Sheet, Render, Animation) are tabs inside its tab; off, the
     /// design keeps one tab and a view switcher lists them.
     design_views_as_tabs: bool = false, PAGE_LAYOUT;
     /// With views as tabs off, a design's tab always shows its view switcher (even with one view),
-    /// and entering a sketch or Render opens a view of its own, as in 0.43.0. Off: the tab looks as
+    /// and entering Render opens a view of its own, as in 0.43.0. Off: the tab looks as
     /// it did before design views, with no switcher until the user opens a second view.
     show_design_view_switcher: bool = false, PAGE_LAYOUT;
     /// Use distinct tab treatments for the focused view, cards, hidden views, and pop-outs.
     clear_view_tabs: bool = true, PAGE_LAYOUT;
     /// A drawing sheet opens as a view (a sub-tab) of its design.
     design_sub_tab_sheets: bool = true, PAGE_LAYOUT;
-    /// Editing a sketch opens it as a view of its design; Finish Sketch returns to the previous view.
-    design_sub_tab_sketches: bool = true, PAGE_LAYOUT;
     /// Render and Animate open as views of their design.
     design_sub_tab_render: bool = true, PAGE_LAYOUT;
-    /// Opening a sheet, sketch or workspace that a view already shows activates that view.
+    /// Opening a sheet or workspace that a view already shows activates that view.
     design_reuse_views: bool = true, PAGE_LAYOUT;
     /// A design opens with the views it had when it was last closed.
     design_reopen_views: bool = false, PAGE_LAYOUT;
@@ -1762,6 +1838,10 @@ preference_settings! {
     /// (`link_folders_prompt`): those the user answered Load for. Kept in the user's settings,
     /// never in a design.
     linked_file_folders: Vec<String> = Vec::new(), PAGE_GENERAL;
+    /// What dragging a mouse button does when the user has chosen it, by button (`left`, `middle`,
+    /// `right`, `extra1`, `extra2`): `orbit`, `pan`, `zoom` or `none`, after any keys (`shift+`,
+    /// `ctrl+`, `alt+`). A button that is absent follows the mouse mapping. Empty by default.
+    nav_button_map: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new(), PAGE_NAVIGATION;
     /// What a middle-button double-click in the view does: `home`, `fit` or `off`.
     middle_double_click: String = "home".into(), PAGE_NAVIGATION;
     /// A view chosen on the navigator (a face, corner or arrow, an axis tip) also frames the
@@ -2888,6 +2968,10 @@ pub fn nav_mode(app: &SolveApp, button: NavButton, mods: Modifiers) -> Option<Na
     if button == NavButton::Right && crate::mouse_gesture::active(app) {
         return None;
     }
+    // A button the user mapped in Preferences takes that choice instead of the preset's bindings.
+    if let Some(choice) = nav_choice(&app.preferences, button) {
+        return choice.mode.filter(|_| choice.keys.held(mods));
+    }
     let mode = nav_preset(&app.preferences.nav).mode(button, mods);
     // "Right drag orbits" off leaves the right button to the context menu (#6492).
     if button == NavButton::Right && mode == Some(NavMode::Orbit) && !app.preferences.right_drag_orbits {
@@ -3683,7 +3767,7 @@ fn button_job_label(app: &SolveApp, job: Option<&crate::space_mouse::ButtonJob>)
             ButtonKey::Alt => "Alt",
         }
         .to_string(),
-        Some(ButtonJob::Command(id)) => solidcraft_engine::find_command(id).map_or_else(|| id.clone(), |c| app.tr_label(c.label).to_string()),
+        Some(ButtonJob::Command(id)) => solidcraft_engine::find_command(id).map_or_else(|| id.clone(), |c| app.tr_command(c.id, c.label).to_string()),
     }
 }
 
@@ -4913,6 +4997,11 @@ fn prepare_preferences(
     }
     if MiddleDoubleClick::parse(&new.middle_double_click).is_none() {
         return Err("`middle_double_click` must be home, fit or off".into());
+    }
+    for (button, choice) in &new.nav_button_map {
+        if !NavButton::ALL.iter().any(|b| b.id() == button) || NavChoice::parse(choice).is_none() {
+            return Err("`nav_button_map` maps left, middle, right, extra1 or extra2 to orbit, pan, zoom or none, after shift+, ctrl+ or alt+".into());
+        }
     }
     let mut new = new;
     for grants in new.plugin_grants.values_mut() {
@@ -7362,7 +7451,6 @@ mod tests {
             ("show_design_view_switcher", json!(true), PAGE_LAYOUT),
             ("clear_view_tabs", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_sheets", json!(false), PAGE_LAYOUT),
-            ("design_sub_tab_sketches", json!(false), PAGE_LAYOUT),
             ("design_sub_tab_render", json!(false), PAGE_LAYOUT),
             ("design_reuse_views", json!(false), PAGE_LAYOUT),
             ("design_reopen_views", json!(true), PAGE_LAYOUT),
@@ -7850,7 +7938,7 @@ mod tests {
         assert_eq!(h.app.preferences.browser_bodies_folders, BodiesFolders::Several, "Interface's Restore Defaults");
     }
 
-    /// Design tabs: views shown as tabs, sub-tabs for sheets, sketches and Render, and reusing a
+    /// Design tabs: views shown as tabs, sub-tabs for sheets and Render, and reusing a
     /// view are on by default and reopening a design's views is off, also in preferences saved
     /// before them. Each is saved and read back, `ui.prefs` refuses a value that is not a boolean,
     /// the Layout page's Restore Defaults resets them, and one struct hands them to the tab strip.
@@ -7861,7 +7949,6 @@ mod tests {
         let keys = [
             "design_views_as_tabs",
             "design_sub_tab_sheets",
-            "design_sub_tab_sketches",
             "design_sub_tab_render",
             "design_reuse_views",
             "design_reopen_views",
@@ -7871,11 +7958,16 @@ mod tests {
         let on = DesignTabPrefs::from(&h.app.preferences);
         // Test change: the owner asked for "Show the design view switcher", off by default.
         assert_eq!(
-            [on.views_as_tabs, on.sub_tab_sheets, on.sub_tab_sketches, on.sub_tab_render, on.reuse_views, on.reopen_views, on.show_switcher],
-            [false, true, true, true, true, false, false]
+            [on.views_as_tabs, on.sub_tab_sheets, on.sub_tab_render, on.reuse_views, on.reopen_views, on.show_switcher],
+            [false, true, true, true, false, false]
         );
         let old = lenient(&json!({"theme": "light"}));
         assert_eq!(DesignTabPrefs::from(&old), on, "saved before they existed");
+        for obsolete in [false, true] {
+            let old = lenient(&json!({"design_sub_tab_sketches": obsolete}));
+            assert_eq!(DesignTabPrefs::from(&old), on, "the removed sketch-view setting is ignored");
+            assert!(serde_json::to_value(&old).unwrap().get("design_sub_tab_sketches").is_none());
+        }
         for key in keys {
             let value = !serde_json::to_value(&h.app.preferences).unwrap()[key].as_bool().unwrap();
             assert_eq!(control(&mut h.app, &json!({ key: value })).unwrap()[key], value, "{key}");
@@ -7890,16 +7982,8 @@ mod tests {
         }
         let flipped = DesignTabPrefs::from(&h.app.preferences);
         assert_eq!(
-            [
-                flipped.views_as_tabs,
-                flipped.sub_tab_sheets,
-                flipped.sub_tab_sketches,
-                flipped.sub_tab_render,
-                flipped.reuse_views,
-                flipped.reopen_views,
-                flipped.show_switcher
-            ],
-            [true, false, false, false, false, true, true]
+            [flipped.views_as_tabs, flipped.sub_tab_sheets, flipped.sub_tab_render, flipped.reuse_views, flipped.reopen_views, flipped.show_switcher],
+            [true, false, false, false, true, true]
         );
         defaults(&mut h.app, PAGE_LAYOUT);
         assert_eq!(DesignTabPrefs::from(&h.app.preferences), on, "Layout's Restore Defaults");

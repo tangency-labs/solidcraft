@@ -508,8 +508,11 @@ impl<'a> MenuItem<'a> {
         // Areas first measure intrinsic content. Filling their provisional available
         // width would make a flipped submenu cover its parent and consume the opening click.
         let width = if ui.is_sizing_pass() {
-            let label =
-                ui.painter().layout_no_wrap(solidcraft_ui_text::tr_label(self.label).to_string(), FontId::proportional(t.font_label), t.form_ink);
+            let label = ui.painter().layout_no_wrap(
+                solidcraft_ui_text::tr_command(self.id, self.label).to_string(),
+                FontId::proportional(t.font_label),
+                t.form_ink,
+            );
             let shortcut = ui.painter().layout_no_wrap(self.shortcut.to_string(), FontId::monospace(t.font_small), t.form_dim);
             let trailing = if self.submenu { t.space_16 } else { 0.0 };
             let check = Self::trailing_check_width(self.icon, self.checked.is_some());
@@ -565,7 +568,7 @@ impl<'a> MenuItem<'a> {
                 plain => plain.paint_plain(&painter, icon, 1.0),
             }
         }
-        let label = solidcraft_ui_text::tr_label(self.label);
+        let label = solidcraft_ui_text::tr_command(self.id, self.label);
         let mut right = r.right() - t.space_8 - trailing;
         if self.submenu {
             let c = pos2(right - t.space_4, r.center().y);
@@ -816,7 +819,7 @@ pub fn workspace_menu(ui: &mut egui::Ui, menu: &WorkspaceMenu<'_>, key_row: Opti
                     icon.paint_plain(ui.painter(), tile.shrink(t.space_6 + 1.0), opacity);
                 }
                 let text = if item.enabled { t.text } else { t.text_dim };
-                let name = solidcraft_ui_text::tr_label(&item.label);
+                let name = solidcraft_ui_text::tr_command(&item.id, &item.label);
                 let x = r.left() + 74.0;
                 let y = r.top() + 17.0;
                 let galley =
