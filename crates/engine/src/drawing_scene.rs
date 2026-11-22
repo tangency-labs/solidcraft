@@ -3499,23 +3499,10 @@ fn live_scene_drawings(s: &Session) -> BTreeSet<u64> {
 /// Release a closed tile's world states and in-flight work, keeping the existing bounded
 /// last-line/picture fallback used when a drawing is reopened.
 fn keep_closed_cache(kept: &mut KeptLines, drawing: u64, cache: Cache) {
-    let views = cache
-        .views
-        .into_iter()
-        .map(|(id, entry)| (id, KeptView { view: entry.view, drawn: entry.drawn, shows: entry.shows, pixels: entry.pixels }))
-        .collect();
-    let dimensions = cache
-        .dimensions
-        .into_iter()
-        .map(|(id, entry)| {
-            (id, KeptDimension { record: entry.record, view_serial: entry.view_serial, lettering: entry.lettering, drawn: entry.drawn })
-        })
-        .collect();
-    let sketches =
-        cache.sketches.into_iter().map(|(id, entry)| (id, KeptSketch { source: entry.source, context: entry.context, drawn: entry.drawn })).collect();
-    let fills =
-        cache.fills.into_iter().map(|(id, entry)| (id, KeptFill { source: entry.source, context: entry.context, drawn: entry.drawn })).collect();
-    kept.keep(drawing, Kept { views, dimensions, sketches, fills });
+    let Cache { views, dimensions, sketches, fills, .. } = cache;
+    let sketches = sketches.into_iter().map(|(id, entry)| (id, KeptSketch { source: entry.source, context: entry.context, drawn: entry.drawn }));
+    let fills = fills.into_iter().map(|(id, entry)| (id, KeptFill { source: entry.source, context: entry.context, drawn: entry.drawn }));
+    kept.keep(drawing, Kept { sketches: sketches.collect(), fills: fills.collect(), ..Kept::closing(views, dimensions) });
 }
 
 /// Select the current drawing's cache without cancelling work on another visible Sheet.
