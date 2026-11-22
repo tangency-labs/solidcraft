@@ -678,12 +678,9 @@ fn initial_setup(
             &GlobalPointSolveOptions::<ObjectHandle>::default(),
         )?;
         let [sol] = sols.as_slice() else {
-            return Err(SolidError::blend_trace(
+            return Err(SolidError::blend_solver(
                 op,
-                TraceFailure::PointDropNotSingle {
-                    onto_edge: true,
-                    solutions: sols.len(),
-                },
+                SolverFailure::NoSingleCurveFoot { count: sols.len() },
             ));
         };
         let mut t = sol.start.param(0)?;
@@ -738,10 +735,7 @@ fn initial_setup(
         let [sol] = *sols.as_slice() else {
             return Err(SolidError::blend_trace(
                 op,
-                TraceFailure::PointDropNotSingle {
-                    onto_edge: false,
-                    solutions: sols.len(),
-                },
+                TraceFailure::NoSingleSurfaceFoot { count: sols.len() },
             ));
         };
         uv2 = sol;

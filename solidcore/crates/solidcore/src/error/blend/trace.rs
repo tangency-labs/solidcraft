@@ -86,14 +86,12 @@ pub enum TraceFailure {
     /// The fillet surface could not be skinned from the traced curves: the surface
     /// generator's error is the failure's cause ([`ErrorKind::Failed`]).
     SkinningFailed,
-    /// The custom solver's drop of a fillet point onto the other filleted edge (or, where
-    /// not `onto_edge`, onto the second base surface) found `solutions` feet, not one: the
-    /// search did not find the one foot it needs ([`ErrorKind::NotFound`]).
-    PointDropNotSingle {
-        /// True for the drop onto the edge, false for the drop onto the surface.
-        onto_edge: bool,
-        /// The feet found.
-        solutions: usize,
+    /// The nearest-point search on a surface found `count` nearest points where one is
+    /// needed: an empty or ambiguous search ([`ErrorKind::NotFound`]). The curve's case is
+    /// `SolverFailure::NoSingleCurveFoot`.
+    NoSingleSurfaceFoot {
+        /// The number of nearest points found.
+        count: usize,
     },
     /// A base surface's first partial derivative has no length at the custom solver's
     /// current solution, so its equations have no Jacobian there
@@ -146,7 +144,7 @@ impl TraceFailure {
             }
             Self::TraceBuiltNoSurface
             | Self::TraceHasNoPoints
-            | Self::PointDropNotSingle { .. }
+            | Self::NoSingleSurfaceFoot { .. }
             | Self::BisectorMissesSegment { .. } => ErrorKind::NotFound,
             Self::SectionValuesFailed | Self::SmoothingFailed | Self::SkinningFailed => {
                 ErrorKind::Failed
@@ -170,7 +168,7 @@ impl TraceFailure {
             | Self::SectionTangentZero { .. }
             | Self::SmoothingFailed
             | Self::SkinningFailed
-            | Self::PointDropNotSingle { .. }
+            | Self::NoSingleSurfaceFoot { .. }
             | Self::BaseDerivativeZero
             | Self::BaseNormalZero { .. }
             | Self::BisectorMissesSegment { .. }
@@ -219,17 +217,9 @@ impl core::fmt::Display for TraceFailure {
                 f.write_str("the self-intersecting fillet could not be smoothed")
             }
             Self::SkinningFailed => f.write_str("the fillet surface could not be skinned"),
-            Self::PointDropNotSingle {
-                onto_edge,
-                solutions,
-            } => write!(
+            Self::NoSingleSurfaceFoot { count } => write!(
                 f,
-                "the point drops onto the {} at {solutions} feet, not one",
-                if *onto_edge {
-                    "other edge"
-                } else {
-                    "second surface"
-                }
+                "the nearest-point search on the surface found {count} points, not one"
             ),
             Self::BaseDerivativeZero => f.write_str("a base surface has a zero derivative"),
             Self::BaseNormalZero { side: Some(side) } => {
