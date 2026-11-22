@@ -299,6 +299,20 @@ pub trait PluginHost {
     }
     fn log(&mut self, message: &str);
     fn progress(&mut self, fraction: f32, message: &str);
+    /// Writes the running plugin's file `name` in the open design from its bytes, as they are
+    /// (`storage@0.1`, the `storage` interface's `put-blob`); `append` adds them to its end. The
+    /// file's size. An app that keeps no plugin data refuses, as here.
+    fn storage_put_blob(&mut self, _name: &str, _data: &[u8], _cache: bool, _append: bool) -> Result<u64> {
+        Err(HostError::PermissionDenied { permission: "storage: this app keeps no plugin data".into() })
+    }
+    /// Up to `len` bytes of a plugin's file from `offset` (`get-blob`).
+    fn storage_get_blob(&mut self, _plugin: Option<&str>, _name: &str, _offset: u64, _len: u32) -> Result<Vec<u8>> {
+        Err(HostError::PermissionDenied { permission: "storage: this app keeps no plugin data".into() })
+    }
+    /// Up to `len` bytes of a plugin's main document, its saved JSON, from `offset` (`get-document`).
+    fn storage_get_document(&mut self, _plugin: Option<&str>, _offset: u64, _len: u32) -> Result<Vec<u8>> {
+        Err(HostError::PermissionDenied { permission: "storage: this app keeps no plugin data".into() })
+    }
     fn is_cancelled(&self) -> bool {
         false
     }
@@ -546,7 +560,7 @@ pub struct Manifest {
     pub runtime: Option<RuntimeManifest>,
 }
 
-/// A read-only entry called after a coalesced whole-document invalidation. Listeners refresh
+/// A read-only entry called after a coalesced design or linked-file invalidation. Listeners refresh
 /// their own caches or panel data; they do not edit, write files or start background work.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -624,11 +638,17 @@ impl RuntimeManifest {
         let mut listeners = BTreeSet::new();
         for listener in &self.listeners {
             let entry = self.entries.iter().find(|entry| entry.name == listener.entry);
+            let mut events = BTreeSet::new();
+            let valid_events = !listener.on.is_empty()
+                && listener.on.iter().all(|event| matches!(event.as_str(), "design.changed" | "design.links_changed") && events.insert(event));
             if !listeners.insert(&listener.entry)
-                || listener.on.as_slice() != ["design.changed"]
+                || !valid_events
                 || entry.is_none_or(|entry| entry.kind != EntryKind::Command || entry.effect != Effect::Read)
             {
-                return Err(invalid("runtime.listeners", "distinct read command entries listening to [\"design.changed\"] are required"));
+                return Err(invalid(
+                    "runtime.listeners",
+                    "distinct read command entries listening to a nonempty, unique selection of design.changed and design.links_changed are required",
+                ));
             }
         }
         if self.commands.len() > 128 || self.commands.iter().any(|id| !valid_command_name(id)) {

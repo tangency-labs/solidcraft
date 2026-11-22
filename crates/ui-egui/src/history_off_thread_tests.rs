@@ -28,7 +28,15 @@ fn block_boss_hole() -> Harness {
 /// Frames until nothing computes or waits (a few seconds at most).
 fn until_settled(h: &mut Harness) {
     for _ in 0..500 {
-        if h.app.deferred.is_none() && h.app.deferred_queue.is_empty() && h.app.delete_check.is_none() && h.app.pending_feature_edit.is_none() {
+        // Finishing a sketch for the next edit computes off the window thread too: the edit waits
+        // for that sketch refresh (`start_after_roll`), as the control channel's `pending` does.
+        if h.app.deferred.is_none()
+            && h.app.deferred_queue.is_empty()
+            && h.app.delete_check.is_none()
+            && h.app.pending_feature_edit.is_none()
+            && h.app.start_after_roll.is_none()
+            && !h.app.sketch_refreshes.contains_key(&h.app.session.uid)
+        {
             break;
         }
         h.frames(1);
@@ -402,6 +410,30 @@ fn switching_from_a_sketch_to_a_feature_restores_partial_markers_and_sketch_chan
     }
 }
 
+/// An editor that is still opening when it is cancelled leaves the finished sketch's refresh to
+/// run afterwards: the model shows the sketch as finished, not as it was before the edit.
+#[test]
+fn a_feature_editor_cancelled_while_opening_still_refreshes_the_finished_sketch() {
+    for when in ["opening", "open"] {
+        let (mut h, sketches) = sketches_with_later_bodies();
+        let feature = h.app.session.doc.features[3].id;
+        h.app.edit_sketch(sketches[0]);
+        h.app.run("sketch.line", json!({"points": [[0, 2], [10, 2]]})).unwrap();
+        h.app.edit_feature(feature);
+        if when == "open" {
+            until_settled(&mut h);
+            assert!(h.app.dialog.is_some());
+        }
+        crate::dialogs::cancel(&mut h.app);
+        until_settled(&mut h);
+        assert!(h.app.dialog.is_none(), "{when}");
+        assert!(!h.app.session.needs_sketch_finish_evaluation(), "{when}: the finished sketch was evaluated");
+        let drawn = h.app.session.doc.sketch(sketches[0]).unwrap().curves.len();
+        let shown = h.app.session.model.state().sketch(sketches[0]).unwrap().sketch.curves.len();
+        assert_eq!(shown, drawn, "{when}: the model shows the line the sketch finished with");
+    }
+}
+
 #[test]
 fn switching_from_a_sketch_to_a_feature_rejects_replaced_or_changed_documents() {
     for action in ["new", "change"] {
@@ -713,7 +745,7 @@ fn a_design_closed_while_its_history_computes_holds_up_nothing() {
     let (job, late) = crate::deferred::Deferred::never_done("timeline.roll_to", json!({"position": 1}), h.app.session.revision);
     h.app.deferred = Some(job);
     h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 2}), 0));
-    h.app.start_after_roll = Some(("solid.extrude".into(), 1));
+    h.app.start_after_roll = Some(("solid.extrude".into(), Some(1)));
     crate::documents::close(&mut h.app, 0, true);
     assert!(h.app.computing_since().is_none(), "the blank design has nothing computing");
     assert!(h.app.deferred.is_none() && h.app.deferred_queue.is_empty() && h.app.start_after_roll.is_none());
@@ -1412,6 +1444,108 @@ fn design_notifications_coalesce_a_burst_and_preserve_the_latest_token() {
 }
 
 #[test]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn linked_file_notifications_retry_and_deliver_without_a_design_edit() {
+    let mut h = Harness::new();
+    let root = plugin_package_for_worker_test("link-events");
+    let dir = root.join("sample");
+    let (package, version) = solidcraft_engine::plugin::API.rsplit_once('@').unwrap();
+    let wat = include_str!("plugin_fixture.wat").replace("PLUGIN_PACKAGE", package).replace("PLUGIN_VERSION", version).replace(
+        "i32.const 0\n    )\n    (data",
+        "i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store i32.const 0\n    )\n    (data",
+    );
+    std::fs::write(dir.join("plugin.wasm"), wat::parse_str(wat).unwrap()).unwrap();
+    std::fs::write(
+        dir.join("plugin.json"),
+        json!({
+            "id":"sample","name":"Worker sample","version":"1","capabilities":["commands@0.1","design@0.1"],
+            "runtime":{"module":"plugin.wasm","entries":[{"name":"design-refresh","effect":"read"},{"name":"refresh","effect":"read"}],"commands":[],
+                "listeners":[{"entry":"design-refresh","on":["design.changed"]},{"entry":"refresh","on":["design.links_changed"]}],
+                "permissions":{"files":[{"name":"work","read":true,"write":false}]}}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let inspected = h.app.session.execute("plugin.inspect", &json!({"path":dir})).unwrap();
+    h.app.preferences.plugin_grants.insert(
+        "sample".into(),
+        solidcraft_engine::plugin::Grants {
+            package_hash: Some(inspected["approval"].as_str().unwrap().into()),
+            folders: vec![solidcraft_engine::plugin::FileGrant { name: "work".into(), folder: root.clone(), read: true, write: false }],
+            ..Default::default()
+        },
+    );
+    let source = root.join("part.sc");
+    let mut part = solidcraft_engine::Session::default();
+    part.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+    part.execute("file.save", &json!({"path":source})).unwrap();
+    let inserted = h.app.session.execute("component.insert_design", &json!({"path":source,"name":"Bracket"})).unwrap();
+    let component = inserted["component"].as_u64().unwrap();
+    h.app.now = 1.0;
+    crate::plugin_events::observe(&mut h.app);
+    h.app.now = 1.11;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert!(!h.app.session.plugin_state.listener_data.contains_key("sample.refresh"), "links-only listeners skip design-only invalidation");
+    let token = h.app.session.design_token();
+    part.execute("document.metadata.set", &json!({"key":"description","value":"New source bytes"})).unwrap();
+    part.execute("file.save", &json!({})).unwrap();
+    h.app.session.execute("component.links", &json!({})).unwrap();
+    h.app.now = 2.0;
+    crate::plugin_events::observe(&mut h.app);
+    h.app.now = 2.11;
+    crate::plugin_events::tick_with_spawner_for_test(&mut h.app, &h.ctx, |_, _| None);
+    h.app.now = 2.22;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert_eq!(h.app.session.design_token(), token);
+    assert_eq!(
+        h.app.session.plugin_state.listener_data["sample.refresh"],
+        json!({"design":token,"links":[{"component":component,"name":"Bracket","path":source,"read":false}]})
+    );
+    assert!(h.app.session.plugin_state.listener_failures.is_empty(), "{:?}", h.app.session.plugin_state.listener_failures);
+    h.app.session.execute("component.links", &json!({})).unwrap();
+    h.app.now = 3.0;
+    crate::plugin_events::observe(&mut h.app);
+    assert!(h.app.plugin_events.take_due(3.11).is_none(), "the same observed file is not delivered again");
+    let cached = h.app.session.plugin_state.listener_data["sample.refresh"].clone();
+    h.app.session.execute("document.metadata.set", &json!({"key":"description","value":"Unrelated edit"})).unwrap();
+    h.app.now = 4.0;
+    crate::plugin_events::observe(&mut h.app);
+    h.app.now = 4.11;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert_eq!(h.app.session.plugin_state.listener_data["sample.refresh"], cached, "uninvoked listeners retain their output");
+    part.execute("document.metadata.set", &json!({"key":"description","value":"Another source change"})).unwrap();
+    part.execute("file.save", &json!({})).unwrap();
+    h.app.session.execute("component.links", &json!({})).unwrap();
+    h.app.now = 5.0;
+    crate::plugin_events::observe(&mut h.app);
+    h.app.now = 5.11;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    h.app.session.execute("document.metadata.set", &json!({"key":"description","value":"Edit while the links listener runs"})).unwrap();
+    let latest = h.app.session.design_token();
+    h.app.now = 5.12;
+    crate::plugin_events::observe(&mut h.app);
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert_eq!(h.app.session.plugin_state.listener_data["sample.refresh"], cached, "superseded output is not published");
+    h.app.now = 5.23;
+    crate::plugin_events::tick(&mut h.app, &h.ctx);
+    crate::plugin_events::drain(&mut h.app).unwrap();
+    assert_eq!(
+        h.app.session.plugin_state.listener_data["sample.refresh"],
+        json!({"design":latest,"links":[{"component":component,"name":"Bracket","path":source,"read":false}]}),
+        "a links-only listener retries at the latest design token"
+    );
+    assert_eq!(
+        h.app.session.plugin_state.listener_data["sample.design-refresh"],
+        json!({"design":latest}),
+        "merging the links retry preserves the pending design invalidation"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn design_notifications_retry_a_failed_worker_spawn_after_the_interval() {
     let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     let ctx = egui::Context::default();
@@ -2050,7 +2184,7 @@ fn many_waiting_agent_commands_keep_the_panel_and_fold_into_one_row() {
     // The summary row's X cancels those past the shown ones, and only them.
     crate::operations::cancel(&mut h.app, "agent:held:more").unwrap();
     let status = h.app.status.as_ref().map(|s| s.0.clone());
-    assert_eq!(status.as_deref(), Some("36 waiting commands cancelled"), "one message for the whole action");
+    assert_eq!(status.as_deref(), Some("36 waiting commands canceled"), "one message for the whole action");
     for (i, w) in waiting.iter().enumerate() {
         match w.try_recv() {
             Ok(r) => assert!(i >= MAX_WAITING_SHOWN && r["cancelled"] == true, "{i}: {r}"),

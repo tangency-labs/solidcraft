@@ -235,7 +235,7 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Session::execute records the wrapper's before snapshot. Nested history must not leak.
     scratch.undo.clear();
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     let reply = DrawDimensionedResult::new(out, added, defined, locate.then_some(located));
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }

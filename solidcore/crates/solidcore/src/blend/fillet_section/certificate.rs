@@ -82,6 +82,20 @@
 //!   sound as the fork's, but it can be another level's. A level's end stations that the
 //!   level before solved (every other one: the same s from the same seed) are taken from
 //!   it, bit for bit what solving them again gives.
+//! - **A span no level certifies (not the fork's).** A proved level's least values at its
+//!   pieces' middles stop the levels, as the fork's do: over the target, no finer level
+//!   certifies the span. The same least values are known from a piece's middle before any
+//!   level is proved (`piece_least`, #14405: the middle's point enclosure, taken also where
+//!   the piece's own is not proved), and there they only kept the feet's Taylor models from
+//!   being taken: the levels went on to the first one the interval enclosures proved (up
+//!   to 64 pieces) for a bound over the target, and the span's halves inherited those
+//!   pieces and took the feet's Taylor models on every one, where a few pieces of their
+//!   own certify them. A caller that reads a bound over its target only as "over"
+//!   ([`SpanReuse::over_is_halved`]: the section build, which halves the span) is answered
+//!   as soon as those least values are over the target, with the bound so far. The span's
+//!   verdict is the same; its halves inherit a level only where it had proved one by
+//!   then, and otherwise start from their own first level, so a half's bound, proved
+//!   either way, can be another level's.
 //! - **The arc's row terms (#14405, not the fork's).** A piece's arc rows (the ball's
 //!   circle, n = 1) are bounded from interval series over the piece, as the fork bounds
 //!   them, and from Taylor models in `s - m` over it ([`super::taylor_model`],
@@ -1672,9 +1686,80 @@ fn guess_box(at: &SpanAt) -> ([f64; 4], [Ivl; 4]) {
 /// Whether the knot `x` of `knots` (degree `p`) is below `continuity` by count: degree minus
 /// its multiplicity. [`knot_cuts`] refuses a crossed line by it, and the cell path's
 /// trigger reads it, so the two cannot drift apart.
-fn below_continuity(knots: &[f64], p: usize, x: f64, continuity: usize) -> bool {
+pub(crate) fn below_continuity(knots: &[f64], p: usize, x: f64, continuity: usize) -> bool {
     let m = knots.iter().filter(|&&y| y == x).count();
     p.checked_sub(m).is_none_or(|c| c < continuity)
+}
+
+/// Pieces of a parameter range: `(from, to, span)`, as [`knot_cuts`] returns them.
+pub(crate) type KnotPieces = Vec<(f64, f64, usize)>;
+
+/// The pieces of `[lo, hi]` when it crosses exactly one knot line `x` below `continuity`
+/// ([`below_continuity`]) and its part on one side of the line (the shorter; the upper on
+/// a tie) is at most `limit` wide: the other side's pieces ([`knot_cuts`]), then that
+/// side's polynomial continued over the short part, the line treated as an end of the
+/// net. Returns the pieces, the short part's width and whether it is the lower part (the
+/// first piece; else the last). The continued polynomial `S~` at a parameter `W` of the
+/// short part lies within the first partials' size times the width of its value at `x`,
+/// the limit of the surface from the kept side (a point of the surface's closure), so
+/// `|C - S~(W)|` plus that slack bounds `C`'s distance to the surface; a caller that takes
+/// point values from the surface's own piece `S` over the short part and bounds the gap
+/// to the image point `S(W)` adds `sup |S - S~|` there twice (`NetSurface::partials`). (#18219: a trim along a face's boundary that is a
+/// C^0 join of an extended net crosses the join by rounding at every depth.) `None` when
+/// the box crosses no such line or more than one, the short part is wider than `limit`,
+/// or another knot lies strictly inside the short part (its surface is then more than one
+/// span).
+pub(crate) fn past_one_low_line(
+    knots: &[f64],
+    p: usize,
+    n: usize,
+    lo: f64,
+    hi: f64,
+    continuity: usize,
+    limit: f64,
+) -> Option<(KnotPieces, f64, bool)> {
+    let mut prev = f64::NAN;
+    let mut line: Option<f64> = None;
+    for &x in knots {
+        if x > lo && x < hi && x != prev && below_continuity(knots, p, x, continuity) {
+            if line.is_some() {
+                return None;
+            }
+            line = Some(x);
+        }
+        prev = x;
+    }
+    let x = line?;
+    let (below, above) = (x - lo, hi - x);
+    // (the short part's true surface is one span: no other knot strictly inside it, so
+    // `sup |S - S~|` over it is that span's polynomial against the kept side's)
+    let (s0, s1) = if below < above { (lo, x) } else { (x, hi) };
+    if knots.iter().any(|&k| k > s0 && k < s1) {
+        return None;
+    }
+    if below < above {
+        if !matches!(
+            below.partial_cmp(&limit),
+            Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+        ) {
+            return None;
+        }
+        let mut cuts = knot_cuts(knots, p, n, x, hi, continuity).ok()?;
+        let kept = cuts.first()?.2;
+        cuts.insert(0, (lo, x, kept));
+        Some((cuts, below, true))
+    } else {
+        if !matches!(
+            above.partial_cmp(&limit),
+            Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
+        ) {
+            return None;
+        }
+        let mut cuts = knot_cuts(knots, p, n, lo, x, continuity).ok()?;
+        let kept = cuts.last()?.2;
+        cuts.push((x, hi, kept));
+        Some((cuts, above, false))
+    }
 }
 
 /// Whether `[lo, hi]` crosses a knot line of `knots` (strictly inside it) below
@@ -4452,6 +4537,14 @@ pub struct SpanReuse<'a> {
     /// certified bound (its uv curves' term in each parameter's own form, not the fork's
     /// that steers the levels) still stops them: past it no level certifies the span.
     pub to_target: bool,
+    /// In: the caller reads a bound over the target only as "over" (the section build: it
+    /// halves the span and certifies the halves). The levels then stop as soon as the
+    /// span's least values at its pieces' middles (`piece_least`: every level's bound is
+    /// at least these) are over the target: no level certifies the span, and the bound so
+    /// far is returned (infinite where no level is proved yet) without the finer levels,
+    /// whose pieces would only prove a bound over the target. A caller that takes a proved
+    /// bound over the target as the span's bound leaves this off.
+    pub over_is_halved: bool,
 }
 
 /// [`gn_certify_span`] taking from and giving to its neighbours ([`SpanReuse`]), not the
@@ -4610,6 +4703,12 @@ pub fn gn_certify_span_reusing(
             }
         }
     }
+    // no level certifies a span whose least values are over the target: a caller that only
+    // halves it is answered at once
+    let stop_over = reuse.over_is_halved;
+    if stop_over && lb > target {
+        return Ok(bound_out);
+    }
     // the last level whose end stations were all solved, and those stations
     let mut solved_ends: Option<(u32, Vec<GnStation>)> = None;
     for level in start..=SPAN_MAX_LEVEL {
@@ -4735,6 +4834,9 @@ pub fn gn_certify_span_reusing(
                 &mut lb,
             );
             level_pieces.push(piece);
+            if stop_over && lb > target {
+                return Ok(bound_out);
+            }
         }
         if acc.proved && acc.lazy.pending {
             resolve_pending(k, &mut acc, &mut level_pieces, &sc, vary.as_deref_mut(), lb)?;
@@ -6253,6 +6355,77 @@ mod tests {
         assert!(old_failed >= 8, "{old_failed}");
         assert!(ratios.len() >= 4 * 4, "{}", ratios.len());
         assert!(median > 100.0, "{median}");
+    }
+
+    /// A span whose least values are over the target (not the fork's). A ball of radius 1
+    /// rolled round a cylinder of radius 3 standing on a plane, over the middle half of a 70
+    /// degree arc of its centre line: the plane's foot is the centre's `(x, y)`, so the
+    /// span's bound is at least `h^4 / 384` times the centre line's fourth derivative at
+    /// the span's middle, far over a target of `1e-9`, and no level certifies the span.
+    /// Asked as [`gn_certify_span`] asks, the levels go on to the first one the interval
+    /// enclosures prove, whose bound says so. Asked by a caller that only halves such a
+    /// span ([`SpanReuse::over_is_halved`]), they stop at the first piece: no level is
+    /// proved, none is kept for the halves, and the verdict is the same.
+    #[test]
+    fn a_span_over_its_least_values_stops_at_its_first_piece() {
+        let k = Kernel::default();
+        let (big_r, r) = (3.0, 1.0);
+        let (faces, nets, leader, side, feet) =
+            rolled_ball(&k, false, Vec3::ZERO, big_r, r, [10.0, 80.0]);
+        let [f0, f1] = &faces;
+        let [n0, n1] = &nets;
+        let ln = NurbsCurve::of(&leader).unwrap();
+        let rr = [r, r];
+        let station_at = |s: f64| {
+            let [fp, fc] = feet(s);
+            let (pu, pv) = nearest_uv(n0, fp);
+            let (u, v) = nearest_uv(n1, fc);
+            station(&k, [f0, f1], &leader, s, [pu, pv, u, v], rr, side)
+        };
+        let (sa, sb) = (0.25, 0.75);
+        let (a, b) = (station_at(sa), station_at(sb));
+        let h = sb - sa;
+        let d4 = leader.evaluate(0.5 * (sa + sb), 4, true, false).unwrap()[4];
+        let least = h * h * h * h / 384.0 * d4.x.abs().max(d4.y.abs());
+        let target = 1e-9;
+        assert!(least > 100.0 * target, "{least}");
+        let certify = |reuse: &mut SpanReuse<'_>| {
+            gn_certify_span_reusing(
+                &k,
+                [n0, n1],
+                &ln,
+                [f0, f1],
+                &leader,
+                &a,
+                &b,
+                rr,
+                side,
+                1,
+                target,
+                None,
+                None,
+                None,
+                reuse,
+            )
+            .unwrap()
+        };
+        // as the fork asks: the levels up to the first one proved, 2^level pieces enclosed
+        // there, for a bound over the target
+        let mut whole = SpanReuse::default();
+        let bound = certify(&mut whole);
+        assert!(bound.is_finite() && bound >= least, "{bound} {least}");
+        let kept = whole.kept.expect("a level proved");
+        assert!(kept.level >= 1, "{}", kept.level);
+        assert_eq!(kept.pieces.len(), 1 << kept.level);
+        // halved by its caller: stopped at the first piece's middle, nothing proved
+        let mut halved = SpanReuse {
+            over_is_halved: true,
+            ..SpanReuse::default()
+        };
+        let over = certify(&mut halved);
+        assert!(over > target, "{over}");
+        assert_eq!(over, f64::INFINITY);
+        assert!(halved.kept.is_none() && halved.first.is_none());
     }
 
     /// A cone of `bot` radius at z = 0 to `top` at z = `height` about the z axis, a whole

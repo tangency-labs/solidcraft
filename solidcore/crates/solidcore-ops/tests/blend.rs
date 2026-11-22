@@ -4838,6 +4838,51 @@ fn a_round_on_a_bar_swept_along_a_wide_arc_is_not_refused_as_cutting_the_part() 
     );
 }
 
+/// #17016's exact pre-fillet body: the public report's six superellipse fit-point sections,
+/// lofted and joined to its radius-6 cylinder by the first 20 script commands. The fixture
+/// is the final SCBREP05 cache slice saved by SolidCraft 0.44.1 (e151d5ea6866), preserving
+/// the cyclic C2 spline sections and the Boolean's intersection curves without refitting.
+#[test]
+fn a_cylinder_foot_round_rolls_across_the_reported_six_section_loft() {
+    // The shipped preset holds these two fixes back; every other fix is enabled.
+    solidcore_ops::session::set_thread_fixes(
+        solidcore::kernel::UpstreamFixes::NAMES
+            .iter()
+            .copied()
+            .filter(|name| {
+                !matches!(
+                    *name,
+                    "fillet_refuse_rounds_breaking_through" | "fillet_round_ends_on_outline"
+                )
+            }),
+    )
+    .unwrap();
+    let saved = solidcore_record::native::decode(include_bytes!(
+        "data/issue_17016_six_section_loft_boss.brep"
+    ))
+    .unwrap();
+    let (body, _) = Body::from_record(&saved.solid, true).unwrap();
+    assert_eq!(body.counts().unwrap()[0], 16);
+    let input = body.check(CheckLevel::All).unwrap();
+    assert!(input.is_valid(), "the pre-fillet body is invalid: {input}");
+    // The report's pick is near the foot, rather than exactly on its curved edge.
+    let foot = nearest_edge(&body, [6.0, 0.0, 33.0]);
+    let before = volume(&body);
+    let made = blend(&body, Blend::Round, &[foot], &[1.0], &[], Corners::Filled)
+        .unwrap_or_else(|error| panic!("the reported cylinder foot does not round: {error:?}"));
+    assert!(!made.made.is_empty(), "the round made no blend faces");
+    assert!(body.counts().unwrap()[0] > 16);
+    // A concave foot round fills the space between the boss and the loft.
+    assert!(volume(&body) > before, "the foot round added no material");
+    let report = body.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "the rounded body is invalid: {report}");
+    let (record, _) = body.to_record().unwrap();
+    let (reopened, _) = Body::from_record(&record, true)
+        .unwrap_or_else(|error| panic!("the rounded body does not reopen: {error:?}"));
+    let report = reopened.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "the reopened body is invalid: {report}");
+}
+
 /// #17016: the round at the foot of a cylinder boss (radius 6 about the z axis, from z = 25)
 /// standing through the top of a hull lofted through six elliptic sections, each the 12 fit
 /// pieces of [`fit_point_ellipse`] from 15 degrees, so no piece joint lies on the top. The
@@ -6057,5 +6102,40 @@ fn a_full_round_whose_rails_meet_along_part_of_one_of_them() {
                 );
             }
         }
+    }
+}
+
+/// The half capsule's outline from pole to pole (the line x = 5 and its two quarter arcs) is
+/// one chain that ends at the spheres' poles, where it runs on into the arcs left sharp. A
+/// chamfer or a round of it failed ("Fillet Surface Computation Failure", status 1001): the
+/// end's section was solved from a guess whose step off the edge was the binormal's
+/// first-order image in the sphere's parameters, which is 0 at a pole, so the solve started on
+/// the pole, where the longitude is undetermined, and found none. The step is now taken in
+/// 3D. Each end is the section in the plane through the pole square to the edge, so the blend
+/// takes off [`capsule_section`] along the line (10) and, by Pappus, turned through pi/2 about
+/// each sphere's centre. An equal chamfer of 1 has offsets 1 at a right angle.
+#[test]
+fn a_chamfer_or_round_of_a_half_capsule_s_outline_from_pole_to_pole_builds() {
+    all_fixes();
+    let pick = |b: &Body| {
+        [
+            edge_at(b, [3.0, 0.0, -4.0]),
+            edge_at(b, [5.0, 0.0, 5.0]),
+            edge_at(b, [3.0, 0.0, 14.0]),
+        ]
+    };
+    for ball in [false, true] {
+        let b = half_capsule();
+        let edges = pick(&b);
+        let kind = if ball { Blend::Round } else { Blend::Chamfer };
+        blend(&b, kind, &edges, &[1.0], &[], Corners::Filled).unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "{kind:?}");
+        let (area, moment) = capsule_section(1.0, 1.0, ball);
+        let want = HALF_CAPSULE - 10.0 * area - PI * moment;
+        assert!(
+            rel(volume(&b), want) < 1e-9,
+            "{kind:?}: {} against {want}",
+            volume(&b)
+        );
     }
 }
