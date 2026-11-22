@@ -2,7 +2,7 @@
 
 use egui::{Context, Ui, ViewportClass, ViewportCommand, ViewportId};
 use serde_json::{Value, json};
-use solidcraft_views::{DesignView, PopOut, TopBar, ViewSet, WindowId, WindowLevel, WindowOptions, WindowPlacement, WindowTarget};
+use solidcraft_views::{DesignView, PopOut, TopBar, ViewKind, ViewSet, WindowId, WindowLevel, WindowOptions, WindowPlacement, WindowTarget};
 
 use crate::ui_kit::{BackingTooltipExt as _, Container, Edge, Menu, Surface};
 use crate::{SolveApp, documents};
@@ -14,6 +14,7 @@ pub(crate) struct Windows {
     embedded: bool,
     painting: Option<WindowId>,
     scoped_focus: Option<u64>,
+    command_window: Option<WindowId>,
     painting_options: Option<WindowOptions>,
     pub(crate) painting_panels: bool,
     closing: Option<Option<u64>>,
@@ -230,6 +231,15 @@ pub(crate) fn focused_view(app: &SolveApp) -> u64 {
         .map_or(app.docs.views.active().id, |views| views.active().id)
 }
 
+/// An explicit host/command scope wins over native focus used by idle API calls.
+pub(crate) fn command_view(app: &SolveApp) -> u64 {
+    if app.view_windows.painting.is_some() || app.view_windows.command_window.is_some() {
+        app.docs.views.active().id
+    } else {
+        app.session.view_context.focused()
+    }
+}
+
 pub(crate) fn layout_views(app: &SolveApp) -> Vec<(WindowId, &DesignView)> {
     available_strip_views(app).collect()
 }
@@ -316,6 +326,14 @@ pub(crate) fn view_at(app: &SolveApp, window: Option<WindowId>, index: usize) ->
         .map_or(0, |(_, window)| window);
     let views = app.docs.views.views_of(window.unwrap_or(current)).ok_or("no_such_window")?;
     views.views().get(index).map(|view| view.id).ok_or_else(|| "no_such_view".into())
+}
+
+/// Only an explicit activation or native focus transition records the MRU receiver.
+pub(crate) fn record_local_focus(app: &mut SolveApp, view: u64) {
+    app.view_windows.last_focus = Some((app.docs.current_tab(), app.view_windows.current_window()));
+    if app.view_windows.scoped_focus.is_some() {
+        app.view_windows.scoped_focus = Some(view);
+    }
 }
 
 pub(crate) fn focus_view(app: &mut SolveApp, view: u64, window: Option<WindowId>) -> Result<(), String> {
@@ -693,7 +711,10 @@ pub(crate) fn with_strip<T>(
             .unwrap_or_default()
     });
     if local == target {
-        return action(app);
+        let previous = app.view_windows.command_window.replace(target);
+        let result = action(app);
+        app.view_windows.command_window = previous;
+        return result;
     }
     if local != 0 {
         return Err("no_such_window".into());
@@ -709,16 +730,36 @@ pub(crate) fn with_strip<T>(
     app.view_windows.parked = Some((tab, app.docs.views.ids().collect()));
     std::mem::swap(&mut app.docs.views, &mut window.views);
     host.swap(app);
-    let ribbon = std::mem::replace(&mut app.ui.tab, documents::view_workspace(app.docs.views.active().kind).into());
+    let workspace = documents::view_workspace(app.docs.views.active().kind);
+    if host.ribbon_view_workspace != workspace {
+        host.ribbon_view_workspace = workspace;
+        host.ribbon_tab = workspace.into();
+        host.ribbon_context = None;
+    }
+    let ribbon = std::mem::replace(&mut app.ui.tab, host.ribbon_tab.clone());
+    std::mem::swap(&mut app.ui.ribbon_context, &mut host.ribbon_context);
+    std::mem::swap(&mut app.ui.sketch_return_tab, &mut host.sketch_return_tab);
+    crate::drawing_workspace::swap_selection(app);
+    crate::drawing_workspace::sync_history(app);
     documents::show_active_look(app);
     app.view_windows.painting = Some(target);
     app.view_windows.painting_options = Some(window.options);
-    let result = action(app);
+    let result = if app.preferences.workspace_follows_view && app.docs.views.active().kind == ViewKind::Sheet {
+        let view = app.docs.views.active().clone();
+        crate::sheet_views::focus(app, &view).and_then(|()| action(app))
+    } else {
+        action(app)
+    };
     if let Some(options) = app.view_windows.painting_options.take() {
         window.options = options;
     }
     documents::park_active_look(app);
-    app.ui.tab = ribbon;
+    host.ribbon_tab = std::mem::replace(&mut app.ui.tab, ribbon);
+    host.ribbon_view_workspace = documents::view_workspace(app.docs.views.active().kind);
+    std::mem::swap(&mut app.ui.ribbon_context, &mut host.ribbon_context);
+    std::mem::swap(&mut app.ui.sketch_return_tab, &mut host.sketch_return_tab);
+    crate::drawing_workspace::swap_selection(app);
+    crate::drawing_workspace::sync_history(app);
     app.view_windows.painting = None;
     app.view_windows.parked = None;
     for (_, view) in &app.view_windows.foreign_views {
@@ -1857,8 +1898,11 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
                 restore_and_focus(ui.ctx());
                 app.view_windows.focus = None;
             }
-            if ui.input(|input| input.viewport().focused == Some(true)) {
+            if ui.input(|input| input.viewport().focused == Some(true)) && app.view_windows.last_focus != Some((tab, id)) {
                 app.view_windows.last_focus = Some((tab, id));
+                if let Err(error) = crate::sketch_view::sync(app) {
+                    app.set_status(error, true);
+                }
             }
             let panel_tab = match app.view_windows.last_focus {
                 Some((owner, focused)) if owner == tab && focused == id => documents::view_workspace(window.views.active().kind).into(),
@@ -1886,6 +1930,14 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             let ribbon = std::mem::replace(&mut app.ui.tab, child_tab);
             std::mem::swap(&mut app.ui.ribbon_context, &mut host.ribbon_context);
             std::mem::swap(&mut app.ui.sketch_return_tab, &mut host.sketch_return_tab);
+            crate::drawing_workspace::swap_selection(app);
+            crate::drawing_workspace::sync_history(app);
+            if app.preferences.workspace_follows_view && app.docs.views.active().kind == ViewKind::Sheet {
+                let view = app.docs.views.active().clone();
+                if let Err(error) = crate::sheet_views::focus(app, &view) {
+                    app.set_status(error, true);
+                }
+            }
             documents::show_active_look(app);
             app.view_windows.painting = Some(id);
             app.view_windows.painting_options = Some(window.options);
@@ -1899,6 +1951,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             if !options.panels || is_clean(app) {
                 crate::panel_runtime::hide_app_host(app);
             }
+            crate::workspace::sync_context(app);
             app.view_window_logic(ui.ctx());
             window_content(
                 app,
@@ -1922,9 +1975,12 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             if on_child_design {
                 documents::park_active_look(app);
                 host.ribbon_tab = std::mem::replace(&mut app.ui.tab, ribbon);
+                host.ribbon_view_workspace = documents::view_workspace(app.docs.views.active().kind);
             }
             std::mem::swap(&mut app.ui.ribbon_context, &mut host.ribbon_context);
             std::mem::swap(&mut app.ui.sketch_return_tab, &mut host.sketch_return_tab);
+            crate::drawing_workspace::swap_selection(app);
+            crate::drawing_workspace::sync_history(app);
             app.home.open = home;
             (app.custom_titlebar, app.integrated_titlebar) = decorations;
             app.view_windows.painting = None;
