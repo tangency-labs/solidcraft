@@ -765,6 +765,66 @@ fn fillet_and_chamfer_the_top_loop_of_rounded_overlapping_cylinders() {
     assert!((v - expect).abs() < 1.5, "{v} vs {expect}");
 }
 
+/// #20411: the top edge of an 8 mm extrusion of a closed control-point spline (24 and 48 poles
+/// on the superellipse |x/35.75|⁴ + |y/73.75|⁴ = 1, at equal angles, as the report gives them)
+/// rounds 1 mm. The round along the whole closed edge starts and ends at the wall's seam, and
+/// was taken for a piece of one ball there (its two feet on the wall a rounding apart): it
+/// failed with "the curve's cache is missing" (24) or "Fillet Face Creation Error" (48).
+#[test]
+fn a_closed_control_point_spline_s_extrusion_rounds_its_top_edge() {
+    use std::f64::consts::TAU;
+    let (a, b, h, r) = (35.75_f64, 73.75_f64, 8.0, 1.0);
+    for n in [24_usize, 48] {
+        let round5 = |v: f64| (v * 1e5).round() / 1e5;
+        let poles: Vec<[f64; 2]> = (0..n)
+            .map(|i| {
+                let t = TAU * i as f64 / n as f64;
+                let (c, s) = (t.cos(), t.sin());
+                [round5(a * c.signum() * c.abs().sqrt()), round5(b * s.signum() * s.abs().sqrt())]
+            })
+            .collect();
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.spline.control_point", json!({"points": poles, "periodic": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": h}));
+        let base = volume(&mut s);
+        // the edge picked 0.2 mm outside its middle on the +x side, as in the report
+        run(&mut s, "solid.fillet", json!({"edges": [[a, 0, h]], "radius": r}));
+        // The outline's length: each span of the uniform cubic B-spline by Simpson's rule.
+        let pole = |i: usize| poles[i % n];
+        let speed = |i: usize, t: f64| {
+            let w = [-3.0 * (1.0 - t).powi(2), 9.0 * t * t - 12.0 * t, -9.0 * t * t + 6.0 * t + 3.0, 3.0 * t * t];
+            let (mut x, mut y) = (0.0, 0.0);
+            for (j, wj) in w.iter().enumerate() {
+                let p = pole(i + n - 1 + j);
+                x += wj * p[0] / 6.0;
+                y += wj * p[1] / 6.0;
+            }
+            x.hypot(y)
+        };
+        let steps = 400;
+        let length: f64 = (0..n)
+            .map(|i| {
+                let dt = 1.0 / steps as f64;
+                (0..steps)
+                    .map(|k| {
+                        let t = k as f64 * dt;
+                        (speed(i, t) + 4.0 * speed(i, t + dt / 2.0) + speed(i, t + dt)) * dt / 6.0
+                    })
+                    .sum::<f64>()
+            })
+            .sum();
+        // By Pappus: the corner's section, (1 − π/4)·r², swept along the outline drawn in by its
+        // centroid's inset, (10 − 3π)/(3(4 − π))·r; a closed convex outline drawn in by d is
+        // 2πd shorter (its curvature radius is over 14 mm everywhere).
+        let inset = (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI)) * r;
+        let removed = (1.0 - PI / 4.0) * r * r * (length - TAU * inset);
+        let v = volume(&mut s);
+        assert!(((base - v) - removed).abs() < 1e-3 * removed, "{n} poles: removed {} vs {removed}", base - v);
+    }
+}
+
 /// Sketch a 40 x 30 rectangle with dimensions, extrude 20, fillet a vertical edge, cut a hole.
 #[test]
 fn box_fillet_cut_part() {
