@@ -1737,10 +1737,7 @@ impl OffsetSurface {
 
         // Leave this tol at SM_EFF_ZERO: that's where output becomes invalid.
         if l < EFF_ZERO {
-            return Err(SolidError::surface(
-                OP_EVAL,
-                SurfaceFailure::NoNormal,
-            ));
+            return Err(SolidError::surface(OP_EVAL, SurfaceFailure::NoNormal));
         }
 
         // never-assigned upstream locals are default SmVector3d values (UNDEF)
@@ -2008,7 +2005,10 @@ impl OffsetSurface {
             }
         } else {
             // Can not swap UV if I do not own the surface
-            return Err(SolidError::surface(OP_EDIT, SurfaceFailure::BaseSurfaceNotOwned));
+            return Err(SolidError::surface(
+                OP_EDIT,
+                SurfaceFailure::BaseSurfaceNotOwned,
+            ));
         }
         Ok(())
     }
@@ -2064,7 +2064,10 @@ impl OffsetSurface {
                 .transform_at_depth(k, rotate_n_move, scale, depth + 1)?;
         } else {
             // Can not transform if I do not own the surface
-            return Err(SolidError::surface(OP_EDIT, SurfaceFailure::BaseSurfaceNotOwned));
+            return Err(SolidError::surface(
+                OP_EDIT,
+                SurfaceFailure::BaseSurfaceNotOwned,
+            ));
         }
         Ok(())
     }
@@ -2097,7 +2100,10 @@ impl OffsetSurface {
             self.surface.trim_with_domain(k, trim_domain)?;
         }
         if !self.owns_surface {
-            return Err(SolidError::surface(OP_EDIT, SurfaceFailure::BaseSurfaceNotOwned));
+            return Err(SolidError::surface(
+                OP_EDIT,
+                SurfaceFailure::BaseSurfaceNotOwned,
+            ));
         }
         Ok(())
     }
@@ -4463,7 +4469,10 @@ mod tests {
         let err = off.swap_uv(&k).unwrap_err();
         assert_eq!(err.operation(), OP_EDIT);
         assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR));
-        assert_eq!(err.surface_failure(), Some(&SurfaceFailure::BaseSurfaceNotOwned));
+        assert_eq!(
+            err.surface_failure(),
+            Some(&SurfaceFailure::BaseSurfaceNotOwned)
+        );
         assert_eq!(off.offset_distance(), -0.4);
         assert!(off.extended_base_surface().is_some());
     }

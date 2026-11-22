@@ -17,8 +17,9 @@
 //! | the named causes of the volume surfaces and the implicit checks | `SM_ERR`, except [`SurfaceFailure::NoNurb`]: `SM_ERR_NULL_POINTER` (a site that reported `SM_ERR` keeps it through `with_status`) |
 //! | [`SurfaceFailure::ScaleNotUniform`], [`SurfaceFailure::CurveWithoutNurb`], [`SurfaceFailure::BallDefinitionUnreadable`], [`SurfaceFailure::PointOnAxis`], [`SurfaceFailure::IsoCircleUndefined`], [`SurfaceFailure::ExtensionNotMadeInBracket`] | `SM_ERR` |
 //! | [`SurfaceFailure::NoInputStream`] | `SM_ERR_NULL_POINTER` (or the site's, through `with_status`) |
-//! | [`SurfaceFailure::BlendCurveNotBSpline`], [`SurfaceFailure::BlendDefinitionUnreadable`], [`SurfaceFailure::NetNotCertified`], [`SurfaceFailure::CurveDimensionTooLarge`], [`SurfaceFailure::NoBSplineForm`], [`SurfaceFailure::DoesNotContinueAsItself`], [`SurfaceFailure::OffsetNestedTooDeep`],[`SurfaceFailure::BaseNormalDegenerate`], [`SurfaceFailure::InvertedPointOffOffset`], [`SurfaceFailure::BaseNotOwned`], [`SurfaceFailure::ExtensionTowardFailed`], [`SurfaceFailure::RevolutionArcOutOfRange`], [`SurfaceFailure::ExtensionSpanNotPositive`], [`SurfaceFailure::ExtensionSpansPastBound`], [`SurfaceFailure::AsItselfNetUnexpected`], [`SurfaceFailure::RevolutionAxisDegenerate`], [`SurfaceFailure::GeneratorCircleUndefined`], [`SurfaceFailure::AsItselfWeightNotPositive`], [`SurfaceFailure::RotationSenseUndefined`], [`SurfaceFailure::NoNonsingularStepoff`] | `SM_ERR` |
+//! | [`SurfaceFailure::BlendCurveNotBSpline`], [`SurfaceFailure::BlendDefinitionUnreadable`], [`SurfaceFailure::NetNotCertified`], [`SurfaceFailure::CurveDimensionTooLarge`], [`SurfaceFailure::NoBSplineForm`], [`SurfaceFailure::DoesNotContinueAsItself`], [`SurfaceFailure::OffsetNestedTooDeep`],[`SurfaceFailure::NoNormal`], [`SurfaceFailure::InvertedPointOffOffset`], [`SurfaceFailure::ExtensionTowardFailed`], [`SurfaceFailure::RevolutionArcOutOfRange`], [`SurfaceFailure::ExtensionSpanNotPositive`], [`SurfaceFailure::ExtensionSpansPastBound`], [`SurfaceFailure::AsItselfNetUnexpected`], [`SurfaceFailure::RevolutionAxisDegenerate`], [`SurfaceFailure::GeneratorCircleUndefined`], [`SurfaceFailure::AsItselfWeightNotPositive`], [`SurfaceFailure::RotationSenseUndefined`], [`SurfaceFailure::NoNonsingularStepoff`] | `SM_ERR` |
 //! | [`SurfaceFailure::RecordDoesNotRebuild`] | `SM_ERR_INVALID_INPUT` |
+//! | [`SurfaceFailure::SurfaceNotBSplineKind`] | `SM_ERR_NULL_POINTER` (class [`ErrorKind::Unsupported`]) |
 //!
 //! [`SurfaceFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
 //! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
@@ -81,7 +82,8 @@ pub enum SurfaceFailure {
     /// infinite v range or a negative volume, or the bend's own numbers are NaN.
     /// [`ErrorKind::InvalidInput`].
     BendBoxMalformed,
-    /// The surface in volume does not own its base surface, so it cannot edit it.
+    /// The surface (a surface in volume, or an offset surface) does not own its base
+    /// surface, so it cannot edit it (swap its UV, transform or trim it).
     /// [`ErrorKind::InvalidInput`].
     BaseSurfaceNotOwned,
     /// A derivative of an order above `max` was asked of a form that evaluates up to `max`.
@@ -219,15 +221,14 @@ pub enum SurfaceFailure {
     /// The offset surface given has a base that is an offset surface whose own base is an
     /// offset surface: offsets nest one deep at most. [`ErrorKind::InvalidInput`].
     OffsetNestedTooDeep,
-    /// The offset surface's base has no normal at the point (its normal is shorter than
-    /// `SM_EFF_ZERO`, even past a pole's step-off). Class `failed`.
-    BaseNormalDegenerate,
+    /// The surface has no normal at the point ([`ErrorKind::Degenerate`], `SM_ERR`).
+    NoNormal,
+    /// The caller's surface is not of a B-spline kind, which the routine reads as one
+    /// ([`ErrorKind::Unsupported`], `SM_ERR_NULL_POINTER`).
+    SurfaceNotBSplineKind,
     /// The point the base surface's inversion gives is farther from the offset surface than
     /// the tolerance. Class `failed`.
     InvertedPointOffOffset,
-    /// The offset surface given does not own its base, so cannot edit it (swap its UV,
-    /// transform or trim it). [`ErrorKind::InvalidInput`].
-    BaseNotOwned,
     /// The NLib G1R extension of the base toward the point failed (its error is the cause).
     /// Class `failed`.
     ExtensionTowardFailed,
@@ -280,9 +281,8 @@ impl SurfaceFailure {
             | Self::DoesNotContinueAsItself
             | Self::OffsetNestedTooDeep
             | Self::DerivativeOrderTooHigh { .. }
-            | Self::BaseNormalDegenerate
+            | Self::NoNormal
             | Self::InvertedPointOffOffset
-            | Self::BaseNotOwned
             | Self::ExtensionTowardFailed
             | Self::RevolutionArcOutOfRange
             | Self::ExtensionSpanNotPositive
@@ -293,7 +293,9 @@ impl SurfaceFailure {
             | Self::AsItselfWeightNotPositive
             | Self::RotationSenseUndefined
             | Self::NoNonsingularStepoff => SM_ERR,
-            Self::Missing(_) | Self::NoNurb | Self::NoInputStream => SM_ERR_NULL_POINTER,
+            Self::Missing(_) | Self::NoNurb | Self::NoInputStream | Self::SurfaceNotBSplineKind => {
+                SM_ERR_NULL_POINTER
+            }
             Self::InvalidValue(_) | Self::RecordDoesNotRebuild => SM_ERR_INVALID_INPUT,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::OffSurface(_) => SM_ERR_NOT_WITHIN_TOLERANCE,
@@ -328,8 +330,7 @@ impl SurfaceFailure {
             | Self::RecordDoesNotRebuild
             | Self::NoBSplineForm
             | Self::DoesNotContinueAsItself
-            | Self::OffsetNestedTooDeep
-            | Self::BaseNotOwned => ErrorKind::InvalidInput,
+            | Self::OffsetNestedTooDeep => ErrorKind::InvalidInput,
             Self::BoxOutsideBendHalfSpace { .. }
             | Self::BoxOutsideZeroPeriod { .. }
             | Self::PointOutsideVolumeDomain { .. }
@@ -338,8 +339,11 @@ impl SurfaceFailure {
             | Self::PseudoBoxOutsideDomain => ErrorKind::OutsideDomain,
             Self::DerivativeCombinationUnsupported { .. }
             | Self::PlainVolume
-            | Self::BSplineVolumeUnsupported => ErrorKind::Unsupported,
-            Self::PointInBendSingularity | Self::ZeroVolumeTangent { .. } => ErrorKind::Degenerate,
+            | Self::BSplineVolumeUnsupported
+            | Self::SurfaceNotBSplineKind => ErrorKind::Unsupported,
+            Self::PointInBendSingularity | Self::ZeroVolumeTangent { .. } | Self::NoNormal => {
+                ErrorKind::Degenerate
+            }
             Self::NoVolumeInverse | Self::CallFailed => ErrorKind::Failed,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
@@ -363,7 +367,7 @@ impl core::fmt::Display for SurfaceFailure {
                 "the box has a NaN bound, a degenerate infinite v range or a negative volume, or the bend's numbers are NaN",
             ),
             Self::BaseSurfaceNotOwned => {
-                f.write_str("the surface in volume does not own its base surface")
+                f.write_str("the surface does not own its base surface")
             }
             Self::DerivativeOrderTooHigh { max } => {
                 write!(f, "a derivative order above {max} was asked")
@@ -435,9 +439,9 @@ impl core::fmt::Display for SurfaceFailure {
             Self::NoBSplineForm => f.write_str("the surface is of a kind with no B-spline form"),
             Self::DoesNotContinueAsItself => f.write_str("only a cone, cylinder, sphere or torus continues as itself"),
             Self::OffsetNestedTooDeep => f.write_str("the base of the offset surface's base is an offset surface"),
-            Self::BaseNormalDegenerate => f.write_str("the base surface's normal is degenerate"),
+            Self::NoNormal => f.write_str("the surface has no normal at the point"),
+            Self::SurfaceNotBSplineKind => f.write_str("the surface is not of a B-spline kind"),
             Self::InvertedPointOffOffset => f.write_str("the inverted point is farther from the offset surface than the tolerance"),
-            Self::BaseNotOwned => f.write_str("the offset surface does not own its base, so cannot edit it"),
             Self::ExtensionTowardFailed => f.write_str("the G1R extension toward the point failed"),
             Self::RevolutionArcOutOfRange => f.write_str("an arc of the surface of revolution or its parameter length is out of range"),
             Self::ExtensionSpanNotPositive => f.write_str("the span length of the extension is not positive"),
@@ -730,14 +734,19 @@ mod tests {
                 SM_ERR,
                 K::InvalidInput,
             ),
-            (SurfaceFailure::BaseNotOwned, SM_ERR, K::InvalidInput),
+            (SurfaceFailure::BaseSurfaceNotOwned, SM_ERR, K::InvalidInput),
             (
                 SurfaceFailure::RecordDoesNotRebuild,
                 SM_ERR_INVALID_INPUT,
                 K::InvalidInput,
             ),
             (SurfaceFailure::NetNotCertified, SM_ERR, K::Failed),
-            (SurfaceFailure::BaseNormalDegenerate, SM_ERR, K::Failed),
+            (SurfaceFailure::NoNormal, SM_ERR, K::Degenerate),
+            (
+                SurfaceFailure::SurfaceNotBSplineKind,
+                SM_ERR_NULL_POINTER,
+                K::Unsupported,
+            ),
             (SurfaceFailure::InvertedPointOffOffset, SM_ERR, K::Failed),
             (SurfaceFailure::ExtensionTowardFailed, SM_ERR, K::Failed),
             (SurfaceFailure::RevolutionArcOutOfRange, SM_ERR, K::Failed),
