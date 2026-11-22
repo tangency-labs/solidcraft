@@ -132,7 +132,7 @@ impl Rng {
 /// Memoisation caches owned by a [`Kernel`] (upstream `SmCacheMgr*`).
 ///
 /// Clearing must never change results, only speed.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct Caches {
     /// Not upstream (#2568): the results of `SmBSplineCurve::AssertValid`'s global
@@ -140,12 +140,32 @@ pub struct Caches {
     /// is not solved again. A [`RefCell`] so the check can fill it through the `&Kernel`
     /// it takes (the kernel stays `Send`; it is not shared between threads).
     pub(crate) curve_analysis: RefCell<crate::nurbs::b_spline_curve::analysis::AnalysisMemo>,
+    /// Not upstream (#18166): whether a lazily built UV trim raises its edge's tolerance by
+    /// the trim's proved distance from the edge (`topology::edgeuse::p3::trim_raise_distance`),
+    /// as it does by default, or by upstream's sampled distance, as a file's translation asks
+    /// through [`Kernel::with_sampled_trim_raise`]. Crate-private: this is not a kernel
+    /// option, only the import's narrow seam. (tangency-labs/solidcore#3368 makes the proved
+    /// raise fast enough for import and removes the sampled path.)
+    pub(crate) prove_lazy_trim_raise: bool,
+}
+
+impl Default for Caches {
+    fn default() -> Self {
+        Self {
+            curve_analysis: RefCell::default(),
+            prove_lazy_trim_raise: true,
+        }
+    }
 }
 
 impl Caches {
-    /// Drops all cached data.
+    /// Drops all cached data. The trim raise's mode stays: clearing a kernel's caches must
+    /// change no result.
     pub fn clear(&mut self) {
-        *self = Self::default();
+        *self = Self {
+            prove_lazy_trim_raise: self.prove_lazy_trim_raise,
+            ..Self::default()
+        };
     }
 }
 
@@ -178,6 +198,7 @@ pub struct WorkCounters {
     classification_snapshots: Cell<u64>,
     orient_boxes: Cell<u64>,
     ball_certified_roots: Cell<u64>,
+    curved_edge_runs: Cell<u64>,
     blends_recertified: Cell<u64>,
     vertex_drops: Cell<u64>,
     seam_tests: Cell<u64>,
@@ -341,6 +362,16 @@ impl WorkCounters {
         self.ball_certified_roots.get()
     }
 
+    /// Curved intersection pieces classified as running along a face edge
+    /// (`CurveClassification::classify_edge_interval`, WR-305): each one certified within the
+    /// intersection tolerance of it as a whole (`curve_runs_along`, or the worst-first bound of
+    /// #18065). Not the fork's (a test's witness that a body reaches the
+    /// certificate).
+    #[must_use]
+    pub fn curved_edge_runs(&self) -> u64 {
+        self.curved_edge_runs.get()
+    }
+
     /// Procedural blends recertified as a record's faces got their definitions back
     /// (`surface::procedural_blend::convert::definition_surface`): each certificate that
     /// ran, not each blend [`Kernel::recertify_memo`] answered. Not the fork's (a test's
@@ -390,6 +421,7 @@ impl WorkCounters {
         self.classification_snapshots.set(0);
         self.orient_boxes.set(0);
         self.ball_certified_roots.set(0);
+        self.curved_edge_runs.set(0);
         self.blends_recertified.set(0);
         self.vertex_drops.set(0);
         self.seam_tests.set(0);
@@ -510,6 +542,12 @@ impl WorkCounters {
     pub(crate) fn add_ball_certified_root(&self) {
         self.ball_certified_roots
             .set(self.ball_certified_roots.get().saturating_add(1));
+    }
+
+    /// Counts one curved piece certified to run along a face edge.
+    pub(crate) fn add_curved_edge_run(&self) {
+        self.curved_edge_runs
+            .set(self.curved_edge_runs.get().saturating_add(1));
     }
 
     /// Counts one procedural blend recertified as its record's face got it back.
@@ -991,6 +1029,28 @@ impl Kernel {
         }
     }
 
+    /// Internal to file import, not a kernel option: runs `f` with lazily built UV trims
+    /// raised by upstream's sampled distance instead of #18166's proved one, then restores
+    /// the proved raise, whether `f` returns a value or an error.
+    ///
+    /// A file's translation builds every trim of every face it reads, and proving each one
+    /// cost many times the translation (a 561-part assembly opened in 126 s instead of
+    /// 20 s). Its trims are then raised as before #18166. A panic instead drops the kernel
+    /// (solidcraft-smlib's `call_on` never reuses a kernel a panic interrupted), so no
+    /// kernel keeps sampled trims past the import.
+    ///
+    /// Do not call this outside file import: https://github.com/tangency-labs/solidcore/issues/3368
+    /// makes the proved raise fast enough for import and then removes this path, so one
+    /// implementation remains.
+    #[doc(hidden)]
+    pub fn with_sampled_trim_raise<T>(&mut self, f: impl FnOnce(&mut Kernel) -> T) -> T {
+        let proved = self.caches.prove_lazy_trim_raise;
+        self.caches.prove_lazy_trim_raise = false;
+        let out = f(self);
+        self.caches.prove_lazy_trim_raise = proved;
+        out
+    }
+
     /// What the profiler recorded since the last call (feature `profile`;
     /// [`crate::profile::Profiler::take`]); the records then start afresh.
     #[cfg(feature = "profile")]
@@ -1254,9 +1314,10 @@ mod tests {
                 w.proto_vertex_point_solves(),
                 w.merge_record_visits(),
                 w.infinite_region_searches(),
+                w.curved_edge_runs(),
             )
         };
-        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
         w.add_face_pair();
         w.add_face_pair();
         w.add_loop_classified();
@@ -1271,11 +1332,12 @@ mod tests {
         w.add_merge_record_visits(3);
         w.add_infinite_region_search();
         w.add_infinite_region_search();
-        assert_eq!(counts(w), (2, 1, 1, 1, 3, 1, 1, 1, 3, 2));
+        w.add_curved_edge_run();
+        assert_eq!(counts(w), (2, 1, 1, 1, 3, 1, 1, 1, 3, 2, 1));
         // each kernel counts its own work
         assert_eq!(Kernel::default().work_counters.face_pairs(), 0);
         w.reset();
-        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0));
     }
 
     #[test]

@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let namespace = namespace.replace('-', "_");
     let name = name.replace('-', "_");
     let output = format!(
-        "use bindings::{namespace}::{name}::{{clock, commands, control, files, log, types::{{self, PluginError}}}};\n\
+        "use bindings::{namespace}::{name}::{{clock, commands, control, design_state, files, forms, log, storage, types::{{self, PluginError}}}};\n\
          macro_rules! call_entry {{ ($guest:expr, $store:expr, $entry:expr, $params:expr) => {{ $guest.{namespace}_{name}_entry().call_execute($store, $entry, $params) }}; }}\n"
     );
     fs::write(PathBuf::from(env::var("OUT_DIR")?).join("aliases.rs"), output)?;
@@ -35,5 +35,27 @@ fn main() -> Result<(), Box<dyn Error>> {
          macro_rules! call_import {{ ($guest:expr, $store:expr, $entry:expr, $file:expr, $options:expr) => {{ $guest.{namespace}_{name}_importer().call_import_file($store, $entry, $file, $options) }}; }}\n"
     );
     fs::write(PathBuf::from(env::var("OUT_DIR")?).join("importer.rs"), importer)?;
+    // Keep the shipped 0.1 WIT frozen. Only the optional export world is additive, generated
+    // against its original error type so legacy command/importer bindings remain unchanged.
+    let older = "../craft-plugin/wit-0.1/plugin.wit";
+    println!("cargo:rerun-if-changed={older}");
+    let (_, additive) = source.split_once("\ninterface dialog-provider").ok_or("missing dialog interfaces")?;
+    let older_wit = format!("{}\ninterface dialog-provider{additive}", fs::read_to_string(older)?);
+    let dialog = format!(
+        "mod dialog_bindings {{\n\
+             wasmtime::component::bindgen!({{\n\
+                 inline: {older_wit:?}, world: \"dialog-plugin\",\n\
+                 with: {{\n\
+                     \"{package_name}/types\": super::bindings::{namespace}::{name}::types,\n\
+                     \"{package_name}/commands\": super::bindings::{namespace}::{name}::commands,\n\
+                     \"{package_name}/log\": super::bindings::{namespace}::{name}::log,\n\
+                     \"{package_name}/control\": super::bindings::{namespace}::{name}::control,\n\
+                     \"{package_name}/files\": super::bindings::{namespace}::{name}::files,\n\
+                     \"{package_name}/clock\": super::bindings::{namespace}::{name}::clock,\n\
+                 }},\n\
+             }});\n\
+         }}\n"
+    );
+    fs::write(PathBuf::from(env::var("OUT_DIR")?).join("dialog_0_1.rs"), dialog)?;
     Ok(())
 }

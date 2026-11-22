@@ -19,7 +19,7 @@ impl Model {
     /// kinds, stale/primed results and `no_cache` continue through the ordinary evaluator.
     pub fn evaluate_shared(&mut self, doc: &Arc<Document>) -> bool {
         let reusable = !self.no_cache
-            && self.primed.is_none()
+            && self.primed.is_empty()
             && self.placement_inputs.as_ref().is_some_and(|inputs| {
                 inputs.state.upgrade().is_some_and(|state| Arc::ptr_eq(&state, &self.state()))
                     && !self.is_stale()
@@ -32,7 +32,7 @@ impl Model {
         }
         self.evaluate(doc);
         self.mark_fingerprinted(doc);
-        if !self.no_cache && self.primed.is_none() && self.placement_local {
+        if !self.no_cache && self.primed.is_empty() && self.placement_local {
             self.placement_inputs = Some(Inputs { document: doc.clone(), state: Arc::downgrade(&self.state()) });
         }
         true
@@ -44,7 +44,7 @@ impl Model {
     /// before the pins, or 0.
     pub fn refingerprint_shared(&mut self, doc: &Arc<Document>, keep: usize) {
         let proven = !self.no_cache
-            && self.primed.is_none()
+            && self.primed.is_empty()
             && self.placement_inputs.as_ref().is_some_and(|inputs| inputs.state.upgrade().is_some_and(|state| Arc::ptr_eq(&state, &self.state())))
             && !self.is_stale();
         self.refingerprint_from(doc, keep);
@@ -105,6 +105,7 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
                 direction: _,
                 distance2: _,
                 start_offset: _,
+                symmetric_offset: _,
                 through_all,
                 second_follows_first: _,
                 taper: _,

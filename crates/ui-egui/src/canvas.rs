@@ -96,11 +96,16 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         _ => return None,
     };
     Some(match &d.kind {
-        Kind::Extrude { start, all, taper, .. } => {
+        Kind::Extrude { start, all, taper, direction, .. } => {
             let n = normal?;
             let plane = solidcore_record::Plane::from_normal(at, n)?;
-            let from =
-                from_slope_height(app, d, &plane, at, *all, taper).or_else(|| reference_height(app, d, "From Object", &plane, at)).unwrap_or(0.0);
+            let two_sided = crate::dialogs::two_sided(*direction);
+            // The window sends a taper only with one side (positive or negative), as the build
+            // gets it.
+            let taper = if *direction < 2 { taper.as_str() } else { "" };
+            let from = from_slope_height(app, d, &plane, at, *all, taper, two_sided)
+                .or_else(|| reference_height(app, d, "From Object", &plane, at))
+                .unwrap_or(0.0);
             let offset = if start.trim().is_empty() { 0.0 } else { crate::length_input::eval(&app.session.doc, start, ValueKind::Length).ok()? };
             (at + n * (from + offset), Some(n))
         }
@@ -218,24 +223,37 @@ pub(crate) fn profile_plane(app: &SolveApp, sketch: u64) -> Option<solidcore_rec
 }
 
 /// Where an extrude From a flat face at a slant starts above `centre`, on the face, when the
-/// build starts it there ([`solidcraft_engine::doc::from_slope_height`]): not with To Object,
-/// Through All (`all`) or a nonzero `taper`, nor for an edited extrude kept on its old start
-/// at the face's level (`from_level`). `None` otherwise, so the arrow starts at
-/// [`reference_height`] as before.
-fn from_slope_height(app: &SolveApp, d: &Dialog, plane: &solidcore_record::Plane, centre: Vec3, all: bool, taper: &str) -> Option<f64> {
-    let to = d.inputs.iter().any(|input| input.label == "To Object" && !input.items.is_empty());
+/// build starts it there ([`solidcraft_engine::doc::from_slope_height`], which decides by the
+/// same rule as the build: To Object on a flat end, Through All (`all`), a nonzero `taper`, Two
+/// Sides (`two_sided`)), and not for an edited extrude kept on its old start at the face's level
+/// (`from_level`). `None` otherwise, so the arrow starts at [`reference_height`] as before.
+fn from_slope_height(
+    app: &SolveApp,
+    d: &Dialog,
+    plane: &solidcore_record::Plane,
+    centre: Vec3,
+    all: bool,
+    taper: &str,
+    two_sided: bool,
+) -> Option<f64> {
+    let to_point = crate::dialogs::object_point(&d.inputs, "To Object").and_then(|point| {
+        let p = point.as_array()?;
+        Some(Vec3::new(p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?))
+    });
     let tapered = !taper.trim().is_empty() && crate::length_input::eval(&app.session.doc, taper, ValueKind::Angle).is_ok_and(|a| a != 0.0);
-    let kept_level = d
-        .editing
-        .and_then(|(id, _)| app.session.doc.feature(id))
-        .is_some_and(|f| matches!(&f.kind, solidcraft_engine::doc::FeatureKind::Extrude { extent, .. } if extent.from_level));
-    if to || all || tapered || kept_level {
+    // An edit that takes To Object off clears `from_level`, as `timeline.edit` does.
+    let has_to = d.inputs.iter().any(|input| input.label == "To Object" && !input.items.is_empty());
+    let kept_level = d.editing.and_then(|(id, _)| app.session.doc.feature(id)).is_some_and(
+        |f| matches!(&f.kind, solidcraft_engine::doc::FeatureKind::Extrude { extent, .. } if extent.from_level && (has_to || extent.to.is_none())),
+    );
+    if kept_level {
         return None;
     }
     let point = crate::dialogs::object_point(&d.inputs, "From Object")?;
     let p = point.as_array()?;
     let p = Vec3::new(p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?);
-    solidcraft_engine::doc::from_slope_height(&crate::open_meshing::session_world(&app.session), plane, centre, p)
+    let ends = solidcraft_engine::doc::ExtrudeEnds { to: None, through_all: all, tapered, two_sided };
+    solidcraft_engine::doc::from_slope_height(&crate::open_meshing::session_world(&app.session), plane, centre, p, to_point, ends)
 }
 
 fn reference_height(app: &SolveApp, d: &Dialog, label: &str, plane: &solidcore_record::Plane, centre: Vec3) -> Option<f64> {
@@ -374,6 +392,7 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
 
 /// Draw the manipulator and the value box (called by the viewport after the model is drawn).
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj) {
+    let _tool_window = ToolWindow::enter(app);
     crate::extrude_face_snap::set(None);
     // While OK computes, the inputs hold what it computes: no arrow to drag, no box to type in.
     if app.applying.is_some() {
@@ -1038,8 +1057,32 @@ pub(crate) fn boxes_shown(ctx: &egui::Context) -> bool {
 
 /// Whether the command's value box takes the keyboard this frame: as the window opens, and after
 /// a pick. Without boxes in the view, it is left for the command window's value field (#9479).
+/// Only the window that shows the command has value boxes (see [`ToolWindow`]).
 fn take_focus(ctx: &egui::Context, d: &mut Dialog) -> bool {
-    boxes_shown(ctx) && std::mem::take(&mut d.focus)
+    boxes_shown(ctx) && TOOL_WINDOW.get() && std::mem::take(&mut d.focus)
+}
+
+thread_local! {
+    /// Whether the window being drawn shows the open command (always, with one window).
+    static TOOL_WINDOW: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// While it lives, value boxes are drawn only if the window being drawn shows the open command.
+/// The keyboard is in that window. Views of the design in other windows draw the manipulator
+/// alone: their box would share its field's text state, and its keyboard, with the real one.
+struct ToolWindow;
+
+impl ToolWindow {
+    fn enter(app: &SolveApp) -> ToolWindow {
+        TOOL_WINDOW.set(crate::view_windows::shows_tool(app));
+        ToolWindow
+    }
+}
+
+impl Drop for ToolWindow {
+    fn drop(&mut self) {
+        TOOL_WINDOW.set(true);
+    }
 }
 
 /// The command's main value in the viewport, next to the geometry: the keyboard goes here while
@@ -1098,7 +1141,7 @@ fn value_box_full(
     place: BoxPlace,
 ) -> Option<egui::Rect> {
     // Off in Preferences: the value is typed in the command window only (#9479).
-    if !boxes_shown(ui.ctx()) {
+    if !boxes_shown(ui.ctx()) || !TOOL_WINDOW.get() {
         return None;
     }
     let t = Tokens::get();
