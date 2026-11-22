@@ -447,9 +447,10 @@ pub enum BlendFailure {
         /// The edges of the fillet B-rep searched.
         candidates: usize,
     },
-    /// The face `face` a mate vertex is classified to has a surface of kind `kind` (its type
-    /// string), which is not of a B-spline class: the mate's point is evaluated on the
-    /// surface's B-spline extension, and this kind has none. An unsupported kind
+    /// The face `face` a point or curve is built on (a mate vertex's face, or the face a
+    /// rail/rail interpolation curve lies on) has a surface of kind `kind` (its type string),
+    /// which is not of a B-spline class: the point or curve is evaluated on the surface's
+    /// B-spline extension, and this kind has none. An unsupported kind
     /// ([`ErrorKind::Unsupported`]); status `SM_ERR_NULL_POINTER` (the `NER` of the cast it
     /// replaces).
     MateFaceSurfaceNotBSpline {
@@ -2113,7 +2114,7 @@ impl core::fmt::Display for BlendFailure {
             ),
             Self::MateFaceSurfaceNotBSpline { face, kind } => write!(
                 f,
-                "{}: the mate's face {face:?} has a {kind} surface, which is not of a B-spline class: the mate is not evaluated on it",
+                "{}: the face {face:?} has a {kind} surface, which is not of a B-spline class: no point or curve is built on it",
                 self.class()
             ),
             Self::RailCrossingNotConverged { face } => write!(
@@ -3443,7 +3444,7 @@ mod tests {
             ErrorKind::Unsupported,
             SM_ERR_NULL_POINTER,
             false,
-            &format!("the mate's face {face:?} has a SmOffsetSurface_TYPE surface, which is not of a B-spline class: the mate is not evaluated on it"),
+            &format!("the face {face:?} has a SmOffsetSurface_TYPE surface, which is not of a B-spline class: no point or curve is built on it"),
         );
         assert_fillet_geom_cause(
             BlendFailure::RailCrossingNotConverged { face },
