@@ -322,6 +322,7 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
     // The body the extrude starts on, when it is in a component inside the active one: it takes
     // part as the active component's own bodies do (#5679).
     let mut started_on = None;
+    let mut hidden_face = None;
     let (base, n) = if let Some(point) = grouped {
         let (mesh, index, distance, name) = super::face::face_at_state(st, point, str_(p, "face_body")).ok().flatten()?;
         if distance > (mesh.bounds().diagonal() * 1e-3).max(1e-3) * 10.0 {
@@ -332,8 +333,11 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
         (point, normal)
     } else {
         if p.get("face").is_none() {
-            started_on =
-                feature_sketch(s, p, "Extrude").ok().and_then(|sketch| face_body_reached(s, sketch).ok().flatten()).filter(|b| s.body_visible(b));
+            let reached = feature_sketch(s, p, "Extrude").ok().and_then(|sketch| face_body_reached(s, sketch).ok().flatten());
+            (started_on, hidden_face) = match reached {
+                Some(b) if !s.body_visible(&b) => (None, Some(b)),
+                reached => (reached, None),
+            };
         }
         extrude_base(s, p)?
     };
@@ -372,6 +376,12 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
     } else {
         active_scope(s, st)
     };
+    // The hidden body the sketch is on is never probed: a Join or Cut that names no body leaves it alone.
+    if parts.is_empty()
+        && let Some(hidden) = &hidden_face
+    {
+        bodies.retain(|b| &b.name != hidden);
+    }
     if parts.is_empty()
         && let Some(body) = started_on.as_deref().and_then(|name| st.body(name))
         && !bodies.iter().any(|b| b.name == body.name)
@@ -1150,7 +1160,8 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
             let auto = Operation::parse(auto_operation_in(s, p, &s.model.state()).unwrap_or("new")).unwrap_or(Operation::NewBody);
             // A Join that names no body would be refused for a hidden face body: Auto makes a new body.
             let hidden = face_body.is_none() && face_body_reached(s, sketch).ok().flatten().is_some_and(|b| !s.body_visible(&b));
-            if auto == Operation::Join && hidden && string_list(cmd, p, "targets")?.is_empty() { Operation::NewBody } else { auto }
+            let named = !string_list(cmd, p, "targets")?.is_empty() || !string_list(cmd, p, "participants")?.is_empty();
+            if auto == Operation::Join && hidden && !named { Operation::NewBody } else { auto }
         }
         _ => operation(p, cmd)?,
     };
@@ -1356,8 +1367,6 @@ fn shown_face_body(s: &Session, sketch: u64, cmd: &str) -> Result<Option<String>
         reached => Ok(reached),
     }
 }
-
-const NO_VISIBLE_JOIN: &str = "no visible body to join; show a body, choose explicit targets, or use New Body";
 
 /// The bodies a Join named none for: the body whose face a profile sketch is on (the first
 /// sketch that is on one), as for an extrude, also in a component inside the active one, moved
@@ -4510,7 +4519,7 @@ fn loft(s: &mut Session, p: &Value) -> Result<Value> {
             // Empty targets mean automatic scope, not "no bodies". Never fall back to that
             // scope when every candidate is hidden; an explicit target can still choose one.
             if targets.is_empty() {
-                return Err(bad(cmd, NO_VISIBLE_JOIN));
+                return Err(bad(cmd, "no visible body to join; show a body, choose explicit targets, or use New Body"));
             }
         }
     }

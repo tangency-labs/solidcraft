@@ -1915,10 +1915,11 @@ fn loft_join_does_not_fall_back_from_a_hidden_sketch_face_body() {
 
 /// #14476: a 10 mm cube `Stock` in component Part, a shown 10 mm cube `Block` beside it at the top
 /// level, and, with the top level active, a sketch on Stock's top face drawn by `draw` (world
-/// points in, sketch points out); then Stock (`hide` "body") or Part's placement is hidden.
+/// points in, sketch points out); then Stock (`hide` "body") or Part's placement is hidden. With
+/// `hide` "own", Stock is a top-level body too, and hidden.
 fn sketch_on_a_hidden_face(hide: &str, draw: impl FnOnce(&mut Session, &dyn Fn(f64, f64) -> [f64; 2])) -> Session {
     let mut s = Session::default();
-    let part = run(&mut s, "component.create", json!({"name": "Part"}));
+    let part = if hide == "own" { Value::Null } else { run(&mut s, "component.create", json!({"name": "Part"})) };
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Stock"}));
     run(&mut s, "component.activate", json!({"component": "root"}));
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [10, 0, 0], "operation": "new", "body_name": "Block"}));
@@ -1929,7 +1930,7 @@ fn sketch_on_a_hidden_face(hide: &str, draw: impl FnOnce(&mut Session, &dyn Fn(f
         };
         draw(s, &at);
     });
-    if hide == "body" {
+    if hide == "body" || hide == "own" {
         run(&mut s, "browser.visibility", json!({"items": ["Stock"], "visible": false}));
     } else {
         run(&mut s, "browser.visibility", json!({"paths": [[part["occurrence"]]], "visible": false}));
@@ -1967,20 +1968,33 @@ fn extrude_join_refuses_a_hidden_sketch_face_body() {
     assert_join_refused(&mut s, "solid.extrude", json!({"distance": 3, "operation": "join"}));
 }
 
-/// Auto never joins onto the hidden body under the sketch, up from its face or down into it: it
+/// Auto never joins or cuts the hidden body under the sketch, up from its face or down into it,
+/// whether that body is in a hidden part, hidden in a shown part, or hidden at the top level: it
 /// makes a new body and leaves both cubes as they were.
 #[test]
 fn extrude_auto_from_a_hidden_bodys_face_makes_a_new_body() {
-    for distance in [3, -3] {
-        let mut s = sketch_on_a_hidden_face("body", |s, at| {
-            run(s, "sketch.rectangle.two_point", json!({"p0": at(2.0, 2.0), "p1": at(8.0, 8.0)}));
-        });
-        let bodies = s.model.state().bodies.len();
-        run(&mut s, "solid.extrude", json!({"distance": distance, "operation": "auto"}));
-        assert!((body_volume(&s, "Stock") - 1000.0).abs() < 1e-6, "{distance}: Stock {:.1}", body_volume(&s, "Stock"));
-        assert!((body_volume(&s, "Block") - 1000.0).abs() < 1e-6, "{distance}: Block {:.1}", body_volume(&s, "Block"));
-        assert_eq!(s.model.state().bodies.len(), bodies + 1, "{distance}");
+    for hide in ["body", "placement", "own"] {
+        for distance in [3, -3] {
+            let mut s = sketch_on_a_hidden_face(hide, |s, at| {
+                run(s, "sketch.rectangle.two_point", json!({"p0": at(2.0, 2.0), "p1": at(8.0, 8.0)}));
+            });
+            let bodies = s.model.state().bodies.len();
+            run(&mut s, "solid.extrude", json!({"distance": distance, "operation": "auto"}));
+            let case = format!("{hide} {distance}");
+            assert!((body_volume(&s, "Stock") - 1000.0).abs() < 1e-6, "{case}: Stock {:.1}", body_volume(&s, "Stock"));
+            assert!((body_volume(&s, "Block") - 1000.0).abs() < 1e-6, "{case}: Block {:.1}", body_volume(&s, "Block"));
+            assert_eq!(s.model.state().bodies.len(), bodies + 1, "{case}");
+        }
     }
+}
+
+/// Auto with explicit participants keeps them: the Join goes into the named shown cube.
+#[test]
+fn extrude_auto_from_a_hidden_bodys_face_keeps_named_participants() {
+    let mut s = sketch_on_a_hidden_face("body", rectangle_over_both_cubes);
+    run(&mut s, "solid.extrude", json!({"distance": 3, "operation": "auto", "participants": ["Block"]}));
+    assert!((body_volume(&s, "Stock") - 1000.0).abs() < 1e-6, "Stock {:.1}", body_volume(&s, "Stock"));
+    assert!(body_volume(&s, "Block") > 1000.0 + 1.0, "Block {:.1}", body_volume(&s, "Block"));
 }
 
 #[test]
