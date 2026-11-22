@@ -1085,10 +1085,99 @@ fn dialog_hook_discards_selection_baselines_when_the_document_changes() {
         let expected = (!changed_document).then(|| json!(["prefilled-a"]));
         assert_eq!(values.get("bodies"), expected.as_ref(), "no old selection may be sent to the next hook");
         assert_eq!(values["width"], if changed_document { 1.0 } else { 12.0 }, "ordinary field baselines still restore");
-        assert!(dialog.fields.as_ref().unwrap().iter().filter(|(f, _)| f.key == "bodies").all(|(f, _)| f.hook_baseline.is_none()));
+        let baselines = dialog.fields.as_ref().unwrap().iter().filter(|(f, _)| f.key == "bodies").all(|(f, _)| f.hook_baseline.is_none());
+        assert_eq!(baselines, changed_document, "only a document change drops the hook's selection");
         assert!(dialog.hook.as_ref().unwrap().generation > 0);
         drop(send);
     }
+}
+
+#[test]
+fn dialog_hook_keeps_its_last_reply_on_screen_while_the_next_one_is_pending() {
+    let schema = json!({"type":"object","properties":{
+        "reveal":{"type":"number","default":2},
+        "plinth":{"type":"boolean","default":false},
+        "plinth_type":{"type":"string","default":"legs","oneOf":[{"const":"legs"},{"const":"box"}],
+            "x-solidcraft-visible-when":{"field":"plinth","eq":true}}
+    }});
+    let reply = || {
+        solidcraft_engine::plugin::dialog::apply(
+            &schema,
+            &json!({"reveal":2,"plinth":false,"plinth_type":"legs"}),
+            &Default::default(),
+            Some(r#"{"plinth":{"default":true}}"#),
+            false,
+        )
+        .unwrap()
+    };
+    let shown = |dialog: &EntryDialog| {
+        let fields = dialog.fields.as_ref().unwrap();
+        (fields.iter().map(|(_, i)| i.clone()).collect::<Vec<_>>(), fields.iter().map(|(f, _)| f.visible).collect::<Vec<_>>())
+    };
+    let mut h = hook_dialog_harness();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.fields = form(&schema);
+    dialog.hook.as_mut().unwrap().schema = schema.clone();
+    assert!(apply_hook_reply(dialog, 0, reply()));
+    set_input(dialog.fields.as_mut().unwrap(), "reveal", Input::Number(3.0));
+    let before = shown(dialog);
+    poll_hooks(&mut h.app, &h.ctx);
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    let generation = dialog.hook.as_ref().unwrap().generation;
+    assert!(generation > 0, "the change starts a new generation");
+    assert_eq!(shown(dialog), before, "nothing moves while the next reply is pending");
+    let fields = dialog.fields.as_ref().unwrap();
+    assert_eq!(params(fields).unwrap(), json!({"reveal":3.0,"plinth":true,"plinth_type":"legs"}));
+    assert_eq!(hook_values(fields)["plinth"], false, "the hook still gets the value from before its default");
+    assert!(apply_hook_reply(dialog, generation, reply()));
+    assert_eq!(shown(dialog), before, "an equal reply changes nothing");
+}
+
+#[test]
+fn dialog_hook_request_keeps_a_selection_its_pre_hook_controller_shows() {
+    let schema = json!({"type":"object","properties":{
+        "plinth":{"type":"boolean","default":true},
+        "bodies":{"type":"array","items":{"type":"string"},"maxItems":1,"x-solidcraft-visible-when":{"field":"plinth","eq":true}}
+    }});
+    let mut h = hook_dialog_harness();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.fields = form(&schema);
+    dialog.hook.as_mut().unwrap().schema = schema.clone();
+    let (_, input) = dialog.fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "bodies").unwrap();
+    *input = Input::Selection(vec![Sel::Body { name: "a".into() }]);
+    let update = solidcraft_engine::plugin::dialog::apply(
+        &schema,
+        &json!({"plinth":true,"bodies":["a"]}),
+        &Default::default(),
+        Some(r#"{"plinth":{"value":false}}"#),
+        false,
+    )
+    .unwrap();
+    assert!(apply_hook_reply(dialog, 0, update));
+    let fields = dialog.fields.as_ref().unwrap();
+    assert!(!fields.iter().find(|(f, _)| f.key == "bodies").unwrap().0.visible, "the hook's value hides the selection on screen");
+    let values = hook_values(fields);
+    assert_eq!(values["plinth"], true);
+    assert_eq!(values.get("bodies"), Some(&json!(["a"])), "the next hook still gets the selection its sent controller shows");
+}
+
+#[test]
+fn dialog_hook_restored_field_takes_the_conditional_default_its_controller_now_gives() {
+    let schema = json!({"type":"object","properties":{
+        "mode":{"type":"boolean","default":false},
+        "depth":{"type":"number","default":1,"x-solidcraft-defaults":[{"when":{"field":"mode","eq":true},"value":5}]}
+    }});
+    let reply =
+        |values: Value, patch: &str| solidcraft_engine::plugin::dialog::apply(&schema, &values, &Default::default(), Some(patch), false).unwrap();
+    let mut h = hook_dialog_harness();
+    let dialog = h.app.plugin_menu.dialogs.last_mut().unwrap();
+    dialog.fields = form(&schema);
+    dialog.hook.as_mut().unwrap().schema = schema.clone();
+    assert!(apply_hook_reply(dialog, 0, reply(json!({"mode":false,"depth":1}), r#"{"depth":{"default":24}}"#)));
+    set_input(dialog.fields.as_mut().unwrap(), "mode", Input::Boolean(true));
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["depth"], 24.0, "the hook value stays while its reply is pending");
+    assert!(apply_hook_reply(dialog, 0, reply(json!({"mode":true,"depth":1}), "{}")));
+    assert_eq!(params(dialog.fields.as_ref().unwrap()).unwrap()["depth"], 5.0, "the reply dropped depth, so mode's default applies");
 }
 
 #[test]

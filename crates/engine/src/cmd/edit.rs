@@ -2661,7 +2661,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         // Offset Plane has no parameter mapping in `frames::map_local`: its constructor maps
         // the complete definition, or captures a face directly in the authoring frame.
         let _world = (spec.id == "construct.plane.offset").then(crate::frames::world_geometry);
-        spec.run_nested(&mut trial, &params)
+        spec.run_nested_continuing(&mut trial, &params)
     }?;
     let made = r.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
     let mut new = trial.doc.feature(made).cloned().ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;

@@ -2711,6 +2711,33 @@ mod tests {
         }
     }
 
+    /// #1017. An import's rigid group takes its id from the shared counter. A design whose saved
+    /// `next_id` is missing or stale must not hand that id out again, in memory or after it opens.
+    #[test]
+    fn a_stale_next_id_never_reuses_a_rigid_group_id() {
+        let mut d = two_components_one_occurrence();
+        let component = d.components[0].id;
+        let members = d.occurrences.iter().map(|o| o.id).collect();
+        let group = d.allocate_id().unwrap();
+        d.assembly.rigid_groups.push(crate::joints::RigidGroup { id: group, name: "Board".into(), component, members });
+        d.next_id = group;
+        assert!(d.next_item_id().unwrap() > group, "next_item_id {} with the group at {group}", d.next_item_id().unwrap());
+        for stale in [None, Some(0), Some(group)] {
+            let json = edited(&d, |v| {
+                let o = v.as_object_mut().unwrap();
+                match stale {
+                    Some(n) => o.insert("next_id".into(), n.into()),
+                    None => o.remove("next_id"),
+                };
+            });
+            let mut back = read(&json).unwrap();
+            assert_eq!(back.assembly.rigid_groups.len(), 1, "the group survives loading with {stale:?}");
+            assert!(back.next_id > group, "next_id {} after load with {stale:?}, group at {group}", back.next_id);
+            let fresh = back.allocate_id().unwrap();
+            assert!(fresh > group, "a new object reused the rigid group's id {fresh} with {stale:?}");
+        }
+    }
+
     #[test]
     fn older_auxiliary_ids_advance_the_saved_counter_before_deletion() {
         use serde_json::json;
