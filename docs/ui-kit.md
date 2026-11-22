@@ -378,7 +378,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | status: `completion_text` | Compact strip readout with an optional green completion tick and caller-supplied result identity | `font_small`, `control_height`, `form_ink/success/dim`, `space_4/14` |
 | metrics: `row_height`, `table_row_height`, `header_height` | Shared control/header heights | `control_height`, `space_8`, `form_header_height` |
 | layout: `scope`, `row`, `value_row` | Form styling and aligned label/control columns; `value_row` shows read-only text that wraps in the control column and grows its row to hold every line (one line keeps the 28 pt row) | `form_label_width`, `form_gap_y`, `control_*`, `font_label`, `dialog_label`, `space_4/8` |
-| `with_row_label_tooltip` | Scoped override for row labels' hover text; `None` suppresses label tooltips, including clipped labels. Controls keep their own tooltips. | Enclosed row tokens |
+| `with_row_label_tooltip` | Scoped override for row labels' hover text when a description is available. Without an override, clipped labels keep their full-text tooltip. Controls keep their own tooltips. | Enclosed row tokens |
 | `caption`, `warning_caption` | Dim caption aligned beneath a control; the warning one says what is wrong with its value | `font_small`, `text_dim`, `warning`, label-column tokens |
 | `status_line`, `StatusTone` | Full-width, wrapping status or refusal text in dim, warning or error ink. Translates source labels; already translated messages also work. Place directly in the form, outside `row`, so its height grows with the whole message. Rect: `dialog:status:TEXT`. | `font_label`, `text_dim`, `warning`, `error` |
 | `figure_rows`, `FigureSlot` | A caller-painted figure in the label column beside a stack of captioned expression fields (the Hole dialog's section); the caller gets each field's rect and hover/focus state to draw leaders and light the part it sizes. Fields keep their `dialog:<label>` handles; the block publishes `dialog:figure:<id>` and its picture `dialog:figure_picture:<id>` | `control_height`, `form_label_width`, `font_small`, `form_dim`, `space_2/4`, label gap |
@@ -399,6 +399,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `menu_filter` | The filter at the top of a long menu: search glyph, frameless editor and a rule under them, so it does not read as an entry; the caller filters and owns focus | `space_8/16`, `font_label`, `form_dim/ink`, `dialog_rule` |
 | `text_area` | Bounded multiline JSON/data editor | field tokens |
 | `dropdown`, `dropdown_menu`, `compact_dropdown_menu` | Indexed choices or caller-supplied menu controls | `control_height`, `text_dim`, form tokens |
+| `swatch_picker`, `SwatchPicker` | Cached raster tiles beside option titles; complete artwork opens a searchable grid. Filtering preserves option indices, and artwork keeps its colours and aspect ratio. | `control_height`, `control_fill/border/radius`, `selected_bg/ink`, `hover`, `font_small`, spacing |
 | `searchable_dropdown`, `SearchOption` | Filtered choices, custom-value action and pending message | dropdown tokens |
 | `search_picker`, `SearchPicker`, `SearchChoice`, `Picked` | Dropdown whose popup opens on a focused search box over rows filtered by value, label and tip, with group headings (two or more groups fold under headers with a count, the current value's open), per-row tips, an optional "use what was typed" row and a dim note; Enter picks the exact or first match, Esc closes the popup only; only the rows in view are laid out, and the popup keeps the height it opened with, the list taking what the rest leaves. Handles `{handles}`, `{handles}:search`, `{handles}:custom`, `{handles}:{value}`; returns the pick and the control's response | dropdown and field tokens, `space_16/24`, `font_small`, `text_dim`, `form_card_width` |
 | `selection_field`, `Selection` | Selection chip with explicit `active` and `filled` state, in three looks: the active input (where the next pick goes) has a `form_primary` border and `selected_bg` tint; a filled inactive one a quiet neutral tint, a stronger neutral border and its count in `form_ink`; an empty inactive one the plain control with a dim prompt | `selected_bg/ink`, `form_primary/ink/dim`, `control_*`, `form_inset`, `space_2/8/24` |
@@ -512,7 +513,7 @@ slot/tile/add/appearance targets retain their identities.
 | Bar 7 | More button follows the selected size; popup width 200; value text drops before labels and overflow | `NavigationMetrics`, `NAV_MORE_WIDTH`, `nav_bar_layout::measure` |
 | Bar 8 | Idle fade 45%, hidden 0%, restored 100%; hide-mode fade in 120ms | `navigation_opacity`, `NAV_IDLE_OPACITY/FADE_SECONDS` |
 | Bar 9 | Tooltip delay 800ms, gap 6, padding (8,5), radius 6; 12 medium text, 11 mono key, 15 key line height | `NAV_TOOLTIP_DELAY/POPUP_GAP`, `navigation_tooltip`; `nav_tip/tip_ink/tip_key_border` |
-| Bar 10 | Render hides Look at and Visual style; flat canvases hide Orbit, Spin, Look at, Projection and Visual style, retaining Home and Display | `Slot::available`, `canvas_caps` |
+| Bar 10 | Render's product view hides Selection mode, which its pick filter sets; Render's result and flat canvases hide Orbit, Spin, Look at, Projection, Visual style and Selection mode, retaining Home and Display; an open sketch hides Selection mode | `Slot::available`, `canvas_caps`, `navigation_bar_view::shows` |
 | Bar 11 | Context width 232; bar has Customise / Hide / Reset, slot has Remove | `NAV_CONTEXT_WIDTH`, `navigation_bar_view::context_menu` |
 | Settings 1, 8 | Stage height 96, radius 8, padding 12 inside its 1 border; a miniature of the 3D view (the view's gradient and grid colours); the bar follows the chosen anchor (side and top or bottom edge) live, and the slot count sits beside it on the side facing the view's middle | `NAV_STAGE_HEIGHT/RADIUS/INSET`, `navigation_stage`, `editor_layout` |
 | Settings 5 | Position is one picker of six anchors on a miniature of the view (`prefs:navbar:anchor:0..5`, top row then bottom row); the separator source is a dashed chip at the end of the Available heading, apart from the button tiles | `navigation_anchor_picker`, `navigation_separator_source` |
@@ -545,7 +546,9 @@ and app-bar colour at 18% replace the board's (0,4), 16 blur and 10%/30% shadow.
 The default is Regular/Centre; saved Compact values stay Compact. `slots` remains
 a plain list of IDs; optional `slot_options: {"visual_style":{"shows":"icon_and_value"}}`
 stores menu presentation independently of global button labels. Missing Visual style
-options mean Icon only; Display has no current value and remains Icon only.
+options mean Icon only, and missing Selection mode options Icon and value; Display has no current value and remains Icon only.
+The menus that hold a setting (a slot with `value_icons`) show its icon on the button: Visual style the
+style's, Selection mode the mode's (`SELECTION_MODE_ICONS`).
 
 Board regression checks live in the existing test modules:
 

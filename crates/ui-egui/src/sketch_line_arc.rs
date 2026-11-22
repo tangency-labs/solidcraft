@@ -93,7 +93,7 @@ pub fn rejoin(app: &SolveApp, t: &mut Tool) {
 /// A drawing snap has no point id until the command materializes it. Keep its picked position
 /// while its source curves remain, including when Undo returns to the start of the chain.
 /// Model-vertex snaps are resolved by the drawing command, not by the sketch's point lookup.
-fn chain_point(sketch: &Sketch, id: &str, picked: Vec2) -> Option<Vec2> {
+pub(crate) fn chain_point(sketch: &Sketch, id: &str, picked: Vec2) -> Option<Vec2> {
     if let Some(point) = sketch.resolve_point(id).and_then(|p| sketch.point(p)) {
         return Some(point);
     }
@@ -235,7 +235,7 @@ fn shown_mode(t: &Tool) -> Option<(&'static str, &'static str)> {
 
 /// The words next to the cursor, in the interface language.
 pub(crate) fn shown_label(t: &Tool) -> Option<&'static str> {
-    shown_mode(t).map(|(command, _)| solidcraft_ui_text::tr_label(crate::command_label(command)))
+    shown_mode(t).map(|(command, _)| solidcraft_ui_text::tr_command(command, crate::command_label(command)))
 }
 
 /// The label next to the cursor (below the point's coordinates).

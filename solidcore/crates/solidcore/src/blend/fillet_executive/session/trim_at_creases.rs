@@ -2089,9 +2089,9 @@ impl FilletSession<'_> {
                 // fitted to a thousandth of the body's accuracy (#17673, `SECTION_FIT`), so
                 // that creases meeting at a corner of the sheet (on two faces past a cliff)
                 // meet there well within it; exact sections stay exact
-                // Not upstream (#10876): the Roll-over's torus against a cliff face parallel
-                // to its axis, its creases as certified graphs over the face's profile
-                let certified = if self.executive.roll_over_pass {
+                // Where a roll-over or continued cliff meets a torus parallel to its axis,
+                // use the certified creases over the face's profile (#10876).
+                let certified = if self.executive.roll_over_pass || continues {
                     match (
                         face::p2::surface(&sheet, s)?,
                         face::p2::surface(self.objects.target, f)?,
