@@ -2607,6 +2607,276 @@ pub fn complete_merged_face_seam(
     Ok(())
 }
 
+/// Complete an imported face after its trims have been lifted across periodic cuts.
+/// An edge used on both sides by this face is an internal cut: if its trim crosses the
+/// base-period cut or leaves a sector missing a seam, remove it before inserting the natural
+/// seam. Real boundary edges stay; `SplitAtSeam` splits those edges, including every
+/// adjacent face's uses, at the cut.
+/// The returned faces are the pieces of `f`; no material or shell side is changed. `None`
+/// means its trims and sectors already respect the base-period seam.
+///
+/// This belongs after trim construction: a trim builder has one edge use and returns one
+/// curve, whereas a crossed cut requires a body edit. The existing seam classification and
+/// interval merger supply that edit, rather than another curve or topology splitter.
+///
+/// # Errors
+/// The typed errors of edge deletion, seam classification, splitting and trim construction.
+/// A trim still crossing the period after the edit is a kernel defect.
+pub fn complete_imported_face_seams(
+    k: &mut Kernel,
+    b: &mut Brep,
+    f: FaceId,
+) -> Result<Option<Vec<FaceId>>> {
+    use crate::topology::brep::p1::HealLoopHandle;
+    use crate::topology::brep::p4::{delete_edge, DeleteEnv};
+
+    let mut needs_completion = false;
+    for eu in super::p4::upward_edgeuses(b, f, false, None)? {
+        let trim = get_or_create_uv_trim_curve(k, b, eu)?;
+        needs_completion |= imported_trim_shift(k, b, f, &trim)? != Some(Vec3::ZERO);
+    }
+    let mut redundant = Vec::new();
+    for e in face_edges(b, f)? {
+        if imported_internal_seam_needs_replacement(k, b, f, e)? {
+            redundant.push(e);
+        }
+    }
+    if !needs_completion && redundant.is_empty() {
+        return Ok(None);
+    }
+
+    brep_p3::edit_brep(k, b, |k, b, scope| {
+        for e in redundant {
+            if b.edge(e).is_err() {
+                continue;
+            }
+            delete_edge(k, b, &mut DeleteEnv::from_notify(scope.env), e, Some(f))?;
+        }
+
+        let check = super::p4::has_seam_problem_in_brep_mut::<HealLoopHandle>(
+            k,
+            b,
+            f,
+            super::p4::HasSeamProblemOptions::default(),
+        )?;
+        let mut faces = vec![f];
+        let mut seams = Vec::new();
+        if check.problem.crossed != SurfParamType::Neither
+            || check.problem.missing != SurfParamType::Neither
+        {
+            let (mut cu, mut cv) = (check.class_u, check.class_v);
+            let split = split_at_seam_notified(
+                k,
+                b,
+                Some(&mut *scope.env),
+                f,
+                &mut cu,
+                &mut cv,
+                check.problem,
+                None,
+                &|o: HealLoopHandle| o.as_topology(),
+            )?;
+            for e in split.edges {
+                store_imported_seam_curve(k, b, e, scope.env)?;
+                seams.push(e);
+            }
+            for face in split.faces {
+                if !faces.contains(&face) {
+                    faces.push(face);
+                }
+            }
+        }
+        for &face in &faces {
+            for eu in super::p4::upward_edgeuses(b, face, false, None)? {
+                let mut trim = get_or_create_uv_trim_curve(k, b, eu)?;
+                let shift = imported_trim_shift(k, b, face, &trim)?.ok_or_else(|| {
+                    SolidError::topology(
+                        OP,
+                        TopologyFailure::Defect {
+                            why: "the imported face's seam edit left a trim crossing the base \
+                                  period, though the seam classification split its boundary",
+                        },
+                    )
+                })?;
+                if shift != Vec3::ZERO {
+                    let mut axis = Axis2Placement::default();
+                    axis.set_canonical(shift, Vec3::X, Vec3::Y)?;
+                    trim.transform(k, &axis, None)?;
+                    trim.convert_to_2d(k)?;
+                    eu1::set_uv_trim_curve(
+                        b,
+                        eu,
+                        eu1::UvTrimCurveArg::New(Box::new(trim)),
+                        0.0,
+                        true,
+                        None,
+                    )?;
+                }
+            }
+        }
+        // Insertion distributes seam copies against the lifted neighbours. Moving a
+        // boundary piece into the base period can change which copy it meets: e.g.
+        // [4, 4.5] becomes [0, 0.5] and needs the U=0 copy, while [3.5, 4] needs U=4.
+        // Redistribute only after every face's boundary pieces have been translated;
+        // the kernel swaps both mated pairs together, preserving the two seam sides.
+        for &face in &faces {
+            let domain = surface_deref(b, face)?.natural_uv_domain_with_nurb(k)?;
+            for eu in super::p4::upward_edgeuses(b, face, false, None)? {
+                let Some(e) = eu1::edge(b, eu)? else {
+                    continue;
+                };
+                if !seams.contains(&e) {
+                    continue;
+                }
+                let trim = get_or_create_uv_trim_curve(k, b, eu)?;
+                let direction = trim.is_domain_boundary(k, &domain, EFF_ZERO)?;
+                crate::topology::brep::p1::redistribute_seam_uv_trim_curves(
+                    k,
+                    b,
+                    e,
+                    Some(&trim),
+                    direction,
+                    &domain,
+                )?;
+                seams.retain(|&seam| seam != e);
+            }
+        }
+        for &face in &faces {
+            let domain =
+                calculate_uv_domain_from_uv_trim_curves(k, b, face, true, false, false)?.domain;
+            fp2::set_uv_domain(b, face, &domain)?;
+        }
+        Ok(Some(faces))
+    })
+}
+
+/// A shared internal edge can hide a missing seam even with in-domain UV fits. Seam
+/// status is derived from the connected sectors, not stored as a bit on an edge.
+fn imported_internal_seam_needs_replacement(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    e: EdgeId,
+) -> Result<bool> {
+    let uses = crate::topology::edge::edgeuses(b, e, None, None)?;
+    if uses.len() != 4 || !crate::topology::edge::is_manifold(b, e)? {
+        return Ok(false);
+    }
+    for &eu in &uses {
+        if eu1::face(b, eu)? != Some(f) {
+            return Ok(false);
+        }
+    }
+    for eu in uses {
+        let trim = get_or_create_uv_trim_curve(k, b, eu)?;
+        if imported_trim_shift(k, b, f, &trim)? != Some(Vec3::ZERO) {
+            return Ok(true);
+        }
+        // The 3D edge may bow away from a trim fitted along the cut. Use the same
+        // missing-sector predicate as the vertex-use validity check (Test #5).
+        if let Some(vu) = eu1::vertexuse(b, eu)? {
+            if crate::topology::vertexuse::is_sector_missing_seam(k, b, vu, true)?.missing {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Seam insertion needs the curve-on-surface representation (including its seam identity).
+/// Once connected, store the exact iso curve in a form the record can carry. The iso's
+/// parameter is the varying surface coordinate; restore the edge's parameter before the
+/// notified replacement, and retain both sides' trims which that replacement invalidates.
+fn store_imported_seam_curve(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    env: &mut crate::topology::edge::NotifyEnv<'_>,
+) -> Result<()> {
+    let interval = b.edge(e)?.interval;
+    let no_form = || {
+        SolidError::topology(
+            OP,
+            TopologyFailure::CurveNotBSpline {
+                entity: Some(EntityRef::Edge(e)),
+            },
+        )
+    };
+    let curve = crate::topology::brep::p5::exact_bspline_of_edge(k, b, e, interval, 0.0)?
+        .ok_or_else(no_form)?;
+    // An exact iso curve may still be an analytic Line or Ellipse with a NURBS
+    // base. Store that base explicitly: exporting the analytic kind can omit the
+    // form (Line) or convert the edge interval to its analytic parameter.
+    let mut curve = Curve::from(
+        crate::curve::from_parameters::b_spline_part(k, &curve)?
+            .ok_or_else(no_form)?
+            .into_owned(),
+    );
+    curve.edit_parameterization_exactly(k, &interval)?;
+    let mut trims = Vec::new();
+    for eu in crate::topology::edge::edgeuses(b, e, None, None)? {
+        trims.push((eu, get_or_create_uv_trim_curve(k, b, eu)?));
+    }
+    crate::topology::edge::replace_3d_curve(b, e, Some(curve), env)?;
+    for (eu, trim) in trims {
+        eu1::set_uv_trim_curve(
+            b,
+            eu,
+            eu1::UvTrimCurveArg::New(Box::new(trim)),
+            0.0,
+            true,
+            None,
+        )?;
+    }
+    Ok(())
+}
+
+/// The whole-period translation putting a trim in its surface's base domain, or `None`
+/// when it must be split first. This uses the curve's tight box, not sample extrema or the
+/// model tolerance. Knots and the edge parameter are unchanged by the translation.
+fn imported_trim_shift(k: &Kernel, b: &Brep, f: FaceId, trim: &Curve) -> Result<Option<Vec3>> {
+    let surface = surface_deref(b, f)?;
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let bounds = trim.calculate_tight_bounding_box(k, &trim.natural_interval())?;
+    let mut shift = Vec3::ZERO;
+    for (dir, range, low, high, out) in [
+        (
+            SurfParamType::U,
+            domain.u_interval(),
+            bounds.min().x,
+            bounds.max().x,
+            &mut shift.x,
+        ),
+        (
+            SurfParamType::V,
+            domain.v_interval(),
+            bounds.min().y,
+            bounds.max().y,
+            &mut shift.y,
+        ),
+    ] {
+        if !surface.is_closed(k, &domain, dir, None, false)?.0 {
+            continue;
+        }
+        let period = range.length();
+        if !(period.is_finite() && period > 0.0 && low.is_finite() && high.is_finite()) {
+            return Ok(None);
+        }
+        let round = 1e-9 * period;
+        // Both endpoints of the base interval belong to it. In particular a seam's high
+        // copy must stay high, rather than being wrapped onto its low copy.
+        if low >= range.min() - round && high <= range.max() + round {
+            continue;
+        }
+        let by = ((low - range.min()) / period + 1e-9).floor() * period;
+        if low - by < range.min() - round || high - by > range.max() + round {
+            return Ok(None);
+        }
+        *out = -by;
+    }
+    Ok(Some(shift))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn split_at_seam_depth<O: LoopObject>(
     k: &mut Kernel,
@@ -3256,6 +3526,61 @@ mod tests {
         assert_eq!(FixSeamPlanType::NoChanges as u8, 1);
         assert_eq!(FixSeamPlanType::SplitFace as u8, 4);
         assert_eq!(FixSeamPlanType::default(), FixSeamPlanType::Unknown);
+    }
+
+    #[test]
+    fn imported_trim_periods_keep_both_sides_of_the_cut_and_request_crossing_splits() {
+        use crate::primitive::api_primitives::create_cylinder;
+
+        let mut k = Kernel::default();
+        let b = create_cylinder(&mut k, Vec3::ZERO, 5.0, 3.0).unwrap();
+        let (face, domain) = b
+            .faces()
+            .iter()
+            .find_map(|(f, _)| {
+                let s = surface_deref(&b, f).ok()?;
+                let d = s.natural_uv_domain_with_nurb(&k).ok()?;
+                s.is_closed(&k, &d, SurfParamType::U, None, false)
+                    .ok()?
+                    .0
+                    .then_some((f, d))
+            })
+            .unwrap();
+        let (u, v) = (domain.u_interval(), domain.v_interval());
+        let line = |a, z, c, w| {
+            Curve::from(Line::from_points(
+                Point3::new(a, z, 0.0),
+                Point3::new(c, w, 0.0),
+                2,
+            ))
+        };
+        for at in [u.min(), u.max()] {
+            let trim = line(at, v.min(), at, v.max());
+            assert_eq!(
+                imported_trim_shift(&k, &b, face, &trim).unwrap(),
+                Some(Vec3::ZERO)
+            );
+        }
+        let trim = line(
+            u.max() - 0.1 * u.length(),
+            v.min(),
+            u.max() + 0.1 * u.length(),
+            v.max(),
+        );
+        assert_eq!(imported_trim_shift(&k, &b, face, &trim).unwrap(), None);
+        for periods in [-2.0, 1.0, 3.0] {
+            let shift = periods * u.length();
+            let trim = line(
+                u.min() + 0.2 * u.length() + shift,
+                v.min(),
+                u.min() + 0.8 * u.length() + shift,
+                v.max(),
+            );
+            assert_eq!(
+                imported_trim_shift(&k, &b, face, &trim).unwrap(),
+                Some(Vec3::new(-shift, 0.0, 0.0))
+            );
+        }
     }
 
     #[test]

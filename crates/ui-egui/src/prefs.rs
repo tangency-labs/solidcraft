@@ -1603,6 +1603,9 @@ preference_settings! {
     show_design_view_switcher: bool = false, PAGE_LAYOUT;
     /// Use distinct tab treatments for the focused view, cards, hidden views, and pop-outs.
     clear_view_tabs: bool = true, PAGE_LAYOUT;
+    /// Focused views choose the workspace; the switcher focuses a recent matching view.
+    /// Off retains the workspace switcher's independent, legacy behaviour.
+    workspace_follows_view: bool = true, PAGE_LAYOUT => check_id("prefs.workspace_follows_view");
     /// A drawing sheet opens as a view (a sub-tab) of its design.
     design_sub_tab_sheets: bool = true, PAGE_LAYOUT;
     /// Render and Animate open as views of their design.
@@ -2702,12 +2705,10 @@ fn defaults(app: &mut SolveApp, page: usize) {
     }
     let (msaa, window_system, adapter) = (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
     let units = app.preferences.default_units.clone();
-    let check_updates = app.preferences.check_updates;
     reset_preferences(&mut app.preferences, page);
-    // A setting the organization's policy locks keeps the person's choice for when the policy goes.
-    if app.policy.locks("check_updates") {
-        app.preferences.check_updates = check_updates;
-    }
+    // A setting the organization's policy sets keeps its value, and the person's own choice stays
+    // kept for when the policy goes.
+    crate::policy::enforce_after_reset(app);
     if page == PAGE_PLUGINS {
         app.prefs_window.plugin_limit_inputs = None;
     }
@@ -2935,7 +2936,7 @@ pub fn new_drawing_params(app: &SolveApp, mut params: Value) -> Value {
 }
 
 /// The new-design preference also applies to the blank, unsaved design already open.
-fn default_units_changed(app: &mut SolveApp) {
+pub(crate) fn default_units_changed(app: &mut SolveApp) {
     if crate::documents::active_is_blank(app) {
         apply_new_design(app);
     }
@@ -3938,7 +3939,13 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         o.insert("stand_up_note".into(), json!(app.stand_up.is_some() && app.stand_up_note));
         o.insert("dark".into(), json!(app.ui.dark));
         if app.policy.managed() {
-            let mut policy = json!({ "locked": app.policy.locked(), "check_updates": crate::policy::check_updates(app) });
+            // The settings report the person's stored choices; `policy` has the values in force.
+            crate::policy::own_values(app, o);
+            let mut policy = json!({
+                "locked": app.policy.locked(),
+                "check_updates": crate::policy::check_updates(app),
+                "settings": crate::policy::in_force(app),
+            });
             if let (Some(name), Some(p)) = (app.policy.organization(), policy.as_object_mut()) {
                 p.insert("organization".into(), json!(name));
             }
@@ -4776,8 +4783,11 @@ fn prepare_preferences(
             if !o.contains_key(k) {
                 return Err(format!("unknown preference `{k}`"));
             }
-            // Writing back the stored value is not a change (a client may send every setting it read).
-            if app.policy.locks(k) && o.get(k) != Some(v) {
+            // Writing back what was read is not a change (a client may send every setting it read).
+            if app.policy.locks(k) {
+                if crate::policy::unchanged(app, k, v) {
+                    continue;
+                }
                 return Err(format!("`{k}` is set by your organization's policy and cannot be changed here"));
             }
             if k == "custom_themes" {
@@ -5786,6 +5796,7 @@ mod tests {
     #[test]
     fn layout_page_checkboxes_keep_their_labels_at_every_width() {
         let checks = [
+            ("workspace_follows_view", "prefs.workspace_follows_view"),
             ("history_play_button", "prefs.layout_page.play_history"),
             ("history_group_joints", "prefs.history_group_joints"),
             ("history_bar_groups", "prefs.history_bar_groups"),
@@ -8152,6 +8163,16 @@ mod tests {
         h.frames(2);
         let hard = resolved_theme(&h.app.preferences, active_theme_file(&h.app).unwrap());
         assert_eq!((Tokens::get().panel, Tokens::get().viewport_top), (hard.panel, Tokens::light().viewport_top));
+        // Dark on a dark theme file is the built-in Dark view too, not the file's own: every choice shows something.
+        let builtin = Tokens::dark();
+        assert_ne!((hard.viewport_top, hard.body), (builtin.viewport_top, builtin.body), "the fixture's view differs from the built-in Dark");
+        for (view, want) in [("dark", (builtin.viewport_top, builtin.body)), ("theme", (hard.viewport_top, hard.body))] {
+            h.call("ui.prefs", json!({"viewport_theme": view}));
+            h.frames(2);
+            let (t, v) = (Tokens::get(), Tokens::view());
+            assert_eq!(t.panel, hard.panel, "{view}: the window keeps the theme file's colours");
+            assert_eq!(((t.viewport_top, t.body), (v.viewport_top, v.body)), (want, want), "{view}: the view");
+        }
 
         // Asked for, an unknown value is refused; read from saved preferences, it is the default.
         assert!(h.call("ui.prefs", json!({"viewport_theme": "dim"}))["error"].is_string());
@@ -14925,5 +14946,22 @@ mod kit_use_tests {
         assert_eq!(restored.ui.recent_colors.first(), Some(&[9, 8, 7]));
         assert_eq!(restored.ui.recent_colors.get(1), Some(&[1, 2, 3]));
         assert_eq!(restored.ui.recent_colors.len(), MAX_RECENT_COLORS);
+    }
+
+    #[test]
+    fn workspace_focus_preference_defaults_on_roundtrips_and_resets_on_layout_page() {
+        use super::{PAGE_LAYOUT, Prefs, defaults, set};
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        assert!(app.preferences.workspace_follows_view);
+        app.load_prefs(r#"{"preferences":{"default_units":"mm"}}"#);
+        assert!(app.preferences.workspace_follows_view, "older preference files receive the new default");
+        set(&mut app, &serde_json::json!({"workspace_follows_view":false})).unwrap();
+        assert!(!app.preferences.workspace_follows_view);
+        let saved = serde_json::to_value(&app.preferences).unwrap();
+        let restored: Prefs = serde_json::from_value(saved).unwrap();
+        assert!(!restored.workspace_follows_view);
+        assert!(set(&mut app, &serde_json::json!({"workspace_follows_view":"yes"})).is_err());
+        defaults(&mut app, PAGE_LAYOUT);
+        assert!(app.preferences.workspace_follows_view);
     }
 }
