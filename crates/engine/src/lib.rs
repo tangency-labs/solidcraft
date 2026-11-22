@@ -2326,6 +2326,14 @@ impl Session {
     /// The pass of [`Session::pin_body_names`] over every feature's result, run when something
     /// it reads changed.
     fn pin_body_names_pass(&mut self) {
+        // With no body left and no feature holding a stored name, nothing the reserved numbers
+        // guard is left, so the next body starts again at `Body1`.
+        if !self.doc.reserved_body_names.is_empty()
+            && self.model.state().bodies.is_empty()
+            && self.doc.features.iter().all(|f| f.body_names.iter().all(|n| n.trim().is_empty()))
+        {
+            self.doc_mut().reserved_body_names.clear();
+        }
         let mut pins: Vec<(u64, Vec<String>)> = Vec::new();
         let mut reserve: Vec<String> = Vec::new();
         // The names of the bodies each feature made, kept with the state they were read from:
