@@ -591,7 +591,12 @@ fn planar_trim(c: &Curve, map: &(Point3, Vec3, Vec3, Point2)) -> Result<Option<C
 /// Makes the trims of edge `e`'s uses again from its curve, after its old ones are deleted:
 /// on a plane exactly ([`planar_trim`]), attached with its certified gap to the plane; on any
 /// other surface by SMLib's trim maker.
-fn remake_trims(k: &Kernel, b: &mut Brep, e: EdgeId, gaps: &[(FaceId, f64)]) -> Result<()> {
+pub(crate) fn remake_trims(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    gaps: &[(FaceId, f64)],
+) -> Result<()> {
     for eu in edge::edgeuses(b, e, None, None)? {
         eu1::delete_uv_trim_curve(b, eu)?;
     }
