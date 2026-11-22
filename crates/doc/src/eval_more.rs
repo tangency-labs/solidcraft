@@ -1518,14 +1518,30 @@ pub(super) fn sheet_eval(
             };
             let mut why = None;
             let mut took = Vec::new();
+            // The sheets the pick is on, whether or not each would take the cross break: a pick
+            // on two sheets is refused even when one of them already has one there.
+            let mut on = 0usize;
             for i in candidates {
                 let Some(mut sk) = st.surface_sheets.get(i).cloned() else { continue };
                 match sk.add_cross_break(f.id, face.0, inset, depth, *up) {
-                    Ok(_) => took.push((i, sk)),
+                    Ok(_) => {
+                        on += 1;
+                        took.push((i, sk));
+                    }
                     // A sheet the pick is on says why before one it is not on.
-                    Err(e) if why.is_none() || !e.to_string().contains(crate::CROSS_BREAK_OFF_PANEL) => why = Some(e),
-                    Err(_) => {}
+                    Err(e) => {
+                        let off = e.to_string().contains(crate::CROSS_BREAK_OFF_PANEL);
+                        if !off {
+                            on += 1;
+                        }
+                        if why.is_none() || !off {
+                            why = Some(e);
+                        }
+                    }
                 }
+            }
+            if body.is_none() && on > 1 {
+                return Err(DocError::Invalid(crate::CROSS_BREAK_SEVERAL.into()));
             }
             match <[(usize, crate::SurfaceSheet); 1]>::try_from(took) {
                 Ok([(i, sk)]) => {

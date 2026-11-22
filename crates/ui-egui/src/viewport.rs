@@ -2755,7 +2755,11 @@ fn body_scene(
     sc.instanced_hidden_edges = hidden_edges && instances.edges.is_some();
     let mut thread_budget = solidcraft_engine::cosmetic_threads::Budget::default();
     // Cross break creases (#8345), drawn over their sheet's panels like its edges.
-    let markings = solidcraft_engine::view::sheet_markings(&app.session);
+    // Each body's markings, gathered once so a body looks up only its own.
+    let mut markings: std::collections::HashMap<String, Vec<(Vec3, Vec3)>> = std::collections::HashMap::new();
+    for (name, a, c) in solidcraft_engine::view::sheet_markings(&app.session) {
+        markings.entry(name).or_default().push((a, c));
+    }
     for (b, (faded, identity, slots, copy)) in shown.into_iter().zip(keyed) {
         let resolved = match appearance.bodies.get(&b.name) {
             Some((key, resolved)) if *key == identity => resolved.clone(),
@@ -2784,7 +2788,7 @@ fn body_scene(
                 sc.line(a.to_f32(), c.to_f32(), slots.edge, 0.85, false);
             }
         }
-        for (_, a, c) in markings.iter().filter(|m| m.0 == b.name) {
+        for (a, c) in markings.get(&b.name).into_iter().flatten() {
             sc.line(a.to_f32(), c.to_f32(), slots.edge, 1.2, false);
         }
         // Ghost Frame Members: see-through in the plain body colour, whatever its appearance.

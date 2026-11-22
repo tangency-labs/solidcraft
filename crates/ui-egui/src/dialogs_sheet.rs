@@ -1356,7 +1356,10 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             if let Some(b) = body {
                 extra.insert("body".into(), json!(b));
             }
-            (Sm::simple_restore(kind)?, face_sel(s, face.0).into_iter().collect())
+            // The saved pick on its own body when that body is shown, never on another one at
+            // the same point.
+            let only = body.as_deref().filter(|name| crate::open_meshing::session_world(s).body(name).is_some());
+            (Sm::simple_restore(kind)?, crate::dialogs::face_sel_on(s, only, face.0).into_iter().collect())
         }
         FeatureKind::SheetFold { sketch, curve, a, b, fixed, stays, body, .. } => {
             if let Some(bd) = body {

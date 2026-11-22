@@ -5181,8 +5181,8 @@ fn takes_material(doc: &Document, f: &Feature, depth: usize) -> bool {
 /// which [`absorb_sheet_cuts`] sets for a change the sheet can't hold). A feature that rebuilds
 /// the body from its sheet (a sheet metal feature, or one that changes the sheet) clears the
 /// mark, and says that the change it drops is not kept. Features that move whole bodies or only
-/// mark their faces (a cosmetic thread, not a modelled one, which cuts material) leave the flat
-/// pattern as it was.
+/// mark their faces (a cosmetic thread, not a modelled one, which cuts material; a cross break,
+/// whose creases are marks and which leaves the body as it is) leave the flat pattern as it was.
 fn track_altered_sheets(before: &ModelState, after: &mut ModelState, f: &Feature, warning: &mut Option<String>) {
     if matches!(
         f.kind,
@@ -5192,6 +5192,7 @@ fn track_altered_sheets(before: &ModelState, after: &mut ModelState, f: &Feature
             | FeatureKind::BodyTransfer { .. }
             | FeatureKind::SplitFace { .. }
             | FeatureKind::Thread { modeled: false, .. }
+            | FeatureKind::SheetCrossBreak { .. }
     ) {
         return;
     }

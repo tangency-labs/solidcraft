@@ -6,8 +6,8 @@
 //!
 //! The creases are the diagonals of the smallest rectangle round the panel's material as the flat
 //! has it when the cross break is made (short of its bends, less its reliefs), clipped to that
-//! material (a corner relief or a notch shortens them instead of leaving them on air), each then
-//! stopping `inset` short of the edge at both ends.
+//! material (a corner relief, a notch or a hole shortens them instead of leaving them on air),
+//! each then stopping `inset` short of the edge at both ends.
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Loop2, Vec2, Vec3};
@@ -66,7 +66,7 @@ impl SurfaceSheet {
             return Err(DocError::Invalid(CROSS_BREAK_OFF_PANEL.into()));
         }
         let dev = self.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
-        let (panel, outline) = self.panel_under(&dev, pick)?;
+        let (panel, outline, holes) = self.panel_under(&dev, pick)?;
         if self.cross_breaks.iter().any(|c| c.panel == panel) {
             return Err(DocError::Invalid(CROSS_BREAK_TWICE.into()));
         }
@@ -76,7 +76,7 @@ impl SurfaceSheet {
         let [c0, c1, c2, c3] = enclosing_rectangle(&outline).ok_or_else(|| DocError::Invalid("the panel has no area for a cross break".into()))?;
         let mut lines = [(c0, c2), (c3, c1)];
         for (a, b) in &mut lines {
-            let (lo, hi) = inside_span(&outline, *a, *b)
+            let (lo, hi) = inside_span(&outline, &holes, *a, *b)
                 .ok_or_else(|| DocError::Invalid("the panel's middle is not material: no room for a cross break".into()))?;
             let len = a.dist(*b);
             let (s0, s1) = (lo + inset / len, hi - inset / len);
@@ -91,13 +91,14 @@ impl SurfaceSheet {
     }
 
     /// The flat panel whose top or bottom face a point lies on (within a quarter of the
-    /// thickness, inside the panel's material in the flat), with that material's outline in the
-    /// panel's chart: the nearest face when two are that close.
-    fn panel_under(&self, dev: &Development, pick: Vec3) -> Result<(usize, Vec<Vec2>)> {
+    /// thickness, inside the panel's material in the flat), with that material's outline and its
+    /// holes in the panel's chart: the nearest face when two are that close.
+    #[allow(clippy::type_complexity)]
+    fn panel_under(&self, dev: &Development, pick: Vec3) -> Result<(usize, Vec<Vec2>, Vec<Vec<Vec2>>)> {
         let frames = crate::sheet_surface_cuts::frames(self, dev)?;
         let pieces = crate::sheet_surface::pieces(dev, &mut crate::sheet::FlatWork::new())?;
         let t = self.thickness;
-        let mut best: Option<(f64, usize, Vec<Vec2>)> = None;
+        let mut best: Option<(f64, usize, Vec<Vec2>, Vec<Vec<Vec2>>)> = None;
         for (i, (panel, frame)) in self.sheet.panels.iter().zip(&frames).enumerate() {
             let (Surface::Plane, Some(frame), Some(Some(at))) = (&panel.surface, frame, dev.placements.get(i)) else { continue };
             let q = frame.inverse().point(pick);
@@ -111,11 +112,11 @@ impl SurfaceSheet {
                 matches!(p, Piece::Panel(k) if *k == i) && r.outer.ccw().contains(flat) && !r.holes.iter().any(|h| h.ccw().contains(flat))
             });
             if let Some((_, r)) = held {
-                let outline: Vec<Vec2> = (&r.outer.ccw().polyline(1e-2)).into_iter().map(|p| back.point(*p)).collect();
-                best = Some((off, i, outline));
+                let chart = |l: &Loop2| -> Vec<Vec2> { (&l.ccw().polyline(1e-2)).into_iter().map(|p| back.point(*p)).collect() };
+                best = Some((off, i, chart(&r.outer), r.holes.iter().map(chart).collect()));
             }
         }
-        best.map(|(_, i, outline)| (i, outline)).ok_or_else(|| DocError::Invalid(CROSS_BREAK_OFF_PANEL.into()))
+        best.map(|(_, i, outline, holes)| (i, outline, holes)).ok_or_else(|| DocError::Invalid(CROSS_BREAK_OFF_PANEL.into()))
     }
 
     /// Lays the cross breaks out into the flat, each crease running from its left end as the flat
@@ -253,16 +254,26 @@ fn convex_hull(pts: &[Vec2]) -> Vec<Vec2> {
     hull
 }
 
-/// Along the line from `a` to `b` (0 at `a`, 1 at `b`), the stretch inside the closed polygon
-/// `pts` that holds the middle: between the outline crossings nearest the middle on either
-/// side. None when the middle is outside the polygon.
-fn inside_span(pts: &[Vec2], a: Vec2, b: Vec2) -> Option<(f64, f64)> {
+/// Along the line from `a` to `b` (0 at `a`, 1 at `b`), the stretch of the material inside the
+/// closed polygon `pts`, less its `holes`, that holds the middle: between the crossings of the
+/// outline or a hole nearest the middle on either side. None when the middle is outside the
+/// polygon or in a hole.
+fn inside_span(pts: &[Vec2], holes: &[Vec<Vec2>], a: Vec2, b: Vec2) -> Option<(f64, f64)> {
     let mid = a.lerp(b, 0.5);
-    if !Loop2::polygon(pts).ccw().contains(mid) {
+    if !Loop2::polygon(pts).ccw().contains(mid) || holes.iter().any(|h| h.len() >= 3 && Loop2::polygon(h).ccw().contains(mid)) {
         return None;
     }
     let d = b - a;
     let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
+    for pts in std::iter::once(pts).chain(holes.iter().map(Vec::as_slice)) {
+        lo_hi_crossings(pts, a, d, &mut lo, &mut hi);
+    }
+    (hi > lo).then_some((lo.clamp(0.0, 1.0), hi.clamp(0.0, 1.0)))
+}
+
+/// Narrows `lo`..`hi` (along the line from `a` by `d`) to the crossings of the closed polygon
+/// `pts` nearest the line's middle on either side.
+fn lo_hi_crossings(pts: &[Vec2], a: Vec2, d: Vec2, lo: &mut f64, hi: &mut f64) {
     let n = pts.len();
     for k in 0..n {
         let (Some(&p), Some(&q)) = (pts.get(k), pts.get((k + 1) % n)) else { continue };
@@ -277,12 +288,11 @@ fn inside_span(pts: &[Vec2], a: Vec2, b: Vec2) -> Option<(f64, f64)> {
             continue;
         }
         if s < 0.5 {
-            lo = lo.max(s);
+            *lo = lo.max(s);
         } else {
-            hi = hi.min(s);
+            *hi = hi.min(s);
         }
     }
-    (hi > lo).then_some((lo.clamp(0.0, 1.0), hi.clamp(0.0, 1.0)))
 }
 
 #[cfg(test)]
@@ -305,10 +315,27 @@ mod tests {
         // A 100 x 50 panel with a 10 x 10 notch at (0, 0): the diagonal from there starts where
         // it meets the notch's side, a tenth of the way along.
         let pts = [v(10.0, 0.0), v(100.0, 0.0), v(100.0, 50.0), v(0.0, 50.0), v(0.0, 10.0), v(10.0, 10.0)];
-        let (lo, hi) = inside_span(&pts, v(0.0, 0.0), v(100.0, 50.0)).unwrap_or_else(|| panic!("no span"));
+        let (lo, hi) = inside_span(&pts, &[], v(0.0, 0.0), v(100.0, 50.0)).unwrap_or_else(|| panic!("no span"));
         assert!((lo - 0.1).abs() < 1e-9 && (hi - 1.0).abs() < 1e-9, "{lo} {hi}");
         // The middle off the material: no span.
         let ring = [v(0.0, 0.0), v(100.0, 0.0), v(100.0, 10.0), v(10.0, 10.0), v(10.0, 50.0), v(0.0, 50.0)];
-        assert!(inside_span(&ring, v(0.0, 0.0), v(100.0, 50.0)).is_none());
+        assert!(inside_span(&ring, &[], v(0.0, 0.0), v(100.0, 50.0)).is_none());
+    }
+
+    #[test]
+    fn a_crease_stops_at_a_hole_and_none_runs_through_one() {
+        // A 100 x 50 panel with a 20 x 20 hole from (60, 25) to (80, 45), across the diagonal
+        // from (0, 0) to (100, 50): y = x / 2 meets the hole's left edge x = 60 at y = 30, a
+        // fraction 0.6 along, so the crease from the corner stops there.
+        let panel = [v(0.0, 0.0), v(100.0, 0.0), v(100.0, 50.0), v(0.0, 50.0)];
+        let hole = vec![v(60.0, 25.0), v(80.0, 25.0), v(80.0, 45.0), v(60.0, 45.0)];
+        let (lo, hi) = inside_span(&panel, std::slice::from_ref(&hole), v(0.0, 0.0), v(100.0, 50.0)).unwrap_or_else(|| panic!("no span"));
+        assert!(lo.abs() < 1e-9 && (hi - 0.6).abs() < 1e-9, "{lo} {hi}");
+        // The other diagonal, y = 50 - x / 2, passes under the hole (y 20 to 10 there): whole.
+        let (lo, hi) = inside_span(&panel, std::slice::from_ref(&hole), v(0.0, 50.0), v(100.0, 0.0)).unwrap_or_else(|| panic!("no span"));
+        assert!(lo.abs() < 1e-9 && (hi - 1.0).abs() < 1e-9, "{lo} {hi}");
+        // A hole in the middle: no span.
+        let middle = vec![v(45.0, 20.0), v(55.0, 20.0), v(55.0, 30.0), v(45.0, 30.0)];
+        assert!(inside_span(&panel, &[middle], v(0.0, 0.0), v(100.0, 50.0)).is_none());
     }
 }

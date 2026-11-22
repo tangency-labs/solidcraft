@@ -199,6 +199,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
                 values
             }
             Sm::Hem { length, gap, .. } => vec![length, gap],
+            Sm::CrossBreak { inset, depth, .. } => vec![inset, depth],
             Sm::Fold { radius, .. } => vec![radius],
             // K factor is the only dimensionless sheet rule value.
             Sm::Rules { values, .. } => values.iter_mut().enumerate().filter(|(i, _)| *i != 1).map(|(_, value)| value).collect(),
