@@ -331,7 +331,7 @@ enabled state and grant checks from every placement. Missing command-group grant
 with an explanation. Opening a command dialog executes no plugin code; Run submits the
 existing `plugin.run` transaction. By default, importer menu entries show options before choosing
 a file, and File › Open and drag-and-drop import their paths directly.
-In **Preferences › Plugins**, turn on **Choose the file before import options**
+In **Preferences › Plugins**, turn on **Pick the file first when importing**
 (`plugin_import_file_first`, off by default) to choose the file before showing its options.
 With this enabled, File › Open and drag-and-drop already have a path and go straight to the same
 form. Open file opens it as a new design with `file.import`; Cancel at either step opens nothing.
