@@ -181,21 +181,20 @@ impl Rigid {
         Some(d)
     }
 
-    fn revolution(&self, r: &RevolutionRecord) -> RevolutionRecord {
-        RevolutionRecord {
-            origin: self.point(r.origin),
-            x_axis: self.direction(r.x_axis),
-            y_axis: self.direction(r.y_axis),
-            radius: r.radius,
-            semi_angle_deg: r.semi_angle_deg,
-        }
+    /// The cone or cylinder moved. `None` when the moved axes are not a frame: the support
+    /// then keeps no revolution and reopens from its label.
+    fn revolution(&self, r: &RevolutionRecord) -> Option<RevolutionRecord> {
+        let [x_axis, y_axis] = solidcore_ops::affine::orthonormal_axes(self.direction(r.x_axis), self.direction(r.y_axis)).ok()?;
+        Some(RevolutionRecord { origin: self.point(r.origin), x_axis, y_axis, radius: r.radius, semi_angle_deg: r.semi_angle_deg })
     }
 
     fn support(&self, s: &SupportRecord) -> Option<SupportRecord> {
         Some(match s {
-            SupportRecord::Nurbs { kind, form, revolution } => {
-                SupportRecord::Nurbs { kind: *kind, form: self.nurbs_surface(form)?, revolution: revolution.as_ref().map(|r| self.revolution(r)) }
-            }
+            SupportRecord::Nurbs { kind, form, revolution } => SupportRecord::Nurbs {
+                kind: *kind,
+                form: self.nurbs_surface(form)?,
+                revolution: revolution.as_ref().and_then(|r| self.revolution(r)),
+            },
             SupportRecord::Blend(b) => {
                 let net = self.nurbs_surface(&b.net)?;
                 let mut definition = self.procedural(&b.definition)?;

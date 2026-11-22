@@ -6132,13 +6132,11 @@ fn a_round_meeting_a_short_rib_s_end_reads_back() {
         .unwrap(),
         "the frustum",
     );
-    let turn = -6.0_f64.to_radians();
-    let (c, s) = (turn.cos(), turn.sin());
-    let p = |x: f64, y: f64| [x, y * c, y * s];
+    // The rib profile turned −6° about X, so a 12° revolve is centred on the seam.
     let tri = [
-        p(18.0, 28.5),
-        p(26.743_129, 33.353_628),
-        p(27.370_857, 30.842_714),
+        [18.0, 28.343_874_018, -2.979_061_203],
+        [26.743_129, 33.170_913_336, -3.486_403_479],
+        [27.370_857, 30.673_754_386, -3.223_941_497],
     ];
     let rib = read_back(
         revolve(

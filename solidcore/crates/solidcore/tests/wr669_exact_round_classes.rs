@@ -334,6 +334,18 @@ fn assert_same_points(
     b: &solidcore::surface::surface::Surface,
     what: &str,
 ) {
+    assert_points_within(k, a, b, 0.0, what);
+}
+
+/// As [`assert_same_points`], and also within `allow` millimetres. A short sweep's
+/// trigonometric point can sit about `R ε / θ²` off the original, which is past 64 ulps.
+fn assert_points_within(
+    k: &Kernel,
+    a: &solidcore::surface::surface::Surface,
+    b: &solidcore::surface::surface::Surface,
+    allow: f64,
+    what: &str,
+) {
     let d = a.natural_uv_domain_with_nurb(k).unwrap();
     for i in 0..=8 {
         for j in 0..=8 {
@@ -345,8 +357,9 @@ fn assert_same_points(
             let pb = b.evaluate_point(k, uv).unwrap();
             let size = pa.length().max(pb.length()).max(25.0);
             let off = (pa - pb).length();
+            let bound = (64.0 * f64::EPSILON * size).max(allow);
             assert!(
-                off <= 64.0 * f64::EPSILON * size,
+                off <= bound,
                 "{what} rebuilt from its record is {off:e} off at {uv:?}"
             );
         }
@@ -763,6 +776,23 @@ fn a_round_on_a_short_rib_s_cone_reads_back_from_its_record() {
                 rec,
                 "{sweep} degrees"
             );
+            // R ε / θ² at 1° and radius 30 mm is about 8×10⁻¹² mm. A hundred times that
+            // still rejects a centre a micrometre off.
+            let near = 1e-9;
+            let (round, again) = (
+                s.procedural_blend().unwrap(),
+                rebuilt.procedural_blend().unwrap(),
+            );
+            assert_points_within(&k, s, &rebuilt, near, "the round");
+            for i in 0..2 {
+                assert_points_within(
+                    &k,
+                    round.support(i).unwrap(),
+                    again.support(i).unwrap(),
+                    near,
+                    "a support",
+                );
+            }
             rounds += 1;
             for (i, support) in rec.supports.iter().enumerate() {
                 let SupportRecord::Nurbs {
