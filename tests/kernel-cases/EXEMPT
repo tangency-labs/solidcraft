@@ -499,6 +499,10 @@ tab.window.clean                  presents a window without chrome; no geometry,
 tab.window.close                  returns views to the main window; no geometry, tested in the engine and UI
 tab.window.focus                  focuses a window of the active design; no geometry, tested in the engine and UI
 tab.window.list                   lists the active design windows; no geometry, tested in the engine and UI
+tab.window.move_to_display        positions a native window; no geometry
+tab.window.options                reads pop-out presentation settings; no geometry
+tab.window.rename                 changes a window label; no geometry
+tab.window.set_options            changes pop-out presentation settings; no geometry
 timeline.dependents               a listing of dependents
 timeline.export_script            writes the history as a script
 timeline.inspect                  a listing of the timeline
@@ -558,6 +562,7 @@ view.tool                         the view: camera, layout, display
 view.tool.zoom                    the view: camera, layout, display
 view.top                          the view: camera, layout, display
 view.visual_style                 the view: camera, layout, display
+window.options.use_as_default     copies pop-out presentation settings to preferences; no geometry
 
 # Commands that make or change geometry and have no case yet. This section only shrinks: the
 # pull request that gives one a case in solidcore's corpus or a test moves its line to the section

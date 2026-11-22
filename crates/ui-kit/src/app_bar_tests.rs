@@ -197,22 +197,12 @@ fn app_bar_old_canonical_quick_layout_loses_only_its_automatic_third_divider() {
     assert_eq!(Layout::from_value(&value, &defaults), old, "custom layout objects are preserved");
 }
 
+/// The kit's own Dark and Light. The look's crate checks its Onyx theme the same way
+/// (`app_bar_edit_palette_reads_on_onyx`), since the theme files are the look's.
 #[test]
 fn app_bar_edit_palette_has_three_distinct_levels_and_readable_foreground() {
     use solidcraft_theme::contrast_ratio;
-    let mut onyx = Tokens::dark();
-    let source: serde_json::Value = serde_json::from_str(include_str!("../../look/themes/onyx.json")).unwrap();
-    let color = |name: &str| {
-        let text = source["colors"][name].as_str().unwrap().trim_start_matches('#');
-        egui::Color32::from_rgb(
-            u8::from_str_radix(&text[..2], 16).unwrap(),
-            u8::from_str_radix(&text[2..4], 16).unwrap(),
-            u8::from_str_radix(&text[4..6], 16).unwrap(),
-        )
-    };
-    onyx.app_bar = color("app_bar");
-    onyx.app_bar_text = color("app_bar_text");
-    for (name, t) in [("dark", Tokens::dark()), ("light", Tokens::light()), ("Onyx", onyx)] {
+    for (name, t) in [("dark", Tokens::dark()), ("light", Tokens::light())] {
         let p = edit_palette(t);
         let a = contrast_ratio(p.card, p.item);
         let b = contrast_ratio(p.item, p.hover);
@@ -1086,7 +1076,7 @@ const VIEW_MENU: [TabMenuRow<'static>; 4] = [
 ];
 const PLUS_MENU: [TabMenuRow<'static>; 4] = [
     TabMenuRow::heading("Open as a view"),
-    TabMenuRow::new("plus_sketch", "Sketch", "").with_icon("sketch", Some(egui::Color32::GREEN)),
+    TabMenuRow::new("plus_render", "Render", "").with_icon("render", Some(egui::Color32::GREEN)),
     TabMenuRow::new("plus_dup", "Duplicate this view", "").with_icon("duplicate", None).separated(),
     TabMenuRow::new("plus_reopen", "Reopen closed view", "Ctrl+Shift+T").with_icon("reopen", None),
 ];
@@ -1106,6 +1096,7 @@ const LAYOUT_MENU: [TabMenuRow<'static>; 8] = [
 const VIEWS: [ViewTab<'static>; 3] = [
     ViewTab {
         compass: None,
+        sketch_mode: false,
         name: "Model",
         icon: "model",
         accent: egui::Color32::BLUE,
@@ -1120,8 +1111,9 @@ const VIEWS: [ViewTab<'static>; 3] = [
     },
     ViewTab {
         compass: None,
-        name: "Sketch 2",
-        icon: "sketch",
+        sketch_mode: false,
+        name: "Render 2",
+        icon: "render",
         accent: egui::Color32::GREEN,
         underline: egui::Color32::GREEN,
         state: ViewState::SourceChanged,
@@ -1130,10 +1122,11 @@ const VIEWS: [ViewTab<'static>; 3] = [
         window_name: None,
         window_number: None,
         to_window: None,
-        tip: "Sketch 2",
+        tip: "Render 2",
     },
     ViewTab {
         compass: None,
+        sketch_mode: false,
         name: "Sheet 1",
         icon: "sheet",
         accent: egui::Color32::RED,
@@ -1654,15 +1647,15 @@ fn the_plus_menu_stays_open_after_its_click() {
     rig.press(rig.at("t:vnew"), egui::PointerButton::Primary);
     rig.frame(Vec::new());
     rig.frame(Vec::new());
-    let row = solidcraft_ui_registry::handle_at("t:menu:plus_sketch").expect("the menu's row is drawn");
+    let row = solidcraft_ui_registry::handle_at("t:menu:plus_render").expect("the menu's row is drawn");
     assert!(row.y > HEIGHT && row.x >= plus.left(), "the menu opens under the + at {row:?}");
-    assert_eq!(rig.press(row, egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_sketch".into() }]);
+    assert_eq!(rig.press(row, egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_render".into() }]);
     // A press and release in one frame (a click driven by a script) leaves the menu open too.
     let at = rig.at("t:vnew");
     let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
     rig.frame(vec![button(true), button(false)]);
     rig.frame(Vec::new());
-    assert!(solidcraft_ui_registry::handle_at("t:menu:plus_sketch").is_some());
+    assert!(solidcraft_ui_registry::handle_at("t:menu:plus_render").is_some());
 }
 
 /// The + menu's header is drawn but never chosen, every row (with a glyph or without) returns its
@@ -1674,8 +1667,8 @@ fn the_plus_menu_has_a_header_icon_rows_and_a_separator() {
     rig.frame(Vec::new());
     rig.frame(Vec::new());
     assert!(solidcraft_ui_registry::handle_at("t:menu:Open as a view").is_none(), "the header is not a row");
-    let (sketch, dup) = (rig.at("t:menu:plus_sketch"), rig.at("t:menu:plus_dup"));
-    assert!(dup.y - sketch.y > 32.0, "a separator sits above Duplicate: {sketch:?} {dup:?}");
+    let (render, dup) = (rig.at("t:menu:plus_render"), rig.at("t:menu:plus_dup"));
+    assert!(dup.y - render.y > 32.0, "a separator sits above Duplicate: {render:?} {dup:?}");
     assert_eq!(rig.press(dup, egui::PointerButton::Primary), vec![TabAction::PlusMenu { id: "plus_dup".into() }]);
     rig.press(rig.at("t:vnew"), egui::PointerButton::Primary);
     rig.frame(Vec::new());
@@ -1692,7 +1685,7 @@ fn menu_row_builders_and_glyphs() {
     assert!(head.heading && head.id == "H" && head.label == "H");
     let row = plain.separated().needing_others().with_icon("close", None);
     assert!(row.separator_before && row.needs_others && row.icon == "close");
-    for glyph in ["model", "sketch", "sheet", "render", "animation", "rename", "close", "duplicate", "tiles", "reopen"] {
+    for glyph in ["model", "sheet", "render", "animation", "rename", "close", "duplicate", "tiles", "reopen"] {
         assert!(!glyph_lines(glyph).is_empty(), "{glyph} has strokes");
     }
 }
@@ -2779,9 +2772,9 @@ fn clear_view_tabs_distinguish_the_four_placements() {
     assert_eq!(view_look(&card), ViewLook::Card);
     assert_eq!(view_look(&hidden), ViewLook::Hidden);
     assert_eq!(view_look(&elsewhere), ViewLook::Elsewhere);
-    assert_eq!(window_badge(&elsewhere, CollapseStage::Full), "Inspection");
-    assert_eq!(window_badge(&elsewhere, CollapseStage::LayoutGlyph), "Inspection");
-    assert_eq!(window_badge(&elsewhere, CollapseStage::WindowNumber), "3");
+    assert_eq!(window_badge(&elsewhere), "3");
+    assert!(!remote_name_hidden(&elsewhere, CollapseStage::Full));
+    assert!(remote_name_hidden(&elsewhere, CollapseStage::WindowNumber));
 }
 
 #[test]
@@ -2794,12 +2787,10 @@ fn clear_view_tabs_collapse_in_order_with_and_without_another_window() {
             let window_names = if elsewhere { 24.0 } else { 0.0 };
             let icons = focused + icon_tabs + 24.0;
             let window_number = icons + idle_names;
-            let glyph = window_number + window_names;
-            let full = glyph + 40.0;
-            let widths = [full, glyph, window_number, icons, focused + 28.0];
+            let full = window_number + window_names;
+            let widths = [full, window_number, icons, focused + 28.0];
             assert_eq!(collapse_stage(widths, full), CollapseStage::Full);
-            assert_eq!(collapse_stage(widths, full - 0.25), CollapseStage::LayoutGlyph);
-            assert_eq!(collapse_stage(widths, glyph - 0.25), if elsewhere { CollapseStage::WindowNumber } else { CollapseStage::Icons });
+            assert_eq!(collapse_stage(widths, full - 0.25), if elsewhere { CollapseStage::WindowNumber } else { CollapseStage::Icons });
             assert_eq!(collapse_stage(widths, icons - 0.25), CollapseStage::Overflow);
         }
     }
@@ -2814,8 +2805,10 @@ fn elsewhere_view_has_only_a_return_button_on_hover() {
     assert!(solidcraft_ui_registry::rect_of("t:vclose:0").is_some());
     assert!(solidcraft_ui_registry::rect_of("t:vclose:1").is_none());
     assert!(solidcraft_ui_registry::rect_of("t:view:1:return").is_none());
+    assert!(solidcraft_ui_registry::rect_of("t:view:1:window").is_some());
     let elsewhere = rig.at("t:view:1");
     rig.frame(vec![egui::Event::PointerMoved(elsewhere)]);
+    assert!(solidcraft_ui_registry::rect_of("t:view:1:window").is_none());
     assert!(solidcraft_ui_registry::rect_of("t:vclose:1").is_none());
     assert_eq!(rig.press(rig.at("t:view:1:return"), egui::PointerButton::Primary), vec![TabAction::ReturnView(1)]);
 }
@@ -2909,4 +2902,38 @@ fn layout_menu_keeps_glyph_choices_open_and_escape_restores_the_button() {
     assert!(rig.frame(vec![key(egui::Key::Enter)]).is_empty());
     rig.frame(Vec::new());
     assert!(solidcraft_ui_registry::rect_of("layout.side_by_side").is_some());
+}
+
+#[test]
+fn sketch_header_keeps_the_editing_chip_inside_its_control_free_room() {
+    let ctx = crate::test_support::context();
+    for width in [240.0, 100.0, 70.0, 60.0, 42.0, 16.0] {
+        let rect = Rect::from_min_size(pos2(10.0, 10.0), vec2(width, 28.0));
+        let output = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+            paint_sketch_header(ui.painter(), rect, "Model · Sketch 1", "Editing");
+        });
+        let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.text().to_string()).collect();
+        if width == 240.0 {
+            assert!(texts.iter().any(|text| text == "Model · Sketch 1"));
+        }
+        if width >= 70.0 {
+            assert!(texts.iter().any(|text| text == "Editing"), "width={width}: the state remains readable");
+        }
+        let chip = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Rect(shape) if shape.fill == Tokens::get().chip => Some(shape.rect),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(chip.height(), 18.0);
+        assert!(rect.contains_rect(chip), "width={width}: {chip:?} must leave header controls free");
+    }
+    for t in [Tokens::light(), Tokens::dark()] {
+        assert!(
+            solidcraft_theme::contrast_ratio(t.sketch_ink, t.sketch_soft) >= 4.5,
+            "sketch titles follow the theme's small-text contrast policy on their actual header surface"
+        );
+    }
 }

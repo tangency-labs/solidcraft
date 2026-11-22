@@ -427,3 +427,42 @@ fn a_cancelled_computation_stops_promptly_and_is_never_cached() {
     assert_eq!(again.computed.model.recomputed, session.model.recomputed + 1, "nothing of the cancelled run was cached");
     assert!(again.computed.model.results.iter().all(|r| r.error.is_none()), "OK again finishes the cut");
 }
+
+#[test]
+fn computed_sketch_ownership_rejects_closed_targets_and_keeps_live_view_metadata() {
+    use crate::{ViewContext, ViewDescriptor};
+    use solidcraft_views::ViewKind;
+    let context = |window| {
+        ViewContext::new(
+            vec![
+                ViewDescriptor { id: 1, kind: ViewKind::Model, window: 0, subject: None },
+                ViewDescriptor { id: 2, kind: ViewKind::Model, window, subject: None },
+            ],
+            1,
+            vec![1, 2],
+        )
+        .unwrap()
+    };
+    let mut session = Session::default();
+    session.set_view_context(context(1)).unwrap();
+    let commands = vec![("sketch.create".into(), json!({"plane":"XY","view":2}))];
+    let prepared = session.scratch().compute_commands(&commands, None).unwrap();
+    session.set_view_context(ViewContext::default()).unwrap();
+    let before = (session.doc.to_json(), session.undo.len(), session.revision);
+    assert!(!prepared.is_current(&session));
+    assert!(session.accept_commands(prepared).is_err());
+    assert_eq!((session.doc.to_json(), session.undo.len(), session.revision), before);
+    session.set_view_context(context(1)).unwrap();
+    let mut computed = session.scratch();
+    computed.execute("sketch.create", &json!({"view":2})).unwrap();
+    session.set_view_context(ViewContext::default()).unwrap();
+    assert!(session.accept_computed(computed).is_err());
+    assert_eq!((session.doc.to_json(), session.undo.len(), session.revision), before);
+    session.set_view_context(context(1)).unwrap();
+    let prepared = session.scratch().compute_commands(&commands, None).unwrap();
+    session.set_view_context(context(2)).unwrap();
+    assert!(prepared.is_current(&session), "moving the same open Model is valid");
+    session.accept_commands(prepared).unwrap();
+    assert_eq!(session.sketching_view, Some(2));
+    assert_eq!(session.view_context, context(2), "adoption cannot reinstall the worker's stale window placement");
+}

@@ -1013,3 +1013,31 @@ fn product_preview_rebuild_cost() {
         );
     }
 }
+
+#[test]
+fn pop_out_interface_scales_only_its_own_viewport_and_pointer() {
+    let ctx = egui::Context::default();
+    let child = egui::ViewportId::from_hash_of("scaled pop-out");
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let pointer = egui::pos2(400.0, 200.0);
+    let input = |viewport_id| {
+        let mut raw =
+            egui::RawInput { viewport_id, screen_rect: Some(screen), events: vec![egui::Event::PointerMoved(pointer)], ..Default::default() };
+        raw.viewports.entry(viewport_id).or_default().native_pixels_per_point = Some(1.0);
+        raw
+    };
+    crate::view_window_scale::in_window(&ctx, child, 2.0, || {
+        ctx.run_ui(input(child), |ui| {
+            assert_eq!(ui.ctx().pixels_per_point(), 2.0);
+            assert_eq!(ui.ctx().content_rect().size(), egui::vec2(400.0, 300.0));
+            assert_eq!(ui.input(|i| i.pointer.hover_pos()), Some(egui::pos2(200.0, 100.0)));
+        })
+        .drop_without_applying_deltas();
+    });
+    ctx.run_ui(input(egui::ViewportId::ROOT), |ui| {
+        assert_eq!(ui.ctx().pixels_per_point(), 1.0);
+        assert_eq!(ui.ctx().content_rect(), screen);
+        assert_eq!(ui.input(|i| i.pointer.hover_pos()), Some(pointer));
+    })
+    .drop_without_applying_deltas();
+}

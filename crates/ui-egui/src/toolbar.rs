@@ -248,8 +248,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let keys = keys.iter().map(|key| crate::ui_kit::chord_label(key)).collect::<Vec<_>>().join(", ");
                 if shown { format!("{label} ({keys})") } else { solidcraft_ui_text::format("ui.needs_design", &[("command", label)]) }
             };
-            let (save_tip, undo_tip, redo_tip) =
-                (tip("ui.save", &["Ctrl+S"]), tip("ui.undo", &["Ctrl+Z"]), tip("ui.redo", &["Ctrl+Y", "Ctrl+Shift+Z"]));
+            let (undo_keys, redo_keys) = (crate::keymap::keys(app, "edit.undo"), crate::keymap::keys(app, "edit.redo"));
+            let (undo_keys, redo_keys): (Vec<&str>, Vec<&str>) =
+                (undo_keys.iter().map(String::as_str).collect(), redo_keys.iter().map(String::as_str).collect());
+            let (save_tip, undo_tip, redo_tip) = (tip("ui.save", &["Ctrl+S"]), tip("ui.undo", &undo_keys), tip("ui.redo", &redo_keys));
             let prefs_tip = if cfg!(target_os = "macos") {
                 format!("{} (Cmd+,)", app.tr("ui.preferences"))
             } else {
@@ -515,7 +517,7 @@ fn fill_overflow_rows(app: &SolveApp, rows: &mut [app_bar::OverflowItem], shown:
                     .and_then(|i| app.toolbar_custom.quick_access.iter().filter_map(|id| solidcraft_engine::find_command(id)).nth(i))
                 {
                     let info = command.info(&app.session);
-                    row.label = app.tr_label(info.label).to_string();
+                    row.label = app.tr_command(command.id, info.label).to_string();
                     row.icon = info.icon.to_string();
                     row.enabled = shown && info.enabled;
                 }
@@ -1039,10 +1041,32 @@ pub(crate) fn persistent_pressed(app: &SolveApp, id: &str) -> bool {
         }
 }
 
+/// The text a ribbon button's width is measured from. A command's is its own label, as the
+/// button draws it ([`SolveApp::tr_command`]), so a translation wider than another entry's
+/// with the same English text is not cut short; a sketch family's is its family label,
+/// whichever of its commands the button shows.
+fn ribbon_size_label(
+    app: &SolveApp,
+    c: &'static solidcraft_engine::CommandSpec,
+    family: Option<&'static crate::sketch_families::Family>,
+) -> &'static str {
+    match family {
+        Some(family) => app.tr_label(crate::workspace::ribbon_family_label(family)),
+        None => app.tr_command(c.id, crate::workspace::ribbon_button_label(c)),
+    }
+}
+
+/// A command's name as the ribbon says it beside its button: in its tooltip, and for a
+/// button painted over its panel. The label the command shows now, from the command's own
+/// entry ([`SolveApp::tr_command`]), so the tooltip reads as the button does.
+fn ribbon_command_name(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> &'static str {
+    app.tr_command(command.id, crate::render_workspace::interactive_command_info(app, command).label)
+}
+
 pub(crate) fn persistent_button_name(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> String {
     let info = crate::render_workspace::interactive_command_info(app, command);
     let label = crate::workspace::ribbon_button_label(command);
-    app.tr_label(if label == command.label { info.label } else { label }).to_string()
+    app.tr_command(command.id, if label == command.label { info.label } else { label }).to_string()
 }
 
 fn persistent_hint(app: &SolveApp, command: &solidcraft_engine::CommandSpec, enabled: bool) -> Option<String> {
@@ -1071,11 +1095,7 @@ fn paint_persistent_ribbon(app: &SolveApp, ui: &egui::Ui, paints: Vec<Persistent
         .map(|paint| {
             let id = paint.command.id;
             let checkable = pressed && persistent_available(app, id);
-            let name = if checkable {
-                persistent_button_name(app, paint.command)
-            } else {
-                app.tr_label(crate::render_workspace::interactive_command_info(app, paint.command).label).to_string()
-            };
+            let name = if checkable { persistent_button_name(app, paint.command) } else { ribbon_command_name(app, paint.command).to_string() };
             let look = ribbon::DeferredLook {
                 id: id.to_string(),
                 selected: persistent_pressed(app, id),
@@ -1240,6 +1260,71 @@ struct RibbonShape {
     r: Rect,
     ws: Rect,
     folded: bool,
+}
+
+const POP_OUT_RIBBON: &str = "sc_pop_out_ribbon";
+
+fn pop_out_ribbon_id(ctx: &egui::Context) -> egui::Id {
+    egui::Id::unique((POP_OUT_RIBBON, ctx.viewport_id()))
+}
+
+pub(crate) fn pop_out_ribbon_focus(ctx: &egui::Context) -> bool {
+    ctx.memory(|m| m.focused())
+        .and_then(|id| ctx.read_response(id))
+        .is_some_and(|response| response.layer_id == egui::LayerId::new(egui::Order::Middle, pop_out_ribbon_id(ctx)))
+}
+
+/// The usual full ribbon, painted in its own clipped layer. Its bounding box is an
+/// input shield, never an anchored shell card or an obstacle for fit.
+pub(crate) fn pop_out_ribbon(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, fraction: f32, keyboard: bool, reveal_top: Option<f32>) {
+    if fraction <= 0.0 || !content.is_positive() {
+        app.shell.ribbon_overlay = None;
+        return;
+    }
+    crate::workspace::sync_context(app);
+    let t = Tokens::get();
+    let layout = shell_layout(app);
+    let floating = Container::for_layout(layout, Surface::Panel).floating();
+    let height = ribbon_height(app.preferences.ribbon_labels);
+    let margin = Container::for_layout(layout, Surface::Chrome).gap();
+    let top = reveal_top.unwrap_or(content.top());
+    let slide = (height + 2.0 * margin) * (1.0 - fraction);
+    let available = Rect::from_min_max(egui::pos2(content.left(), top - slide), content.right_bottom());
+    let cards = crate::ui_kit::Cards::new(available, layout, height, WORKSPACE_WIDTH);
+    let r = if floating {
+        Rect::from_min_max(cards.workspace.min, cards.ribbon.max)
+    } else {
+        Rect::from_min_size(available.min, vec2(content.width(), height))
+    };
+    let clip = Rect::from_min_max(egui::pos2(content.left(), top), content.right_bottom());
+    let visible = clip.intersect(r);
+    if !visible.is_positive() {
+        app.shell.ribbon_overlay = None;
+        return;
+    }
+    let ws = cards.workspace;
+    let host = Container::for_layout(layout, Surface::Chrome);
+    let previous_cards = std::mem::take(&mut app.shell.cards);
+    host.area(pop_out_ribbon_id(ui.ctx())).fixed_pos(visible.min).constrain(false).show(ui.ctx(), |ui| {
+        ui.set_min_size(visible.size());
+        ui.set_clip_rect(ui.clip_rect().intersect(clip));
+        let frame = host.frame(ui.ctx(), t.toolbar, crate::frame::Side::Left);
+        if !floating {
+            Container::paint_frame(ui.painter(), frame, r);
+        }
+        if keyboard && ui.is_visible() && !ui.is_sizing_pass() {
+            ui.memory_mut(|memory| memory.request_focus(ui.scope_id().with("workspace_switcher")));
+        }
+        ribbon_contents(app, ui, RibbonShape { floating, cards, r, ws, folded: false });
+        if floating {
+            for card in [cards.workspace, cards.ribbon] {
+                Container::paint_inset(ui.painter(), frame.widget_rect(card), frame);
+            }
+        }
+    });
+    app.shell.cards = previous_cards;
+    app.shell.ribbon_overlay = Some(visible);
+    crate::scenario::publish_rect("ribbon:pop_out", visible);
 }
 
 pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -1437,8 +1522,7 @@ impl RibbonPanels {
                     let info = crate::render_workspace::interactive_command_info(app, selected);
                     let persistent = persistent_available(app, selected.id);
                     let size = if labels {
-                        let label = family.map_or_else(|| crate::workspace::ribbon_button_label(c), crate::workspace::ribbon_family_label);
-                        ButtonSize { width: ribbon::button_width(painter, app.tr_label(label)), min_width: BUTTON_MIN_WIDTH }
+                        ButtonSize { width: ribbon::button_width(painter, ribbon_size_label(app, c, family)), min_width: BUTTON_MIN_WIDTH }
                     } else {
                         let width = if family.is_some() { 50.0 } else { 40.0 };
                         ButtonSize { width, min_width: width }
@@ -1449,8 +1533,8 @@ impl RibbonPanels {
                         selected,
                         family,
                         covers: crate::sketch_families::family(c.id).filter(|_| sketch_create).map_or(&[], |f| f.commands),
-                        label: app.tr_label(if button_label == selected.label { info.label } else { button_label }).to_string(),
-                        name: app.tr_label(info.label).to_string(),
+                        label: app.tr_command(selected.id, if button_label == selected.label { info.label } else { button_label }).to_string(),
+                        name: app.tr_command(selected.id, info.label).to_string(),
                         icon: if selected.id == "sketch.finish" { "finish" } else { info.icon },
                         size,
                         enabled: can_start(app, selected),
@@ -1475,7 +1559,7 @@ impl RibbonPanels {
                         family: None,
                         covers: &[],
                         label: String::new(),
-                        name: app.tr_label(info.label).to_string(),
+                        name: app.tr_command(c.id, info.label).to_string(),
                         icon: info.icon,
                         size: ButtonSize { width: 0.0, min_width: 0.0 },
                         enabled: can_start(app, c),
@@ -2187,7 +2271,7 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, slots: &[(
         let customizing = app.toolbar_custom.app_bar_customizing;
         let enabled = customizing || (shown && info.enabled);
         let resp = ui.interact(br, ui.scope_id().with(("quick_access", c.id)), if customizing { Sense::hover() } else { Sense::click_and_drag() });
-        let label = app.tr_label(info.label).to_string();
+        let label = app.tr_command(c.id, info.label).to_string();
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, &label));
         crate::scenario::publish_target(&format!("appbar:quick:{}", c.id), br);
         app_bar::paint_item(
@@ -2285,7 +2369,7 @@ fn dropdown_checkable(app: &SolveApp, id: &str) -> bool {
 impl RowData {
     fn new(app: &SolveApp, c: &'static solidcraft_engine::CommandSpec) -> Self {
         let info = crate::render_workspace::interactive_command_info(app, c);
-        let label = app.tr_label(info.label).to_string();
+        let label = app.tr_command(c.id, info.label).to_string();
         let checked = if c.id == "view.shots_strip" {
             Some(app.preferences.render_shots_strip)
         } else {
@@ -2359,7 +2443,7 @@ fn dropdown_width(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_eng
         .map(|c| {
             let info = c.info(&app.session);
             (
-                app.tr_label(info.label).to_string(),
+                app.tr_command(c.id, info.label).to_string(),
                 crate::keymap::display_for(app, c.id).unwrap_or_default(),
                 info.icon,
                 dropdown_checkable(app, c.id),
@@ -2380,7 +2464,7 @@ fn dropdown_grid(
     loose: &[&str],
     paints: &mut Vec<PersistentRibbonPaint>,
 ) -> Option<(&'static str, ribbon::MenuAction)> {
-    let labels: Vec<String> = grouped.iter().map(|(_, c)| app.tr_label(c.label).to_string()).collect();
+    let labels: Vec<String> = grouped.iter().map(|(_, c)| app.tr_command(c.id, c.label).to_string()).collect();
     let headings: Vec<Option<String>> = grouped.iter().map(|(heading, _)| heading.map(group_heading_text)).collect();
     let entries: Vec<(Option<&str>, ribbon::MenuEntry)> = grouped
         .iter()
@@ -2446,7 +2530,7 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
     }
     response.backing_on_hover_ui(|ui| {
         let t = Tokens::get();
-        let name = app.tr_label(crate::render_workspace::interactive_command_info(app, command).label);
+        let name = ribbon_command_name(app, command);
         let name_width = ui
             .painter()
             .layout_no_wrap(name.to_string(), crate::ui_kit::type_face::semibold(solidcraft_theme::Tokens::get().font_heading), t.text)
@@ -2515,7 +2599,7 @@ fn reveal_tooltip(app: &SolveApp, ui: &egui::Ui, rect: Rect, command: &solidcraf
     // The same text as a drop-down row's own tooltip: name and shortcut, its help, and why it is
     // disabled when it is.
     let info = crate::render_workspace::interactive_command_info(app, command);
-    let label = app.tr_label(info.label);
+    let label = app.tr_command(command.id, info.label);
     let shortcut = crate::keymap::display_for(app, command.id).map(|k| format!("  ({k})")).unwrap_or_default();
     let help = crate::command_help::help(command.id);
     if let Some(shown) = crate::ui_kit::Container::show_tooltip(egui::Id::unique(("ribbon_reveal", command.id)), tip, |ui| {
@@ -2875,7 +2959,9 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     } else {
         crate::edit_clipboard::flush(app, ctx);
     }
-    for (k, repeat, mods) in keys {
+    // The keys that ran a command: the character each one typed is dropped below.
+    let mut ran = Vec::new();
+    for (index, (k, repeat, mods)) in keys.into_iter().enumerate() {
         use egui::Key;
         if drawing && k == Key::S && !mods.command && !mods.shift && !mods.alt {
             app.start("ui.palette");
@@ -2961,14 +3047,19 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                         drop(app.run("tab.view.close", json!({})));
                     }
                 }
-                // Ctrl+Shift+Z redoes like Ctrl+Y (#12902): it used to fall into Undo, Shift ignored.
-                Key::Z if mods.shift => drop(app.run("edit.redo", json!({}))),
-                Key::Z => {
-                    if !crate::tools::undo_spline_point(app) {
-                        drop(app.run("edit.undo", json!({})));
+                // Undo and Redo run from whatever keys they are bound to (Ctrl+Z, Ctrl+Y and
+                // Ctrl+Shift+Z by default, #12902): the exact chord decides, so a rebound or
+                // removed key never falls into the other one.
+                Key::Z | Key::Y => {
+                    let key = crate::keymap::key_name(k, mods);
+                    if crate::keymap::commands_for(app, &key).contains(&"edit.undo") && crate::tools::undo_spline_point(app) {
+                        continue;
+                    }
+                    match crate::keymap::command_for(app, &key) {
+                        Some(id @ ("edit.undo" | "edit.redo")) => drop(app.run(id, json!({}))),
+                        _ => crate::keymap::press(app, &key, repeat),
                     }
                 }
-                Key::Y => drop(app.run("edit.redo", json!({}))),
                 // Copy, Cut and Paste, and Paste New with Shift (`edit_clipboard::handle`).
                 Key::C | Key::X if !mods.shift && !mods.alt => {}
                 Key::V if !mods.alt => {}
@@ -2983,6 +3074,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         // Dimension key (D by default, or the key it was rebound to) starts Dimension.
         if let Some(tool) = sheet_tool(app, drawing_history, &crate::keymap::key_name(k, mods)) {
             app.start(tool);
+            ran.push(index);
             continue;
         }
         if !shown {
@@ -3063,9 +3155,44 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     crate::viewport::delete_selection(app);
                 }
             }
-            _ => crate::keymap::press(app, &crate::keymap::key_name(k, mods), repeat),
+            _ => {
+                let key = crate::keymap::key_name(k, mods);
+                if !crate::keymap::commands_for(app, &key).is_empty() {
+                    ran.push(index);
+                }
+                crate::keymap::press(app, &key, repeat);
+            }
         }
     }
+    drop_shortcut_text(ctx, &ran);
+}
+
+/// A key that ran a command is not typing: the character it typed goes nowhere. Else the field
+/// the command opens could take it later in the frame, as a window drawn after this one does.
+/// `ran` counts the frame's key presses from 0, in order.
+fn drop_shortcut_text(ctx: &egui::Context, ran: &[usize]) {
+    if ran.is_empty() {
+        return;
+    }
+    let strip = |events: &mut Vec<egui::Event>| {
+        let (mut presses, mut typed_by_shortcut) = (0, false);
+        events.retain(|event| match event {
+            egui::Event::Key { pressed: true, .. } => {
+                typed_by_shortcut = ran.contains(&presses);
+                presses += 1;
+                true
+            }
+            egui::Event::Text(_) if typed_by_shortcut => {
+                typed_by_shortcut = false;
+                false
+            }
+            _ => true,
+        });
+    };
+    ctx.input_mut(|input| {
+        strip(&mut input.events);
+        strip(&mut input.raw.events);
+    });
 }
 
 /// The place (0 first) of the view a digit key shows: 1 to 9.
@@ -3119,7 +3246,7 @@ fn dropdown_cell(
     pinned: bool,
     paints: &mut Vec<PersistentRibbonPaint>,
 ) -> Option<ribbon::MenuAction> {
-    let label = app.tr_label(c.label).to_string();
+    let label = app.tr_command(c.id, c.label).to_string();
     let (action, cell) = ribbon::grid_cell(ui, &grid_entry(app, c, &label, pinned), rect, &menu_style(app));
     grid_cell_extras(app, ui, c, cell, paints);
     action
@@ -5952,6 +6079,35 @@ mod app_bar_tests {
 mod ribbon_label_tests {
     use super::*;
 
+    /// A ribbon button is sized from the label it draws: a command's own translation, not
+    /// another entry's with the same English text. In Spanish the Ground button is measured
+    /// as "Fijar", the text it shows; a sketch family's button keeps its family label's
+    /// width, whichever of its commands it shows.
+    #[test]
+    fn a_ribbon_button_is_sized_from_the_label_it_draws() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"language": "es"}));
+        let ground = solidcraft_engine::find_command("occurrence.ground").unwrap();
+        assert_eq!(ribbon_size_label(&h.app, ground, None), "Fijar");
+        assert_eq!(ribbon_size_label(&h.app, ground, None), h.app.tr_command(ground.id, crate::workspace::ribbon_button_label(ground)));
+        let family = crate::sketch_families::family("sketch.construction_line").unwrap();
+        let first = solidcraft_engine::find_command(family.commands.first().unwrap()).unwrap();
+        assert_eq!(ribbon_size_label(&h.app, first, Some(family)), h.app.tr_label(crate::workspace::ribbon_family_label(family)));
+    }
+
+    /// A ribbon button's tooltip names the command as the button does: in Spanish Ground's
+    /// reads "Fijar", and Export's "Exportar", each the command's own entry.
+    #[test]
+    fn a_ribbon_tooltip_names_its_command_as_its_button_does() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"language": "es"}));
+        for (id, name) in [("occurrence.ground", "Fijar"), ("file.export", "Exportar")] {
+            let command = solidcraft_engine::find_command(id).unwrap();
+            assert_eq!(ribbon_command_name(&h.app, command), name, "{id}");
+            assert_eq!(ribbon_command_name(&h.app, command), ribbon_size_label(&h.app, command, None), "{id}");
+        }
+    }
+
     #[test]
     fn translated_workspace_captions_fit_with_room_for_the_arrow() {
         let mut h = crate::scenario::Harness::new();
@@ -6369,6 +6525,36 @@ mod fill_width_tests {
     /// width it has. No blank run wider than one button while something is hidden, every panel
     /// on the toolbar shows its icons, the » menu only when even one button a panel won't fit,
     /// and neither the tab row nor the title bar's own controls run into each other.
+    #[test]
+    fn pop_out_ribbon_overlays_without_changing_view_bounds() {
+        for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.app.ui.layout = layout;
+            h.app.shell.cards.clear();
+            let rect = Rect::from_min_size(pos2(0.0, 42.0), vec2(900.0, 650.0));
+            let expected = crate::shell::panel_bounds(&h.app, rect);
+            for fraction in [0.0, 0.2, 1.0, 0.0] {
+                let _ =
+                    h.ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_max(egui::Pos2::ZERO, rect.max)), ..Default::default() }, |ui| {
+                        pop_out_ribbon(&mut h.app, ui, rect, fraction, false, None);
+                        assert_eq!(crate::shell::panel_bounds(&h.app, rect), expected);
+                        assert_eq!(h.app.shell.ribbon_overlay.is_some(), fraction > 0.0);
+                        if let Some(overlay) = h.app.shell.ribbon_overlay {
+                            assert!(overlay.top() >= rect.top());
+                            assert!(crate::shell::covered(&h.app, overlay.center()));
+                            if fraction == 1.0 {
+                                let gap = Container::for_layout(layout, Surface::Chrome).gap();
+                                assert_eq!(overlay.top(), rect.top() + gap);
+                                assert_eq!(overlay.left(), rect.left() + gap);
+                                assert_eq!(overlay.right(), rect.right() - gap);
+                            }
+                        }
+                    });
+            }
+        }
+    }
+
     #[test]
     fn toolbar_fills_its_width_from_wide_to_narrow_windows() {
         // Either header layout: the ribbon fits the same way with search in the bar.
