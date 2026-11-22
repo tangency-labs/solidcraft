@@ -969,7 +969,9 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // (a copy, written back below), and names it.
     let look1 = chamfer_look(d, 0);
     let two_distances = matches!(d.kind, Kind::Fillet { chamfer: true, ctype: 1, .. });
-    let on_second = two_distances && chamfer_editing(d) == Some(1);
+    // Following Distance 2 is opt-in: by default the box stays on Distance 1, as it always has,
+    // and only the arrows show which distance is being edited.
+    let on_second = two_distances && app.preferences.chamfer_box_follows_distance && chamfer_editing(d) == Some(1);
     let second_before = match &d.kind {
         Kind::Fillet { distance2, .. } if on_second => Some(distance2.clone()),
         _ => None,

@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.chamfer_box_follows_distance": "Value box follows the chamfer distance being edited",
+    "prefs.chamfer_box_follows_distance.help": "Off by default. When on, in a Chamfer of Two Distances the value box on the model shows and edits Distance 2 while you edit Distance 2; when off, it stays on Distance 1, as before. The arrow of the distance being edited is highlighted either way."
+  },
+  "de": {
+    "prefs.chamfer_box_follows_distance": "Wertfeld folgt dem bearbeiteten Fasenabstand",
+    "prefs.chamfer_box_follows_distance.help": "Standardmäßig aus. Wenn an, zeigt und bearbeitet das Wertfeld am Modell bei einer Fase mit zwei Abständen Abstand 2, während Sie Abstand 2 bearbeiten; wenn aus, bleibt es wie bisher bei Abstand 1. Der Pfeil des bearbeiteten Abstands wird in beiden Fällen hervorgehoben."
+  },
+  "ar": {
+    "prefs.chamfer_box_follows_distance": "مربع القيمة يتبع مسافة الشطف التي تُحرَّر",
+    "prefs.chamfer_box_follows_distance.help": "مُعطَّل افتراضيًا. عند تفعيله، في شطف بمسافتين يعرض مربع القيمة على النموذج المسافة 2 ويحررها أثناء تحريرك المسافة 2؛ وعند تعطيله يبقى على المسافة 1 كما كان. يُبرَز سهم المسافة التي تُحرَّر في الحالتين."
+  },
+  "he": {
+    "prefs.chamfer_box_follows_distance": "תיבת הערך עוקבת אחר מרחק השיפוע שנערך",
+    "prefs.chamfer_box_follows_distance.help": "כבוי כברירת מחדל. כשמופעל, בשיפוע עם שני מרחקים תיבת הערך על המודל מציגה ועורכת את מרחק 2 בזמן שאתה עורך את מרחק 2; כשכבוי, היא נשארת על מרחק 1 כמו קודם. החץ של המרחק שנערך מודגש בשני המקרים."
+  },
+  "ja": {
+    "prefs.chamfer_box_follows_distance": "値ボックスが編集中の面取り距離に追従",
+    "prefs.chamfer_box_follows_distance.help": "既定ではオフ。オンにすると、2 距離の面取りで距離 2 を編集している間、モデル上の値ボックスが距離 2 を表示・編集します。オフでは従来どおり距離 1 のままです。編集中の距離の矢印はどちらの場合も強調表示されます。"
+  },
+  "ko": {
+    "prefs.chamfer_box_follows_distance": "값 상자가 편집 중인 모따기 거리를 따름",
+    "prefs.chamfer_box_follows_distance.help": "기본값은 꺼짐. 켜면 두 거리 모따기에서 거리 2를 편집하는 동안 모델의 값 상자가 거리 2를 표시하고 편집합니다. 끄면 이전처럼 거리 1에 머뭅니다. 편집 중인 거리의 화살표는 어느 경우든 강조 표시됩니다."
+  },
+  "vi": {
+    "prefs.chamfer_box_follows_distance": "Ô giá trị theo khoảng vát đang sửa",
+    "prefs.chamfer_box_follows_distance.help": "Tắt theo mặc định. Khi bật, với vát mép hai khoảng, ô giá trị trên mô hình hiển thị và sửa Khoảng 2 khi bạn sửa Khoảng 2; khi tắt, nó vẫn ở Khoảng 1 như trước. Mũi tên của khoảng đang sửa luôn được tô sáng."
+  },
+  "zh": {
+    "prefs.chamfer_box_follows_distance": "数值框跟随正在编辑的倒角距离",
+    "prefs.chamfer_box_follows_distance.help": "默认关闭。开启后，在两距离倒角中编辑距离 2 时，模型上的数值框显示并编辑距离 2；关闭时，它像以前一样停留在距离 1。无论哪种情况，正在编辑的距离的箭头都会高亮。"
+  }
+}

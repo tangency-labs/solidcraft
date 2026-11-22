@@ -1799,6 +1799,10 @@ preference_settings! {
     fillet_legacy_radius: bool = false, PAGE_TOOLS => check_id_help("prefs.fillet_legacy_radius", "prefs.fillet_legacy_radius.help");
     /// Placing a Single hole snaps to the middle of the face and the centres of its round edges
     /// (`hole_place`). Off by default: a hole goes where it is clicked.
+    /// In a Chamfer of Two Distances, the value box on the model shows and edits the distance whose
+    /// field was used last, Distance 1 or Distance 2 (#20801). Off by default: the box stays on
+    /// Distance 1, as before; the arrow of the distance being edited is highlighted either way.
+    chamfer_box_follows_distance: bool = false, PAGE_TOOLS => check_id_help("prefs.chamfer_box_follows_distance", "prefs.chamfer_box_follows_distance.help");
     hole_snaps: bool = false, PAGE_TOOLS => check("Snap to face and edge centres");
     /// A placed Single hole has a handle that drags it, and a pick elsewhere on a face that has a
     /// hole moves the hole there (`hole_place`). Off by default: a second pick on its face takes
