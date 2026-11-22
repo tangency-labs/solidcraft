@@ -33,9 +33,9 @@
 //! the failure's `operation` path says which routine. A failure names an entity only where the
 //! site it replaces named one (a blend face whose net fails its re-certification). A check of a
 //! caller's argument that reports no status stays [`crate::SolidError::InvalidInput`]; one that
-//! reports a status is a named cause of class `invalid_input`, keeping that status. Only part of
-//! `crate::surface` uses these yet; the files that still build bare statuses are listed in this
-//! module's ratchet test.
+//! reports a status is a named cause of the class the paragraph above gives, keeping that
+//! status. Only part of `crate::surface` uses these yet; the files that still build bare
+//! statuses are listed in this module's ratchet test.
 
 use super::{
     EntityRef, ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT,
@@ -265,7 +265,7 @@ pub enum SurfaceFailure {
     ZeroLineDirection,
     /// The line given is not parallel to the plane within the angle test, but the
     /// determinant of the crossing's linear solve is below the kernel's zero (a line
-    /// direction or plane scale too small to solve with). Class `failed`.
+    /// direction or plane scale too small to solve with). [`ErrorKind::Degenerate`].
     LineCrossingSingular,
     /// The line where two planes meet is too nearly singular to solve for (a pivot below
     /// the kernel's zero), so it is not built. Upstream's warning: status
@@ -276,11 +276,17 @@ pub enum SurfaceFailure {
     /// surface. [`ErrorKind::InvalidInput`].
     ScaleNotUniform,
     /// The trim domain given is not inside the surface's natural domain.
-    /// [`ErrorKind::InvalidInput`].
+    /// [`ErrorKind::OutsideDomain`].
     TrimDomainOutside,
     /// The NURB tested as a plane has parallel u and v directions at its origin, so it has
-    /// no plane frame (the unitize's error is the cause). Class `failed`.
+    /// no plane frame (the unitize's error is the cause). [`ErrorKind::Degenerate`].
     NurbAxesParallel,
+    /// The transformed plane's tangents cannot be measured: its NURB's evaluation cannot
+    /// make them non-zero (they are below the surface's derivative limit; its error is the
+    /// cause), or the squared length of a tangent or of their cross product is not above the
+    /// kernel's zero squared, or not finite. A uniform scale so small or so large takes the
+    /// plane outside what the kernel resolves. [`ErrorKind::Degenerate`].
+    PlaneTangentUnmeasurable,
     /// The surface's NURB form could not be made (the make's failure is the cause, where it
     /// gave one). Class `failed`; whether it is a defect or a refusal is its cause's
     /// ([`crate::SolidError::is_defect`] follows the chain).
@@ -294,7 +300,7 @@ pub enum SurfaceFailure {
     /// never read or set). [`ErrorKind::InvalidInput`].
     SurfaceWithoutGenerator,
     /// The domain given reaches past the cone's apex, where its radius would be negative.
-    /// [`ErrorKind::InvalidInput`].
+    /// [`ErrorKind::OutsideDomain`].
     DomainPastApex,
     /// The iso curve asked for has zero length (its parameter range on the surface is
     /// degenerate). [`ErrorKind::InvalidInput`].
@@ -376,22 +382,26 @@ impl SurfaceFailure {
             | Self::OperationNotTaken
             | Self::ZeroLineDirection
             | Self::ScaleNotUniform
-            | Self::TrimDomainOutside
             | Self::RadiusNotPositive
             | Self::SurfaceWithoutGenerator
-            | Self::DomainPastApex
             | Self::DegenerateIsoCurve => ErrorKind::InvalidInput,
             Self::BoxOutsideBendHalfSpace { .. }
             | Self::BoxOutsideZeroPeriod { .. }
             | Self::PointOutsideVolumeDomain { .. }
             | Self::PointOutsideGivenDomain { .. }
             | Self::BoxOutsideParamDomain
-            | Self::PseudoBoxOutsideDomain => ErrorKind::OutsideDomain,
+            | Self::PseudoBoxOutsideDomain
+            | Self::TrimDomainOutside
+            | Self::DomainPastApex => ErrorKind::OutsideDomain,
             Self::IsoCurveKindNotLiftable
             | Self::DerivativeCombinationUnsupported { .. }
             | Self::PlainVolume
             | Self::BSplineVolumeUnsupported => ErrorKind::Unsupported,
-            Self::PointInBendSingularity | Self::ZeroVolumeTangent { .. } => ErrorKind::Degenerate,
+            Self::PointInBendSingularity
+            | Self::ZeroVolumeTangent { .. }
+            | Self::LineCrossingSingular
+            | Self::NurbAxesParallel
+            | Self::PlaneTangentUnmeasurable => ErrorKind::Degenerate,
             Self::SolveCacheNotMade
             | Self::BlendSurfaceNotMade
             | Self::MergedRangeReversed { .. }
@@ -550,6 +560,9 @@ impl core::fmt::Display for SurfaceFailure {
             }
             Self::NurbAxesParallel => {
                 f.write_str("the NURB's u and v directions are parallel at its origin")
+            }
+            Self::PlaneTangentUnmeasurable => {
+                f.write_str("the transformed plane's tangents are outside what the kernel resolves")
             }
             Self::NurbNotMade => f.write_str("the surface's NURB form could not be made"),
             Self::NurbEvaluationFailed => {
@@ -934,7 +947,7 @@ mod tests {
             (
                 SurfaceFailure::LineCrossingSingular,
                 SM_ERR,
-                ErrorKind::Failed,
+                ErrorKind::Degenerate,
             ),
             (
                 SurfaceFailure::PlanesLineNearlySingular,
@@ -949,9 +962,18 @@ mod tests {
             (
                 SurfaceFailure::TrimDomainOutside,
                 SM_ERR,
-                ErrorKind::InvalidInput,
+                ErrorKind::OutsideDomain,
             ),
-            (SurfaceFailure::NurbAxesParallel, SM_ERR, ErrorKind::Failed),
+            (
+                SurfaceFailure::NurbAxesParallel,
+                SM_ERR,
+                ErrorKind::Degenerate,
+            ),
+            (
+                SurfaceFailure::PlaneTangentUnmeasurable,
+                SM_ERR,
+                ErrorKind::Degenerate,
+            ),
             (SurfaceFailure::NurbNotMade, SM_ERR, ErrorKind::Failed),
             (
                 SurfaceFailure::NurbEvaluationFailed,
@@ -971,7 +993,7 @@ mod tests {
             (
                 SurfaceFailure::DomainPastApex,
                 SM_ERR_INVALID_INPUT,
-                ErrorKind::InvalidInput,
+                ErrorKind::OutsideDomain,
             ),
             (
                 SurfaceFailure::DerivativeOrderTooHigh { max: 3 },

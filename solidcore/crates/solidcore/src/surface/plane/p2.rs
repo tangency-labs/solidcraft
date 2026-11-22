@@ -98,7 +98,7 @@ use crate::geom::tol::{are_same, is_zero, is_zero_to_tol, within_contact_tol, ZO
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT, PI};
+use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p2::EditNotify;
@@ -348,15 +348,38 @@ impl Plane {
                 break;
             }
         }
+        // The test evaluates the tangents (the evaluation refuses them below the surface's
+        // derivative limit), measures them and their cross product (the normal) only above
+        // the kernel's zero squared, and a square that overflows has no angle: a scale that
+        // takes them there leaves a plane the test cannot see, which is the scale's, not the
+        // kernel's.
+        if plane.is_none() {
+            let at = bss.natural_uv_domain().evaluate(0.0, 0.0);
+            let unmeasurable = Failure::new(OP_XFORM, SurfaceFailure::PlaneTangentUnmeasurable);
+            match evaluate_1st_derivatives(k, &bss, at, Side::Left, Side::Left) {
+                Ok((_, du, dv)) => {
+                    if [du, dv, du.cross(dv)].iter().any(|d| {
+                        let length_squared = d.length_squared();
+                        !(length_squared > EFF_ZERO_SQ && length_squared.is_finite())
+                    }) {
+                        return Err(unmeasurable.into_error());
+                    }
+                }
+                Err(e) if e.is_status_answer() => {
+                    return Err(unmeasurable.caused_by(e).into_error());
+                }
+                Err(e) => return Err(e),
+            }
+        }
         // Something wrong here if scaling a plane does not produce a plane.
         let plane = plane.ok_or_else(|| {
             SolidError::surface(
                 OP_XFORM,
                 SurfaceFailure::Defect {
                     why: "the plane's bilinear NURB, moved rigidly and scaled uniformly by a \
-                          finite, non-zero factor (both checked above), no longer tests as a \
-                          plane at 1000 times the tolerance, though such a transform keeps \
-                          every net planar",
+                          finite, non-zero factor, with tangents the test measures (all \
+                          checked above), no longer tests as a plane at 1000 times the \
+                          tolerance, though such a transform keeps every net planar",
                 },
             )
         })?;
@@ -1858,6 +1881,38 @@ mod tests {
         assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
         assert_eq!(e.surface_failure(), Some(&SurfaceFailure::ScaleNotUniform));
         assert!(!e.is_defect());
+        // a uniform scale that takes the tangents below the surface's derivative limit (the
+        // evaluation's error is the cause) or past the largest square leaves a plane the
+        // planarity test cannot measure: degenerate, not a defect
+        for factor in [1e-13, 1e-9, 1e-200, 1e200] {
+            let e = rect()
+                .transform(
+                    k,
+                    &Axis2Placement::IDENTITY,
+                    Some(Vec3::new(factor, factor, factor)),
+                )
+                .unwrap_err();
+            assert_eq!(e.sm_status(), Some(crate::error::SM_ERR), "{factor:e}");
+            assert_eq!(
+                e.surface_failure(),
+                Some(&SurfaceFailure::PlaneTangentUnmeasurable),
+                "{factor:e}: {e:?}"
+            );
+            // the evaluation's refusal of tangents below the derivative limit is the cause;
+            // tangents of 1e-9 evaluate but their normal's square is below the kernel's zero
+            // squared, and huge ones evaluate with squares that overflow
+            assert_eq!(e.cause().is_some(), factor < 1e-10, "{factor:e}: {e:?}");
+            assert_eq!(e.kind(), crate::error::ErrorKind::Degenerate, "{factor:e}");
+            assert!(!e.is_defect(), "{factor:e}");
+        }
+        // tangents of 1e-5, whose normal's square is 1e-20, still scale
+        let mut q = rect();
+        q.transform(
+            k,
+            &Axis2Placement::IDENTITY,
+            Some(Vec3::new(1e-5, 1e-5, 1e-5)),
+        )
+        .unwrap();
         let mut q = rect();
         q.transform(k, &Axis2Placement::IDENTITY, Some(Vec3::new(2.0, 2.0, 2.0)))
             .unwrap();
@@ -2411,7 +2466,7 @@ mod tests {
                 OP_TRIM,
                 SurfaceFailure::TrimDomainOutside,
                 crate::error::SM_ERR,
-                ErrorKind::InvalidInput,
+                ErrorKind::OutsideDomain,
             ),
         ];
         for (operation, failure, code, kind) in samples {
