@@ -652,7 +652,7 @@ pub enum FilletSetUp {
     VertexGeoms,
     /// A Join's fillet vertex's mate.
     Mate,
-    /// The edge use of a shared side edge on each of the two fillet geometries' faces.
+    /// The radial edge use of a side edge's edge use.
     RadialEdgeUse,
     /// A rail/rail interpolation edge among its corner's fillet edges.
     InterpolationEdgeAtCorner,
@@ -701,9 +701,7 @@ impl FilletSetUp {
             }
             Self::VertexGeoms => "a fillet vertex lacks the fillet geometries its kind joins",
             Self::Mate => "a Join's fillet vertex has no mate",
-            Self::RadialEdgeUse => {
-                "a side edge shared by two fillet geometries has no edge use on one of their faces"
-            }
+            Self::RadialEdgeUse => "an edge use of a side edge has no radial edge use",
             Self::InterpolationEdgeAtCorner => {
                 "the rail/rail interpolation edge is not one of its corner's fillet edges"
             }

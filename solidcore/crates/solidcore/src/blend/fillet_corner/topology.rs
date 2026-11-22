@@ -152,14 +152,14 @@ const NO_SOLVER_SURFACE: &str = "a blend's solver has no offset surface for a ra
 /// 4): `why` names the step and why it is the kernel's fault. Status `SM_ERR`, as the
 /// `SE(SM_ERR)` it replaces.
 #[track_caller]
-pub(super) fn defect(op: &'static str, why: &'static str) -> SolidError {
+fn defect(op: &'static str, why: &'static str) -> SolidError {
     SolidError::blend(op, BlendFailure::Defect { why })
 }
 
 /// [`defect`] with the status `SM_ERR_NULL_POINTER` of the `NER` it replaces: something the
 /// kernel built, or found, before the corner is not there (guide rule 2).
 #[track_caller]
-pub(super) fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
+fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
     Failure::new(op, BlendFailure::Defect { why })
         .with_status(SM_ERR_NULL_POINTER)
         .into_error()
@@ -215,6 +215,7 @@ pub(super) fn set_up(
 
 /// A fillet edge `e` without its original face ([`FilletSetUp::OriginalFace`] at the
 /// edge, `SM_ERR_NULL_POINTER`: upstream `NER`).
+#[track_caller]
 pub(super) fn no_original_face(op: &'static str, e: EdgeId) -> SolidError {
     set_up(
         op,
