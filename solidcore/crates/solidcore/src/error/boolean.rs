@@ -238,8 +238,11 @@ pub enum BooleanFailure {
     /// A slice was asked with another operand that is not a sheet (class
     /// `invalid_input`).
     SliceNeedsSheet,
-    /// The split of an edge at the parameter asked for made no new vertex: the parameter
-    /// lies at an end of the edge, within its vertex's tolerance (class `invalid_input`).
+    /// The split of an edge at the parameter the intersector picked made no new vertex.
+    /// The intersector picks the parameter after its own interior test, and the split
+    /// refuses it under a different one (the parameter's zero test, then the length to
+    /// the nearer end against the vertex's tolerance), so the two can disagree on valid
+    /// input; the parameter is never the caller's (class `failed`).
     EdgeNotSplit,
     /// A Boolean of the tree failed; its error is the cause.
     TreeBooleanFailed,
@@ -327,7 +330,41 @@ impl BooleanFailure {
     pub fn entity(&self) -> Option<EntityRef> {
         match *self {
             Self::SolidLeaks { face } => Some(EntityRef::Face(face)),
-            _ => None,
+            Self::StageFailed { .. }
+            | Self::EntityMissing { .. }
+            | Self::RelateConflict { .. }
+            | Self::MergedVertexReaches { .. }
+            | Self::Defect { .. }
+            | Self::FaceWithoutSurface
+            | Self::EdgeWithoutCurve
+            | Self::MergeWithoutOperands
+            | Self::TreeOperatorWithoutOperands
+            | Self::UnknownTreeOperator { .. }
+            | Self::OperandWithoutFaces
+            | Self::NoSurfacesToMerge
+            | Self::SliceNeedsSheet
+            | Self::EdgeNotSplit
+            | Self::TreeBooleanFailed
+            | Self::FaceInNoRegion
+            | Self::VertexInNoRegion
+            | Self::NoRadialEdgeUse
+            | Self::EmptyResult
+            | Self::IntersectionCurveNotCopyable
+            | Self::ClassificationStepFailed { .. }
+            | Self::ExistingRelationBetter
+            | Self::CoincidenceUnresolved
+            | Self::VertexPairNotDropped { .. }
+            | Self::CoincidentEdgeEndsDiffer
+            | Self::CoincidentEdgeEndMatesConflict
+            | Self::CoincidentEdgeCollapsed
+            | Self::EdgeRelationNotRepaired
+            | Self::DegenerateCurveOnEdges
+            | Self::NoCommonSubinterval
+            | Self::NotRelatedPair
+            | Self::LoopVertexUnrelated
+            | Self::FaceListLimit { .. }
+            | Self::EdgeListLimit { .. }
+            | Self::CoincidentFacesNotSettled { .. } => None,
         }
     }
 
@@ -400,7 +437,8 @@ impl BooleanFailure {
             | Self::EdgeRelationNotRepaired
             | Self::NoCommonSubinterval
             | Self::NotRelatedPair
-            | Self::LoopVertexUnrelated => ErrorKind::Failed,
+            | Self::LoopVertexUnrelated
+            | Self::EdgeNotSplit => ErrorKind::Failed,
             Self::EntityMissing { .. } => ErrorKind::Missing,
             Self::Defect { .. } => ErrorKind::StageFailed,
             Self::FaceWithoutSurface
@@ -410,8 +448,7 @@ impl BooleanFailure {
             | Self::UnknownTreeOperator { .. }
             | Self::OperandWithoutFaces
             | Self::NoSurfacesToMerge
-            | Self::SliceNeedsSheet
-            | Self::EdgeNotSplit => ErrorKind::InvalidInput,
+            | Self::SliceNeedsSheet => ErrorKind::InvalidInput,
             Self::IntersectionCurveNotCopyable
             | Self::DegenerateCurveOnEdges
             | Self::FaceListLimit { .. }
@@ -488,8 +525,8 @@ impl core::fmt::Display for BooleanFailure {
                 f.write_str("a slice needs a sheet, and the other B-rep is not one")
             }
             Self::EdgeNotSplit => f.write_str(
-                "the edge was not split: the parameter lies at its end, within its vertex's \
-                 tolerance",
+                "the edge was not split at the parameter the intersector picked: the split \
+                 finds it at an end of the edge",
             ),
             Self::TreeBooleanFailed => f.write_str("a Boolean of the tree failed"),
             Self::FaceInNoRegion => {
@@ -694,7 +731,7 @@ mod tests {
             (F::UnknownTreeOperator { code: 9 }, SM_ERR, K::InvalidInput),
             (F::NoSurfacesToMerge, SM_ERR, K::InvalidInput),
             (F::SliceNeedsSheet, SM_ERR, K::InvalidInput),
-            (F::EdgeNotSplit, SM_ERR, K::InvalidInput),
+            (F::EdgeNotSplit, SM_ERR, K::Failed),
             (F::TreeBooleanFailed, SM_ERR, K::Failed),
             (F::FaceInNoRegion, SM_ERR, K::Failed),
             (F::VertexInNoRegion, SM_ERR, K::Failed),
