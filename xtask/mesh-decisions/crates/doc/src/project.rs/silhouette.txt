@@ -1,0 +1,1 @@
+projects a body's outline from its mesh triangles

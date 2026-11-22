@@ -5,6 +5,10 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod rounded;
+
+pub use rounded::clip_card;
+
 use std::sync::Arc;
 
 use solidcraft_viewport_gpu::view::{DrawStatsHandle, Frame, GpuTarget, Renderer};
@@ -212,6 +216,41 @@ impl egui_wgpu::CallbackTrait for ProductHighlightCallback {
 #[cfg(test)]
 mod tests {
     use egui::{Rect, pos2, vec2};
+
+    #[test]
+    fn card_paint_clips_rounded_corners_without_covering_the_picture_behind_it() {
+        for scale in [1.0, 1.1, 1.1458334, 1.25, 1.75, 2.0] {
+            for origin in [pos2(0.0, 0.0), pos2(12.3, 18.7), pos2(7.0, 31.0)] {
+                for header in [false, true] {
+                    let ctx = egui::Context::default();
+                    ctx.set_pixels_per_point(scale);
+                    let card = Rect::from_min_size(origin, vec2(240.0, 160.0));
+                    let radius = egui::CornerRadius { nw: if header { 0 } else { 8 }, ne: if header { 0 } else { 8 }, sw: 8, se: 8 };
+                    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                        let ctx = ui.ctx();
+                        let painter = ctx.layer_painter(egui::LayerId::background());
+                        let start = painter.add(egui::Shape::Noop);
+                        painter.rect_filled(card, 0, egui::Color32::RED);
+                        super::clip_card(&painter, start, card, radius);
+                    });
+                    let clips: Vec<_> =
+                        output.shapes.iter().filter(|entry| matches!(entry.shape, egui::Shape::Rect(_))).map(|entry| entry.clip_rect).collect();
+                    assert!(!clips.is_empty());
+                    assert!(clips.len() <= 35, "only corner rows need separate scissors");
+                    assert_eq!(clips.first().unwrap().top(), card.top());
+                    assert_eq!(clips.last().unwrap().bottom(), card.bottom());
+                    assert!(clips.iter().any(|clip| clip.left() == card.left() && clip.right() == card.right() && clip.height() > 100.0));
+                    for pair in clips.windows(2) {
+                        assert_eq!(pair[0].bottom(), pair[1].top(), "no seam or double-painted row");
+                    }
+                    if !header {
+                        assert!(clips.first().unwrap().left() > card.left(), "a hidden header exposes rounded top corners");
+                    }
+                    assert!(clips.last().unwrap().left() > card.left(), "the bottom corner contains no card pixels");
+                }
+            }
+        }
+    }
 
     /// The background is drawn from the two colours it is given, top edge then bottom edge, on a
     /// bare context: no theme is published or read.

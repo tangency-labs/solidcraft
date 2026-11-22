@@ -1672,8 +1672,13 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
         };
         let close = (tol * 100.0 / scale.max(1e-12)).max(1e-9);
         let at_point = tol / scale.max(1e-12);
+        // Two weak cuts are two crossings next to the same end, not a tangent's double root: a
+        // circle just inside a polygon's corner crosses both sides within a fraction of a
+        // millimetre of the corner, and each crossing is a corner of its own sliver region
+        // (#20661). Only cuts at one point are one cut.
         let same = |a: (f64, Cut), b: (f64, Cut), gap: f64| {
-            if a.1 == Cut::Apart || b.1 == Cut::Apart { gap <= at_point } else { gap < close }
+            let both_weak = a.1 == Cut::Weak && b.1 == Cut::Weak;
+            if a.1 == Cut::Apart || b.1 == Cut::Apart || both_weak { gap <= at_point } else { gap < close }
         };
         ts.dedup_by(|a, b| {
             let same = same(*a, *b, (a.0 - b.0).abs());

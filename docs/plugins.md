@@ -91,6 +91,46 @@ or `{"design":null}` without an active design. Closing the window's last tab
 creates a blank design, so that notification names the new active design.
 Events carry no file contents and are not an edit log.
 
+A listener can also opt in to linked-file observations:
+
+```json
+"listeners": [{"entry": "refresh", "on": ["design.changed", "design.links_changed"]}]
+```
+
+`on` must be a nonempty list of distinct events from `design.changed` and
+`design.links_changed`; either event can be declared alone. Both use the existing
+`design@0.1` capability and read-only command entries. No WIT world or interface
+changes are needed. The separate event preserves the exact payload and delivery
+conditions of existing `design.changed` listeners.
+
+When a declared `design.links_changed` event is pending, the entry receives:
+
+```json
+{
+  "design": {"document_id": "…", "revision": "0123456789abcdef0123456789abcdef:42"},
+  "links": [{"component": 7, "name": "Bracket", "path": "/parts/bracket.sc", "read": false}]
+}
+```
+
+`design` is the active design's token, or `null` without an active design.
+Each link names the numeric component id, its name (`null` if absent) and absolute
+source path. `read: false` means a `component.links` check found a file differing
+from the version the design has read. `read: true` means the design already read that version, including after
+Update Links (`component.update_links`) or Relink Source (`component.relink`)
+successfully read the changed source into the design. A disk-only observation does
+not advance the design token or trigger `design.changed`.
+Unread (`read: false`) entries require a source inside the plugin's approved read folders; `read: true` entries remain visible without that grant.
+
+The host observes files only when it already checks links, including the window's
+focus check, and after Update Links; it adds no filesystem watcher. A burst retains
+the latest observation per component, so this is an invalidation, not a history of
+every disk change. A listener declaring both events gets one invocation for the
+coalesced state, including `links` only when a linked-file observation is pending.
+A design-only invalidation still has exactly the `{"design":…}` payload. A listener
+declaring only `design.links_changed` receives no design-only invalidations, and a
+listener declaring only `design.changed` never receives `links` or disk-only
+notifications.
+
 Handlers run on the command worker, away from the window thread, with their own
 budget: at most 1,000,000 fuel, 16 MiB memory, 512 KiB stack and 100 ms execution time, further
 limited by their requested budgets. They may refresh caches or panel data.
@@ -883,12 +923,13 @@ saved back untouched when the plugin is missing, and opening a design never fail
 is missing.
 
 A command plugin keeps its own data there with the `storage@0.1` capability and a data format
-number. Its manifest lists the `storage.*` commands it calls, like any other command:
+number. Its manifest lists the `storage.*` commands it calls, like any other command, and it
+reads and writes its files' bytes through the `storage` interface (`plugin.wit`), never as text:
 
 ```json
-{"id": "gears", "name": "Gears", "version": "1.4.0", "capabilities": ["commands@0.1", "storage@0.1"],
+{"id": "gears", "name": "Gears", "version": "1.4.0", "capabilities": ["commands@0.2", "storage@0.1"],
  "runtime": {"module": "gears.wasm", "entries": ["make"], "data_format": 3,
-   "commands": ["solid.box", "storage.get", "storage.patch", "storage.put_blob"]}}
+   "commands": ["solid.box", "storage.get", "storage.patch"]}}
 ```
 
 - **What it keeps.** One main JSON document (`data.json`, at most 16 MiB) and files of its own
@@ -896,23 +937,17 @@ number. Its manifest lists the `storage.*` commands it calls, like any other com
   256 MiB per plugin per design, and all plugin data in a design at most 256 MiB.
   SolidCraft writes `meta.json` beside them: the plugin's id, name and version and the data's format.
 - **Reading.** `storage.get` returns the main document, the data's `format`, the running plugin's
-  `plugin_format`, `read_only` and the list of files. To read a large main document within the
-  plugin host's 1 MiB result limit, supply `offset` or `len`: `storage.get {offset: 0}` returns
-  `{plugin, data, offset, bytes}`, with `data` holding base64 of up to 512 KiB of the saved JSON
-  bytes and `bytes` the whole document size. Advance `offset` by the number of decoded bytes,
-  concatenate the decoded parts, then parse the JSON. `len` defaults to 524288 and accepts
-  1 through 524288; `offset` defaults to 0. Parts omit metadata and the file list. Past the end,
-  or without a saved document, `data` is empty (`bytes` is 0 without a document). Documents
-  still accept up to 16 MiB; plugins should use parts when the full reply could exceed 1 MiB.
-  `storage.get_blob {name, offset?, len?}`
-  returns up to 512 KiB of a file, base64, so a reply stays inside a plugin's 1 MiB. Inside a
-  plugin's run these reach only that plugin's own data. Agents and scripts read any plugin's
-  data by naming it: `storage.get {"plugin": "gears"}`.
+  `plugin_format`, `read_only` and the list of files with their sizes. A main document larger
+  than the 1 MiB a command result may be is read in parts as its saved JSON bytes:
+  `storage.get-document(plugin?, offset, len)`, up to 1 MiB each; join them and parse. A file is
+  read the same way, `storage.get-blob(plugin?, name, offset, len)`, its bytes as they are; past
+  its end the bytes are empty. Inside a plugin's run these reach only that plugin's own data.
+  Agents and scripts read any plugin's data by naming it: `storage.get {"plugin": "gears"}`.
 - **Writing.** `storage.set {document}`, `storage.patch {patch}` (an RFC 7396 merge patch),
-  `storage.put_blob {name, data, cache?, append?}` (base64; `append` writes a large file in
-  parts) and `storage.delete_blob {name}` change only the running plugin's own data, and only
-  from its run: the whole run is one undo step, and a failed run changes nothing. Called from
-  anywhere else they are refused. A `read` entry can't call them.
+  `storage.put-blob(name, data, cache, append)` (the file's bytes, up to 1 MiB a call; `append`
+  writes a large file in parts) and `storage.delete_blob {name}` change only the running plugin's
+  own data, and only from its run: the whole run is one undo step, and a failed run changes
+  nothing. Called from anywhere else they are refused. A `read` entry can't call them.
 - **Formats.** Every write saves the data in the plugin's `data_format`. When `storage.get` says
   `format` is lower than `plugin_format`, the data is from an older version of the plugin: the
   plugin reads it, converts it and writes it back, which saves it in the new format as one undo
