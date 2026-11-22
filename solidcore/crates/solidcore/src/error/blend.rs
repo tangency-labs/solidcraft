@@ -26,7 +26,7 @@
 //! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
 //! | [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::SeamCornersBothCut`], [`BlendFailure::UvCurveEndsUnresolved`], [`BlendFailure::UvCurveSurfaceNotBSpline`], [`BlendFailure::MateFaceSurfaceNotBSpline`], [`BlendFailure::CurveWithoutNet`], [`BlendFailure::CornerCurvesMeetMoreThanOnce`] | [`ErrorKind::Unsupported`] (5) |
 //! | [`BlendFailure::CornerSurfacesNotIntersected`] | [`ErrorKind::Failed`] (6): the intersection's error, kept as the cause, decides defect or refusal |
-//! | the caller's input and fillet B-rep set-up ([`BlendFailure::NoVertexGiven`], [`BlendFailure::FaceWithoutSurface`], [`BlendFailure::EdgeUseWithoutFace`], [`BlendFailure::EdgeUseWithoutRadial`], [`BlendFailure::FilletGeomWithoutRail`], [`BlendFailure::SolverEdgeUseMissing`], [`BlendFailure::FilletLinkMissing`], [`BlendFailure::NeighbourVertexNotProcessed`], [`BlendFailure::RailNotBlending`], [`BlendFailure::SeamSurfaceNotClosed`]) | [`ErrorKind::InvalidInput`] (1) |
+//! | the caller's input and fillet B-rep set-up ([`BlendFailure::NoVertexGiven`], [`BlendFailure::EdgeUseWithoutRadial`], [`BlendFailure::FilletVertexWithoutCorner`], [`BlendFailure::FilletSetUpInvalid`], [`BlendFailure::NeighbourVertexNotProcessed`], [`BlendFailure::RailNotBlending`], [`BlendFailure::SeamSurfaceNotClosed`]) | [`ErrorKind::InvalidInput`] (1) |
 //! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
 //! | [`BlendFailure::BandInputMissing`]     | [`ErrorKind::Missing`]: neither defect nor refusal |
 //! | [`BlendFailure::Solver`]               | its cause's ([`SolverFailure::class`])       |
@@ -44,7 +44,7 @@
 //! |----------------------------------------|-----------------------------------|
 //! | [`BlendFailure::NoRoom`], [`BlendFailure::RemovalRefused`], [`BlendFailure::StationDidNotConverge`], [`BlendFailure::TrimLoopOpen`], [`BlendFailure::TrimLoopDoesNotSeparate`], [`BlendFailure::StageFailed`], [`BlendFailure::Defect`], [`BlendFailure::SkinPastStationCap`], [`BlendFailure::SkinMeasureNotFinite`], [`BlendFailure::BallsNest`], [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::PlaneCurveTouches`], [`BlendFailure::PlaneCurveEndOff`], [`BlendFailure::PlaneCurveLeavesDomain`], [`BlendFailure::PlaneCurveStepVanished`], [`BlendFailure::PlaneCurveFitCap`], [`BlendFailure::SeamCornersBothCut`], [`BlendFailure::SeamCutOffRib`], [`BlendFailure::UvCurveEndOffSurface`], [`BlendFailure::UvCurveEndsUnresolved`], [`BlendFailure::CurveWithoutNet`], [`BlendFailure::CornerSurfacesNotIntersected`], [`BlendFailure::CornerCurvesDoNotMeet`], [`BlendFailure::CornerCurvesMeetMoreThanOnce`], [`BlendFailure::IntersectionEndsOffFace`], [`BlendFailure::RailMissesEndSurface`], [`BlendFailure::NeighbourVertexNotProcessed`], [`BlendFailure::RailNotBlending`], [`BlendFailure::SeamSurfaceNotClosed`] | `SM_ERR` |
 //! | [`BlendFailure::Failed`], [`BlendFailure::LawIntervalEmpty`], [`BlendFailure::LawHasNoValue`], [`BlendFailure::FilletCrossesItself`], [`BlendFailure::CornerRefused`], [`BlendFailure::ExecutiveStepFailed`], [`BlendFailure::EdgeSplitDeclined`] | `SM_ERR` |
-//! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::SequenceCurveNotBSpline`], [`BlendFailure::NoVertexGiven`], [`BlendFailure::FaceWithoutSurface`], [`BlendFailure::UvCurveSurfaceNotBSpline`], [`BlendFailure::MateFaceSurfaceNotBSpline`], [`BlendFailure::EdgeUseWithoutFace`], [`BlendFailure::EdgeUseWithoutRadial`], [`BlendFailure::FilletGeomWithoutRail`], [`BlendFailure::SolverEdgeUseMissing`], [`BlendFailure::FilletLinkMissing`], [`BlendFailure::LawCornerNotFound`], [`BlendFailure::EdgeUseWithoutEdge`], [`BlendFailure::BoundSurfaceRemoved`], [`BlendFailure::CornerPatchFaceNotFound`] | `SM_ERR_NULL_POINTER` |
+//! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::SequenceCurveNotBSpline`], [`BlendFailure::NoVertexGiven`], [`BlendFailure::UvCurveSurfaceNotBSpline`], [`BlendFailure::MateFaceSurfaceNotBSpline`], [`BlendFailure::EdgeUseWithoutRadial`], [`BlendFailure::FilletVertexWithoutCorner`], [`BlendFailure::FilletSetUpInvalid`], [`BlendFailure::LawCornerNotFound`], [`BlendFailure::EdgeUseWithoutEdge`], [`BlendFailure::BoundSurfaceRemoved`], [`BlendFailure::CornerPatchFaceNotFound`] | `SM_ERR_NULL_POINTER` |
 //! | [`BlendFailure::InvalidValue`], the fillet executive's other checks of the caller's arguments | `SM_ERR_INVALID_INPUT` |
 //! | [`BlendFailure::Inconsistent`]         | `SM_ERR_ASSERT_FAILURE`           |
 //! | [`BlendFailure::BadIntersections`]     | `SM_ERR_BAD_INTERSECTIONS`        |
@@ -53,7 +53,7 @@
 //! | [`BlendFailure::NotWithinTolerance`]   | `SM_ERR_NOT_WITHIN_TOLERANCE`     |
 //! | [`BlendFailure::PassedOn`]             | the status of the stage passed on |
 //! | [`BlendFailure::NotCertified`]         | `SM_ERR`                          |
-//! | [`BlendFailure::Solver`]               | `SM_ERR`, `SM_ERR_NULL_POINTER` for [`SolverFailure::GnSideInputMissing`] and [`SolverFailure::ExtensionCornerMissing`] |
+//! | [`BlendFailure::Solver`]               | `SM_ERR`, `SM_ERR_NULL_POINTER` for [`SolverFailure::GnSideInputMissing`], [`SolverFailure::ExtensionCornerMissing`], [`SolverFailure::EdgeUseWithoutFace`], [`SolverFailure::SolverEdgeUseMissing`], [`SolverFailure::FilletGeomWithoutRail`], [`SolverFailure::FilletGeomWithoutSurface`] and [`SolverFailure::FilletGeomWithoutSolver`] |
 //!
 //! **The phrase causes** ([`BlendFailure::Failed`] to [`BlendFailure::PassedOn`]) are the
 //! shape the blend sites were converted to before the record, some of them refusals not yet
@@ -350,41 +350,21 @@ pub enum BlendFailure {
     /// caller's input ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER` (upstream
     /// dereferences it).
     NoVertexGiven,
-    /// A face of the caller's body has no surface: the caller's input
-    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
-    FaceWithoutSurface {
-        /// The face.
-        face: crate::topology::FaceId,
-    },
-    /// An edge use of the caller's body has no face: the caller's input
-    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
-    EdgeUseWithoutFace,
     /// An edge use of the caller's body has no radial use: the caller's input
     /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
     EdgeUseWithoutRadial,
-    /// The caller's fillet geometry has no rail on side `side`: the caller's solver set-up
-    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
-    FilletGeomWithoutRail {
-        /// The rail side, 0 or 1.
-        side: usize,
-    },
-    /// The solver was given no edge use `index` of the edge to fillet: the caller's solver
-    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
-    SolverEdgeUseMissing {
-        /// The edge use's index, 0 or 1.
-        index: usize,
-    },
-    /// `entity` of the caller's fillet B-rep (or of the solver or corner it names) has no
-    /// `link`, which the routine reads. The fillet executive makes every such link before
-    /// it runs the routine, so only a fillet B-rep set up by hand through the public API
-    /// lacks one: the caller's set-up ([`ErrorKind::InvalidInput`]); status
-    /// `SM_ERR_NULL_POINTER` (the `NER` it replaces) unless its site says otherwise.
-    FilletLinkMissing {
-        /// The entity without the link.
-        entity: FilletEntity,
-        /// The link it lacks.
-        link: FilletLink,
-    },
+    /// The fillet vertex a vertex calculator runs on has no fillet corner, whose filleted
+    /// vertex and kind the calculators read. The caller's input
+    /// ([`ErrorKind::InvalidInput`]): the calculators are public, and a fillet vertex a
+    /// caller builds need not have a corner; status `SM_ERR_NULL_POINTER` (upstream
+    /// dereferences the corner).
+    FilletVertexWithoutCorner,
+    /// A link of the fillet structures a routine is given (the fillet body, its corners and
+    /// solvers) is not there, or not as the routine needs: the link named. The caller's
+    /// input ([`ErrorKind::InvalidInput`]): a caller can build those structures with the
+    /// public API and leave the link out; status `SM_ERR_NULL_POINTER` where upstream
+    /// dereferences the link, `SM_ERR` where it checks it.
+    FilletSetUpInvalid(FilletSetUp),
     /// The corner's vertex is computed from the fillet vertex `vertex` across a fillet edge,
     /// which is not processed yet: the fillet executive computes a corner's vertices in an
     /// order that processes it first, so only a caller running the corner calculators by
@@ -762,6 +742,34 @@ pub enum SolverFailure {
         /// True for the end, false for the start.
         at_end: bool,
     },
+    /// An edge use of the caller's body has no face: the caller's input
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    EdgeUseWithoutFace,
+    /// The solver was given no edge use `index` of the edge to fillet: the caller's solver
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    SolverEdgeUseMissing {
+        /// The edge use's index, 0 or 1.
+        index: usize,
+    },
+    /// The caller's fillet geometry has no rail on side `side`: the caller's solver set-up
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    FilletGeomWithoutRail {
+        /// The rail side, 0 or 1.
+        side: usize,
+    },
+    /// The caller's fillet geometry has no fillet surface (the trace stores none without a
+    /// surface generator): the caller's solver set-up ([`ErrorKind::InvalidInput`]); status
+    /// `SM_ERR_NULL_POINTER`.
+    FilletGeomWithoutSurface {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
+    },
+    /// The caller's fillet geometry names no fillet solver: the caller's solver set-up
+    /// ([`ErrorKind::InvalidInput`]); status `SM_ERR_NULL_POINTER`.
+    FilletGeomWithoutSolver {
+        /// The fillet geometry.
+        fillet_geom: crate::blend::fillet_geom::p1::FilletGeomId,
+    },
 }
 
 /// A method of the base fillet solver ([`SolverFailure::BaseSolverMethod`]).
@@ -791,9 +799,13 @@ impl SolverFailure {
             }
             Self::PiecesTooFarApart { .. } => ErrorKind::NotWithinTolerance,
             Self::GeneratorBuildsNoSurface | Self::BaseSolverMethod(_) => ErrorKind::Unsupported,
-            Self::GnSideInputMissing { .. } | Self::ExtensionCornerMissing => {
-                ErrorKind::InvalidInput
-            }
+            Self::GnSideInputMissing { .. }
+            | Self::ExtensionCornerMissing
+            | Self::EdgeUseWithoutFace
+            | Self::SolverEdgeUseMissing { .. }
+            | Self::FilletGeomWithoutRail { .. }
+            | Self::FilletGeomWithoutSurface { .. }
+            | Self::FilletGeomWithoutSolver { .. } => ErrorKind::InvalidInput,
             Self::JacobianNotLoaded | Self::SupportIntersectionFailed => ErrorKind::Failed,
         }
     }
@@ -801,7 +813,13 @@ impl SolverFailure {
     /// The status the C++ reports unless the site says otherwise (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::GnSideInputMissing { .. } | Self::ExtensionCornerMissing => SM_ERR_NULL_POINTER,
+            Self::GnSideInputMissing { .. }
+            | Self::ExtensionCornerMissing
+            | Self::EdgeUseWithoutFace
+            | Self::SolverEdgeUseMissing { .. }
+            | Self::FilletGeomWithoutRail { .. }
+            | Self::FilletGeomWithoutSurface { .. }
+            | Self::FilletGeomWithoutSolver { .. } => SM_ERR_NULL_POINTER,
             Self::CrossSectionPointNotFound { .. }
             | Self::RailTangentZero { .. }
             | Self::PiecesTooFarApart { .. }
@@ -865,6 +883,22 @@ impl core::fmt::Display for SolverFailure {
             Self::SupportCurveMissesSurface => {
                 f.write_str("the support edge's curve does not meet the fillet surface ending it")
             }
+            Self::EdgeUseWithoutFace => f.write_str("an edge use of the body has no face"),
+            Self::SolverEdgeUseMissing { index } => {
+                write!(
+                    f,
+                    "the solver has no edge use {index} of the edge to fillet"
+                )
+            }
+            Self::FilletGeomWithoutRail { side } => {
+                write!(f, "the fillet geometry has no rail on side {side}")
+            }
+            Self::FilletGeomWithoutSurface { fillet_geom } => {
+                write!(f, "fillet geometry {fillet_geom:?} has no fillet surface")
+            }
+            Self::FilletGeomWithoutSolver { fillet_geom } => {
+                write!(f, "fillet geometry {fillet_geom:?} names no fillet solver")
+            }
             Self::SupportEndOffCurve { at_end } => write!(
                 f,
                 "the support edge's {} does not drop onto its curve",
@@ -896,113 +930,137 @@ impl CliffInput {
     }
 }
 
-/// The entity of the caller's fillet B-rep, or of a solver or corner it names, that lacks
-/// a link ([`BlendFailure::FilletLinkMissing`]).
+/// The link of the fillet structures that is not there or not as the routine needs
+/// ([`BlendFailure::FilletSetUpInvalid`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum FilletEntity {
-    /// A fillet vertex.
-    Vertex(crate::topology::VertexId),
-    /// A fillet edge.
-    Edge(crate::topology::EdgeId),
-    /// A fillet edge use.
-    Edgeuse(crate::topology::EdgeuseId),
-    /// A fillet geometry.
-    Geom(crate::blend::fillet_geom::p1::FilletGeomId),
-    /// A fillet solver.
-    Solver(crate::blend::fillet_geom::p1::FilletSolverId),
-    /// A fillet corner.
-    Corner(crate::blend::fillet_geom::p1::FilletCornerId),
-}
-
-impl core::fmt::Display for FilletEntity {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Vertex(v) => write!(f, "fillet vertex {}", v.index()),
-            Self::Edge(e) => write!(f, "fillet edge {}", e.index()),
-            Self::Edgeuse(eu) => write!(f, "fillet edge use {}", eu.index()),
-            Self::Geom(g) => write!(f, "fillet geometry {}", g.0),
-            Self::Solver(s) => write!(f, "fillet solver {}", s.0),
-            Self::Corner(c) => write!(f, "fillet corner {}", c.0),
-        }
-    }
-}
-
-/// The link a [`FilletEntity`] lacks ([`BlendFailure::FilletLinkMissing`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum FilletLink {
-    /// A vertex's fillet corner.
-    Corner,
-    /// A vertex's cross-section edge.
-    CrossSection,
-    /// A vertex's two fillet/fillet edges (the vertex where three fillets meet).
-    FilletXFilletEdges,
-    /// A vertex's end rib (its fillet/side-face edge).
-    EndRib,
-    /// A vertex's rail edge.
-    Rail,
-    /// A vertex's classification onto the body.
-    Classification,
-    /// An edge's primary edge use.
-    PrimaryEdgeuse,
-    /// The mate of an edge's primary edge use.
+pub enum FilletSetUp {
+    /// One of a fillet solver's two offset surfaces.
+    SolverOffsetSurface,
+    /// The offset surface of a fillet geometry's rail, its own or its solver's.
+    RailOffsetSurface,
+    /// The vertex use an edge use of the body starts at.
+    EdgeUseVertexUse,
+    /// The face use of a vertex use of a face's loop.
+    VertexUseFaceUse,
+    /// The body vertex a fillet corner rounds.
+    CornerVertex,
+    /// The face a fillet vertex (or its mate) is classified to.
+    PointClassFace,
+    /// The side edge use a fillet vertex on a side edge is classified to.
+    PointClassEdgeUse,
+    /// The vertex use of a rail's edge at a fillet vertex at the rail's end.
+    RailEndVertexUse,
+    /// The fillet geometries a fillet vertex's kind joins.
+    VertexGeoms,
+    /// A Join's fillet vertex's mate.
     Mate,
-    /// An edge's vertex at an end.
-    Vertex,
-    /// An edge's face of the body (the face it runs along).
-    OriginalFace,
-    /// An edge's curve.
-    Curve,
-    /// An edge use's fillet geometry.
-    Geom,
-    /// An edge use's UV trim curve.
-    UvCurve,
-    /// An edge use's edge.
-    Edge,
-    /// A geometry's fillet solver.
-    Solver,
-    /// A geometry's fillet surface (the geometry is not traced).
-    Surface,
-    /// A vertex use at an end of a geometry's rail.
-    RailVertexuse,
-    /// A UV trim curve of a rail or side edge of a geometry's boundary.
-    BoundaryUvCurve,
-    /// A solver's executive.
-    Executive,
-    /// A solver's surface generator.
+    /// The edge use of a shared side edge on each of the two fillet geometries' faces.
+    RadialEdgeUse,
+    /// A rail/rail interpolation edge among its corner's fillet edges.
+    InterpolationEdgeAtCorner,
+    /// The cross-section opposite a rail/rail interpolation edge at its corner.
+    OppositeCrossSection,
+    /// The fillet geometry a cross-section's primary edge use spans.
+    CrossSectionGeom,
+    /// A fillet solver's surface generator.
     SurfaceGenerator,
-    /// A corner's filleted vertex of the body.
-    FilletedVertex,
-    /// A corner's extended surface of its side face.
-    ExtendedSurface,
+    /// A fillet edge's primary edge use.
+    PrimaryEdgeUse,
+    /// The mate of a fillet edge's primary edge use.
+    PrimaryEdgeUseMate,
+    /// The two fillet vertices a fillet edge joins.
+    EdgeVertices,
+    /// The face a rail/rail interpolation edge lies on.
+    OriginalFace,
+    /// The rail ending at an end of a rail/rail interpolation edge.
+    InterpolationEndRail,
+    /// A rail edge's 3D curve, or the UV trim curve the 2D path reads.
+    RailCurve,
+    /// A rail's end vertex on the rail's curve.
+    RailEndOffRail,
+    /// The B-spline UV trim curve of a rail's edge use.
+    UvTrimCurve,
+    /// The cross-section edge at a fillet vertex.
+    VertexCrossSection,
+    /// The two fillet/fillet edges at a fillet vertex where three fillets meet.
+    VertexFilletFilletEdges,
+    /// The end rib at a fillet vertex at a fillet's end.
+    VertexEndRib,
+    /// The rail at a fillet vertex at a fillet's end.
+    VertexRail,
+    /// The fillet geometry an edge use of a fillet edge spans.
+    EdgeUseGeom,
+    /// The face a fillet edge (a rail, an end rib, a rail/rail interpolation edge) lies on.
+    FilletEdgeOriginalFace,
+    /// The UV curves either side of a gap the fillet face's boundary loop caps.
+    BoundaryUvCurve,
+    /// A fillet solver's fillet executive.
+    SolverExecutive,
+    /// A fillet corner's extended surface of a side face.
+    CornerExtendedSurface,
 }
 
-impl FilletLink {
+impl FilletSetUp {
+    /// What is wrong, as a clause.
     const fn what(self) -> &'static str {
         match self {
-            Self::Corner => "fillet corner",
-            Self::CrossSection => "cross-section edge",
-            Self::FilletXFilletEdges => "two fillet/fillet edges",
-            Self::EndRib => "end rib",
-            Self::Rail => "rail",
-            Self::Classification => "classification onto the body",
-            Self::PrimaryEdgeuse => "primary edge use",
-            Self::Mate => "mate of its primary edge use",
-            Self::Vertex => "vertex at this end",
-            Self::OriginalFace => "face of the body",
-            Self::Curve => "curve",
-            Self::Geom => "fillet geometry",
-            Self::UvCurve => "UV trim curve",
-            Self::Edge => "edge",
-            Self::Solver => "fillet solver",
-            Self::Surface => "fillet surface",
-            Self::RailVertexuse => "rail vertex use at this end",
-            Self::BoundaryUvCurve => "UV trim curve on a boundary edge",
-            Self::Executive => "executive",
-            Self::SurfaceGenerator => "surface generator",
-            Self::FilletedVertex => "filleted vertex",
-            Self::ExtendedSurface => "extended side surface",
+            Self::SolverOffsetSurface => "a fillet solver lacks one of its two offset surfaces",
+            Self::RailOffsetSurface => {
+                "a rail of a fillet geometry has no offset surface, of its own or its solver's"
+            }
+            Self::EdgeUseVertexUse => "an edge use of the body starts at no vertex use",
+            Self::VertexUseFaceUse => "a vertex use of a face's loop is in no face use",
+            Self::CornerVertex => "the fillet corner records no body vertex it rounds",
+            Self::PointClassFace => "a fillet vertex is not classified to a face",
+            Self::PointClassEdgeUse => {
+                "a fillet vertex on a side edge is not classified to that edge's edge use"
+            }
+            Self::RailEndVertexUse => {
+                "a fillet vertex at a rail's end has no vertex use of the rail's edge"
+            }
+            Self::VertexGeoms => "a fillet vertex lacks the fillet geometries its kind joins",
+            Self::Mate => "a Join's fillet vertex has no mate",
+            Self::RadialEdgeUse => {
+                "a side edge shared by two fillet geometries has no edge use on one of their faces"
+            }
+            Self::InterpolationEdgeAtCorner => {
+                "the rail/rail interpolation edge is not one of its corner's fillet edges"
+            }
+            Self::OppositeCrossSection => {
+                "the fillet edge opposite the rail/rail interpolation edge is not a cross-section"
+            }
+            Self::CrossSectionGeom => "a cross-section's primary edge use spans no fillet geometry",
+            Self::SurfaceGenerator => "a fillet solver has no surface generator",
+            Self::PrimaryEdgeUse => "a fillet edge has no primary edge use",
+            Self::PrimaryEdgeUseMate => "a fillet edge's primary edge use has no mate",
+            Self::EdgeVertices => "a fillet edge does not join two fillet vertices",
+            Self::OriginalFace => "the rail/rail interpolation edge records no face it lies on",
+            Self::InterpolationEndRail => {
+                "an end of the rail/rail interpolation edge is no rail's end"
+            }
+            Self::RailCurve => {
+                "a rail edge lacks its 3D curve or the UV trim curve the 2D path reads"
+            }
+            Self::RailEndOffRail => {
+                "the fillet vertex at the rail's end does not lie on the rail's curve"
+            }
+            Self::UvTrimCurve => "the rail's edge use has no B-spline UV trim curve",
+            Self::VertexCrossSection => "a fillet vertex has no cross-section edge",
+            Self::VertexFilletFilletEdges => {
+                "a fillet vertex where three fillets meet lacks its two fillet/fillet edges"
+            }
+            Self::VertexEndRib => "a fillet vertex at a fillet's end has no end rib",
+            Self::VertexRail => "a fillet vertex at a fillet's end has no rail",
+            Self::EdgeUseGeom => "an edge use of a fillet edge spans no fillet geometry",
+            Self::FilletEdgeOriginalFace => "a fillet edge records no face of the body it lies on",
+            Self::BoundaryUvCurve => {
+                "a gap in the fillet face's boundary loop has no UV curve on one side to cap from"
+            }
+            Self::SolverExecutive => "a fillet solver has no fillet executive",
+            Self::CornerExtendedSurface => {
+                "the fillet corner has no extended surface of the side face"
+            }
         }
     }
 }
@@ -1265,14 +1323,11 @@ impl BlendFailure {
             | Self::EdgeWithoutCurve
             | Self::SequenceCurveNotBSpline { .. }
             | Self::NoVertexGiven
-            | Self::FaceWithoutSurface { .. }
             | Self::UvCurveSurfaceNotBSpline { .. }
             | Self::MateFaceSurfaceNotBSpline { .. }
-            | Self::EdgeUseWithoutFace
             | Self::EdgeUseWithoutRadial
-            | Self::FilletGeomWithoutRail { .. }
-            | Self::SolverEdgeUseMissing { .. }
-            | Self::FilletLinkMissing { .. }
+            | Self::FilletVertexWithoutCorner
+            | Self::FilletSetUpInvalid(_)
             | Self::LawCornerNotFound { .. }
             | Self::EdgeUseWithoutEdge
             | Self::BoundSurfaceRemoved
@@ -1322,7 +1377,7 @@ impl BlendFailure {
     /// kinds ([`BlendFailure::SeamCornersBothCut`], [`BlendFailure::UvCurveEndsUnresolved`], [`BlendFailure::UvCurveSurfaceNotBSpline`], [`BlendFailure::MateFaceSurfaceNotBSpline`], [`BlendFailure::CurveWithoutNet`], [`BlendFailure::CornerCurvesMeetMoreThanOnce`]),
     /// [`ErrorKind::Failed`] for [`BlendFailure::CornerSurfacesNotIntersected`] (its
     /// intersection's error, kept as the cause, decides) and [`ErrorKind::InvalidInput`]
-    /// for the caller's input and fillet B-rep set-up ([`BlendFailure::NoVertexGiven`], [`BlendFailure::FaceWithoutSurface`], [`BlendFailure::EdgeUseWithoutFace`], [`BlendFailure::EdgeUseWithoutRadial`], [`BlendFailure::FilletGeomWithoutRail`], [`BlendFailure::SolverEdgeUseMissing`], [`BlendFailure::FilletLinkMissing`], [`BlendFailure::NeighbourVertexNotProcessed`], [`BlendFailure::RailNotBlending`], [`BlendFailure::SeamSurfaceNotClosed`]). A phrase
+    /// for the caller's input and fillet B-rep set-up ([`BlendFailure::NoVertexGiven`], [`BlendFailure::EdgeUseWithoutRadial`], [`BlendFailure::FilletVertexWithoutCorner`], [`BlendFailure::FilletSetUpInvalid`], [`BlendFailure::NeighbourVertexNotProcessed`], [`BlendFailure::RailNotBlending`], [`BlendFailure::SeamSurfaceNotClosed`]). A phrase
     /// cause keeps the kind of its status ([`ErrorKind::Failed`], [`ErrorKind::Missing`],
     /// [`ErrorKind::InvalidInput`], ...), as before the record ([`BlendFailure::is_phrase`]).
     #[must_use]
@@ -1380,12 +1435,9 @@ impl BlendFailure {
             | Self::LawIntervalEmpty
             | Self::EdgeWithoutCurve
             | Self::NoVertexGiven
-            | Self::FaceWithoutSurface { .. }
-            | Self::EdgeUseWithoutFace
             | Self::EdgeUseWithoutRadial
-            | Self::FilletGeomWithoutRail { .. }
-            | Self::SolverEdgeUseMissing { .. }
-            | Self::FilletLinkMissing { .. }
+            | Self::FilletVertexWithoutCorner
+            | Self::FilletSetUpInvalid(_)
             | Self::NeighbourVertexNotProcessed { .. }
             | Self::RailNotBlending { .. }
             | Self::SeamSurfaceNotClosed
@@ -1448,12 +1500,9 @@ impl BlendFailure {
             | Self::IntersectionEndsOffFace { .. }
             | Self::RailMissesEndSurface { .. }
             | Self::NoVertexGiven
-            | Self::FaceWithoutSurface { .. }
-            | Self::EdgeUseWithoutFace
             | Self::EdgeUseWithoutRadial
-            | Self::FilletGeomWithoutRail { .. }
-            | Self::SolverEdgeUseMissing { .. }
-            | Self::FilletLinkMissing { .. }
+            | Self::FilletVertexWithoutCorner
+            | Self::FilletSetUpInvalid(_)
             | Self::NeighbourVertexNotProcessed { .. }
             | Self::RailNotBlending { .. }
             | Self::SeamSurfaceNotClosed
@@ -1540,12 +1589,9 @@ impl BlendFailure {
             | Self::IntersectionEndsOffFace { .. }
             | Self::RailMissesEndSurface { .. }
             | Self::NoVertexGiven
-            | Self::FaceWithoutSurface { .. }
-            | Self::EdgeUseWithoutFace
             | Self::EdgeUseWithoutRadial
-            | Self::FilletGeomWithoutRail { .. }
-            | Self::SolverEdgeUseMissing { .. }
-            | Self::FilletLinkMissing { .. }
+            | Self::FilletVertexWithoutCorner
+            | Self::FilletSetUpInvalid(_)
             | Self::NeighbourVertexNotProcessed { .. }
             | Self::RailNotBlending { .. }
             | Self::SeamSurfaceNotClosed
@@ -1764,26 +1810,15 @@ impl core::fmt::Display for BlendFailure {
                 self.class()
             ),
             Self::NoVertexGiven => write!(f, "{}: no vertex given", self.class()),
-            Self::FaceWithoutSurface { face } => {
-                write!(f, "{}: face {} of the body has no surface", self.class(), face.index())
-            }
-            Self::EdgeUseWithoutFace => {
-                write!(f, "{}: an edge use of the body has no face", self.class())
-            }
             Self::EdgeUseWithoutRadial => {
                 write!(f, "{}: an edge use of the body has no radial use", self.class())
             }
-            Self::FilletGeomWithoutRail { side } => {
-                write!(f, "{}: the fillet geometry has no rail on side {side}", self.class())
-            }
-            Self::SolverEdgeUseMissing { index } => write!(
+            Self::FilletVertexWithoutCorner => write!(
                 f,
-                "{}: the solver was given no edge use {index} of the edge to fillet",
+                "{}: the fillet vertex has no fillet corner",
                 self.class()
             ),
-            Self::FilletLinkMissing { entity, link } => {
-                write!(f, "{}: {entity} has no {}", self.class(), link.what())
-            }
+            Self::FilletSetUpInvalid(part) => write!(f, "{}: {}", self.class(), part.what()),
             Self::NeighbourVertexNotProcessed { vertex } => write!(
                 f,
                 "{}: the corner's neighbouring fillet vertex {} is not processed yet",
@@ -2538,7 +2573,7 @@ mod tests {
     fn the_fillet_corner_geometry_causes_keep_their_status_and_name_their_numbers() {
         use crate::topology::{EdgeId, FaceId};
         let face = FaceId::from_index(3);
-        let cases: [(BlendFailure, ErrorKind, i32, &str); 24] = [
+        let cases: [(BlendFailure, ErrorKind, i32, &str); 20] = [
             (
                 BlendFailure::SeamCornersBothCut,
                 ErrorKind::Unsupported,
@@ -2645,52 +2680,22 @@ mod tests {
                 "no vertex given",
             ),
             (
-                BlendFailure::FaceWithoutSurface { face },
-                ErrorKind::InvalidInput,
-                SM_ERR_NULL_POINTER,
-                "face 3 of the body has no surface",
-            ),
-            (
-                BlendFailure::EdgeUseWithoutFace,
-                ErrorKind::InvalidInput,
-                SM_ERR_NULL_POINTER,
-                "an edge use of the body has no face",
-            ),
-            (
                 BlendFailure::EdgeUseWithoutRadial,
                 ErrorKind::InvalidInput,
                 SM_ERR_NULL_POINTER,
                 "an edge use of the body has no radial use",
             ),
             (
-                BlendFailure::FilletGeomWithoutRail { side: 1 },
+                BlendFailure::FilletVertexWithoutCorner,
                 ErrorKind::InvalidInput,
                 SM_ERR_NULL_POINTER,
-                "the fillet geometry has no rail on side 1",
+                "the fillet vertex has no fillet corner",
             ),
             (
-                BlendFailure::SolverEdgeUseMissing { index: 0 },
+                BlendFailure::FilletSetUpInvalid(FilletSetUp::VertexEndRib),
                 ErrorKind::InvalidInput,
                 SM_ERR_NULL_POINTER,
-                "the solver was given no edge use 0 of the edge to fillet",
-            ),
-            (
-                BlendFailure::FilletLinkMissing {
-                    entity: FilletEntity::Vertex(crate::topology::VertexId::from_index(7)),
-                    link: FilletLink::Corner,
-                },
-                ErrorKind::InvalidInput,
-                SM_ERR_NULL_POINTER,
-                "fillet vertex 7 has no fillet corner",
-            ),
-            (
-                BlendFailure::FilletLinkMissing {
-                    entity: FilletEntity::Geom(crate::blend::fillet_geom::p1::FilletGeomId(4)),
-                    link: FilletLink::Solver,
-                },
-                ErrorKind::InvalidInput,
-                SM_ERR_NULL_POINTER,
-                "fillet geometry 4 has no fillet solver",
+                "a fillet vertex at a fillet's end has no end rib",
             ),
             (
                 BlendFailure::NeighbourVertexNotProcessed {
@@ -3149,7 +3154,7 @@ mod tests {
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 79;
+    const VARIANTS: usize = 76;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -3218,23 +3223,20 @@ mod tests {
             BlendFailure::IntersectionEndsOffFace { .. } => (59, None),
             BlendFailure::RailMissesEndSurface { .. } => (60, None),
             BlendFailure::NoVertexGiven => (61, None),
-            BlendFailure::FaceWithoutSurface { .. } => (62, None),
-            BlendFailure::CurveWithoutNet { .. } => (63, None),
-            BlendFailure::MateFaceSurfaceNotBSpline { .. } => (64, None),
-            BlendFailure::EdgeUseWithoutFace => (65, None),
-            BlendFailure::EdgeUseWithoutRadial => (66, None),
-            BlendFailure::FilletGeomWithoutRail { .. } => (67, None),
-            BlendFailure::SolverEdgeUseMissing { .. } => (68, None),
-            BlendFailure::FilletLinkMissing { .. } => (69, None),
-            BlendFailure::NeighbourVertexNotProcessed { .. } => (70, None),
-            BlendFailure::RailNotBlending { .. } => (71, None),
-            BlendFailure::SeamSurfaceNotClosed => (72, None),
-            BlendFailure::EdgeSplitDeclined { .. } => (73, None),
-            BlendFailure::LawCornerNotFound { .. } => (74, None),
-            BlendFailure::EdgeUseWithoutEdge => (75, None),
-            BlendFailure::BoundSurfaceRemoved => (76, None),
-            BlendFailure::CornerPatchFaceNotFound { .. } => (77, None),
-            BlendFailure::Solver(_) => (78, None),
+            BlendFailure::CurveWithoutNet { .. } => (62, None),
+            BlendFailure::MateFaceSurfaceNotBSpline { .. } => (63, None),
+            BlendFailure::EdgeUseWithoutRadial => (64, None),
+            BlendFailure::FilletVertexWithoutCorner => (65, None),
+            BlendFailure::FilletSetUpInvalid(_) => (75, None),
+            BlendFailure::NeighbourVertexNotProcessed { .. } => (66, None),
+            BlendFailure::RailNotBlending { .. } => (67, None),
+            BlendFailure::SeamSurfaceNotClosed => (68, None),
+            BlendFailure::EdgeSplitDeclined { .. } => (69, None),
+            BlendFailure::LawCornerNotFound { .. } => (70, None),
+            BlendFailure::EdgeUseWithoutEdge => (71, None),
+            BlendFailure::BoundSurfaceRemoved => (72, None),
+            BlendFailure::CornerPatchFaceNotFound { .. } => (73, None),
+            BlendFailure::Solver(_) => (74, None),
         }
     }
 
@@ -3337,17 +3339,9 @@ mod tests {
             },
             BlendFailure::RailMissesEndSurface { tolerance: 0.0 },
             BlendFailure::NoVertexGiven,
-            BlendFailure::FaceWithoutSurface {
-                face: crate::topology::FaceId::from_index(0),
-            },
-            BlendFailure::EdgeUseWithoutFace,
             BlendFailure::EdgeUseWithoutRadial,
-            BlendFailure::FilletGeomWithoutRail { side: 0 },
-            BlendFailure::SolverEdgeUseMissing { index: 0 },
-            BlendFailure::FilletLinkMissing {
-                entity: FilletEntity::Edge(crate::topology::EdgeId::from_index(0)),
-                link: FilletLink::Mate,
-            },
+            BlendFailure::FilletVertexWithoutCorner,
+            BlendFailure::FilletSetUpInvalid(FilletSetUp::Mate),
             BlendFailure::NeighbourVertexNotProcessed {
                 vertex: crate::topology::VertexId::from_index(0),
             },
