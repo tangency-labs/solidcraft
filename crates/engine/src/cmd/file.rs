@@ -2430,15 +2430,20 @@ fn saved_preview(s: &Session) -> Option<solidcraft_io::DesignPreview> {
         if bytes > 8 << 20 || triangles > 100_000 {
             return None;
         }
-        preview.meshes.push(solidcraft_doc::MeshData {
-            name: body.name.clone(),
-            positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
-            triangles: mesh.triangles.iter().flatten().copied().collect(),
-            color: s.doc.body_color(body),
-            corner_normals: mesh.triangles.iter().flatten().filter_map(|&i| mesh.normals.get(i as usize)).flat_map(|n| [n.x, n.y, n.z]).collect(),
-        });
+        preview.meshes.push(mesh_data(&s.doc, body, &mesh));
     }
     Some(preview)
+}
+
+/// `body`'s mesh `mesh`, in the design's coordinates, as mesh data with the body's name and colour.
+pub(super) fn mesh_data(doc: &Document, body: &solidcraft_doc::ModelBody, mesh: &solidcraft_geom::Mesh) -> solidcraft_doc::MeshData {
+    solidcraft_doc::MeshData {
+        name: body.name.clone(),
+        positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+        triangles: mesh.triangles.iter().flatten().copied().collect(),
+        color: doc.body_color(body),
+        corner_normals: mesh.triangles.iter().flatten().filter_map(|&i| mesh.normals.get(i as usize)).flat_map(|n| [n.x, n.y, n.z]).collect(),
+    }
 }
 
 fn save(s: &mut Session, p: &Value) -> Result<Value> {
