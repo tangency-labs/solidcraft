@@ -2419,11 +2419,13 @@ pub(crate) fn cover_joined_trims(k: &Kernel, b: &mut Brep, edges: &[EdgeId]) -> 
 /// vertex ball it grew ([`vertex_ball_reaches`](crate::topology::brep::validation::vertex_ball_reaches))
 /// are proved not to reach topology they do not bound: otherwise the edge and its vertices
 /// keep the tolerances they came with, the gap left for validation to see, as before #20373.
+/// They keep them too where any step after the snapshot fails: the error is returned with
+/// the old tolerances put back, so no raise stays without its reach proof.
 ///
 /// # Errors
 ///
-/// [`SolidError::NotFound`] for a dangling id; those of [`cover_raised_trims`] and
-/// [`cover_vertex_ends`].
+/// [`SolidError::NotFound`] for a dangling id; those of [`cover_raised_trims`],
+/// [`cover_vertex_ends`] and the reach proofs' unported and cancelled statuses.
 fn cover_joined_edge_trims(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
     let rec = b.edge(e)?;
     let before = rec.tolerance;
@@ -2442,6 +2444,42 @@ fn cover_joined_edge_trims(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
             ends.push((v, b.vertex(v)?.tolerance));
         }
     }
+    // (any error once the edge may be raised puts the old tolerances back before it is
+    // returned: no raise is kept without the reach proof, #20373 review r4)
+    let restore = |b: &mut Brep| -> Result<()> {
+        b.edge_mut(e)?.tolerance = before;
+        for &(v, was) in &ends {
+            b.vertex_mut(v)?.tolerance = was;
+        }
+        Ok(())
+    };
+    match raise_joined_edge(k, b, e, before, &ends) {
+        Ok(true) => Ok(()),
+        Ok(false) => restore(b),
+        Err(err) => {
+            restore(b)?;
+            Err(err)
+        }
+    }
+}
+
+/// The raise of [`cover_joined_edge_trims`]: covers the trims of `e` (tolerance `before`,
+/// its end vertices and their tolerances `ends`) and its vertex ends, and answers whether
+/// the raise may be kept: `true` where nothing was raised or neither the edge's tube nor
+/// a raised vertex's ball may reach topology it does not bound (a proof that fails counts
+/// as reaching).
+///
+/// # Errors
+///
+/// Those of [`cover_raised_trims`], [`cover_vertex_ends`] and the reach proofs' unported
+/// and cancelled statuses.
+fn raise_joined_edge(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    before: f64,
+    ends: &[(crate::topology::VertexId, f64)],
+) -> Result<bool> {
     for round in 0..SETTLE_ROUNDS {
         let was = b.edge(e)?.tolerance;
         cover_raised_trims(k, b, e, round == 0)?;
@@ -2450,16 +2488,14 @@ fn cover_joined_edge_trims(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
         }
     }
     if b.edge(e)?.tolerance <= before {
-        return Ok(());
+        return Ok(true);
     }
     cover_vertex_ends(k, b, e)?;
-    // (a tube or ball that may reach topology it does not bound withholds the raise; a
-    // proof that fails counts as reaching)
     let mut reaches = ignored(crate::topology::brep::validation::edge_tube_reaches(
         k, b, e,
     ))?
     .unwrap_or(true);
-    for &(v, was) in &ends {
+    for &(v, was) in ends {
         if !reaches && b.vertex(v)?.tolerance > was {
             reaches = ignored(crate::topology::brep::validation::vertex_ball_reaches(
                 k, b, v,
@@ -2467,13 +2503,7 @@ fn cover_joined_edge_trims(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
             .unwrap_or(true);
         }
     }
-    if reaches {
-        b.edge_mut(e)?.tolerance = before;
-        for &(v, was) in &ends {
-            b.vertex_mut(v)?.tolerance = was;
-        }
-    }
-    Ok(())
+    Ok(!reaches)
 }
 
 /// Not upstream (#18166): keeps each edge of `covered` ([`covered_trimless_faces`]) covering
@@ -4268,6 +4298,54 @@ mod tests {
             withheld += 1;
         }
         assert!(withheld >= 1, "no raise that would reach");
+    }
+
+    /// #20373 review r4: an error once a joined edge may be raised returns with the edge's
+    /// and its vertices' old tolerances put back, so no raise stays without its reach proof.
+    /// The box edge whose trim moved `1e-4` (a raise that is kept when nothing fails) is run
+    /// cancelled at 24 polls spread over those the whole cover makes and at its last two:
+    /// each cancelled run returns `Cancelled` with every tolerance as it came (without the
+    /// restore, the run cancelled at poll 1401 of 4199 keeps a raise).
+    #[test]
+    fn a_joined_trim_raise_cut_short_by_an_error_is_put_back() {
+        use crate::kernel::CancelToken;
+        let state = |b: &Brep, e: EdgeId| {
+            let (v0, v1) = crate::topology::edge::start_end_vertices(b, e).unwrap();
+            let mut t = vec![b.edge(e).unwrap().tolerance];
+            for v in [v0, v1].into_iter().flatten() {
+                t.push(b.vertex(v).unwrap().tolerance);
+            }
+            t
+        };
+        // (the polls made, and for a run that failed: whether it was `Cancelled`, whether
+        // every tolerance is back)
+        let run = |n: u64| {
+            let (mut k, mut b, e, _) = box_with_moved_trim(1e-4);
+            let before = state(&b, e);
+            let token = CancelToken::after_polls(n);
+            k.set_cancel_token(token.clone());
+            let r = cover_joined_edge_trims(&k, &mut b, e);
+            k.clear_cancel_token();
+            let made = token.polls().unwrap();
+            match r {
+                Ok(()) => (made, None, state(&b, e) != before),
+                Err(err) => (
+                    made,
+                    Some((err.is_cancelled(), state(&b, e) == before)),
+                    false,
+                ),
+            }
+        };
+        let (all, failed, raised) = run(u64::MAX);
+        assert!(failed.is_none() && raised, "uncancelled, the raise is kept");
+        assert!(all > 1, "the cover polls its kernel {all} times");
+        // (24 polls spread over the run, and its last two: cancelled in the reach proofs,
+        // after the raise)
+        let step = usize::try_from(all.div_ceil(24)).unwrap().max(1);
+        for n in (1..=all).step_by(step).chain([all - 1, all]) {
+            let (_, r, _) = run(n);
+            assert_eq!(r, Some((true, true)), "cancelled at poll {n} of {all}");
+        }
     }
 
     /// #20373: a settle round ([`cover_raised_trims`] without `within`) takes a trim's bound
