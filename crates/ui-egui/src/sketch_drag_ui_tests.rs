@@ -479,6 +479,58 @@ fn a_biarc_ratio_drag_previews_one_span_and_applies_once_or_cancels() {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn deferred_history_cancels_a_biarc_ratio_preview_before_the_pointer_releases() {
+    use crate::{scenario, sketch_biarc_edit};
+
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    run(&mut h, "sketch.create", json!({"plane": "XY"}));
+    run(
+        &mut h,
+        "sketch.spline.biarc",
+        json!({"nodes": [
+            {"point": [2,4], "tangent": [6,0]},
+            {"point": [14,8], "tangent": [0,6]}
+        ]}),
+    );
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.camera", json!({"target": [8,5,0], "distance": 48}));
+    let sketch = h.app.session.active_sketch.unwrap();
+    let spline = h.app.session.doc.sketch(sketch).unwrap().biarc_splines[0].clone();
+    h.app.session.selection = vec![Sel::SketchCurve { id: spline.spans[0].curves[0].clone(), sketch: Some(sketch) }];
+    h.frames(3);
+    let before = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    let from = scenario::handle_at("biarc-ratio").unwrap();
+    let to = screen(&mut h, 10.4, 6.8);
+    let mut path = vec![from];
+    path.extend(steps(from, to, 4));
+    press_and_move(&mut h, &path);
+    assert!(sketch_biarc_edit::dragging(&h.app));
+    assert!(sketch_biarc_edit::replaced_members(&h.app, sketch).is_some());
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert_eq!(h.app.session.undo.len(), undo);
+
+    // A rebound key takes the interactive history path. Hold its worker so the release
+    // reaches the viewport before Undo can change the document's revision or selection.
+    crate::keymap::bind(&mut h.app, "edit.undo", "Ctrl+U", false).unwrap();
+    h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+    let (release_work, wait_for_release) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(wait_for_release)));
+    // The owned sender also releases the worker if an assertion unwinds this scope.
+    h.step(&json!({"key": "U", "cmd": true})).unwrap();
+    assert!(h.app.computing_since().is_some(), "Undo waits for its worker");
+    assert_eq!(h.app.session.doc.to_json(), before);
+    release(&mut h, to);
+    assert_eq!(h.app.session.doc.to_json(), before, "release discards the ratio preview while Undo waits");
+    assert_eq!(h.app.session.undo.len(), undo, "release adds no step ahead of the requested Undo");
+    assert!(!sketch_biarc_edit::dragging(&h.app));
+    assert!(sketch_biarc_edit::replaced_members(&h.app, sketch).is_none());
+    drop(release_work);
+}
+
 #[test]
 fn a_biarc_ratio_handle_stays_with_its_active_automatic_span() {
     use crate::{scenario, sketch_biarc_edit};
