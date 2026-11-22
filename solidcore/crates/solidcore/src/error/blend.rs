@@ -1221,7 +1221,7 @@ impl core::fmt::Display for BlendFailure {
                 what.what()
             ),
             Self::EdgeUseWithoutEdge => {
-                write!(f, "{}: an edge use the fillet reads has no edge", self.class())
+                write!(f, "{}: an edge use of the body has no edge", self.class())
             }
             Self::BoundSurfaceRemoved => write!(
                 f,
