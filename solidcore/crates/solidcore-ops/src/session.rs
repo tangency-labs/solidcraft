@@ -229,11 +229,11 @@ fn take() -> Kernel {
 }
 
 /// A call starts from the state a fresh kernel has, whatever kernel it was handed and whatever
-/// ran on it before: the stations the blend definitions solved last are forgotten. A call's
-/// result is then the same after any history and on any kernel of the pool, so calls side by
-/// side on several threads give what they give one after another. (The kernel's other caches
-/// never change a result, only its speed, and stay. Its random draws need no reset: each
-/// sampling call draws from the start of the seed's sequence.)
+/// ran on it before: it holds no position in a random sequence, and the stations the blend
+/// definitions solved last are forgotten. A call's result is then the same after any history
+/// and on any kernel of the pool, so calls side by side on several threads give what they give
+/// one after another. (The kernel's other caches never change a result, only its speed, and
+/// stay.)
 fn start_clean(k: &mut Kernel) {
     *k.blend_station_memo.borrow_mut() = StationMemo::default();
 }

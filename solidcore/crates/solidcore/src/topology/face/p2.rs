@@ -1697,7 +1697,8 @@ fn rand_dither(rng: &mut Rng) -> f64 {
 /// from a generator the call makes from the kernel's seed ([`Kernel::seeded_rng`]): point
 /// `i` takes draw `i` of that seed's sequence, so the points are a function of the face,
 /// the count and the seed, and the same call gives the same points whatever the kernel
-/// sampled before.
+/// sampled before. (The inner-shell tests sample their faces through
+/// [`points_in_face_drawing`], one generator per call for all of them.)
 ///
 /// The rectangular branch starts at the domain's minimum and sizes its columns by the
 /// domain's u length over the column count plus one (upstream samples fractions of the
@@ -1718,10 +1719,28 @@ pub fn points_in_face(
     f: FaceId,
     point_count: u64,
 ) -> Result<PointsInFace> {
-    // init output
-    let mut out = PointsInFace::default();
     // this call's own draws, from the start of the seed's sequence
     let mut rng = k.seeded_rng();
+    points_in_face_drawing(k, b, f, point_count, &mut rng)
+}
+
+/// [`points_in_face`] with its dithers drawn from `rng`, which the caller made for its own
+/// call: a routine that samples several faces in one call (the inner-shell tests) draws
+/// them all from one generator in its own order, so each face takes the next draws of
+/// that call's sequence rather than the same first ones.
+///
+/// # Errors
+///
+/// Those of [`points_in_face`].
+pub(crate) fn points_in_face_drawing(
+    k: &mut Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    point_count: u64,
+    rng: &mut Rng,
+) -> Result<PointsInFace> {
+    // init output
+    let mut out = PointsInFace::default();
 
     // check input - return SM_ERR for degenerate surface
     let face = b.face(f)?;
@@ -1776,7 +1795,7 @@ pub fn points_in_face(
                 }
                 let v = v_min + (j + 1) as f64 * v_inc;
                 let v_dither = if point_count > 1 {
-                    rand_dither(&mut rng) * v_inc
+                    rand_dither(rng) * v_inc
                 } else {
                     0.0
                 };
@@ -1871,7 +1890,7 @@ pub fn points_in_face(
             {
                 for kk in 0..smp_cnt {
                     let v_dither = if point_count > 1 {
-                        rand_dither(&mut rng)
+                        rand_dither(rng)
                     } else {
                         0.0
                     };
@@ -4298,6 +4317,50 @@ mod tests {
             .iter()
             .zip(&other_seed.uv)
             .all(|(a, b)| a.x == b.x && a.y != b.y));
+    }
+
+    /// Face uses that share one call's generator, as the inner-shell tests' do, take
+    /// successive draws: a second face of the same shape and domain is not sampled at the
+    /// first one's relative places, but at the next draws of the seed's sequence, and the
+    /// whole sequence of samples repeats bit for bit from a fresh generator.
+    #[test]
+    fn face_uses_sharing_a_generator_take_successive_draws() {
+        let bounds = (3.0, -7.0, 4.0, -6.5);
+        let (mut b, f) = rectangular_face(bounds);
+        let (mut b2, f2) = rectangular_face(bounds);
+        let mut k = Kernel::default();
+
+        let mut rng = k.seeded_rng();
+        let first = points_in_face_drawing(&mut k, &mut b, f, 3, &mut rng).unwrap();
+        let second = points_in_face_drawing(&mut k, &mut b2, f2, 3, &mut rng).unwrap();
+
+        // three columns at min u + (i + 1) / 4, one row at min v + v length / 2, the first
+        // face dithered by draws 0..3 and the second by draws 3..6
+        let dithers = dithers_of(Rng::DEFAULT_SEED, 6);
+        for (i, (uv, d)) in first.uv.iter().zip(&dithers[..3]).enumerate() {
+            assert_eq!(uv.x, 3.0 + (i + 1) as f64 / 4.0);
+            assert_eq!(uv.y, (-7.0 + 0.25) + d * 0.25);
+        }
+        for (i, (uv, d)) in second.uv.iter().zip(&dithers[3..]).enumerate() {
+            assert_eq!(uv.x, 3.0 + (i + 1) as f64 / 4.0);
+            assert_eq!(uv.y, (-7.0 + 0.25) + d * 0.25);
+        }
+        // the same face sampled at other relative places in each column
+        assert!(first
+            .uv
+            .iter()
+            .zip(&second.uv)
+            .all(|(a, c)| a.x == c.x && a.y != c.y));
+        // the first face's points are those of a call of its own
+        assert_eq!(first.uv, points_in_face(&mut k, &mut b, f, 3).unwrap().uv);
+
+        // the whole sequence again, from a fresh generator, after other sampling
+        points_in_face(&mut k, &mut b2, f2, 31).unwrap();
+        let mut again = k.seeded_rng();
+        let first_again = points_in_face_drawing(&mut k, &mut b, f, 3, &mut again).unwrap();
+        let second_again = points_in_face_drawing(&mut k, &mut b2, f2, 3, &mut again).unwrap();
+        assert_eq!(first.pv, first_again.pv);
+        assert_eq!(second.pv, second_again.pv);
     }
 
     #[test]

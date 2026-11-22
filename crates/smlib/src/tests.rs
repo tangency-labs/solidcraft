@@ -795,12 +795,23 @@ fn a_token_under_another_stops_when_either_does() {
     assert!(dialog.within(|| design.within(|| Brep::make_box([0.0; 3], [1.0; 3]))).is_err(), "either way round");
 }
 
-/// Every call starts with the same draws of random rays, whatever its kernel did before: what
-/// depends on them answers the same on any kernel of the pool.
+/// Every call samples the same random points, whatever its kernel did before: what depends on
+/// them answers the same on any kernel of the pool. (Seven points of a box's first face, each
+/// dithered by a random draw, after the call has sampled the box's other faces.)
 #[test]
 fn every_call_starts_clean_on_any_kernel() {
-    let draw = |k: &mut solidcore::kernel::Kernel| Ok(k.seeded_rng().next_f64());
+    fn draw(k: &mut solidcore::kernel::Kernel) -> solidcore::Result<Vec<[f64; 3]>> {
+        use solidcore::topology::face::p2::points_in_face;
+        let mut b = solidcore::primitive::api_primitives::create_box(k, solidcore::geom::vector3d::Vec3::ZERO, 1.0, 2.0, 3.0)?;
+        let faces = solidcore::topology::brep::faces(&b, None)?;
+        for &f in &faces[1..] {
+            points_in_face(k, &mut b, f, 5)?;
+        }
+        let points = points_in_face(k, &mut b, faces[0], 7)?;
+        Ok(points.pv.iter().step_by(2).map(|p| [p.x, p.y, p.z]).collect())
+    }
     let first = core::run("draw", draw).unwrap();
+    assert_eq!(first.len(), 7);
     assert_eq!(core::run("draw", draw).unwrap(), first, "the same kernel, later");
     let held = hold_a_kernel();
     assert_eq!(core::run("draw", draw).unwrap(), first, "another kernel");
