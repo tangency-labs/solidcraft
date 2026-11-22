@@ -244,34 +244,6 @@ fn restore_base_out_of_bounds(s: &mut OffsetSurface, old: Option<bool>) {
     }
 }
 
-/// `SE(SmEdgeuse::EvaluateBinormal(dT, FALSE, rPnt, rBinVec, NULL, &rFaceuseNormal))`:
-/// the binormal and face use normal of an edge use. The status is only signalled:
-/// after a failure the binormal keeps its `SM_UNDEF_DOUBLE` initial value and the face
-/// use normal is zero (`EvaluateBinormal` zeroes it once the edge use passed its loop
-/// check) or `SM_UNDEF_DOUBLE`. Only [`SolidError::Unported`] propagates.
-fn binormal(k: &Kernel, brep: &mut Brep, eu: EdgeuseId, t: f64) -> Result<(Vec3, Vec3)> {
-    let options = edgeuse_p3::BinormalOptions::default();
-    if let Some(r) = ignored(edgeuse_p3::evaluate_binormal(
-        k, brep, eu, t, false, &options,
-    ))? {
-        return Ok((r.binormal, r.face_normal));
-    }
-    let undef = Vec3::UNDEF;
-    let normal = if edgeuse::is_loop_edgeuse(brep, eu)? {
-        Vec3::new(0.0, 0.0, 0.0)
-    } else {
-        undef
-    };
-    Ok((undef, normal))
-}
-
-/// `pEdgeuse->GetLoopuse()->GetFaceuse()->GetOrientation() == SM_OT_OPPOSITE`.
-fn faceuse_opposite(brep: &Brep, eu: EdgeuseId, op: &'static str) -> Result<bool> {
-    let fu = edgeuse::faceuse(brep, eu)?
-        .ok_or_else(|| SolidError::invalid_input(op, "edge use without face use"))?;
-    Ok(edgeuse::faceuse_orientation(brep, fu)? == OrientType::Opposite)
-}
-
 /// `pEdgeuse->GetLoopuse()->GetFaceuse()->GetFace()->GetSurface()` as the base of an
 /// offset surface (the offset shares the face's surface, `m_pSurface(&rSurface)`: an
 /// exact copy, owner kept, without the copy constructor's knot fix-up).
@@ -281,46 +253,6 @@ fn face_base(brep: &Brep, eu: EdgeuseId, op: &'static str) -> Result<(Surface, S
     let s = face::surface(brep, f)?
         .ok_or_else(|| SolidError::invalid_input(op, "face without surface"))?;
     Ok((s.clone_for_evaluation()?, SurfaceId::Face(f)))
-}
-
-/// The edge-use part of the `SmConstantDistanceFS` and `SmVariableRadiusFS`
-/// constructors: the radial, the edge and its interval, the binormals at the middle of
-/// the edge and the face use normals (negated for opposite face uses).
-struct EdgeuseFrame {
-    radial: Option<EdgeuseId>,
-    bin_vec: Vec3,
-    bin_vec2: Vec3,
-    faceuse_normal: Vec3,
-    faceuse_normal2: Vec3,
-}
-
-fn edgeuse_frame(
-    k: &Kernel,
-    brep: &mut Brep,
-    eu: EdgeuseId,
-    op: &'static str,
-) -> Result<EdgeuseFrame> {
-    let radial = edgeuse::radial(brep, eu)?;
-    let e = edgeuse::edge(brep, eu)?
-        .ok_or_else(|| SolidError::invalid_input(op, "edge use without edge"))?;
-    let interval = edge::interval(brep, e)?;
-    let eu1 = radial.ok_or_else(|| SolidError::invalid_input(op, "edge use without radial"))?;
-    let t = interval.evaluate(0.5);
-    let (bin_vec, mut faceuse_normal) = binormal(k, brep, eu, t)?;
-    let (bin_vec2, mut faceuse_normal2) = binormal(k, brep, eu1, t)?;
-    if faceuse_opposite(brep, eu, op)? {
-        faceuse_normal = -faceuse_normal;
-    }
-    if faceuse_opposite(brep, eu1, op)? {
-        faceuse_normal2 = -faceuse_normal2;
-    }
-    Ok(EdgeuseFrame {
-        radial,
-        bin_vec,
-        bin_vec2,
-        faceuse_normal,
-        faceuse_normal2,
-    })
 }
 
 /// `new SmOffsetSurface(d, *pSurface)` with `SetAllowExtension(TRUE)`.
@@ -1376,50 +1308,20 @@ impl ConstantDistanceFs {
         // Create offset surfaces of appropriate radius in appropriate
         // direction.  For now assume that the orientations at the center of the
         // edge work for the rest of the edge.
-        if k.fixes.fillet_knife_edge_rounds {
-            // (fork b7ec55b) offset each surface to the side of it the other face lies
-            // on (sm_SectorSides), a cusp's faces too
-            let mut cd = Self { solver, distance };
-            let radial = cd.solver.edgeuses[1];
-            let Some(sides) =
-                super::p1::sector_sides(k, brep, [Some(edgeuse), radial], cd.distance, OP)?
-            else {
-                // Smooth, or no sector: can't fillet this.
-                cd.solver.edgeuses = [None, None];
-                // (SE(SM_ERR): only signalled)
-                return Ok(cd);
-            };
-            cd.solver.orientations = sides;
-            let eu1 =
-                radial.ok_or_else(|| SolidError::invalid_input(OP, "edge use without radial"))?;
-            return cd.finish_offsets(k, brep, pseudo, edgeuse, eu1, OP);
-        }
-        let fr = edgeuse_frame(k, brep, edgeuse, OP)?;
+        // (fork b7ec55b) offset each surface to the side of it the other face lies on
+        // (sm_SectorSides), a cusp's faces too
         let mut cd = Self { solver, distance };
-
-        cd.solver.orientations = [1.0, 1.0];
-        let dot1 = fr.bin_vec2.dot(fr.faceuse_normal);
-        if dot1.abs() < EFF_ZERO_SQRT {
+        let radial = cd.solver.edgeuses[1];
+        let Some(sides) =
+            super::p1::sector_sides(k, brep, [Some(edgeuse), radial], cd.distance, OP)?
+        else {
+            // Smooth, or no sector: can't fillet this.
             cd.solver.edgeuses = [None, None];
             // (SE(SM_ERR): only signalled)
             return Ok(cd);
-        }
-        if dot1 < 0.0 {
-            cd.solver.orientations[0] = -1.0;
-        }
-        let dot2 = fr.bin_vec.dot(fr.faceuse_normal2);
-        if dot2.abs() < EFF_ZERO_SQRT {
-            cd.solver.edgeuses = [None, None];
-            // (SE(SM_ERR): only signalled)
-            return Ok(cd);
-        }
-        if dot2 < 0.0 {
-            cd.solver.orientations[1] = -1.0;
-        }
-
-        let eu1 = fr
-            .radial
-            .ok_or_else(|| SolidError::invalid_input(OP, "edge use without radial"))?;
+        };
+        cd.solver.orientations = sides;
+        let eu1 = radial.ok_or_else(|| SolidError::invalid_input(OP, "edge use without radial"))?;
         cd.finish_offsets(k, brep, pseudo, edgeuse, eu1, OP)
     }
 
@@ -1523,66 +1425,14 @@ impl VariableRadiusFs {
         set_law_arc_length(k, &original, &law_interval, approx_tol_3d, &mut law)?;
         curve_based.original = Some(original);
 
-        if k.fixes.fillet_knife_edge_rounds {
-            // (fork b7ec55b) the law's radius at the middle first, then each surface
-            // offset to the side of it the other face lies on (sm_SectorSides), a cusp's
-            // faces too
-            let mut vr = Self {
-                curve_based,
-                law,
-                law_orientation,
-                law_interval,
-            };
-            // (SE: a failed law evaluation leaves the radius undefined; only Unported
-            // propagates)
-            let values = ignored(vr.law.evaluate(
-                vr.law_interval.evaluate(0.5),
-                &vr.law_interval,
-                vr.law_orientation,
-            ))?
-            .ok_or_else(|| SolidError::invalid_input(OP, "undefined fillet law radius"))?;
-            let [approx_radius, _, _] = values;
-            let radial = vr.curve_based.solver.edgeuses[1];
-            let Some(sides) =
-                super::p1::sector_sides(k, brep, [Some(edgeuse), radial], approx_radius.abs(), OP)?
-            else {
-                // Smooth, or no sector: can't fillet this.
-                vr.curve_based.solver.edgeuses = [None, None];
-                // (SE(SM_ERR): only signalled)
-                return Ok(vr);
-            };
-            vr.curve_based.solver.orientations = sides;
-            let eu1 =
-                radial.ok_or_else(|| SolidError::invalid_input(OP, "edge use without radial"))?;
-            return vr.finish_offsets(k, brep, pseudo, edgeuse, eu1, approx_radius, OP);
-        }
-        let fr = edgeuse_frame(k, brep, edgeuse, OP)?;
+        // (fork b7ec55b) the law's radius at the middle first, then each surface offset to
+        // the side of it the other face lies on (sm_SectorSides), a cusp's faces too
         let mut vr = Self {
             curve_based,
             law,
             law_orientation,
             law_interval,
         };
-
-        vr.curve_based.solver.orientations = [1.0, 1.0];
-        let dot1 = fr.bin_vec2.dot(fr.faceuse_normal);
-        if dot1.abs() < EFF_ZERO_SQRT {
-            vr.curve_based.solver.edgeuses = [None, None];
-            return Ok(vr);
-        }
-        if dot1 < 0.0 {
-            vr.curve_based.solver.orientations[0] = -1.0;
-        }
-        let dot2 = fr.bin_vec.dot(fr.faceuse_normal2);
-        if dot2.abs() < EFF_ZERO_SQRT {
-            vr.curve_based.solver.edgeuses = [None, None];
-            // (SE(SM_ERR): only signalled)
-            return Ok(vr);
-        }
-        if dot2 < 0.0 {
-            vr.curve_based.solver.orientations[1] = -1.0;
-        }
-
         // (SE: a failed law evaluation leaves the radius undefined; only Unported
         // propagates)
         let values = ignored(vr.law.evaluate(
@@ -1592,9 +1442,17 @@ impl VariableRadiusFs {
         ))?
         .ok_or_else(|| SolidError::invalid_input(OP, "undefined fillet law radius"))?;
         let [approx_radius, _, _] = values;
-        let eu1 = fr
-            .radial
-            .ok_or_else(|| SolidError::invalid_input(OP, "edge use without radial"))?;
+        let radial = vr.curve_based.solver.edgeuses[1];
+        let Some(sides) =
+            super::p1::sector_sides(k, brep, [Some(edgeuse), radial], approx_radius.abs(), OP)?
+        else {
+            // Smooth, or no sector: can't fillet this.
+            vr.curve_based.solver.edgeuses = [None, None];
+            // (SE(SM_ERR): only signalled)
+            return Ok(vr);
+        };
+        vr.curve_based.solver.orientations = sides;
+        let eu1 = radial.ok_or_else(|| SolidError::invalid_input(OP, "edge use without radial"))?;
         vr.finish_offsets(k, brep, pseudo, edgeuse, eu1, approx_radius, OP)
     }
 

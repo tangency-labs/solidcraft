@@ -6,8 +6,8 @@
 //! opt-in `fillet_trim_inside_by_best_dot`, now retired).
 //!
 //! The part is WR-570's knife edge: a 62 1/6 x 21 plate whose corner is cut by a circle of
-//! radius 21 tangent to its back face y = 0 at x = TIP, extruded 10 (knife edges need
-//! `fillet_knife_edge_rounds`, WR-570). Its edge is chamfered d (a linear section on the
+//! radius 21 tangent to its back face y = 0 at x = TIP, extruded 10 (a knife edge,
+//! WR-570). Its edge is chamfered d (a linear section on the
 //! ball of radius d, as the fork's capi chamfers a knife edge): the chord between the
 //! ball's contacts takes off the triangle flat contact / tip / wall contact less the
 //! wall's circular segment `R^2 / 2 (b - sin b)`, `b = acos((R - d) / (R + d))`, all the
@@ -102,7 +102,6 @@ fn removed(d: f64) -> f64 {
 /// it failed (the chamfer's error, or a body that is not a solid).
 fn chamfer(s: f64, d: f64) -> Result<f64, String> {
     let mut k = Kernel::default();
-    k.fixes.fillet_knife_edge_rounds = true;
     let mut b = part(&mut k, s);
     let e = knife_edge(&k, &b, s);
     // the linear section (`xsect_type` 0) on the ball of radius d

@@ -3141,11 +3141,11 @@ fn blend_edgeuse_unless(
 
     let max_dot = (CREASE_ANGLE * PI / 180.0).cos();
 
-    // the faces are tangent and can't be filleted. With `fillet_knife_edge_rounds`
-    // (WR-570, fork b7ec55b) only when their binormals point away from each other (the
-    // faces continue each other): binormals pointing the same way are a cusp (a knife
-    // edge), whose ball lies back from the edge, filleted like any other edge
-    let cusp = k.fixes.fillet_knife_edge_rounds && bin_vec.dot(bin_vec2) > 0.0;
+    // the faces are tangent and can't be filleted only when their binormals point away
+    // from each other (the faces continue each other; WR-570, fork b7ec55b): binormals
+    // pointing the same way are a cusp (a knife edge), whose ball lies back from the
+    // edge, filleted like any other edge
+    let cusp = bin_vec.dot(bin_vec2) > 0.0;
     let dot1 = bin_vec2.dot(fu_normal);
     let dot2 = bin_vec.dot(fu_normal2);
     if !cusp && (dot1.abs() < max_dot || dot2.abs() < max_dot) {

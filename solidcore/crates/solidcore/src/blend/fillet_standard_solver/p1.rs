@@ -64,10 +64,10 @@
 //!   each circle of fewer arcs again with the most (`ArcCounts`), as the approximated
 //!   arcs' second pass does with knots; and each point section takes the nearest
 //!   circle's arcs and weights (`collapse_point_sections`).
-//! - **Knife edges.** With `fixes.fillet_knife_edge_rounds` (WR-570, the fork's
-//!   tangency-labs/smlib `b7ec55b`, not in SMLib at the pin) the edge-use constructors
-//!   orient their offsets by `sector_sides` (`sm_SectorSides`), which also sides a
-//!   cusp's faces; off, they keep upstream's tangency refusal.
+//! - **Knife edges.** (WR-570, the fork's tangency-labs/smlib `b7ec55b`, not in SMLib at
+//!   the pin; no longer opt-in) the edge-use constructors orient their offsets by
+//!   `sector_sides` (`sm_SectorSides`), which also sides a cusp's faces, where upstream
+//!   refuses tangent faces.
 //! - **Object model.** `SmConstantRadiusFS` is the co-ported [`ConstantRadiusAssistedFs`]
 //!   of `blend.fillet_custom_solver` (the members of `SmFilletSolver`,
 //!   `SmConstantRadiusFS` and `SmConstantRadiusAssistedFS` are the same), aliased as
@@ -151,7 +151,7 @@ use crate::geom::matrix::Matrix;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::intersect::surface_intersector::p1::TsectPnt;
 use crate::kernel::Kernel;
-use crate::math::{Point3, Vec3, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
+use crate::math::{Point3, Vec3, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::p1::NurbCircleParam;
 use crate::nurbs::b_spline_curve::{BSplineCurve, ControlPointForm};
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
@@ -358,82 +358,8 @@ pub type JacobianSurfaces = [Option<SurfaceId>; 2];
 /// [`ConstantRadiusAssistedFs`] holds its members.
 pub type ConstantRadiusFs = ConstantRadiusAssistedFs;
 
-/// `SE(SmEdgeuse::EvaluateBinormal(dT, FALSE, rPnt, rBinVec, NULL, &rFaceuseNormal))`:
-/// the binormal and face use normal of an edge use. The status is only signalled
-/// (`SE`): after a failure the binormal keeps its `SM_UNDEF_DOUBLE` initial value and
-/// the face use normal is zero (`EvaluateBinormal` zeroes it once the edge use passed its
-/// loop check) or `SM_UNDEF_DOUBLE` (an edge use not in a loop). Only
-/// [`SolidError::Unported`] propagates.
-fn evaluate_binormal(k: &Kernel, brep: &mut Brep, eu: EdgeuseId, t: f64) -> Result<(Vec3, Vec3)> {
-    let options = edgeuse_p3::BinormalOptions::default();
-    if let Some(r) = ignored(edgeuse_p3::evaluate_binormal(
-        k, brep, eu, t, false, &options,
-    ))? {
-        return Ok((r.binormal, r.face_normal));
-    }
-    let undef = Vec3::new(UNDEF_DOUBLE, UNDEF_DOUBLE, UNDEF_DOUBLE);
-    let normal = if edgeuse::is_loop_edgeuse(brep, eu)? {
-        Vec3::new(0.0, 0.0, 0.0)
-    } else {
-        undef
-    };
-    Ok((undef, normal))
-}
-
-/// The offset orientations of the faces at an edge use and its radial
-/// (`m_dOrientations` as the edge-use constructors compute them), with the edge use
-/// pair.
-fn edgeuse_orientations(
-    k: &Kernel,
-    brep: &mut Brep,
-    eu: EdgeuseId,
-    op: &'static str,
-) -> Result<([EdgeuseId; 2], [f64; 2])> {
-    let eu1 = edgeuse::radial(brep, eu)?
-        .ok_or_else(|| SolidError::invalid_input(op, "edge use without radial"))?;
-    let e = edgeuse::edge(brep, eu)?
-        .ok_or_else(|| SolidError::invalid_input(op, "edge use without edge"))?;
-    let t = edge::interval(brep, e)?.evaluate(0.5);
-    let (bin_vec, mut faceuse_normal) = evaluate_binormal(k, brep, eu, t)?;
-    let (bin_vec2, mut faceuse_normal2) = evaluate_binormal(k, brep, eu1, t)?;
-
-    let faceuse_of = |eu: EdgeuseId| -> Result<_> {
-        edgeuse::faceuse(brep, eu)?
-            .ok_or_else(|| SolidError::invalid_input(op, "edge use without face use"))
-    };
-    if edgeuse::faceuse_orientation(brep, faceuse_of(eu)?)? == OrientType::Opposite {
-        faceuse_normal = -faceuse_normal;
-    }
-    if edgeuse::faceuse_orientation(brep, faceuse_of(eu1)?)? == OrientType::Opposite {
-        faceuse_normal2 = -faceuse_normal2;
-    }
-
-    let mut orientations = [1.0, 1.0];
-    let dot1 = bin_vec2.dot(faceuse_normal);
-    if dot1.abs() < EFF_ZERO_SQRT {
-        // Surfaces are tangent at midpoint: can't fillet this.
-        return Err(SolidError::blend_failed(
-            op,
-            "the surfaces are tangent at the midpoint",
-        ));
-    }
-    if dot1 < 0.0 {
-        orientations[0] = -1.0;
-    }
-
-    let dot2 = bin_vec.dot(faceuse_normal2);
-    if dot2.abs() < EFF_ZERO_SQRT {
-        // Tangent surfaces.
-        return Err(SolidError::blend_failed(op, "the surfaces are tangent"));
-    }
-    if dot2 < 0.0 {
-        orientations[1] = -1.0;
-    }
-    Ok(([eu, eu1], orientations))
-}
-
 /// `sm_SectorSides(rpEdgeuses, dLength, rdSides)` (the fork's tangency-labs/smlib
-/// `b7ec55b`, `fixes.fillet_knife_edge_rounds`): the side of each face of the sector
+/// `b7ec55b`; WR-570): the side of each face of the sector
 /// between `eus[0]` and its radial `eus[1]` on which the other face lies, at the middle
 /// of the edge, `+1.0` when face `1 - i` lies on the side face `i`'s surface normal
 /// points to, else `-1.0` (the sign of face `i`'s offset). Where the faces are tangent
@@ -617,9 +543,9 @@ pub fn constant_radius_from_edgeuse(
     }
 
     // Create offset surfaces of appropriate radius in appropriate direction.
-    let ([eu0, eu1], orientations) = if k.fixes.fillet_knife_edge_rounds {
-        // (fork b7ec55b) offset each surface to the side of it the other face lies on
-        // (sm_SectorSides), a cusp's faces too
+    // (fork b7ec55b) offset each surface to the side of it the other face lies on
+    // (sm_SectorSides), a cusp's faces too
+    let ([eu0, eu1], orientations) = {
         let radial = edgeuse::radial(brep, edgeuse)?;
         let [r0, r1] = radii;
         let length = if r0.abs() > r1.abs() {
@@ -636,8 +562,6 @@ pub fn constant_radius_from_edgeuse(
         };
         let eu1 = radial.ok_or_else(|| SolidError::invalid_input(OP, "edge use without radial"))?;
         ([edgeuse, eu1], sides)
-    } else {
-        edgeuse_orientations(k, brep, edgeuse, OP)?
     };
     let (s0, id0) = face_surface(brep, eu0, OP)?;
     let (s1, id1) = face_surface(brep, eu1, OP)?;
