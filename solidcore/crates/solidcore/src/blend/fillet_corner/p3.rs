@@ -88,6 +88,7 @@ use std::collections::BTreeMap;
 use crate::blend::blend_corner::{BlendCornerEvent, BlendEnd};
 use crate::blend::fillet_corner::p1;
 use crate::blend::fillet_corner::p2::find_concave_edgeuses;
+use crate::blend::fillet_corner::topology::{defect, missing_defect, shape_not_built};
 use crate::blend::fillet_executive::p3::ErrorInfo;
 use crate::blend::fillet_geom::p1::{
     FilStatus, FilletBrep, FilletCornerId, FilletCornerType, FilletEdgeType, FilletErrorType,
@@ -95,7 +96,6 @@ use crate::blend::fillet_geom::p1::{
 };
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, FilletSurfaceGeneratorType};
 use crate::curve::curve::{Curve, CurveKind};
-use crate::blend::fillet_corner::topology::{defect, missing_defect, shape_not_built};
 use crate::error::blend::{BlendFailure, CornerPatchMiss, CornerShape};
 use crate::error::{ignored, EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::intersect::point_class::PointClassType;
@@ -1960,13 +1960,18 @@ impl FilletCorner {
             // the topology sets the edge on the face the unblended edge use and the blended
             // one share, which it does not check is there
             .ok_or_else(|| shape_not_built(OP_3X2, CornerShape::RingEdgesShareNoFace))?;
-        let surface = env.target.face(orig_face)?.surface.as_ref().ok_or_else(|| {
-            missing_defect(
-                OP_3X2,
-                "the extended edge's face has no surface, though the face is beside the \
+        let surface = env
+            .target
+            .face(orig_face)?
+            .surface
+            .as_ref()
+            .ok_or_else(|| {
+                missing_defect(
+                    OP_3X2,
+                    "the extended edge's face has no surface, though the face is beside the \
                  blended edge whose solver's offset surfaces were made from its faces' surfaces",
-            )
-        })?;
+                )
+            })?;
         // `pSurface->DropCurve(m_crContext, pSurface->GetNaturalUVDomain(), *pCurve1,
         // pCurve1->GetNaturalInterval(), m_dThisApproxTol3d, ..)` (virtual with the
         // defaults `bKeepAllDropCurves = TRUE`, no fail record): the `SmPlane`
@@ -2761,7 +2766,7 @@ mod tests {
             "{e:?}"
         );
         assert!(e.is_defect(), "{e:?}");
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         let e = corner(Some(vec![EdgeuseId::from_index(0)]))
             .filleted_edgeuses()
             .unwrap_err();

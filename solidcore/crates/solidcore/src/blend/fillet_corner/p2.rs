@@ -93,6 +93,7 @@ use crate::blend::fillet_corner::p3::{
     move_vertexuse, primary_eu, set_vertex_point, CornerEnv, CornerPatchEnv, FilletCorner,
     FilletExecutiveData,
 };
+use crate::blend::fillet_corner::topology::{defect, missing_defect, shape_not_built};
 use crate::blend::fillet_custom_solver::SurfaceId;
 use crate::blend::fillet_executive::p3::{ErrorInfo, FilletExecutive};
 use crate::blend::fillet_geom::p1::FilletErrorType;
@@ -110,7 +111,6 @@ use crate::blend::fillet_solver::p1::{
 use crate::blend::fillet_standard_solver::p1::{FilletLaw, VariableRadiusFs};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::blend::fillet_corner::topology::{defect, missing_defect, shape_not_built};
 use crate::error::blend::{BlendFailure, CornerPatchMiss, CornerShape};
 use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -2104,7 +2104,7 @@ mod tests {
     fn a_certificate_past_its_budget_passes_the_corner_s_soft_statuses() {
         let e = SolidError::blend(
             "t",
-            crate::error::blend::BlendFailure::NotCertified {
+            BlendFailure::NotCertified {
                 halvings: 1,
                 stations: 2,
             },
@@ -2276,7 +2276,7 @@ mod tests {
         assert_eq!(
             e.blend_failure(),
             Some(&BlendFailure::CornerShapeNotBuilt(
-                crate::error::blend::CornerShape::RingEdgesShareNoFace
+                CornerShape::RingEdgesShareNoFace
             )),
             "{e:?}"
         );
