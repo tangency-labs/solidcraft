@@ -2755,13 +2755,11 @@ fn a_saved_offset_of_a_shelled_major_arc_reopens_with_its_sources() {
     use solidcraft_doc::{Document, FeatureKind, ProfileSel, WholeProfileBoundary};
     use solidcraft_sketch::{CurveKind, LinkKind, LinkSource, OffsetChain};
 
-    let mut failed = Vec::new();
     for through in [55.0_f64, 25.0] {
         for spline in [false, true] {
             if through == 55. && !spline {
                 continue; // the inner rim reopens as straight segments, not an arc: #TBD
             }
-            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let (mut s, id, mut legacy, inner) = saved_shelled_cap_projection(through, spline);
             let source_ids = [if spline { "s1" } else { "a2" }, "l4", "l5", "l6"];
             let order = source_ids.iter().map(|id| (legacy.curve_index(id).unwrap(), true)).collect::<Vec<_>>();
@@ -2820,12 +2818,8 @@ fn a_saved_offset_of_a_shelled_major_arc_reopens_with_its_sources() {
             run(&mut s, "sketch.offset", json!({"curves":["a2"],"distance":0.8}));
             run(&mut s, "sketch.finish", json!({}));
             assert!(s.model.results.iter().all(|r| r.error.is_none()));
-            })).is_err() {
-                failed.push((through, spline));
-            }
         }
     }
-    assert!(failed.is_empty(), "DIAG failed cases: {failed:?}");
 }
 
 /// A U-slot cut into a plate's edge with its top rim rounded: the round meets the top face on a
