@@ -98,7 +98,9 @@
 //!   the uses' edge/face gaps without caching them.
 //! - **Periodic projection.** The point-drop interpolation lifts consecutive UV samples
 //!   across closed-surface seams before fitting. Interpolating their wrapped coordinates
-//!   instead invents a whole-period excursion between nearby points on the surface.
+//!   instead invents a whole-period excursion between nearby points on the surface. This
+//!   continuous lift is an intermediate chart: import assembly completes the face's seams
+//!   with `face::p1::complete_imported_face_seams` before publishing its stored trims.
 //! - **Passed-on statuses (WR-663).** The statuses the fork passes on
 //!   (tangency-labs/smlib 666242b: `CreateUVTrimCurve`'s box, seam transforms, 2D
 //!   conversions, trims, end evaluations and drops, `NormalizedEvaluate`;
@@ -1646,6 +1648,11 @@ fn brute_force(
         )?
     };
     new_curve.convert_to_2d()?;
+
+    // Keep the lift on the edge's parameters until the body-level seam edit can split real
+    // boundary edges and replace internal cuts. Wrapping individual samples here would fit
+    // across the other side of the surface again; returning one selected piece would lose
+    // the rest of the edge. Import assembly completes the topology once all lifts are known.
 
     // clean up Surface Cache side-effect of attaching 2nd UVTrimCurve
     if !uv_trim_at_start && uv_trim_curve(b, eu)?.0.is_some() {

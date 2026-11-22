@@ -650,26 +650,28 @@ fn put_back_joined(out: &mut crate::Output, raised: &[Raised]) -> Vec<(f64, usiz
 
 /// Rows #18166 took out of [`TRIM_COVER`] that it does not move (see the module docs): unit,
 /// case, and the hash of main's committed line (`origin/main` ee673a19bf's expected file).
+/// #18490 moves these four rows (the round sits on the sphere drop's finer trims), so each
+/// hash is of the row with that change, from Linux CI.
 const KEPT_MAIN_ROW: &[(&str, &str, u64)] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        0xa90a_9179_4750_1297,
+        0xbab5_3857_5f4c_54b2,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        0x1679_1328_0d68_333a,
+        0x0879_39f6_c276_2c27,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        0xfb1f_0985_b9ee_e48c,
+        0xaa56_e948_548e_16f9,
     ),
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        0xcc4d_2e3f_0192_8b71,
+        0x87dc_a442_4a0e_39cd,
     ),
 ];
 
