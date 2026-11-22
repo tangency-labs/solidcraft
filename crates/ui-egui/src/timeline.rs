@@ -3403,7 +3403,9 @@ mod tests {
         select_features(&mut h, &selected);
         for (menu, target) in [("History bar", Target::Timeline { feature: fillet }), ("Browser", Target::Feature { id: fillet })] {
             let entries: Vec<_> = items(&h.app, &target).into_iter().filter(|item| !item.is_sep()).collect();
-            for item in entries.iter().filter(|item| item.enabled) {
+            // Zoom to Selection names the clicked row, and frames the whole selection when the
+            // row is among it (`ui.zoomTo` in context_menu.rs), so its parameters say nothing here.
+            for item in entries.iter().filter(|item| item.enabled && item.id != "ui.zoomTo") {
                 let acts_on = named(item.params.as_ref(), &selected);
                 assert!(
                     acts_on.is_empty() || acts_on == selected,
