@@ -625,7 +625,9 @@ impl<O: Copy> Grid<O> {
                 OP,
                 GeomFailure::VoxelArrayTooLarge {
                     voxels: total,
-                    limit: crate::limits::MAX_ALLOC_BYTES / size_of::<Voxel>().max(1),
+                    limit: crate::limits::MAX_ALLOC_BYTES
+                        .checked_div(size_of::<Voxel>())
+                        .unwrap_or(crate::limits::MAX_ALLOC_BYTES),
                 },
             )
         })?;

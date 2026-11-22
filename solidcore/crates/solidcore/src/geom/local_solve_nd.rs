@@ -1166,10 +1166,7 @@ mod tests {
         let mut e = WantsIntervals;
         let mut s = LocalSolveNd::new(&mut e, None, None);
         let e = s.solve_it(&[1.0], EFF_ZERO).unwrap_err();
-        assert!(matches!(
-            e.geom_failure(),
-            Some(GeomFailure::Defect { .. })
-        ));
+        assert!(matches!(e.geom_failure(), Some(GeomFailure::Defect { .. })));
         assert!(e.is_defect());
         assert_eq!(e.upstream_status(), Some(SM_ERR));
     }
