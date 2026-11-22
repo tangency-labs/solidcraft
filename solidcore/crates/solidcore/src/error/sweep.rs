@@ -172,7 +172,7 @@ pub enum SweepFailure {
     /// [`ErrorKind::InvalidInput`].
     ProfileCurveNotThreeDimensional {
         /// Its dimension.
-        dim: usize,
+        dim: u64,
     },
     /// The base sweep geometry, which only its translational and rotational kinds extend,
     /// builds no geometry and has no copy. [`ErrorKind::Unsupported`].
