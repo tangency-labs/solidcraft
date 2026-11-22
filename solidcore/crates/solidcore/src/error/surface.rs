@@ -430,13 +430,12 @@ mod tests {
         }
         // the re-certification refusal keeps the face the bare status named
         let face = EntityRef::Face(crate::topology::FaceId::from_index(3));
-        let typed = SolidError::surface_at(
+        let typed = Failure::new(
             "surface::procedural_blend::recertify_faces",
-            SurfaceFailure::Failed(
-                "the face's net is not proved within its bound of its definition",
-            ),
-            face,
-        );
+            SurfaceFailure::NetNotCertified,
+        )
+        .at(face)
+        .into_error();
         let before = SolidError::Upstream {
             operation: "surface::procedural_blend::recertify_faces",
             code: SM_ERR,
