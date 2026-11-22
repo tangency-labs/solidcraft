@@ -2001,6 +2001,33 @@ mod tests {
         assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
     }
 
+    /// #20724: the cap on the cache's manifest follows the design file limit (an eighth of it, the
+    /// 32 MiB it always was at the default), saving and reading. A manifest just over 32 MiB is
+    /// left out at the default limit, kept when the limit allows it, and refused on a read under
+    /// the default limit, where it is never read unbounded.
+    #[test]
+    fn the_model_cache_manifest_cap_follows_the_design_file_limit() {
+        let mut model = native_geometry();
+        // Many small entries make a manifest of about 38 MB without a model that big.
+        model.records["padding"] = json!(vec!["x".repeat(32); 1_100_000]);
+        let doc = document();
+        // At the default limit: left out, as before.
+        assert!(native_cache::encode_model(&model, b"{}", usize::MAX).is_err());
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&model), None, 2 << 30, None).unwrap();
+        assert!(!DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
+        // With a limit that allows it: kept, and read back from the cache.
+        crate::limits::test_cap::set(Some(1 << 30));
+        let (manifest, _) = native_cache::encode_model(&model, b"{}", usize::MAX).unwrap();
+        assert!(manifest.len() > 32 << 20, "{} bytes is not past the default cap", manifest.len());
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&model), None, 2 << 30, None).unwrap();
+        assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
+        assert!(read_design_geometry(&bytes).is_some());
+        // Back at the default limit the same file's oversized manifest is refused, not read.
+        crate::limits::test_cap::set(None);
+        assert!(read_design_geometry(&bytes).is_none());
+        assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().geometry().is_none());
+    }
+
     /// Opening a design with its model validates its document once, where the document is read
     /// (`read_document`); reading the model first validated it a second time, a whole parse and
     /// validation of a large design. A broken document still fails the open, as it did.
