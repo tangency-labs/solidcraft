@@ -635,6 +635,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 choice_row(ui, "Chamfer Type", "ch_type", ctype, &CHAMFER_TYPES);
             }
             enter |= expr_row_positive(ui, if *chamfer { if *ctype == 0 { "Distance" } else { "Distance 1" } } else { "Radius" }, radius);
+            // A chamfer of two distances: the row the keyboard is in is the distance its arrow and
+            // the canvas box follow.
+            let mut editing = ui_kit::last_value_field(ctx).filter(|id| ctx.memory(|m| m.has_focus(*id))).map(|_| 0usize);
             let mut rtype = fillet_type(&d.extra);
             if !*chamfer {
                 form_row(ui, "Type", |ui| {
@@ -654,6 +657,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             }
             if *chamfer && *ctype == 1 {
                 enter |= expr_row_positive(ui, "Distance 2", distance2);
+                editing = ui_kit::last_value_field(ctx).filter(|id| ctx.memory(|m| m.has_focus(*id))).map(|_| 1usize).or(editing);
+            }
+            if let Some(k) = editing.filter(|_| *chamfer && *ctype == 1) {
+                crate::canvas::note_chamfer_editing(&mut d.extra, k);
             }
             if *chamfer && *ctype == 2 {
                 enter |= expr_row(ui, "Angle", angle);
