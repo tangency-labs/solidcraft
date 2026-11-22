@@ -370,7 +370,7 @@ pub enum SurfaceFailure {
     UnsupportedSurfaceKind,
     /// The sphere's inversion could not answer whether the point is on it: the point is at
     /// the centre of a sphere whose radius is not above the 3D tolerance, so it has no
-    /// parameters. Class `failed`.
+    /// parameters. [`ErrorKind::Degenerate`].
     InversionNotAnswered,
     /// The surface record read names a surface type `code` the reader does not know.
     /// [`ErrorKind::InvalidInput`].
@@ -402,7 +402,7 @@ pub enum SurfaceFailure {
     /// [`ErrorKind::InvalidInput`].
     CrossSectionValuesDisagree,
     /// The surface has no normal at the point (its tangents' cross product is zero), or its
-    /// fundamental forms degenerate there. Class `failed`.
+    /// fundamental forms degenerate there. [`ErrorKind::Degenerate`].
     SingularPoint,
     /// The vector does not drop onto the surface's tangent plane: its 2D solve against the
     /// tangents failed (the solve's error is the cause). Class `failed`.
@@ -579,7 +579,9 @@ impl SurfaceFailure {
             | Self::LineCrossingSingular
             | Self::NurbAxesParallel
             | Self::PlaneTangentUnmeasurable
-            | Self::ConeClosesWithinSpan => ErrorKind::Degenerate,
+            | Self::ConeClosesWithinSpan
+            | Self::InversionNotAnswered
+            | Self::SingularPoint => ErrorKind::Degenerate,
             Self::SolveCacheNotMade
             | Self::BlendSurfaceNotMade
             | Self::MergedRangeReversed { .. }
@@ -1332,7 +1334,7 @@ mod tests {
             (
                 SurfaceFailure::InversionNotAnswered,
                 SM_ERR,
-                ErrorKind::Failed,
+                ErrorKind::Degenerate,
             ),
             (
                 SurfaceFailure::UnknownSurfaceType { code: 7 },
@@ -1375,7 +1377,7 @@ mod tests {
                 SM_ERR,
                 ErrorKind::InvalidInput,
             ),
-            (SurfaceFailure::SingularPoint, SM_ERR, ErrorKind::Failed),
+            (SurfaceFailure::SingularPoint, SM_ERR, ErrorKind::Degenerate),
             (SurfaceFailure::VectorNotDropped, SM_ERR, ErrorKind::Failed),
         ];
         for (failure, status, kind) in cases {
