@@ -1910,7 +1910,8 @@ mod tests {
         a.make_nurb(k).unwrap();
         b.make_nurb(k).unwrap();
         let (da, db) = (a.rev().base().natural_uv_domain(), b.rev().base().natural_uv_domain());
-        let (more, out) = a.intersect_with_cone(k, &da, &b, &db, None).unwrap();
+        // the approximation tolerance a boolean asks for is half the zone tolerance; 1e-6 here
+        let (more, out) = a.intersect_with_cone(k, &da, &b, &db, Some(1e-6)).unwrap();
         assert!(!more, "delta {delta}, rb {rb}: solved in closed form");
         (a, b, out)
     }
@@ -1929,7 +1930,7 @@ mod tests {
             for i in 0..=4000 {
                 let p = curve.evaluate_point(k, ivl.min() + ivl.length() * f64::from(i) / 4000.0).unwrap();
                 let d = off(a, p).max(off(b, p));
-                assert!(d <= dev + 1e-12 && d < 5e-6, "{p:?} is {d:e} off a cylinder (deviation {dev:e})");
+                assert!(*dev <= 1e-6 && d <= 1e-6, "{p:?} is {d:e} off a cylinder (deviation {dev:e})");
                 pts.push(p);
             }
         }
@@ -1976,5 +1977,124 @@ mod tests {
         let pts = on_both(&k, &a, &b, &out);
         assert_eq!(out.curves_3d.len(), 2);
         assert!(pts.iter().any(|p| p.x < -10.0) && pts.iter().any(|p| p.x > -10.0));
+    }
+
+    /// A cylinder of radius `r` and length `len` centred on `centre`, along `axis`.
+    fn cylinder_along(k: &Kernel, centre: Point3, axis: Vec3, r: f64, len: f64) -> Cone {
+        let z = axis.unitize().unwrap();
+        let x = (if z.x.abs() < 0.9 { Vec3::X } else { Vec3::Y }).cross(z).unitize().unwrap();
+        let y = z.cross(x);
+        let mut c = Cone::new_cylinder_bounded(centre - z * (len / 2.0), x, y, r, 0.0, 360.0, len, false, false, false);
+        c.make_nurb(k).unwrap();
+        c
+    }
+
+    /// The discriminant's sign changes round A, counted on a fine grid, from the cylinders'
+    /// equations alone: the closed curves the pair must meet in (two for a positive
+    /// discriminant without roots).
+    fn expected_loops(a: &Cone, b: &Cone) -> Option<usize> {
+        let (pa, pb) = (a.rev().position(), b.rev().position());
+        let (za, zb) = (pa.z_axis(), pb.z_axis());
+        let w = za - zb * za.dot(zb);
+        let alpha = w.dot(w);
+        let f = |t: f64| {
+            let q = pa.origin() + (pa.x_axis() * t.cos() + pa.y_axis() * t.sin()) * a.bot_radius() - pb.origin();
+            let bq = q.dot(w);
+            bq * bq - alpha * (q.dot(q) - q.dot(zb).powi(2) - b.bot_radius().powi(2))
+        };
+        let n = 200_000;
+        let vals: Vec<f64> = (0..=n).map(|i| f(2.0 * PI * f64::from(i) / f64::from(n))).collect();
+        let changes = vals.windows(2).filter(|w| (w[0] < 0.0) != (w[1] < 0.0)).count();
+        if vals.iter().map(|v| v.abs()).fold(f64::INFINITY, f64::min) < 1e-9 {
+            return None; // a root too close to call on the grid
+        }
+        Some(if changes == 0 { if vals[0] > 0.0 { 2 } else { 0 } } else { changes / 2 })
+    }
+
+    /// #3350's probe: 400 random pairs of cylinders (radii, axis angles and offsets drawn
+    /// from a fixed seed, with near-touching, near-tangent and near-meeting axes among them),
+    /// each solved by the discriminant: every point of every curve lies on both cylinders
+    /// within the tolerance, and the curves are as many as the discriminant's loops. The old
+    /// tracer's answer is compared and its disagreements printed (`--nocapture`).
+    #[test]
+    fn random_skew_cylinder_pairs_meet_in_their_discriminants_loops() {
+        let k = Kernel::default();
+        let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut rnd = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let tol = 5e-6;
+        let (mut solved, mut handed_back, mut tracer_differs) = (0, 0, 0);
+        for case in 0..400 {
+            let ra = 1.0 + 9.0 * rnd();
+            let rb = if case % 4 == 0 { ra } else { 1.0 + 9.0 * rnd() };
+            let angle = 0.2 + (PI / 2.0 - 0.2) * rnd();
+            let dist = match case % 5 {
+                0 => (ra + rb) * (1.0 + (rnd() - 0.5) * 1e-4), // near touching outside
+                1 => (ra - rb).abs() + (rnd() - 0.5) * 1e-4,    // near touching inside
+                2 => 1e-5 + 1e-4 * rnd(),                       // near meeting
+                _ => (ra + rb + 1.0) * rnd(),
+            };
+            let a = cylinder_along(&k, Point3::new(0.0, 0.0, 0.0), Vec3::Z, ra, 400.0);
+            let axis_b = Vec3::new(angle.sin(), 0.0, angle.cos());
+            let b = cylinder_along(&k, Point3::new(0.0, dist, 0.0), axis_b, rb, 400.0);
+            let (da, db) = (a.rev().base().natural_uv_domain(), b.rev().base().natural_uv_domain());
+            let (more, out) = a.intersect_with_cone(&k, &da, &b, &db, Some(tol)).unwrap();
+            if more {
+                handed_back += 1;
+                continue;
+            }
+            solved += 1;
+            let pts = on_both_within(&k, &a, &b, &out, tol);
+            if let Some(want) = expected_loops(&a, &b) {
+                assert_eq!(out.curves_3d.len(), want, "case {case}: ra {ra} rb {rb} angle {angle} dist {dist}");
+            }
+            let old = crate::surface::surface::p2::base_global_surface_intersect(
+                &k, &Surface::from(a.clone()), &da, &Surface::from(b.clone()), &db, [true, true], Some(tol), None,
+            );
+            let old_pts: Vec<Point3> = match &old {
+                Ok(o) => o.curves_3d.iter().flat_map(|c| {
+                    let ivl = c.natural_interval();
+                    (0..=400).map(move |i| (c.clone(), ivl.min() + ivl.length() * f64::from(i) / 400.0))
+                }).map(|(c, t)| c.evaluate_point(&k, t).unwrap()).collect(),
+                Err(_) => Vec::new(),
+            };
+            let far = old_pts.iter().map(|p| nearest(&pts, *p)).fold(0.0, f64::max);
+            let missed = pts.iter().step_by(37).map(|p| nearest(&old_pts, *p)).fold(0.0, f64::max);
+            if old.is_err() || far > 1e-2 || missed > 1e-2 || old.as_ref().is_ok_and(|o| o.curves_3d.len() != out.curves_3d.len()) {
+                tracer_differs += 1;
+                eprintln!(
+                    "case {case} (ra {ra:.4} rb {rb:.4} angle {angle:.4} dist {dist:.6}): {} curves; tracer {:?}, its farthest point {far:.3e} from ours, ours {missed:.3e} from its",
+                    out.curves_3d.len(),
+                    old.as_ref().map(|o| o.curves_3d.len()).map_err(|e| e.to_string()),
+                );
+            }
+        }
+        eprintln!("solved {solved}, handed to the tracer {handed_back}, tracer differs {tracer_differs}");
+        assert!(solved >= 300, "{solved} solved");
+    }
+
+    /// [`on_both`] at tolerance `tol`.
+    fn on_both_within(k: &Kernel, a: &Cone, b: &Cone, out: &SurfaceIntersection, tol: f64) -> Vec<Point3> {
+        let off = |c: &Cone, p: Point3| {
+            let o = c.rev().position().origin();
+            let z = c.rev().position().z_axis();
+            let d = p - o;
+            ((d - z * d.dot(z)).length() - c.bot_radius()).abs()
+        };
+        let mut pts = Vec::new();
+        for (curve, dev) in out.curves_3d.iter().zip(&out.deviations) {
+            let ivl = curve.natural_interval();
+            for i in 0..=2000 {
+                let p = curve.evaluate_point(k, ivl.min() + ivl.length() * f64::from(i) / 2000.0).unwrap();
+                let d = off(a, p).max(off(b, p));
+                assert!(*dev <= tol && d <= tol, "{p:?} is {d:e} off a cylinder (deviation {dev:e})");
+                pts.push(p);
+            }
+        }
+        pts
     }
 }

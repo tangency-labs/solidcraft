@@ -36,8 +36,8 @@
 //! loop's points, each boundary crossing bisected), and each piece is fitted as a piecewise
 //! cubic Hermite B-spline through exact points of the loop with the exact tangent
 //! `n_A × n_B`, spans halved until the cubic stays within the approximation tolerance of
-//! both cylinders and turns by less than [`MAX_TURN_RAD`]; its deviation is the largest
-//! distance found. The trims are left to the drop, as for the ellipses.
+//! both cylinders (half of it at seven points of each span) and turns by less than
+//! [`MAX_TURN_RAD`]; its deviation is the largest distance found there. The trims are left to the drop, as for the ellipses.
 //!
 //! Deviations: none (no upstream counterpart). The root isolation and the span halving loop
 //! with explicit bounds ([`MAX_ROOT_DEPTH`], [`MAX_SPAN_DEPTH`]), not by recursion.
@@ -403,7 +403,8 @@ fn fit(l: &Levin<'_>, lp: Loop, lo: f64, hi: f64, tol: f64) -> Result<(Curve, f6
         }
         let turned = t0.angle_between(t1).unwrap_or(PI);
         let off = l.a.distance(p0).max(l.b.distance(p0));
-        if (worst > tol || turned > MAX_TURN_RAD) && h > EFF_ZERO * (1.0 + p0.max_dimension()) {
+        // half the tolerance at the samples, so the span between them keeps within it
+        if (worst > tol / 2.0 || turned > MAX_TURN_RAD) && h > EFF_ZERO * (1.0 + p0.max_dimension()) {
             if depth >= MAX_SPAN_DEPTH {
                 return Err(SolidError::intersect_failed(OP, "a span of the curve does not fit within the tolerance"));
             }
