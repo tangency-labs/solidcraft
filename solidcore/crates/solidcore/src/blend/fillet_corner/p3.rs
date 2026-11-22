@@ -1950,6 +1950,7 @@ impl FilletCorner {
                         kind: curve.kind().name(),
                     }),
                 )
+                .at(EntityRef::Edge(e))
                 .with_status(SM_ERR_NULL_POINTER)
                 .into_error());
             }

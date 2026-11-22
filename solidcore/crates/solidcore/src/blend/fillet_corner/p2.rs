@@ -1019,11 +1019,12 @@ impl FilletCorner {
                 .ok_or_else(|| no_curve(OP, fillet_edge, SM_ERR))?;
             // Not Nurbs??
             if !is_b_spline_kind(curve) {
-                return Err(patch_miss(
+                return Err(SolidError::blend_at(
                     OP,
-                    CornerPatchMiss::CurveNotBSpline {
+                    BlendFailure::CornerPatchNotMade(CornerPatchMiss::CurveNotBSpline {
                         kind: curve.kind().name(),
-                    },
+                    }),
+                    EntityRef::Edge(fillet_edge),
                 ));
             }
             curves.push(curve.clone());
@@ -2342,6 +2343,31 @@ mod tests {
             env.with_patch_env(|env| c.analytic_corner_surface(env))
         });
         let e = inner.unwrap_err();
+        assert_eq!(e.upstream_status(), Some(SM_ERR), "{e:?}");
+        assert!(c.surfaces.is_empty());
+    }
+
+    /// A corner edge whose curve has no B-spline form (a composite) is a corner the
+    /// analytic surface does not make: the miss names the curve's kind and the failure
+    /// names the edge.
+    #[test]
+    fn analytic_corner_surface_names_the_edge_of_a_curve_without_b_spline_form() {
+        use crate::curve::composite_curve::CompositeCurve;
+        let (mut pseudo, mut c) = loop_corner(FilletCornerKind::ConvexNByN, 3);
+        let edge = c.edges[0];
+        pseudo.brep_mut().edge_mut(edge).unwrap().curve = Some(Curve::from(CompositeCurve::new(3)));
+        let e = with_env(&mut pseudo, |env| {
+            env.with_patch_env(|env| c.analytic_corner_surface(env))
+        })
+        .unwrap_err();
+        assert_eq!(
+            e.blend_failure(),
+            Some(&BlendFailure::CornerPatchNotMade(
+                CornerPatchMiss::CurveNotBSpline { kind: "composite" }
+            )),
+            "{e:?}"
+        );
+        assert_eq!(e.entity(), Some(EntityRef::Edge(edge)), "{e:?}");
         assert_eq!(e.upstream_status(), Some(SM_ERR), "{e:?}");
         assert!(c.surfaces.is_empty());
     }

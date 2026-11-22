@@ -185,13 +185,10 @@ pub(super) fn corner_input(
     entity: Option<EntityRef>,
     status: i32,
 ) -> SolidError {
-    let failure = Failure::new(op, BlendFailure::CornerInputInvalid { input, entity });
-    match entity {
-        Some(at) => failure.at(at),
-        None => failure,
-    }
-    .with_status(status)
-    .into_error()
+    // (the failure takes its entity from the cause)
+    Failure::new(op, BlendFailure::CornerInputInvalid { input, entity })
+        .with_status(status)
+        .into_error()
 }
 
 /// A link of the fillet structures a corner step at `op` reads is not there

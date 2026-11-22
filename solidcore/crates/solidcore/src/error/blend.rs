@@ -1676,6 +1676,16 @@ pub const fn removal_class(reason: RemovalRefusal) -> ErrorKind {
 }
 
 impl BlendFailure {
+    /// The entity the failure names, if any: the entity of a
+    /// [`BlendFailure::CornerInputInvalid`] where its step has one.
+    #[must_use]
+    pub const fn entity(&self) -> Option<EntityRef> {
+        match self {
+            Self::CornerInputInvalid { entity, .. } => *entity,
+            _ => None,
+        }
+    }
+
     /// The status the C++ reports for the failure unless its site says otherwise (a
     /// comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
@@ -2998,15 +3008,16 @@ mod tests {
             assert_eq!(e.kind(), ErrorKind::InvalidInput, "{input:?}");
             assert_eq!(e.upstream_status(), Some(status), "{input:?}");
             assert!(!e.is_defect(), "{input:?}");
+            assert_eq!(e.entity(), None, "{input:?}");
         }
+        // the failure takes the entity from the cause, with no `at` of its own
         let at = EntityRef::Edge(crate::topology::EdgeId::from_index(3));
-        let e = SolidError::blend_at(
+        let e = SolidError::blend(
             "blend::op",
             BlendFailure::CornerInputInvalid {
                 input: I::EdgeWithoutCurve,
                 entity: Some(at),
             },
-            at,
         );
         assert_eq!(e.entity(), Some(at));
         assert_eq!(
