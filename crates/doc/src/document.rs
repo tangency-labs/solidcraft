@@ -3956,6 +3956,9 @@ pub struct Document {
     /// Named views: saved cameras.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub named_views: Vec<NamedView>,
+    /// Named Section Analyses: sets of cutting planes that can be shown again (#20649).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub saved_sections: Vec<crate::saved_sections::SavedSection>,
     /// Notes: text anchored to points in model space, drawn as screen-facing callouts (#1631).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<crate::notes::Note>,
@@ -4274,6 +4277,7 @@ impl Document {
             timeline_groups: Vec::new(),
             browser_order: Default::default(),
             named_views: Vec::new(),
+            saved_sections: Vec::new(),
             notes: Vec::new(),
             visibility: Visibility::default(),
             drawings: Vec::new(),

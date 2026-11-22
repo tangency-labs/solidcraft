@@ -1249,6 +1249,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             } else if section_turns_off(&app.session, d.extra.contains_key("plane"), &d.inputs) {
                 ui_kit::text(ui, tr("section.off_hint"), ui_kit::Text::Hint("section_off"));
             }
+            saved_section_rows(app, ui);
         }
         Kind::Rename { name, .. } => {
             form_row(ui, "Name", |ui| {
@@ -1266,6 +1267,82 @@ fn fmt_mm(app: &SolveApp, v: &Value) -> String {
 
 /// The measurement in the dialog: each item's size, then the distance (a pair of round items
 /// offers centre to centre, closest and farthest), its ΔX/Y/Z and the angle between two items.
+/// What the saved-sections list keeps between frames: the name being typed, the saved section
+/// being renamed, and what the last action said when it failed.
+#[derive(Clone, Default)]
+struct SavedSectionDraft {
+    name: String,
+    renaming: Option<String>,
+    error: String,
+}
+
+/// The design's saved Section Analyses (#20649): pick one to show it, save the section on show
+/// under a name, rename or delete one. Each action is a command.
+fn saved_section_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let id = ui.id().with("saved_sections");
+    let mut draft: SavedSectionDraft = ui.data(|data| data.get_temp(id)).unwrap_or_default();
+    let list = app.run("inspect.section.list", json!({})).unwrap_or(Value::Null);
+    let shown = list.get("shown").and_then(Value::as_str).map(str::to_string);
+    let names: Vec<String> = list
+        .get("sections")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|x| x.get("name").and_then(Value::as_str).map(str::to_string))
+        .collect();
+    let live = !app.session.section.is_empty() || !app.session.section_hidden.is_empty();
+    if names.is_empty() && !live {
+        return;
+    }
+    ui_kit::text(ui, tr("section.saved_title"), ui_kit::Text::Hint("section_saved"));
+    let mut act: Option<(&'static str, Value)> = None;
+    for name in &names {
+        ui.horizontal(|ui| {
+            let on = shown.as_deref() == Some(name.as_str());
+            let look = if on { ui_kit::Button::SmallSelected } else { ui_kit::Button::Small };
+            if ui_kit::button(ui, name.as_str(), look).clicked() {
+                act = Some(("inspect.section.show", json!({"section": name})));
+            }
+            if ui_kit::button(ui, tr("section.saved_rename"), ui_kit::Button::Small).clicked() {
+                draft.renaming = Some(name.clone());
+                draft.name = name.clone();
+            }
+            if ui_kit::button(ui, "×", ui_kit::Button::Small).backing_on_hover_text(tr("section.saved_delete")).clicked() {
+                act = Some(("inspect.section.delete", json!({"section": name})));
+            }
+        });
+    }
+    ui.horizontal(|ui| {
+        let (enter, _) = ui_kit::text_field(ui, &mut draft.name, tr("section.saved_name"));
+        let renaming = draft.renaming.clone();
+        let label = tr(if renaming.is_some() { "section.saved_rename" } else { "section.saved_save" });
+        let ok = !draft.name.trim().is_empty() && (renaming.is_some() || live);
+        let clicked = ui_kit::button(ui, label, ui_kit::Button::Enabled(ok)).clicked();
+        if (clicked || enter) && ok {
+            act = Some(match renaming {
+                Some(old) => ("inspect.section.rename", json!({"section": old, "name": draft.name})),
+                None => ("inspect.section.save", json!({"name": draft.name})),
+            });
+        }
+    });
+    if let Some((cmd, params)) = act {
+        match app.run(cmd, params) {
+            Ok(_) => {
+                draft.error.clear();
+                if cmd != "inspect.section.show" {
+                    draft.name.clear();
+                    draft.renaming = None;
+                }
+            }
+            Err(e) => draft.error = e,
+        }
+    }
+    if !draft.error.is_empty() {
+        ui_kit::text(ui, &draft.error, ui_kit::Text::Error("section_saved_error"));
+    }
+    ui.data_mut(|data| data.insert_temp(id, draft));
+}
+
 fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut Option<Shown>) {
     let Some(r) = r else {
         ui_kit::text(ui, tr("pick one or two vertices, edges or faces"), ui_kit::Text::Hint("measure"));
