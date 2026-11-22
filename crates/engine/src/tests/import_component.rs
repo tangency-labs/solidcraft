@@ -1091,7 +1091,7 @@ fn step_source_link_update_rebuilds_downstream_features() {
     run(&mut source, "file.export", json!({"path": path}));
     let updated = run(&mut s, "component.update_links", json!({}));
     assert!(s.model.result(cut).unwrap().error.is_none(), "{updated}: {:?}", s.model.result(cut).unwrap().error);
-    assert!((volume(&s) - (8000.0 - 160.0)).abs() < 1e-5, "volume after the update: {} {updated}", volume(&s));
+    assert!((volume(&s) - (8000.0 - 160.0)).abs() < 1e-5, "volume after the update: {} {updated} {}", volume(&s), s.doc.to_json());
     run(&mut s, "edit.undo", json!({}));
     assert!((volume(&s) - (6000.0 - 160.0)).abs() < 1e-5);
     run(&mut s, "edit.redo", json!({}));

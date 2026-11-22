@@ -1349,7 +1349,7 @@ fn step_and_component_link_schema_keys_and_replies() {
         ),
         (
             "component.links",
-            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": null, "host": "nas", "reason": "not allowed"}]}),
+            json!({"links": [{"component": 1, "name": "Part", "path": "part.step", "file": "/parts/part.step", "found": null, "host": "nas", "state": "not_allowed", "reason": "not allowed"}]}),
         ),
         (
             "component.update_links",
