@@ -13,15 +13,20 @@
 //! | [`QueryFailure::Missing`]      | `SM_ERR_NULL_POINTER`    |
 //! | [`QueryFailure::InvalidValue`] | `SM_ERR_INVALID_INPUT`   |
 //! | [`QueryFailure::Defect`]       | `SM_ERR` (or the site's, through `with_status`) |
+//! | the named causes, from [`QueryFailure::BoundOverflows`] on | the status of the phrase each replaced (`comparison_status`), or the site's through `with_status` |
 //!
 //! [`QueryFailure::Defect`] is a failure reviewed at its site as the kernel's fault, with its
 //! reason: a defect ([`ErrorKind::StageFailed`], class 127). The phrase causes are sites
 //! not yet converted (the conversion guide: `docs/failure-codes-and-reproduction.md` §6).
 //!
-//! Deviations: not upstream. A failure says in a phrase what went wrong; the failure's
-//! `operation` path says which routine. A failure names an entity only where the site
-//! it replaces did (the point classification's seam failure, at its face). The failures
-//! that are checks of a caller's arguments stay [`crate::SolidError::InvalidInput`].
+//! Deviations: not upstream. A failure names what went wrong (a named cause, or a phrase
+//! where a site is not yet converted); the failure's `operation` path says which routine.
+//! A failure names an entity only where the site it replaces did (the point
+//! classification's seam failure, at its face). A check of a caller's argument or body
+//! that upstream answers with a status is a named cause of kind
+//! [`ErrorKind::InvalidInput`] that keeps the status (for example
+//! [`QueryFailure::FaceWithoutSurface`]); the checks that report no status stay
+//! [`crate::SolidError::InvalidInput`].
 
 use super::{ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER};
 
@@ -48,26 +53,52 @@ pub enum QueryFailure {
         /// The step that failed, and why that is the kernel's fault.
         why: &'static str,
     },
+    /// A bound or size the query computes overflows the floating range, though every number
+    /// given is finite: the inputs' size, or how far apart they are, reaches past it. Class
+    /// `failed`.
+    BoundOverflows,
+    /// No station of the first curve dropped onto the other curve or the surface, so no
+    /// deviation was measured. Class `failed`.
+    NoStationDropped,
+    /// No patch of the surface overlaps the UV box given: the box is within the rounding of
+    /// the patches' knot range, but past every patch. [`ErrorKind::InvalidInput`].
+    NoPatchInBox,
+    /// A face of the caller's body has no surface. [`ErrorKind::InvalidInput`].
+    FaceWithoutSurface,
+    /// The surface the query reads (a B-spline surface, or the B-spline base of an analytic
+    /// one) has no NURBS net: none was made for it, or it could not be made (a NURB that
+    /// cannot be made stays missing), so the query has no net to read.
+    /// [`ErrorKind::Unsupported`].
+    SurfaceWithoutNurbs,
 }
 
 impl QueryFailure {
     /// The status the C++ reports for the failure (a comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) | Self::Defect { .. } => SM_ERR,
-            Self::Missing(_) => SM_ERR_NULL_POINTER,
+            Self::Failed(_)
+            | Self::Defect { .. }
+            | Self::BoundOverflows
+            | Self::NoStationDropped
+            | Self::NoPatchInBox
+            | Self::SurfaceWithoutNurbs => SM_ERR,
+            Self::Missing(_) | Self::FaceWithoutSurface => SM_ERR_NULL_POINTER,
             Self::InvalidValue(_) => SM_ERR_INVALID_INPUT,
         }
     }
 
-    /// The failure's stable [`ErrorKind`]: [`ErrorKind::Missing`] for
-    /// [`QueryFailure::Missing`], [`ErrorKind::InvalidInput`] for
-    /// [`QueryFailure::InvalidValue`], [`ErrorKind::Failed`] otherwise.
+    /// The failure's stable [`ErrorKind`]: [`ErrorKind::InvalidInput`] for
+    /// [`QueryFailure::InvalidValue`] and for a check of the caller's argument or body,
+    /// [`ErrorKind::Unsupported`] for a surface or object the routine does not take,
+    /// [`ErrorKind::Missing`] for [`QueryFailure::Missing`], otherwise the kind of the status
+    /// it replaced.
     /// [`QueryFailure::Defect`] is [`ErrorKind::StageFailed`], a defect.
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
             Self::Defect { .. } => ErrorKind::StageFailed,
+            Self::SurfaceWithoutNurbs => ErrorKind::Unsupported,
+            Self::NoPatchInBox | Self::FaceWithoutSurface => ErrorKind::InvalidInput,
             _ => ErrorKind::of_status(self.comparison_status()),
         }
     }
@@ -79,6 +110,11 @@ impl core::fmt::Display for QueryFailure {
             Self::Failed(what) | Self::InvalidValue(what) => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::Defect { why } => write!(f, "{}: {why}", ErrorKind::StageFailed),
+            Self::BoundOverflows => f.write_str("the bound overflows the floating range"),
+            Self::NoStationDropped => f.write_str("no station dropped onto the other"),
+            Self::NoPatchInBox => f.write_str("no patch of the surface overlaps the UV box"),
+            Self::FaceWithoutSurface => f.write_str("the face has no surface"),
+            Self::SurfaceWithoutNurbs => f.write_str("the surface has no NURBS net"),
         }
     }
 }
@@ -179,6 +215,32 @@ pub(super) mod tests {
         assert_eq!(SolidError::sm_err("query::op").query_failure(), None);
     }
 
+    /// Each named cause reports the status of the phrase it replaced, and its kind.
+    #[test]
+    fn the_named_query_causes_keep_the_status_they_replaced() {
+        use ErrorKind as K;
+        use QueryFailure as F;
+        let cases = [
+            (F::BoundOverflows, SM_ERR, K::Failed),
+            (F::NoStationDropped, SM_ERR, K::Failed),
+            (F::NoPatchInBox, SM_ERR, K::InvalidInput),
+            (F::FaceWithoutSurface, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::SurfaceWithoutNurbs, SM_ERR, K::Unsupported),
+        ];
+        for (failure, code, kind) in cases {
+            let e = SolidError::query("query::op", failure);
+            assert_eq!(e.sm_status(), Some(code), "{failure:?}");
+            assert_eq!(super::super::upstream_status(&e), Some(code), "{failure:?}");
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.query_failure(), Some(&failure));
+            assert!(!e.is_defect(), "{failure:?}");
+        }
+        assert_eq!(
+            SolidError::query("query::op", F::FaceWithoutSurface).to_string(),
+            "query::op: the face has no surface"
+        );
+    }
+
     /// The query routines describe their failures: their library code builds no bare
     /// `Upstream` status, except the files listed (with the bare sites each may still hold)
     /// whose conversion waits on other open work.
@@ -242,25 +304,15 @@ pub(super) mod tests {
         };
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
-            ("solidcore/src/curve/plane_of.rs", 1),
-            ("solidcore/src/nurbs/crv_deviation.rs", 12),
-            ("solidcore/src/nurbs/srf_deviation.rs", 3),
             ("solidcore/src/query/api_queries.rs", 36),
             ("solidcore/src/query/brep.rs", 2),
             ("solidcore/src/query/brep/ray.rs", 2),
             ("solidcore/src/query/brep/ray/live.rs", 4),
-            ("solidcore/src/query/contact.rs", 3),
-            ("solidcore/src/query/continuity.rs", 5),
-            ("solidcore/src/query/curve.rs", 1),
-            ("solidcore/src/query/deviation.rs", 2),
-            ("solidcore/src/query/distance_bound.rs", 4),
             ("solidcore/src/query/edge.rs", 10),
             ("solidcore/src/query/face/p1.rs", 2),
             ("solidcore/src/query/face/p2.rs", 19),
             ("solidcore/src/query/face/p3.rs", 2),
             ("solidcore/src/query/face/p4.rs", 2),
-            ("solidcore/src/query/face_surface.rs", 2),
-            ("solidcore/src/query/normal.rs", 2),
             ("solidcore/src/query/poly.rs", 13),
             ("solidcore/src/query/poly/copy.rs", 11),
             ("solidcore/src/query/poly_properties.rs", 2),

@@ -84,6 +84,16 @@
 //! line to the bit (its hash, taken from main's expected file, which holds these four lines
 //! unchanged) and this branch's committed line. (The hashes their [`TRIM_COVER`] entries held
 //! were of an older main's run, not of the line main now commits.)
+//!
+//! #17739's vertex step raises a vertex whose gap is over half its new tolerance to
+//! `zone_tol3d(gain * 2 * gap)`. Its raises on these reads were recorded the same way
+//! against #18230's healer and carried into [`DATA`]: a listed vertex holds #17739's bits,
+//! and a vertex only #17739 moved is listed with #18230's (main's) bits.
+//!
+//! Twenty rows the cover moved are moved by #17739 too: the 19 `blend.fillet_executive_p3`
+//! bottle rows (vertex 22) and `corpus.parity`'s `Fillet__bolt.smb` (vertices 8, 9, 11, 12).
+//! They are in [`DATA`] with the cover's main hash: the cover's raises go back first, then
+//! those vertices take main's bits, each recorded on both sides with the raises put back.
 
 use std::collections::BTreeMap;
 
@@ -324,8 +334,19 @@ fn replay_trim_cover(unit_id: &str) -> usize {
             failures.push(format!("{name}: {reads} reads, {undone} put back, {f:?}"));
         }
         let committed = golden.get(name);
-        if hash(&line) != main_hash {
-            failures.push(format!("{name}: the row put back is not main's row"));
+        // (a row whose put-back run the joined-trims cover raises further: main's row with
+        // those raises, see [`TRIM_COVER_JOINED`])
+        let joined = TRIM_COVER_JOINED
+            .iter()
+            .find(|r| r.0 == unit_id && r.1 == name);
+        match joined {
+            Some(&(_, _, put_back_hash)) if hash(&line) != put_back_hash => failures.push(format!(
+                "{name}: the row put back is not main's row with the joined raises"
+            )),
+            None if hash(&line) != main_hash => {
+                failures.push(format!("{name}: the row put back is not main's row"));
+            }
+            _ => {}
         }
         let line = run(u.as_ref(), case);
         if TRIM_COVER_WITHIN_COMPARATOR.contains(&(unit_id, name)) {
@@ -531,9 +552,9 @@ macro_rules! replay_tests {
 
 replay_tests! {
     feature_executive_rows_move_only_through_the_read_tolerances: "blend.feature_executive", 1;
-    fillet_executive_p3_rows_move_only_through_the_read_tolerances: "blend.fillet_executive_p3", 10;
+    fillet_executive_p3_rows_move_only_through_the_read_tolerances: "blend.fillet_executive_p3", 29;
     fillet_removal_rows_move_only_through_the_read_tolerances: "blend.fillet_removal", 4;
-    corpus_parity_rows_move_only_through_the_read_tolerances: "corpus.parity", 26;
+    corpus_parity_rows_move_only_through_the_read_tolerances: "corpus.parity", 27;
     stitch_p1_rows_move_only_through_the_read_tolerances: "heal.stitch_p1", 2;
     stitch_p2_rows_move_only_through_the_read_tolerances: "heal.stitch_p2", 4;
     brep_p10_rows_move_only_through_the_read_tolerances: "topology.brep_p10", 38;
@@ -552,9 +573,9 @@ macro_rules! replay_trim_cover_tests {
 
 replay_trim_cover_tests! {
     blend_feature_executive_rows_move_only_through_the_trim_cover: "blend.feature_executive", 3;
-    blend_fillet_executive_p3_rows_move_only_through_the_trim_cover: "blend.fillet_executive_p3", 27;
+    blend_fillet_executive_p3_rows_move_only_through_the_trim_cover: "blend.fillet_executive_p3", 8;
     blend_fillet_removal_rows_move_only_through_the_trim_cover: "blend.fillet_removal", 20;
-    corpus_parity_rows_move_only_through_the_trim_cover: "corpus.parity", 3;
+    corpus_parity_rows_move_only_through_the_trim_cover: "corpus.parity", 2;
     heal_stitch_p1_rows_move_only_through_the_trim_cover: "heal.stitch_p1", 4;
     heal_stitch_p2_rows_move_only_through_the_trim_cover: "heal.stitch_p2", 8;
     topology_api_files_rows_move_only_through_the_trim_cover: "topology.api_files", 12;
@@ -566,6 +587,27 @@ replay_trim_cover_tests! {
     topology_edgeuse_p3_rows_move_only_through_the_trim_cover: "topology.edgeuse_p3", 16;
     topology_face_p3_rows_move_only_through_the_trim_cover: "topology.face_p3", 13;
 }
+
+/// [`TRIM_COVER`] rows whose put-back run moves further through the joined-trims cover
+/// (tangency-labs/solidcraft#20373, `cover_joined_trims` at the end of the stitch): unit,
+/// case, and the hash of this branch's row with the reads' cover raises put back. Their
+/// `TRIM_COVER` main hash is kept; run as is, each is still the committed golden line.
+///
+/// `extended_surface_9_Platte`: the put-back takes the read's cover raises off e145 and
+/// e151 (1.4508e-5 to 1e-5) and e217 and e219 (4.9059e-5 to 1e-5). The blend's edges e19
+/// and e33 then carry trims those uncovered edges leave farther from them than their
+/// tolerance (1e-5), and the joined cover raises both to their proved trim bound,
+/// 4.8984e-5. As is, the read's cover already covers those trims and the joined cover
+/// raises nothing. The put-back row differs from it with `cover_joined_trims` off (which
+/// gives main's hash) only in block 1 (entries 256..424) of `feature0_geometry`: its sum
+/// and absolute sum rise by 7.796797e-5 each and its weighted sum by 0.0115782 = 148.5 x
+/// 7.796797e-5. That is two adjacent entries (weights 148 and 149) each rising by
+/// 3.898398e-5 = 4.8984e-5 - 1e-5: exactly the two raised tolerances, nothing else.
+const TRIM_COVER_JOINED: &[(&str, &str, u64)] = &[(
+    "blend.feature_executive",
+    "extended_surface_9_Platte",
+    0x7a01_4961_6dc2_4b3a,
+)];
 
 /// Rows #18166 took out of [`TRIM_COVER`] that it does not move (see the module docs): unit,
 /// case, and the hash of main's committed line (`origin/main` ee673a19bf's expected file).

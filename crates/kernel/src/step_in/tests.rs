@@ -3483,7 +3483,7 @@ fn a_closed_spline_wall_with_a_curved_seam_keeps_all_faces() {
 /// measured as the body of that record.
 pub(super) fn schema_4_volume(text: &str) -> f64 {
     let ex = solidcore_step::p21::parse(text).unwrap();
-    let r = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibTrims);
+    let r = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibImportTrims);
     assert!(r.failures.is_empty() && r.solids.len() == 1, "{:?}", r.failures);
     measure(&Body::from_record(r.solids[0].brep.clone()).unwrap()).unwrap().volume
 }

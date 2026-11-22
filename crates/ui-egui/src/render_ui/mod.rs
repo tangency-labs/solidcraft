@@ -129,8 +129,10 @@ fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let info = crate::render_workspace::interactive_command_info(app, command);
                     let response = ui_kit::compact_icon_label_button(ui, app.tr(label), icon, info.enabled);
                     crate::scenario::publish_target(&format!("render:stage:{id}"), response.rect);
-                    let hint = crate::keymap::display_for(app, id)
-                        .map_or_else(|| app.tr_label(command.label).to_string(), |key| format!("{} ({key})", app.tr_label(command.label)));
+                    let hint = crate::keymap::display_for(app, id).map_or_else(
+                        || app.tr_command(command.id, command.label).to_string(),
+                        |key| format!("{} ({key})", app.tr_command(command.id, command.label)),
+                    );
                     let response = response.backing_on_hover_text(hint);
                     if response.clicked() {
                         app.start(id);

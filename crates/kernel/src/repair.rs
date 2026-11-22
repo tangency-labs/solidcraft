@@ -329,9 +329,9 @@ fn rebuild_refused(record: &mut Brep, report: &mut RepairReport) -> Result<()> {
 /// Face `f` of `r` rebuilt on its own surface: a cylinder, cone, sphere or torus face on a
 /// NURBS form of the surface laid on arcs from where the face starts
 /// ([`solidcraft_geom::brep::form::surface_on_own_arcs`]) instead of its frame's quarter grid, the same surface
-/// exactly, with SMLib's own trims of the face's edges on it (`SmlibTrims`, as the import makes the
-/// trims it has no closed form for). The face's edges and loops stay as they were. `None` for a
-/// face on another surface.
+/// exactly, with SMLib's own trims of the face's edges on it (`SmlibTrims`, with #18166's proved
+/// raise: a repair keeps it, unlike a file's translation, which samples it). The face's edges and
+/// loops stay as they were. `None` for a face on another surface.
 fn rebuilt_face(r: &Brep, f: usize) -> Result<Option<b::Face>> {
     use solidcore_ops::pcurve::{TrimEdge, TrimFace, TrimUse, Trims};
     let face = r.faces.get(f).ok_or_else(|| invalid(format!("no face {f}")))?;

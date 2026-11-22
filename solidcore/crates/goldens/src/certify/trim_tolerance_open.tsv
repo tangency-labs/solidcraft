@@ -8,6 +8,7 @@ topology.brep_local_operation	fc0008	0	89	line-trim	-	1e-5
 topology.brep_local_operation	fc0008	0	93	loose-raise	-	1.7004360849853164e-3
 topology.brep_local_operation	fc0025	0	89	line-trim	-	1e-5
 topology.brep_local_operation	fc0025	0	93	loose-raise	-	1.7004360849853164e-3
+topology.brep_local_operation	gen0014	0	2	loose-raise	-	8.901607736441525e-5
 topology.brep_mirror	mat0019	0	46	loose-raise	-	1.7091295435254202e-3
 topology.brep_mirror	mat0049	0	46	loose-raise	-	1.7004360860211109e-3
 topology.brep_mirror	mat0094	0	46	loose-raise	-	1.7004360860307453e-3
