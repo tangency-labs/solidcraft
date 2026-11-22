@@ -437,7 +437,7 @@ fn nested_plugin_edits_save_their_current_token_without_retagging_at_acceptance(
     assert_eq!(host.transaction.as_ref().unwrap().design_token(), edited);
     host.commit_transaction().unwrap();
     assert_eq!(host.session.design_token(), edited);
-    accepted.accept_computed(host.session);
+    accepted.accept_computed(host.session).unwrap();
     assert_eq!(accepted.design_token().revision, edited.revision);
     assert_eq!(accepted.design_token().document_id, identity);
 }
@@ -1350,8 +1350,8 @@ mod native {
         let mut transaction = s.scratch();
         transaction.execute("component.update_links", &params).unwrap();
         let mut plugin_call = s.scratch();
-        plugin_call.accept_computed(transaction);
-        s.accept_computed(plugin_call);
+        plugin_call.accept_computed(transaction).unwrap();
+        s.accept_computed(plugin_call).unwrap();
         assert!(s.plugin_state.link_changes[&components[0]].read, "no-op reads survive nested transaction acceptance");
         assert!(!s.plugin_state.link_changes[&components[1]].read);
         assert!(!s.plugin_state.link_changes[&components[2]].read);
@@ -1363,7 +1363,7 @@ mod native {
             if commands {
                 s.accept_commands(prepared).unwrap();
             } else {
-                s.accept_computed(prepared.computed);
+                s.accept_computed(prepared.computed).unwrap();
             }
         }
 
