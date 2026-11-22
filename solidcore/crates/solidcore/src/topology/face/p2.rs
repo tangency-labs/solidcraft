@@ -979,10 +979,18 @@ pub(crate) struct FaceCurveRun {
     pub interval: Extent1d,
     /// `m_vStart`'s class and edge.
     pub start: (PointClassType, Option<EdgeId>),
+    /// Parameter on the classified start edge, when there is one.
+    pub start_edge_param: Option<f64>,
     /// `m_vMid`'s class.
     pub mid: PointClassType,
     /// `m_vEnd`'s class and edge.
     pub end: (PointClassType, Option<EdgeId>),
+    /// Parameter on the classified end edge, when there is one.
+    pub end_edge_param: Option<f64>,
+    /// The vertex the start is classified at, when it is.
+    pub start_vertex: Option<VertexId>,
+    /// The vertex the end is classified at, when it is.
+    pub end_vertex: Option<VertexId>,
 }
 
 /// `SmCurveClassification sClass(&crCurve, interval, NULL, dTol)` followed by
@@ -1032,14 +1040,22 @@ pub(crate) fn classify_free_curve_on_face(
         Some(ClassHandle::Edge(e)) => Some(e),
         _ => None,
     };
+    let vertex_of = |o: Option<ClassHandle>| match o {
+        Some(ClassHandle::Vertex(v)) => Some(v),
+        _ => None,
+    };
     Ok(classification
         .intervals()
         .iter()
         .map(|i| FaceCurveRun {
+            start_vertex: vertex_of(i.start.object()),
+            end_vertex: vertex_of(i.end.object()),
             interval: i.interval,
             start: (i.start.point_class(), edge_of(i.start.object())),
+            start_edge_param: edge_of(i.start.object()).map(|_| i.start.t_param()),
             mid: i.mid.point_class(),
             end: (i.end.point_class(), edge_of(i.end.object())),
+            end_edge_param: edge_of(i.end.object()).map(|_| i.end.t_param()),
         })
         .collect())
 }
