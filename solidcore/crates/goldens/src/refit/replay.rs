@@ -8,7 +8,8 @@
 //! The tests run each case twice:
 //! 1. with every found sphere's file NURB replaced by the fitted one before the topology
 //!    is made ([`super::before_topology`]; at least one replaced, on a read the seam sees),
-//!    the encoded row hashes to main's row;
+//!    the encoded row, without the `contact` record main does not print, hashes to main's
+//!    row;
 //! 2. as is, the encoded row equals the committed golden line.
 //!
 //! So each committed row is this branch's output, and it differs from main's only through
@@ -90,8 +91,15 @@ pub(crate) fn run(u: &dyn UnitDiff, case: &Case) -> Value {
     )
 }
 
+/// The hash of a row as main writes it: without the exact `contact` record of line and
+/// curve solutions (`crate::util::contact_codes`), which main does not print. The new
+/// key is held by the committed golden line (the second run) instead.
 fn hash(v: &Value) -> u64 {
-    fnv1a64(&serde_json::to_string(v).unwrap())
+    let mut v = v.clone();
+    if let Some(ints) = v.get_mut("ints").and_then(Value::as_object_mut) {
+        ints.remove("contact");
+    }
+    fnv1a64(&serde_json::to_string(&v).unwrap())
 }
 
 /// `run` with the refit installed: the row and what the seam saw.

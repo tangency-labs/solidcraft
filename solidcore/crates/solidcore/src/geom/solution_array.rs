@@ -9,6 +9,7 @@
 //! | [`MAX_TREES`], [`MAX_PARAMS`]                 | `SM_SA_MAX_TREES`, `SM_SA_MAX_TREES*2`                     |
 //! | [`SolutionType`]                              | `SmSolutionType`                                           |
 //! | [`SortKey`]                                   | `SmSortKeyType`                                            |
+//! | [`Contact`], [`Contact::merged`], `Solution::contact` | (not upstream) how a solution meets the surface     |
 //! | [`SolutionEnd`], [`SolutionEnd::new`]         | `SmSolutionEnd`, `SmSolutionEnd()`                         |
 //! | `Clone`/`Copy` for [`SolutionEnd`]            | `SmSolutionEnd::operator=`                                 |
 //! | `Drop` (implicit)                             | `~SmSolutionEnd`                                           |
@@ -96,6 +97,11 @@
 //!   `NULL` of a failed `smos_Calloc`). New slots made by growth
 //!   are [`Solution::zeroed`] (type [`SolutionType::NodesOnly`], as calloc'd
 //!   memory reads upstream).
+//! - **Contact.** A solution carries a [`Contact`] upstream has no counterpart
+//!   for: how a line or curve meets the surface there. [`Solution::new`],
+//!   [`Solution::reset`] and new slots make it [`Contact::Unclassified`]; a
+//!   duplicate merged into a held solution leaves it [`Contact::merged`] from both.
+//!   It takes no part in the sort, the duplicate tests or the classification.
 //! - `SmSolution::Dump` and `SmSolutionArray::Dump` print diagnostics only and are
 //!   not ported; the `SM_DEBUG_CODE`/`GWC` blocks and `ERR` on an unknown sort key
 //!   (impossible with the [`SortKey`] enum) have no counterpart.
@@ -155,6 +161,38 @@ impl SolutionType {
     #[must_use]
     pub fn from_code(code: i32) -> Option<Self> {
         Self::ALL.into_iter().find(|t| t.code() == code)
+    }
+}
+
+/// How a line or curve solution meets the surface (not upstream): the type a ray's
+/// parity and a shell's inside test read. A solver sets it only from a certificate;
+/// [`Contact::Unclassified`] is a solution no typing has looked at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Contact {
+    /// No typing has looked at the solution.
+    #[default]
+    Unclassified,
+    /// The line passes from one side of the surface to the other here.
+    Crossing,
+    /// The line stays on one side of the surface here.
+    Touching,
+    /// Typing looked at the solution and could not decide.
+    Undecided,
+}
+
+impl Contact {
+    /// The contact of one solution kept for two that are one contact (a duplicate
+    /// merged into the solution it repeats): the shared type when both agree, the
+    /// other's when one is [`Contact::Unclassified`], and [`Contact::Undecided`] when
+    /// two decided types differ or either is undecided.
+    #[must_use]
+    pub const fn merged(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Unclassified, x) | (x, Self::Unclassified) => x,
+            (Self::Crossing, Self::Crossing) => Self::Crossing,
+            (Self::Touching, Self::Touching) => Self::Touching,
+            _ => Self::Undecided,
+        }
     }
 }
 
@@ -520,6 +558,8 @@ pub struct Solution<O> {
     /// `m_apNodes`: tree nodes the solution was found in; `None` is a null
     /// pointer.
     pub nodes: [Option<NodeId>; MAX_TREES],
+    /// (not upstream) how the solution meets the surface; see [`Contact`].
+    pub contact: Contact,
 }
 
 impl<O: Copy> Default for Solution<O> {
@@ -540,6 +580,7 @@ impl<O: Copy> Solution<O> {
             num_objects: 0,
             objects: [None; MAX_TREES],
             nodes: [None; MAX_TREES],
+            contact: Contact::Unclassified,
         }
     }
 
@@ -555,14 +596,15 @@ impl<O: Copy> Solution<O> {
 }
 
 impl<O: SolutionObject> Solution<O> {
-    /// Clears the type, the counts, the objects and the nodes (`ReSet`). The
-    /// solution ends keep their values, as upstream.
+    /// Clears the type, the counts, the objects, the nodes and the contact
+    /// (`ReSet`). The solution ends keep their values, as upstream.
     pub fn reset(&mut self) {
         self.solution_type = SolutionType::Unknown;
         self.num_variables = 0;
         self.num_objects = 0;
         self.objects = [None; MAX_TREES];
         self.nodes = [None; MAX_TREES];
+        self.contact = Contact::Unclassified;
     }
 
     /// Checks the counts upstream would use to index its fixed arrays.
@@ -1609,6 +1651,7 @@ impl<O: SolutionObject> SolutionArray<O> {
                 num_objects: s.num_objects,
                 objects: [None; MAX_TREES],
                 nodes: s.nodes,
+                contact: s.contact,
             });
         }
         out
@@ -1711,8 +1754,8 @@ impl<O: SolutionObject> SolutionArray<O> {
     /// (`AddSortedSolution`). Returns the index it was added at, or `None` when
     /// it was rejected: its value is `SM_BIG_DOUBLE` (uninitialised), or it
     /// [`Solution::is_equal`] a solution already held, which `new` then
-    /// replaces when its value is smaller in magnitude. Solutions are never
-    /// merged.
+    /// replaces when its value is smaller in magnitude; the solution kept takes
+    /// the [`Contact::merged`] of both. Solutions are never otherwise merged.
     ///
     /// # Errors
     ///
@@ -1752,9 +1795,12 @@ impl<O: SolutionObject> SolutionArray<O> {
             // don't add duplicate solutions (SolValues within ZeroSqrt and ParamValues within ScaledZero)
             if old.is_equal_in(new, domains)? {
                 // save the better solution - improve tolerances
+                // (not upstream) the kept solution carries both contacts
+                let contact = old.contact.merged(new.contact);
                 if new.start.solution_value.abs() < old.start.solution_value.abs() {
                     *old = *new;
                 }
+                old.contact = contact;
                 return Ok(None);
             }
 
@@ -1908,6 +1954,116 @@ mod tests {
             SolutionType::NodesOnly
         );
         assert_eq!(Solution::<Obj>::new().solution_type, SolutionType::Unknown);
+    }
+
+    fn with_contact(mut s: Solution<Obj>, contact: Contact) -> Solution<Obj> {
+        s.contact = contact;
+        s
+    }
+
+    /// A new, zeroed or reset solution is unclassified; the contact travels with its
+    /// solution through a copy, the sorted insertion and the handle change.
+    #[test]
+    fn contact_survives_copy_and_sort() {
+        assert_eq!(Solution::<Obj>::new().contact, Contact::Unclassified);
+        assert_eq!(Solution::<Obj>::zeroed().contact, Contact::Unclassified);
+        assert_eq!(Contact::default(), Contact::Unclassified);
+        let crossing = with_contact(single(3.0, &[3.0]), Contact::Crossing);
+        let copy = crossing;
+        assert_eq!(copy.contact, Contact::Crossing);
+        let mut cleared = crossing;
+        cleared.reset();
+        assert_eq!(cleared.contact, Contact::Unclassified);
+
+        let mut a: SolutionArray<Obj> = SolutionArray::new();
+        for (v, contact) in [
+            (3.0, Contact::Crossing),
+            (1.0, Contact::Touching),
+            (2.0, Contact::Undecided),
+            (0.5, Contact::Unclassified),
+        ] {
+            a.add_sorted_solution(
+                &with_contact(single(v, &[v]), contact),
+                SortKey::BySolutionValue,
+            )
+            .unwrap();
+        }
+        let sorted: Vec<_> = a
+            .as_slice()
+            .iter()
+            .map(|s| (s.start.solution_value, s.contact))
+            .collect();
+        assert_eq!(
+            sorted,
+            [
+                (0.5, Contact::Unclassified),
+                (1.0, Contact::Touching),
+                (2.0, Contact::Undecided),
+                (3.0, Contact::Crossing),
+            ]
+        );
+        a.insert_at(0, &crossing, 1);
+        a.swap(0, 4).unwrap();
+        assert_eq!(a.get(4).map(|s| s.contact), Some(Contact::Crossing));
+        let bare: SolutionArray<Obj> = a.without_objects();
+        let contacts: Vec<_> = bare.as_slice().iter().map(|s| s.contact).collect();
+        let held: Vec<_> = a.as_slice().iter().map(|s| s.contact).collect();
+        assert_eq!(contacts, held);
+    }
+
+    /// The merge rule: two solutions that are one contact keep the shared type, an
+    /// unclassified one takes the other's, and two decided types that differ, or an
+    /// undecided one, give undecided.
+    #[test]
+    fn merged_contacts() {
+        use Contact::{Crossing, Touching, Unclassified, Undecided};
+        let all = [Unclassified, Crossing, Touching, Undecided];
+        for x in all {
+            // the same type on both
+            assert_eq!(x.merged(x), x);
+            // unclassified takes the other's, in either order
+            assert_eq!(Unclassified.merged(x), x);
+            assert_eq!(x.merged(Unclassified), x);
+            // undecided stays undecided
+            assert_eq!(Undecided.merged(x), Undecided);
+            assert_eq!(x.merged(Undecided), Undecided);
+        }
+        // two decided types that differ
+        assert_eq!(Crossing.merged(Touching), Undecided);
+        assert_eq!(Touching.merged(Crossing), Undecided);
+
+        // a duplicate the sorted insertion drops leaves the kept one both contacts,
+        // whichever of the two is kept
+        let mut a: SolutionArray<Obj> = SolutionArray::new();
+        a.add_sorted_solution(
+            &with_contact(single(2.0, &[2.0]), Crossing),
+            SortKey::BySolutionValue,
+        )
+        .unwrap();
+        let dup = with_contact(single(2.0 + 1e-7, &[2.0]), Touching);
+        assert_eq!(
+            a.add_sorted_solution(&dup, SortKey::BySolutionValue)
+                .unwrap(),
+            None
+        );
+        assert_eq!(a.len(), 1);
+        assert_eq!(
+            a.get(0).map(|s| (s.start.solution_value, s.contact)),
+            Some((2.0, Undecided))
+        );
+        let mut b: SolutionArray<Obj> = SolutionArray::new();
+        b.add_sorted_solution(&single(2.0 + 1e-7, &[2.0]), SortKey::BySolutionValue)
+            .unwrap();
+        let better = with_contact(single(2.0, &[2.0]), Crossing);
+        assert_eq!(
+            b.add_sorted_solution(&better, SortKey::BySolutionValue)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            b.get(0).map(|s| (s.start.solution_value, s.contact)),
+            Some((2.0, Crossing))
+        );
     }
 
     #[test]

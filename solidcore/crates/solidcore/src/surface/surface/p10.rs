@@ -42,6 +42,9 @@
 //!   the second span), so a point with valid nodes never culls; it resets a cull flag
 //!   when the outer loop reaches that solution; the obsolete `while (!bDone2)` loop
 //!   runs once (nothing clears the flag) and is a single pass here.
+//! - **Contact (not upstream).** Where the combination keeps one of two point
+//!   solutions close together, the point kept takes the
+//!   [`crate::geom::solution_array::Contact::merged`] of both.
 //! - **Debug only code** (`SM_DEBUG_CODE` drawing and dumps) and the assertions are not
 //!   ported.
 //! - **Bounds.** The leaf solve takes at most six guesses (upstream's fixed arrays). No
@@ -1596,9 +1599,16 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
                     last_sol.end = curr.end;
                     solutions.set_at(last_slot, &last_sol)?;
                 }
-            } else if curr.start.solution_value < last_end.solution_value {
+            } else {
                 // just use the better solution
-                solutions.set_at(last_slot, &curr)?;
+                let mut kept = if curr.start.solution_value < last_end.solution_value {
+                    curr
+                } else {
+                    last_sol
+                };
+                // (not upstream) the point kept stands for both
+                kept.contact = last_sol.contact.merged(curr.contact);
+                solutions.set_at(last_slot, &kept)?;
             }
         } else {
             // Keep the current solution, packed into the array

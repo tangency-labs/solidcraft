@@ -1795,6 +1795,7 @@ pub fn is_degenerate(
                         o
                     },
                     nodes: sol.nodes,
+                    contact: sol.contact,
                 })
                 .collect();
 

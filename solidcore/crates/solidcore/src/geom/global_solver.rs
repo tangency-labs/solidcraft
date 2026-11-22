@@ -65,6 +65,10 @@
 //!   the solve and back out afterwards (also on error), so solutions added
 //!   after `SolveIt` returns go to the solver's own array instead of the
 //!   caller's.
+//! - **Contact.** A duplicate `AddSortedSolution` drops leaves the solution it keeps
+//!   with the [`Contact::merged`] of both, and a point `sm_CombineMinMax` turns into
+//!   a range becomes [`Contact::Unclassified`]: the contact of a point is not that of
+//!   a stretch.
 //! - **Optional vectors** are copied into the solver (upstream keeps the
 //!   caller's pointer).
 //! - **Errors.** `AddSortedSolution` returns `Result` because the solution
@@ -116,8 +120,8 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::{line_closest_point, point_project_to_plane};
 use crate::geom::solution_array::{
-    EndClass, OwnDomains, ParameterDomains, Solution, SolutionArray, SolutionObject, SolutionType,
-    SortKey,
+    Contact, EndClass, OwnDomains, ParameterDomains, Solution, SolutionArray, SolutionObject,
+    SolutionType, SortKey,
 };
 use crate::geom::tol::is_zero;
 use crate::geom::tree::{AuxDataType, NodeData, NodeId, Tree, TreeNode};
@@ -1668,6 +1672,8 @@ fn combine_min_max<O: SolutionObject>(
                     // change point solution into a range that starts at the point solution
                     max.solution_type = SolutionType::RangeOfValues;
                     max.end = min.end;
+                    // (not upstream) a range made from a point is not that point's contact
+                    max.contact = Contact::Unclassified;
 
                     // change min solution into a range that stops at the point solution
                     min.end = max.start;
@@ -2058,15 +2064,15 @@ pub trait GlobalSolve<'t, O: SolutionObject + 't> {
             let (pair, preferred) = self.identical_solutions(solution, test)?;
             if pair == SolutionPairType::Identical {
                 // save the preferred solution if possible, else better solution - improve tolerances
-                // (keeping the stored one, `Second`, is writing it back unchanged: nothing to do)
                 let keep = match preferred {
                     Some(PreferredSolution::First) => true,
                     Some(PreferredSolution::Second) => false,
                     None => solution.start.solution_value.abs() < test.start.solution_value.abs(),
                 };
-                if keep {
-                    self.solver_mut().solutions.set_at(ii, solution)?;
-                }
+                // (not upstream) the solution kept carries both contacts
+                let mut kept = if keep { *solution } else { *test };
+                kept.contact = test.contact.merged(solution.contact);
+                self.solver_mut().solutions.set_at(ii, &kept)?;
                 return Ok(());
             }
 
@@ -2660,6 +2666,62 @@ mod tests {
         assert_eq!(a.end.parameters[0], 1.0);
         assert_eq!(b.solution_type, SolutionType::RangeOfValues);
         assert_eq!(b.end.parameters[0], 2.0);
+    }
+
+    /// The range a tight point is turned into, when it splits a range, is a stretch,
+    /// not the point's contact: unclassified. The range it splits keeps its own.
+    #[test]
+    fn a_range_made_from_a_point_is_unclassified() {
+        let mut solver: GlobalSolver<'_, Obj> = GlobalSolver::new();
+        solver.set_3d_tolerance(1e-6);
+        let mut whole = range(1e-3, 0.0, 1e-3, 2.0);
+        whole.contact = Contact::Touching;
+        solver
+            .add_sorted_solution(&whole, SortKey::ByFirstParameter, true)
+            .unwrap();
+        let mut point = single(1e-9, 1.0);
+        point.contact = Contact::Crossing;
+        solver
+            .add_sorted_solution(&point, SortKey::ByFirstParameter, true)
+            .unwrap();
+        assert_eq!(solver.solutions.len(), 2);
+        let a = solver.solutions.get(0).unwrap();
+        let b = solver.solutions.get(1).unwrap();
+        assert_eq!((a.end.parameters[0], a.contact), (1.0, Contact::Touching));
+        assert_eq!(b.solution_type, SolutionType::RangeOfValues);
+        assert_eq!(b.contact, Contact::Unclassified);
+    }
+
+    /// A duplicate `add_sorted_solution` drops leaves the solution it keeps with the
+    /// merged contact of both, whichever of the two it keeps.
+    #[test]
+    fn a_dropped_duplicate_merges_its_contact_into_the_kept_one() {
+        for (stored, added, want) in [
+            (Contact::Crossing, Contact::Touching, Contact::Undecided),
+            (Contact::Crossing, Contact::Crossing, Contact::Crossing),
+            (Contact::Unclassified, Contact::Touching, Contact::Touching),
+            (Contact::Undecided, Contact::Crossing, Contact::Undecided),
+        ] {
+            // the added one is tighter (kept), then looser (dropped)
+            for (v_stored, v_added) in [(2e-7, 1e-7), (1e-7, 2e-7)] {
+                let mut solver: GlobalSolver<'_, Obj> = GlobalSolver::new();
+                solver.set_solver_operation(SolverOperation::Find);
+                solver.set_3d_tolerance(1e-6);
+                let mut first = single(v_stored, 1.0);
+                first.contact = stored;
+                let mut second = single(v_added, 1.0);
+                second.contact = added;
+                for s in [first, second] {
+                    solver
+                        .add_sorted_solution(&s, SortKey::ByFirstParameter, true)
+                        .unwrap();
+                }
+                assert_eq!(solver.solutions.len(), 1);
+                let kept = solver.solutions.get(0).unwrap();
+                assert_eq!(kept.start.solution_value, 1e-7, "{stored:?} {added:?}");
+                assert_eq!(kept.contact, want, "{stored:?} {added:?} {v_stored}");
+            }
+        }
     }
 
     #[test]

@@ -1861,6 +1861,7 @@ impl Surface {
                     num_objects: s.num_objects,
                     objects: [None; MAX_TREES],
                     nodes: s.nodes,
+                    contact: s.contact,
                 });
             }
             out
