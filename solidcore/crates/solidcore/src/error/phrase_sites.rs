@@ -101,7 +101,6 @@ const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/blend/fillet_corner/topology/mixed_3x2.rs", 4),
     ("solidcore/src/blend/fillet_corner/topology/nx1_end.rs", 1),
     ("solidcore/src/blend/fillet_corner/topology/swept_turn.rs", 8),
-    ("solidcore/src/blend/fillet_custom_solver.rs", 20),
     ("solidcore/src/blend/fillet_exact.rs", 19),
     ("solidcore/src/blend/fillet_exact/rational.rs", 23),
     ("solidcore/src/blend/fillet_executive/session.rs", 43),
@@ -126,7 +125,6 @@ const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/blend/fillet_executive/session/trace_reach.rs", 3),
     ("solidcore/src/blend/fillet_executive/session/trim_at_creases.rs", 34),
     ("solidcore/src/blend/fillet_executive/session/two_offsets.rs", 18),
-    ("solidcore/src/blend/fillet_intersector.rs", 13),
     ("solidcore/src/blend/fillet_overflow.rs", 31),
     ("solidcore/src/blend/fillet_removal.rs", 3),
     ("solidcore/src/blend/fillet_removal/ring.rs", 5),
@@ -151,12 +149,9 @@ const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/blend/fillet_solver/surfaces.rs", 2),
     ("solidcore/src/blend/fillet_standard_solver/p1.rs", 32),
     ("solidcore/src/blend/fillet_standard_solver/p2.rs", 28),
-    ("solidcore/src/blend/fillet_standard_solver/surface_surface.rs", 2),
-    ("solidcore/src/blend/fillet_standard_solver/touch_circle.rs", 1),
     ("solidcore/src/blend/fillet_tangent_rollover.rs", 2),
     ("solidcore/src/blend/hcr.rs", 2),
     ("solidcore/src/blend/identify_fillet.rs", 4),
-    ("solidcore/src/blend/law_corners.rs", 7),
     ("solidcore/src/blend/round_room.rs", 1),
 ];
 

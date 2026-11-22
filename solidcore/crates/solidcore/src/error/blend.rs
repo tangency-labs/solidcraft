@@ -30,6 +30,7 @@
 //! | the fillet executive's checks of the caller's arguments and body ([`BlendFailure::NoEdgesGiven`], [`BlendFailure::SizeBelowResolution`], [`BlendFailure::PerEdgeListLength`], [`BlendFailure::ParameterListSizes`], [`BlendFailure::FaceHasNoSurface`], [`BlendFailure::NoFirstBody`], [`BlendFailure::TargetNotGiven`], [`BlendFailure::EdgeNotInTarget`], [`BlendFailure::EdgeNotFilletable`], [`BlendFailure::GnSectionInvalid`], [`BlendFailure::CrossSectionTypeUnknown`], [`BlendFailure::RadiusTypeNotForEdges`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::VariableRadiusLawMissing`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::LawIntervalEmpty`], [`BlendFailure::EdgeWithoutCurve`]) | [`ErrorKind::InvalidInput`] (1) |
 //! | [`BlendFailure::LawHasNoValue`], [`BlendFailure::SequenceCurveNotBSpline`], [`BlendFailure::FilletCrossesItself`] | [`ErrorKind::Unsupported`] (5) |
 //! | [`BlendFailure::CornerRefused`], [`BlendFailure::ExecutiveStepFailed`] | [`ErrorKind::Failed`] (6): neither defect nor refusal, so a kept cause decides |
+//! | [`BlendFailure::Trace`]               | the cause's ([`TraceFailure::class`])         |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
@@ -43,6 +44,7 @@
 //! | [`BlendFailure::Failed`], [`BlendFailure::LawIntervalEmpty`], [`BlendFailure::LawHasNoValue`], [`BlendFailure::FilletCrossesItself`], [`BlendFailure::CornerRefused`], [`BlendFailure::ExecutiveStepFailed`] | `SM_ERR` |
 //! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::SequenceCurveNotBSpline`] | `SM_ERR_NULL_POINTER` |
 //! | [`BlendFailure::InvalidValue`], the fillet executive's other checks of the caller's arguments | `SM_ERR_INVALID_INPUT` |
+//! | [`BlendFailure::Trace`]               | the cause's, as each [`TraceFailure`] variant says |
 //! | [`BlendFailure::Inconsistent`]         | `SM_ERR_ASSERT_FAILURE`           |
 //! | [`BlendFailure::BadIntersections`]     | `SM_ERR_BAD_INTERSECTIONS`        |
 //! | [`BlendFailure::NotConverged`]         | `SM_ERR_NOT_CONVERGING`           |
@@ -78,6 +80,9 @@ use super::{
     SM_ERR_OUTSIDE_OF_DOMAIN,
 };
 use crate::blend::fillet_executive::NoRoomReason;
+
+pub mod trace;
+pub use trace::TraceFailure;
 
 /// Why a blend fails: the cause of the typed blend failure record. Its class is
 /// [`BlendFailure::class`].
@@ -371,6 +376,10 @@ pub enum BlendFailure {
     /// the cause. [`ErrorKind::Failed`], neither a defect nor a refusal on its own, so the
     /// kept cause decides ([`crate::SolidError::is_defect`]); status `SM_ERR`.
     ExecutiveStepFailed,
+    /// The fillet trace failed, for the reason the [`TraceFailure`] names: the standard and
+    /// custom fillet solvers, the fillet intersector and the law corners. Its class and
+    /// status are the cause's ([`TraceFailure::class`]).
+    Trace(TraceFailure),
     /// The routine could not continue, as the phrase says (for example "the fillet's law
     /// has no value at the base"). Upstream `return SE(SM_ERR)`. A phrase cause
     /// ([`BlendFailure::is_phrase`]).
@@ -696,6 +705,7 @@ impl BlendFailure {
             | Self::CornerRefused
             | Self::ExecutiveStepFailed
             | Self::Failed(_) => SM_ERR,
+            Self::Trace(t) => t.comparison_status(),
             Self::Missing(_)
             | Self::BandInputMissing(_)
             | Self::CliffInputMissing { .. }
@@ -747,6 +757,7 @@ impl BlendFailure {
     pub const fn class(&self) -> ErrorKind {
         match self {
             Self::NoRoom(reason) => no_room_class(*reason),
+            Self::Trace(t) => t.class(),
             Self::RemovalRefused(reason) => removal_class(*reason),
             Self::StationDidNotConverge { .. } => ErrorKind::StationDidNotConverge,
             Self::TrimLoopOpen | Self::TrimLoopDoesNotSeparate => ErrorKind::TrimLeaks,
@@ -847,6 +858,7 @@ impl BlendFailure {
             | Self::FilletCrossesItself { .. }
             | Self::CornerRefused
             | Self::ExecutiveStepFailed
+            | Self::Trace(_)
             | Self::NotCertified { .. } => false,
             Self::Failed(_)
             | Self::Missing(_)
@@ -911,6 +923,7 @@ impl BlendFailure {
             | Self::FilletCrossesItself { .. }
             | Self::CornerRefused
             | Self::ExecutiveStepFailed
+            | Self::Trace(_)
             | Self::Failed(_)
             | Self::Missing(_)
             | Self::InvalidValue(_)
@@ -1119,6 +1132,7 @@ impl core::fmt::Display for BlendFailure {
                 "{}: a step of the fillet executive failed (the error info says which)",
                 self.class()
             ),
+            Self::Trace(t) => write!(f, "{}: {t}", t.class()),
             Self::Failed(what)
             | Self::InvalidValue(what)
             | Self::BadIntersections(what)
@@ -2040,7 +2054,7 @@ mod tests {
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 51;
+    const VARIANTS: usize = 52;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -2098,6 +2112,7 @@ mod tests {
             BlendFailure::FilletCrossesItself { .. } => (48, None),
             BlendFailure::CornerRefused => (49, None),
             BlendFailure::ExecutiveStepFailed => (50, None),
+            BlendFailure::Trace(_) => (51, None),
         }
     }
 
@@ -2226,6 +2241,7 @@ mod tests {
             },
             BlendFailure::CornerRefused,
             BlendFailure::ExecutiveStepFailed,
+            BlendFailure::Trace(TraceFailure::SkinningFailed),
         ];
         let mut names = Vec::new();
         let mut indices = Vec::new();

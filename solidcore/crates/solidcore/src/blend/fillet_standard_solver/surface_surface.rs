@@ -32,6 +32,7 @@ use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps};
 use crate::blend::fillet_solver::p5::RailClassificationContext;
 use crate::blend::fillet_standard_solver::p1::BoundaryTrimmingType;
 use crate::curve::curve::Curve;
+use crate::error::blend::TraceFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent2d::Extent2d;
@@ -140,7 +141,11 @@ impl SurfaceSurfaceFs {
         let mut faces = [None; 2];
         for (ii, face) in faces.iter_mut().enumerate() {
             let SurfaceId::Face(id) = self.base.surface(ii)?.base_id else {
-                return Err(SolidError::blend_missing(OP, "the base surface's face"));
+                // a free base surface is the caller's construction (`SurfaceId::Free`)
+                return Err(SolidError::blend_trace(
+                    OP,
+                    TraceFailure::BaseSurfaceNotOnFace { side: ii },
+                ));
             };
             *face = Some(id);
         }
@@ -172,7 +177,7 @@ impl SurfaceSurfaceFs {
         let uv_domain = pseudo
             .geom(fillet_geom)?
             .fillet_surface(None)?
-            .ok_or_else(|| SolidError::blend_missing(OP, "the fillet surface"))?
+            .ok_or_else(|| SolidError::blend_trace(OP, TraceFailure::TraceBuiltNoSurface))?
             .natural_uv_domain_with_nurb(k)?;
         let uv_max = uv_domain.max();
         let uv_min = uv_domain.min();
