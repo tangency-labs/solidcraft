@@ -8449,6 +8449,62 @@ pub(crate) fn thin_regions(vals: &BTreeMap<String, Value>, ss: &SolvedSketch, th
 /// How far apart (mm) profiles must stay for their extruded tools to be cut as one.
 const APART_GAP: f64 = 1e-3;
 
+/// The most shells one tool of profiles apart holds: a body's record takes no more, so a sketch
+/// of 1369 separate squares, joined into one tool, failed with "shell count" (#20398).
+const MAX_JOINED_SHELLS: usize = solidcore_record::brep::MAX_SHELLS;
+
+#[cfg(test)]
+thread_local! {
+    /// [`MAX_JOINED_SHELLS`] for this thread's tests: a test splits a few profiles into groups.
+    static JOINED_SHELLS_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(MAX_JOINED_SHELLS) };
+}
+
+#[cfg(test)]
+fn joined_shells_limit() -> usize {
+    JOINED_SHELLS_LIMIT.with(std::cell::Cell::get)
+}
+
+#[cfg(not(test))]
+fn joined_shells_limit() -> usize {
+    MAX_JOINED_SHELLS
+}
+
+/// Tools apart from each other (extruded from profiles apart in the sketch) as one tool, so the
+/// body is cut or joined once rather than once per profile. Tools of more than
+/// [`MAX_JOINED_SHELLS`] shells together are joined in even groups, one tool for each, and the
+/// body is cut or joined once per group (#20398). Tools the kernel does not join (meshes) are
+/// left as they are.
+fn join_apart_tools(tools: Vec<Traced>) -> Result<Vec<Traced>> {
+    let limit = joined_shells_limit().max(1);
+    let shells: Vec<usize> = tools.iter().map(|t| t.body.record().shells.len().max(1)).collect();
+    let total: usize = shells.iter().sum();
+    // Even groups: as many as the limit asks for, each holding about as many shells.
+    let most = total.div_ceil(total.div_ceil(limit).max(1));
+    let mut groups: Vec<Vec<Traced>> = Vec::new();
+    let mut held = 0;
+    for (tool, n) in tools.into_iter().zip(shells) {
+        match groups.last_mut() {
+            Some(group) if held + n <= most => {
+                group.push(tool);
+                held += n;
+            }
+            _ => {
+                groups.push(vec![tool]);
+                held = n;
+            }
+        }
+    }
+    let mut out = Vec::with_capacity(groups.len());
+    for group in groups {
+        let bodies: Vec<Body> = group.iter().map(|t| t.body.clone()).collect();
+        match kernel::join_apart(&bodies)? {
+            Some(one) => out.push(Traced::step(one, &group.iter().collect::<Vec<_>>())),
+            None => out.extend(group),
+        }
+    }
+    Ok(out)
+}
+
 /// The tool bodies a feature adds or removes (extrude, revolve, primitives), in the current state.
 /// `to_body` is the body a To Object extent runs to (an extrude), when it found one.
 fn feature_tools_with_constructor(
@@ -8691,10 +8747,7 @@ fn feature_tools_with_constructor(
                     _ => false,
                 };
                 if at_once && tools.len() > 1 && regions_apart(&regions, APART_GAP + 2.0 * growth) {
-                    let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
-                    if let Some(one) = kernel::join_apart(&bodies)? {
-                        tools = vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())];
-                    }
+                    tools = join_apart_tools(tools)?;
                 }
                 if let Some(((tb, (_, fi)), p)) = target {
                     tools = trim_to_curved_face(tools, tb, fi, p.0, to_offset, &ss.plane, base, base + sign * len)?;
@@ -8830,10 +8883,7 @@ fn feature_tools_with_constructor(
                 _ => false,
             };
             if at_once && tools.len() > 1 && !is_symmetric_offset && regions_apart(&regions, APART_GAP) {
-                let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
-                if let Some(one) = kernel::join_apart(&bodies)? {
-                    tools = vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())];
-                }
+                tools = join_apart_tools(tools)?;
             }
             if let Some(tb) = curved.and_then(|bi| tst.bodies.get(bi))
                 && let Some((_, fi)) = to_face
