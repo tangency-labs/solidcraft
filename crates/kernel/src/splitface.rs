@@ -645,7 +645,9 @@ fn split_by(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
 }
 
 /// `tool`, a prism through the surface of `face` of `target` (run on past it), cut at that
-/// surface (extended), keeping the pieces that start at `start`: the planar faces square to
+/// surface (extended) where it crosses it the way it does at `near`, a point of the face
+/// ([`split_at_facing_side`]: on a cylinder the half the face lies on, #20389), keeping the
+/// pieces that start at `start`: the planar faces square to
 /// `plane`'s normal at that height along it. Whether the start lies in air or inside the
 /// target's material does not matter, and a piece never passes the face.
 ///
@@ -658,12 +660,13 @@ fn split_by(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
 ///
 /// The two heights are told apart by a tolerance of the body's own, never more than a quarter of
 /// the distance between them.
-pub fn face_split_if_on_face(tool: &Body, target: &Body, face: usize, plane: &Plane, start: f64, far: f64) -> Result<Option<Vec<Body>>> {
+pub fn face_split_if_on_face(tool: &Body, target: &Body, face: usize, near: Vec3, plane: &Plane, start: f64, far: f64) -> Result<Option<Vec<Body>>> {
     let target_form = target.ops_body().ok_or_else(|| invalid("the To object is not a solid body"))?;
     let (ops_target, order) = &*target_form;
     let n = plane.normal();
     let mut out = Vec::new();
-    for part in split_body(tool, &SplitTool::Face { body: target, face })? {
+    let travel = if far > start { n } else { n * -1.0 };
+    for part in split_at_facing_side(tool, target, face, near, travel)? {
         let own = part.record().tolerance;
         let cut = solidcore_ops::cap::PrismCut {
             origin: a3(plane.origin),
@@ -705,43 +708,20 @@ pub fn split_at_facing_side(tool: &Body, sheet: &Body, face: usize, near: Vec3, 
     let Some(crate::FaceSurface::Cylinder { origin, axis, radius }) = crate::face_surface(sheet, face) else {
         return split_body(tool, &whole);
     };
-    let axis = axis.vec();
-    // The travel across the axis, and where the pick lies across it.
-    let across = |v: Vec3| v - axis * v.dot(axis);
-    let (Some(d), Some(side)) = (across(travel).normalized(), across(near - origin).normalized()) else {
+    let b = tool.exact_bounds()?;
+    let Some(t) = solidcore_ops::facing_trough::facing_trough(a3(origin), a3(axis.vec()), radius, a3(near), a3(travel), a3(b.min), a3(b.max)) else {
         return split_body(tool, &whole);
     };
-    let facing = side.dot(d);
-    if facing.abs() < 1e-9 {
-        return split_body(tool, &whole);
-    }
-    // How far the sheet must reach from the axis's origin to pass the whole tool.
-    let (lo, hi) = {
-        let b = tool.exact_bounds()?;
-        (b.min, b.max)
-    };
-    let reach = (0..8)
-        .map(|i| {
-            let pick = |bit: usize, l: f64, h: f64| if i & bit == 0 { l } else { h };
-            (Vec3::new(pick(1, lo.x, hi.x), pick(2, lo.y, hi.y), pick(4, lo.z, hi.z)) - origin).len()
-        })
-        .fold(0.0_f64, f64::max)
-        + radius
-        + 1.0;
-    // The sketch frame across the axis: x along the travel, its normal along the axis.
-    let plane = Plane { origin, x: d, y: axis.cross(d) };
-    // The half the pick is on faces +x (the tool leaves the cylinder there) or -x (it goes in);
-    // its edges run on away from that half, along -x or +x.
-    let sign = facing.signum();
-    let top = Vec2::new(0.0, radius);
-    let bottom = Vec2::new(0.0, -radius);
-    let back = Vec2::new(-sign * reach, 0.0);
+    let v3 = |[x, y, z]: [f64; 3]| Vec3::new(x, y, z);
+    let v2 = |[x, y]: [f64; 2]| Vec2::new(x, y);
+    // The frame across the axis: x along the travel, its normal along the axis.
+    let plane = Plane { origin: v3(t.origin), x: v3(t.x), y: v3(t.y) };
     let chain = vec![
-        Seg2::Line { a: top + back, b: top },
-        Seg2::Arc { center: Vec2::new(0.0, 0.0), radius, start: std::f64::consts::FRAC_PI_2, sweep: -sign * std::f64::consts::PI },
-        Seg2::Line { a: bottom, b: bottom + back },
+        Seg2::Line { a: v2(t.wing_top), b: v2(t.top) },
+        Seg2::Arc { center: Vec2::new(0.0, 0.0), radius: t.radius, start: t.start, sweep: t.sweep },
+        Seg2::Line { a: v2(t.bottom), b: v2(t.wing_bottom) },
     ];
-    let trough = crate::extrude_sheet(&plane, &[chain], -reach, reach)?;
+    let trough = crate::extrude_sheet(&plane, &[chain], -t.reach, t.reach)?;
     // Named by its round face: were the sheet not taken whole, that face's surface extended
     // is the whole cylinder again, never a plane of the sheet.
     let round = (0..trough.face_count())

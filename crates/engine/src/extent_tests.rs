@@ -491,10 +491,14 @@ fn cut_to_a_curved_face_the_profile_partly_misses_is_refused() {
 /// plane x = -10 along +x over y in [22, 28] and z in [-1, 4]: in the plate, z in [0, 4], it
 /// takes x from 0 to the round's offset cylinder x = 30 + sqrt(r^2 - (y - 20)^2), r = 10 + the
 /// offset, so 4 times 6 * 30 plus the integral of sqrt(r^2 - u^2) over u in [2, 8]. Ending at
-/// the cylinder's back, x = 30 - sqrt(...), it took 4 times 6 * 30 less that integral.
+/// the cylinder's back, x = 30 - sqrt(...), it took 4 times 6 * 30 less that integral. The same
+/// profile over z in [1, 4] lies wholly over the round: 3 times as much, with an offset and with
+/// none (with none it ended at the plate's side x = 0, on the review of #20536).
 #[test]
 fn cut_to_a_round_from_the_far_side_ends_at_the_round() {
-    for to_offset in [-1.57f64, 0.0] {
+    // The profile from z = -1 overhangs the round below the plate; from z = 1 it lies wholly
+    // over it, and the cut is 3 deep in z instead of 4.
+    for (bottom, depth, to_offset) in [(-1, 4.0, -1.57f64), (-1, 4.0, 0.0), (1, 3.0, -1.57), (1, 3.0, 0.0)] {
         let mut s = Session::default();
         run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
         run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
@@ -503,16 +507,16 @@ fn cut_to_a_round_from_the_far_side_ends_at_the_round() {
         run(&mut s, "solid.fillet", json!({"body": "Plate", "edges": [[40, 30, 2.5]], "radius": 10}));
         let before = body(&mut s, "Plate")["volume_mm3"].as_f64().unwrap_or(0.0);
         run(&mut s, "sketch.create", json!({"plane": {"origin": [-10, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "P"}));
-        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [22, -1], "p1": [28, 4]}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [22, bottom], "p1": [28, 4]}));
         run(&mut s, "sketch.finish", json!({}));
         let d = 10.0 / 2f64.sqrt();
         run(&mut s, "solid.extrude", json!({"sketch": "P", "to": [30.0 + d, 20.0 + d, 2.5], "to_offset": to_offset, "operation": "cut"}));
-        assert!(s.model.results.iter().all(|r| r.error.is_none()), "offset {to_offset}: {:?}", s.model.results);
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "z from {bottom}, offset {to_offset}: {:?}", s.model.results);
         let removed = before - body(&mut s, "Plate")["volume_mm3"].as_f64().unwrap_or(0.0);
         let r = 10.0 + to_offset;
         let primitive = |u: f64| u / 2.0 * (r * r - u * u).sqrt() + r * r / 2.0 * (u / r).asin();
-        let want = 4.0 * (180.0 + primitive(8.0) - primitive(2.0));
-        assert!((removed - want).abs() < want * 1e-3, "offset {to_offset}: removed {removed}, want {want}");
+        let want = depth * (180.0 + primitive(8.0) - primitive(2.0));
+        assert!((removed - want).abs() < want * 1e-3, "z from {bottom}, offset {to_offset}: removed {removed}, want {want}");
     }
 }
 

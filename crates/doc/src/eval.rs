@@ -11578,7 +11578,7 @@ fn trim_to_face(tools: Vec<Traced>, target: &ModelBody, face: usize, near: Vec3,
     let mut out = Vec::new();
     let mut on_face = true;
     for t in &tools {
-        let Some(parts) = kernel::face_split_if_on_face(&t.body, &target.body, face, plane, start, far)? else {
+        let Some(parts) = kernel::face_split_if_on_face(&t.body, &target.body, face, near, plane, start, far)? else {
             on_face = false;
             break;
         };
