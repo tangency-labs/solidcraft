@@ -2435,6 +2435,36 @@ mod card_tests {
         }
     }
 
+    /// UnoRouter is a normal OpenAI-compatible preset: one click sets its name and HTTPS
+    /// base URL, then the existing model picker fetches GET /v1/models (#17068).
+    #[test]
+    fn unorouter_preset_populates_the_endpoint_and_lists_models() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width": 1500.0, "height": 900.0}));
+        h.app.home.open = false;
+        h.app.preferences.ai_features = true;
+        h.app.agent_chat.detection = Some(Default::default());
+        let seen = listing_http(&mut h);
+        open_add(&mut h.app);
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:ui.ai_add_endpoint"}})).unwrap();
+        list_settled(&mut h);
+        h.step(&json!({"click":{"handle":"ai_add:preset"}})).unwrap();
+        h.frames(3);
+        let top = solidcraft_ui_registry::handle_at("ai_add:preset:Ollama").expect("preset menu");
+        h.call("ui.scroll", json!({"x":top.x,"y":top.y,"delta":-1000}));
+        h.frames(10);
+        h.step(&json!({"click":{"handle":"ai_add:preset:UnoRouter"}})).unwrap();
+        list_settled(&mut h);
+        let add = h.app.agent_chat.settings.add.as_ref().unwrap();
+        assert_eq!(add.kind, AddKind::Api);
+        assert_eq!(add.protocol, Protocol::OpenAi);
+        assert_eq!(add.name, "UnoRouter");
+        assert_eq!(add.base_url, "https://api.unorouter.com/v1");
+        assert_eq!(seen.lock().unwrap().last().cloned(), Some(("https://api.unorouter.com/v1/models".into(), false)));
+        assert!(solidcraft_ui_registry::handle_at("ai_add:model").is_some(), "existing model picker remains available");
+    }
+
     /// The dialog lists an endpoint's models off the window's thread, once per endpoint and key, of
     /// what the fields say when they are left and not while they are typed in; a key goes only
     /// where it may. A row and a typed model both fill the field, and Add takes either.

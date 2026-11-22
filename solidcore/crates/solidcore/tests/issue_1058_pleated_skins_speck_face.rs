@@ -5,10 +5,10 @@
 //! keeps it, a speck face is split off holding a 15 mm intersection edge, and
 //! `RadialSectorClassify` drops that edge's trim 0.86 mm off the face. Before #16735 the
 //! volume integrator leaked through that gap, and union + intersection lost 18.8 mm^3 of
-//! the skins; it now closes tolerant edges' gaps, so the identity holds on both paths. The
-//! opt-in `Kernel::fixes.degenerate_proto_edge_in_one_vertex` makes such a
-//! curve the vertex (the fork's "an intersection curve inside one vertex is that vertex,
-//! not a closed edge on it").
+//! the skins; it now closes tolerant edges' gaps. `resolve_proto_edge` now makes such a
+//! curve the vertex when a certified hull of it lies within the vertex definition's
+//! tolerance (the fork's "an intersection curve inside one vertex is that vertex, not a
+//! closed edge on it", bounded by the vertex's tolerance instead of the capture distance).
 //!
 //! The operands are the rig's recipe, as in `issue_1480_pleated_loft_union_edge_ends.rs`:
 //! each skin is a capped ruled loft minus a slightly larger one, copied into its own key
@@ -30,6 +30,7 @@ use solidcore::geom::object::ObjectRef;
 use solidcore::kernel::{Kernel, KernelOptions};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::brep::{p2, p3};
 use solidcore::topology::Brep;
 use solidcore::EntityRef;
@@ -101,9 +102,8 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 
 /// The union's worst vertex and edge tolerances, and how far union + intersection falls
 /// short of the two skins' volumes (relative to their sum).
-fn join(fix: bool) -> (f64, f64, f64) {
+fn join() -> (f64, f64, f64) {
     let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes.degenerate_proto_edge_in_one_vertex = fix;
     let k = &mut k;
     let outer = loft(k, &CONELO, &CONEHI);
     let inner = loft(k, &CONEINLO, &CONEINHI);
@@ -114,6 +114,8 @@ fn join(fix: bool) -> (f64, f64, f64) {
     let mut union = boolean(k, &cone, &lip, BooleanOperation::Union);
     let mut common = boolean(k, &cone, &lip, BooleanOperation::Intersection);
     assert!(p2::is_manifold_solid(&union).unwrap());
+    let check = check_brep(k, &mut union, CheckLevel::Level2).unwrap();
+    assert_eq!(check.failure_count(), 0, "{:?}", check.lines());
     let worst_vertex = union
         .vertex_list()
         .iter()
@@ -129,26 +131,12 @@ fn join(fix: bool) -> (f64, f64, f64) {
     (worst_vertex, worst_edge, lost)
 }
 
-#[test]
-fn issue_1058_flag_is_off_by_default() {
-    assert!(!Kernel::default().fixes.degenerate_proto_edge_in_one_vertex);
-}
-
-/// Upstream: tolerances of 1.73 mm. The 18.8 mm^3 the join and the intersection lost was
-/// the integrator leaking through the 0.86 mm trim gap; with the gaps closed (#16735) union +
-/// intersection is the skins' volumes (1.8e-10 relative, MEASURED), as with the fix.
-#[test]
-fn issue_1058_upstream_join_has_millimetre_tolerances() {
-    let (vertex, edge, lost) = join(false);
-    assert!(vertex > 1.0 && edge > 1.0, "{vertex:e} {edge:e}");
-    assert!(lost.abs() < 1e-6, "{lost:e}");
-}
-
-/// With the fix every tolerance stays under 1e-4 (the creases' near miss is about 1.6e-5),
-/// and union + intersection is the two skins' volumes.
+/// The union passes the level-2 check, every tolerance stays under 1e-4 (the creases' near
+/// miss is about 1.6e-5; upstream's were 1.73 mm), and union + intersection is the two
+/// skins' volumes.
 #[test]
 fn issue_1058_join_keeps_its_tolerances_with_the_fix() {
-    let (vertex, edge, lost) = join(true);
+    let (vertex, edge, lost) = join();
     assert!(vertex < 1e-4 && edge < 1e-4, "{vertex:e} {edge:e}");
     assert!(lost.abs() < 1e-6, "{lost:e}");
 }

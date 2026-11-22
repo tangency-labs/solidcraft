@@ -177,7 +177,7 @@ fn inputs(s: &Session, t: &MotionTrace) -> Result<Value> {
         definition.angle = angle;
         definition.values = q;
         definition.exprs = Default::default();
-        let fa = joints::resolve_origin(&s.doc, &st, &j.a)?;
+        let fa = j.offset_frame_a(joints::resolve_origin(&s.doc, &st, &j.a)?);
         let fb = joints::resolve_origin(&s.doc, &st, &j.b)?;
         joints.push(json!([definition, fa, fb]));
     }

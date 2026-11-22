@@ -14,7 +14,6 @@ use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{ConstraintKind, CurveKind, Nurbs, Sketch};
 
 use super::sketch::add_c;
-use super::sketch_freeform::{locate, point_at};
 use crate::Result;
 use crate::params::{bad, str_};
 
@@ -24,6 +23,25 @@ const NEAR: f64 = 1e-6;
 
 /// The most passes the centre's iteration takes: it converges in a handful.
 const MAX_PASSES: usize = 60;
+
+/// Position along the pieces (piece index + local parameter) closest to `p`, and the distance.
+fn locate(segs: &[Seg2], p: Vec2) -> (f64, f64) {
+    segs.iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let t = s.closest_param(p);
+            (i as f64 + t, s.point_at(t).dist(p))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .unwrap_or((0.0, f64::INFINITY))
+}
+
+/// The point at position `u` along the pieces (piece index + local parameter).
+fn point_at(segs: &[Seg2], u: f64) -> Vec2 {
+    let n = segs.len();
+    let i = (u.floor() as usize).min(n.saturating_sub(1));
+    segs.get(i).map(|s| s.point_at((u - i as f64).clamp(0.0, 1.0))).unwrap_or_default()
+}
 
 fn ends(sk: &Sketch, c: usize) -> Option<(usize, usize)> {
     sk.curves.get(c).and_then(|c| c.kind.ends())

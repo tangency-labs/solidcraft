@@ -751,6 +751,8 @@ pub(crate) fn scheme_owner_identity(
 /// - [`Brep::clone_standing_for_self`]: a private copy that stands for this B-rep,
 ///   with the same ids, key and naming, and geometry that keeps its owners. Use it
 ///   for a scratch copy a query addresses by this B-rep's ids.
+/// - [`Brep::clone_standing_for_self_keeping_definitions`]: the same, for a working copy
+///   an operation builds geometry from, which keeps each face surface's definition.
 /// - [`Brep::with_rollback`] (inside the crate, `snapshot`/`restore`): an operation's
 ///   rollback, putting this B-rep back exactly as it was.
 #[derive(Debug)]
@@ -835,6 +837,36 @@ pub struct Brep {
     /// kernel's attributes on its faces, edges, ... (keyed by the B-rep-local
     /// [`loopuse::notify_ref`] identity of each entity). A clone copies them.
     attributes: AttributeStore,
+    /// (not upstream) The tolerances a read's kept-trim cover raised
+    /// ([`Brep::trim_cover_raises`]). A clone copies them.
+    trim_cover_raises: TrimCoverRaises,
+}
+
+/// (not upstream) The edge and vertex tolerances a read's kept-trim cover
+/// (`topology::brep::p2::cover_kept_uv_trim_curves`) raised, each as
+/// `(before, after)`: the tolerance the read had made and the one the cover set.
+///
+/// An edge's fit tolerance (`topology::edgeuse::p3::fit_tolerance`) is taken from its
+/// tolerance before the raise while the edge still holds the raised value, so a raise
+/// that covers a kept trim's distance does not loosen the geometry fitted along the edge,
+/// as a raise that covers an edge/face gap does not.
+///
+/// A clone and a copy (`topology::brep::p3::copy_brep`) carry the entries their entities
+/// still hold. A merge into another B-rep and a written file do not: a B-rep written with
+/// a raised tolerance stores it as its own tolerance, and a read of it fits at that value.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TrimCoverRaises {
+    /// The raised edges: `(before, after)` tolerance.
+    pub edges: std::collections::BTreeMap<EdgeId, (f64, f64)>,
+    /// The vertices the raised edges' tolerances cascaded to: `(before, after)`.
+    pub vertices: std::collections::BTreeMap<VertexId, (f64, f64)>,
+}
+
+impl TrimCoverRaises {
+    /// No edge and no vertex raised.
+    pub fn is_empty(&self) -> bool {
+        self.edges.is_empty() && self.vertices.is_empty()
+    }
 }
 
 /// A B-rep as it was ([`Brep::snapshot`]), to put back with [`Brep::restore`] in its
@@ -881,6 +913,7 @@ impl Brep {
             removals: self.removals.clone(),
             geometry_owner_keys: self.geometry_owner_keys.clone(),
             attributes: self.attributes.clone(),
+            trim_cover_raises: self.trim_cover_raises.clone(),
         }
     }
 }
@@ -919,6 +952,7 @@ impl Default for Brep {
             removals: topology::RemovalLog::default(),
             geometry_owner_keys: std::collections::BTreeMap::new(),
             attributes: AttributeStore::default(),
+            trim_cover_raises: TrimCoverRaises::default(),
         }
     }
 }
@@ -1186,11 +1220,37 @@ impl Brep {
     /// resets every owner, and a B-rep cache made from such a copy holds no curve or
     /// surface).
     ///
+    /// The face surfaces' definitions are dropped, as an evaluation copy
+    /// ([`Surface::clone_for_evaluation`]) has none; a copy an operation builds geometry
+    /// from asks for [`Brep::clone_standing_for_self_keeping_definitions`] instead.
+    ///
     /// # Errors
     ///
     /// Those of the geometry copies (a geometry nesting deeper than
     /// `MAX_GEOMETRY_NESTING`).
     pub fn clone_standing_for_self(&self) -> Result<Self> {
+        self.standing_copy(false)
+    }
+
+    /// [`Brep::clone_standing_for_self`] with every face surface's definition kept
+    /// ([`Surface::procedural_blend`]): a working copy an operation offsets or shells, so that
+    /// a round is offset by its definition, the round of the moved radius on the offset
+    /// supports, not by its net, and the result keeps the definition.
+    ///
+    /// (not upstream: a round of an exact class keeps its definition beside its net, #2485,
+    /// which an evaluation copy drops; upstream's copy keeps the round's class.)
+    ///
+    /// # Errors
+    ///
+    /// Those of the geometry copies (a geometry nesting deeper than
+    /// `MAX_GEOMETRY_NESTING`).
+    pub fn clone_standing_for_self_keeping_definitions(&self) -> Result<Self> {
+        self.standing_copy(true)
+    }
+
+    /// [`Brep::clone_standing_for_self`], keeping the face surfaces' definitions when
+    /// `keep_definitions` says so.
+    fn standing_copy(&self, keep_definitions: bool) -> Result<Self> {
         let mut copy = self.copy(false);
         for (id, edge) in self.edges.iter() {
             if let Some(curve) = edge.curve.as_ref() {
@@ -1199,7 +1259,12 @@ impl Brep {
         }
         for (id, face) in self.faces.iter() {
             if let Some(surface) = face.surface.as_ref() {
-                copy.face_mut(id)?.surface = Some(surface.clone_for_evaluation()?);
+                let made = if keep_definitions {
+                    surface.clone_for_evaluation_keeping_definition()?
+                } else {
+                    surface.clone_for_evaluation()?
+                };
+                copy.face_mut(id)?.surface = Some(made);
             }
         }
         for (id, edgeuse) in self.edgeuses.iter() {
@@ -1213,8 +1278,8 @@ impl Brep {
     /// A [`Brep::clone_standing_for_self`] to be edited as a trial of an operation on this
     /// B-rep (not upstream): the same ids and geometry owners, but each face surface's
     /// top-level cache slot is its own ([`Surface::detach_for_edit`]), holding a copy of
-    /// what this B-rep's holds ([`Surface::copy_cache_slot_of`]: its tree state and its
-    /// trimmed surface cache), so that the trial starts from this B-rep's cache state and
+    /// what this B-rep's holds ([`Surface::copy_cache_slot_of`]: its trimmed surface
+    /// cache), so that the trial starts from this B-rep's cache state and
     /// no cache built on the edited copy reaches this B-rep's face surfaces. Nested
     /// surfaces (an offset's or a STEP surface's base) and the surfaces of edge curves
     /// still share their slots.
@@ -1825,6 +1890,17 @@ impl Brep {
     /// renames the objects while it runs).
     pub(crate) fn take_attributes(&mut self) -> AttributeStore {
         core::mem::take(&mut self.attributes)
+    }
+
+    /// (not upstream) The tolerances the read's kept-trim cover raised
+    /// ([`TrimCoverRaises`]); empty for a B-rep no read covered.
+    pub fn trim_cover_raises(&self) -> &TrimCoverRaises {
+        &self.trim_cover_raises
+    }
+
+    /// Sets [`Brep::trim_cover_raises`].
+    pub(crate) fn set_trim_cover_raises(&mut self, raises: TrimCoverRaises) {
+        self.trim_cover_raises = raises;
     }
 
     /// Replaces the attribute store (keyed by [`loopuse::notify_ref`]).

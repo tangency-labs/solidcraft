@@ -7,9 +7,9 @@ use solidcraft_geom::bezier;
 use solidcraft_geom::prelude::*;
 use solidcraft_io::{DxfFile, DxfPath, DxfPathStyle, DxfShape, DxfVertex, Geom2, IoError, path_shapes, read_dxf, write_dxf_file};
 
-// Accepted fixtures span at most 40 mm. Legacy entities keep twelve decimal places;
-// bulged polylines may retain more. These bounds allow roundoff in the independent
-// inverse-bulge calculation and reader, not fitting error or an output-format requirement.
+// Accepted fixtures span at most 40 mm. Lengths are written on a 1e-9 grid and other values
+// with twelve decimals. These bounds allow that and roundoff in the independent inverse-bulge
+// calculation and reader, not fitting error or an output-format requirement.
 const POSITION_EPS: f64 = 1e-8;
 const BULGE_EPS: f64 = 1e-11;
 
@@ -689,7 +689,13 @@ fn only_mixed_paths_apply_the_aggregate_fitting_budget_to_retained_primitives() 
 
 #[test]
 fn large_translation_cannot_turn_a_three_quarter_unit_radius_into_a_unit_radius() {
-    let coordinate = (1_u64 << 52) as f64;
+    // Past the writable range (9000000), the arc is refused rather than written elsewhere.
+    let far = Vec2::new((1_u64 << 52) as f64, 0.0);
+    let arc = Seg2::Arc { center: far, radius: 0.75, start: 0.0, sweep: FRAC_PI_2 };
+    let error = path_shapes(DxfPath::Open(&[arc]), DxfPathStyle::Polyline).unwrap_err().to_string();
+    assert!(error.contains("arc centre cannot be encoded"), "{error}");
+    // 2^23, the largest power of two in range, where an f64 step (1.9e-9) is coarser than the grid.
+    let coordinate = (1_u64 << 23) as f64;
     let center = Vec2::new(coordinate, coordinate);
     let radius = 0.75;
     let arc = Seg2::Arc { center, radius, start: 0.0, sweep: FRAC_PI_2 };
@@ -715,22 +721,23 @@ fn large_translation_cannot_turn_a_three_quarter_unit_radius_into_a_unit_radius(
             assert_eq!(vertices.last().unwrap().bulge, 0.0);
             let mut sweep = 0.0;
             for edge in vertices.windows(2) {
-                // Translate BEFORE reconstructing. At 2^52, adding a center correction in
-                // world coordinates can erase it and make a wrong circle appear valid.
+                // Translate BEFORE reconstructing. At a large coordinate, adding a center correction
+                // in world coordinates can erase it and make a wrong circle appear valid.
                 let (a, b, bulge) = (edge[0].at - center, edge[1].at - center, edge[0].bulge);
                 assert!(bulge > 0.0 && bulge <= 1.0);
                 let chord = b - a;
                 let square = bulge * bulge;
                 let recovered_center = (a + b) * 0.5 + chord.perp() * ((1.0 - square) / (4.0 * bulge));
                 let recovered_radius = chord.len() * (1.0 + square) / (4.0 * bulge);
-                // Small local arithmetic gets an epsilon-scale allowance, never an ULP
-                // allowance based on the huge translation (which could hide 0.25 mm loss).
-                let support_epsilon = 64.0 * f64::EPSILON * radius;
+                // The written bulge has twelve decimals and the vertices sit on the 1e-9 grid, so
+                // the allowance is one grid tick: never a ULP allowance based on the translation,
+                // which could hide a 0.25 mm loss.
+                let support_epsilon = 1e-9;
                 assert!(recovered_center.len() <= support_epsilon, "local center {recovered_center:?}");
                 assert!((recovered_radius - radius).abs() <= support_epsilon, "radius {recovered_radius}, expected {radius}");
                 sweep += 4.0 * bulge.atan();
             }
-            number_near(sweep, FRAC_PI_2, 64.0 * f64::EPSILON);
+            number_near(sweep, FRAC_PI_2, 1e-11);
         }
         kind => panic!("source arc support was lost or replaced: {kind}"),
     }

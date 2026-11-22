@@ -1,8 +1,8 @@
 //! Regression test for the WR-530 addendum (the fork's tangency-labs/smlib 5d428ae and
 //! 90aabff): a local operation that moves one of two tangent faces along its normal
-//! leaves the two parallel and apart. WR-530's opt-in refuses that; with
-//! `local_operation_step_walls` the step is built (a ruled wall between the two edges,
-//! the gaps at its ends closed).
+//! leaves the two parallel and apart. WR-530 alone refuses that; with the step walls
+//! (always on since the flag `local_operation_step_walls` was removed) the step is built (a
+//! ruled wall between the two edges, the gaps at its ends closed).
 //!
 //! The cases are the fork's, rebuilt here: a block whose top is imprinted with a split,
 //! one piece moved up or down (the step adds or takes off the piece's footprint times
@@ -35,13 +35,6 @@ use solidcore::surface::surface::Surface;
 use solidcore::topology::brep::local_operation::local_operation;
 use solidcore::topology::FaceId;
 use solidcore::{Brep, Kernel};
-
-fn kernel(step_walls: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.local_operation_refuses_loose_tangent_edges = true;
-    k.fixes.local_operation_step_walls = step_walls;
-    k
-}
 
 /// A `dx x dy x dz` block whose top is imprinted along x = `split` (the capi's
 /// `smlib_imprint` of a box over the part x > `split`, z > dz / 2).
@@ -103,18 +96,11 @@ fn move_piece(k: &mut Kernel, b: &mut Brep, piece: FaceId, dz: f64) -> solidcore
     local_operation(k, b, &[piece], vec![surface], &mut notifications.context())
 }
 
-fn refused(result: solidcore::Result<()>) {
-    match result {
-        Err(e) => assert_eq!(e.sm_status(), Some(SM_ERR)),
-        other => panic!("WR-530 refuses the step without the opt-in: {other:?}"),
-    }
-}
-
 /// The fork's shell-12 dump: a 40 x 30 x 10 block, its top split at x = 20, the piece
 /// x < 20 up 2: 8 faces, 13200.
 #[test]
 fn wr_530_step_up_on_a_split_block_top_is_built() {
-    let mut k = kernel(true);
+    let mut k = Kernel::default();
     let mut b = split_block(&mut k, 40.0, 30.0, 10.0, 20.0);
     let piece = top_piece(&k, &b, 10.0, 20.0, false);
     move_piece(&mut k, &mut b, piece, 2.0).unwrap();
@@ -128,7 +114,7 @@ fn wr_530_step_up_on_a_split_block_top_is_built() {
 #[test]
 fn wr_530_step_up_and_down_on_a_split_block_top_is_built() {
     for (to, want) in [(21.0, 49200.0), (19.0, 46800.0)] {
-        let mut k = kernel(true);
+        let mut k = Kernel::default();
         let mut b = split_block(&mut k, 60.0, 40.0, 20.0, 30.0);
         let piece = top_piece(&k, &b, 20.0, 30.0, false);
         move_piece(&mut k, &mut b, piece, to - 20.0).unwrap();
@@ -147,7 +133,7 @@ fn wr_530_step_up_and_down_on_a_split_block_top_is_built() {
 /// the pieces the imprint split off the side faces), up 1.
 #[test]
 fn wr_530_step_on_the_imprinted_piece_is_built() {
-    let mut k = kernel(true);
+    let mut k = Kernel::default();
     let mut b = split_block(&mut k, 60.0, 40.0, 20.0, 30.0);
     let piece = top_piece(&k, &b, 20.0, 30.0, true);
     move_piece(&mut k, &mut b, piece, 1.0).unwrap();
@@ -159,14 +145,6 @@ fn wr_530_step_on_the_imprinted_piece_is_built() {
         Some(49200.0),
         1e-6
     ));
-}
-
-#[test]
-fn wr_530_split_block_step_is_refused_without_the_opt_in() {
-    let mut k = kernel(false);
-    let mut b = split_block(&mut k, 60.0, 40.0, 20.0, 30.0);
-    let piece = top_piece(&k, &b, 20.0, 30.0, true);
-    refused(move_piece(&mut k, &mut b, piece, 1.0));
 }
 
 const AXIS: (f64, f64) = (30.0, 20.0);
@@ -232,7 +210,7 @@ fn move_boss_wall(k: &mut Kernel, b: &mut Brep) -> solidcore::Result<()> {
 fn wr_530_boss_wall_beside_a_torus_round_is_refused_as_reach_uncertified() {
     use solidcore::error::offset::OffsetFailure;
     use solidcore::error::Reason;
-    let mut k = kernel(true);
+    let mut k = Kernel::default();
     let mut b = boss_part(&mut k);
     let e = move_boss_wall(&mut k, &mut b).unwrap_err();
     assert_eq!(
@@ -243,11 +221,4 @@ fn wr_530_boss_wall_beside_a_torus_round_is_refused_as_reach_uncertified() {
         "{e}"
     );
     assert_eq!(e.sm_status(), Some(SM_ERR));
-}
-
-#[test]
-fn wr_530_boss_wall_step_is_refused_without_the_opt_in() {
-    let mut k = kernel(false);
-    let mut b = boss_part(&mut k);
-    refused(move_boss_wall(&mut k, &mut b));
 }

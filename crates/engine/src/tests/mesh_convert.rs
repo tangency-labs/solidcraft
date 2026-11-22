@@ -675,3 +675,34 @@ fn a_second_placements_mesh_body_converts_by_the_name_the_world_shows() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #18465: a file of another CAD program (a zip as a `.f3d`, text as a `.x_t`) is not a design;
+/// Open says it does not open that kind of file, not what the design reader made of it. A design
+/// under its own extension keeps the reader's words, and a design under an odd name still opens.
+#[test]
+fn open_names_an_unsupported_file_instead_of_the_design_readers_complaint() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-open-unsupported-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let write = |name: &str, bytes: &[u8]| {
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        path.to_string_lossy().into_owned()
+    };
+    let mut s = Session::default();
+    for (name, bytes) in [("part.f3d", &b"PK\x03\x04not a design"[..]), ("part.x_t", b"**ABCDEFGHIJKLMNOPQRSTUVWXYZ\n"), ("part.xyz123", b"{")] {
+        let error = s.execute("doc.open", &json!({"path": write(name, bytes)})).unwrap_err().to_string();
+        let ext = name.rsplit('.').next().unwrap();
+        assert!(error.contains(&format!("can't open .{ext} files")), "{error}");
+        assert!(error.contains("export STEP") && error.contains("importer plugin") && error.contains("Preferences › Plugins"), "{error}");
+    }
+    let broken = s.execute("doc.open", &json!({"path": write("broken.sc", b"PK\x03\x04not a design")})).unwrap_err().to_string();
+    assert!(!broken.contains("can't open"), "{broken}");
+    // A design that was copied under another name opens as it did.
+    let mut saved = Session::default();
+    let design = dir.join("design.sc");
+    saved.execute("file.save_as", &json!({"path": design.to_string_lossy()})).unwrap();
+    let copy = dir.join("design.sc.bak");
+    std::fs::copy(&design, &copy).unwrap();
+    assert!(s.execute("doc.open", &json!({"path": copy.to_string_lossy()})).is_ok());
+    std::fs::remove_dir_all(dir).unwrap();
+}

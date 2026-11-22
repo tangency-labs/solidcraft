@@ -1,0 +1,335 @@
+use std::collections::BTreeSet;
+use std::sync::Arc;
+
+use serde_json::{Value, json};
+use solidcraft_geom::drawing_sheet::{self, Orientation, PaperSize};
+use solidcraft_geom::drawing_view::NamedView;
+
+use super::*;
+use crate::drawing::table::{Kind, SheetTable};
+use crate::drawing::view::{View, ViewKind, ViewPlace};
+use crate::drawing::{OnSheet, Sheet, Source};
+use crate::drawing_view::{ViewDirection, ViewOverrides};
+use crate::format::DRAWING;
+use crate::ids::IdSource;
+
+const SEED: u64 = 3874;
+
+fn edge(name: &str, path: Vec<u64>) -> ModelEdge {
+    ModelEdge { body: "Bolt".into(), origin_feature: 4, name: name.into(), path }
+}
+
+/// A drawing of one design on one A3 sheet, its front view at (150, 150), and on the view two
+/// balloons: one on a bolt placed straight in the design (occurrence 3), one on a bolt inside a
+/// sub-assembly (occurrence 7 in 3). Their ids, in the order they were added.
+fn ballooned() -> (Drawing, [u64; 2]) {
+    let mut id_source = IdSource::seeded(SEED);
+    let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
+    let mut d = Drawing::new("Bolted", "en", "Sheet 1", a3, None, &BTreeSet::new(), &mut id_source).unwrap();
+    let source = d.allocate_id(&mut id_source).unwrap();
+    d.sources.push(Source { id: source, path: None });
+    let (view, sheet) = (d.allocate_id(&mut id_source).unwrap(), d.sheets[0].id);
+    let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
+    d.add_views([Arc::new(View {
+        id: view,
+        sheet,
+        kind,
+        place: ViewPlace::At([150.0, 150.0]),
+        settings: ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() },
+        reference_shown_percent: 0.0,
+        label: None,
+    })]);
+    let mut added = [0; 2];
+    for ((path, at), id) in [(vec![3], [40.0, 25.0]), (vec![3, 7], [-35.5, 60.0])].into_iter().zip(&mut added) {
+        *id = d.allocate_id(&mut id_source).unwrap();
+        d.balloons.add([Arc::new(Balloon { id: *id, view, edge: edge("F1:side|F2:head", path), at, parts_list: None })]);
+    }
+    d.validate().unwrap();
+    (d, added)
+}
+
+fn file(d: &Drawing) -> Value {
+    serde_json::from_str(&d.to_json().unwrap()).unwrap()
+}
+
+/// Balloon `id` in a drawing's file.
+fn balloon<'a>(v: &'a mut Value, id: &str) -> &'a mut Value {
+    v["balloons"].as_array_mut().unwrap().iter_mut().find(|x| x["id"] == id).unwrap()
+}
+
+/// Why `d`'s file, changed by `edit`, is refused, or "read".
+fn refused(d: &Drawing, edit: impl FnOnce(&mut Value)) -> String {
+    let mut v = file(d);
+    edit(&mut v);
+    Drawing::from_json(&v.to_string()).map_or_else(|e| e.to_string(), |_| "read".into())
+}
+
+/// A balloon saves its view, its edge by name with the part's occurrence path, and its place, and
+/// nothing worked out. Balloons save by id and read back as saved, the same bytes again; a file
+/// that lists them in another order reads by id. An older drawing reads with none, and a drawing
+/// with none writes none.
+#[test]
+fn balloons_save_what_they_point_at_and_read_back_as_saved() {
+    let (d, added) = ballooned();
+    let [placed, nested] = added.map(ids::encode);
+    let view = ids::encode(d.views[0].id);
+    let mut v = file(&d);
+    assert_eq!(
+        *balloon(&mut v, &nested),
+        json!({
+            "id": nested, "view": view,
+            "edge": {"body": "Bolt", "origin_feature": 4, "name": "F1:side|F2:head", "path": [3, 7]},
+            "at": [-35.5, 60.0]
+        })
+    );
+    assert_eq!(balloon(&mut v, &placed)["edge"]["path"], json!([3]));
+    assert_eq!(d.balloons.by_id(added[1]).unwrap().occurrence(), [3, 7], "the part it numbers is its edge's path");
+    let listed: Vec<u64> = v["balloons"].as_array().unwrap().iter().map(|x| ids::decode(x["id"].as_str().unwrap()).unwrap()).collect();
+    let mut by_id = added.to_vec();
+    by_id.sort_unstable();
+    assert_eq!(listed, by_id);
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened, d);
+    assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
+    let mut other_order = v.clone();
+    other_order["balloons"].as_array_mut().unwrap().reverse();
+    assert_eq!(Drawing::from_json(&other_order.to_string()).unwrap(), d);
+    let mut unsorted = d.clone();
+    unsorted.balloons.reverse();
+    assert_eq!(unsorted.validate().unwrap_err().to_string(), "a drawing lists its balloons by id");
+    let mut none = d.clone();
+    none.balloons.clear();
+    assert_eq!(file(&none).get("balloons"), None, "no balloons, none written");
+    let older = json!({
+        "format": DRAWING.format_string(1), "id": "0000000000002", "name": "Old", "sources": [], "language": "en",
+        "sheets": [{"id": "0000000000001", "name": "S", "sheet": {"size": {"standard": "a4"}}}]
+    });
+    assert!(Drawing::from_json(&older.to_string()).unwrap().balloons.is_empty());
+}
+
+/// What reading refuses, each rule by name, on both sides of every cap: the view a balloon is on,
+/// its edge's names, feature and path (a placed part's: 1 to 64 occurrences, none of them 0), its
+/// place on paper, its id, how many there are, and fields it doesn't know.
+#[test]
+fn the_balloons_rules_are_kept_on_reading() {
+    let (d, added) = ballooned();
+    let [placed, nested] = added.map(ids::encode);
+    let rule = |id: &str, rule: &str| format!("damaged drawing: balloon {id}: {rule}");
+    let nothing = ids::encode(99);
+    let on = format!("it is on view {nothing}, which the drawing doesn't have");
+    assert_eq!(refused(&d, |v| balloon(v, &placed)["view"] = json!(nothing)), rule(&placed, &on));
+    // The edge keeps a dimension's reference rules.
+    let names = "a name in a reference is 1 to 512 bytes, without control characters";
+    let body = |name: &str| refused(&d, |v| balloon(v, &nested)["edge"]["body"] = json!(name));
+    let edge_name = |name: &str| refused(&d, |v| balloon(v, &nested)["edge"]["name"] = json!(name));
+    for fits in ["x".repeat(512), "é".repeat(256)] {
+        assert_eq!([body(&fits), edge_name(&fits)], ["read", "read"], "{} bytes", fits.len());
+    }
+    for broken in ["x".repeat(513), String::new(), "two\nlines".into()] {
+        assert_eq!([body(&broken), edge_name(&broken)], [rule(&nested, names), rule(&nested, names)], "{} bytes", broken.len());
+    }
+    let feature = rule(&placed, "a reference names the feature that made its body");
+    assert_eq!(refused(&d, |v| balloon(v, &placed)["edge"]["origin_feature"] = json!(0)), feature);
+    // A placed part's path: 1 to 64 occurrences, none of them 0. A design's own body is no part.
+    let path = |p: Value| refused(&d, |v| balloon(v, &nested)["edge"]["path"] = p);
+    let deep = rule(&nested, "an occurrence path is at most 64 occurrences, none of them 0");
+    let own = rule(
+        &nested,
+        "a balloon points at a part placed as a component of an assembly: an edge with no `path` is on the design's own body, so place the part as a component and give its occurrence in the edge's `path`",
+    );
+    assert_eq!(
+        [path(json!([3])), path(json!(vec![3; 64])), path(json!(vec![3; 65])), path(json!([3, 0])), path(json!([]))],
+        ["read".to_string(), "read".into(), deep.clone(), deep, own.clone()]
+    );
+    let no_path = refused(&d, |v| {
+        balloon(v, &nested)["edge"].as_object_mut().unwrap().remove("path");
+    });
+    assert_eq!(no_path, own, "no path");
+    // Its place is on paper.
+    let paper = rule(&placed, "its place is at most 5000 mm on paper");
+    let at = |at: [f64; 2]| refused(&d, |v| balloon(v, &placed)["at"] = json!(at));
+    assert_eq!([at([5000.0, -5000.0]), at([5000.001, 0.0]), at([0.0, -5000.001])], ["read".to_string(), paper.clone(), paper]);
+    assert!(refused(&d, |v| balloon(v, &placed)["at"] = json!([1.0])).starts_with("damaged drawing: "), "two numbers");
+    // Its id is the drawing's: never another object's.
+    let view_id = ids::encode(d.views[0].id);
+    assert_eq!(refused(&d, |v| balloon(v, &placed)["id"] = json!(view_id)), format!("damaged drawing: two objects have the id {view_id}"));
+    // Fields it doesn't know, at every level.
+    let unknown: [fn(&mut Value, &str); 3] = [
+        |v, id| balloon(v, id)["item"] = json!(3),
+        |v, id| balloon(v, id)["edge"]["point"] = json!([0.0, 0.0, 0.0]),
+        |v, id| balloon(v, id)["shape"] = json!("circle"),
+    ];
+    for (i, edit) in unknown.into_iter().enumerate() {
+        assert!(refused(&d, |v| edit(v, &placed)).starts_with("damaged drawing: "), "{i}");
+    }
+    // At most MAX_BALLOONS balloons.
+    let many = |n: usize| {
+        let mut v = file(&d);
+        let one = balloon(&mut v, &placed).clone();
+        let copies = (1..=n as u64).map(|i| {
+            let mut copy = one.clone();
+            copy["id"] = json!(ids::encode(i));
+            copy
+        });
+        v["balloons"] = Value::Array(copies.collect());
+        Drawing::from_json(&v.to_string()).map(|d| d.balloons.len()).map_err(|e| e.to_string())
+    };
+    assert_eq!(many(MAX_BALLOONS), Ok(MAX_BALLOONS));
+    assert_eq!(many(MAX_BALLOONS + 1), Err(format!("damaged drawing: a drawing has at most {MAX_BALLOONS} balloons")));
+}
+
+/// A sheet's balloons are its views' and go with it; a new id never takes a balloon's.
+#[test]
+fn a_sheets_balloons_go_with_it() {
+    let (mut d, added) = ballooned();
+    let sheet = d.sheets[0].id;
+    let on = d.on_sheet(sheet);
+    let mut by_id = added.to_vec();
+    by_id.sort_unstable();
+    assert_eq!(on.balloons, by_id);
+    let mut id_source = IdSource::seeded(SEED);
+    for _ in 0..64 {
+        let id = d.allocate_id(&mut id_source).unwrap();
+        assert!(!added.contains(&id), "a new id never takes a balloon's");
+    }
+    let second = d.allocate_id(&mut id_source).unwrap();
+    d.sheets.push(Arc::new(crate::drawing::Sheet { id: second, name: "Sheet 2".into(), ..(*d.sheets[0]).clone() }));
+    assert_eq!(d.remove_sheet(sheet), on);
+    d.validate().unwrap();
+    assert!(d.balloons.is_empty() && d.views.is_empty());
+}
+
+/// A parts list on `d`'s sheet `sheet`, with a fresh id.
+fn add_list(d: &mut Drawing, sheet: u64, id: u64) {
+    use crate::drawing::SheetComponent;
+    use crate::drawing::table::{MassFormat, PartsList};
+    let of = SheetComponent { source: d.sources[0].id, component: 0 };
+    let list =
+        PartsList { of, view: Default::default(), group: Default::default(), fold: false, purchased_contents: false, mass: MassFormat::default() };
+    let kind = Kind::PartsList(list);
+    d.tables.add([Arc::new(SheetTable { id, sheet, table: kind.default_table(), place: kind.default_place(), kind })]);
+}
+
+/// With no link a balloon reads its sheet's only list, else the drawing's only one, else none, with
+/// the choices listed; a revision table is no choice. Its link wins. Saved only when it names one.
+#[test]
+fn a_balloon_reads_the_list_it_names_else_the_only_one() {
+    let (mut d, [id, _]) = ballooned();
+    let sheet = d.sheets[0].id;
+    let read = |d: &Drawing| d.parts_list_for(d.balloons.by_id(id).unwrap()).map(|(list, _)| list);
+    assert_eq!(read(&d), Err(vec![]));
+    let saved: Value = serde_json::from_str(&d.to_json().unwrap()).unwrap();
+    assert_eq!(saved["balloons"][0].get("parts_list"), None);
+
+    let other = 1 << 40;
+    let a4 = drawing_sheet::Sheet::standard(PaperSize::A4, Orientation::Landscape);
+    d.sheets.push(Arc::new(Sheet { id: other, name: "Other".into(), sheet: a4, ..(*d.sheets[0]).clone() }));
+    add_list(&mut d, other, 1 << 41);
+    assert_eq!(read(&d), Ok(1 << 41), "the drawing's only one");
+    add_list(&mut d, sheet, 1 << 42);
+    assert_eq!(read(&d), Ok(1 << 42), "the sheet's only one comes first");
+    add_list(&mut d, sheet, 1 << 43);
+    assert_eq!(read(&d), Err(vec![1 << 41, 1 << 42, 1 << 43]), "the choices");
+    assert!(d.balloons_by_list().is_empty(), "with none to go by, a balloon reads no list");
+    let kind = Kind::Revision;
+    d.tables.add([Arc::new(SheetTable { id: 1 << 44, sheet, table: kind.default_table(), place: kind.default_place(), kind })]);
+    assert_eq!(read(&d).unwrap_err().len(), 3, "a revision table is no choice");
+
+    let at = d.balloons.index_of(id).unwrap();
+    Arc::make_mut(&mut d.balloons[at]).parts_list = Some(1 << 41);
+    assert_eq!(read(&d), Ok(1 << 41), "its link wins");
+    let by_list = d.balloons_by_list();
+    assert_eq!((by_list.len(), by_list[&(1 << 41)].iter().map(|b| b.id).collect::<Vec<_>>()), (1, vec![id]), "the other reads none");
+    d.validate().unwrap();
+    assert_eq!(Drawing::from_json(&d.to_json().unwrap()).unwrap(), d);
+
+    // The list goes, by its own delete or its sheet's: the balloon stays and reads what it can.
+    d.remove_objects(&OnSheet { tables: vec![1 << 41], ..Default::default() });
+    assert_eq!(d.balloons.by_id(id).unwrap().parts_list, None);
+    d.validate().unwrap();
+    assert_eq!(read(&d).unwrap_err(), vec![1 << 42, 1 << 43]);
+}
+
+/// A list counts the balloons that read it, not another list's; one that shows only what its sheet's
+/// balloons read counts only those on its sheet.
+#[test]
+fn a_list_counts_only_the_balloons_that_read_it() {
+    use solidcraft_geom::table::Ballooned;
+    let (mut d, [one, two]) = ballooned();
+    let sheet = d.sheets[0].id;
+    let other = 1 << 40;
+    d.sheets.push(Arc::new(Sheet { id: other, name: "Other".into(), ..(*d.sheets[0]).clone() }));
+    let lists = [1 << 41, 1 << 42];
+    for (balloon, list) in [one, two].into_iter().zip(lists) {
+        add_list(&mut d, sheet, list);
+        let at = d.balloons.index_of(balloon).unwrap();
+        Arc::make_mut(&mut d.balloons[at]).parts_list = Some(list);
+    }
+    let counted = |d: &Drawing, list: u64| -> Vec<u64> { d.balloons_by_list().get(&list).map_or(Vec::new(), |b| b.iter().map(|b| b.id).collect()) };
+    assert_eq!(lists.map(|list| counted(&d, list)), [vec![one], vec![two]]);
+    let scoped = |d: &mut Drawing, on: u64, scope: Option<Ballooned>| {
+        let at = d.tables.index_of(lists[0]).unwrap();
+        let table = Arc::make_mut(&mut d.tables[at]);
+        table.sheet = on;
+        table.table.filter.ballooned = scope;
+    };
+    scoped(&mut d, other, Some(Ballooned::Sheet));
+    assert!(counted(&d, lists[0]).is_empty(), "its balloon is on another sheet");
+    scoped(&mut d, other, Some(Ballooned::Drawing));
+    assert_eq!(counted(&d, lists[0]), [one]);
+    scoped(&mut d, sheet, Some(Ballooned::Sheet));
+    assert_eq!(counted(&d, lists[0]), [one]);
+    d.validate().unwrap();
+}
+
+/// Each source's design is asked for once, and a list whose design can't be read numbers none of
+/// its balloons, saying why; a list of another source still reads its own design.
+#[test]
+fn a_list_whose_design_cant_be_read_numbers_none() {
+    let (mut d, [one, two]) = ballooned();
+    let sheet = d.sheets[0].id;
+    let (read, unread) = (d.sources[0].id, 1 << 45);
+    let lists = [1 << 41, 1 << 42];
+    for (balloon, list) in [one, two].into_iter().zip(lists) {
+        add_list(&mut d, sheet, list);
+        let at = d.balloons.index_of(balloon).unwrap();
+        Arc::make_mut(&mut d.balloons[at]).parts_list = Some(list);
+    }
+    d.sources.push(Source { id: unread, path: Some("plate.solidcraft".into()) });
+    d.sources.sort_by_key(|source| source.id);
+    let at = d.tables.index_of(lists[1]).unwrap();
+    if let Kind::PartsList(list) = &mut Arc::make_mut(&mut d.tables[at]).kind {
+        list.of.source = unread;
+    }
+    d.validate().unwrap();
+
+    let doc = Document::default();
+    let mut asked = Vec::new();
+    let balloons: Vec<&Balloon> = [one, two, one].iter().map(|id| d.balloons.by_id(*id).unwrap()).collect();
+    let rows = balloon_rows(&d, &balloons, |source| {
+        asked.push(source);
+        if source == read { Ok((&doc, Arc::new(ModelState::default()))) } else { Err("it can't be read".into()) }
+    });
+    assert_eq!(asked, [unread.min(read), unread.max(read)], "once per source, in id order");
+    let unread_row = RowRead::Unread { list: lists[1], why: "it can't be read".into() };
+    assert!(matches!(rows[0], RowRead::Unlisted { list, .. } if list == lists[0]), "read from its own design: {rows:?}");
+    assert_eq!((&rows[1], &rows[2]), (&unread_row, &rows[0]), "{rows:?}");
+    assert_eq!((rows[1].list(), rows[1].item()), (Some(lists[1]), None));
+}
+
+/// A link names one of the drawing's parts lists.
+#[test]
+fn a_balloons_link_is_to_a_parts_list() {
+    let (mut d, [id, _]) = ballooned();
+    let sheet = d.sheets[0].id;
+    let kind = Kind::Revision;
+    d.tables.add([Arc::new(SheetTable { id: 1 << 44, sheet, table: kind.default_table(), place: kind.default_place(), kind })]);
+    let at = d.balloons.index_of(id).unwrap();
+    for bad in [1 << 44, 99] {
+        Arc::make_mut(&mut d.balloons[at]).parts_list = Some(bad);
+        assert!(d.validate().unwrap_err().to_string().contains("parts lists"), "{bad}");
+    }
+    let mut v: Value = serde_json::from_str(&Drawing { balloons: Default::default(), ..d.clone() }.to_json().unwrap()).unwrap();
+    v["balloons"] = json!([{"id": "x", "view": "x", "edge": {}, "at": [0.0, 0.0], "parts_list": 7}]);
+    assert!(Drawing::from_value(v).is_err(), "not an id");
+}

@@ -57,7 +57,34 @@ pub fn input_schema_for<T: JsonSchema>() -> Schema {
 
 /// The JSON Schema (2020-12) of what `T` serializes to: a command's result.
 pub fn output_schema_for<T: JsonSchema>() -> Schema {
-    SchemaSettings::draft2020_12().for_serialize().into_generator().into_root_schema_for::<T>()
+    let schema = SchemaSettings::draft2020_12().for_serialize().into_generator().into_root_schema_for::<T>();
+    let mut value = schema.clone().to_value();
+    // All object replies share optional command-dispatch metadata. Describe it here rather
+    // than duplicating a transport field in every operation's domain result type.
+    fn common(node: &mut Value) {
+        if let Some(object) = node.as_object_mut() {
+            if (object.get("type").and_then(Value::as_str) == Some("object") || object.contains_key("properties"))
+                && let Some(properties) = object.entry("properties").or_insert_with(|| json!({})).as_object_mut()
+            {
+                properties
+                    .insert("finished_sketch".into(), json!({"type":"string","description":"Name of the sketch finished before this edit started."}));
+            }
+            for key in ["anyOf", "oneOf", "allOf"] {
+                if let Some(branches) = object.get_mut(key).and_then(Value::as_array_mut) {
+                    for branch in branches {
+                        common(branch);
+                    }
+                }
+            }
+        }
+    }
+    common(&mut value);
+    if let Some(definitions) = value.get_mut("$defs").and_then(Value::as_object_mut) {
+        for definition in definitions.values_mut() {
+            common(definition);
+        }
+    }
+    Schema::try_from(value).unwrap_or(schema)
 }
 
 /// One way a call breaks a contract.
@@ -243,6 +270,12 @@ fn nearest(key: &str, allowed: &BTreeSet<String>) -> Option<String> {
         .filter(|(d, _)| *d <= near)
         .min_by_key(|(d, _)| *d)
         .map(|(_, a)| a.clone())
+}
+
+/// The command `cmd`'s parameters `p` as its contract type `P`, refused in the words the contract
+/// check uses, so the handler and the check say the same thing about the same mistake.
+pub(crate) fn read<P: DeserializeOwned>(cmd: &str, p: &Value) -> Result<P> {
+    serde_path_to_error::deserialize(p).map_err(|e| bad(cmd, parse_issue(&e).message))
 }
 
 /// A deserialization failure as an issue, in the engine's style.

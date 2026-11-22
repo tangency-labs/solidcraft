@@ -313,3 +313,33 @@ fn a_failed_features_tooltip_shows_its_whole_error_in_the_error_colour_wherever_
         assert_eq!((colour, cut), (red, false), "left History {width} wide");
     }
 }
+
+/// #17697: SMLib's check of an inserted STEP part runs on after the design shows. When it ends
+/// with a part to repair, the import's History chip warns and the status line says so, once.
+#[test]
+fn a_part_the_check_fails_after_the_import_shows_raises_the_chip_and_the_status_once() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-17697-ui-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("block.step");
+    std::fs::write(&path, include_str!("../../../tests/step-regressions/block_edge_off_its_face.step")).unwrap();
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.insert_path_with(&path.to_string_lossy(), &Default::default(), false).unwrap();
+    let id = app.session.doc.features.iter().find(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Import { .. })).expect("the import").id;
+    let report = app.session.model.result(id).and_then(|r| r.import_report.clone()).expect("the import's check");
+    report.settled().expect("the check ends");
+    app.status = None;
+    let ctx = crate::fonts::test_context();
+    crate::timeline::tick_import_checks(&mut app, &ctx);
+    let result = app.session.model.result(id).unwrap();
+    assert!(crate::timeline::has_warning(result), "the chip warns");
+    assert!(matches!(crate::timeline::feature_status(&app, id), Some(crate::ui_kit::Status::Warning)));
+    let summary = crate::timeline::import_summary(result.import_report.as_deref().unwrap());
+    let (text, _, error) = app.status.clone().expect("the status line says so");
+    assert_eq!((text, error), (crate::i18n::tr_diagnostic(&summary), false));
+    let details = crate::timeline::feature_message(&app, id).unwrap();
+    assert!(details.contains("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: "), "{details}");
+    app.status = None;
+    crate::timeline::tick_import_checks(&mut app, &ctx);
+    assert!(app.status.is_none(), "once");
+    let _ = std::fs::remove_dir_all(&dir);
+}

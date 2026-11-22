@@ -28,6 +28,11 @@
 //! | [`api_stitch_advanced`], [`AdvancedStitch`], [`AdvancedStitchOptions`] | `SmApiStitchAdvanced` |
 //!
 //! Deviations:
+//! - Not upstream (#18166): each edge join leaves a cover pending, and when
+//!   `DoStitching`, `StitchEdgesOfVertices` or `DoSimpleFaceStitch` ends, every kept edge's
+//!   tolerance is raised to cover its curve's proved distance to each face its joins gave it
+//!   that holds none of its trims, on the final faces, trims and curve
+//!   (`Stitch::finish_joins`). Upstream's join covers only the two curves' distance.
 //! - Out-params become return values. The coincident objects of
 //!   `SelectTopologyToKeep` are [`EntityRef`]s (upstream `SmTopology*`, never null
 //!   here); a null `SmBrep*`/`SmFace*` of the API entry points is `None`.
@@ -98,6 +103,7 @@ use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::topology::brep::p1 as bp1;
+use crate::topology::brep::p6::InfiniteHalf;
 use crate::topology::brep_cache::{arena_identity, CacheObject};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3::{self as eu3, BinormalOptions};
@@ -900,6 +906,12 @@ pub struct Stitch<'c> {
     tol_3d: f64,
     /// Find and set the infinite region after gluing (`m_bDoRegionNesting`).
     pub do_region_nesting: bool,
+    /// A face use the caller knows to lie outside the one solid whose faces are stitched,
+    /// which are alone in the B-rep. The glue that closes the solid's shell splits the
+    /// infinite region and makes the half this face use is in the infinite one, with no
+    /// ray fired ([`InfiniteHalf::Of`]); the stitch's end searches as ever
+    /// (`do_region_nesting`). Not upstream, whose closing glue searches for the half.
+    pub(crate) outside: Option<FaceuseId>,
     /// Validate pointers after stitching in validating builds (`m_bValidateResult`).
     pub validate_result: bool,
     /// Don't signal an error and quit when two edges fail to glue
@@ -924,6 +936,20 @@ pub struct Stitch<'c> {
     /// enclosed, and the tolerance growth its editing applied (not upstream,
     /// solidcore#2975). Nothing else changes.
     pub report_gaps: Option<Vec<ClosedGap>>,
+    /// The covers the running operation's joins left pending (not upstream, #18166;
+    /// [`Stitch::finish_joins`]).
+    pending_covers: Vec<JoinCover>,
+}
+
+/// Not upstream (#18166): the cover one join leaves pending until its operation ends
+/// ([`Stitch::finish_joins`]): the faces the join gave the kept edge, whose distance from
+/// the kept curve the edge's tolerance need not cover.
+#[derive(Debug, Clone)]
+struct JoinCover {
+    /// The kept edge, or a piece split from it.
+    edge: EdgeId,
+    /// Each face the join gave the edge.
+    faces: Vec<FaceId>,
 }
 
 impl Stitch<'_> {
@@ -968,6 +994,7 @@ impl core::fmt::Debug for Stitch<'_> {
         f.debug_struct("Stitch")
             .field("stitch_tol_3d", &self.tol_3d)
             .field("do_region_nesting", &self.do_region_nesting)
+            .field("outside", &self.outside)
             .field("validate_result", &self.validate_result)
             .field("ignore_problems", &self.ignore_problems)
             .field("fast_edge_compare", &self.fast_edge_compare)
@@ -1068,14 +1095,110 @@ impl<'c> Stitch<'c> {
         orientation: OrientType,
         dist: f64,
         nest: bool,
+        half: InfiniteHalf,
         delete: EdgeId,
         inside: Option<&[FaceuseId]>,
     ) -> Result<()> {
-        if let Some(edits) = self.edits.as_deref_mut() {
-            edits.glue_edges(k, b, keep, orientation, dist, nest, delete, inside)
+        // (not upstream, #18166: the join's pending cover, taken before the glue deletes
+        // `delete`; see `JoinCover`)
+        let pending = if keep == delete {
+            None
         } else {
-            glue_edges_general(k, b, keep, orientation, dist, nest, delete, inside)
+            Some(Self::join_cover(b, keep, delete)?)
+        };
+        // (an edit context's glue searches at each closed shell, as upstream)
+        if let Some(edits) = self.edits.as_deref_mut() {
+            edits.glue_edges(k, b, keep, orientation, dist, nest, delete, inside)?;
+        } else {
+            glue_edges_searching(k, b, keep, orientation, dist, nest, half, delete, inside)?;
         }
+        self.pending_covers.extend(pending);
+        Ok(())
+    }
+
+    /// Not upstream (#18166): the cover a join of `delete` into `keep` leaves pending. The
+    /// join keeps `keep`'s curve for the deleted edge's faces and raises the tolerance to the
+    /// two curves' distance only (`UpdateObjectTolerance`), which need not cover that curve's
+    /// distance to those faces: the cover proves that distance when the operation ends.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::NotFound`] for a dangling id.
+    fn join_cover(b: &Brep, keep: EdgeId, delete: EdgeId) -> Result<JoinCover> {
+        Ok(JoinCover {
+            edge: keep,
+            faces: edge::faces(b, delete, None)?,
+        })
+    }
+
+    /// Not upstream (#18166): a split of `e` into `pieces` gives each piece `e`'s pending
+    /// covers.
+    fn split_pending_covers(&mut self, e: EdgeId, pieces: [Option<EdgeId>; 2]) {
+        let of_e: Vec<JoinCover> = self
+            .pending_covers
+            .iter()
+            .filter(|c| c.edge == e)
+            .cloned()
+            .collect();
+        for piece in pieces.into_iter().flatten().filter(|&p| p != e) {
+            self.pending_covers
+                .extend(of_e.iter().cloned().map(|c| JoinCover { edge: piece, ..c }));
+        }
+    }
+
+    /// Not upstream (#18166): runs the covers the operation's joins left pending, on the
+    /// final trims and faces: each live edge's tolerance is raised to cover the proved
+    /// distance of its curve from each face a join gave it that holds none of its trims
+    /// ([`crate::topology::edgeuse::p3::cover_joined_faces`]). A trim set or fitted after the
+    /// join raised the tolerance for its own face when it was set, so only trimless faces
+    /// are covered here, against the faces and curve the operation ends with. `outcome` is
+    /// the operation's; after a failure the covers still run (the joins made stand), unless
+    /// it was cancelled or unported, and the failure is returned.
+    ///
+    /// # Errors
+    ///
+    /// `outcome`'s; [`SolidError::NotFound`] for a dangling id; the covers' unported and
+    /// cancelled statuses, which take precedence over a failed `outcome` (a cancel or an
+    /// unported path is reported as such, whatever failed before it).
+    pub(crate) fn finish_joins<T>(
+        &mut self,
+        k: &Kernel,
+        b: &mut Brep,
+        outcome: Result<T>,
+    ) -> Result<T> {
+        let pending = core::mem::take(&mut self.pending_covers);
+        if matches!(&outcome, Err(err) if err.is_unported_or_cancelled()) {
+            return outcome;
+        }
+        // (the faces of each live edge, once each, in the order the joins ran)
+        let mut edges: Vec<(EdgeId, Vec<FaceId>)> = Vec::new();
+        for cover in &pending {
+            if b.edge(cover.edge).is_err() {
+                continue;
+            }
+            let at = if let Some(at) = edges.iter().position(|(e, _)| *e == cover.edge) {
+                at
+            } else {
+                edges.push((cover.edge, Vec::new()));
+                edges.len() - 1
+            };
+            let Some((_, faces)) = edges.get_mut(at) else {
+                continue;
+            };
+            for &f in &cover.faces {
+                if !faces.contains(&f) {
+                    faces.push(f);
+                }
+            }
+        }
+        // (a cover that fails keeps the raises it made before the failure, each to a proved
+        // bound, and leaves the rest as upstream leaves it)
+        for (e, faces) in &edges {
+            ignored(crate::topology::edgeuse::p3::cover_joined_faces(
+                k, b, *e, faces,
+            ))?;
+        }
+        outcome
     }
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn edit_squeeze_edge(
@@ -1099,11 +1222,13 @@ impl<'c> Stitch<'c> {
         e: EdgeId,
         t: f64,
     ) -> Result<(Option<EdgeId>, Option<EdgeId>, Option<VertexId>)> {
-        if let Some(edits) = self.edits.as_deref_mut() {
-            edits.split_edge(k, b, e, t)
+        let split = if let Some(edits) = self.edits.as_deref_mut() {
+            edits.split_edge(k, b, e, t)?
         } else {
-            make_vertex_split_edge(k, b, e, t)
-        }
+            make_vertex_split_edge(k, b, e, t)?
+        };
+        self.split_pending_covers(e, [split.0, split.1]);
+        Ok(split)
     }
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn edit_brep_pre_edit(&mut self, k: &mut Kernel, b: &mut Brep) -> Result<()> {
@@ -1173,6 +1298,7 @@ impl<'c> Stitch<'c> {
             edits: None,
             tol_3d: stitch_tol_3d,
             do_region_nesting,
+            outside: None,
             validate_result,
             ignore_problems: false,
             fast_edge_compare: false,
@@ -1181,6 +1307,7 @@ impl<'c> Stitch<'c> {
             making_manifold_solid: true,
             remove_laminar_slivers: false,
             report_gaps: None,
+            pending_covers: Vec::new(),
         }
     }
 
@@ -1213,8 +1340,20 @@ impl<'c> Stitch<'c> {
     /// `SM_ERR` for empty or differently sized face lists, faces of another B-rep,
     /// faces whose vertices or edges do not pair up, and a selection or gap above
     /// tolerance; those of the curve evaluations, the callback and the gluing (`SER`).
-    #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn do_simple_face_stitch(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        faces_to_keep: &[FaceId],
+        faces_to_delete: &[FaceId],
+    ) -> Result<SimpleFaceStitch> {
+        let outcome = self.do_simple_face_stitch_body(k, b, faces_to_keep, faces_to_delete);
+        self.finish_joins(k, b, outcome)
+    }
+
+    /// [`Stitch::do_simple_face_stitch`] before its joins' covers run.
+    #[allow(clippy::too_many_lines)] // one upstream routine
+    fn do_simple_face_stitch_body(
         &mut self,
         k: &mut Kernel,
         b: &mut Brep,
@@ -1598,6 +1737,7 @@ impl<'c> Stitch<'c> {
                         orientation,
                         dist_to_curve,
                         do_region_nesting,
+                        InfiniteHalf::Searched,
                         other,
                         None,
                     )?;
@@ -2124,8 +2264,19 @@ impl<'c> Stitch<'c> {
     ///
     /// Those of the curve evaluations and distances (`SER`); a failing glue, or an edge
     /// without B-rep, unless [`Stitch::ignore_problems`].
-    #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn stitch_edges_of_vertices(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        verts: &[Option<VertexId>],
+    ) -> Result<EdgesOfVertices> {
+        let outcome = self.stitch_edges_of_vertices_body(k, b, verts);
+        self.finish_joins(k, b, outcome)
+    }
+
+    /// [`Stitch::stitch_edges_of_vertices`] before its joins' covers run.
+    #[allow(clippy::too_many_lines)] // one upstream routine
+    fn stitch_edges_of_vertices_body(
         &mut self,
         k: &mut Kernel,
         b: &mut Brep,
@@ -2294,6 +2445,7 @@ impl<'c> Stitch<'c> {
                         orientation,
                         dist_to_curve,
                         self.do_region_nesting,
+                        InfiniteHalf::Searched,
                         test_e,
                         None,
                     ) {
@@ -2488,6 +2640,7 @@ fn stitch_and_orient(
 /// ([`brep_p2::ArenaNotifyState`](crate::topology::brep::p2::ArenaNotifyState), so
 /// that `SmTopology::Notify`'s propagation finds both edges) and on the kernel's
 /// notification context, so its installed callbacks see the events.
+#[cfg(test)]
 pub(crate) fn glue_edges_general(
     k: &mut Kernel,
     b: &mut Brep,
@@ -2495,6 +2648,34 @@ pub(crate) fn glue_edges_general(
     orientation: OrientType,
     dist: f64,
     do_region_nesting: bool,
+    delete: EdgeId,
+    inside_faceuses: Option<&[FaceuseId]>,
+) -> Result<()> {
+    glue_edges_searching(
+        k,
+        b,
+        keep,
+        orientation,
+        dist,
+        do_region_nesting,
+        InfiniteHalf::Searched,
+        delete,
+        inside_faceuses,
+    )
+}
+
+/// [`glue_edges_general`] with the caller's word on how a split of the infinite region
+/// tells its infinite half
+/// ([`crate::topology::brep::p7::glue_edges_general_searching`]).
+#[allow(clippy::too_many_arguments)] // upstream's argument list and the half
+pub(crate) fn glue_edges_searching(
+    k: &mut Kernel,
+    b: &mut Brep,
+    keep: EdgeId,
+    orientation: OrientType,
+    dist: f64,
+    do_region_nesting: bool,
+    half: InfiniteHalf,
     delete: EdgeId,
     inside_faceuses: Option<&[FaceuseId]>,
 ) -> Result<()> {
@@ -2506,13 +2687,14 @@ pub(crate) fn glue_edges_general(
         crate::topology::brep::p2::ArenaNotifyState::with_attributes_of_reusing(records, b, serial);
     let r = Context::with_notification_context(k, |k, context| {
         let mut env = state.env(Some(context));
-        crate::topology::brep::p7::glue_edges_general(
+        crate::topology::brep::p7::glue_edges_general_searching(
             k,
             b,
             Some(keep),
             orientation,
             dist,
             do_region_nesting,
+            half,
             Some(delete),
             inside_faceuses,
             &mut env,
