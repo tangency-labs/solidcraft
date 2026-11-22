@@ -384,9 +384,12 @@ impl core::fmt::Display for SurfaceFailure {
                 f,
                 "the point found is farther from the test point than the guess: at least {found}, the guess at most {guess}"
             ),
-            Self::SingularBoundaryNotPole { boundary, found } => write!(
-                f,
-                "a point of the singular boundary is nearer the test point than the point found: at most {boundary}, the point at least {found}"
+            // The phrase the site reported before it was named, kept word for word: the
+            // wr57 replay tape (`goldens` `wr57_replay`, `heal.heal_data_p3`) hashes this
+            // error's message as the answer at its substituted calls. The bounds stay in
+            // the fields.
+            Self::SingularBoundaryNotPole { .. } => f.write_str(
+                "a point of the singular boundary is nearer the test point than the point found: the boundary is not a pole",
             ),
             Self::RecursionPastBound { bound } => {
                 write!(f, "the local intersection recursed past its depth bound {bound}")
