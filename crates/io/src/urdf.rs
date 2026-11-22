@@ -116,10 +116,48 @@ pub struct UrdfJoint {
     pub origin: Mat,
     pub step: Step,
     pub axis: Vec3,
-    /// (lower, upper): radians or mm; `None` for a revolute without limit (`continuous`).
+    /// (lower, upper): radians or mm; `None` without a limit (URDF writes a revolute one as
+    /// `continuous`, a prismatic one as ±1000 m).
     pub limit: Option<(f64, f64)>,
     /// The SolidCraft joint and the index of its value this step follows.
     pub source: Option<(u64, usize)>,
+}
+
+/// What the tree walk met that each format words, or writes, its own way; in the order met.
+#[derive(Clone, Debug)]
+pub enum Note {
+    /// The same in every format.
+    Text(String),
+    /// Joint `joint` would close a loop, so the tree leaves it out.
+    Loop { joint: String },
+    /// Joint `joint` is a relation whose turns follow a fixed step: fixed where it is.
+    Relation { joint: String, kind: JointKind },
+    /// Joint `joint` slides without a limit.
+    Unlimited { joint: String },
+    /// Link `link` is a copy of a jointed occurrence: fixed where it is.
+    JointedCopy { link: String },
+}
+
+impl Note {
+    fn urdf(&self) -> String {
+        match self {
+            Note::Text(t) => t.clone(),
+            Note::Loop { joint } => format!("joint `{joint}` closes a loop: skipped (URDF is a tree)"),
+            Note::Relation { joint, kind } => format!("joint `{joint}` is a {kind:?} relation, which URDF has no joint for: written fixed as it is"),
+            Note::Unlimited { joint } => format!("joint `{joint}` slides without a limit: written as ±1000 m (URDF needs one)"),
+            Note::JointedCopy { link } => format!(
+                "`{link}` is a copy of a jointed occurrence: fixed where it is (the URDF moves only the first placement; copies would need <mimic>)"
+            ),
+        }
+    }
+}
+
+/// The robot as the tree walk builds it, before a format writes it: the model, the mesh files
+/// (name, bytes) and the notes.
+pub(crate) struct Walked {
+    pub model: UrdfModel,
+    pub meshes: Vec<(String, Vec<u8>)>,
+    pub notes: Vec<Note>,
 }
 
 impl UrdfModel {
@@ -401,7 +439,7 @@ struct Tree<'a> {
     parts: BTreeMap<u64, Part>,
     names: Names,
     model: UrdfModel,
-    warnings: Vec<String>,
+    notes: Vec<Note>,
     /// Occurrence to its link and the link's world frame (0: `base_link`).
     placed: BTreeMap<u64, (usize, Mat)>,
     /// Each usable joint's name, taken before any link's so it keeps the name the user gave.
@@ -483,7 +521,7 @@ impl<'a> Tree<'a> {
                 taken.insert(j.id);
                 let child = if j.a.occurrence == p { j.b.occurrence } else { j.a.occurrence };
                 if self.placed.contains_key(&child) {
-                    self.warnings.push(format!("joint `{}` closes a loop: skipped (URDF is a tree)", j.name));
+                    self.notes.push(Note::Loop { joint: j.name.clone() });
                     continue;
                 }
                 if self.attach(j, fa, p, child, values.get(&j.id).map(Vec::as_slice).unwrap_or(&[])).is_some() {
@@ -499,7 +537,7 @@ impl<'a> Tree<'a> {
         let (chain, m) = match steps(j.kind) {
             Some(chain) => (chain, joints::motion(j.kind, q)),
             None => {
-                self.warnings.push(format!("joint `{}` is a {:?} relation, which URDF has no joint for: written fixed as it is", j.name, j.kind));
+                self.notes.push(Note::Relation { joint: j.name.clone(), kind: j.kind });
                 (Vec::new(), IDENTITY)
             }
         };
@@ -561,13 +599,9 @@ impl<'a> Tree<'a> {
             // A limit that is not finite (a hand-edited file) is no limit.
             let limit =
                 j.limits.get(dof).copied().flatten().filter(|(lo, hi)| lo.is_finite() && hi.is_finite()).map(|(lo, hi)| (lo.min(hi), lo.max(hi)));
-            let limit = match (step, limit) {
-                (Step::Prismatic, None) => {
-                    self.warnings.push(format!("joint `{}` slides without a limit: written as ±1000 m (URDF needs one)", j.name));
-                    Some((-UNLIMITED_TRAVEL_MM, UNLIMITED_TRAVEL_MM))
-                }
-                (_, l) => l,
-            };
+            if step == Step::Prismatic && limit.is_none() {
+                self.notes.push(Note::Unlimited { joint: j.name.clone() });
+            }
             let name = if k == last { joint_name.clone() } else { self.names.take(&format!("{}_dof{}", j.name, k + 1)) };
             self.model.joints.push(UrdfJoint {
                 name,
@@ -590,9 +624,9 @@ impl<'a> Tree<'a> {
         let mut copies: BTreeMap<Vec<u64>, (usize, Mat)> = BTreeMap::new();
         let placements = self.doc.placements();
         if placements.len() > MAX_PLACEMENTS || placements.iter().any(|p| p.1.len() > MAX_PLACEMENT_DEPTH) {
-            self.warnings.push(format!(
+            self.notes.push(Note::Text(format!(
                 "the assembly is deeper than {MAX_PLACEMENT_DEPTH} levels or has more than {MAX_PLACEMENTS} placements: copies past that are left out"
-            ));
+            )));
         }
         for (_, path, w) in placements {
             let Some((&occ, parent_path)) = path.split_last() else { continue };
@@ -612,10 +646,7 @@ impl<'a> Tree<'a> {
             if jointed.contains(&occ)
                 && let Some(l) = self.model.links.get(i)
             {
-                self.warnings.push(format!(
-                    "`{}` is a copy of a jointed occurrence: fixed where it is (the URDF moves only the first placement; copies would need <mimic>)",
-                    l.name
-                ));
+                self.notes.push(Note::JointedCopy { link: l.name.clone() });
             }
         }
     }
@@ -633,14 +664,26 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
     if options.mesh_prefix.chars().any(unwritable) {
         return Err(IoError::Invalid("`mesh_prefix` has a character XML cannot hold".into()));
     }
+    let Walked { model, meshes, mut notes } = walk(doc, st, stem, &options.decals)?;
+    let moving = model.joints.iter().any(|j| j.step != Step::Fixed);
+    if moving && (options.effort.is_none() || options.velocity.is_none()) {
+        notes.push(Note::Text(format!(
+            "joint effort and velocity limits are not given: written as {DEFAULT_EFFORT} and {DEFAULT_VELOCITY} (pass effort and velocity)"
+        )));
+    }
+    let xml = write_xml(&model, &sanitise(stem, false), options);
+    Ok(UrdfPackage { xml, meshes, model, warnings: notes.iter().map(Note::urdf).collect() })
+}
+
+/// The tree of links and joints, and the mesh files, that every format writes (see [`urdf`]).
+pub(crate) fn walk(doc: &Document, st: &ModelState, stem: &str, decals: &[UrdfDecal]) -> Result<Walked> {
     let active = doc.active_assembly();
     let doc = &*active;
     let mut names = Names::default();
     let mut out = UrdfPackage { xml: String::new(), meshes: Vec::new(), model: UrdfModel::default(), warnings: Vec::new() };
     let base = names.take("base_link");
-    let robot = sanitise(stem, false);
-    let parts = parts(doc, st, stem, &options.decals, &mut names, &mut out)?;
-    for d in options.decals.iter().filter(|d| !parts.contains_key(&d.component)) {
+    let parts = parts(doc, st, stem, decals, &mut names, &mut out)?;
+    for d in decals.iter().filter(|d| !parts.contains_key(&d.component)) {
         out.warnings.push(format!("decal `{}`: its component is placed nowhere in the assembly: left out", d.name));
     }
     let mut tree = Tree {
@@ -648,7 +691,7 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
         parts,
         names,
         model: UrdfModel::default(),
-        warnings: std::mem::take(&mut out.warnings),
+        notes: std::mem::take(&mut out.warnings).into_iter().map(Note::Text).collect(),
         placed: BTreeMap::from([(0, (0, IDENTITY))]),
         joint_names: BTreeMap::new(),
     };
@@ -676,7 +719,7 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
             joints::resolve_origin(doc, st, &j.a).ok().map(|frame| j.offset_frame_a(frame)).filter(|_| joints::resolve_origin(doc, st, &j.b).is_ok());
         match fa {
             Some(fa) if exists(j.a.occurrence) && exists(j.b.occurrence) && j.a.occurrence != j.b.occurrence => usable.push((j, fa)),
-            _ => tree.warnings.push(format!("joint `{}` is skipped: its origins don't resolve or it joins an occurrence to itself", j.name)),
+            _ => tree.notes.push(Note::Text(format!("joint `{}` is skipped: its origins don't resolve or it joins an occurrence to itself", j.name))),
         }
     }
     let jointed: HashSet<u64> = usable.iter().flat_map(|(j, _)| [j.a.occurrence, j.b.occurrence]).collect();
@@ -711,7 +754,7 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
             .or_else(|| doc.occurrences.iter().find(|o| !done(&tree, o.id)).map(|o| (o.id, true)));
         let Some((occ, to_base)) = next else { break };
         let Some(i) = tree.fix(occ, to_base) else {
-            tree.warnings.push(format!("occurrence {occ} has a degenerate placement: left out"));
+            tree.notes.push(Note::Text(format!("occurrence {occ} has a degenerate placement: left out")));
             left_out.insert(occ);
             continue;
         };
@@ -719,23 +762,13 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
         let nested = tree.occurrence(occ).is_some_and(|o| o.parent != 0);
         let name = tree.model.links.get(i).map(|l| l.name.clone()).unwrap_or_default();
         if jointed.contains(&occ) {
-            tree.warnings.push(format!("`{name}` is not grounded: fixed where it is"));
+            tree.notes.push(Note::Text(format!("`{name}` is not grounded: fixed where it is")));
         } else if !nested || to_base {
-            tree.warnings.push(format!("`{name}` has no joint: fixed where it is"));
+            tree.notes.push(Note::Text(format!("`{name}` has no joint: fixed where it is")));
         }
     }
     tree.copies(&jointed);
-
-    let moving = tree.model.joints.iter().any(|j| j.step != Step::Fixed);
-    if moving && (options.effort.is_none() || options.velocity.is_none()) {
-        tree.warnings.push(format!(
-            "joint effort and velocity limits are not given: written as {DEFAULT_EFFORT} and {DEFAULT_VELOCITY} (pass effort and velocity)"
-        ));
-    }
-    out.xml = write_xml(&tree.model, &robot, options);
-    out.model = tree.model;
-    out.warnings = tree.warnings;
-    Ok(out)
+    Ok(Walked { model: tree.model, meshes: out.meshes, notes: tree.notes })
 }
 
 pub(crate) fn token() -> Inertial {
@@ -1002,7 +1035,11 @@ fn write_xml(model: &UrdfModel, name: &str, options: &UrdfOptions) -> String {
         if j.step != Step::Fixed {
             s += &format!("    <axis xyz=\"{}\"/>\n", triple(j.axis));
             let scale = if j.step == Step::Prismatic { 1e-3 } else { 1.0 };
-            match j.limit {
+            let limit = match (j.step, j.limit) {
+                (Step::Prismatic, None) => Some((-UNLIMITED_TRAVEL_MM, UNLIMITED_TRAVEL_MM)),
+                (_, l) => l,
+            };
+            match limit {
                 Some((lo, hi)) => {
                     s += &format!(
                         "    <limit lower=\"{}\" upper=\"{}\" effort=\"{}\" velocity=\"{}\"/>\n",
