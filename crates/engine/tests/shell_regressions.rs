@@ -244,3 +244,25 @@ fn cut_into_shelled_spline_extrusion_void() {
     assert_eq!(state.bodies.len(), 1);
     assert!(state.bodies[0].body.validity().is_empty(), "{:?}", state.bodies[0].body.validity());
 }
+
+/// #20539: a loft from a Ø40 circle on XZ to a 40 × 16 slot (centres ±20, radius 8) 40 mm
+/// along y, both sketches flipped about x, shelled 2 mm with the slot's end face open. It built
+/// on 0.44.1 and was refused from 0.45.0 by SMLib's check (`Bad CurveCusp` on a 2D trim). It must
+/// give one closed, valid body that weighs less than the loft.
+#[test]
+fn shell_of_a_circle_to_slot_loft_open_at_the_slot() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "flip": "x"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 20.0}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XZ", "offset": "40"}));
+    run(&mut s, "sketch.create", json!({"plane": "Plane1", "flip": "x"}));
+    run(&mut s, "sketch.slot.center_to_center", json!({"p0": [-20.0, 0], "p1": [20.0, 0], "width": 16.0}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.loft", json!({"sections": [{"sketch": 1}, {"sketch": 3}]}));
+    let solid = volume(&s);
+    run(&mut s, "solid.shell", json!({"body": "Body1", "faces": [[0, 40.0, 0]], "thickness": "2 mm", "tangent_chain": true}));
+    sound(&s);
+    let shelled = volume(&s);
+    assert!(shelled > 0.0 && shelled < solid, "{shelled} vs {solid}");
+}
