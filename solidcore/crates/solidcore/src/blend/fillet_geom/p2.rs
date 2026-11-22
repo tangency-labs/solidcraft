@@ -143,8 +143,11 @@
 //!   what the kernel does not build is an unsupported cause naming it (a curve or surface
 //!   kind, a seam-crossing curve with no UV curve, a side edge chain past its bound, a
 //!   set-back point with several feet, a Join whose blends roll off its section); a
-//!   heading the caller gives that the curve does not follow, and a split face recorded
-//!   without its faces, are the caller's input. The rest are reviewed defects
+//!   heading no curve follows is an empty search ([`BlendFailure::SrfSrfHeadingNotFollowed`],
+//!   the heading is the kernel's own); an edge without its curve or a face without its
+//!   surface ([`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::FaceHasNoSurface`]) and a
+//!   split face recorded without its faces are the caller's input. The rest are reviewed
+//!   defects
 //!   ([`BlendFailure::Defect`]) whose reasons are the `const`s at the end of the file: an
 //!   object the kernel built or linked that is not there (`SM_ERR_NULL_POINTER` for a
 //!   `NER`), an evaluation without the derivatives it was asked for, a vertex without the
@@ -193,7 +196,7 @@ use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::blend::BlendFailure;
-use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_line_closest_point;
@@ -603,6 +606,33 @@ fn defect(op: &'static str, why: &'static str) -> SolidError {
     SolidError::blend(op, BlendFailure::Defect { why })
 }
 
+/// An edge of the caller's body without its curve: [`BlendFailure::EdgeWithoutCurve`] at the
+/// edge, keeping upstream's `SM_ERR_NULL_POINTER` (the body is the caller's, and the
+/// executive's check covers only the edges of a smooth sequence).
+#[track_caller]
+fn edge_without_curve(op: &'static str, e: EdgeId) -> SolidError {
+    edge_without_curve_status(op, e, SM_ERR_NULL_POINTER)
+}
+
+/// [`edge_without_curve`] where the site's upstream status is `status`.
+#[track_caller]
+fn edge_without_curve_status(op: &'static str, e: EdgeId, status: i32) -> SolidError {
+    Failure::new(op, BlendFailure::EdgeWithoutCurve)
+        .with_status(status)
+        .at(EntityRef::Edge(e))
+        .into_error()
+}
+
+/// A face of the caller's body without its surface: [`BlendFailure::FaceHasNoSurface`] at the
+/// face, keeping upstream's `SM_ERR_NULL_POINTER` of the `NER` it replaces.
+#[track_caller]
+fn face_without_surface(op: &'static str, f: FaceId) -> SolidError {
+    Failure::new(op, BlendFailure::FaceHasNoSurface)
+        .with_status(SM_ERR_NULL_POINTER)
+        .at(EntityRef::Face(f))
+        .into_error()
+}
+
 /// `NER(p)`: an object the kernel built or linked that is not there. A reviewed
 /// [`BlendFailure::Defect`] whose `why` names the link, keeping upstream's
 /// `SM_ERR_NULL_POINTER`; its origin is the call's file and line (guide section 6, rule 2).
@@ -818,7 +848,7 @@ pub(crate) fn set_back_params<'b>(
     set_back_dist: f64,
     op: &'static str,
 ) -> Result<(&'b Curve, f64, f64)> {
-    let curve = edge::curve(target, e)?.ok_or_else(|| broken_link(op, NO_EDGE_CURVE))?;
+    let curve = edge::curve(target, e)?.ok_or_else(|| edge_without_curve(op, e))?;
     let owner_zone_tol_3d = Some(edge::tolerance(target, e)?);
     let ivl = edge::interval(target, e)?;
     let from_start = edge::start_vertex(target, e)? == cp_vertex;
@@ -2213,7 +2243,8 @@ fn second_order_rail_guess(
     for ((slot, (fs, index)), end) in rails.iter_mut().zip(pairs).zip(ends) {
         let (e, vertex_param, from_min) = end.ok_or_else(|| defect(OP, NO_RAIL_END))?;
         let ivl = edge::interval(target, e)?;
-        let curve = edge::curve(target, e)?.ok_or_else(|| defect(OP, NO_EDGE_CURVE))?;
+        let curve = edge::curve(target, e)?
+            .ok_or_else(|| edge_without_curve_status(OP, e, SM_ERR))?;
         // the span the edge runs along from the vertex (the flag picks the span that starts
         // at the parameter; an edge's curve can run on past its end, into the next edge's)
         let pv = curve.evaluate(k, vertex_param, 2, from_min, true)?;
@@ -2256,7 +2287,7 @@ fn face_surface<'b>(
     op: &'static str,
 ) -> Result<&'b Surface> {
     let f = face.ok_or_else(|| broken_link(op, FACE_NOT_GIVEN))?;
-    face2::surface(target, f)?.ok_or_else(|| broken_link(op, NO_FACE_SURFACE))
+    face2::surface(target, f)?.ok_or_else(|| face_without_surface(op, f))
 }
 
 impl FilletBrep {
@@ -2388,7 +2419,7 @@ impl FilletBrep {
             let eu = solver_edgeuse(fs, index, OP)?;
             let e = eu1::edge(target, eu)?.ok_or_else(|| broken_link(OP, NO_EDGE))?;
             let ivl = edge::interval(target, e)?;
-            let curve = edge::curve(target, e)?.ok_or_else(|| broken_link(OP, NO_EDGE_CURVE))?;
+            let curve = edge::curve(target, e)?.ok_or_else(|| edge_without_curve(OP, e))?;
             let owner_zone_tol_3d = Some(edge::tolerance(target, e)?);
 
             let vu = eu1::vertexuse(target, eu)?.ok_or_else(|| broken_link(OP, NO_VERTEXUSE))?;
@@ -2479,7 +2510,8 @@ impl FilletBrep {
                 Some(face) => Failure::new(OP, BlendFailure::RailCrossingNotConverged { face })
                     .at(EntityRef::Face(face))
                     .into_error(),
-                None => broken_link(OP, FACE_NOT_GIVEN),
+                // no common face: a stop of the solve all the same, keeping `SM_ERR`
+                None => defect(OP, RAIL_RAIL_FACE),
             });
         }
 
@@ -2667,7 +2699,7 @@ impl FilletBrep {
             ivl.evaluate(0.99)
         };
         let side_edge_length = edge::curve(target, side_edge)?
-            .ok_or_else(|| broken_link(OP, NO_EDGE_CURVE))?
+            .ok_or_else(|| edge_without_curve(OP, side_edge))?
             .approximate_length(k, &ivl, 5, false)?
             .0;
         if let Some(off_srf) = solvers.offset_surface(self, first, 0)? {
@@ -3031,7 +3063,7 @@ impl FilletBrep {
             // project it onto the side edge's curve
             let side_e = eu1::edge(target, side_eu1)?.ok_or_else(|| broken_link(OP, NO_EDGE))?;
             let curve =
-                edge::curve(target, side_e)?.ok_or_else(|| broken_link(OP, NO_EDGE_CURVE))?;
+                edge::curve(target, side_e)?.ok_or_else(|| edge_without_curve(OP, side_e))?;
             let (_found, solution) = curve.local_point_solve::<()>(
                 k,
                 &curve.natural_interval(),
@@ -3289,7 +3321,7 @@ impl FilletBrep {
             vert_at_edge_start = false;
         }
         let curve = edge::curve(target, e)?
-            .ok_or_else(|| broken_link(OP, NO_EDGE_CURVE))?
+            .ok_or_else(|| edge_without_curve(OP, e))?
             .clone();
         let pv = curve.evaluate(k, param, 1, true, true)?;
         let plane_orig = pv
@@ -3561,7 +3593,7 @@ impl FilletBrep {
             let eu = solver_edgeuse(fs, 0, OP)?;
             let e = eu1::edge(target, eu)?.ok_or_else(|| broken_link(OP, NO_EDGE))?;
             let curve = edge::curve(target, e)?
-                .ok_or_else(|| broken_link(OP, NO_EDGE_CURVE))?
+                .ok_or_else(|| edge_without_curve(OP, e))?
                 .clone();
             let ivl = edge::interval(target, e)?;
             let param = if edge::start_vertex(target, e)? == Some(cp_vertex) {
@@ -4113,7 +4145,7 @@ impl FilletBrep {
         // through the face, as `smsurf_GetSurfaceCache` reaches `GetFace()`; the cubic
         // interpolant needs the target B-rep mutably)
         let face_srf = face2::surface(target, face)?
-            .ok_or_else(|| broken_link(OP, NO_FACE_SURFACE))?
+            .ok_or_else(|| face_without_surface(OP, face))?
             .clone_for_evaluation()?;
         let face_srf = &face_srf;
         let handle = Some(CacheObject::Surface(face));
@@ -4123,7 +4155,7 @@ impl FilletBrep {
         let surf_net = crate::topology::brep::p3::with_nurb(k, face_srf)?.ok_or_else(|| {
             Failure::new(
                 OP,
-                BlendFailure::FaceSurfaceHasNoNurb {
+                BlendFailure::MateFaceSurfaceNotBSpline {
                     face,
                     kind: face_srf.type_string(),
                 },
@@ -4570,8 +4602,6 @@ const SHORT_DERIVATIVES: &str =
 /// An evaluation without what it was asked for.
 const SHORT_EVALUATION: &str =
     "an evaluation asked for n derivatives returns the point and n derivatives";
-/// A body edge without its curve.
-const NO_EDGE_CURVE: &str = "an edge of the body being filleted has its curve";
 /// An edge use without its edge.
 const NO_EDGE: &str = "an edge use of the body belongs to an edge";
 /// An edge use without its vertex use.
@@ -4585,11 +4615,12 @@ const NO_CORNER: &str =
     "the fillet vertex calculators run on the vertices of a corner, whose build records it on each";
 /// A corner without the body vertex it rounds.
 const NO_FILLETED_VERTEX: &str = "a fillet corner records the body vertex it rounds";
+/// A rail/rail vertex without the face its rails share.
+const RAIL_RAIL_FACE: &str =
+    "a rail/rail vertex is classified on the face both rails lie on when the corner sets it up";
 /// A face asked for that the caller did not resolve.
 const FACE_NOT_GIVEN: &str =
     "the face whose surface is read is the vertex's point class or the rails' common face, set with the vertex";
-/// A face without its surface.
-const NO_FACE_SURFACE: &str = "a face of the body has its surface";
 /// A rail's end without its vertex use.
 const NO_RAIL_END_VU: &str =
     "a fillet vertex at a rail's end has the vertex use the rail's edge ends at";

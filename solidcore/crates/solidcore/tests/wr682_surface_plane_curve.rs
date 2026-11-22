@@ -512,12 +512,12 @@ fn a_heading_along_neither_way_round_is_refused() {
             )
             .err()
             .unwrap_or_else(|| panic!("{from} -> {to}, {what}: an arc was built"));
-            // the heading is not the arc's own tangent at the start, which the option asks of
-            // its caller (#19810): the caller's input, keeping `SM_ERR`
+            // no curve through the points leaves the start along the heading (#19810): an
+            // empty search, keeping `SM_ERR`
             assert_eq!(
                 (e.kind(), e.is_defect(), e.blend_failure()),
                 (
-                    ErrorKind::InvalidInput,
+                    ErrorKind::NotFound,
                     false,
                     Some(&BlendFailure::SrfSrfHeadingNotFollowed)
                 ),
@@ -553,7 +553,7 @@ fn a_heading_along_neither_way_round_is_refused() {
     assert_eq!(
         (e.kind(), e.is_defect(), e.blend_failure()),
         (
-            ErrorKind::InvalidInput,
+            ErrorKind::NotFound,
             false,
             Some(&BlendFailure::SrfSrfHeadingNotFollowed)
         ),
