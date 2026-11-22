@@ -30,7 +30,7 @@
 //! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
 //! | [`BlendFailure::BandInputMissing`]     | [`ErrorKind::Missing`]: neither defect nor refusal |
 //! | the fillet executive's checks of the caller's arguments and body ([`BlendFailure::NoEdgesGiven`], [`BlendFailure::SizeBelowResolution`], [`BlendFailure::PerEdgeListLength`], [`BlendFailure::ParameterListSizes`], [`BlendFailure::FaceHasNoSurface`], [`BlendFailure::NoFirstBody`], [`BlendFailure::TargetNotGiven`], [`BlendFailure::EdgeNotInTarget`], [`BlendFailure::EdgeNotFilletable`], [`BlendFailure::GnSectionInvalid`], [`BlendFailure::CrossSectionTypeUnknown`], [`BlendFailure::RadiusTypeNotForEdges`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::VariableRadiusLawMissing`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::LawIntervalEmpty`], [`BlendFailure::EdgeWithoutCurve`]) | [`ErrorKind::InvalidInput`] (1) |
-//! | [`BlendFailure::LawHasNoValue`], [`BlendFailure::SequenceCurveNotBSpline`], [`BlendFailure::FilletCrossesItself`] | [`ErrorKind::Unsupported`] (5) |
+//! | [`BlendFailure::LawHasNoValue`], [`BlendFailure::SequenceCurveNotBSpline`], [`BlendFailure::JoinCurveNotBSpline`], [`BlendFailure::FilletCrossesItself`] | [`ErrorKind::Unsupported`] (5) |
 //! | [`BlendFailure::CornerRefused`], [`BlendFailure::ExecutiveStepFailed`] | [`ErrorKind::Failed`] (6): neither defect nor refusal, so a kept cause decides |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
@@ -45,7 +45,7 @@
 //! | [`BlendFailure::CornerShapeNotBuilt`]  | the shape's ([`CornerShape::upstream_status`]) |
 //! | [`BlendFailure::CornerPatchNotMade`]   | the miss's ([`CornerPatchMiss::upstream_status`]) |
 //! | [`BlendFailure::Failed`], [`BlendFailure::LawIntervalEmpty`], [`BlendFailure::LawHasNoValue`], [`BlendFailure::FilletCrossesItself`], [`BlendFailure::CornerRefused`], [`BlendFailure::ExecutiveStepFailed`] | `SM_ERR` |
-//! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::SequenceCurveNotBSpline`] | `SM_ERR_NULL_POINTER` |
+//! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::SequenceCurveNotBSpline`], [`BlendFailure::JoinCurveNotBSpline`] | `SM_ERR_NULL_POINTER` |
 //! | [`BlendFailure::InvalidValue`], the fillet executive's other checks of the caller's arguments | `SM_ERR_INVALID_INPUT` |
 //! | [`BlendFailure::Inconsistent`]         | `SM_ERR_ASSERT_FAILURE`           |
 //! | [`BlendFailure::BadIntersections`]     | `SM_ERR_BAD_INTERSECTIONS`        |
@@ -355,6 +355,14 @@ pub enum BlendFailure {
         /// The curve's kind.
         kind: &'static str,
     },
+    /// A curve of kind `kind` that a blend joins end to end with another
+    /// (`SmBSplineCurve::JoinWith`: a fillet corner's edge curves, a removed fillet's edge
+    /// curves) has no B-spline part to join. Unsupported ([`ErrorKind::Unsupported`]); status
+    /// `SM_ERR_NULL_POINTER` (upstream `NER` of the cast).
+    JoinCurveNotBSpline {
+        /// The curve's kind.
+        kind: &'static str,
+    },
     /// A surface/surface fillet's offset surfaces meet in more than one curve, and the
     /// curves at `first` and `second` of the intersection cross: the fillet would cross
     /// itself, which it does not build. Unsupported ([`ErrorKind::Unsupported`]); status
@@ -580,8 +588,11 @@ pub enum CornerPatchMiss {
     /// The variable-radius fillet's rail that replaces the opposite edge leaves the opposite
     /// fillet's surface.
     RailLeavesOppositeFillet,
-    /// A corner edge's curve (or a curve the corner joins) has no B-spline form.
-    CurveNotBSpline,
+    /// A corner edge's curve of kind `kind` has no B-spline form.
+    CurveNotBSpline {
+        /// The curve's kind.
+        kind: &'static str,
+    },
     /// The corner's patch has fewer than four boundary curves.
     TooFewBoundaryCurves {
         /// The boundary curves the patch has.
@@ -634,7 +645,7 @@ impl CornerPatchMiss {
             | Self::OppositeRadiusNotLarger
             | Self::RailRailCurveCrossesCorner
             | Self::RailLeavesOppositeFillet
-            | Self::CurveNotBSpline
+            | Self::CurveNotBSpline { .. }
             | Self::TooFewBoundaryCurves { .. }
             | Self::MixedCornerNotFourEdges { .. }
             | Self::GapPatchNotFourEdges { .. } => ErrorKind::Unsupported,
@@ -666,7 +677,7 @@ impl CornerPatchMiss {
             | Self::VariableRadiusReSolveFailed
             | Self::RailRailCurveCrossesCorner
             | Self::RailLeavesOppositeFillet
-            | Self::CurveNotBSpline
+            | Self::CurveNotBSpline { .. }
             | Self::TooFewBoundaryCurves { .. }
             | Self::FaceNotMade
             | Self::MixedCornerNotFourEdges { .. }
@@ -941,7 +952,8 @@ impl BlendFailure {
             | Self::VariableRadiusLawsNotGiven
             | Self::BevelVertexNotFilleted
             | Self::EdgeWithoutCurve
-            | Self::SequenceCurveNotBSpline { .. } => SM_ERR_NULL_POINTER,
+            | Self::SequenceCurveNotBSpline { .. }
+            | Self::JoinCurveNotBSpline { .. } => SM_ERR_NULL_POINTER,
             Self::CornerShapeNotBuilt(shape) => shape.upstream_status(),
             Self::CornerPatchNotMade(miss) => miss.upstream_status(),
             Self::NoEdgesGiven
@@ -1011,6 +1023,7 @@ impl BlendFailure {
             | Self::CornerShapeNotBuilt(_)
             | Self::LawHasNoValue
             | Self::SequenceCurveNotBSpline { .. }
+            | Self::JoinCurveNotBSpline { .. }
             | Self::FilletCrossesItself { .. } => ErrorKind::Unsupported,
             Self::BandInputMissing(_) | Self::CliffInputMissing { .. } => ErrorKind::Missing,
             Self::CornerPatchNotMade(miss) => miss.class(),
@@ -1095,6 +1108,7 @@ impl BlendFailure {
             | Self::EdgeWithoutCurve
             | Self::LawHasNoValue
             | Self::SequenceCurveNotBSpline { .. }
+            | Self::JoinCurveNotBSpline { .. }
             | Self::FilletCrossesItself { .. }
             | Self::CornerRefused
             | Self::ExecutiveStepFailed
@@ -1162,6 +1176,7 @@ impl BlendFailure {
             | Self::EdgeWithoutCurve
             | Self::LawHasNoValue
             | Self::SequenceCurveNotBSpline { .. }
+            | Self::JoinCurveNotBSpline { .. }
             | Self::FilletCrossesItself { .. }
             | Self::CornerRefused
             | Self::ExecutiveStepFailed
@@ -1356,6 +1371,11 @@ impl core::fmt::Display for BlendFailure {
             Self::SequenceCurveNotBSpline { kind } => write!(
                 f,
                 "{}: a {kind} curve of a smooth sequence of filleted edges has no B-spline form to join",
+                self.class()
+            ),
+            Self::JoinCurveNotBSpline { kind } => write!(
+                f,
+                "{}: a {kind} curve to join end to end has no B-spline part",
                 self.class()
             ),
             Self::FilletCrossesItself { first, second } => write!(
@@ -1908,7 +1928,11 @@ mod tests {
             (M::VariableRadiusReSolveFailed, K::Failed, SM_ERR),
             (M::RailRailCurveCrossesCorner, K::Unsupported, SM_ERR),
             (M::RailLeavesOppositeFillet, K::Unsupported, SM_ERR),
-            (M::CurveNotBSpline, K::Unsupported, SM_ERR),
+            (
+                M::CurveNotBSpline { kind: "offset" },
+                K::Unsupported,
+                SM_ERR,
+            ),
             (
                 M::TooFewBoundaryCurves { curves: 3 },
                 K::Unsupported,
@@ -2388,6 +2412,11 @@ mod tests {
                 SM_ERR_NULL_POINTER,
             ),
             (
+                BlendFailure::JoinCurveNotBSpline { kind: "offset" },
+                ErrorKind::Unsupported,
+                SM_ERR_NULL_POINTER,
+            ),
+            (
                 BlendFailure::FilletCrossesItself {
                     first: 0,
                     second: 1,
@@ -2419,7 +2448,7 @@ mod tests {
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 54;
+    const VARIANTS: usize = 55;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -2480,6 +2509,7 @@ mod tests {
             BlendFailure::CornerShapeNotBuilt(_) => (51, None),
             BlendFailure::CornerPointDropUnresolved { .. } => (52, None),
             BlendFailure::CornerPatchNotMade(_) => (53, None),
+            BlendFailure::JoinCurveNotBSpline { .. } => (54, None),
         }
     }
 
@@ -2605,6 +2635,7 @@ mod tests {
             BlendFailure::EdgeWithoutCurve,
             BlendFailure::LawHasNoValue,
             BlendFailure::SequenceCurveNotBSpline { kind: "offset" },
+            BlendFailure::JoinCurveNotBSpline { kind: "offset" },
             BlendFailure::FilletCrossesItself {
                 first: 0,
                 second: 1,

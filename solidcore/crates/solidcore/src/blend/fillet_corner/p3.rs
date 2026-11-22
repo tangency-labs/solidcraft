@@ -114,6 +114,7 @@ const OP_PATCH: &str = "blend::fillet_corner::p3::create_corner_patch";
 const OP_3X2: &str = "blend::fillet_corner::p3::create_corner_patch_3x2";
 const OP_NX2_PATCH: &str = "blend::fillet_corner::p3::create_corner_patch_nx2";
 const OP_TOPO: &str = "blend::fillet_corner::p3::adjust_topology";
+const OP_JOIN: &str = "blend::fillet_corner::p3::join_with";
 
 /// `SM_BIG_DOUBLE`.
 const SM_BIG_DOUBLE: f64 = BIG_DOUBLE;
@@ -1910,7 +1911,9 @@ impl FilletCorner {
                 // (`SM_CAST_PTR` gives NULL, dereferenced: SM_ERR_NULL_POINTER)
                 return Err(Failure::new(
                     OP_3X2,
-                    BlendFailure::CornerPatchNotMade(CornerPatchMiss::CurveNotBSpline),
+                    BlendFailure::CornerPatchNotMade(CornerPatchMiss::CurveNotBSpline {
+                        kind: curve_kind_name(curve.kind()),
+                    }),
                 )
                 .with_status(SM_ERR_NULL_POINTER)
                 .into_error());
@@ -2625,19 +2628,38 @@ pub(crate) fn join_with_gap(
             owner,
         ),
         kind => {
-            // (`SM_CAST_PTR` gives NULL, dereferenced: SM_ERR_NULL_POINTER)
-            let not_bspline = || {
-                Failure::new(
-                    OP_3X2,
-                    BlendFailure::CornerPatchNotMade(CornerPatchMiss::CurveNotBSpline),
-                )
-                .with_status(SM_ERR_NULL_POINTER)
-                .into_error()
+            // (`SM_CAST_PTR` gives NULL, dereferenced: SM_ERR_NULL_POINTER; the join is
+            // shared with fillet removal, so its cause is not the corner's)
+            let not_bspline = |kind: &'static str| {
+                SolidError::blend(OP_JOIN, BlendFailure::JoinCurveNotBSpline { kind })
             };
-            let this_base = bspline_part_mut(kind).ok_or_else(not_bspline)?;
-            let other_base = bspline_part_mut(other.kind_mut()).ok_or_else(not_bspline)?;
+            let this_name = curve_kind_name(kind);
+            let other_name = curve_kind_name(other.kind());
+            let this_base = bspline_part_mut(kind).ok_or_else(|| not_bspline(this_name))?;
+            let other_base =
+                bspline_part_mut(other.kind_mut()).ok_or_else(|| not_bspline(other_name))?;
             this_base.join_with(k, this_at_end, other_base, other_at_end, gap_tolerance)
         }
+    }
+}
+
+/// The name of a curve's kind, for a cause that names the kind a step cannot handle.
+pub(super) fn curve_kind_name(kind: &CurveKind) -> &'static str {
+    match kind {
+        CurveKind::BSpline(_) => "B-spline",
+        CurveKind::Line(_) => "line",
+        CurveKind::Ellipse(_) => "ellipse",
+        CurveKind::Parabola(_) => "parabola",
+        CurveKind::Hyperbola(_) => "hyperbola",
+        CurveKind::Hermite(_) => "Hermite",
+        CurveKind::Projected(_) => "projected",
+        CurveKind::Iso(_) => "iso-parametric",
+        CurveKind::Offset(_) => "offset",
+        CurveKind::Conic(_) => "conic",
+        CurveKind::CrvInVolume(_) => "curve-in-volume",
+        CurveKind::CrvOnSurf(_) => "curve-on-surface",
+        CurveKind::TangentField(_) => "tangent-field",
+        CurveKind::Composite(_) => "composite",
     }
 }
 
@@ -2781,6 +2803,26 @@ mod tests {
             corner(Some(two.to_vec())).filleted_edgeuses().unwrap(),
             (two[0], two[1])
         );
+    }
+
+    /// The curve join is shared with fillet removal, so a curve without a B-spline part
+    /// names the join's own cause and the kind, not the corner's patch (`SM_ERR_NULL_POINTER`
+    /// as the cast's `NER`).
+    #[test]
+    fn a_join_of_a_curve_without_b_spline_part_names_the_join_and_the_kind() {
+        use crate::curve::composite_curve::CompositeCurve;
+        let k = Kernel::default();
+        let mut this = Curve::from(CompositeCurve::new(3));
+        let mut other = Curve::from(CompositeCurve::new(3));
+        let e = join_with(&k, &mut this, true, &mut other, false).unwrap_err();
+        assert_eq!(e.operation(), OP_JOIN, "{e:?}");
+        assert_eq!(
+            e.blend_failure(),
+            Some(&BlendFailure::JoinCurveNotBSpline { kind: "composite" }),
+            "{e:?}"
+        );
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.kind(), crate::error::ErrorKind::Unsupported, "{e:?}");
     }
 
     #[test]

@@ -1010,7 +1010,12 @@ impl FilletCorner {
                 .ok_or_else(|| defect(OP, NO_CORNER_EDGE_CURVE))?;
             // Not Nurbs??
             if !is_b_spline_kind(curve) {
-                return Err(patch_miss(OP, CornerPatchMiss::CurveNotBSpline));
+                return Err(patch_miss(
+                    OP,
+                    CornerPatchMiss::CurveNotBSpline {
+                        kind: super::p3::curve_kind_name(curve.kind()),
+                    },
+                ));
             }
             curves.push(curve.clone());
         }
