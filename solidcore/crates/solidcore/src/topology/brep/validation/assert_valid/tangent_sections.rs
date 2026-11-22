@@ -17,9 +17,11 @@
 //! outside. Where every face round the edge is a plane or a cylinder whose axis is the
 //! edge's direction, the faces' sections in the plane square to the edge are lines and
 //! circles, and this module decides in closed form a step at which every tangent pair is
-//! more than the contact tolerance apart along the normal, having never been more than it
-//! apart on both sides of each other anywhere from the edge out to that step (the gap's
-//! closed-form extremes over the whole stretch, the edge point included); the steps stay
+//! more than the contact tolerance apart along the normal, with no two neighbouring faces
+//! round the edge (each sector's pair), tangent or not, ever more than it apart on both
+//! sides of each other anywhere
+//! from the edge out to that step (the gap's closed-form extremes over the whole stretch,
+//! the edge point included); the steps stay
 //! inside a ball round
 //! the edge point that no other boundary of the faces enters. Every other edge, and every
 //! edge where one of those conditions fails, keeps WR-540's reading. No recursion, and a
@@ -305,12 +307,15 @@ struct Pair {
 }
 
 /// The step in `(s0, s_max]` at which test 9 reads the faces, or `None` to keep the
-/// reading at `s0`. A step `sigma` is taken when, for every tangent pair and each of its
+/// reading at `s0`. A step `sigma` is taken when, for every pair, tangent or not, and
+/// each of its faces against the other, over `0..=sigma`, from the face's foot at the edge
+/// out, the gap is never past the contact tolerance on both sides (else the faces cross
+/// each other and the order depends on the step: `None`). The stretch inside `s0` counts
+/// too: a dip past the tolerance at the edge that comes back within it before `s0` is a
+/// crossing. A pair that is not tangent counts because its drift bound below holds only
+/// at `sigma`: feet offset from the edge point at a small angle can put the faces in one
+/// order at `s0` and the other at `sigma`. And for every tangent pair and each of its
 /// faces against the other:
-/// - over `0..=sigma`, from the face's foot at the edge out, the gap is never past the
-///   contact tolerance on both sides (else the faces cross each other and the order
-///   depends on the step: `None`). The stretch inside `s0` counts too: a dip past the
-///   tolerance at the edge that comes back within it before `s0` is a crossing;
 /// - at `sigma` the gap is past the contact tolerance (`within_contact_tol` fails);
 /// - at `sigma` the turn from one face's direction to the other's has the sign the gap
 ///   gives (the other face lies on that side of the first one's surface);
@@ -339,10 +344,15 @@ fn choose_step(
     }
     let slack = gamma(32) * size;
     let mut faces = Vec::new();
-    for p in pairs.iter().filter(|p| p.tangent) {
+    let mut crossing = Vec::new();
+    for p in pairs {
         let (a, b) = (sections.get(p.a)?, sections.get(p.b)?);
-        faces.push((a, b));
-        faces.push((b, a));
+        crossing.push((a, b));
+        crossing.push((b, a));
+        if p.tangent {
+            faces.push((a, b));
+            faces.push((b, a));
+        }
     }
     let mut candidates = vec![s0];
     for &(x, y) in &faces {
@@ -354,12 +364,14 @@ fn choose_step(
     candidates.dedup();
     let mut chosen = None;
     for &sigma in &candidates {
-        let mut apart = true;
-        for &(x, y) in &faces {
+        for &(x, y) in &crossing {
             let (lo, hi) = extremes(x, y, 0.0, sigma)?;
             if hi > contact - slack && lo < -(contact - slack) {
                 return None;
             }
+        }
+        let mut apart = true;
+        for &(x, y) in &faces {
             let g = y.gap(x.point(sigma));
             if !g.is_finite() {
                 return None;
@@ -832,6 +844,68 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The #18639 plane and cylinder (`d = 5e-6`, within the contact tolerance) with a
+    /// third face, a plane leaving the edge `1.15` degrees counterclockwise of them whose
+    /// foot lies `f` out from the edge point along its normal; the sectors are plane to
+    /// cylinder (tangent), cylinder to third plane and third plane to plane.
+    fn with_neighbour(f: f64) -> ([Section; 3], [Pair; 3]) {
+        let [plane, cylinder] = issue(5e-6);
+        let a = 1.15_f64.to_radians();
+        let n = Vec2::new(a.cos(), a.sin());
+        let third = Section::Line {
+            n,
+            c: f,
+            foot: n * f,
+            dir: Vec2::new(-a.sin(), a.cos()),
+        };
+        let pairs = [
+            Pair {
+                a: 0,
+                b: 1,
+                tangent: true,
+            },
+            Pair {
+                a: 1,
+                b: 2,
+                tangent: false,
+            },
+            Pair {
+                a: 2,
+                b: 0,
+                tangent: false,
+            },
+        ];
+        ([plane, cylinder, third], pairs)
+    }
+
+    /// A face that is not tangent to its neighbour but crosses it past the contact
+    /// tolerance on both sides between the edge and the step (its foot `1.9e-5` out, the
+    /// plane's points `2.4e-5` behind it at the edge and more than the tolerance in front
+    /// of it at the step) reads one way round at the first step and the other way round
+    /// at the step, while its drift bound holds at the step. The order would depend on
+    /// the step, so the reading stays at the first step. The same face through the edge
+    /// point (the gap at the edge `5e-6 cos(1.15 deg)`, within the tolerance) does not
+    /// cross, and the step is the one of the tangent pair alone.
+    #[test]
+    fn a_face_crossing_a_non_tangent_neighbour_keeps_the_first_step() {
+        let s0 = 20.0 * L;
+        let ([plane, cylinder, third], pairs) = with_neighbour(1.9e-5);
+        let sigma = step(5e-6).unwrap();
+        // The premises: the third plane lies past the tolerance behind the plane at the
+        // edge and in front of it at the step, and the order read flips in between.
+        assert!(third.gap(plane.point(0.0)) < -L);
+        assert!(third.gap(plane.point(sigma)) > L);
+        assert!(cross(plane.point(s0), third.point(s0)) < 0.0);
+        assert!(cross(plane.point(sigma), third.point(sigma)) > 0.0);
+        assert_eq!(
+            choose_step(&[plane, cylinder, third], &pairs, s0, 0.4, L, 1.4),
+            None
+        );
+
+        let (sections, pairs) = with_neighbour(0.0);
+        assert_eq!(choose_step(&sections, &pairs, s0, 0.4, L, 1.4), Some(sigma));
     }
 
     /// The tangent pair's order at the chosen step is the side the gaps give: the plane

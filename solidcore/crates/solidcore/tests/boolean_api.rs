@@ -2222,7 +2222,8 @@ fn issue_18639_box_face_inside_a_cylinder_wall_unions_as_tangent() {
 
 /// #18639 at small radii: a box whose face x = r - d lies d = 5e-6 inside the side of a
 /// cylinder of radius r = 0.01 or 0.002 (height 1) unions as the tangent body, clean at
-/// Level 2 in both operand orders (main reports `SmEdge` test 9 at r = 0.01).
+/// Level 2 in both operand orders (main reports `SmEdge` test 9 at r = 0.01), with no
+/// operand lost (the analytic volume within less than the cylinder's volume).
 ///
 /// Real defects: the same bodies with the box face moved in until it dips 1.1e-5, 1.5e-5
 /// or 2e-5 into the cylinder at the line, or with the overlap split between the faces (box
@@ -2279,6 +2280,20 @@ fn issue_18639_small_cylinders_union_as_tangent_and_still_report_real_defects() 
             assert!(
                 lines.is_empty(),
                 "r {r}, cylinder first {cylinder_first}: {lines:?}"
+            );
+            // No operand lost: the union is the unit box plus the cylinder (pi r^2, height
+            // 1) less their overlap, the cylinder's segment x >= e = r - d (area
+            // r^2 acos(e / r) - e sqrt(r^2 - e^2), under 1e-9 here; the box spans y in
+            // [-0.5, 0.5], wider than the cylinder), within 1e-6 relative. That bound is
+            // under pi r^2, so a union that dropped the cylinder fails.
+            let e: f64 = r - d;
+            let s = r * r * (e / r).acos() - e * (r * r - e * e).sqrt();
+            let want = PI * r * r + 1.0 - s;
+            assert!(VOLUME_REL_TOL * want < PI * r * r, "r {r}");
+            let v = volume_of(&k, &mut u);
+            assert!(
+                (v - want).abs() <= VOLUME_REL_TOL * want,
+                "r {r}, cylinder first {cylinder_first}: {v} against {want}"
             );
         }
     }
