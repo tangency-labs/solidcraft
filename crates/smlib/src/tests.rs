@@ -150,7 +150,7 @@ const NO_KERNEL: [&str; 16] = [
     "start",
 ];
 
-const ANSWERING: [&str; 69] = [
+const ANSWERING: [&str; 70] = [
     "set_dump_dir",
     "current_call",
     "crash_test",

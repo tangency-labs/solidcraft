@@ -929,7 +929,16 @@ fn a_combine_with_a_placed_copys_tool_keeps_its_result_when_other_placements_are
     let st = model.state();
     let name_of = |id: u64| st.bodies.iter().find(|b| b.feature == id).unwrap().name.clone();
     let (board, tool) = (name_of(board), crate::WorldNames::new(&doc, &st).name(&name_of(bit), drill, &[copy]));
-    let kind = FeatureKind::Combine { target: board.clone().into(), tools: vec![tool.into()], operation: Operation::Cut, keep_tools: true };
+    let kind = FeatureKind::Combine {
+        target: board.clone().into(),
+        tools: vec![tool.into()],
+        operation: Operation::Cut,
+        keep_tools: true,
+        offset: None,
+        offset_edges: OffsetEdges::Sharp,
+        offset_faces: Vec::new(),
+        offset_radius: None,
+    };
     let combine = doc.add_feature(kind, None).unwrap();
     model.evaluate(&doc);
     assert!(model.result(combine).is_some_and(|r| r.error.is_none()), "{:?}", model.result(combine));
