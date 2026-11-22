@@ -140,6 +140,53 @@ pub enum TraceFailure {
         /// The fillet points given.
         sections: usize,
     },
+    /// The faces of the edge the caller asked to fillet meet tangentially (the cosine
+    /// `dot` between one face's binormal and the other's normal is within the square root
+    /// of the effective zero, where the check measures one), or the edge has no sector to
+    /// fillet: the constant radius solver has no side to offset each surface to. The
+    /// caller's input ([`ErrorKind::InvalidInput`]); status `SM_ERR`.
+    EdgeFacesTangent {
+        /// The cosine measured, where the check measures one.
+        dot: Option<f64>,
+    },
+    /// The chamfer solver's rail points are `gap` apart, more than ten times its distance
+    /// `distance`: the Newton step has run away from the solution
+    /// ([`ErrorKind::NotConverged`]).
+    RailPointsDiverged {
+        /// The distance between the rail points.
+        gap: f64,
+        /// The chamfer's distance.
+        distance: f64,
+    },
+    /// The curve-based solver's base curve is not B-spline based, and only a B-spline
+    /// based curve is extended past its interval ([`ErrorKind::Unsupported`]).
+    CurveNotExtendable,
+    /// A knot inserted in the middle of the largest span of the rails, which have
+    /// `knots` distinct knots, added none, so the rails cannot be refined to four cross
+    /// sections. The caller's rails ([`ErrorKind::InvalidInput`]); status `SM_ERR`.
+    RailKnotsNotRefinable {
+        /// The rails' distinct knots.
+        knots: usize,
+    },
+    /// The circular cross section surface generator kept `sections` cross sections (it
+    /// skips those whose rails are at radii more than a tenth apart), fewer than the
+    /// surface it builds needs ([`ErrorKind::NotFound`]).
+    TooFewCrossSections {
+        /// The cross sections kept.
+        sections: usize,
+    },
+    /// A circular cross section at rail parameter `t` has a radius under the effective
+    /// zero: a rail meets the centre line inside the surface ([`ErrorKind::Degenerate`]).
+    CrossSectionZeroRadius {
+        /// The rails' parameter.
+        t: f64,
+    },
+    /// A circular cross section's angle, `angle` radians, is zero or a half turn: the
+    /// rails and the centre line are in line ([`ErrorKind::Degenerate`]).
+    CrossSectionAngleDegenerate {
+        /// The angle.
+        angle: f64,
+    },
 }
 
 impl TraceFailure {
@@ -149,23 +196,29 @@ impl TraceFailure {
         match self {
             Self::LawCornerEndMissing { .. }
             | Self::BaseSurfaceNotOnFace { .. }
-            | Self::CrossSectionsIncompatible { .. } => ErrorKind::InvalidInput,
+            | Self::CrossSectionsIncompatible { .. }
+            | Self::EdgeFacesTangent { .. }
+            | Self::RailKnotsNotRefinable { .. } => ErrorKind::InvalidInput,
+            Self::RailPointsDiverged { .. } => ErrorKind::NotConverged,
             Self::RailTangentZero { .. }
             | Self::ZoneEndsCoincide { .. }
             | Self::ZoneFootAtPole
             | Self::ChordTooShort { .. }
             | Self::SectionTangentZero { .. }
             | Self::BaseDerivativeZero
-            | Self::BaseNormalZero { .. } => ErrorKind::Degenerate,
-            Self::ZoneWedgeNearHalfTurn { .. } | Self::ZoneWeightNotPositive { .. } => {
-                ErrorKind::Unsupported
-            }
+            | Self::BaseNormalZero { .. }
+            | Self::CrossSectionZeroRadius { .. }
+            | Self::CrossSectionAngleDegenerate { .. } => ErrorKind::Degenerate,
+            Self::ZoneWedgeNearHalfTurn { .. }
+            | Self::ZoneWeightNotPositive { .. }
+            | Self::CurveNotExtendable => ErrorKind::Unsupported,
             Self::TraceBuiltNoSurface
             | Self::TraceHasNoPoints
             | Self::MidSectionNotFound { .. }
             | Self::PointDropNotSingle { .. }
             | Self::CrossSectionNotFound
-            | Self::BisectorMissesSegment { .. } => ErrorKind::NotFound,
+            | Self::BisectorMissesSegment { .. }
+            | Self::TooFewCrossSections { .. } => ErrorKind::NotFound,
             Self::SectionValuesFailed | Self::SmoothingFailed | Self::SkinningFailed => {
                 ErrorKind::Failed
             }
@@ -195,7 +248,14 @@ impl TraceFailure {
             | Self::BaseDerivativeZero
             | Self::BaseNormalZero { .. }
             | Self::BisectorMissesSegment { .. }
-            | Self::CrossSectionsIncompatible { .. } => SM_ERR,
+            | Self::CrossSectionsIncompatible { .. }
+            | Self::EdgeFacesTangent { .. }
+            | Self::RailPointsDiverged { .. }
+            | Self::CurveNotExtendable
+            | Self::RailKnotsNotRefinable { .. }
+            | Self::TooFewCrossSections { .. }
+            | Self::CrossSectionZeroRadius { .. }
+            | Self::CrossSectionAngleDegenerate { .. } => SM_ERR,
         }
     }
 }
@@ -278,6 +338,32 @@ impl core::fmt::Display for TraceFailure {
             } => write!(
                 f,
                 "the rails have {rail1_knots} and {rail2_knots} knots for {sections} cross sections"
+            ),
+            Self::EdgeFacesTangent { dot: Some(dot) } => {
+                write!(f, "the edge's faces meet tangentially (cosine {dot})")
+            }
+            Self::EdgeFacesTangent { dot: None } => {
+                f.write_str("the edge is smooth or has no sector to fillet")
+            }
+            Self::RailPointsDiverged { gap, distance } => write!(
+                f,
+                "the rail points are {gap} apart, more than ten times the distance {distance}"
+            ),
+            Self::CurveNotExtendable => {
+                f.write_str("a curve that is not B-spline based cannot be extended")
+            }
+            Self::RailKnotsNotRefinable { knots } => {
+                write!(f, "a knot inserted into rails of {knots} knots added none")
+            }
+            Self::TooFewCrossSections { sections } => {
+                write!(f, "only {sections} cross sections were kept")
+            }
+            Self::CrossSectionZeroRadius { t } => {
+                write!(f, "the cross section at t = {t} has zero radius")
+            }
+            Self::CrossSectionAngleDegenerate { angle } => write!(
+                f,
+                "a cross section's angle ({angle} rad) is zero or a half turn"
             ),
         }
     }
