@@ -1536,7 +1536,8 @@ impl Assembly<'_> {
     /// with a vertex at each end. Left as the line between the two points, it slants across the
     /// surface's seam by that hair, so the vertex that is off the seam line is a vertex "near the
     /// seam" to SMLib's check ("Face Near missing Seam"), which the isoline's end vertices are
-    /// not. The vertex's tolerance is raised to cover its move, as a new edge's covers its gap.
+    /// not. The vertex's tolerance is raised to cover its move and the ends of the edges that
+    /// already meet it, as a new edge's covers its gap.
     /// A vertex already on the ruling (to 1e-10 mm), or one the surface cannot place there, stays as it is.
     fn seat_on_ruling(&mut self, va: u32, vb: u32, d: usize, eval: &SurfaceEval) -> R<()> {
         let (pa, pb) = (self.vpoint(va)?, self.vpoint(vb)?);
@@ -1551,9 +1552,21 @@ impl Assembly<'_> {
         if !(gap > 1e-10 && gap <= self.tol) {
             return Ok(());
         }
+        // The edges already ending at the vertex keep their ends where they were: its tolerance
+        // covers each end's distance from where the vertex now is, as `new_edge` covers a new one's.
+        let mut widest = 1.5 * gap;
+        for e in self.edges.iter().filter(|e| e.vertices.contains(&vb)) {
+            let c = CurveEval::new(&e.curve).map_err(|m| m.to_string())?;
+            for (t, v) in e.interval.into_iter().zip(e.vertices) {
+                if v == vb {
+                    let end = c.point(t).ok_or("edge end")?;
+                    widest = widest.max(1.5 * end.dist(on));
+                }
+            }
+        }
         let x = self.vertices.get_mut(vb as usize).ok_or("vertex reference")?;
         x.point = arr(on);
-        x.tolerance = x.tolerance.max(1.5 * gap);
+        x.tolerance = x.tolerance.max(widest);
         Ok(())
     }
 
