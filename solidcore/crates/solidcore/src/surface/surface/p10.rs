@@ -898,7 +898,11 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                 u64::try_from(found.unshown).unwrap_or(u64::MAX),
                 found.finished,
             );
-            if found.roots.is_empty() {
+            // A leaf the pass did not finish adds nothing: it may hold a crossing the pass
+            // never reached, and adding one of two crossings it did reach would turn the
+            // guesses' even count (a ray passing near a crown seam, both crossings missed)
+            // into an odd one. Its answer stays the guesses'.
+            if found.roots.is_empty() || !found.finished {
                 continue;
             }
             let leaf = LsiLeaf {
@@ -2152,5 +2156,36 @@ mod tests {
             let on_surface = s.evaluate_point(&k, Point2::new(u, v)).unwrap();
             assert!(on_surface.distance(p + t * d) < 1.0e-9);
         }
+    }
+
+    /// A line dipping 2e-6 below the torus's crown where the crown meets the seam crosses it
+    /// twice, at 0.5 ± 0.0259 (the gap along the crown's tangent is s⁴/(8R²r), so the dip is
+    /// met at s = ±(8R²r·2e-6)^¼ ≈ ±0.518 on a line of length 20). The guesses miss both,
+    /// and the pass stops at its box limit on the leaves there: it must not add one crossing
+    /// of the two, which would make a ray's count odd.
+    #[test]
+    fn a_leaf_the_pass_does_not_finish_adds_no_crossing() {
+        let k = Kernel::default();
+        let s = torus(&k);
+        let p = Vec3::new(30.0, -10.0, 5.0 - 2.0e-6);
+        let d = Vec3::new(0.0, 20.0, 0.0);
+        let expected = torus_line_roots(p, d, 30.0, 5.0);
+        assert_eq!(expected.len(), 2, "{expected:?}");
+        assert!((expected[0] - 0.474_10).abs() < 1.0e-4, "{expected:?}");
+        let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
+        let sols = s
+            .base_global_line_intersect::<H>(&k, H(0), &domain, p, d, None, false, 1.0e-6)
+            .unwrap();
+        let crossings = sols
+            .as_slice()
+            .iter()
+            .filter(|sol| {
+                sol.solution_type == SolutionType::SingleValue
+                    && expected
+                        .iter()
+                        .any(|e| (sol.start.parameters[0] - e).abs() < 1.0e-6)
+            })
+            .count();
+        assert_ne!(crossings, 1, "one crossing of two: {:?}", sols.as_slice());
     }
 }
