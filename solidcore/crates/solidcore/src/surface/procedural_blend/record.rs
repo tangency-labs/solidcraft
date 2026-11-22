@@ -816,12 +816,22 @@ impl BezierCurveRecord {
         Ok(())
     }
 
-    /// [`BezierCurveRecord::validate`], and a curve: one segment or more (an empty curve
-    /// is refused where the rule reads the field).
+    /// [`BezierCurveRecord::validate`], and a curve the rule reads: one segment or more
+    /// (an empty curve is refused where the rule reads the field), its breaks strictly
+    /// increasing from 0 to 1. The kernel makes every Mixed side and trim curve on
+    /// `[0, 1]` (the rule reads the sides' ends at 0 and 1), and its algebra refines two curves
+    /// to the union of their breaks, so a curve over another range, or with breaks out of
+    /// order, would leave the two with different segment counts.
     fn validate_read(&self, field: &'static str) -> Result<(), RecordError> {
         self.validate(field)?;
         if self.seg.is_empty() {
             return Err(refuse(field, "a curve the rule reads has a segment"));
+        }
+        if !self.brk.windows(2).all(|w| matches!(w, [a, b] if a < b)) {
+            return Err(refuse(field, "a curve's breaks strictly increase"));
+        }
+        if self.brk.first() != Some(&0.0) || self.brk.last() != Some(&1.0) {
+            return Err(refuse(field, "a curve the rule reads runs from 0 to 1"));
         }
         Ok(())
     }

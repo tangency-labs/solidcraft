@@ -57,7 +57,7 @@ use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverType, FilletSurfaceGeneratorType};
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
-use crate::error::blend::{BlendFailure, CornerStep};
+use crate::error::blend::{BlendFailure, CornerInput, CornerStep};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::krawczyk::{contraction, k_operator};
 use crate::intersect::surface_intersector::p1::SrfIndex;
@@ -84,13 +84,6 @@ const OP_BUILD: &str = "blend::blend_corner::ball::ball_corner_edge_geom";
 const OP_PATCH_NET: &str = "blend::blend_corner::ball::ball_triangle_patch";
 const OP_PATCH: &str = "blend::blend_corner::ball::create_ball_patch";
 
-/// The corner's ring of edge uses is missing.
-const NO_RING: &str = "the ball corner has no ring of edge uses, though the corner hierarchy sets the ring on every corner it classifies";
-/// A round's offset surface is missing.
-const NO_OFFSET: &str = "a round's fillet geometry has no offset surface for a rail, though its solver's setup makes both rails' offset surfaces before the corner is built";
-/// The ball corner's own members are missing.
-const NO_BALL: &str = "the corner has no ball members, though the Ball topology sets them before its geometry is built";
-
 /// A defect of `op`: a step the ball corner's own checks or constructions promise did not
 /// hold (`why`).
 #[track_caller]
@@ -103,6 +96,28 @@ fn defect(op: &'static str, why: &'static str) -> SolidError {
 #[track_caller]
 fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
     Failure::new(op, BlendFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// Invalid input to `op`: the caller's corner, fillet B-rep or body is not what the corner's
+/// construction reads (`input`), with the status the site returned before
+/// ([`CornerInput::status`]). The entry points are public and take a caller's corner.
+#[track_caller]
+fn bad_input(op: &'static str, input: CornerInput) -> SolidError {
+    SolidError::blend(op, BlendFailure::CornerInputInvalid(input))
+}
+
+/// The corner has no construction at `step` (status `SM_ERR`).
+#[track_caller]
+fn unbuildable(op: &'static str, step: CornerStep) -> SolidError {
+    SolidError::blend(op, BlendFailure::CornerUnbuildable(step))
+}
+
+/// [`unbuildable`] with the `SM_ERR_NULL_POINTER` status of the site it replaces.
+#[track_caller]
+fn unbuildable_missing(op: &'static str, step: CornerStep) -> SolidError {
+    Failure::new(op, BlendFailure::CornerUnbuildable(step))
         .with_status(SM_ERR_NULL_POINTER)
         .into_error()
 }
@@ -222,9 +237,9 @@ fn planes_meet(on: &[Point3; 3], normal: &[Vec3; 3]) -> Result<Point3> {
     if det.abs() <= EFF_ZERO {
         // the offset planes' normals are the first three faces' normals, which
         // classify_ball checked are independent (|det| > EFF_ZERO_SQRT)
-        return Err(defect(
+        return Err(unbuildable(
             OP_CLASSIFY,
-            "the first three faces' offset planes do not meet in one point, though classify_ball checked the faces' normals are independent",
+            CornerStep::BallOffsetPlanesDegenerate,
         ));
     }
     let mut rhs = [0.0; 3];
@@ -250,12 +265,7 @@ fn max(a: f64, b: f64) -> f64 {
 /// ring face lies on, [`QuadricKind::None`] where it lies on none.
 fn ball_face_quadric(k: &Kernel, b: &Brep, face: FaceId, tol: f64) -> Result<BlendQuadric> {
     let surface = face2::surface(b, face)?
-        .ok_or_else(|| {
-            missing_defect(
-                OP_QUADRIC,
-                "a ring face of the ball corner has no surface, though the rounds' solvers were set up on the faces' surfaces",
-            )
-        })?;
+        .ok_or_else(|| bad_input(OP_QUADRIC, CornerInput::FaceWithoutSurface))?;
     let q = BlendQuadric::from_surface(k, surface, face2::uv_domain(b, face)?.mid(), tol)?;
     if !matches!(
         q.kind,
@@ -498,12 +508,8 @@ pub fn classify_ball(
             return none;
         }
         radius = r0;
-        let e = eu1::edge(b, eu)?.ok_or_else(|| {
-            missing_defect(
-                OP_CLASSIFY,
-                "an edge use of the ball corner's ring has no edge, though the ring was gathered from the vertex's edges",
-            )
-        })?;
+        let e = eu1::edge(b, eu)?
+            .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::EdgeuseWithoutEdge))?;
         let concave = is_concave_edge(k, b, e)?;
         if ii == 0 {
             concave0 = concave;
@@ -610,51 +616,32 @@ fn ball_centre(
     let all_eus = corner
         .all_eus
         .as_deref()
-        .ok_or_else(|| missing_defect(OP_CENTRE, NO_RING))?;
+        .ok_or_else(|| bad_input(OP_CENTRE, CornerInput::RingNotSet))?;
     let n = all_eus.len();
     let (true, Some(&v0), Some(&e0)) = (
         n >= 3 && corner.vertices.len() == n && corner.edges.len() == n,
         corner.vertices.first(),
         corner.edges.first(),
     ) else {
-        return Err(defect(
-            OP_CENTRE,
-            "the ball corner does not have one vertex and one edge per round, at least three, though classify_ball took three or more rounds and the Ball topology makes one vertex and one edge per round",
-        ));
+        return Err(bad_input(OP_CENTRE, CornerInput::TopologyMismatch));
     };
     let tol = corner.approx_tol_3d;
 
     // a ball of the rounds at the contacts: round 0's offset surfaces at vertex 0
-    let section0 = eu1::primary_edgeuse(pseudo.brep(), e0)?.ok_or_else(|| {
-        missing_defect(
-            OP_CENTRE,
-            "the ball corner's first edge has no primary edge use, though the Ball topology makes every corner edge with one",
-        )
-    })?;
+    let section0 = eu1::primary_edgeuse(pseudo.brep(), e0)?
+        .ok_or_else(|| bad_input(OP_CENTRE, CornerInput::EdgeWithoutPrimaryEdgeuse))?;
     let g0 = pseudo
         .fillet_edgeuse(section0)?
         .fillet_geom()
-        .ok_or_else(|| {
-            missing_defect(
-                OP_CENTRE,
-                "the ball corner's first edge is not on a round's fillet geometry, though the Ball topology puts each corner edge on its round's end section",
-            )
-        })?;
+        .ok_or_else(|| bad_input(OP_CENTRE, CornerInput::EdgeOffRound))?;
     let vu = pseudo
         .vu_at_rail_end(v0, Some(g0), None, None)?
-        .ok_or_else(|| {
-            missing_defect(
-                OP_CENTRE,
-                "the ball corner's first vertex has no use at the end of round 0's rail, though the round's trace ends at the corner's vertices",
-            )
-        })?;
+        .ok_or_else(|| bad_input(OP_CENTRE, CornerInput::VertexOffRail))?;
     let tsect = pseudo.fillet_vertexuse(vu)?.tsect_pnt().clone();
-    let solver_id = pseudo.geom(g0)?.fillet_solver().ok_or_else(|| {
-        missing_defect(
-            OP_CENTRE,
-            "round 0's fillet geometry has no solver, though every round's geometry is made by its solver",
-        )
-    })?;
+    let solver_id = pseudo
+        .geom(g0)?
+        .fillet_solver()
+        .ok_or_else(|| bad_input(OP_CENTRE, CornerInput::BlendGeometryNotBuilt))?;
     let solver = solvers.solver(solver_id)?;
     let mut on = [Point3::default(); 2];
     for (p, side) in on.iter_mut().zip([SrfIndex::First, SrfIndex::Second]) {
@@ -662,20 +649,17 @@ fn ball_centre(
         let offset = pseudo
             .geom(g0)?
             .offset_surface(rail, Some(solver))?
-            .ok_or_else(|| missing_defect(OP_CENTRE, NO_OFFSET))?;
+            .ok_or_else(|| bad_input(OP_CENTRE, CornerInput::BlendGeometryNotBuilt))?;
         *p = offset.surface.evaluate_point(k, tsect.uv_pos(side))?;
     }
     if on[0].distance(on[1]) > tol {
-        return Err(defect(
-            OP_CENTRE,
-            "round 0's end section has its two offset points farther apart than the tolerance, though the section was solved with both at its ball's centre",
-        ));
+        return Err(unbuildable(OP_CENTRE, CornerStep::RoundSectionOffsetsApart));
     }
     let ball = on[0];
     let radius = pseudo
         .geom(g0)?
         .offset_surface(0, Some(solver))?
-        .ok_or_else(|| missing_defect(OP_CENTRE, NO_OFFSET))?
+        .ok_or_else(|| bad_input(OP_CENTRE, CornerInput::BlendGeometryNotBuilt))?
         .surface
         .offset_distance()
         .abs();
@@ -694,19 +678,11 @@ fn ball_centre(
         .zip(offsets.iter_mut().zip(side.iter_mut()))
         .enumerate()
     {
-        let face = face.ok_or_else(|| {
-            missing_defect(
-                OP_CENTRE,
-                "an edge use of the ball corner's ring has no face, though classify_ball found a face for every one",
-            )
-        })?;
+        let face = face.ok_or_else(|| bad_input(OP_CENTRE, CornerInput::EdgeuseWithoutFace))?;
         face_ids.push(face);
         let quadric = ball_face_quadric(k, target, face, tol)?;
         if quadric.kind == QuadricKind::None {
-            return Err(defect(
-                OP_CENTRE,
-                "a ring face is no longer a plane or a natural quadric, though classify_ball recognised every one at the same tolerance",
-            ));
+            return Err(bad_input(OP_CENTRE, CornerInput::FaceNotAsClassified));
         }
         let on = pseudo.vertex_point(v)?;
         *sd = if quadric.normal(on).dot(ball - on) >= 0.0 {
@@ -716,19 +692,13 @@ fn ball_centre(
         };
         *offset = quadric.offset(*sd * radius, tol);
         if offset.kind != quadric.kind || offset.side != quadric.side {
-            return Err(defect(
-                OP_CENTRE,
-                "a ring face's offset by the ball's radius changes kind or side, though classify_ball took every cylinder and sphere wider than the ball",
-            ));
+            return Err(bad_input(OP_CENTRE, CornerInput::FaceNotAsClassified));
         }
         if ii < 3 && offset.kind == QuadricKind::Plane {
             planes += 1;
         }
         if ii >= 3 && offset.kind != QuadricKind::Plane {
-            return Err(defect(
-                OP_CENTRE,
-                "a ring face past the third is not a plane, though classify_ball took every face of a ring of four or more to be a plane",
-            ));
+            return Err(bad_input(OP_CENTRE, CornerInput::FaceNotAsClassified));
         }
     }
 
@@ -752,9 +722,9 @@ fn ball_centre(
         let dv = n0.cross(n1);
         let dd = dv.dot(dv);
         if dd <= EFF_ZERO {
-            return Err(defect(
+            return Err(unbuildable(
                 OP_CENTRE,
-                "two of the first three faces' offset planes are parallel, though classify_ball checked the faces' normals are independent",
+                CornerStep::BallOffsetPlanesDegenerate,
             ));
         }
         // its point nearest the origin: (h_0 (n_1 x d) + h_1 (d x n_0)) / |d|^2, h_i = -c_i
@@ -765,9 +735,9 @@ fn ball_centre(
             // the third plane: n_2 . (p0 + t d) = -c_2
             let den = 2.0 * (f2.b[0] * d[0] + f2.b[1] * d[1] + f2.b[2] * d[2]);
             if den.abs() <= EFF_ZERO {
-                return Err(defect(
+                return Err(unbuildable(
                     OP_CENTRE,
-                    "the third offset plane is parallel to the first two's line, though classify_ball checked the faces' normals are independent",
+                    CornerStep::BallOffsetPlanesDegenerate,
                 ));
             }
             let t = -f2.value(&p0).0 / den;
@@ -850,10 +820,7 @@ fn ball_centre(
     }
     let centre = Point3::new(ball.x + x[0], ball.y + x[1], ball.z + x[2]);
     if centre.distance(ball) > tol {
-        return Err(defect(
-            OP_CENTRE,
-            "the offsets' meeting point is farther than the tolerance from round 0's ball, though that ball lies on every offset",
-        ));
+        return Err(unbuildable(OP_CENTRE, CornerStep::BallCentreOffRound));
     }
     // four or more planes: the others' offsets pass through it (n . x + c, n = 2 b)
     for o in offsets.iter().skip(3) {
@@ -863,10 +830,7 @@ fn ball_centre(
         if dn.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
             || fo.value(&x0).0.abs() > tol * dn
         {
-            return Err(defect(
-                OP_CENTRE,
-                "a ring plane past the third has an offset farther than the tolerance from the ball's centre, though classify_ball found every offset plane through the first three's meeting",
-            ));
+            return Err(unbuildable(OP_CENTRE, CornerStep::BallPlaneOffCentre));
         }
     }
     // the contacts: the centre moved back along the offset's normal there (the face's at the
@@ -881,10 +845,7 @@ fn ball_centre(
         let n = o.normal(centre).unitize()?;
         *contact = centre - n * (s * radius);
         if contact.distance(pseudo.vertex_point(v)?) > tol {
-            return Err(defect(
-                OP_CENTRE,
-                "a ball contact is farther than the tolerance from its corner vertex, though the vertex is where the rounds' rails meet on that face at the ball",
-            ));
+            return Err(unbuildable(OP_CENTRE, CornerStep::BallContactOffVertex));
         }
     }
     Ok((centre, radius, contacts))
@@ -922,21 +883,18 @@ pub fn place_ball_contacts(
             let Some(g) = pseudo.fillet_edgeuse(eu)?.fillet_geom() else {
                 continue;
             };
-            let e = pseudo.brep().edgeuse(eu)?.edge.ok_or_else(|| {
-                missing_defect(
-                    OP_PLACE,
-                    "an edge use at a ball corner vertex has no edge, though every edge use of the fillet B-rep is made on its edge",
-                )
-            })?;
+            let e = pseudo
+                .brep()
+                .edgeuse(eu)?
+                .edge
+                .ok_or_else(|| bad_input(OP_PLACE, CornerInput::EdgeuseWithoutEdge))?;
             if pseudo.fillet_edge(e)?.fillet_edge_type() != FilletEdgeType::Rail {
                 continue;
             }
-            let solver_id = pseudo.geom(g)?.fillet_solver().ok_or_else(|| {
-                missing_defect(
-                    OP_PLACE,
-                    "a round's fillet geometry at a ball corner vertex has no solver, though every round's geometry is made by its solver",
-                )
-            })?;
+            let solver_id = pseudo
+                .geom(g)?
+                .fillet_solver()
+                .ok_or_else(|| bad_input(OP_PLACE, CornerInput::BlendGeometryNotBuilt))?;
             let solver = solvers.solver(solver_id)?;
             for side in [SrfIndex::First, SrfIndex::Second] {
                 let rail = usize::from(side == SrfIndex::Second);
@@ -944,21 +902,15 @@ pub fn place_ball_contacts(
                 let offset = pseudo
                     .geom(g)?
                     .offset_surface(rail, Some(solver))?
-                    .ok_or_else(|| missing_defect(OP_PLACE, NO_OFFSET))?;
+                    .ok_or_else(|| bad_input(OP_PLACE, CornerInput::BlendGeometryNotBuilt))?;
                 let domain = offset_natural_uv_domain(offset);
                 let solved = offset_local_point_solve(k, offset, &domain, centre, guess)?;
                 let Some((uv, _)) = solved else {
-                    return Err(defect(
-                        OP_PLACE,
-                        "the point solve found no foot of the ball's centre on a round's offset surface, though ball_centre placed the centre on every offset",
-                    ));
+                    return Err(unbuildable(OP_PLACE, CornerStep::BallContactFootNotFound));
                 };
                 let at = offset.surface.evaluate_point(k, uv)?;
                 if at.distance(centre) > tol {
-                    return Err(defect(
-                        OP_PLACE,
-                        "a round's offset surface at its point solve's foot is farther than the tolerance from the ball's centre, though ball_centre placed the centre on every offset",
-                    ));
+                    return Err(unbuildable(OP_PLACE, CornerStep::BallContactOffOffset));
                 }
                 *pseudo
                     .fillet_vertexuse_mut(vu)?
@@ -1282,7 +1234,7 @@ pub fn ball_corner_edge_geom(
     solvers: &dyn BallSolvers,
 ) -> Result<()> {
     let Some(slot) = corner.ball.as_mut() else {
-        return Err(missing_defect(OP_BUILD, NO_BALL));
+        return Err(bad_input(OP_BUILD, CornerInput::EventNotSet));
     };
     slot.delete_surface();
     let (centre, radius, contacts) = ball_centre(k, target, pseudo, corner, solvers)?;
@@ -1296,13 +1248,9 @@ pub fn ball_corner_edge_geom(
         .as_deref()
         .and_then(<[EdgeuseId]>::first)
         .copied()
-        .ok_or_else(|| missing_defect(OP_BUILD, NO_RING))?;
-    let first_edge = eu1::edge(target, first)?.ok_or_else(|| {
-        missing_defect(
-            OP_BUILD,
-            "the first edge use of the ball corner's ring has no edge, though the ring was gathered from the vertex's edges",
-        )
-    })?;
+        .ok_or_else(|| bad_input(OP_BUILD, CornerInput::RingNotSet))?;
+    let first_edge = eu1::edge(target, first)?
+        .ok_or_else(|| bad_input(OP_BUILD, CornerInput::EdgeuseWithoutEdge))?;
     let adds_material = is_concave_edge(k, target, first_edge)?;
 
     // each contact's direction from the centre and its corner vertex's point (ball_centre
@@ -1366,12 +1314,8 @@ pub fn ball_corner_edge_geom(
         }
         // the two turns of s give the patch opposite normals, so one of them faces the
         // material's way unless its normal is square to the radius
-        let surface = chosen.ok_or_else(|| {
-            missing_defect(
-                OP_BUILD,
-                "neither turn of the ball's triangular patch has its normal out of the material, though turning s reverses the normal, which is the sphere's",
-            )
-        })?;
+        let surface = chosen
+            .ok_or_else(|| unbuildable_missing(OP_BUILD, CornerStep::BallPatchNormalUndecided))?;
 
         // its corners are the contacts: the pole at v = vmin, the others at v = vmax
         let nurb_domain = surface.natural_uv_domain_with_nurb(k)?;
@@ -1388,10 +1332,7 @@ pub fn ball_corner_edge_geom(
                 None => centre + of3(&tri, at) * radius,
             };
             if surface.evaluate_point(k, uv)?.distance(want) > tol {
-                return Err(defect(
-                    OP_BUILD,
-                    "a corner of the ball's triangular patch is farther than the tolerance from its vertex, though the patch is built through the contacts and place_ball_contacts put each vertex at its contact",
-                ));
+                return Err(unbuildable(OP_BUILD, CornerStep::BallPatchOffVertex));
             }
         }
 
@@ -1446,12 +1387,9 @@ pub fn create_ball_patch(
     let ball = corner
         .ball
         .as_mut()
-        .ok_or_else(|| missing_defect(OP_PATCH, NO_BALL))?;
+        .ok_or_else(|| bad_input(OP_PATCH, CornerInput::EventNotSet))?;
     if ball.surfaces.is_empty() || ball.loops.len() != ball.surfaces.len() {
-        return Err(defect(
-            OP_PATCH,
-            "the ball corner has no patches, or its patches and loops do not pair up, though ball_corner_edge_geom keeps one loop per patch, of at least one",
-        ));
+        return Err(bad_input(OP_PATCH, CornerInput::EventMalformed));
     }
     let surfaces = std::mem::take(&mut ball.surfaces);
     let loops = std::mem::take(&mut ball.loops);
@@ -1466,21 +1404,16 @@ pub fn create_ball_patch(
         for _ in 0..count {
             let (Some(c), Some(u), Some(o)) = (curves_3d.next(), uv_curves.next(), orients.next())
             else {
-                return Err(defect(
-                    OP_PATCH,
-                    "a ball patch's loop lacks a curve, its uv curve or its orientation, though ball_corner_edge_geom keeps three of each per patch",
-                ));
+                return Err(bad_input(OP_PATCH, CornerInput::EventMalformed));
             };
             c3.push(Some(c));
             uv.push(u);
             or.push(o);
         }
-        let fillet = env.fillet.as_mut().ok_or_else(|| {
-            missing_defect(
-                OP_PATCH,
-                "the corner patch step has no fillet B-rep, though the session passes it to every corner's patches",
-            )
-        })?;
+        let fillet = env
+            .fillet
+            .as_mut()
+            .ok_or_else(|| bad_input(OP_PATCH, CornerInput::FilletBrepNotGiven))?;
         let input = FaceCurvesInput {
             loops: vec![count],
             curves_3d: Some(c3),
@@ -1567,19 +1500,21 @@ mod tests {
         assert!(!proved, "proved at {x:?}");
     }
 
-    /// Three planes through one line meet in no single point: a defect (`classify_ball`
-    /// checked the faces' normals are independent), with the `SM_ERR` status the bare
+    /// Three planes through one line meet in no single point: the ball's offset planes are
+    /// degenerate there (neither a defect nor a refusal), with the `SM_ERR` status the bare
     /// status had.
     #[test]
-    fn planes_through_one_line_are_a_defect() {
+    fn planes_through_one_line_are_degenerate() {
         let on = [Point3::ZERO; 3];
         let normal = [Vec3::X, Vec3::Y, (Vec3::X + Vec3::Y).unitize().unwrap()];
         let err = planes_meet(&on, &normal).unwrap_err();
-        assert!(matches!(
+        assert_eq!(
             err.blend_failure(),
-            Some(&BlendFailure::Defect { .. })
-        ));
-        assert!(err.is_defect());
+            Some(&BlendFailure::CornerUnbuildable(
+                CornerStep::BallOffsetPlanesDegenerate
+            ))
+        );
+        assert!(!err.is_defect() && !err.is_refusal(), "{err:?}");
         assert_eq!(
             crate::error::upstream_status(&err),
             Some(crate::error::SM_ERR)

@@ -25,7 +25,8 @@
 //! | [`BlendFailure::PlaneCurveLeavesDomain`] | [`ErrorKind::OutsideDomain`] (8)           |
 //! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
 //! | [`BlendFailure::MixedCornerUnbuildable`] | the step's ([`MixedStep::class`]): [`ErrorKind::NotFound`] (2), [`ErrorKind::Degenerate`] (3) or [`ErrorKind::Unsupported`] (5) |
-//! | [`BlendFailure::CornerUnbuildable`] | the step's ([`CornerStep::class`]): [`ErrorKind::NotWithinTolerance`] (9) or [`ErrorKind::Unsupported`] (5) |
+//! | [`BlendFailure::CornerUnbuildable`] | the step's ([`CornerStep::class`]): [`ErrorKind::NotFound`] (2), [`ErrorKind::Degenerate`] (3), [`ErrorKind::Unsupported`] (5) or [`ErrorKind::NotWithinTolerance`] (9) |
+//! | the corner entry points' checks of the caller's corner, fillet B-rep and body ([`BlendFailure::CornerInputInvalid`]) | [`ErrorKind::InvalidInput`] (1) |
 //! | [`BlendFailure::CreasePieceEndUnbuildable`], [`BlendFailure::BallTriangleNotOnePatch`] | [`ErrorKind::Unsupported`] (5) |
 //! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
 //! | [`BlendFailure::BandInputMissing`]     | [`ErrorKind::Missing`]: neither defect nor refusal |
@@ -46,6 +47,7 @@
 //! | [`BlendFailure::Missing`], [`BlendFailure::BandInputMissing`], [`BlendFailure::VariableRadiusLawsNotGiven`], [`BlendFailure::BevelVertexNotFilleted`], [`BlendFailure::EdgeWithoutCurve`], [`BlendFailure::SequenceCurveNotBSpline`] | `SM_ERR_NULL_POINTER` |
 //! | [`BlendFailure::InvalidValue`], the fillet executive's other checks of the caller's arguments | `SM_ERR_INVALID_INPUT` |
 //! | [`BlendFailure::Inconsistent`]         | `SM_ERR_ASSERT_FAILURE`           |
+//! | [`BlendFailure::CornerInputInvalid`]   | the input's ([`CornerInput::status`]): `SM_ERR_NULL_POINTER` or `SM_ERR` |
 //! | [`BlendFailure::BadIntersections`]     | `SM_ERR_BAD_INTERSECTIONS`        |
 //! | [`BlendFailure::NotConverged`]         | `SM_ERR_NOT_CONVERGING`           |
 //! | [`BlendFailure::OutsideDomain`]        | `SM_ERR_OUTSIDE_OF_DOMAIN`        |
@@ -207,6 +209,13 @@ pub enum BlendFailure {
     /// within rounding found or proved nothing, or the geometry is one the construction
     /// does not build. The step's class ([`CornerStep::class`]); status `SM_ERR`.
     CornerUnbuildable(CornerStep),
+    /// A ball, chamfer or Mixed corner's entry point was given corner state, a fillet
+    /// B-rep or a body that is not what the corner's construction reads: the entry points
+    /// are public and take a caller's [`crate::blend::fillet_corner::p3::FilletCorner`] and
+    /// [`crate::blend::fillet_geom::p1::FilletBrep`]. A check of the caller's input
+    /// ([`ErrorKind::InvalidInput`]); the status the site returned before
+    /// ([`CornerInput::status`]).
+    CornerInputInvalid(CornerInput),
     /// Tracing a surface/plane crossing found a station where the surface touches the
     /// plane: its tangent along the crossing has no length, so the crossing has no direction.
     /// Degenerate ([`ErrorKind::Degenerate`]); status `SM_ERR`.
@@ -697,6 +706,42 @@ pub enum CornerStep {
     /// tolerance (no foot of an end on it, or the surface is not affine in its parameters
     /// along the line). Unsupported.
     ChamferSurfaceOffEdgeLine,
+    /// The ball's first three offset planes do not meet in one point (two parallel, or the
+    /// third parallel to the first two's line) at the corner's tolerance. Degenerate.
+    BallOffsetPlanesDegenerate,
+    /// A round's end section has its two offset points farther apart than the tolerance.
+    /// Not within tolerance.
+    RoundSectionOffsetsApart,
+    /// The offsets' meeting point is farther than the tolerance from round 0's ball. Not
+    /// within tolerance.
+    BallCentreOffRound,
+    /// A ring plane past the third has an offset farther than the tolerance from the
+    /// ball's centre. Not within tolerance.
+    BallPlaneOffCentre,
+    /// A ball contact is farther than the tolerance from its corner vertex. Not within
+    /// tolerance.
+    BallContactOffVertex,
+    /// The point solve found no foot of the ball's centre on a round's offset surface.
+    /// Not found.
+    BallContactFootNotFound,
+    /// A round's offset surface at its point solve's foot is farther than the tolerance
+    /// from the ball's centre. Not within tolerance.
+    BallContactOffOffset,
+    /// A corner of the ball's triangular patch is farther than the tolerance from its
+    /// vertex. Not within tolerance.
+    BallPatchOffVertex,
+    /// Neither turn of the ball's triangular patch has its normal out of the material at
+    /// the test point: the normal there is along the material's boundary. Degenerate.
+    BallPatchNormalUndecided,
+    /// A chamfer corner's solved rail crossing is farther than the corner's tolerance from
+    /// its exact point. Not within tolerance.
+    ChamferCrossingOffExact,
+    /// The chamfer facet's plane does not hold a side's line within rounding. Not within
+    /// tolerance.
+    ChamferFacetOffPlane,
+    /// The Mixed corner's common face is not planar to the corner's tolerance. Not within
+    /// tolerance.
+    CommonFaceNotPlanar,
 }
 
 impl CornerStep {
@@ -706,9 +751,21 @@ impl CornerStep {
     #[must_use]
     pub const fn class(self) -> ErrorKind {
         match self {
-            Self::BallCentreLineMissesOffset | Self::BallCentreNotProved => {
-                ErrorKind::NotWithinTolerance
+            Self::BallCentreLineMissesOffset
+            | Self::BallCentreNotProved
+            | Self::RoundSectionOffsetsApart
+            | Self::BallCentreOffRound
+            | Self::BallPlaneOffCentre
+            | Self::BallContactOffVertex
+            | Self::BallContactOffOffset
+            | Self::BallPatchOffVertex
+            | Self::ChamferCrossingOffExact
+            | Self::ChamferFacetOffPlane
+            | Self::CommonFaceNotPlanar => ErrorKind::NotWithinTolerance,
+            Self::BallOffsetPlanesDegenerate | Self::BallPatchNormalUndecided => {
+                ErrorKind::Degenerate
             }
+            Self::BallContactFootNotFound => ErrorKind::NotFound,
             Self::ChamferSurfaceOffEdgeLine => ErrorKind::Unsupported,
         }
     }
@@ -726,6 +783,169 @@ impl CornerStep {
             Self::ChamferSurfaceOffEdgeLine => {
                 "a chamfer's surface does not hold a corner edge's exact line within the corner's tolerance"
             }
+            Self::BallOffsetPlanesDegenerate => {
+                "the ball's first three offset planes do not meet in one point at the corner's tolerance"
+            }
+            Self::RoundSectionOffsetsApart => {
+                "a round's end section has its offset points farther apart than the tolerance"
+            }
+            Self::BallCentreOffRound => {
+                "the offsets' meeting point is farther than the tolerance from round 0's ball"
+            }
+            Self::BallPlaneOffCentre => {
+                "a ring plane past the third has its offset farther than the tolerance from the ball's centre"
+            }
+            Self::BallContactOffVertex => {
+                "a ball contact is farther than the tolerance from its corner vertex"
+            }
+            Self::BallContactFootNotFound => {
+                "the point solve found no foot of the ball's centre on a round's offset surface"
+            }
+            Self::BallContactOffOffset => {
+                "a round's offset surface at the ball contact's foot is farther than the tolerance from the ball's centre"
+            }
+            Self::BallPatchOffVertex => {
+                "a corner of the ball's triangular patch is farther than the tolerance from its vertex"
+            }
+            Self::BallPatchNormalUndecided => {
+                "neither turn of the ball's triangular patch has its normal out of the material"
+            }
+            Self::ChamferCrossingOffExact => {
+                "a solved rail crossing is farther than the chamfer corner's tolerance from its exact point"
+            }
+            Self::ChamferFacetOffPlane => {
+                "the chamfer facet's plane does not hold a side's line within rounding"
+            }
+            Self::CommonFaceNotPlanar => {
+                "the Mixed corner's common face is not planar to the corner's tolerance"
+            }
+        }
+    }
+}
+
+/// What in a corner entry point's input is not what the corner's construction reads
+/// ([`BlendFailure::CornerInputInvalid`]). The ball, chamfer and Mixed entry points are
+/// public and read a caller's corner, fillet B-rep and body, so each of these can come from
+/// the caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CornerInput {
+    /// An edge use of the corner has no edge. Status `SM_ERR_NULL_POINTER`.
+    EdgeuseWithoutEdge,
+    /// An edge of the corner has no curve. Status `SM_ERR_NULL_POINTER`.
+    EdgeWithoutCurve,
+    /// An edge of the corner has no vertex at an end. Status `SM_ERR_NULL_POINTER`.
+    EdgeWithoutVertex,
+    /// An edge of the corner has no primary edge use. Status `SM_ERR_NULL_POINTER`.
+    EdgeWithoutPrimaryEdgeuse,
+    /// An edge use of the corner has no mate. Status `SM_ERR_NULL_POINTER`.
+    EdgeuseWithoutMate,
+    /// An edge use of the corner's ring has no face. Status `SM_ERR_NULL_POINTER`.
+    EdgeuseWithoutFace,
+    /// An edge use of the corner's ring has no radial. Status `SM_ERR_NULL_POINTER`.
+    EdgeuseWithoutRadial,
+    /// A face of the corner has no surface. Status `SM_ERR_NULL_POINTER`.
+    FaceWithoutSurface,
+    /// The corner's edge is not on a round's fillet geometry. Status
+    /// `SM_ERR_NULL_POINTER`.
+    EdgeOffRound,
+    /// The corner's vertex has no use at the end of a round's rail. Status
+    /// `SM_ERR_NULL_POINTER`.
+    VertexOffRail,
+    /// The corner has no ring of edge uses. Status `SM_ERR_NULL_POINTER`.
+    RingNotSet,
+    /// The corner has no vertex. Status `SM_ERR_NULL_POINTER`.
+    VertexNotSet,
+    /// The corner has no event of its kind (ball members, chamfer or Mixed event). Status
+    /// `SM_ERR_NULL_POINTER`.
+    EventNotSet,
+    /// A round's fillet geometry, solver, rail, surface or offset surface that the corner
+    /// reads is not there. Status `SM_ERR_NULL_POINTER`.
+    BlendGeometryNotBuilt,
+    /// The chamfer facet event has no normal. Status `SM_ERR_NULL_POINTER`.
+    FacetNormalNotSet,
+    /// The corner has no faces' geometry for its patch step. Status `SM_ERR_NULL_POINTER`.
+    FacesNotBuilt,
+    /// The corner patch step has no fillet B-rep. Status `SM_ERR_NULL_POINTER`.
+    FilletBrepNotGiven,
+    /// The corner's vertices or edges are not the count or kind its topology makes. Status
+    /// `SM_ERR`.
+    TopologyMismatch,
+    /// A vertex of the corner is not processed. Status `SM_ERR`.
+    VertexNotProcessed,
+    /// A ring face's kind or offset is not the one the corner's classification took.
+    /// Status `SM_ERR`.
+    FaceNotAsClassified,
+    /// An edge does not meet the corner's vertex. Status `SM_ERR`.
+    EdgeOffVertex,
+    /// The corner's event or patches do not hold together: a facet without crossings or a
+    /// unit normal, a patch order that does not run round its crossings, or patches and
+    /// loops that do not pair up. Status `SM_ERR`.
+    EventMalformed,
+}
+
+impl CornerInput {
+    /// The status the site returned before the cause was named.
+    #[must_use]
+    pub const fn status(self) -> i32 {
+        match self {
+            Self::TopologyMismatch
+            | Self::VertexNotProcessed
+            | Self::FaceNotAsClassified
+            | Self::EdgeOffVertex
+            | Self::EventMalformed => SM_ERR,
+            Self::EdgeuseWithoutEdge
+            | Self::EdgeWithoutCurve
+            | Self::EdgeWithoutVertex
+            | Self::EdgeWithoutPrimaryEdgeuse
+            | Self::EdgeuseWithoutMate
+            | Self::EdgeuseWithoutFace
+            | Self::EdgeuseWithoutRadial
+            | Self::FaceWithoutSurface
+            | Self::EdgeOffRound
+            | Self::VertexOffRail
+            | Self::RingNotSet
+            | Self::VertexNotSet
+            | Self::EventNotSet
+            | Self::BlendGeometryNotBuilt
+            | Self::FacetNormalNotSet
+            | Self::FacesNotBuilt
+            | Self::FilletBrepNotGiven => SM_ERR_NULL_POINTER,
+        }
+    }
+
+    /// What is not as the construction reads it, as a phrase.
+    #[must_use]
+    pub const fn what(self) -> &'static str {
+        match self {
+            Self::EdgeuseWithoutEdge => "an edge use of the corner has no edge",
+            Self::EdgeWithoutCurve => "an edge of the corner has no curve",
+            Self::EdgeWithoutVertex => "an edge of the corner has no vertex at an end",
+            Self::EdgeWithoutPrimaryEdgeuse => "an edge of the corner has no primary edge use",
+            Self::EdgeuseWithoutMate => "an edge use of the corner has no mate",
+            Self::EdgeuseWithoutFace => "an edge use of the corner's ring has no face",
+            Self::EdgeuseWithoutRadial => "an edge use of the corner's ring has no radial",
+            Self::FaceWithoutSurface => "a face of the corner has no surface",
+            Self::EdgeOffRound => "the corner's edge is not on a round's fillet geometry",
+            Self::VertexOffRail => "the corner's vertex has no use at the end of a round's rail",
+            Self::RingNotSet => "the corner has no ring of edge uses",
+            Self::VertexNotSet => "the corner has no vertex",
+            Self::EventNotSet => "the corner has no event of its kind",
+            Self::BlendGeometryNotBuilt => {
+                "a round's fillet geometry, solver, rail or surface that the corner reads is not there"
+            }
+            Self::FacetNormalNotSet => "the chamfer facet has no normal",
+            Self::FacesNotBuilt => "the corner has no faces' geometry for its patches",
+            Self::FilletBrepNotGiven => "the corner patch step has no fillet B-rep",
+            Self::TopologyMismatch => {
+                "the corner's vertices or edges are not the count or kind its topology makes"
+            }
+            Self::VertexNotProcessed => "a vertex of the corner is not processed",
+            Self::FaceNotAsClassified => {
+                "a ring face's kind or offset is not the one the corner's classification took"
+            }
+            Self::EdgeOffVertex => "an edge does not meet the corner's vertex",
+            Self::EventMalformed => "the corner's event or patches do not hold together",
         }
     }
 }
@@ -929,6 +1149,7 @@ impl BlendFailure {
             Self::NotConverged(_) => SM_ERR_NOT_CONVERGING,
             Self::OutsideDomain(_) => SM_ERR_OUTSIDE_OF_DOMAIN,
             Self::NotWithinTolerance(_) => SM_ERR_NOT_WITHIN_TOLERANCE,
+            Self::CornerInputInvalid(input) => input.status(),
             Self::PassedOn { status, .. } => *status,
         }
     }
@@ -995,7 +1216,8 @@ impl BlendFailure {
             | Self::VariableRadiusLawMissing { .. }
             | Self::BevelVertexNotFilleted
             | Self::LawIntervalEmpty
-            | Self::EdgeWithoutCurve => ErrorKind::InvalidInput,
+            | Self::EdgeWithoutCurve
+            | Self::CornerInputInvalid(_) => ErrorKind::InvalidInput,
             Self::ClosedCliffWouldNotSplit { .. }
             | Self::CornerRefused
             | Self::ExecutiveStepFailed => ErrorKind::Failed,
@@ -1034,6 +1256,7 @@ impl BlendFailure {
             | Self::BallTriangleNotOnePatch { .. }
             | Self::MixedCornerUnbuildable(_)
             | Self::CornerUnbuildable(_)
+            | Self::CornerInputInvalid(_)
             | Self::PlaneCurveTouches { .. }
             | Self::PlaneCurveEndOff { .. }
             | Self::PlaneCurveLeavesDomain { .. }
@@ -1101,6 +1324,7 @@ impl BlendFailure {
             | Self::BallTriangleNotOnePatch { .. }
             | Self::MixedCornerUnbuildable(_)
             | Self::CornerUnbuildable(_)
+            | Self::CornerInputInvalid(_)
             | Self::PlaneCurveTouches { .. }
             | Self::PlaneCurveEndOff { .. }
             | Self::PlaneCurveLeavesDomain { .. }
@@ -1213,6 +1437,12 @@ impl core::fmt::Display for BlendFailure {
                 "{}: the corner has no construction: {}",
                 self.class(),
                 step.what()
+            ),
+            Self::CornerInputInvalid(input) => write!(
+                f,
+                "{}: the corner's input is not what its construction reads: {}",
+                self.class(),
+                input.what()
             ),
             Self::MixedCornerUnbuildable(step) => write!(
                 f,
@@ -2039,6 +2269,20 @@ mod tests {
                 CornerStep::ChamferSurfaceOffEdgeLine,
                 ErrorKind::Unsupported,
             ),
+            (
+                CornerStep::BallOffsetPlanesDegenerate,
+                ErrorKind::Degenerate,
+            ),
+            (CornerStep::BallPatchNormalUndecided, ErrorKind::Degenerate),
+            (CornerStep::BallContactFootNotFound, ErrorKind::NotFound),
+            (
+                CornerStep::BallCentreOffRound,
+                ErrorKind::NotWithinTolerance,
+            ),
+            (
+                CornerStep::CommonFaceNotPlanar,
+                ErrorKind::NotWithinTolerance,
+            ),
         ] {
             let e = SolidError::blend("blend::op", BlendFailure::CornerUnbuildable(step));
             assert_eq!(e.kind(), class, "{e}");
@@ -2049,6 +2293,26 @@ mod tests {
             );
             assert!(!e.is_unported_or_cancelled(), "{e}");
             assert!(e.to_string().contains(step.what()), "{e}");
+        }
+    }
+
+    #[test]
+    fn a_corner_input_is_invalid_input_with_the_status_its_site_returned() {
+        for (input, status) in [
+            (CornerInput::EventNotSet, SM_ERR_NULL_POINTER),
+            (CornerInput::RingNotSet, SM_ERR_NULL_POINTER),
+            (CornerInput::EdgeWithoutCurve, SM_ERR_NULL_POINTER),
+            (CornerInput::FilletBrepNotGiven, SM_ERR_NULL_POINTER),
+            (CornerInput::TopologyMismatch, SM_ERR),
+            (CornerInput::VertexNotProcessed, SM_ERR),
+            (CornerInput::EventMalformed, SM_ERR),
+        ] {
+            let e = SolidError::blend("blend::op", BlendFailure::CornerInputInvalid(input));
+            assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e}");
+            assert_eq!(e.upstream_status(), Some(status), "{e}");
+            assert!(!e.is_defect() && !e.is_port_failure(), "{e}");
+            assert!(!e.is_unported_or_cancelled(), "{e}");
+            assert!(e.to_string().contains(input.what()), "{e}");
         }
     }
 
@@ -2337,7 +2601,7 @@ mod tests {
     /// The number of `BlendFailure` variants. Adding a variant means adding an arm to
     /// `variant_index_and_phrase_name` (the compiler asks for it), with the next index, and
     /// raising this number; the test below then fails until `causes` holds the new variant.
-    const VARIANTS: usize = 54;
+    const VARIANTS: usize = 55;
 
     /// Each variant's distinct index in `0..VARIANTS`, and the variant name of a phrase cause
     /// (`None` for any other cause). The match has no wildcard, so it is the inventory of
@@ -2398,6 +2662,7 @@ mod tests {
             BlendFailure::BallTriangleNotOnePatch { .. } => (51, None),
             BlendFailure::MixedCornerUnbuildable(_) => (52, None),
             BlendFailure::CornerUnbuildable(_) => (53, None),
+            BlendFailure::CornerInputInvalid(_) => (54, None),
         }
     }
 
@@ -2445,6 +2710,7 @@ mod tests {
             BlendFailure::BallTriangleNotOnePatch { pole: 0 },
             BlendFailure::MixedCornerUnbuildable(MixedStep::NoFootOnWallFace),
             BlendFailure::CornerUnbuildable(CornerStep::BallCentreNotProved),
+            BlendFailure::CornerInputInvalid(CornerInput::EventNotSet),
             BlendFailure::PlaneCurveTouches { u: 0.0, v: 0.0 },
             BlendFailure::PlaneCurveEndOff {
                 at_end: false,

@@ -764,3 +764,91 @@ fn no_mixed_record_curve_shape_reaches_a_defect() {
         }
     }
 }
+
+/// A record whose curve the rule reads has its breaks off `[0, 1]` or out of order: each
+/// shape #20725's second review reproduced (the breaks scaled, shifted, reversed, all
+/// equal, or an extra segment past the end), on every side's curves and the trim curve,
+/// for the Coons and the bilinear rule. The rule's sides' curves are refused as the
+/// caller's input; nothing reaches the algebra's table defect.
+#[test]
+fn a_mixed_record_with_breaks_off_the_unit_range_is_invalid_input() {
+    type Shape = fn(&BezierCurveRecord) -> BezierCurveRecord;
+    let shapes: [(&str, Shape); 5] = [
+        ("scaled", |c| BezierCurveRecord {
+            brk: c.brk.iter().map(|b| b * 2.0).collect(),
+            seg: c.seg.clone(),
+        }),
+        ("shifted", |c| BezierCurveRecord {
+            brk: c.brk.iter().map(|b| b + 0.5).collect(),
+            seg: c.seg.clone(),
+        }),
+        ("reversed", |c| BezierCurveRecord {
+            brk: c.brk.iter().rev().copied().collect(),
+            seg: c.seg.clone(),
+        }),
+        ("all equal", |c| BezierCurveRecord {
+            brk: vec![0.5; c.brk.len()],
+            seg: c.seg.clone(),
+        }),
+        ("extra segment", |c| {
+            let mut r = c.clone();
+            r.brk.push(2.0);
+            r.seg.push(c.seg.last().unwrap().clone());
+            r
+        }),
+    ];
+    let mut refused = 0;
+    for xsect in [1, 0] {
+        let (k, b, res) = blended(2.0, xsect);
+        res.unwrap();
+        for face in corner_faces(&b, CornerKind::Mixed) {
+            let CornerRecord::Mixed(rec) = corner_to_record(&k, &face).unwrap() else {
+                panic!("not a mixed record");
+            };
+            let mut slots: Vec<(String, BezierCurveRecord)> = Vec::new();
+            for (i, side) in rec.sides.iter().enumerate() {
+                slots.push((format!("sides[{i}].c"), side.c.clone()));
+                slots.push((format!("sides[{i}].dir"), side.dir.clone()));
+                slots.push((format!("sides[{i}].t"), side.t.clone()));
+            }
+            slots.push(("trim_uv".to_string(), rec.trim_uv.clone()));
+            for (slot, curve) in &slots {
+                if curve.seg.is_empty() {
+                    continue;
+                }
+                for (shape, make) in shapes {
+                    let mut off = rec.clone();
+                    let bad = make(curve);
+                    let name = slot.as_str();
+                    if name == "trim_uv" {
+                        off.trim_uv = bad;
+                    } else {
+                        let i: usize = name[6..7].parse().unwrap();
+                        let s = &mut off.sides[i];
+                        match &name[9..] {
+                            "c" => s.c = bad,
+                            "dir" => s.dir = bad,
+                            _ => s.t = bad,
+                        }
+                    }
+                    let Err(e) = corner_rebuild(&k, &CornerRecord::Mixed(off)) else {
+                        continue;
+                    };
+                    assert!(!e.is_defect(), "xsect {xsect} {slot} {shape}: {e}");
+                    if name != "trim_uv" && &name[9..] == "c" {
+                        assert_eq!(
+                            e.kind(),
+                            ErrorKind::InvalidInput,
+                            "xsect {xsect} {slot} {shape}: {e}"
+                        );
+                    }
+                    if e.kind() == ErrorKind::InvalidInput {
+                        refused += 1;
+                    }
+                }
+            }
+        }
+    }
+    // every side's c on both faces of both rules, at least, in every shape
+    assert!(refused >= 2 * 2 * 4 * 5, "{refused} refused");
+}

@@ -93,7 +93,7 @@ use crate::blend::fillet_solver::p1::FilletSolver;
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
-use crate::error::blend::{BlendFailure, CornerStep};
+use crate::error::blend::{BlendFailure, CornerInput, CornerStep};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
@@ -114,18 +114,6 @@ const OP_PLACE: &str = "blend::blend_corner::chamfer::place_chamfer_vertices";
 const OP_EDGES: &str = "blend::blend_corner::chamfer::chamfer_corner_edge_geom";
 const OP_PATCH: &str = "blend::blend_corner::chamfer::create_chamfer_patch";
 
-/// The chamfer corner's event is missing.
-const NO_EVENT: &str = "the corner has no chamfer event, though the session sets it when classify_chamfer finds the event, before the corner's geometry is built";
-/// An edge of the corner has no vertex.
-const NO_EDGE_VERTEX: &str = "an edge of the chamfer corner has no vertex at an end, though the corner topology makes every corner edge between two of its vertices";
-
-/// A defect of `op`: a step the chamfer corner's own checks or constructions promise did
-/// not hold (`why`).
-#[track_caller]
-fn defect(op: &'static str, why: &'static str) -> SolidError {
-    SolidError::blend(op, BlendFailure::Defect { why })
-}
-
 /// A defect of `op` where something the kernel built is missing (`why`), with the
 /// `SM_ERR_NULL_POINTER` status of the null pointer it replaces.
 #[track_caller]
@@ -135,12 +123,26 @@ fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
         .into_error()
 }
 
-/// [`defect`], chaining the error of the step that failed (`cause`).
+/// Invalid input to `op`: the caller's corner, fillet B-rep or body is not what the corner's
+/// construction reads (`input`), with the status the site returned before
+/// ([`CornerInput::status`]). The entry points are public and take a caller's corner.
 #[track_caller]
-fn defect_caused(op: &'static str, why: &'static str, cause: SolidError) -> SolidError {
-    Failure::new(op, BlendFailure::Defect { why })
+fn bad_input(op: &'static str, input: CornerInput) -> SolidError {
+    SolidError::blend(op, BlendFailure::CornerInputInvalid(input))
+}
+
+/// [`bad_input`], chaining the error of the step that failed (`cause`).
+#[track_caller]
+fn bad_input_caused(op: &'static str, input: CornerInput, cause: SolidError) -> SolidError {
+    Failure::new(op, BlendFailure::CornerInputInvalid(input))
         .caused_by(cause)
         .into_error()
+}
+
+/// The corner has no construction at `step` (status `SM_ERR`).
+#[track_caller]
+fn unbuildable(op: &'static str, step: CornerStep) -> SolidError {
+    SolidError::blend(op, BlendFailure::CornerUnbuildable(step))
 }
 
 /// The part-scale rounding gate, relative to the part's size.
@@ -702,18 +704,10 @@ pub fn classify_chamfer(
     let mut concave0 = None;
     let mut mixed = false;
     for &eu in all_eus {
-        let e = eu1::edge(b, eu)?.ok_or_else(|| {
-            missing_defect(
-                OP_CLASSIFY,
-                "an edge use of the chamfer corner's ring has no edge, though the ring was gathered from the vertex's edges",
-            )
-        })?;
-        let curve = edge::curve(b, e)?.ok_or_else(|| {
-            missing_defect(
-                OP_CLASSIFY,
-                "a chamfered edge at the vertex has no curve, though the chamfer's solver was set up on that curve",
-            )
-        })?;
+        let e = eu1::edge(b, eu)?
+            .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::EdgeuseWithoutEdge))?;
+        let curve = edge::curve(b, e)?
+            .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::EdgeWithoutCurve))?;
         let Some((_, dir)) = curve.is_line(k, 10, tol)? else {
             return Ok(ChamferClass::Declined(
                 "an edge at the vertex is not a straight line",
@@ -724,19 +718,11 @@ pub fn classify_chamfer(
                 "an edge at the vertex has no direction",
             ));
         };
-        let start = edge::vertex(b, e)?.ok_or_else(|| {
-            missing_defect(
-                OP_CLASSIFY,
-                "a chamfered edge at the vertex has no start vertex, though the ring was gathered from the edges at that vertex",
-            )
-        })?;
+        let start = edge::vertex(b, e)?
+            .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::EdgeWithoutVertex))?;
         let other = if start == vertex {
-            edge::other_vertex(b, e, Some(start))?.ok_or_else(|| {
-                missing_defect(
-                    OP_CLASSIFY,
-                    "a chamfered edge at the vertex has no other vertex: its primary edge use, its mate or their vertex uses are missing, though the B-rep makes every edge with two edge uses, each on a vertex use",
-                )
-            })?
+            edge::other_vertex(b, e, Some(start))?
+                .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::EdgeWithoutVertex))?
         } else {
             start
         };
@@ -762,12 +748,8 @@ pub fn classify_chamfer(
         if faces.iter().filter(|f| **f == Some(face)).count() > 1 {
             return Ok(ChamferClass::Declined("a face meets the vertex twice"));
         }
-        let surface = face2::surface(b, face)?.ok_or_else(|| {
-            missing_defect(
-                OP_CLASSIFY,
-                "a face at the chamfer corner's vertex has no surface, though the chamfers' solvers were set up on the faces' surfaces",
-            )
-        })?;
+        let surface = face2::surface(b, face)?
+            .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::FaceWithoutSurface))?;
         let planar = surface.is_planar(k, tol)?;
         if !planar.is_planar {
             return Ok(ChamferClass::Declined(
@@ -813,12 +795,7 @@ pub fn classify_chamfer(
                 let offset = |r: usize| -> Result<f64> {
                     Ok(solver
                         .surface(r)?
-                        .ok_or_else(|| {
-                            missing_defect(
-                                OP_CLASSIFY,
-                                "a chamfer's solver has no offset surface for a rail, though the solver's setup makes both rails' offset surfaces before the corners are classified",
-                            )
-                        })?
+                        .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::BlendGeometryNotBuilt))?
                         .surface
                         .offset_distance()
                         .abs())
@@ -1062,27 +1039,18 @@ pub fn place_chamfer_vertices(pseudo: &mut FilletBrep, corner: &FilletCorner) ->
     let event = &corner
         .chamfer_corner
         .as_ref()
-        .ok_or_else(|| missing_defect(OP_PLACE, NO_EVENT))?
+        .ok_or_else(|| bad_input(OP_PLACE, CornerInput::EventNotSet))?
         .definition;
     let count = event.crossings.len();
     if corner.vertices.len() != count + usize::from(event.mitre.is_some()) {
-        return Err(defect(
-            OP_PLACE,
-            "the chamfer corner does not have one vertex per crossing (and one for a mitre's point), though its topology makes them from the event",
-        ));
+        return Err(bad_input(OP_PLACE, CornerInput::TopologyMismatch));
     }
     for (&fv, &x) in corner.vertices.iter().zip(&event.crossings) {
         if !pseudo.fillet_vertex(fv)?.is_processed() {
-            return Err(defect(
-                OP_PLACE,
-                "a chamfer corner's crossing vertex is not processed, though the base's vertex geometry solves every crossing before the chamfer corner places them",
-            ));
+            return Err(bad_input(OP_PLACE, CornerInput::VertexNotProcessed));
         }
         if pseudo.vertex_point(fv)?.distance(x) > corner.approx_tol_3d {
-            return Err(defect(
-                OP_PLACE,
-                "a solved rail crossing is farther than the corner's tolerance from its exact point, though the solvers trace the same chamfers as the closed form to that tolerance",
-            ));
+            return Err(unbuildable(OP_PLACE, CornerStep::ChamferCrossingOffExact));
         }
         pseudo.set_vertex_point(fv, x)?;
     }
@@ -1153,7 +1121,7 @@ pub fn chamfer_corner_edge_geom(
     corner: &mut FilletCorner,
 ) -> Result<()> {
     let Some(event) = corner.chamfer_corner.as_mut() else {
-        return Err(missing_defect(OP_EDGES, NO_EVENT));
+        return Err(bad_input(OP_EDGES, CornerInput::EventNotSet));
     };
     let mitre = event.definition.is_mitre();
     let mut size = 1.0_f64;
@@ -1177,31 +1145,20 @@ pub fn chamfer_corner_edge_geom(
     };
     for &e in &corner.edges {
         if pseudo.fillet_edge(e)?.fillet_edge_type() != edge_type {
-            return Err(defect(
-                OP_EDGES,
-                "a chamfer corner edge is not of the kind its topology makes (a mitre's fillet-by-fillet edge, a facet's cross section)",
-            ));
+            return Err(bad_input(OP_EDGES, CornerInput::TopologyMismatch));
         }
         let start = edge::vertex(pseudo.brep(), e)?
-            .ok_or_else(|| missing_defect(OP_EDGES, NO_EDGE_VERTEX))?;
+            .ok_or_else(|| bad_input(OP_EDGES, CornerInput::EdgeWithoutVertex))?;
         let end = edge::other_vertex(pseudo.brep(), e, Some(start))?
-            .ok_or_else(|| missing_defect(OP_EDGES, NO_EDGE_VERTEX))?;
+            .ok_or_else(|| bad_input(OP_EDGES, CornerInput::EdgeWithoutVertex))?;
         let (p, q) = (pseudo.vertex_point(start)?, pseudo.vertex_point(end)?);
         let line = Curve::from(Line::create_line_segment(3, p, q, None)?);
         let ivl = line.natural_interval();
         let span = [ivl.min(), ivl.max()];
-        let prim = eu1::primary_edgeuse(pseudo.brep(), e)?.ok_or_else(|| {
-            missing_defect(
-                OP_EDGES,
-                "a chamfer corner edge has no primary edge use, though the corner topology makes every corner edge with one",
-            )
-        })?;
-        let mate = eu1::mate(pseudo.brep(), prim)?.ok_or_else(|| {
-            missing_defect(
-                OP_EDGES,
-                "a chamfer corner edge's primary edge use has no mate, though the corner topology makes every corner edge between two faces' sides",
-            )
-        })?;
+        let prim = eu1::primary_edgeuse(pseudo.brep(), e)?
+            .ok_or_else(|| bad_input(OP_EDGES, CornerInput::EdgeWithoutPrimaryEdgeuse))?;
+        let mate = eu1::mate(pseudo.brep(), prim)?
+            .ok_or_else(|| bad_input(OP_EDGES, CornerInput::EdgeuseWithoutMate))?;
         for eu in [prim, mate] {
             let Some(g) = pseudo.fillet_edgeuse(eu)?.fillet_geom() else {
                 continue; // the facet's side of a facet edge: the patch's own loop
@@ -1209,12 +1166,7 @@ pub fn chamfer_corner_edge_geom(
             let surface = pseudo
                 .geom(g)?
                 .fillet_surface(None)?
-                .ok_or_else(|| {
-                    missing_defect(
-                        OP_EDGES,
-                        "a chamfer's fillet geometry at the corner has no surface, though the chamfers are traced before the corner's edges are built",
-                    )
-                })?
+                .ok_or_else(|| bad_input(OP_EDGES, CornerInput::BlendGeometryNotBuilt))?
                 .clone();
             // the chamfer's surface is its solver's; its feet are searches and its
             // parameters need not be affine along the line
@@ -1246,41 +1198,22 @@ pub fn chamfer_corner_edge_geom(
     let normal = event
         .definition
         .facet_normal
-        .ok_or_else(|| {
-            missing_defect(
-                OP_EDGES,
-                "the chamfer facet has no normal, though classify_chamfer gives every facet event its plane's normal",
-            )
-        })?
+        .ok_or_else(|| bad_input(OP_EDGES, CornerInput::FacetNormalNotSet))?
         .unitize()
-        .map_err(|cause| {
-            defect_caused(
-                OP_EDGES,
-                "the chamfer facet's normal has no length, though classify_chamfer made it a unit normal",
-                cause,
-            )
-        })?;
+        .map_err(|cause| bad_input_caused(OP_EDGES, CornerInput::EventMalformed, cause))?;
     let count = xs.len();
     let mut centre = Vec3::default();
     for x in xs {
         centre += *x;
     }
     let centre = centre * (1.0 / count as f64);
-    let first = xs.first().copied().ok_or_else(|| {
-        defect(
-            OP_EDGES,
-            "the chamfer facet has no crossings, though classify_chamfer takes three or more chamfers",
-        )
-    })?;
+    let first = xs
+        .first()
+        .copied()
+        .ok_or_else(|| bad_input(OP_EDGES, CornerInput::EventMalformed))?;
     let x_axis = (first - centre - normal * (first - centre).dot(normal))
         .unitize()
-        .map_err(|cause| {
-            defect_caused(
-                OP_EDGES,
-                "the chamfer facet's first crossing is at the crossings' centroid, though classify_chamfer accepted the facet only with its crossings round the vertex, each on the kept side of every chamfer not through it",
-                cause,
-            )
-        })?;
+        .map_err(|cause| bad_input_caused(OP_EDGES, CornerInput::EventMalformed, cause))?;
     let y_axis = normal.cross(x_axis);
     let uv_of = |p: Point3| Point2::new((p - centre).dot(x_axis), (p - centre).dot(y_axis));
     let (mut lo, mut hi) = (
@@ -1315,12 +1248,8 @@ pub fn chamfer_corner_edge_geom(
         // the side's line, as the corner's edge from p to q, run as the loop runs
         let curve = Curve::from(Line::create_line_segment(3, p, q, None)?);
         let ivl = curve.natural_interval();
-        let uv = uv_line(k, &surface, p, q, [ivl.min(), ivl.max()], exact)?.ok_or_else(|| {
-            defect(
-                OP_EDGES,
-                "the chamfer facet's own plane does not hold a side's line to rounding, though the plane is affine in its parameters and was built through the crossings, which classify_chamfer found in one plane to rounding",
-            )
-        })?;
+        let uv = uv_line(k, &surface, p, q, [ivl.min(), ivl.max()], exact)?
+            .ok_or_else(|| unbuildable(OP_EDGES, CornerStep::ChamferFacetOffPlane))?;
         curves_3d.push(curve);
         uv_curves.push(uv);
         orients.push(OrientType::Same);
@@ -1420,10 +1349,7 @@ fn patch_faces(event: &mut ChamferCorner, patch: &ChamferPatch) -> Result<()> {
         .filter_map(|&i| xs.get(i).copied())
         .collect();
     if n != xs.len() || n < 4 || ring.len() != n {
-        return Err(defect(
-            OP_EDGES,
-            "the chamfer corner patch's order does not run once round four or more crossings, though corner_patch makes it a turn of the crossings, of four or more",
-        ));
+        return Err(bad_input(OP_EDGES, CornerInput::EventMalformed));
     }
     let mut faces = Vec::new();
     if let &[a, b, c, d] = ring.as_slice() {
@@ -1462,20 +1388,15 @@ pub fn create_chamfer_patch(
     let event = corner
         .chamfer_corner
         .as_mut()
-        .ok_or_else(|| missing_defect(OP_PATCH, NO_EVENT))?;
+        .ok_or_else(|| bad_input(OP_PATCH, CornerInput::EventNotSet))?;
     let faces = std::mem::take(&mut event.faces);
     if faces.is_empty() {
-        return Err(missing_defect(
-            OP_PATCH,
-            "the chamfer corner has no faces to make, though chamfer_corner_edge_geom builds the facet's or the patch's (a mitre, which has none, makes no patch)",
-        ));
+        return Err(bad_input(OP_PATCH, CornerInput::FacesNotBuilt));
     }
-    let fillet = env.fillet.as_mut().ok_or_else(|| {
-        missing_defect(
-            OP_PATCH,
-            "the corner patch step has no fillet B-rep, though the session passes it to every corner's patches",
-        )
-    })?;
+    let fillet = env
+        .fillet
+        .as_mut()
+        .ok_or_else(|| bad_input(OP_PATCH, CornerInput::FilletBrepNotGiven))?;
     for face in faces {
         let input = FaceCurvesInput {
             loops: vec![face.curves_3d.len()],
@@ -1515,6 +1436,26 @@ pub fn create_chamfer_patch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A caller's corner with no chamfer event (the entry point is public and takes a
+    /// caller-built corner) is refused as the caller's input, with the
+    /// `SM_ERR_NULL_POINTER` status the missing event had (#20725's second review).
+    #[test]
+    fn a_caller_corner_without_its_event_is_invalid_input() {
+        use crate::blend::fillet_corner::p3::FilletCornerKind;
+        let corner = FilletCorner::new(FilletCornerKind::NByTwo, None, None, None, 1e-6, 1e-3);
+        let err = place_chamfer_vertices(&mut FilletBrep::new(), &corner).unwrap_err();
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::CornerInputInvalid(CornerInput::EventNotSet)),
+            "{err:?}"
+        );
+        assert!(!err.is_defect(), "{err:?}");
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(SM_ERR_NULL_POINTER)
+        );
+    }
 
     /// The square corner's frame: the edges along u, v, w; face i between edges i - 1
     /// and i, so face 0 (edges w, u) is v = 0, face 1 (u, v) is w = 0, face 2 (v, w) is

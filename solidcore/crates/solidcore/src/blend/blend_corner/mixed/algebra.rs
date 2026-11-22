@@ -91,13 +91,13 @@ impl Srf {
 /// size step (the tables are made at the sizes their degrees and breaks give, and the
 /// B-splines read are the kernel's own, canonical and consistent). A Mixed face rebuilt
 /// from a record reads the caller's curves: the record's check refuses, as invalid input,
-/// an empty curve the rule reads or an empty segment before the rule runs
-/// (`CornerRecord::validate`).
+/// an empty curve the rule reads, an empty segment, or breaks that do not strictly
+/// increase from 0 to 1, before the rule runs (`CornerRecord::validate`).
 fn out_of_table() -> SolidError {
     SolidError::blend(
         OP,
         BlendFailure::Defect {
-            why: "an index or size is past a table of the Mixed corner's algebra, though every table is built at the size its degree and breaks give, from consistent canonical B-spline data or a record whose curves the record check found non-empty",
+            why: "an index or size is past a table of the Mixed corner's algebra, though every table is built at the size its degree and breaks give, from consistent canonical B-spline data or a record whose curves the record check found non-empty, with breaks strictly increasing from 0 to 1",
         },
     )
 }

@@ -55,7 +55,7 @@ use crate::blend::fillet_geom::p4::set_edge_curve;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGeneratorType};
 use crate::blend::fillet_solver::p5::is_concave_edge;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::blend::{BlendFailure, MixedStep};
+use crate::error::blend::{BlendFailure, CornerInput, CornerStep, MixedStep};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -135,10 +135,6 @@ fn of8m(a: &mut [Side; 8], i: usize) -> &mut Side {
     }
 }
 
-/// An edge use of the corner's ring has no edge.
-const NO_RING_EDGE: &str = "an edge use of the Mixed corner's ring has no edge, though the ring was gathered from the edges at the vertex";
-/// The corner has no Mixed event.
-const NO_EVENT: &str = "the corner has no Mixed event, though the session builds a corner's Mixed geometry only when classify_mixed set its event";
 /// A curve of the corner's algebra has no segment or control point.
 const EMPTY_CURVE: &str = "a curve of the Mixed corner's algebra has no segment or no control point, though from_bspline, compose and piece make one segment of degree + 1 points at least";
 
@@ -156,6 +152,20 @@ fn missing_defect(op: &'static str, why: &'static str) -> SolidError {
     Failure::new(op, BlendFailure::Defect { why })
         .with_status(SM_ERR_NULL_POINTER)
         .into_error()
+}
+
+/// Invalid input to `op`: the caller's corner, fillet B-rep or body is not what the corner's
+/// construction reads (`input`), with the status the site returned before
+/// ([`CornerInput::status`]). The entry points are public and take a caller's corner.
+#[track_caller]
+fn bad_input(op: &'static str, input: CornerInput) -> SolidError {
+    SolidError::blend(op, BlendFailure::CornerInputInvalid(input))
+}
+
+/// The corner has no construction at `step` (status `SM_ERR`).
+#[track_caller]
+fn corner_unbuildable(op: &'static str, step: CornerStep) -> SolidError {
+    SolidError::blend(op, BlendFailure::CornerUnbuildable(step))
 }
 
 /// The Mixed corner's geometry has no construction at `step` (status `SM_ERR`).
@@ -270,8 +280,10 @@ pub(crate) fn mixed_ring<S: Copy>(
     let &[eu0, eu1_] = solver_eus else {
         return Ok(None);
     };
-    let e0 = eu1::edge(b, eu0)?.ok_or_else(|| missing_defect(OP_CLASSIFY, NO_RING_EDGE))?;
-    let e1 = eu1::edge(b, eu1_)?.ok_or_else(|| missing_defect(OP_CLASSIFY, NO_RING_EDGE))?;
+    let e0 = eu1::edge(b, eu0)?
+        .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::EdgeuseWithoutEdge))?;
+    let e1 = eu1::edge(b, eu1_)?
+        .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::EdgeuseWithoutEdge))?;
     let concave = [is_concave_edge(k, b, e0)?, is_concave_edge(k, b, e1)?];
     if concave[0] == concave[1] {
         return Ok(None);
@@ -299,12 +311,8 @@ pub(crate) fn mixed_ring<S: Copy>(
 
 /// The face of `eu`'s sector other than `not`, where the sector holds `not`.
 fn other_face(b: &Brep, eu: EdgeuseId, not: FaceId) -> Result<Option<FaceId>> {
-    let radial = eu1::radial(b, eu)?.ok_or_else(|| {
-        missing_defect(
-            OP_CLASSIFY,
-            "an edge use of the Mixed corner's ring has no radial, though every face edge use of the body is in its edge's radial cycle",
-        )
-    })?;
+    let radial = eu1::radial(b, eu)?
+        .ok_or_else(|| bad_input(OP_CLASSIFY, CornerInput::EdgeuseWithoutRadial))?;
     let faces = [eu1::face(b, eu)?, eu1::face(b, radial)?];
     Ok(match faces {
         [Some(f), Some(g)] if f == not => Some(g),
@@ -561,18 +569,12 @@ pub(crate) fn leaving(
 ) -> Result<Vec3> {
     let at_start = edge::start_vertex(b, e)? == Some(vertex);
     if !at_start && edge::end_vertex(b, e)? != Some(vertex) {
-        return Err(defect(
-            op,
-            "the edge does not meet the vertex, though every caller passes an edge of the ring or the corner at that vertex",
-        ));
+        return Err(bad_input(op, CornerInput::EdgeOffVertex));
     }
     // the one evaluation, inside the edge and turned away from the vertex
     let d = match leaving_tangent(k, b, e, at_start)? {
         Leaving::NoCurve => {
-            return Err(missing_defect(
-                op,
-                "the edge has no curve, though every caller passes an edge whose curve it has read (a blended edge's solver was set up on it; a seam's was tested as a line)",
-            ))
+            return Err(bad_input(op, CornerInput::EdgeWithoutCurve))
         }
         Leaving::NoTangent => {
             return Err(defect(
@@ -705,18 +707,15 @@ fn rails(
         let it = fs.find_index_of_rail_on_face(target, Some(mixed.ring.t))?;
         let iw = fs.find_index_of_rail_on_face(target, Some(wall))?;
         let rail_curve = |idx| -> Result<Curve> {
-            let rail = geom.rail(idx).ok_or_else(|| {
-                missing_defect(
-                    op,
-                    "a blend's geometry has no rail at the index its solver gives for the face, though the trace makes both rails",
-                )
-            })?;
-            pseudo.brep().edge(rail)?.curve.clone().ok_or_else(|| {
-                missing_defect(
-                    op,
-                    "a blend's rail edge has no curve, though the trace makes every rail edge with its curve",
-                )
-            })
+            let rail = geom
+                .rail(idx)
+                .ok_or_else(|| bad_input(op, CornerInput::BlendGeometryNotBuilt))?;
+            pseudo
+                .brep()
+                .edge(rail)?
+                .curve
+                .clone()
+                .ok_or_else(|| bad_input(op, CornerInput::BlendGeometryNotBuilt))
         };
         Ok([rail_curve(it)?, rail_curve(iw)?])
     };
@@ -728,25 +727,11 @@ fn rails(
     })
 }
 
-/// The corner does not have six vertices.
-const SIX_VERTICES: &str =
-    "the Mixed corner does not have six vertices, though its topology makes six (X, A, P, V, Q, B)";
-/// The corner has no vertex.
-const NO_VERTEX: &str =
-    "the Mixed corner has no vertex, though the session makes every vertex corner at its vertex";
-
-/// The common face T has no surface.
-const NO_T_SURFACE: &str =
-    "the Mixed corner's common face has no surface, though classify_mixed found it planar";
-
 /// T's plane (`s`, T's surface): its unit normal.
 fn plane_normal(k: &Kernel, s: &Surface, tol: f64, op: &'static str) -> Result<Vec3> {
     let planar = s.is_planar(k, tol)?;
     if !planar.is_planar {
-        return Err(defect(
-            op,
-            "the common face is not planar to the corner's tolerance, though classify_mixed found it planar to the same tolerance (the least of the blends' tolerances)",
-        ));
+        return Err(corner_unbuildable(op, CornerStep::CommonFaceNotPlanar));
     }
     planar.normal.unitize()
 }
@@ -773,15 +758,12 @@ pub fn calc_mixed_vert_geom(
     let mixed = corner
         .mixed
         .as_ref()
-        .ok_or_else(|| missing_defect(OP_VERT, NO_EVENT))?;
+        .ok_or_else(|| bad_input(OP_VERT, CornerInput::EventNotSet))?;
     let &[x, a, p, v, q, bv] = corner.vertices.as_slice() else {
-        return Err(defect(OP_VERT, SIX_VERTICES));
+        return Err(bad_input(OP_VERT, CornerInput::TopologyMismatch));
     };
     if corner.edges.len() != 7 {
-        return Err(defect(
-            OP_VERT,
-            "the Mixed corner does not have seven edges, though its topology makes seven",
-        ));
+        return Err(bad_input(OP_VERT, CornerInput::TopologyMismatch));
     }
     let fs = [
         solvers.solver(mixed.solvers[0])?,
@@ -794,17 +776,14 @@ pub fn calc_mixed_vert_geom(
         }
     }
     if !pseudo.fillet_vertex(x)?.is_processed() || !pseudo.fillet_vertex(v)?.is_processed() {
-        return Err(defect(
-            OP_VERT,
-            "the rails' crossing X or the vertex V is not processed, though the base's vertex geometry places both before the Mixed corner's own",
-        ));
+        return Err(bad_input(OP_VERT, CornerInput::VertexNotProcessed));
     }
     let tol = corner.approx_tol_3d;
     let t_surface = target
         .face(mixed.ring.t)?
         .surface
         .as_ref()
-        .ok_or_else(|| missing_defect(OP_VERT, NO_T_SURFACE))?;
+        .ok_or_else(|| bad_input(OP_VERT, CornerInput::FaceWithoutSurface))?;
     let normal = plane_normal(k, t_surface, tol, OP_VERT)?;
     let sv = pseudo.vertex_point(v)?;
     let sx = pseudo.vertex_point(x)?;
@@ -829,11 +808,11 @@ pub fn calc_mixed_vert_geom(
     }
 
     // P: B1's wall rail crosses the seam; Q: B2's wall rail crosses the seam's line past V
-    let seam_e =
-        eu1::edge(target, mixed.ring.seam)?.ok_or_else(|| missing_defect(OP_VERT, NO_RING_EDGE))?;
+    let seam_e = eu1::edge(target, mixed.ring.seam)?
+        .ok_or_else(|| bad_input(OP_VERT, CornerInput::EdgeuseWithoutEdge))?;
     let vertex = corner
         .vertex
-        .ok_or_else(|| missing_defect(OP_VERT, NO_VERTEX))?;
+        .ok_or_else(|| bad_input(OP_VERT, CornerInput::VertexNotSet))?;
     let along = leaving(k, target, seam_e, vertex, OP_VERT)?;
     let line = Curve::from(BSplineCurve::create_line_segment(
         3,
@@ -913,12 +892,7 @@ fn normal_at(
         .face(face)?
         .surface
         .clone()
-        .ok_or_else(|| {
-            missing_defect(
-                op,
-                "a wall face of the Mixed corner has no surface, though the blends' solvers were set up on their walls' surfaces",
-            )
-        })?;
+        .ok_or_else(|| bad_input(op, CornerInput::FaceWithoutSurface))?;
     let dom = surface.natural_uv_domain_with_nurb(k)?;
     let mut test_on: Option<bool> = None;
     let mut classify = |k: &Kernel, uv: Point2, src_tol: f64| -> Result<bool> {
@@ -979,19 +953,16 @@ pub fn calc_mixed_edge_geom(
     solvers: &dyn SweptSolvers,
 ) -> Result<()> {
     let Some(mixed) = corner.mixed.as_mut() else {
-        return Err(missing_defect(OP_EDGE, NO_EVENT));
+        return Err(bad_input(OP_EDGE, CornerInput::EventNotSet));
     };
     let ring = mixed.ring;
     for &v in &corner.vertices {
         if !pseudo.fillet_vertex(v)?.is_processed() {
-            return Err(defect(
-                OP_EDGE,
-                "a Mixed corner vertex is not processed, though the edges are built after both blends are traced, when calc_mixed_vert_geom has placed all six",
-            ));
+            return Err(bad_input(OP_EDGE, CornerInput::VertexNotProcessed));
         }
     }
     let &[x, a, p, v, q, bv] = corner.vertices.as_slice() else {
-        return Err(defect(OP_EDGE, SIX_VERTICES));
+        return Err(bad_input(OP_EDGE, CornerInput::TopologyMismatch));
     };
     let fs = [
         solvers.solver(mixed.solvers[0])?,
@@ -1004,12 +975,7 @@ pub fn calc_mixed_edge_geom(
     let mut chamfer = false;
     for s in fs {
         if s.fillet_surface_generator()
-            .ok_or_else(|| {
-                missing_defect(
-                    OP_EDGE,
-                    "a blend's solver has no surface generator, though the blend was traced with it",
-                )
-            })?
+            .ok_or_else(|| bad_input(OP_EDGE, CornerInput::BlendGeometryNotBuilt))?
             .fillet_surface_generator_type()
             == FilletSurfaceGeneratorType::Linear
         {
@@ -1020,7 +986,7 @@ pub fn calc_mixed_edge_geom(
         .face(ring.t)?
         .surface
         .clone()
-        .ok_or_else(|| missing_defect(OP_EDGE, NO_T_SURFACE))?;
+        .ok_or_else(|| bad_input(OP_EDGE, CornerInput::FaceWithoutSurface))?;
     let normal = plane_normal(k, &common, tol, OP_EDGE)?;
     let sx = pseudo.vertex_point(x)?;
     let sv = pseudo.vertex_point(v)?;
@@ -1032,12 +998,7 @@ pub fn calc_mixed_edge_geom(
         Ok(pseudo
             .geom(g)?
             .fillet_surface(None)?
-            .ok_or_else(|| {
-                missing_defect(
-                    OP_EDGE,
-                    "a blend's geometry has no surface, though both blends are traced before the Mixed corner's edges",
-                )
-            })?
+            .ok_or_else(|| bad_input(OP_EDGE, CornerInput::BlendGeometryNotBuilt))?
             .clone())
     };
     let rounds = [round_of(geoms[0])?, round_of(geoms[1])?];
@@ -1045,13 +1006,13 @@ pub fn calc_mixed_edge_geom(
     // the edges' directions at V, the seam's, the concave edge's axis (Omega through O)
     let vertex = corner
         .vertex
-        .ok_or_else(|| missing_defect(OP_EDGE, NO_VERTEX))?;
-    let convex_e =
-        eu1::edge(target, ring.convex)?.ok_or_else(|| missing_defect(OP_EDGE, NO_RING_EDGE))?;
-    let seam_e =
-        eu1::edge(target, ring.seam)?.ok_or_else(|| missing_defect(OP_EDGE, NO_RING_EDGE))?;
-    let concave_e =
-        eu1::edge(target, ring.concave)?.ok_or_else(|| missing_defect(OP_EDGE, NO_RING_EDGE))?;
+        .ok_or_else(|| bad_input(OP_EDGE, CornerInput::VertexNotSet))?;
+    let convex_e = eu1::edge(target, ring.convex)?
+        .ok_or_else(|| bad_input(OP_EDGE, CornerInput::EdgeuseWithoutEdge))?;
+    let seam_e = eu1::edge(target, ring.seam)?
+        .ok_or_else(|| bad_input(OP_EDGE, CornerInput::EdgeuseWithoutEdge))?;
+    let concave_e = eu1::edge(target, ring.concave)?
+        .ok_or_else(|| bad_input(OP_EDGE, CornerInput::EdgeuseWithoutEdge))?;
     // along the convex edge into V, on along the concave one
     let chain = -leaving(k, target, convex_e, vertex, OP_EDGE)?;
     let seam_dir = leaving(k, target, seam_e, vertex, OP_EDGE)?;
@@ -1059,12 +1020,8 @@ pub fn calc_mixed_edge_geom(
     let omega = normal;
     let o = {
         // the concave edge's circle: its centre from three of its points
-        let arc = edge::curve(target, concave_e)?.ok_or_else(|| {
-            missing_defect(
-                OP_EDGE,
-                "the concave blended edge has no curve, though its blend's solver was set up on it",
-            )
-        })?;
+        let arc = edge::curve(target, concave_e)?
+            .ok_or_else(|| bad_input(OP_EDGE, CornerInput::EdgeWithoutCurve))?;
         let ivl = edge::interval(target, concave_e)?;
         let p0 = arc.evaluate_point(k, ivl.evaluate(0.1))?;
         let p1 = arc.evaluate_point(k, ivl.evaluate(0.5))?;
@@ -1679,12 +1636,11 @@ pub fn calc_mixed_edge_geom(
     let faces = [0usize, 0, 0, 0, 1, 1, 1];
     let which = [0usize, 3, 1, 2, 3, 1, 2];
     let rev = [false, false, true, true, false, true, false];
-    let edges: [EdgeId; 7] = corner.edges.as_slice().try_into().map_err(|_| {
-        defect(
-            OP_EDGE,
-            "the Mixed corner does not have seven edges, though its topology makes seven (calc_mixed_vert_geom checked them)",
-        )
-    })?;
+    let edges: [EdgeId; 7] = corner
+        .edges
+        .as_slice()
+        .try_into()
+        .map_err(|_| bad_input(OP_EDGE, CornerInput::TopologyMismatch))?;
     for (((&face, &side), &reversed), &e) in faces.iter().zip(&which).zip(&rev).zip(&edges) {
         let iso = of2(&side_curves, face)
             .get(side)
@@ -1707,12 +1663,8 @@ pub fn calc_mixed_edge_geom(
     for ii in 0..2 {
         let uv = algebra::to_uv(of2(&pcs, ii))?;
         let e = if ii == 0 { edges[0] } else { edges[6] };
-        let prim = eu1::primary_edgeuse(pseudo.brep(), e)?.ok_or_else(|| {
-            missing_defect(
-                OP_EDGE,
-                "a trimline edge of the Mixed corner has no primary edge use, though the corner topology makes every corner edge with one",
-            )
-        })?;
+        let prim = eu1::primary_edgeuse(pseudo.brep(), e)?
+            .ok_or_else(|| bad_input(OP_EDGE, CornerInput::EdgeWithoutPrimaryEdgeuse))?;
         pseudo.set_edgeuse_uv_curve(prim, Some(Curve::from(uv)), true, false)?;
         pseudo
             .geom_mut(*of2(&geoms, ii))?
@@ -1738,22 +1690,17 @@ pub fn create_mixed_patches(
         let mixed = corner
             .mixed
             .as_mut()
-            .ok_or_else(|| missing_defect(OP_PATCH, NO_EVENT))?;
-        let surface = of2m(&mut mixed.surfaces, f).take().ok_or_else(|| {
-            missing_defect(
-                OP_PATCH,
-                "a Mixed face has no surface, though calc_mixed_edge_geom sets both faces' surfaces before the patches",
-            )
-        })?;
+            .ok_or_else(|| bad_input(OP_PATCH, CornerInput::EventNotSet))?;
+        let surface = of2m(&mut mixed.surfaces, f)
+            .take()
+            .ok_or_else(|| bad_input(OP_PATCH, CornerInput::FacesNotBuilt))?;
         let curves_3d = std::mem::take(of2m(&mut mixed.curves_3d, f));
         let uv_curves = std::mem::take(of2m(&mut mixed.uv_curves, f));
         let orients = of2(&mixed.orients, f).clone();
-        let fillet = env.fillet.as_mut().ok_or_else(|| {
-            missing_defect(
-                OP_PATCH,
-                "the corner patch step has no fillet B-rep, though the session passes it to every corner's patches",
-            )
-        })?;
+        let fillet = env
+            .fillet
+            .as_mut()
+            .ok_or_else(|| bad_input(OP_PATCH, CornerInput::FilletBrepNotGiven))?;
         let input = FaceCurvesInput {
             loops: vec![curves_3d.len()],
             curves_3d: Some(curves_3d.into_iter().map(Some).collect()),
@@ -1843,18 +1790,22 @@ mod tests {
         assert!(leaving(&k, &b, e, off, "test").is_err());
     }
 
-    /// An edge that does not meet the vertex is a `Defect` of the caller's operation (every
-    /// caller passes an edge at the vertex), with the `SM_ERR` status the bare status had.
+    /// An edge that does not meet the vertex is invalid caller input (`leaving`
+    /// is reached from the public entry points with a caller's corner), with the `SM_ERR`
+    /// status the bare status had.
     #[test]
-    fn an_edge_off_the_vertex_is_a_defect() {
+    fn an_edge_off_the_vertex_is_invalid_input() {
         let k = Kernel::default();
         let (b, e, _, _, off) = kinked_edge();
         let err = leaving(&k, &b, e, off, OP_VERT).unwrap_err();
-        assert!(
-            matches!(err.blend_failure(), Some(BlendFailure::Defect { .. })),
+        assert_eq!(
+            err.blend_failure(),
+            Some(&BlendFailure::CornerInputInvalid(
+                CornerInput::EdgeOffVertex
+            )),
             "{err:?}"
         );
-        assert!(err.is_defect(), "{err:?}");
+        assert!(!err.is_defect(), "{err:?}");
         assert_eq!(err.operation(), OP_VERT);
         assert_eq!(
             crate::error::upstream_status(&err),
