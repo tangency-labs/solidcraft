@@ -78,7 +78,6 @@ const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/boolean/topology_intersector/p3.rs", 1),
     ("solidcore/src/curve/curve/p3.rs", 2),
     ("solidcore/src/curve/curve/p7.rs", 3),
-    ("solidcore/src/geom/local_solve_nd.rs", 1),
     ("solidcore/src/intersect/surface_intersector/p1.rs", 5),
     ("solidcore/src/intersect/surface_intersector/p5.rs", 6),
     ("solidcore/src/nurbs/b_spline_curve/p3.rs", 2),
