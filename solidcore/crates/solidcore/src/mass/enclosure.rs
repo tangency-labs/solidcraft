@@ -40,7 +40,8 @@
 //! certified face holds within its bound of the definition (that bound is not added here).
 //! The enclosure refines the cell of widest enclosure, one bisection at a time,
 //! until it is as narrow as asked ([`enclose_volume`]) or decides the sign
-//! ([`volume_sign`]), or until [`CELL_BUDGET`] cells are spent or no cell is left to cut
+//! ([`volume_sign`]), or until [`CELL_BUDGET`] cells are cut past the starting ones or no cell
+//! is left to cut
 //! ([`EnclosureStop`]); it answers the intersection of every enclosure it summed.
 //!
 //! **Moments and area** ([`enclose_quantity`], [`enclose_mass_properties`],
@@ -63,7 +64,9 @@
 //! (2003); [3] R. E. Moore, R. B. Kearfott, M. J. Cloud, *Introduction to Interval
 //! Analysis*, SIAM (2009).
 //!
-//! Deviations: none (not upstream). Bounded work: at most [`CELL_BUDGET`] cells and
+//! Deviations: none (not upstream). Bounded work: the starting cells (set by the input alone:
+//! the trim pieces, the knot lines they cross and the levels of each face), then at most
+//! [`CELL_BUDGET`] cells more (one over: the last bisection's two come on top) and
 //! [`MAX_DEPTH`] bisections of one cell, no recursion (a work list ordered by width, then by
 //! insertion), the kernel's cancel token polled every 64 cells.
 
@@ -96,9 +99,10 @@ pub const ORDER: usize = 8;
 /// before it is cut.
 pub const FIRST_ORDER: usize = 3;
 
-/// The cells past which an enclosure is no longer refined (the starting cells, one or a
-/// few per trim piece and edge, and the last bisection's two come on top). A bound on the
-/// work of one decision, not fitted to a case: the rig's slowest decision takes about 10^5.
+/// The cells an enclosure is refined by, past the starting cells (one or a few per trim
+/// piece and edge, however many the input needs: they are built before any is cut, and the
+/// last bisection's two come on top). A bound on the refinement of one decision, not fitted
+/// to a case: the rig's slowest decision refines by about 10^5.
 pub const CELL_BUDGET: usize = 1 << 17;
 
 /// The most bisections from a starting cell to one of its cells: past it a cell is kept
@@ -135,7 +139,7 @@ pub enum EnclosureStop {
     /// The sign is not decided, and the settled cells and fixed terms already hold 0
     /// whatever the rest becomes ([`volume_sign`] only).
     Settled,
-    /// [`CELL_BUDGET`] cells are spent.
+    /// [`CELL_BUDGET`] cells are cut past the starting ones.
     Budget,
     /// No cell is left that a cut narrows: every cell is settled, cut [`MAX_DEPTH`] times,
     /// or of single parameters.
@@ -179,13 +183,13 @@ pub enum VolumeSign {
     Negative(VolumeEnclosure),
     /// The enclosure still holds 0 when refinement ends: the cells that no cut narrows (gaps
     /// between faces) already hold it whatever the rest becomes, [`CELL_BUDGET`] cells are
-    /// spent, or every cell is cut [`MAX_DEPTH`] times.
+    /// cut past the starting ones, or every cell is cut [`MAX_DEPTH`] times.
     Undecided(VolumeEnclosure),
 }
 
 /// An enclosure of the volume of the closed body `b` at most `width` wide
 /// ([`EnclosureStop::Reached`]), or else the narrowest refinement gives within
-/// [`CELL_BUDGET`] cells ([`EnclosureStop::Budget`]) or once no cut narrows a cell
+/// [`CELL_BUDGET`] cells past the starting ones ([`EnclosureStop::Budget`]) or once no cut narrows a cell
 /// ([`EnclosureStop::Exhausted`]). It is refined whatever `width` is: a width below the
 /// enclosure's [`VolumeEnclosure::floor`] is not reached, and refining stops only at one of
 /// those ends. The result is the intersection of every enclosure summed along the way (each
@@ -320,7 +324,8 @@ pub fn enclose_face_area_relative(
 
 /// Whether an enclosure is finite and at most `rel` of its own magnitude wide (false for
 /// infinite or NaN ends: `inf <= rel * inf` would hold, so an unbounded enclosure would
-/// count as reached before any cell is cut; refinement goes on instead, to its budget).
+/// count as reached before any cell is cut; refinement goes on instead, to its budget of cells
+/// past the starting ones).
 fn within(rel: f64) -> impl Fn(Ivl) -> bool {
     move |e: Ivl| {
         let width = e.hi - e.lo;
@@ -514,7 +519,7 @@ pub fn volume_sign(k: &Kernel, b: &mut Brep) -> Result<VolumeSign> {
     volume_sign_within(k, b, CELL_BUDGET)
 }
 
-/// [`volume_sign`] within `budget` cells.
+/// [`volume_sign`] refining by at most `budget` cells past the starting ones.
 fn volume_sign_within(k: &Kernel, b: &mut Brep, budget: usize) -> Result<VolumeSign> {
     let mut w = Work::new(k, b)?;
     w.budget = budget;
@@ -885,7 +890,8 @@ struct Work<'a> {
     heap: BinaryHeap<(u64, Reverse<usize>)>,
     /// The caps' and the loops' rounding terms, `[-w, w]`.
     fixed: Ivl,
-    /// The cells past which it is no longer refined ([`CELL_BUDGET`]).
+    /// The cells it is refined by, past the cells it holds when a refinement starts
+    /// ([`CELL_BUDGET`]).
     budget: usize,
     counts: EnclosureCounts,
 }
@@ -2099,7 +2105,8 @@ impl<'a> Work<'a> {
 
     /// Refines the widest cell, one bisection at a time, until `done` holds of the
     /// enclosure ([`EnclosureStop::Reached`]), `hopeless` of its parts ([`Work::parts`]: no
-    /// refining can make `done` hold; [`EnclosureStop::Settled`]), the budget is spent, or
+    /// refining can make `done` hold; [`EnclosureStop::Settled`]), the budget is spent (cells
+    /// cut past the cells it holds on entry: those are not counted), or
     /// no cell is left to cut. The result is the intersection of every enclosure summed
     /// (each holds the volume): rounding that grows faster than the cells shrink does not
     /// widen it. Two enclosures that do not overlap mean one of them is not sound, which no
@@ -2121,6 +2128,8 @@ impl<'a> Work<'a> {
                 counts: w.counts,
             })
         };
+        // the budget bounds the refinement: the starting cells are built before any is cut
+        let limit = self.counts.cells.saturating_add(self.budget);
         // running sums in f64 say when to sum the enclosure in intervals again: when they
         // look done, or every quarter of the work list's length
         let total = self.total();
@@ -2146,7 +2155,7 @@ impl<'a> Work<'a> {
                 checked = self.counts.cells;
                 next_check = self.counts.cells + (self.items.len() / 4).max(64);
             }
-            if self.counts.cells >= self.budget {
+            if self.counts.cells >= limit {
                 return out(self, best, EnclosureStop::Budget);
             }
             let Some((_, Reverse(i))) = self.heap.pop() else {
@@ -2709,13 +2718,10 @@ mod tests {
         assert!(width(Ivl::new(-1e-16, 1.0)) > 1.0);
     }
 
-    /// A budget too small to decide leaves the sign undecided, its enclosure holding the
-    /// volume (the quarter shell R 1e4, t 1e-3, V 157.08, decides within some 150 cells).
-    #[test]
-    fn a_spent_budget_leaves_the_sign_undecided() {
-        let mut k = Kernel::default();
-        let mut b = crate::primitive::api_primitives::create_cylindrical_box(
-            &mut k,
+    /// The quarter shell R 1e4, t 1e-3, V 157.08: it decides within some 150 cells in all.
+    fn quarter_shell(k: &mut Kernel) -> Brep {
+        crate::primitive::api_primitives::create_cylindrical_box(
+            k,
             Point3::new(0.0, 0.0, 0.0),
             10.0,
             1e4,
@@ -2723,12 +2729,64 @@ mod tests {
             0.0,
             90.0,
         )
-        .unwrap();
+        .unwrap()
+    }
+
+    /// A budget too small to decide leaves the sign undecided, its enclosure holding the
+    /// volume. The budget is cells of refinement past the starting ones (`start`): the run
+    /// ends at most one cell over `start + budget` (the last bisection's two).
+    #[test]
+    fn a_spent_budget_leaves_the_sign_undecided() {
+        let mut k = Kernel::default();
+        let mut b = quarter_shell(&mut k);
+        let start = Work::new(&k, &mut b).unwrap().counts.cells;
         let v = 157.0796;
         match volume_sign_within(&k, &mut b, 16).unwrap() {
-            VolumeSign::Undecided(e) => assert!(e.lo < v && v < e.hi, "{e:?}"),
+            VolumeSign::Undecided(e) => {
+                assert!(e.lo < v && v < e.hi, "{e:?}");
+                assert!(
+                    e.counts.cells <= start + 16 + 1,
+                    "{} cells from {start} starting ones",
+                    e.counts.cells
+                );
+            }
             other => panic!("{other:?}"),
         }
+    }
+
+    /// The budget counts refinement, not the starting cells. The sign is decided with
+    /// `refined` cells cut past `start` starting ones; a budget of `refined + 2` therefore
+    /// decides it too (it fails when the budget also counts the `start` cells: the run stops
+    /// at `refined + 2` cells in all).
+    #[test]
+    fn the_budget_counts_the_refinement_not_the_starting_cells() {
+        let mut k = Kernel::default();
+        let mut b = quarter_shell(&mut k);
+        let start = Work::new(&k, &mut b).unwrap().counts.cells;
+        let VolumeSign::Positive(e) = volume_sign_within(&k, &mut b, CELL_BUDGET).unwrap() else {
+            panic!("the quarter shell does not decide");
+        };
+        let refined = e.counts.cells - start;
+        // the body must make the test mean something: more than two starting cells, and cells cut
+        assert!(
+            start > 2 && refined > 2,
+            "{start} starting cells, {refined} refined"
+        );
+        match volume_sign_within(&k, &mut b, refined + 2).unwrap() {
+            VolumeSign::Positive(_) => {}
+            other => panic!("{other:?} with {refined} + 2 cells of {start} starting ones"),
+        }
+    }
+
+    /// A budget of 0 cuts no cell: the enclosure is the starting cells'.
+    #[test]
+    fn a_zero_budget_refines_nothing() {
+        let mut k = Kernel::default();
+        let mut b = quarter_shell(&mut k);
+        let start = Work::new(&k, &mut b).unwrap().counts.cells;
+        let (VolumeSign::Positive(e) | VolumeSign::Negative(e) | VolumeSign::Undecided(e)) =
+            volume_sign_within(&k, &mut b, 0).unwrap();
+        assert_eq!(e.counts.cells, start, "{e:?}");
     }
 
     /// Enclosures intersect to their common part, and two that do not overlap (one of them
