@@ -477,6 +477,79 @@ fn dimension_tool_dimensions_a_holes_diameter() {
     assert_eq!(read["text"], "Ø12.00", "{read}");
 }
 
+/// A Ø12 rod 100 long along X, seen side on in a 1:2 front view centred at (140, 180) on A3: on paper
+/// its two outline lines (silhouettes, not edges) run from x = 115 to 165 at y = 177 and 183, and its
+/// ends, circles seen edge on, are the edges x = 115 and x = 165. The Dimension tool is on.
+fn rod_dimensioning() -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width": 1400, "height": 900}));
+    h.app.run("solid.cylinder", json!({"radius": 6, "height": 100, "base": [0, 0, 0], "axis": "X", "body_name": "Rod"})).unwrap();
+    h.app.run("drawing.create", json!({})).unwrap();
+    h.app.run("drawing.view.base", json!({"sheet": "Sheet 1", "scale": "1:2", "position_mm": [140, 180]})).unwrap();
+    crate::drawing_workspace::enter(&mut h.app, true).unwrap();
+    settle(&mut h);
+    let sheet = solidcraft_engine::doc::ids::encode(h.app.session.drawing("drawing.inspect").unwrap().sheets[0].id);
+    for y in [177.0, 183.0] {
+        let line = h.app.run("drawing.scene.line", json!({"sheet": sheet, "point_mm": [140.0, y], "band_mm": 0.5})).unwrap();
+        assert_eq!(line["line"]["source"]["kind"], "silhouette", "an outline line at y = {y}: {line}");
+    }
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.dimension"));
+    h.frames(4);
+    h
+}
+
+/// A cylinder seen side on is dimensioned by its outline, as on paper (ISO 129-1): the outline line
+/// under the pointer is shaded, a click picks it, and the next click places the rod's Ø12 there.
+#[test]
+fn dimension_tool_dimensions_a_cylinders_diameter_from_one_outline() {
+    use crate::drawing_workspace::dimension::{Shape, hovered_shape, picked_shapes};
+    let mut h = rod_dimensioning();
+    let before: Vec<u64> = h.app.session.drawing("drawing.inspect").unwrap().dimensions.iter().map(|d| d.id).collect();
+    let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+    h.step(&json!({"move": [paper.left() + paper.width() * 140.0 / 420.0, paper.bottom() - paper.height() * 183.0 / 297.0]})).unwrap();
+    h.frames(2);
+    assert!(matches!(hovered_shape(&h.app), Some(Shape::Straight(_))), "the outline line is shaded: {:?}", hovered_shape(&h.app));
+    click_paper(&mut h, 140.0, 183.0);
+    assert!(matches!(picked_shapes(&h.app)[..], [Shape::Straight(_)]), "{:?}", picked_shapes(&h.app));
+    // Past the rod's left end: the engine draws a Ø between outlines beyond their ends.
+    click_paper(&mut h, 100.0, 180.0);
+    let read = added_dimension(&mut h, &before);
+    assert!(read["record"]["kind"]["cylinder"].is_object(), "{read}");
+    assert_eq!(read["text"], "Ø12.00", "{read}");
+}
+
+/// Both outline lines of one cylinder, picked one after the other, are its diameter: one Ø12, not a
+/// distance between two lines.
+#[test]
+fn dimension_tool_dimensions_a_cylinders_diameter_from_its_two_outlines() {
+    use crate::drawing_workspace::dimension::{Shape, picked_shapes};
+    let mut h = rod_dimensioning();
+    let before: Vec<u64> = h.app.session.drawing("drawing.inspect").unwrap().dimensions.iter().map(|d| d.id).collect();
+    click_paper(&mut h, 140.0, 183.0);
+    click_paper(&mut h, 140.0, 177.0);
+    assert!(matches!(picked_shapes(&h.app)[..], [Shape::Straight(_), Shape::Straight(_)]), "{:?}", picked_shapes(&h.app));
+    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), before.len(), "two picks place nothing yet");
+    click_paper(&mut h, 100.0, 180.0);
+    let read = added_dimension(&mut h, &before);
+    assert!(read["record"]["kind"]["cylinder"].is_object(), "{read}");
+    assert_eq!(read["text"], "Ø12.00", "{read}");
+}
+
+/// An outline line and an edge measure nothing the drawing has a dimension for, so the click after
+/// them adds nothing: the rod's outline, then its left end.
+#[test]
+fn dimension_tool_adds_nothing_for_an_outline_and_an_edge() {
+    use crate::drawing_workspace::dimension::{Shape, picked_shapes};
+    let mut h = rod_dimensioning();
+    let before = h.app.session.drawing("drawing.inspect").unwrap().dimensions.len();
+    click_paper(&mut h, 140.0, 183.0);
+    click_paper(&mut h, 115.0, 180.0);
+    assert!(matches!(picked_shapes(&h.app)[..], [Shape::Straight(_), Shape::Straight(_)]), "{:?}", picked_shapes(&h.app));
+    click_paper(&mut h, 100.0, 180.0);
+    assert_eq!(h.app.session.drawing("drawing.inspect").unwrap().dimensions.len(), before, "nothing added");
+}
+
 /// Esc drops the tool's picks first and keeps the tool, as in a sketch; the next Esc leaves it.
 #[test]
 fn dimension_tool_escape_drops_picks_then_the_tool() {
