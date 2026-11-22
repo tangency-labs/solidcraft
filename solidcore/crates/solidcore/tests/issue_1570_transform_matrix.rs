@@ -176,7 +176,7 @@ fn edgeuse_ids(b: &Brep) -> Vec<EdgeuseId> {
 /// its tolerances (`Body::transform`). `cleared`: every gap cache of the scaled body is then
 /// emptied, the twin whose reads measure everything afresh.
 fn scaled_after_the_tolerance_pass(
-    build: fn(&mut Kernel) -> Brep,
+    build: Build,
     s: f64,
     cleared: bool,
 ) -> (Kernel, Brep) {
@@ -269,7 +269,10 @@ fn tighten(k: &mut Kernel, b: &mut Brep, zone: f64) {
     update_tolerances_after_boolean(k, b).unwrap();
 }
 
-const SCALED_BODIES: [(&str, fn(&mut Kernel) -> Brep); 2] = [
+/// Builds a test body.
+type Build = fn(&mut Kernel) -> Brep;
+
+const SCALED_BODIES: [(&str, Build); 2] = [
     ("crossed cylinders", crossed_cylinders),
     ("ball drilled off centre", ball_drilled_off_centre),
 ];
