@@ -149,7 +149,8 @@ pub enum IntersectFailure {
     /// caller's B-rep, or the classification's parameter is not within the edge's interval.
     /// [`ErrorKind::InvalidInput`].
     EdgeNotSplit,
-    /// The dropped UV curve is of a kind with no B-spline form. [`ErrorKind::Unsupported`].
+    /// A UV curve the routine needs in B-spline form (the dropped UV curve, or the UV trim
+    /// curve of a curve classification) is of a kind with none. [`ErrorKind::Unsupported`].
     CurveNotBSpline,
     /// A singular point of the surface lies inside its domain, not on its boundary, so the
     /// drop has no iso direction to start along. [`ErrorKind::Unsupported`].
@@ -185,6 +186,68 @@ pub enum IntersectFailure {
         /// What is left of the drop's tolerance for the move.
         budget: f64,
     },
+    /// The curve classification has no source curve, or its handle names no curve in the
+    /// geometry given (the caller sets it with `set_curve`). The caller's classification:
+    /// [`ErrorKind::InvalidInput`].
+    NoSourceCurve,
+    /// The curve classification has no face, and the routine drops a point of its 3d curve
+    /// onto that face's surface (the caller sets it with `set_face`). The caller's
+    /// classification: [`ErrorKind::InvalidInput`].
+    NoClassFace,
+    /// The interval index given is not below the number of intervals of the classification.
+    /// The caller's argument: [`ErrorKind::InvalidInput`].
+    IntervalIndexPastEnd {
+        /// The index given.
+        index: usize,
+        /// The number of intervals.
+        size: usize,
+    },
+    /// The new end parameter given for an interval is outside the range its neighbours allow
+    /// (from the previous interval's start to its own end, or from its own start to the next
+    /// interval's end). The caller's argument: [`ErrorKind::InvalidInput`].
+    ParameterOutsideRange {
+        /// The parameter given.
+        param: f64,
+        /// The smallest parameter allowed.
+        min: f64,
+        /// The largest parameter allowed.
+        max: f64,
+    },
+    /// No surface cache of a surface the routine works on, or its tree, could be built (the
+    /// build's error is the cause). Class `missing`; whether it is a defect or a refusal is
+    /// its cause's ([`crate::SolidError::is_defect`] follows the chain).
+    SurfaceCacheNotBuilt,
+    /// The touches of a curve against a face's loops do not pair into arrivals and
+    /// departures: there are `count`, an odd number, or the curve is closed and has fewer
+    /// than four touches or its last is not on the seam its first is on. Class `failed`.
+    TouchesUnpaired {
+        /// The number of touches.
+        count: usize,
+    },
+    /// Squeezing out the smallest interval of a classification left its number of intervals
+    /// unchanged, so the two classifications of one curve cannot be brought to the same
+    /// number of intervals (the squeeze's error, where it gave one, is the cause). Class
+    /// `failed`.
+    SqueezeStalled,
+    /// A repair of a classification that restarts after each change it makes (inserting a
+    /// curve interval, fixing the classes of the interval ends) restarted `restarts` times,
+    /// the most it allows for the classification's number of intervals, without settling.
+    /// Class `failed`.
+    RepairDidNotSettle {
+        /// The restarts allowed and taken.
+        restarts: usize,
+    },
+    /// An end of the curve interval to insert is found at the wrong end of an interval of the
+    /// classification (its start at an interval's end, or its end at an interval's start),
+    /// so the interval cannot be inserted there. Class `failed`.
+    IntervalEndMisplaced,
+    /// A point classification could not be inserted into the classification it is combined
+    /// with at its parameter. Class `failed`.
+    PointClassNotInserted,
+    /// No vertex use at an end of the edge to insert has a sector of the face the curve runs
+    /// in: the curve does not classify to that face consistently at its ends. Class
+    /// `missing`.
+    NoEndSector,
 }
 
 impl IntersectFailure {
@@ -214,7 +277,14 @@ impl IntersectFailure {
             | Self::DegenerateTangent
             | Self::TangentAlongNormal { .. }
             | Self::DegenerateDomain
-            | Self::MoveNotProved { .. } => SM_ERR,
+            | Self::MoveNotProved { .. }
+            | Self::NoClassFace
+            | Self::IntervalIndexPastEnd { .. }
+            | Self::ParameterOutsideRange { .. }
+            | Self::SqueezeStalled
+            | Self::RepairDidNotSettle { .. }
+            | Self::IntervalEndMisplaced
+            | Self::PointClassNotInserted => SM_ERR,
             Self::Missing(_)
             | Self::CurveCacheNotBuilt
             | Self::FaceWithoutSurface
@@ -222,9 +292,12 @@ impl IntersectFailure {
             | Self::NoClassObject
             | Self::NotSetUp
             | Self::PolyFaceWithoutEdges
-            | Self::CurveNotBSpline => SM_ERR_NULL_POINTER,
+            | Self::CurveNotBSpline
+            | Self::NoSourceCurve
+            | Self::SurfaceCacheNotBuilt
+            | Self::NoEndSector => SM_ERR_NULL_POINTER,
             Self::OutsideDomain(_) | Self::SeamJumpNotSnapped => SM_ERR_OUTSIDE_OF_DOMAIN,
-            Self::Inconsistent(_) => SM_ERR_ASSERT_FAILURE,
+            Self::Inconsistent(_) | Self::TouchesUnpaired { .. } => SM_ERR_ASSERT_FAILURE,
         }
     }
 
@@ -255,7 +328,11 @@ impl IntersectFailure {
             | Self::EmptyDomain
             | Self::NotFinite
             | Self::PolyFaceWithoutEdges
-            | Self::EdgeNotSplit => ErrorKind::InvalidInput,
+            | Self::EdgeNotSplit
+            | Self::NoSourceCurve
+            | Self::NoClassFace
+            | Self::IntervalIndexPastEnd { .. }
+            | Self::ParameterOutsideRange { .. } => ErrorKind::InvalidInput,
             Self::UnsupportedObjectKind
             | Self::CurveNotBSpline
             | Self::SingularPointInside
@@ -323,7 +400,7 @@ impl core::fmt::Display for IntersectFailure {
                 f.write_str("the object is of a kind the routine does not take")
             }
             Self::EdgeNotSplit => f.write_str("the edge was not split at the point"),
-            Self::CurveNotBSpline => f.write_str("the dropped uv curve has no B-spline form"),
+            Self::CurveNotBSpline => f.write_str("the uv curve has no B-spline form"),
             Self::SingularPointInside => {
                 f.write_str("the singular surface point is not on the domain's boundary")
             }
@@ -345,6 +422,39 @@ impl core::fmt::Display for IntersectFailure {
                 f,
                 "a span's move is not proved within the tolerance left ({budget:e})"
             ),
+            Self::NoSourceCurve => f.write_str("the curve classification has no source curve"),
+            Self::NoClassFace => f.write_str("the curve classification has no face"),
+            Self::IntervalIndexPastEnd { index, size } => write!(
+                f,
+                "the interval index {index} is past the end of the classification ({size} intervals)"
+            ),
+            Self::ParameterOutsideRange { param, min, max } => write!(
+                f,
+                "the new interval end {param} is outside the range [{min}, {max}] its neighbours allow"
+            ),
+            Self::SurfaceCacheNotBuilt => {
+                f.write_str("no surface cache, or its tree, could be built")
+            }
+            Self::TouchesUnpaired { count } => write!(
+                f,
+                "the {count} touches of the curve against the loops do not pair into arrivals and departures"
+            ),
+            Self::SqueezeStalled => f.write_str(
+                "squeezing out the smallest interval did not shorten the classification",
+            ),
+            Self::RepairDidNotSettle { restarts } => write!(
+                f,
+                "the repair of the classification did not settle in {restarts} restarts"
+            ),
+            Self::IntervalEndMisplaced => f.write_str(
+                "an end of the interval to insert is at the wrong end of the classification's interval",
+            ),
+            Self::PointClassNotInserted => f.write_str(
+                "the point classification could not be inserted into the classification",
+            ),
+            Self::NoEndSector => {
+                f.write_str("no vertex use at an end of the edge has a sector of the face")
+            }
         }
     }
 }
@@ -640,6 +750,74 @@ pub(super) mod tests {
         assert_eq!(super::super::upstream_status(&e), Some(SM_ERR_NULL_POINTER));
     }
 
+    /// The curve classification's causes keep the status of the phrase each replaced, and
+    /// a chained cause decides defect or refusal.
+    #[test]
+    fn the_curve_classification_causes_keep_their_status_and_have_their_class() {
+        use ErrorKind as K;
+        use IntersectFailure as F;
+        let op = "intersect::curve_class::op";
+        let cases = [
+            (F::NoSourceCurve, SM_ERR_NULL_POINTER, K::InvalidInput),
+            (F::NoClassFace, SM_ERR, K::InvalidInput),
+            (
+                F::IntervalIndexPastEnd { index: 3, size: 3 },
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (
+                F::ParameterOutsideRange {
+                    param: 2.0,
+                    min: 0.0,
+                    max: 1.0,
+                },
+                SM_ERR,
+                K::InvalidInput,
+            ),
+            (F::SurfaceCacheNotBuilt, SM_ERR_NULL_POINTER, K::Missing),
+            (
+                F::TouchesUnpaired { count: 3 },
+                SM_ERR_ASSERT_FAILURE,
+                K::Failed,
+            ),
+            (F::SqueezeStalled, SM_ERR, K::Failed),
+            (F::RepairDidNotSettle { restarts: 4 }, SM_ERR, K::Failed),
+            (F::IntervalEndMisplaced, SM_ERR, K::Failed),
+            (F::PointClassNotInserted, SM_ERR, K::Failed),
+            (F::NoEndSector, SM_ERR_NULL_POINTER, K::Missing),
+        ];
+        for (failure, status, kind) in cases {
+            let e = SolidError::intersect(op, failure);
+            assert_eq!(e.sm_status(), Some(status), "{failure:?}");
+            assert_eq!(
+                super::super::upstream_status(&e),
+                Some(status),
+                "{failure:?}"
+            );
+            assert_eq!(e.kind(), kind, "{failure:?}");
+            assert_eq!(e.intersect_failure(), Some(&failure));
+            assert!(!e.is_defect() && !e.is_refusal(), "{failure:?}");
+        }
+        // a cache or squeeze failure keeps the error it chains as its cause
+        let why = "a step the kernel got wrong";
+        let cause = SolidError::intersect(op, F::Defect { why });
+        for failure in [F::SurfaceCacheNotBuilt, F::SqueezeStalled] {
+            let e = Failure::new(op, failure)
+                .caused_by(cause.clone())
+                .into_error();
+            assert_eq!(e.cause(), Some(&cause));
+            assert!(e.is_defect(), "{failure:?}");
+            assert_eq!(e.sm_status(), Some(failure.comparison_status()));
+        }
+        // a kernel link that is not there is a defect keeping the null pointer status
+        let e = Failure::new(op, F::Defect { why })
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error();
+        assert!(e.is_defect());
+        assert_eq!(e.kind(), K::StageFailed);
+        assert_eq!(super::super::upstream_status(&e), Some(SM_ERR_NULL_POINTER));
+    }
+
     /// The intersection routines describe their failures: their library code builds no
     /// bare `Upstream` status.
     #[test]
@@ -669,12 +847,9 @@ pub(super) mod tests {
         #[rustfmt::skip] // one file per line, so conversions in parallel merge cleanly
         const PINNED: &[(&str, usize)] = &[
             ("solidcore/src/intersect/adv_surface_intersector.rs", 10),
-            ("solidcore/src/intersect/curve_class/p1.rs", 9),
-            ("solidcore/src/intersect/curve_class/p2.rs", 7),
             ("solidcore/src/intersect/curve_class/p3.rs", 19),
             ("solidcore/src/intersect/curve_class/p4.rs", 26),
             ("solidcore/src/intersect/curve_class/p5.rs", 8),
-            ("solidcore/src/intersect/curve_class/p6.rs", 21),
             ("solidcore/src/intersect/curve_class/p7.rs", 17),
             ("solidcore/src/intersect/curve_class/p8.rs", 17),
             ("solidcore/src/intersect/curve_class/p9.rs", 17),
