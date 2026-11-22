@@ -36,11 +36,11 @@ use solidcore::geom::extent1d::Extent1d;
 use solidcore::kernel::Kernel;
 use solidcore::surface::face_surface::record_face;
 use solidcore::surface::procedural_blend::convert::face_definition;
+use solidcore::topology::brep::create_missing_uv_trim_curves;
 use solidcore::topology::brep::outer_shells::outer_shells;
 use solidcore::topology::brep::p1 as bl;
 use solidcore::topology::brep_data::{BrepData, NO_OBJECT, UNDEF_ULONG};
 use solidcore::topology::brep_data_write::{data_regions, FromBrepEnv};
-use solidcore::topology::edgeuse::{p1 as eu1, p3 as eu3};
 use solidcore::topology::loopuse::notify_ref;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::EdgeuseId;
@@ -128,12 +128,7 @@ struct Edge {
 /// step the kernel refuses; [`Unsupported::Invalid`] for kernel data that does not hold
 /// together or a record that does not validate.
 pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
-    for eu in solidcore::topology::brep::p2::edgeuses(b, None)? {
-        if eu1::faceuse(b, eu)?.is_none() || eu1::uv_trim_curve_pointer(b, eu)?.is_some() {
-            continue;
-        }
-        eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
-    }
+    create_missing_uv_trim_curves(k, b)?;
     let b: &Brep = b;
     let store = AttributeStore::default();
     let records = NotifyRecords::new();
