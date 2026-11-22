@@ -235,7 +235,7 @@ impl PanelView {
         let current = agents::current(app);
         let permission_agent =
             if app.agent_chat.state().running() { Some(app.agent_chat.running_id.clone()) } else { current.as_ref().map(|e| e.id.clone()) };
-        let permission = permission_agent.as_deref().map_or(app.preferences.ai_permissions, |id| agents::mode_for(&app.preferences, id));
+        let permission = permission_agent.as_deref().map_or(app.preferences.ai_permissions, |id| agents::mode_in_force(app, id));
         PanelView {
             shown: shown(app),
             document: app.session.doc.name.clone(),
